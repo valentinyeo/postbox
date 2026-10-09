@@ -110,7 +110,7 @@ const wm_control = win.WM_APP + 7;
 const wm_startup_probe = win.WM_APP + 8;
 const wacli_queue_size = 8;
 const max_wacli_args = 16;
-const wacli_arg_cap = 512;
+const wacli_arg_cap = 4095;
 const max_msg_cache = 8;
 const msg_cache_max_bytes = 4 * 1024 * 1024;
 // WAZI-60: check every 15 minutes so a release is noticed quickly, plus
@@ -334,14 +334,10 @@ const PendingSend = struct {
     // that wasn't a store lock) leaves it unclear whether wacli actually
     // delivered the message. Gates the pre-retry duplicate check.
     ambiguous: bool = false,
-    // WAZI-100: client-generated 128-bit hex id. Keys the send's outbox
-    // entry in outbox.jsonl so a restart re-sends the same message, and it
-    // will later reach the wa-bridge for server-side dedupe.
     id: [outbox.id_len]u8 = [_]u8{'0'} ** outbox.id_len,
-    // True once the entry was reloaded from the outbox file: the previous
-    // run may have delivered it right before dying, so the pre-send
-    // duplicate check runs for the first attempt too.
     from_disk: bool = false,
+    completed: bool = false,
+    delivered: bool = false,
 };
 
 // A permanently failed send kept for the next reload: the composer got the
@@ -362,16 +358,11 @@ const FailedSend = struct {
     voice_seconds: u32 = 0,
 };
 
-// WAZI-100: a Slack send journaled in the outbox. Slack writes ride the
-// shared job queue instead of the WhatsApp send FIFO, so this is the
-// in-memory copy whose outbox line survives a restart: the entry leaves the
-// file (and the bubble resolves) only when the send succeeds or fails for
-// good. `inflight` means its job is queued or running; a refused enqueue
-// (full queue of writes) leaves it false for the refresh tick to retry.
 const max_slack_outbox = 16;
 const SlackOutbox = struct {
     entry: outbox.Entry = .{},
     inflight: bool = false,
+    completed: bool = false,
     not_before_ms: u64 = 0,
 };
 
@@ -853,11 +844,10 @@ const App = struct {
     send_started_ms: u64 = 0,
     pending_sends: [max_pending_sends]PendingSend = [_]PendingSend{.{}} ** max_pending_sends,
     pending_send_count: usize = 0,
-    // WAZI-100: Slack sends journaled in the outbox, keyed by client id;
-    // their jobs ride the shared queue but the entries survive a restart.
     slack_outbox: [max_slack_outbox]SlackOutbox = [_]SlackOutbox{.{}} ** max_slack_outbox,
     slack_outbox_count: usize = 0,
     outbox_path: []u8 = &.{},
+    outbox_load_failed: bool = false,
     // Monotonic id handed to each queued send, so its optimistic bubble can be
     // re-appended after a reload and found again on a permanent failure.
     send_seq: u64 = 0,
@@ -997,6 +987,7 @@ const App = struct {
     wacli_cond: std.Io.Condition = .init,
     wacli_queue: [wacli_queue_size]WacliJob = [_]WacliJob{.{}} ** wacli_queue_size,
     wacli_queue_len: usize = 0,
+    wacli_refresh_again: bool = false,
     wacli_quit: bool = false,
     wacli_pending: [wacli_kind_count]u32 = [_]u32{0} ** wacli_kind_count,
     slack_tokens: ?slack_win.Tokens = null,
@@ -1699,10 +1690,6 @@ fn wacliPendingSub(a: *App, kind: WacliJobKind) void {
     a.wacli_mutex.unlock(a.io);
 }
 
-/// True for jobs that write to a provider: sends and reactions. A full
-/// queue must never evict one of these (WAZI-100); the incoming job then
-/// waits and its owner retries on the next tick. Everything else is a
-/// refresh or download the timers re-issue on their own.
 fn jobIsWrite(kind: WacliJobKind) bool {
     return switch (kind) {
         .reaction, .status_seen, .slack_send, .slack_attach => true,
@@ -1711,10 +1698,6 @@ fn jobIsWrite(kind: WacliJobKind) bool {
 }
 
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
-    var dropped_reaction = false;
-    var dropped_status_seen = false;
-    var dropped_msg_id = Utf8Text(191){};
-    var dropped_emoji = Utf8Text(63){};
     a.wacli_mutex.lockUncancelable(a.io);
     if (a.wacli_queue_len >= a.wacli_queue.len) {
         // A best-effort read receipt must never evict a send or reaction.
@@ -1724,27 +1707,14 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
             logSlackFailure(a, job.kind, "QueueFull", 0);
             return false;
         }
-        // Superseded refreshes are droppable; writes (sends, reactions) are
-        // never dropped (WAZI-100): when the queue holds nothing else, the
-        // incoming job waits instead, and its owner retries on the next
-        // tick. Scan from the back so the oldest droppable job is evicted;
-        // index 0 holds the newest (urgent) job and must survive.
         var keep: [wacli_queue_size]bool = [_]bool{false} ** wacli_queue_size;
         for (a.wacli_queue[0..a.wacli_queue_len], 0..) |queued, queued_index| keep[queued_index] = jobIsWrite(queued.kind);
         const victim = outbox.evictionVictim(keep[0..a.wacli_queue_len]) orelse {
+            if (!jobIsWrite(job.kind)) a.wacli_refresh_again = true;
             a.wacli_mutex.unlock(a.io);
-            // The fallback inline pump (dead worker threads) is the only
-            // drainer then; without it a full queue of writes would never
-            // clear and the waiting write would retry forever.
             if (a.wacli_thread == null or (jobIsSlack(job.kind) and a.wacli_slack_thread == null)) wacliPumpSync(a);
             return false;
         };
-        dropped_reaction = a.wacli_queue[victim].kind == .reaction;
-        dropped_status_seen = a.wacli_queue[victim].kind == .status_seen;
-        if (dropped_reaction or dropped_status_seen) {
-            dropped_msg_id.set(a.wacli_queue[victim].msg_id.slice());
-            dropped_emoji.set(a.wacli_queue[victim].extra.slice());
-        }
         a.wacli_pending[@intFromEnum(a.wacli_queue[victim].kind)] -= 1;
         var shift = victim;
         while (shift + 1 < a.wacli_queue_len) : (shift += 1) a.wacli_queue[shift] = a.wacli_queue[shift + 1];
@@ -1769,17 +1739,24 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
     // Two worker lanes (wacli and Slack) scan the same queue: wake both.
     a.wacli_cond.broadcast(a.io);
     a.wacli_mutex.unlock(a.io);
-    if (dropped_reaction) {
-        // The optimistic bubble stays; its retry timer sends it again.
-        if (findPendingReaction(a, dropped_msg_id.slice())) |entry| {
-            if (std.mem.eql(u8, entry.emoji.slice(), dropped_emoji.slice()) and entry.retry_at_ms == 0)
-                entry.retry_at_ms = win.GetTickCount64() + 3_000;
-        }
-        setStatus(a, "Reaction queue is full; retrying");
-    }
-    if (dropped_status_seen) statusSeenFailed(a, dropped_msg_id.slice(), "queue full");
     if (a.wacli_thread == null or (jobIsSlack(job.kind) and a.wacli_slack_thread == null)) wacliPumpSync(a);
     return true;
+}
+
+fn retryWacliRefreshes(a: *App) void {
+    a.wacli_mutex.lockUncancelable(a.io);
+    const retry = a.wacli_refresh_again and a.wacli_queue_len == 0;
+    if (retry) a.wacli_refresh_again = false;
+    a.wacli_mutex.unlock(a.io);
+    if (!retry) return;
+    refreshGroups(a);
+    refreshChats(a);
+    refreshMessages(a);
+    if (slackConfigured(a)) {
+        refreshSlackWorkspace(a);
+        _ = wacliEnqueue(a, .{ .kind = .slack_auth }, false);
+    }
+    enqueueCacheTagProbe(a);
 }
 
 // Fallback when the worker thread never started: run queued jobs inline on
@@ -4071,17 +4048,11 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
         wacliJobArgs(&job, &.{ chat.jid.slice(), parent.slice() });
         _ = wacliEnqueue(a, job, false);
     }
-    // WAZI-100: Slack sends journaled in the outbox (including entries
-    // reloaded at startup) show as pending bubbles until their job lands,
-    // the same way queued WhatsApp sends re-append after a reload.
     for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
         if (a.message_count >= max_messages) break;
+        if (slot.completed) continue;
         const entry = &slot.entry;
-        if (entry.file.len > 0) continue; // attaches resolve via status only
-        // An entry without a client_msg_id can never be recognized as
-        // already shown, so re-appending it would stack a bubble on every
-        // refresh; its on-screen bubble is preserved by the saved loop
-        // instead.
+        if (entry.file.len > 0) continue;
         if (entry.client_msg_id.len == 0) continue;
         if (!std.mem.eql(u8, entry.jid.slice(), chat.jid.slice())) continue;
         if (pendingByClientMsgId(a, entry.client_msg_id.slice()) != null) continue;
@@ -4201,9 +4172,9 @@ fn retryingBubbleText(buffer: []u8, text: []const u8, retries: u8) []const u8 {
 /// reload (`from_reload`) the stored message may already be present, and
 /// re-appending would show it twice.
 fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool) void {
-    if (a.message_count >= max_messages or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
+    if (pending.completed or a.message_count >= max_messages or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
     if (!std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), pending.jid.slice())) return;
-    if (from_reload) {
+    if (from_reload and !pending.from_disk) {
         for (a.messages[0..a.message_count]) |*message| {
             if (!message.from_me or message.send_state != .none) continue;
             if (pending.ptt) {
@@ -4467,7 +4438,14 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         a.send_seq += 1;
         file_pending.seq = a.send_seq;
         file_pending.queued_unix = nowUnixSeconds();
+        mintSendId(a, &file_pending.id);
         a.pending_send_count += 1;
+        if (!persistOutbox(a)) {
+            a.pending_send_count -= 1;
+            file_pending.* = .{};
+            setStatus(a, "Could not save outbox; message not queued");
+            return true;
+        }
         message.send_state = .pending;
         var label_buffer: [48]u8 = undefined;
         message.text.set(a.allocator, sendBaseText(&label_buffer, file_pending.text.slice(), true, file_pending.ptt, file_pending.voice_seconds));
@@ -4492,7 +4470,6 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         refreshMessages(a);
         return true;
     }
-    forgetFailedSend(a, jid, original);
     const pending = &a.pending_sends[a.pending_send_count];
     pending.* = .{};
     pending.jid.set(jid);
@@ -4502,7 +4479,13 @@ fn resendFailedMessage(a: *App, index: usize) bool {
     pending.queued_unix = nowUnixSeconds();
     mintSendId(a, &pending.id);
     a.pending_send_count += 1;
-    persistOutbox(a);
+    if (!persistOutbox(a)) {
+        a.pending_send_count -= 1;
+        pending.* = .{};
+        setStatus(a, "Could not save outbox; message not queued");
+        return true;
+    }
+    forgetFailedSend(a, jid, original);
     message.send_state = .pending;
     message.text.set(a.allocator, original);
     var id_buffer: [32]u8 = undefined;
@@ -4594,14 +4577,14 @@ fn resolveSlackSend(a: *App, result: *WacliResult) void {
     // pending send (ponytail: that orphan bubble is silently dropped, the
     // status bar still reports the outcome).
     if (!std.mem.eql(u8, a.displayed_jid.slice(), result.jid.slice())) return;
-    // Correlate by client_msg_id; only when a result carries no id (sends
-    // queued before correlation existed) fall back to the oldest pending.
-    // A failure result carries the error name in extra instead (the launch
-    // log reads it from there), so a failed send can only resolve through
-    // the oldest pending bubble; the Slack lane is FIFO, so results arrive
-    // in queue order.
-    const index = pendingByClientMsgId(a, result.extra.slice()) orelse
-        (if (!result.ok or result.extra.len == 0) oldestPendingSend(a) else null) orelse return;
+    var client_msg_id: []const u8 = "";
+    for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
+        if (std.mem.eql(u8, slot.entry.idSlice(), result.msg_id.slice())) {
+            client_msg_id = slot.entry.client_msg_id.slice();
+            break;
+        }
+    }
+    const index = pendingByClientMsgId(a, client_msg_id) orelse return;
     if (!result.ok) {
         const message = &a.messages[index];
         message.send_state = .failed;
@@ -4641,47 +4624,40 @@ fn resolveSlackSend(a: *App, result: *WacliResult) void {
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
 }
 
-// --- WAZI-100: the Slack half of the send outbox ---
-
-/// Fresh 128-bit client send id (lowercase hex). Keys every outbox entry,
-/// WhatsApp and Slack; the wa-bridge will later use it for server-side
-/// dedupe.
 fn mintSendId(a: *App, id: *[outbox.id_len]u8) void {
     var raw: [16]u8 = undefined;
     a.io.random(&raw);
     id.* = outbox.hexId(raw);
 }
 
-/// Journal a queued send (WhatsApp or Slack) so a crash or restart re-sends
-/// instead of silently dropping it. The whole file is rewritten from the
-/// in-memory queues on every change, so entries leave it exactly when they
-/// leave memory: on confirmed success or final failure.
-fn persistOutbox(a: *App) void {
-    if (a.outbox_path.len == 0) return;
+fn persistOutbox(a: *App) bool {
+    if (a.outbox_path.len == 0 or a.outbox_load_failed) return false;
     var allocating = std.Io.Writer.Allocating.init(a.allocator);
     defer allocating.deinit();
     for (a.pending_sends[0..a.pending_send_count]) |*pending| {
+        if (pending.completed) continue;
         var entry = outbox.Entry{ .queued_unix = pending.queued_unix };
         entry.id = pending.id;
         entry.jid.set(pending.jid.slice());
         entry.text.set(pending.text.slice());
         entry.file.set(pending.file.slice());
+        entry.ptt = pending.ptt;
+        entry.voice_seconds = pending.voice_seconds;
         entry.reply_to.set(pending.reply_to.slice());
         entry.reply_sender.set(pending.reply_sender.slice());
-        outbox.writeLine(&allocating.writer, &entry) catch return;
+        outbox.writeLine(&allocating.writer, &entry) catch return false;
     }
     for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
-        outbox.writeLine(&allocating.writer, &slot.entry) catch return;
+        if (slot.completed) continue;
+        outbox.writeLine(&allocating.writer, &slot.entry) catch return false;
     }
-    // Write to a sibling temp file and swap it in (same pattern as the
-    // pending-reads queue): a failed or partial write must never destroy
-    // the last good outbox.
-    const temp_path = std.fmt.allocPrint(a.allocator, "{s}.new", .{a.outbox_path}) catch return;
+    const temp_path = std.fmt.allocPrint(a.allocator, "{s}.new", .{a.outbox_path}) catch return false;
     defer a.allocator.free(temp_path);
-    const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, temp_path) catch return;
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, temp_path) catch return false;
     defer a.allocator.free(wide);
     const handle = win.CreateFileW(wide.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
-    if (handle == win.INVALID_HANDLE_VALUE or handle == null) return;
+    if (handle == win.INVALID_HANDLE_VALUE or handle == null) return false;
+    defer _ = win.DeleteFileW(wide.ptr);
     const data = allocating.written();
     var written_total: usize = 0;
     var ok = true;
@@ -4690,77 +4666,85 @@ fn persistOutbox(a: *App) void {
         if (win.WriteFile(handle, data[written_total..].ptr, @intCast(data.len - written_total), &written, null) == 0 or written == 0) ok = false;
         written_total += written;
     }
-    _ = win.CloseHandle(handle);
-    if (!ok or written_total != data.len) return;
-    const target = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, a.outbox_path) catch return;
+    const flushed = ok and written_total == data.len and win.FlushFileBuffers(handle) != 0;
+    const closed = win.CloseHandle(handle) != 0;
+    if (!flushed or !closed) return false;
+    const target = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, a.outbox_path) catch return false;
     defer a.allocator.free(target);
-    // A full write landed; replacing the outbox now cannot leave a
-    // truncated store behind. If the swap fails the in-memory queues are
-    // still accurate and the next change re-persists.
-    _ = win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING);
+    return win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) != 0;
 }
 
-/// Fills the WhatsApp send FIFO and the Slack outbox from outbox.jsonl
-/// (WAZI-100), skipping corrupt lines and collapsing duplicate ids. Runs at
-/// startup, before the first timer tick starts draining either queue.
 fn loadOutbox(a: *App) void {
+    a.outbox_load_failed = true;
     if (a.outbox_path.len == 0) return;
     const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, a.outbox_path) catch return;
     defer a.allocator.free(wide);
     const handle = win.CreateFileW(wide.ptr, win.GENERIC_READ, win.FILE_SHARE_READ, null, win.OPEN_EXISTING, win.FILE_ATTRIBUTE_NORMAL, null);
-    if (handle == win.INVALID_HANDLE_VALUE or handle == null) return;
+    if (handle == win.INVALID_HANDLE_VALUE or handle == null) {
+        if (win.GetLastError() == win.ERROR_FILE_NOT_FOUND) a.outbox_load_failed = false;
+        return;
+    }
     defer _ = win.CloseHandle(handle);
-    const buffer = a.allocator.alloc(u8, outbox.max_entries * outbox.max_line_len) catch return;
+    var size: win.LARGE_INTEGER = undefined;
+    if (win.GetFileSizeEx(handle, &size) == 0 or size.QuadPart < 0 or
+        size.QuadPart > outbox.max_entries * outbox.max_line_len) return;
+    const buffer = a.allocator.alloc(u8, @intCast(size.QuadPart)) catch return;
     defer a.allocator.free(buffer);
     var total: usize = 0;
     while (total < buffer.len) {
         var got: win.DWORD = 0;
-        if (win.ReadFile(handle, buffer[total..].ptr, @intCast(buffer.len - total), &got, null) == 0) break;
-        if (got == 0) break;
+        if (win.ReadFile(handle, buffer[total..].ptr, @intCast(buffer.len - total), &got, null) == 0) return;
+        if (got == 0) return;
         total += got;
     }
     var scanner = outbox.Scanner.init(a.allocator, buffer[0..total]);
     while (scanner.next()) |entry| {
         if (entry.provider == .whatsapp) {
-            if (a.pending_send_count >= a.pending_sends.len) break;
+            if (a.pending_send_count >= a.pending_sends.len) return;
             const pending = &a.pending_sends[a.pending_send_count];
             pending.* = .{};
             pending.id = entry.id;
             pending.jid.set(entry.jid.slice());
             pending.text.set(entry.text.slice());
             pending.file.set(entry.file.slice());
+            pending.ptt = entry.ptt;
+            pending.voice_seconds = entry.voice_seconds;
             pending.reply_to.set(entry.reply_to.slice());
             pending.reply_sender.set(entry.reply_sender.slice());
             pending.queued_unix = entry.queued_unix;
             pending.from_disk = true;
+            a.send_seq += 1;
+            pending.seq = a.send_seq;
             a.pending_send_count += 1;
         } else {
-            if (a.slack_outbox_count >= a.slack_outbox.len) break;
+            if (a.slack_outbox_count >= a.slack_outbox.len) return;
             const slot = &a.slack_outbox[a.slack_outbox_count];
             slot.* = .{};
             slot.entry = entry.*;
             a.slack_outbox_count += 1;
         }
     }
+    a.outbox_load_failed = false;
 }
 
-/// Queue the job for one journaled Slack send. On success the entry is
-/// inflight and its result retires it; when the shared queue holds nothing
-/// but writes the entry stays waiting and the refresh tick retries.
 fn enqueueSlackOutbox(a: *App, slot: *SlackOutbox) void {
+    if (a.outbox_load_failed or !slackConfigured(a) or slot.inflight or slot.completed) return;
+    for (a.slack_outbox[0..a.slack_outbox_count]) |*earlier| {
+        if (earlier == slot) break;
+        if (!earlier.inflight and !earlier.completed) return;
+    }
     if (win.GetTickCount64() < slot.not_before_ms) return;
     const entry = &slot.entry;
     const is_file = entry.file.len > 0;
     var job = WacliJob{ .kind = if (is_file) .slack_attach else .slack_send, .started_ms = win.GetTickCount64() };
     job.jid.set(entry.jid.slice());
+    job.msg_id.set(entry.idSlice());
     if (!is_file) job.extra.set(entry.client_msg_id.slice());
     if (is_file) {
         wacliJobArgs(&job, &.{ entry.jid.slice(), entry.reply_to.slice(), entry.file.slice(), entry.text.slice() });
     } else {
         wacliJobArgs(&job, &.{ entry.jid.slice(), entry.text.slice(), entry.reply_to.slice(), entry.client_msg_id.slice() });
     }
-    // Urgent, like a direct send: ahead of chat and message refreshes, but
-    // behind writes already queued so messages leave in the order typed.
     if (wacliEnqueue(a, job, true)) {
         slot.inflight = true;
         slot.not_before_ms = 0;
@@ -4770,49 +4754,35 @@ fn enqueueSlackOutbox(a: *App, slot: *SlackOutbox) void {
     }
 }
 
-/// WAZI-100: a Slack send whose enqueue found a full queue of writes waits
-/// here and retries on later ticks, the same way pending reactions do.
 fn retrySlackOutbox(a: *App) void {
-    for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
-        if (slot.inflight) continue;
-        enqueueSlackOutbox(a, slot);
-    }
-}
-
-/// Sends journaled in the outbox only go out once the Slack connection
-/// exists, so this runs from loadSlackTokens (startup and reconnects);
-/// entries already inflight are left alone.
-fn requeueSlackOutbox(a: *App) void {
-    var count: usize = 0;
-    while (count < a.slack_outbox_count) : (count += 1) {
-        const slot = &a.slack_outbox[count];
-        if (!slot.inflight) enqueueSlackOutbox(a, slot);
-    }
-}
-
-/// Retire the outbox entry for a finished Slack send (success or final
-/// failure alike): it must not survive a restart and send again. Matches by
-/// client_msg_id when the result still carries it, else by channel (the
-/// Slack lane is FIFO, so results arrive in queue order).
-fn retireSlackOutbox(a: *App, kind: WacliJobKind, jid: []const u8, client_msg_id: []const u8) void {
-    var match: ?usize = null;
     var index: usize = 0;
-    while (index < a.slack_outbox_count) : (index += 1) {
-        const entry = &a.slack_outbox[index].entry;
-        if ((kind == .slack_send) != (entry.file.len == 0)) continue;
-        if (!std.mem.eql(u8, entry.jid.slice(), jid)) continue;
-        if (client_msg_id.len > 0 and std.mem.eql(u8, entry.client_msg_id.slice(), client_msg_id)) {
-            match = index;
-            break;
-        }
-        if (match == null) match = index;
+    while (index < a.slack_outbox_count) {
+        const slot = &a.slack_outbox[index];
+        if (slot.completed) {
+            const id = slot.entry.id;
+            const before = a.slack_outbox_count;
+            retireSlackOutbox(a, &id);
+            if (a.slack_outbox_count < before) continue;
+        } else if (!slot.inflight) enqueueSlackOutbox(a, slot);
+        index += 1;
     }
-    const victim = match orelse return;
-    var shift = victim;
-    while (shift + 1 < a.slack_outbox_count) : (shift += 1) a.slack_outbox[shift] = a.slack_outbox[shift + 1];
-    a.slack_outbox_count -= 1;
-    a.slack_outbox[a.slack_outbox_count] = .{};
-    persistOutbox(a);
+}
+
+fn retireSlackOutbox(a: *App, id: []const u8) void {
+    for (a.slack_outbox[0..a.slack_outbox_count], 0..) |*slot, victim| {
+        if (!std.mem.eql(u8, slot.entry.idSlice(), id)) continue;
+        slot.completed = true;
+        slot.inflight = false;
+        if (!persistOutbox(a)) {
+            setStatus(a, "Could not save send completion; retrying journal");
+            return;
+        }
+        var shift = victim;
+        while (shift + 1 < a.slack_outbox_count) : (shift += 1) a.slack_outbox[shift] = a.slack_outbox[shift + 1];
+        a.slack_outbox_count -= 1;
+        a.slack_outbox[a.slack_outbox_count] = .{};
+        return;
+    }
 }
 
 fn requestSlackDownload(a: *App, channel: []const u8, item: slack.HistoryItem) void {
@@ -4904,9 +4874,7 @@ fn loadSlackTokens(a: *App) void {
     if (a.slack_tokens == null and a.slack_bridge == null) return;
     const job = WacliJob{ .kind = .slack_auth };
     _ = wacliEnqueue(a, job, false);
-    // WAZI-100: Slack sends journaled in the outbox wait for this point;
-    // with the connection loaded their jobs can finally be queued.
-    requeueSlackOutbox(a);
+    retrySlackOutbox(a);
 }
 
 // --- Slack token dialog (masked entry, DPAPI-stored on save) ---
@@ -8707,6 +8675,17 @@ fn logSendTiming(a: *App, outcome: []const u8, pending: PendingSend) void {
     appendLaunchLog(a, line);
 }
 
+fn completePendingSend(a: *App, delivered: bool) bool {
+    const head = &a.pending_sends[0];
+    if (!head.completed) head.delivered = delivered;
+    head.completed = true;
+    if (!persistOutbox(a)) {
+        setStatus(a, "Could not save send completion; retrying journal");
+        return false;
+    }
+    return true;
+}
+
 /// Drop the head of the send queue. The staged file (image or voice note) is
 /// deleted only when `delivered` is true: a failed send keeps it so the red
 /// bubble can retry the upload. A delivered voice note, image or file keeps
@@ -8714,6 +8693,7 @@ fn logSendTiming(a: *App, outcome: []const u8, pending: PendingSend) void {
 /// media-cache age policy evicts it later.
 fn removeFirstPendingSend(a: *App, delivered: bool) void {
     if (a.pending_send_count == 0) return;
+    if (!completePendingSend(a, delivered)) return;
     const head = &a.pending_sends[0];
     if (delivered) unarchiveSentChat(a, head.jid.slice());
     if (delivered and head.file.len > 0 and head.jid.len <= 191 and head.file.len <= 520) {
@@ -8730,7 +8710,6 @@ fn removeFirstPendingSend(a: *App, delivered: bool) void {
     }
     a.pending_send_count -= 1;
     a.pending_sends[a.pending_send_count] = .{};
-    persistOutbox(a);
     persistFileOutbox(a);
 }
 
@@ -8772,10 +8751,6 @@ fn persistFileOutbox(a: *App) void {
     defer a.allocator.free(path);
     var body: std.ArrayList(u8) = .empty;
     defer body.deinit(a.allocator);
-    for (a.pending_sends[0..a.pending_send_count]) |*pending| {
-        if (pending.file.len == 0) continue;
-        appendOutboxLine(a, &body, pending.jid.slice(), pending.ptt, pending.voice_seconds, pending.queued_unix, pending.file.slice(), pending.text.slice());
-    }
     for (a.failed_sends[0..a.failed_send_count]) |*failed| {
         if (!failed.is_file) continue;
         appendOutboxLine(a, &body, failed.jid.slice(), failed.ptt, failed.voice_seconds, failed.queued_unix, failed.file.slice(), failed.text.slice());
@@ -8813,6 +8788,11 @@ fn loadFileOutbox(a: *App) void {
         const file = fields.next() orelse continue;
         const caption = fields.rest();
         if (jid.len == 0 or file.len == 0 or !fileExistsUtf8(file)) continue;
+        var pending_file = false;
+        for (a.pending_sends[0..a.pending_send_count]) |*pending| {
+            if (std.mem.eql(u8, pending.file.slice(), file)) pending_file = true;
+        }
+        if (pending_file) continue;
         const entry = &a.failed_sends[a.failed_send_count];
         entry.* = .{};
         entry.jid.set(jid);
@@ -9041,7 +9021,15 @@ fn readChildOutput(a: *App, file: ?std.Io.File) ?[]u8 {
 }
 
 fn startNextSend(a: *App) void {
+    if (a.outbox_load_failed) {
+        setStatus(a, "Outbox could not be loaded; sends paused");
+        return;
+    }
     if (a.send_child != null or a.read_child != null or a.pending_send_count == 0) return;
+    if (a.pending_sends[0].completed) {
+        removeFirstPendingSend(a, a.pending_sends[0].delivered);
+        return;
+    }
     // With live sync stopped by another write job, a send started now would
     // take the store lock itself and collide with the job that later restarts
     // sync (whose argv has no --lock-wait). Wait for that job to finish.
@@ -9052,12 +9040,8 @@ fn startNextSend(a: *App) void {
     // A retry after an ambiguous failure (timeout, or a nonzero exit that
     // wasn't a store lock) might be sending a message a second time: if the
     // open chat already shows it as delivered, count it sent instead.
-    // WAZI-100: an entry reloaded from the outbox carries the same doubt,
-    // because the previous run may have died between wacli delivering the
-    // message and the entry leaving the file. A caption-less file send has
-    // no text to prove anything with, so it never takes this shortcut.
     const head = &a.pending_sends[0];
-    if (((head.retries > 0 and head.ambiguous) or (head.from_disk and head.text.len > 0)) and
+    if (head.retries > 0 and head.ambiguous and
         sentMessageExists(a, head.jid.slice(), head.text.slice(), head.queued_unix))
     {
         appendLaunchLog(a, "send: matched an already-delivered message, not resending");
@@ -9599,7 +9583,7 @@ fn tickVoice(a: *App) void {
 /// are not on the wacli command line.
 fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, waveform: *const [64]u8) bool {
     _ = waveform;
-    if (a.pending_send_count >= max_pending_sends) return false;
+    if (a.outbox_load_failed or a.pending_send_count >= max_pending_sends) return false;
     var path_buffer: [520]u8 = undefined;
     const path_len = stageNewPath(a, &path_buffer, "ogg") orelse return false;
     const path = path_buffer[0..path_len];
@@ -9615,11 +9599,18 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
     pending.voice_seconds = seconds;
     pending.reply_to.set(a.reply_to.slice());
     pending.reply_sender.set(a.reply_sender.slice());
-    clearReply(a);
     a.send_seq += 1;
     pending.seq = a.send_seq;
     pending.queued_unix = nowUnixSeconds();
+    mintSendId(a, &pending.id);
     a.pending_send_count += 1;
+    if (!persistOutbox(a)) {
+        a.pending_send_count -= 1;
+        pending.* = .{};
+        deleteFileUtf8(path);
+        return false;
+    }
+    clearReply(a);
     a.user_viewed = true;
     a.scroll_y = 0;
     appendWhatsAppPending(a, pending, false);
@@ -9631,7 +9622,11 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
 
 fn sendMessage(a: *App) void {
     if (a.compose == null or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
-    if (a.pending_send_count >= max_pending_sends) {
+    if (a.outbox_load_failed) {
+        setStatus(a, "Outbox could not be loaded; sends paused");
+        return;
+    }
+    if (!selectedChatIsSlack(a) and a.pending_send_count >= max_pending_sends) {
         setStatus(a, "Send queue is full");
         return;
     }
@@ -9651,28 +9646,37 @@ fn sendMessage(a: *App) void {
     if (length == 0 and staged_file.len == 0) return;
     const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide_buffer[0..length]) catch return;
     defer a.allocator.free(text);
-    if (staged_file.len > 0) {
+    if (text.len > outbox.max_text_len) {
+        setStatus(a, "Message exceeds 4095 UTF-8 bytes; shorten it first");
+        return;
+    }
+    if (staged_file.len > 0 and !selectedChatIsSlack(a)) {
         const path_copy = a.allocator.dupe(u8, staged_file) catch return;
         defer a.allocator.free(path_copy);
         const caption_copy = a.allocator.dupe(u8, text) catch return;
         defer a.allocator.free(caption_copy);
         // File deletion transfers to the send queue (removeFirstPendingSend)
         // once wacli has finished with it; only the preview is dropped here.
-        releaseStagedImage(a);
         const pending = &a.pending_sends[a.pending_send_count];
         pending.jid.set(a.chats[a.selected_chat].jid.slice());
         pending.text.set(caption_copy);
         pending.file.set(path_copy);
         pending.reply_to.set(a.reply_to.slice());
         pending.reply_sender.set(a.reply_sender.slice());
-        clearReply(a);
-        forgetFailedSend(a, pending.jid.slice(), pending.text.slice());
         a.send_seq += 1;
         pending.seq = a.send_seq;
         pending.queued_unix = nowUnixSeconds();
         mintSendId(a, &pending.id);
         a.pending_send_count += 1;
-        persistOutbox(a);
+        if (!persistOutbox(a)) {
+            a.pending_send_count -= 1;
+            pending.* = .{};
+            setStatus(a, "Could not save outbox; message not queued");
+            return;
+        }
+        releaseStagedImage(a);
+        clearReply(a);
+        forgetFailedSend(a, pending.jid.slice(), pending.text.slice());
         a.user_viewed = true;
         a.scroll_y = 0; // the user just sent: pin the view to the newest bubble
         appendWhatsAppPending(a, pending, false);
@@ -9701,8 +9705,6 @@ fn sendMessage(a: *App) void {
         return;
     }
     if (selectedChatIsSlack(a)) {
-        // WAZI-100: the Slack outbox is bounded like the WhatsApp send FIFO,
-        // and a full one tells the user instead of dropping the message.
         if (a.slack_outbox_count >= max_slack_outbox) {
             setStatus(a, "Send queue is full");
             return;
@@ -9719,8 +9721,6 @@ fn sendMessage(a: *App) void {
                 const attach_len = std.unicode.utf16LeToUtf8(&attach_path_buffer, a.slack_attach.slice()) catch 0;
                 attach = attach_path_buffer[0..attach_len];
             } else setStatus(a, "Attached image dropped: chat changed");
-            a.slack_attach.set(a.allocator, "");
-            a.slack_attach_jid.set("");
         } else if (staged_file.len > 0) {
             // Bridge mode has no uploads: keep the image and text staged
             // instead of losing the caption to a failed upload job.
@@ -9728,20 +9728,15 @@ fn sendMessage(a: *App) void {
                 setStatus(a, "File upload not available over the Slack bridge");
                 return;
             }
-            // staged_file borrows the staged image's own buffer, which
-            // releaseStagedImage zeroes below; copy the path out first so
-            // the journaled entry and the job args see the real path.
             const staged_len = @min(staged_file.len, staged_attach_buffer.len);
             @memcpy(staged_attach_buffer[0..staged_len], staged_file[0..staged_len]);
             attach = staged_attach_buffer[0..staged_len];
-            releaseStagedImage(a);
+        }
+        if (attach.len > outbox.max_file_len) {
+            setStatus(a, "Attachment path is too long; file not queued");
+            return;
         }
         if (attach.len > 0) {
-            // WAZI-100: journal the file send before its job is queued, so a
-            // crash or restart re-sends it instead of silently dropping it.
-            // The file is the user's own (palette pick) or a staged paste
-            // the paste folder owns; neither is deleted on send, so nothing
-            // references a path the entry outlives.
             const slot = &a.slack_outbox[a.slack_outbox_count];
             slot.* = .{};
             mintSendId(a, &slot.entry.id);
@@ -9752,7 +9747,12 @@ fn sendMessage(a: *App) void {
             slot.entry.reply_to.set(a.reply_to.slice());
             slot.entry.queued_unix = nowUnixSeconds();
             a.slack_outbox_count += 1;
-            persistOutbox(a);
+            if (!persistOutbox(a)) {
+                a.slack_outbox_count -= 1;
+                slot.* = .{};
+                setStatus(a, "Could not save outbox; message not queued");
+                return;
+            }
             enqueueSlackOutbox(a, slot);
         } else {
             // WAZI-61: client_msg_id correlates the optimistic bubble with
@@ -9769,8 +9769,6 @@ fn sendMessage(a: *App) void {
                 uuid_bytes[8],  uuid_bytes[9],  uuid_bytes[10], uuid_bytes[11],
                 uuid_bytes[12], uuid_bytes[13], uuid_bytes[14], uuid_bytes[15],
             }) catch "";
-            // WAZI-100: journal the send before its job is queued, then
-            // queue and bubble exactly as before.
             const slot = &a.slack_outbox[a.slack_outbox_count];
             slot.* = .{};
             mintSendId(a, &slot.entry.id);
@@ -9781,13 +9779,21 @@ fn sendMessage(a: *App) void {
             slot.entry.client_msg_id.set(client_msg_id);
             slot.entry.queued_unix = nowUnixSeconds();
             a.slack_outbox_count += 1;
-            persistOutbox(a);
+            if (!persistOutbox(a)) {
+                a.slack_outbox_count -= 1;
+                slot.* = .{};
+                setStatus(a, "Could not save outbox; message not queued");
+                return;
+            }
             enqueueSlackOutbox(a, slot);
             // Show the message immediately as pending; the send completion
             // (or the Slack echo, whichever lands first) stamps it with the
             // real ts or marks it failed.
             appendSlackPending(a, text, client_msg_id);
         }
+        if (staged_file.len > 0) releaseStagedImage(a);
+        a.slack_attach.set(a.allocator, "");
+        a.slack_attach_jid.set("");
         clearReply(a);
         a.user_viewed = true;
         _ = win.SetWindowTextW(a.compose.?, lit(""));
@@ -9802,14 +9808,19 @@ fn sendMessage(a: *App) void {
     pending.reply_to.set(a.reply_to.slice());
     pending.reply_sender.set(a.reply_sender.slice());
     pending.file = .{};
-    clearReply(a);
-    forgetFailedSend(a, pending.jid.slice(), pending.text.slice());
     a.send_seq += 1;
     pending.seq = a.send_seq;
     pending.queued_unix = nowUnixSeconds();
     mintSendId(a, &pending.id);
     a.pending_send_count += 1;
-    persistOutbox(a);
+    if (!persistOutbox(a)) {
+        a.pending_send_count -= 1;
+        pending.* = .{};
+        setStatus(a, "Could not save outbox; message not queued");
+        return;
+    }
+    clearReply(a);
+    forgetFailedSend(a, pending.jid.slice(), pending.text.slice());
     a.user_viewed = true;
     a.scroll_y = 0; // the user just sent: pin the view to the newest bubble
     appendWhatsAppPending(a, pending, false);
@@ -10337,9 +10348,6 @@ fn enqueueReactionJob(a: *App, entry: *PendingReaction) void {
     wacliJobArgs(&job, args[0..count]);
     // Urgent: ahead of chat and message refreshes, but behind reactions
     // already queued so an add then remove reach the server in that order.
-    // WAZI-100: a queue holding nothing but writes refuses the job; the
-    // reaction then waits here and the refresh tick re-enqueues it, exactly
-    // like a reaction dropped as a queue-full victim above.
     if (!wacliEnqueue(a, job, true)) {
         if (entry.retry_at_ms == 0) entry.retry_at_ms = win.GetTickCount64() + 3_000;
         setStatus(a, "Reaction queue is full; retrying");
@@ -13311,7 +13319,7 @@ fn enqueueStatusSeen(a: *App, id: []const u8) void {
     var job = WacliJob{ .kind = .status_seen, .gen = a.status_gen };
     job.msg_id.set(id);
     wacliJobArgs(&job, &args);
-    _ = wacliEnqueue(a, job, true);
+    if (!wacliEnqueue(a, job, true)) statusSeenFailed(a, id, "queue full");
 }
 
 fn statusSeenFailed(a: *App, id: []const u8, err: []const u8) void {
@@ -15541,10 +15549,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     // Only text sends own an optimistic bubble; an attach
                     // failure must never fail a pending text bubble.
                     if (result.kind == .slack_send) resolveSlackSend(a, result);
-                    // WAZI-100: the send finished, success or final failure
-                    // alike; its outbox entry must not survive a restart and
-                    // send again.
-                    retireSlackOutbox(a, result.kind, result.jid.slice(), if (result.ok) result.extra.slice() else "");
+                    retireSlackOutbox(a, result.msg_id.slice());
                     var status_buffer: [64]u8 = undefined;
                     if (result.ok) {
                         // WAZI-61 timing: enqueue-to-confirmation, visible proof.
@@ -15949,6 +15954,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 checkSend(a);
                 retryPendingReactions(a);
                 retrySlackOutbox(a);
+                retryWacliRefreshes(a);
                 checkMarkRead(a);
                 checkAvatarDownload(a);
                 checkArchive(a);
@@ -17178,9 +17184,11 @@ fn LoadAppIcon(instance: win.HINSTANCE, cx: i32, cy: i32, flags: u32) win.HICON 
 
 pub fn main(init: std.process.Init) !void {
     process_start_ms = win.GetTickCount64();
+    var update_relaunch = false;
     var argument_iterator = try init.minimal.args.iterateAllocator(init.gpa);
     defer argument_iterator.deinit();
     while (argument_iterator.next()) |argument| {
+        if (std.mem.eql(u8, argument, "--update-relaunch")) update_relaunch = true;
         if (std.mem.eql(u8, argument, "--tdlib-smoke")) {
             if (!tg.enabled) std.process.exit(2);
             std.process.exit(tdlibSmoke(init.io));
@@ -17191,6 +17199,19 @@ pub fn main(init: std.process.Init) !void {
     }
     const instance = win.GetModuleHandleW(null) orelse return error.NoModuleHandle;
     installCrashFilter();
+    const outbox_store = init.environ_map.get("LOCALAPPDATA") orelse return error.MissingLocalAppData;
+    var mutex_name_buffer: [80]u8 = undefined;
+    const mutex_name = try std.fmt.bufPrint(&mutex_name_buffer, "Global\\MessagesOutbox-{x}", .{std.hash.Wyhash.hash(0, outbox_store)});
+    const mutex_wide = try std.unicode.utf8ToUtf16LeAllocZ(init.gpa, mutex_name);
+    defer init.gpa.free(mutex_wide);
+    const outbox_mutex = win.CreateMutexW(null, win.FALSE, mutex_wide.ptr) orelse return error.OutboxMutexFailed;
+    defer _ = win.CloseHandle(outbox_mutex);
+    const outbox_wait = win.WaitForSingleObject(outbox_mutex, if (update_relaunch) 10_000 else 0);
+    if (outbox_wait != win.WAIT_OBJECT_0 and outbox_wait != win.WAIT_ABANDONED) {
+        _ = win.MessageBoxW(null, lit("Messages is already running. Close that window before starting another instance."), lit("Messages"), win.MB_OK);
+        return;
+    }
+    defer _ = win.ReleaseMutex(outbox_mutex);
     const wacli_path = try findWacli(init, init.gpa);
     defer init.gpa.free(wacli_path);
     // Not freed: the detached sync-stderr reader thread may still log via
@@ -17272,7 +17293,6 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     loadEmojiRecents(&app);
-    loadFileOutbox(&app);
     if (init.environ_map.get("LOCALAPPDATA")) |local| {
         if (std.fs.path.join(init.gpa, &.{ local, "Messages", "telegram" })) |telegram_dir| {
             // Runtime keys (registry) override the baked build defaults.
@@ -17325,7 +17345,9 @@ pub fn main(init: std.process.Init) !void {
     }
     defer app.read_state.deinit(init.gpa);
     app.outbox_path = hashStorePath(init, init.gpa, "outbox.jsonl");
+    defer if (app.outbox_path.len > 0) init.gpa.free(app.outbox_path);
     loadOutbox(&app);
+    loadFileOutbox(&app);
     app.store_watch_path.set(init.gpa, store_watch_path);
     app.sync_heartbeat_path.set(init.gpa, sync_heartbeat_path);
     app_ptr = &app;
@@ -18652,12 +18674,17 @@ fn relaunchIntoUpdate(a: *App) void {
     startup.cb = @sizeOf(win.STARTUPINFOW);
     var process: win.PROCESS_INFORMATION = std.mem.zeroes(win.PROCESS_INFORMATION);
     appendLaunchLog(a, "update: relaunching");
-    // WAZI-71: retry once before giving up; a transient failure must not
-    // push the restart back onto the user.
-    var launched = win.CreateProcessW(exe_buf[0..exe_len :0].ptr, null, null, null, win.FALSE, 0, null, null, &startup, &process) != 0;
+    var command_template: [600]u16 = [_]u16{0} ** 600;
+    command_template[0] = '"';
+    @memcpy(command_template[1..][0..exe_len], exe_buf[0..exe_len]);
+    const suffix = std.mem.span(lit("\" --update-relaunch"));
+    @memcpy(command_template[exe_len + 1 ..][0..suffix.len], suffix);
+    var command_line = command_template;
+    var launched = win.CreateProcessW(exe_buf[0..exe_len :0].ptr, &command_line, null, null, win.FALSE, 0, null, null, &startup, &process) != 0;
     if (!launched) {
         process = std.mem.zeroes(win.PROCESS_INFORMATION);
-        launched = win.CreateProcessW(exe_buf[0..exe_len :0].ptr, null, null, null, win.FALSE, 0, null, null, &startup, &process) != 0;
+        command_line = command_template;
+        launched = win.CreateProcessW(exe_buf[0..exe_len :0].ptr, &command_line, null, null, win.FALSE, 0, null, null, &startup, &process) != 0;
     }
     if (launched) {
         _ = win.CloseHandle(process.hProcess);

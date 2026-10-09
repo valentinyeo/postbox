@@ -1,36 +1,15 @@
-//! WAZI-100: durable send outbox. Every queued send (WhatsApp and Slack,
-//! text and staged file) carries a client-generated 128-bit hex id and is
-//! mirrored as one JSON line to outbox.jsonl, so a crash or an update
-//! restart can never silently lose a message: unsent entries reload on
-//! startup, show as pending bubbles, and send. Pure format logic lives here
-//! so it can be unit tested without Windows; main.zig owns the file I/O.
-//!
-//! One line per entry:
-//! {"id":"<32 hex>","provider":"whatsapp|slack","jid":"...","text":"...",
-//!  "file":"...","reply_to":"...","reply_sender":"...","client_msg_id":"...",
-//!  "queued_unix":1234567890}
-
 const std = @import("std");
 
-/// Length of a client send id: 128 random bits, lowercase hex.
 pub const id_len = 32;
 pub const max_jid_len = 191;
 pub const max_text_len = 4095;
 pub const max_file_len = 519;
-/// Slack's client_msg_id (a UUID string) rides along for bubble correlation.
 pub const max_client_msg_id_len = 63;
-/// A 4095-byte text of control characters escapes to 6 bytes each, plus
-/// field overhead; the writer never produces longer lines, so the reader
-/// can safely reject anything past this as corrupt.
 pub const max_line_len = 32 * 1024;
-/// Loader capacity bound; the app's queues are smaller.
 pub const max_entries = 64;
 
 pub const Provider = enum { whatsapp, slack };
 
-/// One nul-terminated fixed string field, mirroring main.zig's Utf8Text:
-/// a stored value is never truncated back into existence, so parse rejects
-/// fields that do not fit instead of silently shortening them.
 pub fn Str(comptime capacity: usize) type {
     return struct {
         buf: [capacity + 1]u8 = [_]u8{0} ** (capacity + 1),
@@ -58,13 +37,14 @@ pub const Entry = struct {
     reply_sender: Str(max_jid_len) = .{},
     client_msg_id: Str(max_client_msg_id_len) = .{},
     queued_unix: i64 = 0,
+    ptt: bool = false,
+    voice_seconds: u32 = 0,
 
     pub fn idSlice(self: *const Entry) []const u8 {
         return &self.id;
     }
 };
 
-/// True for a 128-bit lowercase hex id, the only shape mintSendId produces.
 pub fn validId(id: []const u8) bool {
     if (id.len != id_len) return false;
     for (id) |byte| {
@@ -78,7 +58,6 @@ pub fn validId(id: []const u8) bool {
     return true;
 }
 
-/// Random bytes to the 32-character hex id the outbox keys entries by.
 pub fn hexId(random: [16]u8) [id_len]u8 {
     return std.fmt.bytesToHex(random, .lower);
 }
@@ -93,9 +72,10 @@ const line_fields = struct {
     reply_sender: []const u8,
     client_msg_id: []const u8,
     queued_unix: i64,
+    ptt: bool,
+    voice_seconds: u32,
 };
 
-/// Appends `entry` as one JSONL line (newline included).
 pub fn writeLine(writer: *std.Io.Writer, entry: *const Entry) !void {
     try std.json.Stringify.value(line_fields{
         .id = entry.idSlice(),
@@ -107,13 +87,12 @@ pub fn writeLine(writer: *std.Io.Writer, entry: *const Entry) !void {
         .reply_sender = entry.reply_sender.slice(),
         .client_msg_id = entry.client_msg_id.slice(),
         .queued_unix = entry.queued_unix,
+        .ptt = entry.ptt,
+        .voice_seconds = entry.voice_seconds,
     }, .{}, writer);
     try writer.writeByte('\n');
 }
 
-/// The parsed form: every field defaults, so a line written by another
-/// version that omits empty fields still loads, and the explicit checks
-/// below decide what is invalid.
 const parsed_line = struct {
     id: []const u8 = "",
     provider: []const u8 = "",
@@ -124,12 +103,10 @@ const parsed_line = struct {
     reply_sender: []const u8 = "",
     client_msg_id: []const u8 = "",
     queued_unix: i64 = 0,
+    ptt: bool = false,
+    voice_seconds: u32 = 0,
 };
 
-/// Parses one JSONL line into `out`. Returns false for anything that is not
-/// a well-formed entry (empty, corrupt JSON, wrong id shape, unknown
-/// provider, field that does not fit, no message and no file); the loader
-/// skips the line instead of sending garbage.
 pub fn parseLine(allocator: std.mem.Allocator, line: []const u8, out: *Entry) bool {
     const trimmed = std.mem.trim(u8, line, " \t\r");
     if (trimmed.len == 0 or trimmed.len > max_line_len) return false;
@@ -143,7 +120,11 @@ pub fn parseLine(allocator: std.mem.Allocator, line: []const u8, out: *Entry) bo
     if (value.text.len > max_text_len or value.file.len > max_file_len or
         value.reply_to.len > max_jid_len or value.reply_sender.len > max_jid_len or
         value.client_msg_id.len > max_client_msg_id_len) return false;
-    out.* = .{ .provider = provider, .queued_unix = value.queued_unix };
+    if (value.queued_unix < 0) return false;
+    for ([_][]const u8{ value.jid, value.text, value.file, value.reply_to, value.reply_sender, value.client_msg_id }) |field| {
+        if (std.mem.indexOfScalar(u8, field, 0) != null) return false;
+    }
+    out.* = .{ .provider = provider, .queued_unix = value.queued_unix, .ptt = value.ptt, .voice_seconds = value.voice_seconds };
     @memcpy(&out.id, value.id);
     out.jid.set(value.jid);
     out.text.set(value.text);
@@ -154,9 +135,6 @@ pub fn parseLine(allocator: std.mem.Allocator, line: []const u8, out: *Entry) bo
     return true;
 }
 
-/// Line-by-line loader: `next` returns each valid entry from the file,
-/// skipping corrupt lines and collapsing duplicates by id (first wins).
-/// The borrowed result stays valid until the following `next` call.
 pub const Scanner = struct {
     allocator: std.mem.Allocator,
     rest: []const u8,
@@ -187,18 +165,11 @@ pub const Scanner = struct {
                 }
                 return &self.current;
             }
-            // A duplicate id: keep scanning so later entries still load.
         }
         return null;
     }
 };
 
-/// Index of the queued job to evict when the shared job queue is full, or
-/// null when nothing may be dropped. `keep[i]` marks queue entries that are
-/// writes (sends, reactions): a full queue never evicts one of those
-/// (WAZI-100); the incoming job instead waits and its owner retries on the
-/// next tick. Scans from the back so the oldest droppable job goes first,
-/// as before: index 0 holds the newest (urgent) job and must survive.
 pub fn evictionVictim(keep: []const bool) ?usize {
     var index: usize = keep.len;
     while (index > 0) {
@@ -257,14 +228,10 @@ test "scanner skips corrupt lines and loads the valid ones" {
         "not json at all\n",
         "\n",
         "{\"id\":\"too-short\",\"provider\":\"whatsapp\",\"jid\":\"x\",\"text\":\"y\",\"queued_unix\":1}\n",
-        // Right length, but not hex.
         "{\"id\":\"0123456789abcdef0123456789abcdeg\",\"provider\":\"whatsapp\",\"jid\":\"x\",\"text\":\"y\",\"queued_unix\":1}\n",
-        // Unknown provider tag.
         "{\"id\":\"0123456789abcdef0123456789abcdef\",\"provider\":\"carrier-pigeon\",\"jid\":\"x\",\"text\":\"y\",\"queued_unix\":1}\n",
-        // Well-formed JSON but no text and no file: never sendable.
         "{\"id\":\"0123456789abcdef0123456789abcdef\",\"provider\":\"whatsapp\",\"jid\":\"x\",\"queued_unix\":1}\n",
         good,
-        // Truncated mid-line, as a crash mid-write could leave the file.
         "{\"id\":\"0123456789abcdef0123456789abcde\n",
     }) catch unreachable;
     defer allocator.free(contents);
@@ -308,11 +275,42 @@ test "scanner collapses duplicate ids and keeps the first entry" {
 }
 
 test "evictionVictim never evicts a write and gives up when only writes remain" {
-    // Writes only: nothing may be dropped, whatever arrives.
     try std.testing.expectEqual(@as(?usize, null), evictionVictim(&.{ true, true, true }));
-    // The oldest droppable job goes first, scanning from the back.
     try std.testing.expectEqual(@as(?usize, 3), evictionVictim(&.{ true, false, false, false }));
     try std.testing.expectEqual(@as(?usize, 1), evictionVictim(&.{ true, false, true, true }));
     try std.testing.expectEqual(@as(?usize, 0), evictionVictim(&.{ false, true, true, true }));
     try std.testing.expectEqual(@as(?usize, null), evictionVictim(&.{}));
+}
+
+test "parse rejects NUL fields and negative enqueue times before Win32 use" {
+    const allocator = std.testing.allocator;
+    for ([_][]const u8{ "jid", "text", "file", "reply_to", "reply_sender", "client_msg_id" }) |field| {
+        const line = try std.fmt.allocPrint(allocator, "{{\"id\":\"0123456789abcdef0123456789abcdef\",\"provider\":\"whatsapp\",\"{s}\":\"before\\u0000after\",{s}}}", .{ field, if (std.mem.eql(u8, field, "jid")) "\"text\":\"synthetic\"" else if (std.mem.eql(u8, field, "text")) "\"jid\":\"synthetic\"" else "\"jid\":\"synthetic\",\"text\":\"synthetic\"" });
+        defer allocator.free(line);
+        var parsed = Entry{};
+        try std.testing.expect(!parseLine(allocator, line, &parsed));
+    }
+    var parsed = Entry{};
+    try std.testing.expect(!parseLine(allocator, "{\"id\":\"0123456789abcdef0123456789abcdef\",\"provider\":\"whatsapp\",\"jid\":\"synthetic\",\"text\":\"synthetic\",\"queued_unix\":-9223372036854775808}", &parsed));
+}
+
+test "maximum escaped fields round trip and oversized fields are rejected" {
+    const allocator = std.testing.allocator;
+    var entry = Entry{};
+    entry.jid.set(&([_]u8{'\t'} ** max_jid_len));
+    entry.text.set(&([_]u8{1} ** max_text_len));
+    entry.file.set(&([_]u8{'\t'} ** max_file_len));
+    entry.reply_to = entry.jid;
+    entry.reply_sender = entry.jid;
+    entry.client_msg_id.set(&([_]u8{'\t'} ** max_client_msg_id_len));
+    var writer = std.Io.Writer.Allocating.init(allocator);
+    defer writer.deinit();
+    try writeLine(&writer.writer, &entry);
+    try std.testing.expect(writer.written().len <= max_line_len);
+    var parsed = Entry{};
+    try std.testing.expect(parseLine(allocator, writer.written(), &parsed));
+    try std.testing.expectEqualStrings(entry.text.slice(), parsed.text.slice());
+    const oversized = try std.fmt.allocPrint(allocator, "{{\"id\":\"0123456789abcdef0123456789abcdef\",\"provider\":\"whatsapp\",\"jid\":\"synthetic\",\"text\":\"{s}\"}}", .{[_]u8{'x'} ** (max_text_len + 1)});
+    defer allocator.free(oversized);
+    try std.testing.expect(!parseLine(allocator, oversized, &parsed));
 }

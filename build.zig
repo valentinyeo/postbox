@@ -402,6 +402,7 @@ pub fn build(b: *std.Build) void {
             "",
         sourceSection("fn archiveSelectedChat(", "// --------------------------------------------------------- wazigctl control"),
         sourceSection("fn startNextArchive(", "fn checkArchive("),
+        "fn completePendingSend(_: *App, _: bool) bool { return true; }\n",
         sourceSection("fn removeFirstPendingSend(", "fn playableVideoPath("),
         sourceSection("fn buildPaletteItems(", "    a.palette_item_count = 0;"),
         "std.mem.doNotOptimizeAway(a); }\nfn activateArchivePalette(a: *App, item: struct { command: u16 }) void {\n",
