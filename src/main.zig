@@ -14,6 +14,7 @@ const played = @import("played.zig");
 const voice_pos = @import("voice_pos.zig");
 const mic_choice = @import("mic_choice.zig");
 const pending_reads = @import("pending_reads.zig");
+const read_state = @import("read_state.zig");
 const chat_order = @import("chat_order.zig");
 const chat_reconcile = @import("chat_reconcile.zig");
 const compose_layout = @import("compose_layout.zig");
@@ -276,6 +277,7 @@ const Chat = struct {
     time: WideText(15) = .{},
     unread_count: i64 = 0,
     unread: bool = false,
+    provider_unread: bool = false,
     pinned: bool = false,
     archived: bool = false,
     provider: transport.Provider = .whatsapp,
@@ -523,7 +525,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 
 const WacliJob = struct {
@@ -922,6 +924,7 @@ const App = struct {
     // Mirrors the pending mark-read queue so reads that never reached the
     // store survive a restart (WAZI-74).
     read_path: []u8 = &.{},
+    read_state: read_state.State = .{},
     // Set after repeated wacli spawn failures: stop retrying reads this
     // session, but keep the queue file so they retry next launch.
     read_queue_dead: bool = false,
@@ -1936,7 +1939,7 @@ fn msgCacheStore(a: *App, jid: []const u8, data: []const u8) void {
         defer a.allocator.free(path);
         const envelope = chat_cache.envelope(a.allocator, jid, data) catch return;
         defer a.allocator.free(envelope);
-        writeCacheFileAtomic(a, path, envelope);
+        _ = writeCacheFileAtomic(a, path, envelope);
     }
 }
 
@@ -2069,7 +2072,7 @@ fn isUnresolvableChatEntry(name: []const u8, jid: []const u8, kind: []const u8) 
 /// so the caller can decide whether it is safe to persist as the launch
 /// snapshot (WAZI-67): a malformed response must never overwrite the last
 /// valid cache.
-fn applyChats(a: *App, raw: []const u8) bool {
+fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     var query_wide: [256]u16 = [_]u16{0} ** 256;
     const query_len = if (a.search) |search| @as(usize, @intCast(win.GetWindowTextW(search, &query_wide, query_wide.len))) else 0;
     const query_utf8 = if (query_len > 0) std.unicode.utf16LeToUtf8Alloc(a.allocator, query_wide[0..query_len]) catch null else null;
@@ -2160,8 +2163,13 @@ fn applyChats(a: *App, raw: []const u8) bool {
         chat.name.set(a.allocator, display_name);
         chat.kind.set(a.allocator, if (std.mem.endsWith(u8, jid, "@g.us")) "Group" else getString(object, "kind"));
         chat.timestamp.set(getString(object, "last_message_ts"));
-        chat.unread = getBool(object, "unread");
-        chat.unread_count = getInt(object, "unread_count");
+        chat.provider_unread = getBool(object, "unread") or getInt(object, "unread_count") > 0;
+        const timestamp = media_age.unixSeconds(chat.timestamp.slice()) orelse 0;
+        a.read_state.observeChat(a.allocator, a.cache_tag.slice(), jid, timestamp, chat.provider_unread, fresh and !a.startup_probe_pending);
+        chat.unread = a.read_state.isUnread(a.cache_tag.slice(), jid);
+        chat.unread_count = if (chat.unread) @max(1, getInt(object, "unread_count")) else 0;
+        queueUnreadProbe(a, &chat);
+        if (a.unread_only and !chat.unread) continue;
         chat.pinned = getBool(object, "pinned");
         chat.archived = getBool(object, "archived");
         a.chats[a.chat_count] = chat;
@@ -2193,18 +2201,6 @@ fn applyChats(a: *App, raw: []const u8) bool {
             a.chats[j] = temporary;
         }
     }
-    // A mark-read write may still be queued or running: keep those chats
-    // shown as read until the write lands and the next refresh reflects it.
-    for (a.chats[0..a.chat_count]) |*chat| {
-        var queued: usize = 0;
-        while (queued < a.pending_read_count) : (queued += 1) {
-            if (std.mem.eql(u8, a.pending_reads[queued].slice(), chat.jid.slice())) {
-                chat.unread = false;
-                chat.unread_count = 0;
-            }
-        }
-    }
-
     a.selected_chat = 0;
     if (selected_len > 0) {
         for (a.chats[0..a.chat_count], 0..) |chat, index| {
@@ -2255,7 +2251,43 @@ fn applyChats(a: *App, raw: []const u8) bool {
         // Keep the logged-out hint visible over the first chat-list load.
         setStatus(a, if (a.sync_logged_out) logged_out_status else status);
     }
+    persistReadState(a);
     return true;
+}
+
+fn persistReadState(a: *App) void {
+    if (!a.read_state.dirty) return;
+    const path = messagesDirPath(a, "read-state.txt") orelse return;
+    defer a.allocator.free(path);
+    const data = a.read_state.encode(a.allocator) catch return;
+    defer a.allocator.free(data);
+    if (writeCacheFileAtomic(a, path, data)) a.read_state.dirty = false;
+}
+
+fn queueUnreadProbe(a: *App, chat: *const Chat) void {
+    if (chat.provider != .whatsapp or a.startup_probe_pending or wacliPendingGet(a, .unread_probe) > 0) return;
+    const timestamp = media_age.unixSeconds(chat.timestamp.slice()) orelse return;
+    if (!a.read_state.needsProbe(a.cache_tag.slice(), chat.jid.slice(), timestamp, chat.provider_unread)) return;
+    var job = WacliJob{ .kind = .unread_probe };
+    job.jid.set(chat.jid.slice());
+    job.extra.set(chat.timestamp.slice());
+    job.msg_id.set(a.cache_tag.slice());
+    wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "messages", "list", "--chat", chat.jid.slice(), "--from-them", "--limit", "1" });
+    wacliEnqueue(a, job, false);
+}
+
+fn applyUnreadProbe(a: *App, result: *const WacliResult) void {
+    if (!result.ok or !std.mem.eql(u8, result.msg_id.slice(), a.cache_tag.slice())) return;
+    const timestamp = media_age.unixSeconds(result.extra.slice()) orelse return;
+    if (!a.read_state.acceptProbe(a.allocator, a.cache_tag.slice(), result.jid.slice(), timestamp, result.data)) return;
+    for (a.chats[0..a.chat_count]) |*chat| {
+        if (chat.provider != .whatsapp) continue;
+        chat.unread = a.read_state.isUnread(a.cache_tag.slice(), chat.jid.slice());
+        chat.unread_count = if (chat.unread) @max(1, chat.unread_count) else 0;
+        queueUnreadProbe(a, chat);
+    }
+    if (a.unread_only) refreshChats(a);
+    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
 }
 
 // --------------------------------------------------------------- Telegram
@@ -3480,7 +3512,7 @@ fn clearSearch(a: *App) bool {
 /// from local caches, so they rebuild at once without a wacli read.
 fn refreshVisibleChats(a: *App) void {
     if (activeChatView(a) == .whatsapp) return refreshChats(a);
-    _ = applyChats(a, "{\"data\":[]}");
+    _ = applyChats(a, "{\"data\":[]}", false);
 }
 
 /// Alt+N: show one messenger's chats. Keeps each messenger's last chat.
@@ -3502,7 +3534,7 @@ fn switchChatView(a: *App, view: transport.Provider) void {
     discardStagedImage(a);
     if (view == .whatsapp) {
         // Paint the last WhatsApp list at once; the fresh read follows.
-        _ = applyChats(a, "{\"data\":[]}");
+        _ = applyChats(a, "{\"data\":[]}", false);
         loadChatsCache(a);
         refreshChats(a);
     } else refreshVisibleChats(a);
@@ -4750,10 +4782,21 @@ fn markChatRead(a: *App) void {
         requestSlackMark(a, chat.jid.slice());
         return;
     }
-    if (!chat.unread and chat.unread_count == 0) return;
-    if (a.read_queue_dead) return;
-    // Clear the badge once the request is queued or already in flight; if
-    // the queue is full, keep the unread state so the next view retries.
+    const needs_receipt = chat.provider_unread or chat.unread or chat.unread_count > 0;
+    if (std.mem.eql(u8, a.displayed_jid.slice(), chat.jid.slice())) {
+        for (a.messages[0..a.message_count]) |*message| {
+            if (message.send_state != .none) continue;
+            const timestamp = media_age.unixSeconds(message.timestamp.slice()) orelse continue;
+            a.read_state.markRead(a.allocator, a.cache_tag.slice(), chat.jid.slice(), timestamp);
+        }
+        persistReadState(a);
+        chat.unread = a.read_state.isUnread(a.cache_tag.slice(), chat.jid.slice());
+        chat.unread_count = if (chat.unread) @max(1, chat.unread_count) else 0;
+        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+    }
+    if (!needs_receipt or a.read_queue_dead) return;
+    // Local reads stick even when the write queue is full. The provider's
+    // unread flag keeps the next view eligible to retry the receipt.
     var already_queued = false;
     var index: usize = 0;
     while (index < a.pending_read_count) : (index += 1) {
@@ -4766,9 +4809,6 @@ fn markChatRead(a: *App) void {
             a.pending_read_count += 1;
             persistPendingReads(a);
         }
-        chat.unread = false;
-        chat.unread_count = 0;
-        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
     }
     startNextMarkRead(a);
 }
@@ -4992,31 +5032,22 @@ fn startNextMarkRead(a: *App) void {
     // 70s, longer than the longest known hold, instead of losing the write.
     // Anything still queued when the app closes persists to disk and
     // retries next launch (WAZI-74).
-    // --receipts (wacli 0.19.0+) sends read receipts on their own path.
-    // Plain mark-read waits on a regular_low app-state recovery that only
-    // the phone can answer, so a desynced collection hung every read and
-    // kept live sync paused (openclaw/wacli#428).
     if (a.send_child != null or sendReadyPending(a) or
         a.archive_child != null or a.pending_archive_count > 0 or
         avatarBusy(a) or mediaBusy(a)) return;
-    // With live sync running, wacli 0.19 hands mark-read to the sync child
-    // over its socket, so sync is never paused for a read. That hand-off
-    // only happens once the lock attempt fails, so no lock wait then (a 70s
-    // wait would just delay it), and the socket only opens once the child
-    // has connected: give a fresh child sync_gate.delegate_warmup_secs.
-    // With sync stopped, the read takes the store lock itself.
-    const delegated = a.sync_child != null;
-    if (delegated and nowUnixSeconds() - a.sync_started_secs < sync_gate.delegate_warmup_secs) return;
+    // wacli 0.18.1 has no --receipts or live-sync delegation. Release the
+    // store lock before the supported app-state mark-read command.
+    stopSync(a, "mark read");
     const child = child_process.spawn(a.io, .{
-        .argv = &.{ a.wacli_path, "--json", "--lock-wait", if (delegated) "0s" else "70s", "chats", "mark-read", "--receipts", "--chat", a.pending_reads[0].slice() },
+        .argv = &.{ a.wacli_path, "--json", "--lock-wait", "70s", "chats", "mark-read", "--chat", a.pending_reads[0].slice() },
         .stdin = .ignore,
         .stdout = .ignore,
         .stderr = .ignore,
         .create_no_window = true,
     }) catch {
         // Give up after repeated spawn failures: clear the in-memory queue,
-        // restore the real unread badges via refreshChats, and let live sync
-        // run so a broken wacli cannot keep the app's sync permanently
+        // keep local watermarks, and let live sync run so a broken wacli
+        // cannot keep the app's sync permanently
         // stopped. The queue file is untouched, so the reads retry next
         // launch instead of being lost.
         a.read_spawn_failures += 1;
@@ -5026,7 +5057,7 @@ fn startNextMarkRead(a: *App) void {
             a.read_spawn_failures = 0;
             startSync(a);
             refreshChats(a);
-            setStatus(a, "Could not mark chats as read; unread badges restored");
+            setStatus(a, "Could not sync read state; local reads saved");
         } else setStatus(a, "Could not start mark as read; retrying");
         return;
     };
@@ -5157,7 +5188,7 @@ fn saveAudioPos(a: *App) void {
     const text = a.voice_pos.serialize(&buffer) orelse return;
     const path = messagesDirPath(a, "voice-pos.txt") orelse return;
     defer a.allocator.free(path);
-    writeCacheFileAtomic(a, path, text);
+    _ = writeCacheFileAtomic(a, path, text);
 }
 
 fn loadVoicePos(a: *App) void {
@@ -6267,28 +6298,30 @@ fn messagesDirPath(a: *App, part: []const u8) ?[]u8 {
 
 // Write to a same-directory temp file, then replace: a crash mid-write can
 // never leave a truncated cache visible to the next launch.
-fn writeCacheFileAtomic(a: *App, path: []const u8, data: []const u8) void {
-    const tmp = std.fmt.allocPrint(a.allocator, "{s}.{x}.tmp", .{ path, win.GetTickCount64() }) catch return;
+fn writeCacheFileAtomic(a: *App, path: []const u8, data: []const u8) bool {
+    const tmp = std.fmt.allocPrint(a.allocator, "{s}.{x}.tmp", .{ path, win.GetTickCount64() }) catch return false;
     defer a.allocator.free(tmp);
-    const tmp_wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, tmp) catch return;
+    const tmp_wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, tmp) catch return false;
     defer a.allocator.free(tmp_wide);
     const handle = win.CreateFileW(tmp_wide.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
-    if (handle == win.INVALID_HANDLE_VALUE or handle == null) return;
+    if (handle == win.INVALID_HANDLE_VALUE or handle == null) return false;
     var written: win.DWORD = 0;
     const wrote = win.WriteFile(handle, data.ptr, @intCast(data.len), &written, null) != 0 and written == data.len;
     const flushed = win.FlushFileBuffers(handle) != 0;
     _ = win.CloseHandle(handle);
     if (!wrote or !flushed) {
         _ = win.DeleteFileW(tmp_wide.ptr);
-        return;
+        return false;
     }
-    const path_wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch return;
+    const path_wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch return false;
     defer a.allocator.free(path_wide);
     // Sharing violations (antivirus, a stuck reader) must never be fatal;
     // the next successful read simply overwrites the cache again.
     if (win.MoveFileExW(tmp_wide.ptr, path_wide.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) == 0) {
         _ = win.DeleteFileW(tmp_wide.ptr);
+        return false;
     }
+    return true;
 }
 
 // Delete one account's launch-cache files before its tag is dropped: the
@@ -6330,7 +6363,7 @@ fn saveChatsCache(a: *App, raw: []const u8) void {
     if (a.startup_probe_pending) return;
     const path = chatsCachePath(a) orelse return;
     defer a.allocator.free(path);
-    writeCacheFileAtomic(a, path, raw);
+    _ = writeCacheFileAtomic(a, path, raw);
     removeOtherChatsCaches(a, path);
 }
 
@@ -6370,7 +6403,7 @@ fn loadChatsCache(a: *App) void {
         return;
     };
     defer a.allocator.free(data);
-    const applied = applyChats(a, data);
+    const applied = applyChats(a, data, false);
     if (applied) logStartupMilestone(a, .chats, "chat list from cache");
     var log_buffer: [64]u8 = undefined;
     const log_line = std.fmt.bufPrint(&log_buffer, "cache-load: {d} bytes, applied={}", .{ data.len, applied }) catch "cache-load: logged";
@@ -8310,7 +8343,7 @@ fn persistFileOutbox(a: *App) void {
         deleteFileUtf8(path);
         return;
     }
-    writeCacheFileAtomic(a, path, body.items);
+    _ = writeCacheFileAtomic(a, path, body.items);
 }
 
 fn appendOutboxLine(a: *App, body: *std.ArrayList(u8), jid: []const u8, ptt: bool, seconds: u32, queued_unix: i64, file: []const u8, caption: []const u8) void {
@@ -8449,7 +8482,7 @@ fn saveSentVoice(a: *App) void {
     }
     const path = messagesDirPath(a, "voice-sent.txt") orelse return;
     defer a.allocator.free(path);
-    writeCacheFileAtomic(a, path, text.items);
+    _ = writeCacheFileAtomic(a, path, text.items);
 }
 
 fn loadSentVoice(a: *App) void {
@@ -14369,7 +14402,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         // A malformed payload (applyChats = false) leaves the
                         // sidebar just as empty as a failed read, so it goes
                         // through the same bounded retry.
-                        if (applyChats(a, result.data)) {
+                        if (applyChats(a, result.data, true)) {
                             a.chats_read_retry_ticks = 0;
                             a.chats_read_attempts = 0;
                             saveChatsCache(a, result.data);
@@ -14442,6 +14475,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 .reaction => applyReaction(a, result),
                 .archived_scan => if (result.ok) applyArchivedScan(a, result.data),
                 .resurface_probe => if (result.ok) applyResurfaceProbe(a, result.jid.slice(), result.extra.slice(), result.data),
+                .unread_probe => applyUnreadProbe(a, result),
                 .cache_tag => {
                     if (a.sync_auth_probe and result.gen == a.cache_tag_gen) applySyncAuthProbe(a, result.ok, result.data);
                     if (a.pairing_probe and result.gen == a.cache_tag_gen) applyPairingProbe(a, result.ok, result.data);
@@ -15048,6 +15082,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             // After spawn failures the queue is dead but its file is the
             // only copy of those reads — never overwrite it from memory.
             if (!a.read_queue_dead) persistPendingReads(a);
+            persistReadState(a);
             // ponytail: the Socket Mode thread stops at its next frame or at
             // process exit, whichever comes first; upgrade path is a stored
             // socket handle closed here to unblock the receive immediately.
@@ -15976,7 +16011,7 @@ fn persistTag(a: *App, tag: []const u8) void {
     const path = messagesDirPath(a, account_tag_file) orelse return;
     defer a.allocator.free(path);
     if (tag.len == 0) return deleteFileUtf8(path);
-    writeCacheFileAtomic(a, path, tag);
+    _ = writeCacheFileAtomic(a, path, tag);
 }
 
 /// The auth probe answered (it was started right after the window showed).
@@ -15990,6 +16025,10 @@ fn applyStartupProbe(a: *App, code: usize, hash: u64) void {
     if (kind == .failed) {
         // Keep whatever tag the disk gave us; the next launch probes again.
         appendLaunchLog(a, "startup: auth status failed, keeping saved account tag");
+        if (activeChatView(a) == .whatsapp) {
+            refreshChats(a);
+            refreshMessages(a);
+        }
         return;
     }
     var tag_buffer: [16]u8 = undefined;
@@ -16004,8 +16043,10 @@ fn applyStartupProbe(a: *App, code: usize, hash: u64) void {
     }
     if (changed and activeChatView(a) == .whatsapp) {
         appendLaunchLog(a, "startup: account changed, reloading caches");
-        _ = applyChats(a, "{\"data\":[]}");
+        _ = applyChats(a, "{\"data\":[]}", false);
         loadChatsCache(a);
+    }
+    if (activeChatView(a) == .whatsapp) {
         refreshChats(a);
         refreshMessages(a);
     }
@@ -16180,6 +16221,14 @@ pub fn main(init: std.process.Init) !void {
     loadArchiveState(&app);
     app.read_path = hashStorePath(init, init.gpa, "pending-reads.txt");
     loadPendingReads(&app);
+    if (messagesDirPath(&app, "read-state.txt")) |path| {
+        defer init.gpa.free(path);
+        if (readFileWin(init.gpa, path, 4 * 1024 * 1024)) |data| {
+            defer init.gpa.free(data);
+            app.read_state.load(init.gpa, data);
+        }
+    }
+    defer app.read_state.deinit(init.gpa);
     app.store_watch_path.set(init.gpa, store_watch_path);
     app.sync_heartbeat_path.set(init.gpa, sync_heartbeat_path);
     app_ptr = &app;
