@@ -1,128 +1,250 @@
-//! Pure selection and drain rules for the automatic media backfill
-//! (WAZI-103). Lives outside main.zig so its tests run on the non-Windows CI
-//! host and can reproduce the endless drain loop without a window server.
-
+//! Pure policy for the open chat's automatic media queue. The message list
+//! is the bounded queue: scan newest first and refill one serialized child.
 const std = @import("std");
 
-/// The auto-download eligibility facts of one message, gathered by the
-/// caller from the live message list. Candidates reach selectNext in
-/// newest-first order, so the media the user is looking at is offered first.
+pub const max_children = 1;
+pub const max_auto_bytes: u64 = 100 * 1024 * 1024;
+pub const max_burst_files = 4;
+pub const burst_budget_ms = 20_000;
+
 pub const Candidate = struct {
     index: usize,
-    /// image, sticker, video, gif, audio or document: anything the chat's
-    /// transport can fetch for an open chat.
     downloadable: bool = false,
     has_id: bool = false,
     has_local_path: bool = false,
-    /// A download for this message id is already running.
     in_flight: bool = false,
-    within_age: bool = false,
-    /// Arrived after live sync started: sync's own --download-media fetches
-    /// it, pausing sync again would restart on every incoming photo.
-    newer_than_sync_start: bool = false,
-    /// Tried once this session (success or failure): never retried.
     attempted: bool = false,
-    /// Recorded in the persistent fetched index, including earlier sessions.
-    fetched: bool = false,
-    /// wacli media download is a WhatsApp-store call: Slack and Telegram
-    /// attachments fetch through their own transports and must never queue
-    /// one. A candidate without it can never start a download.
+    retry_after_ms: u64 = 0,
+    size_bytes: u64 = 0,
     whatsapp_store: bool = false,
 };
 
-/// Picks the next auto-download target, newest first, or null when no
-/// message is eligible. Every skipped candidate mirrors a gate of the live
-/// scan, so a chat full of ineligible messages answers null instead of
-/// naming an attempt that cannot start.
-pub fn selectNext(candidates: []const Candidate) ?usize {
+pub fn downloadable(kind: []const u8) bool {
+    for ([_][]const u8{ "image", "sticker", "video", "gif", "audio", "voice", "document" }) |supported| {
+        if (std.ascii.eqlIgnoreCase(kind, supported)) return true;
+    }
+    return false;
+}
+
+pub fn isPlaceholder(kind: []const u8, text: []const u8) bool {
+    if (!downloadable(kind)) return false;
+    if (std.mem.startsWith(u8, text, "Sent ") and std.ascii.eqlIgnoreCase(text[5..], kind)) return true;
+    return text.len > 2 and text[0] == '[' and text[text.len - 1] == ']' and
+        std.ascii.eqlIgnoreCase(text[1 .. text.len - 1], kind);
+}
+
+pub fn oversized(size_bytes: u64) bool {
+    return size_bytes > max_auto_bytes;
+}
+
+/// Only the open chat supplies candidates. Age, sender and group/DM do not
+/// affect eligibility. Unknown sizes remain eligible: wacli may omit them.
+pub fn selectNext(candidates: []const Candidate, now_ms: u64) ?usize {
     for (candidates) |candidate| {
-        if (!candidate.downloadable) continue;
-        if (!candidate.has_id) continue;
-        if (candidate.has_local_path) continue;
-        if (candidate.in_flight) continue;
-        if (!candidate.within_age) continue;
-        if (candidate.newer_than_sync_start) continue;
-        if (candidate.attempted) continue;
-        if (candidate.fetched) continue;
-        if (!candidate.whatsapp_store) continue;
+        if (!candidate.downloadable or !candidate.has_id or !candidate.whatsapp_store) continue;
+        if (candidate.has_local_path or candidate.in_flight or candidate.attempted) continue;
+        if (now_ms < candidate.retry_after_ms or oversized(candidate.size_bytes)) continue;
         return candidate.index;
     }
     return null;
 }
 
-/// Hard per-tick cap on drain steps. Each productive step fills one media
-/// slot (three exist), so the cap only ever bites when the loop would
-/// otherwise spin.
-pub const max_drain_steps = 8;
+/// Bound a sync pause even for a chat with many missing attachments. A
+/// single slow child is still bounded by the caller's process timeout.
+pub fn mayContinueBurst(files_started: usize, started_ms: u64, now_ms: u64) bool {
+    return files_started < max_burst_files and now_ms -| started_ms < burst_budget_ms;
+}
 
-/// May the drain loop take another step? A drain begins because an item
-/// changed state (a download finished, or a send, mark-read or archive
-/// released the store), so the first step always runs; every later step must
-/// itself have started a download. WAZI-103: the old loop kept going while
-/// an attempt changed nothing and spun the UI thread to a freeze.
+pub const max_drain_steps = max_children;
+
 pub fn mayDrainStep(steps_done: usize, last_step_started: bool) bool {
-    if (steps_done >= max_drain_steps) return false;
-    if (steps_done == 0) return true;
-    return last_step_started;
+    return steps_done < max_drain_steps and (steps_done == 0 or last_step_started);
 }
 
-test "selectNext refuses a candidate that can never start a download" {
-    // WAZI-103 endless loop, in pure form: an open Slack chat with a file
-    // attachment looked downloadable to the old scan (id set, no local path,
-    // within age, not fetched) but downloadMedia returned early at the
-    // provider gate without changing any state, so the drain asked again
-    // forever and froze the app. The selector must answer null instead.
-    const slack_attachment = [_]Candidate{.{
-        .index = 0,
-        .downloadable = true,
-        .has_id = true,
-        .within_age = true,
-    }};
-    try std.testing.expectEqual(@as(?usize, null), selectNext(&slack_attachment));
+/// Success is suppressed only until a fresh read confirms the local file.
+/// Forget it then so a later eviction can queue the attachment again.
+pub fn forgetAttempt(attempts: []u64, count: *usize, key: u64) void {
+    var i: usize = 0;
+    while (i < count.*) {
+        if (attempts[i] == key) {
+            count.* -= 1;
+            attempts[i] = attempts[count.*];
+        } else i += 1;
+    }
 }
 
-test "a drain that cannot start anything stops after the entry step" {
-    // Models the wired loop shape: the drain entered after a finished
-    // download, then each turn counts only when the attempt actually started
-    // one. With the old behaviour (an attempt always counted) the step count
-    // would run to the cap instead of stopping at one.
-    const candidates = [_]Candidate{.{
-        .index = 0,
-        .downloadable = true,
-        .has_id = true,
-        .within_age = true,
-    }};
+pub fn sizeFromJson(object: std.json.ObjectMap) u64 {
+    for ([_][]const u8{ "FileSize", "FileLength", "MediaSize", "Size" }) |key| {
+        const value = object.get(key) orelse continue;
+        const size: u64 = switch (value) {
+            .integer => |n| if (n > 0) @intCast(n) else 0,
+            .string, .number_string => |text| std.fmt.parseInt(u64, text, 10) catch 0,
+            else => 0,
+        };
+        if (size > 0) return size;
+    }
+    return 0;
+}
+
+pub fn attachmentLabel(buffer: []u8, name: []const u8, size_bytes: u64, local: bool) []const u8 {
+    const state = if (local) "Open" else if (oversized(size_bytes)) "Click to download" else "Downloading...";
+    const filename = if (name.len > 0) name else "Attachment";
+    if (size_bytes == 0) return std.fmt.bufPrint(buffer, "{s} · {s}", .{ filename, state }) catch filename;
+    if (size_bytes < 1024) return std.fmt.bufPrint(buffer, "{s} · {d} B · {s}", .{ filename, size_bytes, state }) catch filename;
+    if (size_bytes < 1024 * 1024) return std.fmt.bufPrint(buffer, "{s} · {d} KB · {s}", .{ filename, (size_bytes + 1023) / 1024, state }) catch filename;
+    return std.fmt.bufPrint(buffer, "{s} · {d} MB · {s}", .{ filename, size_bytes / (1024 * 1024), state }) catch filename;
+}
+
+fn ready(index: usize) Candidate {
+    return .{ .index = index, .downloadable = true, .has_id = true, .whatsapp_store = true };
+}
+
+test "all media types including stickers and own sent documents are downloadable" {
+    for ([_][]const u8{ "image", "sticker", "video", "gif", "audio", "voice", "document", "Document" }) |kind| {
+        try std.testing.expect(downloadable(kind));
+    }
+    try std.testing.expect(!downloadable(""));
+    try std.testing.expect(!downloadable("reaction"));
+}
+
+test "open chat candidates drain newest first including old and newly synced rows" {
+    var candidates = [_]Candidate{ ready(2), ready(1), ready(0) };
+    try std.testing.expectEqual(@as(?usize, 2), selectNext(&candidates, 0));
+    candidates[0].in_flight = true;
+    try std.testing.expectEqual(@as(?usize, 1), selectNext(&candidates, 0));
+    candidates[1].has_local_path = true;
+    try std.testing.expectEqual(@as(?usize, 0), selectNext(&candidates, 0));
+    candidates[2].attempted = true;
+    try std.testing.expectEqual(@as(?usize, null), selectNext(&candidates, 0));
+}
+
+test "cache hits and in-flight duplicates skip but missing cached files queue again" {
+    var candidate = ready(0);
+    candidate.has_local_path = true;
+    try std.testing.expectEqual(@as(?usize, null), selectNext(&.{candidate}, 0));
+    candidate.has_local_path = false;
+    try std.testing.expectEqual(@as(?usize, 0), selectNext(&.{candidate}, 0));
+    candidate.in_flight = true;
+    try std.testing.expectEqual(@as(?usize, null), selectNext(&.{ candidate, candidate }, 0));
+}
+
+test "unsupported providers missing ids and non-media cannot start or spin" {
+    var candidates = [_]Candidate{ ready(3), ready(2), ready(1) };
+    candidates[0].whatsapp_store = false;
+    candidates[1].has_id = false;
+    candidates[2].downloadable = false;
+    try std.testing.expectEqual(@as(?usize, null), selectNext(&candidates, 0));
+    try std.testing.expectEqual(@as(?usize, null), selectNext(&.{}, 0));
     var steps: usize = 0;
     var started = true;
     while (mayDrainStep(steps, started)) {
-        started = selectNext(&candidates) != null;
+        started = selectNext(&candidates, 0) != null;
         steps += 1;
     }
     try std.testing.expectEqual(@as(usize, 1), steps);
 }
 
-test "selectNext walks past ineligible candidates to the newest eligible one" {
-    const candidates = [_]Candidate{
-        .{ .index = 2, .downloadable = true, .has_id = true, .within_age = true, .whatsapp_store = true, .in_flight = true },
-        .{ .index = 1, .downloadable = true, .has_id = true, .within_age = true, .whatsapp_store = true, .has_local_path = true },
-        .{ .index = 0, .downloadable = true, .has_id = true, .within_age = true, .whatsapp_store = true },
-    };
-    try std.testing.expectEqual(@as(?usize, 0), selectNext(&candidates));
+test "one slow or failed attachment does not block the remaining queue" {
+    var candidates = [_]Candidate{ ready(1), ready(0) };
+    candidates[0].retry_after_ms = 30_000;
+    try std.testing.expectEqual(@as(?usize, 0), selectNext(&candidates, 29_999));
+    try std.testing.expectEqual(@as(?usize, 1), selectNext(&candidates, 30_000));
 }
 
-test "selectNext returns null when nothing is eligible" {
-    const all_done = [_]Candidate{
-        .{ .index = 1, .downloadable = true, .has_id = true, .within_age = true, .whatsapp_store = true, .fetched = true },
-        .{ .index = 0 },
-    };
-    try std.testing.expectEqual(@as(?usize, null), selectNext(&all_done));
-    try std.testing.expectEqual(@as(?usize, null), selectNext(&.{}));
+test "size cap skips only above 100 MB and cached oversized files remain usable" {
+    var candidates = [_]Candidate{ ready(1), ready(0) };
+    candidates[0].size_bytes = max_auto_bytes + 1;
+    candidates[1].size_bytes = max_auto_bytes;
+    try std.testing.expectEqual(@as(?usize, 0), selectNext(&candidates, 0));
+    candidates[1].has_local_path = true;
+    try std.testing.expectEqual(@as(?usize, null), selectNext(&candidates, 0));
+    try std.testing.expect(!oversized(0));
+    try std.testing.expect(!oversized(max_auto_bytes));
+    try std.testing.expect(oversized(max_auto_bytes + 1));
 }
 
-test "the drain continues only on started downloads and honours the cap" {
+test "bounded serial refill and burst yield prevent UI loops and long sync starvation" {
+    try std.testing.expectEqual(@as(usize, 1), max_children);
     try std.testing.expect(mayDrainStep(0, false));
     try std.testing.expect(!mayDrainStep(1, false));
-    try std.testing.expect(mayDrainStep(1, true));
-    try std.testing.expect(mayDrainStep(max_drain_steps - 1, true));
     try std.testing.expect(!mayDrainStep(max_drain_steps, true));
+    try std.testing.expect(mayContinueBurst(0, 100, 100));
+    try std.testing.expect(mayContinueBurst(max_burst_files - 1, 100, 100));
+    try std.testing.expect(!mayContinueBurst(max_burst_files, 100, 100));
+    try std.testing.expect(!mayContinueBurst(1, 100, 100 + burst_budget_ms));
+}
+
+test "size metadata tolerates missing negative and string byte counts" {
+    for ([_]struct { json: []const u8, size: u64 }{
+        .{ .json = "{}", .size = 0 },
+        .{ .json = "{\"FileSize\":104857601}", .size = max_auto_bytes + 1 },
+        .{ .json = "{\"FileLength\":\"104857600\"}", .size = max_auto_bytes },
+        .{ .json = "{\"FileSize\":-1,\"Size\":17}", .size = 17 },
+        .{ .json = "{\"FileSize\":\"bad\"}", .size = 0 },
+    }) |fixture| {
+        var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, fixture.json, .{});
+        defer parsed.deinit();
+        try std.testing.expectEqual(fixture.size, sizeFromJson(parsed.value.object));
+    }
+}
+
+test "documents show name size and only oversized uncached files request a click" {
+    var buffer: [512]u8 = undefined;
+    try std.testing.expectEqualStrings("report.pdf · 2 KB · Open", attachmentLabel(&buffer, "report.pdf", 1500, true));
+    try std.testing.expectEqualStrings("report.pdf · Downloading...", attachmentLabel(&buffer, "report.pdf", 0, false));
+    try std.testing.expectEqualStrings("report.pdf · 101 MB · Click to download", attachmentLabel(&buffer, "report.pdf", 101 * 1024 * 1024, false));
+    try std.testing.expectEqualStrings("report.pdf · 101 MB · Open", attachmentLabel(&buffer, "report.pdf", 101 * 1024 * 1024, true));
+}
+
+test "transport media placeholders are hidden but real captions are retained" {
+    try std.testing.expect(isPlaceholder("document", "Sent document"));
+    try std.testing.expect(isPlaceholder("image", "[Image]"));
+    try std.testing.expect(isPlaceholder("audio", "Sent audio"));
+    try std.testing.expect(!isPlaceholder("document", "Sent document yesterday"));
+    try std.testing.expect(!isPlaceholder("", "Sent document"));
+    try std.testing.expect(!isPlaceholder("video", "holiday.mp4"));
+}
+
+test "reopened chat snapshot preserves the local file and prevents another download" {
+    const cache = @import("chat_cache.zig");
+    const payload = "{\"data\":{\"messages\":[{\"MsgID\":\"sent-document\",\"MediaType\":\"document\",\"FromMe\":true,\"LocalPath\":\"C:\\\\cache\\\\report.pdf\",\"Filename\":\"report.pdf\"}]}}";
+    const stored = try cache.envelope(std.testing.allocator, "group@g.us", payload);
+    defer std.testing.allocator.free(stored);
+    const restored = cache.payloadFor(stored, "group@g.us").?;
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, restored, .{});
+    defer parsed.deinit();
+    const row = parsed.value.object.get("data").?.object.get("messages").?.array.items[0].object;
+    var candidate = ready(0);
+    candidate.downloadable = downloadable(row.get("MediaType").?.string);
+    candidate.has_local_path = row.get("LocalPath").?.string.len > 0;
+    try std.testing.expectEqual(@as(?usize, null), selectNext(&.{candidate}, 0));
+    candidate.has_local_path = false; // Caller found the cached file missing.
+    try std.testing.expectEqual(@as(?usize, 0), selectNext(&.{candidate}, 0));
+    try std.testing.expect(cache.payloadFor(stored, "dm@s.whatsapp.net") == null);
+}
+
+test "duplicate ids in different chats have independent attempt keys" {
+    const played = @import("played.zig");
+    var attempts = played.Set{};
+    var line: [40]u8 = undefined;
+    const group_key = played.Set.pairKey("group@g.us", "same-id");
+    const dm_key = played.Set.pairKey("dm@s.whatsapp.net", "same-id");
+    _ = attempts.markRaw(group_key, &line);
+    try std.testing.expect(attempts.wasPlayedRaw(group_key));
+    try std.testing.expect(!attempts.wasPlayedRaw(dm_key));
+}
+
+test "confirmed cache hits clear success suppression so later eviction refills" {
+    var attempts = [_]u64{ 11, 22, 11 };
+    var count: usize = attempts.len;
+    forgetAttempt(&attempts, &count, 99);
+    try std.testing.expectEqual(@as(usize, 3), count);
+    forgetAttempt(&attempts, &count, 11);
+    try std.testing.expectEqual(@as(usize, 1), count);
+    try std.testing.expectEqual(@as(u64, 22), attempts[0]);
+    forgetAttempt(&attempts, &count, 22);
+    try std.testing.expectEqual(@as(usize, 0), count);
+    var candidate = ready(0);
+    candidate.attempted = std.mem.indexOfScalar(u64, attempts[0..count], 11) != null;
+    try std.testing.expectEqual(@as(?usize, 0), selectNext(&.{candidate}, 0));
 }

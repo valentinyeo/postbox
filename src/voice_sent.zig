@@ -69,12 +69,10 @@ pub fn claimsId(entries: []const Entry, jid: []const u8, id: []const u8) bool {
     return false;
 }
 
-/// An own media row that wazig still holds the file for is never fetched:
-/// the download would pause live sync for a file already on this PC.
-pub fn needsDownload(from_me: bool, has_local_path: bool, claimed_by_sent_entry: bool) bool {
-    if (has_local_path) return false;
-    if (from_me and claimed_by_sent_entry) return false;
-    return true;
+/// Only a verified local file suppresses a download. A remembered sent id
+/// is not proof that its temporary source file still exists.
+pub fn needsDownload(has_local_path: bool) bool {
+    return !has_local_path;
 }
 
 /// Append, dropping the oldest entry when full.
@@ -126,12 +124,9 @@ test "claimsId finds only matched entries of that chat" {
     try std.testing.expect(!claimsId(&list, "j", "Y"));
 }
 
-test "own media with a local file is not downloaded" {
-    try std.testing.expect(!needsDownload(true, true, true));
-    try std.testing.expect(!needsDownload(true, false, true));
-    try std.testing.expect(!needsDownload(false, true, false));
-    try std.testing.expect(needsDownload(false, false, false));
-    try std.testing.expect(needsDownload(true, false, false));
+test "own media requires a download when its remembered source is missing" {
+    try std.testing.expect(!needsDownload(true));
+    try std.testing.expect(needsDownload(false));
 }
 
 test "audio placeholders are hidden, real captions are kept" {

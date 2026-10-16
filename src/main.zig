@@ -462,6 +462,7 @@ const Message = struct {
     mime_type: Utf8Text(95) = .{},
     local_path: WideText(519) = .{},
     filename: WideText(259) = .{},
+    media_size: u64 = 0,
     reaction_to: Utf8Text(191) = .{},
     reaction: WideText(31) = .{},
     from_me: bool = false,
@@ -556,13 +557,10 @@ const MsgCacheEntry = struct {
     data: ?[]u8 = null,
 };
 
-// One attachment download is a background wacli child; up to three run in
-// parallel and independently of the mark-read child. Every job serializes
-// on the store through wacli's --lock-wait instead of gating on each other.
-const max_media_children = 3;
+// wacli store writes serialize, so never spawn children waiting on each other.
+const max_media_children = media_drain.max_children;
 const media_timeout_ms: u64 = 90_000;
-// Attachments older than this are not fetched; the store keeps their files
-// once downloaded, and the 14-day eviction window matches the product rule.
+// Cache eviction age, not a cutoff for downloading older messages.
 const media_cache_days: i64 = 14;
 const MediaDownload = struct {
     child: ?std.process.Child = null,
@@ -574,7 +572,7 @@ const MediaDownload = struct {
 // Bounded retries: a download may fail transiently (store lock lost to a
 // parallel job, network blip) up to 2 times; after the 3rd failure it is
 // marked terminal for the session and retried on the next app start.
-const MediaFailure = struct { hash: u64 = 0, count: u8 = 0 };
+const MediaFailure = struct { hash: u64 = 0, count: u8 = 0, retry_after_ms: u64 = 0 };
 const max_media_retries = 3;
 
 fn mediaBusy(a: *const App) bool {
@@ -582,9 +580,9 @@ fn mediaBusy(a: *const App) bool {
     return false;
 }
 
-fn mediaDownloading(a: *const App, id: []const u8) bool {
+fn mediaDownloading(a: *const App, jid: []const u8, id: []const u8) bool {
     for (&a.media_downloads) |*slot| {
-        if (slot.child != null and std.mem.eql(u8, slot.id.slice(), id)) return true;
+        if (slot.child != null and std.mem.eql(u8, slot.jid.slice(), jid) and std.mem.eql(u8, slot.id.slice(), id)) return true;
     }
     return false;
 }
@@ -821,10 +819,9 @@ const App = struct {
     staged_image: StagedImage = .{},
     media_attempts: [512]u64 = [_]u64{0} ** 512,
     media_attempt_count: usize = 0,
-    // After any failed download, auto-scanning pauses for 30s so a
-    // permanently broken attachment cannot burn a tick (and starve the
-    // messages behind it) on every timer expiry.
-    media_retry_after_ms: u64 = 0,
+    media_burst_started_ms: u64 = 0,
+    media_burst_files: usize = 0,
+    media_resume_after_ms: u64 = 0,
     media_failures: [16]MediaFailure = [_]MediaFailure{.{}} ** 16,
     avatar_session: ?*avatar.Session = null,
     transcribe_session: ?*dictation.FileSession = null,
@@ -923,8 +920,6 @@ const App = struct {
     displayed_timestamp: Utf8Text(47) = .{},
     played_set: played.Set = .{},
     played_path: []u8 = &.{},
-    media_fetched: played.Set = .{},
-    media_fetched_path: []u8 = &.{},
     // Mirrors the pending mark-read queue so reads that never reached the
     // store survive a restart (WAZI-74).
     read_path: []u8 = &.{},
@@ -5134,7 +5129,8 @@ fn isVideo(message: *const Message) bool {
 }
 
 fn isAudio(message: *const Message) bool {
-    return std.ascii.eqlIgnoreCase(message.media_type.slice(), "audio");
+    return std.ascii.eqlIgnoreCase(message.media_type.slice(), "audio") or
+        std.ascii.eqlIgnoreCase(message.media_type.slice(), "voice");
 }
 
 fn ensureAudioPlayer(a: *App) ?*audio.Player {
@@ -5286,11 +5282,11 @@ fn advanceAudio(a: *App, after_id: []const u8) bool {
         if (message.local_path.len > 0) {
             startAudioPlayback(a, message);
             return true;
-        } else if (freeMediaSlot(a) != null or mediaDownloading(a, message.id.slice())) {
+        } else if (freeMediaSlot(a) != null or mediaDownloading(a, a.chats[a.selected_chat].jid.slice(), message.id.slice())) {
             _ = downloadMedia(a, index, true);
             // Arm only if the download actually started; a failed spawn just
             // ends the chain instead of leaking a stale trigger.
-            if (mediaDownloading(a, message.id.slice())) {
+            if (mediaDownloading(a, a.chats[a.selected_chat].jid.slice(), message.id.slice())) {
                 a.audio_chain_waiting = true;
                 a.audio_chain_id.set(message.id.slice());
             }
@@ -5767,13 +5763,18 @@ fn filetimeToUnixSeconds(ft: win.FILETIME) i64 {
 fn startMediaDownload(a: *App, chat_jid: []const u8, message_id: []const u8) bool {
     // A send in flight may still be relying on live sync staying paused;
     // callers treat false as "try later" and the next tick retries.
-    if (a.send_child != null) return false;
+    if (a.send_child != null or a.pending_send_count > 0 or a.read_child != null or
+        a.archive_child != null or avatarBusy(a)) return false;
     // Never two children for one attachment: every caller (auto scan, audio
     // chain, manual click) funnels through here.
-    if (mediaDownloading(a, message_id)) return false;
+    if (mediaDownloading(a, chat_jid, message_id)) return false;
     const slot = freeMediaSlot(a) orelse return false;
     slot.jid.set(chat_jid);
     slot.id.set(message_id);
+    if (a.sync_child != null or a.media_burst_files == 0) {
+        a.media_burst_started_ms = win.GetTickCount64();
+        a.media_burst_files = 0;
+    }
     stopSync(a, "media");
     const args = [_][]const u8{ a.wacli_path, "--json", "--lock-wait", "10s", "--timeout", "60s", "media", "download", "--chat", slot.jid.slice(), "--id", slot.id.slice() };
     const child = child_process.spawn(a.io, .{
@@ -5788,13 +5789,14 @@ fn startMediaDownload(a: *App, chat_jid: []const u8, message_id: []const u8) boo
         // Count a spawn failure like a download failure (bounded retries,
         // cooldown) instead of instantly blacklisting: a manual click must
         // not be lost to one transient spawn error.
-        noteMediaFailure(a, message_id);
+        noteMediaFailure(a, chat_jid, message_id);
         setStatus(a, "Could not start attachment download");
         if (!mediaBusy(a)) startSync(a);
         return false;
     };
     slot.child = child;
     slot.started_ms = win.GetTickCount64();
+    a.media_burst_files += 1;
     return true;
 }
 
@@ -5804,20 +5806,24 @@ fn startMediaDownload(a: *App, chat_jid: []const u8, message_id: []const u8) boo
 /// drain loop keys on so a startable-looking candidate can never spin it.
 fn downloadMedia(a: *App, message_index: usize, automatic: bool) bool {
     if (message_index >= a.message_count or a.selected_chat >= a.chat_count) return false;
+    if (!std.mem.eql(u8, a.displayed_jid.slice(), a.chats[a.selected_chat].jid.slice())) return false;
     const message = &a.messages[message_index];
     if (message.media_type.len == 0 or message.id.len == 0) return false;
     // Already on disk (e.g. a parallel download finished since the request):
     // a retry must not re-download.
-    if (!voice_sent.needsDownload(message.from_me, message.local_path.len > 0, voice_sent.claimsId(a.sent_voice[0..a.sent_voice_count], a.chats[a.selected_chat].jid.slice(), message.id.slice()))) return false;
+    if (!voice_sent.needsDownload(message.local_path.len > 0)) return false;
+    if (automatic and media_drain.oversized(message.media_size)) return false;
     const chat = &a.chats[a.selected_chat];
     // wacli media download is a WhatsApp-store call. Slack attachments fetch
     // through requestSlackDownload and Telegram ones through the TDLib
     // client; neither may reach here with their chat id as a WhatsApp jid.
     if (chat.provider != .whatsapp) return false;
     // Already downloading in another slot: nothing to queue.
-    if (mediaDownloading(a, message.id.slice())) return false;
-    if (freeMediaSlot(a) == null) {
-        // Slots full: remember one manual click and retry it when a slot
+    if (mediaDownloading(a, a.chats[a.selected_chat].jid.slice(), message.id.slice())) return false;
+    if (freeMediaSlot(a) == null or a.send_child != null or a.pending_send_count > 0 or
+        a.read_child != null or a.archive_child != null or avatarBusy(a))
+    {
+        // Store busy: remember one manual click and retry it when a slot
         // frees up; automatic requests just wait for their next timer tick.
         if (!automatic) {
             a.pending_download_jid.set(chat.jid.slice());
@@ -5827,25 +5833,23 @@ fn downloadMedia(a: *App, message_index: usize, automatic: bool) bool {
         }
         return false;
     }
-    // The only failure left here is a spawn failure, which sets its own
-    // status and must not register a pending retry.
+    // A busy store waits for the next tick, just like a full slot.
     if (!startMediaDownload(a, chat.jid.slice(), message.id.slice())) return false;
     setStatus(a, if (automatic) "Downloading media..." else "Downloading attachment...");
     if (a.hwnd) |hwnd| _ = win.UpdateWindow(hwnd);
     return true;
 }
 
-// Pure membership check: the attempt ring records downloads that finished
-// (successfully or not) or could not even spawn, so a message is tried once
-// per session and retried on the next app start.
-fn mediaAttempted(a: *const App, id: []const u8) bool {
-    const hash = std.hash.Wyhash.hash(0, id);
+// Suppress terminal failures this session and completed downloads until a
+// fresh message read confirms the local file. Verified files clear the entry.
+fn mediaAttempted(a: *const App, jid: []const u8, id: []const u8) bool {
+    const hash = played.Set.pairKey(jid, id);
     for (a.media_attempts[0..a.media_attempt_count]) |attempt| if (attempt == hash) return true;
     return false;
 }
 
-fn markMediaAttempted(a: *App, id: []const u8) void {
-    const hash = std.hash.Wyhash.hash(0, id);
+fn markMediaAttempted(a: *App, jid: []const u8, id: []const u8) void {
+    const hash = played.Set.pairKey(jid, id);
     if (a.media_attempt_count >= a.media_attempts.len) a.media_attempt_count = 0;
     a.media_attempts[a.media_attempt_count] = hash;
     a.media_attempt_count += 1;
@@ -5853,8 +5857,8 @@ fn markMediaAttempted(a: *App, id: []const u8) void {
 
 // A success erases past failures so the bounded-retry table cannot fill
 // with attachments that recovered on their own.
-fn clearMediaFailure(a: *App, id: []const u8) void {
-    const hash = std.hash.Wyhash.hash(0, id);
+fn clearMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
+    const hash = played.Set.pairKey(jid, id);
     for (&a.media_failures) |*entry| {
         if (entry.hash == hash) {
             entry.hash = 0;
@@ -5864,8 +5868,8 @@ fn clearMediaFailure(a: *App, id: []const u8) void {
     }
 }
 
-fn noteMediaFailure(a: *App, id: []const u8) void {
-    const hash = std.hash.Wyhash.hash(0, id);
+fn noteMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
+    const hash = played.Set.pairKey(jid, id);
     var count: u8 = 0;
     var matched: ?*MediaFailure = null;
     for (&a.media_failures) |*entry| {
@@ -5876,55 +5880,55 @@ fn noteMediaFailure(a: *App, id: []const u8) void {
         }
     }
     count += 1;
-    a.media_retry_after_ms = win.GetTickCount64() + 30_000;
+    const retry_after_ms = win.GetTickCount64() + 30_000;
     if (count >= max_media_retries) {
         // Reclaim the table slot so 16 old failures cannot lock out new ones.
         if (matched) |entry| {
             entry.hash = 0;
             entry.count = 0;
         }
-        markMediaAttempted(a, id);
+        markMediaAttempted(a, jid, id);
         return;
     }
     if (matched) |entry| {
         entry.count = count;
+        entry.retry_after_ms = retry_after_ms;
         return;
     }
     for (&a.media_failures) |*entry| {
         if (entry.hash == 0 and entry.count == 0) {
             entry.hash = hash;
             entry.count = count;
+            entry.retry_after_ms = retry_after_ms;
             return;
         }
     }
     // ponytail: 16 attachments failing concurrently is implausible; if it
     // happens, degrade to terminal marking rather than growing state.
-    markMediaAttempted(a, id);
+    markMediaAttempted(a, jid, id);
 }
 
 fn isDownloadableMedia(message: *const Message) bool {
-    return isImage(message) or isVideo(message) or isAudio(message) or
-        std.ascii.eqlIgnoreCase(message.media_type.slice(), "document");
+    return !message.revoked and media_drain.downloadable(message.media_type.slice());
 }
 
 fn autoDownloadNextMedia(a: *App) bool {
     // Slots full: the next finished download re-enters here from the timer.
     if (freeMediaSlot(a) == null) return false;
-    // Failure cooldown: give transient store-lock or network failures time
-    // to clear before trying again.
-    if (win.GetTickCount64() < a.media_retry_after_ms) return false;
+    const now_ms = win.GetTickCount64();
+    if (a.sync_child == null and a.media_burst_files > 0 and !media_drain.mayContinueBurst(a.media_burst_files, a.media_burst_started_ms, now_ms)) return false;
     // Pausing live sync for background downloads is rate limited: the first
     // download of a burst waits sync_gate.media_stop_gap_ms after the last
     // pause, and the rest of the burst runs inside the same pause. A
     // mark-read handed to the sync child finishes first.
-    if (a.sync_child != null and (a.read_child != null or
+    if (a.sync_child != null and (now_ms < a.media_resume_after_ms or a.read_child != null or
         !sync_gate.gapElapsed(a.last_sync_stop_ms, win.GetTickCount64(), sync_gate.media_stop_gap_ms))) return false;
     // wacli media download only serves WhatsApp: scanning Slack or Telegram
     // attachments would name a candidate whose download always returns
     // without starting one, and the drain would spin forever (WAZI-103).
     if (a.selected_chat >= a.chat_count or a.chats[a.selected_chat].provider != .whatsapp) return false;
     // Newest first: the media the user is looking at arrives first.
-    const now = nowUnixSeconds();
+    if (!std.mem.eql(u8, a.displayed_jid.slice(), a.chats[a.selected_chat].jid.slice())) return false;
     const chat_jid = a.chats[a.selected_chat].jid.slice();
     var candidates: [max_messages]media_drain.Candidate = undefined;
     var count: usize = 0;
@@ -5933,25 +5937,25 @@ fn autoDownloadNextMedia(a: *App) bool {
         index -= 1;
         const message = &a.messages[index];
         const id = message.id.slice();
+        var retry_after_ms: u64 = 0;
+        const hash = played.Set.pairKey(chat_jid, id);
+        for (a.media_failures) |failure| {
+            if (failure.hash == hash) retry_after_ms = failure.retry_after_ms;
+        }
         candidates[count] = .{
             .index = index,
             .downloadable = isDownloadableMedia(message),
             .has_id = id.len > 0,
             .has_local_path = message.local_path.len > 0,
-            .in_flight = mediaDownloading(a, id),
-            .within_age = media_age.withinDays(message.timestamp.slice(), now, media_cache_days),
-            // Live sync runs with --download-media and fetches what arrives
-            // while it runs: pausing it for those would restart sync on every
-            // incoming photo in the open chat.
-            .newer_than_sync_start = a.sync_child != null and
-                (media_age.unixSeconds(message.timestamp.slice()) orelse 0) >= a.sync_started_secs,
-            .attempted = mediaAttempted(a, id),
-            .fetched = mediaWasFetched(a, chat_jid, id),
+            .in_flight = mediaDownloading(a, chat_jid, id),
+            .attempted = mediaAttempted(a, chat_jid, id),
+            .retry_after_ms = retry_after_ms,
+            .size_bytes = message.media_size,
             .whatsapp_store = true,
         };
         count += 1;
     }
-    const pick = media_drain.selectNext(candidates[0..count]) orelse return false;
+    const pick = media_drain.selectNext(candidates[0..count], now_ms) orelse return false;
     // A started download is the only progress the drain may count on; a
     // spawn failure or a slot snatched away reports false and stops it.
     return downloadMedia(a, pick, true);
@@ -5960,7 +5964,7 @@ fn autoDownloadNextMedia(a: *App) bool {
 // One stopSync/startSync per media burst, not per wave of downloads: refill
 // the freed slots from the chat's own missing-media scan first; startSync
 // skips itself while any slot is still busy, so live sync only comes back
-// once the burst has nothing left to download.
+// once the burst is empty or reaches its sync-pause budget.
 fn drainMediaDownloads(a: *App) void {
     retryPendingDownload(a);
     // WAZI-103: a turn that starts no download ends the drain, so a
@@ -6714,11 +6718,10 @@ fn checkMediaDownload(a: *App) void {
             if (!got_code) code = 1;
             _ = child.wait(a.io) catch {};
             if (code == 0) {
-                markMediaAttempted(a, slot.id.slice());
-                clearMediaFailure(a, slot.id.slice());
-                markMediaFetched(a, slot.jid.slice(), slot.id.slice());
+                markMediaAttempted(a, slot.jid.slice(), slot.id.slice());
+                clearMediaFailure(a, slot.jid.slice(), slot.id.slice());
             } else {
-                noteMediaFailure(a, slot.id.slice());
+                noteMediaFailure(a, slot.jid.slice(), slot.id.slice());
             }
             // The chained note's own slot decides the chain's fate; an
             // unrelated slot finishing must leave the chain armed.
@@ -8018,14 +8021,20 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
                 text = parts.body;
             }
         }
-        // wacli's "Sent audio" label sits under every audio row, received
-        // ones too; the player already says what it is.
-        message.text.set(a.allocator, if (std.ascii.eqlIgnoreCase(media_type, "audio") and voice_sent.isAudioPlaceholder(text)) "" else text);
+        // The media card already describes the attachment; keep real captions.
+        message.text.set(a.allocator, if (media_drain.isPlaceholder(media_type, text)) "" else text);
         message.from_me = getBool(object, "FromMe");
         message.media_type.set(media_type);
         message.mime_type.set(getString(object, "MimeType"));
         message.local_path.set(a.allocator, local_path);
-        message.filename.set(a.allocator, filename);
+        message.media_size = media_drain.sizeFromJson(object);
+        if (message.local_path.len > 0) {
+            if (wideFileSize(message.local_path.ptr())) |size| {
+                message.media_size = size;
+                media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(chat.jid.slice(), id));
+            } else message.local_path = .{};
+        }
+        message.filename.set(a.allocator, if (filename.len > 0) filename else std.fs.path.basename(local_path));
         message.reaction_to.set(reaction_to);
         message.reaction.set(a.allocator, getString(object, "ReactionEmoji"));
         message.timestamp.set(getString(object, "Timestamp"));
@@ -8101,6 +8110,7 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
     a.msg_applied_hash = std.hash.Wyhash.hash(0, raw);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
     if (final) markChatRead(a);
+    drainMediaDownloads(a);
     if (a.message_count > 0) logStartupMilestone(a, .messages, if (final) "first messages shown (fresh)" else "first messages shown (cache)");
     return true;
 }
@@ -8228,6 +8238,8 @@ fn startSync(a: *App) void {
         if (child.id) |handle| _ = win.AssignProcessToJobObject(job, handle);
     }
     a.sync_child = child;
+    if (a.media_burst_files > 0) a.media_resume_after_ms = now_ms + sync_gate.media_stop_gap_ms;
+    a.media_burst_files = 0;
     // The reader thread owns the stderr handle: take it out of the child so
     // kill/wait cannot close it under the reader, which would race a
     // recycled handle onto another file.
@@ -8677,7 +8689,7 @@ fn loadSentVoice(a: *App) void {
 /// appended instead, so a delivered note never vanishes on reload.
 fn applySentVoice(a: *App, jid: []const u8) void {
     for (a.sent_voice[0..a.sent_voice_count]) |*entry| {
-        if (!std.mem.eql(u8, entry.jidSlice(), jid)) continue;
+        if (!std.mem.eql(u8, entry.jidSlice(), jid) or !fileExistsUtf8(entry.fileSlice())) continue;
         var found: ?*Message = null;
         for (a.messages[0..a.message_count]) |*message| {
             if (!message.from_me or message.send_state != .none) continue;
@@ -8703,6 +8715,9 @@ fn applySentVoice(a: *App, jid: []const u8) void {
                 saveSentVoice(a);
             }
             message.local_path.set(a.allocator, entry.fileSlice());
+            message.media_size = wideFileSize(message.local_path.ptr()) orelse 0;
+            media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(jid, message.id.slice()));
+            if (message.filename.len == 0) message.filename.set(a.allocator, std.fs.path.basename(entry.fileSlice()));
             if (entry.voice) loadTranscriptCache(a, message);
             continue;
         }
@@ -14066,7 +14081,10 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                 _ = win.SetTextColor(hdc, color_accent);
                 var media_rect = win.RECT{ .left = left + px(a, 12), .top = strip_top, .right = right - px(a, 12), .bottom = strip_top + px(a, 42) };
-                _ = win.DrawTextW(hdc, lit("Voice message · click to download"), -1, &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+                var label_buffer: [128]u8 = undefined;
+                var label_wide = WideText(127){};
+                label_wide.set(a.allocator, media_drain.attachmentLabel(&label_buffer, "Voice message", message.media_size, false));
+                _ = win.DrawTextW(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
             } else {
                 const playing_now = active and a.audio_state == .playing;
                 const button_brush = win.CreateSolidBrush(color_accent) orelse continue;
@@ -14175,15 +14193,17 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = win.SetTextColor(hdc, color_accent);
             var media_rect = win.RECT{ .left = left + px(a, 12), .top = text_top + px(a, 4), .right = right - px(a, 12), .bottom = text_top + px(a, 46) };
             const local = message.local_path.len > 0;
-            const label = if (isVideoGif(message))
-                (if (local) lit("GIF") else lit("GIF · click to download"))
-            else if (isVideo(message))
-                (if (local) lit("Video · click to play") else lit("Video · click to download"))
-            else if (isImage(message))
-                (if (local) lit("Image · click to open") else lit("Image · click to download"))
+            var label_buffer: [1024]u8 = undefined;
+            var name_buffer: [780]u8 = undefined;
+            const name = if (message.filename.len > 0)
+                std.unicode.utf16LeToUtf8(&name_buffer, message.filename.slice()) catch 0
             else
-                (if (local) lit("Attachment · click to open") else lit("Attachment · click to download"));
-            _ = win.DrawTextW(hdc, label, -1, &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+                0;
+            const kind = if (isVideoGif(message)) "GIF" else if (isVideo(message)) "Video" else if (isImage(message)) "Image" else "Attachment";
+            const label = media_drain.attachmentLabel(&label_buffer, if (name > 0) name_buffer[0..name] else kind, message.media_size, local);
+            var label_wide = WideText(1023){};
+            label_wide.set(a.allocator, label);
+            _ = win.DrawTextW(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);
             message.media_hit = media_rect;
             text_top += px(a, 54);
         }
@@ -15152,9 +15172,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     refreshChats(a);
                     if (!messagesAreCurrent(a)) refreshMessages(a);
                 }
-                // A queued manual click goes first: the auto scan skips
-                // attachments older than the cutoff, so without this it
-                // could never start.
+                // A queued manual click goes before automatic downloads.
                 retryPendingDownload(a);
                 retryUnarchiveChat(a);
                 tickArchivedScan(a, changed);
@@ -15829,12 +15847,6 @@ fn findPlayedPath(init: std.process.Init, allocator: std.mem.Allocator) []u8 {
     return hashStorePath(init, allocator, "played.txt");
 }
 
-// Persistent index of media ids whose file was fetched, so a chat's media is
-// never re-checked or re-downloaded after a restart.
-fn findMediaFetchedPath(init: std.process.Init, allocator: std.mem.Allocator) []u8 {
-    return hashStorePath(init, allocator, "media-fetched.txt");
-}
-
 fn loadHashSet(a: *App, path: []const u8, set: *played.Set) void {
     if (path.len == 0) return;
     const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch return;
@@ -16076,19 +16088,6 @@ fn markPlayed(a: *App, id: []const u8) void {
     var line_buffer: [40]u8 = undefined;
     const line = a.played_set.mark(id, &line_buffer) orelse return;
     appendHashLine(a, a.played_path, line);
-}
-
-// Record a finished download so the auto scan never touches it again, even
-// across restarts. Keyed by (chat jid, message id).
-fn markMediaFetched(a: *App, chat_jid: []const u8, message_id: []const u8) void {
-    if (a.media_fetched_path.len == 0 or message_id.len == 0) return;
-    var line_buffer: [40]u8 = undefined;
-    const line = a.media_fetched.markRaw(played.Set.pairKey(chat_jid, message_id), &line_buffer) orelse return;
-    appendHashLine(a, a.media_fetched_path, line);
-}
-
-fn mediaWasFetched(a: *const App, chat_jid: []const u8, message_id: []const u8) bool {
-    return a.media_fetched.wasPlayedRaw(played.Set.pairKey(chat_jid, message_id));
 }
 
 /// The auth probe runs on its own thread after the window is up, so a slow
@@ -16403,8 +16402,6 @@ pub fn main(init: std.process.Init) !void {
     app.played_path = findPlayedPath(init, init.gpa);
     loadPlayed(&app);
     loadArchiveState(&app);
-    app.media_fetched_path = findMediaFetchedPath(init, init.gpa);
-    loadHashSet(&app, app.media_fetched_path, &app.media_fetched);
     app.read_path = hashStorePath(init, init.gpa, "pending-reads.txt");
     loadPendingReads(&app);
     app.store_watch_path.set(init.gpa, store_watch_path);
