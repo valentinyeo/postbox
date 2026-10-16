@@ -9,6 +9,7 @@
 - `zig fmt --check src build.zig`
 - `zig build test`
 - `zig test src/stretch.zig`
+- `python3 tools/check_new_comments.py origin/main`: CI fails a PR that adds code comments; put the why in the commit or PR.
 - `zig build -Dtarget=x86_64-windows-gnu --release=small`
 - `bash .claude/skills/evals/run-evals.sh` when `.claude/skills/` or `board.yml` changes.
 - build.zig harnesses slice `src/main.zig` by text markers; editing near them breaks `unfurl-verification`.
