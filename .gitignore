@@ -1,5 +1,7 @@
 .zig-cache/
 zig-out/
+zig-out-*/
+.wrangler/
 *.exe
 *.pdb
 probe
