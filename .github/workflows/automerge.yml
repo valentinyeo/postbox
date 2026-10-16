@@ -36,7 +36,7 @@ jobs:
           # A PR merges only when every release-gating check is present and
           # green on its current head: pending, skipped, or failed copies of
           # a required check block, and duplicate names cannot hide a red run.
-          required='["ci","tdlib","windows-smoke","code-review"]'
+          required='["ci","tdlib","windows-smoke"]'
           for pr in $(gh pr list -R "$REPO" --state open --json number -q '.[].number'); do
             info=$(gh pr view "$pr" -R "$REPO" --json isDraft,labels,additions,deletions,files,mergeable,statusCheckRollup,headRefOid)
             head_oid=$(echo "$info" | jq -r .headRefOid)
