@@ -1,0 +1,17 @@
+# agent-template: owned v3.21.4 sha256:7a90bd3ef633f0fde4fea4922a312b6e2f07bec133e969572eeb7a5379539db4
+# This agent's board columns, named as roles rather than raw section names,
+# so supervise-board's checks (runner-health, pr-hygiene, and the rest) can
+# reason about "the review lane" or "the intake column" without knowing this
+# board's exact section labels. Fill in the right-hand side with the real
+# section name from the board this agent watches; leave a role blank if this
+# board has no matching column.
+agent: wazig
+board_adapter: hypertask
+board_id: 4874
+roles:
+  intake: Todo
+  in_progress: Doing
+  ai_review: AI Review
+  manager_review:
+  human_review: Valentin Review
+  done: Done

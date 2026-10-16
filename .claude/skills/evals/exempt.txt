@@ -1,0 +1,4 @@
+# agent-template: owned v3.12.1 sha256:9d46d63d9ce1575619a3a5fc373d96593004b4f97217baf278c6266bdf787eb7
+# Skills in .claude/skills/ that this INDEX.md does not govern: general Claude
+# Code skills invoked as slash commands, not rows in the routing table.
+# One name per line, each with a reason above it.

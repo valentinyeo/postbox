@@ -1,0 +1,16 @@
+# agent-template: owned v3.12.1 sha256:65d8d2af55e401ac8de2f4e52179970fd544d1634ac031af22cc983c29c05ecf
+name: skills-evals
+on:
+  pull_request:
+    paths:
+      - '.claude/skills/**'
+      - 'board.yml'
+      - '.github/workflows/skills-evals.yml'
+
+jobs:
+  skills-evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check the skill pack is internally consistent
+        run: bash .claude/skills/evals/run-evals.sh
