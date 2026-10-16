@@ -391,6 +391,23 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(format_tests).step);
 
+    const archive_harness_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("src/archive_actions_test.zig"),
+        sourceSection("fn queueUnarchiveChat(", "const archived_scan_min_ticks"),
+        sourceSection("fn archiveChat(", "/// Rows just left the list."),
+        sourceSection("fn archiveSelectedChat(", "// --------------------------------------------------------- wazigctl control"),
+    }) catch @panic("Out of memory building archive harness");
+    const archive_harness = b.addWriteFiles().add("archive_actions_test.zig", archive_harness_source);
+    const archive_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = archive_harness,
+        .target = b.resolveTargetQuery(.{}),
+        .imports = &.{.{ .name = "archive_rules", .module = b.createModule(.{
+            .root_source_file = b.path("src/archive_rules.zig"),
+            .target = b.resolveTargetQuery(.{}),
+        }) }},
+    }) });
+    test_step.dependOn(&b.addRunArtifact(archive_tests).step);
+
     // webp.zig tests use the host target: they must run on the CI machine
     // even when the exe is cross-compiled for Windows.
     const webp_tests = b.addTest(.{

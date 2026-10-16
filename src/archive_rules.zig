@@ -9,6 +9,20 @@ pub const max_entries = 300;
 pub const max_jid = 191;
 pub const max_ts = 47;
 
+pub const Action = enum {
+    archive,
+    keep,
+    unarchive,
+
+    pub fn status(self: Action) []const u8 {
+        return switch (self) {
+            .archive => "Archived. Comes back on a new message",
+            .keep => "Kept archived. Won't come back",
+            .unarchive => "Chat unarchived",
+        };
+    }
+};
+
 /// What the app knows about one archived chat: whether it must stay archived
 /// and the last-message stamp seen when it was archived (or first seen
 /// archived). A newer incoming message than the baseline brings it back.
@@ -79,6 +93,15 @@ pub const State = struct {
         const n = @min(ts.len, max_ts);
         @memcpy(entry.ts[0..n], ts[0..n]);
         entry.ts_len = @intCast(n);
+    }
+
+    /// Reserve kept state before queuing the write: a full kept table must
+    /// not silently turn "Keep archived" into regular archiving.
+    pub fn archive(self: *State, jid: []const u8, ts: []const u8, keep: bool) bool {
+        const entry = self.slot(jid) orelse return false;
+        entry.keep = keep;
+        if (ts.len > 0) self.setBaseline(jid, ts);
+        return true;
     }
 
     pub fn setKeep(self: *State, jid: []const u8, keep: bool) void {
@@ -260,4 +283,49 @@ test "the pane switches when the open chat left the list" {
     try std.testing.expect(paneNeedsSwitch("a@g.us", "b@g.us"));
     try std.testing.expect(paneNeedsSwitch("a@g.us", null));
     try std.testing.expect(!paneNeedsSwitch("a@g.us", "a@g.us"));
+}
+
+test "archive modes survive restart and allow resurfacing undoes keep" {
+    const jid = "kept@g.us";
+    const baseline_ts = "2026-10-10T10:00:00Z";
+    const incoming_ts = "2026-10-10T11:00:00Z";
+    var state = State{};
+    try std.testing.expect(state.archive(jid, baseline_ts, true));
+    var buffer: [512]u8 = undefined;
+    var loaded = State{};
+    loaded.parse(state.format(&buffer));
+    try std.testing.expect(!needsProbe(loaded.isKept(jid), incoming_ts, loaded.baseline(jid).?));
+    try std.testing.expect(!shouldResurface(false, loaded.isKept(jid), incoming_ts, loaded.baseline(jid).?));
+    loaded.setKeep(jid, false);
+    state.parse(loaded.format(&buffer));
+    try std.testing.expect(shouldResurface(false, state.isKept(jid), incoming_ts, state.baseline(jid).?));
+    try std.testing.expect(!shouldResurface(true, state.isKept(jid), incoming_ts, state.baseline(jid).?));
+    try std.testing.expect(state.archive(jid, incoming_ts, false));
+    try std.testing.expect(!shouldResurface(false, state.isKept(jid), incoming_ts, state.baseline(jid).?));
+    try std.testing.expect(shouldResurface(false, state.isKept(jid), "2026-10-10T12:00:00Z", state.baseline(jid).?));
+}
+
+test "a full kept table refuses a new archive without changing existing state" {
+    var state = State{};
+    var name: [16]u8 = undefined;
+    for (0..max_entries) |i| {
+        const jid = try std.fmt.bufPrint(&name, "{d}@g.us", .{i});
+        try std.testing.expect(state.archive(jid, "baseline", true));
+    }
+    try std.testing.expect(!state.archive("overflow@g.us", "baseline", true));
+    try std.testing.expectEqual(@as(usize, max_entries), state.count);
+    try std.testing.expect(state.isKept("0@g.us"));
+    try std.testing.expect(state.archive("0@g.us", "new-baseline", true));
+    try std.testing.expectEqualStrings("new-baseline", state.baseline("0@g.us").?);
+}
+
+test "plain archive explicitly replaces keep and own messages never resurface" {
+    var state = State{};
+    const jid = "a@g.us";
+    try std.testing.expect(state.archive(jid, "2026-10-10T10:00:00Z", true));
+    try std.testing.expect(state.archive(jid, "2026-10-10T11:00:00Z", false));
+    try std.testing.expect(!state.isKept(jid));
+    for ([_]bool{ false, true }) |kept| {
+        try std.testing.expect(!shouldResurface(true, kept, "2026-10-10T12:00:00Z", state.baseline(jid).?));
+    }
 }
