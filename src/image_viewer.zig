@@ -144,7 +144,7 @@ fn show(a: anytype, index: usize, comptime actions: anytype) void {
             a.pending_download_id.set(message.id.slice());
         } else {
             const queued = actions.download(a, index, false);
-            if (a.chats[a.selected_chat].provider == .whatsapp and !queued and !actions.isDownloading(a, message.id.slice())) a.viewer_failed = true;
+            if (a.chats[a.selected_chat].provider == .whatsapp and !queued and !actions.isDownloading(a, a.chats[a.selected_chat].jid.slice(), message.id.slice())) a.viewer_failed = true;
         }
     }
     refresh(a, actions);

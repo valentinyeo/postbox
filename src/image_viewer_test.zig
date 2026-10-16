@@ -57,7 +57,7 @@ fn download(a: *App, _: usize, _: bool) bool {
     a.downloads += 1;
     return true;
 }
-fn downloading(_: *const App, _: []const u8) bool {
+fn downloading(_: *const App, _: []const u8, _: []const u8) bool {
     return true;
 }
 fn external(_: *App, _: *const Message) void {
