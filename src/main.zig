@@ -7,6 +7,7 @@ const avatar_mask = @import("avatar_mask.zig");
 const dictation = @import("dictation.zig");
 const voice_capture = @import("voice_capture.zig");
 const format_request = @import("format_request.zig");
+const format_cache = @import("format_cache.zig");
 const slack = @import("slack.zig");
 const slack_win = @import("slack_win.zig");
 const played = @import("played.zig");
@@ -229,7 +230,7 @@ fn WideText(comptime capacity: usize) type {
         buf: [capacity + 1]u16 = [_]u16{0} ** (capacity + 1),
         len: usize = 0,
 
-        fn set(self: *@This(), allocator: std.mem.Allocator, text: []const u8) void {
+        pub fn set(self: *@This(), allocator: std.mem.Allocator, text: []const u8) void {
             self.len = 0;
             self.buf[0] = 0;
             const converted = std.unicode.utf8ToUtf16LeAllocZ(allocator, text) catch return;
@@ -840,14 +841,14 @@ const App = struct {
     click_moved: bool = false,
     openrouter_session: ?*dictation.TextSession = null,
     openrouter_active_id: Utf8Text(191) = .{},
+    openrouter_active_chat: Utf8Text(191) = .{},
+    openrouter_active_account: Utf8Text(32) = .{},
     openrouter_key: []const u8 = "",
     openrouter_model: []const u8 = "openai/gpt-5.6-luna",
     openrouter_configured: bool = false,
     // Anthropic workspace id for the formatting key; empty for workspace-scoped keys.
     format_workspace: []const u8 = "",
-    openrouter_attempts: [512]u64 = [_]u64{0} ** 512,
-    openrouter_attempt_count: usize = 0,
-    openrouter_attempt_next: usize = 0,
+    formatting_requests: format_cache.Requests = .{},
     // Hash of the last WhatsApp messages payload painted; an identical fresh read is skipped.
     msg_applied_hash: u64 = 0,
     // Paint counters for the once-a-minute launch-log line (idle proof).
@@ -2480,7 +2481,7 @@ fn refreshTelegramMessages(a: *App) void {
         a.messages[a.message_count] = message;
         a.message_count += 1;
         const stored = &a.messages[a.message_count - 1];
-        if (isAudio(stored) and stored.local_path.len > 0) loadTranscriptCache(a, stored);
+        if (isAudio(stored)) loadTranscriptCache(a, stored);
     }
     if (selected_id.len > 0) {
         for (a.messages[0..a.message_count], 0..) |*message, index| {
@@ -6166,17 +6167,52 @@ fn touchFileW(path: [*:0]const u16) void {
     _ = win.CloseHandle(handle);
 }
 
+fn formatCachePath(a: *App, key: format_cache.Key) ?[]u8 {
+    const name = format_cache.filename(a.allocator, key) catch return null;
+    defer a.allocator.free(name);
+    const dir_name = std.fmt.allocPrint(a.allocator, "voice-format-{s}", .{key.account}) catch return null;
+    defer a.allocator.free(dir_name);
+    const dir = messagesDirPath(a, dir_name) orelse return null;
+    defer a.allocator.free(dir);
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, dir) catch return null;
+    defer a.allocator.free(wide);
+    _ = win.CreateDirectoryW(wide.ptr, null);
+    return std.fs.path.join(a.allocator, &.{ dir, name }) catch null;
+}
+
+fn saveFormattedCache(a: *App, key: format_cache.Key, text: []const u8) void {
+    const path = formatCachePath(a, key) orelse return;
+    defer a.allocator.free(path);
+    const data = format_cache.envelope(a.allocator, key, text) catch return;
+    defer a.allocator.free(data);
+    writeCacheFileAtomic(a, path, data);
+}
+
 fn loadTranscriptCache(a: *App, message: *Message) void {
+    const key = format_cache.Key{
+        .account = a.cache_tag.slice(),
+        .chat = if (a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else "",
+        .message = message.id.slice(),
+    };
+    if (formatCachePath(a, key)) |path| {
+        defer a.allocator.free(path);
+        if (readFileWin(a.allocator, path, format_cache.max_bytes)) |data| {
+            defer a.allocator.free(data);
+            if (format_cache.restore(a.allocator, message, data, key)) return;
+        }
+    }
+    if (message.local_path.len == 0) return;
     const path_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.local_path.slice()) catch return;
     defer a.allocator.free(path_utf8);
     const cache_path = std.fmt.allocPrint(a.allocator, "{s}.txt", .{path_utf8}) catch return;
     defer a.allocator.free(cache_path);
-    const contents = readFileWin(a.allocator, cache_path, 4096) orelse return;
+    const contents = readFileWin(a.allocator, cache_path, format_cache.max_bytes) orelse return;
     defer a.allocator.free(contents);
     const trimmed = std.mem.trim(u8, contents, " \r\n\t");
     if (trimmed.len == 0) return;
     message.transcript.set(a.allocator, trimmed);
     message.transcript_state = .ready;
+    if (format_request.looksFormatted(u8, trimmed)) saveFormattedCache(a, key, trimmed);
 }
 
 fn readFileWin(allocator: std.mem.Allocator, path_utf8: []const u8, max_bytes: usize) ?[]u8 {
@@ -6266,6 +6302,12 @@ fn deleteAccountCaches(a: *App) void {
         }
     } else |_| {}
     if (std.fmt.bufPrint(&name_buffer, "msg-cache-{s}", .{tag})) |dir_name| {
+        if (messagesDirPath(a, dir_name)) |dir_path| {
+            defer a.allocator.free(dir_path);
+            std.Io.Dir.cwd().deleteTree(a.io, dir_path) catch {};
+        }
+    } else |_| {}
+    if (std.fmt.bufPrint(&name_buffer, "voice-format-{s}", .{tag})) |dir_name| {
         if (messagesDirPath(a, dir_name)) |dir_path| {
             defer a.allocator.free(dir_path);
             std.Io.Dir.cwd().deleteTree(a.io, dir_path) catch {};
@@ -6556,34 +6598,32 @@ fn pollFormatting(a: *App) void {
         }
         return;
     }
-    for (a.messages[0..a.message_count]) |*message| {
-        if (!std.mem.eql(u8, message.id.slice(), done_id.slice())) continue;
-        if (state == .ready) {
-            var buffer: [16384]u8 = undefined;
-            if (session.takeResult(&buffer)) |formatted| {
-                if (formatted.len > 0) {
-                    message.transcript.set(a.allocator, formatted);
-                    saveTranscriptCache(a, message);
-                    appendDebugLog(a, "format: ready len={d}", .{formatted.len});
+    const key = format_cache.Key{
+        .account = a.openrouter_active_account.slice(),
+        .chat = a.openrouter_active_chat.slice(),
+        .message = done_id.slice(),
+    };
+    if (state == .ready) {
+        var buffer: [16384]u8 = undefined;
+        if (session.takeResult(&buffer)) |formatted| {
+            // A chat switch must not discard the only copy of a finished summary.
+            if (formatted.len > 0 and std.mem.eql(u8, key.account, a.cache_tag.slice())) {
+                saveFormattedCache(a, key, formatted);
+                if (std.mem.eql(u8, key.chat, a.displayed_jid.slice())) {
+                    for (a.messages[0..a.message_count]) |*message| {
+                        if (!std.mem.eql(u8, message.id.slice(), done_id.slice())) continue;
+                        message.transcript.set(a.allocator, formatted);
+                        message.transcript_state = .ready;
+                        break;
+                    }
                 }
+                appendDebugLog(a, "format: ready len={d}", .{formatted.len});
             }
-        } else {
-            appendDebugLog(a, "format: failed, keeping raw transcript", .{});
         }
-        break;
+    } else {
+        appendDebugLog(a, "format: failed, keeping raw transcript", .{});
     }
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
-}
-
-fn openrouterWasAttempted(a: *App, id: []const u8) bool {
-    const hash = std.hash.Wyhash.hash(0, id);
-    for (a.openrouter_attempts[0..a.openrouter_attempt_count]) |attempt| if (attempt == hash) return true;
-    // Ring buffer: overwrite the oldest entry. Resetting the count used to
-    // forget every attempt at once and re-sent all notes for formatting.
-    a.openrouter_attempts[a.openrouter_attempt_next % a.openrouter_attempts.len] = hash;
-    a.openrouter_attempt_next += 1;
-    a.openrouter_attempt_count = @min(a.openrouter_attempt_next, a.openrouter_attempts.len);
-    return false;
 }
 
 fn scheduleNextFormatting(a: *App) void {
@@ -6602,8 +6642,7 @@ fn scheduleNextFormatting(a: *App) void {
         index -= 1;
         const message = &a.messages[index];
         if (message.transcript_state != .ready or message.transcript.len == 0) continue;
-        if (format_request.looksFormatted(u16, message.transcript.slice())) continue;
-        if (message.id.len == 0 or openrouterWasAttempted(a, message.id.slice())) continue;
+        if (!a.formatting_requests.claim(u16, message.id.slice(), message.transcript.slice())) continue;
         candidate = index;
         break;
     }
@@ -6622,6 +6661,8 @@ fn scheduleNextFormatting(a: *App) void {
     defer a.allocator.free(speaker);
     if (session.start(transcript_utf8, a.openrouter_key, a.openrouter_model, a.format_workspace, speaker)) {
         a.openrouter_active_id.set(message.id.slice());
+        a.openrouter_active_chat = a.displayed_jid;
+        a.openrouter_active_account = a.cache_tag;
         appendDebugLog(a, "format schedule: queued len={d}", .{transcript_utf8.len});
     }
 }
@@ -7992,7 +8033,7 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
         a.messages[a.message_count] = message;
         a.message_count += 1;
         const stored = &a.messages[a.message_count - 1];
-        if (isAudio(stored) and stored.local_path.len > 0) loadTranscriptCache(a, stored);
+        if (isAudio(stored)) loadTranscriptCache(a, stored);
     }
     var reaction_index: usize = 0;
     while (reaction_index < a.message_count) {
