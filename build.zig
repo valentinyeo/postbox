@@ -333,7 +333,7 @@ pub fn build(b: *std.Build) void {
 
     // Tests live in Windows-free modules so they run on any host.
     const test_step = b.step("test", "Run unit tests");
-    for ([_][]const u8{ "src/image_gallery.zig", "src/chat_order.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/update.zig", "src/avatar_mask.zig", "src/compose_layout.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/format_cache.zig" }) |test_root| {
+    for ([_][]const u8{ "src/chat_order.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/update.zig", "src/avatar_mask.zig", "src/compose_layout.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/format_cache.zig", "src/image_gallery.zig" }) |test_root| {
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(test_root),
@@ -407,6 +407,23 @@ pub fn build(b: *std.Build) void {
         }) }},
     }) });
     test_step.dependOn(&b.addRunArtifact(archive_tests).step);
+
+    const read_state_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("src/read_state_test.zig"),
+        sourceSection("fn queueUnreadProbe(", "// --------------------------------------------------------------- Telegram"),
+        sourceSection("fn markChatRead(a: *App) void {", "    if (chat.provider == .telegram)"),
+        sourceSection("    const needs_receipt = chat.provider_unread", "// Quiet period before"),
+        sourceSection("fn startNextMarkRead(a: *App) void {", "// The mark-read child gates"),
+    }) catch @panic("Out of memory building read state harness");
+    const read_state_files = b.addWriteFiles();
+    _ = read_state_files.addCopyFile(b.path("src/read_state.zig"), "read_state.zig");
+    _ = read_state_files.addCopyFile(b.path("src/media_age.zig"), "media_age.zig");
+    const read_state_harness = read_state_files.add("read_state_test.zig", read_state_source);
+    const read_state_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = read_state_harness,
+        .target = b.resolveTargetQuery(.{}),
+    }) });
+    test_step.dependOn(&b.addRunArtifact(read_state_tests).step);
 
     // webp.zig tests use the host target: they must run on the CI machine
     // even when the exe is cross-compiled for Windows.

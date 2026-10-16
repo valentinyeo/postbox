@@ -102,7 +102,7 @@ fn wacliEnqueue(a: *App, job: WacliJob, _: bool) void {
 fn msgCacheStore(a: *App, _: []const u8, _: []const u8) void {
     a.cached += 1;
 }
-fn applyChats(a: *App, raw: []const u8) bool {
+fn applyChats(a: *App, raw: []const u8, _: bool) bool {
     // Only chat-list painting is stubbed: supply the fresh row's stamp.
     a.chats[0].timestamp.set(raw);
     return true;
