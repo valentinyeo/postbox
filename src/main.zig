@@ -37,6 +37,7 @@ const control_pipe = @import("control_pipe.zig");
 const mf_lazy = @import("mf_lazy.zig");
 const shell_lazy = @import("shell_lazy.zig");
 const bitmap_lru = @import("bitmap_lru.zig");
+const image_viewer = @import("image_viewer.zig");
 
 const webp = @cImport({
     @cInclude("src/webp/decode.h");
@@ -244,7 +245,7 @@ fn WideText(comptime capacity: usize) type {
             return self.buf[0..self.len];
         }
 
-        fn ptr(self: *const @This()) [*:0]const u16 {
+        pub fn ptr(self: *const @This()) [*:0]const u16 {
             return @ptrCast(&self.buf);
         }
     };
@@ -255,13 +256,13 @@ fn Utf8Text(comptime capacity: usize) type {
         buf: [capacity + 1]u8 = [_]u8{0} ** (capacity + 1),
         len: usize = 0,
 
-        fn set(self: *@This(), text: []const u8) void {
+        pub fn set(self: *@This(), text: []const u8) void {
             self.len = @min(text.len, capacity);
             @memcpy(self.buf[0..self.len], text[0..self.len]);
             self.buf[self.len] = 0;
         }
 
-        fn slice(self: *const @This()) []const u8 {
+        pub fn slice(self: *const @This()) []const u8 {
             return self.buf[0..self.len];
         }
     };
@@ -787,11 +788,6 @@ const App = struct {
     read_retries: [max_pending_reads]u8 = [_]u8{0} ** max_pending_reads,
     pending_download_jid: Utf8Text(191) = .{},
     pending_download_id: Utf8Text(191) = .{},
-    // An image queued to download from Ctrl+O or Enter, so it can open in the
-    // viewer as soon as the download completes instead of needing a second
-    // press.
-    pending_viewer_open_jid: Utf8Text(191) = .{},
-    pending_viewer_open_id: Utf8Text(191) = .{},
     pins: [max_pins]Utf8Text(191) = [_]Utf8Text(191){.{}} ** max_pins,
     pin_count: usize = 0,
     pins_loaded: bool = false,
@@ -908,6 +904,9 @@ const App = struct {
     // double-click window right after opening (the second half of the
     // double-click gesture that opened it) doesn't instantly close it.
     viewer_opened_ms: u64 = 0,
+    viewer_chat: Utf8Text(191) = .{},
+    viewer_id: Utf8Text(191) = .{},
+    viewer_failed: bool = false,
     // Keyboard shortcuts help overlay (F1, or the palette command); one at a
     // time, closed by Esc, F1 or a click.
     shortcut_help: ?win.HWND = null,
@@ -5082,7 +5081,7 @@ fn checkMarkRead(a: *App) void {
 // download slot is free and its message is on screen (the request is dropped
 // if the user switched chats meanwhile).
 fn retryPendingDownload(a: *App) void {
-    if (a.pending_download_id.len == 0 or freeMediaSlot(a) == null) return;
+    if (a.pending_download_id.len == 0 or freeMediaSlot(a) == null or a.send_child != null) return;
     if (a.selected_chat >= a.chat_count) return;
     if (!std.mem.eql(u8, a.pending_download_jid.slice(), a.chats[a.selected_chat].jid.slice())) {
         a.pending_download_jid.set("");
@@ -6723,6 +6722,7 @@ fn checkMediaDownload(a: *App) void {
             } else {
                 noteMediaFailure(a, slot.jid.slice(), slot.id.slice());
             }
+            image_viewer.downloadFinished(a, slot.jid.slice(), slot.id.slice(), code == 0);
             // The chained note's own slot decides the chain's fate; an
             // unrelated slot finishing must leave the chain armed.
             if (std.mem.eql(u8, slot.id.slice(), a.audio_chain_id.slice())) chain_slot_done = true;
@@ -7027,238 +7027,33 @@ fn togglePlayerFullscreen(a: *App, hwnd: win.HWND) void {
     if (a.mf_player) |player| _ = player.lpVtbl.*.UpdateVideo.?(player);
 }
 
-// Double-click an image to see it large inside the app. The window is an
-// owned WS_POPUP covering the monitor work area; the image is decoded once at
-// open (WIC, full resolution) and blitted centered on every paint.
+fn isViewerImage(message: *const Message) bool {
+    return isImage(message) or (isGif(message) and !isVideoGif(message));
+}
+
+const viewer_actions = .{
+    .isImage = isViewerImage,
+    .download = downloadMedia,
+    .isDownloading = mediaDownloading,
+    .openExternal = openMedia,
+};
+
 fn closeImageViewer(a: *App) void {
-    // Drop the handle first so a re-entrant paint never sees a destroyed
-    // window, then free the decoded bitmap.
-    if (a.image_viewer_window) |hwnd| {
-        a.image_viewer_window = null;
-        _ = win.DestroyWindow(hwnd);
-    }
-    if (a.viewer_bitmap) |bitmap| {
-        a.viewer_bitmap = null;
-        _ = win.DeleteObject(bitmap);
-    }
-    a.viewer_width = 0;
-    a.viewer_height = 0;
-    if (a.hwnd) |main_hwnd| _ = win.SetFocus(main_hwnd);
-}
-
-// Fit the source into the work area: shrink to fit, but never grow a small
-// image past 2x. Aspect ratio is preserved.
-fn viewerTargetSize(source_width: u32, source_height: u32, max_width: i32, max_height: i32) webp_detect.FitBox {
-    if (source_width == 0 or source_height == 0) return .{ .width = 1, .height = 1 };
-    if (max_width <= 0 or max_height <= 0) return .{ .width = source_width, .height = source_height };
-    const sw: f32 = @floatFromInt(source_width);
-    const sh: f32 = @floatFromInt(source_height);
-    var scale: f32 = @min(@as(f32, @floatFromInt(max_width)) / sw, @as(f32, @floatFromInt(max_height)) / sh);
-    if (scale > 2.0) scale = 2.0;
-    if (scale <= 0.0) scale = 1.0;
-    return .{
-        .width = @max(1, @as(u32, @intFromFloat(sw * scale))),
-        .height = @max(1, @as(u32, @intFromFloat(sh * scale))),
-    };
-}
-
-// Decode the attachment's first frame at viewer size into a top-down 32bpp
-// DIB. Fills out_width/out_height with the bitmap's pixel size.
-fn decodeImageViewerBitmap(a: *App, message: *const Message, max_width: i32, max_height: i32, out_width: *i32, out_height: *i32) ?win.HBITMAP {
-    if (a.wic_factory == null or message.local_path.len == 0) return null;
-    var decoder: [*c]win.IWICBitmapDecoder = null;
-    if (a.wic_factory.*.lpVtbl.*.CreateDecoderFromFilename.?(
-        a.wic_factory,
-        message.local_path.ptr(),
-        null,
-        win.GENERIC_READ,
-        win.WICDecodeMetadataCacheOnLoad,
-        &decoder,
-    ) < 0 or decoder == null) return null;
-    defer _ = decoder.*.lpVtbl.*.Release.?(decoder);
-
-    var frame: [*c]win.IWICBitmapFrameDecode = null;
-    if (decoder.*.lpVtbl.*.GetFrame.?(decoder, 0, &frame) < 0 or frame == null) return null;
-    defer _ = frame.*.lpVtbl.*.Release.?(frame);
-    var source_width: win.UINT = 0;
-    var source_height: win.UINT = 0;
-    if (frame.*.lpVtbl.*.GetSize.?(@ptrCast(frame), &source_width, &source_height) < 0 or source_width == 0 or source_height == 0) return null;
-
-    const target = viewerTargetSize(source_width, source_height, max_width, max_height);
-    var converter: [*c]win.IWICFormatConverter = null;
-    if (a.wic_factory.*.lpVtbl.*.CreateFormatConverter.?(a.wic_factory, &converter) < 0 or converter == null) return null;
-    defer _ = converter.*.lpVtbl.*.Release.?(converter);
-    if (converter.*.lpVtbl.*.Initialize.?(
-        converter,
-        @ptrCast(frame),
-        &win.GUID_WICPixelFormat32bppPBGRA,
-        win.WICBitmapDitherTypeNone,
-        null,
-        0,
-        win.WICBitmapPaletteTypeCustom,
-    ) < 0) return null;
-
-    var source: *win.IWICBitmapSource = @ptrCast(converter);
-    var scaler: [*c]win.IWICBitmapScaler = null;
-    defer {
-        if (scaler != null) _ = scaler.*.lpVtbl.*.Release.?(scaler);
-    }
-    if (source_width != target.width or source_height != target.height) {
-        if (a.wic_factory.*.lpVtbl.*.CreateBitmapScaler.?(a.wic_factory, &scaler) < 0 or scaler == null) return null;
-        // Fant = high quality downscaling; small images grow cleanly too.
-        if (scaler.*.lpVtbl.*.Initialize.?(scaler, @ptrCast(converter), target.width, target.height, win.WICBitmapInterpolationModeFant) < 0) return null;
-        source = @ptrCast(scaler);
-    }
-
-    const stride: win.UINT = target.width * 4;
-    const byte_count: usize = @as(usize, stride) * target.height;
-    const pixels = a.allocator.alloc(u8, byte_count) catch return null;
-    defer a.allocator.free(pixels);
-    if (source.*.lpVtbl.*.CopyPixels.?(source, null, stride, @intCast(byte_count), pixels.ptr) < 0) return null;
-
-    var info = std.mem.zeroes(win.BITMAPINFO);
-    info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = @intCast(target.width);
-    info.bmiHeader.biHeight = -@as(win.LONG, @intCast(target.height));
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = win.BI_RGB;
-    var bits: ?*anyopaque = null;
-    const bitmap = win.CreateDIBSection(null, &info, win.DIB_RGB_COLORS, &bits, null, 0) orelse return null;
-    if (bits == null) {
-        _ = win.DeleteObject(bitmap);
-        return null;
-    }
-    @memcpy(@as([*]u8, @ptrCast(bits.?))[0..byte_count], pixels);
-    out_width.* = @intCast(target.width);
-    out_height.* = @intCast(target.height);
-    return bitmap;
+    image_viewer.close(a);
 }
 
 fn openImageViewer(a: *App, message: *const Message) void {
-    if (message.local_path.len == 0) return;
-    if (a.image_viewer_window != null) closeImageViewer(a);
-    const owner = a.hwnd orelse return;
-    const monitor = win.MonitorFromWindow(owner, win.MONITOR_DEFAULTTONEAREST);
-    var info = std.mem.zeroes(win.MONITORINFO);
-    info.cbSize = @sizeOf(win.MONITORINFO);
-    if (win.GetMonitorInfoW(monitor, &info) == 0) return;
-    const work = info.rcWork;
-    const width = @max(1, work.right - work.left);
-    const height = @max(1, work.bottom - work.top);
-
-    var bitmap_width: i32 = 0;
-    var bitmap_height: i32 = 0;
-    const bitmap = decodeImageViewerBitmap(a, message, width, height, &bitmap_width, &bitmap_height) orelse {
-        // WebP stickers have no WIC codec; the external viewer is the only path.
-        openMedia(a, message);
-        return;
-    };
-
-    const hwnd = win.CreateWindowExW(
-        0,
-        lit("MessagesImageViewer"),
-        lit("Messages · Image"),
-        win.WS_POPUP,
-        work.left,
-        work.top,
-        width,
-        height,
-        owner,
-        null,
-        a.instance,
-        null,
-    ) orelse {
-        _ = win.DeleteObject(bitmap);
-        setStatus(a, "Could not open the image");
-        return;
-    };
-    a.image_viewer_window = hwnd;
-    a.viewer_bitmap = bitmap;
-    a.viewer_width = bitmap_width;
-    a.viewer_height = bitmap_height;
-    a.viewer_opened_ms = win.GetTickCount64();
-    _ = win.ShowWindow(hwnd, win.SW_SHOW);
-    _ = win.SetForegroundWindow(hwnd);
-    _ = win.SetFocus(hwnd);
+    image_viewer.open(a, message, viewer_actions);
 }
 
-// Opens an image message in the viewer if it's already on disk; otherwise
-// starts the same download a media click starts and remembers the message so
-// checkMediaDownload can open it the moment the download finishes.
 fn openImageInViewerOrQueue(a: *App, index: usize, message: *const Message) void {
-    if (message.local_path.len > 0) {
-        openImageViewer(a, message);
-        return;
-    }
-    if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp) {
-        a.pending_viewer_open_jid.set(a.chats[a.selected_chat].jid.slice());
-        a.pending_viewer_open_id.set(message.id.slice());
-        _ = downloadMedia(a, index, false);
-    } else {
-        setStatus(a, "Still downloading");
-    }
+    _ = index;
+    openImageViewer(a, message);
 }
 
 fn imageViewerProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
-    switch (message) {
-        win.WM_ERASEBKGND => return 1,
-        win.WM_PAINT => {
-            var ps = win.PAINTSTRUCT{};
-            const hdc = win.BeginPaint(hwnd, &ps);
-            var client = std.mem.zeroes(win.RECT);
-            _ = win.GetClientRect(hwnd, &client);
-            const background = win.CreateSolidBrush(rgb(9, 9, 9));
-            if (background) |brush| {
-                _ = win.FillRect(hdc, &client, brush);
-                _ = win.DeleteObject(brush);
-            }
-            if (a.viewer_bitmap) |bitmap| {
-                if (win.CreateCompatibleDC(hdc)) |memory| {
-                    const old = win.SelectObject(memory, bitmap);
-                    const x = @divTrunc(client.right - a.viewer_width, 2);
-                    const y = @divTrunc(client.bottom - a.viewer_height, 2);
-                    _ = win.BitBlt(hdc, x, y, a.viewer_width, a.viewer_height, memory, 0, 0, win.SRCCOPY);
-                    _ = win.SelectObject(memory, old);
-                    _ = win.DeleteDC(memory);
-                }
-            }
-            _ = win.EndPaint(hwnd, &ps);
-            return 0;
-        },
-        // Close on the button release, not the press: closing on the press
-        // would hand the release to the chat underneath as a click. The
-        // viewer fully covers the monitor while shown, so both halves of the
-        // click land on it without needing to grab mouse capture.
-        win.WM_LBUTTONDOWN, win.WM_LBUTTONDBLCLK => return 0,
-        win.WM_LBUTTONUP => {
-            // The click that opened this viewer can have a second click
-            // riding along behind it (a real double-click, or Windows
-            // coalescing a fast double-click into one open). Ignore any
-            // click inside the system double-click window after opening so
-            // it doesn't close the viewer the instant it appears.
-            if (win.GetTickCount64() - a.viewer_opened_ms < win.GetDoubleClickTime()) return 0;
-            closeImageViewer(a);
-            return 0;
-        },
-        win.WM_KEYDOWN => {
-            if (wparam == 27 or wparam == win.VK_SPACE or wparam == win.VK_RETURN) { // esc, space, enter
-                closeImageViewer(a);
-                return 0;
-            }
-        },
-        win.WM_CLOSE => {
-            closeImageViewer(a);
-            return 0;
-        },
-        win.WM_DESTROY => {
-            if (a.image_viewer_window != null and a.image_viewer_window.? == hwnd) a.image_viewer_window = null;
-            return 0;
-        },
-        else => {},
-    }
-    return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    return image_viewer.windowProc(a, hwnd, message, wparam, lparam, viewer_actions);
 }
 
 fn detectUnfurl(message: *Message) void {
@@ -8066,20 +7861,6 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
         for (a.messages[0..a.message_count], 0..) |*message, index| {
             if (std.mem.eql(u8, selected_id.slice(), message.id.slice())) {
                 a.selected_message = index;
-                break;
-            }
-        }
-    }
-    // An image queued from Ctrl+O or Enter opens the moment its download
-    // shows up here, so the picker doesn't need a second press.
-    if (final and a.pending_viewer_open_id.len > 0 and std.mem.eql(u8, a.pending_viewer_open_jid.slice(), chat.jid.slice())) {
-        for (a.messages[0..a.message_count]) |*message| {
-            if (std.mem.eql(u8, message.id.slice(), a.pending_viewer_open_id.slice())) {
-                if (message.local_path.len > 0) {
-                    a.pending_viewer_open_jid.set("");
-                    a.pending_viewer_open_id.set("");
-                    openImageViewer(a, message);
-                }
                 break;
             }
         }
@@ -9839,17 +9620,15 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
         }
         if (x >= media.left and x <= media.right and y >= media.top and y <= media.bottom) {
             a.selected_message = index;
-            if (item.local_path.len == 0) {
+            if (isImage(item)) {
+                // A drag selects text; only a click opens the gallery.
+                if (!a.click_moved) openImageViewer(a, item);
+            } else if (item.local_path.len == 0) {
                 _ = downloadMedia(a, index, false);
             } else if (isAudio(item)) {
                 handleAudioClick(a, item, x);
             } else if (std.ascii.eqlIgnoreCase(item.media_type.slice(), "video")) {
                 playVideoInline(a, item);
-            } else if (isImage(item)) {
-                // A click that stayed put opens the in-app viewer; a click
-                // that turned into a drag (text selection, or dragging off
-                // the image) leaves it at just selecting the message.
-                if (!a.click_moved) openImageViewer(a, item);
             } else if (!isGif(item)) {
                 // GIFs already animate in place; popping them out to
                 // an external player was unwanted.
@@ -11243,13 +11022,10 @@ fn controlOnUi(a: *App, call: *ControlCall) void {
 fn controlDispatch(a: *App, call: *ControlCall) !void {
     const request = &call.parsed.value;
     const w = &call.out.writer;
-    // A Ctrl+O image still downloading opens the viewer, which takes the
-    // foreground, as soon as its chat loads. Commands that load a chat drop
-    // that deferred open so they can never raise a window; the download
-    // itself carries on and Ctrl+O opens it later.
+    // A control command that loads a chat must not leave its image popup
+    // covering the newly selected conversation. Downloads carry on.
     if (call.phase == .select or request.cmd == .select or request.cmd == .search or request.cmd == .view) {
-        a.pending_viewer_open_jid.set("");
-        a.pending_viewer_open_id.set("");
+        if (a.image_viewer_window != null) closeImageViewer(a);
     }
     // Loading a chat marks it read only once the user picked a chat
     // (user_viewed). A refilter, view switch or archive can move the
@@ -15125,6 +14901,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     a.paints_window = 0;
                 }
                 checkMediaDownload(a);
+                image_viewer.refresh(a, viewer_actions);
                 checkSend(a);
                 retryPendingReactions(a);
                 checkMarkRead(a);
