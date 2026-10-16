@@ -87,7 +87,7 @@ FNR == 1 {
 }
 {
     code = $0
-    if (code ~ /^[[:space:]]*#/) next
+    if (code ~ ("^[[:space:]]*" sprintf("%c", 35))) next
     match(code, /[^ ]/)
     indent = RSTART - 1
     if (running && code !~ /^[[:space:]]*$/ && indent <= run_indent) finish()
