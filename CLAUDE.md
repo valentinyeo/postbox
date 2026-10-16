@@ -6,11 +6,8 @@
 - Ship through a PR with all checks green. `automerge.yml` merges green PRs unless they edit release-gating workflows; `auto-release.yml` tags and `release.yml` publishes.
 
 ## Build and test (Zig 0.16.0, on the VPS at `~/.local/zig-0.16.0/zig`; the `zig` on PATH is too old)
-- `zig fmt --check src build.zig`
-- `zig build test`
-- `zig test src/stretch.zig`
+- `tools/preflight.sh`: the same format, test, Windows build and lint steps CI runs.
 - `python3 tools/check_new_comments.py origin/main`: CI fails a PR that adds code comments; put the why in the commit or PR.
-- `zig build -Dtarget=x86_64-windows-gnu --release=small`
 - `bash .claude/skills/evals/run-evals.sh` when `.claude/skills/` or `board.yml` changes.
 - build.zig harnesses slice `src/main.zig` by text markers; editing near them breaks `unfurl-verification`.
 
@@ -22,3 +19,11 @@ This repo owns the agent slugs `wazig-dev-1`..`wazig-dev-5`. The Hypertask team'
 - Test new functions on the X13s (`lh2`), or on the P1 only after he has updated.
 - Never run a test copy of Messages (`WAZIG_FAKE_VERSION`, a scratch folder) on his visible screen.
 - Never report a release as done without testing the new function on screen (keys, clicks, screenshots). `wazigctl status|chats|select|messages` reads app state without stealing focus.
+
+## Rules and what enforces them (WAZI-123)
+| Rule | Enforced by |
+|---|---|
+| Format, tests and the Windows build pass before a push or PR | `.claude/hooks/preflight-guard.sh` blocks `git push` and `gh pr create/ready/merge`; CI runs the same `tools/preflight.sh` |
+| The wacli worker keeps the job it dequeues; a full archive queue keeps the unarchive request | `tools/lint-repeats.sh` rules A1, A2 |
+| Release workflows dispatch release.yml for bot tags, wait for GUI exes, end expected-exit-3 checks with `exit 0`, never use `gh api --slurp` | `tools/lint-repeats.sh` rules B1 to B4 |
+| Each check still fails on the past commit it was written for | `tools/test-preflight-guard.sh`, `tools/test-lint-repeats.sh` in CI |
