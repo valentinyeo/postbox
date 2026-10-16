@@ -43,7 +43,10 @@ jobs:
         run: ZIG=zig bash tools/preflight.sh
 
       - name: Agent guard tests
-        run: bash tools/test-preflight-guard.sh && bash tools/test-lint-repeats.sh
+        run: |
+          git fetch --quiet --no-tags origin '+refs/pull/*/head:refs/remotes/pr/*'
+          bash tools/test-preflight-guard.sh
+          bash tools/test-lint-repeats.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
