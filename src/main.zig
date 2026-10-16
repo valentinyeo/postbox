@@ -6219,7 +6219,7 @@ fn saveFormattedCache(a: *App, key: format_cache.Key, text: []const u8) void {
     defer a.allocator.free(path);
     const data = format_cache.envelope(a.allocator, key, text) catch return;
     defer a.allocator.free(data);
-    writeCacheFileAtomic(a, path, data);
+    _ = writeCacheFileAtomic(a, path, data);
 }
 
 fn loadTranscriptCache(a: *App, message: *Message) void {
@@ -10480,7 +10480,7 @@ fn saveArchiveState(a: *App) void {
     if (a.archive_state_path.len == 0) return;
     const buffer = a.allocator.alloc(u8, archive_rules.max_entries * 260) catch return;
     defer a.allocator.free(buffer);
-    writeCacheFileAtomic(a, a.archive_state_path, state.format(buffer));
+    _ = writeCacheFileAtomic(a, a.archive_state_path, state.format(buffer));
 }
 
 fn isKeptArchived(a: *const App, jid: []const u8) bool {
