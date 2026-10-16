@@ -39,17 +39,14 @@ jobs:
       - name: Zig version
         run: zig version
 
-      - name: Check formatting
-        run: zig fmt --check src build.zig
+      - name: Preflight
+        run: ZIG=zig bash tools/preflight.sh
 
-      - name: Test
-        run: zig build test
-
-      - name: Stretch tests
-        run: zig test src/stretch.zig
-
-      - name: Build
-        run: zig build -Dtarget=x86_64-windows-gnu --release=small
+      - name: Agent guard tests
+        run: |
+          git fetch --quiet --no-tags origin '+refs/pull/*/head:refs/remotes/pr/*'
+          bash tools/test-preflight-guard.sh
+          bash tools/test-lint-repeats.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
