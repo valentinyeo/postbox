@@ -30,7 +30,7 @@ jobs:
   tag:
     name: tag
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     # Only ever tag a commit CI has passed. A manual run is trusted.
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -121,20 +121,13 @@ jobs:
           fi
 
       - name: Prove manual runs point at a CI-green main HEAD
-        # A manual dispatch is not trusted: like the automatic path, it may
-        # only tag a commit for which a completed, successful ci run exists.
         if: env.skip != 'true' && github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha="$(git rev-parse HEAD)"
           echo "head_sha=${sha}" >> "$GITHUB_ENV"
-          # Fail closed: a failed query must count as "no proof".
-          ci_ok="$(gh run list -R "${GITHUB_REPOSITORY}" -w ci -b main --commit "${sha}" --json databaseId,conclusion -q '[.[] | select(.conclusion == "success")] | length' 2>/dev/null)" || ci_ok=""
-          if ! [ "${ci_ok:-}" -ge 1 ] 2>/dev/null; then
-            echo "no successful ci run for main HEAD ${sha} (or the query failed); refusing to tag" >&2
-            exit 1
-          fi
+          bash tools/ci-green.sh "${sha}"
 
       - name: Work out the next version
         if: env.skip != 'true'

@@ -18,4 +18,5 @@
 | The wacli worker keeps the job it dequeues; a full archive queue keeps the unarchive request | `tools/lint-repeats.sh` rules A1, A2 |
 | Release workflows dispatch release.yml for bot tags, wait for GUI exes, end expected-exit-3 checks with `exit 0`, never use `gh api --slurp`; automerge never requires the AI `code-review` check; workflows never call OpenRouter or Z.ai, the AI review runs `tools/ai-review.sh` on Codex via hax on the self-hosted `wazig` runner | `tools/lint-repeats.sh` rules B1 to B6 |
 | No private markers in tracked files, PR title, PR body or PR commit messages; private agent files stay out of git | `tools/check_private_markers.py` in `private-markers.yml`, patterns from the `PRIVATE_MARKERS` secret (WAZI-138) |
-| Each check still fails on the past commit it was written for | `tools/test-preflight-guard.sh`, `tools/test-lint-repeats.sh` in CI |
+| A dispatched auto-release waits for the running ci on main HEAD instead of refusing to tag | `tools/ci-green.sh` (WAZI-142) |
+| Each check still fails on the past commit it was written for | `tools/test-preflight-guard.sh`, `tools/test-lint-repeats.sh`, `tools/test-ci-green.sh` in CI |
