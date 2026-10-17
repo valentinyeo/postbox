@@ -2029,7 +2029,10 @@ fn refreshPeopleSearch(a: *App) void {
     if (activeChatView(a) != .whatsapp) return;
     if (!a.show_archived) {
         if (a.search) |search| {
-            if (win.GetWindowTextLengthW(search) > 0) refilterChats(a);
+            if (win.GetWindowTextLengthW(search) > 0) {
+                refilterChats(a);
+                if (!messagesAreCurrent(a)) refreshMessages(a);
+            }
         }
     }
     if (a.palette != null and !a.palette_links_mode and !a.palette_accounts_mode) paletteFilter(a);
