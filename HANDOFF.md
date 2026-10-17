@@ -31,7 +31,7 @@
 
 ## Keys and config (locations only)
 - wa-bridge key for wazig: on Hetzner `~/.config/wa-bridge/wazig-pc.key` (read scope). Not used by wazig yet.
-- hax preset `wazig` (GLM 5.3 Flash via OpenRouter, 50 USD/month key): `~/.config/hax/config.json` on this VPS. `/hax-setup` skill mints more keys from `~/.config/openrouter/management.env`.
+- Helpers run on Valentin's subscriptions (token ladder): `hax --provider=codex --model=gpt-6.1-sol --effort=high --no-session -p "<task>"`. The old OpenRouter preset `wazig` is retired; its key goes with the key cleanup (WAZI-129).
 - AI code review (WAZI-124): `.github/workflows/ai-review.yml` runs `tools/ai-review.sh` on the self-hosted `wazig` runner with Codex via hax, on Valentin's subscription. Rerun with a `/ai-review` PR comment.
 
 ## Things that will bite you
