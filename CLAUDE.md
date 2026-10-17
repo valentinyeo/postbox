@@ -14,9 +14,9 @@
 ## Agents owned by this repo
 This repo owns the agent slugs `wazig-dev-1`..`wazig-dev-5`. The Hypertask team's agents are off-limits: `ht-bug-fixer`, `dev-2`..`dev-5`, `qa-agent`, `dev-glm` and `dev-glm-2`..`dev-glm-5`, `ht-manager`. `.claude/hooks/agent-scope-guard.sh` blocks Bash commands that reference them.
 
-## Delivering releases to Valentin's PC (Valentin, 2026-10-10)
-- Never stop or restart Messages on his main PC (P1) to install a release. Publish it; he installs it with the in-app update card's Update now button (shipped in v0.9.98).
-- Test new functions on the X13s (`lh2`), or on the P1 only after he has updated.
+## Delivering releases to Valentin's PC (Valentin, 2026-10-17)
+- Install every new release on his PC (P1) right away, without asking, unless he says not to: the update card's Update now, or the swap in HANDOFF.md.
+- Then test the new function on the P1, or on the X13s (`lh2`) when it is online.
 - Never run a test copy of Messages (`WAZIG_FAKE_VERSION`, a scratch folder) on his visible screen.
 - Never report a release as done without testing the new function on screen (keys, clicks, screenshots). `wazigctl status|chats|select|messages` reads app state without stealing focus.
 
