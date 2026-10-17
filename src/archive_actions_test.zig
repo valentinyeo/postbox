@@ -36,6 +36,7 @@ const App = struct {
     archive_state: ?*archive_rules.State,
     pending_archives: [4]PendingArchive = @splat(.{}),
     pending_archive_count: usize = 0,
+    archive_batch_total: usize = 0,
     chats_hwnd: ?usize = null,
     canvas: ?usize = null,
     status: Utf8Text(191) = .{},
@@ -58,7 +59,12 @@ fn fixture(state: *archive_rules.State) App {
     return a;
 }
 fn setStatus(a: *App, status: []const u8) void {
-    a.status.set(status);
+    var buffer: [64]u8 = undefined;
+    const progress = if (a.pending_archive_count > 0)
+        archive_rules.progressStatus(&buffer, a.pending_archives[0].should_unarchive, a.archive_batch_total, a.pending_archive_count)
+    else
+        null;
+    a.status.set(progress orelse status);
 }
 fn saveArchiveState(a: *App) void {
     a.saved_len = a.archive_state.?.format(&a.saved).len;
@@ -151,7 +157,7 @@ test "plain bulk archive resurfaces on incoming but not outgoing messages" {
     selectAllChats(&a);
     archiveSelectedChat(&a, false);
     try std.testing.expectEqual(@as(usize, 2), a.pending_archive_count);
-    try std.testing.expectEqualStrings("Archived. Comes back on a new message", a.status.slice());
+    try std.testing.expectEqualStrings("Archiving 1 of 2", a.status.slice());
     for ([_][]const u8{ "a@g.us", "b@g.us" }) |jid| {
         try std.testing.expect(archive_rules.shouldResurface(false, state.isKept(jid), "2026-10-10T11:00:00Z", state.baseline(jid).?));
         try std.testing.expect(!archive_rules.shouldResurface(true, state.isKept(jid), "2026-10-10T11:00:00Z", state.baseline(jid).?));
@@ -214,4 +220,47 @@ test "a delayed resurfacing retry cannot unarchive a chat kept since the probe" 
     queueUnarchiveChat(&a, "b@g.us");
     try std.testing.expectEqual(@as(usize, 2), a.pending_archive_count);
     try std.testing.expect(a.pending_archives[1].should_unarchive);
+}
+
+test "pending archive rows stay hidden through queue advancement and view switches" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    selectAllChats(&a);
+    archiveSelectedChat(&a, false);
+    try std.testing.expectEqual(@as(usize, 2), a.archive_batch_total);
+    try std.testing.expect(pendingArchiveHidesChat(&a, "a@g.us", false));
+    try std.testing.expect(pendingArchiveHidesChat(&a, "b@g.us", false));
+    try std.testing.expect(!pendingArchiveHidesChat(&a, "later@g.us", false));
+    try std.testing.expect(!pendingArchiveHidesChat(&a, "b@g.us", true));
+    removeFirstPendingArchive(&a);
+    setStatus(&a, "Refreshed");
+    try std.testing.expectEqualStrings("Archiving 2 of 2", a.status.slice());
+    try std.testing.expect(pendingArchiveHidesChat(&a, "b@g.us", false));
+    try std.testing.expect(!pendingArchiveHidesChat(&a, "a@g.us", false));
+    removeFirstPendingArchive(&a);
+    setStatus(&a, archive_rules.Action.archive.status());
+    try std.testing.expectEqualStrings("Archived. Comes back on a new message", a.status.slice());
+    try std.testing.expect(!pendingArchiveHidesChat(&a, "b@g.us", false));
+    try std.testing.expect(archiveChat(&a, "later@g.us", .archive) == null);
+    try std.testing.expectEqual(@as(usize, 1), a.archive_batch_total);
+}
+
+test "pending unarchives stay hidden in archived view and share batch accounting" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    a.show_archived = true;
+    archiveSelectedChat(&a, false);
+    queueUnarchiveChat(&a, "b@g.us");
+    queueUnarchiveChat(&a, "b@g.us");
+    try std.testing.expectEqual(@as(usize, 2), a.archive_batch_total);
+    setStatus(&a, "Refreshed");
+    try std.testing.expectEqualStrings("Unarchiving 1 of 2", a.status.slice());
+    try std.testing.expect(pendingArchiveHidesChat(&a, "a@g.us", true));
+    try std.testing.expect(pendingArchiveHidesChat(&a, "b@g.us", true));
+    try std.testing.expect(!pendingArchiveHidesChat(&a, "b@g.us", false));
+    removeFirstPendingArchive(&a);
+    try std.testing.expect(pendingArchiveHidesChat(&a, "b@g.us", true));
+    removeFirstPendingArchive(&a);
+    setStatus(&a, archive_rules.Action.unarchive.status());
+    try std.testing.expectEqualStrings("Chat unarchived", a.status.slice());
 }
