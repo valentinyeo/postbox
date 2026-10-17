@@ -744,6 +744,7 @@ const App = struct {
     archive_child: ?std.process.Child = null,
     pending_archives: [max_pending_archives]PendingArchive = [_]PendingArchive{.{}} ** max_pending_archives,
     pending_archive_count: usize = 0,
+    archive_batch_total: usize = 0,
     // WAZI-62: an unarchive that could not queue (full queue) waits here and
     // is retried from the refresh timer, so the chat is never lost for good.
     unarchive_retry: Utf8Text(191) = .{},
@@ -2154,6 +2155,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         };
         var chat = Chat{};
         const jid = getString(object, "jid");
+        if (pendingArchiveHidesChat(a, jid, a.show_archived)) continue;
         const raw_name = getString(object, "name");
         const display_name = groupName(a, jid) orelse raw_name;
         if (isUnresolvableChatEntry(display_name, jid, getString(object, "kind"))) continue;
@@ -8263,9 +8265,14 @@ fn applySyncAuthProbe(a: *App, ok: bool, data: []const u8) void {
 }
 
 fn setStatus(a: *App, text: []const u8) void {
+    var buffer: [64]u8 = undefined;
+    const progress = if (a.pending_archive_count > 0)
+        archive_rules.progressStatus(&buffer, a.pending_archives[0].should_unarchive, a.archive_batch_total, a.pending_archive_count)
+    else
+        null;
     if (a.status) |status| {
         var wide_text = WideText(255){};
-        wide_text.set(a.allocator, text);
+        wide_text.set(a.allocator, progress orelse text);
         _ = win.SetWindowTextW(status, wide_text.ptr());
     }
 }
@@ -10534,6 +10541,7 @@ fn queueUnarchiveChat(a: *App, jid: []const u8) void {
     const pending = &a.pending_archives[a.pending_archive_count];
     pending.jid.set(jid);
     pending.should_unarchive = true;
+    a.archive_batch_total = if (a.pending_archive_count == 0) 1 else a.archive_batch_total + 1;
     a.pending_archive_count += 1;
     if (a.archive_state) |state| {
         state.remove(jid);
@@ -10697,6 +10705,14 @@ fn retryUnarchiveChat(a: *App) void {
     queueUnarchiveChat(a, jid);
 }
 
+fn pendingArchiveHidesChat(a: *const App, jid: []const u8, show_archived: bool) bool {
+    for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
+        if (archive_rules.pendingHidesChat(show_archived, pending.should_unarchive) and
+            std.mem.eql(u8, pending.jid.slice(), jid)) return true;
+    }
+    return false;
+}
+
 fn removeFirstPendingArchive(a: *App) void {
     if (a.pending_archive_count == 0) return;
     var index: usize = 1;
@@ -10705,6 +10721,7 @@ fn removeFirstPendingArchive(a: *App) void {
 }
 
 fn startNextArchive(a: *App) void {
+    if (a.pending_archive_count > 0 and a.archive_batch_total > 1) setStatus(a, "");
     if (a.archive_child != null or a.read_child != null or a.pending_archive_count == 0) return;
     if (mediaBusy(a) or a.send_child != null or sendReadyPending(a) or avatarBusy(a)) return;
     stopSync(a, "archive");
@@ -10818,6 +10835,7 @@ fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action) ?[]const 
         const pending = &a.pending_archives[a.pending_archive_count];
         pending.jid.set(jid);
         pending.should_unarchive = unarchive;
+        a.archive_batch_total = if (a.pending_archive_count == 0) 1 else a.archive_batch_total + 1;
         a.pending_archive_count += 1;
     }
     if (visibleChatIndex(a, jid)) |index| {
@@ -11199,7 +11217,7 @@ fn controlChats(a: *App, call: *ControlCall) !void {
                     call.need_whatsapp = true;
                     return;
                 }
-                controlWhatsAppChats(a, call.whatsapp_raw, wanted, &list) catch |err| switch (err) {
+                controlWhatsAppChats(a, call.whatsapp_raw, request.archived, wanted, &list) catch |err| switch (err) {
                     error.OutOfMemory => return err,
                     else => return control_api.writeError(w, "could not parse the WhatsApp chat list"),
                 };
@@ -11218,7 +11236,7 @@ fn controlChats(a: *App, call: *ControlCall) !void {
 
 /// Rows of a wacli `chats list` answer, named and filtered the way
 /// applyChats does it.
-fn controlWhatsAppChats(a: *App, raw: []const u8, query: []const u8, list: *std.ArrayList(Chat)) !void {
+fn controlWhatsAppChats(a: *App, raw: []const u8, show_archived: bool, query: []const u8, list: *std.ArrayList(Chat)) !void {
     var parsed = try std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{});
     defer parsed.deinit();
     const root = switch (parsed.value) {
@@ -11235,6 +11253,7 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, query: []const u8, list: *std.
             else => continue,
         };
         const jid = getString(object, "jid");
+        if (pendingArchiveHidesChat(a, jid, show_archived)) continue;
         const display_name = groupName(a, jid) orelse getString(object, "name");
         if (isUnresolvableChatEntry(display_name, jid, getString(object, "kind"))) continue;
         if (query.len > 0 and !containsIgnoreCase(display_name, query) and !containsIgnoreCase(jid, query)) continue;

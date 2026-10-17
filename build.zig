@@ -393,6 +393,7 @@ pub fn build(b: *std.Build) void {
 
     const archive_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/archive_actions_test.zig"),
+        sourceSection("fn pendingArchiveHidesChat(", "fn startNextArchive("),
         sourceSection("fn queueUnarchiveChat(", "const archived_scan_min_ticks"),
         sourceSection("fn archiveChat(", "/// Rows just left the list."),
         sourceSection("fn archiveSelectedChat(", "// --------------------------------------------------------- wazigctl control"),

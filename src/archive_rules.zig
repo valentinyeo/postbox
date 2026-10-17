@@ -9,6 +9,19 @@ pub const max_entries = 300;
 pub const max_jid = 191;
 pub const max_ts = 47;
 
+pub fn pendingHidesChat(show_archived: bool, should_unarchive: bool) bool {
+    return show_archived == should_unarchive;
+}
+
+pub fn progressStatus(out: []u8, should_unarchive: bool, total: usize, remaining: usize) ?[]const u8 {
+    if (total <= 1 or remaining == 0 or remaining > total) return null;
+    return std.fmt.bufPrint(out, "{s} {d} of {d}", .{
+        if (should_unarchive) @as([]const u8, "Unarchiving") else "Archiving",
+        total - remaining + 1,
+        total,
+    }) catch null;
+}
+
 pub const Action = enum {
     archive,
     keep,
@@ -328,4 +341,24 @@ test "plain archive explicitly replaces keep and own messages never resurface" {
     for ([_]bool{ false, true }) |kept| {
         try std.testing.expect(!shouldResurface(true, kept, "2026-10-10T12:00:00Z", state.baseline(jid).?));
     }
+}
+
+test "pending operations hide chats only in the view they are leaving" {
+    try std.testing.expect(pendingHidesChat(false, false));
+    try std.testing.expect(!pendingHidesChat(true, false));
+    try std.testing.expect(pendingHidesChat(true, true));
+    try std.testing.expect(!pendingHidesChat(false, true));
+}
+
+test "batch progress includes the current operation through the last item" {
+    var out: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("Archiving 1 of 250", progressStatus(&out, false, 250, 250).?);
+    try std.testing.expectEqualStrings("Archiving 12 of 250", progressStatus(&out, false, 250, 239).?);
+    try std.testing.expectEqualStrings("Archiving 250 of 250", progressStatus(&out, false, 250, 1).?);
+    try std.testing.expectEqualStrings("Unarchiving 2 of 3", progressStatus(&out, true, 3, 2).?);
+    try std.testing.expect(progressStatus(&out, false, 250, 0) == null);
+    try std.testing.expect(progressStatus(&out, false, 1, 1) == null);
+    try std.testing.expect(progressStatus(&out, false, 0, 0) == null);
+    try std.testing.expect(progressStatus(&out, false, 2, 3) == null);
+    try std.testing.expect(progressStatus(out[0..1], false, 250, 239) == null);
 }
