@@ -63,3 +63,5 @@ To prepare Deepgram dictation without committing a key:
 ```powershell
 [Environment]::SetEnvironmentVariable('DEEPGRAM_API_KEY', 'your-key', 'User')
 ```
+
+Canary for the private-markers proof: ZZPLANTED-WAZI138
