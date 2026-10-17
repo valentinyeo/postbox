@@ -1,7 +1,7 @@
 @AGENTS.md
 
 ## Work
-- Private agent rules, board, skills and handoff live in a private companion repo. Run `bash tools/agent-setup.sh` once per checkout: it links them in as `CLAUDE.local.md`, `HANDOFF.md`, `board.yml` and `.claude/skills` (all gitignored). Never commit them back.
+- Private agent rules, board, skills and handoff live in a private companion repo. Run `bash tools/agent-setup.sh` once in the main checkout: it links them in as `CLAUDE.local.md`, `HANDOFF.md`, `board.yml` and `.claude/skills` (all gitignored) and installs a `post-checkout` hook, so every worktree cut from it is linked too and `git worktree add` fails if the private repo is missing. Never commit them back.
 - Nothing that names a person's machines, servers, accounts or contacts goes in this public repo, its PR text or commit messages: the `private-markers` check fails on it.
 - One git worktree per ticket under `~/projects/wazig-wt/<TICKET>`, branched from `origin/main`. Never edit or build in the main checkout.
 - Ship through a PR with all checks green. `automerge.yml` merges green PRs unless they edit release-gating workflows; `auto-release.yml` tags and `release.yml` publishes.
