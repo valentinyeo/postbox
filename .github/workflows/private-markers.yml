@@ -1,0 +1,34 @@
+name: private-markers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  private-markers:
+    name: private-markers
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: No private markers in code, docs, PR text or commit messages
+        env:
+          PRIVATE_MARKERS: ${{ secrets.PRIVATE_MARKERS }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -n "$BASE" ]; then
+            python3 tools/check_private_markers.py "$BASE" "$HEAD"
+          else
+            python3 tools/check_private_markers.py
+          fi
