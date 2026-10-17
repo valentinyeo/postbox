@@ -2,6 +2,8 @@
 //! is the bounded queue: scan newest first and refill one serialized child.
 const std = @import("std");
 
+pub const wazi_135 = true;
+
 pub const max_children = 1;
 pub const max_auto_bytes: u64 = 100 * 1024 * 1024;
 pub const max_burst_files = 4;
@@ -86,8 +88,15 @@ pub fn sizeFromJson(object: std.json.ObjectMap) u64 {
     return 0;
 }
 
-pub fn attachmentLabel(buffer: []u8, name: []const u8, size_bytes: u64, local: bool) []const u8 {
-    const state = if (local) "Open" else if (oversized(size_bytes)) "Click to download" else "Downloading...";
+pub const AttachmentState = enum { local, downloading, oversized, unavailable };
+
+pub fn attachmentLabel(buffer: []u8, name: []const u8, size_bytes: u64, attachment_state: AttachmentState) []const u8 {
+    const state = switch (attachment_state) {
+        .local => "Open",
+        .downloading => "Downloading...",
+        .oversized => "Click to download",
+        .unavailable => "Not available, ask the sender to send it again",
+    };
     const filename = if (name.len > 0) name else "Attachment";
     if (size_bytes == 0) return std.fmt.bufPrint(buffer, "{s} · {s}", .{ filename, state }) catch filename;
     if (size_bytes < 1024) return std.fmt.bufPrint(buffer, "{s} · {d} B · {s}", .{ filename, size_bytes, state }) catch filename;
@@ -190,10 +199,19 @@ test "size metadata tolerates missing negative and string byte counts" {
 
 test "documents show name size and only oversized uncached files request a click" {
     var buffer: [512]u8 = undefined;
-    try std.testing.expectEqualStrings("report.pdf · 2 KB · Open", attachmentLabel(&buffer, "report.pdf", 1500, true));
-    try std.testing.expectEqualStrings("report.pdf · Downloading...", attachmentLabel(&buffer, "report.pdf", 0, false));
-    try std.testing.expectEqualStrings("report.pdf · 101 MB · Click to download", attachmentLabel(&buffer, "report.pdf", 101 * 1024 * 1024, false));
-    try std.testing.expectEqualStrings("report.pdf · 101 MB · Open", attachmentLabel(&buffer, "report.pdf", 101 * 1024 * 1024, true));
+    try std.testing.expectEqualStrings("report.pdf · 2 KB · Open", attachmentLabel(&buffer, "report.pdf", 1500, .local));
+    try std.testing.expectEqualStrings("report.pdf · Downloading...", attachmentLabel(&buffer, "report.pdf", 0, .downloading));
+    try std.testing.expectEqualStrings("report.pdf · 101 MB · Click to download", attachmentLabel(&buffer, "report.pdf", 101 * 1024 * 1024, .oversized));
+    try std.testing.expectEqualStrings("report.pdf · 101 MB · Open", attachmentLabel(&buffer, "report.pdf", 101 * 1024 * 1024, .local));
+}
+
+test "unavailable attachments retain the filename and optional size" {
+    var buffer: [512]u8 = undefined;
+    try std.testing.expectEqualStrings("report.pdf · Not available, ask the sender to send it again", attachmentLabel(&buffer, "report.pdf", 0, .unavailable));
+    try std.testing.expectEqualStrings("report.pdf · 17 B · Not available, ask the sender to send it again", attachmentLabel(&buffer, "report.pdf", 17, .unavailable));
+    try std.testing.expectEqualStrings("report.pdf · 2 KB · Not available, ask the sender to send it again", attachmentLabel(&buffer, "report.pdf", 1500, .unavailable));
+    try std.testing.expectEqualStrings("report.pdf · 101 MB · Not available, ask the sender to send it again", attachmentLabel(&buffer, "report.pdf", 101 * 1024 * 1024, .unavailable));
+    try std.testing.expectEqualStrings("Attachment · Not available, ask the sender to send it again", attachmentLabel(&buffer, "", 0, .unavailable));
 }
 
 test "transport media placeholders are hidden but real captions are retained" {
