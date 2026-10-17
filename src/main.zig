@@ -20,6 +20,7 @@ const chat_reconcile = @import("chat_reconcile.zig");
 const compose_layout = @import("compose_layout.zig");
 const media_age = @import("media_age.zig");
 const media_drain = @import("media_drain.zig");
+const video_alias = @import("video_alias.zig");
 const sync_gate = @import("sync_gate.zig");
 const webp_detect = @import("webp.zig");
 const paste_image = @import("paste_image.zig");
@@ -7860,6 +7861,9 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
             if (wideFileSize(message.local_path.ptr())) |size| {
                 message.media_size = size;
                 media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(chat.jid.slice(), id));
+                var alias_buffer: [1024]u8 = undefined;
+                const playable = playableVideoPath(&alias_buffer, media_type, message.mime_type.slice(), local_path);
+                if (playable.ptr != local_path.ptr) message.local_path.set(a.allocator, playable);
             } else message.local_path = .{};
         }
         message.filename.set(a.allocator, if (filename.len > 0) filename else std.fs.path.basename(local_path));
@@ -8303,6 +8307,18 @@ fn removeFirstPendingSend(a: *App, delivered: bool) void {
     a.pending_send_count -= 1;
     a.pending_sends[a.pending_send_count] = .{};
     persistFileOutbox(a);
+}
+
+fn playableVideoPath(buffer: []u8, media_type: []const u8, mime: []const u8, path: []const u8) []const u8 {
+    if (!video_alias.needsAlias(media_type, mime, path)) return path;
+    const alias = video_alias.aliasPath(buffer, path) orelse return path;
+    if (fileExistsUtf8(alias)) return alias;
+    const source = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, path) catch return path;
+    defer std.heap.page_allocator.free(source);
+    const target = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, alias) catch return path;
+    defer std.heap.page_allocator.free(target);
+    if (win.CreateHardLinkW(target.ptr, source.ptr, null) == 0) return path;
+    return alias;
 }
 
 fn fileExistsUtf8(path_utf8: []const u8) bool {
