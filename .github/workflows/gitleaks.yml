@@ -3,7 +3,12 @@
 # because trufflehog's live check can call a working key dead. A false hit: `trufflehog:ignore` on its line.
 name: Gitleaks
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,6 +31,11 @@ jobs:
           PUSH_BEFORE_SHA: ${{ github.event.before }}
           PUSH_HEAD_SHA: ${{ github.sha }}
         run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            echo "Scanning every branch, full history"
+            echo "SCAN_ALL=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
           if [ -n "$PR_BASE_SHA" ]; then
             # A pull request scans only the commits it adds.
             base="$PR_BASE_SHA"; head="$PR_HEAD_SHA"
@@ -47,21 +57,27 @@ jobs:
       - name: Run gitleaks
         run: |
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz gitleaks
-          ./gitleaks detect --no-banner --source . --redact --log-opts "${SCAN_BASE:+$SCAN_BASE..}$SCAN_HEAD"
+          if [ -n "$SCAN_ALL" ]; then
+            ./gitleaks detect --no-banner --source . --redact --log-opts "--all"
+          else
+            ./gitleaks detect --no-banner --source . --redact --log-opts "${SCAN_BASE:+$SCAN_BASE..}$SCAN_HEAD"
+          fi
       - name: Run trufflehog
         run: |
           curl -sSfL https://github.com/trufflesecurity/trufflehog/releases/download/v3.97.0/trufflehog_3.97.0_linux_amd64.tar.gz | tar -xz trufflehog
           # --json keeps values out of the plain log; only the key type and place are printed.
           set +e
-          ./trufflehog git "file://$PWD" --branch "$SCAN_HEAD" ${SCAN_BASE:+--since-commit "$SCAN_BASE"} \
+          ./trufflehog git "file://$PWD" ${SCAN_HEAD:+--branch "$SCAN_HEAD"} ${SCAN_BASE:+--since-commit "$SCAN_BASE"} \
             --fail --no-update --json > found.json 2> trufflehog.err
           code=$?
           set -e
-          grep -o '"DetectorName":"[^"]*"\|"file":"[^"]*"\|"commit":"[^"]*"' found.json || true
+          jq -r '[.SourceMetadata.Data.Git.commit, .SourceMetadata.Data.Git.file, .DetectorName] | join(" ")' found.json | sort -u > hits.txt
           grep -o '"chunks":[0-9]*\|"bytes":[0-9]*\|"verified_secrets":[0-9]*\|"unverified_secrets":[0-9]*' trufflehog.err | tr '\n' ' ' || true
           rm -f found.json
-          if [ "$code" = 183 ]; then
+          grep -vxFf .trufflehog-known.txt hits.txt > new-hits.txt || true
+          cat new-hits.txt
+          if [ "$code" = 183 ] && [ -s new-hits.txt ]; then
             echo "::error::trufflehog found a key. Remove it, and roll it if it was ever real."
             exit 1
           fi
-          if [ "$code" != 0 ]; then tail -5 trufflehog.err; exit "$code"; fi
+          if [ "$code" != 0 ] && [ "$code" != 183 ]; then tail -5 trufflehog.err; exit "$code"; fi

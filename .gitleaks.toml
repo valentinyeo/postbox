@@ -21,3 +21,6 @@ regex = '''(?i)(?:token|secret|api[ _-]?key|password)[^\n]{0,60}?[`'"]([A-Za-z0-
 secretGroup = 1
 entropy = 4.0
 keywords = ["token", "secret", "key", "password"]
+
+[allowlist]
+commits = ["b72a0d90f9d72fe0813737e466f0edbe7b037f44", "eb8091cd624d8af43d7443c16be3a0c0b1c102f9"]
