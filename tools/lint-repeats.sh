@@ -96,6 +96,8 @@ FNR == 1 {
         run_indent = indent
         next
     }
+    if (code ~ /openrouter\.ai|OPENROUTER_API_KEY|api\.z\.ai/)
+        fail(FNR, "B6", "workflow calls a paid OpenRouter or Z.ai API instead of the Codex or Claude subscriptions", "bash tools/ai-review.sh on runs-on: [self-hosted, wazig], which calls hax --provider=codex")
     if (!running) next
     if (file == ".github/workflows/auto-release.yml") {
         if (code ~ /git[[:space:]]+push.*next_tag/ || code ~ /ref=refs\/tags\/\$\{next_tag\}/) tag_line = FNR
