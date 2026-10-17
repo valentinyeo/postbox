@@ -208,6 +208,7 @@ test "stale success and failure never paint, cache or consume retry budget" {
     refreshMessages(&a);
     var old = resultFor(a.last_job);
     a.chats[1].jid.set("b@g.us");
+    a.chats[1].timestamp.set("2026-09-06T13:30:00");
     a.chat_count = 2;
     a.selected_chat = 1;
     refreshMessages(&a);
@@ -234,4 +235,16 @@ test "reconciliation respects provider, selection and user-view guards" {
     a.chats[0].provider = .slack;
     reconcileOpenChat(&a);
     try std.testing.expectEqual(@as(u32, 0), a.queued);
+}
+
+test "uncached contact opens an empty conversation before the fresh read" {
+    var a = fixture();
+    a.chats[0].jid.set("447700900100@s.whatsapp.net");
+    a.chats[0].timestamp.set("");
+    refreshMessages(&a);
+    try std.testing.expectEqual(@as(u32, 1), a.painted);
+    try std.testing.expectEqual(@as(u32, 0), a.cached);
+    try std.testing.expectEqual(@as(u32, 1), a.queued);
+    try std.testing.expectEqualStrings(a.chats[0].jid.slice(), a.displayed_jid.slice());
+    try std.testing.expectEqualStrings(a.chats[0].jid.slice(), a.last_job.jid.slice());
 }

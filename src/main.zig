@@ -32,6 +32,7 @@ const message_filter = @import("message_filter.zig");
 const voice_sent = @import("voice_sent.zig");
 const send_args = @import("send_args.zig");
 const chat_cache = @import("chat_cache.zig");
+const people_index = @import("people_index.zig");
 const unfurl = @import("unfurl.zig");
 const shortcuts = @import("shortcuts.zig");
 const control_api = @import("control.zig");
@@ -439,7 +440,7 @@ const PaletteItem = struct {
 // entries near the end were silently dropped.
 // 64 command slots plus one per chat, so palette search can always reach
 // every chat in the list (older chats are the ones name search matters for).
-const max_palette_items = 64 + max_chats;
+const max_palette_items = 64 + max_chats + 20;
 const palette_width: i32 = 540;
 const palette_row_height: i32 = 40;
 const palette_edit_zone: i32 = 64;
@@ -526,7 +527,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe, contacts_index };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 
 const WacliJob = struct {
@@ -603,6 +604,10 @@ const SlackUser = struct {
 
 const App = struct {
     allocator: std.mem.Allocator,
+    people: people_index.Index,
+    chats_raw: ?[]u8 = null,
+    chats_raw_flags: u8 = 0,
+    people_open_jid: Utf8Text(191) = .{},
     io: std.Io,
     instance: win.HINSTANCE,
     wacli_path: []u8,
@@ -637,6 +642,7 @@ const App = struct {
     palette_list: ?win.HWND = null,
     palette_items: [max_palette_items]PaletteItem = [_]PaletteItem{.{}} ** max_palette_items,
     palette_item_count: usize = 0,
+    palette_base_item_count: usize = 0,
     palette_matches: [max_palette_items]usize = [_]usize{0} ** max_palette_items,
     palette_match_count: usize = 0,
     palette_selected: usize = 0,
@@ -2012,6 +2018,33 @@ fn refreshGroups(a: *App) void {
     wacliEnqueue(a, job, false);
 }
 
+fn refreshContactsIndex(a: *App) void {
+    if (wacliPendingGet(a, .contacts_index) > 0) return;
+    var job = WacliJob{ .kind = .contacts_index };
+    wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "contacts", "search", "@", "--limit", "10000" });
+    wacliEnqueue(a, job, false);
+}
+
+fn refreshPeopleSearch(a: *App) void {
+    if (activeChatView(a) != .whatsapp) return;
+    if (!a.show_archived) {
+        if (a.search) |search| {
+            if (win.GetWindowTextLengthW(search) > 0) refilterChats(a);
+        }
+    }
+    if (a.palette != null and !a.palette_links_mode and !a.palette_accounts_mode) paletteFilter(a);
+}
+
+fn peopleChat(a: *App, entry: people_index.Entry) Chat {
+    var chat = Chat{ .archived = entry.origin == .archived };
+    chat.jid.set(entry.jid);
+    chat.name.set(a.allocator, entry.name);
+    chat.kind.set(a.allocator, if (entry.origin == .contact) "Contact" else if (std.mem.endsWith(u8, entry.jid, "@g.us")) "Group" else "Chat");
+    chat.timestamp.set(entry.last_message_ts);
+    formatTime(&chat.time, a.allocator, entry.last_message_ts);
+    return chat;
+}
+
 fn applyGroups(a: *App, raw: []const u8) void {
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
     defer parsed.deinit();
@@ -2206,6 +2239,37 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
             a.chats[j] = temporary;
         }
     }
+    if (view == .whatsapp and !a.show_archived) {
+        if (query_utf8) |query| {
+            var exclude: [max_chats][]const u8 = undefined;
+            for (a.chats[0..a.chat_count], 0..) |*chat, index| exclude[index] = chat.jid.slice();
+            var matches: [max_chats]people_index.Entry = undefined;
+            const count = a.people.search(query, exclude[0..a.chat_count], &matches, max_chats - a.chat_count);
+            for (matches[0..count]) |entry| {
+                if (pendingArchiveHidesChat(a, entry.jid, entry.origin == .archived)) continue;
+                a.chats[a.chat_count] = peopleChat(a, entry);
+                a.chat_count += 1;
+            }
+        }
+    }
+    if (a.people_open_jid.len > 0) {
+        if (view != .whatsapp or a.show_archived or query_len > 0 or
+            !std.mem.eql(u8, selected_jid[0..selected_len], a.people_open_jid.slice()))
+        {
+            a.people_open_jid.set("");
+        } else {
+            var shown = false;
+            for (a.chats[0..a.chat_count]) |*chat| {
+                if (std.mem.eql(u8, chat.jid.slice(), a.people_open_jid.slice())) shown = true;
+            }
+            if (!shown and a.chat_count < max_chats) {
+                if (a.people.find(a.people_open_jid.slice())) |entry| {
+                    a.chats[a.chat_count] = peopleChat(a, entry);
+                    a.chat_count += 1;
+                }
+            }
+        }
+    }
     a.selected_chat = 0;
     if (selected_len > 0) {
         for (a.chats[0..a.chat_count], 0..) |chat, index| {
@@ -2257,6 +2321,13 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         setStatus(a, if (a.sync_logged_out) logged_out_status else status);
     }
     persistReadState(a);
+    if (fresh) {
+        if (a.allocator.dupe(u8, raw)) |copy| {
+            if (a.chats_raw) |old| a.allocator.free(old);
+            a.chats_raw = copy;
+            a.chats_raw_flags = a.chats_pending_flags;
+        } else |_| {}
+    }
     return true;
 }
 
@@ -3279,11 +3350,14 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     var scratch: [1]u8 = .{0};
     var app = App{
         .allocator = allocator,
+        .people = people_index.Index.init(allocator),
         .io = init.io,
         .instance = instance,
         .wacli_path = scratch[0..0],
         .avatar_dir = scratch[0..0],
     };
+    defer app.people.deinit();
+    defer if (app.chats_raw) |raw| allocator.free(raw);
     app_ptr = &app;
     defer app_ptr = null;
     _ = win.CoCreateInstance(&win.CLSID_WICImagingFactory, null, win.CLSCTX_INPROC_SERVER, &win.IID_IWICImagingFactory, @ptrCast(&app.wic_factory));
@@ -3518,6 +3592,21 @@ fn clearSearch(a: *App) bool {
 fn refreshVisibleChats(a: *App) void {
     if (activeChatView(a) == .whatsapp) return refreshChats(a);
     _ = applyChats(a, "{\"data\":[]}", false);
+}
+
+fn refilterChats(a: *App) void {
+    if (activeChatView(a) != .whatsapp) {
+        _ = applyChats(a, "{\"data\":[]}", false);
+        return;
+    }
+    const flags: u8 = (if (a.unread_only) @as(u8, 1) else 0) | (if (a.show_archived) @as(u8, 2) else 0);
+    if (a.chats_raw) |raw| {
+        if (a.chats_raw_flags == flags) {
+            _ = applyChats(a, raw, false);
+            return;
+        }
+    }
+    refreshChats(a);
 }
 
 /// Alt+N: show one messenger's chats. Keeps each messenger's last chat.
@@ -6383,6 +6472,9 @@ fn chatsCachePath(a: *App) ?[]u8 {
 
 fn saveChatsCache(a: *App, raw: []const u8) void {
     if (a.startup_probe_pending) return;
+    if (a.search) |search| {
+        if (win.GetWindowTextLengthW(search) > 0) return;
+    }
     const path = chatsCachePath(a) orelse return;
     defer a.allocator.free(path);
     _ = writeCacheFileAtomic(a, path, raw);
@@ -7697,6 +7789,8 @@ fn refreshMessages(a: *App) void {
     } else if (loadMsgCacheDisk(a, chat.jid.slice())) |cached| {
         defer a.allocator.free(cached);
         _ = applyMessageData(a, cached, false);
+    } else if (chat_changed and chat.timestamp.len == 0) {
+        _ = applyMessageData(a, "{\"data\":{\"messages\":[]}}", false);
     }
     a.messages_gen += 1;
     var job = WacliJob{ .kind = .messages, .gen = a.messages_gen };
@@ -8094,7 +8188,10 @@ fn startSync(a: *App) void {
             file.close(a.io);
         }
     }
-    if (refresh) a.last_sync_refresh_ms = now_ms;
+    if (refresh) {
+        a.last_sync_refresh_ms = now_ms;
+        refreshContactsIndex(a);
+    }
     appendLaunchLog(a, if (refresh) "sync: child started (refresh groups)" else "sync: child started");
     a.sync_started_secs = nowUnixSeconds();
     // A fresh child gets a fresh watchdog: unknown heartbeat stamp, first
@@ -10536,6 +10633,7 @@ fn isKeptArchived(a: *const App, jid: []const u8) bool {
 /// archived chats just say archived. Null for an inbox chat.
 fn archiveMarker(a: *const App, chat: *const Chat) ?[*:0]const u16 {
     if (chat.provider != .whatsapp) return null;
+    if (std.mem.eql(u16, chat.kind.slice(), std.mem.span(lit("Contact")))) return lit("Contact");
     if (!chat.archived and !a.show_archived) return null;
     return if (isKeptArchived(a, chat.jid.slice())) lit("Kept archived") else lit("Archived");
 }
@@ -10593,7 +10691,7 @@ fn tickArchivedScan(a: *App, store_changed: bool) void {
     a.archived_scan_dirty = false;
     a.archived_scan_ticks = 0;
     var job = WacliJob{ .kind = .archived_scan };
-    wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--archived", "--limit", archive_rules.scan_limit });
+    wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--archived", "--limit", "10000" });
     wacliEnqueue(a, job, false);
 }
 
@@ -10609,6 +10707,8 @@ fn enqueueResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8) void {
 /// time, probe chats that moved past theirs, and forget chats that are no
 /// longer archived (unarchived on the phone, say).
 fn applyArchivedScan(a: *App, raw: []const u8) void {
+    a.people.replaceArchived(raw) catch {};
+    refreshPeopleSearch(a);
     const state = a.archive_state orelse return;
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
     defer parsed.deinit();
@@ -10622,7 +10722,7 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
     };
     var changed = false;
     var probes: usize = 0;
-    for (rows) |item| {
+    for (rows[0..@min(rows.len, archive_rules.max_entries)]) |item| {
         const object = switch (item) {
             .object => |o| o,
             else => continue,
@@ -11315,8 +11415,8 @@ fn controlSearch(a: *App, call: *ControlCall) !void {
         // SetWindowText fires EN_CHANGE, which arms the typing debounce:
         // refilter now, as its timer would, and wait for the read to land.
         if (a.hwnd) |hwnd| _ = win.KillTimer(hwnd, timer_search);
-        refreshChats(a);
-        refreshMessages(a);
+        refilterChats(a);
+        if (!messagesAreCurrent(a)) refreshMessages(a);
         call.phase = .wait;
         call.retry = true;
         return;
@@ -11556,6 +11656,7 @@ fn buildPaletteItems(a: *App) void {
     if (a.update_pending != null) appendPalette(a, "Restart now to install update", "", command_update_install);
     appendPalette(a, "Quit Messages", "Q", command_quit);
     for (0..a.chat_count) |index| appendPaletteChat(a, index);
+    a.palette_base_item_count = a.palette_item_count;
 }
 
 fn lowerUnit(unit: u16) u16 {
@@ -11599,6 +11700,7 @@ fn paletteLayout(a: *App) void {
 fn paletteFilter(a: *App) void {
     var query_buf: [64]u16 = [_]u16{0} ** 64;
     const query_len: usize = if (a.palette_edit) |edit| @intCast(win.GetWindowTextW(edit, &query_buf, query_buf.len)) else 0;
+    if (!a.palette_links_mode and !a.palette_accounts_mode) a.palette_item_count = a.palette_base_item_count;
     a.palette_match_count = 0;
     a.palette_selected = 0;
     var scores: [max_palette_items]i32 = [_]i32{0} ** max_palette_items;
@@ -11621,6 +11723,32 @@ fn paletteFilter(a: *App) void {
         while (j > 0 and scores[j - 1] < scores[j]) : (j -= 1) {
             std.mem.swap(usize, &a.palette_matches[j - 1], &a.palette_matches[j]);
             std.mem.swap(i32, &scores[j - 1], &scores[j]);
+        }
+    }
+    if (!a.palette_links_mode and !a.palette_accounts_mode and activeChatView(a) == .whatsapp and query_len > 0) {
+        const query = std.unicode.utf16LeToUtf8Alloc(a.allocator, query_buf[0..query_len]) catch null;
+        defer if (query) |text| a.allocator.free(text);
+        if (query) |text| {
+            var exclude: [max_palette_items][]const u8 = undefined;
+            var exclude_count: usize = 0;
+            for (a.palette_matches[0..a.palette_match_count]) |match| {
+                const item = &a.palette_items[match];
+                if (item.chat_jid.len == 0) continue;
+                exclude[exclude_count] = item.chat_jid.slice();
+                exclude_count += 1;
+            }
+            var matches: [20]people_index.Entry = undefined;
+            const count = a.people.search(text, exclude[0..exclude_count], &matches, 20);
+            for (matches[0..count]) |entry| {
+                if (a.palette_item_count == max_palette_items) break;
+                const label = std.fmt.allocPrint(a.allocator, "{s}  ·  {s}", .{ entry.name, if (entry.origin == .archived) "Archived" else "Contact" }) catch continue;
+                defer a.allocator.free(label);
+                const index = a.palette_item_count;
+                appendPalette(a, label, "", 0);
+                a.palette_items[index].chat_jid.set(entry.jid);
+                a.palette_matches[a.palette_match_count] = index;
+                a.palette_match_count += 1;
+            }
         }
     }
     if (a.palette_list) |list| {
@@ -11668,6 +11796,19 @@ fn paletteActivate(a: *App) void {
                 break;
             }
         }
+        if (chat_index == null and activeChatView(a) == .whatsapp and !a.palette_links_mode and !a.palette_accounts_mode) {
+            if (a.people.find(item.chat_jid.slice())) |entry| {
+                const index = @min(a.chat_count, max_chats - 1);
+                a.chats[index] = peopleChat(a, entry);
+                a.people_open_jid.set(entry.jid);
+                if (a.chats_hwnd) |list| {
+                    if (a.chat_count == max_chats) _ = win.SendMessageW(list, win.LB_DELETESTRING, index, 0);
+                    _ = win.SendMessageW(list, win.LB_ADDSTRING, 0, @bitCast(@intFromPtr(a.chats[index].name.ptr())));
+                }
+                a.chat_count = index + 1;
+                chat_index = index;
+            }
+        }
         // Resolve before closing: gone from the visible list (refresh,
         // archive toggle, or the 250-row wacli cap) means nothing to open,
         // and closing first left the palette gone with no feedback.
@@ -11689,6 +11830,7 @@ fn paletteActivate(a: *App) void {
         // the composer with the caret at the end.
         discardStagedImage(a);
         a.selected_chat = @intCast(selected);
+        if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, selected, 0);
         a.user_viewed = true;
         refreshMessages(a);
         focusCompose(a);
@@ -11878,7 +12020,8 @@ fn removeWhatsAppAccount(a: *App) void {
         a.read_child != null or a.pending_read_count > 0 or
         a.archive_child != null or a.pending_archive_count > 0 or avatarBusy(a) or
         wacliPendingGet(a, .chats) > 0 or wacliPendingGet(a, .groups) > 0 or
-        wacliPendingGet(a, .messages) > 0 or wacliPendingGet(a, .reaction) > 0)
+        wacliPendingGet(a, .messages) > 0 or wacliPendingGet(a, .reaction) > 0 or
+        wacliPendingGet(a, .contacts_index) > 0 or wacliPendingGet(a, .archived_scan) > 0)
     {
         setStatus(a, "Wait for pending tasks to finish, then remove again");
         return;
@@ -11921,6 +12064,10 @@ fn removeWhatsAppAccount(a: *App) void {
         entry.data = null;
     }
     a.msg_cache_len = 0;
+    a.people.deinit();
+    a.people_open_jid.set("");
+    if (a.chats_raw) |raw| a.allocator.free(raw);
+    a.chats_raw = null;
     a.cache_tag.set("");
     a.cache_tag_gen += 1;
     a.chat_count = 0;
@@ -14440,6 +14587,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (jobIsSlack(result.kind) and !result.ok) logSlackFailure(a, result.kind, result.extra.slice(), result.http_status);
             switch (result.kind) {
                 .groups => if (result.ok) applyGroups(a, result.data),
+                .contacts_index => if (result.ok) {
+                    a.people.replaceContacts(result.data) catch return 0;
+                    refreshPeopleSearch(a);
+                },
                 .chats => {
                     // A stale failure must not restart the retry cycle or
                     // repaint the status over a newer read (same rule as the
@@ -14755,6 +14906,9 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             loadChatsCache(a);
             pruneStaleMsgCache(a);
             refreshChats(a);
+            refreshContactsIndex(a);
+            a.archived_scan_ticks = archived_scan_min_ticks;
+            tickArchivedScan(a, false);
             refreshMessages(a);
             _ = storeChanged(a);
             startSync(a);
@@ -15054,8 +15208,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             } else if (wparam == timer_search) {
                 _ = clearBulkSelection(a);
                 _ = win.KillTimer(hwnd, timer_search);
-                refreshChats(a);
-                refreshMessages(a);
+                refilterChats(a);
+                if (!messagesAreCurrent(a)) refreshMessages(a);
             } else if (wparam == timer_telegram) {
                 drainTelegram(a);
             } else if (wparam == timer_animation) {
@@ -16246,7 +16400,9 @@ pub fn main(init: std.process.Init) !void {
         openrouter_model = "claude-haiku-5-5";
         format_workspace = loadRegistryString(init.gpa, lit("AnthropicWorkspaceId")) orelse "";
     }
-    var app = App{ .allocator = init.gpa, .io = init.io, .instance = instance, .wacli_path = wacli_path, .avatar_dir = avatar_dir, .slack_media_dir = slack_media_dir, .deepgram_configured = deepgram_key.len > 0, .deepgram_key = deepgram_key, .openrouter_key = openrouter_key, .openrouter_model = openrouter_model, .openrouter_configured = openrouter_key.len > 0, .format_workspace = format_workspace, .dictation_language = loadDictationLanguage(), .font_scale = loadFontScale(), .chat_view = loadChatView() };
+    var app = App{ .allocator = init.gpa, .people = people_index.Index.init(init.gpa), .io = init.io, .instance = instance, .wacli_path = wacli_path, .avatar_dir = avatar_dir, .slack_media_dir = slack_media_dir, .deepgram_configured = deepgram_key.len > 0, .deepgram_key = deepgram_key, .openrouter_key = openrouter_key, .openrouter_model = openrouter_model, .openrouter_configured = openrouter_key.len > 0, .format_workspace = format_workspace, .dictation_language = loadDictationLanguage(), .font_scale = loadFontScale(), .chat_view = loadChatView() };
+    defer app.people.deinit();
+    defer if (app.chats_raw) |raw| init.gpa.free(raw);
     app.wacli_dir.set(wacli_dir);
     app.startup_probe_pending = true;
     if (cache_tag) |tag| {
