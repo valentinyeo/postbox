@@ -10514,7 +10514,7 @@ fn loadArchiveState(a: *App) void {
     a.archive_state = state;
     const path = messagesDirPath(a, "archive-state.txt") orelse return;
     a.archive_state_path = path;
-    const data = readFileWin(a.allocator, path, 256 * 1024) orelse return;
+    const data = readFileWin(a.allocator, path, archive_rules.max_entries * 260) orelse return;
     defer a.allocator.free(data);
     state.parse(data);
 }
@@ -10593,7 +10593,7 @@ fn tickArchivedScan(a: *App, store_changed: bool) void {
     a.archived_scan_dirty = false;
     a.archived_scan_ticks = 0;
     var job = WacliJob{ .kind = .archived_scan };
-    wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--archived", "--limit", "250" });
+    wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--archived", "--limit", archive_rules.scan_limit });
     wacliEnqueue(a, job, false);
 }
 
@@ -10649,7 +10649,7 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
     }
     // A full page means rows may be missing, and a queued archive means the
     // list is about to change: only prune on a complete, quiet read.
-    if (rows.len < 250 and a.pending_archive_count == 0 and a.archive_child == null) {
+    if (rows.len < archive_rules.max_entries and a.pending_archive_count == 0 and a.archive_child == null) {
         var index = state.count;
         while (index > 0) {
             index -= 1;

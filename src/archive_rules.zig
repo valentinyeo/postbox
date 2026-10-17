@@ -5,7 +5,8 @@
 
 const std = @import("std");
 
-pub const max_entries = 300;
+pub const max_entries = 2048;
+pub const scan_limit = std.fmt.comptimePrint("{d}", .{max_entries});
 pub const max_jid = 191;
 pub const max_ts = 47;
 
@@ -279,6 +280,20 @@ test "a full table drops unkept entries first" {
     }
     try std.testing.expectEqual(@as(usize, max_entries), state.count);
     try std.testing.expect(state.isKept("keep@g.us"));
+}
+
+test "an archived chat keeps its baseline while hundreds of other archived chats are seen" {
+    var state = State{};
+    try std.testing.expect(state.archive("a@s.whatsapp.net", "2026-10-10T10:00:00Z", false));
+    var i: usize = 0;
+    var name: [24]u8 = undefined;
+    while (i < 430) : (i += 1) {
+        const jid = std.fmt.bufPrint(&name, "{d}@s.whatsapp.net", .{i}) catch unreachable;
+        state.setBaseline(jid, "0001-01-01T00:00:00Z");
+    }
+    const base = state.baseline("a@s.whatsapp.net") orelse return error.BaselineLost;
+    try std.testing.expect(needsProbe(false, "2026-10-10T10:30:00Z", base));
+    try std.testing.expect(shouldResurface(false, false, "2026-10-10T10:30:00Z", base));
 }
 
 test "select-all snapshot holds exactly the rows shown" {
