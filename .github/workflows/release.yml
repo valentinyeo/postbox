@@ -102,7 +102,6 @@ jobs:
           cd zig-out/bin
           zip -r "${GITHUB_WORKSPACE}/Messages-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe *.ttf *LICENSE*
       - name: Build and package ARM64
-        # Native build for Windows on ARM laptops (e.g. the X13s); its updater only picks Messages_arm64-*.zip.
         run: |
           zig build -Dtarget=aarch64-windows-gnu --release=small -Dversion="${GITHUB_REF_NAME#v}" -p zig-out-arm64
           cd zig-out-arm64/bin

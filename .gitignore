@@ -9,3 +9,10 @@ probe
 .env.*
 !.env.example
 .claude/handoffs/
+CLAUDE.local.md
+HANDOFF.md
+board.yml
+.claude/skills
+.claude/hooks/agent-scope-guard.sh
+.claude/settings.local.json
+__pycache__/
