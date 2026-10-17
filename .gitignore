@@ -14,5 +14,7 @@ HANDOFF.md
 board.yml
 .claude/skills
 .claude/hooks/agent-scope-guard.sh
+.claude/hooks/board-write-guard.sh
+.github/workflows/skills-evals.yml
 .claude/settings.local.json
 __pycache__/
