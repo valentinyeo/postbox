@@ -819,6 +819,8 @@ const App = struct {
     staged_image: StagedImage = .{},
     media_attempts: [512]u64 = [_]u64{0} ** 512,
     media_attempt_count: usize = 0,
+    media_unavailable: [512]u64 = [_]u64{0} ** 512,
+    media_unavailable_count: usize = 0,
     media_burst_started_ms: u64 = 0,
     media_burst_files: usize = 0,
     media_resume_after_ms: u64 = 0,
@@ -5851,6 +5853,10 @@ fn downloadMedia(a: *App, message_index: usize, automatic: bool) bool {
     // through requestSlackDownload and Telegram ones through the TDLib
     // client; neither may reach here with their chat id as a WhatsApp jid.
     if (chat.provider != .whatsapp) return false;
+    if (media_drain.wazi_135 and !automatic) {
+        clearMediaFailure(a, chat.jid.slice(), message.id.slice());
+        media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(chat.jid.slice(), message.id.slice()));
+    }
     // Already downloading in another slot: nothing to queue.
     if (mediaDownloading(a, a.chats[a.selected_chat].jid.slice(), message.id.slice())) return false;
     if (freeMediaSlot(a) == null or a.send_child != null or a.pending_send_count > 0 or
@@ -5888,10 +5894,23 @@ fn markMediaAttempted(a: *App, jid: []const u8, id: []const u8) void {
     a.media_attempt_count += 1;
 }
 
+fn mediaUnavailable(a: *const App, jid: []const u8, id: []const u8) bool {
+    return std.mem.indexOfScalar(u64, a.media_unavailable[0..a.media_unavailable_count], played.Set.pairKey(jid, id)) != null;
+}
+
+fn markMediaUnavailable(a: *App, jid: []const u8, id: []const u8) void {
+    markMediaAttempted(a, jid, id);
+    if (mediaUnavailable(a, jid, id)) return;
+    if (a.media_unavailable_count >= a.media_unavailable.len) a.media_unavailable_count = 0;
+    a.media_unavailable[a.media_unavailable_count] = played.Set.pairKey(jid, id);
+    a.media_unavailable_count += 1;
+}
+
 // A success erases past failures so the bounded-retry table cannot fill
 // with attachments that recovered on their own.
 fn clearMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
     const hash = played.Set.pairKey(jid, id);
+    media_drain.forgetAttempt(&a.media_unavailable, &a.media_unavailable_count, hash);
     for (&a.media_failures) |*entry| {
         if (entry.hash == hash) {
             entry.hash = 0;
@@ -5920,7 +5939,7 @@ fn noteMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
             entry.hash = 0;
             entry.count = 0;
         }
-        markMediaAttempted(a, jid, id);
+        markMediaUnavailable(a, jid, id);
         return;
     }
     if (matched) |entry| {
@@ -5938,7 +5957,7 @@ fn noteMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
     }
     // ponytail: 16 attachments failing concurrently is implausible; if it
     // happens, degrade to terminal marking rather than growing state.
-    markMediaAttempted(a, jid, id);
+    markMediaUnavailable(a, jid, id);
 }
 
 fn isDownloadableMedia(message: *const Message) bool {
@@ -7863,6 +7882,7 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
             if (wideFileSize(message.local_path.ptr())) |size| {
                 message.media_size = size;
                 media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(chat.jid.slice(), id));
+                clearMediaFailure(a, chat.jid.slice(), id);
                 var alias_buffer: [1024]u8 = undefined;
                 const playable = playableVideoPath(&alias_buffer, media_type, message.mime_type.slice(), local_path);
                 if (playable.ptr != local_path.ptr) message.local_path.set(a.allocator, playable);
@@ -8554,6 +8574,7 @@ fn applySentVoice(a: *App, jid: []const u8) void {
             message.local_path.set(a.allocator, entry.fileSlice());
             message.media_size = wideFileSize(message.local_path.ptr()) orelse 0;
             media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(jid, message.id.slice()));
+            clearMediaFailure(a, jid, message.id.slice());
             if (message.filename.len == 0) message.filename.set(a.allocator, std.fs.path.basename(entry.fileSlice()));
             if (entry.voice) loadTranscriptCache(a, message);
             continue;
@@ -13926,7 +13947,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 var media_rect = win.RECT{ .left = left + px(a, 12), .top = strip_top, .right = right - px(a, 12), .bottom = strip_top + px(a, 42) };
                 var label_buffer: [128]u8 = undefined;
                 var label_wide = WideText(127){};
-                label_wide.set(a.allocator, media_drain.attachmentLabel(&label_buffer, "Voice message", message.media_size, false));
+                label_wide.set(a.allocator, media_drain.attachmentLabel(&label_buffer, "Voice message", message.media_size, if (media_drain.oversized(message.media_size)) .oversized else .downloading));
                 _ = win.DrawTextW(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
             } else {
                 const playing_now = active and a.audio_state == .playing;
@@ -14043,7 +14064,15 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             else
                 0;
             const kind = if (isVideoGif(message)) "GIF" else if (isVideo(message)) "Video" else if (isImage(message)) "Image" else "Attachment";
-            const label = media_drain.attachmentLabel(&label_buffer, if (name > 0) name_buffer[0..name] else kind, message.media_size, local);
+            const attachment_state: media_drain.AttachmentState = if (local)
+                .local
+            else if (media_drain.wazi_135 and mediaUnavailable(a, a.displayed_jid.slice(), message.id.slice()))
+                .unavailable
+            else if (media_drain.oversized(message.media_size))
+                .oversized
+            else
+                .downloading;
+            const label = media_drain.attachmentLabel(&label_buffer, if (name > 0) name_buffer[0..name] else kind, message.media_size, attachment_state);
             var label_wide = WideText(1023){};
             label_wide.set(a.allocator, label);
             _ = win.DrawTextW(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);

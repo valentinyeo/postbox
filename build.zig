@@ -426,6 +426,30 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(read_state_tests).step);
 
+    const media_failure_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("src/media_failure_test.zig"),
+        sourceSection("fn Utf8Text(", "const Chat = struct"),
+        sourceSection("const MediaFailure = struct", "fn mediaBusy("),
+        "const App = struct {\n",
+        sourceSection("    media_attempts: [512]u64", "    media_burst_started_ms:"),
+        sourceSection("    media_failures: [16]MediaFailure", "    avatar_session:"),
+        "chats: [1]Chat = .{.{}}, chat_count: usize = 1, selected_chat: usize = 0, displayed_jid: Utf8Text(191) = .{}, messages: [1]Message = .{.{}}, message_count: usize = 1, send_child: ?u8 = null, pending_send_count: usize = 0, read_child: ?u8 = null, archive_child: ?u8 = null, pending_download_jid: Utf8Text(191) = .{}, pending_download_id: Utf8Text(191) = .{}, hwnd: ?usize = null, started: usize = 0 };\n",
+        sourceSection("fn downloadMedia(", "fn isDownloadableMedia("),
+        "fn attachmentState(a: *const App, message: *const Message, local: bool) media_drain.AttachmentState {\n",
+        sourceSection("            const attachment_state: media_drain.AttachmentState", "            const label = media_drain.attachmentLabel"),
+        "return attachment_state; }\n",
+    }) catch @panic("Out of memory building media failure harness");
+    const media_failure_files = b.addWriteFiles();
+    for ([_][]const u8{ "media_drain.zig", "played.zig", "chat_cache.zig" }) |name| {
+        _ = media_failure_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
+    }
+    const media_failure_harness = media_failure_files.add("media_failure_test.zig", media_failure_source);
+    const media_failure_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = media_failure_harness,
+        .target = b.resolveTargetQuery(.{}),
+    }) });
+    test_step.dependOn(&b.addRunArtifact(media_failure_tests).step);
+
     // webp.zig tests use the host target: they must run on the CI machine
     // even when the exe is cross-compiled for Windows.
     const webp_tests = b.addTest(.{
