@@ -31,7 +31,7 @@ pub const CommandInfo = struct { cmd: Command, usage: []const u8, summary: []con
 pub const commands = [_]CommandInfo{
     .{ .cmd = .status, .usage = "status", .summary = "version, active messenger, selected chat, sync state, pending sends, search text" },
     .{ .cmd = .statuses, .usage = "statuses", .summary = "loaded WhatsApp Status updates and local viewed state" },
-    .{ .cmd = .@"open-status", .usage = "open-status", .summary = "open WhatsApp Status without focusing the app" },
+    .{ .cmd = .@"open-status", .usage = "open-status [SENDER_JID]", .summary = "open WhatsApp Status without focusing the app" },
     .{ .cmd = .chats, .usage = "chats [--messenger whatsapp|slack|telegram] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
     .{ .cmd = .search, .usage = "search <text>", .summary = "set the sidebar search text (\"\" clears it)" },
     .{ .cmd = .view, .usage = "view <whatsapp|slack|telegram>", .summary = "switch the sidebar messenger, like Alt+1/Alt+2" },
@@ -106,7 +106,11 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
     }
     const items = positional.items;
     switch (cmd) {
-        .status, .statuses, .@"open-status", .chats => if (items.len != 0) return usage(message, "unexpected argument"),
+        .status, .statuses, .chats => if (items.len != 0) return usage(message, "unexpected argument"),
+        .@"open-status" => {
+            if (items.len > 1) return usage(message, "open-status takes at most one sender jid");
+            if (items.len == 1) request.id = try allocator.dupe(u8, items[0]);
+        },
         .search => {
             // Words join with spaces, so `search foo bar` needs no quoting.
             if (items.len == 0) return usage(message, "search needs text (\"\" clears it)");
@@ -367,6 +371,25 @@ test "help lists every command and says nothing sends" {
     for (commands) |info| try std.testing.expect(std.mem.indexOf(u8, help_text, info.usage) != null);
     try std.testing.expect(std.mem.indexOf(u8, help_text, "Nothing here sends messages") != null);
     try std.testing.expectEqual(@typeInfo(Command).@"enum".fields.len, commands.len);
+}
+
+test "open-status without a sender opens the list" {
+    const request = try parseForTest(&.{"open-status"});
+    try std.testing.expectEqual(Command.@"open-status", request.cmd);
+    try std.testing.expectEqualStrings("", request.id);
+}
+
+test "open-status with one sender sets the request id" {
+    const request = try parseForTest(&.{ "open-status", "123@s.whatsapp.net" });
+    defer std.testing.allocator.free(request.id);
+    try std.testing.expectEqual(Command.@"open-status", request.cmd);
+    try std.testing.expectEqualStrings("123@s.whatsapp.net", request.id);
+}
+
+test "open-status rejects two senders as a usage error" {
+    var message: []const u8 = "";
+    try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{ "open-status", "123@s.whatsapp.net", "456@s.whatsapp.net" }, &message));
+    try std.testing.expectEqualStrings("open-status takes at most one sender jid", message);
 }
 
 test "status commands parse without focus or mutation arguments" {
