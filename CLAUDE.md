@@ -17,6 +17,7 @@
 | Format, tests and the Windows build pass before a push or PR | `.claude/hooks/preflight-guard.sh` blocks `git push` and `gh pr create/ready/merge`; CI runs the same `tools/preflight.sh` |
 | The wacli worker keeps the job it dequeues; a full archive queue keeps the unarchive request | `tools/lint-repeats.sh` rules A1, A2 |
 | Release workflows dispatch release.yml for bot tags, wait for GUI exes, end expected-exit-3 checks with `exit 0`, never use `gh api --slurp`; automerge never requires the AI `code-review` check; workflows never call OpenRouter or Z.ai, the AI review runs from `tools/ai-review-poll.sh` (systemd user timer from `tools/systemd/`, clean checkout at `~/projects/wazig-review`) on Codex via hax and posts through `ai-review-post.yml`; no workflow runs on a self-hosted runner (B7) | `tools/lint-repeats.sh` rules B1 to B7 |
+| Anthropic and OpenRouter keys load through `slack_win.loadSecret` (DPAPI, plain values migrate on start), never as plain registry strings (WAZI-137) | `tools/lint-repeats.sh` rule C1 |
 | No private markers in tracked files, PR title, PR body or PR commit messages; private agent files stay out of git | `tools/check_private_markers.py` in `private-markers.yml`, patterns from the `PRIVATE_MARKERS` secret (WAZI-138) |
 | A dispatched auto-release waits for the running ci on main HEAD instead of refusing to tag | `tools/ci-green.sh` (WAZI-142) |
 | Each check still fails on the past commit it was written for | `tools/test-preflight-guard.sh`, `tools/test-lint-repeats.sh`, `tools/test-ci-green.sh` in CI |

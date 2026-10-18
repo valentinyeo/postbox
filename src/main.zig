@@ -16396,10 +16396,10 @@ pub fn main(init: std.process.Init) !void {
     const wacli_dir = std.fs.path.dirname(store_watch_path) orelse return error.MissingUserProfile;
     const deepgram_key = init.environ_map.get("DEEPGRAM_API_KEY") orelse "";
     var openrouter_key = init.environ_map.get("OPENROUTER_API_KEY") orelse "";
+    var stored_openrouter: ?slack_win.SecretLoad = null;
     if (openrouter_key.len == 0) {
-        if (loadRegistryString(init.gpa, lit("OpenRouterApiKey"))) |stored| {
-            openrouter_key = stored;
-        }
+        stored_openrouter = slack_win.loadSecret(init.gpa, lit("OpenRouterApiKey"));
+        if (stored_openrouter) |stored| openrouter_key = stored.value;
     }
     var openrouter_model = init.environ_map.get("OPENROUTER_MODEL") orelse "";
     if (openrouter_model.len == 0) {
@@ -16411,8 +16411,9 @@ pub fn main(init: std.process.Init) !void {
     // A dedicated Anthropic key (registry only, so an env key meant for other tools is ignored)
     // takes over transcript formatting: Haiku without reasoning answers in seconds.
     var format_workspace: []const u8 = "";
-    if (loadRegistryString(init.gpa, lit("AnthropicApiKey"))) |anthropic_key| {
-        openrouter_key = anthropic_key;
+    const stored_anthropic = slack_win.loadSecret(init.gpa, lit("AnthropicApiKey"));
+    if (stored_anthropic) |anthropic_key| {
+        openrouter_key = anthropic_key.value;
         openrouter_model = "claude-haiku-5-5";
         format_workspace = loadRegistryString(init.gpa, lit("AnthropicWorkspaceId")) orelse "";
     }
@@ -16425,6 +16426,26 @@ pub fn main(init: std.process.Init) !void {
         app.cache_tag.set(&tag);
         appendLaunchLog(&app, "startup: saved account tag loaded");
     } else appendLaunchLog(&app, "startup: no saved account tag, caches wait for auth status");
+    if (stored_openrouter) |stored| {
+        switch (stored.outcome) {
+            .encrypted => appendLaunchLog(&app, "startup: openrouter key loaded (encrypted)"),
+            .migrated => {
+                appendLaunchLog(&app, "startup: openrouter key migrated to encrypted storage");
+                appendLaunchLog(&app, "startup: openrouter key loaded (encrypted)");
+            },
+            .migration_failed => appendLaunchLog(&app, "startup: openrouter key left plain, encryption failed"),
+        }
+    }
+    if (stored_anthropic) |stored| {
+        switch (stored.outcome) {
+            .encrypted => appendLaunchLog(&app, "startup: anthropic key loaded (encrypted)"),
+            .migrated => {
+                appendLaunchLog(&app, "startup: anthropic key migrated to encrypted storage");
+                appendLaunchLog(&app, "startup: anthropic key loaded (encrypted)");
+            },
+            .migration_failed => appendLaunchLog(&app, "startup: anthropic key left plain, encryption failed"),
+        }
+    }
     loadEmojiRecents(&app);
     loadFileOutbox(&app);
     if (init.environ_map.get("LOCALAPPDATA")) |local| {
