@@ -393,19 +393,38 @@ pub fn build(b: *std.Build) void {
 
     const archive_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/archive_actions_test.zig"),
-        sourceSection("fn pendingArchiveHidesChat(", "fn startNextArchive("),
+        sourceSection("fn retryUnarchiveChat(", "fn startNextArchive("),
         sourceSection("fn queueUnarchiveChat(", "const archived_scan_min_ticks"),
         sourceSection("fn archiveChat(", "/// Rows just left the list."),
+        if (std.mem.indexOf(u8, @embedFile("src/main.zig"), "fn archiveShortcutAllowed(") != null)
+            sourceSection("fn archiveShortcutAllowed(", "fn archiveSelectedChat(")
+        else
+            "",
         sourceSection("fn archiveSelectedChat(", "// --------------------------------------------------------- wazigctl control"),
+        sourceSection("fn startNextArchive(", "fn checkArchive("),
+        sourceSection("fn removeFirstPendingSend(", "fn playableVideoPath("),
+        sourceSection("fn buildPaletteItems(", "    a.palette_item_count = 0;"),
+        "std.mem.doNotOptimizeAway(a); }\nfn activateArchivePalette(a: *App, item: struct { command: u16 }) void {\n",
+        sourceSection("    const command = item.command;\n    closePalette(a);", "fn openPalette("),
+        "fn archiveKey(a: *App, key: u32, control: bool, alt: bool, shift: bool, focus: ?win.HWND, message: *const win.MSG) bool {\nstd.mem.doNotOptimizeAway(focus); std.mem.doNotOptimizeAway(message);\n",
+        sourceSection("    if (control and !alt and key == 'E') {", "    if (control and shift and key == 'C') {"),
+        sourceSection("    if (key == 'E') {", "    if (key == 'U') {"),
+        "return false; }\n",
     }) catch @panic("Out of memory building archive harness");
     const archive_harness = b.addWriteFiles().add("archive_actions_test.zig", archive_harness_source);
     const archive_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = archive_harness,
         .target = b.resolveTargetQuery(.{}),
-        .imports = &.{.{ .name = "archive_rules", .module = b.createModule(.{
-            .root_source_file = b.path("src/archive_rules.zig"),
-            .target = b.resolveTargetQuery(.{}),
-        }) }},
+        .imports = &.{
+            .{ .name = "archive_rules", .module = b.createModule(.{
+                .root_source_file = b.path("src/archive_rules.zig"),
+                .target = b.resolveTargetQuery(.{}),
+            }) },
+            .{ .name = "voice_sent", .module = b.createModule(.{
+                .root_source_file = b.path("src/voice_sent.zig"),
+                .target = b.resolveTargetQuery(.{}),
+            }) },
+        },
     }) });
     test_step.dependOn(&b.addRunArtifact(archive_tests).step);
 
