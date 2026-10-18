@@ -172,6 +172,121 @@ pub const Viewed = struct {
     }
 };
 
+pub fn seenArgs(wacli: []const u8, msg_id: []const u8) [8][]const u8 {
+    return .{ wacli, "--json", "--lock-wait", "0s", "status", "seen", "--id", msg_id };
+}
+
+pub const SeenRetries = struct {
+    pub const Entry = struct {
+        id: [191]u8 = undefined,
+        len: usize = 0,
+        retries: u8 = 0,
+        pending: bool = false,
+
+        pub fn slice(self: *const Entry) []const u8 {
+            return self.id[0..self.len];
+        }
+
+        pub fn retry(self: *Entry) ?[]const u8 {
+            if (self.pending or self.retries >= 3) return null;
+            self.retries += 1;
+            self.pending = true;
+            return self.slice();
+        }
+    };
+
+    entries: [32]Entry = undefined,
+    count: usize = 0,
+
+    pub fn failed(self: *SeenRetries, id: []const u8) bool {
+        if (id.len == 0 or id.len > 191) return false;
+        for (self.entries[0..self.count]) |*entry| {
+            if (std.mem.eql(u8, entry.slice(), id)) {
+                entry.pending = false;
+                return true;
+            }
+        }
+        if (self.count == self.entries.len) return false;
+        const entry = &self.entries[self.count];
+        entry.* = .{ .len = id.len };
+        @memcpy(entry.id[0..id.len], id);
+        self.count += 1;
+        return true;
+    }
+
+    pub fn remove(self: *SeenRetries, id: []const u8) void {
+        for (self.entries[0..self.count], 0..) |*entry, i| {
+            if (!std.mem.eql(u8, entry.slice(), id)) continue;
+            for (i..self.count - 1) |j| self.entries[j] = self.entries[j + 1];
+            self.count -= 1;
+            return;
+        }
+    }
+
+    pub fn prune(self: *SeenRetries, rows: []const Row) void {
+        var kept: usize = 0;
+        for (self.entries[0..self.count]) |entry| {
+            for (rows) |row| {
+                if (!std.mem.eql(u8, entry.slice(), row.msg_id)) continue;
+                self.entries[kept] = entry;
+                kept += 1;
+                break;
+            }
+        }
+        self.count = kept;
+    }
+};
+
+pub const SeenResult = struct { ok: bool, line: []const u8 };
+
+fn logText(out: []u8, text: []const u8) []const u8 {
+    const len = @min(out.len, text.len);
+    for (text[0..len], 0..) |c, i| out[i] = if (c < 32 or c == 127) ' ' else c;
+    return out[0..len];
+}
+
+fn seenLog(buffer: *[512]u8, id: []const u8, receipt: []const u8, notified: []const u8, err: []const u8) SeenResult {
+    var id_buf: [191]u8 = undefined;
+    var text_buf: [160]u8 = undefined;
+    const safe_id = logText(&id_buf, id);
+    const ok = err.len == 0;
+    const line = if (ok)
+        std.fmt.bufPrint(buffer, "status-seen: ok id={s} receipt={s} notified={s}", .{ safe_id, logText(&text_buf, receipt), notified }) catch unreachable
+    else
+        std.fmt.bufPrint(buffer, "status-seen: failed id={s} err={s}", .{ safe_id, logText(&text_buf, err) }) catch unreachable;
+    return .{ .ok = ok, .line = line };
+}
+
+pub fn seenResult(allocator: std.mem.Allocator, buffer: *[512]u8, id: []const u8, process_ok: bool, raw: []const u8, failure: []const u8) SeenResult {
+    const fallback = if (failure.len > 0) failure else "wacli failed";
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, raw, .{}) catch
+        return seenLog(buffer, id, "", "", if (process_ok) "invalid JSON" else fallback);
+    defer parsed.deinit();
+    const root = switch (parsed.value) {
+        .object => |object| object,
+        else => return seenLog(buffer, id, "", "", "invalid response"),
+    };
+    const success = root.get("success");
+    if (!process_ok or success == null or success.? != .bool or !success.?.bool) {
+        const err = string(root, "error");
+        return seenLog(buffer, id, "", "", if (err.len > 0) err else fallback);
+    }
+    const data = switch (root.get("data") orelse return seenLog(buffer, id, "", "", "missing data")) {
+        .object => |object| object,
+        else => return seenLog(buffer, id, "", "", "invalid data"),
+    };
+    const ok = data.get("ok");
+    if (ok == null or ok.? != .bool or !ok.?.bool) return seenLog(buffer, id, "", "", "receipt not accepted");
+    const receipt = string(data, "receipt");
+    if (receipt.len == 0) return seenLog(buffer, id, "", "", "missing receipt");
+    const notified: []const u8 = switch (data.get("sender_notified") orelse .null) {
+        .bool => |value| if (value) "true" else "false",
+        .null => "null",
+        else => return seenLog(buffer, id, "", "", "invalid sender_notified"),
+    };
+    return seenLog(buffer, id, receipt, notified, "");
+}
+
 pub const Contact = struct { newest: usize, unseen: bool };
 pub const Groups = struct {
     contacts: [max_rows]Contact = undefined,
@@ -517,4 +632,109 @@ test "unix seconds JSON numbers may use floating point notation" {
     var list = try List.parse(a, "{\"data\":{\"statuses\":[{\"msg_id\":\"number\",\"sender_jid\":\"fixture\",\"ts\":100000.0}]}}", 100001);
     defer list.deinit(a);
     try std.testing.expectEqual(@as(i64, 100000), list.rows.items[0].ts);
+}
+
+test "status-seen argv delegates immediately without read-only" {
+    const args = seenArgs("wacli.exe", "STATUS_ID");
+    const expected = [_][]const u8{ "wacli.exe", "--json", "--lock-wait", "0s", "status", "seen", "--id", "STATUS_ID" };
+    try std.testing.expectEqual(expected.len, args.len);
+    for (expected, args) |want, actual| {
+        try std.testing.expectEqualStrings(want, actual);
+        try std.testing.expect(!std.mem.eql(u8, actual, "--read-only"));
+    }
+}
+
+test "status-seen retries own ids deduplicate and bound capacity" {
+    var retries: SeenRetries = .{};
+    var id = [_]u8{ 'a', 'b' };
+    try std.testing.expect(retries.failed(&id));
+    id[0] = 'x';
+    try std.testing.expectEqualStrings("ab", retries.entries[0].slice());
+    try std.testing.expect(retries.failed("ab"));
+    try std.testing.expectEqual(@as(usize, 1), retries.count);
+    try std.testing.expect(!retries.failed(""));
+    try std.testing.expect(!retries.failed("x" ** 192));
+    var buffer: [16]u8 = undefined;
+    for (0..31) |i| try std.testing.expect(retries.failed(try std.fmt.bufPrint(&buffer, "id-{d}", .{i})));
+    try std.testing.expectEqual(@as(usize, 32), retries.count);
+    try std.testing.expect(!retries.failed("overflow"));
+    retries.remove("ab");
+    try std.testing.expectEqual(@as(usize, 31), retries.count);
+    try std.testing.expectEqualStrings("id-0", retries.entries[0].slice());
+    try std.testing.expect(retries.failed("replacement"));
+}
+
+test "status-seen retries cap at three and never duplicate an in-flight attempt" {
+    var retries: SeenRetries = .{};
+    try std.testing.expect(retries.failed("id"));
+    const entry = &retries.entries[0];
+    for (1..4) |attempt| {
+        try std.testing.expectEqualStrings("id", entry.retry().?);
+        try std.testing.expectEqual(@as(u8, @intCast(attempt)), entry.retries);
+        try std.testing.expectEqual(@as(?[]const u8, null), entry.retry());
+        try std.testing.expect(retries.failed("id"));
+    }
+    try std.testing.expectEqual(@as(?[]const u8, null), entry.retry());
+    try std.testing.expect(retries.failed("id"));
+    try std.testing.expectEqual(@as(?[]const u8, null), entry.retry());
+    retries.remove("id");
+    try std.testing.expectEqual(@as(usize, 0), retries.count);
+}
+
+test "status-seen retries drop ids gone from the refreshed statuses" {
+    var retries: SeenRetries = .{};
+    try std.testing.expect(retries.failed("gone"));
+    try std.testing.expect(retries.failed("keep"));
+    try std.testing.expect(retries.failed("also-gone"));
+    _ = retries.entries[1].retry();
+    retries.prune(&.{.{ .msg_id = "keep" }});
+    try std.testing.expectEqual(@as(usize, 1), retries.count);
+    try std.testing.expectEqualStrings("keep", retries.entries[0].slice());
+    try std.testing.expectEqual(@as(u8, 1), retries.entries[0].retries);
+    try std.testing.expect(retries.entries[0].pending);
+    retries.prune(&.{});
+    try std.testing.expectEqual(@as(usize, 0), retries.count);
+}
+
+test "status-seen success logs receipt and true false or null notification" {
+    var buffer: [512]u8 = undefined;
+    for ([_][]const u8{ "true", "false", "null" }) |notified| {
+        var raw: [256]u8 = undefined;
+        const json = try std.fmt.bufPrint(&raw, "{{\"success\":true,\"data\":{{\"delegated\":true,\"ids\":[\"id\"],\"ok\":true,\"receipt\":\"read\",\"sender\":\"fixture\",\"sender_notified\":{s}}},\"error\":null}}", .{notified});
+        const outcome = seenResult(std.testing.allocator, &buffer, "id", true, json, "");
+        try std.testing.expect(outcome.ok);
+        var expected: [128]u8 = undefined;
+        try std.testing.expectEqualStrings(try std.fmt.bufPrint(&expected, "status-seen: ok id=id receipt=read notified={s}", .{notified}), outcome.line);
+    }
+}
+
+test "status-seen failures reject process errors malformed JSON and rejected receipts" {
+    var buffer: [512]u8 = undefined;
+    const rejected = seenResult(std.testing.allocator, &buffer, "id", true, "{\"success\":false,\"error\":\"offline\"}", "");
+    try std.testing.expect(!rejected.ok);
+    try std.testing.expectEqualStrings("status-seen: failed id=id err=offline", rejected.line);
+    const process = seenResult(std.testing.allocator, &buffer, "id", false, "{\"success\":true,\"data\":{\"ok\":true,\"receipt\":\"read\"}}", "exit code 1");
+    try std.testing.expect(!process.ok);
+    try std.testing.expectEqualStrings("status-seen: failed id=id err=exit code 1", process.line);
+    const empty = seenResult(std.testing.allocator, &buffer, "id", false, "", "SpawnFailed");
+    try std.testing.expect(!empty.ok);
+    try std.testing.expectEqualStrings("status-seen: failed id=id err=SpawnFailed", empty.line);
+    for ([_][]const u8{
+        "bad",                                        "[]",                                        "{}",                                                                                         "{\"success\":true}", "{\"success\":true,\"data\":null}",
+        "{\"success\":true,\"data\":{\"ok\":false}}", "{\"success\":true,\"data\":{\"ok\":true}}", "{\"success\":true,\"data\":{\"ok\":true,\"receipt\":\"read\",\"sender_notified\":\"bad\"}}",
+    }) |raw| {
+        const outcome = seenResult(std.testing.allocator, &buffer, "id", true, raw, "");
+        try std.testing.expect(!outcome.ok);
+        try std.testing.expect(std.mem.startsWith(u8, outcome.line, "status-seen: failed id=id err="));
+    }
+}
+
+test "status-seen logs are bounded single lines for errors and receipts" {
+    var buffer: [512]u8 = undefined;
+    const outcome = seenResult(std.testing.allocator, &buffer, "id\r\n", false, "", "x\n\r\t" ** 1000);
+    try std.testing.expect(!outcome.ok);
+    try std.testing.expectEqualStrings("status-seen: failed id=id   err=" ++ "x   " ** 40, outcome.line);
+    const success = seenResult(std.testing.allocator, &buffer, "id", true, "{\"success\":true,\"data\":{\"ok\":true,\"receipt\":\"r\\n\\r\",\"sender_notified\":null}}", "");
+    try std.testing.expect(success.ok);
+    try std.testing.expectEqualStrings("status-seen: ok id=id receipt=r   notified=null", success.line);
 }

@@ -532,7 +532,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe, contacts_index, statuses };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe, contacts_index, statuses, status_seen };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 
 const WacliJob = struct {
@@ -623,6 +623,7 @@ const App = struct {
     status_row: ?win.HWND = null,
     status_list: ?status_view.List = null,
     status_viewed: status_view.Viewed = .{},
+    status_seen_retries: status_view.SeenRetries = .{},
     status_ui: status_ui.State = .{},
     status_last_refresh_ms: ?u64 = null,
     status_refresh_requested: bool = false,
@@ -1673,6 +1674,7 @@ fn wacliPendingSub(a: *App, kind: WacliJobKind) void {
 
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) void {
     var dropped_reaction = false;
+    var dropped_status_seen = false;
     var dropped_msg_id = Utf8Text(191){};
     var dropped_emoji = Utf8Text(63){};
     a.wacli_mutex.lockUncancelable(a.io);
@@ -1693,13 +1695,14 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) void {
         var index: usize = a.wacli_queue_len;
         while (index > 0) {
             index -= 1;
-            if (a.wacli_queue[index].kind != .reaction) {
+            if (a.wacli_queue[index].kind != .reaction and a.wacli_queue[index].kind != .status_seen) {
                 victim = index;
                 break;
             }
         }
         dropped_reaction = a.wacli_queue[victim].kind == .reaction;
-        if (dropped_reaction) {
+        dropped_status_seen = a.wacli_queue[victim].kind == .status_seen;
+        if (dropped_reaction or dropped_status_seen) {
             dropped_msg_id.set(a.wacli_queue[victim].msg_id.slice());
             dropped_emoji.set(a.wacli_queue[victim].extra.slice());
         }
@@ -1715,7 +1718,7 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) void {
         // are user writes too: an add then a remove must stay in order.
         var insert: usize = 0;
         while (insert < a.wacli_queue_len and
-            (a.wacli_queue[insert].kind == .slack_send or a.wacli_queue[insert].kind == .slack_attach or a.wacli_queue[insert].kind == .reaction)) insert += 1;
+            (a.wacli_queue[insert].kind == .slack_send or a.wacli_queue[insert].kind == .slack_attach or a.wacli_queue[insert].kind == .reaction or a.wacli_queue[insert].kind == .status_seen)) insert += 1;
         var shift = a.wacli_queue_len;
         while (shift > insert) : (shift -= 1) a.wacli_queue[shift] = a.wacli_queue[shift - 1];
         a.wacli_queue[insert] = job;
@@ -1735,6 +1738,7 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) void {
         }
         setStatus(a, "Reaction queue is full; retrying");
     }
+    if (dropped_status_seen) statusSeenFailed(a, dropped_msg_id.slice(), "queue full");
     if (a.wacli_thread == null or (jobIsSlack(job.kind) and a.wacli_slack_thread == null)) wacliPumpSync(a);
 }
 
@@ -1872,9 +1876,7 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
         .stderr_limit = .limited(256 * 1024),
         .create_no_window = true,
     }) catch |err| {
-        // .reaction reuses result.extra to carry the emoji through to
-        // applyReaction; only .messages may repurpose it for error text.
-        if (job.kind == .messages) result.extra.set(@errorName(err));
+        if (job.kind == .messages or job.kind == .status_seen) result.extra.set(@errorName(err));
         wacliPost(a, result);
         return;
     };
@@ -1886,14 +1888,13 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
         .exited => |code| code == 0,
         else => false,
     };
-    if (result.ok) {
+    if (result.ok or job.kind == .status_seen) {
         result.data = a.allocator.dupe(u8, run.stdout) catch blk: {
             result.ok = false;
             break :blk &.{};
         };
-    } else if (job.kind == .messages) {
-        // Bounded error text for the launch log. .reaction reuses this same
-        // field for its emoji, so only .messages may overwrite it here.
+    }
+    if (!result.ok and (job.kind == .messages or job.kind == .status_seen)) {
         const stderr_trim = std.mem.trim(u8, run.stderr, " \t\r\n");
         const stderr_line = stderr_trim[0..(std.mem.indexOfScalar(u8, stderr_trim, '\n') orelse stderr_trim.len)];
         if (stderr_line.len > 0) {
@@ -6185,7 +6186,7 @@ fn avatarBatchBlocked(a: *App) bool {
     return a.read_child != null or a.pending_read_count > 0 or mediaBusy(a) or
         a.send_child != null or a.pending_send_count > 0 or
         a.archive_child != null or a.pending_archive_count > 0 or
-        wacliPendingGet(a, .reaction) > 0;
+        wacliPendingGet(a, .reaction) > 0 or wacliPendingGet(a, .status_seen) > 0;
 }
 
 // The single path for every profile-picture fetch (chat list, open chat,
@@ -12142,6 +12143,7 @@ fn removeWhatsAppAccount(a: *App) void {
         a.archive_child != null or a.pending_archive_count > 0 or avatarBusy(a) or
         wacliPendingGet(a, .chats) > 0 or wacliPendingGet(a, .groups) > 0 or
         wacliPendingGet(a, .messages) > 0 or wacliPendingGet(a, .reaction) > 0 or
+        wacliPendingGet(a, .status_seen) > 0 or
         wacliPendingGet(a, .contacts_index) > 0 or wacliPendingGet(a, .archived_scan) > 0)
     {
         setStatus(a, "Wait for pending tasks to finish, then remove again");
@@ -12861,6 +12863,7 @@ fn clearStatusAccount(a: *App) void {
     a.status_gen += 1;
     if (a.status_list) |*list| list.deinit(a.allocator);
     a.status_list = null;
+    a.status_seen_retries = .{};
     a.status_reply_chat = null;
     a.status_last_refresh_ms = null;
     a.status_refresh_requested = false;
@@ -12897,7 +12900,7 @@ fn refreshStatuses(a: *App, requested: bool) void {
     if (a.wacli_thread == null or a.accounts_maintenance or a.sync_logged_out) return;
     if (mediaBusy(a) or a.send_child != null or
         a.read_child != null or a.archive_child != null or avatarBusy(a) or
-        wacliPendingGet(a, .reaction) > 0) return;
+        wacliPendingGet(a, .reaction) > 0 or wacliPendingGet(a, .status_seen) > 0) return;
     const now = win.GetTickCount64();
     if (!a.status_refresh_requested and !status_view.mayRefresh(a.status_last_refresh_ms, now)) return;
     a.status_refresh_requested = false;
@@ -12932,6 +12935,11 @@ fn applyStatuses(a: *App, raw: []const u8) void {
     }
     if (a.status_list) |*old| old.deinit(a.allocator);
     a.status_list = list;
+    a.status_seen_retries.prune(statusRows(a));
+    for (a.status_seen_retries.entries[0..a.status_seen_retries.count]) |*entry| {
+        const id = entry.retry() orelse continue;
+        enqueueStatusSeen(a, id);
+    }
     a.status_ui.failed = false;
     if (next_navigation) |navigation| {
         a.status_ui.navigation = navigation;
@@ -12996,11 +13004,42 @@ fn openStatusContact(a: *App, contact: usize) void {
     invalidateStatuses(a);
 }
 
+fn enqueueStatusSeen(a: *App, id: []const u8) void {
+    const args = status_view.seenArgs(a.wacli_path, id);
+    var job = WacliJob{ .kind = .status_seen, .gen = a.status_gen };
+    job.msg_id.set(id);
+    wacliJobArgs(&job, &args);
+    wacliEnqueue(a, job, true);
+}
+
+fn statusSeenFailed(a: *App, id: []const u8, err: []const u8) void {
+    var buffer: [512]u8 = undefined;
+    const retained = a.status_seen_retries.failed(id);
+    const outcome = status_view.seenResult(a.allocator, &buffer, id, false, "", if (retained) err else "retry list full");
+    appendLaunchLog(a, outcome.line);
+}
+
+fn applyStatusSeen(a: *App, result: *WacliResult) void {
+    if (result.gen != a.status_gen) return;
+    var buffer: [512]u8 = undefined;
+    const outcome = status_view.seenResult(a.allocator, &buffer, result.msg_id.slice(), result.ok, result.data, result.extra.slice());
+    if (outcome.ok) {
+        a.status_seen_retries.remove(result.msg_id.slice());
+    } else if (!a.status_seen_retries.failed(result.msg_id.slice())) {
+        const overflow = status_view.seenResult(a.allocator, &buffer, result.msg_id.slice(), false, "", "retry list full");
+        appendLaunchLog(a, overflow.line);
+        return;
+    }
+    appendLaunchLog(a, outcome.line);
+}
+
 fn markStatusViewed(a: *App) void {
     const index = a.status_ui.navigation.current() orelse return;
     const rows = statusRows(a);
     if (index >= rows.len or a.status_viewed.contains(rows[index].msg_id)) return;
     a.status_viewed.mark(a.allocator, rows[index].msg_id, rows[index].ts) catch return;
+    if (!a.status_viewed.contains(rows[index].msg_id)) return;
+    enqueueStatusSeen(a, rows[index].msg_id);
     persistStatusViewed(a);
     if (a.status_row) |row| _ = win.InvalidateRect(row, null, win.FALSE);
 }
@@ -15016,12 +15055,13 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             switch (result.kind) {
                 .statuses => {
                     if (result.gen != a.status_gen) return 0;
+                    startSync(a);
                     if (result.ok) applyStatuses(a, result.data) else {
                         a.status_ui.failed = true;
                         invalidateStatuses(a);
                     }
-                    startSync(a);
                 },
+                .status_seen => applyStatusSeen(a, result),
                 .groups => if (result.ok) applyGroups(a, result.data),
                 .contacts_index => if (result.ok) {
                     a.people.replaceContacts(result.data) catch return 0;
