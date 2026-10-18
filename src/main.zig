@@ -3051,9 +3051,7 @@ fn saveTelegramKeys(a: *App) bool {
     const id_wide = utf8ToWide(a.allocator, id_text) catch return false;
     defer a.allocator.free(id_wide);
     const id_saved = win.RegSetValueExW(key, lit("TelegramApiId"), 0, win.REG_SZ, @ptrCast(id_wide.ptr), @intCast((id_wide.len + 1) * 2)) == win.ERROR_SUCCESS;
-    const hash_wide = utf8ToWide(a.allocator, a.tg_api_hash.slice()) catch return false;
-    defer a.allocator.free(hash_wide);
-    const hash_saved = win.RegSetValueExW(key, lit("TelegramApiHash"), 0, win.REG_SZ, @ptrCast(hash_wide.ptr), @intCast((hash_wide.len + 1) * 2)) == win.ERROR_SUCCESS;
+    const hash_saved = slack_win.saveSecret(lit("TelegramApiHash"), a.tg_api_hash.slice());
     if (!id_saved or !hash_saved) {
         // Roll back a partial write so a later start does not read a key
         // pair where only one half belongs to this user.
@@ -16984,12 +16982,25 @@ pub fn main(init: std.process.Init) !void {
     if (init.environ_map.get("LOCALAPPDATA")) |local| {
         if (std.fs.path.join(init.gpa, &.{ local, "Messages", "telegram" })) |telegram_dir| {
             // Runtime keys (registry) override the baked build defaults.
+            const stored_hash = slack_win.loadSecret(init.gpa, lit("TelegramApiHash"));
+            defer if (stored_hash) |stored| init.gpa.free(stored.value);
+            if (stored_hash) |stored| {
+                switch (stored.outcome) {
+                    .encrypted => appendLaunchLog(&app, "startup: telegram key loaded (encrypted)"),
+                    .migrated => {
+                        appendLaunchLog(&app, "startup: telegram key migrated to encrypted storage");
+                        appendLaunchLog(&app, "startup: telegram key loaded (encrypted)");
+                    },
+                    .migration_failed => appendLaunchLog(&app, "startup: telegram key left plain, encryption failed"),
+                }
+            }
             if (loadRegistryString(init.gpa, lit("TelegramApiId"))) |stored| {
+                defer init.gpa.free(stored);
                 if (std.fmt.parseInt(i32, stored, 10)) |parsed| {
                     if (parsed != 0) {
                         app.tg_api_id = parsed;
-                        if (loadRegistryString(init.gpa, lit("TelegramApiHash"))) |stored_hash| {
-                            if (stored_hash.len > 0) app.tg_api_hash.set(stored_hash);
+                        if (stored_hash) |hash| {
+                            if (hash.value.len > 0) app.tg_api_hash.set(hash.value);
                         }
                     }
                 } else |_| {}

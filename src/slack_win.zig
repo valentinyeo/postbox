@@ -141,6 +141,14 @@ pub const SecretLoad = struct {
     outcome: enum { encrypted, migrated, migration_failed },
 };
 
+pub fn saveSecret(name: [*:0]const u16, value: []const u8) bool {
+    if (!enabled) return false;
+    const allocator = std.heap.page_allocator;
+    const blob = protect(allocator, value) orelse return false;
+    defer allocator.free(blob);
+    return regSetBinary(name, blob);
+}
+
 pub fn loadSecret(allocator: std.mem.Allocator, name: [*:0]const u16) ?SecretLoad {
     if (!enabled) return null;
     if (regGetBinary(allocator, name)) |blob| {
