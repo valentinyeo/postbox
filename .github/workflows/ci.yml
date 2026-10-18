@@ -53,6 +53,9 @@ jobs:
           bash tools/test-lint-repeats.sh
           bash tools/test-ci-green.sh
 
+      - name: Outbox lifecycle and regression controls
+        run: python3 tools/test_outbox_runtime.py --zig "$(command -v zig)" --negative-controls
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
