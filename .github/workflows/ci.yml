@@ -153,6 +153,7 @@ jobs:
         shell: pwsh
         env:
           UNFURL_SMOKE_DIR: smoke-out
+          UNFURL_SMOKE_VIDEO: ${{ github.workspace }}\tools\fixtures\smoke-clip.mp4
         run: |
           $p = Start-Process -FilePath "zig-out\bin\Messages.exe" -ArgumentList "--unfurl-smoke" -Wait -PassThru
           if (Test-Path "smoke-out\results.txt") { Get-Content "smoke-out\results.txt" | Write-Host }
