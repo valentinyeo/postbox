@@ -6,7 +6,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FUNCTIONS = (
-    "persistOutbox", "loadOutbox", "enqueueSlackOutbox", "retrySlackOutbox",
+    "stagedFileGoesToWacli", "persistOutbox", "loadOutbox", "enqueueSlackOutbox", "retrySlackOutbox",
     "retireSlackOutbox", "evictOldestFailedSlackOutbox", "completePendingSend", "removeFirstPendingSend", "sendMessage",
     "resolveSlackSend", "pendingByClientMsgId", "jobIsWrite", "jobIsSlack",
     "wacliEnqueue", "wacliTakeJob", "wacliJobArgs", "storedAfterQueued", "sentMessageExists", "startNextSend", "retryWacliRefreshes", "appendWhatsAppPending", "retryingBubbleText", "localSendId",
@@ -32,7 +32,7 @@ def mutate(source, name):
         "no-credentials": ("or !slackConfigured(a) ", ""),
         "wrong-retirement": ("if (!std.mem.eql(u8, slot.entry.idSlice(), id)) continue;", "_ = id;"),
         "wrong-failed-bubble": ("const index = pendingByClientMsgId(a, client_msg_id) orelse return;", "const index = if (!result.ok) oldestPendingSend(a) orelse return else pendingByClientMsgId(a, client_msg_id) orelse return;"),
-        "slack-paste-to-whatsapp": ("staged_file.len > 0 and !selectedChatIsSlack(a)", "staged_file.len > 0"),
+        "slack-paste-to-whatsapp": ("staged_file.len > 0 and stagedFileGoesToWacli(a.chats[a.selected_chat].provider)", "staged_file.len > 0"),
         "same-text-reload": ("if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if ((head.from_disk or head.retries == 0 or (head.retries > 0 and head.ambiguous)) and"),
         "restored-resend": ("if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if (head.retries > 0 and head.ambiguous and"),
         "delete-before-retirement": ("if (!persistOutbox(a)) {\n        setStatus(a, \"Could not save send completion; retrying journal\");\n        return false;\n    }", "_ = persistOutbox(a);"),
@@ -79,6 +79,7 @@ def main():
     (ROOT / ".zig-cache").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="outbox-runtime-", dir=ROOT / ".zig-cache") as directory:
         directory = Path(directory)
+        (directory / "transport.zig").write_text((ROOT / "src/transport.zig").read_text())
         (directory / "voice_sent.zig").write_text((ROOT / "src/voice_sent.zig").read_text())
         format_source = (ROOT / "src/outbox.zig").read_text()
         for mutant in mutants:

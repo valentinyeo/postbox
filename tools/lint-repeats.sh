@@ -19,6 +19,8 @@ function fail(line, rule, problem, fix) {
     sub(/\/\/.*$/, "", code)
     if (code ~ /loadRegistryString[[:space:]]*\(|REG_SZ/ && code ~ /lit[[:space:]]*\([[:space:]]*"([^"]*ApiKey|TelegramApiHash)"[[:space:]]*\)/)
         fail(FNR, "C1", "API key uses plain registry storage", "slack_win.loadSecret for encrypted storage and migration")
+    if (code ~ /^[[:space:]]*if \(staged_file\.len > 0/ && code ~ /\{/ && code !~ /stagedFileGoesToWacli\(/)
+        fail(FNR, "D1", "staged pasted file is queued without routing by the chat\047s provider, so a Slack paste goes to WhatsApp", "if (staged_file.len > 0 and stagedFileGoesToWacli(a.chats[a.selected_chat].provider))")
     if (code ~ /^fn /) {
         worker = code ~ /^fn wacliWorkerMain\(/
         unarchive = code ~ /^fn queueUnarchiveChat\(/

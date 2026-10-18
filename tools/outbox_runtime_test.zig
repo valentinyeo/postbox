@@ -1,5 +1,6 @@
 const std = @import("std");
 const outbox = @import("outbox.zig");
+const transport = @import("transport.zig");
 const voice_sent = @import("voice_sent.zig");
 const Utf8Text = outbox.Str;
 const max_pending_sends = 32;
@@ -114,7 +115,7 @@ const App = struct {
     hwnd: ?usize = null,
     chat_count: usize = 1,
     selected_chat: usize = 0,
-    chats: [1]struct { jid: Utf8Text(191) = .{}, provider: enum { whatsapp, slack, telegram } = .whatsapp } = @splat(.{}),
+    chats: [1]struct { jid: Utf8Text(191) = .{}, provider: transport.Provider = .whatsapp } = @splat(.{}),
     reply_to: Utf8Text(191) = .{},
     reply_sender: Utf8Text(191) = .{},
     staged_image: struct { path: Utf8Text(519) = .{}, jid: Utf8Text(191) = .{} } = .{},
@@ -567,6 +568,12 @@ test "failed Slack result never fails a later bubble consumed by a prior echo" {
     result.msg_id.set(app.slack_outbox[1].entry.idSlice());
     resolveSlackSend(&app, &result);
     try std.testing.expectEqual(@TypeOf(app.messages[0].send_state).failed, app.messages[0].send_state);
+}
+
+test "staged files reach wacli only for WhatsApp" {
+    try std.testing.expect(stagedFileGoesToWacli(.whatsapp));
+    try std.testing.expect(!stagedFileGoesToWacli(.slack));
+    try std.testing.expect(!stagedFileGoesToWacli(.telegram));
 }
 
 test "Slack pasted image reaches Slack journal and preserves borrowed path" {

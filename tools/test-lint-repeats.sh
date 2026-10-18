@@ -22,6 +22,7 @@ cases=(
     'a701837 B7 HEAD'
     'dc9bdce C1 HEAD'
     '0e7c320d44f1 C1 HEAD'
+    '1f5853e^ D1 HEAD'
 )
 
 "$lint" "$repo"
@@ -29,9 +30,13 @@ printf 'test-lint-repeats: HEAD passes\n'
 for entry in "${cases[@]}"; do
     read -r bad rule fixed <<< "$entry"
     for sha in "$bad" "$fixed"; do
-        tree="$temp/$sha"
-        mkdir -p -- "$tree"
-        git -C "$repo" archive "$sha" src/main.zig .github/workflows | tar -x -C "$tree"
+        if [[ $sha == HEAD ]]; then
+            tree="$repo"
+        else
+            tree="$temp/$sha"
+            mkdir -p -- "$tree"
+            git -C "$repo" archive "$sha" src/main.zig .github/workflows | tar -x -C "$tree"
+        fi
         status=0
         "$lint" "$tree" > "$temp/output" 2>&1 || status=$?
         if [[ $sha == "$bad" ]]; then
