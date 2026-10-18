@@ -3256,20 +3256,44 @@ fn smokeDrawCard(allocator: std.mem.Allocator, io: std.Io, a: *App, dir: []const
     return true;
 }
 
-// One diagnostic media-open attempt so the log records the exact MFPlay
-// result when a machine refuses the sample clip. Diagnostic only: the
-// shipped play path above stays the one whose behaviour is judged.
-fn smokeMfProbe(a: *App) struct { hr: win.HRESULT, note: []const u8 } {
-    if (!mf_lazy.ensureStarted()) return .{ .hr = -1, .note = "Media Foundation failed to load on this machine" };
+fn smokeMfProbe(a: *App, url: [*:0]const u16) win.HRESULT {
+    if (!mf_lazy.ensureStarted()) return -1;
     var player: ?*win.IMFPMediaPlayer = null;
-    const probe_url = lit("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
-    const hr = mf_lazy.createMediaPlayer.?(probe_url, 0, win.MFP_OPTION_NONE, &player_callback, a.hwnd orelse null, &player);
-    if (hr >= 0 and player != null) {
-        _ = player.?.lpVtbl.*.Shutdown.?(player.?);
-        _ = player.?.lpVtbl.*.Release.?(player.?);
-        return .{ .hr = hr, .note = "the media source opens on retry; the earlier refusal was transient" };
+    const hr = mf_lazy.createMediaPlayer.?(url, 0, win.MFP_OPTION_NONE, &player_callback, a.hwnd orelse null, &player);
+    if (player) |opened| {
+        _ = opened.lpVtbl.*.Shutdown.?(opened);
+        _ = opened.lpVtbl.*.Release.?(opened);
     }
-    return .{ .hr = hr, .note = "MFPlay refused the media source on this machine; whether video can decode is a capability of the machine the app runs on" };
+    return hr;
+}
+
+const SmokePlayback = struct { state: win.MFP_MEDIAPLAYER_STATE = win.MFP_MEDIAPLAYER_STATE_EMPTY, width: i32 = 0, height: i32 = 0 };
+
+fn smokeWaitPlaying(io: std.Io, a: *App, timeout_ms: u32) SmokePlayback {
+    var result = SmokePlayback{};
+    var waited: u32 = 0;
+    while (waited < timeout_ms) : (waited += 100) {
+        smokePump(io, 100, 0xFFFFFFFF);
+        const player = a.mf_player orelse return result;
+        var state: win.MFP_MEDIAPLAYER_STATE = win.MFP_MEDIAPLAYER_STATE_EMPTY;
+        _ = player.lpVtbl.*.GetState.?(player, &state);
+        var size = std.mem.zeroes(win.SIZE);
+        _ = player.lpVtbl.*.GetNativeVideoSize.?(player, &size, null);
+        result = .{ .state = state, .width = size.cx, .height = size.cy };
+        if (state == win.MFP_MEDIAPLAYER_STATE_PLAYING and size.cx > 0 and size.cy > 0) return result;
+    }
+    return result;
+}
+
+fn smokeStateName(state: win.MFP_MEDIAPLAYER_STATE) []const u8 {
+    return switch (state) {
+        win.MFP_MEDIAPLAYER_STATE_EMPTY => "EMPTY",
+        win.MFP_MEDIAPLAYER_STATE_STOPPED => "STOPPED",
+        win.MFP_MEDIAPLAYER_STATE_PLAYING => "PLAYING",
+        win.MFP_MEDIAPLAYER_STATE_PAUSED => "PAUSED",
+        win.MFP_MEDIAPLAYER_STATE_SHUTDOWN => "SHUTDOWN",
+        else => "UNKNOWN",
+    };
 }
 
 const SmokeLog = struct {
@@ -3419,48 +3443,37 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         smoke_log.line("render {s}: {s}", .{ name, if (drawn) "PASS" else "FAIL" });
     }
 
-    // 4. Player and fullscreen through the shipped MFPlay window. When
-    // YouTube resolved a stream its entry is played as-is; otherwise a
-    // public sample clip keeps the player mechanics observable. MFPlay may
-    // still refuse the media on a server-class machine that cannot decode
-    // it; the player window and its fullscreen mechanics exist
-    // independently of the decoder, so they are then verified on the bare
-    // shipped window and the decode refusal is recorded, not hidden.
+    const clip_path = init.environ_map.get("UNFURL_SMOKE_VIDEO") orelse "";
     var play_entry = UnfurlEntry{};
-    var play_source: []const u8 = "the resolved YouTube stream";
-    var play_target: *const UnfurlEntry = &app.unfurl_entries[0];
-    if (app.unfurl_entries[0].play_url.len == 0) {
-        play_entry.play_url.set(allocator, "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
-        play_source = "a public sample clip (YouTube did not resolve a stream here)";
-        play_target = &play_entry;
+    play_entry.play_url.set(allocator, clip_path);
+    if (clip_path.len > 0) playUnfurlVideo(&app, &play_entry);
+    const playback = smokeWaitPlaying(init.io, &app, 8_000);
+    const media_opened = app.player_window != null and app.mf_player != null;
+    if (clip_path.len == 0) {
+        failures += 1;
+        smoke_log.line("FAIL: the test clip path is not set (UNFURL_SMOKE_VIDEO)", .{});
+    } else if (!media_opened) {
+        failures += 1;
+        const hr = smokeMfProbe(&app, play_entry.play_url.ptr());
+        smoke_log.line("FAIL: the test clip {s} did not open in the player: MFPlay returned hr=0x{x:0>8}", .{ clip_path, @as(u32, @bitCast(hr)) });
+    } else {
+        const playing = playback.state == win.MFP_MEDIAPLAYER_STATE_PLAYING and playback.width > 0 and playback.height > 0;
+        if (!playing) failures += 1;
+        smoke_log.line("media: test clip {s} state={s} video={d}x{d}: {s}", .{ clip_path, smokeStateName(playback.state), playback.width, playback.height, if (playing) "PASS" else "FAIL" });
     }
-    playUnfurlVideo(&app, play_target);
-    smokePump(init.io, 8_000, 0xFFFFFFFF);
-    var media_opened = true;
     var player_hwnd = app.player_window;
     if (player_hwnd == null) {
-        media_opened = false;
-        const probe = smokeMfProbe(&app);
-        smoke_log.line("media open on this machine: MFPlay returned hr=0x{x:0>8}: {s}; fullscreen mechanics are verified on the bare shipped player window", .{ @as(u32, @bitCast(probe.hr)), probe.note });
         player_hwnd = openPlayerWindow(&app, 800, 450);
         if (player_hwnd) |hwnd| _ = win.ShowWindow(hwnd, win.SW_SHOW);
     }
     const bare_window = player_hwnd orelse {
         failures += 1;
-        smoke_log.line("FAIL: the player window did not open for {s}", .{play_source});
+        smoke_log.line("FAIL: the player window did not open", .{});
         smoke_log.line("SMOKE RESULT: FAIL ({d} checks failed)", .{failures});
         smoke_log.flush();
         return 1;
     };
-    if (media_opened) {
-        if (app.mf_player == null) {
-            failures += 1;
-            smoke_log.line("FAIL: MFPlay did not start for {s}", .{play_source});
-        } else {
-            smoke_log.line("player: MFPlay started for {s}: PASS", .{play_source});
-        }
-    }
-    smokePump(init.io, 6_000, 0xFFFFFFFF);
+    smokePump(init.io, 2_000, 0xFFFFFFFF);
     const windowed_shot = smokeCaptureWindow(allocator, init.io, out_dir, "player-windowed.bmp", bare_window);
     smoke_log.line("capture player-windowed.bmp: {}", .{windowed_shot});
 
