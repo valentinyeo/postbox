@@ -19,6 +19,7 @@
 | Release workflows dispatch release.yml for bot tags, wait for GUI exes, end expected-exit-3 checks with `exit 0`, never use `gh api --slurp`; automerge never requires the AI `code-review` check; workflows never call OpenRouter or Z.ai, the AI review runs from `tools/ai-review-poll.sh` (systemd user timer from `tools/systemd/`, clean checkout at `~/projects/wazig-review`) on Codex via hax and posts through `ai-review-post.yml`; no workflow runs on a self-hosted runner (B7) | `tools/lint-repeats.sh` rules B1 to B7 |
 | A pasted file is routed by the chat's provider (D1, WAZI-101) | `tools/lint-repeats.sh` rule D1 |
 | Anthropic and OpenRouter keys and the Telegram API hash load through `slack_win.loadSecret` (DPAPI, plain values migrate on start), never as plain registry strings (WAZI-137, WAZI-145) | `tools/lint-repeats.sh` rule C1 |
+| Chat identities compare provider, account and jid with `chat_key.Key`, never two bare jids (WAZI-150) | `tools/lint-repeats.sh` rule E1 |
 | No private markers in tracked files, PR title, PR body or PR commit messages; private agent files stay out of git | `tools/check_private_markers.py` in `private-markers.yml`, patterns from the `PRIVATE_MARKERS` secret (WAZI-138) |
 | A dispatched auto-release waits for the running ci on main HEAD instead of refusing to tag | `tools/ci-green.sh` (WAZI-142) |
 | Each check still fails on the past commit it was written for | `tools/test-preflight-guard.sh`, `tools/test-lint-repeats.sh`, `tools/test-ci-green.sh` in CI |

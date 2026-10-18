@@ -22,6 +22,7 @@ cases=(
     'a701837 B7 HEAD'
     'dc9bdce C1 HEAD'
     '0e7c320d44f1 C1 HEAD'
+    '55e826b E1 HEAD'
     '1f5853e^ D1 HEAD'
 )
 

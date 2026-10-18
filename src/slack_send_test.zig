@@ -1,4 +1,8 @@
 const std = @import("std");
+const chat_key = @import("chat_key");
+const transport = struct {
+    const Provider = @FieldType(chat_key.Key, "provider");
+};
 const outbox = @import("outbox");
 const slack_send = @import("slack_send");
 const slack = @import("slack");
@@ -47,7 +51,7 @@ const App = struct {
     sent_bubbles: usize = 0,
     allocator: std.mem.Allocator = std.testing.allocator,
     selected_chat: usize = 0,
-    chats: [1]struct { jid: Utf8Text(191) = .{} } = .{.{}},
+    chats: [1]struct { provider: enum { slack } = .slack, account: Utf8Text(32) = .{}, jid: Utf8Text(191) = .{} } = .{.{}},
     messages: [1]Bubble = .{.{}},
     canvas: ?u8 = null,
 };

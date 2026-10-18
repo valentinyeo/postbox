@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const id_len = 32;
+pub const max_account_len = 32;
 pub const max_jid_len = 191;
 pub const max_text_len = 4095;
 pub const max_file_len = 519;
@@ -32,6 +33,7 @@ pub fn Str(comptime capacity: usize) type {
 pub const Entry = struct {
     id: [id_len]u8 = [_]u8{'0'} ** id_len,
     provider: Provider = .whatsapp,
+    account: Str(max_account_len) = .{},
     jid: Str(max_jid_len) = .{},
     text: Str(max_text_len) = .{},
     file: Str(max_file_len) = .{},
@@ -70,6 +72,7 @@ pub fn hexId(random: [16]u8) [id_len]u8 {
 const line_fields = struct {
     id: []const u8,
     provider: []const u8,
+    account: []const u8,
     jid: []const u8,
     text: []const u8,
     file: []const u8,
@@ -88,6 +91,7 @@ pub fn writeLine(writer: *std.Io.Writer, entry: *const Entry) !void {
     try std.json.Stringify.value(line_fields{
         .id = entry.idSlice(),
         .provider = @tagName(entry.provider),
+        .account = entry.account.slice(),
         .jid = entry.jid.slice(),
         .text = entry.text.slice(),
         .file = entry.file.slice(),
@@ -107,6 +111,7 @@ pub fn writeLine(writer: *std.Io.Writer, entry: *const Entry) !void {
 const parsed_line = struct {
     id: []const u8 = "",
     provider: []const u8 = "",
+    account: []const u8 = "",
     jid: []const u8 = "",
     text: []const u8 = "",
     file: []const u8 = "",
@@ -130,17 +135,19 @@ pub fn parseLine(allocator: std.mem.Allocator, line: []const u8, out: *Entry) bo
     if (!validId(value.id)) return false;
     const provider = std.meta.stringToEnum(Provider, value.provider) orelse return false;
     const state = std.meta.stringToEnum(SendState, value.state) orelse return false;
+    if (value.account.len > max_account_len) return false;
     if (value.jid.len == 0 or value.jid.len > max_jid_len) return false;
     if (value.text.len == 0 and value.file.len == 0) return false;
     if (value.text.len > max_text_len or value.file.len > max_file_len or
         value.reply_to.len > max_jid_len or value.reply_sender.len > max_jid_len or
         value.client_msg_id.len > max_client_msg_id_len or value.upload_file_id.len > max_file_id_len) return false;
     if (value.queued_unix < 0) return false;
-    for ([_][]const u8{ value.jid, value.text, value.file, value.reply_to, value.reply_sender, value.client_msg_id, value.upload_file_id }) |field| {
+    for ([_][]const u8{ value.account, value.jid, value.text, value.file, value.reply_to, value.reply_sender, value.client_msg_id, value.upload_file_id }) |field| {
         if (std.mem.indexOfScalar(u8, field, 0) != null) return false;
     }
     out.* = .{ .provider = provider, .queued_unix = value.queued_unix, .ptt = value.ptt, .voice_seconds = value.voice_seconds, .attempts = value.attempts, .state = state };
     @memcpy(&out.id, value.id);
+    out.account.set(value.account);
     out.jid.set(value.jid);
     out.text.set(value.text);
     out.file.set(value.file);
@@ -202,6 +209,7 @@ test "line round trip keeps every field through escapes" {
         .queued_unix = 1_700_000_000,
     };
     entry.id = hexId([_]u8{0xab} ** 16);
+    entry.account.set("T01234567");
     entry.jid.set("1701234567-1234567890@us-east-1.ahoy.4-1-1.chcimbabwe-internal.slack.com");
     entry.text.set("line one\n\"quoted\" back\\slash, emoji 🎉 and unicode ünïcodé");
     entry.file.set("C:\\Users\\test\\AppData\\Local\\Messages\\paste\\paste-1.png");
@@ -219,6 +227,7 @@ test "line round trip keeps every field through escapes" {
     try std.testing.expect(parseLine(allocator, line, &parsed));
     try std.testing.expectEqual(Provider.slack, parsed.provider);
     try std.testing.expectEqualSlices(u8, entry.idSlice(), parsed.idSlice());
+    try std.testing.expectEqualStrings(entry.account.slice(), parsed.account.slice());
     try std.testing.expectEqualStrings(entry.jid.slice(), parsed.jid.slice());
     try std.testing.expectEqualStrings(entry.text.slice(), parsed.text.slice());
     try std.testing.expectEqualStrings(entry.file.slice(), parsed.file.slice());
@@ -300,7 +309,7 @@ test "evictionVictim never evicts a write and gives up when only writes remain" 
 
 test "parse rejects NUL fields and negative enqueue times before Win32 use" {
     const allocator = std.testing.allocator;
-    for ([_][]const u8{ "jid", "text", "file", "reply_to", "reply_sender", "client_msg_id" }) |field| {
+    for ([_][]const u8{ "account", "jid", "text", "file", "reply_to", "reply_sender", "client_msg_id" }) |field| {
         const line = try std.fmt.allocPrint(allocator, "{{\"id\":\"0123456789abcdef0123456789abcdef\",\"provider\":\"whatsapp\",\"{s}\":\"before\\u0000after\",{s}}}", .{ field, if (std.mem.eql(u8, field, "jid")) "\"text\":\"synthetic\"" else if (std.mem.eql(u8, field, "text")) "\"jid\":\"synthetic\"" else "\"jid\":\"synthetic\",\"text\":\"synthetic\"" });
         defer allocator.free(line);
         var parsed = Entry{};
@@ -375,4 +384,25 @@ test "invalid upload fields are rejected" {
         var entry = Entry{};
         try std.testing.expect(!parseLine(std.testing.allocator, line, &entry));
     }
+}
+
+test "old line without account parses and keeps the send" {
+    const line =
+        \\{"id":"0123456789abcdef0123456789abcdef","provider":"whatsapp","jid":"4915112345678@s.whatsapp.net","text":"hello","file":"C:\\cache\\voice.ogg","reply_to":"quoted-id","reply_sender":"sender@s.whatsapp.net","client_msg_id":"client-id","attempts":2,"upload_file_id":"file-id","state":"queued","queued_unix":1700000000,"ptt":true,"voice_seconds":7}
+    ;
+    var parsed = Entry{};
+    try std.testing.expect(parseLine(std.testing.allocator, line, &parsed));
+    var expected = Entry{ .provider = .whatsapp, .attempts = 2, .queued_unix = 1700000000, .ptt = true, .voice_seconds = 7 };
+    @memcpy(&expected.id, "0123456789abcdef0123456789abcdef");
+    expected.jid.set("4915112345678@s.whatsapp.net");
+    expected.text.set("hello");
+    expected.file.set("C:\\cache\\voice.ogg");
+    expected.reply_to.set("quoted-id");
+    expected.reply_sender.set("sender@s.whatsapp.net");
+    expected.client_msg_id.set("client-id");
+    expected.upload_file_id.set("file-id");
+    try std.testing.expectEqualDeep(expected, parsed);
+    var scanner = Scanner.init(std.testing.allocator, line);
+    try std.testing.expectEqualDeep(expected, scanner.next().?.*);
+    try std.testing.expect(scanner.next() == null);
 }

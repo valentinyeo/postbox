@@ -17,6 +17,8 @@ function fail(line, rule, problem, fix) {
 {
     code = $0
     sub(/\/\/.*$/, "", code)
+    if (code ~ /std\.mem\.eql\(u8, [A-Za-z0-9_.\[\]]*\.jid\.slice\(\), [A-Za-z0-9_.\[\]]*\.jid\.slice\(\)\)/)
+        fail(FNR, "E1", "two chat ids compared without provider and account, so two accounts that share a contact mix", "chat_key.Key.eql(chat_key.of(x), chat_key.of(y))")
     if (code ~ /loadRegistryString[[:space:]]*\(|REG_SZ/ && code ~ /lit[[:space:]]*\([[:space:]]*"([^"]*ApiKey|TelegramApiHash)"[[:space:]]*\)/)
         fail(FNR, "C1", "API key uses plain registry storage", "slack_win.loadSecret for encrypted storage and migration")
     if (code ~ /^[[:space:]]*if \(staged_file\.len > 0/ && code ~ /\{/ && code !~ /stagedFileGoesToWacli\(/)

@@ -49,6 +49,8 @@ const App = struct {
     chats: [1]struct { jid: Text = .{}, name: WideText(159) = .{} } = .{.{}},
     selected_chat: usize = 0,
     chat_count: usize = 1,
+    displayed_provider: enum { whatsapp, slack, telegram } = .whatsapp,
+    displayed_account: Text = .{},
     displayed_jid: Text = .{},
     messages: [1]Message = .{.{}},
     message_count: usize = 1,
@@ -94,6 +96,7 @@ fn readFileWin(allocator: std.mem.Allocator, path: []const u8, _: usize) ?[]u8 {
 fn fixture(session: *Session) App {
     var a = App{ .openrouter_session = session };
     a.cache_tag.set("account-a");
+    a.displayed_account.set("account-a");
     a.chats[0].jid.set("chat-a");
     a.displayed_jid.set("chat-a");
     a.messages[0].id.set("message-a");

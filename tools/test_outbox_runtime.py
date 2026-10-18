@@ -6,7 +6,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FUNCTIONS = (
-    "stagedFileGoesToWacli", "persistOutbox", "loadOutbox", "enqueueSlackOutbox", "retrySlackOutbox",
+    "stagedFileGoesToWacli", "persistOutbox", "loadOutbox", "bindOutboxAccount", "enqueueSlackOutbox", "retrySlackOutbox",
     "retireSlackOutbox", "evictOldestFailedSlackOutbox", "completePendingSend", "removeFirstPendingSend", "sendMessage",
     "resolveSlackSend", "pendingByClientMsgId", "jobIsWrite", "jobIsSlack",
     "wacliEnqueue", "wacliTakeJob", "wacliJobArgs", "storedAfterQueued", "sentMessageExists", "startNextSend", "retryWacliRefreshes", "appendWhatsAppPending", "retryingBubbleText", "localSendId",
@@ -42,6 +42,10 @@ def mutate(source, name):
         "voice-metadata": ("entry.ptt = pending.ptt;", "entry.ptt = false;"),
         "status-seen-eviction": (".reaction, .status_seen, .slack_send, .slack_attach, .slack_share => true,", ".reaction, .slack_send, .slack_attach, .slack_share => true,"),
         "lost-refresh": ("if (!jobIsWrite(job.kind)) a.wacli_refresh_again = true;", ""),
+        "no-account-migration": ("if (pending.provider == .whatsapp and pending.account.len == 0)", "if (false)"),
+        "overwrite-known-account": ("pending.provider == .whatsapp and pending.account.len == 0", "pending.provider == .whatsapp"),
+        "send-wrong-account": ("or !std.mem.eql(u8, head.account.slice(), a.cache_tag.slice())", ""),
+        "jid-only-dedup": ("if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), key) or !chat_key.Key.eql(chat_key.displayed(a), key)) return false;", "if (!std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), key.id)) return false;"),
         "partial-load": ("if (win.ReadFile(handle, buffer[total..].ptr, @intCast(buffer.len - total), &got, null) == 0) return;", "if (win.ReadFile(handle, buffer[total..].ptr, @intCast(buffer.len - total), &got, null) == 0) break;"),
     }
     if name == "overtake-refused":
@@ -75,10 +79,11 @@ def main():
                     "wrong-retirement", "wrong-failed-bubble", "slack-paste-to-whatsapp",
                     "same-text-reload", "restored-resend", "delete-before-retirement", "silent-admission",
                     "utf8-truncation", "partial-load", "overtake-refused", "short-job-args",
-                    "nul-field", "negative-time", "lost-refresh", "evict-write", "hidden-restored-bubble", "voice-metadata", "status-seen-eviction"]
+                    "nul-field", "negative-time", "lost-refresh", "evict-write", "hidden-restored-bubble", "voice-metadata", "status-seen-eviction", "no-account-migration", "overwrite-known-account", "send-wrong-account", "jid-only-dedup"]
     (ROOT / ".zig-cache").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="outbox-runtime-", dir=ROOT / ".zig-cache") as directory:
         directory = Path(directory)
+        (directory / "chat_key.zig").write_text((ROOT / "src/chat_key.zig").read_text())
         (directory / "transport.zig").write_text((ROOT / "src/transport.zig").read_text())
         (directory / "voice_sent.zig").write_text((ROOT / "src/voice_sent.zig").read_text())
         format_source = (ROOT / "src/outbox.zig").read_text()

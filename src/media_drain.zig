@@ -226,9 +226,9 @@ test "transport media placeholders are hidden but real captions are retained" {
 test "reopened chat snapshot preserves the local file and prevents another download" {
     const cache = @import("chat_cache.zig");
     const payload = "{\"data\":{\"messages\":[{\"MsgID\":\"sent-document\",\"MediaType\":\"document\",\"FromMe\":true,\"LocalPath\":\"C:\\\\cache\\\\report.pdf\",\"Filename\":\"report.pdf\"}]}}";
-    const stored = try cache.envelope(std.testing.allocator, "group@g.us", payload);
+    const stored = try cache.envelope(std.testing.allocator, "account", "group@g.us", payload);
     defer std.testing.allocator.free(stored);
-    const restored = cache.payloadFor(stored, "group@g.us").?;
+    const restored = cache.payloadFor(stored, "account", "group@g.us").?;
     var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, restored, .{});
     defer parsed.deinit();
     const row = parsed.value.object.get("data").?.object.get("messages").?.array.items[0].object;
@@ -238,7 +238,7 @@ test "reopened chat snapshot preserves the local file and prevents another downl
     try std.testing.expectEqual(@as(?usize, null), selectNext(&.{candidate}, 0));
     candidate.has_local_path = false; // Caller found the cached file missing.
     try std.testing.expectEqual(@as(?usize, 0), selectNext(&.{candidate}, 0));
-    try std.testing.expect(cache.payloadFor(stored, "dm@s.whatsapp.net") == null);
+    try std.testing.expect(cache.payloadFor(stored, "account", "dm@s.whatsapp.net") == null);
 }
 
 test "duplicate ids in different chats have independent attempt keys" {

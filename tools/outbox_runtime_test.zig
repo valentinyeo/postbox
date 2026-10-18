@@ -1,5 +1,6 @@
 const std = @import("std");
 const outbox = @import("outbox.zig");
+const chat_key = @import("chat_key.zig");
 const transport = @import("transport.zig");
 const voice_sent = @import("voice_sent.zig");
 const Utf8Text = outbox.Str;
@@ -90,6 +91,7 @@ const TelegramClient = struct {
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     io: std.Io = std.testing.io,
+    cache_tag: Utf8Text(32) = .{},
     outbox_path: []const u8 = "outbox.jsonl",
     outbox_load_failed: bool = false,
     pending_sends: [max_pending_sends]PendingSend = @splat(.{}),
@@ -115,10 +117,10 @@ const App = struct {
     hwnd: ?usize = null,
     chat_count: usize = 1,
     selected_chat: usize = 0,
-    chats: [1]struct { jid: Utf8Text(191) = .{}, provider: transport.Provider = .whatsapp } = @splat(.{}),
+    chats: [1]struct { account: Utf8Text(32) = .{}, jid: Utf8Text(191) = .{}, provider: transport.Provider = .whatsapp } = @splat(.{}),
     reply_to: Utf8Text(191) = .{},
     reply_sender: Utf8Text(191) = .{},
-    staged_image: struct { path: Utf8Text(519) = .{}, jid: Utf8Text(191) = .{} } = .{},
+    staged_image: struct { provider: transport.Provider = .whatsapp, account: Utf8Text(32) = .{}, path: Utf8Text(519) = .{}, jid: Utf8Text(191) = .{} } = .{},
     slack_attach: WideText(519) = .{},
     slack_attach_jid: Utf8Text(191) = .{},
     telegram: ?*TelegramClient = null,
@@ -128,6 +130,8 @@ const App = struct {
     compose_client_height: i32 = 0,
     messages: [3]Message = @splat(.{}),
     message_count: usize = 0,
+    displayed_provider: transport.Provider = .whatsapp,
+    displayed_account: Utf8Text(32) = .{},
     displayed_jid: Utf8Text(191) = .{},
     slack_log_mutex: NoLock = .{},
     slack_log: NoLock = .{},
@@ -299,7 +303,7 @@ fn releaseStagedImage(a: *App) void {
 fn discardStagedImage(a: *App) void {
     releaseStagedImage(a);
 }
-fn forgetFailedSend(_: *App, _: []const u8, _: []const u8) void {}
+fn forgetFailedSend(_: *App, _: chat_key.Key, _: []const u8) void {}
 fn nowUnixSeconds() i64 {
     return 42;
 }
@@ -336,6 +340,13 @@ fn refreshMessages(_: *App) void {
 fn refreshGroups(_: *App) void {}
 fn refreshSlackWorkspace(_: *App) void {}
 fn enqueueCacheTagProbe(_: *App) void {}
+fn fixture() App {
+    var app = App{};
+    app.cache_tag.set("aaaaaaaaaaaaaaaa");
+    app.chats[0].account = app.cache_tag;
+    app.displayed_account = app.cache_tag;
+    return app;
+}
 fn sampleEntry(number: u8) outbox.Entry {
     var value = outbox.Entry{};
     value.id = outbox.hexId(@splat(number));
@@ -351,7 +362,7 @@ fn setCompose(text: []const u8) void {
 test "failed atomic journal stages do not acknowledge persistence" {
     for ([_]@TypeOf(fault){ .open, .write, .flush, .rename }) |failure| {
         reset();
-        var app = App{};
+        var app = fixture();
         app.slack_outbox_count = 1;
         app.slack_outbox[0].entry = sampleEntry(1);
         try std.testing.expect(persistOutbox(&app));
@@ -364,14 +375,14 @@ test "failed atomic journal stages do not acknowledge persistence" {
         try std.testing.expectEqual(old_hash, std.hash.Wyhash.hash(0, disk[0..disk_len]));
     }
     reset();
-    var app = App{};
+    var app = fixture();
     try std.testing.expect(persistOutbox(&app));
     try std.testing.expect(flushes > 0 and try_write_through);
 }
 
 test "failed journal admission preserves composer reply and staged image" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.chats[0].jid.set("synthetic-chat");
     app.reply_to.set("synthetic-reply");
     setCompose("draft");
@@ -381,10 +392,15 @@ test "failed journal admission preserves composer reply and staged image" {
     try std.testing.expect(compose_len > 0 and app.reply_to.len > 0);
     app.staged_image.path.set("synthetic.png");
     app.staged_image.jid = app.chats[0].jid;
+    app.staged_image.provider = app.chats[0].provider;
+    app.staged_image.account = app.chats[0].account;
     sendMessage(&app);
     try std.testing.expectEqual(@as(usize, 0), app.pending_send_count);
     try std.testing.expect(app.staged_image.path.len > 0 and app.reply_to.len > 0);
     app.chats[0].provider = .slack;
+    app.chats[0].account.set("");
+    app.staged_image.provider = .slack;
+    app.staged_image.account.set("");
     sendMessage(&app);
     try std.testing.expectEqual(@as(usize, 0), app.slack_outbox_count);
     try std.testing.expect(app.staged_image.path.len > 0 and compose_len > 0);
@@ -392,7 +408,7 @@ test "failed journal admission preserves composer reply and staged image" {
 
 test "completed file stays alive until journal retirement succeeds" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.pending_send_count = 1;
     app.pending_sends[0].file.set("synthetic.png");
     try std.testing.expect(persistOutbox(&app));
@@ -413,12 +429,12 @@ test "completed file stays alive until journal retirement succeeds" {
 
 test "restored WhatsApp sends have unique bubble sequences" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.slack_outbox_count = 2;
     app.slack_outbox[0].entry = sampleEntry(1);
     app.slack_outbox[1].entry = sampleEntry(2);
     try std.testing.expect(persistOutbox(&app));
-    var restored = App{};
+    var restored = fixture();
     loadOutbox(&restored);
     try std.testing.expect(!restored.outbox_load_failed);
     try std.testing.expectEqual(@as(usize, 2), restored.pending_send_count);
@@ -431,7 +447,7 @@ test "restored WhatsApp sends have unique bubble sequences" {
 
 test "restored WhatsApp send already delivered in the chat is not resent" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.chats[0].jid.set("synthetic-chat");
     app.pending_send_count = 1;
     app.pending_sends[0].id = sampleEntry(1).id;
@@ -439,7 +455,7 @@ test "restored WhatsApp send already delivered in the chat is not resent" {
     app.pending_sends[0].text.set("synthetic text");
     app.pending_sends[0].queued_unix = 42;
     try std.testing.expect(persistOutbox(&app));
-    var restored = App{};
+    var restored = fixture();
     restored.chats = app.chats;
     loadOutbox(&restored);
     try std.testing.expect(!restored.outbox_load_failed);
@@ -451,6 +467,7 @@ test "restored WhatsApp send already delivered in the chat is not resent" {
     restored.messages[0].send_state = .none;
     restored.messages[0].text.set(restored.allocator, "synthetic text");
     restored.messages[0].timestamp.set("1970-01-01T00:00:42Z");
+    restored.displayed_jid = restored.chats[0].jid;
     startNextSend(&restored);
     try std.testing.expectEqual(@as(usize, 0), spawned);
     try std.testing.expectEqual(@as(usize, 0), restored.pending_send_count);
@@ -459,8 +476,9 @@ test "restored WhatsApp send already delivered in the chat is not resent" {
 
 test "fresh WhatsApp send is not suppressed by matching delivered text" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.chats[0].jid.set("synthetic-chat");
+    app.displayed_jid = app.chats[0].jid;
     app.message_count = 1;
     app.messages[0].send_state = .none;
     app.messages[0].text.set(app.allocator, "synthetic text");
@@ -474,13 +492,13 @@ test "fresh WhatsApp send is not suppressed by matching delivered text" {
 
 test "partial journal read fails closed and cannot overwrite disk" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.slack_outbox_count = 1;
     app.slack_outbox[0].entry = sampleEntry(1);
     try std.testing.expect(persistOutbox(&app));
     const saved_len = disk_len;
     fault = .read;
-    var restored = App{};
+    var restored = fixture();
     loadOutbox(&restored);
     try std.testing.expect(restored.outbox_load_failed);
     fault = .none;
@@ -492,7 +510,7 @@ test "partial journal read fails closed and cannot overwrite disk" {
 
 test "disconnected Slack outbox waits without losing entries" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.slack_tokens = null;
     app.slack_outbox_count = 1;
     app.slack_outbox[0].entry = sampleEntry(1);
@@ -507,7 +525,7 @@ test "disconnected Slack outbox waits without losing entries" {
 
 test "refused write cannot be overtaken and full queue preserves writes" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.slack_outbox_count = 2;
     app.slack_outbox[0].entry = sampleEntry(1);
     app.slack_outbox[1].entry = sampleEntry(2);
@@ -528,7 +546,7 @@ test "refused write cannot be overtaken and full queue preserves writes" {
 
 test "Slack results retire exact ids even after echo and out-of-order admission" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.slack_outbox_count = 2;
     app.slack_outbox[0].entry = sampleEntry(1);
     app.slack_outbox[1].entry = sampleEntry(2);
@@ -551,7 +569,7 @@ test "Slack results retire exact ids even after echo and out-of-order admission"
 
 test "failed Slack result never fails a later bubble consumed by a prior echo" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.slack_outbox_count = 2;
     app.slack_outbox[0].entry = sampleEntry(1);
     app.slack_outbox[1].entry = sampleEntry(2);
@@ -559,7 +577,7 @@ test "failed Slack result never fails a later bubble consumed by a prior echo" {
     app.message_count = 1;
     app.messages[0].timestamp.set("client-two");
     app.messages[0].text.set(app.allocator, "later draft");
-    var result = WacliResult{};
+    var result = WacliResult{ .account = app.displayed_account };
     result.jid.set("synthetic-chat");
     result.extra.set("HttpFailed");
     result.msg_id.set(app.slack_outbox[0].entry.idSlice());
@@ -578,10 +596,15 @@ test "staged files reach wacli only for WhatsApp" {
 
 test "Slack pasted image reaches Slack journal and preserves borrowed path" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.chats[0].provider = .slack;
+    app.chats[0].account.set("");
+    app.staged_image.provider = .slack;
+    app.staged_image.account.set("");
     app.chats[0].jid.set("synthetic-chat");
     app.staged_image.jid = app.chats[0].jid;
+    app.staged_image.provider = app.chats[0].provider;
+    app.staged_image.account = app.chats[0].account;
     app.staged_image.path.set("synthetic.png");
     sendMessage(&app);
     try std.testing.expectEqual(@as(usize, 0), app.pending_send_count);
@@ -593,8 +616,11 @@ test "Slack pasted image reaches Slack journal and preserves borrowed path" {
 
 test "multibyte composer text is refused rather than journaled as invalid UTF8" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.chats[0].provider = .slack;
+    app.chats[0].account.set("");
+    app.staged_image.provider = .slack;
+    app.staged_image.account.set("");
     compose_len = 3000;
     @memset(compose_text[0..compose_len], 0x00fc);
     sendMessage(&app);
@@ -604,8 +630,11 @@ test "multibyte composer text is refused rather than journaled as invalid UTF8" 
 
 test "Slack text is not truncated to the old 512-byte job capacity" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.chats[0].provider = .slack;
+    app.chats[0].account.set("");
+    app.staged_image.provider = .slack;
+    app.staged_image.account.set("");
     app.chats[0].jid.set("synthetic-chat");
     const text = [_]u8{'a'} ** 1024;
     setCompose(&text);
@@ -617,7 +646,7 @@ test "Slack text is not truncated to the old 512-byte job capacity" {
 
 test "chat read refused by writes retries after the queue drains" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.wacli_queue_len = app.wacli_queue.len;
     for (&app.wacli_queue) |*job| job.kind = .slack_send;
     try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .messages }, true));
@@ -632,12 +661,12 @@ test "chat read refused by writes retries after the queue drains" {
 
 test "restored pending bubble is not hidden by a matching old text" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.chats[0].jid.set("synthetic-chat");
     app.message_count = 1;
     app.messages[0].send_state = .none;
     app.messages[0].text.set(app.allocator, "synthetic text");
-    var pending = PendingSend{};
+    var pending = PendingSend{ .account = app.chats[0].account };
     pending.from_disk = true;
     pending.jid = app.chats[0].jid;
     pending.text.set("synthetic text");
@@ -649,7 +678,7 @@ test "restored pending bubble is not hidden by a matching old text" {
 
 test "restored voice notes retain their transport flag duration and local player" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.chats[0].jid.set("synthetic-chat");
     app.pending_send_count = 1;
     const pending = &app.pending_sends[0];
@@ -660,7 +689,7 @@ test "restored voice notes retain their transport flag duration and local player
     pending.voice_seconds = 42;
     pending.reply_to.set("synthetic-reply");
     try std.testing.expect(persistOutbox(&app));
-    var restored = App{};
+    var restored = fixture();
     restored.chats = app.chats;
     loadOutbox(&restored);
     try std.testing.expectEqual(@as(usize, 1), restored.pending_send_count);
@@ -675,7 +704,7 @@ test "restored voice notes retain their transport flag duration and local player
 
 test "failed file retirement keeps its source without unarchiving or caching delivery" {
     reset();
-    var app = App{};
+    var app = fixture();
     app.pending_send_count = 1;
     app.pending_sends[0].file.set("synthetic.png");
     try std.testing.expect(persistOutbox(&app));
@@ -688,11 +717,109 @@ test "failed file retirement keeps its source without unarchiving or caching del
 
 test "queued Status seen receipts are retained when the shared queue is full" {
     reset();
-    var app = App{};
+    var app = fixture();
     for (0..app.wacli_queue.len) |_| {
         try std.testing.expect(wacliEnqueue(&app, .{ .kind = .status_seen }, true));
     }
     try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .slack_send }, true));
     try std.testing.expectEqual(app.wacli_queue.len, app.wacli_queue_len);
     for (app.wacli_queue) |job| try std.testing.expectEqual(WacliJobKind.status_seen, job.kind);
+}
+
+
+test "legacy outbox migration retains every send with immediate or delayed account discovery" {
+    const legacy = "{\"id\":\"01010101010101010101010101010101\",\"provider\":\"whatsapp\",\"jid\":\"synthetic-chat\",\"text\":\"synthetic text\",\"file\":\"synthetic.ogg\",\"reply_to\":\"quoted-id\",\"reply_sender\":\"sender\",\"client_msg_id\":\"\",\"attempts\":0,\"upload_file_id\":\"\",\"state\":\"queued\",\"queued_unix\":42,\"ptt\":true,\"voice_seconds\":7}\n";
+    for ([_]bool{ false, true }) |delayed| {
+        reset();
+        var writer = std.Io.Writer.fixed(&disk);
+        try writer.writeAll(legacy);
+        var other = outbox.Entry{};
+        other.id = sampleEntry(2).id;
+        other.jid.set("synthetic-chat");
+        other.text.set("synthetic text");
+        other.account.set("bbbbbbbbbbbbbbbb");
+        try outbox.writeLine(&writer, &other);
+        var slack_entry = sampleEntry(3);
+        slack_entry.provider = .slack;
+        try outbox.writeLine(&writer, &slack_entry);
+        disk_len = writer.end;
+        exists = true;
+        const old_hash = std.hash.Wyhash.hash(0, disk[0..disk_len]);
+        var app = fixture();
+        if (delayed) app.cache_tag.set("");
+        loadOutbox(&app);
+        try std.testing.expect(!app.outbox_load_failed);
+        try std.testing.expectEqual(@as(usize, 2), app.pending_send_count);
+        try std.testing.expectEqual(@as(usize, 1), app.slack_outbox_count);
+        try std.testing.expectEqualStrings("bbbbbbbbbbbbbbbb", app.pending_sends[1].account.slice());
+        if (delayed) {
+            try std.testing.expectEqualStrings("", app.pending_sends[0].account.slice());
+            try std.testing.expectEqual(old_hash, std.hash.Wyhash.hash(0, disk[0..disk_len]));
+            startNextSend(&app);
+            try std.testing.expectEqual(@as(usize, 0), spawned);
+            app.cache_tag.set("aaaaaaaaaaaaaaaa");
+            fault = .rename;
+            bindOutboxAccount(&app);
+            try std.testing.expect(app.slack_outbox_dirty);
+            try std.testing.expectEqual(old_hash, std.hash.Wyhash.hash(0, disk[0..disk_len]));
+            startNextSend(&app);
+            try std.testing.expectEqual(@as(usize, 0), spawned);
+            fault = .none;
+            bindOutboxAccount(&app);
+        }
+        try std.testing.expect(!app.slack_outbox_dirty);
+        var expected = outbox.Entry{};
+        try std.testing.expect(outbox.parseLine(std.testing.allocator, legacy, &expected));
+        expected.account.set("aaaaaaaaaaaaaaaa");
+        var scanner = outbox.Scanner.init(std.testing.allocator, disk[0..disk_len]);
+        try std.testing.expectEqualDeep(expected, scanner.next().?.*);
+        try std.testing.expectEqualDeep(other, scanner.next().?.*);
+        try std.testing.expectEqualDeep(slack_entry, scanner.next().?.*);
+        try std.testing.expect(scanner.next() == null);
+        const writes = flushes;
+        bindOutboxAccount(&app);
+        try std.testing.expectEqual(writes, flushes);
+        var restarted = fixture();
+        loadOutbox(&restarted);
+        try std.testing.expectEqual(@as(usize, 2), restarted.pending_send_count);
+        try std.testing.expectEqual(@as(usize, 1), restarted.slack_outbox_count);
+        try std.testing.expectEqualStrings("aaaaaaaaaaaaaaaa", restarted.pending_sends[0].account.slice());
+        try std.testing.expectEqualStrings("bbbbbbbbbbbbbbbb", restarted.pending_sends[1].account.slice());
+        try std.testing.expectEqualStrings("synthetic.ogg", restarted.pending_sends[0].file.slice());
+        try std.testing.expectEqualStrings("quoted-id", restarted.pending_sends[0].reply_to.slice());
+        try std.testing.expect(restarted.pending_sends[0].ptt);
+        try std.testing.expectEqual(@as(u32, 7), restarted.pending_sends[0].voice_seconds);
+    }
+}
+
+test "queued send for another account waits and cannot dedup against the shared contact" {
+    reset();
+    var app = fixture();
+    app.chats[0].jid.set("synthetic-chat");
+    app.pending_send_count = 1;
+    const pending = &app.pending_sends[0];
+    pending.id = sampleEntry(1).id;
+    pending.account.set("bbbbbbbbbbbbbbbb");
+    pending.jid = app.chats[0].jid;
+    pending.text.set("synthetic text");
+    pending.from_disk = true;
+    pending.queued_unix = 42;
+    app.displayed_jid = app.chats[0].jid;
+    app.message_count = 1;
+    app.messages[0].send_state = .none;
+    app.messages[0].text.set(app.allocator, "synthetic text");
+    try std.testing.expect(persistOutbox(&app));
+    try std.testing.expect(!sentMessageExists(&app, chat_key.of(pending), pending.text.slice(), 42));
+    startNextSend(&app);
+    try std.testing.expectEqual(@as(usize, 0), spawned);
+    try std.testing.expectEqual(@as(usize, 1), app.pending_send_count);
+    app.cache_tag.set("bbbbbbbbbbbbbbbb");
+    startNextSend(&app);
+    try std.testing.expectEqual(@as(usize, 1), spawned);
+    try std.testing.expectEqual(@as(usize, 1), app.pending_send_count);
+    appendWhatsAppPending(&app, pending, true);
+    try std.testing.expectEqual(@as(usize, 1), app.message_count);
+    app.chats[0].account = app.cache_tag;
+    appendWhatsAppPending(&app, pending, true);
+    try std.testing.expectEqual(@as(usize, 2), app.message_count);
 }
