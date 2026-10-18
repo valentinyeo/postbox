@@ -12,6 +12,16 @@ fi
 run() { echo "preflight: $*"; "$@"; }
 run "$ZIG" fmt --check src build.zig
 run "$ZIG" build test
+run python3 tools/test_outbox_runtime.py --zig "$ZIG" --negative-controls
 run "$ZIG" test src/stretch.zig
 run "$ZIG" build -Dtarget=x86_64-windows-gnu --release=small
+run du -h zig-out/bin/Messages.exe
 run bash tools/lint-repeats.sh .
+run python3 -m unittest discover -s tools -p 'test_*.py'
+run python3 tools/check_cache_keys.py
+run python3 tools/check_new_comments.py origin/main
+run git fetch --quiet --no-tags origin '+refs/pull/*/head:refs/remotes/pr/*'
+run bash tools/test-preflight-guard.sh
+run bash tools/test-agent-setup.sh
+run bash tools/test-lint-repeats.sh
+run bash tools/test-ci-green.sh
