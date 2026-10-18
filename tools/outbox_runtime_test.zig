@@ -246,7 +246,6 @@ var closes: usize = 0;
 var try_write_through = false;
 var deleted: usize = 0;
 var spawned: usize = 0;
-var delivered_same_text = false;
 var refreshed: usize = 0;
 var compose_text: [4096]u16 = @splat(0);
 var compose_len: usize = 0;
@@ -260,7 +259,6 @@ fn reset() void {
     deleted = 0;
     spawned = 0;
     try_write_through = false;
-    delivered_same_text = false;
     compose_len = 0;
     refreshed = 0;
 }
@@ -325,9 +323,6 @@ fn mediaBusy(_: *App) bool {
 }
 fn avatarBusy(_: *App) bool {
     return false;
-}
-fn sentMessageExists(_: *App, _: []const u8, _: []const u8, _: i64) bool {
-    return delivered_same_text;
 }
 fn appendLaunchLog(_: *App, _: []const u8) void {}
 fn drainMediaDownloads(_: *App) void {}
@@ -427,9 +422,51 @@ test "restored WhatsApp sends have unique bubble sequences" {
     try std.testing.expectEqual(@as(usize, 2), restored.pending_send_count);
     try std.testing.expect(restored.pending_sends[0].seq > 0);
     try std.testing.expect(restored.pending_sends[1].seq > restored.pending_sends[0].seq);
-    delivered_same_text = true;
     startNextSend(&restored);
     try std.testing.expectEqual(@as(usize, 2), restored.pending_send_count);
+    try std.testing.expectEqual(@as(usize, 1), spawned);
+}
+
+test "restored WhatsApp send already delivered in the chat is not resent" {
+    reset();
+    var app = App{};
+    app.chats[0].jid.set("synthetic-chat");
+    app.pending_send_count = 1;
+    app.pending_sends[0].id = sampleEntry(1).id;
+    app.pending_sends[0].jid = app.chats[0].jid;
+    app.pending_sends[0].text.set("synthetic text");
+    app.pending_sends[0].queued_unix = 42;
+    try std.testing.expect(persistOutbox(&app));
+    var restored = App{};
+    restored.chats = app.chats;
+    loadOutbox(&restored);
+    try std.testing.expect(!restored.outbox_load_failed);
+    try std.testing.expectEqual(@as(usize, 1), restored.pending_send_count);
+    try std.testing.expect(restored.pending_sends[0].from_disk);
+    try std.testing.expectEqual(@as(u8, 0), restored.pending_sends[0].retries);
+    try std.testing.expect(!restored.pending_sends[0].ambiguous);
+    restored.message_count = 1;
+    restored.messages[0].send_state = .none;
+    restored.messages[0].text.set(restored.allocator, "synthetic text");
+    restored.messages[0].timestamp.set("1970-01-01T00:00:42Z");
+    startNextSend(&restored);
+    try std.testing.expectEqual(@as(usize, 0), spawned);
+    try std.testing.expectEqual(@as(usize, 0), restored.pending_send_count);
+    try std.testing.expectEqual(@as(usize, 0), disk_len);
+}
+
+test "fresh WhatsApp send is not suppressed by matching delivered text" {
+    reset();
+    var app = App{};
+    app.chats[0].jid.set("synthetic-chat");
+    app.message_count = 1;
+    app.messages[0].send_state = .none;
+    app.messages[0].text.set(app.allocator, "synthetic text");
+    app.messages[0].timestamp.set("1970-01-01T00:00:42Z");
+    setCompose("synthetic text");
+    sendMessage(&app);
+    try std.testing.expectEqual(@as(usize, 1), app.pending_send_count);
+    try std.testing.expect(!app.pending_sends[0].from_disk);
     try std.testing.expectEqual(@as(usize, 1), spawned);
 }
 

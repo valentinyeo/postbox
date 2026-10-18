@@ -9041,7 +9041,7 @@ fn startNextSend(a: *App) void {
     // wasn't a store lock) might be sending a message a second time: if the
     // open chat already shows it as delivered, count it sent instead.
     const head = &a.pending_sends[0];
-    if (head.retries > 0 and head.ambiguous and
+    if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and
         sentMessageExists(a, head.jid.slice(), head.text.slice(), head.queued_unix))
     {
         appendLaunchLog(a, "send: matched an already-delivered message, not resending");

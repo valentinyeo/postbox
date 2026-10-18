@@ -9,7 +9,7 @@ FUNCTIONS = (
     "persistOutbox", "loadOutbox", "enqueueSlackOutbox", "retrySlackOutbox",
     "retireSlackOutbox", "completePendingSend", "removeFirstPendingSend", "sendMessage",
     "resolveSlackSend", "pendingByClientMsgId", "jobIsWrite", "jobIsSlack",
-    "wacliEnqueue", "wacliTakeJob", "wacliJobArgs", "startNextSend", "retryWacliRefreshes", "appendWhatsAppPending", "retryingBubbleText", "localSendId",
+    "wacliEnqueue", "wacliTakeJob", "wacliJobArgs", "storedAfterQueued", "sentMessageExists", "startNextSend", "retryWacliRefreshes", "appendWhatsAppPending", "retryingBubbleText", "localSendId",
 )
 
 
@@ -33,7 +33,8 @@ def mutate(source, name):
         "wrong-retirement": ("if (!std.mem.eql(u8, slot.entry.idSlice(), id)) continue;", "_ = id;"),
         "wrong-failed-bubble": ("const index = pendingByClientMsgId(a, client_msg_id) orelse return;", "const index = if (!result.ok) oldestPendingSend(a) orelse return else pendingByClientMsgId(a, client_msg_id) orelse return;"),
         "slack-paste-to-whatsapp": ("staged_file.len > 0 and !selectedChatIsSlack(a)", "staged_file.len > 0"),
-        "same-text-reload": ("if (head.retries > 0 and head.ambiguous and", "if ((head.retries > 0 and head.ambiguous or head.retries == 0) and"),
+        "same-text-reload": ("if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if ((head.from_disk or head.retries == 0 or (head.retries > 0 and head.ambiguous)) and"),
+        "restored-resend": ("if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if (head.retries > 0 and head.ambiguous and"),
         "delete-before-retirement": ("if (!persistOutbox(a)) {\n        setStatus(a, \"Could not save send completion; retrying journal\");\n        return false;\n    }", "_ = persistOutbox(a);"),
         "silent-admission": ("if (!persistOutbox(a)) {\n        a.pending_send_count -= 1;\n        pending.* = .{};\n        setStatus(a, \"Could not save outbox; message not queued\");\n        return;\n    }", "_ = persistOutbox(a);"),
         "utf8-truncation": ("if (text.len > outbox.max_text_len)", "if (false)"),
@@ -70,7 +71,7 @@ def main():
     if args.negative_controls:
         mutants += ["ignored-swap", "unflushed-write", "local-zero", "no-credentials",
                     "wrong-retirement", "wrong-failed-bubble", "slack-paste-to-whatsapp",
-                    "same-text-reload", "delete-before-retirement", "silent-admission",
+                    "same-text-reload", "restored-resend", "delete-before-retirement", "silent-admission",
                     "utf8-truncation", "partial-load", "overtake-refused", "short-job-args",
                     "nul-field", "negative-time", "lost-refresh", "evict-write", "hidden-restored-bubble", "voice-metadata", "status-seen-eviction"]
     (ROOT / ".zig-cache").mkdir(exist_ok=True)
