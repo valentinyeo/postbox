@@ -12,7 +12,7 @@ const std = @import("std");
 
 pub const pipe_prefix = "\\\\.\\pipe\\wazig-control-";
 
-pub const Command = enum { status, chats, search, view, select, messages, archive, unarchive, @"archive-many" };
+pub const Command = enum { status, statuses, @"open-status", chats, search, view, select, messages, archive, unarchive, @"archive-many" };
 pub const Messenger = enum { whatsapp, slack, telegram };
 
 pub const Request = struct {
@@ -30,6 +30,8 @@ pub const CommandInfo = struct { cmd: Command, usage: []const u8, summary: []con
 
 pub const commands = [_]CommandInfo{
     .{ .cmd = .status, .usage = "status", .summary = "version, active messenger, selected chat, sync state, pending sends, search text" },
+    .{ .cmd = .statuses, .usage = "statuses", .summary = "loaded WhatsApp Status updates and local viewed state" },
+    .{ .cmd = .@"open-status", .usage = "open-status", .summary = "open WhatsApp Status without focusing the app" },
     .{ .cmd = .chats, .usage = "chats [--messenger whatsapp|slack|telegram] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
     .{ .cmd = .search, .usage = "search <text>", .summary = "set the sidebar search text (\"\" clears it)" },
     .{ .cmd = .view, .usage = "view <whatsapp|slack|telegram>", .summary = "switch the sidebar messenger, like Alt+1/Alt+2" },
@@ -104,7 +106,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
     }
     const items = positional.items;
     switch (cmd) {
-        .status, .chats => if (items.len != 0) return usage(message, "unexpected argument"),
+        .status, .statuses, .@"open-status", .chats => if (items.len != 0) return usage(message, "unexpected argument"),
         .search => {
             // Words join with spaces, so `search foo bar` needs no quoting.
             if (items.len == 0) return usage(message, "search needs text (\"\" clears it)");
@@ -365,4 +367,11 @@ test "help lists every command and says nothing sends" {
     for (commands) |info| try std.testing.expect(std.mem.indexOf(u8, help_text, info.usage) != null);
     try std.testing.expect(std.mem.indexOf(u8, help_text, "Nothing here sends messages") != null);
     try std.testing.expectEqual(@typeInfo(Command).@"enum".fields.len, commands.len);
+}
+
+test "status commands parse without focus or mutation arguments" {
+    try std.testing.expectEqual(Command.statuses, (try parseForTest(&.{"statuses"})).cmd);
+    try std.testing.expectEqual(Command.@"open-status", (try parseForTest(&.{"open-status"})).cmd);
+    var message: []const u8 = "";
+    try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{ "statuses", "extra" }, &message));
 }

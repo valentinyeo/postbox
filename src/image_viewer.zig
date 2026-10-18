@@ -43,7 +43,7 @@ fn viewerTargetSize(source_width: u32, source_height: u32, max_width: i32, max_h
 
 // Decode the attachment's first frame at viewer size into a top-down 32bpp
 // DIB. Fills out_width/out_height with the bitmap's pixel size.
-fn decodeImageViewerBitmap(a: anytype, message: anytype, max_width: i32, max_height: i32, out_width: *i32, out_height: *i32) ?win.HBITMAP {
+pub fn decodeImageViewerBitmap(a: anytype, message: anytype, max_width: i32, max_height: i32, out_width: *i32, out_height: *i32) ?win.HBITMAP {
     if (a.wic_factory == null or message.local_path.len == 0) return null;
     var decoder: [*c]win.IWICBitmapDecoder = null;
     if (a.wic_factory.*.lpVtbl.*.CreateDecoderFromFilename.?(
