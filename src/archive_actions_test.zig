@@ -1,6 +1,7 @@
 //! Host tests of the archive handlers extracted from main.zig by build.zig.
 //! Only Windows UI, persistence and the child-process queue are stubbed.
 const std = @import("std");
+const chat_key = @import("chat_key");
 const archive_rules = @import("archive_rules");
 const voice_sent = @import("voice_sent");
 const ArchiveSource = if (@hasDecl(archive_rules, "Source")) archive_rules.Source else enum { shortcut, menu, control, resurface, send };
@@ -23,13 +24,14 @@ fn Utf8Text(comptime capacity: usize) type {
             self.len = @min(text.len, capacity);
             @memcpy(self.data[0..self.len], text[0..self.len]);
         }
-        fn slice(self: *const @This()) []const u8 {
+        pub fn slice(self: *const @This()) []const u8 {
             return self.data[0..self.len];
         }
     };
 }
 const Provider = enum { whatsapp, slack, telegram };
 const Chat = struct {
+    account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     timestamp: Utf8Text(47) = .{},
     provider: Provider = .whatsapp,
@@ -41,9 +43,12 @@ const PendingArchive = struct {
     source: ArchiveSource = .shortcut,
 };
 const App = struct {
+    cache_tag: Utf8Text(32) = .{},
     chats: [4]Chat = @splat(.{}),
     chat_count: usize = 2,
     selected_chat: usize = 0,
+    displayed_provider: @TypeOf((Chat{}).provider) = .whatsapp,
+    displayed_account: Utf8Text(32) = .{},
     displayed_jid: Utf8Text(191) = .{},
     show_archived: bool = false,
     bulk: archive_rules.Selection(4) = .{},
@@ -165,14 +170,14 @@ fn resurfaceRequest(a: *App, jid: []const u8) void {
     if (@typeInfo(@TypeOf(queueUnarchiveChat)).@"fn".params.len == 3) queueUnarchiveChat(a, jid, .resurface) else queueUnarchiveChat(a, jid);
 }
 fn paneFollowSelection(_: *App, _: []const u8) void {}
-fn visibleChatIndex(a: *const App, jid: []const u8) ?usize {
-    for (a.chats[0..a.chat_count], 0..) |*chat, i| {
-        if (std.mem.eql(u8, chat.jid.slice(), jid)) return i;
-    }
-    return null;
+fn visibleChatIndex(a: *const App, key: chat_key.Key) ?usize {
+    return chat_key.indexOf(Chat, a.chats[0..a.chat_count], key);
 }
 fn chatProvider(a: *App, jid: []const u8) Provider {
-    return if (visibleChatIndex(a, jid)) |i| a.chats[i].provider else .whatsapp;
+    for (a.chats[0..a.chat_count]) |*chat| {
+        if (std.mem.eql(u8, chat.jid.slice(), jid)) return chat.provider;
+    }
+    return .whatsapp;
 }
 fn removeChatRow(a: *App, removed: usize) void {
     var i = removed + 1;

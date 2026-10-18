@@ -333,7 +333,7 @@ pub fn build(b: *std.Build) void {
 
     // Tests live in Windows-free modules so they run on any host.
     const test_step = b.step("test", "Run unit tests");
-    for ([_][]const u8{ "src/chat_order.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/status_view.zig", "src/update.zig", "src/avatar_mask.zig", "src/compose_layout.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
+    for ([_][]const u8{ "src/chat_key.zig", "src/chat_order.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/status_view.zig", "src/update.zig", "src/avatar_mask.zig", "src/compose_layout.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(test_root),
@@ -361,6 +361,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = slack_send_harness,
         .target = b.resolveTargetQuery(.{}),
         .imports = &.{
+            .{ .name = "chat_key", .module = b.createModule(.{ .root_source_file = b.path("src/chat_key.zig"), .target = b.resolveTargetQuery(.{}) }) },
             .{ .name = "outbox", .module = b.createModule(.{ .root_source_file = b.path("src/outbox.zig"), .target = b.resolveTargetQuery(.{}) }) },
             .{ .name = "slack_send", .module = b.createModule(.{ .root_source_file = b.path("src/slack_send.zig"), .target = b.resolveTargetQuery(.{}) }) },
             .{ .name = "slack", .module = b.createModule(.{ .root_source_file = b.path("src/slack.zig"), .target = b.resolveTargetQuery(.{}) }) },
@@ -385,17 +386,17 @@ pub fn build(b: *std.Build) void {
         "}\n",
         sourceSection("fn applyMessageData(", "    var selected_id = Utf8Text(191){};"),
         "_ = list; _ = chat_changed; a.painted += 1;\n",
-        sourceSection("    a.displayed_jid.set(chat.jid.slice());\n    //", "    // Optimistic bubbles"),
+        sourceSection("    a.displayed_jid.set(chat.jid.slice());\n    a.displayed_account = chat.account;\n    a.displayed_provider = chat.provider;\n    //", "    // Optimistic bubbles"),
         "return true; }\n",
     }) catch @panic("Out of memory building read harness");
     const read_harness = b.addWriteFiles().add("chat_reconcile_test.zig", read_harness_source);
     const read_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = read_harness,
         .target = b.resolveTargetQuery(.{}),
-        .imports = &.{.{ .name = "chat_reconcile", .module = b.createModule(.{
+        .imports = &.{ .{ .name = "chat_key", .module = b.createModule(.{ .root_source_file = b.path("src/chat_key.zig"), .target = b.resolveTargetQuery(.{}) }) }, .{ .name = "chat_reconcile", .module = b.createModule(.{
             .root_source_file = b.path("src/chat_reconcile.zig"),
             .target = b.resolveTargetQuery(.{}),
-        }) }},
+        }) } },
     }) });
     test_step.dependOn(&b.addRunArtifact(read_tests).step);
 
@@ -441,6 +442,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = archive_harness,
         .target = b.resolveTargetQuery(.{}),
         .imports = &.{
+            .{ .name = "chat_key", .module = b.createModule(.{ .root_source_file = b.path("src/chat_key.zig"), .target = b.resolveTargetQuery(.{}) }) },
             .{ .name = "archive_rules", .module = b.createModule(.{
                 .root_source_file = b.path("src/archive_rules.zig"),
                 .target = b.resolveTargetQuery(.{}),
@@ -461,6 +463,8 @@ pub fn build(b: *std.Build) void {
         sourceSection("fn startNextMarkRead(a: *App) void {", "// The mark-read child gates"),
     }) catch @panic("Out of memory building read state harness");
     const read_state_files = b.addWriteFiles();
+    _ = read_state_files.addCopyFile(b.path("src/chat_key.zig"), "chat_key.zig");
+    _ = read_state_files.addCopyFile(b.path("src/transport.zig"), "transport.zig");
     _ = read_state_files.addCopyFile(b.path("src/read_state.zig"), "read_state.zig");
     _ = read_state_files.addCopyFile(b.path("src/media_age.zig"), "media_age.zig");
     const read_state_harness = read_state_files.add("read_state_test.zig", read_state_source);
@@ -477,14 +481,14 @@ pub fn build(b: *std.Build) void {
         "const App = struct {\n",
         sourceSection("    media_attempts: [512]u64", "    media_burst_started_ms:"),
         sourceSection("    media_failures: [16]MediaFailure", "    avatar_session:"),
-        "chats: [1]Chat = .{.{}}, chat_count: usize = 1, selected_chat: usize = 0, displayed_jid: Utf8Text(191) = .{}, messages: [1]Message = .{.{}}, message_count: usize = 1, send_child: ?u8 = null, pending_send_count: usize = 0, read_child: ?u8 = null, archive_child: ?u8 = null, pending_download_jid: Utf8Text(191) = .{}, pending_download_id: Utf8Text(191) = .{}, hwnd: ?usize = null, started: usize = 0 };\n",
+        "displayed_provider: @TypeOf((Chat{}).provider) = .whatsapp, displayed_account: Utf8Text(32) = .{}, chats: [1]Chat = .{.{}}, chat_count: usize = 1, selected_chat: usize = 0, displayed_jid: Utf8Text(191) = .{}, messages: [1]Message = .{.{}}, message_count: usize = 1, send_child: ?u8 = null, pending_send_count: usize = 0, read_child: ?u8 = null, archive_child: ?u8 = null, pending_download_jid: Utf8Text(191) = .{}, pending_download_id: Utf8Text(191) = .{}, hwnd: ?usize = null, started: usize = 0 };\n",
         sourceSection("fn downloadMedia(", "fn isDownloadableMedia("),
         "fn attachmentState(a: *const App, message: *const Message, local: bool) media_drain.AttachmentState {\n",
         sourceSection("            const attachment_state: media_drain.AttachmentState", "            const label = media_drain.attachmentLabel"),
         "return attachment_state; }\n",
     }) catch @panic("Out of memory building media failure harness");
     const media_failure_files = b.addWriteFiles();
-    for ([_][]const u8{ "media_drain.zig", "played.zig", "chat_cache.zig" }) |name| {
+    for ([_][]const u8{ "media_drain.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {
         _ = media_failure_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
     }
     const media_failure_harness = media_failure_files.add("media_failure_test.zig", media_failure_source);

@@ -1,6 +1,7 @@
 //! Host tests of the production read watermark and probe wiring, extracted
 //! by build.zig. Only Win32 painting, persistence, and subprocesses are stubbed.
 const std = @import("std");
+const chat_key = @import("chat_key.zig");
 const read_state = @import("read_state.zig");
 const media_age = @import("media_age.zig");
 const max_pending_reads = 8;
@@ -13,13 +14,15 @@ fn Utf8Text(comptime capacity: usize) type {
             self.len = @min(text.len, capacity);
             @memcpy(self.data[0..self.len], text[0..self.len]);
         }
-        fn slice(self: *const @This()) []const u8 {
+        pub fn slice(self: *const @This()) []const u8 {
             return self.data[0..self.len];
         }
     };
 }
+const Provider = enum { whatsapp, slack, telegram };
 const Chat = struct {
-    provider: enum { whatsapp, slack, telegram } = .whatsapp,
+    account: Utf8Text(32) = .{},
+    provider: Provider = .whatsapp,
     jid: Utf8Text(191) = .{},
     timestamp: Utf8Text(47) = .{},
     unread: bool = false,
@@ -32,12 +35,16 @@ const Message = struct {
 };
 const WacliJobKind = enum { unread_probe };
 const WacliJob = struct {
+    provider: Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
     kind: WacliJobKind,
     jid: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
     msg_id: Utf8Text(191) = .{},
 };
 const WacliResult = struct {
+    provider: Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
     ok: bool = true,
     jid: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
@@ -55,13 +62,15 @@ const App = struct {
     read_spawn_failures: u32 = 0,
     read_started_ms: u64 = 0,
     read_state: read_state.State = .{},
-    cache_tag: Utf8Text(16) = .{},
+    cache_tag: Utf8Text(32) = .{},
     startup_probe_pending: bool = false,
     chats: [2]Chat = .{ .{}, .{} },
     chat_count: usize = 1,
     selected_chat: usize = 0,
     user_viewed: bool = true,
     read_queue_dead: bool = false,
+    displayed_provider: @TypeOf((Chat{}).provider) = .whatsapp,
+    displayed_account: Utf8Text(32) = .{},
     displayed_jid: Utf8Text(191) = .{},
     messages: [2]Message = .{ .{}, .{} },
     message_count: usize = 1,

@@ -7,9 +7,6 @@ const std = @import("std");
 
 /// One chat as the transports present it to the UI.
 pub const ChatSummary = struct {
-    /// Provider-qualified identity: WhatsApp uses its jid, Telegram its decimal
-    /// chat id. The provider tag plus this string is the unique key for
-    /// selection, dedup, pending sends, unread state, and cache paths.
     id: []const u8,
     name: []const u8,
     unread_count: i32,

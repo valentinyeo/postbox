@@ -2,6 +2,7 @@
 //! Windows painting, disk I/O and the queue are stubbed; decisions, JSON
 //! validation and result generation guards are production code.
 const std = @import("std");
+const chat_key = @import("chat_key");
 const chat_reconcile = @import("chat_reconcile");
 
 fn Utf8Text(comptime capacity: usize) type {
@@ -12,19 +13,22 @@ fn Utf8Text(comptime capacity: usize) type {
             self.len = @min(text.len, capacity);
             @memcpy(self.data[0..self.len], text[0..self.len]);
         }
-        fn slice(self: *const @This()) []const u8 {
+        pub fn slice(self: *const @This()) []const u8 {
             return self.data[0..self.len];
         }
     };
 }
 const Provider = enum { whatsapp, slack, telegram };
 const Chat = struct {
+    account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     timestamp: Utf8Text(47) = .{},
     provider: Provider = .whatsapp,
 };
 const WacliJobKind = enum { messages, chats };
 const WacliJob = struct {
+    provider: Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
     kind: WacliJobKind = .messages,
     gen: u64 = 0,
     jid: Utf8Text(191) = .{},
@@ -33,6 +37,8 @@ const WacliJob = struct {
     started_ms: u64 = 0,
 };
 const WacliResult = struct {
+    provider: Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
     kind: WacliJobKind = .messages,
     gen: u64 = 0,
     jid: Utf8Text(191) = .{},
@@ -43,12 +49,15 @@ const WacliResult = struct {
     data: []const u8 = "{\"data\":{\"messages\":[]}}",
 };
 const App = struct {
+    cache_tag: Utf8Text(32) = .{},
     allocator: std.mem.Allocator = std.testing.allocator,
     chats: [2]Chat = .{ .{}, .{} },
     chat_count: usize = 1,
     selected_chat: usize = 0,
     user_viewed: bool = true,
     chat_selection_pending: bool = false,
+    displayed_provider: @TypeOf((Chat{}).provider) = .whatsapp,
+    displayed_account: Utf8Text(32) = .{},
     displayed_jid: Utf8Text(191) = .{},
     displayed_timestamp: Utf8Text(47) = .{},
     messages_gen: u64 = 0,
@@ -84,7 +93,7 @@ fn cancelSlackMark(_: *App) void {}
 fn stopAudio(_: *App) void {}
 fn refreshTelegramMessages(_: *App) void {}
 fn refreshSlackHistory(_: *App) void {}
-fn msgCacheGet(_: *App, _: []const u8) ?[]const u8 {
+fn msgCacheGet(_: *App, _: chat_key.Key) ?[]const u8 {
     return null;
 }
 fn loadMsgCacheDisk(_: *App, _: []const u8) ?[]u8 {
@@ -99,7 +108,7 @@ fn wacliEnqueue(a: *App, job: WacliJob, _: bool) void {
     a.queued += 1;
     a.last_job = job;
 }
-fn msgCacheStore(a: *App, _: []const u8, _: []const u8) void {
+fn msgCacheStore(a: *App, _: chat_key.Key, _: []const u8) void {
     a.cached += 1;
 }
 fn applyChats(a: *App, raw: []const u8, _: bool) bool {
@@ -247,4 +256,28 @@ test "uncached contact opens an empty conversation before the fresh read" {
     try std.testing.expectEqual(@as(u32, 1), a.queued);
     try std.testing.expectEqualStrings(a.chats[0].jid.slice(), a.displayed_jid.slice());
     try std.testing.expectEqualStrings(a.chats[0].jid.slice(), a.last_job.jid.slice());
+}
+
+test "same jid from another WhatsApp account cannot paint or retry the current chat" {
+    for ([_]bool{ false, true }) |ok| {
+        var a = fixture();
+        a.cache_tag.set("aaaaaaaaaaaaaaaa");
+        a.chats[0].account = a.cache_tag;
+        refreshMessages(&a);
+        var result = resultFor(a.last_job);
+        try std.testing.expectEqualStrings("aaaaaaaaaaaaaaaa", result.account.slice());
+        result.ok = ok;
+        a.cache_tag.set("bbbbbbbbbbbbbbbb");
+        a.chats[0].account = a.cache_tag;
+        const painted = a.painted;
+        deliver(&a, &result);
+        try std.testing.expectEqual(painted, a.painted);
+        try std.testing.expectEqual(@as(u32, 0), a.cached);
+        try std.testing.expectEqual(@as(u32, 0), a.msg_read_retry_ticks);
+        refreshMessages(&a);
+        result = resultFor(a.last_job);
+        try std.testing.expectEqualStrings("bbbbbbbbbbbbbbbb", result.account.slice());
+        deliver(&a, &result);
+        try std.testing.expectEqual(@as(u32, 1), a.cached);
+    }
 }

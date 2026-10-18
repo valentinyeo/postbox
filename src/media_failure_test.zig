@@ -1,4 +1,5 @@
 const std = @import("std");
+const chat_key = @import("chat_key.zig");
 const media_drain = @import("media_drain.zig");
 const played = @import("played.zig");
 const voice_sent = struct {
@@ -13,6 +14,7 @@ const Message = struct {
     media_size: u64 = 0,
 };
 const Chat = struct {
+    account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     provider: enum { whatsapp, slack } = .whatsapp,
 };

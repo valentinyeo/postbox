@@ -20,8 +20,9 @@ cases=(
     'f169d18 B5 e955d363'
     '7ea1b5b B6 HEAD'
     'a701837 B7 HEAD'
-    'dc9bdce C1 HEAD'
-    '0e7c320d44f1 C1 HEAD'
+    'dc9bdce C2 HEAD'
+    '0e7c320d44f1 C2 HEAD'
+    '55e826b C1 HEAD'
     '1f5853e^ D1 HEAD'
 )
 
@@ -40,13 +41,13 @@ for entry in "${cases[@]}"; do
         status=0
         "$lint" "$tree" > "$temp/output" 2>&1 || status=$?
         if [[ $sha == "$bad" ]]; then
-            if (( status != 1 )) || ! grep -Eq "^lint-repeats: [^:]+:[0-9]+: \\[$rule\\] " "$temp/output"; then
+            if (( status != 1 )) || ! grep -Eq "^(lint-repeats: |C1: )[^:]+:[0-9]+: \\[$rule\\] " "$temp/output"; then
                 cat "$temp/output" >&2
                 printf 'test-lint-repeats: FAIL %s must exit 1 with [%s], got exit %s\n' "$sha" "$rule" "$status" >&2
                 exit 1
             fi
             printf '%s: ' "$bad"
-            grep -E "^lint-repeats: [^:]+:[0-9]+: \\[$rule\\] " "$temp/output"
+            grep -E "^(lint-repeats: |C1: )[^:]+:[0-9]+: \\[$rule\\] " "$temp/output"
         elif (( status > 1 )) || grep -Fq "[$rule]" "$temp/output"; then
             cat "$temp/output" >&2
             printf 'test-lint-repeats: FAIL fix %s still triggers [%s] or lint errored\n' "$sha" "$rule" >&2

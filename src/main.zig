@@ -33,6 +33,7 @@ const archive_rules = @import("archive_rules.zig");
 const message_filter = @import("message_filter.zig");
 const voice_sent = @import("voice_sent.zig");
 const send_args = @import("send_args.zig");
+const chat_key = @import("chat_key.zig");
 const chat_cache = @import("chat_cache.zig");
 const people_index = @import("people_index.zig");
 const unfurl = @import("unfurl.zig");
@@ -279,6 +280,7 @@ fn Utf8Text(comptime capacity: usize) type {
 }
 
 const Chat = struct {
+    account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     name: WideText(159) = .{},
     kind: WideText(31) = .{},
@@ -313,6 +315,8 @@ const TgChat = struct {
 const TgLoginMode = enum { none, phone, code, password, api_id, api_hash };
 
 const PendingSend = struct {
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     text: Utf8Text(4095) = .{},
     reply_to: Utf8Text(191) = .{},
@@ -346,6 +350,8 @@ const PendingSend = struct {
 // text back and a muted "(not sent)" bubble shows again in its chat.
 const max_failed_sends = 8;
 const FailedSend = struct {
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     text: Utf8Text(4095) = .{},
     // Enqueue time (unix seconds); the reload dedup ignores stored messages
@@ -372,6 +378,8 @@ const SlackOutbox = struct {
 // paste folder plus a small preview bitmap shown above the composer. Bound
 // to the chat JID it was pasted in so it can never send to the wrong chat.
 const StagedImage = struct {
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     path: Utf8Text(519) = .{},
     preview: ?win.HBITMAP = null,
@@ -535,6 +543,8 @@ const Message = struct {
 // A reaction made in the app that wacli has not confirmed yet (optimistic UI).
 const max_pending_reactions = 8;
 const PendingReaction = struct {
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
     // Group chats only: the author of the message reacted to.
@@ -551,6 +561,8 @@ const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspa
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 
 const WacliJob = struct {
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
     kind: WacliJobKind = .chats,
     gen: u64 = 0,
     jid: Utf8Text(191) = .{},
@@ -563,6 +575,8 @@ const WacliJob = struct {
 };
 
 const WacliResult = struct {
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
     kind: WacliJobKind = .chats,
     gen: u64 = 0,
     ok: bool = false,
@@ -579,6 +593,8 @@ const WacliResult = struct {
 // Last raw wacli response per chat, so switching back to a recent chat paints
 // its messages instantly while the fresh read runs.
 const MsgCacheEntry = struct {
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     data: ?[]u8 = null,
 };
@@ -968,6 +984,8 @@ const App = struct {
     unfurl_evict_slot: usize = 0,
     reply_to: Utf8Text(191) = .{},
     reply_sender: Utf8Text(191) = .{},
+    displayed_provider: transport.Provider = .whatsapp,
+    displayed_account: Utf8Text(32) = .{},
     displayed_jid: Utf8Text(191) = .{},
     displayed_timestamp: Utf8Text(47) = .{},
     played_set: played.Set = .{},
@@ -1851,6 +1869,10 @@ fn wacliWorkerMain(a: *App, slack_lane: bool) void {
 // read stalls the queue and blocks shutdown; upgrade path is spawn plus a
 // WaitForSingleObject deadline with TerminateProcess.
 fn wacliRunJob(a: *App, job: WacliJob) void {
+    if (job.kind != .cache_tag and job.provider == .whatsapp and !std.mem.eql(u8, job.account.slice(), a.cache_tag.slice())) {
+        wacliPendingSub(a, job.kind);
+        return;
+    }
     var argv: [max_wacli_args][]const u8 = undefined;
     var count: usize = 0;
     while (count < job.arg_count) : (count += 1) argv[count] = job.args[count].slice();
@@ -1858,7 +1880,7 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
         wacliPendingSub(a, job.kind);
         return;
     };
-    result.* = .{ .kind = job.kind, .gen = job.gen, .jid = job.jid, .msg_id = job.msg_id, .extra = job.extra, .started_ms = job.started_ms };
+    result.* = .{ .kind = job.kind, .provider = job.provider, .account = job.account, .gen = job.gen, .jid = job.jid, .msg_id = job.msg_id, .extra = job.extra, .started_ms = job.started_ms };
     switch (job.kind) {
         .slack_workspace, .slack_users, .slack_history, .slack_replies, .slack_send, .slack_attach, .slack_share, .slack_download, .slack_auth, .slack_mark => {
             var slack_args: [max_wacli_args][]const u8 = undefined;
@@ -1952,23 +1974,15 @@ fn wacliDiscard(a: *App, result: *WacliResult) void {
     wacliPendingSub(a, kind);
 }
 
-fn msgCacheGet(a: *App, jid: []const u8) ?[]const u8 {
-    for (a.msg_cache[0..a.msg_cache_len]) |*entry| {
-        if (std.mem.eql(u8, entry.jid.slice(), jid)) return entry.data;
-    }
-    return null;
+fn msgCacheGet(a: *App, key: chat_key.Key) ?[]const u8 {
+    const index = chat_key.indexOf(MsgCacheEntry, a.msg_cache[0..a.msg_cache_len], key) orelse return null;
+    return a.msg_cache[index].data;
 }
 
-fn msgCacheStore(a: *App, jid: []const u8, data: []const u8) void {
+fn msgCacheStore(a: *App, key: chat_key.Key, data: []const u8) void {
     if (data.len == 0 or data.len > msg_cache_max_bytes) return;
     const copy = a.allocator.dupe(u8, data) catch return;
-    var slot: ?usize = null;
-    for (a.msg_cache[0..a.msg_cache_len], 0..) |*entry, index| {
-        if (std.mem.eql(u8, entry.jid.slice(), jid)) {
-            slot = index;
-            break;
-        }
-    }
+    var slot = chat_key.indexOf(MsgCacheEntry, a.msg_cache[0..a.msg_cache_len], key);
     if (slot == null and a.msg_cache_len < a.msg_cache.len) {
         a.msg_cache_len += 1;
         slot = a.msg_cache_len - 1;
@@ -1984,15 +1998,17 @@ fn msgCacheStore(a: *App, jid: []const u8, data: []const u8) void {
     }
     const entry = &a.msg_cache[slot.?];
     if (entry.data) |old| a.allocator.free(old);
-    entry.jid.set(jid);
+    entry.provider = key.provider;
+    entry.account.set(key.account);
+    entry.jid.set(key.id);
     entry.data = copy;
     // Also persist for the next launch (WAZI-67). The file carries the jid
     // and it is verified on read, so a hash collision can only waste a file,
     // never show the wrong chat.
-    if (a.startup_probe_pending) return;
-    if (msgCacheDiskPath(a, jid)) |path| {
+    if (a.startup_probe_pending or key.provider != .whatsapp or !std.mem.eql(u8, key.account, a.cache_tag.slice())) return;
+    if (msgCacheDiskPath(a, key.id)) |path| {
         defer a.allocator.free(path);
-        const envelope = chat_cache.envelope(a.allocator, jid, data) catch return;
+        const envelope = chat_cache.envelope(a.allocator, key.account, key.id, data) catch return;
         defer a.allocator.free(envelope);
         _ = writeCacheFileAtomic(a, path, envelope);
     }
@@ -2058,14 +2074,14 @@ fn groupName(a: *const App, jid: []const u8) ?[]const u8 {
 
 fn refreshGroups(a: *App) void {
     if (wacliPendingGet(a, .groups) > 0) return;
-    var job = WacliJob{ .kind = .groups };
+    var job = WacliJob{ .account = a.cache_tag, .kind = .groups };
     wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "groups", "list", "--limit", "1000" });
     _ = wacliEnqueue(a, job, false);
 }
 
 fn refreshContactsIndex(a: *App) void {
     if (wacliPendingGet(a, .contacts_index) > 0) return;
-    var job = WacliJob{ .kind = .contacts_index };
+    var job = WacliJob{ .account = a.cache_tag, .kind = .contacts_index };
     wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "contacts", "search", "@", "--limit", "10000" });
     _ = wacliEnqueue(a, job, false);
 }
@@ -2084,7 +2100,7 @@ fn refreshPeopleSearch(a: *App) void {
 }
 
 fn peopleChat(a: *App, entry: people_index.Entry) Chat {
-    var chat = Chat{ .archived = entry.origin == .archived };
+    var chat = Chat{ .account = a.cache_tag, .archived = entry.origin == .archived };
     chat.jid.set(entry.jid);
     chat.name.set(a.allocator, entry.name);
     chat.kind.set(a.allocator, if (entry.origin == .contact) "Contact" else if (std.mem.endsWith(u8, entry.jid, "@g.us")) "Group" else "Chat");
@@ -2126,7 +2142,7 @@ fn refreshChats(a: *App) void {
     // Skip only while an identical job is already queued; a queued job built
     // with different archive/unread flags is superseded by an urgent re-read.
     if (wacliPendingGet(a, .chats) > 0 and a.chats_pending_flags == flags) return;
-    var job = WacliJob{ .kind = .chats };
+    var job = WacliJob{ .account = a.cache_tag, .kind = .chats };
     wacliJobArgs(&job, &.{
         a.wacli_path,                                           "--json", "--read-only", "chats", "list", "--limit", "250",
         if (a.show_archived) "--archived" else "--no-archived",
@@ -2236,7 +2252,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
             .object => |o| o,
             else => continue,
         };
-        var chat = Chat{};
+        var chat = Chat{ .account = a.cache_tag };
         const jid = getString(object, "jid");
         if (pendingArchiveHidesChat(a, jid, a.show_archived)) continue;
         const raw_name = getString(object, "name");
@@ -2397,7 +2413,9 @@ fn queueUnreadProbe(a: *App, chat: *const Chat) void {
     if (chat.provider != .whatsapp or a.startup_probe_pending or wacliPendingGet(a, .unread_probe) > 0) return;
     const timestamp = media_age.unixSeconds(chat.timestamp.slice()) orelse return;
     if (!a.read_state.needsProbe(a.cache_tag.slice(), chat.jid.slice(), timestamp, chat.provider_unread)) return;
-    var job = WacliJob{ .kind = .unread_probe };
+    var job = WacliJob{ .account = a.cache_tag, .kind = .unread_probe };
+    job.provider = chat.provider;
+    job.account = chat.account;
     job.jid.set(chat.jid.slice());
     job.extra.set(chat.timestamp.slice());
     job.msg_id.set(a.cache_tag.slice());
@@ -2483,6 +2501,7 @@ fn appendTelegramChats(a: *App, query_utf8: ?[]const u8) void {
         chat.unread = cached.unread_count > 0;
         chat.unread_count = cached.unread_count;
         chat.provider = .telegram;
+        chat.account.set("");
         a.chats[a.chat_count] = chat;
         a.chat_count += 1;
     }
@@ -2591,7 +2610,7 @@ fn refreshTelegramMessages(a: *App) void {
     const chat_id = tgSelectedChatId(a) orelse return;
     const snapshot = client.historySnapshot(a.allocator, chat_id);
     defer client.freeHistorySnapshot(a.allocator, snapshot);
-    const chat_changed = !std.mem.eql(u8, a.displayed_jid.slice(), a.chats[a.selected_chat].jid.slice());
+    const chat_changed = !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]));
     var selected_id = Utf8Text(191){};
     if (a.selected_message) |selected| {
         if (selected < a.message_count) selected_id.set(a.messages[selected].id.slice());
@@ -2652,6 +2671,8 @@ fn refreshTelegramMessages(a: *App) void {
     // above) and used to snap a scrolled-up reader straight to the bottom.
     if (chat_changed) a.scroll_y = 0;
     a.displayed_jid.set(a.chats[a.selected_chat].jid.slice());
+    a.displayed_account = a.chats[a.selected_chat].account;
+    a.displayed_provider = a.chats[a.selected_chat].provider;
     a.displayed_timestamp.set(a.chats[a.selected_chat].timestamp.slice());
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
     telegramAutoDownload(a);
@@ -3583,10 +3604,8 @@ fn slackUserLookup(a: *App) slack.UserLookup {
 }
 
 fn slackChatById(a: *App, channel_id: []const u8) ?*Chat {
-    for (a.slack_chats[0..a.slack_chat_count]) |*chat| {
-        if (std.mem.eql(u8, chat.jid.slice(), channel_id)) return chat;
-    }
-    return null;
+    const index = chat_key.indexOf(Chat, a.slack_chats[0..a.slack_chat_count], .{ .provider = .slack, .account = "", .id = channel_id }) orelse return null;
+    return &a.slack_chats[index];
 }
 
 fn selectedChatIsSlack(a: *App) bool {
@@ -3620,7 +3639,7 @@ fn noteSlackActivity(a: *App, channel: []const u8, seconds: i64) void {
     if (slackChatById(a, channel)) |cached| _ = raiseSlackTimestamp(cached, seconds);
     for (a.chats[0..a.chat_count]) |*chat| {
         if (chat.provider != .slack or !std.mem.eql(u8, chat.jid.slice(), channel)) continue;
-        const was_displayed = std.mem.eql(u8, a.displayed_jid.slice(), channel) and
+        const was_displayed = chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat)) and
             std.mem.eql(u8, a.displayed_timestamp.slice(), chat.timestamp.slice());
         if (raiseSlackTimestamp(chat, seconds) and was_displayed) a.displayed_timestamp.set(chat.timestamp.slice());
         break;
@@ -3775,7 +3794,7 @@ fn applySlackWorkspace(a: *App, raw: []const u8) bool {
     a.slack_workspace_pages += 1;
     const cursor = slack.nextCursor(root);
     if (slack.wantsNextPage(cursor, a.slack_workspace_pages, wacli_arg_cap)) {
-        var job = WacliJob{ .kind = .slack_workspace };
+        var job = WacliJob{ .provider = .slack, .kind = .slack_workspace };
         wacliJobArgs(&job, &.{ slack_workspace_types, cursor });
         _ = wacliEnqueue(a, job, false);
         return true;
@@ -3851,7 +3870,7 @@ fn applySlackUsers(a: *App, raw: []const u8) bool {
     a.slack_user_pages += 1;
     const cursor = slack.nextCursor(root);
     if (slack.wantsNextPage(cursor, a.slack_user_pages, wacli_arg_cap)) {
-        var job = WacliJob{ .kind = .slack_users };
+        var job = WacliJob{ .provider = .slack, .kind = .slack_users };
         wacliJobArgs(&job, &.{cursor});
         _ = wacliEnqueue(a, job, false);
     }
@@ -3863,13 +3882,13 @@ const slack_workspace_types = "public_channel,private_channel,mpim,im";
 fn refreshSlackWorkspace(a: *App) void {
     if (!slackConfigured(a)) return;
     a.slack_workspace_pages = 0;
-    var job = WacliJob{ .kind = .slack_workspace };
+    var job = WacliJob{ .provider = .slack, .kind = .slack_workspace };
     wacliJobArgs(&job, &.{ slack_workspace_types, "" });
     _ = wacliEnqueue(a, job, false);
     // A users.list round still paging keeps going; do not start a second.
     if (wacliPendingGet(a, .slack_users) != 0) return;
     a.slack_user_pages = 0;
-    var users_job = WacliJob{ .kind = .slack_users };
+    var users_job = WacliJob{ .provider = .slack, .kind = .slack_users };
     wacliJobArgs(&users_job, &.{""});
     _ = wacliEnqueue(a, users_job, false);
 }
@@ -3883,7 +3902,9 @@ fn refreshSlackHistory(a: *App) void {
     // the generation, the same guard a stale wacli read needs; later bridge
     // polls reuse it so replies queued by the previous apply still land.
     if (a.slack_history_hash == 0) a.messages_gen += 1;
-    var job = WacliJob{ .kind = .slack_history, .gen = a.messages_gen };
+    var job = WacliJob{ .provider = .slack, .kind = .slack_history, .gen = a.messages_gen };
+    job.provider = chat.provider;
+    job.account = chat.account;
     job.jid.set(chat.jid.slice());
     wacliJobArgs(&job, &.{chat.jid.slice()});
     _ = wacliEnqueue(a, job, true);
@@ -3995,7 +4016,7 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
     // discards them (the switched-back view refetches authoritative history).
     var saved: []Message = &.{};
     var saved_count: usize = 0;
-    if (std.mem.eql(u8, a.displayed_jid.slice(), chat.jid.slice())) {
+    if (chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat))) {
         for (a.messages[0..a.message_count]) |*message| {
             if (message.from_me and message.send_state != .none) saved_count += 1;
         }
@@ -4053,10 +4074,14 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
     // A polled message newer than the listing moves the chat up the list.
     noteSlackActivity(a, chat.jid.slice(), newest_seconds);
     a.displayed_jid.set(chat.jid.slice());
+    a.displayed_account = chat.account;
+    a.displayed_provider = chat.provider;
     a.displayed_timestamp.set(chat.timestamp.slice());
     // Threads shown inline: fetch each parent's replies once.
     for (reply_parents[0..reply_parent_count]) |parent| {
-        var job = WacliJob{ .kind = .slack_replies, .gen = a.messages_gen };
+        var job = WacliJob{ .provider = .slack, .kind = .slack_replies, .gen = a.messages_gen };
+        job.provider = chat.provider;
+        job.account = chat.account;
         job.jid.set(chat.jid.slice());
         job.msg_id.set(parent.slice());
         wacliJobArgs(&job, &.{ chat.jid.slice(), parent.slice() });
@@ -4066,7 +4091,7 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
         if (a.message_count >= max_messages) break;
         if (slot.completed) continue;
         const entry = &slot.entry;
-        if (!std.mem.eql(u8, entry.jid.slice(), chat.jid.slice())) continue;
+        if (!chat_key.Key.eql(chat_key.of(entry), chat_key.of(chat))) continue;
         if (entry.file.len > 0) {
             if (entry.state == .failed) setStatus(a, "Slack image send failed");
             continue;
@@ -4082,7 +4107,8 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
         if (visible) continue;
         appendSlackPending(a, entry.text.slice(), entry.client_msg_id.slice());
         if (entry.state == .failed) {
-            var result = WacliResult{ .kind = .slack_send };
+            var result = WacliResult{ .provider = .slack, .kind = .slack_send };
+            result.account.set(entry.account.slice());
             result.jid.set(entry.jid.slice());
             result.msg_id.set(entry.idSlice());
             resolveSlackSend(a, &result);
@@ -4203,7 +4229,7 @@ fn retryingBubbleText(buffer: []u8, text: []const u8, retries: u8) []const u8 {
 /// re-appending would show it twice.
 fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool) void {
     if (pending.completed or a.message_count >= max_messages or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
-    if (!std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), pending.jid.slice())) return;
+    if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(pending))) return;
     if (from_reload and !pending.from_disk) {
         for (a.messages[0..a.message_count]) |*message| {
             if (!message.from_me or message.send_state != .none) continue;
@@ -4294,7 +4320,7 @@ fn markPendingSendRetrying(a: *App, pending: *const PendingSend) void {
 /// reload, the same way pending bubbles are re-appended.
 fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
     if (a.message_count >= max_messages or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
-    if (!std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), failed.jid.slice())) return;
+    if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(failed))) return;
     var message = Message{};
     message.from_me = true;
     message.sender.set(a.allocator, "You");
@@ -4325,7 +4351,7 @@ fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
 /// the next reload. Keeps the newest max_failed_sends entries.
 fn rememberFailedSend(a: *App, pending: *const PendingSend) void {
     for (a.failed_sends[0..a.failed_send_count]) |*entry| {
-        if (std.mem.eql(u8, entry.jid.slice(), pending.jid.slice()) and
+        if (chat_key.Key.eql(chat_key.of(entry), chat_key.of(pending)) and
             std.mem.eql(u8, entry.text.slice(), pending.text.slice()) and
             std.mem.eql(u8, entry.file.slice(), pending.file.slice())) return;
     }
@@ -4334,6 +4360,8 @@ fn rememberFailedSend(a: *App, pending: *const PendingSend) void {
         while (index < a.failed_send_count) : (index += 1) a.failed_sends[index - 1] = a.failed_sends[index];
         a.failed_send_count -= 1;
     }
+    a.failed_sends[a.failed_send_count].provider = pending.provider;
+    a.failed_sends[a.failed_send_count].account = pending.account;
     a.failed_sends[a.failed_send_count].jid.set(pending.jid.slice());
     a.failed_sends[a.failed_send_count].text.set(pending.text.slice());
     a.failed_sends[a.failed_send_count].queued_unix = pending.queued_unix;
@@ -4346,9 +4374,9 @@ fn rememberFailedSend(a: *App, pending: *const PendingSend) void {
 
 /// Drop a remembered failure the user just resent so its stale "(not sent)"
 /// bubble is not resurrected by the next reload.
-fn forgetFailedSend(a: *App, jid: []const u8, text: []const u8) void {
+fn forgetFailedSend(a: *App, key: chat_key.Key, text: []const u8) void {
     for (a.failed_sends[0..a.failed_send_count], 0..) |*entry, index| {
-        if (entry.is_file or !std.mem.eql(u8, entry.jid.slice(), jid) or !std.mem.eql(u8, entry.text.slice(), text)) continue;
+        if (entry.is_file or !chat_key.Key.eql(chat_key.of(entry), key) or !std.mem.eql(u8, entry.text.slice(), text)) continue;
         var shift = index;
         while (shift + 1 < a.failed_send_count) : (shift += 1) a.failed_sends[shift] = a.failed_sends[shift + 1];
         a.failed_send_count -= 1;
@@ -4359,12 +4387,12 @@ fn forgetFailedSend(a: *App, jid: []const u8, text: []const u8) void {
 
 /// Drop remembered failures the reloaded store already contains: the message
 /// was delivered (or resent) after all, so no "(not sent)" bubble remains.
-fn pruneFailedSends(a: *App, jid: []const u8) void {
+fn pruneFailedSends(a: *App, key: chat_key.Key) void {
     var index: usize = 0;
     while (index < a.failed_send_count) {
         const entry = &a.failed_sends[index];
         var delivered = false;
-        if (std.mem.eql(u8, entry.jid.slice(), jid)) {
+        if (chat_key.Key.eql(chat_key.of(entry), key)) {
             for (a.messages[0..a.message_count]) |*message| {
                 if (!message.from_me or message.send_state != .none) continue;
                 const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch continue;
@@ -4399,7 +4427,7 @@ fn pruneFailedSends(a: *App, jid: []const u8) void {
 fn restoreFailedSendText(a: *App, failed: *const PendingSend) void {
     if (failed.file.len > 0 or failed.text.len == 0) return;
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
-    if (!std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), failed.jid.slice())) return;
+    if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(failed))) return;
     const compose = a.compose orelse return;
     var probe: [2]u16 = undefined;
     if (win.GetWindowTextW(compose, &probe, probe.len) != 0) return;
@@ -4428,7 +4456,7 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
             const entry = &slot.entry;
             if (slot.completed or entry.state != .failed or entry.file.len > 0 or
-                !std.mem.eql(u8, entry.jid.slice(), a.chats[a.selected_chat].jid.slice()) or
+                !chat_key.Key.eql(chat_key.of(entry), chat_key.of(&a.chats[a.selected_chat])) or
                 !std.mem.eql(u8, entry.client_msg_id.slice(), message.timestamp.slice())) continue;
             entry.state = .queued;
             entry.attempts = 0;
@@ -4465,7 +4493,7 @@ fn resendFailedMessage(a: *App, index: usize) bool {
     for (a.failed_sends[0..a.failed_send_count]) |*candidate| {
         var base_buffer: [48]u8 = undefined;
         const base = sendBaseText(&base_buffer, candidate.text.slice(), candidate.is_file, candidate.ptt, candidate.voice_seconds);
-        if (std.mem.eql(u8, candidate.jid.slice(), jid) and std.mem.eql(u8, base, original)) {
+        if (chat_key.Key.eql(chat_key.of(candidate), chat_key.of(&a.chats[a.selected_chat])) and std.mem.eql(u8, base, original)) {
             entry = candidate;
             break;
         }
@@ -4484,6 +4512,8 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         }
         const file_pending = &a.pending_sends[a.pending_send_count];
         file_pending.* = .{};
+        file_pending.provider = failed.provider;
+        file_pending.account = failed.account;
         file_pending.jid.set(jid);
         file_pending.text.set(failed.text.slice());
         file_pending.file.set(failed.file.slice());
@@ -4518,14 +4548,16 @@ fn resendFailedMessage(a: *App, index: usize) bool {
     }
     // The last attempt may have gone out after all (a timeout): if the open
     // chat already shows it, don't send it twice.
-    if (sentMessageExists(a, jid, original, failed.queued_unix)) {
-        forgetFailedSend(a, jid, original);
+    if (sentMessageExists(a, chat_key.of(failed), original, failed.queued_unix)) {
+        forgetFailedSend(a, chat_key.of(failed), original);
         setStatus(a, "Already sent");
         refreshMessages(a);
         return true;
     }
     const pending = &a.pending_sends[a.pending_send_count];
     pending.* = .{};
+    pending.provider = failed.provider;
+    pending.account = failed.account;
     pending.jid.set(jid);
     pending.text.set(original);
     a.send_seq += 1;
@@ -4539,7 +4571,7 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         setStatus(a, "Could not save outbox; message not queued");
         return true;
     }
-    forgetFailedSend(a, jid, original);
+    forgetFailedSend(a, chat_key.of(failed), original);
     message.send_state = .pending;
     message.text.set(a.allocator, original);
     var id_buffer: [32]u8 = undefined;
@@ -4630,7 +4662,7 @@ fn resolveSlackSend(a: *App, result: *WacliResult) void {
     // result for a chat the user already left must not stamp another chat's
     // pending send (ponytail: that orphan bubble is silently dropped, the
     // status bar still reports the outcome).
-    if (!std.mem.eql(u8, a.displayed_jid.slice(), result.jid.slice())) return;
+    if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(result))) return;
     var client_msg_id: []const u8 = "";
     for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
         if (std.mem.eql(u8, slot.entry.idSlice(), result.msg_id.slice())) {
@@ -4692,6 +4724,7 @@ fn persistOutbox(a: *App) bool {
         if (pending.completed) continue;
         var entry = outbox.Entry{ .queued_unix = pending.queued_unix };
         entry.id = pending.id;
+        entry.account.set(pending.account.slice());
         entry.jid.set(pending.jid.slice());
         entry.text.set(pending.text.slice());
         entry.file.set(pending.file.slice());
@@ -4740,7 +4773,10 @@ fn loadOutbox(a: *App) void {
         if (win.GetLastError() == win.ERROR_FILE_NOT_FOUND) a.outbox_load_failed = false;
         return;
     }
-    defer _ = win.CloseHandle(handle);
+    defer {
+        _ = win.CloseHandle(handle);
+        bindOutboxAccount(a);
+    }
     var size: win.LARGE_INTEGER = undefined;
     if (win.GetFileSizeEx(handle, &size) == 0 or size.QuadPart < 0 or
         size.QuadPart > outbox.max_entries * outbox.max_line_len) return;
@@ -4760,6 +4796,7 @@ fn loadOutbox(a: *App) void {
             const pending = &a.pending_sends[a.pending_send_count];
             pending.* = .{};
             pending.id = entry.id;
+            pending.account.set(entry.account.slice());
             pending.jid.set(entry.jid.slice());
             pending.text.set(entry.text.slice());
             pending.file.set(entry.file.slice());
@@ -4783,6 +4820,17 @@ fn loadOutbox(a: *App) void {
     a.outbox_load_failed = false;
 }
 
+fn bindOutboxAccount(a: *App) void {
+    if (a.outbox_load_failed or a.cache_tag.len == 0) return;
+    for (a.pending_sends[0..a.pending_send_count]) |*pending| {
+        if (pending.provider == .whatsapp and pending.account.len == 0) {
+            pending.account = a.cache_tag;
+            a.slack_outbox_dirty = true;
+        }
+    }
+    if (a.slack_outbox_dirty) _ = persistOutbox(a);
+}
+
 fn enqueueSlackOutbox(a: *App, slot: *SlackOutbox) void {
     if (a.outbox_load_failed or a.slack_outbox_dirty or !slackConfigured(a) or slot.inflight or slot.completed or slot.entry.state == .failed) return;
     for (a.slack_outbox[0..a.slack_outbox_count]) |*earlier| {
@@ -4792,7 +4840,8 @@ fn enqueueSlackOutbox(a: *App, slot: *SlackOutbox) void {
     if (win.GetTickCount64() < slot.not_before_ms) return;
     const entry = &slot.entry;
     const is_file = entry.file.len > 0;
-    var job = WacliJob{ .kind = if (!is_file) .slack_send else if (entry.upload_file_id.len > 0) .slack_share else .slack_attach, .started_ms = win.GetTickCount64() };
+    var job = WacliJob{ .provider = .slack, .kind = if (!is_file) .slack_send else if (entry.upload_file_id.len > 0) .slack_share else .slack_attach, .started_ms = win.GetTickCount64() };
+    job.account.set(entry.account.slice());
     job.jid.set(entry.jid.slice());
     job.msg_id.set(entry.idSlice());
     if (!is_file) job.extra.set(entry.client_msg_id.slice());
@@ -4925,7 +4974,7 @@ fn evictOldestFailedSlackOutbox(a: *App) bool {
 
 fn requestSlackDownload(a: *App, channel: []const u8, item: slack.HistoryItem) void {
     if (item.file_id.len == 0 or item.file_url.len == 0) return;
-    var job = WacliJob{ .kind = .slack_download };
+    var job = WacliJob{ .provider = .slack, .kind = .slack_download };
     job.jid.set(channel);
     job.msg_id.set(item.ts);
     wacliJobArgs(&job, &.{ item.file_url, item.file_id, item.file_name, channel, item.ts });
@@ -5023,7 +5072,7 @@ fn loadSlackTokens(a: *App) void {
     a.slack_tokens = slack_win.loadTokens(a.allocator);
     a.slack_bridge = slack_win.loadBridge(a.allocator);
     if (a.slack_tokens == null and a.slack_bridge == null) return;
-    const job = WacliJob{ .kind = .slack_auth };
+    const job = WacliJob{ .provider = .slack, .kind = .slack_auth };
     _ = wacliEnqueue(a, job, false);
     retrySlackOutbox(a);
 }
@@ -5277,7 +5326,7 @@ fn markChatRead(a: *App) void {
         return;
     }
     const needs_receipt = chat.provider_unread or chat.unread or chat.unread_count > 0;
-    if (std.mem.eql(u8, a.displayed_jid.slice(), chat.jid.slice())) {
+    if (chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat))) {
         for (a.messages[0..a.message_count]) |*message| {
             if (message.send_state != .none) continue;
             const timestamp = media_age.unixSeconds(message.timestamp.slice()) orelse continue;
@@ -5323,7 +5372,7 @@ fn cancelSlackMark(a: *App) void {
 fn slackMarkViewMatches(a: *App, channel: []const u8) bool {
     if (!a.user_viewed or a.chat_selection_pending or !selectedChatIsSlack(a)) return false;
     return std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), channel) and
-        std.mem.eql(u8, a.displayed_jid.slice(), channel);
+        chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]));
 }
 
 /// Debounce only messages belonging to the explicitly selected, loaded chat.
@@ -5368,7 +5417,7 @@ fn fireSlackMark(a: *App) void {
         return;
     }
     a.slack_mark_due_ms = 0;
-    var job = WacliJob{ .kind = .slack_mark, .gen = a.slack_mark_gen };
+    var job = WacliJob{ .provider = .slack, .kind = .slack_mark, .gen = a.slack_mark_gen };
     job.jid.set(channel);
     job.msg_id.set(ts);
     wacliJobArgs(&job, &.{ channel, ts });
@@ -5638,7 +5687,7 @@ fn clearMessages(a: *App) void {
 fn messagesAreCurrent(a: *const App) bool {
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return a.displayed_jid.len == 0;
     const chat = &a.chats[a.selected_chat];
-    return std.mem.eql(u8, a.displayed_jid.slice(), chat.jid.slice()) and
+    return chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat)) and
         std.mem.eql(u8, a.displayed_timestamp.slice(), chat.timestamp.slice());
 }
 
@@ -6331,7 +6380,7 @@ fn startMediaDownload(a: *App, chat_jid: []const u8, message_id: []const u8) boo
 /// drain loop keys on so a startable-looking candidate can never spin it.
 fn downloadMedia(a: *App, message_index: usize, automatic: bool) bool {
     if (message_index >= a.message_count or a.selected_chat >= a.chat_count) return false;
-    if (!std.mem.eql(u8, a.displayed_jid.slice(), a.chats[a.selected_chat].jid.slice())) return false;
+    if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]))) return false;
     const message = &a.messages[message_index];
     if (message.media_type.len == 0 or message.id.len == 0) return false;
     // Already on disk (e.g. a parallel download finished since the request):
@@ -6471,7 +6520,7 @@ fn autoDownloadNextMedia(a: *App) bool {
     // without starting one, and the drain would spin forever (WAZI-103).
     if (a.selected_chat >= a.chat_count or a.chats[a.selected_chat].provider != .whatsapp) return false;
     // Newest first: the media the user is looking at arrives first.
-    if (!std.mem.eql(u8, a.displayed_jid.slice(), a.chats[a.selected_chat].jid.slice())) return false;
+    if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]))) return false;
     const chat_jid = a.chats[a.selected_chat].jid.slice();
     var candidates: [max_messages]media_drain.Candidate = undefined;
     var count: usize = 0;
@@ -6950,7 +6999,7 @@ fn loadMsgCacheDisk(a: *App, jid: []const u8) ?[]u8 {
     defer a.allocator.free(path);
     const data = readFileWin(a.allocator, path, msg_cache_max_bytes) orelse return null;
     defer a.allocator.free(data);
-    const payload = chat_cache.payloadFor(data, jid) orelse return null;
+    const payload = chat_cache.payloadFor(data, a.cache_tag.slice(), jid) orelse return null;
     return a.allocator.dupe(u8, payload) catch null;
 }
 
@@ -7161,7 +7210,7 @@ fn pollFormatting(a: *App) void {
             // A chat switch must not discard the only copy of a finished summary.
             if (formatted.len > 0 and std.mem.eql(u8, key.account, a.cache_tag.slice())) {
                 saveFormattedCache(a, key, formatted);
-                if (std.mem.eql(u8, key.chat, a.displayed_jid.slice())) {
+                if (a.displayed_provider == .whatsapp and std.mem.eql(u8, key.account, a.displayed_account.slice()) and std.mem.eql(u8, key.chat, a.displayed_jid.slice())) {
                     for (a.messages[0..a.message_count]) |*message| {
                         if (!std.mem.eql(u8, message.id.slice(), done_id.slice())) continue;
                         message.transcript.set(a.allocator, formatted);
@@ -8178,6 +8227,7 @@ fn refreshMessages(a: *App) void {
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) {
         clearMessages(a);
         a.displayed_jid.set("");
+        a.displayed_account.set("");
         a.displayed_timestamp.set("");
         a.msg_read_last_jid.set("");
         a.msg_read_attempts = 0;
@@ -8195,14 +8245,14 @@ fn refreshMessages(a: *App) void {
     }
     if (chat.provider == .telegram) return refreshTelegramMessages(a);
     if (chat.provider == .slack) return refreshSlackHistory(a);
-    const chat_changed = !std.mem.eql(u8, a.displayed_jid.slice(), chat.jid.slice());
+    const chat_changed = !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat));
     if (chat_changed) stopAudio(a);
     // Instant first paint: render the chat's last known response from the
     // cache while the fresh read runs in the worker. Only the fresh result
     // (final) runs mark-as-read. The disk snapshot (WAZI-67) covers the
     // first open of a chat after a relaunch, before the in-memory cache
     // has been warmed.
-    if (msgCacheGet(a, chat.jid.slice())) |cached| {
+    if (msgCacheGet(a, chat_key.of(chat))) |cached| {
         _ = applyMessageData(a, cached, false);
     } else if (loadMsgCacheDisk(a, chat.jid.slice())) |cached| {
         defer a.allocator.free(cached);
@@ -8211,7 +8261,9 @@ fn refreshMessages(a: *App) void {
         _ = applyMessageData(a, "{\"data\":{\"messages\":[]}}", false);
     }
     a.messages_gen += 1;
-    var job = WacliJob{ .kind = .messages, .gen = a.messages_gen };
+    var job = WacliJob{ .account = a.cache_tag, .kind = .messages, .gen = a.messages_gen };
+    job.provider = chat.provider;
+    job.account = chat.account;
     job.jid.set(chat.jid.slice());
     wacliJobArgs(&job, &.{
         a.wacli_path, "--json", "--read-only", "messages", "list", "--chat", chat.jid.slice(), "--limit", "80",
@@ -8233,7 +8285,7 @@ fn reconcileOpenChat(a: *App) void {
     const chat = &a.chats[a.selected_chat];
     if (chat.provider != .whatsapp) return;
     if (wacliPendingGet(a, .messages) > 0) return;
-    if (!chat_reconcile.openChatStale(chat.jid.slice(), chat.timestamp.slice(), a.displayed_jid.slice(), a.displayed_timestamp.slice())) return;
+    if (chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat)) and !chat_reconcile.openChatStale(chat.jid.slice(), chat.timestamp.slice(), a.displayed_jid.slice(), a.displayed_timestamp.slice())) return;
     refreshMessages(a);
 }
 
@@ -8316,7 +8368,7 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
     defer parsed.deinit();
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return false;
     const chat = &a.chats[a.selected_chat];
-    const chat_changed = !std.mem.eql(u8, a.displayed_jid.slice(), chat.jid.slice());
+    const chat_changed = !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat));
     const root = switch (parsed.value) {
         .object => |o| o,
         else => return false,
@@ -8441,6 +8493,8 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
     // every time background refreshes redrew the conversation.
     if (chat_changed) a.scroll_y = 0;
     a.displayed_jid.set(chat.jid.slice());
+    a.displayed_account = chat.account;
+    a.displayed_provider = chat.provider;
     // Only a fresh result marks the view current: a cached paint must keep
     // the old timestamp so a later store change still triggers a real read.
     if (final) a.displayed_timestamp.set(chat.timestamp.slice());
@@ -8454,7 +8508,7 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
     applySentVoice(a, chat.jid.slice());
     // Failures remembered from earlier sends: drop the ones the store now
     // contains, then re-append the rest for the open chat.
-    pruneFailedSends(a, chat.jid.slice());
+    pruneFailedSends(a, chat_key.of(chat));
     for (a.failed_sends[0..a.failed_send_count]) |*failed| {
         if (a.message_count >= max_messages) break;
         appendWhatsAppFailed(a, failed);
@@ -8480,7 +8534,7 @@ fn enqueueCacheTagProbe(a: *App) void {
         a.cache_tag_probe_again = true;
         return;
     }
-    var job = WacliJob{ .kind = .cache_tag, .gen = a.cache_tag_gen };
+    var job = WacliJob{ .account = a.cache_tag, .kind = .cache_tag, .gen = a.cache_tag_gen };
     wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "auth", "status" });
     _ = wacliEnqueue(a, job, false);
 }
@@ -9145,9 +9199,9 @@ fn applySentVoice(a: *App, jid: []const u8) void {
 /// outgoing message in the open chat, the same way a reload recognizes a
 /// pending send that already landed (appendWhatsAppPending, pruneFailedSends).
 /// Only the currently open chat has messages loaded to check against.
-fn sentMessageExists(a: *App, jid: []const u8, text: []const u8, queued_unix: i64) bool {
+fn sentMessageExists(a: *App, key: chat_key.Key, text: []const u8, queued_unix: i64) bool {
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return false;
-    if (!std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), jid)) return false;
+    if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), key) or !chat_key.Key.eql(chat_key.displayed(a), key)) return false;
     for (a.messages[0..a.message_count]) |*message| {
         if (!message.from_me or message.send_state != .none) continue;
         const stored = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch continue;
@@ -9191,9 +9245,11 @@ fn startNextSend(a: *App) void {
     // A retry after an ambiguous failure (timeout, or a nonzero exit that
     // wasn't a store lock) might be sending a message a second time: if the
     // open chat already shows it as delivered, count it sent instead.
+    bindOutboxAccount(a);
     const head = &a.pending_sends[0];
+    if (a.slack_outbox_dirty or head.account.len == 0 or !std.mem.eql(u8, head.account.slice(), a.cache_tag.slice())) return;
     if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and
-        sentMessageExists(a, head.jid.slice(), head.text.slice(), head.queued_unix))
+        sentMessageExists(a, chat_key.of(head), head.text.slice(), head.queued_unix))
     {
         appendLaunchLog(a, "send: matched an already-delivered message, not resending");
         removeFirstPendingSend(a, true);
@@ -9615,6 +9671,8 @@ fn stageImageFromClipboard(a: *App) bool {
     // Everything succeeded: only now replace any earlier staged image.
     discardStagedImage(a);
     a.staged_image.path.set(path_buffer[0..path_len]);
+    a.staged_image.provider = a.chats[a.selected_chat].provider;
+    a.staged_image.account = a.chats[a.selected_chat].account;
     a.staged_image.jid.set(a.chats[a.selected_chat].jid.slice());
     a.staged_image.preview = preview;
     var bitmap: win.BITMAP = undefined;
@@ -9744,6 +9802,8 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
     };
     const pending = &a.pending_sends[a.pending_send_count];
     pending.* = .{};
+    pending.provider = .whatsapp;
+    pending.account = a.cache_tag;
     pending.jid.set(jid);
     pending.file.set(path);
     pending.ptt = true;
@@ -9790,7 +9850,7 @@ fn sendMessage(a: *App) void {
     var staged_file: []const u8 = "";
     var attach_path_buffer: [1600]u8 = undefined;
     if (a.staged_image.path.len > 0) {
-        if (std.mem.eql(u8, a.staged_image.jid.slice(), a.chats[a.selected_chat].jid.slice())) {
+        if (chat_key.Key.eql(chat_key.of(&a.staged_image), chat_key.of(&a.chats[a.selected_chat]))) {
             staged_file = a.staged_image.path.slice();
         } else discardStagedImage(a);
     }
@@ -9809,6 +9869,8 @@ fn sendMessage(a: *App) void {
         // File deletion transfers to the send queue (removeFirstPendingSend)
         // once wacli has finished with it; only the preview is dropped here.
         const pending = &a.pending_sends[a.pending_send_count];
+        pending.provider = a.chats[a.selected_chat].provider;
+        pending.account = a.chats[a.selected_chat].account;
         pending.jid.set(a.chats[a.selected_chat].jid.slice());
         pending.text.set(caption_copy);
         pending.file.set(path_copy);
@@ -9827,7 +9889,7 @@ fn sendMessage(a: *App) void {
         }
         releaseStagedImage(a);
         clearReply(a);
-        forgetFailedSend(a, pending.jid.slice(), pending.text.slice());
+        forgetFailedSend(a, chat_key.of(pending), pending.text.slice());
         a.user_viewed = true;
         a.scroll_y = 0; // the user just sent: pin the view to the newest bubble
         appendWhatsAppPending(a, pending, false);
@@ -9892,6 +9954,7 @@ fn sendMessage(a: *App) void {
             slot.* = .{};
             mintSendId(a, &slot.entry.id);
             slot.entry.provider = .slack;
+            slot.entry.account.set(chat.account.slice());
             slot.entry.jid.set(chat.jid.slice());
             slot.entry.text.set(text);
             slot.entry.file.set(attach);
@@ -9924,6 +9987,7 @@ fn sendMessage(a: *App) void {
             slot.* = .{};
             mintSendId(a, &slot.entry.id);
             slot.entry.provider = .slack;
+            slot.entry.account.set(chat.account.slice());
             slot.entry.jid.set(chat.jid.slice());
             slot.entry.text.set(text);
             slot.entry.reply_to.set(a.reply_to.slice());
@@ -9954,6 +10018,8 @@ fn sendMessage(a: *App) void {
     }
 
     const pending = &a.pending_sends[a.pending_send_count];
+    pending.provider = a.chats[a.selected_chat].provider;
+    pending.account = a.chats[a.selected_chat].account;
     pending.jid.set(a.chats[a.selected_chat].jid.slice());
     pending.text.set(text);
     pending.reply_to.set(a.reply_to.slice());
@@ -9971,7 +10037,7 @@ fn sendMessage(a: *App) void {
         return;
     }
     clearReply(a);
-    forgetFailedSend(a, pending.jid.slice(), pending.text.slice());
+    forgetFailedSend(a, chat_key.of(pending), pending.text.slice());
     a.user_viewed = true;
     a.scroll_y = 0; // the user just sent: pin the view to the newest bubble
     appendWhatsAppPending(a, pending, false);
@@ -10462,7 +10528,7 @@ fn reactToMessage(a: *App, jid: []const u8, msg_id: []const u8, emoji: []const u
         }
         const fresh = &a.pending_reactions[a.pending_reaction_count];
         a.pending_reaction_count += 1;
-        fresh.* = .{ .previous = message.reaction };
+        fresh.* = .{ .account = chat.account, .previous = message.reaction };
         fresh.jid.set(jid);
         fresh.msg_id.set(msg_id);
         if (std.mem.endsWith(u8, jid, "@g.us")) fresh.sender.set(message.sender_jid.slice());
@@ -10492,7 +10558,7 @@ fn reactToMessage(a: *App, jid: []const u8, msg_id: []const u8, emoji: []const u
 fn enqueueReactionJob(a: *App, entry: *PendingReaction) void {
     var args: [send_args.max_args][]const u8 = undefined;
     const count = send_args.buildReact(&args, a.wacli_path, entry.jid.slice(), entry.msg_id.slice(), entry.emoji.slice(), entry.sender.slice());
-    var job = WacliJob{ .kind = .reaction };
+    var job = WacliJob{ .provider = entry.provider, .account = entry.account, .kind = .reaction };
     job.jid.set(entry.jid.slice());
     job.msg_id.set(entry.msg_id.slice());
     job.extra.set(entry.emoji.slice());
@@ -11211,13 +11277,13 @@ fn tickArchivedScan(a: *App, store_changed: bool) void {
     if (a.pending_archive_count > 0 or a.archive_child != null) return;
     a.archived_scan_dirty = false;
     a.archived_scan_ticks = 0;
-    var job = WacliJob{ .kind = .archived_scan };
+    var job = WacliJob{ .account = a.cache_tag, .kind = .archived_scan };
     wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--archived", "--limit", "10000" });
     _ = wacliEnqueue(a, job, false);
 }
 
 fn enqueueResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8) void {
-    var job = WacliJob{ .kind = .resurface_probe };
+    var job = WacliJob{ .account = a.cache_tag, .kind = .resurface_probe };
     job.jid.set(jid);
     job.extra.set(row_ts);
     wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "messages", "list", "--chat", jid, "--limit", "3" });
@@ -11422,17 +11488,15 @@ fn removeChatRow(a: *App, removed: usize) void {
     }
 }
 
-fn visibleChatIndex(a: *const App, jid: []const u8) ?usize {
-    for (a.chats[0..a.chat_count], 0..) |*chat, index| {
-        if (std.mem.eql(u8, chat.jid.slice(), jid)) return index;
-    }
-    return null;
+fn visibleChatIndex(a: *const App, key: chat_key.Key) ?usize {
+    return chat_key.indexOf(Chat, a.chats[0..a.chat_count], key);
 }
 
 /// Which messenger a chat id belongs to: the visible row's provider, else
 /// the Slack or Telegram cache, else WhatsApp.
 fn chatProvider(a: *App, jid: []const u8) transport.Provider {
-    if (visibleChatIndex(a, jid)) |index| return a.chats[index].provider;
+    const view = activeChatView(a);
+    if (visibleChatIndex(a, .{ .provider = view, .account = if (view == .whatsapp) a.cache_tag.slice() else "", .id = jid })) |index| return a.chats[index].provider;
     if (slackChatById(a, jid) != null) return .slack;
     if (std.fmt.parseInt(i64, jid, 10)) |id| {
         for (a.tg_chats[0..a.tg_chat_count]) |*chat| if (chat.id == id) return .telegram;
@@ -11468,7 +11532,7 @@ fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action, source: a
         if (unarchive) {
             state.remove(jid);
         } else {
-            const stamp = if (visibleChatIndex(a, jid)) |index| a.chats[index].timestamp.slice() else "";
+            const stamp = if (visibleChatIndex(a, .{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = jid })) |index| a.chats[index].timestamp.slice() else "";
             if (!state.archive(jid, stamp, action == .keep) and action == .keep) return "Keep archived list is full";
         }
         saveArchiveState(a);
@@ -11483,7 +11547,7 @@ fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action, source: a
         a.archive_batch_total = if (a.pending_archive_count == 0) 1 else a.archive_batch_total + 1;
         a.pending_archive_count += 1;
     }
-    if (visibleChatIndex(a, jid)) |index| {
+    if (visibleChatIndex(a, .{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = jid })) |index| {
         if (unarchive or !(a.show_archived or a.chats[index].archived)) removeChatRow(a, index);
     }
     startNextArchive(a);
@@ -11513,7 +11577,7 @@ fn archiveShortcutAllowed(a: *const App, focus: ?win.HWND, lparam: win.LPARAM) b
 
 fn unarchiveSentChat(a: *App, jid: []const u8) void {
     var archived = if (a.archive_state) |state| state.find(jid) != null else false;
-    if (visibleChatIndex(a, jid)) |index| archived = archived or a.chats[index].archived;
+    if (visibleChatIndex(a, .{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = jid })) |index| archived = archived or a.chats[index].archived;
     if (a.people.find(jid)) |entry| archived = archived or entry.origin == .archived;
     for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
         if (std.mem.eql(u8, pending.jid.slice(), jid)) archived = !pending.should_unarchive;
@@ -11535,7 +11599,7 @@ fn archiveSelectedChat(a: *App, keep: bool, source: archive_rules.Source) void {
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
     if (a.bulk.count > 0) return archiveBulkSelection(a, keep, source);
     const chat = &a.chats[a.selected_chat];
-    if (source == .shortcut and a.displayed_jid.len > 0 and !std.mem.eql(u8, a.displayed_jid.slice(), chat.jid.slice()))
+    if (source == .shortcut and a.displayed_jid.len > 0 and !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat)))
         return setStatus(a, "Chat selection changed. Wait for the selected chat to open");
     var open_jid = Utf8Text(191){};
     open_jid.set(chat.jid.slice());
@@ -11949,7 +12013,7 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, show_archived: bool, query: []
         const display_name = groupName(a, jid) orelse getString(object, "name");
         if (isUnresolvableChatEntry(display_name, jid, getString(object, "kind"))) continue;
         if (query.len > 0 and !containsIgnoreCase(display_name, query) and !containsIgnoreCase(jid, query)) continue;
-        var chat = Chat{};
+        var chat = Chat{ .account = a.cache_tag };
         chat.jid.set(jid);
         chat.name.set(a.allocator, display_name);
         chat.kind.set(a.allocator, if (std.mem.endsWith(u8, jid, "@g.us")) "Group" else getString(object, "kind"));
@@ -12029,7 +12093,7 @@ fn controlSelect(a: *App, call: *ControlCall) !void {
     const w = &call.out.writer;
     const id = call.parsed.value.id;
     if (id.len == 0) return control_api.writeError(w, "needs a chat id");
-    var index = visibleChatIndex(a, id);
+    var index = visibleChatIndex(a, .{ .provider = activeChatView(a), .account = if (activeChatView(a) == .whatsapp) a.cache_tag.slice() else "", .id = id });
     if (index == null) {
         const provider = chatProvider(a, id);
         if (provider != activeChatView(a)) {
@@ -12038,7 +12102,7 @@ fn controlSelect(a: *App, call: *ControlCall) !void {
             // Switching restores the view's remembered chat: make it this one.
             a.view_selected[@intFromEnum(provider)].set(id);
             switchChatView(a, provider);
-            index = visibleChatIndex(a, id);
+            index = visibleChatIndex(a, .{ .provider = activeChatView(a), .account = if (activeChatView(a) == .whatsapp) a.cache_tag.slice() else "", .id = id });
         }
     }
     const found = index orelse {
@@ -12061,7 +12125,7 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
     if (a.selected_chat >= a.chat_count) return control_api.writeError(w, "no chat is selected");
     const chat = &a.chats[a.selected_chat];
     const wrong_chat = request.id.len > 0 and !std.mem.eql(u8, chat.jid.slice(), request.id);
-    if (wrong_chat or !std.mem.eql(u8, a.displayed_jid.slice(), chat.jid.slice())) {
+    if (wrong_chat or !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat))) {
         call.retry = true;
         return;
     }
@@ -13366,7 +13430,7 @@ fn refreshStatuses(a: *App, requested: bool) void {
     if (!a.status_refresh_requested and !status_view.mayRefresh(a.status_last_refresh_ms, now)) return;
     a.status_refresh_requested = false;
     stopSync(a, "status");
-    var job = WacliJob{ .kind = .statuses, .gen = a.status_gen };
+    var job = WacliJob{ .account = a.cache_tag, .kind = .statuses, .gen = a.status_gen };
     wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "status", "list", "--limit", "200" });
     a.status_last_refresh_ms = now;
     _ = wacliEnqueue(a, job, false);
@@ -13467,7 +13531,7 @@ fn openStatusContact(a: *App, contact: usize) void {
 
 fn enqueueStatusSeen(a: *App, id: []const u8) void {
     const args = status_view.seenArgs(a.wacli_path, id);
-    var job = WacliJob{ .kind = .status_seen, .gen = a.status_gen };
+    var job = WacliJob{ .account = a.cache_tag, .kind = .status_seen, .gen = a.status_gen };
     job.msg_id.set(id);
     wacliJobArgs(&job, &args);
     if (!wacliEnqueue(a, job, true)) statusSeenFailed(a, id, "queue full");
@@ -13598,13 +13662,13 @@ fn replyToStatus(a: *App) void {
     a.show_archived = false;
     a.unread_only = false;
     switchChatView(a, .whatsapp);
-    a.status_reply_chat = Chat{ .jid = jid, .name = name };
+    a.status_reply_chat = Chat{ .account = a.cache_tag, .jid = jid, .name = name };
     a.people_open_jid = jid;
     if (a.search) |search| _ = win.SetWindowTextW(search, lit(""));
-    var selected = visibleChatIndex(a, jid.slice());
+    var selected = visibleChatIndex(a, .{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = jid.slice() });
     if (selected == null) {
         const slot = @min(a.chat_count, max_chats - 1);
-        a.chats[slot] = .{ .jid = jid, .name = name };
+        a.chats[slot] = .{ .account = a.cache_tag, .jid = jid, .name = name };
         a.people_open_jid = jid;
         if (a.chats_hwnd) |list| {
             if (a.chat_count == max_chats) _ = win.SendMessageW(list, win.LB_DELETESTRING, slot, 0);
@@ -15575,6 +15639,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             wacliPendingSub(a, result.kind);
             if (jobIsSlack(result.kind) and !result.ok) logSlackFailure(a, result.kind, result.extra.slice(), result.http_status);
+            if (result.kind != .cache_tag and result.provider == .whatsapp and !std.mem.eql(u8, result.account.slice(), a.cache_tag.slice())) return 0;
             switch (result.kind) {
                 .statuses => {
                     if (result.gen != a.status_gen) return 0;
@@ -15637,7 +15702,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     // Chat kind + error only, never the message payload.
                     var kind: []const u8 = "unknown";
                     for (a.chats[0..a.chat_count]) |*chat| {
-                        if (std.mem.eql(u8, chat.jid.slice(), result.jid.slice())) {
+                        if (chat_key.Key.eql(chat_key.of(chat), chat_key.of(result))) {
                             kind = @tagName(chat.provider);
                             break;
                         }
@@ -15652,12 +15717,12 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         // stale answer belongs to a chat the user has already
                         // left and the newer read covers it.
                         if (result.gen == a.messages_gen and a.selected_chat < a.chat_count and
-                            std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), result.jid.slice()))
+                            chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)))
                         {
                             scheduleMessageReadRetry(a);
                         }
                     } else if (a.selected_chat < a.chat_count and
-                        std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), result.jid.slice()) and
+                        chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)) and
                         result.gen == a.messages_gen)
                     {
                         // WAZI-79: a 0-exit read without a messages list is
@@ -15667,14 +15732,14 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         // changes nothing: skip the teardown, re-decode and
                         // repaint (the WAL moves far more often than a chat).
                         if (a.message_count > 0 and a.pending_send_count == 0 and a.failed_send_count == 0 and
-                            std.mem.eql(u8, a.displayed_jid.slice(), result.jid.slice()) and
+                            chat_key.Key.eql(chat_key.displayed(a), chat_key.of(result)) and
                             std.hash.Wyhash.hash(0, result.data) == a.msg_applied_hash)
                         {
                             markChatRead(a);
                             a.msg_read_attempts = 0;
                             a.msg_read_retry_ticks = 0;
                         } else if (applyMessageData(a, result.data, true)) {
-                            msgCacheStore(a, result.jid.slice(), result.data);
+                            msgCacheStore(a, chat_key.of(result), result.data);
                             a.msg_read_attempts = 0;
                             a.msg_read_retry_ticks = 0;
                         } else {
@@ -15702,6 +15767,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                             const tag = std.fmt.bufPrint(&tag_buffer, "{x:0>16}", .{std.hash.Wyhash.hash(0, linked)}) catch return 0;
                             if (!std.mem.eql(u8, a.cache_tag.slice(), tag)) clearStatusAccount(a);
                             a.cache_tag.set(tag);
+                            bindOutboxAccount(a);
                         }
                     }
                     // An account changed while this probe was queued: run the
@@ -15737,14 +15803,14 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     if (!result.ok) {
                         setStatus(a, "Unable to read Slack history");
                     } else if (result.gen == a.messages_gen and selectedChatIsSlack(a) and
-                        std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), result.jid.slice()))
+                        chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)))
                     {
                         // Bridge poll: an unchanged answer for the chat already
                         // on screen is skipped, so images, thread replies and
                         // scroll are not torn down and refetched every 5 s.
                         const hash = std.hash.Wyhash.hash(0, result.data);
                         const unchanged = a.slack_bridge != null and hash == a.slack_history_hash and
-                            std.mem.eql(u8, a.displayed_jid.slice(), result.jid.slice());
+                            chat_key.Key.eql(chat_key.displayed(a), chat_key.of(result));
                         if (!unchanged) {
                             applySlackHistory(a, result.data);
                             a.slack_history_hash = hash;
@@ -15753,7 +15819,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 },
                 .slack_replies => {
                     if (result.ok and result.gen == a.messages_gen and selectedChatIsSlack(a) and
-                        std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), result.jid.slice()))
+                        chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)))
                     {
                         applySlackReplies(a, result.data);
                     }
@@ -17286,6 +17352,7 @@ fn applyStartupProbe(a: *App, code: usize, hash: u64) void {
     const new_tag: []const u8 = if (kind == .linked) (std.fmt.bufPrint(&tag_buffer, "{x:0>16}", .{hash}) catch "") else "";
     const changed = !std.mem.eql(u8, a.cache_tag.slice(), new_tag);
     a.cache_tag.set(new_tag);
+    bindOutboxAccount(a);
     if (changed) clearStatusAccount(a);
     persistTag(a, new_tag);
     if (kind == .unlinked) appendLaunchLog(a, "startup: no account tag (WhatsApp unlinked)");
