@@ -5,10 +5,12 @@ pub const max_jid_len = 191;
 pub const max_text_len = 4095;
 pub const max_file_len = 519;
 pub const max_client_msg_id_len = 63;
+pub const max_file_id_len = 63;
 pub const max_line_len = 32 * 1024;
 pub const max_entries = 64;
 
 pub const Provider = enum { whatsapp, slack };
+pub const SendState = enum { queued, uploaded, failed };
 
 pub fn Str(comptime capacity: usize) type {
     return struct {
@@ -36,6 +38,9 @@ pub const Entry = struct {
     reply_to: Str(max_jid_len) = .{},
     reply_sender: Str(max_jid_len) = .{},
     client_msg_id: Str(max_client_msg_id_len) = .{},
+    attempts: u8 = 0,
+    upload_file_id: Str(max_file_id_len) = .{},
+    state: SendState = .queued,
     queued_unix: i64 = 0,
     ptt: bool = false,
     voice_seconds: u32 = 0,
@@ -71,6 +76,9 @@ const line_fields = struct {
     reply_to: []const u8,
     reply_sender: []const u8,
     client_msg_id: []const u8,
+    attempts: u8,
+    upload_file_id: []const u8,
+    state: []const u8,
     queued_unix: i64,
     ptt: bool,
     voice_seconds: u32,
@@ -86,6 +94,9 @@ pub fn writeLine(writer: *std.Io.Writer, entry: *const Entry) !void {
         .reply_to = entry.reply_to.slice(),
         .reply_sender = entry.reply_sender.slice(),
         .client_msg_id = entry.client_msg_id.slice(),
+        .attempts = entry.attempts,
+        .upload_file_id = entry.upload_file_id.slice(),
+        .state = @tagName(entry.state),
         .queued_unix = entry.queued_unix,
         .ptt = entry.ptt,
         .voice_seconds = entry.voice_seconds,
@@ -102,6 +113,9 @@ const parsed_line = struct {
     reply_to: []const u8 = "",
     reply_sender: []const u8 = "",
     client_msg_id: []const u8 = "",
+    attempts: u8 = 0,
+    upload_file_id: []const u8 = "",
+    state: []const u8 = "queued",
     queued_unix: i64 = 0,
     ptt: bool = false,
     voice_seconds: u32 = 0,
@@ -115,16 +129,17 @@ pub fn parseLine(allocator: std.mem.Allocator, line: []const u8, out: *Entry) bo
     const value = parsed.value;
     if (!validId(value.id)) return false;
     const provider = std.meta.stringToEnum(Provider, value.provider) orelse return false;
+    const state = std.meta.stringToEnum(SendState, value.state) orelse return false;
     if (value.jid.len == 0 or value.jid.len > max_jid_len) return false;
     if (value.text.len == 0 and value.file.len == 0) return false;
     if (value.text.len > max_text_len or value.file.len > max_file_len or
         value.reply_to.len > max_jid_len or value.reply_sender.len > max_jid_len or
-        value.client_msg_id.len > max_client_msg_id_len) return false;
+        value.client_msg_id.len > max_client_msg_id_len or value.upload_file_id.len > max_file_id_len) return false;
     if (value.queued_unix < 0) return false;
-    for ([_][]const u8{ value.jid, value.text, value.file, value.reply_to, value.reply_sender, value.client_msg_id }) |field| {
+    for ([_][]const u8{ value.jid, value.text, value.file, value.reply_to, value.reply_sender, value.client_msg_id, value.upload_file_id }) |field| {
         if (std.mem.indexOfScalar(u8, field, 0) != null) return false;
     }
-    out.* = .{ .provider = provider, .queued_unix = value.queued_unix, .ptt = value.ptt, .voice_seconds = value.voice_seconds };
+    out.* = .{ .provider = provider, .queued_unix = value.queued_unix, .ptt = value.ptt, .voice_seconds = value.voice_seconds, .attempts = value.attempts, .state = state };
     @memcpy(&out.id, value.id);
     out.jid.set(value.jid);
     out.text.set(value.text);
@@ -132,6 +147,7 @@ pub fn parseLine(allocator: std.mem.Allocator, line: []const u8, out: *Entry) bo
     out.reply_to.set(value.reply_to);
     out.reply_sender.set(value.reply_sender);
     out.client_msg_id.set(value.client_msg_id);
+    out.upload_file_id.set(value.upload_file_id);
     return true;
 }
 
@@ -313,4 +329,50 @@ test "maximum escaped fields round trip and oversized fields are rejected" {
     const oversized = try std.fmt.allocPrint(allocator, "{{\"id\":\"0123456789abcdef0123456789abcdef\",\"provider\":\"whatsapp\",\"jid\":\"synthetic\",\"text\":\"{s}\"}}", .{[_]u8{'x'} ** (max_text_len + 1)});
     defer allocator.free(oversized);
     try std.testing.expect(!parseLine(allocator, oversized, &parsed));
+}
+
+test "slack upload state round-trips" {
+    var entry = Entry{ .provider = .slack, .queued_unix = 1700000000, .attempts = 2, .state = .uploaded };
+    entry.id = hexId([_]u8{0xcd} ** 16);
+    entry.jid.set("C01234567");
+    entry.text.set("image caption");
+    entry.file.set("C:\\cache\\image.png");
+    entry.upload_file_id.set("F01234567");
+    var allocating = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer allocating.deinit();
+    try writeLine(&allocating.writer, &entry);
+    var parsed = Entry{};
+    try std.testing.expect(parseLine(std.testing.allocator, allocating.written(), &parsed));
+    try std.testing.expectEqualDeep(entry, parsed);
+    entry.state = .failed;
+    allocating.clearRetainingCapacity();
+    try writeLine(&allocating.writer, &entry);
+    try std.testing.expect(parseLine(std.testing.allocator, allocating.written(), &parsed));
+    try std.testing.expectEqualDeep(entry, parsed);
+}
+
+test "old line without upload fields parses" {
+    const line =
+        \\{"id":"0123456789abcdef0123456789abcdef","provider":"slack","jid":"C01234567","text":"hello","file":"","reply_to":"","reply_sender":"","client_msg_id":"00000000-0000-4000-8000-000000000000","queued_unix":1700000000,"ptt":false,"voice_seconds":0}
+    ;
+    var parsed = Entry{};
+    try std.testing.expect(parseLine(std.testing.allocator, line, &parsed));
+    try std.testing.expectEqual(SendState.queued, parsed.state);
+    try std.testing.expectEqual(@as(u8, 0), parsed.attempts);
+    try std.testing.expectEqualStrings("", parsed.upload_file_id.slice());
+}
+
+test "invalid upload fields are rejected" {
+    for ([_][]const u8{
+        "\"state\":\"invalid\"",
+        "\"attempts\":256",
+        "\"attempts\":-1",
+        "\"upload_file_id\":\"F\\u0000bad\"",
+        "\"upload_file_id\":\"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\"",
+    }) |field| {
+        const line = try std.fmt.allocPrint(std.testing.allocator, "{{\"id\":\"0123456789abcdef0123456789abcdef\",\"provider\":\"slack\",\"jid\":\"C01234567\",\"text\":\"hello\",{s}}}", .{field});
+        defer std.testing.allocator.free(line);
+        var entry = Entry{};
+        try std.testing.expect(!parseLine(std.testing.allocator, line, &entry));
+    }
 }

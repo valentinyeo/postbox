@@ -333,7 +333,7 @@ pub fn build(b: *std.Build) void {
 
     // Tests live in Windows-free modules so they run on any host.
     const test_step = b.step("test", "Run unit tests");
-    for ([_][]const u8{ "src/chat_order.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/status_view.zig", "src/update.zig", "src/avatar_mask.zig", "src/compose_layout.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
+    for ([_][]const u8{ "src/chat_order.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/status_view.zig", "src/update.zig", "src/avatar_mask.zig", "src/compose_layout.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(test_root),
@@ -344,6 +344,30 @@ pub fn build(b: *std.Build) void {
         const run_tests = b.addRunArtifact(tests);
         test_step.dependOn(&run_tests.step);
     }
+    const slack_worker_source = @embedFile("src/slack_win.zig");
+    const slack_send_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("src/slack_send_test.zig"),
+        sourceSection("const SlackOutbox = struct", "// An image staged"),
+        sourceSection("const WacliJobKind = enum", "// Last raw wacli response"),
+        sourceSection("fn wacliJobArgs(", "fn wacliPendingGet("),
+        sourceSection("fn enqueueSlackOutbox(", "fn requestSlackDownload("),
+        "fn resendSlackBubble(a: *App) bool { const message = &a.messages[0];\n",
+        sourceSection("    if (selectedChatIsSlack(a)) {\n        for (a.slack_outbox", "    if (selectedChatIsTelegram(a)) return false;"),
+        "return false; }\n",
+        slack_worker_source[std.mem.indexOf(u8, slack_worker_source, "fn shareImage(").?..],
+    }) catch @panic("Out of memory building Slack send harness");
+    const slack_send_harness = b.addWriteFiles().add("slack_send_test.zig", slack_send_source);
+    const slack_send_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = slack_send_harness,
+        .target = b.resolveTargetQuery(.{}),
+        .imports = &.{
+            .{ .name = "outbox", .module = b.createModule(.{ .root_source_file = b.path("src/outbox.zig"), .target = b.resolveTargetQuery(.{}) }) },
+            .{ .name = "slack_send", .module = b.createModule(.{ .root_source_file = b.path("src/slack_send.zig"), .target = b.resolveTargetQuery(.{}) }) },
+            .{ .name = "slack", .module = b.createModule(.{ .root_source_file = b.path("src/slack.zig"), .target = b.resolveTargetQuery(.{}) }) },
+        },
+    }) });
+    test_step.dependOn(&b.addRunArtifact(slack_send_tests).step);
+
     // Compile the actual UI decisions with host stubs, rather than testing
     // another copy of the state machine that can drift from main.zig.
     const read_harness_source = std.mem.concat(b.allocator, u8, &.{
