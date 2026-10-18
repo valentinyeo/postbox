@@ -41,6 +41,8 @@ const mf_lazy = @import("mf_lazy.zig");
 const shell_lazy = @import("shell_lazy.zig");
 const bitmap_lru = @import("bitmap_lru.zig");
 const image_viewer = @import("image_viewer.zig");
+const status_view = @import("status_view.zig");
+const status_ui = @import("status_ui.zig");
 
 const webp = @cImport({
     @cInclude("src/webp/decode.h");
@@ -200,6 +202,8 @@ const command_show_slack = 2058;
 const command_show_telegram = 2059;
 const command_shortcuts_help = 2060;
 const command_keep_archived = 2061;
+const command_status = 2062;
+const id_status_row = 1120;
 const command_mic_default = 2400; // + 1..16: input devices listed by mic_choice
 const reaction_like = 3001;
 const reaction_love = 3002;
@@ -528,7 +532,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe, contacts_index };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe, contacts_index, statuses };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 
 const WacliJob = struct {
@@ -616,6 +620,14 @@ const App = struct {
     hwnd: ?win.HWND = null,
     search: ?win.HWND = null,
     chats_hwnd: ?win.HWND = null,
+    status_row: ?win.HWND = null,
+    status_list: ?status_view.List = null,
+    status_viewed: status_view.Viewed = .{},
+    status_ui: status_ui.State = .{},
+    status_last_refresh_ms: ?u64 = null,
+    status_refresh_requested: bool = false,
+    status_reply_chat: ?Chat = null,
+    status_gen: u64 = 0,
     canvas: ?win.HWND = null,
     compose: ?win.HWND = null,
     compose_dragged: i32 = 0,
@@ -1546,6 +1558,7 @@ fn recreateFonts(a: *App) void {
     a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     setFont(a.search, a.font);
     setFont(a.chats_hwnd, a.font);
+    setFont(a.status_row, a.font);
     setFont(a.compose, a.font);
     setFont(a.dictate, a.font_bold);
     setFont(a.send, a.font_bold);
@@ -2276,6 +2289,11 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
                 if (a.people.find(a.people_open_jid.slice())) |entry| {
                     a.chats[a.chat_count] = peopleChat(a, entry);
                     a.chat_count += 1;
+                } else if (a.status_reply_chat) |chat| {
+                    if (std.mem.eql(u8, chat.jid.slice(), a.people_open_jid.slice())) {
+                        a.chats[a.chat_count] = chat;
+                        a.chat_count += 1;
+                    }
                 }
             }
         }
@@ -3634,6 +3652,7 @@ fn refilterChats(a: *App) void {
 
 /// Alt+N: show one messenger's chats. Keeps each messenger's last chat.
 fn switchChatView(a: *App, view: transport.Provider) void {
+    if (a.status_ui.mode != .closed) closeStatuses(a);
     _ = clearBulkSelection(a);
     const current = activeChatView(a);
     if (messenger_view.effective(view, slackConfigured(a), telegramReady(a)) != view) {
@@ -3644,6 +3663,7 @@ fn switchChatView(a: *App, view: transport.Provider) void {
         a.view_selected[@intFromEnum(current)].set(a.chats[a.selected_chat].jid.slice());
     }
     a.chat_view = view;
+    layout(a, a.compose_client_width, a.compose_client_height);
     saveChatView(view);
     if (view == current) return;
     a.chat_view_switched = true;
@@ -5908,6 +5928,7 @@ fn filetimeToUnixSeconds(ft: win.FILETIME) i64 {
 }
 
 fn startMediaDownload(a: *App, chat_jid: []const u8, message_id: []const u8) bool {
+    if (wacliPendingGet(a, .statuses) > 0) return false;
     // A send in flight may still be relying on live sync staying paused;
     // callers treat false as "try later" and the next tick retries.
     if (a.send_child != null or a.pending_send_count > 0 or a.read_child != null or
@@ -6077,6 +6098,7 @@ fn isDownloadableMedia(message: *const Message) bool {
 }
 
 fn autoDownloadNextMedia(a: *App) bool {
+    if (a.status_ui.mode == .viewer) return autoDownloadStatus(a);
     // Slots full: the next finished download re-enters here from the timer.
     if (freeMediaSlot(a) == null) return false;
     const now_ms = win.GetTickCount64();
@@ -6871,6 +6893,7 @@ fn checkMediaDownload(a: *App) void {
     var finished_ok: usize = 0;
     var finished_failed: usize = 0;
     var chain_slot_done = false;
+    var status_finished = false;
     for (&a.media_downloads) |*slot| {
         if (slot.child) |*child| {
             const timed_out = win.GetTickCount64() - slot.started_ms > media_timeout_ms;
@@ -6892,6 +6915,7 @@ fn checkMediaDownload(a: *App) void {
             } else {
                 noteMediaFailure(a, slot.jid.slice(), slot.id.slice());
             }
+            if (std.mem.eql(u8, slot.jid.slice(), status_view.broadcast)) status_finished = true;
             image_viewer.downloadFinished(a, slot.jid.slice(), slot.id.slice(), code == 0);
             // The chained note's own slot decides the chain's fate; an
             // unrelated slot finishing must leave the chain armed.
@@ -6907,8 +6931,9 @@ fn checkMediaDownload(a: *App) void {
     // store lock behind live downloads, which is fine for a worker call.
     if (finished_ok + finished_failed > 0) {
         drainMediaDownloads(a);
+        if (status_finished) refreshStatuses(a, true);
         startSync(a);
-        refreshMessages(a);
+        if (!status_finished) refreshMessages(a);
         if (a.audio_chain_waiting and chain_slot_done) {
             a.audio_chain_waiting = false;
             var chain_started = false;
@@ -7006,6 +7031,7 @@ var player_callback_refs: u32 = 1;
 var player_class_registered: bool = false;
 
 fn closePlayer(a: *App) void {
+    a.player_fullscreen = false;
     if (a.mf_player) |player| {
         // Drop the field first: Shutdown pumps messages on the STA, and a
         // re-entrant paint or resize must not see a released player.
@@ -7021,6 +7047,18 @@ fn closePlayer(a: *App) void {
 
 fn playerProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    if (a.status_ui.mode == .viewer) {
+        if (message == win.WM_CLOSE) {
+            statusBack(a);
+            return 0;
+        }
+        if (message == win.WM_LBUTTONUP) {
+            const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
+            const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+            status_ui.click(a, hwnd, x, y, status_actions);
+            return 0;
+        }
+    }
     switch (message) {
         win.WM_KEYDOWN => {
             if (wparam == win.VK_F11) {
@@ -8165,7 +8203,7 @@ fn startSync(a: *App) void {
     if (a.sync_child != null or a.read_child != null or readsPendingBlockingSync(a) or
         mediaBusy(a) or (a.send_child != null and a.send_direct) or
         a.archive_child != null or a.pending_archive_count > 0 or avatarBusy(a) or
-        wacliPendingGet(a, .reaction) > 0) return;
+        wacliPendingGet(a, .reaction) > 0 or wacliPendingGet(a, .statuses) > 0) return;
     // Refreshing groups and contacts on every restart got the account rate
     // limited (429 rate-overlimit): do it on the first start of a run and
     // then at most every sync_gate.sync_refresh_gap_ms.
@@ -9525,6 +9563,10 @@ fn startReply(a: *App) void {
 }
 
 fn focusCompose(a: *App) void {
+    if (a.status_ui.mode != .closed) {
+        if (a.canvas) |canvas| _ = win.SetFocus(canvas);
+        return;
+    }
     if (a.compose) |compose| {
         _ = win.SetFocus(compose);
         const length: usize = @intCast(win.GetWindowTextLengthW(compose));
@@ -9608,6 +9650,7 @@ fn updateDictation(a: *App) void {
 }
 
 fn selectChat(a: *App, delta: i32, wrap: bool) void {
+    closeStatuses(a);
     _ = clearBulkSelection(a);
     if (a.chat_count == 0) return;
     clearReply(a);
@@ -11288,6 +11331,11 @@ fn controlDispatch(a: *App, call: *ControlCall) !void {
     if (call.phase == .select) return controlSelect(a, call);
     switch (request.cmd) {
         .status => try controlStatus(a, w),
+        .statuses => try status_view.writeStatuses(w, statusRows(a), &a.status_viewed),
+        .@"open-status" => {
+            openStatuses(a, false);
+            try w.writeAll("{\"ok\":true,\"result\":{\"view\":\"status\"}}\n");
+        },
         .chats => try controlChats(a, call),
         .search => try controlSearch(a, call),
         .view => try controlView(a, w, request.messenger),
@@ -11502,6 +11550,7 @@ fn controlView(a: *App, w: *std.Io.Writer, messenger: ?control_api.Messenger) !v
 
 /// The chat-list click, minus the composer focus: select, load, repaint.
 fn controlSelectIndex(a: *App, index: usize) void {
+    if (a.status_ui.mode != .closed) closeStatuses(a);
     if (index != a.selected_chat) {
         clearReply(a);
         discardStagedImage(a);
@@ -11654,6 +11703,7 @@ fn buildPaletteItems(a: *App) void {
     a.palette_archive_kept = isKeptArchived(a, a.palette_archive_jid.slice());
     a.palette_item_count = 0;
     appendPalette(a, "Search chats", "Ctrl+F", command_search);
+    appendPalette(a, "Status", "", command_status);
     appendPalette(a, "Compose message", "C", command_compose);
     appendPalette(a, "Keyboard shortcuts", "F1", command_shortcuts_help);
     appendPalette(a, "Dictate", "Ctrl+D", command_dictate);
@@ -11894,6 +11944,7 @@ fn paletteActivate(a: *App) void {
         closePalette(a);
         // Same flow as clicking the chat in the list: open it and land in
         // the composer with the caret at the end.
+        closeStatuses(a);
         discardStagedImage(a);
         a.selected_chat = @intCast(selected);
         if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, selected, 0);
@@ -12125,6 +12176,7 @@ fn removeWhatsAppAccount(a: *App) void {
     }
     // Keep auto-reconnect off: the store is gone until pairing runs again.
     a.accounts_maintenance = true;
+    clearStatusAccount(a);
     deleteAccountCaches(a);
     // The in-memory message ring is keyed only by chat jid, which a shared
     // group can survive an account switch: free it too, or pairing another
@@ -12559,10 +12611,12 @@ fn shortcutHelpProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lpara
 
 fn runCommand(a: *App, command: u16) void {
     switch (command) {
+        command_status => openStatuses(a, true),
         command_search => {
             if (a.search) |search| _ = win.SetFocus(search);
         },
         command_compose => {
+            closeStatuses(a);
             a.user_viewed = true;
             if (a.compose) |compose| _ = win.SetFocus(compose);
         },
@@ -12802,6 +12856,281 @@ fn runCommand(a: *App, command: u16) void {
     }
 }
 
+fn clearStatusAccount(a: *App) void {
+    closeStatuses(a);
+    a.status_gen += 1;
+    if (a.status_list) |*list| list.deinit(a.allocator);
+    a.status_list = null;
+    a.status_reply_chat = null;
+    a.status_last_refresh_ms = null;
+    a.status_refresh_requested = false;
+    invalidateStatuses(a);
+}
+
+fn statusRows(a: *const App) []const status_view.Row {
+    return if (a.status_list) |list| list.rows.items else &.{};
+}
+
+fn invalidateStatuses(a: *App) void {
+    if (a.status_row) |row| _ = win.InvalidateRect(row, null, win.FALSE);
+    if (a.status_ui.mode != .closed) {
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    }
+}
+
+fn persistStatusViewed(a: *App) void {
+    a.status_viewed.prune(a.allocator, nowUnixSeconds());
+    if (!a.status_viewed.dirty) return;
+    const path = messagesDirPath(a, "status-viewed.txt") orelse return;
+    defer a.allocator.free(path);
+    const data = a.status_viewed.encode(a.allocator, nowUnixSeconds()) catch return;
+    defer a.allocator.free(data);
+    if (writeCacheFileAtomic(a, path, data)) a.status_viewed.dirty = false;
+}
+
+fn refreshStatuses(a: *App, requested: bool) void {
+    if (requested) a.status_refresh_requested = true;
+    if (wacliPendingGet(a, .statuses) > 0) {
+        a.status_refresh_requested = false;
+        return;
+    }
+    if (a.wacli_thread == null or a.accounts_maintenance or a.sync_logged_out) return;
+    if (mediaBusy(a) or a.send_child != null or
+        a.read_child != null or a.archive_child != null or avatarBusy(a) or
+        wacliPendingGet(a, .reaction) > 0) return;
+    const now = win.GetTickCount64();
+    if (!a.status_refresh_requested and !status_view.mayRefresh(a.status_last_refresh_ms, now)) return;
+    a.status_refresh_requested = false;
+    stopSync(a, "status");
+    var job = WacliJob{ .kind = .statuses, .gen = a.status_gen };
+    wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "status", "list", "--limit", "200" });
+    a.status_last_refresh_ms = now;
+    wacliEnqueue(a, job, false);
+}
+
+fn applyStatuses(a: *App, raw: []const u8) void {
+    const list = status_view.List.parse(a.allocator, raw, nowUnixSeconds()) catch {
+        a.status_ui.failed = true;
+        invalidateStatuses(a);
+        return;
+    };
+    var next_navigation: ?status_view.Navigation = null;
+    var same_item = false;
+    if (a.status_ui.mode == .viewer) {
+        const old_rows = statusRows(a);
+        const navigation = a.status_ui.navigation.refreshed(old_rows, list.rows.items, &a.status_viewed);
+        if (a.status_ui.navigation.current()) |old_index| {
+            if (navigation.current()) |new_index| {
+                same_item = std.mem.eql(u8, old_rows[old_index].msg_id, list.rows.items[new_index].msg_id);
+            }
+        }
+        next_navigation = navigation;
+    }
+    for (list.rows.items) |*row| {
+        if (row.local_path.len > 0 and !fileExistsUtf8(row.local_path)) row.local_path = "";
+        if (row.local_path.len > 0) media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(status_view.broadcast, row.msg_id));
+    }
+    if (a.status_list) |*old| old.deinit(a.allocator);
+    a.status_list = list;
+    a.status_ui.failed = false;
+    if (next_navigation) |navigation| {
+        a.status_ui.navigation = navigation;
+        if (navigation.current() != null) {
+            if (!same_item) {
+                closePlayer(a);
+                status_ui.clearMedia(a);
+            }
+            showStatusMedia(a);
+            drainMediaDownloads(a);
+        } else statusBack(a);
+    }
+    persistStatusViewed(a);
+    invalidateStatuses(a);
+}
+
+fn openStatuses(a: *App, focus: bool) void {
+    if (a.image_viewer_window != null) closeImageViewer(a);
+    closePlayer(a);
+    status_ui.clearMedia(a);
+    a.status_ui.mode = .list;
+    a.status_ui.scroll = 0;
+    a.status_ui.selected = 0;
+    a.user_viewed = false;
+    layout(a, a.compose_client_width, a.compose_client_height);
+    refreshStatuses(a, true);
+    invalidateStatuses(a);
+    if (focus) {
+        if (a.canvas) |canvas| _ = win.SetFocus(canvas);
+    }
+}
+
+fn closeStatuses(a: *App) void {
+    if (a.status_ui.mode == .closed) return;
+    a.status_ui.mode = .closed;
+    closePlayer(a);
+    status_ui.clearMedia(a);
+    layout(a, a.compose_client_width, a.compose_client_height);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+}
+
+fn statusBack(a: *App) void {
+    closePlayer(a);
+    status_ui.clearMedia(a);
+    a.status_ui.mode = .list;
+    a.status_ui.failed = false;
+    invalidateStatuses(a);
+    if (a.canvas) |canvas| _ = win.SetFocus(canvas);
+}
+
+fn openStatusContact(a: *App, contact: usize) void {
+    const rows = statusRows(a);
+    const groups = status_view.group(rows, &a.status_viewed);
+    if (contact >= groups.count) return;
+    closePlayer(a);
+    status_ui.clearMedia(a);
+    a.status_ui.mode = .viewer;
+    a.status_ui.navigation = status_view.Navigation.init(rows, &a.status_viewed, groups, contact);
+    a.status_ui.failed = false;
+    showStatusMedia(a);
+    drainMediaDownloads(a);
+    invalidateStatuses(a);
+}
+
+fn markStatusViewed(a: *App) void {
+    const index = a.status_ui.navigation.current() orelse return;
+    const rows = statusRows(a);
+    if (index >= rows.len or a.status_viewed.contains(rows[index].msg_id)) return;
+    a.status_viewed.mark(a.allocator, rows[index].msg_id, rows[index].ts) catch return;
+    persistStatusViewed(a);
+    if (a.status_row) |row| _ = win.InvalidateRect(row, null, win.FALSE);
+}
+
+fn showStatusMedia(a: *App) void {
+    if (a.status_ui.mode != .viewer or a.status_ui.displayed) return;
+    const index = a.status_ui.navigation.current() orelse return;
+    const rows = statusRows(a);
+    if (index >= rows.len) return;
+    const row = rows[index];
+    if (row.media_type.len == 0) return;
+    if (row.local_path.len == 0) {
+        a.status_ui.failed = mediaUnavailable(a, status_view.broadcast, row.msg_id);
+        return;
+    }
+    var message = Message{};
+    message.local_path.set(a.allocator, row.local_path);
+    message.media_type.set(row.media_type);
+    message.mime_type.set(row.mime_type);
+    if (std.mem.eql(u8, row.media_type, "video")) {
+        var alias_buffer: [1024]u8 = undefined;
+        message.local_path.set(a.allocator, playableVideoPath(&alias_buffer, row.media_type, row.mime_type, row.local_path));
+        a.status_ui.displayed = true;
+        playVideoInline(a, &message);
+        if (a.player_window) |hwnd| {
+            var title = WideText(511){};
+            var buffer: [512]u8 = undefined;
+            title.set(a.allocator, std.fmt.bufPrint(&buffer, "{s} · {d:0>2}:{d:0>2} UTC · R: Reply · ←/→: navigate · Esc: updates", .{ row.name(), @divTrunc(@mod(row.ts, 86400), 3600), @divTrunc(@mod(row.ts, 3600), 60) }) catch row.name());
+            _ = win.SetWindowTextW(hwnd, title.ptr());
+            _ = win.ShowWindow(hwnd, win.SW_MAXIMIZE);
+            markStatusViewed(a);
+        } else a.status_ui.failed = true;
+    } else {
+        var client: win.RECT = undefined;
+        const canvas = a.canvas orelse return;
+        _ = win.GetClientRect(canvas, &client);
+        a.status_ui.bitmap = image_viewer.decodeImageViewerBitmap(a, &message, @max(1, client.right), @max(1, client.bottom), &a.status_ui.width, &a.status_ui.height);
+        a.status_ui.displayed = true;
+        a.status_ui.failed = a.status_ui.bitmap == null;
+    }
+    invalidateStatuses(a);
+}
+
+fn stepStatus(a: *App, direction: i32) void {
+    if (!a.status_ui.navigation.step(direction)) {
+        if (direction > 0) statusBack(a);
+        return;
+    }
+    closePlayer(a);
+    status_ui.clearMedia(a);
+    a.status_ui.failed = false;
+    showStatusMedia(a);
+    drainMediaDownloads(a);
+    invalidateStatuses(a);
+}
+
+fn autoDownloadStatus(a: *App) bool {
+    if (a.status_ui.mode != .viewer or freeMediaSlot(a) == null or wacliPendingGet(a, .statuses) > 0) return false;
+    const now = win.GetTickCount64();
+    if (a.sync_child == null and a.media_burst_files > 0 and !media_drain.mayContinueBurst(a.media_burst_files, a.media_burst_started_ms, now)) return false;
+    if (a.sync_child != null and (now < a.media_resume_after_ms or a.read_child != null or
+        !sync_gate.gapElapsed(a.last_sync_stop_ms, now, sync_gate.media_stop_gap_ms))) return false;
+    const rows = statusRows(a);
+    const current = a.status_ui.navigation.current() orelse return false;
+    if (current >= rows.len) return false;
+    for (rows) |row| {
+        if (row.from_me or !std.mem.eql(u8, row.sender_jid, rows[current].sender_jid) or
+            row.media_type.len == 0 or row.local_path.len > 0 or mediaAttempted(a, status_view.broadcast, row.msg_id) or
+            mediaDownloading(a, status_view.broadcast, row.msg_id)) continue;
+        var waiting = false;
+        const hash = played.Set.pairKey(status_view.broadcast, row.msg_id);
+        for (a.media_failures) |failure| {
+            if (failure.hash == hash and now < failure.retry_after_ms) waiting = true;
+        }
+        if (waiting) continue;
+        return startMediaDownload(a, status_view.broadcast, row.msg_id);
+    }
+    return false;
+}
+
+fn replyToStatus(a: *App) void {
+    const rows = statusRows(a);
+    const index = a.status_ui.navigation.current() orelse return;
+    if (index >= rows.len) return;
+    const row = rows[index];
+    var jid = Utf8Text(191){};
+    jid.set(row.sender_jid);
+    var name = WideText(159){};
+    name.set(a.allocator, row.name());
+    var quoted = WideText(4095){};
+    const prefix = std.fmt.allocPrint(a.allocator, "> {s}\r\n\r\n", .{row.quote()}) catch return;
+    defer a.allocator.free(prefix);
+    quoted.set(a.allocator, prefix);
+    closeStatuses(a);
+    a.show_archived = false;
+    a.unread_only = false;
+    switchChatView(a, .whatsapp);
+    a.status_reply_chat = Chat{ .jid = jid, .name = name };
+    a.people_open_jid = jid;
+    if (a.search) |search| _ = win.SetWindowTextW(search, lit(""));
+    var selected = visibleChatIndex(a, jid.slice());
+    if (selected == null) {
+        const slot = @min(a.chat_count, max_chats - 1);
+        a.chats[slot] = .{ .jid = jid, .name = name };
+        a.people_open_jid = jid;
+        if (a.chats_hwnd) |list| {
+            if (a.chat_count == max_chats) _ = win.SendMessageW(list, win.LB_DELETESTRING, slot, 0);
+            _ = win.SendMessageW(list, win.LB_ADDSTRING, 0, @bitCast(@intFromPtr(a.chats[slot].name.ptr())));
+        }
+        a.chat_count = slot + 1;
+        selected = slot;
+    }
+    clearReply(a);
+    controlSelectIndex(a, selected.?);
+    if (a.compose) |compose| _ = win.SetWindowTextW(compose, quoted.ptr());
+    focusCompose(a);
+}
+
+const status_actions = .{
+    .rows = statusRows,
+    .px = px,
+    .now = nowUnixSeconds,
+    .avatar = avatarForChat,
+    .drawAvatar = drawAvatarBitmap,
+    .viewed = markStatusViewed,
+    .reply = replyToStatus,
+    .step = stepStatus,
+    .openContact = openStatusContact,
+};
+
 fn composerNonClientY(compose: win.HWND) i32 {
     var rc_win: win.RECT = undefined;
     var rc_cli: win.RECT = undefined;
@@ -12832,6 +13161,11 @@ fn layout(a: *App, width: i32, height: i32) void {
     const header_height: i32 = 0;
     const search_height: i32 = px(a, 48);
     const status_height: i32 = px(a, 26);
+    const status_row_height: i32 = if (activeChatView(a) == .whatsapp) px(a, 64) else 0;
+    if (a.status_row) |row| {
+        _ = win.ShowWindow(row, if (status_row_height > 0) win.SW_SHOWNA else win.SW_HIDE);
+        _ = win.MoveWindow(row, 0, search_height, left_width - scrollbar_width, status_row_height, win.TRUE);
+    }
     var sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
     // The wrap count depends on the edit's width, so measure once more after
     // sizing (the themed strip keeps that width constant across heights).
@@ -12849,7 +13183,7 @@ fn layout(a: *App, width: i32, height: i32) void {
             if (win.SetWindowRgn(hwnd, rgn, win.TRUE) == 0) _ = win.DeleteObject(rgn);
         }
     }
-    if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, height - header_height - search_height - status_height - updateCardSpan(a), win.TRUE);
+    if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + search_height + status_row_height, left_width - scrollbar_width, height - header_height - search_height - status_row_height - status_height - updateCardSpan(a), win.TRUE);
     if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);
     if (a.canvas) |hwnd| _ = win.MoveWindow(hwnd, left_width + 1, header_height, width - left_width - 1, height - header_height - sizes.strip_height, win.TRUE);
     if (a.emoji_btn) |hwnd| _ = win.MoveWindow(hwnd, width - px(a, 236), height - px(a, 55), px(a, 44), px(a, 44), win.TRUE);
@@ -12860,6 +13194,14 @@ fn layout(a: *App, width: i32, height: i32) void {
         _ = win.MoveWindow(hwnd, width - px(a, 244) - voice_width, height - px(a, 55), voice_width, px(a, 44), win.TRUE);
     }
     if (a.send) |hwnd| _ = win.MoveWindow(hwnd, width - px(a, 82), height - px(a, 55), px(a, 68), px(a, 44), win.TRUE);
+    const status_open = a.status_ui.mode != .closed;
+    for ([_]?win.HWND{ a.compose, a.emoji_btn, a.dictate, a.voice_btn, a.send }) |child| {
+        if (child) |hwnd| _ = win.ShowWindow(hwnd, if (status_open) win.SW_HIDE else win.SW_SHOWNA);
+    }
+    if (status_open) {
+        a.compose_strip_top = height;
+        if (a.canvas) |hwnd| _ = win.MoveWindow(hwnd, left_width + 1, 0, width - left_width - 1, height, win.TRUE);
+    }
     if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.TRUE);
 }
 
@@ -14357,6 +14699,22 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
 
 fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    if (a.status_ui.mode != .closed) {
+        switch (message) {
+            win.WM_PAINT => status_ui.paint(a, hwnd, status_actions),
+            win.WM_ERASEBKGND => return 1,
+            win.WM_LBUTTONUP => {
+                const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
+                const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+                status_ui.click(a, hwnd, x, y, status_actions);
+            },
+            win.WM_LBUTTONDOWN => {
+                _ = win.SetFocus(hwnd);
+            },
+            else => return win.DefWindowProcW(hwnd, message, wparam, lparam),
+        }
+        return 0;
+    }
     switch (message) {
         win.WM_PAINT => {
             a.paints_canvas +%= 1;
@@ -14656,6 +15014,14 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             wacliPendingSub(a, result.kind);
             if (jobIsSlack(result.kind) and !result.ok) logSlackFailure(a, result.kind, result.extra.slice(), result.http_status);
             switch (result.kind) {
+                .statuses => {
+                    if (result.gen != a.status_gen) return 0;
+                    if (result.ok) applyStatuses(a, result.data) else {
+                        a.status_ui.failed = true;
+                        invalidateStatuses(a);
+                    }
+                    startSync(a);
+                },
                 .groups => if (result.ok) applyGroups(a, result.data),
                 .contacts_index => if (result.ok) {
                     a.people.replaceContacts(result.data) catch return 0;
@@ -14771,6 +15137,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         if (linked.len > 0) {
                             var tag_buffer: [32]u8 = undefined;
                             const tag = std.fmt.bufPrint(&tag_buffer, "{x:0>16}", .{std.hash.Wyhash.hash(0, linked)}) catch return 0;
+                            if (!std.mem.eql(u8, a.cache_tag.slice(), tag)) clearStatusAccount(a);
                             a.cache_tag.set(tag);
                         }
                     }
@@ -14931,6 +15298,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             a.brush_muted = win.CreateSolidBrush(color_muted);
             a.search = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 0, 0, 0, 0, hwnd, controlId(id_search), a.instance, null);
             a.chats_hwnd = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 0, 0, 0, 0, hwnd, controlId(id_chats), a.instance, null);
+            a.status_row = win.CreateWindowExW(0, lit("BUTTON"), lit("Status"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_status_row), a.instance, null);
             a.canvas = win.CreateWindowExW(0, lit("WacliMessageCanvas"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, hwnd, controlId(id_canvas), a.instance, null);
             a.compose = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 0, 0, hwnd, controlId(id_compose), a.instance, null);
             a.dictate = win.CreateWindowExW(0, lit("BUTTON"), lit("Dictate"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_dictate), a.instance, null);
@@ -14977,6 +15345,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             pruneStaleMsgCache(a);
             refreshChats(a);
             refreshContactsIndex(a);
+            refreshStatuses(a, false);
             a.archived_scan_ticks = archived_scan_min_ticks;
             tickArchivedScan(a, false);
             refreshMessages(a);
@@ -15157,6 +15526,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             const item: *win.DRAWITEMSTRUCT = winHandle(*win.DRAWITEMSTRUCT, @as(usize, @bitCast(lparam)));
             if (item.CtlType == win.ODT_MENU) {
                 if (item.itemID == reaction_row) drawReactionRow(a, item);
+            } else if (item.CtlID == id_status_row) {
+                status_ui.drawPinned(a, item, status_actions);
             } else if (item.CtlID == id_chats) {
                 drawChat(a, item);
             } else if (item.CtlID == id_voice) {
@@ -15180,10 +15551,13 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         win.WM_COMMAND => {
             const id = loword(wparam);
             const notification = hiword(wparam);
-            if (id == id_chats and notification == win.LBN_SELCHANGE) {
+            if (id == id_status_row and notification == win.BN_CLICKED) {
+                openStatuses(a, true);
+            } else if (id == id_chats and notification == win.LBN_SELCHANGE) {
                 _ = clearBulkSelection(a);
                 const selected = win.SendMessageW(a.chats_hwnd.?, win.LB_GETCURSEL, 0, 0);
                 if (selected >= 0) {
+                    closeStatuses(a);
                     discardStagedImage(a);
                     a.selected_chat = @intCast(selected);
                     a.user_viewed = true;
@@ -15213,6 +15587,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 tickVoice(a);
             } else if (wparam == timer_refresh) {
                 updateVoiceButton(a);
+                refreshStatuses(a, false);
+                if (a.status_ui.mode == .viewer) showStatusMedia(a);
                 // Idle proof: paints per minute, one launch-log line a minute.
                 a.paint_minute_ticks += 1;
                 if (a.paint_minute_ticks >= 60) {
@@ -15371,6 +15747,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             // only copy of those reads — never overwrite it from memory.
             if (!a.read_queue_dead) persistPendingReads(a);
             persistReadState(a);
+            persistStatusViewed(a);
+            status_ui.clearMedia(a);
             // ponytail: the Socket Mode thread stops at its next frame or at
             // process exit, whichever comes first; upgrade path is a stored
             // socket handle closed here to unblock the receive immediately.
@@ -15510,6 +15888,39 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     const control = win.GetKeyState(win.VK_CONTROL) < 0;
     const shift = win.GetKeyState(win.VK_SHIFT) < 0;
     const alt = win.GetKeyState(win.VK_MENU) < 0;
+    if (a.status_ui.mode != .closed and a.palette == null and a.shortcut_help == null and (a.search == null or focus != a.search.?) and !control and !alt) {
+        switch (key) {
+            win.VK_ESCAPE => {
+                if (a.status_ui.mode == .viewer) statusBack(a) else {
+                    closeStatuses(a);
+                    focusCompose(a);
+                }
+            },
+            win.VK_LEFT => {
+                if (a.status_ui.mode == .viewer) stepStatus(a, -1);
+            },
+            win.VK_RIGHT => {
+                if (a.status_ui.mode == .viewer) stepStatus(a, 1);
+            },
+            'R' => {
+                if (a.status_ui.mode == .viewer) replyToStatus(a);
+            },
+            win.VK_RETURN => {
+                if (a.status_ui.mode == .list) openStatusContact(a, a.status_ui.selected);
+            },
+            win.VK_UP, win.VK_DOWN => {
+                const count = status_view.group(statusRows(a), &a.status_viewed).count;
+                if (count > 0 and a.status_ui.mode == .list) {
+                    if (key == win.VK_UP) a.status_ui.selected -|= 1 else a.status_ui.selected = @min(count - 1, a.status_ui.selected + 1);
+                    a.status_ui.scroll = @max(0, @as(i32, @intCast(a.status_ui.selected)) * px(a, 76) - px(a, 150));
+                    invalidateStatuses(a);
+                }
+            },
+            win.VK_F1, win.VK_F11 => return false,
+            else => return true,
+        }
+        return true;
+    }
     // Swallow a bare Alt keydown: if it reaches the edit control's default
     // proc it enters menu mode, which hides the caret, and because Alt+J/K
     // are consumed here the mode never exits and the caret stays hidden.
@@ -16325,6 +16736,7 @@ fn applyStartupProbe(a: *App, code: usize, hash: u64) void {
     const new_tag: []const u8 = if (kind == .linked) (std.fmt.bufPrint(&tag_buffer, "{x:0>16}", .{hash}) catch "") else "";
     const changed = !std.mem.eql(u8, a.cache_tag.slice(), new_tag);
     a.cache_tag.set(new_tag);
+    if (changed) clearStatusAccount(a);
     persistTag(a, new_tag);
     if (kind == .unlinked) appendLaunchLog(a, "startup: no account tag (WhatsApp unlinked)");
     if (logged_out and !a.sync_logged_out) {
@@ -16475,6 +16887,16 @@ pub fn main(init: std.process.Init) !void {
     }
     var app = App{ .allocator = init.gpa, .people = people_index.Index.init(init.gpa), .io = init.io, .instance = instance, .wacli_path = wacli_path, .avatar_dir = avatar_dir, .slack_media_dir = slack_media_dir, .deepgram_configured = deepgram_key.len > 0, .deepgram_key = deepgram_key, .openrouter_key = openrouter_key, .openrouter_model = openrouter_model, .openrouter_configured = openrouter_key.len > 0, .format_workspace = format_workspace, .dictation_language = loadDictationLanguage(), .font_scale = loadFontScale(), .chat_view = loadChatView() };
     defer app.people.deinit();
+    defer if (app.status_list) |*list| list.deinit(init.gpa);
+    defer app.status_viewed.deinit(init.gpa);
+    if (messagesDirPath(&app, "status-viewed.txt")) |path| {
+        defer init.gpa.free(path);
+        if (readFileWin(init.gpa, path, 4 * 1024 * 1024)) |data| {
+            defer init.gpa.free(data);
+            app.status_viewed.load(init.gpa, data, nowUnixSeconds()) catch {};
+        }
+    }
+
     defer if (app.chats_raw) |raw| init.gpa.free(raw);
     app.wacli_dir.set(wacli_dir);
     app.startup_probe_pending = true;
@@ -16757,7 +17179,11 @@ pub fn main(init: std.process.Init) !void {
             _ = win.GetWindowRect(app.canvas.?, &canvas_rect);
             if (wheel_point.x >= canvas_rect.left and wheel_point.x <= canvas_rect.right and wheel_point.y >= canvas_rect.top and wheel_point.y <= canvas_rect.bottom) {
                 const wheel_delta: i16 = @bitCast(hiword(@as(usize, @bitCast(message.wParam))));
-                app.scroll_y = std.math.clamp(app.scroll_y + @divTrunc(@as(i32, wheel_delta), 2), 0, app.max_scroll);
+                if (app.status_ui.mode == .list) {
+                    app.status_ui.scroll = @max(0, app.status_ui.scroll - @as(i32, wheel_delta));
+                } else if (app.status_ui.mode == .closed) {
+                    app.scroll_y = std.math.clamp(app.scroll_y + @divTrunc(@as(i32, wheel_delta), 2), 0, app.max_scroll);
+                }
                 _ = win.InvalidateRect(app.canvas.?, null, win.TRUE);
                 continue;
             }
@@ -16793,7 +17219,10 @@ pub fn main(init: std.process.Init) !void {
             app.chats_hwnd != null and message.hwnd == app.chats_hwnd.?;
         _ = win.TranslateMessage(&message);
         _ = win.DispatchMessageW(&message);
-        if (clicked_chat_list) focusCompose(&app);
+        if (clicked_chat_list) {
+            closeStatuses(&app);
+            focusCompose(&app);
+        }
     }
 }
 
