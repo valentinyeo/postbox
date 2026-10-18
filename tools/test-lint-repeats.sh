@@ -19,6 +19,7 @@ cases=(
     'f2518728 B4 a311894'
     'f169d18 B5 e955d363'
     '7ea1b5b B6 HEAD'
+    'a701837 B7 HEAD'
 )
 
 "$lint" "$repo"
@@ -27,7 +28,7 @@ for entry in "${cases[@]}"; do
     read -r bad rule fixed <<< "$entry"
     for sha in "$bad" "$fixed"; do
         tree="$temp/$sha"
-        mkdir -- "$tree"
+        mkdir -p -- "$tree"
         git -C "$repo" archive "$sha" src/main.zig .github/workflows | tar -x -C "$tree"
         status=0
         "$lint" "$tree" > "$temp/output" 2>&1 || status=$?

@@ -1,0 +1,43 @@
+name: AI review post
+run-name: AI review post for PR ${{ inputs.pr }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        required: true
+        type: string
+      body:
+        required: true
+        type: string
+
+permissions:
+  pull-requests: write
+  contents: read
+
+concurrency:
+  group: ai-review-post-${{ inputs.pr }}
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Post advisory review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          trap 'rm -rf -- "$work"' EXIT
+          pr=$(jq -er '.inputs.pr | select(type == "string" and test("^[0-9]+$"))' "$GITHUB_EVENT_PATH")
+          jq -er '.inputs.body | select(type == "string" and startswith("<!-- wazig-ai-review -->"))' "$GITHUB_EVENT_PATH" > "$work/body.md"
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- wazig-ai-review -->"))) | {id, created_at}' \
+            | jq -sr 'max_by(.created_at, .id) | .id // empty')
+          if [[ -n $existing ]]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@"$work/body.md" > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$pr/comments" -F body=@"$work/body.md" > /dev/null
+          fi

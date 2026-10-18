@@ -49,6 +49,19 @@ def scan_tree(markers):
     return hits
 
 
+def scan_logs(markers, directory):
+    hits = []
+    for root, dirs, files in os.walk(directory):
+        dirs.sort()
+        for name in sorted(files):
+            path = os.path.join(root, name)
+            with open(path, "rb") as handle:
+                text = readable(handle.read())
+            if text is not None:
+                hits += scan_text(os.path.relpath(path, directory), text, markers)
+    return hits
+
+
 def scan_history(markers):
     hits = []
     seen = set()
@@ -79,7 +92,12 @@ def main(argv):
     if not markers:
         print("PRIVATE_MARKERS is empty: set the repo secret from the private companion repo. Refusing to pass.")
         return 2
-    if argv[:1] == ["--history"]:
+    if argv[:1] == ["--logs"]:
+        if len(argv) != 2 or not os.path.isdir(argv[1]):
+            print("usage: check_private_markers.py --logs <directory>")
+            return 2
+        hits = scan_logs(markers, argv[1])
+    elif argv[:1] == ["--history"]:
         hits = scan_history(markers)
     else:
         hits = scan_tree(markers)

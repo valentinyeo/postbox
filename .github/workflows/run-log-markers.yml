@@ -1,0 +1,60 @@
+name: run-log-markers
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      hours:
+        required: false
+        type: string
+        default: "3"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Scan completed run logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIVATE_MARKERS: ${{ secrets.PRIVATE_MARKERS }}
+        run: |
+          set -euo pipefail
+          hours=$(jq -er '(.inputs.hours // "3") | select(type == "string" and test("^[0-9]+$"))' "$GITHUB_EVENT_PATH")
+          since=$(date -u -d "$hours hours ago" +%Y-%m-%dT%H:%M:%SZ)
+          work=$(mktemp -d)
+          trap 'rm -rf -- "$work"' EXIT
+          mkdir "$work/logs"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?per_page=100&created=>=$since" \
+            --jq '.workflow_runs[] | select(.status == "completed" and .path != ".github/workflows/run-log-markers.yml") | .id' > "$work/runs"
+          runs=0
+          jobs=0
+          failed=0
+          while IFS= read -r run; do
+            [[ $run =~ ^[0-9]+$ ]] || continue
+            printf 'Run %s\n' "$run"
+            runs=$((runs + 1))
+            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100&filter=all" \
+              --jq '.jobs[].id' > "$work/jobs"
+            while IFS= read -r job; do
+              [[ $job =~ ^[0-9]+$ ]] || continue
+              if gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job/logs" > "$work/logs/$run-$job.log" 2> /dev/null; then
+                jobs=$((jobs + 1))
+              else
+                failed=$((failed + 1))
+                rm -f -- "$work/logs/$run-$job.log"
+              fi
+            done < "$work/jobs"
+          done < "$work/runs"
+          printf 'Scanned %s runs, downloaded %s job logs, %s downloads failed\n' "$runs" "$jobs" "$failed"
+          python3 tools/check_private_markers.py --logs "$work/logs"
+          (( failed == 0 ))
