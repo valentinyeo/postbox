@@ -17,12 +17,10 @@ function fail(line, rule, problem, fix) {
 {
     code = $0
     sub(/\/\/.*$/, "", code)
-    if (code ~ /std\.mem\.eql\(u8, [A-Za-z0-9_.\[\]]*\.jid\.slice\(\), [A-Za-z0-9_.\[\]]*\.jid\.slice\(\)\)/) {
-        printf "C1: %s:%d: [C1] bare jid comparison. Compare with chat_key.Key so provider and account match.\n", FILENAME, FNR
-        failed = 1
-    }
+    if (code ~ /std\.mem\.eql\(u8, [A-Za-z0-9_.\[\]]*\.jid\.slice\(\), [A-Za-z0-9_.\[\]]*\.jid\.slice\(\)\)/)
+        fail(FNR, "E1", "two chat ids compared without provider and account, so two accounts that share a contact mix", "chat_key.Key.eql(chat_key.of(x), chat_key.of(y))")
     if (code ~ /loadRegistryString[[:space:]]*\(|REG_SZ/ && code ~ /lit[[:space:]]*\([[:space:]]*"([^"]*ApiKey|TelegramApiHash)"[[:space:]]*\)/)
-        fail(FNR, "C2", "API key uses plain registry storage", "slack_win.loadSecret for encrypted storage and migration")
+        fail(FNR, "C1", "API key uses plain registry storage", "slack_win.loadSecret for encrypted storage and migration")
     if (code ~ /^[[:space:]]*if \(staged_file\.len > 0/ && code ~ /\{/ && code !~ /stagedFileGoesToWacli\(/)
         fail(FNR, "D1", "staged pasted file is queued without routing by the chat\047s provider, so a Slack paste goes to WhatsApp", "if (staged_file.len > 0 and stagedFileGoesToWacli(a.chats[a.selected_chat].provider))")
     if (code ~ /^fn /) {
