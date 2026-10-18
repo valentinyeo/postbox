@@ -39,6 +39,7 @@ jobs:
           runs=0
           jobs=0
           failed=0
+          nolog=0
           while IFS= read -r run; do
             [[ $run =~ ^[0-9]+$ ]] || continue
             printf 'Run %s\n' "$run"
@@ -47,14 +48,17 @@ jobs:
               --jq '.jobs[].id' > "$work/jobs"
             while IFS= read -r job; do
               [[ $job =~ ^[0-9]+$ ]] || continue
-              if gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job/logs" > "$work/logs/$run-$job.log" 2> /dev/null; then
+              if gh api --allow-escape-sequences "repos/$GITHUB_REPOSITORY/actions/jobs/$job/logs" > "$work/logs/$run-$job.log" 2> "$work/err"; then
                 jobs=$((jobs + 1))
+              elif grep -q 'HTTP 404' "$work/err"; then
+                nolog=$((nolog + 1))
+                rm -f -- "$work/logs/$run-$job.log"
               else
                 failed=$((failed + 1))
                 rm -f -- "$work/logs/$run-$job.log"
               fi
             done < "$work/jobs"
           done < "$work/runs"
-          printf 'Scanned %s runs, downloaded %s job logs, %s downloads failed\n' "$runs" "$jobs" "$failed"
+          printf 'Scanned %s runs, downloaded %s job logs, %s jobs had no log, %s downloads failed\n' "$runs" "$jobs" "$nolog" "$failed"
           python3 tools/check_private_markers.py --logs "$work/logs"
           (( failed == 0 ))
