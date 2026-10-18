@@ -17,6 +17,7 @@ const mic_choice = @import("mic_choice.zig");
 const pending_reads = @import("pending_reads.zig");
 const read_state = @import("read_state.zig");
 const chat_order = @import("chat_order.zig");
+const chat_menu = @import("chat_menu.zig");
 const chat_reconcile = @import("chat_reconcile.zig");
 const compose_layout = @import("compose_layout.zig");
 const media_age = @import("media_age.zig");
@@ -15376,6 +15377,68 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         else => return win.DefWindowProcW(hwnd, message, wparam, lparam),
     }
 }
+
+fn selectChatRow(a: *App, row: usize) void {
+    _ = clearBulkSelection(a);
+    if (row >= a.chat_count) return;
+    _ = win.SendMessageW(a.chats_hwnd.?, win.LB_SETCURSEL, row, 0);
+    closeStatuses(a);
+    discardStagedImage(a);
+    a.selected_chat = row;
+    a.user_viewed = true;
+    refreshMessages(a);
+    focusCompose(a);
+    _ = win.InvalidateRect(a.hwnd.?, null, win.TRUE);
+}
+
+fn openChatMenu(a: *App, lparam: win.LPARAM) void {
+    const list = a.chats_hwnd orelse return;
+    var row: usize = undefined;
+    var point: win.POINT = undefined;
+    if (lparam == -1) {
+        const selected = win.SendMessageW(list, win.LB_GETCURSEL, 0, 0);
+        if (selected < 0 or selected >= a.chat_count) return;
+        row = @intCast(selected);
+        var rect: win.RECT = undefined;
+        if (win.SendMessageW(list, win.LB_GETITEMRECT, row, @intCast(@intFromPtr(&rect))) == win.LB_ERR) return;
+        point = .{ .x = rect.left, .y = rect.bottom };
+        if (win.ClientToScreen(list, &point) == 0) return;
+    } else {
+        const coords: usize = @bitCast(lparam);
+        point = .{ .x = @as(i16, @bitCast(loword(coords))), .y = @as(i16, @bitCast(hiword(coords))) };
+        var client = point;
+        if (win.ScreenToClient(list, &client) == 0) return;
+        const client_coords = @as(u32, @as(u16, @bitCast(@as(i16, @intCast(client.x))))) |
+            (@as(u32, @as(u16, @bitCast(@as(i16, @intCast(client.y))))) << 16);
+        const hit = win.SendMessageW(list, win.LB_ITEMFROMPOINT, 0, @intCast(client_coords));
+        const result: usize = @bitCast(hit);
+        if (hiword(result) != 0) return;
+        row = loword(result);
+        if (row >= a.chat_count) return;
+        var rect: win.RECT = undefined;
+        if (win.SendMessageW(list, win.LB_GETITEMRECT, row, @intCast(@intFromPtr(&rect))) == win.LB_ERR) return;
+        if (client.x < rect.left or client.x >= rect.right or client.y < rect.top or client.y >= rect.bottom) return;
+    }
+    if (row != a.selected_chat and !(a.bulk.count > 0 and a.bulk.contains(a.chats[row].jid.slice())))
+        selectChatRow(a, row);
+    const chat = &a.chats[row];
+    const choice = menu: {
+        const popup = win.CreatePopupMenu() orelse return;
+        defer _ = win.DestroyMenu(popup);
+        var out: [3]chat_menu.Item = undefined;
+        const rows = chat_menu.items(.{
+            .whatsapp = chat.provider == .whatsapp,
+            .archived = chat.archived,
+            .kept = isKeptArchived(a, chat.jid.slice()),
+            .pinned = isChatPinned(a, chat.jid.slice()),
+            .show_archived = a.show_archived,
+        }, .{ .archive = command_archive, .keep = command_keep_archived, .pin = command_pin }, &out);
+        for (rows) |item| _ = win.AppendMenuW(popup, win.MF_STRING, item.command, item.label.ptr);
+        break :menu win.TrackPopupMenu(popup, win.TPM_RETURNCMD | win.TPM_NONOTIFY | win.TPM_RIGHTBUTTON, point.x, point.y, 0, a.hwnd.?, null);
+    };
+    if (choice != 0) runCommand(a, @intCast(choice));
+}
+
 fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
     switch (message) {
@@ -16035,23 +16098,21 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (loword(wparam) == win.WM_LBUTTONDOWN) _ = clearBulkSelection(a);
             return 0;
         },
+        win.WM_CONTEXTMENU => {
+            if (a.chats_hwnd != null and wparam == @intFromPtr(a.chats_hwnd.?)) {
+                openChatMenu(a, lparam);
+                return 0;
+            }
+            return win.DefWindowProcW(hwnd, message, wparam, lparam);
+        },
         win.WM_COMMAND => {
             const id = loword(wparam);
             const notification = hiword(wparam);
             if (id == id_status_row and notification == win.BN_CLICKED) {
                 openStatuses(a, true);
             } else if (id == id_chats and notification == win.LBN_SELCHANGE) {
-                _ = clearBulkSelection(a);
                 const selected = win.SendMessageW(a.chats_hwnd.?, win.LB_GETCURSEL, 0, 0);
-                if (selected >= 0) {
-                    closeStatuses(a);
-                    discardStagedImage(a);
-                    a.selected_chat = @intCast(selected);
-                    a.user_viewed = true;
-                    refreshMessages(a);
-                    focusCompose(a);
-                    _ = win.InvalidateRect(hwnd, null, win.TRUE);
-                }
+                if (selected >= 0) selectChatRow(a, @intCast(selected)) else _ = clearBulkSelection(a);
             } else if (id == id_send and notification == win.BN_CLICKED) {
                 sendMessage(a);
             } else if (id == id_dictate and notification == win.BN_CLICKED) {
