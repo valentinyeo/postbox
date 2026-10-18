@@ -95,6 +95,7 @@ const App = struct {
     pending_send_count: usize = 0,
     slack_outbox: [max_slack_outbox]SlackOutbox = @splat(.{}),
     slack_outbox_count: usize = 0,
+    slack_outbox_dirty: bool = false,
     send_seq: u64 = 0,
     sent_voice: [voice_sent.max_entries]voice_sent.Entry = @splat(.{}),
     sent_voice_count: usize = 0,

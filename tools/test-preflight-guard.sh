@@ -9,6 +9,11 @@ trap 'rm -rf "$TMP"' EXIT
 printf '%s\n' '#!/usr/bin/env bash' '[ "$1" = version ] && { echo 0.16.0; exit 0; }' '[ "$1" = fmt ] && [ -n "${FAKE_FMT_FAIL:-}" ] && { echo "src/main.zig:1:1: bad indentation"; exit 1; }' 'exit 0' > "$TMP/zig"
 chmod +x "$TMP/zig"
 export ZIG="$TMP/zig"
+ROOT="$TMP/repo"
+git init -q "$ROOT"
+mkdir -p "$ROOT/tools"
+printf '%s\n' '#!/usr/bin/env bash' '"$ZIG" fmt --check src build.zig' > "$ROOT/tools/preflight.sh"
+chmod +x "$ROOT/tools/preflight.sh"
 
 failures=0
 expect() {

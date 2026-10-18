@@ -4,6 +4,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const slack = @import("slack.zig");
+const slack_send = @import("slack_send.zig");
 
 pub const enabled = builtin.os.tag == .windows;
 
@@ -343,12 +344,15 @@ fn sharedApiHandles(host: []const u8) ?win.HINTERNET {
 /// HTTP status of the last callApi on this thread (0 before any answer), so
 /// a failing job can log it. A job runs start to end on one thread.
 pub threadlocal var last_status: u32 = 0;
+pub threadlocal var last_error: [64]u8 = [_]u8{0} ** 64;
 
 /// One HTTPS call to slack.com/api. `body` null means GET. Returns the status
 /// and body; Slack's own "ok" flag is checked by the caller through the job
 /// runner. 429 responses surface with their status so the caller can honor
 /// Retry-After.
 pub fn callApi(allocator: std.mem.Allocator, host: []const u8, token: []const u8, method: []const u8, path_query: []const u8, body: ?[]const u8) !Response {
+    last_status = 0;
+    last_error = [_]u8{0} ** 64;
     if (!enabled) return error.Unsupported;
     const wide_path = try toWide(allocator, path_query);
     defer allocator.free(wide_path);
@@ -397,6 +401,8 @@ pub fn callApi(allocator: std.mem.Allocator, host: []const u8, token: []const u8
 /// PUT raw bytes to Slack's pre-signed upload host. Never sends the bearer
 /// token: the upload URL is the credential for this call.
 pub fn putFile(allocator: std.mem.Allocator, url: []const u8, bytes: []const u8) !void {
+    last_status = 0;
+    last_error = [_]u8{0} ** 64;
     if (!enabled) return error.Unsupported;
     if (!std.mem.startsWith(u8, url, "https://")) return error.UntrustedUrl;
     const scheme_end = std.mem.indexOf(u8, url, "://").?;
@@ -420,6 +426,7 @@ pub fn putFile(allocator: std.mem.Allocator, url: []const u8, bytes: []const u8)
     var status: win.DWORD = 0;
     var status_size: win.DWORD = @sizeOf(win.DWORD);
     _ = win.WinHttpQueryHeaders(request, win.WINHTTP_QUERY_STATUS_CODE | win.WINHTTP_QUERY_FLAG_NUMBER, null, &status, &status_size, null);
+    last_status = status;
     if (status < 200 or status >= 300) return error.UploadRejected;
 }
 
@@ -740,7 +747,8 @@ pub const JobKind = enum(u8) {
     history, // conversations.history: args = [channel]
     replies, // conversations.replies: args = [channel, parent_ts]
     send_text, // chat.postMessage: args = [channel, text, thread_ts]
-    send_image, // 3-step upload: args = [channel, thread_ts, file_path]
+    upload_image,
+    share_image,
     download, // file to media cache: args = [url, file_id, filename, channel, ts]
     auth, // auth.test: no args
     mark, // conversations.mark: args = [channel, ts] (WAZI-104)
@@ -822,10 +830,15 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
             if (response.status != 200) return error.HttpFailed;
             return bodyOnly(allocator, response);
         },
-        .send_image => {
+        .upload_image => {
             if (ctx.is_bridge) return error.UploadNotSupported;
             if (args.len < 4) return error.BadArguments;
-            return uploadImage(allocator, ctx, args[0], args[1], args[2], args[3]);
+            return uploadImage(allocator, ctx, args[2]);
+        },
+        .share_image => {
+            if (ctx.is_bridge) return error.UploadNotSupported;
+            if (args.len < 4) return error.BadArguments;
+            return shareImage(allocator, ctx, args[0], args[1], args[2], args[3]);
         },
         .auth => {
             var response = try callWithRetry(allocator, ctx.host, ctx.user_token, "/api/auth.test", null);
@@ -902,10 +915,14 @@ fn callWithRetry(allocator: std.mem.Allocator, host: []const u8, token: []const 
         win.Sleep(@intCast(@as(u64, @min(wait_seconds, 30)) * 1000));
         response = try callApi(allocator, host, token, if (body == null) "GET" else "POST", path, body);
     }
+    var parsed = std.json.parseFromSlice(struct { @"error": []const u8 = "" }, allocator, response.body, .{ .ignore_unknown_fields = true }) catch return response;
+    defer parsed.deinit();
+    const len = @min(parsed.value.@"error".len, last_error.len - 1);
+    @memcpy(last_error[0..len], parsed.value.@"error"[0..len]);
     return response;
 }
 
-fn uploadImage(allocator: std.mem.Allocator, ctx: JobContext, channel: []const u8, thread_ts: []const u8, file_path: []const u8, caption: []const u8) ![]u8 {
+fn uploadImage(allocator: std.mem.Allocator, ctx: JobContext, file_path: []const u8) ![]u8 {
     const bytes = std.Io.Dir.cwd().readFileAlloc(ctx.io, file_path, allocator, .limited(max_download_bytes)) catch return error.ReadFailed;
     defer allocator.free(bytes);
     const base = std.fs.path.basename(file_path);
@@ -930,11 +947,28 @@ fn uploadImage(allocator: std.mem.Allocator, ctx: JobContext, channel: []const u
     defer allocator.free(grant.file_id);
 
     try putFile(allocator, grant.upload_url, bytes);
+    if (grant.file_id.len == 0 or grant.file_id.len > 63 or std.mem.indexOfScalar(u8, grant.file_id, 0) != null) return error.HttpFailed;
+    return allocator.dupe(u8, grant.file_id);
+}
 
-    const complete_body = try slack.buildCompleteUploadBody(allocator, grant.file_id, channel, thread_ts, caption);
+fn shareImage(allocator: std.mem.Allocator, ctx: JobContext, channel: []const u8, thread_ts: []const u8, file_id: []const u8, caption: []const u8) ![]u8 {
+    const encoded = try slack.percentEncode(allocator, file_id);
+    defer allocator.free(encoded);
+    const path = try std.fmt.allocPrint(allocator, "/api/files.info?file={s}", .{encoded});
+    defer allocator.free(path);
+    var info = try callWithRetry(allocator, ctx.host, ctx.user_token, path, null);
+    defer info.deinit(allocator);
+    if (info.status != 200) return error.HttpFailed;
+    switch (slack_send.sharedIn(allocator, info.body, channel)) {
+        .shared => return allocator.dupe(u8, "{\"ok\":true,\"already_shared\":true}"),
+        .not_shared => {},
+        .missing => return error.FileMissing,
+        .unknown => return error.HttpFailed,
+    }
+    const complete_body = try slack.buildCompleteUploadBody(allocator, file_id, channel, thread_ts, caption);
     defer allocator.free(complete_body);
     var complete = try callWithRetry(allocator, ctx.host, ctx.user_token, "/api/files.completeUploadExternal", complete_body);
     errdefer complete.deinit(allocator);
     if (complete.status != 200 or !httpOk(allocator, complete.body)) return error.UploadRejected;
-    return complete.body;
+    return bodyOnly(allocator, complete);
 }

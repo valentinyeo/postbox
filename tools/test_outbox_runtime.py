@@ -7,7 +7,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 FUNCTIONS = (
     "persistOutbox", "loadOutbox", "enqueueSlackOutbox", "retrySlackOutbox",
-    "retireSlackOutbox", "completePendingSend", "removeFirstPendingSend", "sendMessage",
+    "retireSlackOutbox", "evictOldestFailedSlackOutbox", "completePendingSend", "removeFirstPendingSend", "sendMessage",
     "resolveSlackSend", "pendingByClientMsgId", "jobIsWrite", "jobIsSlack",
     "wacliEnqueue", "wacliTakeJob", "wacliJobArgs", "storedAfterQueued", "sentMessageExists", "startNextSend", "retryWacliRefreshes", "appendWhatsAppPending", "retryingBubbleText", "localSendId",
 )
@@ -26,7 +26,7 @@ def mutate(source, name):
     if name in ("short-job-args", "nul-field", "negative-time", "evict-write"):
         return source
     replacements = {
-        "ignored-swap": ("return win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) != 0;", "_ = win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH); return true;"),
+        "ignored-swap": ("if (win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) == 0) return false;", "_ = win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH);"),
         "unflushed-write": ("win.FlushFileBuffers(handle) != 0", "true"),
         "local-zero": ("a.send_seq += 1;\n            pending.seq = a.send_seq;", "pending.seq = 0;"),
         "no-credentials": ("or !slackConfigured(a) ", ""),
@@ -40,7 +40,7 @@ def mutate(source, name):
         "utf8-truncation": ("if (text.len > outbox.max_text_len)", "if (false)"),
         "hidden-restored-bubble": ("if (from_reload and !pending.from_disk)", "if (from_reload)"),
         "voice-metadata": ("entry.ptt = pending.ptt;", "entry.ptt = false;"),
-        "status-seen-eviction": (".reaction, .status_seen, .slack_send, .slack_attach => true,", ".reaction, .slack_send, .slack_attach => true,"),
+        "status-seen-eviction": (".reaction, .status_seen, .slack_send, .slack_attach, .slack_share => true,", ".reaction, .slack_send, .slack_attach, .slack_share => true,"),
         "lost-refresh": ("if (!jobIsWrite(job.kind)) a.wacli_refresh_again = true;", ""),
         "partial-load": ("if (win.ReadFile(handle, buffer[total..].ptr, @intCast(buffer.len - total), &got, null) == 0) return;", "if (win.ReadFile(handle, buffer[total..].ptr, @intCast(buffer.len - total), &got, null) == 0) break;"),
     }
@@ -63,6 +63,8 @@ def main():
     for name in ("max_pending_sends", "max_slack_outbox", "max_wacli_args", "wacli_arg_cap", "wacli_queue_size"):
         declaration = re.search(rf"^const {name} = .*?;", source, re.M).group()
         fixture = re.sub(rf"^const {name} = .*?;", lambda _: declaration, fixture, flags=re.M)
+    declaration = re.search(r"^const WacliJobKind = enum\(u8\) \{.*?};", source, re.M | re.S).group()
+    fixture = re.sub(r"^const WacliJobKind = enum\(u8\) \{.*?};", lambda _: declaration, fixture, flags=re.M | re.S)
     for name in ("PendingSend", "SlackOutbox", "WacliJob", "WacliResult"):
         pattern = rf"^const {name} = struct \{{.*?^}};"
         declaration = re.search(pattern, source, re.M | re.S).group()

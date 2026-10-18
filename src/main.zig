@@ -10,6 +10,7 @@ const format_request = @import("format_request.zig");
 const format_cache = @import("format_cache.zig");
 const slack = @import("slack.zig");
 const slack_win = @import("slack_win.zig");
+const slack_send = @import("slack_send.zig");
 const played = @import("played.zig");
 const voice_pos = @import("voice_pos.zig");
 const mic_choice = @import("mic_choice.zig");
@@ -545,7 +546,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe, contacts_index, statuses, status_seen };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe, contacts_index, statuses, status_seen };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 
 const WacliJob = struct {
@@ -570,6 +571,7 @@ const WacliResult = struct {
     started_ms: u64 = 0,
     // Slack jobs: HTTP status of the last call, 0 when none answered.
     http_status: u32 = 0,
+    slack_error: Utf8Text(63) = .{},
     data: []u8 = &.{},
 };
 
@@ -844,6 +846,7 @@ const App = struct {
     send_started_ms: u64 = 0,
     pending_sends: [max_pending_sends]PendingSend = [_]PendingSend{.{}} ** max_pending_sends,
     pending_send_count: usize = 0,
+    slack_outbox_dirty: bool = false,
     slack_outbox: [max_slack_outbox]SlackOutbox = [_]SlackOutbox{.{}} ** max_slack_outbox,
     slack_outbox_count: usize = 0,
     outbox_path: []u8 = &.{},
@@ -1692,7 +1695,7 @@ fn wacliPendingSub(a: *App, kind: WacliJobKind) void {
 
 fn jobIsWrite(kind: WacliJobKind) bool {
     return switch (kind) {
-        .reaction, .status_seen, .slack_send, .slack_attach => true,
+        .reaction, .status_seen, .slack_send, .slack_attach, .slack_share => true,
         else => false,
     };
 }
@@ -1727,7 +1730,7 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
         // are user writes too: an add then a remove must stay in order.
         var insert: usize = 0;
         while (insert < a.wacli_queue_len and
-            (a.wacli_queue[insert].kind == .slack_send or a.wacli_queue[insert].kind == .slack_attach or a.wacli_queue[insert].kind == .reaction or a.wacli_queue[insert].kind == .status_seen)) insert += 1;
+            (a.wacli_queue[insert].kind == .slack_send or a.wacli_queue[insert].kind == .slack_attach or a.wacli_queue[insert].kind == .slack_share or a.wacli_queue[insert].kind == .reaction or a.wacli_queue[insert].kind == .status_seen)) insert += 1;
         var shift = a.wacli_queue_len;
         while (shift > insert) : (shift -= 1) a.wacli_queue[shift] = a.wacli_queue[shift - 1];
         a.wacli_queue[insert] = job;
@@ -1803,7 +1806,7 @@ fn wacliShutdown(a: *App) void {
 /// sleep then stalls only Slack work, never wacli reads/writes.
 fn jobIsSlack(kind: WacliJobKind) bool {
     return switch (kind) {
-        .slack_workspace, .slack_users, .slack_history, .slack_replies, .slack_send, .slack_attach, .slack_download, .slack_auth, .slack_mark => true,
+        .slack_workspace, .slack_users, .slack_history, .slack_replies, .slack_send, .slack_attach, .slack_share, .slack_download, .slack_auth, .slack_mark => true,
         else => false,
     };
 }
@@ -1856,7 +1859,7 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
     };
     result.* = .{ .kind = job.kind, .gen = job.gen, .jid = job.jid, .msg_id = job.msg_id, .extra = job.extra, .started_ms = job.started_ms };
     switch (job.kind) {
-        .slack_workspace, .slack_users, .slack_history, .slack_replies, .slack_send, .slack_attach, .slack_download, .slack_auth, .slack_mark => {
+        .slack_workspace, .slack_users, .slack_history, .slack_replies, .slack_send, .slack_attach, .slack_share, .slack_download, .slack_auth, .slack_mark => {
             var slack_args: [max_wacli_args][]const u8 = undefined;
             var slack_count: usize = 0;
             while (slack_count < job.arg_count) : (slack_count += 1) slack_args[slack_count] = job.args[slack_count].slice();
@@ -1866,12 +1869,14 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
                 .slack_history => .history,
                 .slack_replies => .replies,
                 .slack_send => .send_text,
-                .slack_attach => .send_image,
+                .slack_attach => .upload_image,
+                .slack_share => .share_image,
                 .slack_auth => .auth,
                 .slack_mark => .mark,
                 else => .download,
             };
             slack_win.last_status = 0;
+            slack_win.last_error = [_]u8{0} ** 64;
             // ok defaults to false, so success must set it: without this
             // every Slack answer (channels, users, history, sends) was
             // treated as a failure and the Slack view stayed empty.
@@ -1882,6 +1887,7 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
                 result.extra.set(@errorName(err));
             }
             result.http_status = slack_win.last_status;
+            result.slack_error.set(std.mem.sliceTo(&slack_win.last_error, 0));
             wacliPost(a, result);
             return;
         },
@@ -4052,11 +4058,27 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
         if (a.message_count >= max_messages) break;
         if (slot.completed) continue;
         const entry = &slot.entry;
-        if (entry.file.len > 0) continue;
-        if (entry.client_msg_id.len == 0) continue;
         if (!std.mem.eql(u8, entry.jid.slice(), chat.jid.slice())) continue;
-        if (pendingByClientMsgId(a, entry.client_msg_id.slice()) != null) continue;
+        if (entry.file.len > 0) {
+            if (entry.state == .failed) setStatus(a, "Slack image send failed");
+            continue;
+        }
+        if (entry.client_msg_id.len == 0) continue;
+        var visible = false;
+        for (a.messages[0..a.message_count]) |*message| {
+            if (message.from_me and message.send_state != .none and std.mem.eql(u8, message.timestamp.slice(), entry.client_msg_id.slice())) {
+                visible = true;
+                break;
+            }
+        }
+        if (visible) continue;
         appendSlackPending(a, entry.text.slice(), entry.client_msg_id.slice());
+        if (entry.state == .failed) {
+            var result = WacliResult{ .kind = .slack_send };
+            result.jid.set(entry.jid.slice());
+            result.msg_id.set(entry.idSlice());
+            resolveSlackSend(a, &result);
+        }
     }
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
     if (a.chats_hwnd) |chats_list| _ = win.InvalidateRect(chats_list, null, win.TRUE);
@@ -4394,8 +4416,32 @@ fn resendFailedMessage(a: *App, index: usize) bool {
     const message = &a.messages[index];
     if (!message.from_me or message.send_state != .failed) return false;
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return false;
-    // Slack marks its own failed bubbles; those never go through wacli.
-    if (selectedChatIsSlack(a) or selectedChatIsTelegram(a)) return false;
+    if (selectedChatIsSlack(a)) {
+        for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
+            const entry = &slot.entry;
+            if (slot.completed or entry.state != .failed or entry.file.len > 0 or
+                !std.mem.eql(u8, entry.jid.slice(), a.chats[a.selected_chat].jid.slice()) or
+                !std.mem.eql(u8, entry.client_msg_id.slice(), message.timestamp.slice())) continue;
+            entry.state = .queued;
+            entry.attempts = 0;
+            slot.not_before_ms = 0;
+            a.slack_outbox_dirty = true;
+            if (!persistOutbox(a)) {
+                entry.state = .failed;
+                setStatus(a, "Could not save outbox; message not queued");
+                return true;
+            }
+            message.send_state = .pending;
+            message.text.set(a.allocator, entry.text.slice());
+            enqueueSlackOutbox(a, slot);
+            setStatus(a, "Resending...");
+            if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+            return true;
+        }
+        setStatus(a, "Can't resend this message - type it again");
+        return true;
+    }
+    if (selectedChatIsTelegram(a)) return false;
     if (a.pending_send_count >= max_pending_sends) {
         setStatus(a, "Send queue is full");
         return true;
@@ -4671,7 +4717,9 @@ fn persistOutbox(a: *App) bool {
     if (!flushed or !closed) return false;
     const target = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, a.outbox_path) catch return false;
     defer a.allocator.free(target);
-    return win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) != 0;
+    if (win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) == 0) return false;
+    a.slack_outbox_dirty = false;
+    return true;
 }
 
 fn loadOutbox(a: *App) void {
@@ -4728,20 +4776,20 @@ fn loadOutbox(a: *App) void {
 }
 
 fn enqueueSlackOutbox(a: *App, slot: *SlackOutbox) void {
-    if (a.outbox_load_failed or !slackConfigured(a) or slot.inflight or slot.completed) return;
+    if (a.outbox_load_failed or a.slack_outbox_dirty or !slackConfigured(a) or slot.inflight or slot.completed or slot.entry.state == .failed) return;
     for (a.slack_outbox[0..a.slack_outbox_count]) |*earlier| {
         if (earlier == slot) break;
-        if (!earlier.inflight and !earlier.completed) return;
+        if (!earlier.inflight and !earlier.completed and earlier.entry.state != .failed) return;
     }
     if (win.GetTickCount64() < slot.not_before_ms) return;
     const entry = &slot.entry;
     const is_file = entry.file.len > 0;
-    var job = WacliJob{ .kind = if (is_file) .slack_attach else .slack_send, .started_ms = win.GetTickCount64() };
+    var job = WacliJob{ .kind = if (!is_file) .slack_send else if (entry.upload_file_id.len > 0) .slack_share else .slack_attach, .started_ms = win.GetTickCount64() };
     job.jid.set(entry.jid.slice());
     job.msg_id.set(entry.idSlice());
     if (!is_file) job.extra.set(entry.client_msg_id.slice());
     if (is_file) {
-        wacliJobArgs(&job, &.{ entry.jid.slice(), entry.reply_to.slice(), entry.file.slice(), entry.text.slice() });
+        wacliJobArgs(&job, &.{ entry.jid.slice(), entry.reply_to.slice(), if (entry.upload_file_id.len > 0) entry.upload_file_id.slice() else entry.file.slice(), entry.text.slice() });
     } else {
         wacliJobArgs(&job, &.{ entry.jid.slice(), entry.text.slice(), entry.reply_to.slice(), entry.client_msg_id.slice() });
     }
@@ -4755,6 +4803,10 @@ fn enqueueSlackOutbox(a: *App, slot: *SlackOutbox) void {
 }
 
 fn retrySlackOutbox(a: *App) void {
+    if (a.slack_outbox_dirty and !persistOutbox(a)) {
+        setStatus(a, "Could not save Slack outbox; retrying journal");
+        return;
+    }
     var index: usize = 0;
     while (index < a.slack_outbox_count) {
         const slot = &a.slack_outbox[index];
@@ -4785,6 +4837,84 @@ fn retireSlackOutbox(a: *App, id: []const u8) void {
     }
 }
 
+fn handleSlackSendResult(a: *App, result: *WacliResult) void {
+    for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
+        if (!std.mem.eql(u8, slot.entry.idSlice(), result.msg_id.slice()) or slot.completed) continue;
+        slot.inflight = false;
+        const entry = &slot.entry;
+        if (result.ok and result.kind != .slack_attach) {
+            if (result.kind == .slack_send) resolveSlackSend(a, result);
+            retireSlackOutbox(a, result.msg_id.slice());
+            var status_buffer: [64]u8 = undefined;
+            const label: []const u8 = if (result.kind == .slack_send) "Sent" else "Image sent";
+            const elapsed = win.GetTickCount64() - result.started_ms;
+            setStatus(a, std.fmt.bufPrint(&status_buffer, "{s} in {d} ms", .{ label, elapsed }) catch label);
+            return;
+        }
+        if (result.ok) {
+            entry.upload_file_id.set(result.data);
+            entry.state = .uploaded;
+            entry.attempts = 0;
+            a.slack_outbox_dirty = true;
+            if (!persistOutbox(a)) {
+                setStatus(a, "Could not save Slack upload; retrying journal");
+                return;
+            }
+            enqueueSlackOutbox(a, slot);
+            return;
+        }
+        if (result.kind == .slack_share and std.mem.eql(u8, result.extra.slice(), "FileMissing")) {
+            entry.upload_file_id.set("");
+            entry.state = .queued;
+            a.slack_outbox_dirty = true;
+            if (!persistOutbox(a)) {
+                setStatus(a, "Could not save Slack upload; retrying journal");
+                return;
+            }
+            enqueueSlackOutbox(a, slot);
+            return;
+        }
+        entry.attempts +|= 1;
+        switch (slack_send.retryDecision(result.extra.slice(), result.http_status, result.slack_error.slice(), entry.attempts)) {
+            .retry => |delay| {
+                slot.not_before_ms = win.GetTickCount64() + delay;
+                a.slack_outbox_dirty = true;
+                if (!persistOutbox(a)) {
+                    setStatus(a, "Could not save Slack retry; retrying journal");
+                    return;
+                }
+                setStatus(a, if (entry.file.len == 0) "Slack send failed, retrying" else "Slack image send failed, retrying");
+            },
+            .give_up => {
+                entry.state = .failed;
+                a.slack_outbox_dirty = true;
+                const saved = persistOutbox(a);
+                if (result.kind == .slack_send) resolveSlackSend(a, result);
+                setStatus(a, if (!saved) "Could not save Slack failure; retrying journal" else if (entry.file.len == 0) "Slack send failed" else "Slack image send failed");
+                var failed: usize = 0;
+                for (a.slack_outbox[0..a.slack_outbox_count]) |*candidate| {
+                    if (!candidate.completed and candidate.entry.state == .failed) failed += 1;
+                }
+                if (failed > max_failed_sends) _ = evictOldestFailedSlackOutbox(a);
+            },
+        }
+        return;
+    }
+}
+
+fn evictOldestFailedSlackOutbox(a: *App) bool {
+    var oldest: ?usize = null;
+    for (a.slack_outbox[0..a.slack_outbox_count], 0..) |*slot, index| {
+        if (slot.entry.state != .failed or slot.completed) continue;
+        if (oldest == null or slot.entry.queued_unix < a.slack_outbox[oldest.?].entry.queued_unix) oldest = index;
+    }
+    const victim = oldest orelse return false;
+    const id = a.slack_outbox[victim].entry.id;
+    const before = a.slack_outbox_count;
+    retireSlackOutbox(a, &id);
+    return a.slack_outbox_count < before;
+}
+
 fn requestSlackDownload(a: *App, channel: []const u8, item: slack.HistoryItem) void {
     if (item.file_id.len == 0 or item.file_url.len == 0) return;
     var job = WacliJob{ .kind = .slack_download };
@@ -4801,13 +4931,26 @@ fn applySlackEvent(a: *App, event: *slack_win.Event) void {
     a.slack_log_mutex.lockUncancelable(a.io);
     const fresh = a.slack_log.mark(event.channelSlice(), event.tsSlice());
     a.slack_log_mutex.unlock(a.io);
+    const from_me = a.slack_user_id.len > 0 and std.mem.eql(u8, event.userSlice(), a.slack_user_id.slice());
+    if (from_me and event.clientMsgIdSlice().len > 0) {
+        for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
+            if (slot.entry.file.len == 0 and
+                std.mem.eql(u8, slot.entry.jid.slice(), event.channelSlice()) and
+                std.mem.eql(u8, slot.entry.client_msg_id.slice(), event.clientMsgIdSlice()))
+            {
+                const id = slot.entry.id;
+                setStatus(a, "Sent");
+                retireSlackOutbox(a, &id);
+                break;
+            }
+        }
+    }
     if (!fresh) return;
 
     const channel = event.channelSlice();
     const is_open = a.selected_chat < a.chat_count and
         std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), channel) and
         a.chats[a.selected_chat].provider == .slack;
-    const from_me = a.slack_user_id.len > 0 and std.mem.eql(u8, event.userSlice(), a.slack_user_id.slice());
     noteSlackActivity(a, channel, slack.tsSeconds(event.tsSlice()) orelse 0);
     if (slackChatById(a, channel)) |chat| {
         if (!from_me and !is_open) {
@@ -9705,7 +9848,7 @@ fn sendMessage(a: *App) void {
         return;
     }
     if (selectedChatIsSlack(a)) {
-        if (a.slack_outbox_count >= max_slack_outbox) {
+        if (a.slack_outbox_count >= max_slack_outbox and !evictOldestFailedSlackOutbox(a)) {
             setStatus(a, "Send queue is full");
             return;
         }
@@ -11697,7 +11840,7 @@ fn controlSearchText(a: *App, buffer: *[1024]u8) []const u8 {
 
 fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     const sync = if (a.accounts_maintenance) "maintenance" else if (a.sync_logged_out) "logged_out" else if (a.sync_child != null) "running" else "stopped";
-    const pending_sends = a.pending_send_count + wacliPendingGet(a, .slack_send) + wacliPendingGet(a, .slack_attach);
+    const pending_sends = a.pending_send_count + wacliPendingGet(a, .slack_send) + wacliPendingGet(a, .slack_attach) + wacliPendingGet(a, .slack_share);
     try w.print("{{\"ok\":true,\"result\":{{\"version\":\"{s}\",\"view\":\"{s}\",\"selected\":", .{ app_version, @tagName(activeChatView(a)) });
     if (a.selected_chat < a.chat_count) try controlWriteChat(a, w, &a.chats[a.selected_chat]) else try w.writeAll("null");
     var buffer: [1024]u8 = undefined;
@@ -15545,21 +15688,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         applySlackReplies(a, result.data);
                     }
                 },
-                .slack_send, .slack_attach => {
-                    // Only text sends own an optimistic bubble; an attach
-                    // failure must never fail a pending text bubble.
-                    if (result.kind == .slack_send) resolveSlackSend(a, result);
-                    retireSlackOutbox(a, result.msg_id.slice());
-                    var status_buffer: [64]u8 = undefined;
-                    if (result.ok) {
-                        // WAZI-61 timing: enqueue-to-confirmation, visible proof.
-                        const label: []const u8 = if (result.kind == .slack_send) "Sent" else "Image sent";
-                        const elapsed = win.GetTickCount64() - result.started_ms;
-                        setStatus(a, std.fmt.bufPrint(&status_buffer, "{s} in {d} ms", .{ label, elapsed }) catch label);
-                    } else {
-                        setStatus(a, if (result.kind == .slack_send) "Slack send failed" else "Slack image send failed");
-                    }
-                },
+                .slack_send, .slack_attach, .slack_share => handleSlackSendResult(a, result),
                 .slack_download => {
                     if (result.ok) {
                         const ts = result.msg_id.slice();
