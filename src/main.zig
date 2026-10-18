@@ -9247,7 +9247,7 @@ fn startNextSend(a: *App) void {
     // open chat already shows it as delivered, count it sent instead.
     bindOutboxAccount(a);
     const head = &a.pending_sends[0];
-    if (a.slack_outbox_dirty or !std.mem.eql(u8, head.account.slice(), a.cache_tag.slice())) return;
+    if (a.slack_outbox_dirty or head.account.len == 0 or !std.mem.eql(u8, head.account.slice(), a.cache_tag.slice())) return;
     if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and
         sentMessageExists(a, chat_key.of(head), head.text.slice(), head.queued_unix))
     {
