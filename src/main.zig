@@ -11335,7 +11335,22 @@ fn controlDispatch(a: *App, call: *ControlCall) !void {
         .statuses => try status_view.writeStatuses(w, statusRows(a), &a.status_viewed),
         .@"open-status" => {
             openStatuses(a, false);
-            try w.writeAll("{\"ok\":true,\"result\":{\"view\":\"status\"}}\n");
+            if (request.id.len > 0) {
+                const rows = statusRows(a);
+                const groups = status_view.group(rows, &a.status_viewed);
+                for (groups.contacts[0..groups.count], 0..) |contact, index| {
+                    if (std.mem.eql(u8, rows[contact.newest].sender_jid, request.id)) {
+                        openStatusContact(a, index);
+                        break;
+                    }
+                } else return control_api.writeError(w, "status contact not loaded");
+            }
+            try w.writeAll("{\"ok\":true,\"result\":{\"view\":\"status\"");
+            if (request.id.len > 0) {
+                try w.writeAll(",\"contact\":");
+                try control_api.writeString(w, request.id);
+            }
+            try w.writeAll("}}\n");
         },
         .chats => try controlChats(a, call),
         .search => try controlSearch(a, call),
