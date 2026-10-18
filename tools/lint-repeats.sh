@@ -62,7 +62,7 @@ END { exit failed ? 1 : 0 }
 fi
 
 shopt -s nullglob
-workflows=(.github/workflows/*.yml)
+workflows=(.github/workflows/*.yml .github/workflows/*.yaml)
 if (( ${#workflows[@]} == 0 )); then
     printf 'lint-repeats: no .github/workflows/*.yml files found\n' >&2
     exit 1
@@ -97,7 +97,9 @@ FNR == 1 {
         next
     }
     if (code ~ /openrouter\.ai|OPENROUTER_API_KEY|api\.z\.ai/)
-        fail(FNR, "B6", "workflow calls a paid OpenRouter or Z.ai API instead of the Codex or Claude subscriptions", "bash tools/ai-review.sh on runs-on: [self-hosted, wazig], which calls hax --provider=codex")
+        fail(FNR, "B6", "workflow calls a paid OpenRouter or Z.ai API instead of the Codex or Claude subscriptions", "bash tools/ai-review.sh from tools/ai-review-poll.sh on the review server, which calls hax --provider=codex")
+    if (code ~ /^[[:space:]]*runs-on:/ && code ~ /self-hosted/)
+        fail(FNR, "B7", "workflow runs on a self-hosted runner, whose public logs show the server\047s name and folders", "runs-on: ubuntu-latest; the AI review runs from tools/ai-review-poll.sh on the review server")
     if (!running) next
     if (file == ".github/workflows/auto-release.yml") {
         if (code ~ /git[[:space:]]+push.*next_tag/ || code ~ /ref=refs\/tags\/\$\{next_tag\}/) tag_line = FNR

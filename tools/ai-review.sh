@@ -54,15 +54,10 @@ if (( ! ok )); then
 fi
 
 {
-    printf '%s\n### AI review (Codex %s on the Wazig runner, advisory)\n\nCommit %s\n\n' "$marker" "$model" "$head_sha"
+    printf '%s\n### AI review (Codex %s on the review server, advisory)\n\nCommit %s\n\n' "$marker" "$model" "$head_sha"
     sed -n '/^Verdict:/,$p' "$work/review.md"
 } > "$work/comment.md"
 
-existing=$(gh api "repos/$repo/issues/$pr/comments" --paginate \
-    --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | tail -n 1)
-if [[ -n $existing ]]; then
-    gh api -X PATCH "repos/$repo/issues/comments/$existing" -F body=@"$work/comment.md" > /dev/null
-else
-    gh api -X POST "repos/$repo/issues/$pr/comments" -F body=@"$work/comment.md" > /dev/null
-fi
+body=$(python3 -c 'import sys; sys.stdout.write(open(sys.argv[1], "rb").read(60000).decode("utf-8", "ignore"))' "$work/comment.md")
+gh workflow run ai-review-post.yml -R "$repo" --ref main -f pr="$pr" -f body="$body"
 grep -m 1 '^Verdict:' "$work/review.md"
