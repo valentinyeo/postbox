@@ -3593,6 +3593,13 @@ fn selectedChatIsSlack(a: *App) bool {
     return a.chats[a.selected_chat].provider == .slack;
 }
 
+fn stagedFileGoesToWacli(provider: transport.Provider) bool {
+    return switch (provider) {
+        .whatsapp => true,
+        .slack, .telegram => false,
+    };
+}
+
 /// Raise a Slack chat's recency to `seconds` if that is newer. Timestamps use
 /// the same "YYYY-MM-DD HH:MM:SS" UTC form as Telegram, which sorts with the
 /// wacli `last_message_ts` strings, so Slack interleaves with WhatsApp.
@@ -9793,7 +9800,7 @@ fn sendMessage(a: *App) void {
         setStatus(a, "Message exceeds 4095 UTF-8 bytes; shorten it first");
         return;
     }
-    if (staged_file.len > 0 and !selectedChatIsSlack(a)) {
+    if (staged_file.len > 0 and stagedFileGoesToWacli(a.chats[a.selected_chat].provider)) {
         const path_copy = a.allocator.dupe(u8, staged_file) catch return;
         defer a.allocator.free(path_copy);
         const caption_copy = a.allocator.dupe(u8, text) catch return;
