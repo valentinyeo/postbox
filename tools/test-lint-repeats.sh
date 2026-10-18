@@ -20,6 +20,7 @@ cases=(
     'f169d18 B5 e955d363'
     '7ea1b5b B6 HEAD'
     'a701837 B7 HEAD'
+    'dc9bdce C1 HEAD'
 )
 
 "$lint" "$repo"

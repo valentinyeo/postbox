@@ -136,6 +136,35 @@ fn winHandleHkey(value: usize) win.HKEY {
     return @ptrFromInt(value);
 }
 
+pub const SecretLoad = struct {
+    value: []u8,
+    outcome: enum { encrypted, migrated, migration_failed },
+};
+
+pub fn loadSecret(allocator: std.mem.Allocator, name: [*:0]const u16) ?SecretLoad {
+    if (!enabled) return null;
+    if (regGetBinary(allocator, name)) |blob| {
+        defer allocator.free(blob);
+        if (unprotect(allocator, blob)) |plain| {
+            if (plain.len > 0) return .{ .value = plain, .outcome = .encrypted };
+            allocator.free(plain);
+        }
+    }
+    const plain = regGetString(allocator, name) orelse return null;
+    if (plain.len == 0) {
+        allocator.free(plain);
+        return null;
+    }
+    const failed = SecretLoad{ .value = plain, .outcome = .migration_failed };
+    const blob = protect(allocator, plain) orelse return failed;
+    defer allocator.free(blob);
+    const verified = unprotect(allocator, blob) orelse return failed;
+    defer allocator.free(verified);
+    if (!std.mem.eql(u8, verified, plain)) return failed;
+    if (!regSetBinary(name, blob)) return failed;
+    return .{ .value = plain, .outcome = .migrated };
+}
+
 pub fn saveTokens(user: []const u8, app: []const u8) bool {
     const allocator = std.heap.page_allocator;
     const user_blob = protect(allocator, user) orelse return false;

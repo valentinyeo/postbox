@@ -17,6 +17,8 @@ function fail(line, rule, problem, fix) {
 {
     code = $0
     sub(/\/\/.*$/, "", code)
+    if (code ~ /loadRegistryString[[:space:]]*\(|REG_SZ/ && code ~ /lit[[:space:]]*\([[:space:]]*"[^"]*ApiKey"[[:space:]]*\)/)
+        fail(FNR, "C1", "API key uses plain registry storage", "slack_win.loadSecret for encrypted storage and migration")
     if (code ~ /^fn /) {
         worker = code ~ /^fn wacliWorkerMain\(/
         unarchive = code ~ /^fn queueUnarchiveChat\(/
