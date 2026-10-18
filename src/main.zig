@@ -404,6 +404,7 @@ const WordSpan = struct {
 const PendingArchive = struct {
     jid: Utf8Text(191) = .{},
     should_unarchive: bool = false,
+    source: archive_rules.Source = .shortcut,
 };
 
 const AvatarEntry = struct {
@@ -647,6 +648,11 @@ const App = struct {
     palette_match_count: usize = 0,
     palette_selected: usize = 0,
     palette_ever_active: bool = false,
+    palette_archive_jid: Utf8Text(191) = .{},
+    palette_archive_bulk_count: usize = 0,
+    palette_archive_show_archived: bool = false,
+    palette_archive_was_archived: bool = false,
+    palette_archive_kept: bool = false,
     emoji_wnd: ?win.HWND = null,
     emoji_edit: ?win.HWND = null,
     emoji_list: ?win.HWND = null,
@@ -754,6 +760,7 @@ const App = struct {
     // WAZI-62: an unarchive that could not queue (full queue) waits here and
     // is retried from the refresh timer, so the chat is never lost for good.
     unarchive_retry: Utf8Text(191) = .{},
+    unarchive_retry_source: archive_rules.Source = .resurface,
     // Kept-archived set and per-chat baselines (archive_rules.zig), loaded
     // from archive-state.txt in the Messages folder under LOCALAPPDATA.
     archive_state: ?*archive_rules.State = null,
@@ -8432,6 +8439,7 @@ fn logSendTiming(a: *App, outcome: []const u8, pending: PendingSend) void {
 fn removeFirstPendingSend(a: *App, delivered: bool) void {
     if (a.pending_send_count == 0) return;
     const head = &a.pending_sends[0];
+    if (delivered) unarchiveSentChat(a, head.jid.slice());
     if (delivered and head.file.len > 0 and head.jid.len <= 191 and head.file.len <= 520) {
         var entry = voice_sent.Entry{ .queued_unix = head.queued_unix, .seconds = head.voice_seconds, .seq = head.seq, .voice = head.ptt };
         @memcpy(entry.jid[0..head.jid.len], head.jid.slice());
@@ -10656,26 +10664,33 @@ fn archiveMarker(a: *const App, chat: *const Chat) ?[*:0]const u16 {
 
 /// Queue an unarchive for a chat the inbox list does not show (WAZI-62).
 /// Duplicates are dropped: live events can repeat before the write lands.
-fn queueUnarchiveChat(a: *App, jid: []const u8) void {
-    if (isKeptArchived(a, jid)) {
+fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) void {
+    if (source == .resurface and isKeptArchived(a, jid)) {
         if (std.mem.eql(u8, a.unarchive_retry.slice(), jid)) a.unarchive_retry.set("");
         return;
     }
-    var index: usize = 0;
-    while (index < a.pending_archive_count) : (index += 1) {
-        const pending = &a.pending_archives[index];
-        if (pending.should_unarchive and std.mem.eql(u8, pending.jid.slice(), jid)) return;
+    var already_queued = false;
+    for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
+        if (std.mem.eql(u8, pending.jid.slice(), jid)) already_queued = pending.should_unarchive;
+    }
+    if (already_queued) {
+        if (std.mem.eql(u8, a.unarchive_retry.slice(), jid)) a.unarchive_retry.set("");
+        return;
     }
     if (a.pending_archive_count >= a.pending_archives.len) {
         // Remember the request instead of dropping it (review finding): the
         // refresh timer re-queues it once the archive queue drains.
-        if (a.unarchive_retry.len == 0) a.unarchive_retry.set(jid);
+        if (a.unarchive_retry.len == 0 or (source == .send and std.mem.eql(u8, a.unarchive_retry.slice(), jid))) {
+            a.unarchive_retry.set(jid);
+            a.unarchive_retry_source = source;
+        }
         return;
     }
-    a.unarchive_retry.set("");
+    if (std.mem.eql(u8, a.unarchive_retry.slice(), jid)) a.unarchive_retry.set("");
     const pending = &a.pending_archives[a.pending_archive_count];
     pending.jid.set(jid);
     pending.should_unarchive = true;
+    pending.source = source;
     a.archive_batch_total = if (a.pending_archive_count == 0) 1 else a.archive_batch_total + 1;
     a.pending_archive_count += 1;
     if (a.archive_state) |state| {
@@ -10826,7 +10841,7 @@ fn applyResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8, raw: []cons
     const base = state.baseline(jid) orelse "";
     if (archive_rules.shouldResurface(from_me, state.isKept(jid), row_ts, base)) {
         appendLaunchLog(a, "archive-scan: new message in an archived chat, unarchiving");
-        queueUnarchiveChat(a, jid);
+        queueUnarchiveChat(a, jid, .resurface);
         return;
     }
     // Not resurfacing (my own reply, or kept): move the baseline so the same
@@ -10839,7 +10854,7 @@ fn applyResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8, raw: []cons
 fn retryUnarchiveChat(a: *App) void {
     if (a.unarchive_retry.len == 0) return;
     const jid = a.unarchive_retry.slice();
-    queueUnarchiveChat(a, jid);
+    queueUnarchiveChat(a, jid, a.unarchive_retry_source);
 }
 
 fn pendingArchiveHidesChat(a: *const App, jid: []const u8, show_archived: bool) bool {
@@ -10863,6 +10878,8 @@ fn startNextArchive(a: *App) void {
     if (mediaBusy(a) or a.send_child != null or sendReadyPending(a) or avatarBusy(a)) return;
     stopSync(a, "archive");
     const pending = &a.pending_archives[0];
+    var log_buffer: [288]u8 = undefined;
+    appendLaunchLog(a, archive_rules.logLine(&log_buffer, pending.jid.slice(), !pending.should_unarchive, pending.source));
     const child = child_process.spawn(a.io, .{
         .argv = &.{ a.wacli_path, "--json", "--lock-wait", "10s", "chats", if (pending.should_unarchive) "unarchive" else "archive", "--chat", pending.jid.slice() },
         .stdin = .ignore,
@@ -10936,7 +10953,7 @@ fn chatProvider(a: *App, jid: []const u8) transport.Provider {
 /// Queue the app's archive (or unarchive) action for one chat, the same
 /// wacli write Ctrl+E makes. Returns why it could not, or null once queued.
 /// Shared by Ctrl+E and wazigctl, so a later Slack "hide" lands here once.
-fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action) ?[]const u8 {
+fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action, source: archive_rules.Source) ?[]const u8 {
     const unarchive = action == .unarchive;
     switch (chatProvider(a, jid)) {
         // ponytail: no archive call until the exact TDLib archive method is
@@ -10950,7 +10967,7 @@ fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action) ?[]const 
     }
     // A real WhatsApp jid always has an @server part (see
     // isUnresolvableChatEntry); anything else is an unknown id.
-    if (std.mem.indexOfScalar(u8, jid, '@') == null) return "Unknown chat id";
+    if (jid.len > archive_rules.max_jid or std.mem.indexOfScalar(u8, jid, '@') == null) return "Unknown chat id";
     // Only the last queued action for this chat determines the final state.
     var already_queued = false;
     for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
@@ -10972,6 +10989,7 @@ fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action) ?[]const 
         const pending = &a.pending_archives[a.pending_archive_count];
         pending.jid.set(jid);
         pending.should_unarchive = unarchive;
+        pending.source = source;
         a.archive_batch_total = if (a.pending_archive_count == 0) 1 else a.archive_batch_total + 1;
         a.pending_archive_count += 1;
     }
@@ -10998,14 +11016,41 @@ fn paneFollowSelection(a: *App, open_jid: []const u8) void {
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
 }
 
-fn archiveSelectedChat(a: *App, keep: bool) void {
+fn archiveShortcutAllowed(a: *const App, focus: ?win.HWND, lparam: win.LPARAM) bool {
+    if ((@as(usize, @bitCast(lparam)) & (@as(usize, 1) << 30)) != 0) return false;
+    return focus != null and (focus == a.chats_hwnd or focus == a.canvas or focus == a.hwnd);
+}
+
+fn unarchiveSentChat(a: *App, jid: []const u8) void {
+    var archived = if (a.archive_state) |state| state.find(jid) != null else false;
+    if (visibleChatIndex(a, jid)) |index| archived = archived or a.chats[index].archived;
+    if (a.people.find(jid)) |entry| archived = archived or entry.origin == .archived;
+    for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
+        if (std.mem.eql(u8, pending.jid.slice(), jid)) archived = !pending.should_unarchive;
+    }
+    if (archived) queueUnarchiveChat(a, jid, .send);
+}
+
+fn archivePaletteSelection(a: *App, keep: bool) void {
+    const jid = if (a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else "";
+    if (!std.mem.eql(u8, jid, a.palette_archive_jid.slice()) or
+        a.bulk.count != a.palette_archive_bulk_count or a.show_archived != a.palette_archive_show_archived or
+        (a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived != a.palette_archive_was_archived) or
+        (keep and isKeptArchived(a, jid) != a.palette_archive_kept))
+        return setStatus(a, "Chat selection changed. Open the command palette again");
+    if (keep) toggleKeepArchived(a, .menu) else archiveSelectedChat(a, false, .menu);
+}
+
+fn archiveSelectedChat(a: *App, keep: bool, source: archive_rules.Source) void {
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
-    if (a.bulk.count > 0) return archiveBulkSelection(a, keep);
+    if (a.bulk.count > 0) return archiveBulkSelection(a, keep, source);
     const chat = &a.chats[a.selected_chat];
+    if (source == .shortcut and a.displayed_jid.len > 0 and !std.mem.eql(u8, a.displayed_jid.slice(), chat.jid.slice()))
+        return setStatus(a, "Chat selection changed. Wait for the selected chat to open");
     var open_jid = Utf8Text(191){};
     open_jid.set(chat.jid.slice());
     const action: archive_rules.Action = if (keep) .keep else if (a.show_archived or chat.archived) .unarchive else .archive;
-    if (archiveChat(a, open_jid.slice(), action)) |problem| return setStatus(a, problem);
+    if (archiveChat(a, open_jid.slice(), action, source)) |problem| return setStatus(a, problem);
     paneFollowSelection(a, open_jid.slice());
     setStatus(a, action.status());
 }
@@ -11029,7 +11074,7 @@ fn clearBulkSelection(a: *App) bool {
 
 /// Ctrl+E with chats selected by Ctrl+A: queue one call per chat, drop the
 /// rows from the list at once, and move the pane a single time.
-fn archiveBulkSelection(a: *App, keep: bool) void {
+fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void {
     var open_jid = Utf8Text(191){};
     if (a.selected_chat < a.chat_count) open_jid.set(a.chats[a.selected_chat].jid.slice());
     const action: archive_rules.Action = if (keep) .keep else if (a.show_archived) .unarchive else .archive;
@@ -11037,7 +11082,7 @@ fn archiveBulkSelection(a: *App, keep: bool) void {
     var index: usize = 0;
     while (index < a.bulk.count) : (index += 1) {
         // The selection holds copies, so removed rows cannot shift them.
-        if (archiveChat(a, a.bulk.at(index), action)) |why| {
+        if (archiveChat(a, a.bulk.at(index), action, source)) |why| {
             problem = why;
         }
     }
@@ -11050,8 +11095,8 @@ fn archiveBulkSelection(a: *App, keep: bool) void {
 
 /// Ctrl+K "Archive and keep archived": archive the open chat and stop it coming back on
 /// new messages. Run again ("Allow resurfacing") it only clears the flag.
-fn toggleKeepArchived(a: *App) void {
-    if (a.bulk.count > 0) return archiveSelectedChat(a, true);
+fn toggleKeepArchived(a: *App, source: archive_rules.Source) void {
+    if (a.bulk.count > 0) return archiveSelectedChat(a, true, source);
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return setStatus(a, "Select a chat first");
     const state = a.archive_state orelse return setStatus(a, "Keep archived is not available");
     const chat = &a.chats[a.selected_chat];
@@ -11065,7 +11110,7 @@ fn toggleKeepArchived(a: *App) void {
         if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
         return setStatus(a, "New messages can bring this chat back to the inbox again");
     }
-    archiveSelectedChat(a, true);
+    archiveSelectedChat(a, true, source);
 }
 
 // --------------------------------------------------------- wazigctl control
@@ -11250,7 +11295,7 @@ fn controlDispatch(a: *App, call: *ControlCall) !void {
         .messages => try controlMessages(a, call),
         .archive, .unarchive => {
             if (request.id.len == 0) return control_api.writeError(w, "needs a chat id");
-            if (archiveChat(a, request.id, if (request.cmd == .unarchive) .unarchive else .archive)) |problem| return control_api.writeError(w, problem);
+            if (archiveChat(a, request.id, if (request.cmd == .unarchive) .unarchive else .archive, .control)) |problem| return control_api.writeError(w, problem);
             try w.writeAll("{\"ok\":true,\"result\":{\"id\":");
             try control_api.writeString(w, request.id);
             try w.print(",\"queued\":\"{s}\"}}}}\n", .{@tagName(request.cmd)});
@@ -11538,7 +11583,7 @@ fn controlArchiveMany(a: *App, w: *std.Io.Writer, ids: []const []const u8) !void
     defer a.allocator.free(problems);
     var failed: usize = 0;
     for (ids, problems) |id, *problem| {
-        problem.* = archiveChat(a, id, .archive);
+        problem.* = archiveChat(a, id, .archive, .control);
         if (problem.* != null) failed += 1;
     }
     if (failed == 0) try w.writeAll("{\"ok\":true,\"result\":{\"results\":[") else try w.print("{{\"ok\":false,\"error\":\"{d} of {d} chats could not be archived\",\"result\":{{\"results\":[", .{ failed, ids.len });
@@ -11602,6 +11647,11 @@ fn appendMicrophones(a: *App) void {
 }
 
 fn buildPaletteItems(a: *App) void {
+    a.palette_archive_jid.set(if (a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else "");
+    a.palette_archive_bulk_count = a.bulk.count;
+    a.palette_archive_show_archived = a.show_archived;
+    a.palette_archive_was_archived = a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived;
+    a.palette_archive_kept = isKeptArchived(a, a.palette_archive_jid.slice());
     a.palette_item_count = 0;
     appendPalette(a, "Search chats", "Ctrl+F", command_search);
     appendPalette(a, "Compose message", "C", command_compose);
@@ -11899,6 +11949,10 @@ fn paletteActivate(a: *App) void {
     const command = item.command;
     closePalette(a);
     if (command == 0) return;
+    if (command == command_archive or command == command_keep_archived) {
+        archivePaletteSelection(a, command == command_keep_archived);
+        return;
+    }
     runCommand(a, command);
 }
 
@@ -12521,8 +12575,8 @@ fn runCommand(a: *App, command: u16) void {
             refreshChats(a);
             refreshMessages(a);
         },
-        command_archive => archiveSelectedChat(a, false),
-        command_keep_archived => toggleKeepArchived(a),
+        command_archive => archiveSelectedChat(a, false, .menu),
+        command_keep_archived => toggleKeepArchived(a, .menu),
         command_pin => togglePinSelected(a),
         command_reply => startReply(a),
         command_resend => {
@@ -15715,7 +15769,8 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (control and !alt and key == 'E') {
-        archiveSelectedChat(a, shift);
+        if (!archiveShortcutAllowed(a, focus, message.lParam)) return false;
+        archiveSelectedChat(a, shift, .shortcut);
         return true;
     }
     if (control and shift and key == 'C') {
@@ -15850,7 +15905,8 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (key == 'E') {
-        runCommand(a, command_archive);
+        if (control or alt or shift or !archiveShortcutAllowed(a, focus, message.lParam)) return false;
+        archiveSelectedChat(a, false, .shortcut);
         return true;
     }
     if (key == 'U') {

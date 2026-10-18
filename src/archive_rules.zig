@@ -23,6 +23,12 @@ pub fn progressStatus(out: []u8, should_unarchive: bool, total: usize, remaining
     }) catch null;
 }
 
+pub const Source = enum { shortcut, menu, control, resurface, send };
+
+pub fn logLine(out: []u8, jid: []const u8, archived: bool, source: Source) []const u8 {
+    return std.fmt.bufPrint(out, "archive: jid={s} archived={} source={s}", .{ jid, archived, @tagName(source) }) catch unreachable;
+}
+
 pub const Action = enum {
     archive,
     keep,
