@@ -1,19 +1,13 @@
-//! COLRv0 + CPAL parser for colour emoji drawn with plain GDI. Pure: it only
-//! reads big-endian byte slices, so it runs in host unit tests. The caller
-//! fetches the bytes (GetFontData on Windows) and may load only the v0 arrays
-//! of a COLR table, skipping the much larger v1 paint data.
 const std = @import("std");
 
 pub const Error = error{ Truncated, UnsupportedVersion, NoPalette };
 
-/// Palette index meaning "use the current text colour".
 pub const foreground: u16 = 0xFFFF;
 
 pub const header_len = 14;
 const base_record_len = 6;
 const layer_record_len = 4;
 
-/// Where the v0 arrays live inside the COLR table (COLR v0 and v1 share it).
 pub const Header = struct {
     base_count: u16,
     base_offset: u32,
@@ -43,7 +37,6 @@ pub fn parseHeader(bytes: []const u8) Error!Header {
     };
 }
 
-/// Palette 0 as B,G,R,A byte quads (CPAL stores them in exactly that order).
 pub fn paletteZero(cpal: []const u8) Error![]const u8 {
     if (cpal.len < 12) return error.Truncated;
     const entries = be16(cpal, 2);
@@ -62,8 +55,6 @@ pub const Colr = struct {
     layers: []const u8,
     palette: []const u8,
 
-    /// Builds from the v0 arrays alone; `base` and `layers` are the raw
-    /// BaseGlyphRecord and LayerRecord bytes.
     pub fn init(base: []const u8, layers: []const u8, palette: []const u8) Colr {
         return .{
             .base = base[0 .. base.len - base.len % base_record_len],
@@ -72,8 +63,6 @@ pub const Colr = struct {
         };
     }
 
-    /// Builds from whole COLR and CPAL tables (tests, or a caller that has
-    /// both tables in memory anyway).
     pub fn fromTables(colr: []const u8, cpal: []const u8) Error!Colr {
         const header = try parseHeader(colr);
         const base_end = @as(usize, header.base_offset) + header.baseLen();
@@ -86,8 +75,6 @@ pub const Colr = struct {
         return self.layers.len / layer_record_len;
     }
 
-    /// The layer range of a base glyph, or null when the glyph has no colour
-    /// layers (draw it plain) or its record points past the layer array.
     pub fn find(self: Colr, glyph: u16) ?LayerRange {
         var low: usize = 0;
         var high: usize = self.base.len / base_record_len;
@@ -111,8 +98,6 @@ pub const Colr = struct {
         return .{ .glyph = be16(record, 0), .palette_index = be16(record, 2) };
     }
 
-    /// Colour of a palette entry as B,G,R,A; null for an out-of-range index.
-    /// The foreground index (0xFFFF) is the caller's to resolve.
     pub fn color(self: Colr, palette_index: u16) ?[4]u8 {
         const start = @as(usize, palette_index) * 4;
         if (start + 4 > self.palette.len) return null;
@@ -130,16 +115,14 @@ fn be32(bytes: []const u8, offset: usize) u32 {
     return std.mem.readInt(u32, bytes[offset..][0..4], .big);
 }
 
-// Fixture: glyph 5 = two layers (glyph 20 red, glyph 21 foreground),
-// glyph 9 = one layer (glyph 22, half-transparent blue), glyph 12 points past
-// the layer array. Palette 1 exists but must be ignored.
 const fixture_colr = [_]u8{
-    0, 1, // version 1 (v0 arrays still valid)
-    0, 3, // numBaseGlyphRecords
-    0, 0, 0, 14, // baseGlyphRecordsOffset
-    0, 0, 0, 32, // layerRecordsOffset
-    0,    3, // numLayerRecords
-    // BaseGlyphRecords, sorted by glyph id
+    0,    1,
+    0,    3,
+    0,    0,
+    0,    14,
+    0,    0,
+    0,    32,
+    0,    3,
     0,    5,
     0,    0,
     0,    2,
@@ -149,7 +132,6 @@ const fixture_colr = [_]u8{
     0,    12,
     0,    2,
     0,    5,
-    // LayerRecords
     0,    20,
     0,    0,
     0,    21,
@@ -159,18 +141,22 @@ const fixture_colr = [_]u8{
 };
 
 const fixture_cpal = [_]u8{
-    0, 0, // version 0
-    0, 2, // numPaletteEntries
-    0, 2, // numPalettes
-    0, 4, // numColorRecords
-    0, 0, 0, 16, // colorRecordsArrayOffset
-    0, 0, // palette 0 starts at record 0
-    0, 2, // palette 1 starts at record 2
-    // B, G, R, A
-    0, 0, 0xFF, 0xFF, // red
-    0xFF, 0, 0, 0x80, // half-transparent blue
-    0, 0xFF, 0, 0xFF, // palette 1: green
-    0, 0,    0, 0xFF,
+    0,    0,
+    0,    2,
+    0,    2,
+    0,    4,
+    0,    0,
+    0,    16,
+    0,    0,
+    0,    2,
+    0,    0,
+    0xFF, 0xFF,
+    0xFF, 0,
+    0,    0x80,
+    0,    0xFF,
+    0,    0xFF,
+    0,    0,
+    0,    0xFF,
 };
 
 test "finds layers and palette 0 colours of a base glyph" {
@@ -181,7 +167,6 @@ test "finds layers and palette 0 colours of a base glyph" {
     const bottom = table.layer(range.first);
     try std.testing.expectEqual(@as(u16, 20), bottom.glyph);
     try std.testing.expectEqual([4]u8{ 0, 0, 0xFF, 0xFF }, table.color(bottom.palette_index).?);
-    // Layer order is paint order: the foreground layer is drawn last.
     try std.testing.expectEqual(foreground, table.layer(range.first + 1).palette_index);
     const blue = table.layer(table.find(9).?.first);
     try std.testing.expectEqual([4]u8{ 0xFF, 0, 0, 0x80 }, table.color(blue.palette_index).?);
@@ -191,9 +176,7 @@ test "glyphs without colour or with broken records draw plain" {
     const table = try Colr.fromTables(&fixture_colr, &fixture_cpal);
     try std.testing.expectEqual(@as(?LayerRange, null), table.find(4));
     try std.testing.expectEqual(@as(?LayerRange, null), table.find(0xFFFF));
-    // Record says layers 2..6 but only 3 exist: never read out of bounds.
     try std.testing.expectEqual(@as(?LayerRange, null), table.find(12));
-    // Palette 1's green is not reachable through palette 0.
     try std.testing.expectEqual(@as(?[4]u8, null), table.color(2));
 }
 

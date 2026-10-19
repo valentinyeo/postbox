@@ -1,4 +1,3 @@
-// Windows UI smoke: zig test src/image_viewer_test.zig -lc -luser32 -lgdi32 -lole32 -luuid
 const std = @import("std");
 const viewer = @import("image_viewer.zig");
 const win = @import("win32.zig").c;
@@ -105,7 +104,6 @@ test "real viewer keys, clicks, queued loading, refresh identity and close" {
     try std.testing.expectEqualStrings("newer", a.viewer_id.slice());
     key(&a, win.VK_RIGHT);
     try std.testing.expectEqualStrings("newer", a.viewer_id.slice());
-    // A background read can replace/reorder the message array during download.
     std.mem.swap(Message, &a.messages[0], &a.messages[3]);
     viewer.downloadFinished(&a, "other-chat", "newer", false);
     viewer.downloadFinished(&a, "synthetic-chat", "older", false);
@@ -115,7 +113,6 @@ test "real viewer keys, clicks, queued loading, refresh identity and close" {
     viewer.downloadFinished(&a, "synthetic-chat", "newer", true);
     try std.testing.expect(!a.viewer_failed);
 
-    // Minimal synthetic 1x1 24-bit BMP, written only to the worktree cache.
     const bmp = [_]u8{ 0x42, 0x4d, 58, 0, 0, 0, 0, 0, 0, 0, 54, 0, 0, 0, 40, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 24, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 0, 0, 0 };
     const file = win.CreateFileW(Path.ptr(&.{}), win.GENERIC_WRITE, 0, null, win.CREATE_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
     try std.testing.expect(file != win.INVALID_HANDLE_VALUE);

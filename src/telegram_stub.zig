@@ -1,8 +1,3 @@
-//! Compile-time stand-in for telegram.zig used whenever the build was not
-//! given -Dtdlib=<dir>. Exposes the identical Client API; create() returns
-//! null so callers know Telegram is unavailable, and the other methods are
-//! safe no-ops.
-
 const std = @import("std");
 const tj = @import("telegram_json.zig");
 

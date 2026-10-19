@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # automerge.yml dispatches ci on main after a GITHUB_TOKEN squash merge,
-  # because merges made with that token do not fire the push trigger.
   workflow_dispatch:
 
 concurrency:
@@ -25,15 +23,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Comment checker tests
+      - name: Python tooling tests
         run: python3 -m unittest discover -s tools -p 'test_*.py'
 
       - name: Cache keys skip workflow files
         run: python3 tools/check_cache_keys.py
-
-      - name: No new code comments
-        if: github.event_name == 'pull_request'
-        run: python3 tools/check_new_comments.py "${{ github.event.pull_request.base.sha }}" HEAD
 
       - uses: mlugg/setup-zig@v2
         with:
@@ -93,10 +87,6 @@ jobs:
         if: steps.tdcache.outputs.cache-hit != 'true'
         run: bash tools/build-tdlib.sh
 
-      # Placeholder credentials: this artifact exists for the Windows smoke
-      # test only, and workflow artifacts are readable by anyone with repo
-      # access, so the real API credentials are compiled in exclusively by
-      # release.yml.
       - name: Build with Telegram (placeholder credentials)
         run: |
           zig build -Dtarget=x86_64-windows-gnu --release=small \
@@ -114,8 +104,6 @@ jobs:
           name: Messages-windows-x86_64-telegram
           path: zig-out/bin/
 
-  # Runs the Telegram-enabled exe headlessly on a real Windows machine to
-  # prove TDLib loads, opens its database and reaches the first auth state.
   windows-smoke:
     name: windows-smoke
     runs-on: windows-latest
@@ -134,10 +122,6 @@ jobs:
           $p = Start-Process -FilePath "bin\Messages.exe" -ArgumentList "--tdlib-smoke" -Wait -PassThru
           exit $p.ExitCode
 
-  # WAZI-68 affected-machine verification: runs the shipped unfurl code
-  # (link classifier, live card fetch, card painter, MFPlay player window,
-  # fullscreen toggle) on a real Windows desktop, without a WhatsApp
-  # session, and uploads the screenshots and result log as evidence.
   unfurl-verification:
     name: unfurl-verification
     runs-on: windows-latest
@@ -169,18 +153,11 @@ jobs:
           name: unfurl-verification-evidence
           path: smoke-out/
 
-  # A ci run on main that was started by workflow_dispatch (the automerge
-  # bot-merge path and the automerge self-heal) gets no downstream
-  # workflow_run trigger: GitHub does not fire workflow_run for runs that
-  # were themselves dispatched. Push-triggered ci runs already start
-  # auto-release through workflow_run, so this handoff is dispatch-only.
   notify-release:
     name: notify-release
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [ci, tdlib, windows-smoke]
-    # success() must stay explicit: a job-level if replaces the implicit
-    # all-dependencies-succeeded check.
     if: >-
       success() &&
       github.event_name == 'workflow_dispatch' &&
@@ -192,10 +169,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # auto-release re-verifies everything itself (head of main, tag
-          # dedupe, app-files-changed) before it tags anything.
-          # Retry transient dispatch failures: this handoff is the only
-          # auto-release trigger for heads without a push-triggered ci run.
           for _ in 1 2 3; do
             if gh workflow run auto-release.yml -R "${GITHUB_REPOSITORY}" --ref main; then
               exit 0

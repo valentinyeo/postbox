@@ -1,5 +1,3 @@
-// Request bodies and response parsing for transcript formatting (Anthropic or OpenRouter).
-// Windows-free so the unit tests run on any host.
 const std = @import("std");
 
 pub fn appendJsonEscaped(list: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []const u8) !void {
@@ -21,8 +19,6 @@ pub fn appendJsonEscaped(list: *std.ArrayList(u8), allocator: std.mem.Allocator,
     }
 }
 
-// Anthropic: Messages API without reasoning (speed matters more than depth here).
-// OpenRouter: chat completions with medium reasoning, as before.
 pub fn formatRequestBody(allocator: std.mem.Allocator, anthropic: bool, model: []const u8, system_prompt: []const u8, transcript: []const u8) ![]u8 {
     var body: std.ArrayList(u8) = .empty;
     errdefer body.deinit(allocator);
@@ -37,7 +33,6 @@ pub fn formatRequestBody(allocator: std.mem.Allocator, anthropic: bool, model: [
         try appendJsonEscaped(&body, allocator, system_prompt);
         try body.appendSlice(allocator, "\"},{\"role\":\"user\",\"content\":\"");
     }
-    // Tagged so the model formats a note that greets "Valentin" instead of answering it.
     try body.appendSlice(allocator, "<transcript>\\n");
     try appendJsonEscaped(&body, allocator, transcript);
     try body.appendSlice(allocator, "\\n</transcript>\"}]}");
@@ -55,7 +50,6 @@ pub fn formatResponseText(allocator: std.mem.Allocator, anthropic: bool, respons
         .array => |value| value,
         else => return error.BadResponse,
     };
-    // Anthropic can put thinking blocks before the answer, so take the first text block.
     const first = for (items.items) |item| {
         const object = switch (item) {
             .object => |value| value,
@@ -78,14 +72,10 @@ pub fn formatResponseText(allocator: std.mem.Allocator, anthropic: bool, respons
     return allocator.dupe(u8, trimmed);
 }
 
-/// The app's owner; his own notes are summarised from his point of view.
 pub const owner_name = "Valentin";
 
-/// Notes come in German, English or both; the summary follows the note, never a setting.
 pub const language_rule = " LANGUAGE: write the summary in the SAME language as the transcript (German transcript: German summary, English transcript: English summary). For a mix, use the language of most of the words. Never translate.";
 
-/// Paragraph appended to the system prompt: who is talking in this note.
-/// `contact` is the other person in the chat (empty when unknown).
 pub fn speakerInstruction(allocator: std.mem.Allocator, from_me: bool, contact: []const u8) ![]u8 {
     const other = if (contact.len > 0) contact else "the other person";
     if (from_me) return std.fmt.allocPrint(
@@ -100,15 +90,11 @@ pub fn speakerInstruction(allocator: std.mem.Allocator, from_me: bool, contact: 
     );
 }
 
-/// True when the model answered about the task instead of doing it: a refusal,
-/// an apology, a question, or any reply that is not the numbered summary the
-/// prompt demands. Such an answer must never replace the raw transcript.
 pub fn isRefusal(text: []const u8) bool {
     const body = std.mem.trimStart(u8, text, " \r\n\t");
     if (body.len == 0) return true;
     var lower_buffer: [96]u8 = undefined;
     const head = std.ascii.lowerString(&lower_buffer, body[0..@min(body.len, lower_buffer.len)]);
-    // Skip a list marker so "1. I cannot ..." is caught too.
     var skip: usize = 0;
     while (skip < head.len and (std.ascii.isDigit(head[skip]) or head[skip] == '.' or head[skip] == ')' or head[skip] == ' ' or head[skip] == '-')) skip += 1;
     const openers = [_][]const u8{
@@ -120,13 +106,9 @@ pub fn isRefusal(text: []const u8) bool {
         "it seems",       "could you",  "can you",         "please provide",  "please share",
     };
     for (openers) |opener| if (std.mem.startsWith(u8, head[skip..], opener)) return true;
-    // The contract: the answer starts with the numbered summary line "1.".
-    // Anything else is a meta answer, not a summary.
     return !(head.len >= 2 and head[0] == '1' and (head[1] == '.' or head[1] == ')'));
 }
 
-/// True when a transcript already carries the numbered summary this app asks
-/// for, so it is not sent for formatting a second time.
 pub fn looksFormatted(comptime T: type, text: []const T) bool {
     if (text.len < 2) return false;
     if (text[0] == '1' and (text[1] == '.' or text[1] == ')')) return true;
@@ -200,9 +182,7 @@ test "anthropic format request uses a system field and no reasoning" {
     try std.testing.expectEqualStrings("sys \"x\"", root.get("system").?.string);
     try std.testing.expect(root.get("reasoning") == null);
     try std.testing.expect(root.get("max_tokens") != null);
-    // Haiku 5.5 rejects temperature ("deprecated for this model"), which failed every summary.
     try std.testing.expect(root.get("temperature") == null);
-    // Haiku 5.5 thinks by default; summaries want speed.
     try std.testing.expectEqualStrings("disabled", root.get("thinking").?.object.get("type").?.string);
     try std.testing.expectEqualStrings("<transcript>\nhi\nthere\n</transcript>", root.get("messages").?.array.items[0].object.get("content").?.string);
 }

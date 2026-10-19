@@ -1,5 +1,3 @@
-//! Host tests of the production read watermark and probe wiring, extracted
-//! by build.zig. Only Win32 painting, persistence, and subprocesses are stubbed.
 const std = @import("std");
 const chat_key = @import("chat_key.zig");
 const read_state = @import("read_state.zig");

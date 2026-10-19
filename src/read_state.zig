@@ -1,5 +1,3 @@
-//! Monotonic, account-scoped read watermarks. Provider unread counts can be
-//! stale; only a confirmed incoming message past the watermark earns a dot.
 const std = @import("std");
 const media_age = @import("media_age.zig");
 
@@ -54,8 +52,6 @@ pub const State = struct {
         self.dirty = true;
     }
 
-    /// Only a live list can acknowledge a phone-side read. A cached zero
-    /// count must never acknowledge messages that arrived after that cache.
     pub fn observeChat(self: *State, allocator: std.mem.Allocator, account: []const u8, jid: []const u8, timestamp: i64, reported_unread: bool, fresh: bool) void {
         if (fresh and !reported_unread) self.markRead(allocator, account, jid, timestamp);
     }
@@ -72,8 +68,6 @@ pub const State = struct {
         return reported_unread and timestamp > value.read and timestamp > value.checked;
     }
 
-    /// The read-only probe uses --from-them, so a later outgoing message
-    /// cannot resurrect an old provider unread count.
     pub fn acceptProbe(self: *State, allocator: std.mem.Allocator, account: []const u8, jid: []const u8, row_timestamp: i64, raw: []const u8) bool {
         var parsed = std.json.parseFromSlice(std.json.Value, allocator, raw, .{}) catch return false;
         defer parsed.deinit();
@@ -158,7 +152,6 @@ test "read in Messages survives restart and stale unread count then new incoming
     try std.testing.expect(reloaded.needsProbe(test_account, test_jid, read_time + 1, true));
     try std.testing.expect(reloaded.acceptProbe(allocator, test_account, test_jid, read_time + 1, incoming_new));
     try std.testing.expect(reloaded.isUnread(test_account, test_jid));
-    // A stale zero count, from disk or an older live read, cannot hide it.
     reloaded.observeChat(allocator, test_account, test_jid, read_time, false, false);
     reloaded.observeChat(allocator, test_account, test_jid, read_time, false, true);
     try std.testing.expect(reloaded.isUnread(test_account, test_jid));

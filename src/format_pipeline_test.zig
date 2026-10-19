@@ -1,4 +1,3 @@
-// Host stubs for the actual load, poll and schedule functions from main.zig.
 const std = @import("std");
 const format_cache = @import("format_cache");
 const format_request = format_cache.format_request;
@@ -122,7 +121,6 @@ test "first build loads cached summary without a media path or formatting reques
     try expectTranscript(&a.messages[0], summary);
     scheduleNextFormatting(&a);
     try std.testing.expectEqual(@as(usize, 0), session.starts);
-    // Rebuilt messages and a fresh app (restart) both use the disk result.
     a = fixture(&session);
     loadTranscriptCache(&a, &a.messages[0]);
     try expectTranscript(&a.messages[0], summary);
@@ -157,7 +155,6 @@ test "completion after switching chats persists for the original message and res
     a.messages[0].transcript.set(a.allocator, "raw transcript");
     a.messages[0].transcript_state = .ready;
     scheduleNextFormatting(&a);
-    // Same message id in another chat must not receive the completed summary.
     a.chats[0].jid.set("chat-b");
     a.displayed_jid.set("chat-b");
     session.status = .ready;

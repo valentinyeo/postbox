@@ -1,12 +1,6 @@
-//! Local record of which voice notes the user has already played.
-//! Kept entirely on-device; nothing is sent to the other party.
-
 const std = @import("std");
 
 pub const Set = struct {
-    // ponytail: fixed 2048-entry ring; once full, the oldest entry is
-    // overwritten and that voice note falls back to unplayed. Upgrade path:
-    // hash-set file with compaction.
     hashes: [2048]u64 = [_]u64{0} ** 2048,
     count: usize = 0,
 
@@ -22,11 +16,6 @@ pub const Set = struct {
         return false;
     }
 
-    /// Parses the store contents (one 16-digit hex hash per line). Lines of
-    /// any other length are treated as corrupt — including a truncated tail
-    /// from a crash mid-write, which must not become a phantom entry. The
-    /// file is append-only, so parsing wraps head-first and the newest
-    /// entries survive the ring capacity.
     pub fn load(self: *Set, contents: []const u8) void {
         var lines = std.mem.tokenizeAny(u8, contents, "\r\n");
         while (lines.next()) |line| {
@@ -37,14 +26,11 @@ pub const Set = struct {
         }
     }
 
-    /// Returns the hex line to append to the store file, or null when the id
-    /// was already recorded.
     pub fn mark(self: *Set, id: []const u8, line_buffer: []u8) ?[]const u8 {
         if (id.len == 0) return null;
         return self.markRaw(std.hash.Wyhash.hash(0, id), line_buffer);
     }
 
-    /// Same as mark for a precomputed hash (e.g. a jid+id composite key).
     pub fn markRaw(self: *Set, hash: u64, line_buffer: []u8) ?[]const u8 {
         if (self.wasPlayedRaw(hash)) return null;
         self.hashes[self.count % self.hashes.len] = hash;
@@ -52,8 +38,6 @@ pub const Set = struct {
         return std.fmt.bufPrint(line_buffer, "{x:0>16}\n", .{hash}) catch null;
     }
 
-    /// Composite key for two-part identities (chat jid + message id) so ids
-    /// from different chats can never collide in a shared hash set.
     pub fn pairKey(first: []const u8, second: []const u8) u64 {
         var hasher = std.hash.Wyhash.init(0);
         hasher.update(first);
@@ -83,7 +67,6 @@ test "markRaw and pairKey keep jids and ids separate" {
     try std.testing.expect(set.markRaw(key, &buffer) != null);
     try std.testing.expect(set.markRaw(key, &buffer) == null);
     try std.testing.expect(set.wasPlayedRaw(key));
-    // The same id under a different chat must stay distinct.
     try std.testing.expect(set.markRaw(Set.pairKey("chat2", "msg1"), &buffer) != null);
     try std.testing.expect(Set.pairKey("chat1", "msg1") != Set.pairKey("chat1", "msg2"));
 }
@@ -98,10 +81,9 @@ test "load skips malformed and truncated lines" {
 
 test "load wraps so the newest entries survive the ring capacity" {
     var set: Set = .{ .count = 2048 };
-    set.hashes[0] = 0x11; // oldest slot when the ring is full
+    set.hashes[0] = 0x11;
     set.load("0000000000000022\n0000000000000033\n");
     try std.testing.expectEqual(@as(usize, 2050), set.count);
-    // Slot 0 (the oldest) was overwritten by the wrap; the newest two survive.
     try std.testing.expect(!set.wasPlayedRaw(0x11));
     try std.testing.expect(set.wasPlayedRaw(0x22));
     try std.testing.expect(set.wasPlayedRaw(0x33));

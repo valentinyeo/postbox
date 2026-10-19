@@ -1,14 +1,7 @@
-//! Voice notes, pasted images and files sent from wazig through wacli. wacli
-//! stores a sent row late, or with a file path this PC cannot open, so the app
-//! keeps its own copy and lays it over the stored row (a voice note also over
-//! a stand-in bubble) so the media shows or plays at once, transcribes from
-//! the local file, and is never downloaded back (every download pauses sync).
-
 const std = @import("std");
 
 pub const max_entries = 32;
 
-/// One sent note: where its OGG lives and which stored row claimed it.
 pub const Entry = struct {
     jid: [191]u8 = undefined,
     jid_len: usize = 0,
@@ -16,8 +9,6 @@ pub const Entry = struct {
     file_len: usize = 0,
     queued_unix: i64 = 0,
     seconds: u32 = 0,
-    /// A recorded voice note (audio row, stand-in bubble). False for a pasted
-    /// image or other file, which matches any non-audio media row.
     voice: bool = true,
     matched_id: [191]u8 = undefined,
     matched_len: usize = 0,
@@ -34,33 +25,23 @@ pub const Entry = struct {
     }
 };
 
-/// wacli labels every audio row "Sent audio" (even a received one) or
-/// "[Audio]". Under a player that text is noise, so it is hidden.
 pub fn isAudioPlaceholder(text: []const u8) bool {
     return std.mem.eql(u8, text, "Sent audio") or std.mem.eql(u8, text, "[Audio]");
 }
 
-/// A stored row is one of our own voice notes: from me, an audio row.
 pub fn isOwnVoiceRow(from_me: bool, media_type: []const u8) bool {
     return from_me and std.ascii.eqlIgnoreCase(media_type, "audio");
 }
 
-/// A stored row is one of our own images or files: from me, a media row that
-/// is not audio.
 pub fn isOwnFileRow(from_me: bool, media_type: []const u8) bool {
     return from_me and media_type.len > 0 and !std.ascii.eqlIgnoreCase(media_type, "audio");
 }
 
-/// Does this stored row belong to the send queued at `queued_unix`? The row
-/// must be our own media of the right kind (`voice` picks audio, otherwise
-/// image or file) and stamped at or just before the queue time (the same 5
-/// second slack the text-send match uses).
 pub fn rowMatchesEntry(from_me: bool, media_type: []const u8, row_unix: i64, queued_unix: i64, voice: bool) bool {
     const own = if (voice) isOwnVoiceRow(from_me, media_type) else isOwnFileRow(from_me, media_type);
     return own and row_unix >= queued_unix - 5;
 }
 
-/// Is this stored message id one of ours with a remembered local file?
 pub fn claimsId(entries: []const Entry, jid: []const u8, id: []const u8) bool {
     for (entries) |*entry| {
         if (entry.matched_len == 0) continue;
@@ -69,13 +50,10 @@ pub fn claimsId(entries: []const Entry, jid: []const u8, id: []const u8) bool {
     return false;
 }
 
-/// Only a verified local file suppresses a download. A remembered sent id
-/// is not proof that its temporary source file still exists.
 pub fn needsDownload(has_local_path: bool) bool {
     return !has_local_path;
 }
 
-/// Append, dropping the oldest entry when full.
 pub fn push(list: *[max_entries]Entry, count: *usize, entry: Entry) void {
     if (count.* == max_entries) {
         var i: usize = 1;
@@ -145,10 +123,6 @@ test "push drops the oldest entry when full" {
     try std.testing.expectEqual(@as(u64, max_entries + 1), list[max_entries - 1].seq);
 }
 
-/// One persisted line: jid, message id, file and an optional kind ("f" for an
-/// image or file, anything else or absent for a voice note), tab separated.
-/// Loaded entries are already matched to their stored row, so they need no
-/// queue time.
 pub fn parseLine(line: []const u8) ?Entry {
     var parts = std.mem.splitScalar(u8, line, '\t');
     const jid = parts.next() orelse return null;

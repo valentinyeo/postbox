@@ -8,7 +8,6 @@ fn sourceSection(start: []const u8, end: []const u8) []const u8 {
     return rest[0..last];
 }
 
-// Files of the vendored libwebp 1.4.0 subset that decodes WebP (see vendor/libwebp).
 const libwebp_sources = [_][]const u8{
     "src/dec/alpha_dec.c",
     "src/dec/buffer_dec.c",
@@ -55,7 +54,6 @@ const libwebp_sources = [_][]const u8{
     "src/utils/utils.c",
 };
 
-// Files of the vendored libopus 1.5.2 (fixed-point, see vendor/libopus/VENDORED.txt).
 const libopus_sources = [_][]const u8{
     "celt/bands.c",
     "celt/celt.c",
@@ -183,7 +181,6 @@ const libopus_sources = [_][]const u8{
     "src/wazig_nb_frames.c",
 };
 
-// Only the unit tests decode (round trip); the app only encodes.
 const libopus_decoder_only = [_][]const u8{
     "celt/celt_decoder.c",
     "silk/dec_API.c",
@@ -207,7 +204,6 @@ fn addOpus(b: *std.Build, module: *std.Build.Module, with_decoder: bool) void {
         const decoder_only = for (libopus_decoder_only) |name| {
             if (std.mem.eql(u8, name, file)) break true;
         } else false;
-        // wazig_nb_frames.c stands in for opus_decoder.c when no decoder is linked.
         const stand_in = std.mem.eql(u8, file, "src/wazig_nb_frames.c");
         if ((with_decoder and !stand_in) or (!with_decoder and !decoder_only)) files.append(b.allocator, file) catch @panic("Out of memory");
     }
@@ -221,23 +217,15 @@ fn addOpus(b: *std.Build, module: *std.Build.Module, with_decoder: bool) void {
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
-    // ponytail: local builds without -Dversion report 0.9.7 to the self-update check;
-    // upgrade path: make -Dversion required once CI is the only release builder.
     const version = b.option([]const u8, "version", "App version embedded for self-update (e.g. 0.9.7)") orelse "0.9.7";
 
     const build_info = b.addOptions();
     build_info.addOption([]const u8, "version", version);
 
-    // Telegram (TDLib) support: -Dtdlib=<dir> points at a directory holding
-    // include/td/... and the static tdjson_static libraries. Without it the
-    // build compiles src/telegram_stub.zig instead and Telegram stays off.
     const tdlib_dir = b.option([]const u8, "tdlib", "Path to a built TDLib static install") orelse "";
     const td_enabled = tdlib_dir.len > 0;
     build_info.addOption(bool, "td_enabled", td_enabled);
     const telegram_api_id = b.option(i32, "telegram-api-id", "Telegram application api_id (build-time, from CI secret)") orelse 0;
-    // Baked credentials are only defaults so their owner skips the in-app
-    // api_id/api_hash step; without them the Add Telegram flow asks for keys
-    // at runtime and stores them in the registry. Builds never require them.
     const telegram_api_hash = b.option([]const u8, "telegram-api-hash", "Telegram application api_hash (baked default)") orelse "";
     build_info.addOption(i32, "telegram_api_id", telegram_api_id);
     build_info.addOption([]const u8, "telegram_api_hash", telegram_api_hash);
@@ -250,8 +238,6 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    // Vendored libwebp 1.4.0 (decode-only): Windows WIC has no WebP codec, so
-    // stickers need this to render.
     exe.root_module.addIncludePath(b.path("vendor/libwebp"));
     exe.root_module.addCSourceFiles(.{ .root = b.path("vendor/libwebp"), .files = &libwebp_sources });
     addOpus(b, exe.root_module, false);
@@ -260,8 +246,6 @@ pub fn build(b: *std.Build) void {
     exe.root_module.link_libc = true;
     for ([_][]const u8{
         "user32",
-        // Before gdi32: newer gdi32 import libs also list the Script* calls,
-        // and usp10.dll is the export every supported Windows has.
         "usp10",
         "gdi32",
         "kernel32",
@@ -280,38 +264,29 @@ pub fn build(b: *std.Build) void {
     if (td_enabled) {
         exe.root_module.addIncludePath(.{ .cwd_relative = tdlib_dir });
         exe.root_module.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ tdlib_dir, "include" }) });
-        // Order matters: each archive may reference symbols in the next.
         const td_archives = [_][]const u8{
             "libtdjson_static.a", "libtdjson_private.a", "libtdclient.a", "libtdcore.a",
             "libtddb.a",          "libtdmtproto.a",      "libtdnet.a",    "libtdactor.a",
             "libtdapi.a",         "libtdutils.a",        "libtdsqlite.a", "libtde2e.a",
-            // OpenSSL (static) and zlib are copied next to the TDLib archives.
             "libssl.a",           "libcrypto.a",         "libz.a",
         };
         for (td_archives) |archive| {
             const path = b.pathJoin(&.{ tdlib_dir, "lib", archive });
             exe.root_module.addObjectFile(.{ .cwd_relative = path });
         }
-        // TDLib is compiled with the mingw g++, so it needs the mingw
-        // libstdc++/libgcc (win32 threads variant) rather than zig's libc++.
         const mingw_lib_dir = b.option([]const u8, "mingw-lib-dir", "Path to the mingw win32-threads gcc lib directory") orelse "/usr/lib/gcc/x86_64-w64-mingw32/13-win32";
         exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libstdc++.a" }) });
         exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libgcc_eh.a" }) });
         exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libgcc.a" }) });
         exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libgcc_s.a" }) });
-        // TDLib also needs the Windows socket/crypto stack.
         exe.root_module.link_libc = true;
         for ([_][]const u8{ "ws2_32", "iphlpapi", "crypt32", "bcrypt", "advapi32", "userenv", "ncrypt", "cryptbase", "secur32", "psapi" }) |library| {
             exe.root_module.linkSystemLibrary(library, .{});
         }
-        // Shims for the dllimport _vsnprintf/_timezone symbols the mingw-built
-        // TDLib/OpenSSL archives reference.
         exe.root_module.addCSourceFile(.{ .file = b.path("src/tdlib_mingw_shims.c"), .flags = &.{"-std=gnu11"} });
     }
     b.installArtifact(exe);
 
-    // wazigctl.exe: console CLI that drives the running app over its
-    // per-user control pipe (src/control.zig). Shipped next to Messages.exe.
     const ctl = b.addExecutable(.{
         .name = "wazigctl",
         .root_module = b.createModule(.{
@@ -331,7 +306,6 @@ pub fn build(b: *std.Build) void {
     b.installFile("assets/IBMPlexSans-SemiBold.ttf", "bin/IBMPlexSans-SemiBold.ttf");
     b.installFile("assets/IBM-Plex-LICENSE.txt", "bin/IBM-Plex-LICENSE.txt");
 
-    // Tests live in Windows-free modules so they run on any host.
     const test_step = b.step("test", "Run unit tests");
     for ([_][]const u8{ "src/theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/status_view.zig", "src/update.zig", "src/avatar_mask.zig", "src/compose_layout.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
         const tests = b.addTest(.{
@@ -347,8 +321,8 @@ pub fn build(b: *std.Build) void {
     const slack_worker_source = @embedFile("src/slack_win.zig");
     const slack_send_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/slack_send_test.zig"),
-        sourceSection("const SlackOutbox = struct", "// An image staged"),
-        sourceSection("const WacliJobKind = enum", "// Last raw wacli response"),
+        sourceSection("const SlackOutbox = struct", "const StagedImage = struct {"),
+        sourceSection("const WacliJobKind = enum", "const MsgCacheEntry = struct {"),
         sourceSection("fn wacliJobArgs(", "fn wacliPendingGet("),
         sourceSection("fn enqueueSlackOutbox(", "fn requestSlackDownload("),
         "fn resendSlackBubble(a: *App) bool { const message = &a.messages[0];\n",
@@ -369,24 +343,22 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(slack_send_tests).step);
 
-    // Compile the actual UI decisions with host stubs, rather than testing
-    // another copy of the state machine that can drift from main.zig.
     const read_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/chat_reconcile_test.zig"),
-        sourceSection("fn refreshMessages(", "/// WAZI-79: the WAL tick"),
+        sourceSection("fn refreshMessages(", "fn reconcileOpenChat(a: *App) void {"),
         sourceSection("fn reconcileOpenChat(", "fn youSender("),
         "fn resultFor(job: WacliJob) WacliResult { var storage = WacliResult{}; const result = &storage;\n",
         sourceSection("    result.* = .{ .kind = job.kind", "    switch (job.kind)"),
         "return storage; }\nfn deliverChats(a: *App, result: *const WacliResult) void {\n",
-        sourceSection("                    // A stale failure must not restart", "                },\n                .messages =>"),
+        sourceSection("                    if (!result.ok and result.gen == a.chats_gen) {", "                },\n                .messages =>"),
         "}\nfn deliver(a: *App, result: *WacliResult) void { a.pending -= 1;\n",
-        sourceSection("                    // Chat kind + error only", "                },\n                .reaction =>"),
+        sourceSection("                    var kind: []const u8 = \"unknown\";", "                },\n                .reaction =>"),
         "}\nfn tick(a: *App) void {\n",
         sourceSection("                if (a.msg_read_retry_ticks > 0)", "                if (changed and"),
         "}\n",
         sourceSection("fn applyMessageData(", "    var selected_id = Utf8Text(191){};"),
         "_ = list; _ = chat_changed; a.painted += 1;\n",
-        sourceSection("    a.displayed_jid.set(chat.jid.slice());\n    a.displayed_account = chat.account;\n    a.displayed_provider = chat.provider;\n    //", "    // Optimistic bubbles"),
+        sourceSection("    a.displayed_jid.set(chat.jid.slice());\n    a.displayed_account = chat.account;\n    a.displayed_provider = chat.provider;\n    if (fresh_read) a.displayed_timestamp.set(chat.timestamp.slice());", "    for (a.pending_sends[0..a.pending_send_count]) |*pending| {"),
         "return true; }\n",
     }) catch @panic("Out of memory building read harness");
     const read_harness = b.addWriteFiles().add("chat_reconcile_test.zig", read_harness_source);
@@ -420,12 +392,12 @@ pub fn build(b: *std.Build) void {
         @embedFile("src/archive_actions_test.zig"),
         sourceSection("fn retryUnarchiveChat(", "fn startNextArchive("),
         sourceSection("fn queueUnarchiveChat(", "const archived_scan_min_ticks"),
-        sourceSection("fn archiveChat(", "/// Rows just left the list."),
+        sourceSection("fn archiveChat(", "fn paneFollowSelection(a: *App, open_jid: []const u8) void {"),
         if (std.mem.indexOf(u8, @embedFile("src/main.zig"), "fn archiveShortcutAllowed(") != null)
             sourceSection("fn archiveShortcutAllowed(", "fn archiveSelectedChat(")
         else
             "",
-        sourceSection("fn archiveSelectedChat(", "// --------------------------------------------------------- wazigctl control"),
+        sourceSection("fn archiveSelectedChat(", "const control_call_posted: u8 = 0;"),
         sourceSection("fn startNextArchive(", "fn checkArchive("),
         "fn completePendingSend(_: *App, _: bool) bool { return true; }\n",
         sourceSection("fn removeFirstPendingSend(", "fn playableVideoPath("),
@@ -457,10 +429,10 @@ pub fn build(b: *std.Build) void {
 
     const read_state_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/read_state_test.zig"),
-        sourceSection("fn queueUnreadProbe(", "// --------------------------------------------------------------- Telegram"),
+        sourceSection("fn queueUnreadProbe(", "fn tgChatIdString(buffer: *[24]u8, chat_id: i64) []const u8 {"),
         sourceSection("fn markChatRead(a: *App) void {", "    if (chat.provider == .telegram)"),
-        sourceSection("    const needs_receipt = chat.provider_unread", "// Quiet period before"),
-        sourceSection("fn startNextMarkRead(a: *App) void {", "// The mark-read child gates"),
+        sourceSection("    const needs_receipt = chat.provider_unread", "const slack_mark_debounce_ms: u32 = 750;"),
+        sourceSection("fn startNextMarkRead(a: *App) void {", "const mark_read_hung_child_timeout_ms: u64 = 90_000;"),
     }) catch @panic("Out of memory building read state harness");
     const read_state_files = b.addWriteFiles();
     _ = read_state_files.addCopyFile(b.path("src/chat_key.zig"), "chat_key.zig");
@@ -498,8 +470,6 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(media_failure_tests).step);
 
-    // webp.zig tests use the host target: they must run on the CI machine
-    // even when the exe is cross-compiled for Windows.
     const webp_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/webp.zig"),
@@ -509,8 +479,6 @@ pub fn build(b: *std.Build) void {
     const run_webp_tests = b.addRunArtifact(webp_tests);
     test_step.dependOn(&run_webp_tests.step);
 
-    // voice_note.zig tests also use the host target; they run the vendored
-    // libopus encoder and decoder against a generated tone.
     const voice_module = b.createModule(.{
         .root_source_file = b.path("src/voice_note.zig"),
         .target = b.resolveTargetQuery(.{}),

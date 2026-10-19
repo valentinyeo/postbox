@@ -8,7 +8,6 @@ pub const Selection = struct {
     next: ?usize = null,
 };
 
-// Messages are already in chat order, oldest first. Keep only indices, not pixels.
 pub fn select(messages: anytype, current: usize, comptime isImage: anytype) ?Selection {
     if (current >= messages.len or !isImage(&messages[current])) return null;
     var result = Selection{ .index = current, .position = 0, .total = 0 };

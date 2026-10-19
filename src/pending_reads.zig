@@ -1,15 +1,8 @@
-//! Pending mark-read queue file parsing (WAZI-74). Reads that never reached
-//! the WhatsApp store are mirrored to disk and retried on the next launch.
-
 const std = @import("std");
 
 pub const max_pending_reads = 8;
 pub const max_jid_len = 191;
 
-/// Parses one jid per line from the queue file into `out`, which holds
-/// null-terminated entries. Rejects empty lines, entries that do not fit,
-/// and lines without an '@' (jid marker), so a corrupt or truncated file can
-/// never enqueue garbage. Duplicates collapse; capacity is `out.len`.
 pub fn term(entry: []const u8) []const u8 {
     const end = std.mem.indexOfScalar(u8, entry, 0) orelse entry.len;
     return entry[0..end];

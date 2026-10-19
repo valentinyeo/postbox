@@ -1,23 +1,13 @@
-//! Emoji catalog for the picker plus the pure logic behind it: name search,
-//! recent-emoji persistence (registry string parsing/validation) and grid
-//! hit-testing. No Windows calls here so everything is testable headless.
-//! The catalog is every standard emoji, generated into emoji_data.zig by
-//! tools/gen_emoji_data.py from Unicode's emoji-test.txt.
-
 const std = @import("std");
 const data = @import("emoji_data.zig");
 
 pub const grid_columns: usize = 8;
 pub const grid_rows: usize = 6;
-/// Cell size at 96 DPI; the app scales it with px().
 pub const cell_size: i32 = 44;
 pub const max_recents: usize = grid_columns;
 
-/// Filled into the "frequently used" row after the user's own recents, so the
-/// row is always full and the common WhatsApp reactions are one key away.
 pub const default_frequent = [_][]const u8{ "👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉" };
 
-/// Byte offset of each record in data.records, plus one past the last.
 const record_starts = blk: {
     @setEvalBranchQuota(400_000);
     var starts: [countRecords() + 1]u32 = undefined;
@@ -73,7 +63,6 @@ pub fn subgroup(index: usize) []const u8 {
     return data.subgroup_names[data.record_subgroup[index]];
 }
 
-/// Catalog index of an emoji string, or null when it is not a standard emoji.
 pub fn indexOf(text: []const u8) ?u16 {
     for (0..count) |index| {
         if (std.mem.eql(u8, emoji(index), text)) return @intCast(index);
@@ -81,8 +70,6 @@ pub fn indexOf(text: []const u8) ?u16 {
     return null;
 }
 
-/// Writes the "frequently used" row: recents first, then defaults not already
-/// shown, up to one grid row. Returns the number written.
 pub fn frequentRow(recents: []const u16, out: *[grid_columns]u16) usize {
     var written: usize = 0;
     for (recents) |recent| {
@@ -100,10 +87,6 @@ pub fn frequentRow(recents: []const u16, out: *[grid_columns]u16) usize {
     return written;
 }
 
-/// How well `query` (lowercase ASCII) matches catalog entry `index`: 4 when
-/// it is the whole name ("fire"), 3 when it is a whole word of the name or aliases ("fire" in "fire"), 2 when such a
-/// word starts with it, 1 for any other substring of the name, aliases or
-/// subgroup, 0 for no match.
 pub fn matchRank(index: usize, query: []const u8) u8 {
     if (query.len == 0) return 1;
     if (std.ascii.eqlIgnoreCase(name(index), query)) return 4;
@@ -113,7 +96,6 @@ pub fn matchRank(index: usize, query: []const u8) u8 {
     return 0;
 }
 
-/// 2 when `query` is a whole word of `text`, 1 when a word starts with it.
 fn wordMatch(text: []const u8, query: []const u8) u8 {
     var best: u8 = 0;
     var start: usize = 0;
@@ -127,8 +109,6 @@ fn wordMatch(text: []const u8, query: []const u8) u8 {
     return best;
 }
 
-/// Fills `out` with the catalog indices matching `query`, word-start matches
-/// first, each group in catalog order. Returns the number written.
 pub fn search(query: []const u8, out: []u16) usize {
     var written: usize = 0;
     const lowest: u8 = if (query.len == 0) 1 else 4;
@@ -144,7 +124,6 @@ pub fn search(query: []const u8, out: []u16) usize {
     return written;
 }
 
-/// Case-insensitive substring match of an ASCII query against an ASCII name.
 pub fn nameMatches(label: []const u8, query: []const u8) bool {
     if (query.len == 0) return true;
     if (query.len > label.len) return false;
@@ -167,10 +146,6 @@ fn lowerAscii(character: u8) u8 {
     return if (character >= 'A' and character <= 'Z') character + 32 else character;
 }
 
-/// Parses the persisted recent-emoji registry string ("👍,🔥,❤️") into
-/// catalog indices. Unknown, malformed and duplicate entries are dropped (so
-/// the old numeric format from before the full catalog is ignored); the most
-/// recent first. Returns the number of valid entries written.
 pub fn parseRecents(text: []const u8, out: *[max_recents]u16) usize {
     var written: usize = 0;
     var iterator = std.mem.splitScalar(u8, text, ',');
@@ -186,8 +161,6 @@ pub fn parseRecents(text: []const u8, out: *[max_recents]u16) usize {
     return written;
 }
 
-/// Formats recents for the registry as emoji joined by commas: "👍,🔥".
-/// Stored as text, not indices, so a regenerated catalog keeps them.
 pub fn formatRecents(buffer: []u8, recents: []const u16) []const u8 {
     var len: usize = 0;
     for (recents, 0..) |index, position| {
@@ -202,8 +175,6 @@ pub fn formatRecents(buffer: []u8, recents: []const u16) []const u8 {
     return buffer[0..len];
 }
 
-/// Moves an emoji to the front of the recents list (inserting or promoting),
-/// keeping at most max_recents entries.
 pub fn pushRecent(recents: []u16, recent_count: *usize, index: u16) void {
     for (recents[0..recent_count.*], 0..) |existing, position| {
         if (existing == index) {
@@ -221,8 +192,6 @@ pub fn pushRecent(recents: []u16, recent_count: *usize, index: u16) void {
     recent_count.* = capped;
 }
 
-/// Maps a click inside a grid row to a column, or null outside the grid.
-/// `cell` is the scaled cell size in pixels.
 pub fn cellFromHit(offset_in_row: i32, cell: i32) ?usize {
     if (cell <= 0 or offset_in_row < 0 or offset_in_row >= cell * @as(i32, @intCast(grid_columns))) return null;
     return @intCast(@divTrunc(offset_in_row, cell));
@@ -252,19 +221,16 @@ test "name search matches substrings case-insensitively" {
 }
 
 test "catalog has every standard emoji once, and no skin-tone variants" {
-    // Emoji 15+ has well over 1800 base emoji; the old hand list had ~390.
     try std.testing.expect(count > 1800);
     for (0..count) |index| {
         try std.testing.expect(emoji(index).len > 0);
         try std.testing.expect(name(index).len > 0);
-        // U+1F3FB..U+1F3FF are the skin-tone modifiers (F0 9F 8F BB..BF).
         for (0x1F3FB..0x1F400) |tone| {
             var encoded: [4]u8 = undefined;
             const len = std.unicode.utf8Encode(@intCast(tone), &encoded) catch unreachable;
             try std.testing.expect(std.mem.indexOf(u8, emoji(index), encoded[0..len]) == null);
         }
     }
-    // No duplicates: a sorted copy has no equal neighbours.
     var sorted: [count][]const u8 = undefined;
     for (&sorted, 0..) |*slot, index| slot.* = emoji(index);
     std.mem.sort([]const u8, &sorted, {}, struct {
@@ -304,7 +270,6 @@ test "search filters by name, alias and subgroup, word starts first" {
     try std.testing.expect(searchContains("heart", "💔"));
     try std.testing.expect(searchContains("laugh", "🤣"));
     try std.testing.expect(searchContains("party", "🥳"));
-    // Subgroup keyword: "hand-fingers-open" reaches the waving hand.
     try std.testing.expect(searchContains("fingers-open", "👋"));
     try std.testing.expect(!searchContains("fire", "👍"));
     var out: [count]u16 = undefined;
@@ -320,7 +285,6 @@ test "frequent row puts recents first, then fills with defaults" {
     try std.testing.expectEqual(wave, row[0]);
     try std.testing.expectEqual(fire, row[1]);
     try std.testing.expectEqualStrings("👍", emoji(row[2]));
-    // Fire is a default too but appears once.
     var fires: usize = 0;
     for (row) |index| {
         if (index == fire) fires += 1;
@@ -333,7 +297,6 @@ test "recents parse validates and deduplicates" {
     try std.testing.expectEqual(@as(usize, 2), parseRecents("👍, 🔥,👍", &recents));
     try std.testing.expectEqualStrings("👍", emoji(recents[0]));
     try std.testing.expectEqualStrings("🔥", emoji(recents[1]));
-    // The pre-catalog numeric format and junk are ignored.
     try std.testing.expectEqual(@as(usize, 0), parseRecents("3,17,5", &recents));
     try std.testing.expectEqual(@as(usize, 0), parseRecents("bogus", &recents));
     try std.testing.expectEqual(@as(usize, 0), parseRecents("", &recents));
@@ -350,7 +313,6 @@ test "format and parse round-trip recents" {
     var recents: [max_recents]u16 = undefined;
     const parsed = parseRecents(text, &recents);
     try std.testing.expectEqualSlices(u16, &recents_in, recents[0..parsed]);
-    // A too-small buffer drops whole entries, never half an emoji.
     try std.testing.expectEqualStrings("❤️", formatRecents(buffer[0..8], &recents_in));
 }
 
@@ -373,7 +335,6 @@ test "grid hit test maps offsets to columns at any scale" {
     try std.testing.expectEqual(@as(?usize, 3), cellFromHit(3 * cell_size, cell_size));
     try std.testing.expectEqual(@as(?usize, null), cellFromHit(-1, cell_size));
     try std.testing.expectEqual(@as(?usize, null), cellFromHit(cell_size * @as(i32, @intCast(grid_columns)), cell_size));
-    // 150%: 66 px cells.
     try std.testing.expectEqual(@as(?usize, 1), cellFromHit(66, 66));
     try std.testing.expectEqual(@as(?usize, 0), cellFromHit(65, 66));
 }

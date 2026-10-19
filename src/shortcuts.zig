@@ -1,6 +1,3 @@
-// Data behind the keyboard shortcuts help overlay (F1, or the "Keyboard
-// shortcuts" command palette entry). Kept as plain data, separate from the
-// drawing code in main.zig, so the list can be tested on its own.
 const std = @import("std");
 
 pub const Shortcut = struct {

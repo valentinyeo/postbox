@@ -1,4 +1,3 @@
-// Fetches one WhatsApp profile image through wacli and stores it on disk.
 const std = @import("std");
 const child_process = @import("child_process.zig");
 const sync_gate = @import("sync_gate.zig");
@@ -136,10 +135,6 @@ fn workerRun(self: *Session, exe: []const u8, jid: []const u8, destination: []co
     self.state_value.store(@intFromEnum(State.ready), .release);
 }
 
-// urlmon.dll is not linked at build time (see build.zig): it is only ever
-// needed here, on a background thread, well after startup, and a static
-// import would put it (and iertutil.dll, which it pulls in) in the exe's
-// import table so both load unconditionally at process start.
 fn lit(comptime text: []const u8) [*:0]const u16 {
     return std.unicode.utf8ToUtf16LeStringLiteral(text);
 }

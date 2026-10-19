@@ -1,5 +1,3 @@
-//! Pure policy for the open chat's automatic media queue. The message list
-//! is the bounded queue: scan newest first and refill one serialized child.
 const std = @import("std");
 
 pub const wazi_135 = true;
@@ -39,8 +37,6 @@ pub fn oversized(size_bytes: u64) bool {
     return size_bytes > max_auto_bytes;
 }
 
-/// Only the open chat supplies candidates. Age, sender and group/DM do not
-/// affect eligibility. Unknown sizes remain eligible: wacli may omit them.
 pub fn selectNext(candidates: []const Candidate, now_ms: u64) ?usize {
     for (candidates) |candidate| {
         if (!candidate.downloadable or !candidate.has_id or !candidate.whatsapp_store) continue;
@@ -51,8 +47,6 @@ pub fn selectNext(candidates: []const Candidate, now_ms: u64) ?usize {
     return null;
 }
 
-/// Bound a sync pause even for a chat with many missing attachments. A
-/// single slow child is still bounded by the caller's process timeout.
 pub fn mayContinueBurst(files_started: usize, started_ms: u64, now_ms: u64) bool {
     return files_started < max_burst_files and now_ms -| started_ms < burst_budget_ms;
 }
@@ -63,8 +57,6 @@ pub fn mayDrainStep(steps_done: usize, last_step_started: bool) bool {
     return steps_done < max_drain_steps and (steps_done == 0 or last_step_started);
 }
 
-/// Success is suppressed only until a fresh read confirms the local file.
-/// Forget it then so a later eviction can queue the attachment again.
 pub fn forgetAttempt(attempts: []u64, count: *usize, key: u64) void {
     var i: usize = 0;
     while (i < count.*) {
@@ -236,7 +228,7 @@ test "reopened chat snapshot preserves the local file and prevents another downl
     candidate.downloadable = downloadable(row.get("MediaType").?.string);
     candidate.has_local_path = row.get("LocalPath").?.string.len > 0;
     try std.testing.expectEqual(@as(?usize, null), selectNext(&.{candidate}, 0));
-    candidate.has_local_path = false; // Caller found the cached file missing.
+    candidate.has_local_path = false;
     try std.testing.expectEqual(@as(?usize, 0), selectNext(&.{candidate}, 0));
     try std.testing.expect(cache.payloadFor(stored, "account", "dm@s.whatsapp.net") == null);
 }

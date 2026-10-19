@@ -67,17 +67,10 @@ const max_chats = 256;
 const max_groups = 1024;
 const max_messages = 100;
 const max_pending_sends = 32;
-// Ctrl+A then Ctrl+E queues one wacli call per chat.
 const max_pending_archives = max_chats;
 const max_pending_reads = 8;
-// A send that fails is retried instead of dropped: any failure (nonzero
-// exit, timeout, or a lost store lock) retries up to 3 times, backing off
-// longer each time so a transient problem (lock contention, a slow phone)
-// has room to clear.
 const max_send_retries: u8 = 4;
 
-/// Backoff before retry number `retries` (1st, 2nd, 3rd); null once
-/// max_send_retries is exhausted and the send gives up for good.
 fn sendRetryDelayMs(retries: u8) ?u64 {
     return switch (retries) {
         1 => 3_000,
@@ -87,8 +80,6 @@ fn sendRetryDelayMs(retries: u8) ?u64 {
     };
 }
 const max_avatars = 256;
-// Bounded separately from max_avatars so participants can't fill or evict
-// chat icons: a chat-heavy account can already fill all 256 chat slots.
 const max_participant_avatars = 64;
 const timer_refresh = 1;
 const timer_search = 2;
@@ -100,9 +91,7 @@ const timer_update_first_check = 8;
 const timer_telegram = 7;
 const timer_slack_mark = 9;
 const timer_voice = 10;
-// Repaints the update card's progress bar while a download runs.
 const timer_update_card = 60;
-// Telegram-specific commands live past the shared palette command block.
 const command_telegram_login = 2025;
 const command_telegram_logout = 2026;
 const wm_update_ready = win.WM_APP + 2;
@@ -117,23 +106,13 @@ const max_wacli_args = 16;
 const wacli_arg_cap = 4095;
 const max_msg_cache = 8;
 const msg_cache_max_bytes = 4 * 1024 * 1024;
-// WAZI-60: check every 15 minutes so a release is noticed quickly, plus
-// right after the machine wakes and when the window is focused.
 const update_check_interval_ms: u32 = 15 * 60 * 1000;
-// Automatic re-checks (wake, focus) are throttled to at most one per 5 minutes.
-const update_min_retry_ms: u64 = 5 * 60 * 1000;
-// A check stuck longer than this means its completion message was lost; allow
-// a new check instead of blocking the rest of the session.
+const update_wake_focus_throttle_ms: u64 = 5 * 60 * 1000;
 const update_check_timeout_ms: u64 = 10 * 60 * 1000;
 const update_restart_delay_ms: u32 = 10 * 1000;
-// One check shortly after launch catches a release published while the app
-// was closed, without waiting for the first periodic tick.
 const update_first_check_delay_ms: u32 = 20 * 1000;
-const scrollbar_width: i32 = 8; // 6px thumb + 1px inset on each side
+const scrollbar_width: i32 = 8;
 const scrollbar_min_thumb: i32 = 24;
-// Rows the chat list scrolls per full wheel notch (Windows' own default
-// "lines to scroll" value); sidebar_nav.wheelRows accumulates sub-notch
-// deltas from smooth/precision touchpads until they add up to a whole notch.
 const chat_wheel_lines_per_notch: i32 = 3;
 const SbDrag = enum { none, chats, compose, palette, canvas, emoji };
 const update_max_asset_bytes: usize = 256 * 1024 * 1024;
@@ -209,7 +188,7 @@ const command_shortcuts_help = 2060;
 const command_keep_archived = 2061;
 const command_status = 2062;
 const id_status_row = 1120;
-const command_mic_default = 2400; // + 1..16: input devices listed by mic_choice
+const command_mic_default = 2400;
 const reaction_like = 3001;
 const reaction_love = 3002;
 const reaction_laugh = 3003;
@@ -218,7 +197,7 @@ const reaction_sad = 3005;
 const reaction_thanks = 3006;
 const reaction_remove = 3007;
 const reaction_woozy = 3008;
-const reaction_row = 3010; // owner-drawn quick row in the message menu
+const reaction_row = 3010;
 const emoji_picker = @import("emoji_picker.zig");
 const emoji_draw = @import("emoji_draw.zig");
 const shortcodes = @import("shortcodes.zig");
@@ -300,9 +279,6 @@ const Group = struct {
     name: Utf8Text(255) = .{},
 };
 
-// Telegram chats the UI caches between refreshes; ids are the exact 64-bit
-// Telegram chat ids and every lookup is provider-qualified through provider
-// tags on Chat/Message.
 const max_tg_chats = 64;
 const TgChat = struct {
     id: i64 = 0,
@@ -322,24 +298,13 @@ const PendingSend = struct {
     text: Utf8Text(4095) = .{},
     reply_to: Utf8Text(191) = .{},
     reply_sender: Utf8Text(191) = .{},
-    // Paste-to-send (WAZI-37): when set, the queued send is
-    // `wacli send file --file <path>` with `text` as the caption.
     file: Utf8Text(519) = .{},
-    // Recorded voice note: the file is sent with `--ptt` so it arrives as a
-    // native WhatsApp voice note. `voice_seconds` only labels the local bubble.
     ptt: bool = false,
     voice_seconds: u32 = 0,
-    // Optimistic-bubble correlation and retry bookkeeping: `seq` names the
-    // local bubble, `retries` counts failed attempts, `not_before_ms` delays
-    // the next attempt, and `queued_unix` is the enqueue time (unix seconds)
-    // that same-text dedup compares message timestamps against.
     seq: u64 = 0,
     retries: u8 = 0,
     not_before_ms: u64 = 0,
     queued_unix: i64 = 0,
-    // True when the last attempt's failure (a timeout, or a nonzero exit
-    // that wasn't a store lock) leaves it unclear whether wacli actually
-    // delivered the message. Gates the pre-retry duplicate check.
     ambiguous: bool = false,
     id: [outbox.id_len]u8 = [_]u8{'0'} ** outbox.id_len,
     from_disk: bool = false,
@@ -347,20 +312,13 @@ const PendingSend = struct {
     delivered: bool = false,
 };
 
-// A permanently failed send kept for the next reload: the composer got the
-// text back and a muted "(not sent)" bubble shows again in its chat.
 const max_failed_sends = 8;
 const FailedSend = struct {
     provider: transport.Provider = .whatsapp,
     account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     text: Utf8Text(4095) = .{},
-    // Enqueue time (unix seconds); the reload dedup ignores stored messages
-    // older than this, so an old same-text message is not mistaken for this
-    // failed (then delivered) send.
     queued_unix: i64 = 0,
-    // A file send keeps its staged file until a send is confirmed, so a
-    // manual resend can upload it again (image or recorded voice note).
     is_file: bool = false,
     file: Utf8Text(519) = .{},
     ptt: bool = false,
@@ -375,9 +333,6 @@ const SlackOutbox = struct {
     not_before_ms: u64 = 0,
 };
 
-// An image staged from the clipboard (WAZI-37): a PNG copy written to the
-// paste folder plus a small preview bitmap shown above the composer. Bound
-// to the chat JID it was pasted in so it can never send to the wrong chat.
 const StagedImage = struct {
     provider: transport.Provider = .whatsapp,
     account: Utf8Text(32) = .{},
@@ -388,9 +343,6 @@ const StagedImage = struct {
     preview_height: i32 = 0,
 };
 
-// One span per URL word. A word too wide for a line is split into chunks but
-// keeps a single link target: the first chunk rect lives in `rect`, later
-// chunk rects go in `chunk_rects` so hit testing still finds every piece.
 const max_link_chunk_rects = 16;
 const LinkSpan = struct {
     rect: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
@@ -399,10 +351,6 @@ const LinkSpan = struct {
     url: WideText(519) = .{},
 };
 
-// WAZI-68: unfurled video-link cards. Thumbnails, titles and stream URLs
-// live in this cache keyed by (provider, id), never inside Message structs:
-// the message array is rebuilt on every refresh while the cache survives,
-// and a shared entry also deduplicates repeated links in one chat.
 const UnfurlEntry = struct {
     provider: unfurl.Provider = .none,
     id: Utf8Text(unfurl.max_id_len) = .{},
@@ -411,14 +359,11 @@ const UnfurlEntry = struct {
     play_url: WideText(1023) = .{},
     thumb: ?win.HBITMAP = null,
     status: enum { loading, ready, failed } = .loading,
-    // A fetch may be skipped while the concurrency cap is full; a later
-    // paint retries until this flips true.
     fetch_started: bool = false,
 };
 
 const max_unfurl_entries = 24;
 const max_unfurl_fetches = 3;
-// Fixed card size keeps layout stable while metadata is still loading.
 const unfurl_card_width: i32 = 320;
 const unfurl_card_height: i32 = 100;
 const unfurl_thumb_width: i32 = 160;
@@ -440,16 +385,9 @@ const AvatarEntry = struct {
     path: WideText(519) = .{},
     bitmap: ?win.HBITMAP = null,
     status: enum { unknown, loading, ready, unavailable } = .unknown,
-    // A cached picture is shown but older than the cache TTL: the avatar
-    // batch asks WhatsApp again when it gets to it.
     refresh: bool = false,
 };
 
-// Which of the two avatar tables a batch fetch is working on: chat icons
-// (App.avatars, max_avatars) or group participants (App.participant_avatars,
-// max_participant_avatars). Kept separate so a chat-heavy account can never
-// fill the chat table and starve, or evict, participant entries, or the
-// other way around.
 const AvatarTarget = union(enum) { chat: usize, participant: usize };
 
 const PaletteItem = struct {
@@ -457,27 +395,17 @@ const PaletteItem = struct {
     shortcut: WideText(15) = .{},
     command: u16 = 0,
     url: WideText(519) = .{},
-    // Chat entries are resolved by their stable id at activation time; the
-    // chat list can reorder (new message, pin) while the palette is open.
     chat_jid: Utf8Text(191) = .{},
-    // Media entries resolve the message by its stable id too: the message
-    // list can reload or scroll while the palette is open.
     message_id: Utf8Text(191) = .{},
 };
 
-// buildPaletteItems registers more items than the original cap allowed, so
-// entries near the end were silently dropped.
-// 64 command slots plus one per chat, so palette search can always reach
-// every chat in the list (older chats are the ones name search matters for).
 const max_palette_items = 64 + max_chats + 20;
 const palette_width: i32 = 540;
 const palette_row_height: i32 = 40;
 const palette_edit_zone: i32 = 64;
 const palette_max_rows = 10;
-// Picker geometry at 96 DPI; emojiCell/emojiPickerWidth/emojiEditZone scale it.
 const emoji_edit_zone_base: i32 = 64;
 const emoji_max_rows: i32 = @intCast(emoji_picker.grid_rows);
-// The whole catalog plus the "frequently used" row shown above it.
 const max_emoji_matches = emoji_picker.count + emoji_picker.grid_columns;
 
 const Message = struct {
@@ -485,8 +413,6 @@ const Message = struct {
     sender_jid: Utf8Text(191) = .{},
     sender: WideText(159) = .{},
     text: WideText(4095) = .{},
-    // WAZI-reply: a reply renders as its own quote block above the body; the
-    // quoted text and its sender are split out of wacli's DisplayText.
     quote: WideText(4095) = .{},
     quote_sender: WideText(159) = .{},
     quote_sender_jid: Utf8Text(191) = .{},
@@ -501,10 +427,7 @@ const Message = struct {
     reaction: WideText(31) = .{},
     from_me: bool = false,
     revoked: bool = false,
-    // WAZI-61: optimistic Slack sends render before Slack confirms; .failed
-    // bubbles keep their text with a "(not sent)" marker.
     send_state: enum { none, pending, failed } = .none,
-    // The reaction was just made here and wacli has not confirmed it yet.
     reaction_pending: bool = false,
     bitmap: ?win.HBITMAP = null,
     bitmap_width: i32 = 0,
@@ -516,8 +439,6 @@ const Message = struct {
     transcript_state: enum { none, loading, ready, failed } = .none,
     links: [8]LinkSpan = [_]LinkSpan{.{}} ** 8,
     link_count: usize = 0,
-    // WAZI-68: video links unfurl into a card; bitmaps live in the App-level
-    // unfurl cache keyed by provider+id.
     unfurl_provider: unfurl.Provider = .none,
     unfurl_id: Utf8Text(unfurl.max_id_len) = .{},
     unfurl_canonical: Utf8Text(unfurl.max_canonical_len) = .{},
@@ -529,32 +450,20 @@ const Message = struct {
     toggle_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     media_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     bubble_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
-    // Height cache for the paint pass: re-measuring every message (long
-    // transcripts included) on each repaint pegged a core while a voice note
-    // played. measure_tag says which inputs the cached height was made for.
     measure_tag: u64 = 0,
     measure_height: i32 = 0,
 };
 
-// Background wacli reads: one worker thread runs every wacli call so the UI
-// thread never blocks on process startup (100-300 ms per spawn). The worker
-// posts a WacliResult pointer back with wm_wacli_done; the UI thread parses
-// and applies it. Jobs carry a generation token so a stale answer can never
-// overwrite a newer view.
-// A reaction made in the app that wacli has not confirmed yet (optimistic UI).
 const max_pending_reactions = 8;
 const PendingReaction = struct {
     provider: transport.Provider = .whatsapp,
     account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
-    // Group chats only: the author of the message reacted to.
     sender: Utf8Text(191) = .{},
     emoji: Utf8Text(63) = .{},
-    // What the bubble showed before; restored when every retry fails.
     previous: WideText(31) = .{},
     retries: u8 = 0,
-    // Nonzero while waiting out a retry backoff; the refresh timer re-sends.
     retry_at_ms: u64 = 0,
 };
 
@@ -569,7 +478,6 @@ const WacliJob = struct {
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
-    // WAZI-61: enqueue timestamp so send latency is visible in the UI.
     started_ms: u64 = 0,
     arg_count: usize = 0,
     args: [max_wacli_args]Utf8Text(wacli_arg_cap) = [_]Utf8Text(wacli_arg_cap){.{}} ** max_wacli_args,
@@ -585,14 +493,11 @@ const WacliResult = struct {
     msg_id: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
     started_ms: u64 = 0,
-    // Slack jobs: HTTP status of the last call, 0 when none answered.
     http_status: u32 = 0,
     slack_error: Utf8Text(63) = .{},
     data: []u8 = &.{},
 };
 
-// Last raw wacli response per chat, so switching back to a recent chat paints
-// its messages instantly while the fresh read runs.
 const MsgCacheEntry = struct {
     provider: transport.Provider = .whatsapp,
     account: Utf8Text(32) = .{},
@@ -600,11 +505,9 @@ const MsgCacheEntry = struct {
     data: ?[]u8 = null,
 };
 
-// wacli store writes serialize, so never spawn children waiting on each other.
 const max_media_children = media_drain.max_children;
 const media_timeout_ms: u64 = 90_000;
-// Cache eviction age, not a cutoff for downloading older messages.
-const media_cache_days: i64 = 14;
+const media_cache_eviction_days: i64 = 14;
 const MediaDownload = struct {
     child: ?std.process.Child = null,
     jid: Utf8Text(191) = .{},
@@ -612,9 +515,6 @@ const MediaDownload = struct {
     started_ms: u64 = 0,
 };
 
-// Bounded retries: a download may fail transiently (store lock lost to a
-// parallel job, network blip) up to 2 times; after the 3rd failure it is
-// marked terminal for the session and retried on the next app start.
 const MediaFailure = struct { hash: u64 = 0, count: u8 = 0, retry_after_ms: u64 = 0 };
 const max_media_retries = 3;
 
@@ -672,14 +572,12 @@ const App = struct {
     send: ?win.HWND = null,
     emoji_btn: ?win.HWND = null,
     dictate: ?win.HWND = null,
-    // Voice-note recorder (mic button, index 8 in btn_hover).
     voice_btn: ?win.HWND = null,
     voice_session: ?*voice_capture.Session = null,
     voice_active: bool = false,
     voice_finishing: bool = false,
     voice_visible: bool = true,
     voice_jid: Utf8Text(191) = .{},
-    // 0-2: composer buttons, 3-4: Slack setup dialog, 5-7: Telegram login dialog.
     btn_hover: [9]bool = .{ false, false, false, false, false, false, false, false, false },
     search_prev_proc: usize = 0,
     btn_prev_proc: [9]usize = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -707,8 +605,6 @@ const App = struct {
     emoji_match_count: usize = 0,
     emoji_selected: usize = 0,
     emoji_ever_active: bool = false,
-    // Ctrl+R opens the picker in react mode for one message, named by chat
-    // jid and message id because indices shift when the chat reloads.
     emoji_react: bool = false,
     sc_wnd: ?win.HWND = null,
     sc_matches: [shortcodes.max_matches]shortcodes.Match = undefined,
@@ -733,13 +629,10 @@ const App = struct {
     palette_links_mode: bool = false,
     palette_accounts_mode: bool = false,
     accounts_confirm_remove: bool = false,
-    // True after the WhatsApp data folder was moved aside: keeps checkSync
-    // from re-spawning a sync child against a store that no longer exists.
     accounts_maintenance: bool = false,
     last_refresh_unix: i64 = 0,
     wacli_dir: Utf8Text(259) = .{},
     font_scale: i32 = 82,
-    // Physical DPI of the window's monitor; 96 until WM_CREATE reads it.
     dpi: u32 = 96,
     brush_bg: ?win.HBRUSH = null,
     brush_panel: ?win.HBRUSH = null,
@@ -754,25 +647,15 @@ const App = struct {
     sb_palette_total: i32 = -1,
     update_pending: ?*UpdateAvailable = null,
     update_check_running: bool = false,
-    // Touched by both the UI thread and the detached update worker.
     update_install_running: std.atomic.Value(bool) = .init(false),
     update_last_check_ms: u64 = 0,
     update_failures: u32 = 0,
-    // An install finished; the version number in this process is stale until
-    // the restart, so no further check may offer the same tag again.
     update_installed: bool = false,
-    // True when the running install came from an automatic check, so its
-    // failures stay quiet unless they keep repeating.
     update_install_auto: bool = false,
-    // True when the running check came from the Ctrl+K command, so its
-    // result installs in the foreground with its own status line.
     update_check_manual: bool = false,
-    // Update card (bottom-left of the sidebar). The release is downloaded and
-    // verified in the background; the card's click does only the swap and
-    // restart. Nothing restarts the app on its own.
-    update_staged: bool = false, // the pending tag is downloaded, verified and extracted
-    update_card_busy: bool = false, // the user clicked; waiting for stage and swap
-    update_click_wait: bool = false, // click arrived while staging still ran
+    update_staged: bool = false,
+    update_card_busy: bool = false,
+    update_click_wait: bool = false,
     update_card_error: [96]u8 = undefined,
     update_card_error_len: usize = 0,
     update_dismissed: [32]u8 = undefined,
@@ -804,18 +687,11 @@ const App = struct {
     pending_archives: [max_pending_archives]PendingArchive = [_]PendingArchive{.{}} ** max_pending_archives,
     pending_archive_count: usize = 0,
     archive_batch_total: usize = 0,
-    // WAZI-62: an unarchive that could not queue (full queue) waits here and
-    // is retried from the refresh timer, so the chat is never lost for good.
     unarchive_retry: Utf8Text(191) = .{},
     unarchive_retry_source: archive_rules.Source = .resurface,
-    // Kept-archived set and per-chat baselines (archive_rules.zig), loaded
-    // from archive-state.txt in the Messages folder under LOCALAPPDATA.
     archive_state: ?*archive_rules.State = null,
     archive_state_path: []u8 = &.{},
-    // Ctrl+A in the chat list: the jids that Ctrl+E will archive together.
     bulk: archive_rules.Selection(max_chats) = .{},
-    // A wacli store change since the last archived-list scan, and the
-    // seconds since that scan ran.
     archived_scan_dirty: bool = true,
     archived_scan_ticks: u32 = 0,
     group_refresh_ticks: u8 = 0,
@@ -830,11 +706,8 @@ const App = struct {
     audio_state: enum { empty, ready, playing, paused } = .empty,
     audio_playing_id: Utf8Text(191) = .{},
     audio_playing_jid: Utf8Text(191) = .{},
-    // Saved position to jump to once the player knows the duration.
     audio_resume_ms: i64 = 0,
-    // Last playback position per voice note (voice_pos.zig).
     voice_pos: voice_pos.Store = .{},
-    // Input devices shown in the palette, so a pick maps back to a name.
     mic_names: [mic_choice.max_devices]mic_choice.Name = undefined,
     mic_count: usize = 0,
     audio_position_ms: i64 = 0,
@@ -856,12 +729,7 @@ const App = struct {
     pin_count: usize = 0,
     pins_loaded: bool = false,
     send_child: ?std.process.Child = null,
-    // True when the running send was spawned with live sync already stopped:
-    // sync must wait for that send, unlike a delegated send wacli hands to the
-    // running sync process.
     send_direct: bool = false,
-    // Ticks when the running send child spawned; checkSend kills it past
-    // send_timeout_ms the way checkMarkRead reaps a wedged read.
     send_started_ms: u64 = 0,
     pending_sends: [max_pending_sends]PendingSend = [_]PendingSend{.{}} ** max_pending_sends,
     pending_send_count: usize = 0,
@@ -870,15 +738,9 @@ const App = struct {
     slack_outbox_count: usize = 0,
     outbox_path: []u8 = &.{},
     outbox_load_failed: bool = false,
-    // Monotonic id handed to each queued send, so its optimistic bubble can be
-    // re-appended after a reload and found again on a permanent failure.
     send_seq: u64 = 0,
-    // Failed sends survive a reload as "(not sent)" bubbles for their chat; at
-    // most max_failed_sends, the oldest dropped first.
     failed_sends: [max_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_failed_sends,
     failed_send_count: usize = 0,
-    // Voice notes recorded here and already sent: their OGG stays on disk so
-    // they play and transcribe at once (voice_sent.zig).
     sent_voice: [voice_sent.max_entries]voice_sent.Entry = [_]voice_sent.Entry{.{}} ** voice_sent.max_entries,
     sent_voice_count: usize = 0,
     staged_image: StagedImage = .{},
@@ -898,9 +760,6 @@ const App = struct {
     text_dragging: bool = false,
     drag_moved: bool = false,
     drag_origin: win.POINT = .{ .x = 0, .y = 0 },
-    // Tracks every canvas left-click from press to release so a click that
-    // turns into a drag (text selection or otherwise) never opens the image
-    // viewer: only a click that stays put counts as "click", not "drag".
     click_origin: win.POINT = .{ .x = 0, .y = 0 },
     click_moved: bool = false,
     openrouter_session: ?*dictation.TextSession = null,
@@ -910,12 +769,9 @@ const App = struct {
     openrouter_key: []const u8 = "",
     openrouter_model: []const u8 = "openai/gpt-5.6-luna",
     openrouter_configured: bool = false,
-    // Anthropic workspace id for the formatting key; empty for workspace-scoped keys.
     format_workspace: []const u8 = "",
     formatting_requests: format_cache.Requests = .{},
-    // Hash of the last WhatsApp messages payload painted; an identical fresh read is skipped.
     msg_applied_hash: u64 = 0,
-    // Paint counters for the once-a-minute launch-log line (idle proof).
     paints_canvas: u32 = 0,
     paints_window: u32 = 0,
     paint_minute_ticks: u32 = 0,
@@ -923,63 +779,37 @@ const App = struct {
     transcribe_attempts: [512]u64 = [_]u64{0} ** 512,
     transcribe_attempt_count: usize = 0,
     last_alt_g_ms: u64 = 0,
-    // Chat list wheel-scroll accumulator; see sidebar_nav.zig for the pure
-    // wheel-notch math.
     chat_wheel_accum: i32 = 0,
     avatars: [max_avatars]AvatarEntry = [_]AvatarEntry{.{}} ** max_avatars,
     avatar_count: usize = 0,
-    // Group participants who don't reuse a contact's avatar (see
-    // reuseContactAvatar); a separate bounded table so they never compete
-    // with chat icons for a max_avatars slot. Full table evicts the entry
-    // least recently drawn.
     participant_avatars: [max_participant_avatars]AvatarEntry = [_]AvatarEntry{.{}} ** max_participant_avatars,
     participant_avatar_count: usize = 0,
     participant_avatar_touch_ms: [max_participant_avatars]u64 = [_]u64{0} ** max_participant_avatars,
     avatar_active_index: ?AvatarTarget = null,
-    // Avatar batches: one sync pause runs several picture fetches back to
-    // back (sync_gate caps count and time), then sync resumes once.
     avatar_batch_active: bool = false,
     avatar_batch_fetched: u32 = 0,
     avatar_batch_started_ms: u64 = 0,
     avatar_batch_end_ms: ?u64 = null,
-    // Ticks before which no batch starts, set when a fetch fails.
     avatar_retry_after_ms: u64 = 0,
-    // Ticks of the last time stopSync killed a live child; background work
-    // checks it through sync_gate so it cannot pause sync back to back.
     last_sync_stop_ms: ?u64 = null,
-    // Ticks of the last sync start that refreshed groups and contacts.
     last_sync_refresh_ms: ?u64 = null,
     wic_factory: [*c]win.IWICImagingFactory = null,
     player_window: ?win.HWND = null,
     mf_player: ?*win.IMFPMediaPlayer = null,
-    // Consecutive timer_refresh ticks (1s each) with no gif_reader and no
-    // mf_player: once past mf_idle_unload_ticks, Media Foundation is
-    // released. Reset to 0 whenever either is in use.
     mf_idle_ticks: u32 = 0,
-    // Byte accounting for message.bitmap across the whole message list, so
-    // it can be capped instead of just wiped on every off-screen message
-    // each paint (see the pre-paint eviction pass).
     message_bitmap_lru: bitmap_lru.Lru(max_messages) = .{},
     startup_ticks: u32 = 0,
     startup_memory_logged: bool = false,
-    // WAZI-68 fullscreen state for the video player window.
     player_saved_placement: win.WINDOWPLACEMENT = undefined,
     player_fullscreen: bool = false,
-    // In-app full-resolution image viewer; one at a time, decoded at open so
-    // WM_PAINT only blits and never re-decodes.
     image_viewer_window: ?win.HWND = null,
     viewer_bitmap: ?win.HBITMAP = null,
     viewer_width: i32 = 0,
     viewer_height: i32 = 0,
-    // GetTickCount64() at open, so a click landing within the system
-    // double-click window right after opening (the second half of the
-    // double-click gesture that opened it) doesn't instantly close it.
     viewer_opened_ms: u64 = 0,
     viewer_chat: Utf8Text(191) = .{},
     viewer_id: Utf8Text(191) = .{},
     viewer_failed: bool = false,
-    // Keyboard shortcuts help overlay (F1, or the palette command); one at a
-    // time, closed by Esc, F1 or a click.
     shortcut_help: ?win.HWND = null,
     unfurl_entries: [max_unfurl_entries]UnfurlEntry = [_]UnfurlEntry{.{}} ** max_unfurl_entries,
     unfurl_entry_count: usize = 0,
@@ -992,19 +822,10 @@ const App = struct {
     displayed_timestamp: Utf8Text(47) = .{},
     played_set: played.Set = .{},
     played_path: []u8 = &.{},
-    // Mirrors the pending mark-read queue so reads that never reached the
-    // store survive a restart (WAZI-74).
     read_path: []u8 = &.{},
     read_state: read_state.State = .{},
-    // Set after repeated wacli spawn failures: stop retrying reads this
-    // session, but keep the queue file so they retry next launch.
     read_queue_dead: bool = false,
-    // appendLaunchLog runs on the UI thread and on each sync child's detached
-    // stderr reader thread, so the append is serialized.
     launch_log_mutex: std.Io.Mutex = .init,
-    // The wacli worker thread shares allocator and io with the UI thread:
-    // safe because start.zig provides c_allocator and std.Io.Threaded, both
-    // thread-safe. wacli_pending is only touched under wacli_mutex.
     wacli_thread: ?std.Thread = null,
     wacli_slack_thread: ?std.Thread = null,
     wacli_mutex: std.Io.Mutex = .init,
@@ -1017,10 +838,7 @@ const App = struct {
     slack_tokens: ?slack_win.Tokens = null,
     slack_bridge: ?slack_win.Bridge = null,
     slack_poll_ticks: u32 = 0,
-    // Hash of the last applied bridge history answer; 0 after anything else
-    // may have repainted the message list.
     slack_history_hash: u64 = 0,
-    // UI-owned target, retained only within one view to suppress repeat polls.
     slack_mark_channel: Utf8Text(191) = .{},
     slack_mark_ts: Utf8Text(191) = .{},
     slack_mark_gen: u64 = 0,
@@ -1035,17 +853,12 @@ const App = struct {
     slack_setup_window: ?win.HWND = null,
     slack_chats: [max_chats]Chat = [_]Chat{.{}} ** max_chats,
     slack_chat_count: usize = 0,
-    // Pages fetched in the current conversations.list / users.list round.
     slack_workspace_pages: u32 = 0,
     slack_user_pages: u32 = 0,
-    // Launch-log rate limits: per job kind for failures, one slot for the
-    // chat count logged after a workspace load.
     slack_fail_log_ms: [wacli_kind_count]u64 = [_]u64{0} ** wacli_kind_count,
     slack_fail_log_hash: [wacli_kind_count]u64 = [_]u64{0} ** wacli_kind_count,
     slack_count_log_ms: u64 = 0,
     slack_count_log_hash: u64 = 0,
-    // One messenger at a time in the sidebar (Alt+1/2/3). The last selected
-    // chat per messenger is kept by id so switching back restores it.
     chat_view: transport.Provider = .whatsapp,
     view_selected: [3]Utf8Text(191) = [_]Utf8Text(191){.{}} ** 3,
     chat_view_switched: bool = false,
@@ -1057,73 +870,39 @@ const App = struct {
     messages_gen: u64 = 0,
     chats_gen: u64 = 0,
     chats_pending_flags: u8 = 0,
-    // WAZI-79: retry budget for a failed or empty messages read. Tied to the
-    // chat it was granted for, so failures on one chat never consume the
-    // retries of the chat the user opens next.
     msg_read_retry_ticks: u32 = 0,
     msg_read_attempts: u32 = 0,
     msg_read_last_jid: Utf8Text(191) = .{},
     msg_cache: [max_msg_cache]MsgCacheEntry = [_]MsgCacheEntry{.{}} ** max_msg_cache,
     msg_cache_len: usize = 0,
-    // Hashed linked WhatsApp account: cache files are scoped to it, so a
-    // store that switches accounts can never paint the other account's data.
     cache_tag: Utf8Text(32) = .{},
-    // Bumped on every account-change event; a pending probe result with an
-    // older generation is stale and must never install a tag.
     cache_tag_gen: u64 = 0,
     cache_tag_probe_again: bool = false,
-    // WAZI-82: track sync-child deaths so a logged-out WhatsApp session can
-    // never crash-loop behind a "Live sync running" status line. After three
-    // consecutive fast exits the restart loop halts, one read-only
-    // `auth status` probe names the cause, and sync stays stopped until the
-    // user reconnects or restarts it from the palette.
     sync_fail_count: u32 = 0,
     sync_started_secs: i64 = 0,
     sync_auth_probe: bool = false,
-    // Heartbeat watchdog (2026-09-22): wacli touches .wacli\HEARTBEAT on
-    // WhatsApp activity, so a quiet account leaves it frozen for a long
-    // while. A child whose socket died silently kept running with that file
-    // frozen, so checkSyncHeartbeat restarts it. See there.
     sync_heartbeat_path: WideText(519) = .{},
     sync_heartbeat_ticks: u32 = 0,
     sync_heartbeat_mtime: i64 = 0,
     sync_heartbeat_restart_secs: i64 = 0,
     sync_heartbeat_unreadable: bool = false,
     sync_logged_out: bool = false,
-    // Set by the sync stderr reader thread when wacli says the session is
-    // gone ("logged_out" event or "not authenticated"); checkSync consumes
-    // it on the UI thread.
     sync_auth_lost: std.atomic.Value(bool) = .init(false),
-    // The `wacli auth` pairing window. Sync stays off while it runs (it holds
-    // the store lock); when it exits, an auth status probe decides whether
-    // sync resumes (pairing_probe marks that probe).
     pairing_process: ?win.HANDLE = null,
     pairing_probe: bool = false,
     store_watch_path: WideText(519) = .{},
     last_store_write: u64 = 0,
-    // WAZI-67: a chats read that fails on the first launch after an update
-    // used to leave the sidebar empty until a manual restart, because the
-    // retry only fired when the wacli store file changed. Each failure
-    // schedules one further read two refresh ticks later, three rounds at
-    // most, so the reads stay bounded even when wacli keeps failing.
     chats_read_retry_ticks: u32 = 0,
     chats_read_attempts: u32 = 0,
-    // Startup speed: the account tag comes from disk at launch and the
-    // `auth status` probe verifies it after the window is up. Until the
-    // probe answers, cache files are only read, never written, so a stale
-    // tag cannot overwrite another account's snapshot.
     startup_probe_pending: bool = false,
     startup_logged: u8 = 0,
 };
 
 var app_ptr: ?*App = null;
-/// GetTickCount64 at the top of main; launch-log timings count from here.
 var process_start_ms: u64 = 0;
 
 const StartupMilestone = enum(u3) { window, chats, messages, auth };
 
-/// One launch-log line per milestone per run: milliseconds since process
-/// start, so a slow launch shows which step was late. UI thread only.
 fn logStartupMilestone(a: *App, milestone: StartupMilestone, label: []const u8) void {
     const bit: u8 = @as(u8, 1) << @intFromEnum(milestone);
     if (a.startup_logged & bit != 0) return;
@@ -1273,7 +1052,6 @@ fn drawVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
         drawMicIcon(a, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, if (pressed) theme.on_primary_container else theme.on_secondary_container);
         return;
     }
-    // Red dot, elapsed time, live level, and the mic at the right end.
     const dot = px(a, 5);
     const dot_x = item.rcItem.left + px(a, 16);
     if (win.CreateSolidBrush(color_recording)) |red| {
@@ -1322,8 +1100,6 @@ fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     const pressed = (item.itemState & win.ODS_SELECTED) != 0;
     const focused = (item.itemState & win.ODS_FOCUS) != 0;
     const dictating = a.last_dictation_state == .recording or a.last_dictation_state == .transcribing;
-    // The strip behind the buttons is the main-window background; paint it so
-    // the rounded corners don't leave square artifacts.
     _ = win.FillRect(item.hDC, &item.rcItem, a.brush_bg.?);
     const face: win.COLORREF = if (index == 1 and !pressed) theme.primary else if (pressed or (index == 0 and dictating)) theme.primary_container else if (a.btn_hover[index]) theme.surface_container_highest else theme.secondary_container;
     var text_buffer: [32]u16 = undefined;
@@ -1352,8 +1128,6 @@ fn drawSetupButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     const focused = (item.itemState & win.ODS_FOCUS) != 0;
     _ = win.FillRect(item.hDC, &item.rcItem, a.brush_panel.?);
     const face: win.COLORREF = if (pressed) color_outgoing else if (a.btn_hover[index]) color_selected else color_raised;
-    // Save/Next are the default action; keep their accent outline even
-    // without focus.
     const frame: ?win.COLORREF = if (index == 3 or index == 5 or focused) color_accent else null;
     var text_buffer: [32]u16 = undefined;
     paintRoundedButton(a, item.hDC, item.rcItem, face, color_text, a.font_bold.?, frame, buttonLabel(item, &text_buffer));
@@ -1393,7 +1167,6 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
         null,
     ) orelse return;
     a.tooltips = tt;
-    // TTM_SETMAXWIDTH (WM_USER + 24); not exposed by the commctrl.h import
     _ = win.SendMessageW(tt, 0x400 + 24, 0, 260);
     addTooltip(tt, a.search, lit("Search chats  Ctrl+F or /"));
     addTooltip(tt, a.chats_hwnd, lit("Chats  ↑/↓ move · Ctrl+Tab next chat"));
@@ -1430,8 +1203,6 @@ fn loadDictationLanguage() dictation.Language {
     return @enumFromInt(value);
 }
 
-// Pinned chats are stored locally as newline-separated jids under
-// Software\Messages\PinnedChats. Pinning never touches WhatsApp's own pin.
 fn isChatPinned(a: *const App, jid: []const u8) bool {
     for (a.pins[0..a.pin_count]) |*pin| {
         if (std.mem.eql(u8, pin.slice(), jid)) return true;
@@ -1446,7 +1217,6 @@ fn addPin(a: *App, jid: []const u8) void {
     a.pin_count += 1;
 }
 
-/// Returns false when the registry value does not exist yet (first launch).
 fn loadPins(a: *App) bool {
     const stored = loadRegistryString(a.allocator, lit("PinnedChats")) orelse return false;
     defer a.allocator.free(stored);
@@ -1491,7 +1261,6 @@ fn togglePinSelected(a: *App) void {
             a.pin_count -= 1;
         }
         if (!savePins(a)) {
-            // Roll the in-memory list back so it still matches the registry.
             addPin(a, jid);
             setStatus(a, "Could not save pin");
             return;
@@ -1506,7 +1275,6 @@ fn togglePinSelected(a: *App) void {
         addPin(a, jid);
         if (a.pin_count == before) return;
         if (!savePins(a)) {
-            // Roll the in-memory list back so it still matches the registry.
             a.pin_count -= 1;
             setStatus(a, "Could not save pin");
             return;
@@ -1542,8 +1310,6 @@ fn saveChatView(view: transport.Provider) void {
     _ = win.RegSetValueExW(key, lit("Messenger"), 0, win.REG_DWORD, @ptrCast(&value), @sizeOf(win.DWORD));
 }
 
-/// Dragged composer height is persisted in 96-DPI logical pixels and rescaled
-/// for the current monitor so it keeps the same physical size across screens.
 fn loadComposeDragged(hwnd: win.HWND) i32 {
     var value: win.DWORD = 0;
     var size: win.DWORD = @sizeOf(win.DWORD);
@@ -1577,7 +1343,6 @@ fn loadEmojiRecents(a: *App) void {
 }
 
 fn saveEmojiRecents(a: *App) void {
-    // Recents are stored as emoji text: up to 8 emoji of at most ~30 bytes.
     var buffer: [320]u8 = undefined;
     const text = emoji_picker.formatRecents(&buffer, a.emoji_recents[0..a.emoji_recents_count]);
     var wide = WideText(255){};
@@ -1599,16 +1364,12 @@ fn saveFontScale(scale: i32) void {
     _ = win.RegSetValueExW(key, lit("FontScale"), 0, win.REG_DWORD, @ptrCast(&value), @sizeOf(win.DWORD));
 }
 
-/// Scales a 96-DPI logical pixel value to the window's physical pixels,
-/// rounding to nearest so repeated scale/unscale stays stable.
 fn px(a: *const App, v: i32) i32 {
     const dpi: i32 = @intCast(a.dpi);
     return @divTrunc(v * dpi + 48, 96);
 }
 
 fn scaledFontHeight(base: i32, scale: i32, dpi: i32) i32 {
-    // base and dpi are 96-DPI design metrics; the font height must follow
-    // both the user's zoom and the monitor scaling.
     return -@divTrunc(base * scale * dpi + 4800, 9600);
 }
 
@@ -1679,9 +1440,6 @@ fn getInt(object: std.json.ObjectMap, key: []const u8) i64 {
 
 const QuoteParts = struct { quote: []const u8, body: []const u8 };
 
-/// wacli renders a reply as "> <quoted text>\n<reply>". The quoted text can
-/// itself contain newlines, so the split point comes from the known reply
-/// tail, never from the first newline. A missing reply means no quote.
 fn splitQuote(display: []const u8, reply: []const u8) ?QuoteParts {
     if (reply.len == 0) return null;
     if (display.len < 2 or !std.mem.startsWith(u8, display, "> ")) return null;
@@ -1717,7 +1475,6 @@ test "splitQuote rejects plain messages and mismatched replies" {
     try std.testing.expect(splitQuote("just some text", "text") == null);
     try std.testing.expect(splitQuote("> quoted\nreal reply", "other reply") == null);
     try std.testing.expect(splitQuote("> quoted\nreal reply", "") == null);
-    // The reply appears at the end but is not preceded by the separator.
     try std.testing.expect(splitQuote("> quoted\nreal reply", "reply") == null);
 }
 
@@ -1749,7 +1506,6 @@ fn jobIsWrite(kind: WacliJobKind) bool {
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
     a.wacli_mutex.lockUncancelable(a.io);
     if (a.wacli_queue_len >= a.wacli_queue.len) {
-        // A best-effort read receipt must never evict a send or reaction.
         if (job.kind == .slack_mark) {
             a.wacli_mutex.unlock(a.io);
             cancelSlackMark(a);
@@ -1770,10 +1526,6 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
         a.wacli_queue_len -= 1;
     }
     if (urgent) {
-        // WAZI-61: sends must keep the order they were typed in, so an urgent
-        // send slots in after any already-queued sends instead of jumping
-        // ahead of them (plain head-insert would reverse A and B). Reactions
-        // are user writes too: an add then a remove must stay in order.
         var insert: usize = 0;
         while (insert < a.wacli_queue_len and
             (a.wacli_queue[insert].kind == .slack_send or a.wacli_queue[insert].kind == .slack_attach or a.wacli_queue[insert].kind == .slack_share or a.wacli_queue[insert].kind == .reaction or a.wacli_queue[insert].kind == .status_seen)) insert += 1;
@@ -1785,7 +1537,6 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
     }
     a.wacli_queue_len += 1;
     a.wacli_pending[@intFromEnum(job.kind)] += 1;
-    // Two worker lanes (wacli and Slack) scan the same queue: wake both.
     a.wacli_cond.broadcast(a.io);
     a.wacli_mutex.unlock(a.io);
     if (a.wacli_thread == null or (jobIsSlack(job.kind) and a.wacli_slack_thread == null)) wacliPumpSync(a);
@@ -1808,13 +1559,9 @@ fn retryWacliRefreshes(a: *App) void {
     enqueueCacheTagProbe(a);
 }
 
-// Fallback when the worker thread never started: run queued jobs inline on
-// the UI thread. Blocking, but the app stays functional.
 fn wacliPumpSync(a: *App) void {
     while (true) {
         a.wacli_mutex.lockUncancelable(a.io);
-        // Every job kind must have a lane: its worker thread, or this inline
-        // pump for exactly the lanes whose thread failed to spawn.
         const pump_wacli = a.wacli_thread == null;
         const pump_slack = a.wacli_slack_thread == null;
         if (a.wacli_queue_len == 0 or (!pump_wacli and !pump_slack)) {
@@ -1848,8 +1595,6 @@ fn wacliShutdown(a: *App) void {
     a.msg_cache_len = 0;
 }
 
-/// True when `kind` runs on the dedicated Slack lane (WAZI-61): a 429 backoff
-/// sleep then stalls only Slack work, never wacli reads/writes.
 fn jobIsSlack(kind: WacliJobKind) bool {
     return switch (kind) {
         .slack_workspace, .slack_users, .slack_history, .slack_replies, .slack_send, .slack_attach, .slack_share, .slack_download, .slack_auth, .slack_mark => true,
@@ -1857,8 +1602,6 @@ fn jobIsSlack(kind: WacliJobKind) bool {
     };
 }
 
-/// Take the first queued job matching this lane; null when none is queued.
-/// Caller holds wacli_mutex.
 fn wacliTakeJob(a: *App, slack_lane: bool) ?WacliJob {
     var index: usize = 0;
     while (index < a.wacli_queue_len) : (index += 1) {
@@ -1875,14 +1618,11 @@ fn wacliTakeJob(a: *App, slack_lane: bool) ?WacliJob {
 fn wacliWorkerMain(a: *App, slack_lane: bool) void {
     while (true) {
         a.wacli_mutex.lockUncancelable(a.io);
-        // Take once and keep the job: a second take here would drop work.
         var job = wacliTakeJob(a, slack_lane);
         while (job == null and !a.wacli_quit) {
             a.wacli_cond.waitUncancelable(a.io, &a.wacli_mutex);
             job = wacliTakeJob(a, slack_lane);
         }
-        // Quit discards any remaining queued jobs: the window is going away
-        // and joining behind them would hang the close.
         if (job == null or a.wacli_quit) {
             a.wacli_mutex.unlock(a.io);
             return;
@@ -1892,9 +1632,6 @@ fn wacliWorkerMain(a: *App, slack_lane: bool) void {
     }
 }
 
-// ponytail: no hard timeout around the worker's wacli call, so a hung wacli
-// read stalls the queue and blocks shutdown; upgrade path is spawn plus a
-// WaitForSingleObject deadline with TerminateProcess.
 fn wacliRunJob(a: *App, job: WacliJob) void {
     if (job.kind != .cache_tag and job.provider == .whatsapp and !std.mem.eql(u8, job.account.slice(), a.cache_tag.slice())) {
         wacliPendingSub(a, job.kind);
@@ -1927,9 +1664,6 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
             };
             slack_win.last_status = 0;
             slack_win.last_error = [_]u8{0} ** 64;
-            // ok defaults to false, so success must set it: without this
-            // every Slack answer (channels, users, history, sends) was
-            // treated as a failure and the Slack view stayed empty.
             if (slack_win.runJob(a.allocator, slackContext(a), kind, slack_args[0..slack_count])) |data| {
                 result.data = data;
                 result.ok = true;
@@ -1992,8 +1726,6 @@ fn wacliPost(a: *App, result: *WacliResult) void {
     if (win.PostMessageW(hwnd, wm_wacli_done, 0, @bitCast(@intFromPtr(result))) == 0) wacliDiscard(a, result);
 }
 
-// Terminal path for a result the UI will never see: free it and release its
-// pending slot so a lost result cannot wedge live sync or a refresh.
 fn wacliDiscard(a: *App, result: *WacliResult) void {
     const kind = result.kind;
     if (result.data.len > 0) a.allocator.free(result.data);
@@ -2018,8 +1750,6 @@ fn msgCacheStore(a: *App, key: chat_key.Key, data: []const u8) void {
         if (a.msg_cache[0].data) |old| a.allocator.free(old);
         var shift: usize = 0;
         while (shift + 1 < a.msg_cache_len) : (shift += 1) a.msg_cache[shift] = a.msg_cache[shift + 1];
-        // The shift copied the last slot's pointer into len-2; clear it here
-        // so the reuse below cannot free the same pointer twice.
         a.msg_cache[a.msg_cache_len - 1].data = null;
         slot = a.msg_cache_len - 1;
     }
@@ -2029,9 +1759,6 @@ fn msgCacheStore(a: *App, key: chat_key.Key, data: []const u8) void {
     entry.account.set(key.account);
     entry.jid.set(key.id);
     entry.data = copy;
-    // Also persist for the next launch (WAZI-67). The file carries the jid
-    // and it is verified on read, so a hash collision can only waste a file,
-    // never show the wrong chat.
     if (a.startup_probe_pending or key.provider != .whatsapp or !std.mem.eql(u8, key.account, a.cache_tag.slice())) return;
     if (msgCacheDiskPath(a, key.id)) |path| {
         defer a.allocator.free(path);
@@ -2166,8 +1893,6 @@ fn applyGroups(a: *App, raw: []const u8) void {
 
 fn refreshChats(a: *App) void {
     const flags: u8 = (if (a.unread_only) @as(u8, 1) else 0) | (if (a.show_archived) @as(u8, 2) else 0);
-    // Skip only while an identical job is already queued; a queued job built
-    // with different archive/unread flags is superseded by an urgent re-read.
     if (wacliPendingGet(a, .chats) > 0 and a.chats_pending_flags == flags) return;
     var job = WacliJob{ .account = a.cache_tag, .kind = .chats };
     wacliJobArgs(&job, &.{
@@ -2175,7 +1900,6 @@ fn refreshChats(a: *App) void {
         if (a.show_archived) "--archived" else "--no-archived",
     });
     if (a.unread_only) {
-        // One extra slot; the base list leaves room for it.
         job.args[job.arg_count].set("--unread");
         job.arg_count += 1;
     }
@@ -2185,21 +1909,12 @@ fn refreshChats(a: *App) void {
     a.chats_pending_flags = flags;
 }
 
-/// WAZI-76: wacli can return rows that are not addressable chats — the jid is
-/// a bare hex id with no @server part, no name resolves, and the kind stays
-/// "unknown". A real WhatsApp jid always carries an @server suffix, so an
-/// unknown-kind row that falls back to its raw jid as the name is storage
-/// noise, not a hidden conversation. Drop it instead of rendering hex.
 fn isUnresolvableChatEntry(name: []const u8, jid: []const u8, kind: []const u8) bool {
     if (!std.mem.eql(u8, kind, "unknown")) return false;
     if (std.mem.indexOfScalar(u8, jid, '@') != null) return false;
     return name.len == 0 or std.mem.eql(u8, name, jid);
 }
 
-/// Returns true only when the payload was fully parsed into the chat list,
-/// so the caller can decide whether it is safe to persist as the launch
-/// snapshot (WAZI-67): a malformed response must never overwrite the last
-/// valid cache.
 fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     var query_wide: [256]u16 = [_]u16{0} ** 256;
     const query_len = if (a.search) |search| @as(usize, @intCast(win.GetWindowTextW(search, &query_wide, query_wide.len))) else 0;
@@ -2220,14 +1935,9 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         .array => |items| items,
         else => return false,
     };
-    // A Slack or Telegram view rebuilds with an empty WhatsApp payload; the
-    // first-launch pin import must wait for a real WhatsApp list.
     if (!a.pins_loaded and data.items.len > 0) {
         a.pins_loaded = true;
         if (!loadPins(a)) {
-            // First launch: import the pins the user already made inside
-            // WhatsApp; after this the app's own pin list is the source of
-            // truth and later WhatsApp-side pins are ignored.
             for (data.items) |item| {
                 const object = switch (item) {
                     .object => |o| o,
@@ -2245,19 +1955,15 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         selected_len = a.chats[a.selected_chat].jid.len;
         @memcpy(selected_jid[0..selected_len], a.chats[a.selected_chat].jid.slice());
     } else {
-        // The list is switching messenger: restore that messenger's last chat.
         const remembered = &a.view_selected[@intFromEnum(view)];
         selected_len = remembered.len;
         @memcpy(selected_jid[0..selected_len], remembered.slice());
     }
 
-    // Remember the top visible row by jid so the rebuild below can anchor the
-    // list to the same chat instead of resetting the scroll and jumping.
     var anchor_jid: [192]u8 = [_]u8{0} ** 192;
     var anchor_len: usize = 0;
     var top_index: i32 = -1;
     if (a.chat_view_switched) {
-        // A different messenger's rows: the old scroll position means nothing.
         a.chat_view_switched = false;
     } else if (a.chats_hwnd) |list| {
         const current_top = win.SendMessageW(list, win.LB_GETTOPINDEX, 0, 0);
@@ -2313,9 +2019,6 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     while (i < a.chat_count) : (i += 1) {
         var j = i;
         while (j > 0) : (j -= 1) {
-            // Pinned chats come first; ties in the timestamp fall back to the
-            // jid so the order is fully deterministic no matter what order
-            // wacli returned this time.
             const by_time = std.mem.order(u8, a.chats[j - 1].timestamp.slice(), a.chats[j].timestamp.slice());
             const jid_order = std.mem.order(u8, a.chats[j - 1].jid.slice(), a.chats[j].jid.slice());
             const should_move = chat_order.shouldMoveUp(
@@ -2375,7 +2078,6 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
             }
         }
     }
-    // A Slack sidebar refilter can select a different chat without a click.
     if (view == .slack and (a.selected_chat >= a.chat_count or
         !std.mem.eql(u8, selected_jid[0..selected_len], a.chats[a.selected_chat].jid.slice())))
     {
@@ -2400,8 +2102,6 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
             }
             if (restore_top >= 0) {
                 const clamped = @min(restore_top, @as(i32, @intCast(a.chat_count)) - 1);
-                // Selection first: LB_SETCURSEL scrolls to the selection, and
-                // the top-index restore below must have the final say.
                 _ = win.SendMessageW(list, win.LB_SETCURSEL, a.selected_chat, 0);
                 _ = win.SendMessageW(list, win.LB_SETTOPINDEX, @intCast(clamped), 0);
             } else _ = win.SendMessageW(list, win.LB_SETCURSEL, a.selected_chat, 0);
@@ -2413,7 +2113,6 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     if (a.chat_count != a.last_chat_count) {
         a.last_chat_count = a.chat_count;
         const status = std.fmt.bufPrint(&status_buffer, "{d} chats", .{a.chat_count}) catch "Chats loaded";
-        // Keep the logged-out hint visible over the first chat-list load.
         setStatus(a, if (a.sync_logged_out) logged_out_status else status);
     }
     persistReadState(a);
@@ -2464,8 +2163,6 @@ fn applyUnreadProbe(a: *App, result: *const WacliResult) void {
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
 }
 
-// --------------------------------------------------------------- Telegram
-
 fn tgChatIdString(buffer: *[24]u8, chat_id: i64) []const u8 {
     return std.fmt.bufPrint(buffer, "{d}", .{chat_id}) catch "";
 }
@@ -2484,7 +2181,6 @@ fn tgSelectedChatIsGroup(a: *App) bool {
     for (a.tg_chats[0..a.tg_chat_count]) |cached| {
         if (cached.id == chat_id) return cached.is_group;
     }
-    // Unknown chat: refuse the send rather than risk writing to a group.
     return true;
 }
 
@@ -2534,8 +2230,6 @@ fn appendTelegramChats(a: *App, query_utf8: ?[]const u8) void {
     }
 }
 
-/// Drains parsed TDLib events and applies them to the UI. Runs on the timer
-/// tick, so nothing here may block.
 fn drainTelegram(a: *App) void {
     const client = a.telegram orelse return;
     while (client.poll()) |event_in| {
@@ -2548,9 +2242,6 @@ fn drainTelegram(a: *App) void {
                     a.tg_dirty = true;
                 }
                 switch (auth.state) {
-                    // Auto-advance only while a login flow is running
-                    // (a.tg_login != .none): stale events from an earlier
-                    // cancelled attempt must not pop the sign-in dialog.
                     .wait_phone => if (a.tg_login != .none) {
                         openTelegramLogin(a, .phone);
                     },
@@ -2622,8 +2313,6 @@ fn drainTelegram(a: *App) void {
     } else a.tg_dirty = false;
 }
 
-/// Auto-downloads media for the open Telegram chat: the product rule is all
-/// media downloads the moment a chat is opened, never a click to load.
 fn telegramAutoDownload(a: *App) void {
     const client = a.telegram orelse return;
     for (a.messages[0..a.message_count]) |*message| {
@@ -2667,8 +2356,6 @@ fn refreshTelegramMessages(a: *App) void {
             .document => "document",
             else => "",
         });
-        // ponytail: animated TGS/WebM stickers render as text placeholders;
-        // upgrade path: decode Lottie/WebM once a decoder is vendored.
         if (msg.media_kind == .sticker and msg.animated_sticker) {
             message.tg_file_id = 0;
             message.text.set(a.allocator, "[Animated sticker]");
@@ -2692,10 +2379,6 @@ fn refreshTelegramMessages(a: *App) void {
             }
         }
     }
-    // Preserve the reading position; only jump to the newest message when a
-    // different chat was opened. A new incoming message otherwise re-runs
-    // this exact refresh path for the still-open chat (see the callers
-    // above) and used to snap a scrolled-up reader straight to the bottom.
     if (chat_changed) a.scroll_y = 0;
     a.displayed_jid.set(a.chats[a.selected_chat].jid.slice());
     a.displayed_account = a.chats[a.selected_chat].account;
@@ -2718,10 +2401,6 @@ fn tgDisplayText(msg: *const tg.Msg) []const u8 {
     };
 }
 
-/// Routes the user back to the login step the error belongs to. Matches the
-/// plain-language texts from friendlyTgError in telegram_json.zig. Errors
-/// only steer the dialog while a login flow is running; otherwise they stay
-/// in the status bar instead of popping the sign-in window unasked.
 fn handleTgAuthError(a: *App, error_text: []const u8) void {
     if (a.tg_login == .none) return;
     if (std.mem.indexOf(u8, error_text, "app keys") != null) {
@@ -2739,8 +2418,6 @@ fn handleTgAuthError(a: *App, error_text: []const u8) void {
     else if (std.mem.indexOf(u8, error_text, "2FA password") != null)
         .password
     else {
-        // Unknown error: unblock the dialog so the user can retry the same
-        // step instead of staying locked on the "checking" state.
         tgLoginRetryInput(a);
         tgLoginShowError(a, error_text);
         return;
@@ -2761,7 +2438,6 @@ fn tgPromptText(mode: TgLoginMode) [*:0]const u16 {
 }
 
 fn tgModeSecret(mode: TgLoginMode) bool {
-    // Password and api_hash are credentials; mask them like the Slack tokens.
     return mode == .password or mode == .api_hash;
 }
 
@@ -2772,8 +2448,6 @@ fn parseTgApiId(text: []const u8) ?i32 {
 }
 
 fn validTgApiHash(text: []const u8) bool {
-    // my.telegram.org shows exactly 32 hex characters; anything else is a
-    // copy mistake and must not be persisted.
     if (text.len != 32) return false;
     for (text) |c| {
         const hex = (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
@@ -2782,12 +2456,8 @@ fn validTgApiHash(text: []const u8) bool {
     return true;
 }
 
-/// The rejection must name both failure modes the validator checks (length
-/// and characters), not just one (WAZI-73 review follow-up).
 const tg_api_hash_error = "The api_hash is exactly 32 hexadecimal characters (0-9, a-f). Copy the whole value from my.telegram.org/apps.";
 
-/// Shows an error inside the sign-in dialog, keeping the current step's
-/// instruction visible after it. No-ops when the dialog is not open.
 fn tgLoginShowError(a: *App, error_text: []const u8) void {
     const window = a.tg_login_window orelse return;
     const prompt_ctl = win.GetDlgItem(window, id_tg_prompt) orelse return;
@@ -2809,9 +2479,6 @@ fn tgLoginShowError(a: *App, error_text: []const u8) void {
     _ = win.SetWindowTextW(prompt_ctl, @ptrCast(buffer.ptr));
 }
 
-/// Switches the dialog's edit box to a new login step: clear the input,
-/// mask it when the step is a secret, and show the my.telegram.org helper
-/// button only while collecting api keys.
 fn tgLoginApplyMode(a: *App, window: win.HWND, mode: TgLoginMode) void {
     const edit = win.GetDlgItem(window, id_tg_edit) orelse return;
     _ = win.SendMessageW(edit, win.EM_SETPASSWORDCHAR, if (tgModeSecret(mode)) @as(usize, '*') else 0, 0);
@@ -2828,8 +2495,6 @@ fn tgLoginApplyMode(a: *App, window: win.HWND, mode: TgLoginMode) void {
     _ = win.SetFocus(edit);
 }
 
-/// After a phone/code/password submit: keep the dialog up (so the next auth
-/// state can update it in place) but block resubmission until TDLib answers.
 fn tgLoginSetChecking(a: *App) void {
     const window = a.tg_login_window orelse return;
     const edit = win.GetDlgItem(window, id_tg_edit) orelse return;
@@ -2839,7 +2504,6 @@ fn tgLoginSetChecking(a: *App) void {
     _ = win.SetWindowTextW(prompt, lit("Checking with Telegram..."));
 }
 
-/// Unblocks the dialog for another try on the same step (unknown errors).
 fn tgLoginRetryInput(a: *App) void {
     const window = a.tg_login_window orelse return;
     const edit = win.GetDlgItem(window, id_tg_edit) orelse return;
@@ -2895,9 +2559,6 @@ fn setPaletteCue(a: *App) void {
     _ = win.SendMessageW(edit, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(cue)));
 }
 
-/// Closes the sign-in dialog and ends the login flow. TDLib may still be
-/// waiting for input; its later auth events are ignored because
-/// a.tg_login is .none again.
 fn closeTgLogin(a: *App) void {
     a.tg_login = .none;
     if (a.tg_login_window) |window| _ = win.DestroyWindow(window);
@@ -2962,11 +2623,11 @@ fn telegramLoginProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lpar
         },
         win.WM_COMMAND => {
             const id = loword(wparam);
-            if (id == id_tg_next or id == 1) { // 1 = IDOK (Enter)
+            if (id == id_tg_next or id == 1) {
                 tgLoginSubmit(a);
                 return 0;
             }
-            if (id == id_tg_cancel or id == 2) { // 2 = IDCANCEL (Escape)
+            if (id == id_tg_cancel or id == 2) {
                 closeTgLogin(a);
                 return 0;
             }
@@ -3014,8 +2675,6 @@ fn tgLoginSubmit(a: *App) void {
                 .password => client.authPassword(trimmed),
                 else => unreachable,
             }
-            // Stay in this mode so the next auth event can move the dialog
-            // to the following step; block a second submit meanwhile.
             tgLoginSetChecking(a);
             setStatus(a, "Telegram: checking with Telegram...");
         },
@@ -3024,9 +2683,6 @@ fn tgLoginSubmit(a: *App) void {
     }
 }
 
-/// The api_id/api_hash steps run before the Telegram client exists: input is
-/// validated and stored (registry), and only the api_hash step starts the
-/// client and hands over to the phone step. Failures are shown in the dialog.
 fn handleTgKeyInput(a: *App, trimmed: []const u8) void {
     switch (a.tg_login) {
         .api_id => {
@@ -3049,8 +2705,6 @@ fn handleTgKeyInput(a: *App, trimmed: []const u8) void {
             }
             createTelegramClient(a);
             if (a.telegram == null) {
-                // Creation failed: stay on the api_hash step so Next retries
-                // instead of a phone prompt that can never be answered.
                 tgLoginShowError(a, "Telegram could not start on this PC. Press Next to try again.");
                 return;
             }
@@ -3099,8 +2753,6 @@ fn startTelegramAdd(a: *App) void {
         }
         createTelegramClient(a);
         if (a.telegram == null) {
-            // Creation failed: the status names the cause, and the api_hash
-            // prompt gives Next a way to retry with a corrected key.
             if (a.tg_login == .none) openTelegramLogin(a, .api_hash);
             return;
         }
@@ -3112,8 +2764,6 @@ fn startTelegramAdd(a: *App) void {
     });
 }
 
-/// Returns false when either registry write failed; the caller treats the
-/// keys as unsaved instead of continuing the login with half-saved keys.
 fn saveTelegramKeys(a: *App) bool {
     var key: win.HKEY = undefined;
     if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), 0, null, 0, win.KEY_SET_VALUE, null, &key, null) != win.ERROR_SUCCESS) return false;
@@ -3125,8 +2775,6 @@ fn saveTelegramKeys(a: *App) bool {
     const id_saved = win.RegSetValueExW(key, lit("TelegramApiId"), 0, win.REG_SZ, @ptrCast(id_wide.ptr), @intCast((id_wide.len + 1) * 2)) == win.ERROR_SUCCESS;
     const hash_saved = slack_win.saveSecret(lit("TelegramApiHash"), a.tg_api_hash.slice());
     if (!id_saved or !hash_saved) {
-        // Roll back a partial write so a later start does not read a key
-        // pair where only one half belongs to this user.
         _ = win.RegDeleteValueW(key, lit("TelegramApiId"));
         _ = win.RegDeleteValueW(key, lit("TelegramApiHash"));
         return false;
@@ -3144,8 +2792,6 @@ fn deleteTelegramKeys(a: *App) void {
     a.tg_api_hash.set("");
 }
 
-/// Bad keys are wiped so the next Add attempt asks for them again instead of
-/// replaying the same failure from the registry.
 fn wipeBadTelegramKeys(a: *App) void {
     deleteTelegramKeys(a);
     if (a.telegram) |client| {
@@ -3155,8 +2801,6 @@ fn wipeBadTelegramKeys(a: *App) void {
     openTelegramLogin(a, .api_id);
 }
 
-/// Stops Telegram cleanly (destroy closes TDLib and joins its receive
-/// thread), then deletes the stored keys and the local Telegram data folder.
 fn removeTelegramAccount(a: *App) void {
     if (a.telegram) |client| {
         a.telegram = null;
@@ -3180,8 +2824,6 @@ fn removeTelegramAccount(a: *App) void {
 }
 
 fn tdlibSmoke(io: std.Io) u8 {
-    // Headless init check for CI: create the client, expect the first
-    // authorization state within 20 seconds, then exit. No GUI, no login.
     const client = tg.Client.create(std.heap.page_allocator, io, 1, "smoke", "tdlib-smoke") orelse return 1;
     defer client.destroy();
     var waited_ms: u32 = 0;
@@ -3196,14 +2838,6 @@ fn tdlibSmoke(io: std.Io) u8 {
     }
     return 1;
 }
-
-// --- WAZI-68 affected-machine verification (--unfurl-smoke) ---
-// Runs the shipped unfurl pipeline on a real Windows desktop without a
-// WhatsApp session: classify the ticket's link forms, fetch live card data
-// through the real background fetch, render the real card painter offscreen,
-// then play through the real MFPlay player window and toggle real fullscreen.
-// Writes screenshots and a results log into UNFURL_SMOKE_DIR (default
-// "unfurl-smoke") and exits 0 only when every mechanical check passes.
 
 var smoke_unfurl_done_count: u32 = 0;
 
@@ -3270,7 +2904,6 @@ fn smokeWriteBmp(allocator: std.mem.Allocator, io: std.Io, dir: []const u8, name
     var info_header = std.mem.zeroes(win.BITMAPINFOHEADER);
     info_header.biSize = @sizeOf(win.BITMAPINFOHEADER);
     info_header.biWidth = width;
-    // Top-down rows, so no bottom-up flip is needed on capture.
     info_header.biHeight = -height;
     info_header.biPlanes = 1;
     info_header.biBitCount = 32;
@@ -3284,7 +2917,6 @@ fn smokeWriteBmp(allocator: std.mem.Allocator, io: std.Io, dir: []const u8, name
     std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = blob.items }) catch {};
 }
 
-// Offscreen capture of a real window: BitBlt from its own DC into a DIB.
 fn smokeCaptureWindow(allocator: std.mem.Allocator, io: std.Io, dir: []const u8, name: []const u8, hwnd: win.HWND) bool {
     const rect = smokeWindowRect(hwnd);
     const w = rect.right - rect.left;
@@ -3314,7 +2946,6 @@ fn smokeCaptureWindow(allocator: std.mem.Allocator, io: std.Io, dir: []const u8,
     return true;
 }
 
-// Renders one card with the shipped painter into its own offscreen bitmap.
 fn smokeDrawCard(allocator: std.mem.Allocator, io: std.Io, a: *App, dir: []const u8, name: []const u8, provider: unfurl.Provider, id: []const u8, canonical: []const u8) bool {
     const width: i32 = 360;
     const height: i32 = 120;
@@ -3322,8 +2953,6 @@ fn smokeDrawCard(allocator: std.mem.Allocator, io: std.Io, a: *App, dir: []const
     defer _ = win.ReleaseDC(null, screen_dc);
     const memory = win.CreateCompatibleDC(screen_dc) orelse return false;
     defer _ = win.DeleteDC(memory);
-    // The chat frame sets this once per paint before drawing messages;
-    // mirror it so the evidence shows the card as the app renders it.
     _ = win.SetBkMode(memory, win.TRANSPARENT);
     var info = std.mem.zeroes(win.BITMAPINFO);
     info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
@@ -3420,7 +3049,6 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     var smoke_log = SmokeLog{ .allocator = allocator, .io = init.io, .dir = out_dir };
     var failures: u32 = 0;
 
-    // 1. Classifier: every link form from the ticket, plus the fallbacks.
     const Case = struct { url: []const u8, provider: unfurl.Provider, id: []const u8 = "" };
     const cases = [_]Case{
         .{ .url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ", .provider = .youtube, .id = "dQw4w9WgXcQ" },
@@ -3443,10 +3071,6 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         smoke_log.line("classify {s}: {s} (got {s}/{s})", .{ case.url, if (ok) "PASS" else "FAIL", @tagName(info.provider), info.idSlice() });
     }
 
-    // 2. Live fetch through the shipped pipeline. Canonical URLs are what
-    // classify() itself produces, so this exercises the exact path a chat
-    // opening triggers; what the providers return decides metadata versus
-    // the fallback, both of which are ticket behaviours.
     const Target = struct { provider: unfurl.Provider, id: []const u8, url: []const u8 };
     const targets = [_]Target{
         .{ .provider = .youtube, .id = "dQw4w9WgXcQ", .url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
@@ -3454,7 +3078,6 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         .{ .provider = .facebook, .id = "1234567890", .url = "https://www.facebook.com/watch?v=1234567890" },
     };
 
-    // Same initialization the GUI runs: private IBM Plex, COM, MF, WIC, fonts.
     _ = win.SetProcessDpiAwarenessContext(win.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     var plex_regular = bundledFilePath("IBMPlexSans-Regular.ttf");
     var plex_semibold = bundledFilePath("IBMPlexSans-SemiBold.ttf");
@@ -3464,9 +3087,6 @@ fn unfurlSmoke(init: std.process.Init) u8 {
 
     _ = win.CoInitializeEx(null, win.COINIT_APARTMENTTHREADED);
     defer win.CoUninitialize();
-    // The smoke test exercises the MFPlay video path, so start Media
-    // Foundation up front here (unlike the real app, which starts it lazily
-    // on first GIF/video use; see mf_lazy.zig).
     _ = mf_lazy.ensureStarted();
     defer mf_lazy.unloadIfStarted();
 
@@ -3517,8 +3137,6 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         smoke_log.line("FAIL: only {d} of {d} unfurl fetches completed within the timeout", .{ @atomicLoad(u32, &smoke_unfurl_done_count, .monotonic), targets.len });
     }
     for (app.unfurl_entries[0..targets.len]) |*entry| {
-        // openUnfurlCard() plays inline exactly when a stream was resolved
-        // and opens the canonical URL externally otherwise; record which.
         const decision: []const u8 = if (entry.play_url.len > 0) "inline play" else "open externally (ticket fallback)";
         smoke_log.line("card {s}/{s}: status={s} title_bytes={d} author_bytes={d} thumbnail={} decision={s}", .{
             @tagName(entry.provider),
@@ -3531,7 +3149,6 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         });
     }
 
-    // 3. Card rendering through the shipped painter.
     const card_names = [_][]const u8{ "card-youtube.bmp", "card-instagram.bmp", "card-facebook.bmp" };
     for (targets, card_names) |spec, name| {
         const drawn = smokeDrawCard(allocator, init.io, &app, out_dir, name, spec.provider, spec.id, spec.url);
@@ -3573,7 +3190,6 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     const windowed_shot = smokeCaptureWindow(allocator, init.io, out_dir, "player-windowed.bmp", bare_window);
     smoke_log.line("capture player-windowed.bmp: {}", .{windowed_shot});
 
-    // Fullscreen enter: borderless, covering the monitor.
     const caption_before = smokeHasCaption(bare_window);
     togglePlayerFullscreen(&app, bare_window);
     const entered = !smokeHasCaption(bare_window) and smokeRectsClose(smokeWindowRect(bare_window), smokeMonitorRect(bare_window), 8);
@@ -3583,15 +3199,12 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     const fullscreen_shot = smokeCaptureWindow(allocator, init.io, out_dir, "player-fullscreen.bmp", bare_window);
     smoke_log.line("capture player-fullscreen.bmp: {}", .{fullscreen_shot});
 
-    // Fullscreen exit: caption and placement restored, exactly what keeps
-    // the chat behind the player unchanged.
     togglePlayerFullscreen(&app, bare_window);
     const restored = smokeHasCaption(bare_window) and
         smokeRectsClose(smokeWindowRect(bare_window), app.player_saved_placement.rcNormalPosition, 8);
     if (!restored) failures += 1;
     smoke_log.line("fullscreen exit: caption and placement restored = {}: {s}", .{ restored, if (restored) "PASS" else "FAIL" });
 
-    // ESC closes the player cleanly (first leaving fullscreen when needed).
     _ = win.PostMessageW(bare_window, win.WM_KEYDOWN, win.VK_ESCAPE, 0);
     smokePump(init.io, 3_000, 0xFFFFFFFF);
     const closed = app.player_window == null and app.mf_player == null;
@@ -3602,8 +3215,6 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     smoke_log.flush();
     return if (failures == 0) 0 else 1;
 }
-
-// --- Slack provider (WAZI-55) ---
 
 fn slackConfigured(a: *App) bool {
     return a.slack_tokens != null or a.slack_bridge != null;
@@ -3647,9 +3258,6 @@ fn stagedFileGoesToWacli(provider: transport.Provider) bool {
     };
 }
 
-/// Raise a Slack chat's recency to `seconds` if that is newer. Timestamps use
-/// the same "YYYY-MM-DD HH:MM:SS" UTC form as Telegram, which sorts with the
-/// wacli `last_message_ts` strings, so Slack interleaves with WhatsApp.
 fn raiseSlackTimestamp(chat: *Chat, seconds: i64) bool {
     if (seconds <= 0) return false;
     var buffer: [20]u8 = undefined;
@@ -3659,9 +3267,6 @@ fn raiseSlackTimestamp(chat: *Chat, seconds: i64) bool {
     return true;
 }
 
-/// A newer message in `channel`: bump the cached Slack chat and the row in
-/// the visible list. The open chat's displayed_timestamp follows along so the
-/// bump alone does not trigger a history reload.
 fn noteSlackActivity(a: *App, channel: []const u8, seconds: i64) void {
     if (slackChatById(a, channel)) |cached| _ = raiseSlackTimestamp(cached, seconds);
     for (a.chats[0..a.chat_count]) |*chat| {
@@ -3677,14 +3282,10 @@ fn telegramReady(a: *App) bool {
     return a.telegram != null and a.tg_auth == .ready;
 }
 
-/// The messenger the sidebar shows right now. A remembered Slack or Telegram
-/// view that is not set up (yet) shows WhatsApp instead.
 fn activeChatView(a: *App) transport.Provider {
     return messenger_view.effective(a.chat_view, slackConfigured(a), telegramReady(a));
 }
 
-/// The search box's placeholder names the messenger on screen, so the
-/// active view is visible without a new control.
 fn updateSearchCue(a: *App, view: transport.Provider) void {
     const search = a.search orelse return;
     var buffer: [64]u8 = undefined;
@@ -3695,8 +3296,6 @@ fn updateSearchCue(a: *App, view: transport.Provider) void {
     _ = win.SendMessageW(search, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(&wide)));
 }
 
-/// Empties the sidebar search so the full chat list comes back (the
-/// EN_CHANGE debounce refilters). Returns false when there was nothing to clear.
 fn clearSearch(a: *App) bool {
     const search = a.search orelse return false;
     if (win.GetWindowTextLengthW(search) == 0) return false;
@@ -3704,8 +3303,6 @@ fn clearSearch(a: *App) bool {
     return true;
 }
 
-/// Rebuild the sidebar for the active view. Slack and Telegram lists come
-/// from local caches, so they rebuild at once without a wacli read.
 fn refreshVisibleChats(a: *App) void {
     if (activeChatView(a) == .whatsapp) return refreshChats(a);
     _ = applyChats(a, "{\"data\":[]}", false);
@@ -3726,7 +3323,6 @@ fn refilterChats(a: *App) void {
     refreshChats(a);
 }
 
-/// Alt+N: show one messenger's chats. Keeps each messenger's last chat.
 fn switchChatView(a: *App, view: transport.Provider) void {
     if (a.status_ui.mode != .closed) closeStatuses(a);
     _ = clearBulkSelection(a);
@@ -3746,7 +3342,6 @@ fn switchChatView(a: *App, view: transport.Provider) void {
     clearReply(a);
     discardStagedImage(a);
     if (view == .whatsapp) {
-        // Paint the last WhatsApp list at once; the fresh read follows.
         _ = applyChats(a, "{\"data\":[]}", false);
         loadChatsCache(a);
         refreshChats(a);
@@ -3756,8 +3351,6 @@ fn switchChatView(a: *App, view: transport.Provider) void {
     setStatus(a, std.fmt.bufPrint(&buffer, "Showing {s}", .{messenger_view.label(view)}) catch "");
 }
 
-/// Fill the Slack view from the cached workspace; applyChats sorts it by
-/// recency afterwards.
 fn appendSlackChats(a: *App, query_utf8: ?[]const u8) void {
     if (!slackConfigured(a)) return;
     for (a.slack_chats[0..a.slack_chat_count]) |cached| {
@@ -3773,9 +3366,6 @@ fn appendSlackChats(a: *App, query_utf8: ?[]const u8) void {
     }
 }
 
-/// Merge one conversations.list page into a.slack_chats and queue the next
-/// page while Slack returns a cursor. False when the page is not a channel
-/// list, so the caller can log it.
 fn applySlackWorkspace(a: *App, raw: []const u8) bool {
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return false;
     defer parsed.deinit();
@@ -3803,11 +3393,9 @@ fn applySlackWorkspace(a: *App, raw: []const u8) bool {
         const hash_prefix = id[0] == 'C' or id[0] == 'G';
         const shown = if (hash_prefix) std.fmt.allocPrint(a.allocator, "#{s}", .{name}) catch a.allocator.dupe(u8, name) catch continue else a.allocator.dupe(u8, name) catch continue;
         defer a.allocator.free(shown);
-        // Upsert: a later page or refresh must not duplicate a channel.
         const seconds = channel.seconds;
         if (slackChatById(a, id)) |existing| {
             existing.name.set(a.allocator, shown);
-            // Never lower: a live event or history poll may know a newer one.
             _ = raiseSlackTimestamp(existing, seconds);
             continue;
         }
@@ -3826,8 +3414,6 @@ fn applySlackWorkspace(a: *App, raw: []const u8) bool {
         _ = wacliEnqueue(a, job, false);
         return true;
     }
-    // Last page: one line with the chat count, repeated at most every 10
-    // minutes unless the count changes.
     const now = win.GetTickCount64();
     if (slack.logDue(a.slack_count_log_ms, a.slack_count_log_hash, now, a.slack_chat_count)) {
         a.slack_count_log_ms = now;
@@ -3838,8 +3424,6 @@ fn applySlackWorkspace(a: *App, raw: []const u8) bool {
     return true;
 }
 
-/// One launch-log line per failing Slack job: kind, error name and HTTP
-/// status, never tokens or message text. Rate limited per job kind.
 fn logSlackFailure(a: *App, kind: WacliJobKind, error_name: []const u8, http_status: u32) void {
     const index = @intFromEnum(kind);
     const now = win.GetTickCount64();
@@ -3912,7 +3496,6 @@ fn refreshSlackWorkspace(a: *App) void {
     var job = WacliJob{ .provider = .slack, .kind = .slack_workspace };
     wacliJobArgs(&job, &.{ slack_workspace_types, "" });
     _ = wacliEnqueue(a, job, false);
-    // A users.list round still paging keeps going; do not start a second.
     if (wacliPendingGet(a, .slack_users) != 0) return;
     a.slack_user_pages = 0;
     var users_job = WacliJob{ .provider = .slack, .kind = .slack_users };
@@ -3923,11 +3506,6 @@ fn refreshSlackWorkspace(a: *App) void {
 fn refreshSlackHistory(a: *App) void {
     if (!selectedChatIsSlack(a)) return;
     const chat = &a.chats[a.selected_chat];
-    // The bridge poll and refreshMessages (chat selection, manual refresh,
-    // send/archive completion) both call this. refreshMessages always zeroes
-    // slack_history_hash first, so the first fetch after any of those bumps
-    // the generation, the same guard a stale wacli read needs; later bridge
-    // polls reuse it so replies queued by the previous apply still land.
     if (a.slack_history_hash == 0) a.messages_gen += 1;
     var job = WacliJob{ .provider = .slack, .kind = .slack_history, .gen = a.messages_gen };
     job.provider = chat.provider;
@@ -3961,8 +3539,6 @@ fn buildSlackMessage(a: *App, item: slack.HistoryItem) Message {
     const name = if (from_me) "You" else (slackUserName(a, item.user) orelse (if (item.user.len > 0) item.user else "Slack"));
     message.sender.set(a.allocator, name);
     const lookup = slackUserLookup(a);
-    // A shared/forwarded Slack message renders as a quote block; the
-    // message's own text, if any, stays as the body.
     if (item.share_text.len > 0 or item.share_sender.len > 0) {
         var quote_buffer: [slack.max_text + 1]u8 = undefined;
         message.quote.set(a.allocator, slack.convertMrkdwn(&quote_buffer, item.share_text, lookup));
@@ -3989,20 +3565,16 @@ fn buildSlackMessage(a: *App, item: slack.HistoryItem) Message {
     return message;
 }
 
-/// Slack timestamps are unix seconds with a fraction; convert to local
-/// HH:MM. (WhatsApp paths use ISO strings via formatTime.)
 fn formatSlackTime(target: *WideText(15), allocator: std.mem.Allocator, ts: []const u8) void {
     const dot = std.mem.indexOfScalar(u8, ts, '.') orelse ts.len;
     const seconds = std.fmt.parseInt(i64, ts[0..dot], 10) catch {
         target.set(allocator, "");
         return;
     };
-    // Slack-supplied values are untrusted; keep the FILETIME math in range.
     if (seconds < 0 or seconds > 100_000_000_000) {
         target.set(allocator, "");
         return;
     }
-    // Windows FILETIME epoch is 1601; unix epoch offset in 100ns ticks.
     const ticks: i64 = (seconds + 11644473600) * 10_000_000;
     var ft = win.FILETIME{ .dwLowDateTime = @truncate(@as(u64, @bitCast(ticks))), .dwHighDateTime = @truncate(@as(u64, @bitCast(ticks)) >> 32) };
     var utc = std.mem.zeroes(win.SYSTEMTIME);
@@ -4038,9 +3610,6 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
     if (a.selected_message) |selected| {
         if (selected < a.message_count) selected_id.set(a.messages[selected].id.slice());
     }
-    // WAZI-61: optimistic bubbles are not in Slack's history yet. Keep them
-    // only when this refresh is for the chat already on screen; a chat switch
-    // discards them (the switched-back view refetches authoritative history).
     var saved: []Message = &.{};
     var saved_count: usize = 0;
     if (chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat))) {
@@ -4048,8 +3617,6 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
             if (message.from_me and message.send_state != .none) saved_count += 1;
         }
         if (saved_count > 0) {
-            // On allocation failure abort the refresh: clearing the view would
-            // permanently lose the bubbles still awaiting resolution.
             saved = a.allocator.alloc(Message, saved_count) catch return;
             var filled: usize = 0;
             for (a.messages[0..a.message_count]) |*message| {
@@ -4098,13 +3665,11 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
             }
         }
     }
-    // A polled message newer than the listing moves the chat up the list.
     noteSlackActivity(a, chat.jid.slice(), newest_seconds);
     a.displayed_jid.set(chat.jid.slice());
     a.displayed_account = chat.account;
     a.displayed_provider = chat.provider;
     a.displayed_timestamp.set(chat.timestamp.slice());
-    // Threads shown inline: fetch each parent's replies once.
     for (reply_parents[0..reply_parent_count]) |parent| {
         var job = WacliJob{ .provider = .slack, .kind = .slack_replies, .gen = a.messages_gen };
         job.provider = chat.provider;
@@ -4143,13 +3708,9 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
     }
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
     if (a.chats_hwnd) |chats_list| _ = win.InvalidateRect(chats_list, null, win.TRUE);
-    // Fresh history for the chat on screen: clear the badge and queue the
-    // debounced conversations.mark. markChatRead's user_viewed gate keeps
-    // startup and background refreshes from marking anything.
     markChatRead(a);
 }
 
-/// Merge conversations.replies (parent + children) into the open chat.
 fn applySlackReplies(a: *App, raw: []const u8) void {
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
     defer parsed.deinit();
@@ -4166,7 +3727,6 @@ fn applySlackReplies(a: *App, raw: []const u8) void {
     };
     for (list.items) |item_value| {
         const item = slack.readHistoryItem(item_value) orelse continue;
-        // Skip parent duplicates already rendered by history.
         var known = false;
         for (a.messages[0..a.message_count]) |*existing| {
             if (std.mem.eql(u8, existing.id.slice(), item.ts)) known = true;
@@ -4176,8 +3736,6 @@ fn applySlackReplies(a: *App, raw: []const u8) void {
         insertSlackMessageSorted(a, message);
     }
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
-    // A thread reply can be the newest displayed message; raise the mark
-    // target to it through the same debounced request (WAZI-104).
     if (a.user_viewed) requestSlackMark(a, chat.jid.slice());
 }
 
@@ -4191,15 +3749,12 @@ fn insertSlackMessageSorted(a: *App, message: Message) void {
     a.message_count += 1;
 }
 
-/// WAZI-61: render an optimistic bubble for a Slack text send the moment the
-/// composer clears, instead of waiting for the send round trip plus echo.
 fn appendSlackPending(a: *App, text: []const u8, client_msg_id: []const u8) void {
     if (a.message_count >= max_messages) return;
     var message = Message{};
     message.from_me = true;
     message.sender.set(a.allocator, "You");
     message.text.set(a.allocator, text);
-    // Slack messages leave `timestamp` unused; park the client_msg_id here.
     message.timestamp.set(client_msg_id);
     var local = std.mem.zeroes(win.SYSTEMTIME);
     win.GetLocalTime(&local);
@@ -4210,11 +3765,10 @@ fn appendSlackPending(a: *App, text: []const u8, client_msg_id: []const u8) void
     message.send_state = .pending;
     a.messages[a.message_count] = message;
     a.message_count += 1;
-    a.scroll_y = 0; // the user just typed: pin the view to the newest bubble
+    a.scroll_y = 0;
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
 }
 
-/// Index of the oldest from-me pending Slack bubble in the open conversation.
 fn oldestPendingSend(a: *App) ?usize {
     for (a.messages[0..a.message_count], 0..) |*message, index| {
         if (message.from_me and message.send_state == .pending) return index;
@@ -4222,38 +3776,23 @@ fn oldestPendingSend(a: *App) ?usize {
     return null;
 }
 
-/// Local bubble id for a queued WhatsApp send: a reload re-appends the same
-/// bubble and a permanent failure finds it by this id.
 fn localSendId(buffer: []u8, seq: u64) []const u8 {
     return std.fmt.bufPrint(buffer, "local-{d}", .{seq}) catch "local";
 }
 
-// The placeholder text a file send's bubble shows instead of its caption.
 const file_send_placeholder = "Sending file...";
 
-/// The bubble label of a send without any "(retrying)" or "(not sent)"
-/// decoration: a voice note reads "Voice message m:ss", a caption-less file
-/// "Image", anything else its text.
 fn sendBaseText(buffer: []u8, text: []const u8, has_file: bool, ptt: bool, voice_seconds: u32) []const u8 {
     if (ptt) return std.fmt.bufPrint(buffer, "Voice message {d}:{d:0>2}", .{ voice_seconds / 60, voice_seconds % 60 }) catch "Voice message";
     if (has_file and text.len == 0) return "Image";
     return text;
 }
 
-/// Bubble text for a queued send that has failed at least once and is
-/// waiting out its backoff: still reads as in-progress, not "not sent".
-/// Built fresh from `pending.text` each time rather than accumulated, so it
-/// never stacks across retries.
 fn retryingBubbleText(buffer: []u8, text: []const u8, retries: u8) []const u8 {
     if (retries == 0 or text.len == 0) return text;
     return std.fmt.bufPrint(buffer, "{s} (retrying {d}/{d})", .{ text, retries, max_send_retries - 1 }) catch text;
 }
 
-/// Optimistic bubble for a queued WhatsApp send (mirrors appendSlackPending):
-/// the message shows the moment the composer clears, and applyMessageData
-/// re-appends it after every reload until wacli stores the real message. On a
-/// reload (`from_reload`) the stored message may already be present, and
-/// re-appending would show it twice.
 fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool) void {
     if (pending.completed or a.message_count >= max_messages or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
     if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(pending))) return;
@@ -4268,8 +3807,6 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
             const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch continue;
             defer a.allocator.free(text);
             if (!std.mem.eql(u8, text, pending.text.slice())) continue;
-            // Only a stored message at or after the queued time proves this
-            // send landed; an unparseable timestamp never counts as a match.
             const stored_unix = media_age.unixSeconds(message.timestamp.slice()) orelse continue;
             if (stored_unix >= pending.queued_unix - 5) return;
         }
@@ -4278,7 +3815,6 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
     message.from_me = true;
     message.sender.set(a.allocator, "You");
     if (pending.ptt) {
-        // The player bubble, playing straight from the recorded file.
         message.media_type.set("audio");
         message.local_path.set(a.allocator, pending.file.slice());
     } else if (pending.file.len > 0 and pending.text.len == 0) {
@@ -4301,8 +3837,6 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
 }
 
-/// Mark the optimistic bubble for a permanently failed send the way Slack
-/// renders failures: a muted bubble with a "(not sent)" marker.
 fn markPendingSendFailed(a: *App, pending: *const PendingSend) void {
     var id_buffer: [32]u8 = undefined;
     const id = localSendId(&id_buffer, pending.seq);
@@ -4310,9 +3844,6 @@ fn markPendingSendFailed(a: *App, pending: *const PendingSend) void {
         if (!message.from_me or message.send_state != .pending or
             !std.mem.eql(u8, message.id.slice(), id)) continue;
         message.send_state = .failed;
-        // Built from pending.text (the canonical, unmarked text), not the
-        // displayed bubble: a retried send's bubble carries a "(retrying
-        // N/3)" label that must not end up stacked onto "(not sent)".
         var base_buffer: [48]u8 = undefined;
         const old = sendBaseText(&base_buffer, pending.text.slice(), pending.file.len > 0, pending.ptt, pending.voice_seconds);
         if (old.len + " (not sent)".len < 4095) {
@@ -4327,8 +3858,6 @@ fn markPendingSendFailed(a: *App, pending: *const PendingSend) void {
     }
 }
 
-/// Update a queued send's bubble to show it's about to retry, not that it
-/// failed for good. File sends keep their "Sending file..." placeholder.
 fn markPendingSendRetrying(a: *App, pending: *const PendingSend) void {
     if (pending.text.len == 0) return;
     var id_buffer: [32]u8 = undefined;
@@ -4343,8 +3872,6 @@ fn markPendingSendRetrying(a: *App, pending: *const PendingSend) void {
     }
 }
 
-/// Re-append a remembered failed send as a muted "(not sent)" bubble after a
-/// reload, the same way pending bubbles are re-appended.
 fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
     if (a.message_count >= max_messages or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
     if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(failed))) return;
@@ -4374,8 +3901,6 @@ fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
 }
 
-/// Remember a permanently failed send (jid and text) so its bubble survives
-/// the next reload. Keeps the newest max_failed_sends entries.
 fn rememberFailedSend(a: *App, pending: *const PendingSend) void {
     for (a.failed_sends[0..a.failed_send_count]) |*entry| {
         if (chat_key.Key.eql(chat_key.of(entry), chat_key.of(pending)) and
@@ -4399,8 +3924,6 @@ fn rememberFailedSend(a: *App, pending: *const PendingSend) void {
     a.failed_send_count += 1;
 }
 
-/// Drop a remembered failure the user just resent so its stale "(not sent)"
-/// bubble is not resurrected by the next reload.
 fn forgetFailedSend(a: *App, key: chat_key.Key, text: []const u8) void {
     for (a.failed_sends[0..a.failed_send_count], 0..) |*entry, index| {
         if (entry.is_file or !chat_key.Key.eql(chat_key.of(entry), key) or !std.mem.eql(u8, entry.text.slice(), text)) continue;
@@ -4412,8 +3935,6 @@ fn forgetFailedSend(a: *App, key: chat_key.Key, text: []const u8) void {
     }
 }
 
-/// Drop remembered failures the reloaded store already contains: the message
-/// was delivered (or resent) after all, so no "(not sent)" bubble remains.
 fn pruneFailedSends(a: *App, key: chat_key.Key) void {
     var index: usize = 0;
     while (index < a.failed_send_count) {
@@ -4425,8 +3946,6 @@ fn pruneFailedSends(a: *App, key: chat_key.Key) void {
                 const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch continue;
                 defer a.allocator.free(text);
                 if (!std.mem.eql(u8, text, entry.text.slice())) continue;
-                // Same-time guard as appendWhatsAppPending: an old same-text
-                // message is not evidence this send was delivered.
                 const stored_unix = media_age.unixSeconds(message.timestamp.slice()) orelse continue;
                 if (stored_unix >= entry.queued_unix - 5) {
                     delivered = true;
@@ -4438,7 +3957,6 @@ fn pruneFailedSends(a: *App, key: chat_key.Key) void {
             index += 1;
             continue;
         }
-        // Delivered after all: the kept file is no longer needed.
         if (entry.is_file and entry.file.len > 0) deleteFileUtf8(entry.file.slice());
         var shift = index;
         while (shift + 1 < a.failed_send_count) : (shift += 1) a.failed_sends[shift] = a.failed_sends[shift + 1];
@@ -4448,9 +3966,6 @@ fn pruneFailedSends(a: *App, key: chat_key.Key) void {
     }
 }
 
-/// A failed text send goes back into the composer when the user has not typed
-/// something new and is still looking at the chat the send belonged to, so the
-/// message is recoverable instead of lost or pasted into the wrong chat.
 fn restoreFailedSendText(a: *App, failed: *const PendingSend) void {
     if (failed.file.len > 0 or failed.text.len == 0) return;
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
@@ -4466,14 +3981,6 @@ fn restoreFailedSendText(a: *App, failed: *const PendingSend) void {
     focusCompose(a);
 }
 
-/// Manual resend of a permanently failed bubble: requeues its text with a
-/// fresh retry counter. Reachable by clicking the failed bubble, selecting it
-/// and pressing Enter/R, or the "Resend failed message" palette command. A
-/// failed file send can't be resent this way: its paste file is deleted once
-/// the send finishes with it (removeFirstPendingSend), so only the caption
-/// would go out.
-/// Returns true when the bubble was a WhatsApp failed send it acted on
-/// (resent, refused with a status, or found already delivered).
 fn resendFailedMessage(a: *App, index: usize) bool {
     if (index >= a.message_count) return false;
     const message = &a.messages[index];
@@ -4514,8 +4021,6 @@ fn resendFailedMessage(a: *App, index: usize) bool {
     const suffix = " (not sent)";
     const original = if (std.mem.endsWith(u8, bubble_text, suffix)) bubble_text[0 .. bubble_text.len - suffix.len] else bubble_text;
     const jid = a.chats[a.selected_chat].jid.slice();
-    // The remembered failure, not the bubble, is the source of truth: it
-    // says whether this was a file send and when it was first queued.
     var entry: ?*const FailedSend = null;
     for (a.failed_sends[0..a.failed_send_count]) |*candidate| {
         var base_buffer: [48]u8 = undefined;
@@ -4530,8 +4035,6 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         return true;
     };
     if (failed.is_file) {
-        // The file was kept on purpose (a failed send never deletes it):
-        // upload it again, with its caption and voice-note flag.
         if (!fileExistsUtf8(failed.file.slice())) {
             forgetFailedSendEntry(a, failed);
             setStatus(a, "The file is gone - attach it again");
@@ -4573,8 +4076,6 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         setStatus(a, "Nothing to resend");
         return true;
     }
-    // The last attempt may have gone out after all (a timeout): if the open
-    // chat already shows it, don't send it twice.
     if (sentMessageExists(a, chat_key.of(failed), original, failed.queued_unix)) {
         forgetFailedSend(a, chat_key.of(failed), original);
         setStatus(a, "Already sent");
@@ -4603,9 +4104,6 @@ fn resendFailedMessage(a: *App, index: usize) bool {
     message.text.set(a.allocator, original);
     var id_buffer: [32]u8 = undefined;
     message.id.set(localSendId(&id_buffer, pending.seq));
-    // A failed send may have copied its text back into the composer
-    // (restoreFailedSendText); clear it so resending doesn't leave a
-    // duplicate ready to send again.
     if (a.compose) |compose| {
         var wide_buffer: [4096]u16 = undefined;
         const length: usize = @intCast(win.GetWindowTextW(compose, &wide_buffer, wide_buffer.len));
@@ -4622,7 +4120,6 @@ fn resendFailedMessage(a: *App, index: usize) bool {
     return true;
 }
 
-/// Pending bubble carrying this client_msg_id, if still displayed.
 fn pendingByClientMsgId(a: *App, client_msg_id: []const u8) ?usize {
     if (client_msg_id.len == 0) return null;
     for (a.messages[0..a.message_count], 0..) |*message, index| {
@@ -4633,7 +4130,6 @@ fn pendingByClientMsgId(a: *App, client_msg_id: []const u8) ?usize {
 }
 
 fn removeMessageAt(a: *App, index: usize) void {
-    // Keep the selection pointing at the same bubble (or none) after the shift.
     if (a.selected_message) |selected| {
         if (selected == index) {
             a.selected_message = null;
@@ -4646,10 +4142,6 @@ fn removeMessageAt(a: *App, index: usize) void {
     a.message_count -= 1;
 }
 
-/// Drop the bubble the moment our own echo arrives (it can beat the HTTP
-/// response); correlate by client_msg_id, falling back to text match only
-/// when Slack sent no id. Failed bubbles match too: Slack may have accepted
-/// a send the HTTP layer reported as failed, and the echo is authoritative.
 fn dropPendingForEcho(a: *App, event: *slack_win.Event) void {
     const cmid = event.clientMsgIdSlice();
     var index: ?usize = null;
@@ -4663,8 +4155,6 @@ fn dropPendingForEcho(a: *App, event: *slack_win.Event) void {
             }
         }
     } else {
-        // No id in the echo: match the oldest optimistic bubble whose text
-        // equals the echo, allowing the "(not sent)" failure marker.
         for (a.messages[0..a.message_count], 0..) |*message, i| {
             if (!message.from_me or message.send_state == .none) continue;
             const bubble_text = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch continue;
@@ -4682,13 +4172,7 @@ fn dropPendingForEcho(a: *App, event: *slack_win.Event) void {
     if (index) |found| removeMessageAt(a, found);
 }
 
-/// Stamp the optimistic bubble with Slack's authoritative ts (or mark it
-/// failed) when the chat.postMessage job completes.
 fn resolveSlackSend(a: *App, result: *WacliResult) void {
-    // Only the conversation the bubble is displayed in may resolve it; a
-    // result for a chat the user already left must not stamp another chat's
-    // pending send (ponytail: that orphan bubble is silently dropped, the
-    // status bar still reports the outcome).
     if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(result))) return;
     var client_msg_id: []const u8 = "";
     for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
@@ -4712,15 +4196,10 @@ fn resolveSlackSend(a: *App, result: *WacliResult) void {
         return;
     }
     const ts = slack.parseSentTs(a.allocator, result.data) orelse {
-        // No usable ts: the send succeeded, so release the pending state and
-        // let the next history refresh give the bubble its real identity.
         a.messages[index].send_state = .none;
         return;
     };
     defer a.allocator.free(ts);
-    // The echo may have replaced the pending bubble already; then the message
-    // with this ts exists and the leftover optimistic copy must go, or every
-    // refresh would re-preserve it as a duplicate.
     for (a.messages[0..a.message_count]) |*message| {
         if (std.mem.eql(u8, message.id.slice(), ts)) {
             removeMessageAt(a, index);
@@ -5008,8 +4487,6 @@ fn requestSlackDownload(a: *App, channel: []const u8, item: slack.HistoryItem) v
     _ = wacliEnqueue(a, job, false);
 }
 
-/// A live Socket Mode event: dedup, update the chat list, and merge into the
-/// open conversation.
 fn applySlackEvent(a: *App, event: *slack_win.Event) void {
     defer slack_win.destroyEvent(event);
     a.slack_log_mutex.lockUncancelable(a.io);
@@ -5042,14 +4519,6 @@ fn applySlackEvent(a: *App, event: *slack_win.Event) void {
             chat.unread_count += 1;
         }
     }
-    // WAZI-62 pulled an archived WhatsApp chat back into the list on a new
-    // message via queueUnarchiveChat, a WhatsApp-store wacli call. Chat.archived
-    // is only ever set from a WhatsApp wacli read, so it is always false for a
-    // Slack channel here; "not visible" just means the sidebar is showing
-    // another messenger or a.slack_chats has not picked the channel up yet,
-    // neither of which wacli can fix. Rebuild the Slack list from its own
-    // cache (no wacli call) when that view is on screen; otherwise leave it
-    // for the next view switch or workspace poll to pick up.
     if (!is_open) {
         var visible = false;
         for (a.chats[0..a.chat_count]) |*chat| {
@@ -5076,8 +4545,6 @@ fn applySlackEvent(a: *App, event: *slack_win.Event) void {
         if (from_me) dropPendingForEcho(a, event);
         const message = buildSlackMessage(a, item);
         insertSlackMessageSorted(a, message);
-        // WAZI-104: the chat is on screen, so a message arriving while it is
-        // open becomes read through the same debounced mark as a fresh view.
         if (a.user_viewed) requestSlackMark(a, channel);
         if (item.file_url.len > 0) requestSlackDownload(a, channel, item);
         if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
@@ -5092,9 +4559,6 @@ fn loadSlackTokens(a: *App) void {
         a.allocator.free(tokens.app);
         a.slack_tokens = null;
     }
-    // ponytail: worker threads read the bridge strings through slackContext
-    // while a job runs, so they are leaked (like the socket's token bytes)
-    // instead of freed here.
     a.slack_bridge = null;
     a.slack_tokens = slack_win.loadTokens(a.allocator);
     a.slack_bridge = slack_win.loadBridge(a.allocator);
@@ -5104,14 +4568,11 @@ fn loadSlackTokens(a: *App) void {
     retrySlackOutbox(a);
 }
 
-// --- Slack token dialog (masked entry, DPAPI-stored on save) ---
-
 const id_slack_user_edit = 100;
 const id_slack_app_edit = 101;
 const id_slack_save = 102;
 const id_slack_cancel = 103;
 
-// Telegram sign-in dialog controls.
 const id_tg_prompt = 110;
 const id_tg_edit = 111;
 const id_tg_next = 112;
@@ -5153,7 +4614,7 @@ fn pickImageFile(a: *App) ?WideText(519) {
     ofn.lpstrFilter = lit("Images\x00*.png;*.jpg;*.jpeg;*.gif;*.webp\x00All files\x00*.*\x00");
     ofn.lpstrFile = @ptrCast(&buffer);
     ofn.nMaxFile = buffer.len;
-    ofn.Flags = 0x00000800 | 0x00001000 | 0x00000008; // path + file must exist, no dir change
+    ofn.Flags = 0x00000800 | 0x00001000 | 0x00000008;
     if (shell_lazy.getOpenFileNameW.?(@ptrCast(&ofn)) == 0) return null;
     const chosen = std.unicode.utf16LeToUtf8Alloc(a.allocator, std.mem.span(@as([*:0]const u16, @ptrCast(&buffer)))) catch return null;
     defer a.allocator.free(chosen);
@@ -5286,13 +4747,10 @@ fn openSlackSetup(a: *App) void {
     while (true) {
         const got = win.GetMessageW(&msg, null, 0, 0);
         if (got == 0) {
-            // A quit issued while the dialog is up must still close the app.
             _ = win.PostQuitMessage(@intCast(msg.wParam));
             break;
         }
         if (got < 0) break;
-        // Dialog navigation (Tab between fields, Enter presses the default
-        // Save button) works only when the pump routes through IsDialogMessage.
         if (win.IsDialogMessageW(wnd, &msg) != 0) {
             if (a.slack_setup_window == null) break;
             continue;
@@ -5303,10 +4761,9 @@ fn openSlackSetup(a: *App) void {
     }
 }
 
-/// Start (or restart after token entry) the Socket Mode session.
 fn startSlackSocket(a: *App) void {
     if (!slackConfigured(a) or a.slack_socket_thread != null) return;
-    if (a.slack_bridge != null) return; // Bridge mode has no Socket Mode; polling covers live updates.
+    if (a.slack_bridge != null) return;
     const tokens = a.slack_tokens.?;
     a.slack_stop.store(false, .release);
     const config = slack_win.SocketConfig{
@@ -5328,8 +4785,6 @@ fn markChatRead(a: *App) void {
     if (!a.user_viewed or a.selected_chat >= a.chat_count) return;
     const chat = &a.chats[a.selected_chat];
     if (chat.provider == .telegram) {
-        // Telegram has no store lock: mark read directly on the client with
-        // the newest visible message id.
         if (a.message_count > 0) {
             const last = a.messages[a.message_count - 1];
             const chat_id = tgSelectedChatId(a) orelse return;
@@ -5343,7 +4798,6 @@ fn markChatRead(a: *App) void {
     if (chat.provider == .slack) {
         chat.unread = false;
         chat.unread_count = 0;
-        // The list is rebuilt from the cache on every reload: clear it there too.
         if (slackChatById(a, chat.jid.slice())) |cached| {
             cached.unread = false;
             cached.unread_count = 0;
@@ -5365,8 +4819,6 @@ fn markChatRead(a: *App) void {
         if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
     }
     if (!needs_receipt or a.read_queue_dead) return;
-    // Local reads stick even when the write queue is full. The provider's
-    // unread flag keeps the next view eligible to retry the receipt.
     var already_queued = false;
     var index: usize = 0;
     while (index < a.pending_read_count) : (index += 1) {
@@ -5383,9 +4835,6 @@ fn markChatRead(a: *App) void {
     startNextMarkRead(a);
 }
 
-// Quiet period before one conversations.mark goes out for the viewed Slack
-// chat: quick chat switches replace the pending target instead of firing a
-// call per view (WAZI-104).
 const slack_mark_debounce_ms: u32 = 750;
 
 fn cancelSlackMark(a: *App) void {
@@ -5402,7 +4851,6 @@ fn slackMarkViewMatches(a: *App, channel: []const u8) bool {
         chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]));
 }
 
-/// Debounce only messages belonging to the explicitly selected, loaded chat.
 fn requestSlackMark(a: *App, channel: []const u8) void {
     if (!slackMarkViewMatches(a, channel)) return;
     var newest: []const u8 = "";
@@ -5422,8 +4870,6 @@ fn requestSlackMark(a: *App, channel: []const u8) void {
     }
 }
 
-/// Keep a fired target only within this view; a canceled or failed target
-/// must not suppress a later attempt. Results correlate by generation and ts.
 fn fireSlackMark(a: *App) void {
     const channel = a.slack_mark_channel.slice();
     const ts = a.slack_mark_ts.slice();
@@ -5432,7 +4878,6 @@ fn fireSlackMark(a: *App) void {
         cancelSlackMark(a);
         return;
     }
-    // KillTimer does not remove an already queued WM_TIMER from an older arm.
     const now = win.GetTickCount64();
     if (now < a.slack_mark_due_ms) {
         if (a.hwnd) |hwnd| {
@@ -5466,19 +4911,10 @@ fn removeFirstPendingRead(a: *App) void {
     persistPendingReads(a);
 }
 
-// A failed write goes back in the queue instead of being dropped: the store
-// lock can be lost to a parallel job, and without a retry the chat stays
-// unread until the user opens it again.
 const max_read_retries = 3;
 
-// After this many consecutive failures the read backs off before its next
-// attempt instead of being dropped.
 const read_retry_backoff_ms: u64 = 10 * 60 * 1000;
 
-// Next retry counter for a read that just failed: it climbs to the cap, then
-// the caller applies a backoff and the counter restarts. The read itself is
-// never dropped — its badge is already cleared, so a dropped read leaves the
-// chat unread in the store and it reappears after the next launch (WAZI-88).
 fn nextReadRetry(retries: u8) u8 {
     return if (retries + 1 >= max_read_retries) 0 else retries + 1;
 }
@@ -5495,9 +4931,6 @@ fn requeueFailedRead(a: *App) void {
     persistPendingReads(a);
 }
 
-// The pending mark-read queue mirrors to disk on every change: a read that
-// is still queued or in flight when the app closes must retry next launch,
-// because the store's unread state only clears once the write lands.
 fn persistPendingReads(a: *App) void {
     if (a.read_path.len == 0) return;
     var buffer: [max_pending_reads * 192]u8 = undefined;
@@ -5510,9 +4943,6 @@ fn persistPendingReads(a: *App) void {
         buffer[total] = '\n';
         total += 1;
     }
-    // Write to a sibling temp file and swap it in: CREATE_ALWAYS on the
-    // queue file itself would truncate the last good queue before the new
-    // one is written, and a failed or partial write would destroy it.
     const temp_path = std.fmt.allocPrint(a.allocator, "{s}.new", .{a.read_path}) catch return;
     defer a.allocator.free(temp_path);
     const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, temp_path) catch return;
@@ -5530,15 +4960,9 @@ fn persistPendingReads(a: *App) void {
     if (!ok or written_total != total) return;
     const target = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, a.read_path) catch return;
     defer a.allocator.free(target);
-    // A full write landed; replacing the queue now cannot leave a truncated
-    // store behind. If the swap itself fails the in-memory queue is still
-    // accurate and WM_DESTROY re-persists (retries the swap) on exit.
     _ = win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING);
 }
 
-/// Fills `out` from the one-jid-per-line queue file, dropping duplicates and
-/// entries that do not fit. Runs at startup, before the frame loop starts
-/// draining via startNextMarkRead.
 fn loadPendingReads(a: *App) void {
     if (a.read_path.len == 0) return;
     const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, a.read_path) catch return;
@@ -5564,16 +4988,9 @@ fn loadPendingReads(a: *App) void {
     }
 }
 
-// The mark-read write used to run on the UI thread with the sync child
-// stopped, so opening any unread chat froze the window for as long as the
-// store lock took. Run it as a background job like sends and archives.
 fn startNextMarkRead(a: *App) void {
     if (a.read_child != null or a.pending_read_count == 0) return;
     if (a.read_backoff_until[0] > win.GetTickCount64()) {
-        // The head read is waiting out its failure backoff: swap in the
-        // first ready read behind it so the queue keeps draining. When no
-        // read is ready — a lone backed-off read or a queue that is entirely
-        // backing off — wait until the earliest deadline.
         const now = win.GetTickCount64();
         var ready: ?usize = null;
         var index: usize = 1;
@@ -5595,18 +5012,9 @@ fn startNextMarkRead(a: *App) void {
         a.read_backoff_until[swap_with] = backoff;
         persistPendingReads(a);
     }
-    // Media downloads hold the store lock for up to 60s while a mark-read
-    // write waits only 10s, so a read started next to them loses the lock
-    // and its write is dropped. Jobs are serialized by the gates above, but
-    // a download that races us to the lock can still hold it: wait up to
-    // 70s, longer than the longest known hold, instead of losing the write.
-    // Anything still queued when the app closes persists to disk and
-    // retries next launch (WAZI-74).
     if (a.send_child != null or sendReadyPending(a) or
         a.archive_child != null or a.pending_archive_count > 0 or
         avatarBusy(a) or mediaBusy(a)) return;
-    // wacli 0.18.1 has no --receipts or live-sync delegation. Release the
-    // store lock before the supported app-state mark-read command.
     stopSync(a, "mark read");
     const child = child_process.spawn(a.io, .{
         .argv = &.{ a.wacli_path, "--json", "--lock-wait", "70s", "chats", "mark-read", "--chat", a.pending_reads[0].slice() },
@@ -5615,11 +5023,6 @@ fn startNextMarkRead(a: *App) void {
         .stderr = .ignore,
         .create_no_window = true,
     }) catch {
-        // Give up after repeated spawn failures: clear the in-memory queue,
-        // keep local watermarks, and let live sync run so a broken wacli
-        // cannot keep the app's sync permanently
-        // stopped. The queue file is untouched, so the reads retry next
-        // launch instead of being lost.
         a.read_spawn_failures += 1;
         if (a.read_spawn_failures >= 3) {
             a.pending_read_count = 0;
@@ -5636,12 +5039,8 @@ fn startNextMarkRead(a: *App) void {
     a.read_started_ms = win.GetTickCount64();
 }
 
-// The mark-read child gates every other background job, so a hung wacli must
-// not wedge the app: the lock wait is capped at 70s, so 90s means it is stuck.
-const read_timeout_ms: u64 = 90_000;
+const mark_read_hung_child_timeout_ms: u64 = 90_000;
 
-// A send lock wait is capped at 70s too; 90s means wacli is stuck and the
-// child is killed rather than gating every queued send forever.
 const send_timeout_ms: u64 = 90_000;
 
 fn checkMarkRead(a: *App) void {
@@ -5649,38 +5048,26 @@ fn checkMarkRead(a: *App) void {
         const handle = child.id orelse return;
         var code: win.DWORD = 0;
         if (win.GetExitCodeProcess(handle, &code) == 0 or code == win.STILL_ACTIVE) {
-            if (win.GetTickCount64() - a.read_started_ms <= read_timeout_ms) return;
-            // kill already reaps the child; waiting on it again trips an assert.
+            if (win.GetTickCount64() - a.read_started_ms <= mark_read_hung_child_timeout_ms) return;
             _ = child.kill(a.io);
             code = 1;
         } else _ = child.wait(a.io) catch {};
         a.read_child = null;
         if (code != 0) requeueFailedRead(a) else removeFirstPendingRead(a);
-        // Drain the queue back-to-back before restarting live sync, which
-        // stays suspended while reads are pending. A lone backed-off read
-        // starts no child: release the store and bring live sync back
-        // instead of holding it suspended for the whole backoff.
         if (a.pending_read_count > 0) {
             startNextMarkRead(a);
             if (a.read_child != null) return;
         }
-        // Release any sends or archives that queued up while the store was
-        // held, then bring live sync back. startSync skips itself while a
-        // write job is running.
         startNextSend(a);
         startNextArchive(a);
         drainMediaDownloads(a);
         startSync(a);
         refreshChats(a);
         setStatus(a, if (code == 0) "Chat marked as read" else "Mark as read failed");
-        // After the status above so a queued download's own message shows.
         retryPendingDownload(a);
     } else startNextMarkRead(a);
 }
 
-// A manual download click that could not start waits here; retry it once a
-// download slot is free and its message is on screen (the request is dropped
-// if the user switched chats meanwhile).
 fn retryPendingDownload(a: *App) void {
     if (a.pending_download_id.len == 0 or freeMediaSlot(a) == null or a.send_child != null) return;
     if (a.selected_chat >= a.chat_count) return;
@@ -5744,8 +5131,6 @@ fn voicePosKey(a: *const App, jid: []const u8, id: []const u8) u64 {
     return played.Set.pairKey(jid, id);
 }
 
-/// Remember where the note being played stands (0 when it finished). Called
-/// only on pause, stop, note switch and chat switch, never per frame.
 fn saveAudioPos(a: *App) void {
     if (a.audio_playing_id.len == 0) return;
     const player = a.audio_player orelse return;
@@ -5790,7 +5175,6 @@ fn startAudioPlayback(a: *App, message: *Message) void {
     };
     const path_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.local_path.slice()) catch return;
     defer a.allocator.free(path_utf8);
-    // Leaving another note part way: remember where it stood first.
     if (a.audio_state != .empty and !std.mem.eql(u8, a.audio_playing_id.slice(), message.id.slice())) saveAudioPos(a);
     const jid = if (a.chat_count > 0 and a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else "";
     player.play(path_utf8);
@@ -5808,8 +5192,6 @@ fn startAudioPlayback(a: *App, message: *Message) void {
 
 fn toggleAudio(a: *App, message: *Message) void {
     const player = a.audio_player orelse return;
-    // Drive from the player's real state; the cached UI state can desync
-    // after a message ends, which made the button stop responding.
     switch (player.state()) {
         .playing => {
             player.pause();
@@ -5864,9 +5246,6 @@ fn handleAudioClick(a: *App, message: *Message, x: i32) void {
     seekAudio(a, x, hit);
 }
 
-// When a voice note ends, start the next audio message below it, downloading
-// first if needed, until the chat runs out. Switching chats, stopping, or a
-// failed download ends the chain.
 fn advanceAudio(a: *App, after_id: []const u8) bool {
     if (!a.audio_auto_advance) return false;
     var start: usize = a.message_count;
@@ -5884,14 +5263,11 @@ fn advanceAudio(a: *App, after_id: []const u8) bool {
             return true;
         } else if (freeMediaSlot(a) != null or mediaDownloading(a, a.chats[a.selected_chat].jid.slice(), message.id.slice())) {
             _ = downloadMedia(a, index, true);
-            // Arm only if the download actually started; a failed spawn just
-            // ends the chain instead of leaking a stale trigger.
             if (mediaDownloading(a, a.chats[a.selected_chat].jid.slice(), message.id.slice())) {
                 a.audio_chain_waiting = true;
                 a.audio_chain_id.set(message.id.slice());
             }
         }
-        // A busy store means the next note cannot start; the chain stops here.
         return true;
     }
     return false;
@@ -5900,15 +5276,12 @@ fn advanceAudio(a: *App, after_id: []const u8) bool {
 fn updateAudioPlayback(a: *App) void {
     const player = a.audio_player orelse return;
     const state = player.state();
-    // Fire only on the transition into .ended: the player reports .ended
-    // continuously afterwards, and the mapped UI state becomes .ready.
     if (state == .ended and (a.audio_state == .playing or a.audio_state == .paused)) {
         var ended_id: [191]u8 = undefined;
         const ended = a.audio_playing_id.slice();
         const ended_len = @min(ended.len, ended_id.len);
         @memcpy(ended_id[0..ended_len], ended[0..ended_len]);
-        saveAudioPos(a); // finished: resets the note to the start
-        // The next note is playing; skip the stale snapshot handling below.
+        saveAudioPos(a);
         if (advanceAudio(a, ended_id[0..ended_len])) return;
     }
     if (player.start_failed.load(.acquire) and state == .idle) {
@@ -5997,8 +5370,6 @@ fn decodeGifVideoFrame(message: *Message) bool {
     var info = std.mem.zeroes(win.BITMAPINFO);
     info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
     info.bmiHeader.biWidth = message.bitmap_width;
-    // The reference decode proved MF RGB32 Lock2D rows start at the top
-    // image row, so the DIB must be top-down to match.
     info.bmiHeader.biHeight = -message.bitmap_height;
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
@@ -6083,9 +5454,6 @@ fn ensureGifVideoBitmap(message: *Message) void {
         _ = output_type.?.*.lpVtbl.*.SetGUID.?(output_type.?, &win.MF_MT_SUBTYPE, &win.MFVideoFormat_RGB32);
         _ = output_type.?.*.lpVtbl.*.SetUINT64.?(output_type.?, &win.MF_MT_FRAME_SIZE, (@as(u64, target_width) << 32) | target_height);
         if (reader.*.lpVtbl.*.SetCurrentMediaType.?(reader, win.MF_SOURCE_READER_FIRST_VIDEO_STREAM, null, output_type.?) < 0) return;
-        // Media Foundation may ignore the requested size; query what it
-        // actually produces, otherwise frames read with the wrong width
-        // come out sheared and distorted.
         var effective_type: ?*win.IMFMediaType = null;
         if (reader.*.lpVtbl.*.GetCurrentMediaType.?(reader, win.MF_SOURCE_READER_FIRST_VIDEO_STREAM, &effective_type) >= 0 and effective_type != null) {
             var packed_size: win.UINT64 = 0;
@@ -6127,8 +5495,6 @@ fn ensureVideoBitmap(message: *Message) void {
 
 fn ensureBitmap(a: *App, message: *Message) void {
     if (message.bitmap != null) {
-        // Already decoded: refresh recency so a long-visible image is not
-        // mistaken for stale by the LRU cap below.
         noteMessageBitmap(message);
         return;
     }
@@ -6171,11 +5537,6 @@ fn ensureBitmap(a: *App, message: *Message) void {
     fillBitmapFromSource(a, message, @ptrCast(frame), source_width, source_height);
 }
 
-// Windows WIC has no WebP codec, so stickers (WebP files) would never render.
-// Decode them with the vendored libwebp; animated stickers are handled by
-// firstAnimationFrame (the simple API cannot decode animation) and show the
-// first frame. ponytail: frames are not animated on screen; use WebPAnimDecoder
-// (vendor src/demux) if stickers should move later.
 fn ensureWebPBitmap(a: *App, message: *Message) void {
     const path_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.local_path.slice()) catch return;
     defer a.allocator.free(path_utf8);
@@ -6186,8 +5547,6 @@ fn ensureWebPBitmap(a: *App, message: *Message) void {
     if (webp.WebPGetFeatures(data.ptr, data.len, &features) != webp.VP8_STATUS_OK) return;
 
     if (features.has_animation == 0) {
-        // Decode straight to the display box: scaling inside libwebp avoids
-        // ever materializing the full-size frame.
         const fit = webp_detect.fitBox(@intCast(features.width), @intCast(features.height), 420, 250);
         var config: webp.WebPDecoderConfig = undefined;
         if (webp.WebPInitDecoderConfig(&config) == 0) return;
@@ -6197,8 +5556,6 @@ fn ensureWebPBitmap(a: *App, message: *Message) void {
         config.output.colorspace = webp.MODE_RGBA;
         const status = webp.WebPDecode(data.ptr, data.len, &config);
         if (status == webp.VP8_STATUS_OK and config.output.u.RGBA.stride == @as(c_int, @intCast(fit.width * 4))) {
-            // CreateBitmapFromMemory copies synchronously, so the decoder
-            // buffer can be freed once the WIC bitmap holds the pixels.
             var wic_bitmap: [*c]win.IWICBitmap = null;
             const create_hr = a.wic_factory.*.lpVtbl.*.CreateBitmapFromMemory.?(
                 a.wic_factory,
@@ -6217,7 +5574,6 @@ fn ensureWebPBitmap(a: *App, message: *Message) void {
                 return;
             }
         } else webp.WebPFreeDecBuffer(&config.output);
-        // Fall through to the full-size decode paths below on failure.
     }
 
     var width: c_int = 0;
@@ -6231,8 +5587,6 @@ fn ensureWebPBitmap(a: *App, message: *Message) void {
     defer webp.WebPFree(pixels);
     if (pixels == null or width <= 0 or height <= 0) return;
 
-    // Wrap the decoded pixels as a WIC bitmap so the shared convert/scale/DIB
-    // path can be reused.
     var wic_bitmap: [*c]win.IWICBitmap = null;
     const create_hr = a.wic_factory.*.lpVtbl.*.CreateBitmapFromMemory.?(
         a.wic_factory,
@@ -6249,8 +5603,6 @@ fn ensureWebPBitmap(a: *App, message: *Message) void {
     fillDibFromWic(a, message, @ptrCast(wic_bitmap), @intCast(width), @intCast(height));
 }
 
-// Copy a WIC source into the message's DIB at the given display size,
-// scaling down only when the source is larger than the display box.
 fn fillDibFromWic(a: *App, message: *Message, source: *win.IWICBitmapSource, source_width: win.UINT, source_height: win.UINT) void {
     const fit = webp_detect.fitBox(source_width, source_height, 420, 250);
     const target_width: win.UINT = fit.width;
@@ -6269,8 +5621,6 @@ fn fillDibFromWic(a: *App, message: *Message, source: *win.IWICBitmapSource, sou
         win.WICBitmapPaletteTypeCustom,
     ) < 0) return;
 
-    // libwebp already scaled the pixels to the display box; scaling again
-    // through the WIC scaler would resample a second time.
     if (source_width == target_width and source_height == target_height) {
         fillDibFromSource(a, message, @ptrCast(converter), target_width, target_height);
         return;
@@ -6302,8 +5652,6 @@ fn fillBitmapFromSource(a: *App, message: *Message, source: *win.IWICBitmapSourc
         win.WICBitmapPaletteTypeCustom,
     ) < 0) return;
 
-    // libwebp already scaled the pixels to the display box; scaling again
-    // through the WIC scaler would resample a second time.
     if (source_width == target_width and source_height == target_height) {
         fillDibFromSource(a, message, @ptrCast(converter), target_width, target_height);
         return;
@@ -6345,16 +5693,12 @@ fn fillDibFromSource(a: *App, message: *Message, source: *win.IWICBitmapSource, 
     noteMessageBitmap(message);
 }
 
-// Current wall-clock unix seconds via FILETIME: std.time lost its
-// timestamp helpers in Zig 0.16 and the app is Windows-only anyway.
 fn nowUnixSeconds() i64 {
     var ft: win.FILETIME = undefined;
     win.GetSystemTimeAsFileTime(&ft);
     return filetimeToUnixSeconds(ft);
 }
 
-/// FILETIME (100ns ticks since 1601) to unix seconds. The heartbeat watchdog
-/// compares the file's stamp against wall-clock time.
 fn filetimeToUnixSeconds(ft: win.FILETIME) i64 {
     const q: i64 = (@as(i64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
     return @divTrunc(q - 116444736000000000, 10_000_000);
@@ -6362,12 +5706,8 @@ fn filetimeToUnixSeconds(ft: win.FILETIME) i64 {
 
 fn startMediaDownload(a: *App, chat_jid: []const u8, message_id: []const u8) bool {
     if (wacliPendingGet(a, .statuses) > 0) return false;
-    // A send in flight may still be relying on live sync staying paused;
-    // callers treat false as "try later" and the next tick retries.
     if (a.send_child != null or a.pending_send_count > 0 or a.read_child != null or
         a.archive_child != null or avatarBusy(a)) return false;
-    // Never two children for one attachment: every caller (auto scan, audio
-    // chain, manual click) funnels through here.
     if (mediaDownloading(a, chat_jid, message_id)) return false;
     const slot = freeMediaSlot(a) orelse return false;
     slot.jid.set(chat_jid);
@@ -6387,9 +5727,6 @@ fn startMediaDownload(a: *App, chat_jid: []const u8, message_id: []const u8) boo
     }) catch {
         slot.jid.set("");
         slot.id.set("");
-        // Count a spawn failure like a download failure (bounded retries,
-        // cooldown) instead of instantly blacklisting: a manual click must
-        // not be lost to one transient spawn error.
         noteMediaFailure(a, chat_jid, message_id);
         setStatus(a, "Could not start attachment download");
         if (!mediaBusy(a)) startSync(a);
@@ -6401,35 +5738,23 @@ fn startMediaDownload(a: *App, chat_jid: []const u8, message_id: []const u8) boo
     return true;
 }
 
-/// Starts a download for one message. Returns true only when state actually
-/// changed: a child spawned, or a manual click was queued for when a slot
-/// frees up. Every false answer means "nothing happened", which is what the
-/// drain loop keys on so a startable-looking candidate can never spin it.
 fn downloadMedia(a: *App, message_index: usize, automatic: bool) bool {
     if (message_index >= a.message_count or a.selected_chat >= a.chat_count) return false;
     if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]))) return false;
     const message = &a.messages[message_index];
     if (message.media_type.len == 0 or message.id.len == 0) return false;
-    // Already on disk (e.g. a parallel download finished since the request):
-    // a retry must not re-download.
     if (!voice_sent.needsDownload(message.local_path.len > 0)) return false;
     if (automatic and media_drain.oversized(message.media_size)) return false;
     const chat = &a.chats[a.selected_chat];
-    // wacli media download is a WhatsApp-store call. Slack attachments fetch
-    // through requestSlackDownload and Telegram ones through the TDLib
-    // client; neither may reach here with their chat id as a WhatsApp jid.
     if (chat.provider != .whatsapp) return false;
     if (media_drain.wazi_135 and !automatic) {
         clearMediaFailure(a, chat.jid.slice(), message.id.slice());
         media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(chat.jid.slice(), message.id.slice()));
     }
-    // Already downloading in another slot: nothing to queue.
     if (mediaDownloading(a, a.chats[a.selected_chat].jid.slice(), message.id.slice())) return false;
     if (freeMediaSlot(a) == null or a.send_child != null or a.pending_send_count > 0 or
         a.read_child != null or a.archive_child != null or avatarBusy(a))
     {
-        // Store busy: remember one manual click and retry it when a slot
-        // frees up; automatic requests just wait for their next timer tick.
         if (!automatic) {
             a.pending_download_jid.set(chat.jid.slice());
             a.pending_download_id.set(message.id.slice());
@@ -6438,15 +5763,12 @@ fn downloadMedia(a: *App, message_index: usize, automatic: bool) bool {
         }
         return false;
     }
-    // A busy store waits for the next tick, just like a full slot.
     if (!startMediaDownload(a, chat.jid.slice(), message.id.slice())) return false;
     setStatus(a, if (automatic) "Downloading media..." else "Downloading attachment...");
     if (a.hwnd) |hwnd| _ = win.UpdateWindow(hwnd);
     return true;
 }
 
-// Suppress terminal failures this session and completed downloads until a
-// fresh message read confirms the local file. Verified files clear the entry.
 fn mediaAttempted(a: *const App, jid: []const u8, id: []const u8) bool {
     const hash = played.Set.pairKey(jid, id);
     for (a.media_attempts[0..a.media_attempt_count]) |attempt| if (attempt == hash) return true;
@@ -6472,8 +5794,6 @@ fn markMediaUnavailable(a: *App, jid: []const u8, id: []const u8) void {
     a.media_unavailable_count += 1;
 }
 
-// A success erases past failures so the bounded-retry table cannot fill
-// with attachments that recovered on their own.
 fn clearMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
     const hash = played.Set.pairKey(jid, id);
     media_drain.forgetAttempt(&a.media_unavailable, &a.media_unavailable_count, hash);
@@ -6500,7 +5820,6 @@ fn noteMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
     count += 1;
     const retry_after_ms = win.GetTickCount64() + 30_000;
     if (count >= max_media_retries) {
-        // Reclaim the table slot so 16 old failures cannot lock out new ones.
         if (matched) |entry| {
             entry.hash = 0;
             entry.count = 0;
@@ -6521,8 +5840,6 @@ fn noteMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
             return;
         }
     }
-    // ponytail: 16 attachments failing concurrently is implausible; if it
-    // happens, degrade to terminal marking rather than growing state.
     markMediaUnavailable(a, jid, id);
 }
 
@@ -6532,21 +5849,12 @@ fn isDownloadableMedia(message: *const Message) bool {
 
 fn autoDownloadNextMedia(a: *App) bool {
     if (a.status_ui.mode == .viewer) return autoDownloadStatus(a);
-    // Slots full: the next finished download re-enters here from the timer.
     if (freeMediaSlot(a) == null) return false;
     const now_ms = win.GetTickCount64();
     if (a.sync_child == null and a.media_burst_files > 0 and !media_drain.mayContinueBurst(a.media_burst_files, a.media_burst_started_ms, now_ms)) return false;
-    // Pausing live sync for background downloads is rate limited: the first
-    // download of a burst waits sync_gate.media_stop_gap_ms after the last
-    // pause, and the rest of the burst runs inside the same pause. A
-    // mark-read handed to the sync child finishes first.
     if (a.sync_child != null and (now_ms < a.media_resume_after_ms or a.read_child != null or
         !sync_gate.gapElapsed(a.last_sync_stop_ms, win.GetTickCount64(), sync_gate.media_stop_gap_ms))) return false;
-    // wacli media download only serves WhatsApp: scanning Slack or Telegram
-    // attachments would name a candidate whose download always returns
-    // without starting one, and the drain would spin forever (WAZI-103).
     if (a.selected_chat >= a.chat_count or a.chats[a.selected_chat].provider != .whatsapp) return false;
-    // Newest first: the media the user is looking at arrives first.
     if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]))) return false;
     const chat_jid = a.chats[a.selected_chat].jid.slice();
     var candidates: [max_messages]media_drain.Candidate = undefined;
@@ -6575,22 +5883,11 @@ fn autoDownloadNextMedia(a: *App) bool {
         count += 1;
     }
     const pick = media_drain.selectNext(candidates[0..count], now_ms) orelse return false;
-    // A started download is the only progress the drain may count on; a
-    // spawn failure or a slot snatched away reports false and stops it.
     return downloadMedia(a, pick, true);
 }
 
-// One stopSync/startSync per media burst, not per wave of downloads: refill
-// the freed slots from the chat's own missing-media scan first; startSync
-// skips itself while any slot is still busy, so live sync only comes back
-// once the burst is empty or reaches its sync-pause budget.
 fn drainMediaDownloads(a: *App) void {
     retryPendingDownload(a);
-    // WAZI-103: a turn that starts no download ends the drain, so a
-    // candidate that can never start (send child holding the store, spawn
-    // failure) cannot spin this loop on the UI thread; the step bound is a
-    // hard backstop on top. The entry event (a finished download) counts as
-    // the first change of state.
     var steps: usize = 0;
     var started = true;
     while (media_drain.mayDrainStep(steps, started) and freeMediaSlot(a) != null) {
@@ -6605,15 +5902,11 @@ fn ensureAvatarSession(a: *App) ?*avatar.Session {
     return a.avatar_session;
 }
 
-// The whole batch counts as busy, not just the fetch in flight: between two
-// fetches of one batch live sync is still paused and the store is ours.
 fn avatarBusy(a: *const App) bool {
     if (a.avatar_batch_active) return true;
     return if (a.avatar_session) |session| session.state() == .working else false;
 }
 
-// Work that must not wait behind, or race, an avatar batch for the store
-// lock. A queued send in particular must never sit behind picture fetches.
 fn avatarBatchBlocked(a: *App) bool {
     return a.read_child != null or a.pending_read_count > 0 or mediaBusy(a) or
         a.send_child != null or a.pending_send_count > 0 or
@@ -6621,9 +5914,6 @@ fn avatarBatchBlocked(a: *App) bool {
         wacliPendingGet(a, .reaction) > 0 or wacliPendingGet(a, .status_seen) > 0;
 }
 
-// The single path for every profile-picture fetch (chat list, open chat,
-// group participants): requestNextAvatar starts a batch, this finishes each
-// fetch and either chains the next one or ends the batch.
 fn checkAvatarDownload(a: *App) void {
     const session = a.avatar_session orelse {
         requestNextAvatar(a);
@@ -6652,16 +5942,12 @@ fn checkAvatarDownload(a: *App) void {
     requestNextAvatar(a);
 }
 
-// Missing, stale or never-asked pictures: open chat first, then the chat
-// list in order, then any other chat avatar, then group participants last.
 fn avatarWanted(entry: *const AvatarEntry) bool {
     if (entry.path.len == 0) return false;
     return entry.status == .unknown or (entry.status == .ready and entry.refresh);
 }
 
 fn nextAvatarTarget(a: *App) ?AvatarTarget {
-    // avatarForChat's fetch is a wacli WhatsApp-store call; Slack and
-    // Telegram chat ids must never be looked up (or created) here.
     if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp) {
         if (avatarForChat(a, a.chats[a.selected_chat].jid.slice())) |entry| {
             if (avatarWanted(entry)) return .{ .chat = avatarIndex(a, entry) };
@@ -6675,8 +5961,6 @@ fn nextAvatarTarget(a: *App) ?AvatarTarget {
     for (a.avatars[0..a.avatar_count], 0..) |*entry, index| {
         if (avatarWanted(entry)) return .{ .chat = index };
     }
-    // Lower priority than every chat icon above: a participant fetch never
-    // jumps ahead of a chat icon that still needs one.
     for (a.participant_avatars[0..a.participant_avatar_count], 0..) |*entry, index| {
         if (avatarWanted(entry)) return .{ .participant = index };
     }
@@ -6687,13 +5971,7 @@ fn avatarIndex(a: *const App, entry: *const AvatarEntry) usize {
     return (@intFromPtr(entry) - @intFromPtr(&a.avatars[0])) / @sizeOf(AvatarEntry);
 }
 
-// Start a batch: pause live sync once, then fetch up to
-// sync_gate.avatar_batch_max pictures back to back. Batches are spaced by
-// sync_gate so a long chat list cannot keep pausing live sync, and every
-// answer (picture, no picture, failure) is cached on disk so a relaunch or
-// reinstall does not ask WhatsApp again (see avatarForChat).
 fn requestNextAvatar(a: *App) void {
-    // Picture fetches need a live session; failures would be cached on disk.
     if (a.sync_logged_out or a.pairing_process != null) return;
     if (avatarBusy(a) or avatarBatchBlocked(a)) return;
     const now = win.GetTickCount64();
@@ -6717,8 +5995,6 @@ fn startAvatarFetch(a: *App, target: AvatarTarget) bool {
         .chat => |index| if (index < a.avatar_count) &a.avatars[index] else return false,
         .participant => |index| if (index < a.participant_avatar_count) &a.participant_avatars[index] else return false,
     };
-    // Whatever happens next, this entry is not picked again this session
-    // unless its answer says so.
     entry.refresh = false;
     const session = ensureAvatarSession(a) orelse return false;
     const destination = std.unicode.utf16LeToUtf8Alloc(a.allocator, entry.path.slice()) catch return false;
@@ -6728,16 +6004,12 @@ fn startAvatarFetch(a: *App, target: AvatarTarget) bool {
         session.reset();
         return false;
     }
-    // A stale picture keeps showing while it is refreshed.
     if (entry.status == .unknown) entry.status = .loading;
     a.avatar_active_index = target;
     a.avatar_batch_fetched += 1;
     return true;
 }
 
-// Record a fetch answer in memory and on disk. "<hash>.img" is the picture,
-// "<hash>.img.none" says the chat has no picture, "<hash>.img.fail" says the
-// last fetch failed; their modification times drive sync_gate.classifyAvatar.
 fn applyAvatarResult(a: *App, entry: *AvatarEntry, state: avatar.State) void {
     var buffer: [540]u16 = undefined;
     switch (state) {
@@ -6775,14 +6047,12 @@ fn avatarMarkerPath(entry: *const AvatarEntry, suffix: []const u8, buffer: *[540
     return @ptrCast(buffer);
 }
 
-// Last-write time in unix seconds, null when the file is missing.
 fn fileStampSecs(path: [*:0]const u16) ?i64 {
     var attributes = std.mem.zeroes(win.WIN32_FILE_ATTRIBUTE_DATA);
     if (win.GetFileAttributesExW(path, win.GetFileExInfoStandard, &attributes) == 0) return null;
     return filetimeToUnixSeconds(attributes.ftLastWriteTime);
 }
 
-// Recreate an empty marker file so its modification time is now.
 fn touchFileW(path: [*:0]const u16) void {
     _ = win.DeleteFileW(path);
     const handle = win.CreateFileW(path, win.GENERIC_WRITE, 0, null, win.CREATE_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
@@ -6874,19 +6144,11 @@ fn writeFileWin(path_utf8: []const u8, data: []const u8) void {
     _ = win.WriteFile(handle, data.ptr, @intCast(data.len), &written, null);
 }
 
-// WAZI-67 cache helpers: last good chats read and per-chat message reads
-// survive a relaunch (an update included) so the app never opens blank.
-// Files live in %LOCALAPPDATA%\Messages, which the updater never touches,
-// and are named for the linked account so two accounts on one PC can never
-// see each other's cached data.
-
 fn messagesDirPath(a: *App, part: []const u8) ?[]u8 {
     const dir = std.fs.path.dirname(a.avatar_dir) orelse return null;
     return std.fs.path.join(a.allocator, &.{ dir, part }) catch null;
 }
 
-// Write to a same-directory temp file, then replace: a crash mid-write can
-// never leave a truncated cache visible to the next launch.
 fn writeCacheFileAtomic(a: *App, path: []const u8, data: []const u8) bool {
     const tmp = std.fmt.allocPrint(a.allocator, "{s}.{x}.tmp", .{ path, win.GetTickCount64() }) catch return false;
     defer a.allocator.free(tmp);
@@ -6904,8 +6166,6 @@ fn writeCacheFileAtomic(a: *App, path: []const u8, data: []const u8) bool {
     }
     const path_wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch return false;
     defer a.allocator.free(path_wide);
-    // Sharing violations (antivirus, a stuck reader) must never be fatal;
-    // the next successful read simply overwrites the cache again.
     if (win.MoveFileExW(tmp_wide.ptr, path_wide.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) == 0) {
         _ = win.DeleteFileW(tmp_wide.ptr);
         return false;
@@ -6913,9 +6173,6 @@ fn writeCacheFileAtomic(a: *App, path: []const u8, data: []const u8) bool {
     return true;
 }
 
-// Delete one account's launch-cache files before its tag is dropped: the
-// 14-day prune only visits directories whose tag it knows, so unlinking an
-// account without this would strand its message snapshots forever.
 fn deleteAccountCaches(a: *App) void {
     const tag = a.cache_tag.slice();
     if (tag.len == 0) return;
@@ -6942,7 +6199,7 @@ fn deleteAccountCaches(a: *App) void {
 
 fn chatsCachePath(a: *App) ?[]u8 {
     const tag = a.cache_tag.slice();
-    if (tag.len == 0) return null; // identity unknown: cache disabled
+    if (tag.len == 0) return null;
     var name_buffer: [64]u8 = undefined;
     const name = std.fmt.bufPrint(&name_buffer, "chats-{s}.json", .{tag}) catch return null;
     return messagesDirPath(a, name);
@@ -6959,9 +6216,6 @@ fn saveChatsCache(a: *App, raw: []const u8) void {
     removeOtherChatsCaches(a, path);
 }
 
-// The cache file is named for the linked account; when the account changes
-// the old snapshot would linger forever, so drop every chats-*.json that is
-// not the file just written.
 fn removeOtherChatsCaches(a: *App, keep_path: []const u8) void {
     const dir = std.fs.path.dirname(a.avatar_dir) orelse return;
     const pattern = messagesDirPath(a, "chats-*.json") orelse return;
@@ -7003,7 +6257,6 @@ fn loadChatsCache(a: *App) void {
 }
 
 fn msgCacheDirName(a: *App, buffer: []u8) ?[]const u8 {
-    // Empty tag means the account identity is unknown: the cache is off.
     if (a.cache_tag.len == 0) return null;
     return std.fmt.bufPrint(buffer, "msg-cache-{s}", .{a.cache_tag.slice()}) catch null;
 }
@@ -7030,11 +6283,6 @@ fn loadMsgCacheDisk(a: *App, jid: []const u8) ?[]u8 {
     return a.allocator.dupe(u8, payload) catch null;
 }
 
-// Same 14-day window as the media cache: message snapshots older than that
-// are pruned at startup so the folders cannot grow without bound. Every
-// account's directory is visited, because an account that was replaced
-// without the remove flow leaves its snapshots behind. The scan is capped;
-// it never follows subdirectories or reparse points.
 fn pruneStaleMsgCache(a: *App) void {
     const dir = std.fs.path.dirname(a.avatar_dir) orelse return;
     const dirs_pattern = messagesDirPath(a, "msg-cache-*") orelse return;
@@ -7076,9 +6324,7 @@ fn pruneStaleInDir(a: *App, parent: []const u8, entry: *const win.WIN32_FIND_DAT
         if (!is_dir and (find.dwFileAttributes & win.FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
             const ticks: i64 = (@as(i64, find.ftLastWriteTime.dwHighDateTime) << 32) | find.ftLastWriteTime.dwLowDateTime;
             const written = @divTrunc(ticks - 116444736000000000, 10_000_000);
-            if (now - written > media_cache_days * 24 * 60 * 60) {
-                // FindFirstFileW returns bare names: join the cache directory
-                // or the delete would look in the process's current directory.
+            if (now - written > media_cache_eviction_days * 24 * 60 * 60) {
                 const file_len = std.mem.indexOfScalar(u16, &find.cFileName, 0) orelse find.cFileName.len;
                 const file_name = std.unicode.utf16LeToUtf8Alloc(a.allocator, find.cFileName[0..file_len]) catch continue;
                 defer a.allocator.free(file_name);
@@ -7133,8 +6379,6 @@ fn appendDebugLog(a: *App, comptime format: []const u8, args: anytype) void {
 
 fn scheduleNextTranscription(a: *App) void {
     if (!a.deepgram_configured) return;
-    // Keep the pipeline serial: wait until the previous transcript has been
-    // formatted so no result is overwritten.
     if (a.openrouter_session) |format_session| {
         const format_state = format_session.state();
         if (format_state == .recording or format_state == .transcribing) return;
@@ -7144,7 +6388,6 @@ fn scheduleNextTranscription(a: *App) void {
     if (state != .idle and state != .ready and state != .failed) return;
     var candidate: ?usize = null;
     var index: usize = a.message_count;
-    // Newest first: the voice notes the user just received transcribe first.
     while (index > 0) {
         index -= 1;
         const message = &a.messages[index];
@@ -7155,8 +6398,6 @@ fn scheduleNextTranscription(a: *App) void {
     }
     if (candidate == null) return;
     const message = &a.messages[candidate.?];
-    // Notes arrive in German or English (or mixed): always detect per note.
-    // The dictation language setting only applies to the microphone button.
     const language: dictation.Language = .automatic;
     const path_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.local_path.slice()) catch return;
     defer a.allocator.free(path_utf8);
@@ -7234,7 +6475,6 @@ fn pollFormatting(a: *App) void {
     if (state == .ready) {
         var buffer: [16384]u8 = undefined;
         if (session.takeResult(&buffer)) |formatted| {
-            // A chat switch must not discard the only copy of a finished summary.
             if (formatted.len > 0 and std.mem.eql(u8, key.account, a.cache_tag.slice())) {
                 saveFormattedCache(a, key, formatted);
                 if (a.displayed_provider == .whatsapp and std.mem.eql(u8, key.account, a.displayed_account.slice()) and std.mem.eql(u8, key.chat, a.displayed_jid.slice())) {
@@ -7278,7 +6518,6 @@ fn scheduleNextFormatting(a: *App) void {
     const message = &a.messages[message_index];
     const transcript_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.transcript.slice()) catch return;
     defer a.allocator.free(transcript_utf8);
-    // Who is talking: his own note is summarised as "I", a received one by the contact's name.
     var contact_buffer: [192]u8 = undefined;
     const contact_name = blk: {
         const named = if (message.sender.len > 0 and !message.from_me) message.sender.slice() else if (a.selected_chat < a.chat_count) a.chats[a.selected_chat].name.slice() else &[_]u16{};
@@ -7334,11 +6573,6 @@ fn checkMediaDownload(a: *App) void {
             var got_code = false;
             if (child.id) |handle| got_code = win.GetExitCodeProcess(handle, &code) != 0;
             if (got_code and code == win.STILL_ACTIVE and !timed_out) continue;
-            // The timeout covers every stuck case, including a missing or
-            // dead handle where the exit code can no longer be read; a slot
-            // in that state is reaped instead of wedging forever. A child
-            // that already exited keeps its real exit code even if it ran
-            // past the timeout, so a finished download is not called failed.
             if (timed_out or !got_code) _ = child.kill(a.io);
             if (!got_code) code = 1;
             _ = child.wait(a.io) catch {};
@@ -7350,8 +6584,6 @@ fn checkMediaDownload(a: *App) void {
             }
             if (std.mem.eql(u8, slot.jid.slice(), status_view.broadcast)) status_finished = true;
             image_viewer.downloadFinished(a, slot.jid.slice(), slot.id.slice(), code == 0);
-            // The chained note's own slot decides the chain's fate; an
-            // unrelated slot finishing must leave the chain armed.
             if (std.mem.eql(u8, slot.id.slice(), a.audio_chain_id.slice())) chain_slot_done = true;
             slot.child = null;
             slot.jid.set("");
@@ -7359,9 +6591,6 @@ fn checkMediaDownload(a: *App) void {
             if (code == 0) finished_ok += 1 else finished_failed += 1;
         }
     }
-    // One refresh per tick. refreshMessages goes through the async wacli
-    // worker (never the UI thread); its --read-only query may wait on the
-    // store lock behind live downloads, which is fine for a worker call.
     if (finished_ok + finished_failed > 0) {
         drainMediaDownloads(a);
         if (status_finished) refreshStatuses(a, true);
@@ -7379,12 +6608,8 @@ fn checkMediaDownload(a: *App) void {
                     break;
                 }
             }
-            // The chained note did not come down (no file after the
-            // refresh): end the autoplay chain like any other failure.
             if (!chain_started and a.audio_state != .empty) a.audio_auto_advance = false;
         }
-        // With mixed results, lead with the success; a lone failure is the
-        // only case where the failure message is the whole story.
         if (finished_ok > 0) {
             setStatus(a, "Attachment downloaded");
         } else {
@@ -7446,9 +6671,6 @@ fn playerCallbackRelease(_: [*c]win.IMFPMediaPlayerCallback) callconv(.winapi) w
 }
 
 fn playerCallbackEvent(_: [*c]win.IMFPMediaPlayerCallback, event: [*c]win.MFP_EVENT_HEADER) callconv(.winapi) void {
-    // Runs on an MFPlay worker thread; deliberately touches no window state
-    // to avoid cross-thread races. On playback failure the window simply
-    // stops and the user closes it with Esc or the close button.
     _ = event;
 }
 
@@ -7466,8 +6688,6 @@ var player_class_registered: bool = false;
 fn closePlayer(a: *App) void {
     a.player_fullscreen = false;
     if (a.mf_player) |player| {
-        // Drop the field first: Shutdown pumps messages on the STA, and a
-        // re-entrant paint or resize must not see a released player.
         a.mf_player = null;
         _ = player.lpVtbl.*.Shutdown.?(player);
         _ = player.lpVtbl.*.Release.?(player);
@@ -7498,7 +6718,7 @@ fn playerProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                 togglePlayerFullscreen(a, hwnd);
                 return 0;
             }
-            if (wparam == 27) { // escape: leave fullscreen first, then close
+            if (wparam == 27) {
                 if (a.player_fullscreen) {
                     togglePlayerFullscreen(a, hwnd);
                 } else {
@@ -7512,11 +6732,9 @@ fn playerProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             return 0;
         },
         win.WM_SIZE => {
-            // MFPlay does not move its video surface on its own.
             if (a.mf_player) |player| _ = player.lpVtbl.*.UpdateVideo.?(player);
         },
         win.WM_PAINT => {
-            // Paint ordering per the MFPlay docs: erase, present, validate.
             var ps = win.PAINTSTRUCT{};
             const hdc = win.BeginPaint(hwnd, &ps);
             if (a.mf_player) |player| _ = player.lpVtbl.*.UpdateVideo.?(player);
@@ -7568,8 +6786,6 @@ fn playVideoInline(a: *App, message: *const Message) void {
     _ = win.ShowWindow(hwnd, win.SW_SHOW);
 }
 
-// WAZI-68: play a resolved stream URL (YouTube googlevideo, provider CDNs)
-// in the same MFPlay window used for downloaded videos.
 fn playUnfurlVideo(a: *App, entry: *const UnfurlEntry) void {
     if (entry.play_url.len == 0) return;
     if (!mf_lazy.ensureStarted()) {
@@ -7598,7 +6814,6 @@ fn openPlayerWindow(a: *App, width: i32, height: i32) ?win.HWND {
         const class_brush = win.CreateSolidBrush(color_bg);
         var class = win.WNDCLASSEXW{
             .cbSize = @sizeOf(win.WNDCLASSEXW),
-            // Double clicks toggle fullscreen, so the class must see them.
             .style = win.CS_HREDRAW | win.CS_VREDRAW | win.CS_DBLCLKS,
             .lpfnWndProc = playerProc,
             .hInstance = a.instance,
@@ -7631,8 +6846,6 @@ fn openPlayerWindow(a: *App, width: i32, height: i32) ?win.HWND {
     return hwnd;
 }
 
-// Fullscreen for the video player: borderless window covering the monitor,
-// remembered placement restored on exit. ESC exits fullscreen first.
 fn togglePlayerFullscreen(a: *App, hwnd: win.HWND) void {
     const style = win.GetWindowLongPtrW(hwnd, win.GWL_STYLE);
     if (!a.player_fullscreen) {
@@ -7724,8 +6937,6 @@ fn unfurlEntryFor(a: *App, message: *Message) ?*UnfurlEntry {
         entry = &a.unfurl_entries[a.unfurl_entry_count];
         a.unfurl_entry_count += 1;
     } else {
-        // Cache full: reuse the oldest slot. Its bitmap is deleted here on
-        // the UI thread; no other thread owns entry bitmaps.
         entry = &a.unfurl_entries[a.unfurl_evict_slot];
         a.unfurl_evict_slot = (a.unfurl_evict_slot + 1) % max_unfurl_entries;
         if (entry.thumb) |thumb| _ = win.DeleteObject(thumb);
@@ -7733,8 +6944,6 @@ fn unfurlEntryFor(a: *App, message: *Message) ?*UnfurlEntry {
     }
     entry.provider = message.unfurl_provider;
     entry.id.set(message.unfurl_id.slice());
-    // The original message link is the fetch target; classify() already
-    // vetted its host against the page allowlist.
     if (message.unfurl_canonical.len > 0) {
         var canonical_buffer: [unfurl.max_canonical_len]u8 = undefined;
         @memcpy(canonical_buffer[0..message.unfurl_canonical.len], message.unfurl_canonical.slice());
@@ -7783,13 +6992,10 @@ fn drawUnfurlCard(hdc: win.HDC, a: *App, message: *Message, x: i32, top: i32, wi
         _ = win.SetStretchBltMode(hdc, win.HALFTONE);
         _ = win.StretchBlt(hdc, x, top, unfurl_thumb_width, unfurl_card_height, memory, 0, 0, 320, 180, win.SRCCOPY);
     } else {
-        // Placeholder: provider tint with a play circle until (or unless) a
-        // thumbnail arrives.
         const tint = win.CreateSolidBrush(unfurlPlaceholderColor(message.unfurl_provider)) orelse return;
         defer _ = win.DeleteObject(tint);
         _ = win.FillRect(hdc, &.{ .left = x, .top = top, .right = thumb_right, .bottom = bottom }, tint);
     }
-    // Play affordance over the thumbnail half.
     const play_brush = win.CreateSolidBrush(theme.on_surface) orelse return;
     defer _ = win.DeleteObject(play_brush);
     const old_play = win.SelectObject(hdc, play_brush);
@@ -7803,7 +7009,6 @@ fn drawUnfurlCard(hdc: win.HDC, a: *App, message: *Message, x: i32, top: i32, wi
     _ = win.Polygon(hdc, &points, 3);
     _ = win.SelectObject(hdc, old_play);
 
-    // Title and source on the right half.
     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(hdc, color_text);
     var title: []const u16 = std.unicode.utf8ToUtf16LeStringLiteral("Loading…")[0..];
@@ -7830,8 +7035,6 @@ fn drawUnfurlCard(hdc: win.HDC, a: *App, message: *Message, x: i32, top: i32, wi
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
 }
 
-// Click on a card: play in place when a stream was resolved, otherwise open
-// the video externally (the ticket's fallback for refused embeds).
 fn openUnfurlCard(a: *App, message: *const Message) void {
     for (a.unfurl_entries[0..a.unfurl_entry_count]) |*entry| {
         if (entry.provider != message.unfurl_provider) continue;
@@ -7846,8 +7049,6 @@ fn openUnfurlCard(a: *App, message: *const Message) void {
         return;
     }
 }
-
-// ===== background unfurl fetches (WAZI-68) =====
 
 var unfurl_fetch_count = std.atomic.Value(u32).init(0);
 
@@ -7877,8 +7078,6 @@ fn startUnfurlFetch(a: *App, entry: *UnfurlEntry, url_utf8: []const u8) void {
         entry.status = .failed;
         return;
     }
-    // Bounded concurrency: over the cap the entry stays .loading and a later
-    // paint (new entry creation path) retries; no fetch storm while scrolling.
     if (unfurl_fetch_count.load(.monotonic) >= max_unfurl_fetches) return;
     const page = std.heap.page_allocator;
     const url = page.dupe(u8, url_utf8) catch {
@@ -7909,12 +7108,6 @@ fn startUnfurlFetch(a: *App, entry: *UnfurlEntry, url_utf8: []const u8) void {
     _ = unfurl_fetch_count.fetchAdd(1, .monotonic);
 }
 
-// HTTPS GET with the unfurl allowlist enforced on the original URL. WinHTTP
-// redirects stay https-only (httpGet sets that policy); cross-host https
-// redirects are accepted but the target host was checked by classify() at
-// the entry point, so this fetch can only start from a known provider host.
-// ponytail: redirect targets are not re-allowlisted; tighten if a provider
-// starts redirecting off-domain.
 fn httpGetChecked(allocator: std.mem.Allocator, url: []const u8, comptime kind: unfurl.FetchKind, max_bytes: usize) ![]u8 {
     switch (kind) {
         .page => if (!unfurl.isPageFetchAllowed(url)) return error.UpdateBadUrl,
@@ -7991,8 +7184,6 @@ fn unfurlThreadMain(ctx: *UnfurlContext) void {
                         }
                     } else |_| {}
                 }
-                // Best-effort direct stream: when YouTube refuses (signature,
-                // age gate, PO tokens) the card falls back to external open.
                 if (httpGetChecked(allocator, ctx.canonical, .page, 1024 * 1024)) |page_body| {
                     defer allocator.free(page_body);
                     var stream_buffer: [2048]u8 = undefined;
@@ -8036,8 +7227,6 @@ fn unfurlThreadMain(ctx: *UnfurlContext) void {
     }
 }
 
-// Thumbnail decode: WIC from memory into a 320x180 PBGRA DIB (2x the card
-// area, so it stays crisp when the window is scaled up).
 fn decodeUnfurlThumb(a: *App, bytes: []const u8) ?win.HBITMAP {
     if (a.wic_factory == null or bytes.len == 0) return null;
     var stream: [*c]win.IWICStream = null;
@@ -8098,20 +7287,10 @@ fn applyUnfurlResult(a: *App, result: *UnfurlResult) void {
         if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
         return;
     }
-    // No matching entry: the message scrolled away and the slot was reused.
-    // Nothing to repaint; the result (and its thumbnail bytes) just expires.
 }
 
-// Total budget for message.bitmap pixel data across the whole message
-// list. Once over budget, the least-recently-shown bitmaps are freed
-// first; scrolling back to one re-decodes it from the file on disk.
 const message_bitmap_budget_bytes: usize = 24 * 1024 * 1024;
 
-// Registers message.bitmap's current size/recency with the app (or drops
-// it from accounting when the caller already freed the bitmap itself).
-// Called through app_ptr because the three bitmap-creation functions this
-// feeds (decodeGifVideoFrame, ensureVideoBitmap, fillDibFromSource) work
-// on a single *Message and do not otherwise need the whole *App.
 fn noteMessageBitmap(message: *Message) void {
     const a = app_ptr orelse return;
     if (message.bitmap != null) {
@@ -8122,7 +7301,6 @@ fn noteMessageBitmap(message: *Message) void {
     }
 }
 
-// Frees message.bitmap and drops it from the LRU's accounting.
 fn dropMessageBitmap(message: *Message) void {
     if (message.bitmap) |bitmap| {
         _ = win.DeleteObject(bitmap);
@@ -8131,9 +7309,6 @@ fn dropMessageBitmap(message: *Message) void {
     if (app_ptr) |a| a.message_bitmap_lru.remove(@intFromPtr(message));
 }
 
-// PROCESS_MEMORY_COUNTERS_EX (psapi.h). Declared by hand and called through
-// kernel32's own K32GetProcessMemoryInfo (available since Windows 7) so this
-// does not need to link psapi.dll just for one diagnostic log line.
 const PROCESS_MEMORY_COUNTERS_EX = extern struct {
     cb: win.DWORD = @sizeOf(@This()),
     PageFaultCount: win.DWORD = 0,
@@ -8155,8 +7330,6 @@ pub const MemorySnapshot = struct {
     module_count: u32 = 0,
 };
 
-/// Cheap enough to call from a timer tick or wazigctl status: one
-/// GetProcessMemoryInfo call plus a Toolhelp module walk.
 pub fn readMemorySnapshot() MemorySnapshot {
     var result = MemorySnapshot{};
     var counters = PROCESS_MEMORY_COUNTERS_EX{};
@@ -8175,8 +7348,6 @@ pub fn readMemorySnapshot() MemorySnapshot {
     return result;
 }
 
-// One line in launch-log.txt ~30s after startup, so a memory regression on
-// the user's machine shows up without asking them to attach a profiler.
 fn logStartupMemorySnapshot(a: *App) void {
     const snapshot = readMemorySnapshot();
     var buffer: [160]u8 = undefined;
@@ -8188,7 +7359,7 @@ fn logStartupMemorySnapshot(a: *App) void {
     appendLaunchLog(a, line);
 }
 
-const mf_idle_unload_ticks: u32 = 60; // ~60s at the 1s timer_refresh cadence
+const mf_idle_unload_ticks: u32 = 60;
 
 fn anyGifReaderOpen(a: *App) bool {
     for (a.messages[0..a.message_count]) |*message| {
@@ -8197,11 +7368,6 @@ fn anyGifReaderOpen(a: *App) bool {
     return false;
 }
 
-// Frees Media Foundation once nothing has needed it for a while: called
-// once per timer_refresh tick (~1s). Keeps the ~20 MB of MF/codec DLLs
-// (mfplat, mfreadwrite, mfplay, and the Windows.Media/mfcore/msvproc they
-// pull in) from sitting resident for a session that opened one GIF or
-// video and then went back to plain chat.
 fn tickMediaFoundationIdle(a: *App) void {
     if (!mf_lazy.isStarted()) {
         a.mf_idle_ticks = 0;
@@ -8251,7 +7417,6 @@ fn advanceGifs(a: *App) void {
 }
 
 fn refreshMessages(a: *App) void {
-    // A fresh view must retry even if its previous receipt failed or was canceled.
     cancelSlackMark(a);
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) {
         clearMessages(a);
@@ -8265,8 +7430,6 @@ fn refreshMessages(a: *App) void {
     }
     const chat = &a.chats[a.selected_chat];
     a.slack_history_hash = 0;
-    // Leaving WhatsApp also ends the retry cycle, even if the next WhatsApp
-    // chat has the same jid as before the provider switch.
     if (chat.provider != .whatsapp or !std.mem.eql(u8, a.msg_read_last_jid.slice(), chat.jid.slice())) {
         a.msg_read_last_jid.set(chat.jid.slice());
         a.msg_read_attempts = 0;
@@ -8276,11 +7439,6 @@ fn refreshMessages(a: *App) void {
     if (chat.provider == .slack) return refreshSlackHistory(a);
     const chat_changed = !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat));
     if (chat_changed) stopAudio(a);
-    // Instant first paint: render the chat's last known response from the
-    // cache while the fresh read runs in the worker. Only the fresh result
-    // (final) runs mark-as-read. The disk snapshot (WAZI-67) covers the
-    // first open of a chat after a relaunch, before the in-memory cache
-    // has been warmed.
     if (msgCacheGet(a, chat_key.of(chat))) |cached| {
         _ = applyMessageData(a, cached, false);
     } else if (loadMsgCacheDisk(a, chat.jid.slice())) |cached| {
@@ -8300,14 +7458,6 @@ fn refreshMessages(a: *App) void {
     _ = wacliEnqueue(a, job, true);
 }
 
-/// WAZI-79: the WAL tick that starts a chats read compares the open
-/// conversation against the chat row it loaded before, so a message that
-/// arrives while that read is in flight only shows up in the row once the
-/// read lands, and nothing re-reads the conversation then. When the fresh
-/// row's last-message stamp is newer than what the conversation on screen
-/// was painted from, queue one read for it: coalesced with any read already
-/// queued, and generation-guarded like every other messages read (a chat
-/// the user opens meanwhile supersedes it).
 fn reconcileOpenChat(a: *App) void {
     if (!a.user_viewed or a.chat_selection_pending) return;
     if (a.selected_chat >= a.chat_count) return;
@@ -8318,10 +7468,6 @@ fn reconcileOpenChat(a: *App) void {
     refreshMessages(a);
 }
 
-/// WAZI-79: a failed or empty messages read gets one or two further tries
-/// with a growing backoff (chat_reconcile.retryDelayTicks); a successful
-/// read clears the budget. When the budget is spent the failure stands
-/// until something else refreshes the chat.
 fn scheduleMessageReadRetry(a: *App) void {
     const attempt = a.msg_read_attempts + 1;
     const delay = chat_reconcile.retryDelayTicks(attempt) orelse return;
@@ -8335,10 +7481,6 @@ fn youSender(allocator: std.mem.Allocator) WideText(159) {
     return sender;
 }
 
-/// Resolve the reply target's display name from messages already parsed for
-/// this chat, using the same per-sender name and from-me logic the bubbles
-/// use. Older messages are parsed first, so the quoted message usually is in
-/// the list by the time the reply is reached; nothing found stays empty.
 fn resolveQuoteSender(a: *const App, chat_jid: []const u8, jid: []const u8) WideText(159) {
     if (jid.len == 0) return .{};
     for (a.messages[0..a.message_count]) |*prior| {
@@ -8346,9 +7488,6 @@ fn resolveQuoteSender(a: *const App, chat_jid: []const u8, jid: []const u8) Wide
         if (prior.from_me) return youSender(a.allocator);
         if (prior.sender.len > 0) return prior.sender;
     }
-    // In a direct chat the other party is the chat itself. Compare only the
-    // user part: jids can carry a device suffix (":5"). Anything else (an
-    // @lid alias, say) stays unnamed rather than risk calling them "You".
     if (!std.mem.endsWith(u8, chat_jid, "@g.us") and std.mem.eql(u8, jidUser(jid), jidUser(chat_jid))) {
         if (a.selected_chat < a.chat_count) return a.chats[a.selected_chat].name;
     }
@@ -8360,13 +7499,6 @@ fn jidUser(jid: []const u8) []const u8 {
     return jid[0..end];
 }
 
-// Most group participants are also 1:1 contacts whose avatar is already
-// cached under their own chat jid. A participant's in-group jid can carry a
-// different suffix for the same person (@lid vs @s.whatsapp.net), so match
-// on jidUser rather than the full jid. Reusing avatarForChat here means both
-// the in-memory entry and the on-disk cache (keyed by the contact's own jid)
-// are picked up exactly as a direct chat's icon would be, and no extra fetch
-// or table slot is spent on them.
 fn reuseContactAvatar(a: *App, sender_jid: []const u8) ?*AvatarEntry {
     if (sender_jid.len == 0) return null;
     const sender_user = jidUser(sender_jid);
@@ -8379,20 +7511,13 @@ fn reuseContactAvatar(a: *App, sender_jid: []const u8) ?*AvatarEntry {
     return null;
 }
 
-// Reuse first, the participant's own (bounded, lower-priority) table entry
-// second: see reuseContactAvatar and avatarForParticipant.
 fn avatarEntryForSender(a: *App, sender_jid: []const u8) ?*AvatarEntry {
     if (sender_jid.len == 0) return null;
     if (reuseContactAvatar(a, sender_jid)) |entry| return entry;
     return avatarForParticipant(a, sender_jid);
 }
 
-/// Paints the parsed payload into the conversation pane. Returns false when
-/// the payload carried no messages list at all (unparseable, wrong shape),
-/// so the caller can treat a 0-exit but empty read like a failed one and
-/// retry (WAZI-79); a valid `{"data":{"messages":[]}}` paints an empty
-/// conversation and counts as a real answer.
-fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
+fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return false;
     defer parsed.deinit();
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return false;
@@ -8435,10 +7560,6 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
         const filename = getString(object, "Filename");
         const local_path = getString(object, "LocalPath");
         const reaction_to = getString(object, "ReactionToID");
-        // Protocol/system rows (receipts, sync stubs) have an id but nothing
-        // to show: rendering them produced phantom "messages" that were never
-        // sent. See message_filter.zig. Filter before building the Message so
-        // no allocator-owned fields are populated for a dropped row.
         if (!message_filter.isRealMessage(.{
             .id = id,
             .text = text,
@@ -8464,7 +7585,6 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
                 text = parts.body;
             }
         }
-        // The media card already describes the attachment; keep real captions.
         message.text.set(a.allocator, if (media_drain.isPlaceholder(media_type, text)) "" else text);
         message.from_me = getBool(object, "FromMe");
         message.media_type.set(media_type);
@@ -8517,26 +7637,16 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
             }
         }
     }
-    // Preserve the reading position; only jump to the newest message when
-    // a different chat was opened. Scrolling used to reset to the bottom
-    // every time background refreshes redrew the conversation.
     if (chat_changed) a.scroll_y = 0;
     a.displayed_jid.set(chat.jid.slice());
     a.displayed_account = chat.account;
     a.displayed_provider = chat.provider;
-    // Only a fresh result marks the view current: a cached paint must keep
-    // the old timestamp so a later store change still triggers a real read.
-    if (final) a.displayed_timestamp.set(chat.timestamp.slice());
-    // Optimistic bubbles for queued/running sends in the open chat are wiped
-    // by the rebuild above; put them back until wacli stores the real message
-    // and a later refresh replaces them.
+    if (fresh_read) a.displayed_timestamp.set(chat.timestamp.slice());
     for (a.pending_sends[0..a.pending_send_count]) |*pending| {
         if (a.message_count >= max_messages) break;
         appendWhatsAppPending(a, pending, true);
     }
     applySentVoice(a, chat.jid.slice());
-    // Failures remembered from earlier sends: drop the ones the store now
-    // contains, then re-append the rest for the open chat.
     pruneFailedSends(a, chat_key.of(chat));
     for (a.failed_sends[0..a.failed_send_count]) |*failed| {
         if (a.message_count >= max_messages) break;
@@ -8544,20 +7654,13 @@ fn applyMessageData(a: *App, raw: []const u8, final: bool) bool {
     }
     a.msg_applied_hash = std.hash.Wyhash.hash(0, raw);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
-    if (final) markChatRead(a);
+    if (fresh_read) markChatRead(a);
     drainMediaDownloads(a);
-    if (a.message_count > 0) logStartupMilestone(a, .messages, if (final) "first messages shown (fresh)" else "first messages shown (cache)");
+    if (a.message_count > 0) logStartupMilestone(a, .messages, if (fresh_read) "first messages shown (fresh)" else "first messages shown (cache)");
     return true;
 }
 
-// Re-verify the linked account after the store was replaced, so the launch
-// cache is scoped to the account actually linked now. A failed probe keeps
-// the cache disabled for the rest of the session (fail-safe direction);
-// a restart recomputes it from scratch.
 fn enqueueCacheTagProbe(a: *App) void {
-    // Invalidate any probe already in flight before the pending check: an
-    // account change while one is queued must never let the old answer
-    // install its tag, and a fresh probe must follow the pending one.
     a.cache_tag_gen += 1;
     if (wacliPendingGet(a, .cache_tag) > 0) {
         a.cache_tag_probe_again = true;
@@ -8568,9 +7671,6 @@ fn enqueueCacheTagProbe(a: *App) void {
     _ = wacliEnqueue(a, job, false);
 }
 
-// Pending reads normally hold live sync off the store, but reads that are
-// waiting out a failure backoff leave it free (WAZI-88): no write child is
-// running and the next attempt is minutes away.
 fn readsPendingBlockingSync(a: *const App) bool {
     if (a.pending_read_count == 0) return false;
     const now = win.GetTickCount64();
@@ -8580,25 +7680,16 @@ fn readsPendingBlockingSync(a: *const App) bool {
     return false;
 }
 
-// wacli's live-sync warnings used to go to .stderr = .ignore and vanish.
-// One detached thread per sync child reads the child's stderr and appends
-// every line to the launch log, capped so a chatty child cannot fill it; past
-// the cap the pipe keeps draining but nothing more is logged, because a
-// reader that stops would let the child block on a full stderr pipe.
 const sync_stderr_line_max_bytes = 400;
 const sync_stderr_line_cap = 200;
 
 fn syncStderrMain(a: *App, stderr: std.Io.File) void {
-    // The reader owns the handle: startSync took it out of the child so
-    // kill/wait cannot close it under this thread.
     defer stderr.close(a.io);
     var buffer: [4096]u8 = undefined;
     var reader = stderr.readerStreaming(a.io, &buffer);
     var logged: usize = 0;
     while (true) {
         const raw = reader.interface.takeDelimiter('\n') catch |err| switch (err) {
-            // A line longer than the reader buffer: drain it to the newline
-            // but log nothing from it.
             error.StreamTooLong => {
                 while (true) {
                     const byte = reader.interface.takeByte() catch return;
@@ -8623,19 +7714,10 @@ fn syncStderrMain(a: *App, stderr: std.Io.File) void {
 }
 
 fn startSync(a: *App) void {
-    // A logged-out session fails at once on every start, so nothing restarts
-    // sync until pairing succeeds or the user restarts it from the palette.
     if (a.sync_logged_out or a.pairing_process != null) return;
-    // Hold off while any write job is pending: they pause live sync and
-    // serialize on the store lock, so don't fight them. checkSync restarts
-    // sync once the last job finishes.
     if (a.accounts_maintenance) {
-        // Pairing (re)creates the store; sync resumes automatically then.
         if (!whatsappStorePresent(a)) return;
         a.accounts_maintenance = false;
-        // The store was replaced, so the linked account may differ now.
-        // Drop the cache tag - which disables launch-cache reads and writes
-        // - until a fresh auth status verifies the new account (WAZI-67).
         a.cache_tag.set("");
         enqueueCacheTagProbe(a);
         a.last_sync_refresh_ms = null;
@@ -8644,9 +7726,6 @@ fn startSync(a: *App) void {
         mediaBusy(a) or (a.send_child != null and a.send_direct) or
         a.archive_child != null or a.pending_archive_count > 0 or avatarBusy(a) or
         wacliPendingGet(a, .reaction) > 0 or wacliPendingGet(a, .statuses) > 0) return;
-    // Refreshing groups and contacts on every restart got the account rate
-    // limited (429 rate-overlimit): do it on the first start of a run and
-    // then at most every sync_gate.sync_refresh_gap_ms.
     const now_ms = win.GetTickCount64();
     const refresh = sync_gate.gapElapsed(a.last_sync_refresh_ms, now_ms, sync_gate.sync_refresh_gap_ms);
     const base_argv = [_][]const u8{ a.wacli_path, "--events", "sync", "--follow", "--max-reconnect", "0", "--stale-threshold", "1m", "--download-media" };
@@ -8675,17 +7754,12 @@ fn startSync(a: *App) void {
     a.sync_child = child;
     if (a.media_burst_files > 0) a.media_resume_after_ms = now_ms + sync_gate.media_stop_gap_ms;
     a.media_burst_files = 0;
-    // The reader thread owns the stderr handle: take it out of the child so
-    // kill/wait cannot close it under the reader, which would race a
-    // recycled handle onto another file.
     const sync_stderr = a.sync_child.?.stderr;
     a.sync_child.?.stderr = null;
     if (sync_stderr) |file| {
         if (std.Thread.spawn(.{ .stack_size = 256 * 1024 }, syncStderrMain, .{ a, file })) |thread| {
             thread.detach();
         } else |_| {
-            // With no reader, closing the read end is all that keeps the
-            // child from blocking on a full stderr pipe.
             file.close(a.io);
         }
     }
@@ -8695,17 +7769,12 @@ fn startSync(a: *App) void {
     }
     appendLaunchLog(a, if (refresh) "sync: child started (refresh groups)" else "sync: child started");
     a.sync_started_secs = nowUnixSeconds();
-    // A fresh child gets a fresh watchdog: unknown heartbeat stamp, first
-    // check after sync_heartbeat_check_ticks, and the unreadable notice once.
     a.sync_heartbeat_ticks = 0;
     a.sync_heartbeat_mtime = 0;
     a.sync_heartbeat_unreadable = false;
     setStatus(a, "Live sync running");
 }
 
-// Every caller names its reason so the launch log shows what pauses live
-// sync ("sync: child stopped (avatars)"). Background callers check
-// last_sync_stop_ms through sync_gate before they get here.
 fn stopSync(a: *App, reason: []const u8) void {
     if (a.sync_child) |*child| {
         child.kill(a.io);
@@ -8717,18 +7786,9 @@ fn stopSync(a: *App, reason: []const u8) void {
     a.sync_child = null;
 }
 
-// Heartbeat watchdog tuning: look once every 30 one-second refresh ticks,
-// and treat a child older than stale_secs whose heartbeat is at least as
-// old and unmoved since the previous look as stuck. The same span also
-// keeps the watchdog from firing again right after a restart. 15 minutes,
-// not 3: wacli only touches the file on WhatsApp activity, and a quiet
-// account is not a dead socket.
 const sync_heartbeat_check_ticks: u32 = 30;
 const sync_heartbeat_stale_secs: i64 = 900;
 
-/// Last-write time of the sync heartbeat file in unix seconds, or null when
-/// the lookup fails (missing, locked, unreadable). Null means "do nothing":
-/// the watchdog must never restart a child on evidence it could not read.
 fn syncHeartbeatMtime(a: *App) ?i64 {
     if (a.sync_heartbeat_path.len == 0) return null;
     var attributes = std.mem.zeroes(win.WIN32_FILE_ATTRIBUTE_DATA);
@@ -8736,10 +7796,6 @@ fn syncHeartbeatMtime(a: *App) ?i64 {
     return filetimeToUnixSeconds(attributes.ftLastWriteTime);
 }
 
-/// Runs while the sync child is alive. A child past the stale span with a
-/// heartbeat just as old that did not advance since the previous check has a
-/// dead socket behind a live process: stop it, and checkSync respawns on the
-/// next tick. A missing or unreadable file fails closed and logs once.
 fn checkSyncHeartbeat(a: *App) void {
     a.sync_heartbeat_ticks += 1;
     if (a.sync_heartbeat_ticks < sync_heartbeat_check_ticks) return;
@@ -8755,7 +7811,6 @@ fn checkSyncHeartbeat(a: *App) void {
     a.sync_heartbeat_mtime = mtime;
     const now = nowUnixSeconds();
     const age = now - mtime;
-    // "Has not advanced" needs two looks: the first only records the stamp.
     if (previous == 0 or mtime != previous) return;
     if (now - a.sync_started_secs <= sync_heartbeat_stale_secs) return;
     if (age <= sync_heartbeat_stale_secs) return;
@@ -8769,8 +7824,6 @@ fn checkSyncHeartbeat(a: *App) void {
 
 const logged_out_status = "WhatsApp logged out. Press Ctrl+K, Manage accounts, Reconnect WhatsApp";
 
-/// The WhatsApp session is gone (revoked, or never re-paired): stop sync,
-/// keep it stopped, and point the user at the pairing window.
 fn markWhatsAppLoggedOut(a: *App) void {
     if (!a.sync_logged_out) appendLaunchLog(a, "sync: WhatsApp logged out, live sync halted");
     a.sync_logged_out = true;
@@ -8785,15 +7838,12 @@ fn checkPairing(a: *App) void {
     _ = win.CloseHandle(handle);
     a.pairing_process = null;
     appendLaunchLog(a, "accounts: pairing window closed");
-    // The account may differ now: keep the launch cache off until the probe
-    // verifies it (WAZI-67), and let its answer decide whether sync resumes.
     a.cache_tag.set("");
     a.pairing_probe = true;
     enqueueCacheTagProbe(a);
     setStatus(a, "Pairing window closed - checking WhatsApp login");
 }
 
-/// Answer of the auth probe that follows the pairing window.
 fn applyPairingProbe(a: *App, ok: bool, data: []const u8) void {
     a.pairing_probe = false;
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, data, .{}) catch null;
@@ -8804,8 +7854,6 @@ fn applyPairingProbe(a: *App, ok: bool, data: []const u8) void {
         setStatus(a, "WhatsApp is still not linked. Press Ctrl+K, Manage accounts, Reconnect WhatsApp");
         return;
     }
-    // Linked, or the probe could not tell: try sync once. A session that is
-    // still gone reports "not authenticated" and halts again without a loop.
     a.sync_logged_out = false;
     a.sync_fail_count = 0;
     a.last_sync_refresh_ms = null;
@@ -8816,8 +7864,6 @@ fn checkSync(a: *App) void {
     checkPairing(a);
     if (a.sync_auth_lost.swap(false, .acq_rel)) markWhatsAppLoggedOut(a);
     if (mediaBusy(a) or a.read_child != null or (a.send_child != null and a.send_direct) or a.archive_child != null or a.pending_archive_count > 0 or avatarBusy(a)) return;
-    // WAZI-82: while halted after repeated fast deaths, stay stopped; only
-    // the auth probe answer or an explicit palette command restarts sync.
     if (a.sync_fail_count >= accounts.sync_halt_after_fast_deaths) return;
     if (a.sync_child) |*child| {
         if (child.id) |handle| {
@@ -8845,8 +7891,6 @@ fn checkSync(a: *App) void {
     } else startSync(a);
 }
 
-/// Answer of the login probe that follows a halted sync child: name the
-/// cause on the status line instead of crash-looping (WAZI-82).
 fn applySyncAuthProbe(a: *App, ok: bool, data: []const u8) void {
     a.sync_auth_probe = false;
     if (!ok) {
@@ -8900,9 +7944,6 @@ fn sendKindName(pending: *const PendingSend) []const u8 {
     return if (pending.file.len > 0) "file" else "text";
 }
 
-/// One launch-log line per finished send with where the time went: `run` is
-/// how long the wacli child ran (forwarder, ssh and VM upload), `since_queued`
-/// is everything from the click, so queue wait is the difference.
 fn logSendTiming(a: *App, outcome: []const u8, pending: PendingSend) void {
     var buffer: [160]u8 = undefined;
     const line = std.fmt.bufPrint(&buffer, "send: {s} kind={s} run={d}ms since_queued={d}s retries={d}", .{ outcome, sendKindName(&pending), win.GetTickCount64() -| a.send_started_ms, nowUnixSeconds() - pending.queued_unix, pending.retries }) catch "send: ok";
@@ -8920,11 +7961,6 @@ fn completePendingSend(a: *App, delivered: bool) bool {
     return true;
 }
 
-/// Drop the head of the send queue. The staged file (image or voice note) is
-/// deleted only when `delivered` is true: a failed send keeps it so the red
-/// bubble can retry the upload. A delivered voice note, image or file keeps
-/// its file: it plays or shows from disk with no download, and the
-/// media-cache age policy evicts it later.
 fn removeFirstPendingSend(a: *App, delivered: bool) void {
     if (a.pending_send_count == 0) return;
     if (!completePendingSend(a, delivered)) return;
@@ -8975,11 +8011,6 @@ fn forgetFailedSendEntry(a: *App, entry: *const FailedSend) void {
     persistFileOutbox(a);
 }
 
-/// Journal of file sends (images, voice notes) that are queued or failed:
-/// one tab-separated line each, `jid ptt seconds queued_unix file caption`.
-/// It lets a restart (an update relaunch killed a queued voice note on
-/// 2026-10-10) bring them back as red "not sent" bubbles instead of losing
-/// them. Rewritten whole after every change; an empty queue removes it.
 fn persistFileOutbox(a: *App) void {
     const path = messagesDirPath(a, "outbox-files.txt") orelse return;
     defer a.allocator.free(path);
@@ -9004,8 +8035,6 @@ fn appendOutboxLine(a: *App, body: *std.ArrayList(u8), jid: []const u8, ptt: boo
     body.append(a.allocator, '\n') catch return;
 }
 
-/// At startup, turn every journalled file send whose file still exists into
-/// a remembered failure, so it shows as a red "not sent" bubble with retry.
 fn loadFileOutbox(a: *App) void {
     const path = messagesDirPath(a, "outbox-files.txt") orelse return;
     defer a.allocator.free(path);
@@ -9041,16 +8070,6 @@ fn loadFileOutbox(a: *App) void {
     if (a.failed_send_count > 0) appendLaunchLog(a, "outbox: restored unsent file sends");
 }
 
-/// Record a failed attempt for the head send. Every failure (a nonzero exit,
-/// a timeout, or a lost store lock) is retried, up to max_send_retries, with
-/// a longer backoff each time (see sendRetryDelayMs). `ambiguous` marks a
-/// failure that doesn't rule out the message having gone out anyway (a
-/// timeout, or any nonzero exit that wasn't a store lock); startNextSend
-/// checks for a duplicate before spawning that retry. After max_send_retries,
-/// mark its bubble failed, drop it, and hand the text back to the composer.
-/// The send is never silently lost.
-/// `auth_failed` skips the retry entirely: the account is logged out, so
-/// every retry would hit the same error until the user reconnects.
 fn failHeadPendingSend(a: *App, code: u32, ambiguous: bool, detail: []const u8, auth_failed: bool) void {
     a.pending_sends[0].retries += 1;
     a.pending_sends[0].ambiguous = ambiguous;
@@ -9066,7 +8085,6 @@ fn failHeadPendingSend(a: *App, code: u32, ambiguous: bool, detail: []const u8, 
             const status = std.fmt.bufPrint(&retry_buffer, "Sending, retry {d} of {d}", .{ retries, max_send_retries - 1 }) catch "Sending, retrying";
             setStatus(a, status);
             markPendingSendRetrying(a, &a.pending_sends[0]);
-            // A direct send had paused live sync; let it run during the backoff.
             startSync(a);
             return;
         }
@@ -9082,31 +8100,20 @@ fn failHeadPendingSend(a: *App, code: u32, ambiguous: bool, detail: []const u8, 
     else
         std.fmt.bufPrint(&status_buffer, "Message to {s} failed to send - text copied back to the box", .{failed.jid.slice()}) catch "Message failed to send - text copied back to the box";
     setStatus(a, status);
-    // Do not refreshMessages here: a reload would wipe the failed bubble.
     if (a.pending_send_count > 0) {
         startNextSend(a);
     } else {
         drainMediaDownloads(a);
-        // startSync's own success status ("Live sync running") would
-        // overwrite the auth message set above in the same tick, and sync is
-        // halted anyway once the account is known logged out (WAZI-82).
         if (!auth_failed) startSync(a);
     }
 }
 
-/// True when a queued send is due now. The mark-read and archive gates wait
-/// for a ready send, but must not stall behind one biding out retry backoff.
 fn sendReadyPending(a: *const App) bool {
-    // Only the head can start (FIFO), so a later entry must not count as
-    // ready while the head waits out its backoff.
     return a.pending_send_count > 0 and a.pending_sends[0].not_before_ms <= win.GetTickCount64();
 }
 
 const send_output_max_bytes = 64 * 1024;
 
-/// One line of a send child's stdout/stderr, trimmed to send_log_snippet_len
-/// bytes at a UTF-8 boundary, for the launch log: the next failure's cause
-/// should be visible without dumping the whole (possibly multi-line) output.
 const send_log_snippet_len = 200;
 fn oneLineSnippet(buffer: []u8, text: []const u8) []const u8 {
     var length: usize = 0;
@@ -9119,15 +8126,10 @@ fn oneLineSnippet(buffer: []u8, text: []const u8) []const u8 {
     return std.mem.trim(u8, buffer[0..length], " ");
 }
 
-/// True when a stored timestamp is compatible with having been recorded no
-/// earlier than `queued_unix`, allowing the same 5s clock-skew slack
-/// appendWhatsAppPending and pruneFailedSends use.
 fn storedAfterQueued(stored_unix: i64, queued_unix: i64) bool {
     return stored_unix >= queued_unix - 5;
 }
 
-/// Remember which stored message each sent note's file belongs to, so after a
-/// restart the note still plays from disk instead of asking for a download.
 fn saveSentVoice(a: *App) void {
     var text = std.ArrayList(u8).empty;
     defer text.deinit(a.allocator);
@@ -9152,10 +8154,6 @@ fn loadSentVoice(a: *App) void {
     }
 }
 
-/// Lay the OGG of each voice note recorded here over its stored row, so the
-/// note plays at once and transcribes from the local file with no download.
-/// When wacli has not stored the row (yet), a stand-in player bubble is
-/// appended instead, so a delivered note never vanishes on reload.
 fn applySentVoice(a: *App, jid: []const u8) void {
     for (a.sent_voice[0..a.sent_voice_count]) |*entry| {
         if (!std.mem.eql(u8, entry.jidSlice(), jid) or !fileExistsUtf8(entry.fileSlice())) continue;
@@ -9164,7 +8162,6 @@ fn applySentVoice(a: *App, jid: []const u8) void {
             if (!message.from_me or message.send_state != .none) continue;
             const row_unix = media_age.unixSeconds(message.timestamp.slice()) orelse continue;
             if (entry.matched_len > 0) {
-                // Remembered across restarts: the id alone identifies the row.
                 if (!std.mem.eql(u8, message.id.slice(), entry.matchedSlice())) continue;
             } else {
                 if (!voice_sent.rowMatchesEntry(true, message.media_type.slice(), row_unix, entry.queued_unix, entry.voice)) continue;
@@ -9191,8 +8188,6 @@ fn applySentVoice(a: *App, jid: []const u8) void {
             if (entry.voice) loadTranscriptCache(a, message);
             continue;
         }
-        // A remembered note whose row is outside the loaded window gets no
-        // stand-in; only a note not yet stored does.
         if (!entry.voice or entry.matched_len > 0 or a.message_count >= max_messages) continue;
         var message = Message{};
         message.from_me = true;
@@ -9223,11 +8218,6 @@ fn applySentVoice(a: *App, jid: []const u8) void {
     }
 }
 
-/// A timeout or an ambiguous nonzero exit may still have delivered the
-/// message; before retrying, check whether it already shows up as a recent
-/// outgoing message in the open chat, the same way a reload recognizes a
-/// pending send that already landed (appendWhatsAppPending, pruneFailedSends).
-/// Only the currently open chat has messages loaded to check against.
 fn sentMessageExists(a: *App, key: chat_key.Key, text: []const u8, queued_unix: i64) bool {
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return false;
     if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), key) or !chat_key.Key.eql(chat_key.displayed(a), key)) return false;
@@ -9242,11 +8232,6 @@ fn sentMessageExists(a: *App, key: chat_key.Key, text: []const u8, queued_unix: 
     return false;
 }
 
-/// Read one finished send child pipe: wacli --json prints its result on
-/// stdout and lock errors on stderr. Must run before child.wait, which closes
-/// the pipes; the child has exited, so reading to EOF cannot block. Mirrors
-/// the streaming reader syncStderrMain uses on a child pipe, but keeps the
-/// result instead of logging lines.
 fn readChildOutput(a: *App, file: ?std.Io.File) ?[]u8 {
     const stream = file orelse return null;
     var buffer: [4096]u8 = undefined;
@@ -9264,16 +8249,8 @@ fn startNextSend(a: *App) void {
         removeFirstPendingSend(a, a.pending_sends[0].delivered);
         return;
     }
-    // With live sync stopped by another write job, a send started now would
-    // take the store lock itself and collide with the job that later restarts
-    // sync (whose argv has no --lock-wait). Wait for that job to finish.
     if (a.sync_child == null and (a.read_child != null or mediaBusy(a) or avatarBusy(a) or a.archive_child != null)) return;
-    // A failed send waits out its not-before stamp; checkSend retries it on
-    // the next refresh tick.
     if (win.GetTickCount64() < a.pending_sends[0].not_before_ms) return;
-    // A retry after an ambiguous failure (timeout, or a nonzero exit that
-    // wasn't a store lock) might be sending a message a second time: if the
-    // open chat already shows it as delivered, count it sent instead.
     bindOutboxAccount(a);
     const head = &a.pending_sends[0];
     if (a.slack_outbox_dirty or head.account.len == 0 or !std.mem.eql(u8, head.account.slice(), a.cache_tag.slice())) return;
@@ -9295,12 +8272,6 @@ fn startNextSend(a: *App) void {
     }
     const pending = &a.pending_sends[0];
     var args: [send_args.max_args][]const u8 = undefined;
-    // Sends never stop live sync: wacli 0.19 hands them to the running sync
-    // process over .send.sock, but only after the lock attempt fails, so any
-    // lock wait would delay every send by its full length (70 s before
-    // WAZI-113). send_args always passes 0s. A send in the few seconds before
-    // a fresh sync child opens its socket fails on the lock and retries
-    // (sendRetryDelayMs).
     const count = send_args.buildSend(&args, .{
         .wacli = a.wacli_path,
         .jid = pending.jid.slice(),
@@ -9337,19 +8308,14 @@ fn checkSend(a: *App) void {
         var timed_out = false;
         if (win.GetExitCodeProcess(handle, &code) == 0 or code == win.STILL_ACTIVE) {
             if (win.GetTickCount64() - a.send_started_ms <= send_timeout_ms) return;
-            // A wedged send is killed like a wedged mark-read. wacli may
-            // already have delivered it, so the retry checks for it first.
             _ = child.kill(a.io);
             code = 1;
             timed_out = true;
         }
-        // Read stdout and stderr before wait closes the pipes: wacli --json
-        // prints its result on stdout but a lost store lock on stderr.
         const stdout_output = readChildOutput(a, child.stdout);
         defer if (stdout_output) |buffer| a.allocator.free(buffer);
         const stderr_output = readChildOutput(a, child.stderr);
         defer if (stderr_output) |buffer| a.allocator.free(buffer);
-        // kill already reaps the child; waiting on it again trips an assert.
         if (!timed_out) _ = child.wait(a.io) catch {};
         a.send_child = null;
         a.send_direct = false;
@@ -9368,16 +8334,9 @@ fn checkSend(a: *App) void {
             return;
         }
         const has_lock = outputHasStoreLock(stdout_output) or outputHasStoreLock(stderr_output);
-        // A store-lock failure never left the machine, so it isn't ambiguous.
-        // A timeout, or any other nonzero exit, might have delivered anyway.
         const ambiguous = timed_out or !has_lock;
-        // Logged out never resolves itself: every retry would hit the same
-        // "not authenticated" error until the user reconnects, so don't
-        // retry.
         const auth_failed = !sendFailureRetryable(a.sync_logged_out, stdout_output, stderr_output);
         var snippet_buffer: [send_log_snippet_len]u8 = undefined;
-        // Log only wacli's error output (stderr), never stdout (its --json
-        // result), and never anything that echoes the message text.
         const message_text = a.pending_sends[0].text.slice();
         const detail = if (timed_out)
             "timed out"
@@ -9390,9 +8349,6 @@ fn checkSend(a: *App) void {
                 oneLineSnippet(&snippet_buffer, text))
         else
             "no error output";
-        // Every failure (lock, timeout, or otherwise) stays queued and is
-        // retried, up to max_send_retries, with the next attempt spaced out,
-        // unless the account is logged out (auth_failed): that fails once.
         failHeadPendingSend(a, code, ambiguous, detail, auth_failed);
         return;
     }
@@ -9400,26 +8356,16 @@ fn checkSend(a: *App) void {
     startNextSend(a);
 }
 
-/// Does a send child's output mention the wacli store lock? wacli writes the
-/// error to stderr with either wording ("store is locked" / "store lock").
 fn outputHasStoreLock(output: ?[]const u8) bool {
     const text = output orelse return false;
     return std.mem.indexOf(u8, text, "store is locked") != null or
         std.mem.indexOf(u8, text, "store lock") != null;
 }
 
-/// True when wacli's error text says the WhatsApp account is logged out
-/// ("not authenticated; run `wacli auth`").
 fn isAuthFailureText(text: []const u8) bool {
     return std.mem.indexOf(u8, text, "not authenticated") != null;
 }
 
-/// True when a send failure can be retried. False when the account is
-/// logged out: every retry would repeat the same "not authenticated" error
-/// until the user reconnects. `sync_logged_out` covers a disconnect live
-/// sync's own login probe already confirmed (WAZI-82); `stdout`/`stderr` are
-/// the send child's own output. Pure text/bool check with no App state, so
-/// the retry decision is directly testable.
 fn sendFailureRetryable(sync_logged_out: bool, stdout: ?[]const u8, stderr: ?[]const u8) bool {
     if (sync_logged_out) return false;
     if (stdout) |text| if (isAuthFailureText(text)) return false;
@@ -9437,8 +8383,6 @@ fn discardStagedImage(a: *App) void {
     const path = a.staged_image.path;
     releaseStagedImage(a);
     if (path.len > 0) deleteFileUtf8(path.slice());
-    // Reclaim the preview band everywhere the staged image can go away,
-    // not just the Esc path.
     layout(a, a.compose_client_width, a.compose_client_height);
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
 }
@@ -9449,8 +8393,6 @@ fn releaseStagedImage(a: *App) void {
 }
 
 fn pasteDirectory(a: *App) ?[]u8 {
-    // avatar_dir is <LOCALAPPDATA>/Messages/avatars; staged pastes live in a
-    // sibling folder so the 14-day media-cache policy can evict them later.
     const parent = std.fs.path.dirname(a.avatar_dir) orelse return null;
     const dir = std.fs.path.join(a.allocator, &.{ parent, "paste" }) catch return null;
     const cwd = std.Io.Dir.cwd();
@@ -9507,8 +8449,6 @@ fn makePreviewBitmap(a: *App, path_wide: [*:0]const u16) ?win.HBITMAP {
     return bitmap;
 }
 
-// Encode top-down 32bpp BGRA rows as a PNG file via WIC (screenshots arrive
-// as raw DIB pixels, and wacli wants a real image file to upload).
 fn writePngFile(a: *App, path_wide: [*:0]const u16, width: u32, height: u32, pixels: []const u8) bool {
     var stream: [*c]win.IWICStream = null;
     if (a.wic_factory.*.lpVtbl.*.CreateStream.?(a.wic_factory, &stream) < 0 or stream == null) return false;
@@ -9540,8 +8480,6 @@ fn clipboardDibPixels(a: *App, handle: win.HANDLE) ?paste_image.Bitmap {
     return paste_image.dibToBitmap(a.allocator, bytes[0..size]);
 }
 
-// Reserve an exclusive staging path so a concurrent instance or a retry can
-// never overwrite an image another queued send is still uploading.
 fn stageNewPath(a: *App, buffer: []u8, extension: []const u8) ?usize {
     var dir_buffer: [520]u8 = undefined;
     const dir = pasteDirectory(a) orelse return null;
@@ -9558,23 +8496,15 @@ fn stageNewPath(a: *App, buffer: []u8, extension: []const u8) ?usize {
     return null;
 }
 
-// Stage the clipboard image for the currently selected chat. Returns true
-// when the paste keypress was consumed (an image was staged, or the
-// clipboard holds an image we deliberately reject); false lets the edit
-// control do its normal text paste.
 fn stageImageFromClipboard(a: *App) bool {
     if (a.compose == null or a.wic_factory == null or a.chat_count == 0 or a.selected_chat >= a.chat_count) return false;
     if (win.IsClipboardFormatAvailable(win.CF_DIB) == 0 and win.IsClipboardFormatAvailable(win.CF_BITMAP) == 0 and win.IsClipboardFormatAvailable(win.CF_HDROP) == 0) return false;
-    // Many apps publish an image next to CF_UNICODETEXT (Excel, Word);
-    // with text on the clipboard the edit control's normal paste wins.
     if (win.IsClipboardFormatAvailable(win.CF_UNICODETEXT) != 0 or win.IsClipboardFormatAvailable(win.CF_TEXT) != 0) return false;
     if (selectedChatIsTelegram(a)) {
         setStatus(a, "Sending pasted images is not available for Telegram chats");
         return true;
     }
     if (win.OpenClipboard(a.hwnd orelse null) == 0) return false;
-    // The clipboard is a system-wide exclusive resource: copy the payload
-    // out, close it, then do the slow file I/O and encoding.
     var path_buffer: [520]u8 = undefined;
     var path_len: usize = 0;
     var pixels: ?paste_image.Bitmap = null;
@@ -9583,8 +8513,6 @@ fn stageImageFromClipboard(a: *App) bool {
     {
         defer _ = win.CloseClipboard();
         if (win.GetClipboardData(win.CF_HDROP)) |hdrop| {
-            // A copied file: reuse the original bytes, but only for formats
-            // wacli uploads as images.
             var name_buffer: [520]u16 = undefined;
             if (!shell_lazy.ensureShell32()) return true;
             const chars = shell_lazy.dragQueryFileW.?(@ptrCast(@alignCast(hdrop)), 0, &name_buffer, name_buffer.len);
@@ -9598,7 +8526,6 @@ fn stageImageFromClipboard(a: *App) bool {
                 return true;
             };
         } else if (win.GetClipboardData(win.CF_BITMAP)) |handle| {
-            // A bare HBITMAP without a DIB: ask GDI for top-down 32bpp rows.
             var bitmap_header: win.BITMAP = undefined;
             if (win.GetObjectW(handle, @sizeOf(win.BITMAP), &bitmap_header) == 0 or bitmap_header.bmWidth <= 0 or bitmap_header.bmHeight <= 0) {
                 setStatus(a, "Clipboard holds no image to paste");
@@ -9634,7 +8561,6 @@ fn stageImageFromClipboard(a: *App) bool {
         }
     }
 
-    // A copied file: stage it outside the clipboard (see the block above).
     if (source_name) |name_len| {
         defer a.allocator.free(name_len);
         var extension: []const u8 = "";
@@ -9665,7 +8591,6 @@ fn stageImageFromClipboard(a: *App) bool {
         };
     }
 
-    // Encode DIB pixels to a staged PNG (the HDROP path already has a file).
     if (pixels) |bitmap| {
         defer a.allocator.free(bitmap.pixels);
         path_len = stageNewPath(a, &path_buffer, "png") orelse {
@@ -9697,7 +8622,6 @@ fn stageImageFromClipboard(a: *App) bool {
         setStatus(a, "Could not preview the pasted image");
         return true;
     };
-    // Everything succeeded: only now replace any earlier staged image.
     discardStagedImage(a);
     a.staged_image.path.set(path_buffer[0..path_len]);
     a.staged_image.provider = a.chats[a.selected_chat].provider;
@@ -9716,13 +8640,10 @@ fn stageImageFromClipboard(a: *App) bool {
     return true;
 }
 
-// ---------------------------------------------------------------- Voice notes
-
 fn voiceChatAllowed(a: *const App) bool {
     return a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp;
 }
 
-/// The mic button only exists for WhatsApp chats.
 fn updateVoiceButton(a: *App) void {
     const button = a.voice_btn orelse return;
     const allowed = voiceChatAllowed(a);
@@ -9813,12 +8734,6 @@ fn tickVoice(a: *App) void {
     }
 }
 
-/// The one place a recorded voice note leaves the app: today it joins the
-/// wacli send queue (`wacli send file --ptt`, which WhatsApp shows as a
-/// native voice note); moving sends to the wa-bridge only means replacing
-/// this body with a POST of the same four values. WhatsApp's `seconds` and
-/// `waveform` are filled by the receiving side from the Ogg today, so they
-/// are not on the wacli command line.
 fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, waveform: *const [64]u8) bool {
     _ = waveform;
     if (a.outbox_load_failed or a.pending_send_count >= max_pending_sends) return false;
@@ -9873,9 +8788,6 @@ fn sendMessage(a: *App) void {
     var wide_buffer: [4096]u16 = [_]u16{0} ** 4096;
     const length: usize = @intCast(win.GetWindowTextW(a.compose.?, &wide_buffer, wide_buffer.len));
     if (length == 0 and a.staged_image.path.len == 0) return;
-    // A staged paste (WAZI-37) sends the image, with any typed text as the
-    // caption. The JID guard keeps it from ever landing in another chat if
-    // selection state and the staged image ever disagree.
     var staged_file: []const u8 = "";
     var attach_path_buffer: [1600]u8 = undefined;
     if (a.staged_image.path.len > 0) {
@@ -9895,8 +8807,6 @@ fn sendMessage(a: *App) void {
         defer a.allocator.free(path_copy);
         const caption_copy = a.allocator.dupe(u8, text) catch return;
         defer a.allocator.free(caption_copy);
-        // File deletion transfers to the send queue (removeFirstPendingSend)
-        // once wacli has finished with it; only the preview is dropped here.
         const pending = &a.pending_sends[a.pending_send_count];
         pending.provider = a.chats[a.selected_chat].provider;
         pending.account = a.chats[a.selected_chat].account;
@@ -9920,7 +8830,7 @@ fn sendMessage(a: *App) void {
         clearReply(a);
         forgetFailedSend(a, chat_key.of(pending), pending.text.slice());
         a.user_viewed = true;
-        a.scroll_y = 0; // the user just sent: pin the view to the newest bubble
+        a.scroll_y = 0;
         appendWhatsAppPending(a, pending, false);
         persistFileOutbox(a);
         _ = win.SetWindowTextW(a.compose.?, lit(""));
@@ -9937,8 +8847,6 @@ fn sendMessage(a: *App) void {
         }
         const chat_id = tgSelectedChatId(a) orelse return;
         const client = a.telegram orelse return;
-        // The client enforces the read-only rule as a second gate; TDLib
-        // echoes the sent message back as an update, which refreshes the view.
         if (client.sendText(chat_id, text)) {
             _ = win.SetWindowTextW(a.compose.?, lit(""));
             focusCompose(a);
@@ -9952,20 +8860,14 @@ fn sendMessage(a: *App) void {
             return;
         }
         const chat = &a.chats[a.selected_chat];
-        // A pasted image (WAZI-37) or the palette-picked file goes out as a
-        // Slack file attachment; typed text rides along as the caption.
         var attach: []const u8 = "";
         var staged_attach_buffer: [520]u8 = undefined;
         if (a.slack_attach.len > 0) {
-            // Same guard as the staged paste: the attach belongs to the chat
-            // it was picked in and must never land in another conversation.
             if (std.mem.eql(u8, a.slack_attach_jid.slice(), chat.jid.slice())) {
                 const attach_len = std.unicode.utf16LeToUtf8(&attach_path_buffer, a.slack_attach.slice()) catch 0;
                 attach = attach_path_buffer[0..attach_len];
             } else setStatus(a, "Attached image dropped: chat changed");
         } else if (staged_file.len > 0) {
-            // Bridge mode has no uploads: keep the image and text staged
-            // instead of losing the caption to a failed upload job.
             if (a.slack_bridge != null) {
                 setStatus(a, "File upload not available over the Slack bridge");
                 return;
@@ -9998,9 +8900,6 @@ fn sendMessage(a: *App) void {
             }
             enqueueSlackOutbox(a, slot);
         } else {
-            // WAZI-61: client_msg_id correlates the optimistic bubble with
-            // Slack's echo and the send result, even for duplicate texts.
-            // Slack expects a UUID here, so mint a random v4-shaped one.
             var uuid_bytes: [16]u8 = undefined;
             a.io.random(&uuid_bytes);
             uuid_bytes[6] = (uuid_bytes[6] & 0x0f) | 0x40;
@@ -10030,9 +8929,6 @@ fn sendMessage(a: *App) void {
                 return;
             }
             enqueueSlackOutbox(a, slot);
-            // Show the message immediately as pending; the send completion
-            // (or the Slack echo, whichever lands first) stamps it with the
-            // real ts or marks it failed.
             appendSlackPending(a, text, client_msg_id);
         }
         if (staged_file.len > 0) releaseStagedImage(a);
@@ -10068,7 +8964,7 @@ fn sendMessage(a: *App) void {
     clearReply(a);
     forgetFailedSend(a, chat_key.of(pending), pending.text.slice());
     a.user_viewed = true;
-    a.scroll_y = 0; // the user just sent: pin the view to the newest bubble
+    a.scroll_y = 0;
     appendWhatsAppPending(a, pending, false);
     _ = win.SetWindowTextW(a.compose.?, lit(""));
     focusCompose(a);
@@ -10207,9 +9103,6 @@ fn selectChat(a: *App, delta: i32, wrap: bool) void {
     a.selected_chat = @intCast(next);
     a.user_viewed = true;
     if (a.chats_hwnd) |list| {
-        // Let the native list box scroll only when the selection leaves the
-        // visible viewport. Forcing the top index here made every Ctrl+Tab
-        // appear to move the entire list.
         _ = win.SendMessageW(list, win.LB_SETCURSEL, a.selected_chat, 0);
     }
     a.chat_selection_pending = true;
@@ -10228,12 +9121,6 @@ fn scrollToSelectedMessage(a: *App) void {
     var client: win.RECT = undefined;
     _ = win.GetClientRect(canvas, &client);
     const bubble_width = std.math.clamp(@divTrunc((client.right - client.left) * 7, 10), px(a, 280), px(a, 620));
-    // A message that has never been painted has no decoded bitmap yet, so
-    // measureMessage falls back to a small placeholder height for its media
-    // instead of the real one. Decoding it here first (paint does the same
-    // once it's on screen) keeps this walk's height in sync with what will
-    // actually render, so the scroll lands the real bubble in view instead of
-    // undershooting a taller image and leaving its top cut off.
     ensureBitmap(a, &a.messages[selected]);
     var total_height: i32 = px(a, 18);
     for (a.messages[0..a.message_count], 0..) |*message, index| total_height += measureMessage(hdc, a, message, bubble_width, showSenderName(a, index)) + messageGap(a, index);
@@ -10255,7 +9142,6 @@ fn selectMessage(a: *App, delta: i32) void {
     if (a.message_count == 0) return;
     if (a.selected_message) |selected| {
         const next = @as(i32, @intCast(selected)) + delta;
-        // Hard stop at the oldest and newest message instead of cycling.
         if (next < 0 or next >= a.message_count) return;
         a.selected_message = @intCast(next);
     } else {
@@ -10263,14 +9149,10 @@ fn selectMessage(a: *App, delta: i32) void {
     }
     scrollToSelectedMessage(a);
     if (a.canvas) |canvas| {
-        // Deliberately keep keyboard focus wherever it was so the composer
-        // caret keeps blinking and typing can resume immediately.
         _ = win.InvalidateRect(canvas, null, win.TRUE);
     }
 }
 
-/// Up/Down and Ctrl+Up/Down share this: Down past the newest message clears
-/// the highlight, everything else steps selectMessage by one.
 fn walkMessageHighlight(a: *App, key: u32) void {
     if (key == win.VK_DOWN) {
         if (a.selected_message) |selected| {
@@ -10390,8 +9272,6 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
     for (a.messages[0..a.message_count], 0..) |*item, index| {
         const media = item.media_hit;
         const bubble = item.bubble_hit;
-        // A failed bubble resends on a plain click rather than selecting
-        // text or media inside it: there's nothing else useful to click.
         if (item.send_state == .failed and x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom and
             resendFailedMessage(a, index))
         {
@@ -10401,7 +9281,6 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
         if (x >= media.left and x <= media.right and y >= media.top and y <= media.bottom) {
             a.selected_message = index;
             if (isImage(item)) {
-                // A drag selects text; only a click opens the gallery.
                 if (!a.click_moved) openImageViewer(a, item);
             } else if (item.local_path.len == 0) {
                 _ = downloadMedia(a, index, false);
@@ -10410,8 +9289,6 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
             } else if (std.ascii.eqlIgnoreCase(item.media_type.slice(), "video")) {
                 playVideoInline(a, item);
             } else if (!isGif(item)) {
-                // GIFs already animate in place; popping them out to
-                // an external player was unwanted.
                 openMedia(a, item);
             }
             return;
@@ -10448,13 +9325,10 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
     }
 }
 
-/// True when the double-click landed on an image and was handled.
 fn handleCanvasDoubleClick(a: *App, x: i32, y: i32) bool {
     for (a.messages[0..a.message_count], 0..) |*item, index| {
         const media = item.media_hit;
         if (x < media.left or x > media.right or y < media.top or y > media.bottom) continue;
-        // Still images, stickers and animated GIFs (first frame) all open;
-        // video GIFs need Media Foundation and stay a single click.
         if (!isImage(item) and (!isGif(item) or isVideoGif(item))) return false;
         a.selected_message = index;
         if (item.local_path.len == 0) {
@@ -10462,10 +9336,6 @@ fn handleCanvasDoubleClick(a: *App, x: i32, y: i32) bool {
             _ = downloadMedia(a, index, false);
             return true;
         }
-        // A downloaded still image already opened on the first half of this
-        // double-click (single-click-to-open handles it in handleCanvasClick);
-        // opening it again here would relaunch the external viewer a second
-        // time for a WIC-undecodable sticker. GIFs only ever open here.
         if (isImage(item)) return true;
         openImageViewer(a, item);
         return true;
@@ -10533,9 +9403,6 @@ fn findLoadedMessage(a: *App, msg_id: []const u8) ?*Message {
     return null;
 }
 
-/// React optimistically: the emoji shows on the bubble at once, muted until
-/// wacli confirms, and is taken off again if every retry fails. An empty
-/// emoji removes the reaction.
 fn reactToMessage(a: *App, jid: []const u8, msg_id: []const u8, emoji: []const u8) void {
     if (a.selected_chat >= a.chat_count or !std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), jid)) {
         setStatus(a, "The chat changed; reaction not sent");
@@ -10579,11 +9446,6 @@ fn reactToMessage(a: *App, jid: []const u8, msg_id: []const u8, emoji: []const u
     setStatus(a, if (emoji.len == 0) "Removing reaction..." else "Reacting...");
 }
 
-/// Queue `wacli send react` without stopping live sync. Since wacli 0.19 a
-/// send that finds the store locked hands itself to the running sync process
-/// over .send.sock, so the reaction rides sync's open connection instead of a
-/// cold connect. --lock-wait delays that handoff by its full length, so it is
-/// always 0s (send_args.zig).
 fn enqueueReactionJob(a: *App, entry: *PendingReaction) void {
     var args: [send_args.max_args][]const u8 = undefined;
     const count = send_args.buildReact(&args, a.wacli_path, entry.jid.slice(), entry.msg_id.slice(), entry.emoji.slice(), entry.sender.slice());
@@ -10592,8 +9454,6 @@ fn enqueueReactionJob(a: *App, entry: *PendingReaction) void {
     job.msg_id.set(entry.msg_id.slice());
     job.extra.set(entry.emoji.slice());
     wacliJobArgs(&job, args[0..count]);
-    // Urgent: ahead of chat and message refreshes, but behind reactions
-    // already queued so an add then remove reach the server in that order.
     if (!wacliEnqueue(a, job, true)) {
         if (entry.retry_at_ms == 0) entry.retry_at_ms = win.GetTickCount64() + 3_000;
         setStatus(a, "Reaction queue is full; retrying");
@@ -10603,8 +9463,6 @@ fn enqueueReactionJob(a: *App, entry: *PendingReaction) void {
 fn applyReaction(a: *App, result: *WacliResult) void {
     defer if (!mediaBusy(a)) startSync(a);
     const entry = findPendingReaction(a, result.msg_id.slice()) orelse return;
-    // A newer reaction to the same message is queued behind this one; its
-    // result decides what the bubble shows.
     if (!std.mem.eql(u8, entry.emoji.slice(), result.extra.slice())) return;
     const message = findLoadedMessage(a, result.msg_id.slice());
     if (result.ok) {
@@ -10614,7 +9472,6 @@ fn applyReaction(a: *App, result: *WacliResult) void {
     } else {
         entry.retries += 1;
         if (sendRetryDelayMs(entry.retries)) |delay| {
-            // Reactions are idempotent, so any failure is safe to retry.
             entry.retry_at_ms = win.GetTickCount64() + delay;
             setStatus(a, "Reaction not sent yet; retrying");
             return;
@@ -10629,7 +9486,6 @@ fn applyReaction(a: *App, result: *WacliResult) void {
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
-/// Refresh-timer hook: re-queue reactions whose retry backoff has passed.
 fn retryPendingReactions(a: *App) void {
     const now = win.GetTickCount64();
     for (a.pending_reactions[0..a.pending_reaction_count]) |*entry| {
@@ -10639,8 +9495,6 @@ fn retryPendingReactions(a: *App) void {
     }
 }
 
-/// A reload rebuilds reactions from the store, which may not have a pending
-/// one yet: put pending reactions back on their bubbles.
 fn reapplyPendingReactions(a: *App, jid: []const u8) void {
     for (a.pending_reactions[0..a.pending_reaction_count]) |*entry| {
         if (!std.mem.eql(u8, entry.jid.slice(), jid)) continue;
@@ -10662,12 +9516,8 @@ fn insertEmoji(a: *App, emoji: []const u8) void {
     _ = win.SetFocus(compose);
 }
 
-// ---- :shortcode autocomplete in the composer (shortcodes.zig) ----
-
 const sc_row_base: i32 = 30;
 
-/// The shortcode being typed before the caret, if any (same text the
-/// popup was built from, so a stale popup can never edit the wrong place).
 fn shortcodeTyping(a: *App) ?shortcodes.Typing {
     const compose = a.compose orelse return null;
     var start: u32 = 0;
@@ -10696,8 +9546,6 @@ fn shortcodeReplace(a: *App, t: shortcodes.Typing, emoji: []const u8) void {
     _ = win.SendMessageW(compose, win.EM_SCROLLCARET, 0, 0);
 }
 
-/// Called after every composer edit: replaces a finished ":name:", or
-/// shows, updates or hides the suggestion popup for ":na".
 fn shortcodeUpdate(a: *App) void {
     const t = shortcodeTyping(a) orelse return shortcodeHide(a);
     if (t.closed) {
@@ -10712,7 +9560,7 @@ fn shortcodeUpdate(a: *App) void {
     if (a.sc_wnd == null) {
         a.sc_wnd = win.CreateWindowExW(win.WS_EX_TOOLWINDOW | win.WS_EX_NOACTIVATE, lit("MessagesShortcodePopup"), null, win.WS_POPUP, 0, 0, 10, 10, owner, null, a.instance, null);
         if (a.sc_wnd) |popup| {
-            var corner: win.DWORD = 2; // DWMWCP_ROUND
+            var corner: win.DWORD = 2;
             _ = win.DwmSetWindowAttribute(popup, 33, &corner, @sizeOf(win.DWORD));
         }
     }
@@ -10728,7 +9576,6 @@ fn shortcodeUpdate(a: *App) void {
     _ = win.InvalidateRect(popup, null, win.TRUE);
 }
 
-/// Inserts the highlighted suggestion; false when nothing is open.
 fn shortcodeAccept(a: *App) bool {
     if (a.sc_count == 0 or a.sc_sel >= a.sc_count) return false;
     const t = shortcodeTyping(a) orelse {
@@ -10815,8 +9662,6 @@ fn openEmojiPicker(a: *App) void {
     showEmojiPickerWindow(a);
 }
 
-/// Ctrl+R: the composer's emoji picker, but Enter reacts to the highlighted
-/// message (or the newest incoming one) instead of inserting the emoji.
 fn openReactionPicker(a: *App) void {
     if (a.emoji_wnd) |picker| _ = win.DestroyWindow(picker);
     if (a.selected_chat >= a.chat_count or a.message_count == 0) return;
@@ -10859,9 +9704,6 @@ fn emojiPickerWidth(a: *const App) i32 {
     return emojiCell(a) * @as(i32, @intCast(emoji_picker.grid_columns)) + px(a, 12) + scrollbar_width;
 }
 
-/// Fills the match list. An empty query shows the "frequently used" row
-/// (recent reactions and picks, topped up with common reactions) and then the
-/// whole catalog; otherwise the matches, best first.
 fn buildEmojiMatches(a: *App) void {
     a.emoji_match_count = 0;
     var query_buf: [64]u16 = [_]u16{0} ** 64;
@@ -10909,7 +9751,6 @@ fn emojiFilter(a: *App) void {
     if (a.emoji_wnd) |picker| _ = win.InvalidateRect(picker, null, win.TRUE);
 }
 
-/// Moves the grid selection in cells; deltas are in grid coordinates.
 fn emojiMove(a: *App, delta_columns: i32, delta_rows: i32) void {
     if (a.emoji_match_count == 0) return;
     const columns: i32 = @intCast(emoji_picker.grid_columns);
@@ -10929,7 +9770,6 @@ fn emojiActivate(a: *App) void {
     const react = a.emoji_react;
     closeEmojiPicker(a);
     if (react) {
-        // reactToMessage records the pick in the recents itself.
         reactToMessage(a, a.emoji_react_jid.slice(), a.emoji_react_id.slice(), emoji);
         return;
     }
@@ -11008,7 +9848,7 @@ fn showEmojiPickerWindow(a: *App) void {
     ) orelse return;
     a.emoji_wnd = picker;
     a.emoji_ever_active = false;
-    var corner: win.DWORD = 2; // DWMWCP_ROUND
+    var corner: win.DWORD = 2;
     _ = win.DwmSetWindowAttribute(picker, 33, &corner, @sizeOf(win.DWORD));
     var margins = win.MARGINS{ .cxLeftWidth = 0, .cxRightWidth = 0, .cyTopHeight = 0, .cyBottomHeight = 1 };
     _ = win.DwmExtendFrameIntoClientArea(picker, &margins);
@@ -11128,8 +9968,6 @@ fn setEmojiScroll(a: *App, top: i32) void {
     if (a.emoji_list) |list| setListboxTop(list, top);
 }
 
-/// Client x offset of a click inside the grid listbox, tracked between the
-/// LBN_SELCHANGE notification and the mouse position.
 fn emojiCellX(a: *App) i32 {
     var point: win.POINT = undefined;
     _ = win.GetCursorPos(&point);
@@ -11142,9 +9980,6 @@ fn openEmojiMenu(a: *App) void {
     openEmojiPicker(a);
 }
 
-/// Quick reactions in the message menu, in row order; the last cell is "+"
-/// for the full picker. The row is one owner-drawn item painted with the
-/// same color emoji as the picker; the clicked cell comes from the mouse x.
 const quick_reactions = [_]u16{ reaction_like, reaction_love, reaction_laugh, reaction_surprised, reaction_sad, reaction_thanks, reaction_woozy };
 const quick_cells = quick_reactions.len + 1;
 
@@ -11238,8 +10073,6 @@ fn isKeptArchived(a: *const App, jid: []const u8) bool {
     return state.isKept(jid);
 }
 
-/// Label for the archived marker on a chat: kept chats say so, other
-/// archived chats just say archived. Null for an inbox chat.
 fn archiveMarker(a: *const App, chat: *const Chat) ?[*:0]const u16 {
     if (chat.provider != .whatsapp) return null;
     if (std.mem.eql(u16, chat.kind.slice(), std.mem.span(lit("Contact")))) return lit("Contact");
@@ -11247,8 +10080,6 @@ fn archiveMarker(a: *const App, chat: *const Chat) ?[*:0]const u16 {
     return if (isKeptArchived(a, chat.jid.slice())) lit("Kept archived") else lit("Archived");
 }
 
-/// Queue an unarchive for a chat the inbox list does not show (WAZI-62).
-/// Duplicates are dropped: live events can repeat before the write lands.
 fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) void {
     if (source == .resurface and isKeptArchived(a, jid)) {
         if (std.mem.eql(u8, a.unarchive_retry.slice(), jid)) a.unarchive_retry.set("");
@@ -11263,8 +10094,6 @@ fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) vo
         return;
     }
     if (a.pending_archive_count >= a.pending_archives.len) {
-        // Remember the request instead of dropping it (review finding): the
-        // refresh timer re-queues it once the archive queue drains.
         if (a.unarchive_retry.len == 0 or (source == .send and std.mem.eql(u8, a.unarchive_retry.slice(), jid))) {
             a.unarchive_retry.set(jid);
             a.unarchive_retry_source = source;
@@ -11289,13 +10118,6 @@ const archived_scan_min_ticks = 20;
 const archived_scan_idle_ticks = 300;
 const max_probes_per_scan = 4;
 
-/// Resurfacing, cheapest signal first: a store change (the same WAL stamp
-/// that drives the chat list) marks the archived list dirty, and at most
-/// every 20 s after that one `chats list --archived` read runs on the wacli
-/// worker. Only a chat whose last-message stamp moved past its baseline
-/// costs a second, one-chat read (applyArchivedScan). Without a store change
-/// it runs every 5 minutes as a safety net. Nothing runs while an archive
-/// call is queued or running, so the scan never races its own write.
 fn tickArchivedScan(a: *App, store_changed: bool) void {
     if (a.archive_state == null) return;
     if (store_changed) a.archived_scan_dirty = true;
@@ -11319,9 +10141,6 @@ fn enqueueResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8) void {
     _ = wacliEnqueue(a, job, false);
 }
 
-/// Read the archived list: remember a baseline for chats seen for the first
-/// time, probe chats that moved past theirs, and forget chats that are no
-/// longer archived (unarchived on the phone, say).
 fn applyArchivedScan(a: *App, raw: []const u8) void {
     a.people.replaceArchived(raw) catch {};
     refreshPeopleSearch(a);
@@ -11363,8 +10182,6 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
             changed = true;
         }
     }
-    // A full page means rows may be missing, and a queued archive means the
-    // list is about to change: only prune on a complete, quiet read.
     if (rows.len < archive_rules.max_entries and a.pending_archive_count == 0 and a.archive_child == null) {
         var index = state.count;
         while (index > 0) {
@@ -11393,8 +10210,6 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
     appendLaunchLog(a, std.fmt.bufPrint(&log_buffer, "archive-scan: {d} archived, {d} to probe", .{ rows.len, probes }) catch "archive-scan");
 }
 
-/// The newest real message of an archived chat decides: someone else's and
-/// newer than the baseline brings the chat back, mine only moves the baseline.
 fn applyResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8, raw: []const u8) void {
     const state = a.archive_state orelse return;
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
@@ -11417,7 +10232,6 @@ fn applyResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8, raw: []cons
             .object => |o| o,
             else => continue,
         };
-        // Reactions and receipts are not a conversation turn.
         if (getString(object, "ReactionToID").len > 0 or getString(object, "MsgID").len == 0) continue;
         newest_from_me = getBool(object, "FromMe");
         break;
@@ -11429,13 +10243,10 @@ fn applyResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8, raw: []cons
         queueUnarchiveChat(a, jid, .resurface);
         return;
     }
-    // Not resurfacing (my own reply, or kept): move the baseline so the same
-    // message is not probed again.
     state.setBaseline(jid, row_ts);
     saveArchiveState(a);
 }
 
-/// Re-queue an unarchive that had to wait for a free archive slot.
 fn retryUnarchiveChat(a: *App) void {
     if (a.unarchive_retry.len == 0) return;
     const jid = a.unarchive_retry.slice();
@@ -11502,8 +10313,6 @@ fn checkArchive(a: *App) void {
     } else startNextArchive(a);
 }
 
-/// Drop one row from the visible list; the selection stays on the same chat,
-/// or moves to the next row when the removed row was selected.
 fn removeChatRow(a: *App, removed: usize) void {
     if (removed >= a.chat_count) return;
     var index = removed + 1;
@@ -11521,8 +10330,6 @@ fn visibleChatIndex(a: *const App, key: chat_key.Key) ?usize {
     return chat_key.indexOf(Chat, a.chats[0..a.chat_count], key);
 }
 
-/// Which messenger a chat id belongs to: the visible row's provider, else
-/// the Slack or Telegram cache, else WhatsApp.
 fn chatProvider(a: *App, jid: []const u8) transport.Provider {
     const view = activeChatView(a);
     if (visibleChatIndex(a, .{ .provider = view, .account = if (view == .whatsapp) a.cache_tag.slice() else "", .id = jid })) |index| return a.chats[index].provider;
@@ -11533,25 +10340,14 @@ fn chatProvider(a: *App, jid: []const u8) transport.Provider {
     return .whatsapp;
 }
 
-/// Queue the app's archive (or unarchive) action for one chat, the same
-/// wacli write Ctrl+E makes. Returns why it could not, or null once queued.
-/// Shared by Ctrl+E and wazigctl, so a later Slack "hide" lands here once.
 fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action, source: archive_rules.Source) ?[]const u8 {
     const unarchive = action == .unarchive;
     switch (chatProvider(a, jid)) {
-        // ponytail: no archive call until the exact TDLib archive method is
-        // confirmed against the pinned scheme; upgrade path: add the verified
-        // toggle and route it through the transport interface.
         .telegram => return "Archiving is not available for Telegram chats yet",
-        // Archive/unarchive is a wacli WhatsApp-store call; a Slack channel
-        // id must never reach it as a WhatsApp jid.
         .slack => return "Archiving is not available for Slack channels yet",
         .whatsapp => {},
     }
-    // A real WhatsApp jid always has an @server part (see
-    // isUnresolvableChatEntry); anything else is an unknown id.
     if (jid.len > archive_rules.max_jid or std.mem.indexOfScalar(u8, jid, '@') == null) return "Unknown chat id";
-    // Only the last queued action for this chat determines the final state.
     var already_queued = false;
     for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
         if (std.mem.eql(u8, pending.jid.slice(), jid)) already_queued = pending.should_unarchive == unarchive;
@@ -11583,11 +10379,6 @@ fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action, source: a
     return null;
 }
 
-/// Rows just left the list. If the chat open in the pane was one of them,
-/// show the new selection at once, the way Ctrl+Tab does: refreshMessages
-/// paints from the in-memory cache, then the disk cache, then reads fresh.
-/// Waiting for the archive call to finish left the old chat on screen for
-/// many seconds.
 fn paneFollowSelection(a: *App, open_jid: []const u8) void {
     const now: ?[]const u8 = if (a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else null;
     if (!archive_rules.paneNeedsSwitch(open_jid, now)) return;
@@ -11638,8 +10429,6 @@ fn archiveSelectedChat(a: *App, keep: bool, source: archive_rules.Source) void {
     setStatus(a, action.status());
 }
 
-/// Ctrl+A in the chat list: remember every row on screen. Ctrl+E then
-/// archives exactly these; Esc or a click clears them.
 fn selectAllChats(a: *App) void {
     a.bulk.clear();
     for (a.chats[0..a.chat_count]) |*chat| a.bulk.add(chat.jid.slice());
@@ -11655,8 +10444,6 @@ fn clearBulkSelection(a: *App) bool {
     return true;
 }
 
-/// Ctrl+E with chats selected by Ctrl+A: queue one call per chat, drop the
-/// rows from the list at once, and move the pane a single time.
 fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void {
     var open_jid = Utf8Text(191){};
     if (a.selected_chat < a.chat_count) open_jid.set(a.chats[a.selected_chat].jid.slice());
@@ -11664,7 +10451,6 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void 
     var problem: ?[]const u8 = null;
     var index: usize = 0;
     while (index < a.bulk.count) : (index += 1) {
-        // The selection holds copies, so removed rows cannot shift them.
         if (archiveChat(a, a.bulk.at(index), action, source)) |why| {
             problem = why;
         }
@@ -11676,8 +10462,6 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void 
     setStatus(a, action.status());
 }
 
-/// Ctrl+K "Archive and keep archived": archive the open chat and stop it coming back on
-/// new messages. Run again ("Allow resurfacing") it only clears the flag.
 fn toggleKeepArchived(a: *App, source: archive_rules.Source) void {
     if (a.bulk.count > 0) return archiveSelectedChat(a, true, source);
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return setStatus(a, "Select a chat first");
@@ -11696,37 +10480,20 @@ fn toggleKeepArchived(a: *App, source: archive_rules.Source) void {
     archiveSelectedChat(a, true, source);
 }
 
-// --------------------------------------------------------- wazigctl control
-// wazigctl.exe talks to the app over a per-user named pipe
-// (control_pipe.zig). Pipe threads post each request here as wm_control, so
-// every App access happens on the UI thread, and they do any waiting
-// themselves (never the UI thread). HARD RULE: nothing in this section may
-// focus, show or activate a window; state changes are silent and repaint
-// through InvalidateRect only. No command sends a message.
-
 const control_call_posted: u8 = 0;
 const control_call_answered: u8 = 1;
 const control_call_abandoned: u8 = 2;
-// How long a pipe thread keeps asking while the UI says "not ready yet".
-const control_wait_ms: u64 = 8_000;
-// How long a pipe thread waits for the UI thread to handle one message.
-const control_ui_timeout_ms: u32 = 10_000;
+const control_not_ready_retry_window_ms: u64 = 8_000;
+const control_ui_reply_timeout_ms: u32 = 10_000;
 
 const ControlCall = struct {
     parsed: std.json.Parsed(control_api.Request),
     out: std.Io.Writer.Allocating,
     event: win.HANDLE,
-    // posted -> answered by the UI, or posted -> abandoned by a pipe thread
-    // that gave up waiting; whoever loses the race frees the call.
     state: std.atomic.Value(u8) = .init(control_call_posted),
-    // Set by the UI thread: not ready yet (a chat still loading, a search
-    // still refiltering), ask again shortly.
     retry: bool = false,
-    // Set by the UI thread: the WhatsApp list it needs is not in memory; the
-    // pipe thread runs a read-only wacli chats read into whatsapp_raw.
     need_whatsapp: bool = false,
     whatsapp_raw: []u8 = &.{},
-    // `messages <id>` selects first; `search` sets the text, then waits.
     phase: enum { select, main, wait } = .main,
 };
 
@@ -11742,7 +10509,6 @@ fn controlCallDestroy(a: *App, call: *ControlCall) void {
     a.allocator.destroy(call);
 }
 
-/// Pipe thread: one request line in, one reply line out.
 fn controlHandle(context: *anyopaque, line: []const u8, out: *std.Io.Writer.Allocating) void {
     const a: *App = @ptrCast(@alignCast(context));
     const w = &out.writer;
@@ -11780,7 +10546,6 @@ const ControlOutcome = enum { answered, abandoned, gone, too_slow, wacli_failed 
 
 fn controlFinish(call: *ControlCall, outcome: ControlOutcome, w: *std.Io.Writer) void {
     const problem = switch (outcome) {
-        // An abandoned call belongs to the UI thread now; never read it.
         .answered => return w.writeAll(call.out.written()) catch {},
         .abandoned => "Wazig did not answer within 10 s",
         .gone => "Wazig is closing",
@@ -11790,22 +10555,18 @@ fn controlFinish(call: *ControlCall, outcome: ControlOutcome, w: *std.Io.Writer)
     control_api.writeError(w, problem) catch {};
 }
 
-/// Post the call to the UI thread, asking again every 200 ms while it says
-/// "not ready yet", for up to control_wait_ms.
 fn controlRound(a: *App, call: *ControlCall) ControlOutcome {
     const hwnd = a.hwnd orelse return .gone;
-    const deadline = win.GetTickCount64() + control_wait_ms;
+    const deadline = win.GetTickCount64() + control_not_ready_retry_window_ms;
     while (true) {
         call.out.clearRetainingCapacity();
         call.retry = false;
         call.need_whatsapp = false;
         call.state.store(control_call_posted, .release);
-        switch (control_pipe.callUi(hwnd, wm_control, call, call.event, control_ui_timeout_ms)) {
+        switch (control_pipe.callUi(hwnd, wm_control, call, call.event, control_ui_reply_timeout_ms)) {
             .gone => return .gone,
             .timeout => {
                 if (call.state.cmpxchgStrong(control_call_posted, control_call_abandoned, .acq_rel, .acquire) == null) return .abandoned;
-                // The UI answered as the wait ran out: take its signal so the
-                // next round does not see it.
                 control_pipe.waitForever(call.event);
             },
             .done => {},
@@ -11821,8 +10582,6 @@ fn controlRound(a: *App, call: *ControlCall) ControlOutcome {
     }
 }
 
-/// Pipe thread: the same read-only chats read refreshChats queues, for a
-/// list the sidebar is not showing (another view, --all, --archived).
 fn controlReadWhatsAppChats(a: *App, archived: bool) ?[]u8 {
     const run = child_process.run(a.allocator, a.io, .{
         .argv = &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--limit", "250", if (archived) "--archived" else "--no-archived" },
@@ -11840,7 +10599,6 @@ fn controlReadWhatsAppChats(a: *App, archived: bool) ?[]u8 {
     return null;
 }
 
-/// UI thread (wm_control): answer into call.out, then hand the call back.
 fn controlOnUi(a: *App, call: *ControlCall) void {
     controlDispatch(a, call) catch {
         call.out.clearRetainingCapacity();
@@ -11854,16 +10612,9 @@ fn controlOnUi(a: *App, call: *ControlCall) void {
 fn controlDispatch(a: *App, call: *ControlCall) !void {
     const request = &call.parsed.value;
     const w = &call.out.writer;
-    // A control command that loads a chat must not leave its image popup
-    // covering the newly selected conversation. Downloads carry on.
     if (call.phase == .select or request.cmd == .select or request.cmd == .search or request.cmd == .view) {
         if (a.image_viewer_window != null) closeImageViewer(a);
     }
-    // Loading a chat marks it read only once the user picked a chat
-    // (user_viewed). A refilter, view switch or archive can move the
-    // selection to another chat: that chat must not be marked read, so these
-    // commands clear the flag until the next real selection (a click, a
-    // send, or wazigctl select).
     switch (request.cmd) {
         .search, .view, .archive, .unarchive, .@"archive-many" => a.user_viewed = false,
         else => {},
@@ -11930,7 +10681,6 @@ fn controlWriteChat(a: *const App, w: *std.Io.Writer, chat: *const Chat) !void {
     try w.writeByte('}');
 }
 
-/// The sidebar search text as UTF-8 (empty when unset or unconvertible).
 fn controlSearchText(a: *App, buffer: *[1024]u8) []const u8 {
     const search = a.search orelse return "";
     var wide: [256]u16 = undefined;
@@ -11979,13 +10729,11 @@ fn controlChats(a: *App, call: *ControlCall) !void {
     const query = controlSearchText(a, &query_buffer);
     var filtered = query.len > 0 and !request.all;
     if (view == active and request.archived == a.show_archived and !request.all) {
-        // Exactly what the sidebar shows, in its order.
         try list.appendSlice(a.allocator, a.chats[0..a.chat_count]);
         filtered = filtered or a.unread_only;
     } else {
         const wanted = if (request.all) "" else query;
         switch (view) {
-            // Slack and Telegram have no archive yet: their archived list is empty.
             .slack => if (!request.archived) for (a.slack_chats[0..a.slack_chat_count]) |*chat| {
                 if (controlMatches(a, chat, wanted)) try list.append(a.allocator, chat.*);
             },
@@ -12019,8 +10767,6 @@ fn controlChats(a: *App, call: *ControlCall) !void {
     try w.writeAll("]}}\n");
 }
 
-/// Rows of a wacli `chats list` answer, named and filtered the way
-/// applyChats does it.
 fn controlWhatsAppChats(a: *App, raw: []const u8, show_archived: bool, query: []const u8, list: *std.ArrayList(Chat)) !void {
     var parsed = try std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{});
     defer parsed.deinit();
@@ -12054,7 +10800,6 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, show_archived: bool, query: []
     }
 }
 
-/// Sidebar order: pinned first, then most recent, jid as the tie-break.
 fn controlSortChats(a: *const App, chats: []Chat) void {
     var i: usize = 1;
     while (i < chats.len) : (i += 1) {
@@ -12076,8 +10821,6 @@ fn controlSearch(a: *App, call: *ControlCall) !void {
             return control_api.writeError(w, "search text is not valid UTF-8");
         defer a.allocator.free(wide);
         _ = win.SetWindowTextW(search, wide.ptr);
-        // SetWindowText fires EN_CHANGE, which arms the typing debounce:
-        // refilter now, as its timer would, and wait for the read to land.
         if (a.hwnd) |hwnd| _ = win.KillTimer(hwnd, timer_search);
         refilterChats(a);
         if (!messagesAreCurrent(a)) refreshMessages(a);
@@ -12103,7 +10846,6 @@ fn controlView(a: *App, w: *std.Io.Writer, messenger: ?control_api.Messenger) !v
     try w.print("{{\"ok\":true,\"result\":{{\"view\":\"{s}\"}}}}\n", .{@tagName(view)});
 }
 
-/// The chat-list click, minus the composer focus: select, load, repaint.
 fn controlSelectIndex(a: *App, index: usize) void {
     if (a.status_ui.mode != .closed) closeStatuses(a);
     if (index != a.selected_chat) {
@@ -12128,14 +10870,12 @@ fn controlSelect(a: *App, call: *ControlCall) !void {
         if (provider != activeChatView(a)) {
             if (messenger_view.effective(provider, slackConfigured(a), telegramReady(a)) != provider)
                 return control_api.writeError(w, if (provider == .slack) "Slack is not set up" else "Telegram is not signed in");
-            // Switching restores the view's remembered chat: make it this one.
             a.view_selected[@intFromEnum(provider)].set(id);
             switchChatView(a, provider);
             index = visibleChatIndex(a, .{ .provider = activeChatView(a), .account = if (activeChatView(a) == .whatsapp) a.cache_tag.slice() else "", .id = id });
         }
     }
     const found = index orelse {
-        // A WhatsApp list read may still be on its way.
         if (wacliPendingGet(a, .chats) > 0) {
             call.retry = true;
             return;
@@ -12211,15 +10951,11 @@ fn appendPalette(a: *App, label: []const u8, shortcut: []const u8, command: u16)
     item.label.set(a.allocator, label);
     item.shortcut.set(a.allocator, shortcut);
     item.command = command;
-    // Link, chat, and media items keep extra state across palette rebuilds;
-    // stale values from an earlier mode would hijack activation.
     item.url = .{};
     item.chat_jid = .{};
     item.message_id = .{};
 }
 
-// Chat entries reuse the command palette list: the label is the chat name as
-// shown in the chat list, and a.chats is already ordered most recent first.
 fn appendPaletteChat(a: *App, index: usize) void {
     if (a.palette_item_count >= max_palette_items) return;
     const chat = &a.chats[index];
@@ -12236,8 +10972,6 @@ fn appendPaletteChat(a: *App, index: usize) void {
     item.chat_jid.set(chat.jid.slice());
 }
 
-/// "Microphone: ..." entries: System default plus each active input device,
-/// the current pick marked. Used by voice notes and Dictate alike.
 fn appendMicrophones(a: *App) void {
     a.mic_count = mic_choice.list(&a.mic_names);
     const picked = mic_choice.current();
@@ -12480,9 +11214,6 @@ fn paletteActivate(a: *App) void {
                 chat_index = index;
             }
         }
-        // Resolve before closing: gone from the visible list (refresh,
-        // archive toggle, or the 250-row wacli cap) means nothing to open,
-        // and closing first left the palette gone with no feedback.
         const selected = chat_index orelse {
             appendDebugLog(a, "palette: chat not in current list, jid={s}", .{item.chat_jid.slice()});
             const name_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, item.label.slice()) catch null;
@@ -12497,8 +11228,6 @@ fn paletteActivate(a: *App) void {
             return;
         };
         closePalette(a);
-        // Same flow as clicking the chat in the list: open it and land in
-        // the composer with the caret at the end.
         closeStatuses(a);
         discardStagedImage(a);
         a.selected_chat = @intCast(selected);
@@ -12516,8 +11245,6 @@ fn paletteActivate(a: *App) void {
         return;
     }
     if (item.message_id.len > 0) {
-        // Resolve by id, not by position: a refresh can reload the messages
-        // while the palette is open.
         var found: ?usize = null;
         for (a.messages[0..a.message_count], 0..) |*candidate, index| {
             if (std.mem.eql(u8, candidate.id.slice(), item.message_id.slice())) {
@@ -12530,9 +11257,6 @@ fn paletteActivate(a: *App) void {
             return;
         };
         const message = &a.messages[index];
-        // Images open in the app's own viewer (downloading first if needed,
-        // then opening once the download finishes); anything else keeps
-        // opening externally.
         if (isImage(message)) {
             closePalette(a);
             openImageInViewerOrQueue(a, index, message);
@@ -12543,10 +11267,6 @@ fn paletteActivate(a: *App) void {
             openMedia(a, message);
             return;
         }
-        // Not on disk yet: start the same download a media click starts and
-        // keep the palette open so a second Enter opens it when ready.
-        // Slack and Telegram fetch their own media; only WhatsApp goes
-        // through wacli. downloadMedia sets its own status.
         if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp) {
             _ = downloadMedia(a, index, false);
         } else setStatus(a, "Still downloading");
@@ -12593,8 +11313,6 @@ fn buildLinkPaletteItems(a: *App) void {
     a.palette_item_count = 0;
     for (a.messages[0..a.message_count]) |*message| {
         if (message.bubble_hit.right <= message.bubble_hit.left) continue;
-        // Links of a message come first, then its media, so the list stays in
-        // on-screen order top to bottom.
         for (message.links[0..message.link_count]) |*span| {
             if (span.url.len == 0) continue;
             var duplicate = false;
@@ -12688,10 +11406,7 @@ fn buildAccountsItems(a: *App) void {
     }
 }
 
-// Removal moves the WhatsApp data folder aside instead of deleting it: one
-// rename either happens or not, and renaming it back undoes the removal.
 fn removeWhatsAppAccount(a: *App) void {
-    // Every wacli child holds a store lock; a folder rename would fail on it.
     if (mediaBusy(a) or a.send_child != null or a.pending_send_count > 0 or
         a.read_child != null or a.pending_read_count > 0 or
         a.archive_child != null or a.pending_archive_count > 0 or avatarBusy(a) or
@@ -12725,18 +11440,12 @@ fn removeWhatsAppAccount(a: *App) void {
     defer a.allocator.free(target_wide);
     const moved = win.MoveFileExW(dir_wide.ptr, target_wide.ptr, win.MOVEFILE_WRITE_THROUGH) != 0;
     if (!moved) {
-        // stopSync is asynchronous: the wacli child may still hold the
-        // folder for a moment. Retrying is safe; nothing was changed.
         setStatus(a, "WhatsApp is still closing - try Remove again in a few seconds");
         return;
     }
-    // Keep auto-reconnect off: the store is gone until pairing runs again.
     a.accounts_maintenance = true;
     clearStatusAccount(a);
     deleteAccountCaches(a);
-    // The in-memory message ring is keyed only by chat jid, which a shared
-    // group can survive an account switch: free it too, or pairing another
-    // account could paint the previous account's messages.
     for (a.msg_cache[0..a.msg_cache_len]) |*entry| {
         if (entry.data) |data| a.allocator.free(data);
         entry.data = null;
@@ -12756,8 +11465,6 @@ fn removeWhatsAppAccount(a: *App) void {
     a.message_count = 0;
     a.last_refresh_unix = 0;
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
-    // The data folder is renamed, not deleted, so removal can be undone by
-    // renaming it back; deleting it is a manual step.
     setStatus(a, "WhatsApp signed out - its data was kept as a backup folder; pair again with Add account");
 }
 
@@ -12766,19 +11473,13 @@ fn addWhatsAppAccount(a: *App) void {
         setStatus(a, "Pairing window is already open - scan the QR code there");
         return;
     }
-    // wacli auth holds the store lock while it pairs and bootstraps.
     stopSync(a, "pairing");
-    // WAZI-82: pairing is the escape hatch from a halted sync loop, so it
-    // must clear the halt or checkSync would stay stopped after a relink.
     a.sync_fail_count = 0;
     const exe_wide = utf8ToWide(a.allocator, a.wacli_path) catch {
         setStatus(a, "Could not open the pairing window");
         return;
     };
     defer a.allocator.free(exe_wide);
-    // `auth` shows the QR; the default 30s idle exit closed it before most
-    // people could scan. CreateProcessW may write to the command line, so it
-    // is a heap copy, and argv[0] comes first or Go would drop `auth`.
     const command_utf8 = std.fmt.allocPrint(a.allocator, "\"{s}\" auth --idle-exit 10m", .{a.wacli_path}) catch {
         setStatus(a, "Could not open the pairing window");
         return;
@@ -12795,8 +11496,6 @@ fn addWhatsAppAccount(a: *App) void {
     const create_new_console: win.DWORD = 0x00000010;
     if (win.CreateProcessW(exe_wide.ptr, command_wide.ptr, null, null, win.FALSE, create_new_console, null, null, &startup, &process) != 0) {
         _ = win.CloseHandle(process.hThread);
-        // Sync stays off while the window is open; checkPairing probes the
-        // login when it closes and resumes sync if pairing worked.
         a.pairing_process = process.hProcess;
         appendLaunchLog(a, "accounts: pairing window opened");
         setStatus(a, "Pairing window opened - scan the QR code, then close that window to start live sync");
@@ -12827,7 +11526,7 @@ fn showPaletteWindow(a: *App) void {
     ) orelse return;
     a.palette = palette;
     a.palette_ever_active = false;
-    var corner: win.DWORD = 2; // DWMWCP_ROUND
+    var corner: win.DWORD = 2;
     _ = win.DwmSetWindowAttribute(palette, 33, &corner, @sizeOf(win.DWORD));
     var margins = win.MARGINS{ .cxLeftWidth = 0, .cxRightWidth = 0, .cyTopHeight = 0, .cyBottomHeight = 1 };
     _ = win.DwmExtendFrameIntoClientArea(palette, &margins);
@@ -12860,7 +11559,6 @@ fn drawPaletteItem(a: *App, item: *win.DRAWITEMSTRUCT) void {
     }
     _ = win.SelectObject(item.hDC, @ptrCast(a.font.?));
     _ = win.SetTextColor(item.hDC, color_text);
-    // Chat rows have no shortcut, so their labels can use the full width.
     const label_right = if (palette_item.shortcut.len > 0) item.rcItem.right - 130 else item.rcItem.right - 20;
     var label_rect = win.RECT{ .left = item.rcItem.left + 20, .top = item.rcItem.top, .right = label_right, .bottom = item.rcItem.bottom };
     _ = win.DrawTextW(item.hDC, palette_item.label.ptr(), @intCast(palette_item.label.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
@@ -12915,8 +11613,6 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
             if (a.palette_match_count == 0) {
                 _ = win.SetTextColor(hdc, color_muted);
                 _ = win.SelectObject(hdc, @ptrCast(a.font.?));
-                // In Telegram login mode the empty list is expected, not a
-                // failed command search.
                 const empty_text: [*:0]const u16 = if (a.tg_login != .none)
                     lit("Type in the box above and press Enter")
                 else
@@ -12971,9 +11667,6 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
             a.palette = null;
             a.palette_edit = null;
             a.palette_list = null;
-            // Closing the prompt cancels the login (WAZI-72): the next
-            // palette must be a normal command list, and TDLib events must
-            // not re-prompt on their own.
             a.tg_login = .none;
             if (a.sb_drag == .palette) a.sb_drag = .none;
             return 0;
@@ -12982,8 +11675,6 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
     }
 }
 
-// Layout metrics for the keyboard shortcuts help overlay, in 96-DPI logical
-// pixels; px() scales them to the window's physical pixels at draw time.
 const shortcut_padding: i32 = 22;
 const shortcut_title_height: i32 = 40;
 const shortcut_heading_height: i32 = 30;
@@ -13004,9 +11695,6 @@ const ShortcutLayout = struct {
     height: i32,
 };
 
-// One column when everything fits the available height, otherwise two
-// columns with groups assigned greedily to whichever column is shorter so
-// far, so the overlay never needs to scroll.
 fn computeShortcutLayout(a: *const App, available_height: i32) ShortcutLayout {
     var total: i32 = 0;
     for (shortcuts.groups) |group| total += shortcutGroupHeight(a, group);
@@ -13036,8 +11724,6 @@ fn computeShortcutLayout(a: *const App, available_height: i32) ShortcutLayout {
     return sh_layout;
 }
 
-// The shortcut table is plain ASCII, so a straight byte-to-u16 copy avoids
-// the allocator on every repaint.
 fn drawAscii(hdc: win.HDC, rect: *win.RECT, text: []const u8, flags: c_uint) void {
     var buffer: [256]u16 = undefined;
     const len = @min(text.len, buffer.len - 1);
@@ -13125,7 +11811,7 @@ fn openShortcutHelp(a: *App) void {
         null,
     ) orelse return;
     a.shortcut_help = hwnd;
-    var corner: win.DWORD = 2; // DWMWCP_ROUND
+    var corner: win.DWORD = 2;
     _ = win.DwmSetWindowAttribute(hwnd, 33, &corner, @sizeOf(win.DWORD));
     _ = win.ShowWindow(hwnd, win.SW_SHOW);
     _ = win.SetForegroundWindow(hwnd);
@@ -13299,14 +11985,9 @@ fn runCommand(a: *App, command: u16) void {
             slack_win.clearTokens();
             slack_win.clearBridge();
             a.slack_stop.store(true, .release);
-            // ponytail: the socket thread cannot be joined while it blocks in
-            // a receive, so it is detached and the token bytes it still
-            // borrows stay allocated until process exit; upgrade path is a
-            // stored socket handle closed here to unblock the receive.
             if (a.slack_socket_thread) |thread| thread.detach();
             a.slack_socket_thread = null;
             a.slack_tokens = null;
-            // Leaked, not freed: an in-flight worker job may still borrow them.
             a.slack_bridge = null;
             a.slack_user_id.set("");
             a.slack_chat_count = 0;
@@ -13381,8 +12062,6 @@ fn runCommand(a: *App, command: u16) void {
         command_accounts => openAccountsPalette(a),
         command_accounts_reconnect => {
             stopSync(a, "reconnect");
-            // WAZI-82: a logged-out session cannot be fixed by restarting the
-            // sync child; run the pairing window so the QR flow can relink.
             if (a.sync_logged_out or a.pairing_process != null) {
                 addWhatsAppAccount(a);
             } else {
@@ -13732,7 +12411,6 @@ fn composerNonClientY(compose: win.HWND) i32 {
     return (rc_win.bottom - rc_win.top) - (rc_cli.bottom - rc_cli.top);
 }
 
-/// Height the composer content needs at the edit's current width.
 fn composerContentHeight(a: *App) i32 {
     const compose = a.compose orelse return compose_layout.edit_min_height;
     var fmt: win.RECT = undefined;
@@ -13760,8 +12438,6 @@ fn layout(a: *App, width: i32, height: i32) void {
         _ = win.MoveWindow(row, 0, search_height, left_width - scrollbar_width, status_row_height, win.TRUE);
     }
     var sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
-    // The wrap count depends on the edit's width, so measure once more after
-    // sizing (the themed strip keeps that width constant across heights).
     if (a.compose) |hwnd| {
         _ = win.MoveWindow(hwnd, left_width + px(a, 14), height - px(a, 11) - sizes.edit_height, width - left_width - px(a, 310) - scrollbar_width, sizes.edit_height, win.TRUE);
         sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
@@ -13790,7 +12466,6 @@ fn layout(a: *App, width: i32, height: i32) void {
     if (a.emoji_btn) |hwnd| _ = win.MoveWindow(hwnd, width - px(a, 236), height - px(a, 55), px(a, 44), px(a, 44), win.TRUE);
     if (a.dictate) |hwnd| _ = win.MoveWindow(hwnd, width - px(a, 176), height - px(a, 55), px(a, 84), px(a, 44), win.TRUE);
     if (a.voice_btn) |hwnd| {
-        // While recording the button grows left over the composer to fit the dot, time and level.
         const voice_width: i32 = if (a.voice_active) px(a, 200) else px(a, 44);
         _ = win.MoveWindow(hwnd, width - px(a, 244) - voice_width, height - px(a, 55), voice_width, px(a, 44), win.TRUE);
     }
@@ -13824,7 +12499,6 @@ fn loadAvatarBitmap(a: *App, path: [*:0]const u16) ?win.HBITMAP {
     if (scaler.*.lpVtbl.*.Initialize.?(scaler, @ptrCast(converter), 42, 42, win.WICBitmapInterpolationModeFant) < 0) return null;
     var pixels: [42 * 42 * 4]u8 = undefined;
     if (scaler.*.lpVtbl.*.CopyPixels.?(@ptrCast(scaler), null, 42 * 4, pixels.len, &pixels) < 0) return null;
-    // Bake an anti-aliased circular alpha; GDI clip regions would leave frizzled edges.
     avatar_mask.applyMask(&pixels, 42);
     var info = std.mem.zeroes(win.BITMAPINFO);
     info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
@@ -13844,10 +12518,6 @@ fn loadAvatarBitmap(a: *App, path: [*:0]const u16) ?win.HBITMAP {
     return bitmap;
 }
 
-// Shared by both avatar tables (avatarForChat, avatarForParticipant): fills
-// a freshly jid'd entry from the on-disk cache. A picture shows at once, and
-// a recent "no picture" or failed answer (sync_gate's TTLs) is not asked
-// again, so this is the one place that reads those markers.
 fn populateAvatarEntry(a: *App, entry: *AvatarEntry, jid: []const u8) void {
     entry.jid.set(jid);
     var filename_buffer: [40]u8 = undefined;
@@ -13878,10 +12548,6 @@ fn avatarForChat(a: *App, jid: []const u8) ?*AvatarEntry {
     return entry;
 }
 
-// Group participants without a matching contact (see reuseContactAvatar)
-// get their own small, bounded table so they never fill up or evict a chat
-// icon out of avatarForChat's table, and vice versa. A full table evicts the
-// entry least recently drawn rather than refusing new participants.
 fn avatarForParticipant(a: *App, jid: []const u8) ?*AvatarEntry {
     const now = win.GetTickCount64();
     for (a.participant_avatars[0..a.participant_avatar_count], 0..) |*entry, index| {
@@ -13908,16 +12574,11 @@ fn avatarForParticipant(a: *App, jid: []const u8) ?*AvatarEntry {
     return entry;
 }
 
-// size is the destination box (DPI-scaled by callers); the source DIB is
-// always the fixed 42px bake from loadAvatarBitmap/createAvatarCircleDib, so
-// AlphaBlend stretches it when size differs.
 fn drawAvatarBitmap(hdc: win.HDC, bitmap: win.HBITMAP, left: i32, top: i32, size: i32) void {
     const memory = win.CreateCompatibleDC(hdc) orelse return;
     defer _ = win.DeleteDC(memory);
     const old_bitmap = win.SelectObject(memory, bitmap);
     defer _ = win.SelectObject(memory, old_bitmap);
-    // Per-pixel alpha (AC_SRC_ALPHA) gives the smooth circle edge; the bitmap
-    // is premultiplied PBGRA from WIC.
     const blend = win.BLENDFUNCTION{
         .BlendOp = win.AC_SRC_OVER,
         .BlendFlags = 0,
@@ -13947,7 +12608,7 @@ fn createAvatarCircleDib(r: u8, g: u8, b: u8) ?win.HBITMAP {
 
 fn isEmojiCodepoint(cp: u21) bool {
     return (cp >= 0x1F000 and cp <= 0x1FAFF) or
-        (cp >= 0xE0020 and cp <= 0xE007F) or // tag characters (subdivision flags)
+        (cp >= 0xE0020 and cp <= 0xE007F) or
         (cp >= 0x2600 and cp <= 0x27BF) or
         (cp >= 0x2B00 and cp <= 0x2BFF) or
         cp == 0xFE0F or cp == 0x200D or cp == 0x20E3 or
@@ -13956,9 +12617,6 @@ fn isEmojiCodepoint(cp: u21) bool {
 
 const TextUnit = struct { emoji: bool, len: usize };
 
-/// Classifies the character starting at text[index]. Most emoji sit above
-/// U+FFFF, so they arrive as a UTF-16 surrogate pair and must be decoded
-/// before the range check; a lone code unit never matches them.
 fn emojiUnitAt(text: []const u16, index: usize) TextUnit {
     const unit = text[index];
     if (unit >= 0xD800 and unit <= 0xDBFF and index + 1 < text.len) {
@@ -13983,8 +12641,6 @@ fn splitRuns(text: []const u16, runs: []TextRun) usize {
         while (index < text.len) {
             const unit = text[index];
             const current = emojiUnitAt(text, index);
-            // Joiners, variation selectors, and combining keycaps keep the
-            // current run attached so ZWJ sequences render in one font.
             const glue = unit == 0x200D or unit == 0xFE0F or unit == 0x20E3;
             if (current.emoji != emoji and !glue) break;
             index += current.len;
@@ -14012,21 +12668,13 @@ fn runWidth(hdc: win.HDC, text: []const u16) i32 {
     return size.cx;
 }
 
-/// Draws one emoji run with the COLR colour layers (emoji_draw.zig) when available, else the
-/// monochrome GDI font. Returns the run width in pixels; measuring and
-/// painting always use the same source so wrapping stays consistent.
 fn drawEmojiRun(hdc: win.HDC, emoji_font: win.HFONT, text_ascent: i32, line_height: i32, slice: []const u16, cursor: i32, y: i32, draw: bool) i32 {
     const em = line_height;
-    // A paint pass measures and paints from the one shaping call draw()
-    // makes; a measuring pass only needs the width and renders nothing.
     if (draw) {
         if (emoji_draw.draw(hdc, slice, cursor, y, text_ascent, em)) |run_metrics| return run_metrics.width;
     } else if (emoji_draw.metrics(slice, em)) |run_metrics| {
         return run_metrics.width;
     }
-    // WAZI-65: colour fallback is never silent; each new reason shows once.
-    // Only announce on real paint passes: measuring passes cannot show the
-    // status text and must not consume the one-shot notice.
     if (draw) {
         if (app_ptr) |app| {
             if (emoji_draw.takeNotice()) |notice| {
@@ -14040,7 +12688,6 @@ fn drawEmojiRun(hdc: win.HDC, emoji_font: win.HFONT, text_ascent: i32, line_heig
     return runWidth(hdc, slice);
 }
 
-/// Draws one line mixing text and emoji runs. Returns the end x position.
 fn drawMixedLine(hdc: win.HDC, text_font: win.HFONT, emoji_font: win.HFONT, text: []const u16, x: i32, y: i32) i32 {
     var runs: [max_text_runs]TextRun = undefined;
     const count = splitRuns(text, &runs);
@@ -14077,9 +12724,6 @@ fn textLineHeight(hdc: win.HDC, font: win.HFONT) i32 {
     return metrics.tmHeight;
 }
 
-// Bubble chrome above the body. Measure and draw both read these so a font
-// scale change moves the sender band, header and time band together instead
-// of leaving fixed pixel bands that clip at larger fonts.
 fn senderBandHeight(hdc: win.HDC, a: *App) i32 {
     const font = a.font_bold orelse a.font.?;
     return textLineHeight(hdc, font);
@@ -14087,8 +12731,6 @@ fn senderBandHeight(hdc: win.HDC, a: *App) i32 {
 
 fn messageHeaderHeight(hdc: win.HDC, a: *App, show_sender: bool) i32 {
     if (!show_sender) return px(a, 12);
-    // 6px above the name, the name band, then 8px under it: the body starts
-    // at header - 6, leaving the same 6px bottom padding as the one-line case.
     return px(a, 6) + senderBandHeight(hdc, a) + px(a, 8);
 }
 
@@ -14123,8 +12765,6 @@ fn containsUrlHint(text: []const u16) bool {
     return false;
 }
 
-// Width of one slice with the same run-aware measuring the manual wrapper
-// uses, so chunk decisions and the painted result agree.
 fn mixedSliceWidth(hdc: win.HDC, text_font: win.HFONT, emoji_font: win.HFONT, line_height: i32, text_ascent: i32, slice: []const u16) i32 {
     var runs: [max_text_runs]TextRun = undefined;
     const count = splitRuns(slice, &runs);
@@ -14141,9 +12781,6 @@ fn mixedSliceWidth(hdc: win.HDC, text_font: win.HFONT, emoji_font: win.HFONT, li
     return width;
 }
 
-// Paints one word slice at (cursor_x, line_top) and returns the new cursor x.
-// A link slice is underlined and accent-colored; the caller records the hit
-// rect against the whole word so every chunk of a broken URL stays a link.
 fn drawWordSlice(hdc: win.HDC, a: *App, text_font: win.HFONT, emoji_font: win.HFONT, line_height: i32, text_ascent: i32, slice: []const u16, cursor_x_in: i32, line_top: i32, link: bool) i32 {
     const text_color = win.GetTextColor(hdc);
     defer _ = win.SetTextColor(hdc, text_color);
@@ -14181,23 +12818,15 @@ fn isLowSurrogate(unit: u16) bool {
     return unit >= 0xDC00 and unit <= 0xDFFF;
 }
 
-// A joiner, variation selector or keycap binds to the character before it, so
-// a chunk must not start with one.
 fn isCombiningGlue(unit: u16) bool {
     return unit == 0x200D or unit == 0xFE0F or unit == 0x20E3;
 }
 
-// Start index of the character ending at `index`; a lone UTF-16 unit is one,
-// a surrogate pair two.
 fn previousCharStart(word: []const u16, index: usize) usize {
     if (index >= 2 and isLowSurrogate(word[index - 1]) and isHighSurrogate(word[index - 2])) return index - 2;
     return if (index > 0) index - 1 else 0;
 }
 
-// Byte count of the longest prefix of `word` that fits in `max_width`.
-// Plain text with no emoji runs measures in one font, so a single
-// GetTextExtentExPointW call finds it; emoji runs need the run-aware width
-// and a binary search over prefix widths.
 fn fittingPrefixLen(hdc: win.HDC, text_font: win.HFONT, emoji_font: win.HFONT, line_height: i32, text_ascent: i32, word: []const u16, max_width: i32) usize {
     if (word.len == 0) return 0;
     if (!containsEmoji(word) and !containsSurrogateUnit(word)) {
@@ -14206,9 +12835,6 @@ fn fittingPrefixLen(hdc: win.HDC, text_font: win.HFONT, emoji_font: win.HFONT, l
         var size: win.SIZE = undefined;
         _ = win.GetTextExtentExPointW(hdc, word.ptr, @intCast(word.len), max_width, &fit, null, &size);
         var len: usize = if (fit > 0) @as(usize, @intCast(fit)) else 0;
-        // A unit that starts inside the extent can still overflow it; trim
-        // until the measured prefix fits, but always keep one unit so the
-        // chunk makes progress.
         while (len > 0 and mixedSliceWidth(hdc, text_font, emoji_font, line_height, text_ascent, word[0..len]) > max_width) len -= 1;
         return @max(1, len);
     }
@@ -14226,10 +12852,6 @@ fn fittingPrefixLen(hdc: win.HDC, text_font: win.HFONT, emoji_font: win.HFONT, l
     return lo;
 }
 
-// Splits an over-long word: when `fit` UTF-16 units fit on a line, break
-// after the last URL-ish delimiter inside them so a link splits at readable
-// points, else at `fit` itself. Always advances by at least one full
-// character and never splits a surrogate pair.
 fn wrapChunkLen(word: []const u16, fit: usize) usize {
     if (word.len == 0) return 1;
     const limit = @min(fit, word.len);
@@ -14244,10 +12866,6 @@ fn wrapChunkLen(word: []const u16, fit: usize) usize {
     return clampChunkCut(word, if (last_break > 0) last_break else @max(1, limit));
 }
 
-// Adjusts a proposed chunk length so it never cuts an emoji in half: a low
-// surrogate at the cut backs up one unit (or takes the whole pair when that
-// would leave nothing), a leading surrogate pair is the two-unit minimum,
-// and the cut never lands before a joiner, variation selector or keycap.
 fn clampChunkCut(word: []const u16, cut_in: usize) usize {
     if (word.len == 0) return 1;
     var cut = @min(cut_in, word.len);
@@ -14294,10 +12912,6 @@ fn wrapMixedSink(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int, max_
                 cursor_x = left;
             }
             const is_link = wordIsUrl(word);
-            // A word wider than a whole line cannot be placed by the normal
-            // pass; split it into chunks that each fit, preferring URL
-            // punctuation. Every chunk gets its own line but keeps the same
-            // link target and word span.
             var emitted: usize = 0;
             while (true) {
                 const remaining = word[emitted..];
@@ -14314,8 +12928,6 @@ fn wrapMixedSink(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int, max_
                         if (sink) |const_target| {
                             const target = @constCast(const_target);
                             const chunk_rect = win.RECT{ .left = word_x_start, .top = line_top, .right = cursor_x, .bottom = line_top + line_height };
-                            // Chunks of one URL word share a single span: the
-                            // first makes it, later ones only add a hit rect.
                             var extended = false;
                             if (target.link_count > 0) {
                                 const last = &target.links[target.link_count - 1];
@@ -14366,8 +12978,6 @@ fn wrapMixedSink(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int, max_
             }
             word_start = index + 1;
             if (at_end) break;
-            // Formatted transcripts separate paragraphs with newlines; the
-            // manual wrapper must honor them as hard breaks.
             if (text[index] == '\n') {
                 line_top += line_height;
                 cursor_x = left;
@@ -14385,7 +12995,6 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
     if (index >= a.chat_count) return;
     const chat = &a.chats[index];
     const selected = (item.itemState & win.ODS_SELECTED) != 0;
-    // Ctrl+A marks every row: green fill plus an accent bar on the left.
     const bulk_selected = a.bulk.count > 0 and a.bulk.contains(chat.jid.slice());
     const background = win.CreateSolidBrush(theme.surface_container_low) orelse return;
     defer _ = win.DeleteObject(background);
@@ -14410,18 +13019,12 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
         }
     }
 
-    // The avatar bitmap is a fixed 42px DIB, so its offset scales but its
-    // own box stays 42 to keep the baked circle and initial centered.
     const avatar_left = item.rcItem.left + px(a, 12);
     const avatar_top = item.rcItem.top + px(a, 10);
-    // avatarForChat fetches through wacli, a WhatsApp-only call: looking one
-    // up for a Slack/Telegram row would register its channel/chat id as a
-    // pending WhatsApp avatar fetch. Those chats fall back to initials.
     const avatar_entry = if (chat.provider == .whatsapp) avatarForChat(a, chat.jid.slice()) else null;
     if (avatar_entry != null and avatar_entry.?.bitmap != null) {
         drawAvatarBitmap(item.hDC, avatar_entry.?.bitmap.?, avatar_left, avatar_top, 42);
     } else {
-        // Anti-aliased circle via per-pixel alpha; GDI Ellipse has a hard edge.
         if (createAvatarCircleDib(@truncate(theme.surface_container_highest), @truncate(theme.surface_container_highest >> 8), @truncate(theme.surface_container_highest >> 16))) |circle| {
             defer _ = win.DeleteObject(circle);
             drawAvatarBitmap(item.hDC, circle, avatar_left, avatar_top, 42);
@@ -14451,7 +13054,7 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
     var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 34) };
     _ = win.DrawTextW(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     if (pinned_chat) {
-        const pin_glyph = [_]u16{ 0xD83D, 0xDCCC }; // 📌
+        const pin_glyph = [_]u16{ 0xD83D, 0xDCCC };
         _ = drawMixedLine(item.hDC, a.font_bold.?, a.font_emoji orelse a.font_bold.?, &pin_glyph, item.rcItem.right - px(a, 76), item.rcItem.top + px(a, 12));
     }
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
@@ -14497,10 +13100,6 @@ fn transcriptLineKind(line: []const u16) enum { text, header, bullet, rule, blan
     return .text;
 }
 
-// Renders the transcript with markdown interpreted: # headers become bold
-// accent lines, - bullets become dot bullets with hanging indent, ---
-// becomes a rule. Measure and draw share this exact code path so bubble
-// heights always match what is drawn.
 fn transcriptRender(hdc: win.HDC, a: *App, message: *const Message, shown: c_int, width: i32, draw: bool, left: i32, top: i32) i32 {
     const text = message.transcript.slice()[0..@intCast(shown)];
     var y = top;
@@ -14555,7 +13154,6 @@ fn transcriptRender(hdc: win.HDC, a: *App, message: *const Message, shown: c_int
     return y - top;
 }
 
-// Consecutive messages from the same sender hide the name header to save space.
 fn showSenderName(a: *App, index: usize) bool {
     if (index == 0) return true;
     const message = &a.messages[index];
@@ -14567,14 +13165,10 @@ fn showSenderName(a: *App, index: usize) bool {
     return !std.mem.eql(u16, message.sender.slice(), previous.sender.slice());
 }
 
-// Nearly zero gap inside a same-sender run; normal gap when a new sender starts.
 fn messageGap(a: *App, index: usize) i32 {
     return if (showSenderName(a, index)) 8 else 2;
 }
 
-// WAZI-reply: a reply's quote block sits between the sender line and the
-// body. Measure and draw share these constants so the reserved height always
-// matches what is painted; a mismatch shifts every bubble below.
 const quote_inset: i32 = 12;
 const quote_bar_width: i32 = 3;
 const quote_text_gap: i32 = 6;
@@ -14606,7 +13200,6 @@ fn quoteBlockHeight(hdc: win.HDC, a: *App, message: *const Message, width: i32) 
     return px(a, quote_vertical_pad) + name_height + quoteBodyHeight(hdc, a, message.quote.slice(), quoteTextWidth(a, width)) + px(a, quote_after_gap);
 }
 
-// Blend a bubble color 12% toward white (incoming) or black (own).
 fn quoteBlockTint(base: win.COLORREF, toward: u8) win.COLORREF {
     const r: i32 = @intCast(base & 0xff);
     const g: i32 = @intCast((base >> 8) & 0xff);
@@ -14619,9 +13212,6 @@ fn quoteBlockTint(base: win.COLORREF, toward: u8) win.COLORREF {
     );
 }
 
-// Cached height for messages that are only summed or located, not drawn. The
-// tag covers what changes the height; the exact measure of each visible
-// message in the paint pass refreshes it.
 fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: bool) u64 {
     var h = std.hash.Wyhash.init(0);
     const parts = [_]u64{
@@ -14649,17 +13239,11 @@ fn measureMessageStore(hdc: win.HDC, a: *App, message: *Message, width: i32, sho
 fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, show_sender: bool) i32 {
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
     const header_height = messageHeaderHeight(hdc, a, show_sender);
-    // A quote block with no body text (a shared message with nothing added)
-    // gets no reserved body line; every other case keeps its placeholder
-    // line, matching the draw pass below.
     const skip_body_line = message.text.len == 0 and message.quote.len > 0;
     var height = quoteBlockHeight(hdc, a, message, width) + header_height;
     if (!skip_body_line) {
         height += wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), if (message.text.len > 0) @intCast(message.text.len) else 1, width - px(a, 24), false, 0, 0, message);
     }
-    // WAZI-68: a video link unfurls into a fixed-size card below the text.
-    // Links are collected during the measure pass above, so classify here;
-    // once classified the result is sticky for the message's lifetime.
     if (message.unfurl_provider == .none and message.link_count > 0) detectUnfurl(@constCast(message));
     if (message.unfurl_provider != .none) height += unfurl_card_height + px(a, 6);
     if (message.bitmap_height > 0) {
@@ -14672,8 +13256,6 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, sh
         height += transcriptRender(hdc, a, message, shown, width - px(a, 24), false, 0, 0) + px(a, 22);
     }
     if (message.reaction.len > 0) height += px(a, 18);
-    // Reserve the timestamp band the same way the old fixed 20px was
-    // reserved: the minimum bubble must hold the header plus a time line.
     const min_height: i32 = header_height + timeBandHeight(hdc, a) + px(a, 5);
     return @max(height, min_height);
 }
@@ -14689,7 +13271,6 @@ const sender_palette = [_]SenderColor{
     .{ .r = 235, .g = 110, .b = 150 },
 };
 
-// Stable per-sender color so the same person keeps one color within a chat.
 fn senderColorFor(seed: []const u8) SenderColor {
     if (seed.len == 0) return sender_palette[0];
     var hash: u32 = 2166136261;
@@ -14700,8 +13281,6 @@ fn senderColorFor(seed: []const u8) SenderColor {
     return sender_palette[hash % sender_palette.len];
 }
 
-// First grapheme-ish chunk of a UTF-16 name: pairs up surrogate halves so an
-// emoji initial does not render as a lone surrogate.
 fn senderInitial(sender: []const u16) []const u16 {
     if (sender.len == 0) return sender;
     const first = sender[0];
@@ -14711,12 +13290,6 @@ fn senderInitial(sender: []const u16) []const u16 {
 }
 
 fn drawSenderAvatar(hdc: win.HDC, a: *App, x: i32, top: i32, message: *const Message) void {
-    // A real profile picture, reused from a matching contact or fetched for
-    // this participant, replaces the initials circle at the same DPI-scaled
-    // size; no bitmap yet (or no jid) falls through to initials below.
-    // avatarEntryForSender fetches through wacli, a WhatsApp-only call: the
-    // displayed messages all belong to the selected chat, so only look one
-    // up when that chat is WhatsApp (Slack/Telegram senders get initials).
     if (message.sender_jid.len > 0 and a.selected_chat < a.chat_count and
         a.chats[a.selected_chat].provider == .whatsapp)
     {
@@ -14727,8 +13300,6 @@ fn drawSenderAvatar(hdc: win.HDC, a: *App, x: i32, top: i32, message: *const Mes
             }
         }
     }
-    // Seed the color from the jid; fall back to the first name code unit when
-    // the jid is missing (both are stable per person).
     const seed = if (message.sender_jid.len > 0)
         message.sender_jid.slice()
     else blk: {
@@ -14752,9 +13323,6 @@ fn drawSenderAvatar(hdc: win.HDC, a: *App, x: i32, top: i32, message: *const Mes
     _ = win.SelectObject(hdc, old_font);
 }
 
-// Themed scrollbars (WAZI-35): the child controls are created without
-// WS_VSCROLL and narrowed by scrollbar_width in layout(); the freed column is
-// painted here with a rounded thumb and driven by jump-and-center dragging.
 const ScrollInfo = struct { total: i32 = 0, page: i32 = 0, top: i32 = 0 };
 
 fn trackOf(strip: win.RECT) struct { top: i32, h: i32 } {
@@ -14779,8 +13347,6 @@ fn drawScrollbar(hdc: win.HDC, strip: win.RECT, info: ScrollInfo, brush: win.HBR
     const t = trackOf(strip);
     const geom = scrollbar.thumbGeom(t.top, t.h, info.total, info.page, info.top, scrollbar_min_thumb) orelse return;
     const width = strip.right - strip.left - 2;
-    // Fully-rounded pill: corner square equals the thumb width. GDI regions
-    // exclude the right and bottom edges, hence the un-adjusted coordinates.
     const rgn = win.CreateRoundRectRgn(strip.left + 1, geom.top, strip.right - 1, geom.top + geom.height, width, width) orelse return;
     defer _ = win.DeleteObject(rgn);
     _ = win.FillRgn(hdc, rgn, brush);
@@ -14833,7 +13399,6 @@ fn canvasScrollInfo(a: *App) ScrollInfo {
     _ = win.GetClientRect(canvas, &client);
     const page = @max(1, client.bottom - client.top);
     const max_scroll = @max(0, a.max_scroll);
-    // scroll_y counts from the bottom of the conversation (0 = newest message).
     return .{ .total = page + max_scroll, .page = page, .top = max_scroll - a.scroll_y };
 }
 
@@ -14869,9 +13434,6 @@ fn dragStrip(a: *App, strip: win.RECT, info: ScrollInfo, y: i32, set_top: SetScr
     set_top(a, scrollbar.topFromPoint(y, t.top, t.h, info.total, info.page, scrollbar_min_thumb));
 }
 
-// Poll scroll positions once per animation tick: child controls scroll
-// natively (wheel, keyboard) without notifying the parent, so compare against
-// the last painted state and repaint the strip on change.
 fn syncScrollbarStrips(a: *App) void {
     const owner = a.hwnd orelse return;
     if (a.chats_hwnd) |list| {
@@ -14924,7 +13486,6 @@ fn drawQuoteBlock(hdc: win.HDC, a: *App, message: *const Message, left: i32, rig
         _ = win.DeleteObject(block_brush);
     }
 
-    // Accent bar and sender name share the same stable per-sender colour.
     const accent = senderColorFor(message.quote_sender_jid.slice());
     const accent_color = rgb(accent.r, accent.g, accent.b);
     if (win.CreateSolidBrush(accent_color)) |bar_brush| {
@@ -14960,8 +13521,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     _ = win.GetClientRect(hwnd, &client);
     const canvas_width = @max(1, client.right - client.left);
     const canvas_height = @max(1, client.bottom - client.top);
-    // Draw into a memory bitmap first and blit once; painting directly to
-    // the screen flickered whenever GIF frames invalidated the canvas.
     const memory_dc = win.CreateCompatibleDC(screen_dc);
     var memory_bitmap: win.HBITMAP = null;
     var old_bitmap: ?win.HGDIOBJ = null;
@@ -14989,11 +13548,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     else
         "";
     const in_group = std.mem.endsWith(u8, chat_jid, "@g.us");
-    // Cap total message-image bitmap memory: once over budget, free the
-    // least-recently-shown ones first (typically messages that scrolled
-    // off screen a while ago). No handle is selected into a DC between
-    // frames, so freeing here is safe; scrolling back re-decodes from the
-    // downloaded file on disk.
     if (a.message_bitmap_lru.total_bytes > message_bitmap_budget_bytes) {
         var victims: [max_messages]usize = undefined;
         const evicted = a.message_bitmap_lru.evict(message_bitmap_budget_bytes, &victims);
@@ -15018,8 +13572,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     while (index > 0) {
         index -= 1;
         const message = &a.messages[index];
-        // WAZI-85: name the message being painted in the crash log (its id,
-        // never its content); the defer fires on continue and return too.
         setPaintingMessageId(message.id.slice());
         defer clearPaintingMessageId();
         message.media_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
@@ -15052,8 +13604,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         var text_top = y + messageHeaderHeight(hdc, a, show_sender) - px(a, 6);
         if (show_sender) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
-            // In group chats the name uses the same stable per-person tint as
-            // the avatar; direct chats and own messages keep their plain colors.
             const name_tint = if (!message.from_me and in_group and message.sender_jid.len > 0)
                 senderColorFor(message.sender_jid.slice())
             else
@@ -15087,8 +13637,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             }
             message.media_hit = .{ .left = image_left, .top = image_top, .right = image_left + message.bitmap_width, .bottom = image_top + message.bitmap_height };
             if (std.ascii.eqlIgnoreCase(message.media_type.slice(), "video")) {
-                // Keep the play button inside the thumbnail; tiny thumbnails
-                // shrink it, and a zero-size bitmap draws nothing.
                 const radius = @min(26, @min(@divTrunc(message.bitmap_width, 2), @divTrunc(message.bitmap_height, 2)));
                 if (radius > 4) {
                     const center_x = image_left + @divTrunc(message.bitmap_width, 2);
@@ -15149,8 +13697,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 _ = win.DeleteObject(glyph_brush);
                 _ = win.DeleteObject(button_brush);
 
-                // Playback-speed button between the play control and the
-                // progress track; click cycles 1x -> 1.5x -> 2x.
                 _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                 const speed_active = a.audio_player != null and a.audio_player.?.speed() != 100;
                 _ = win.SetTextColor(hdc, if (speed_active) color_accent else color_muted);
@@ -15173,7 +13719,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                     _ = win.DeleteObject(filled_brush);
                 }
                 if (!active) {
-                    // Where he left this note: progress shows after a reopen.
                     const jid_here = if (a.chat_count > 0 and a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else "";
                     if (a.voice_pos.get(voicePosKey(a, jid_here, message.id.slice()))) |saved| {
                         if (saved.dur_ms > 0) {
@@ -15254,13 +13799,9 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         }
         _ = win.SelectObject(hdc, @ptrCast(a.font.?));
         _ = win.SetTextColor(hdc, if (message.from_me) theme.on_primary_container else theme.on_surface);
-        // Matches measureMessage's skip_body_line: a quote block with an
-        // empty body draws no placeholder line beneath it.
         const skip_body_line = message.text.len == 0 and message.quote.len > 0;
         const text_len: c_int = if (message.text.len > 0) @intCast(message.text.len) else 1;
         const text_height: i32 = if (skip_body_line) 0 else wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), text_len, right - left - px(a, 24), true, left + px(a, 12), text_top, message);
-        // WAZI-68: the unfurled video card sits below the text; its height
-        // was reserved in measureMessage, so no other block moves.
         if (message.unfurl_provider != .none) {
             drawUnfurlCard(hdc, a, message, left + px(a, 12), text_top + text_height + px(a, 4), right - left - px(a, 24));
             text_top += text_height + unfurl_card_height + px(a, 6);
@@ -15284,7 +13825,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         }
         if (message.reaction.len > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font.?));
-            // Muted until wacli confirms an optimistic reaction.
             _ = win.SetTextColor(hdc, if (message.reaction_pending) color_muted else if (message.from_me) theme.on_primary_container else theme.on_surface);
             var reaction_rect = win.RECT{ .left = left + px(a, 12), .top = y + height - px(a, 30), .right = left + px(a, 52), .bottom = y + height - px(a, 6) };
             _ = win.DrawTextW(hdc, message.reaction.ptr(), @intCast(message.reaction.len), &reaction_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
@@ -15295,7 +13835,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         var time_rect = win.RECT{ .left = right - px(a, 52), .top = y + height - px(a, 5) - time_band, .right = right - px(a, 10), .bottom = y + height - px(a, 5) };
         _ = win.DrawTextW(hdc, message.time.ptr(), @intCast(message.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE);
     }
-    // Archived chats say so in a small badge at the top right of the pane.
     if (a.selected_chat < a.chat_count) {
         if (archiveMarker(a, &a.chats[a.selected_chat])) |text| {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
@@ -15346,8 +13885,6 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
             if (a.canvas != null) {
-                // The strip overlays canvas content, so only capture clicks
-                // when a thumb is actually drawn.
                 const strip = canvasStripRect(a);
                 const info = canvasScrollInfo(a);
                 if (hitStrip(strip, x, y)) {
@@ -15358,9 +13895,6 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                     }
                 }
             }
-            // Tracked for every press so the matching release can tell a
-            // plain click (opens an image) from a drag (selects text, or
-            // just moves off the target) that happens to land on media too.
             a.click_origin = .{ .x = x, .y = y };
             a.click_moved = false;
             for (a.messages[0..a.message_count], 0..) |*item, index| {
@@ -15385,15 +13919,9 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
             if (handleCanvasDoubleClick(a, x, y)) {
-                // The trailing release of this double-click still reaches
-                // WM_LBUTTONUP; mark it as "moved" so handleCanvasClick's
-                // click-to-open doesn't fire a second time for it.
                 a.click_moved = true;
                 return 0;
             }
-            // CS_DBLCLKS turns a fast second press into a double-click;
-            // anywhere but an image it is still a press (scrollbar drag,
-            // text selection).
             return canvasProc(hwnd, win.WM_LBUTTONDOWN, wparam, lparam);
         },
         win.WM_MOUSEMOVE => {
@@ -15557,13 +14085,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
     switch (message) {
         wm_update_ready => {
-            // wparam: 1 installed, 2 newer version found (lparam = *UpdateAvailable),
-            // 3 no update, 4 check failed automatically, 5 check failed manually
-            // (lparam = static @errorName text), 6 blocked by another running copy,
-            // 7 install failed (lparam like 5), 8 install found no update.
-            // Check threads post 2-5; install threads post 1 and 6-8. Each
-            // completion clears only its own slot, so overlapping operations
-            // can never free each other's flag.
             if (wparam >= 2 and wparam <= 5) a.update_check_running = false;
             if (wparam == 1 or wparam >= 6) a.update_install_running.store(false, .release);
             switch (wparam) {
@@ -15571,23 +14092,16 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     a.update_installed = true;
                     a.update_failures = 0;
                     setStatus(a, "Update installed - restarting");
-                    // Only the card click starts an install, so the restart is wanted now;
-                    // the timer still waits out unsent typing and sends in flight.
                     _ = win.SetTimer(hwnd, timer_update_restart, update_card_restart_delay_ms, null);
                     updateCardRefresh(a);
                 },
                 2 => {
                     const upd: *UpdateAvailable = @ptrFromInt(@as(usize, @bitCast(lparam)));
-                    // The install already succeeded; drop the late offer
-                    // instead of trying to install the same tag again.
                     if (a.update_installed) {
                         upd.deinit(std.heap.page_allocator);
                         std.heap.page_allocator.destroy(upd);
                         return 0;
                     }
-                    // A re-found tag is the same failed install, not a new
-                    // offer: counting it keeps a repeating automatic failure
-                    // from staying silent forever.
                     const known = if (a.update_pending) |old| old.tag else null;
                     const is_new_offer = update.isNewOffer(known, upd.tag);
                     if (a.update_pending) |old| {
@@ -15596,8 +14110,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     }
                     a.update_pending = upd;
                     if (is_new_offer) a.update_failures = 0;
-                    // A new release resets the card; a click already in flight
-                    // keeps going on its own.
                     if (is_new_offer) {
                         a.update_staged = false;
                         a.update_card_error_len = 0;
@@ -15607,8 +14119,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         return 0;
                     }
                     a.update_install_auto = true;
-                    // Download and verify quietly now; the card click only swaps
-                    // and restarts. Nothing installs on its own.
                     if (!a.update_staged) startUpdateInstall(hwnd, true);
                     var offer_buf: [128]u8 = undefined;
                     setStatus(a, std.fmt.bufPrint(&offer_buf, "New version {s} is available - use the card to update", .{upd.tag}) catch "New version available");
@@ -15622,8 +14132,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     setStatus(a, std.fmt.bufPrint(&none_buf, "You are on v{s} - this is the newest version", .{app_version}) catch "No updates found");
                 },
                 9 => {
-                    // Downloaded and verified in the background. If the user
-                    // already clicked, finish with the swap now.
                     a.update_staged = true;
                     a.update_failures = 0;
                     if (a.update_click_wait) {
@@ -15644,7 +14152,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 8 => {
                     a.update_click_wait = false;
                     if (a.update_card_busy) {
-                        // The release is no longer newer than this copy: nothing to offer.
                         a.update_card_busy = false;
                         if (a.update_pending) |old| {
                             old.deinit(std.heap.page_allocator);
@@ -15669,12 +14176,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     var fail_buf: [128]u8 = undefined;
                     const verb: []const u8 = if (wparam == 7) "install" else "check";
                     const text = std.fmt.bufPrint(&fail_buf, "Update {s} failed: {s}", .{ verb, std.mem.span(name) }) catch "Update failed";
-                    // 5 is user-initiated; an automatic 4 or 7 only speaks up
-                    // when the failure repeats.
                     const auto = wparam == 4 or (wparam == 7 and a.update_install_auto);
                     if (!auto or a.update_failures >= 2) setStatus(a, text);
-                    // A failed background download stays quiet on the card (the
-                    // next check retries it); a failed click shows the error.
                     if (wparam == 7 and (a.update_card_busy or a.update_click_wait)) updateCardFail(a, std.mem.span(name));
                 },
                 else => {},
@@ -15706,16 +14209,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     refreshPeopleSearch(a);
                 },
                 .chats => {
-                    // A stale failure must not restart the retry cycle or
-                    // repaint the status over a newer read (same rule as the
-                    // success path below).
                     if (!result.ok and result.gen == a.chats_gen) {
                         setStatus(a, "Unable to read chats from wacli");
-                        // WAZI-67: refreshChats used to re-run only when the
-                        // wacli store changed, so a read that failed once at
-                        // the very first launch after an update left the
-                        // sidebar empty until a manual restart. Schedule one
-                        // further read, three rounds at most.
                         if (a.chats_read_attempts < 3) {
                             a.chats_read_attempts += 1;
                             a.chats_read_retry_ticks = 2;
@@ -15724,13 +14219,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                             appendLaunchLog(a, fail_line);
                         }
                     } else if (result.ok and result.gen == a.chats_gen) {
-                        // A queued job with older archive/unread flags must
-                        // not repaint over a newer one.
-                        // Persist the validated read so the next launch
-                        // (an update included) opens with this list (WAZI-67).
-                        // A malformed payload (applyChats = false) leaves the
-                        // sidebar just as empty as a failed read, so it goes
-                        // through the same bounded retry.
                         if (applyChats(a, result.data, true)) {
                             a.chats_read_retry_ticks = 0;
                             a.chats_read_attempts = 0;
@@ -15738,8 +14226,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                             var log_buffer: [64]u8 = undefined;
                             const log_line = std.fmt.bufPrint(&log_buffer, "chats-read: ok {d} bytes, {d} chats", .{ result.data.len, a.chat_count }) catch "chats-read: ok";
                             appendLaunchLog(a, log_line);
-                            // WAZI-79: the fresh row may be newer than the
-                            // conversation on screen; read it if so.
                             reconcileOpenChat(a);
                         } else if (a.chats_read_attempts < 3) {
                             a.chats_read_attempts += 1;
@@ -15749,7 +14235,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     }
                 },
                 .messages => {
-                    // Chat kind + error only, never the message payload.
                     var kind: []const u8 = "unknown";
                     for (a.chats[0..a.chat_count]) |*chat| {
                         if (chat_key.Key.eql(chat_key.of(chat), chat_key.of(result))) {
@@ -15762,10 +14247,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         var fail_buffer: [128]u8 = undefined;
                         const fail_line = std.fmt.bufPrint(&fail_buffer, "messages-read: fail, chat={s} err={s}", .{ kind, result.extra.slice() }) catch "messages-read: fail";
                         appendLaunchLog(a, fail_line);
-                        // WAZI-79: a fresh read that failed (the store lock
-                        // was held, say) retries after a short backoff; a
-                        // stale answer belongs to a chat the user has already
-                        // left and the newer read covers it.
                         if (result.gen == a.messages_gen and a.selected_chat < a.chat_count and
                             chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)))
                         {
@@ -15775,12 +14256,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)) and
                         result.gen == a.messages_gen)
                     {
-                        // WAZI-79: a 0-exit read without a messages list is
-                        // as useless as a failed one; a valid empty
-                        // conversation paints and clears the retry budget.
-                        // An identical answer for the chat already on screen
-                        // changes nothing: skip the teardown, re-decode and
-                        // repaint (the WAL moves far more often than a chat).
                         if (a.message_count > 0 and a.pending_send_count == 0 and a.failed_send_count == 0 and
                             chat_key.Key.eql(chat_key.displayed(a), chat_key.of(result)) and
                             std.hash.Wyhash.hash(0, result.data) == a.msg_applied_hash)
@@ -15820,8 +14295,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                             bindOutboxAccount(a);
                         }
                     }
-                    // An account changed while this probe was queued: run the
-                    // deferred one now that the pending slot is free.
                     if (a.cache_tag_probe_again) {
                         a.cache_tag_probe_again = false;
                         enqueueCacheTagProbe(a);
@@ -15848,16 +14321,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     setStatus(a, std.fmt.bufPrint(&status_buffer, "Slack connected: {s}", .{if (team.len > 0) team else "workspace"}) catch "Slack connected");
                 } else setStatus(a, "Slack tokens are not valid"),
                 .slack_history => {
-                    // Generation + channel guards: a stale answer must never
-                    // repaint over a newer chat (same rule as wacli reads).
                     if (!result.ok) {
                         setStatus(a, "Unable to read Slack history");
                     } else if (result.gen == a.messages_gen and selectedChatIsSlack(a) and
                         chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)))
                     {
-                        // Bridge poll: an unchanged answer for the chat already
-                        // on screen is skipped, so images, thread replies and
-                        // scroll are not torn down and refetched every 5 s.
                         const hash = std.hash.Wyhash.hash(0, result.data);
                         const unchanged = a.slack_bridge != null and hash == a.slack_history_hash and
                             chat_key.Key.eql(chat_key.displayed(a), chat_key.of(result));
@@ -15921,18 +14389,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return 0;
         },
         win.WM_POWERBROADCAST => {
-            // WAZI-60: catch up right after the machine wakes; the hourly
-            // timer alone can go a whole sleep cycle without firing.
             if (wparam == win.PBT_APMRESUMEAUTOMATIC) startUpdateCheck(hwnd, false);
-            return 1; // TRUE: message handled
+            return 1;
         },
         win.WM_ACTIVATE => {
-            // WAZI-60: a laptop that sleeps at night checks on the first
-            // focus after waking even if no power broadcast arrived.
-            // The caret must always be blinking in the composer: every
-            // shortcut relies on a modifier key rather than a focus mode, so
-            // reactivating the window (Alt+Tab, clicking the taskbar,
-            // restoring from minimize) sends focus straight back there.
             if (loword(wparam) != win.WA_INACTIVE) {
                 startUpdateCheck(hwnd, false);
                 focusCompose(a);
@@ -15940,22 +14400,15 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return win.DefWindowProcW(hwnd, message, wparam, lparam);
         },
         win.WM_ACTIVATEAPP => {
-            // Alt+Tab back into the app from another application: WM_ACTIVATE
-            // alone doesn't always fire in that case, so this catches it too.
             if (wparam != 0) focusCompose(a);
             return win.DefWindowProcW(hwnd, message, wparam, lparam);
         },
         win.WM_SETFOCUS => {
-            // Belt and braces: whatever handed the main window focus (the
-            // taskbar, the shell after restoring from minimize), keep it
-            // moving straight through to the composer.
             focusCompose(a);
             return 0;
         },
         win.WM_CREATE => {
             a.hwnd = hwnd;
-            // Read the monitor DPI before any font exists so the first paint
-            // already uses physical sizes.
             const window_dpi = win.GetDpiForWindow(hwnd);
             a.dpi = if (window_dpi == 0) 96 else window_dpi;
             a.brush_bg = win.CreateSolidBrush(color_bg);
@@ -15997,19 +14450,14 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 a.wacli_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, false }) catch null;
             }
             if (a.wacli_thread == null) setStatus(a, "Background reader failed to start");
-            // wazigctl control pipe: its threads only ever post wm_control here.
             if (std.Thread.spawn(.{ .stack_size = 256 * 1024 }, controlThreadMain, .{a})) |thread| {
                 thread.detach();
             } else |_| appendLaunchLog(a, "control pipe: thread failed to start");
-            // WAZI-61: a second lane for Slack HTTP so a 429 backoff sleep
-            // cannot stall wacli work (and vice versa).
             if (a.wacli_slack_thread == null) {
                 a.wacli_slack_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, true }) catch null;
                 if (a.wacli_slack_thread == null) setStatus(a, "Slack worker failed to start; sends run inline");
             }
             refreshGroups(a);
-            // WAZI-67: paint the previous chat list before the first wacli
-            // read lands, then prune message snapshots older than 14 days.
             loadChatsCache(a);
             pruneStaleMsgCache(a);
             refreshChats(a);
@@ -16034,18 +14482,14 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return 0;
         },
         win.WM_DPICHANGED => {
-            // HIWORD is the new Y dpi; both axes move together in v2 awareness.
             const new_dpi = hiword(@bitCast(wparam));
             if (new_dpi > 0) {
-                // The dragged compose height is physical pixels: carry it to
-                // the new monitor's scale.
                 const old_dpi: i32 = @intCast(a.dpi);
                 a.compose_dragged = @divTrunc(a.compose_dragged * @as(i32, new_dpi) + @divTrunc(old_dpi, 2), old_dpi);
                 a.dpi = new_dpi;
             }
             recreateFonts(a);
             if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, px(a, 64));
-            // Adopt the size the system suggests for the new monitor.
             const suggested: *const win.RECT = @ptrFromInt(@as(usize, @bitCast(lparam)));
             _ = win.SetWindowPos(hwnd, null, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top, win.SWP_NOZORDER | win.SWP_NOACTIVATE);
             var rc_dpi: win.RECT = undefined;
@@ -16066,14 +14510,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             _ = win.FillRect(hdc, &left_rect, a.brush_panel.?);
             var composer_rect = win.RECT{ .left = left_width + 1, .top = a.compose_strip_top, .right = client.right, .bottom = client.bottom };
             _ = win.FillRect(hdc, &composer_rect, a.brush_bg.?);
-            // Drag-handle affordance: a short grip line centered on the strip's top padding.
             if (a.compose != null) {
                 const cx = @divTrunc(left_width + 1 + client.right, 2);
                 var grip = win.RECT{ .left = cx - px(a, 22), .top = a.compose_strip_top + px(a, 4), .right = cx + px(a, 22), .bottom = a.compose_strip_top + px(a, 6) };
                 _ = win.FillRect(hdc, &grip, a.brush_panel.?);
             }
-            // Paste preview (WAZI-37): the staged image thumbnail sits in the
-            // band the strip reserves above the edit while it waits to send.
             if (a.staged_image.preview) |preview| {
                 var preview_rect = win.RECT{
                     .left = left_width + px(a, 13),
@@ -16099,13 +14540,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         },
         win.WM_ERASEBKGND => return 1,
         win.WM_SETCURSOR => {
-            // Sizing cursor over the composer's top drag band (parent-owned padding).
             if (a.compose != null) {
                 var pt: win.POINT = undefined;
                 _ = win.GetCursorPos(&pt);
                 _ = win.ScreenToClient(hwnd, &pt);
                 if (pt.y >= a.compose_strip_top and pt.y < a.compose_strip_top + px(a, 11) and pt.x > 0) {
-                    // IDC_SIZENS = MAKEINTRESOURCE(32646); the macro doesn't translate.
                     _ = win.SetCursor(win.LoadCursorW(null, @as([*:0]const u16, @ptrFromInt(32646))));
                     return 1;
                 }
@@ -16127,8 +14566,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 .body => return 0,
                 .none => {},
             }
-            // The composer's resize band takes precedence over the scrollbar
-            // strip: their top 11px overlap when the edit is at minimum height.
             if (a.compose != null and y >= a.compose_strip_top and y < a.compose_strip_top + px(a, 11)) {
                 a.compose_dragging = true;
                 _ = win.SetCapture(hwnd);
@@ -16212,7 +14649,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (item.itemID == reaction_row) measureReactionRow(a, item);
             return 1;
         },
-        // A click on any child (the chat list included) drops a Ctrl+A selection.
         win.WM_PARENTNOTIFY => {
             if (loword(wparam) == win.WM_LBUTTONDOWN) _ = clearBulkSelection(a);
             return 0;
@@ -16256,7 +14692,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 updateVoiceButton(a);
                 refreshStatuses(a, false);
                 if (a.status_ui.mode == .viewer) showStatusMedia(a);
-                // Idle proof: paints per minute, one launch-log line a minute.
                 a.paint_minute_ticks += 1;
                 if (a.paint_minute_ticks >= 60) {
                     a.paint_minute_ticks = 0;
@@ -16282,9 +14717,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         a.startup_memory_logged = true;
                     }
                 }
-                // Reads wait for media slots instead of racing them for the
-                // store lock: a read that loses the lock fails, so it would
-                // never mark the chat read.
                 checkSync(a);
                 a.group_refresh_ticks += 1;
                 if (a.group_refresh_ticks >= 60) {
@@ -16293,15 +14725,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 }
                 pollSlackBridge(a);
                 const changed = storeChanged(a);
-                // WAZI-67: bounded retry for a chats read that failed: one
-                // further read two ticks after each failure, three rounds.
                 if (a.chats_read_retry_ticks > 0) {
                     a.chats_read_retry_ticks -= 1;
                     if (a.chats_read_retry_ticks == 0) refreshChats(a);
                 }
-                // WAZI-79: a failed or empty messages read retries after its
-                // backoff, but only while the same chat is still open and no
-                // read for it is queued or running.
                 if (a.msg_read_retry_ticks > 0) {
                     a.msg_read_retry_ticks -= 1;
                     if (a.msg_read_retry_ticks == 0 and wacliPendingGet(a, .messages) == 0 and
@@ -16315,7 +14742,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     refreshChats(a);
                     if (!messagesAreCurrent(a)) refreshMessages(a);
                 }
-                // A queued manual click goes before automatic downloads.
                 retryPendingDownload(a);
                 retryUnarchiveChat(a);
                 tickArchivedScan(a, changed);
@@ -16328,16 +14754,12 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             } else if (wparam == timer_telegram) {
                 drainTelegram(a);
             } else if (wparam == timer_animation) {
-                // A minimized window shows nothing: no GIF frames or scrollbar strips.
                 if (win.IsIconic(hwnd) == 0) {
                     advanceGifs(a);
                     syncScrollbarStrips(a);
                 }
                 updateAudioPlayback(a);
                 updateDictation(a);
-                // Harvest the finished result before scheduling the next
-                // job; the session has one result slot and scheduling first
-                // silently discarded every completed transcript.
                 pollTranscription(a);
                 scheduleNextTranscription(a);
                 pollFormatting(a);
@@ -16347,8 +14769,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 a.chat_selection_pending = false;
                 refreshMessages(a);
             } else if (wparam == timer_slack_mark) {
-                // WAZI-104: the viewed Slack chat stayed still long enough;
-                // one conversations.mark goes out for its newest displayed ts.
                 _ = win.KillTimer(hwnd, timer_slack_mark);
                 fireSlackMark(a);
             } else if (wparam == timer_update_first_check) {
@@ -16364,9 +14784,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 }
                 if (!a.update_card_busy and !a.update_install_running.load(.acquire)) _ = win.KillTimer(hwnd, timer_update_card);
             } else if (wparam == timer_update_restart) {
-                // Never throw away unsent typing or a message still on its
-                // way to WhatsApp: keep pushing the restart back until the
-                // compose box is empty and every send has finished.
                 const composing = if (a.compose) |compose| win.GetWindowTextLengthW(compose) > 0 else false;
                 if (composing or a.pending_send_count > 0 or a.send_child != null) {
                     setStatus(a, if (composing) "Update installed - restarting when you finish typing" else "Update installed - restarting after the message is sent");
@@ -16412,18 +14829,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             a.archive_child = null;
             if (a.read_child) |*child| child.kill(a.io);
             a.read_child = null;
-            // Flush reads that never reached the store: the write may have
-            // been queued, in flight, or killed mid-run, and mark-read is
-            // idempotent so retrying next launch is always safe (WAZI-74).
-            // After spawn failures the queue is dead but its file is the
-            // only copy of those reads — never overwrite it from memory.
             if (!a.read_queue_dead) persistPendingReads(a);
             persistReadState(a);
             persistStatusViewed(a);
             status_ui.clearMedia(a);
-            // ponytail: the Socket Mode thread stops at its next frame or at
-            // process exit, whichever comes first; upgrade path is a stored
-            // socket handle closed here to unblock the receive immediately.
             a.slack_stop.store(true, .release);
             stopSync(a, "shutdown");
             if (a.sync_job) |job| _ = win.CloseHandle(job);
@@ -16511,10 +14920,6 @@ fn toggleSelectedTranscript(a: *App) void {
 fn restoreComposeCaret(a: *App) void {
     const compose = a.compose orelse return;
     if (win.GetFocus() != compose) return;
-    // Alt+J/K hotkeys are consumed before the edit control sees them, but the
-    // caret can still be left hidden (menu-mode leftover or system-key churn).
-    // A focus pair makes the edit control destroy and recreate its caret, so
-    // blinking resumes; the selection is preserved.
     var start: usize = 0;
     var end: usize = 0;
     _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
@@ -16527,10 +14932,6 @@ fn isWordBreakChar(c: u16) bool {
     return c == ' ' or c == '\t' or c == '\r' or c == '\n';
 }
 
-/// Ctrl+Backspace's word-delete: a plain EDIT control has none, and left to
-/// the default proc it turns into a WM_CHAR carrying the DEL control
-/// character, which the control shows as a small box glyph. With an active
-/// selection this instead deletes just that, matching plain Backspace.
 fn deleteWordBeforeCaret(edit: win.HWND) void {
     var start: usize = 0;
     var end: usize = 0;
@@ -16542,9 +14943,6 @@ fn deleteWordBeforeCaret(edit: win.HWND) void {
     if (start == 0) return;
     var wide_buffer: [4096]u16 = undefined;
     const length: usize = @intCast(win.GetWindowTextW(edit, &wide_buffer, wide_buffer.len));
-    // GetWindowTextW truncates past the buffer; on text longer than that,
-    // bail rather than delete the wrong word. The keydown is still swallowed
-    // either way, so no box glyph appears.
     if (start > length) return;
     var word_start = start;
     while (word_start > 0 and isWordBreakChar(wide_buffer[word_start - 1])) word_start -= 1;
@@ -16593,21 +14991,10 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         }
         return true;
     }
-    // Swallow a bare Alt keydown: if it reaches the edit control's default
-    // proc it enters menu mode, which hides the caret, and because Alt+J/K
-    // are consumed here the mode never exits and the caret stays hidden.
     if (alt and key == win.VK_MENU) return true;
-    // While the Telegram sign-in dialog is open, all keys go to it: the main
-    // loop routes them through IsDialogMessageW, and the global shortcuts
-    // (Ctrl+K palette, hotkeys) must not fire underneath the login flow.
     if (a.tg_login_window != null) return false;
-    // The image viewer owns the keyboard too: shortcuts like Q (quit) or
-    // E (archive) must not act on the chat hidden behind it.
     if (a.image_viewer_window != null) return false;
-    // The shortcuts help overlay owns the keyboard while open; its own
-    // window proc handles Esc/F1 to close it.
     if (a.shortcut_help != null) return false;
-    // A voice note being recorded: Enter sends it, Esc throws it away.
     if (a.voice_active and !a.voice_finishing and (key == win.VK_RETURN or key == win.VK_ESCAPE) and !alt and !control) {
         if (key == win.VK_ESCAPE) cancelVoice(a, "Voice note cancelled") else finishVoice(a);
         return true;
@@ -16616,9 +15003,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         openShortcutHelp(a);
         return true;
     }
-    // With the composer empty, Up/Down walk the message highlight like
-    // Alt+K/J; Down past the newest message clears it. Once there is text,
-    // the arrows move the caret as usual.
     if (!control and !alt and !shift and (key == win.VK_UP or key == win.VK_DOWN)) {
         if (a.compose) |compose| {
             if (win.GetFocus() == compose and win.GetWindowTextLengthW(compose) == 0 and a.message_count > 0) {
@@ -16627,18 +15011,14 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             }
         }
     }
-    // Ctrl+Up/Down walk the highlight the same way, but always: Ctrl makes
-    // the intent explicit regardless of composer focus or content.
     if (control and !alt and !shift and (key == win.VK_UP or key == win.VK_DOWN) and a.message_count > 0) {
         walkMessageHighlight(a, key);
         return true;
     }
-    // Alt+1..9 show one messenger: WhatsApp, then Slack and Telegram when set up.
     if (alt and !control and !shift and key >= '1' and key <= '9') {
         if (messenger_view.forNumber(key - '0', slackConfigured(a), telegramReady(a))) |view| switchChatView(a, view);
         return true;
     }
-    // Ctrl+1..9 open the chat at that position in the list.
     if (control and !alt and key >= '1' and key <= '9') {
         const target: i32 = @intCast(key - '1');
         if (target < a.chat_count) {
@@ -16647,11 +15027,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         }
         return true;
     }
-    // Chat list navigation: heavy modifier combos so they work no matter
-    // what has focus (the composer always does, see focusCompose) without
-    // colliding with typing or the composer's own Home/End/PgUp/PgDn.
-    // Ctrl+Shift+Home/End jump to the first/last chat; Ctrl+PgUp/PgDn move
-    // one visible page. Plain Page Up/Down keep scrolling the chat (below).
     if (control and shift and !alt and (key == win.VK_HOME or key == win.VK_END)) {
         if (a.chat_count > 0) {
             const target: i32 = if (key == win.VK_HOME) 0 else @intCast(a.chat_count - 1);
@@ -16668,9 +15043,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         }
         return true;
     }
-    // Chat history from the keyboard: Page Up/Down a screen, Ctrl+End back to
-    // the newest message. Same path as the wheel, so older messages load the
-    // same way. Ctrl+Up/Down walk the message highlight instead (above).
     if (a.canvas != null and !alt and (key == win.VK_PRIOR or key == win.VK_NEXT or
         (control and key == win.VK_END)))
     {
@@ -16681,7 +15053,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             const step: i32 = switch (key) {
                 win.VK_PRIOR => page,
                 win.VK_NEXT => -page,
-                else => -a.scroll_y, // Ctrl+End
+                else => -a.scroll_y,
             };
             a.scroll_y = std.math.clamp(a.scroll_y + step, 0, a.max_scroll);
             _ = win.InvalidateRect(canvas, null, win.TRUE);
@@ -16695,9 +15067,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         }
         return true;
     }
-    // Ctrl+A selects all text in whichever text field has focus: the
-    // composer, the sidebar search box, or the emoji picker's search field.
-    // Plain Win32 EDIT controls don't support this on their own.
     if (control and !alt and !shift and key == 'A') {
         const in_text_field = (a.compose != null and focus == a.compose.?) or
             (a.search != null and focus == a.search.?) or
@@ -16706,16 +15075,11 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             _ = win.SendMessageW(focus.?, win.EM_SETSEL, 0, @bitCast(@as(isize, -1)));
             return true;
         }
-        // With focus in the chat list, Ctrl+A selects every chat shown;
-        // Ctrl+E then archives them together.
         if (a.chats_hwnd != null and focus == a.chats_hwnd.?) {
             selectAllChats(a);
             return true;
         }
     }
-    // Ctrl+Backspace deletes the previous word in the same three fields:
-    // left to the default EDIT control it inserts a box glyph instead (see
-    // deleteWordBeforeCaret).
     if (control and !alt and key == win.VK_BACK) {
         const in_text_field = (a.compose != null and focus == a.compose.?) or
             (a.search != null and focus == a.search.?) or
@@ -16738,8 +15102,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             paletteMove(a, -1);
             return true;
         }
-        // j/k walk the open-externally picker like Up/Down; an empty filter
-        // keeps them from colliding with the typed filter text.
         if (a.palette_links_mode and !control and !alt) {
             const filter_empty = if (a.palette_edit) |edit| win.GetWindowTextLengthW(edit) == 0 else true;
             if (filter_empty and key == 'J') {
@@ -16788,8 +15150,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         }
         return false;
     }
-    // Enter or R resends the selected failed message, only while the
-    // composer is empty and the search box isn't taking the keystroke.
     if (!control and !alt and (key == win.VK_RETURN or key == 'R')) {
         if (a.selected_message) |selected| {
             if (selected < a.message_count and a.messages[selected].from_me and a.messages[selected].send_state == .failed) {
@@ -16799,10 +15159,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             }
         }
     }
-    // Enter opens the highlighted image message in the viewer, the same
-    // download-then-open path as Ctrl+O and a single click. Resend above
-    // takes priority on a failed message; with text (or a staged image)
-    // ready to send, Enter still sends as usual.
     if (!control and !alt and key == win.VK_RETURN) {
         if (a.selected_message) |selected| {
             if (selected < a.message_count and isImage(&a.messages[selected])) {
@@ -16815,7 +15171,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             }
         }
     }
-    // Esc drops a Ctrl+A chat selection before anything else uses it.
     if (key == win.VK_ESCAPE and clearBulkSelection(a)) {
         setStatus(a, "Selection cleared");
         return true;
@@ -16861,7 +15216,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (control and key == 'C') {
-        // Keep native copy when an editor has its own text selection.
         const focus_control = win.GetFocus();
         const in_editor = (a.compose != null and focus_control == a.compose.?) or (a.search != null and focus_control == a.search.?);
         if (in_editor) {
@@ -16935,8 +15289,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
                     else => {},
                 }
             }
-            // Ctrl+V with an image on the clipboard stages a paste-to-send
-            // (WAZI-37); without an image the edit control pastes text as usual.
             if (control and key == 'V' and stageImageFromClipboard(a)) return true;
             if (key == win.VK_RETURN and !shift) {
                 sendMessage(a);
@@ -17035,8 +15387,6 @@ fn loadHashSet(a: *App, path: []const u8, set: *played.Set) void {
     if (path.len == 0) return;
     const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch return;
     defer a.allocator.free(wide);
-    // Read only the tail of the append-only store: the newest entries are
-    // at the end and the read is capped to keep startup bounded.
     const handle = win.CreateFileW(wide.ptr, win.GENERIC_READ, win.FILE_SHARE_READ, null, win.OPEN_EXISTING, win.FILE_ATTRIBUTE_NORMAL, null);
     if (handle == win.INVALID_HANDLE_VALUE or handle == null) return;
     defer _ = win.CloseHandle(handle);
@@ -17060,7 +15410,6 @@ fn loadHashSet(a: *App, path: []const u8, set: *played.Set) void {
 fn appendHashLine(a: *App, path: []const u8, line: []const u8) void {
     const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch return;
     defer a.allocator.free(wide);
-    // True append: a crash mid-write can never truncate existing history.
     const handle = win.CreateFileW(wide.ptr, win.FILE_APPEND_DATA, win.FILE_SHARE_READ, null, win.OPEN_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
     if (handle == win.INVALID_HANDLE_VALUE or handle == null) return;
     defer _ = win.CloseHandle(handle);
@@ -17068,13 +15417,6 @@ fn appendHashLine(a: *App, path: []const u8, line: []const u8) void {
     _ = win.WriteFile(handle, line.ptr, @intCast(line.len), &written, null);
 }
 
-// ponytail: temporary WAZI-67 diagnostics, one line per launch event in
-// Messages/launch-log.txt. Past 64 KiB the log rotates to
-// launch-log.old.txt instead of being truncated, so the history from the
-// launch that exposed a bug is never erased; if the rotation fails the
-// event still appends, which at worst lets the file keep growing. Remove
-// once the blank first-launch-after-update is root-caused and verified
-// fixed.
 const launch_log_max_bytes: i64 = 64 * 1024;
 
 fn launchLogShouldRotate(size: i64) bool {
@@ -17082,16 +15424,12 @@ fn launchLogShouldRotate(size: i64) bool {
 }
 
 fn appendLaunchLog(a: *App, event: []const u8) void {
-    // Called from the UI thread and from each sync child's stderr reader, so
-    // the size-read/rotate/append sequence is serialized.
     a.launch_log_mutex.lockUncancelable(a.io);
     defer a.launch_log_mutex.unlock(a.io);
     const path = messagesDirPath(a, "launch-log.txt") orelse return;
     defer a.allocator.free(path);
     const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch return;
     defer a.allocator.free(wide);
-    // Read the size first, then close: MoveFileExW cannot rename a file we
-    // still hold a handle on.
     const read_handle = win.CreateFileW(wide.ptr, win.GENERIC_READ, win.FILE_SHARE_READ | win.FILE_SHARE_WRITE, null, win.OPEN_EXISTING, win.FILE_ATTRIBUTE_NORMAL, null);
     var size: i64 = 0;
     if (read_handle != win.INVALID_HANDLE_VALUE and read_handle != null) {
@@ -17106,9 +15444,6 @@ fn appendLaunchLog(a: *App, event: []const u8) void {
         defer a.allocator.free(old_wide);
         _ = win.MoveFileExW(wide.ptr, old_wide.ptr, win.MOVEFILE_REPLACE_EXISTING);
     }
-    // FILE_APPEND_DATA, never a seek-and-write: NTFS appends through this
-    // access atomically at the end of file, so two instances logging the
-    // same event cannot overwrite each other's lines.
     const handle = win.CreateFileW(wide.ptr, win.FILE_APPEND_DATA, win.FILE_SHARE_READ | win.FILE_SHARE_WRITE, null, win.OPEN_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
     if (handle == win.INVALID_HANDLE_VALUE or handle == null) return;
     defer _ = win.CloseHandle(handle);
@@ -17125,26 +15460,10 @@ fn loadPlayed(a: *App) void {
     loadSentVoice(a);
 }
 
-// WAZI-85 crash diagnostics. When the process dies on an unhandled
-// exception, the filter below appends one line to
-// %LOCALAPPDATA%\Wazig\crash.log: exception code, faulting module with byte
-// offset, and the id of the message being painted. Never message content —
-// a bad message has to be quarantinable from the log alone. The filter runs
-// on a crashed process, so it uses no allocator: stack buffers and Win32
-// only, and every failure is swallowed silently.
 const crash_message_id_max = 48;
 var crash_message_id: [crash_message_id_max]u8 = undefined;
 var crash_message_id_len: usize = 0;
-// Length is the cross-thread publication point: the bytes are stored first,
-// the length last with release ordering, and crashFilter loads it with
-// acquire, so a crash on a worker thread cannot see a length longer than
-// what was already written. The filter also re-filters to printable ASCII at
-// read time, because the paint thread may be overwriting the buffer while it
-// reads; a worst-case torn id is a garbled log hint, never a crash.
 
-/// Remembers which message id is on screen right now, so the crash log can
-/// name it. The id is the wire identifier, not content; non-printable bytes
-/// are replaced so the log line stays single-byte ASCII.
 fn setPaintingMessageId(id: []const u8) void {
     const count = @min(id.len, crash_message_id_max);
     for (id[0..count], 0..) |byte, index| {
@@ -17163,9 +15482,6 @@ fn appendCrashLog(line: []const u8) void {
     const local_len: usize = @intCast(win.GetEnvironmentVariableW(local_label, &path, path.len - 40));
     if (local_len == 0 or local_len >= path.len - 40) return;
     const suffix = std.unicode.utf8ToUtf16LeStringLiteral("\\Wazig\\crash.log");
-    // Units before the file name in suffix: the "\Wazig\" directory prefix
-    // (all-ASCII, so unit count equals character count), reused for the
-    // CreateDirectoryW split below so the two can never drift apart.
     const crash_log_dir_units = suffix.len - "crash.log".len;
     @memcpy(path[local_len..][0..suffix.len], suffix);
     const total = local_len + suffix.len;
@@ -17177,7 +15493,6 @@ fn appendCrashLog(line: []const u8) void {
     const handle = win.CreateFileW(path[0..total :0].ptr, win.FILE_APPEND_DATA, win.FILE_SHARE_READ | win.FILE_SHARE_WRITE, null, win.OPEN_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
     if (handle == win.INVALID_HANDLE_VALUE or handle == null) return;
     defer _ = win.CloseHandle(handle);
-    // Keep crash.log bounded: a repeating crash must not grow it forever.
     var size: win.LARGE_INTEGER = undefined;
     if (win.GetFileSizeEx(handle, &size) != 0 and size.QuadPart > crash_log_max_bytes) {
         _ = win.SetFilePointer(handle, 0, null, win.FILE_BEGIN);
@@ -17187,13 +15502,8 @@ fn appendCrashLog(line: []const u8) void {
     _ = win.WriteFile(handle, line.ptr, @intCast(line.len), &written, null);
 }
 
-/// One crash line is ~160 bytes; 4 MiB is weeks of crashes. Past the cap the
-/// log truncates instead of rotating: the newest crashes matter.
 const crash_log_max_bytes: i64 = 4 * 1024 * 1024;
 
-/// UTF-16 file path to ASCII for the log line, keeping only the file name
-/// (after the last backslash): the module name plus offset is what a crash
-/// is diagnosed from, and system module names are ASCII.
 fn crashLogModuleName(out: []u8, path_utf16: []const u16) usize {
     var start: usize = 0;
     for (path_utf16, 0..) |unit, index| {
@@ -17236,8 +15546,6 @@ fn crashFilter(info: ?*win.EXCEPTION_POINTERS) callconv(.winapi) win.LONG {
         const base: usize = @intFromPtr(module);
         if (address >= base) offset = address - base;
     }
-    // Re-filter at read time: the paint thread may be overwriting the buffer
-    // while this runs, so never trust the stored bytes to stay printable.
     var id_storage: [crash_message_id_max]u8 = undefined;
     const id_len = @min(@atomicLoad(usize, &crash_message_id_len, .acquire), crash_message_id_max);
     for (crash_message_id[0..id_len], 0..) |byte, index| {
@@ -17258,8 +15566,6 @@ fn crashFilter(info: ?*win.EXCEPTION_POINTERS) callconv(.winapi) win.LONG {
         if (id_len > 0) id_storage[0..id_len] else "none",
     }) catch return 0;
     appendCrashLog(line);
-    // EXCEPTION_CONTINUE_SEARCH: Windows Error Reporting keeps writing its
-    // own dump exactly as before; this only adds the log line.
     return win.EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -17274,17 +15580,11 @@ fn markPlayed(a: *App, id: []const u8) void {
     appendHashLine(a, a.played_path, line);
 }
 
-/// The auth probe runs on its own thread after the window is up, so a slow
-/// `wacli` only delays the account check, never the window.
 const cache_tag_timeout_ms: win.DWORD = 20000;
 
 const ProbeKind = enum(u2) { failed = 0, unlinked = 1, linked = 2 };
 const ProbeResult = struct { kind: ProbeKind, hash: u64 = 0, logged_out: bool = false };
 
-/// Identity of the linked WhatsApp account, hashed for cache filenames
-/// (WAZI-67). One read-only `auth status` spawn, hard-bounded by
-/// cache_tag_timeout_ms. `failed` (spawn, timeout, bad output) leaves the
-/// persisted tag alone; `unlinked` means wacli answered with no account.
 fn probeAccount(gpa: std.mem.Allocator, io: std.Io, wacli_path: []const u8, scratch_dir: []const u8) ProbeResult {
     const failed = ProbeResult{ .kind = .failed };
     const out_path = std.fs.path.join(gpa, &.{ scratch_dir, "auth-status.tmp" }) catch return failed;
@@ -17301,8 +15601,6 @@ fn probeAccount(gpa: std.mem.Allocator, io: std.Io, wacli_path: []const u8, scra
         out_file.close(io);
         return failed;
     };
-    // The child inherited the handle; drop the parent's copy before reading
-    // so the file pointer each side sees cannot interfere.
     out_file.close(io);
     const handle = child.id orelse return failed;
     defer _ = win.CloseHandle(handle);
@@ -17317,8 +15615,6 @@ fn probeAccount(gpa: std.mem.Allocator, io: std.Io, wacli_path: []const u8, scra
     deleteFileUtf8(out_path);
     var parsed = std.json.parseFromSlice(std.json.Value, gpa, data, .{}) catch return failed;
     defer parsed.deinit();
-    // A revoked session keeps its store but answers authenticated:false;
-    // starting sync on it only loops on "not authenticated".
     const logged_out = auth_status.unauthenticated(parsed.value) == true;
     const jid = auth_status.linkedJid(parsed.value) orelse return .{ .kind = .unlinked, .logged_out = logged_out };
     if (jid.len == 0) return .{ .kind = .unlinked, .logged_out = logged_out };
@@ -17342,9 +15638,6 @@ fn isHexTag(text: []const u8) bool {
     return true;
 }
 
-/// Account tag remembered from the last verified run, so the disk caches
-/// open before `auth status` has answered. Without the file (first launch of
-/// this version) the single chats-<tag>.json snapshot names the account.
 fn loadPersistedTag(allocator: std.mem.Allocator, messages_dir: []const u8) ?[16]u8 {
     if (std.fs.path.join(allocator, &.{ messages_dir, account_tag_file })) |path| {
         defer allocator.free(path);
@@ -17367,11 +15660,10 @@ fn loadPersistedTag(allocator: std.mem.Allocator, messages_dir: []const u8) ?[16
         const name_len = std.mem.indexOfScalar(u16, &find.cFileName, 0) orelse find.cFileName.len;
         var name_buffer: [64]u8 = undefined;
         if (name_len <= name_buffer.len) {
-            // Tag characters are ASCII hex; anything else fails isHexTag.
             for (find.cFileName[0..name_len], 0..) |wide_char, index| name_buffer[index] = if (wide_char < 128) @intCast(wide_char) else '?';
             const name = name_buffer[0..name_len];
             if (name.len == 27 and std.mem.startsWith(u8, name, "chats-") and std.mem.endsWith(u8, name, ".json") and isHexTag(name[6..22])) {
-                if (found != null) return null; // two accounts' snapshots: do not guess
+                if (found != null) return null;
                 found = name[6..22].*;
             }
         }
@@ -17387,8 +15679,6 @@ fn persistTag(a: *App, tag: []const u8) void {
     _ = writeCacheFileAtomic(a, path, tag);
 }
 
-/// The auth probe answered (it was started right after the window showed).
-/// wparam: ProbeKind in the low two bits, 4 = logged out; lparam: tag hash.
 fn applyStartupProbe(a: *App, code: usize, hash: u64) void {
     a.startup_probe_pending = false;
     const kind: ProbeKind = @enumFromInt(@as(u2, @truncate(code)));
@@ -17396,7 +15686,6 @@ fn applyStartupProbe(a: *App, code: usize, hash: u64) void {
     var label_buffer: [48]u8 = undefined;
     logStartupMilestone(a, .auth, std.fmt.bufPrint(&label_buffer, "auth status done ({s})", .{@tagName(kind)}) catch "auth status done");
     if (kind == .failed) {
-        // Keep whatever tag the disk gave us; the next launch probes again.
         appendLaunchLog(a, "startup: auth status failed, keeping saved account tag");
         if (activeChatView(a) == .whatsapp) {
             refreshChats(a);
@@ -17447,8 +15736,6 @@ fn createStoreWatchPath(init: std.process.Init, allocator: std.mem.Allocator) ![
     return std.fs.path.join(allocator, &.{ home, ".wacli", "wacli.db-wal" });
 }
 
-/// The heartbeat sits beside wacli.db-wal: same directory, file name
-/// HEARTBEAT. Built the same way as the store watch path.
 fn createSyncHeartbeatPath(init: std.process.Init, allocator: std.mem.Allocator) ![]u8 {
     const home = init.environ_map.get("USERPROFILE") orelse return error.MissingUserProfile;
     return std.fs.path.join(allocator, &.{ home, ".wacli", "HEARTBEAT" });
@@ -17494,8 +15781,6 @@ fn bundledFilePath(comptime filename: []const u8) WideText(519) {
     return result;
 }
 
-// LoadImageW with the name argument passed as an integer (MAKEINTRESOURCE),
-// avoiding translate-c's aligned LPCWSTR pointer for resource ids.
 extern "user32" fn LoadImageW(instance: win.HINSTANCE, icon_name: usize, icon_type: u32, cx: i32, cy: i32, load_flags: u32) callconv(.c) win.HICON;
 
 fn LoadAppIcon(instance: win.HINSTANCE, cx: i32, cy: i32, flags: u32) win.HICON {
@@ -17534,12 +15819,8 @@ pub fn main(init: std.process.Init) !void {
     defer _ = win.ReleaseMutex(outbox_mutex);
     const wacli_path = try findWacli(init, init.gpa);
     defer init.gpa.free(wacli_path);
-    // Not freed: the detached sync-stderr reader thread may still log via
-    // avatar_dir during teardown; the process reclaims it.
     const avatar_dir = try createAvatarDirectory(init, init.gpa);
     const messages_dir = std.fs.path.dirname(avatar_dir) orelse return error.MissingMessagesDir;
-    // The window never waits for `auth status`: the tag saved by the last
-    // run opens the caches now and the probe verifies it after first paint.
     const cache_tag = loadPersistedTag(init.gpa, messages_dir);
     const slack_media_dir = try createSlackMediaDirectory(init, init.gpa);
     defer init.gpa.free(slack_media_dir);
@@ -17547,8 +15828,6 @@ pub fn main(init: std.process.Init) !void {
     defer init.gpa.free(store_watch_path);
     const sync_heartbeat_path = try createSyncHeartbeatPath(init, init.gpa);
     defer init.gpa.free(sync_heartbeat_path);
-    // store_watch_path is <home>\.wacli\wacli.db-wal; the parent is the
-    // WhatsApp data folder that account removal moves aside.
     const wacli_dir = std.fs.path.dirname(store_watch_path) orelse return error.MissingUserProfile;
     const deepgram_key = init.environ_map.get("DEEPGRAM_API_KEY") orelse "";
     var openrouter_key = init.environ_map.get("OPENROUTER_API_KEY") orelse "";
@@ -17564,8 +15843,6 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     if (openrouter_model.len == 0) openrouter_model = "openai/gpt-5.6-luna";
-    // A dedicated Anthropic key (registry only, so an env key meant for other tools is ignored)
-    // takes over transcript formatting: Haiku without reasoning answers in seconds.
     var format_workspace: []const u8 = "";
     const stored_anthropic = slack_win.loadSecret(init.gpa, lit("AnthropicApiKey"));
     if (stored_anthropic) |anthropic_key| {
@@ -17615,7 +15892,6 @@ pub fn main(init: std.process.Init) !void {
     loadEmojiRecents(&app);
     if (init.environ_map.get("LOCALAPPDATA")) |local| {
         if (std.fs.path.join(init.gpa, &.{ local, "Messages", "telegram" })) |telegram_dir| {
-            // Runtime keys (registry) override the baked build defaults.
             const stored_hash = slack_win.loadSecret(init.gpa, lit("TelegramApiHash"));
             defer if (stored_hash) |stored| init.gpa.free(stored.value);
             if (stored_hash) |stored| {
@@ -17642,8 +15918,6 @@ pub fn main(init: std.process.Init) !void {
             if (app.tg_api_id == 0) app.tg_api_id = build_info.telegram_api_id;
             if (app.tg_api_hash.len == 0) app.tg_api_hash.set(build_info.telegram_api_hash);
             app.tg_data_dir.set(telegram_dir);
-            // Without usable keys the client is created on demand once the
-            // Add Telegram flow has collected them.
             if (app.tg_api_id != 0 and app.tg_api_hash.len > 0) {
                 if (tg.Client.create(init.gpa, init.io, app.tg_api_id, app.tg_api_hash.slice(), telegram_dir)) |client| {
                     app.telegram = client;
@@ -17684,9 +15958,6 @@ pub fn main(init: std.process.Init) !void {
     }
     _ = win.CoInitializeEx(null, win.COINIT_APARTMENTTHREADED);
     defer win.CoUninitialize();
-    // Media Foundation (mfplat/mfreadwrite/mfplay, plus the codecs and
-    // Windows.Media it drags in) starts lazily on first GIF/video use; see
-    // mf_lazy.zig. Not started here on purpose.
     defer mf_lazy.unloadIfStarted();
     _ = win.CoCreateInstance(
         &win.CLSID_WICImagingFactory,
@@ -17702,7 +15973,6 @@ pub fn main(init: std.process.Init) !void {
     _ = win.InitCommonControlsEx(&controls);
 
     const cursor = win.LoadCursorW(null, @ptrFromInt(32512));
-    // Resource id 1 in assets/app.rc; same icon serves the title bar and taskbar.
     const icon_big = LoadAppIcon(instance, 0, 0, win.LR_DEFAULTSIZE | win.LR_SHARED);
     const icon_small = LoadAppIcon(
         instance,
@@ -17858,8 +16128,6 @@ pub fn main(init: std.process.Init) !void {
     _ = win.UpdateWindow(hwnd);
     focusCompose(&app);
     logStartupMilestone(&app, .window, "window shown");
-    // Verify the saved account tag off the UI thread; the answer arrives as
-    // wm_startup_probe. Without a thread the saved tag simply stays.
     if (std.heap.page_allocator.create(ProbeThread)) |probe| {
         probe.* = .{ .io = init.io, .hwnd = hwnd, .wacli_path = wacli_path, .scratch_dir = messages_dir };
         if (std.Thread.spawn(.{ .stack_size = 512 * 1024 }, startupProbeMain, .{probe})) |thread| {
@@ -17872,8 +16140,6 @@ pub fn main(init: std.process.Init) !void {
 
     var message: win.MSG = undefined;
     while (win.GetMessageW(&message, null, 0, 0) > 0) {
-        // Scroll the conversation, or the chat list, when the cursor is over
-        // it, no matter which control holds keyboard focus.
         if (message.message == win.WM_MOUSEWHEEL and app.canvas != null) {
             const wheel_point = win.POINT{
                 .x = @as(i16, @bitCast(loword(@as(usize, @bitCast(message.lParam))))),
@@ -17908,17 +16174,10 @@ pub fn main(init: std.process.Init) !void {
                 }
             }
         }
-        // Telegram sign-in dialog first: Tab/Enter/Escape are dialog
-        // navigation and IsDialogMessageW dispatches them itself.
         if (app.tg_login_window) |login_wnd| {
             if (win.IsDialogMessageW(login_wnd, &message) != 0) continue;
         }
         if (handleKeyboard(&app, &message)) continue;
-        // The chat list is a native listbox: clicking it (even to reselect
-        // the already-selected chat, which never fires LBN_SELCHANGE) sets
-        // native keyboard focus to it. The caret must always stay in the
-        // composer, so let the click do its job (select the chat) and then
-        // send focus straight back.
         const clicked_chat_list = message.message == win.WM_LBUTTONDOWN and
             app.chats_hwnd != null and message.hwnd == app.chats_hwnd.?;
         _ = win.TranslateMessage(&message);
@@ -17930,30 +16189,20 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-// Self-update (WAZI-27, WAZI-60): checks GitHub Releases for a newer version.
-// A check only looks and reports; a newer release then downloads and installs
-// automatically, and the Ctrl+K "Restart now to install update" command can
-// start the same install by hand. All work happens on a detached worker
-// thread; the UI only hears back via wm_update_ready.
 const UpdateContext = struct {
     io: std.Io,
     hwnd: win.HWND,
     manual: bool,
     install: bool,
-    // With install: download and verify only; the swap waits for the card click.
     stage_only: bool = false,
 };
 
 const UpdateOutcome = enum { none, blocked, installed, staged };
 
-// Download progress for the update card: written by the worker, read by the UI.
 var update_dl_done: std.atomic.Value(u64) = .init(0);
 var update_dl_total: std.atomic.Value(u64) = .init(0);
 var update_dl_active: std.atomic.Value(bool) = .init(false);
 
-/// WAZIG_FAKE_VERSION (test hook): names an OLDER version the app should
-/// believe it is on, so the update card can be shown for real. A value that
-/// is not older is ignored, so it can only ever offer the latest release.
 fn currentVersion() ?update.Version {
     const real = update.parseVersion(app_version) orelse return null;
     var buf: [32]u16 = undefined;
@@ -17964,8 +16213,6 @@ fn currentVersion() ?update.Version {
     return update.effectiveCurrent(real, text[0..len]);
 }
 
-/// A newer release found by a check: enough to ask the user, nothing more.
-/// The install path re-checks, so a stale download URL is never used.
 const UpdateAvailable = struct {
     tag: []u8,
     notes: []u8,
@@ -17976,12 +16223,6 @@ const UpdateAvailable = struct {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Update card: a small card in the bottom left of the sidebar (above the
-// status line) announces a newer release. The release is downloaded and
-// verified in the background; "Update now" does only the fast swap and
-// restart. Layout, look and wording follow zigshell's in-app update card.
-// ---------------------------------------------------------------------------
 const update_card_restart_delay_ms: u32 = 600;
 const UpdateCardHit = enum { none, body, button, close };
 
@@ -17996,7 +16237,6 @@ fn updateCardHeight(a: *const App) i32 {
     return px(a, 78);
 }
 
-/// Height the chat list gives up for the card (card plus gaps); 0 when hidden.
 fn updateCardSpan(a: *const App) i32 {
     if (!updateCardVisible(a)) return 0;
     return updateCardHeight(a) + px(a, 10);
@@ -18030,8 +16270,6 @@ fn updateCardHit(a: *const App, x: i32, y: i32) UpdateCardHit {
     return .body;
 }
 
-/// Re-lays out the sidebar (the chat list shrinks or grows by the card) and
-/// keeps the progress timer running only while something is in flight.
 fn updateCardRefresh(a: *App) void {
     const hwnd = a.hwnd orelse return;
     layout(a, a.compose_client_width, a.compose_client_height);
@@ -18053,7 +16291,6 @@ fn updateCardFail(a: *App, text: []const u8) void {
     updateCardRefresh(a);
 }
 
-/// "Update now" and "Retry": the swap and restart happen on this click only.
 fn updateCardClick(a: *App) void {
     if (a.update_pending == null or a.update_installed or a.update_card_busy) return;
     const hwnd = a.hwnd orelse return;
@@ -18062,8 +16299,6 @@ fn updateCardClick(a: *App) void {
     a.update_card_busy = true;
     appendLaunchLog(a, "update: card clicked");
     setStatus(a, "Updating Messages...");
-    // A background download still running finishes first; its completion
-    // message then starts the swap.
     if (a.update_install_running.load(.acquire)) {
         a.update_click_wait = true;
     } else {
@@ -18072,7 +16307,6 @@ fn updateCardClick(a: *App) void {
     updateCardRefresh(a);
 }
 
-/// Hides the card until a newer version than the dismissed one is found.
 fn updateCardDismiss(a: *App) void {
     const pending = a.update_pending orelse return;
     const n = @min(pending.tag.len, a.update_dismissed.len);
@@ -18081,8 +16315,6 @@ fn updateCardDismiss(a: *App) void {
     updateCardRefresh(a);
 }
 
-/// A copy of this exe that an earlier in-app swap renamed aside cannot be
-/// deleted while that process runs; the restarted app removes it.
 fn removeLeftoverOldExe() void {
     var buf: [530]u16 = undefined;
     const len: usize = @intCast(win.GetModuleFileNameW(null, &buf, 519));
@@ -18099,7 +16331,6 @@ fn paintUpdateCard(a: *App, hdc: win.HDC) void {
     paintRoundedButton(a, hdc, card, color_raised, color_text, a.font.?, color_selected, &[_]u16{});
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
 
-    // Title.
     var title_buf: [64]u8 = undefined;
     const tag = if (pending.tag.len > 0 and pending.tag[0] == 'v') pending.tag[1..] else pending.tag;
     const failed = a.update_card_error_len > 0;
@@ -18116,7 +16347,6 @@ fn paintUpdateCard(a: *App, hdc: win.HDC) void {
     var title_rc = win.RECT{ .left = card.left + px(a, 12), .top = card.top + px(a, 8), .right = card.right - px(a, 32), .bottom = card.top + px(a, 30) };
     drawAscii(hdc, &title_rc, title, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX | win.DT_END_ELLIPSIS);
 
-    // Second line: state, or a progress bar while updating.
     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
     var line_buf: [112]u8 = undefined;
     const pct: u32 = if (a.update_staged or a.update_installed) 100 else update.percent(update_dl_done.load(.acquire), update_dl_total.load(.acquire));
@@ -18151,24 +16381,20 @@ fn paintUpdateCard(a: *App, hdc: win.HDC) void {
         return;
     }
 
-    // Dismiss x.
     var close_rc = updateCardCloseRect(a, card);
     _ = win.SetTextColor(hdc, color_muted);
     drawAscii(hdc, &close_rc, "x", win.DT_SINGLELINE | win.DT_VCENTER | win.DT_CENTER | win.DT_NOPREFIX);
 
-    // Button.
     const label: []const u16 = if (failed) std.unicode.utf8ToUtf16LeStringLiteral("Retry") else std.unicode.utf8ToUtf16LeStringLiteral("Update now");
     paintRoundedButton(a, hdc, updateCardButtonRect(a, card), color_accent, theme.on_primary, a.font_bold.?, null, label);
 }
 
 fn startUpdateCheck(hwnd: win.HWND, manual: bool) void {
     const a = app_ptr orelse return;
-    // An installed update means this process is on borrowed time until its
-    // restart; do not start another check that would re-offer the same tag.
     if (a.update_installed) return;
     const now = win.GetTickCount64();
     if (a.update_check_running and now - a.update_last_check_ms < update_check_timeout_ms) return;
-    if (!manual and a.update_last_check_ms != 0 and now - a.update_last_check_ms < update_min_retry_ms) return;
+    if (!manual and a.update_last_check_ms != 0 and now - a.update_last_check_ms < update_wake_focus_throttle_ms) return;
     a.update_check_manual = manual;
     const ctx = std.heap.page_allocator.create(UpdateContext) catch return;
     ctx.* = .{ .io = a.io, .hwnd = hwnd, .manual = manual, .install = false };
@@ -18183,19 +16409,12 @@ fn startUpdateCheck(hwnd: win.HWND, manual: bool) void {
 
 fn startUpdateInstall(hwnd: win.HWND, stage_only: bool) void {
     const a = app_ptr orelse return;
-    // WAZI-81: a concurrent read-only check must never swallow an explicit
-    // install request — activation fires checks constantly, so this guard
-    // used to turn the update button into a silent no-op. performUpdate
-    // re-checks and serializes on the update mutex itself.
     if (a.update_install_running.load(.acquire)) {
         if (!stage_only) setStatus(a, "An update install is already running");
         return;
     }
     const ctx = std.heap.page_allocator.create(UpdateContext) catch return;
     ctx.* = .{ .io = a.io, .hwnd = hwnd, .manual = true, .install = true, .stage_only = stage_only };
-    // Claim the slot before spawning: the worker may post its completion
-    // (and free the slot) as soon as it starts, so claiming afterwards
-    // could leave a stale claim behind.
     a.update_install_running.store(true, .release);
     const thread = std.Thread.spawn(.{}, updateThreadMain, .{ctx}) catch {
         a.update_install_running.store(false, .release);
@@ -18205,11 +16424,6 @@ fn startUpdateInstall(hwnd: win.HWND, stage_only: bool) void {
     thread.detach();
 }
 
-/// A lost completion message would wedge the install slot (the button
-/// would refuse every later install until restart), so a full message
-/// queue is retried briefly instead of dropping the outcome. If even the
-/// retries fail, the slot is freed from here: a wrongly freed slot can
-/// at worst start a second install, which the update mutex serializes.
 fn postInstallResult(hwnd: win.HWND, code: u32, lparam: usize) void {
     var tries: u32 = 0;
     while (tries < 50) : (tries += 1) {
@@ -18229,13 +16443,8 @@ fn updateThreadMain(ctx: *UpdateContext) void {
     defer std.heap.page_allocator.destroy(ctx);
     const allocator = std.heap.page_allocator;
     if (ctx.install) {
-        // ponytail: updates are authenticated only by HTTPS plus GitHub's own asset
-        // digest; a code-signing certificate would be needed to authenticate the
-        // publisher itself. Upgrade path: verify an Authenticode signature here.
         const outcome = performUpdate(ctx.io, ctx.stage_only) catch |err| {
             logUpdateFailure(@errorName(err));
-            // 7 is install-only: a concurrent check posting 4/5 must never
-            // look like the install finished and free its slot.
             const name: [*:0]const u8 = @errorName(err).ptr;
             postInstallResult(ctx.hwnd, 7, @intCast(@intFromPtr(name)));
             return;
@@ -18244,7 +16453,6 @@ fn updateThreadMain(ctx: *UpdateContext) void {
         postInstallResult(ctx.hwnd, switch (outcome) {
             .installed => @as(u32, 1),
             .blocked => 6,
-            // 8 is install-only, same reason as 7.
             .none => 8,
             .staged => 9,
         }, 0);
@@ -18262,8 +16470,6 @@ fn updateThreadMain(ctx: *UpdateContext) void {
             return;
         };
         stored.* = found;
-        // Ownership of `stored` moves to the UI thread only if the post
-        // succeeds; reclaim it here otherwise.
         if (win.PostMessageW(ctx.hwnd, wm_update_ready, 2, @intCast(@intFromPtr(stored))) == 0) {
             stored.deinit(allocator);
             std.heap.page_allocator.destroy(stored);
@@ -18273,7 +16479,6 @@ fn updateThreadMain(ctx: *UpdateContext) void {
     }
 }
 
-/// Asks GitHub Releases whether a newer version exists. Downloads nothing.
 fn checkForUpdate(allocator: std.mem.Allocator) !?UpdateAvailable {
     const current = currentVersion() orelse return error.UpdateBadVersion;
     const api_headers = try utf8ToWide(allocator, "User-Agent: Messages updater\r\nAccept: application/vnd.github+json\r\n");
@@ -18292,9 +16497,6 @@ fn checkForUpdate(allocator: std.mem.Allocator) !?UpdateAvailable {
     return .{ .tag = tag, .notes = notes };
 }
 
-/// Every failed check or install gets a timestamped line in
-/// %LOCALAPPDATA%\Wazig\update.log (WAZI-60): failures must never vanish
-/// into "nothing to do".
 fn logUpdateFailure(err_name: []const u8) void {
     var clock = std.mem.zeroes(win.SYSTEMTIME);
     win.GetLocalTime(&clock);
@@ -18305,8 +16507,6 @@ fn logUpdateFailure(err_name: []const u8) void {
     appendUpdateLogLine(line);
 }
 
-/// Appends one pre-formatted line to %LOCALAPPDATA%\Wazig\update.log; a
-/// diagnostics channel shared with logUpdateFailure (WAZI-84).
 fn appendUpdateLogLine(line: []const u8) void {
     const allocator = std.heap.page_allocator;
     var local_buf: [256]u16 = undefined;
@@ -18325,9 +16525,6 @@ fn appendUpdateLogLine(line: []const u8) void {
     _ = win.WriteFile(handle, line.ptr, @intCast(line.len), &written, null);
 }
 
-/// WAZI-84: a swap failure used to leave nothing in update.log but the error
-/// name, so the real machine could not be diagnosed. Record the exe path and
-/// what the staged swap actually held when the exe destination is the problem.
 fn logUpdateSwapDetail(exe_path: []const u8, pending: []const SwapPending) void {
     const allocator = std.heap.page_allocator;
     var line_buf: [1024]u8 = undefined;
@@ -18400,7 +16597,6 @@ fn httpGetUrl(allocator: std.mem.Allocator, url_wide: []const u16, headers: [*:0
     if (win.WinHttpCrackUrl(url_wide.ptr, @intCast(url_wide.len), 0, &components) == 0) return error.UpdateBadUrl;
     if (components.nScheme != win.INTERNET_SCHEME_HTTPS) return error.UpdateBadUrl;
     if (components.dwHostNameLength == 0 or components.dwHostNameLength >= host_buf.len) return error.UpdateBadUrl;
-    // Downloads only ever come from GitHub release hosts.
     const host_utf8 = try wideToUtf8(allocator, host_buf[0..components.dwHostNameLength]);
     defer allocator.free(host_utf8);
     const github_suffixes = [_][]const u8{ "api.github.com", "objects.githubusercontent.com", "github.com" };
@@ -18412,7 +16608,6 @@ fn httpGetUrl(allocator: std.mem.Allocator, url_wide: []const u16, headers: [*:0
     if (components.dwUrlPathLength >= path_buf.len) return error.UpdateBadUrl;
     if (components.dwUrlPathLength + components.dwExtraInfoLength >= path_buf.len) return error.UpdateBadUrl;
     host_buf[components.dwHostNameLength] = 0;
-    // Keep query/fragment with the path; crackUrl otherwise discards them.
     std.mem.copyForwards(u16, path_buf[components.dwUrlPathLength..], extra_buf[0..components.dwExtraInfoLength]);
     const path_total = components.dwUrlPathLength + components.dwExtraInfoLength;
     path_buf[path_total] = 0;
@@ -18425,20 +16620,12 @@ fn httpGetUrl(allocator: std.mem.Allocator, url_wide: []const u16, headers: [*:0
     );
 }
 
-/// WAZI-66: end windowless leftover copies of this exact executable. An
-/// orphan from an earlier update swap still locks the .old binary and can
-/// hold the update mutex indefinitely. Only processes running the same exe
-/// path with no visible window are terminated; a real copy of the app in
-/// another window always keeps a visible window and is never touched.
 fn clearStaleOrphans() void {
     const self_pid = win.GetCurrentProcessId();
     var exe_buf: [519]u16 = undefined;
     const exe_len: usize = @intCast(win.GetModuleFileNameW(null, &exe_buf, exe_buf.len));
     if (exe_len == 0 or exe_len >= exe_buf.len) return;
 
-    // First pass: pids that own a visible window anywhere on the desktop.
-    // The list is bounded; if it overflows we skip orphan cleanup entirely
-    // rather than risk misreading a live copy as windowless.
     var visible: [1024]win.DWORD = undefined;
     var visible_count: usize = 0;
     var visible_overflow = false;
@@ -18455,9 +16642,6 @@ fn clearStaleOrphans() void {
     while (true) {
         const pid = entry.th32ProcessID;
         if (pid != self_pid) {
-            // A live copy is also windowless while starting up (and
-            // --tdlib-smoke runs windowless by design), so only a copy that
-            // has been alive for minutes can be an orphan.
             const handle = win.OpenProcess(win.PROCESS_QUERY_LIMITED_INFORMATION | win.PROCESS_TERMINATE | win.SYNCHRONIZE, win.FALSE, pid);
             if (handle != null and handle != win.INVALID_HANDLE_VALUE) {
                 defer _ = win.CloseHandle(handle);
@@ -18469,9 +16653,6 @@ fn clearStaleOrphans() void {
                 var path_len: win.DWORD = path_buf.len;
                 var orphan_session: win.DWORD = 0;
                 var self_session: win.DWORD = 0;
-                // EnumWindows only sees this desktop, so a live copy in
-                // another user session would look windowless here; only ever
-                // reclaim orphans within our own session.
                 const same_session = win.ProcessIdToSessionId(pid, &orphan_session) != 0 and
                     win.ProcessIdToSessionId(self_pid, &self_session) != 0 and
                     orphan_session == self_session;
@@ -18481,8 +16662,6 @@ fn clearStaleOrphans() void {
                     win.QueryFullProcessImageNameW(handle, 0, &path_buf, &path_len) != 0 and
                     eqlWideIgnoreCase(path_buf[0..path_len], exe_buf[0..exe_len]))
                 {
-                    // Terminating is the only way an orphan releases the
-                    // mutex it took as a windowless instance.
                     _ = win.TerminateProcess(handle, 1);
                     _ = win.WaitForSingleObject(handle, 5000);
                 }
@@ -18505,7 +16684,7 @@ fn visibleWindowProc(hwnd: win.HWND, lparam: win.LPARAM) callconv(.winapi) win.B
         _ = win.GetWindowThreadProcessId(hwnd, &pid);
         if (scan.count.* >= scan.pids.len) {
             scan.overflow.* = true;
-            return 0; // Stop enumerating; the caller will not kill anything.
+            return 0;
         }
         scan.pids[scan.count.*] = pid;
         scan.count.* += 1;
@@ -18529,21 +16708,13 @@ fn filetimeAgeSeconds(created: win.FILETIME) u64 {
     return (now_64 - created_64) / 10_000_000;
 }
 
-/// Tri-state file lookup: true/false when the lookup answers, null when it
-/// fails for a reason other than a missing file (access, sharing, I/O). A
-/// null answer means the disk state is unknown and the caller must not
-/// delete or restore anything based on it.
 fn filePresentLookup(path_wide: [*:0]const u16) ?bool {
-    // The last-error value is only meaningful when the lookup failed; a
-    // successful lookup does not clear it.
     if (win.GetFileAttributesW(path_wide) != win.INVALID_FILE_ATTRIBUTES) return true;
     const err = win.GetLastError();
-    if (err == 2 or err == 3) return false; // ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND
+    if (err == 2 or err == 3) return false;
     return null;
 }
 
-/// Windows paths are case-insensitive and the reporting of casing varies,
-/// so compare without case.
 fn eqlWideIgnoreCase(a: []const u16, b: []const u16) bool {
     if (a.len != b.len) return false;
     for (a, b) |x, y| {
@@ -18554,21 +16725,14 @@ fn eqlWideIgnoreCase(a: []const u16, b: []const u16) bool {
     return true;
 }
 
-/// `stage_only`: download, verify and extract, then stop (marker file written);
-/// otherwise install: swap an already staged release, or download one first.
 fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
     const allocator = std.heap.page_allocator;
     const current = currentVersion() orelse return error.UpdateBadVersion;
 
-    // One updater at a time across every running copy of the app.
     const mutex = win.CreateMutexW(null, win.FALSE, lit("Local\\MessagesUpdateMutex")) orelse return error.UpdateMutexFailed;
     defer _ = win.CloseHandle(mutex);
     var wait = update.classifyMutexWait(win.WaitForSingleObject(mutex, 0));
     if (wait == .busy) {
-        // WAZI-66: a windowless orphan from an earlier swap holds the mutex
-        // (and the .old binary) forever, so contention used to look like
-        // "no update available". End stale orphans, wait once more, and only
-        // then report a distinct blocked outcome.
         clearStaleOrphans();
         wait = update.classifyMutexWait(win.WaitForSingleObject(mutex, 10_000));
     }
@@ -18596,13 +16760,9 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
     defer allocator.free(update_root);
 
     const cwd = std.Io.Dir.cwd();
-    // The staging area persists between the background download and the card click.
     const root = try cwd.createDirPathOpen(io, update_root, .{});
     defer root.close(io);
 
-    // Recover from an interrupted earlier swap (WAZI-71). A windowless
-    // orphan from an earlier update locks the .old/.new copies and every
-    // rename below, so end the orphans before touching anything.
     clearStaleOrphans();
     const exe_name = std.fs.path.basename(exe_path);
     {
@@ -18616,9 +16776,6 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
         defer allocator.free(exe_new_wide);
         const exe_here_wide = try utf8ToWide(allocator, exe_path);
         defer allocator.free(exe_here_wide);
-        // If the exe is missing, bring a runnable copy back before anything
-        // else: the digest-verified replacement first, then the backup —
-        // a source locked by a leftover process must not stop the other.
         const exe_here = filePresentLookup(exe_here_wide.ptr) orelse return error.UpdateSwapStateUnknown;
         if (!exe_here) {
             const new_there = filePresentLookup(exe_new_wide.ptr) orelse return error.UpdateSwapStateUnknown;
@@ -18638,24 +16795,15 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
                 return error.UpdateSwapRestoreFailed;
             }
         }
-        // A .old backup left by a completed swap is safe to drop now. When
-        // the delete leaves the file behind, a stale orphan copy still locks
-        // it (WAZI-66): end the orphans and retry, so the commit rename onto
-        // .old cannot hit a locked file.
         const old_there = filePresentLookup(exe_old_wide.ptr) orelse return error.UpdateSwapStateUnknown;
         if (old_there and win.DeleteFileW(exe_old_wide.ptr) == 0) {
             clearStaleOrphans();
             _ = win.DeleteFileW(exe_old_wide.ptr);
-            // Still present after the retry: the lock persists and the
-            // commit rename onto .old would fail — abort with a distinct
-            // error instead of starting the download.
             if (filePresentLookup(exe_old_wide.ptr) != false) return error.UpdateOldBackupLocked;
         }
-        _ = win.DeleteFileW(exe_new_wide.ptr); // stale replacement debris
+        _ = win.DeleteFileW(exe_new_wide.ptr);
     }
 
-    // A release downloaded earlier in the background (marker file written only
-    // after verify and extract) installs without touching the network.
     const marker_text: ?[]u8 = root.readFileAlloc(io, "ready.txt", allocator, .limited(512)) catch null;
     defer if (marker_text) |text| allocator.free(text);
     const marker = if (marker_text) |text| update.parseStageMarker(text) else null;
@@ -18676,9 +16824,7 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
     defer parsed.deinit();
     const asset = maybe_asset orelse return .none;
     if (!update.isNewer(asset.tag, current)) return .none;
-    // The same release is already staged: nothing to download again.
     if (stage_only and staged and std.mem.eql(u8, marker.?.tag, asset.tag)) return .staged;
-    // A stale or half-made stage must never be mistaken for a ready one.
     root.deleteFile(io, "ready.txt") catch {};
     root.deleteTree(io, "stage") catch {};
 
@@ -18698,7 +16844,6 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
     if (asset.size != 0 and body.len != asset.size) return error.UpdateSizeMismatch;
     if (!update.digestMatches(body, asset.digest)) return error.UpdateDigestMismatch;
 
-    // Save the verified archive; the std.zip extractor needs a seekable file.
     {
         const zip_file = try root.createFile(io, "Messages.zip", .{});
         defer zip_file.close(io);
@@ -18707,15 +16852,8 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
         try zip_writer.interface.writeAll(body);
         try zip_writer.interface.flush();
     }
-    // WAZI-84: the stage handle must carry list rights, or copying the staged
-    // files walks an empty directory: on Windows a handle opened without
-    // .iterate lacks FILE_LIST_DIRECTORY, NtQueryDirectoryFile is denied, and
-    // the failed query looks like zero entries - so nothing matched the exe
-    // path and every install died with UpdateNoExePath before renaming a
-    // single file.
     const stage = try root.createDirPathOpen(io, "stage", .{ .open_options = .{ .iterate = true } });
     defer stage.close(io);
-    // Bound the archive before trusting it: entry count and decompressed size.
     {
         const scan_file = try root.openFile(io, "Messages.zip", .{});
         defer scan_file.close(io);
@@ -18751,8 +16889,6 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
     return swapStaged(io, allocator, root, stage, update_root, exe_path, exe_dir, exe_name, inner_root);
 }
 
-/// Second half of an install: copies the staged files beside their targets and
-/// swaps them in (the exe last), then forgets the stage.
 fn swapStaged(
     io: std.Io,
     allocator: std.mem.Allocator,
@@ -18771,10 +16907,6 @@ fn swapStaged(
     defer allocator.free(new_exe_rel);
     const staged_exe_size = (try stage.statFile(io, new_exe_rel, .{})).size;
 
-    // Copy every staged file to a temporary `.new` name beside its destination
-    // first. The running exe and all existing files stay untouched until every
-    // byte is in place, so a failed copy can never leave the folder without a
-    // runnable exe.
     var pending: std.ArrayList(SwapPending) = .empty;
     defer {
         for (pending.items) |p| {
@@ -18787,9 +16919,6 @@ fn swapStaged(
     defer allocator.free(stage_path);
     if (!copyStagedFiles(io, allocator, stage, stage_path, inner_root, exe_dir, &pending)) return error.UpdateCopyFailed;
 
-    // Commit (WAZI-71): every non-exe file renames into place first. The
-    // live exe is renamed aside only after its verified replacement is on
-    // disk, so every failure path leaves a runnable exe in the folder.
     const exe_wide = try utf8ToWide(allocator, exe_path);
     defer allocator.free(exe_wide);
     var exe_index: ?usize = null;
@@ -18800,40 +16929,23 @@ fn swapStaged(
     const exe_i = exe_index orelse return error.UpdateNoExePath;
     const exe_temp = pending.items[exe_i].temp;
 
-    // The replacement must be verifiably on disk before the live exe is
-    // touched: exact size match against the digest-checked staged bytes.
     if (!update.replacementVerified(staged_exe_size, wideFileSize(exe_temp))) return error.UpdateCopyFailed;
 
     const exe_old = try std.fmt.allocPrint(allocator, "{s}\\{s}.old", .{ exe_dir, exe_name });
     defer allocator.free(exe_old);
     const exe_old_wide = try utf8ToWide(allocator, exe_old);
     defer allocator.free(exe_old_wide);
-    // Rename the live exe aside. A failure here leaves it in place and
-    // nothing else has been touched; the usual cause is a leftover process
-    // holding .old, so end the orphans and retry once.
     if (win.MoveFileExW(exe_wide.ptr, exe_old_wide.ptr, win.MOVEFILE_REPLACE_EXISTING) == 0) {
         clearStaleOrphans();
         if (win.MoveFileExW(exe_wide.ptr, exe_old_wide.ptr, win.MOVEFILE_REPLACE_EXISTING) == 0) return error.UpdateSwapFailed;
     }
     if (!restoreExeFile(exe_temp, exe_wide)) {
-        // The replacement did not land; put the old exe back. The verified
-        // .new replacement also remains on disk for the next recovery pass.
         if (!restoreExeFile(exe_old_wide, exe_wide)) return error.UpdateSwapRestoreFailed;
         return error.UpdateCopyFailed;
     }
-    // The new exe is in place; now the support files. On a failure the old
-    // exe comes back — closest to the pre-update state. ponytail: no per-file
-    // rollback journal, deliberately — the only files beside the exe are the
-    // two IBM Plex fonts and the OFL license, so a partially renamed support
-    // set leaves the app runnable and is redone on the next update attempt.
-    // Leftover temps and a stale .old are also cleared there. The fonts are
-    // open in the running app (they load privately from beside the exe), so
-    // the swap goes through swapFileIntoPlace instead of a bare replace.
     for (pending.items, 0..) |p, i| {
         if (i == exe_i) continue;
         if (!swapFileIntoPlace(p.temp, p.dest)) {
-            // WAZI-84: name the file that refused the swap, so a failure on
-            // the real machine says which open handle was in the way.
             if (wideToUtf8(allocator, p.dest)) |dest_utf8| {
                 defer allocator.free(dest_utf8);
                 var detail_buf: [600]u8 = undefined;
@@ -18848,22 +16960,15 @@ fn swapStaged(
             return error.UpdateCopyFailed;
         }
     }
-    _ = win.DeleteFileW(exe_old_wide.ptr); // best effort; a leftover is removed on the next update attempt
-    // The staged files are in place; drop the stage so it is never reused.
+    _ = win.DeleteFileW(exe_old_wide.ptr);
     root.deleteFile(io, "ready.txt") catch {};
     root.deleteTree(io, "stage") catch {};
     root.deleteFile(io, "Messages.zip") catch {};
     return .installed;
 }
 
-/// One staged file waiting to be renamed from its temporary `.new` name to its
-/// final destination.
 const SwapPending = struct { temp: [:0]u16, dest: [:0]u16 };
 
-/// WAZI-71: put a runnable exe back at `dest` from `source`. Rename first;
-/// when the source is locked against the rename, byte-copy it to a
-/// temporary name and rename that in, so `dest` is never left partial: a
-/// copy needs only read access, which a running executable always grants.
 fn restoreExeFile(source: [:0]const u16, dest: [:0]const u16) bool {
     if (win.MoveFileExW(source.ptr, dest.ptr, win.MOVEFILE_REPLACE_EXISTING) != 0) return true;
     const suffix = ".restore-tmp";
@@ -18881,14 +16986,6 @@ fn restoreExeFile(source: [:0]const u16, dest: [:0]const u16) bool {
     return true;
 }
 
-/// WAZI-84: move one staged replacement onto its destination. A direct
-/// replace has to delete the target first, and that fails while the running
-/// app holds the file open — the two privately loaded IBM Plex fonts are open
-/// exactly like the live exe. Fall back to the exe's own dance: rename the
-/// open destination aside (a rename needs no write access to the bytes), then
-/// the staged file renames onto the now-free name. The open handle keeps the
-/// aside copy alive under its new name until the app exits, so its delete is
-/// best effort and the next update attempt clears it.
 fn swapFileIntoPlace(temp: [:0]const u16, dest: [:0]const u16) bool {
     if (win.MoveFileExW(temp.ptr, dest.ptr, win.MOVEFILE_REPLACE_EXISTING) != 0) return true;
     const suffix = ".old";
@@ -18900,7 +16997,6 @@ fn swapFileIntoPlace(temp: [:0]const u16, dest: [:0]const u16) bool {
     const old_path = old_buf[0 .. dest.len + suffix.len :0];
     if (win.MoveFileExW(dest.ptr, old_path.ptr, win.MOVEFILE_REPLACE_EXISTING) == 0) return false;
     if (win.MoveFileExW(temp.ptr, dest.ptr, win.MOVEFILE_REPLACE_EXISTING) == 0) {
-        // Nothing is in place now; put the original back before giving up.
         _ = win.MoveFileExW(old_path.ptr, dest.ptr, win.MOVEFILE_REPLACE_EXISTING);
         return false;
     }
@@ -18908,7 +17004,6 @@ fn swapFileIntoPlace(temp: [:0]const u16, dest: [:0]const u16) bool {
     return true;
 }
 
-/// WAZI-71: size of a file by wide path, or null when it cannot be read.
 fn wideFileSize(path_wide: [*:0]const u16) ?u64 {
     var info: win.WIN32_FILE_ATTRIBUTE_DATA = undefined;
     if (win.GetFileAttributesExW(path_wide, win.GetFileExInfoStandard, &info) == 0) return null;
@@ -18916,12 +17011,6 @@ fn wideFileSize(path_wide: [*:0]const u16) ?u64 {
     return (high << 32) | info.nFileSizeLow;
 }
 
-/// Copies every staged file (below `inner_root` inside `stage_path`) to a
-/// temporary `<dest>.new` name in `exe_dir`, appending one entry per file to
-/// `pending`. Returns false on any failure (missing ancestors are created,
-/// archive entries may nest arbitrarily, and paths may not escape the
-/// application directory); the caller renames the staged files into place only
-/// after every copy succeeded.
 fn copyStagedFiles(
     io: std.Io,
     allocator: std.mem.Allocator,
@@ -18939,12 +17028,10 @@ fn copyStagedFiles(
             entry.path[inner_root.len + 1 ..]
         else
             entry.path;
-        // Normalize separators first so the traversal guard sees both spellings.
         var relative_buf: [512]u8 = undefined;
         if (relative.len >= relative_buf.len) return false;
         for (relative, 0..) |c, i| relative_buf[i] = if (c == '\\') '/' else c;
         const normalized = relative_buf[0..relative.len];
-        // Never install anything that escapes the application directory.
         var components = std.mem.splitScalar(u8, normalized, '/');
         while (components.next()) |component| {
             if (std.mem.eql(u8, component, "..")) return false;
@@ -18955,18 +17042,17 @@ fn copyStagedFiles(
         const destination = std.fmt.allocPrint(allocator, "{s}\\{s}", .{ exe_dir, windows_relative }) catch return false;
         defer allocator.free(destination);
         if (std.fs.path.dirname(destination)) |parent| {
-            // Create every missing ancestor; archive entries may nest arbitrarily.
             var depth: usize = 0;
             while (depth < parent.len) : (depth += 1) {
                 if (parent[depth] == '\\') {
                     const prefix_wide = utf8ToWide(allocator, parent[0..depth]) catch return false;
                     defer allocator.free(prefix_wide);
-                    _ = win.CreateDirectoryW(prefix_wide.ptr, null); // exists already is fine
+                    _ = win.CreateDirectoryW(prefix_wide.ptr, null);
                 }
             }
             const parent_wide = utf8ToWide(allocator, parent) catch return false;
             defer allocator.free(parent_wide);
-            _ = win.CreateDirectoryW(parent_wide.ptr, null); // exists already is fine
+            _ = win.CreateDirectoryW(parent_wide.ptr, null);
         }
         const source = std.fmt.allocPrint(allocator, "{s}\\{s}", .{ stage_path, entry.path }) catch return false;
         defer allocator.free(source);
@@ -19036,8 +17122,6 @@ test "a send retries 3 times with a longer backoff each time, then gives up" {
 }
 
 test "a stored message only counts as delivering a queued send at or after it was queued" {
-    // The 5s slack absorbs clock skew between the queue time and wacli's
-    // stored timestamp; anything older is a coincidence, not this send.
     try std.testing.expect(storedAfterQueued(100, 100));
     try std.testing.expect(storedAfterQueued(96, 100));
     try std.testing.expect(!storedAfterQueued(94, 100));
@@ -19054,8 +17138,6 @@ test "a send-failure snippet collapses newlines and stays on one UTF-8 boundary"
     var buffer: [send_log_snippet_len]u8 = undefined;
     try std.testing.expectEqualStrings("line one line two", oneLineSnippet(&buffer, "line one\nline two"));
     var small_buffer: [4]u8 = undefined;
-    // "café" is c-a-f-é where é is 2 bytes (0xC3 0xA9); cutting after 4 bytes
-    // lands mid-character, so the trim must drop the truncated byte.
     try std.testing.expectEqualStrings("caf", oneLineSnippet(small_buffer[0..4], "café"));
 }
 
@@ -19073,7 +17155,6 @@ test "sender name shows only at the start of a same-sender run" {
     try std.testing.expect(!showSenderName(&a, 1));
     try std.testing.expect(showSenderName(&a, 2));
 
-    // Same display name but a different sender jid must still show.
     const testing = std.testing;
     a.messages[2].sender_jid.set("111@g.us");
     a.messages[2].sender.set(testing.allocator, "Same Name");
@@ -19081,12 +17162,10 @@ test "sender name shows only at the start of a same-sender run" {
     a.messages[1].sender.set(testing.allocator, "Same Name");
     try std.testing.expect(showSenderName(&a, 2));
 
-    // Without jids the display name decides.
     a.messages[2].sender_jid.set("");
     a.messages[1].sender_jid.set("");
     try std.testing.expect(!showSenderName(&a, 2));
 
-    // Switching direction (own vs incoming) always shows the name.
     a.messages[2].sender_jid.set("111@g.us");
     a.messages[2].sender.set(testing.allocator, "");
     a.messages[1].sender_jid.set("");
@@ -19108,21 +17187,16 @@ test "reuseContactAvatar matches a group participant to their contact's cached j
     a.chat_count = 3;
     a.chats[0] = .{};
     a.chats[0].jid.set("15551234567@s.whatsapp.net");
-    // A group jid sharing the same digits must never be treated as a contact.
     a.chats[1] = .{};
     a.chats[1].jid.set("15551234567@g.us");
     a.chats[2] = .{};
     a.chats[2].jid.set("999@s.whatsapp.net");
 
-    // Same person, but the group-scoped jid uses @lid where the contact's
-    // own chat jid uses @s.whatsapp.net: jidUser must still line them up.
     const entry = reuseContactAvatar(&a, "15551234567@lid") orelse return error.TestExpectedEntry;
     try std.testing.expectEqualStrings("15551234567@s.whatsapp.net", entry.jid.slice());
 
-    // No matching contact.
     try std.testing.expect(reuseContactAvatar(&a, "77777@lid") == null);
 
-    // A device-suffixed exact match on the same domain also lines up.
     const same_domain = reuseContactAvatar(&a, "999@s.whatsapp.net:5") orelse return error.TestExpectedEntry;
     try std.testing.expectEqualStrings("999@s.whatsapp.net", same_domain.jid.slice());
 
@@ -19147,8 +17221,6 @@ test "telegram api_hash must be exactly 32 hex characters" {
 }
 
 test "telegram api_hash rejection text covers both validation rules" {
-    // The dialog error must describe length and characters, since the
-    // validator rejects overlong and non-hex values too (not just short ones).
     try std.testing.expect(std.mem.indexOf(u8, tg_api_hash_error, "exactly 32") != null);
     try std.testing.expect(std.mem.indexOf(u8, tg_api_hash_error, "hexadecimal") != null);
     try std.testing.expect(std.mem.indexOf(u8, tg_api_hash_error, "too short") == null);
@@ -19156,23 +17228,15 @@ test "telegram api_hash rejection text covers both validation rules" {
 }
 
 test "unresolvable chat entries are dropped, real chats are kept" {
-    // WAZI-76 junk row: bare hex jid, no name, kind unknown.
     try std.testing.expect(isUnresolvableChatEntry("00C6AD6F2E64", "00C6AD6F2E64", "unknown"));
     try std.testing.expect(isUnresolvableChatEntry("", "00C6AD6F2E64", "unknown"));
-    // A real contact or group jid always carries an @server part.
     try std.testing.expect(!isUnresolvableChatEntry("00C6AD6F2E64", "4917012345678@s.whatsapp.net", "dm"));
     try std.testing.expect(!isUnresolvableChatEntry("Team", "120363...@g.us", "unknown"));
-    // Unknown kind is not enough on its own: a jid with a server part stays.
     try std.testing.expect(!isUnresolvableChatEntry("", "4917012345678@s.whatsapp.net", "unknown"));
-    // A named chat resolves even when wacli reports no type.
     try std.testing.expect(!isUnresolvableChatEntry("Mum", "00C6AD6F2E64", "unknown"));
 }
 
 test "launch log rotates one byte past its cap, never at or under it" {
-    // The old code truncated a full log, erasing exactly the launch history
-    // the log exists to keep. The boundary is where the bug lived: at the
-    // cap the log keeps growing, past it the whole file moves to
-    // launch-log.old.txt.
     try std.testing.expect(!launchLogShouldRotate(0));
     try std.testing.expect(!launchLogShouldRotate(launch_log_max_bytes));
     try std.testing.expect(launchLogShouldRotate(launch_log_max_bytes + 1));
@@ -19181,16 +17245,11 @@ test "launch log rotates one byte past its cap, never at or under it" {
 test "wrapChunkLen breaks long words at punctuation then characters" {
     const Case = struct { word: []const u16, fit: usize, want: usize };
     const cases = [_]Case{
-        // No delimiter inside the prefix: break at the last character that fits.
         .{ .word = &[_]u16{ 'a', 'b', 'c', 'd', 'e' }, .fit = 3, .want = 3 },
-        // A fitting delimiter wins even when later characters also fit.
         .{ .word = &[_]u16{ 'a', 'b', '/', 'c', 'd' }, .fit = 4, .want = 3 },
-        // The last fitting delimiter is used, not the first.
         .{ .word = &[_]u16{ 'a', '/', 'b', '/', 'c' }, .fit = 5, .want = 4 },
         .{ .word = &[_]u16{ 'h', 't', 't', 'p', 's', ':', '/', '/', 'x' }, .fit = 8, .want = 8 },
-        // A word that cannot fit a single character still advances by one.
         .{ .word = &[_]u16{ 'x', 'y' }, .fit = 0, .want = 1 },
-        // Empty input never yields a zero-length chunk.
         .{ .word = &[_]u16{}, .fit = 5, .want = 1 },
     };
     for (cases) |case| {
@@ -19201,32 +17260,24 @@ test "wrapChunkLen breaks long words at punctuation then characters" {
 test "wrapChunkLen keeps surrogate pairs and joiners whole" {
     const Case = struct { word: []const u16, fit: usize, want: usize };
     const cases = [_]Case{
-        // A cut between the halves of a pair backs up to its start.
         .{ .word = &[_]u16{ 'a', 0xD83D, 0xDC69, 'b' }, .fit = 2, .want = 1 },
         .{ .word = &[_]u16{ 'x', 0xD83D, 0xDC69 }, .fit = 2, .want = 1 },
-        // A leading pair is one character, so the smallest chunk is two units.
         .{ .word = &[_]u16{ 0xD83D, 0xDC69 }, .fit = 1, .want = 2 },
         .{ .word = &[_]u16{ 0xD83D, 0xDC69, 'a' }, .fit = 0, .want = 2 },
-        // Never cut before a ZWJ: back up to the character in front of it.
         .{ .word = &[_]u16{ 'a', 'b', 0x200D, 0xD83D, 0xDC69 }, .fit = 2, .want = 1 },
-        // When the joiner follows the first character, keep one whole one.
         .{ .word = &[_]u16{ 0xD83D, 0xDC69, 0x200D, 0xD83C, 0xDFA9 }, .fit = 2, .want = 2 },
         .{ .word = &[_]u16{ '1', 0x20E3, 'x' }, .fit = 1, .want = 1 },
         .{ .word = &[_]u16{ 'a', 0xFE0F, 'b' }, .fit = 1, .want = 1 },
-        // The whole ZWJ family survives when it all fits.
         .{ .word = &[_]u16{ 0xD83D, 0xDC69, 0x200D, 0xD83C, 0xDFA9 }, .fit = 5, .want = 5 },
     };
     for (cases) |case| {
         try std.testing.expectEqual(case.want, wrapChunkLen(case.word, case.fit));
     }
-    // A lone high surrogate is still one unit; do not over-advance past it.
     try std.testing.expectEqual(@as(usize, 1), wrapChunkLen(&[_]u16{0xD83D}, 1));
 }
 
 test "splitRuns sends surrogate-pair emoji to the colour path" {
     var runs: [8]TextRun = undefined;
-    // "hi 😀 ok ❤": the astral emoji must form an emoji run (both halves), not
-    // fall through to the monochrome GDI text run as it did before.
     const mixed = [_]u16{ 'h', 'i', ' ', 0xD83D, 0xDE00, ' ', 'o', 'k', ' ', 0x2764 };
     const count = splitRuns(&mixed, &runs);
     try std.testing.expectEqual(@as(usize, 4), count);
@@ -19236,13 +17287,11 @@ test "splitRuns sends surrogate-pair emoji to the colour path" {
     try std.testing.expect(runs[3].emoji);
     try std.testing.expect(containsEmoji(&mixed));
 
-    // A ZWJ sequence (woman + ZWJ + top hat) stays one emoji run.
     const zwj = [_]u16{ 0xD83D, 0xDC69, 0x200D, 0xD83C, 0xDFA9 };
     try std.testing.expectEqual(@as(usize, 1), splitRuns(&zwj, &runs));
     try std.testing.expect(runs[0].emoji);
     try std.testing.expectEqual(@as(usize, 5), runs[0].len);
 
-    // A non-emoji astral character (mathematical bold A) stays plain text.
     const math = [_]u16{ 0xD835, 0xDC00, 'x' };
     try std.testing.expectEqual(@as(usize, 1), splitRuns(&math, &runs));
     try std.testing.expect(!runs[0].emoji);

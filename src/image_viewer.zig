@@ -9,8 +9,6 @@ fn lit(comptime text: []const u8) [*:0]const u16 {
 }
 
 pub fn close(a: anytype) void {
-    // Drop the handle first so a re-entrant paint never sees a destroyed
-    // window, then free the decoded bitmap.
     if (a.image_viewer_window) |hwnd| {
         a.image_viewer_window = null;
         _ = win.DestroyWindow(hwnd);
@@ -26,8 +24,6 @@ pub fn close(a: anytype) void {
     if (a.hwnd) |main_hwnd| _ = win.SetFocus(main_hwnd);
 }
 
-// Fit the source into the work area: shrink to fit, but never grow a small
-// image past 2x. Aspect ratio is preserved.
 fn viewerTargetSize(source_width: u32, source_height: u32, max_width: i32, max_height: i32) webp_detect.FitBox {
     if (source_width == 0 or source_height == 0) return .{ .width = 1, .height = 1 };
     if (max_width <= 0 or max_height <= 0) return .{ .width = source_width, .height = source_height };
@@ -42,8 +38,6 @@ fn viewerTargetSize(source_width: u32, source_height: u32, max_width: i32, max_h
     };
 }
 
-// Decode the attachment's first frame at viewer size into a top-down 32bpp
-// DIB. Fills out_width/out_height with the bitmap's pixel size.
 pub fn decodeImageViewerBitmap(a: anytype, message: anytype, max_width: i32, max_height: i32, out_width: *i32, out_height: *i32) ?win.HBITMAP {
     if (a.wic_factory == null or message.local_path.len == 0) return null;
     var decoder: [*c]win.IWICBitmapDecoder = null;
@@ -85,7 +79,6 @@ pub fn decodeImageViewerBitmap(a: anytype, message: anytype, max_width: i32, max
     }
     if (source_width != target.width or source_height != target.height) {
         if (a.wic_factory.*.lpVtbl.*.CreateBitmapScaler.?(a.wic_factory, &scaler) < 0 or scaler == null) return null;
-        // Fant = high quality downscaling; small images grow cleanly too.
         if (scaler.*.lpVtbl.*.Initialize.?(scaler, @ptrCast(converter), target.width, target.height, win.WICBitmapInterpolationModeFant) < 0) return null;
         source = @ptrCast(scaler);
     }
@@ -292,7 +285,6 @@ pub fn windowProc(a: anytype, hwnd: win.HWND, message: win.UINT, wparam: win.WPA
                     return 0;
                 }
             }
-            // Do not let the opening double-click immediately close the popup.
             if (win.GetTickCount64() - a.viewer_opened_ms >= win.GetDoubleClickTime()) close(a);
             return 0;
         },

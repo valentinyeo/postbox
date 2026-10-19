@@ -1,8 +1,3 @@
-//! WhatsApp store rows include protocol and system events (receipts, revokes,
-//! sync stubs) that wacli returns alongside real chat messages. Only rows with
-//! actual renderable content may become message bubbles; anything else used to
-//! show up as a phantom "message that was never sent".
-
 pub const Row = struct {
     id: []const u8,
     text: []const u8 = "",
@@ -13,10 +8,6 @@ pub const Row = struct {
     reaction_to: []const u8 = "",
 };
 
-/// A row is a real chat message when it has an id and something to show:
-/// text, an attachment, a delete notice, or a reaction to merge into its
-/// target message. Everything else is a protocol or system event and is
-/// hidden.
 pub fn isRealMessage(row: Row) bool {
     if (row.id.len == 0) return false;
     return row.text.len > 0 or row.media_type.len > 0 or
@@ -24,11 +15,6 @@ pub fn isRealMessage(row: Row) bool {
         row.reaction_to.len > 0;
 }
 
-/// wacli stores the literal "(message)" for message payloads it cannot parse
-/// (view-once, contacts, group invites and other protobuf fields it does not
-/// handle). stripPlaceholder turns it back into no text so isRealMessage can
-/// hide the phantom row, while rows that also carry media, a revoke, or a
-/// reaction keep rendering.
 pub fn stripPlaceholder(text: []const u8) []const u8 {
     if (std.mem.eql(u8, text, "(message)")) return "";
     return text;
@@ -61,11 +47,7 @@ test "protocol stub without content is hidden" {
 test "wacli placeholder counts as no text" {
     try std.testing.expectEqualStrings("", stripPlaceholder("(message)"));
     try std.testing.expectEqualStrings("hello", stripPlaceholder("hello"));
-    // Text that merely contains the placeholder keeps rendering; a human
-    // sending exactly "(message)" is indistinguishable from the unparseable
-    // payload and is dropped (accepted false positive).
     try std.testing.expectEqualStrings("(message) later", stripPlaceholder("(message) later"));
-    // Placeholder without media is hidden, placeholder with media stays.
     try std.testing.expect(!isRealMessage(.{ .id = "ABC7", .text = stripPlaceholder("(message)") }));
     try std.testing.expect(isRealMessage(.{ .id = "ABC8", .text = stripPlaceholder("(message)"), .media_type = "gif" }));
     try std.testing.expect(isRealMessage(.{ .id = "ABC9", .text = stripPlaceholder("(message)"), .revoked = true }));

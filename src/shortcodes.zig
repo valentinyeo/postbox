@@ -1,8 +1,3 @@
-//! Slack/Discord style :shortcodes: typed in the composer. Pure logic: finds
-//! the shortcode being typed before the caret, matches it against the emoji
-//! catalog's CLDR names ("woozy face" is :woozy_face:) plus the small gemoji
-//! alias table (:+1:, :joy:), and resolves a finished :name:.
-
 const std = @import("std");
 const picker = @import("emoji_picker.zig");
 const data = @import("shortcode_data.zig");
@@ -21,8 +16,6 @@ pub const Match = struct {
     }
 };
 
-/// What the caret is inside: `start` is the UTF-16 index of the colon, the
-/// shortcode text runs to `end` (exclusive), and `query` is its lowercase name.
 pub const Typing = struct {
     start: usize,
     end: usize,
@@ -39,10 +32,6 @@ fn isCodeChar(unit: u16) bool {
     return unit < 128 and (std.ascii.isAlphanumeric(@intCast(unit)) or unit == '_' or unit == '+' or unit == '-');
 }
 
-/// Looks at the text before the caret. Returns the shortcode being typed
-/// (":woo") or just finished (":woozy:"), or null. A colon only opens a
-/// shortcode at the start of the text or after a non-alphanumeric character
-/// other than ':' and '/', so "12:30", "http://x" and "a:b" never trigger.
 pub fn typing(before_caret: []const u16) ?Typing {
     var end = before_caret.len;
     var closed = false;
@@ -67,7 +56,6 @@ pub fn typing(before_caret: []const u16) ?Typing {
     return result;
 }
 
-/// Lowercase, spaces and hyphens to '_', other punctuation dropped.
 fn normalize(text: []const u8, out: *[max_name]u8) usize {
     var length: usize = 0;
     for (text) |byte| {
@@ -81,7 +69,6 @@ fn normalize(text: []const u8, out: *[max_name]u8) usize {
     return length;
 }
 
-/// Offers every (shortcode, emoji) pair to `sink` until it returns false.
 fn forEachCode(sink: anytype) void {
     var buffer: [max_name]u8 = undefined;
     for (0..picker.count) |index| {
@@ -105,7 +92,6 @@ const Collector = struct {
 
     fn offer(self: *Collector, code: []const u8, emoji: []const u8) bool {
         if (!std.mem.startsWith(u8, code, self.query)) return true;
-        // One entry per emoji, keeping its shortest name.
         for (self.out[0..self.count], 0..) |*kept, index| {
             if (!std.mem.eql(u8, kept.emoji, emoji)) continue;
             if (code.len < kept.code_len) {
@@ -123,8 +109,6 @@ const Collector = struct {
         self.count -= 1;
     }
 
-    /// Keeps the list ordered by name length, so the exact and shortest
-    /// names come first; ties keep catalog order.
     fn insert(self: *Collector, code: []const u8, emoji: []const u8) void {
         var at: usize = 0;
         while (at < self.count and self.out[at].code_len <= code.len) at += 1;
@@ -138,8 +122,6 @@ const Collector = struct {
     }
 };
 
-/// Fills `out` with the emojis whose shortcode starts with `query`
-/// (lowercase), shortest names first, one per emoji. Returns the count.
 pub fn matches(query: []const u8, out: []Match) usize {
     if (query.len == 0 or query.len > max_name) return 0;
     var collector = Collector{ .query = query, .out = out };
@@ -147,8 +129,6 @@ pub fn matches(query: []const u8, out: []Match) usize {
     return collector.count;
 }
 
-/// The emoji for a finished ":name:": the exact shortcode, else the best
-/// prefix match (":woozy:" finds woozy_face), else null.
 pub fn resolve(query: []const u8) ?[]const u8 {
     var found: [1]Match = undefined;
     if (matches(query, &found) == 0) return null;

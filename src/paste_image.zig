@@ -1,20 +1,11 @@
-//! Clipboard CF_DIB parsing for paste-to-send. Pure byte handling so it can
-//! be unit-tested on the host (see build.zig test step, like webp.zig).
 const std = @import("std");
 
 pub const Bitmap = struct {
     width: u32,
     height: u32,
-    /// Top-down rows of 4-byte BGRA; stride = width * 4. Caller frees.
     pixels: []u8,
 };
 
-/// Parse a CF_DIB memory block (BITMAPINFOHEADER followed by optional
-/// bitfield masks, palette, and pixel data). Supports 32bpp BI_RGB and
-/// BI_BITFIELDS plus 24bpp BI_RGB, which is what every common Windows
-/// screenshot and image copy produces. Alpha is forced opaque because
-/// clipboard 32bpp pixels usually carry garbage in the alpha byte.
-/// Returns null for anything else or a truncated block.
 pub fn dibToBitmap(allocator: std.mem.Allocator, dib: []const u8) ?Bitmap {
     if (dib.len < 40) return null;
     const header_size = std.mem.readInt(u32, dib[0..4], .little);
@@ -30,15 +21,9 @@ pub fn dibToBitmap(allocator: std.mem.Allocator, dib: []const u8) ?Bitmap {
     const height: u32 = @intCast(if (top_down) -raw_height else raw_height);
 
     const bi_bitfields: u32 = 3;
-    // Only the combinations real clipboard producers emit are supported;
-    // anything else is rejected rather than guessed at. ponytail: 32bpp
-    // BI_BITFIELDS is assumed to be the standard BGRA masks (screenshots
-    // always are); exotic masks would swap channels.
     const supported = (bpp == 32 and (compression == 0 or compression == bi_bitfields)) or
         (bpp == 24 and compression == 0);
     if (!supported) return null;
-    // V4/V5 headers carry the masks inside the header itself, so pixels
-    // always start after the declared header size for BI_RGB.
     var pixel_offset: usize = header_size;
     if (compression == bi_bitfields and header_size == 40) pixel_offset += 12;
     const palette_entries: usize = if (colors_used != 0)
@@ -46,9 +31,6 @@ pub fn dibToBitmap(allocator: std.mem.Allocator, dib: []const u8) ?Bitmap {
     else if (bpp <= 8) @as(usize, 1) << @intCast(bpp) else 0;
     pixel_offset += palette_entries * 4;
 
-    // Bound the header-supplied dimensions before any multiplication: a
-    // malformed or hostile clipboard producer can claim sizes its payload
-    // can never satisfy, and the raw products can overflow usize.
     if (width == 0 or height == 0) return null;
     if (width > 1 << 15 or height > 1 << 15) return null;
 
@@ -90,31 +72,30 @@ test "parses 32bpp bottom-up DIB and flips rows" {
     @memset(&dib, 0);
     std.mem.writeInt(u32, dib[0..4], 40, .little);
     std.mem.writeInt(i32, dib[4..8], 2, .little);
-    std.mem.writeInt(i32, dib[8..12], 2, .little); // positive: bottom-up
+    std.mem.writeInt(i32, dib[8..12], 2, .little);
     std.mem.writeInt(u16, dib[12..14], 1, .little);
     std.mem.writeInt(u16, dib[14..16], 32, .little);
-    // Bottom row (blue) first, then top row (red).
-    dib[40] = 255; // B
-    dib[44 + 2] = 255; // R
+    dib[40] = 255;
+    dib[44 + 2] = 255;
     const bitmap = dibToBitmap(allocator, &dib) orelse return error.TestUnexpectedResult;
     defer allocator.free(bitmap.pixels);
     try std.testing.expectEqual(@as(u32, 2), bitmap.width);
     try std.testing.expectEqual(@as(u32, 2), bitmap.height);
-    try std.testing.expectEqual(@as(u8, 255), bitmap.pixels[3]); // alpha forced opaque
-    try std.testing.expectEqual(@as(u8, 255), bitmap.pixels[8]); // bottom row = first stored block (blue)
-    try std.testing.expectEqual(@as(u8, 255), bitmap.pixels[14]); // bottom row pixel 1: red
+    try std.testing.expectEqual(@as(u8, 255), bitmap.pixels[3]);
+    try std.testing.expectEqual(@as(u8, 255), bitmap.pixels[8]);
+    try std.testing.expectEqual(@as(u8, 255), bitmap.pixels[14]);
 }
 
 test "parses 24bpp top-down DIB" {
     const allocator = std.testing.allocator;
-    var dib: [40 + 2 * 8]u8 = undefined; // stride 8 for two 24-bit pixels
+    var dib: [40 + 2 * 8]u8 = undefined;
     @memset(&dib, 0);
     std.mem.writeInt(u32, dib[0..4], 40, .little);
     std.mem.writeInt(i32, dib[4..8], 2, .little);
-    std.mem.writeInt(i32, dib[8..12], -2, .little); // negative: top-down
+    std.mem.writeInt(i32, dib[8..12], -2, .little);
     std.mem.writeInt(u16, dib[12..14], 1, .little);
     std.mem.writeInt(u16, dib[14..16], 24, .little);
-    dib[40 + 1] = 128; // first pixel G
+    dib[40 + 1] = 128;
     const bitmap = dibToBitmap(allocator, &dib) orelse return error.TestUnexpectedResult;
     defer allocator.free(bitmap.pixels);
     try std.testing.expectEqual(@as(u8, 128), bitmap.pixels[1]);
@@ -128,8 +109,8 @@ test "rejects unsupported and truncated formats" {
     std.mem.writeInt(i32, dib[4..8], 2, .little);
     std.mem.writeInt(i32, dib[8..12], 2, .little);
     std.mem.writeInt(u16, dib[12..14], 1, .little);
-    std.mem.writeInt(u16, dib[14..16], 8, .little); // paletted: unsupported
+    std.mem.writeInt(u16, dib[14..16], 8, .little);
     try std.testing.expect(dibToBitmap(std.testing.allocator, &dib) == null);
     std.mem.writeInt(u16, dib[14..16], 32, .little);
-    try std.testing.expect(dibToBitmap(std.testing.allocator, dib[0..30]) == null); // truncated header
+    try std.testing.expect(dibToBitmap(std.testing.allocator, dib[0..30]) == null);
 }

@@ -1,9 +1,5 @@
-//! Parsing for `wacli --json auth status` payloads (WAZI-67, WAZI-86).
-
 const std = @import("std");
 
-/// `auth status` moved its payload under a top-level `data` wrapper in newer
-/// wacli releases (WAZI-86); accept both that shape and the old flat one.
 pub fn linkedJid(value: std.json.Value) ?[]const u8 {
     const holder = switch (value) {
         .object => |object| object.get("data") orelse value,
@@ -20,8 +16,6 @@ pub fn linkedJid(value: std.json.Value) ?[]const u8 {
 }
 
 test "linked jid parses both the flat and the data-wrapped auth status shape" {
-    // wacli 0.17 moved the payload under `data` (WAZI-86); the parser must
-    // accept both shapes or every launch disables the caches.
     const wrapped = try std.json.parseFromSlice(std.json.Value, std.testing.allocator,
         \\{"success":true,"data":{"authenticated":true,"linked_jid":"1234@s.whatsapp.net"}}
     , .{});
@@ -41,9 +35,6 @@ test "linked jid parses both the flat and the data-wrapped auth status shape" {
     try std.testing.expect(linkedJid(unlinked.value) == null);
 }
 
-/// `auth status` answer: true when the payload says `authenticated:false`
-/// (flat or data-wrapped), false when it says true. Null for an unknown
-/// shape, so a changed wacli payload can never lock the user out of sync.
 pub fn unauthenticated(value: std.json.Value) ?bool {
     const holder = switch (value) {
         .object => |object| object.get("data") orelse value,
@@ -59,10 +50,6 @@ pub fn unauthenticated(value: std.json.Value) ?bool {
     };
 }
 
-/// One `wacli --events sync` stderr line: true when it says the WhatsApp
-/// session is gone, either the live `logged_out` event or the start-up
-/// "not authenticated" error. Restarting sync can never fix either, so the
-/// app stops and offers the QR pairing window instead.
 pub fn syncLineLoggedOut(allocator: std.mem.Allocator, line: []const u8) bool {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, line, .{}) catch return false;
     defer parsed.deinit();
@@ -88,9 +75,6 @@ pub fn syncLineLoggedOut(allocator: std.mem.Allocator, line: []const u8) bool {
 }
 
 test "auth status reports unauthenticated only on an explicit false" {
-    // A PC whose session was revoked keeps its store, and auth status then
-    // answers authenticated:false. That must gate sync off; anything we do
-    // not recognise must not, or a wacli format change would block sync.
     const cases = [_]struct { json: []const u8, want: ?bool }{
         .{ .json = "{\"success\":true,\"data\":{\"authenticated\":false},\"error\":null}", .want = true },
         .{ .json = "{\"authenticated\":false}", .want = true },
@@ -107,14 +91,12 @@ test "auth status reports unauthenticated only on an explicit false" {
 }
 
 test "sync lines that mean the WhatsApp session is gone" {
-    // Both of these kept the app respawning sync once a second forever.
     try std.testing.expect(syncLineLoggedOut(std.testing.allocator,
         \\{"event":"error","data":{"message":"not authenticated; run `wacli auth`"},"ts":1790506466370}
     ));
     try std.testing.expect(syncLineLoggedOut(std.testing.allocator,
         \\{"event":"logged_out","data":{"reason":"401: logged out from another device"},"ts":1}
     ));
-    // Transient failures must keep the normal restart path.
     try std.testing.expect(!syncLineLoggedOut(std.testing.allocator,
         \\{"event":"error","data":{"message":"429 rate-overlimit"},"ts":1}
     ));
@@ -124,8 +106,6 @@ test "sync lines that mean the WhatsApp session is gone" {
     try std.testing.expect(!syncLineLoggedOut(std.testing.allocator,
         \\{"event":"connected","data":{},"ts":1}
     ));
-    // Message text quoting the phrase is escaped inside JSON, and plain log
-    // lines are not events: neither may log the user out.
     try std.testing.expect(!syncLineLoggedOut(std.testing.allocator,
         \\{"event":"message","data":{"text":"{\"event\":\"logged_out\"} not authenticated"},"ts":1}
     ));

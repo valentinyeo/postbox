@@ -1,9 +1,3 @@
-//! Real Telegram client backed by the official TDLib td_json_client C API.
-//! Compiled only when the build was given -Dtdlib=<dir>; otherwise
-//! telegram_stub.zig provides the identical API. The receive thread owns all
-//! TDLib receives; the UI thread only calls send-style requests (thread-safe
-//! per TDLib) and drains parsed events through poll().
-
 const std = @import("std");
 const tj = @import("telegram_json.zig");
 
@@ -46,9 +40,6 @@ pub const Client = struct {
     files_dir: []u8,
     stopping: std.atomic.Value(bool) = .init(false),
     parameters_sent: bool = false,
-    /// Phone number submitted before TDLib asked for it (client start is still
-    /// setting up parameters); flushed on the receive thread when wait_phone
-    /// arrives. Guarded by state_mutex.
     pending_phone: ?[]u8 = null,
 
     pub fn create(allocator: std.mem.Allocator, io: std.Io, api_id: i32, api_hash: []const u8, base_dir: []const u8) ?*Client {
@@ -74,8 +65,6 @@ pub const Client = struct {
         ensureDirectory(self.allocator, self.database_dir);
         ensureDirectory(self.allocator, self.files_dir);
         self.client = c.td_json_client_create() orelse return null;
-        // ponytail: a failed thread spawn leaves TDLib running without a
-        // receive pump; upgrade path: retry the spawn or fail create().
         self.thread = std.Thread.spawn(.{}, receiveLoop, .{self}) catch null;
         return self;
     }
@@ -104,8 +93,6 @@ pub const Client = struct {
         self.allocator.destroy(self);
     }
 
-    /// Returns one queued event, or null. The caller owns the event and must
-    /// call event.deinit(allocator).
     pub fn poll(self: *Client) ?Event {
         self.queue_mutex.lockUncancelable(self.io);
         defer self.queue_mutex.unlock(self.io);
@@ -121,12 +108,6 @@ pub const Client = struct {
     }
 
     pub fn authPhone(self: *Client, phone: []const u8) void {
-        // TDLib needs setTdlibParameters before it accepts a phone number. In
-        // the pre-phone states the dialog is already open while the receive
-        // thread is still waiting for wait_parameters/wait_phone, so hold the
-        // number and send it when wait_phone arrives; in any later state
-        // (wait_code and beyond) send immediately so a stale number is never
-        // parked for a future login.
         self.state_mutex.lockUncancelable(self.io);
         const wait_for_it = self.auth == .unknown or self.auth == .wait_parameters;
         if (wait_for_it) {
@@ -137,8 +118,6 @@ pub const Client = struct {
             if (self.pending_phone) |old| self.allocator.free(old);
             self.pending_phone = copy;
         } else {
-            // Sent under state_mutex so a concurrent flush of an older stashed
-            // number cannot land after this newer submission.
             self.sendPhoneNumber(phone);
         }
         self.state_mutex.unlock(self.io);
@@ -165,8 +144,6 @@ pub const Client = struct {
     }
 
     pub fn sendText(self: *Client, chat_id: i64, text: []const u8) bool {
-        // Read-only guard for Telegram groups: the UI disables the composer,
-        // but every send path funnels through here as the second gate.
         self.state_mutex.lockUncancelable(self.io);
         const info = self.chats.get(chat_id);
         self.state_mutex.unlock(self.io);
@@ -226,7 +203,6 @@ pub const Client = struct {
         self.sendFields(.{ .type = "logOut" });
     }
 
-    /// Owned copies of the tracked chats. Caller frees with freeChatSnapshot.
     pub fn chatSnapshot(self: *Client, allocator: std.mem.Allocator) []ChatInfo {
         self.state_mutex.lockUncancelable(self.io);
         defer self.state_mutex.unlock(self.io);
@@ -250,8 +226,6 @@ pub const Client = struct {
         allocator.free(snapshot);
     }
 
-    /// Owned copies of the cached history for one chat, oldest first.
-    /// Caller frees with freeHistorySnapshot.
     pub fn historySnapshot(self: *Client, allocator: std.mem.Allocator, chat_id: i64) []Msg {
         self.state_mutex.lockUncancelable(self.io);
         defer self.state_mutex.unlock(self.io);
@@ -342,19 +316,8 @@ pub const Client = struct {
                 .auth => |auth| {
                     self.state_mutex.lockUncancelable(self.io);
                     if (auth.state != .unknown) self.auth = auth.state;
-                    // The phone number may have been submitted while TDLib was
-                    // still setting up parameters; send it now that it is asked
-                    // for. The take and send share the critical section that
-                    // publishes wait_phone with authPhone, so phone requests
-                    // stay ordered and a newer submission can never be overtaken
-                    // by an older stashed one.
                     var pending: ?[]u8 = null;
                     if (auth.state != .unknown and auth.state != .wait_parameters) {
-                        // Either TDLib now asks for the number (wait_phone) or
-                        // it moved past the phone step without asking (for
-                        // example an already authorized session): in both cases
-                        // a stashed phone leaves the pre-phone window, to be
-                        // sent or dropped, never parked for a later cycle.
                         pending = self.pending_phone;
                         self.pending_phone = null;
                     }
@@ -402,9 +365,6 @@ pub const Client = struct {
                 else => {},
             }
         }
-        // The events were applied to client state (which made its own copies);
-        // the queue hands the same owned events to the UI thread, which frees
-        // them after applying them to widgets.
         self.queue_mutex.lockUncancelable(self.io);
         defer self.queue_mutex.unlock(self.io);
         for (events.items) |event| {
@@ -425,14 +385,11 @@ pub const Client = struct {
         self.state_mutex.lockUncancelable(self.io);
         defer self.state_mutex.unlock(self.io);
         if (self.chats.count() >= max_tracked_chats and !self.chats.contains(info.id)) return;
-        // The map owns its own title copy; the queued event keeps the original.
         const entry = self.chats.getOrPut(info.id) catch return;
         const stored_title = self.allocator.dupe(u8, info.title) catch return;
         if (entry.found_existing) {
             const previous = entry.value_ptr.*;
             entry.value_ptr.* = info.*;
-            // updateChatReadInbox carries only the id and unread count: keep
-            // the title and last-message date we already know.
             if (info.title.len == 0) {
                 entry.value_ptr.title = previous.title;
                 self.allocator.free(stored_title);
@@ -452,9 +409,6 @@ pub const Client = struct {
         const pointer = self.history.getOrPut(msg.chat_id) catch return;
         if (!pointer.found_existing) pointer.value_ptr.* = .empty;
         const list = pointer.value_ptr;
-        // Replace an existing copy (send reconciliation, edited messages);
-        // the queued event keeps ownership of the incoming strings, so the
-        // stored copy duplicates them.
         for (list.items) |*existing| {
             if (existing.id == msg.id) {
                 if (self.dupeMessage(msg)) |copy| {
@@ -471,8 +425,6 @@ pub const Client = struct {
                 return;
             };
         }
-        // ponytail: history cache is capped per chat and never evicted across
-        // chats; upgrade path: LRU over chats if memory becomes measurable.
         while (list.items.len > max_history_per_chat) {
             var oldest = list.orderedRemove(0);
             oldest.deinit(self.allocator);

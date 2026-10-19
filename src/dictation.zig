@@ -1,4 +1,3 @@
-// Native Windows microphone capture and Deepgram transcription.
 const std = @import("std");
 const mic_choice = @import("mic_choice.zig");
 const format_request = @import("format_request.zig");
@@ -110,7 +109,6 @@ fn captureMicrophone(self: *Session) ![]u8 {
     defer _ = enumerator.?.*.lpVtbl.*.Release.?(enumerator);
 
     var device: ?*win.IMMDevice = null;
-    // The microphone picked in the palette, else the Windows default.
     if (mic_choice.openChosen()) |picked| device = @ptrCast(@alignCast(picked));
     if (device == null and (enumerator.?.*.lpVtbl.*.GetDefaultAudioEndpoint.?(enumerator.?, win.eCapture, win.eCommunications, &device) < 0 or device == null)) return error.NoMicrophone;
     defer _ = device.?.*.lpVtbl.*.Release.?(device);
@@ -180,7 +178,6 @@ fn captureMicrophone(self: *Session) ![]u8 {
 
 fn transcribe(allocator: std.mem.Allocator, api_key: []const u8, language: Language, content_type: []const u8, body: []const u8) ![]u8 {
     return switch (language) {
-        // Detection can pick a language and return no words (a 72 s Spanish note did); multi still hears it.
         .automatic => transcribeAt(allocator, api_key, lit("/v1/listen?model=nova-3&smart_format=true&detect_language=true"), content_type, body) catch |err| switch (err) {
             error.NoSpeech => transcribeAt(allocator, api_key, lit("/v1/listen?model=nova-3&smart_format=true&language=multi"), content_type, body),
             else => err,
@@ -262,7 +259,6 @@ fn lit(comptime text: []const u8) [*:0]const u16 {
     return std.unicode.utf8ToUtf16LeStringLiteral(text);
 }
 
-// Transcribes an audio file that already exists on disk (voice notes).
 pub const FileSession = struct {
     allocator: std.mem.Allocator,
     thread: ?std.Thread = null,
@@ -339,7 +335,6 @@ fn fileWorker(self: *FileSession, path: []u8, api_key: []u8, language: Language)
     self.state_value.store(@intFromEnum(State.ready), .release);
 }
 
-// Formats a transcript for easier reading, through Anthropic (sk-ant- key) or OpenRouter.
 pub const TextSession = struct {
     allocator: std.mem.Allocator,
     thread: ?std.Thread = null,
@@ -511,8 +506,6 @@ fn formatTranscript(allocator: std.mem.Allocator, transcript: []const u8, api_ke
     }
 
     const formatted = try format_request.formatResponseText(allocator, anthropic, response.items);
-    // A refusal or other meta answer must not replace the transcript: failing
-    // here keeps the raw transcript on screen.
     if (format_request.isRefusal(formatted)) {
         allocator.free(formatted);
         return error.Refused;
