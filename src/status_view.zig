@@ -1,3 +1,4 @@
+const theme = @import("theme.zig");
 const std = @import("std");
 const media_age = @import("media_age.zig");
 const control = @import("control.zig");
@@ -432,8 +433,8 @@ pub fn mayRefresh(last: ?u64, now: u64) bool {
 }
 
 pub fn backgroundColor(text: []const u8) u32 {
-    if ((text.len != 7 and text.len != 9) or text[0] != '#') return 0x003b2c22;
-    const value = std.fmt.parseInt(u32, text[1..], 16) catch return 0x003b2c22;
+    if ((text.len != 7 and text.len != 9) or text[0] != '#') return theme.surface_container_high;
+    const value = std.fmt.parseInt(u32, text[1..], 16) catch return theme.surface_container_high;
     return ((value & 0xff) << 16) | (value & 0xff00) | ((value >> 16) & 0xff);
 }
 
