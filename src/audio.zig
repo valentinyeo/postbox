@@ -1,9 +1,3 @@
-// In-app voice message playback.
-//
-// Windows Media Foundation has no Ogg container source, so this module
-// demuxes Opus packets from the Ogg stream, decodes them with the built-in
-// Microsoft Opus decoder MFT, and renders PCM through shared-mode WASAPI.
-// Only Windows system components are used.
 const std = @import("std");
 const sola = @import("stretch.zig");
 pub const win = @cImport({
@@ -56,7 +50,7 @@ const Packet = struct {
 };
 
 const ParsedOgg = struct {
-    packets: []Packet, // audio packets only (head/tags excluded)
+    packets: []Packet,
     pre_skip: u32,
     duration_samples: u64,
 };
@@ -99,9 +93,7 @@ fn parseOpusOgg(allocator: std.mem.Allocator, data: []const u8) !ParsedOgg {
                     if (bytes.len >= 8 and std.mem.eql(u8, bytes[0..8], "OpusHead")) {
                         if (bytes.len >= 12) pre_skip = std.mem.readInt(u16, bytes[10..12], .little);
                         saw_head = true;
-                    } else if (bytes.len >= 8 and std.mem.eql(u8, bytes[0..8], "OpusTags")) {
-                        // Metadata packet, not decoder input.
-                    } else if (saw_head) {
+                    } else if (bytes.len >= 8 and std.mem.eql(u8, bytes[0..8], "OpusTags")) {} else if (saw_head) {
                         try packets.append(allocator, .{ .offset = start, .len = current_len, .granule_end = granule });
                     }
                     current_start = null;
@@ -110,7 +102,7 @@ fn parseOpusOgg(allocator: std.mem.Allocator, data: []const u8) !ParsedOgg {
             }
         }
 
-        if ((header_type & 0x04) != 0) break; // end of stream
+        if ((header_type & 0x04) != 0) break;
         offset = payload_start + payload_len;
     }
 
@@ -124,7 +116,6 @@ fn parseOpusOgg(allocator: std.mem.Allocator, data: []const u8) !ParsedOgg {
     };
 }
 
-// Opus packet duration at 48 kHz (RFC 6716, opus_packet_get_nb_samples).
 fn opusPacketSamples(packet: []const u8) u64 {
     if (packet.len == 0) return 0;
     const toc = packet[0];
@@ -175,8 +166,6 @@ fn readFileAlloc(allocator: std.mem.Allocator, path: []const u8, max_bytes: usiz
     return data;
 }
 
-// --- Public player ---
-
 pub const Player = struct {
     allocator: std.mem.Allocator,
     thread: ?std.Thread = null,
@@ -186,7 +175,6 @@ pub const Player = struct {
     pause_requested: bool = false,
     seek_request_ms: ?i64 = null,
 
-    // Shared playback data (owned by worker while running).
     file_data: []u8 = &.{},
     packets: []Packet = &.{},
     ring: []f32 = &.{},
@@ -195,14 +183,8 @@ pub const Player = struct {
     ring_write: std.atomic.Value(u64) = .init(0),
     pre_skip: u32 = 0,
     duration_ms: std.atomic.Value(i64) = .init(0),
-    // Source-frame position of audio handed to WASAPI: rendered output
-    // converted to source time chunk-by-chunk at the speed in effect, plus
-    // the source-frame offset playback started (or seeked) at.
     rendered_src: std.atomic.Value(u64) = .init(0),
     seek_base: std.atomic.Value(u64) = .init(0),
-    // ponytail: rendered chunks are converted at the *current* speed, so for
-    // up to ~2 s after a speed change the progress bar can drift until the
-    // ring drains. Fixing exactly needs per-chunk speed metadata in the ring.
     position_ms_value: std.atomic.Value(i64) = .init(0),
     state_value: std.atomic.Value(u8) = .init(@intFromEnum(State.idle)),
     start_failed: std.atomic.Value(bool) = .init(false),
@@ -346,8 +328,6 @@ fn workerRun(self: *Player, path: []const u8) !void {
     var audio = try WasapiOutput.open(48000);
     defer audio.close();
 
-    // Decoded PCM accumulates here; the stretch stage consumes it from the
-    // front (acc_base is the absolute source frame of acc[0]).
     var acc: std.ArrayList(f32) = .empty;
     defer acc.deinit(self.allocator);
     var acc_base: u64 = 0;
@@ -397,12 +377,7 @@ fn workerRun(self: *Player, path: []const u8) !void {
             if (next_packet >= opus.packets.len) packets_done = true;
         }
 
-        // Drop already-consumed frames from the front. Batched to a second
-        // while stretching; fully before the 1x copy path so it never
-        // replays consumed frames after a speed change.
         const pos = stretch.sourceFramesConsumed();
-        // pos can overshoot the accumulator at high speeds (the hop skips
-        // ahead); never trim more than is actually buffered.
         const stale = @min(pos - acc_base, @as(u64, @intCast(acc.items.len / output_channels)));
         if (stretch.percent == 100 or stale >= output_rate) {
             const n = stale * output_channels;
@@ -412,9 +387,6 @@ fn workerRun(self: *Player, path: []const u8) !void {
         }
 
         if (stretch.percent == 100) {
-            // Normal speed: copy decoded frames through untouched. The
-            // stretch tail is dropped so returning to a higher speed does
-            // not crossfade against audio from before the 1x segment.
             stretch.has_tail = false;
             while (acc.items.len >= sola.window_frames * output_channels and
                 ringAvailableFrames(self) + sola.window_frames <= ring_cap)
@@ -433,15 +405,11 @@ fn workerRun(self: *Player, path: []const u8) !void {
             ringWriteFrames(self, &out_block);
         }
 
-        // End of file: flush what a window could not consume, crossfaded
-        // from the stretch tail so the last seam stays click-free. Gate and
-        // flush on the unconsumed part only.
         const stale_now = @min(stretch.sourceFramesConsumed() - acc_base, @as(u64, @intCast(acc.items.len / output_channels)));
         const unconsumed = acc.items.len / output_channels - stale_now;
         if (packets_done and unconsumed < sola.lookahead_frames) {
             const remaining = acc.items.len - @as(usize, @intCast(stale_now * output_channels));
             if (remaining == 0) {
-                // Everything consumed (pos may overshoot at high speeds).
                 acc.clearRetainingCapacity();
             } else if (ringAvailableFrames(self) + remaining / output_channels <= ring_cap) {
                 const pcm = acc.items[@intCast(stale_now * output_channels)..];
@@ -452,8 +420,6 @@ fn workerRun(self: *Player, path: []const u8) !void {
                     while (tail_i < fade) : (tail_i += 1) {
                         const t: f32 = @as(f32, @floatFromInt(tail_i)) * inv;
                         for (0..output_channels) |c| {
-                            // pending already holds the (1 - t) fade-out of
-                            // the last window; the fade-in completes it.
                             pcm[tail_i * output_channels + c] =
                                 stretch.pending[tail_i * output_channels + c] + pcm[tail_i * output_channels + c] * t;
                         }
@@ -479,8 +445,6 @@ fn workerRun(self: *Player, path: []const u8) !void {
     self.ring_read.store(self.ring_write.load(.acquire), .release);
 }
 
-// Copies whole frames into the playback ring. The caller must have checked
-// that the ring has room.
 fn ringWriteFrames(self: *Player, src: []const f32) void {
     const ch: usize = self.ring_channels;
     const cap: u64 = @intCast(self.ring.len / ch);
@@ -506,8 +470,6 @@ fn ringAvailableFrames(self: *Player) u64 {
     return self.ring_write.load(.acquire) - self.ring_read.load(.acquire);
 }
 
-// Decodes one packet into the PCM accumulator. Returns false while the
-// decoder needs more input before producing output.
 fn decodePacketToAcc(self: *Player, decoder: *Decoder, opus: ParsedOgg, packet_index: usize, acc: *std.ArrayList(f32), pending_skip: *u64, decode_samples: *u64) !bool {
     const packet = opus.packets[packet_index];
     const packet_data = self.file_data[packet.offset .. packet.offset + packet.len];
@@ -545,8 +507,6 @@ fn decodePacketToAcc(self: *Player, decoder: *Decoder, opus: ParsedOgg, packet_i
     }
 }
 
-// --- Microsoft Opus decoder MFT wrapper ---
-
 const Decoder = struct {
     allocator: std.mem.Allocator,
     transform: *win.IMFTransform,
@@ -561,7 +521,6 @@ const Decoder = struct {
         if (self.transform.*.lpVtbl.*.ProcessMessage.?(self.transform, win.MFT_MESSAGE_COMMAND_FLUSH, 0) < 0) return error.MfFailure;
     }
 
-    // Builds an input sample (copy of packet bytes with timestamps).
     fn makeInputSample(payload: []const u8, time_100ns: u64, duration_100ns: u64) !*win.IMFSample {
         var buffer: ?*win.IMFMediaBuffer = null;
         if (mf_create_memory_buffer.?(@intCast(payload.len), &buffer) < 0 or buffer == null) return error.MfFailure;
@@ -727,8 +686,6 @@ fn openDecoder() !*Decoder {
     errdefer std.heap.page_allocator.destroy(self);
     self.* = .{ .allocator = std.heap.page_allocator, .transform = transform.? };
 
-    // Input: compressed Opus, stereo-coded 48 kHz packets (WhatsApp quirk:
-    // OpusHead says mono but the packets carry stereo TOCs).
     var media_type: ?*win.IMFMediaType = null;
     if (mf_create_media_type.?(&media_type) < 0 or media_type == null) return error.MfFailure;
     _ = media_type.?.*.lpVtbl.*.SetGUID.?(media_type.?, &guid_mf_mt_major_type, &guid_mf_media_type_audio);
@@ -749,8 +706,6 @@ fn openDecoder() !*Decoder {
     _ = self.transform.*.lpVtbl.*.ProcessMessage.?(self.transform, win.MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
     return self;
 }
-
-// --- WASAPI output ---
 
 const WasapiOutput = struct {
     client: *win.IAudioClient,
@@ -825,8 +780,6 @@ const WasapiOutput = struct {
         @memset(samples[written..total], 0);
         _ = self.render.*.lpVtbl.*.ReleaseBuffer.?(self.render, frames_free, 0);
         if (playing and written > 0) {
-            // Convert this chunk to source time at the speed in effect now,
-            // so later speed changes do not rescale earlier audio.
             const src_frames = written / channels * player.speed() / 100;
             _ = player.rendered_src.fetchAdd(src_frames, .release);
             player.storePositionMs();

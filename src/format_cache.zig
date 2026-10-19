@@ -1,5 +1,3 @@
-//! Finished voice summaries are keyed by account, chat and message, not by
-//! the downloaded media path. main.zig owns native file I/O and atomic writes.
 const std = @import("std");
 pub const format_request = @import("format_request.zig");
 
@@ -52,7 +50,6 @@ pub fn payloadFor(data: []const u8, key: Key) ?[]const u8 {
     return rest;
 }
 
-/// Called while building messages, before any paint or formatting scheduling.
 pub fn restore(allocator: std.mem.Allocator, message: anytype, data: []const u8, key: Key) bool {
     const text = payloadFor(data, key) orelse return false;
     message.transcript.set(allocator, text);
@@ -102,7 +99,6 @@ test "disk cache restores summary on first build after switch and restart with n
     try dir.dir.writeFile(io, .{ .sub_path = name, .data = stored });
     var requests = Requests{};
     for (0..3) |build| {
-        // A restart has no in-memory request history or message state.
         if (build == 2) requests = .{};
         const data = try dir.dir.readFileAlloc(io, name, allocator, .limited(max_bytes));
         defer allocator.free(data);

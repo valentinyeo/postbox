@@ -1,10 +1,3 @@
-//! Argument lists for the wacli send commands (text, file, voice note,
-//! reaction). Pure, so the tests can pin the lock wait: since wacli 0.19 a
-//! send that finds the store locked hands itself to the running sync, but
-//! only after its --lock-wait runs out, so any wait above 0s delays every
-//! send by its full length. Sends always pass 0s; the forwarder and
-//! sendRetryDelayMs cover the rare moment no sync is there to take the job.
-
 const std = @import("std");
 
 pub const lock_wait = "0s";
@@ -20,7 +13,6 @@ pub const SendSpec = struct {
     reply_sender: []const u8 = "",
 };
 
-/// Fills `out` with the argv of `wacli send text|file` and returns its length.
 pub fn buildSend(out: *[max_args][]const u8, spec: SendSpec) usize {
     var n: usize = 0;
     const is_file = spec.file.len > 0;
@@ -59,7 +51,6 @@ pub fn buildSend(out: *[max_args][]const u8, spec: SendSpec) usize {
     return n;
 }
 
-/// Fills `out` with the argv of `wacli send react` and returns its length.
 pub fn buildReact(out: *[max_args][]const u8, wacli: []const u8, jid: []const u8, msg_id: []const u8, emoji: []const u8, sender: []const u8) usize {
     var n: usize = 0;
     for ([_][]const u8{ wacli, "--json", "--lock-wait", lock_wait, "send", "react", "--to", jid, "--id", msg_id, "--reaction", emoji }) |arg| {

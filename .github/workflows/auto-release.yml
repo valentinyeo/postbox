@@ -1,8 +1,3 @@
-# Cut a release whenever app code lands on main.
-#
-# release.yml already builds and publishes from a vX.Y.Z tag, and takes the
-# version straight from the tag name. So releasing automatically just means
-# creating that tag automatically, once CI has gone green on the commit.
 name: auto-release
 
 on:
@@ -31,7 +26,6 @@ jobs:
     name: tag
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # Only ever tag a commit CI has passed. A manual run is trusted.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
@@ -68,15 +62,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # One release tag per commit: a rerun or a second successful CI run
-          # for the same HEAD must not mint another version. But if a previous
-          # attempt tagged this commit and never started release.yml (the
-          # push trigger is not guaranteed for GITHUB_TOKEN refs), finish the
-          # job here instead of skipping: dispatch at the existing tag.
           tag="$(git tag -l 'v*' --points-at HEAD | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | tail -1 || true)"
           if [ -n "${tag}" ]; then
-            # Server-side commit filter and a generous limit, so old tags and
-            # page truncation cannot hide a completed release run.
             runs_json="$(gh run list -R "${GITHUB_REPOSITORY}" -w release --commit "$(git rev-parse HEAD)" -L 50 \
               --json event,headBranch,headSha,status,conclusion 2>/dev/null)" || runs_json=""
             if [ -z "${runs_json}" ]; then
@@ -101,8 +88,6 @@ jobs:
       - name: Release only when the app itself changed
         if: env.skip != 'true'
         run: |
-          # Strict vX.Y.Z only: prerelease or four-part tags must never feed
-          # the version bump.
           last="$(git tag -l 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -1 || true)"
           if [ -z "${last}" ]; then
             echo "no previous tag, treating as releasable"
@@ -111,7 +96,6 @@ jobs:
           fi
           echo "last_tag=${last}" >> "$GITHUB_ENV"
 
-          # Anything that ends up inside the shipped binary or installer.
           if git diff --name-only "${last}..HEAD" \
              | grep -qE '^(src/|assets/|vendor/|build\.zig)'; then
             echo "app changed since ${last}"
@@ -155,8 +139,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Revalidate main against the remote, not the local checkout:
-          # both local reads stay equal even if main has moved on.
           sha="$(git rev-parse HEAD)"
           remote_main="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
           if [ "${sha}" != "${remote_main}" ]; then
@@ -165,17 +147,12 @@ jobs:
           fi
           if ! gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
             -f "ref=refs/tags/${next_tag}" -f "sha=${sha}" >/dev/null; then
-            # Refuse to publish a tag some concurrent run may have pointed
-            # elsewhere; compare against the remote ref, not local state,
-            # and only proceed if it already tags exactly this commit.
             remote_tag="$(gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${next_tag}" --jq .object.sha 2>/dev/null || true)"
             if [ -z "${remote_tag}" ]; then
               echo "could not create ${next_tag} and it does not exist remotely" >&2
               exit 1
             fi
             if [ "${remote_tag}" != "${sha}" ]; then
-              # Annotated tags point at a tag object; peel to the commit,
-              # recursing if a tag was made pointing at another tag.
               for _ in 1 2 3; do
                 read -r obj_type obj_sha < <(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${remote_tag}" --jq '"\(.object.type) \(.object.sha)"' 2>/dev/null || echo "missing -")
                 if [ "${obj_type}" = "commit" ]; then remote_tag="${obj_sha}"; break; fi
@@ -188,19 +165,10 @@ jobs:
               fi
             fi
           fi
-          # ponytail: a merge landing between the check above and the ref
-          # creation would still tag a CI-green commit slightly behind main.
-          # The GitHub refs API has no compare-and-swap, so re-verify after
-          # creation and rely on the newer commit getting its own release.
           remote_main="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha 2>/dev/null || true)"
           if [ -n "${remote_main}" ] && [ "${remote_main}" != "${sha}" ]; then
             echo "note: main advanced to ${remote_main} while tagging ${next_tag} at the tested commit ${sha}" >&2
           fi
-          # Single release path: the tag push is what starts release.yml.
-          # The push trigger fires from the ref creation (observed in the
-          # duplicate-release incident), so wait for a release run that is
-          # really this tag at this commit before falling back to a dispatch;
-          # release.yml is re-run safe (create-or-clobber upload) either way.
           for _ in 1 2 3 4 5 6; do
             sleep 10
             started="$(gh run list -R "${GITHUB_REPOSITORY}" -w release --commit "${sha}" -L 50 \

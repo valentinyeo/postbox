@@ -1,8 +1,3 @@
-//! wazigctl.exe: scriptable control of the running Wazig Messages app over
-//! its per-user named pipe. Reads and list management only; it never sends
-//! messages and never focuses the app window. See control.zig for the
-//! command table and wire format.
-
 const std = @import("std");
 const win = @import("win32.zig").c;
 const control = @import("control.zig");
@@ -46,8 +41,6 @@ pub fn main(init: std.process.Init.Minimal) u8 {
     control.writeRequest(&request_line.writer, request) catch return fail(exit_usage, "out of memory");
 
     const pipe = connect() orelse return exit_not_running;
-    // The app answers within ~20 s even when a chat is slow to load; a hung
-    // wacli read must still not hang the caller forever.
     if (std.Thread.spawn(.{ .stack_size = 64 * 1024 }, watchdog, .{})) |thread| thread.detach() else |_| {}
     defer _ = win.CloseHandle(pipe);
     control_pipe.writeAll(pipe, request_line.written());
@@ -77,7 +70,6 @@ fn watchdog() void {
     win.ExitProcess(exit_app_error);
 }
 
-/// Open the app's pipe, waiting briefly while every instance is busy.
 fn connect() ?win.HANDLE {
     var name_buffer: [200]u16 = undefined;
     const name = control_pipe.pipeName(&name_buffer) orelse {

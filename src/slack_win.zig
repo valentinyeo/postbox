@@ -1,6 +1,3 @@
-// Slack Windows transport: WinHTTP REST client, Socket Mode websocket thread,
-// DPAPI-protected token storage, and file upload/download. Windows only; the
-// pure JSON logic lives in slack.zig so it stays unit-testable on any host.
 const std = @import("std");
 const builtin = @import("builtin");
 const slack = @import("slack.zig");
@@ -19,7 +16,6 @@ const win = if (enabled)
 else
     struct {};
 
-// Fallbacks in case the SDK headers are missing the newer winhttp constants.
 const option_upgrade_to_web_socket = 114;
 const web_socket_utf8_message: c_int = 0;
 const web_socket_utf8_fragment: c_int = 1;
@@ -47,8 +43,6 @@ pub fn isUserToken(token: []const u8) bool {
 pub fn isAppToken(token: []const u8) bool {
     return std.mem.startsWith(u8, token, "xapp-") and token.len >= 20 and token.len <= 512;
 }
-
-// --- registry storage with DPAPI encryption ---
 
 const DATA_BLOB = extern struct {
     cbData: win.DWORD,
@@ -207,11 +201,6 @@ pub fn loadTokens(allocator: std.mem.Allocator) ?Tokens {
     return .{ .user = user, .app = app };
 }
 
-/// BridgeHost and BridgeKey are set from PowerShell using
-/// System.Security.Cryptography.ProtectedData with CurrentUser scope and null
-/// entropy, matching this file's protect(). That is how a user with no Slack
-/// app tokens (xoxp/xapp) points Messages at a bridge server instead; the
-/// exact snippet lives in the PR description.
 pub fn saveBridge(host: []const u8, key: []const u8) bool {
     if (!slack.isValidBridgeHost(host) or !slack.isValidBridgeKey(key)) return false;
     const allocator = std.heap.page_allocator;
@@ -245,12 +234,10 @@ pub fn loadBridge(allocator: std.mem.Allocator) ?Bridge {
     return .{ .host = host, .key = key };
 }
 
-// --- WinHTTP REST ---
-
 pub const Response = struct {
     status: u32 = 0,
     body: []u8 = &.{},
-    headers: []u8 = &.{}, // raw header block, CRLF-separated
+    headers: []u8 = &.{},
 
     pub fn deinit(self: *Response, allocator: std.mem.Allocator) void {
         if (self.body.len > 0) allocator.free(self.body);
@@ -264,14 +251,13 @@ fn toWide(allocator: std.mem.Allocator, text: []const u8) ![:0]u16 {
     return std.unicode.utf8ToUtf16LeAllocZ(allocator, text);
 }
 
-/// Host portion of an https URL (no scheme, no path), borrowed from `url`.
 fn urlHost(url: []const u8) []const u8 {
     const scheme_end = std.mem.indexOf(u8, url, "://") orelse return "";
     const host_start = scheme_end + 3;
     const path_start = std.mem.indexOfScalarPos(u8, url, host_start, '/') orelse url.len;
     var host = url[host_start..path_start];
-    if (std.mem.indexOfScalar(u8, host, '@')) |at| host = host[at + 1 ..]; // strip userinfo
-    if (std.mem.indexOfScalar(u8, host, ':')) |colon| host = host[0..colon]; // strip port
+    if (std.mem.indexOfScalar(u8, host, '@')) |at| host = host[at + 1 ..];
+    if (std.mem.indexOfScalar(u8, host, ':')) |colon| host = host[0..colon];
     return host;
 }
 
@@ -280,8 +266,6 @@ fn readResponse(allocator: std.mem.Allocator, request: win.HINTERNET, max_bytes:
     errdefer out.deinit(allocator);
     while (true) {
         var available: win.DWORD = 0;
-        // A failed query mid-body used to break out and hand back a cut
-        // body as success; fail loudly instead.
         if (win.WinHttpQueryDataAvailable(request, &available) == 0) return error.NetworkFailed;
         if (available == 0) break;
         if (out.items.len + available > max_bytes) return error.ResponseTooLarge;
@@ -298,18 +282,9 @@ fn readResponse(allocator: std.mem.Allocator, request: win.HINTERNET, max_bytes:
     return out.toOwnedSlice(allocator);
 }
 
-// WAZI-61: one process-lifetime session + connection for slack.com so the
-// TLS handshake is paid once instead of per API call. WinHTTP handles are
-// thread-safe for concurrent requests; per-call request handles are still
-// opened and closed here. ponytail: handles are never closed; upgrade path
-// is an owned client shut down after the workers stop.
 var api_session: ?win.HINTERNET = null;
 var api_connection: ?win.HINTERNET = null;
-// Host the cached api_connection points at. Bridge mode points api_connection
-// at a bridge server instead of slack.com, so a host change reconnects.
-// page_allocator-owned; replaced (and the old copy freed) on a host change.
 var api_host: ?[]u8 = null;
-// Zeroed SRWLOCK is SRWLOCK_INIT (std.Thread.Mutex moved in this Zig version).
 var api_lock: win.SRWLOCK = .{};
 
 fn sharedApiHandles(host: []const u8) ?win.HINTERNET {
@@ -333,23 +308,15 @@ fn sharedApiHandles(host: []const u8) ?win.HINTERNET {
         std.heap.page_allocator.free(owned_host);
         return null;
     };
-    // The replaced connection is not closed: another worker may still have a
-    // request open on it. Only the old host string is released.
     if (api_host) |old_host| std.heap.page_allocator.free(old_host);
     api_connection = connection;
     api_host = owned_host;
     return connection;
 }
 
-/// HTTP status of the last callApi on this thread (0 before any answer), so
-/// a failing job can log it. A job runs start to end on one thread.
 pub threadlocal var last_status: u32 = 0;
 pub threadlocal var last_error: [64]u8 = [_]u8{0} ** 64;
 
-/// One HTTPS call to slack.com/api. `body` null means GET. Returns the status
-/// and body; Slack's own "ok" flag is checked by the caller through the job
-/// runner. 429 responses surface with their status so the caller can honor
-/// Retry-After.
 pub fn callApi(allocator: std.mem.Allocator, host: []const u8, token: []const u8, method: []const u8, path_query: []const u8, body: ?[]const u8) !Response {
     last_status = 0;
     last_error = [_]u8{0} ** 64;
@@ -398,8 +365,6 @@ pub fn callApi(allocator: std.mem.Allocator, host: []const u8, token: []const u8
     return .{ .status = status, .body = data, .headers = raw_headers };
 }
 
-/// PUT raw bytes to Slack's pre-signed upload host. Never sends the bearer
-/// token: the upload URL is the credential for this call.
 pub fn putFile(allocator: std.mem.Allocator, url: []const u8, bytes: []const u8) !void {
     last_status = 0;
     last_error = [_]u8{0} ** 64;
@@ -430,9 +395,6 @@ pub fn putFile(allocator: std.mem.Allocator, url: []const u8, bytes: []const u8)
     if (status < 200 or status >= 300) return error.UploadRejected;
 }
 
-/// Download a Slack file (bearer-authenticated) to dest_path. Only HTTPS
-/// hosts under slack.com receive the Authorization header, and the size is
-/// capped so a runaway file cannot fill the disk.
 pub fn downloadTo(allocator: std.mem.Allocator, token: []const u8, url: []const u8, dest_path: []const u8, bridge_host: ?[]const u8) !void {
     if (!enabled) return error.Unsupported;
     if (!std.mem.startsWith(u8, url, "https://")) return error.UntrustedUrl;
@@ -498,8 +460,6 @@ pub fn downloadTo(allocator: std.mem.Allocator, token: []const u8, url: []const 
     }
 }
 
-// --- Socket Mode websocket ---
-
 pub const Socket = struct {
     session: win.HINTERNET,
     connection: win.HINTERNET,
@@ -507,8 +467,6 @@ pub const Socket = struct {
     socket: win.HINTERNET,
 };
 
-/// Connect to a wss:// endpoint from apps.connections.open using WinHTTP's
-/// native WebSocket upgrade.
 pub fn socketConnect(allocator: std.mem.Allocator, endpoint: slack.WsEndpoint) !Socket {
     if (!enabled) return error.Unsupported;
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -518,7 +476,7 @@ pub fn socketConnect(allocator: std.mem.Allocator, endpoint: slack.WsEndpoint) !
 
     const session = win.WinHttpOpen(wideLiteral("Wazig Messages/1.0"), win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, null, null, 0) orelse return error.NetworkFailed;
     errdefer _ = win.WinHttpCloseHandle(session);
-    _ = win.WinHttpSetTimeouts(session, 10_000, 10_000, 30_000, 0); // receive timeout 0: no deadline while idle
+    _ = win.WinHttpSetTimeouts(session, 10_000, 10_000, 30_000, 0);
     const connection = win.WinHttpConnect(session, wide_host.ptr, win.INTERNET_DEFAULT_HTTPS_PORT, 0) orelse return error.NetworkFailed;
     errdefer _ = win.WinHttpCloseHandle(connection);
     const request = win.WinHttpOpenRequest(connection, wideLiteral("GET"), wide_path.ptr, null, null, null, win.WINHTTP_FLAG_SECURE) orelse return error.NetworkFailed;
@@ -550,12 +508,9 @@ pub fn socketSend(allocator: std.mem.Allocator, sock: Socket, bytes: []const u8)
     const wide_free = false;
     _ = allocator;
     _ = wide_free;
-    // WebSocket calls return a DWORD error code; 0 (NO_ERROR) means success.
     if (win.WinHttpWebSocketSend(sock.socket, web_socket_utf8_message, @constCast(bytes.ptr), @intCast(bytes.len)) != 0) return error.NetworkFailed;
 }
 
-/// Receive one complete websocket message (across fragments) into buf.
-/// Returns the slice. A close frame returns error.Closed.
 pub fn socketReceive(sock: Socket, buf: []u8) ![]u8 {
     if (!enabled) return error.Unsupported;
     var offset: usize = 0;
@@ -571,10 +526,6 @@ pub fn socketReceive(sock: Socket, buf: []u8) ![]u8 {
     }
 }
 
-// --- event handed to the UI thread ---
-
-/// Deep-copied Socket Mode message event. Lives on the heap from the socket
-/// thread until the UI thread frees it.
 pub const Event = struct {
     channel: [slack.max_channel_id + 1]u8 = undefined,
     channel_len: u8 = 0,
@@ -643,18 +594,14 @@ fn copyInto(dest: anytype, dest_len: anytype, source: []const u8) void {
 }
 
 pub const EventSink = struct {
-    hwnd: *anyopaque, // win.HWND as opaque to keep this module UI-free
+    hwnd: *anyopaque,
     message_id: u32,
-    queue: *std.atomic.Value(usize), // number of events posted but not yet consumed
+    queue: *std.atomic.Value(usize),
 };
 
-/// Build a heap Event from classified envelope fields; returns null when the
-/// event carries nothing displayable.
 pub fn buildEvent(envelope: slack.Envelope) ?*Event {
     if (envelope.channel.len == 0 or envelope.ts.len == 0) return null;
-    if (envelope.ts.len != envelope.thread_ts.len or !std.mem.eql(u8, envelope.ts, envelope.thread_ts)) {
-        // A thread reply: still displayable.
-    }
+    if (envelope.ts.len != envelope.thread_ts.len or !std.mem.eql(u8, envelope.ts, envelope.thread_ts)) {}
     const event = std.heap.page_allocator.create(Event) catch return null;
     event.* = .{};
     copyInto(&event.channel, &event.channel_len, envelope.channel);
@@ -675,8 +622,6 @@ pub fn destroyEvent(event: *Event) void {
     std.heap.page_allocator.destroy(event);
 }
 
-// --- background Socket Mode session ---
-
 pub const SocketConfig = struct {
     user_token: []const u8,
     app_token: []const u8,
@@ -685,9 +630,6 @@ pub const SocketConfig = struct {
     connected: *std.atomic.Value(bool),
 };
 
-/// Reconnect with fresh URLs forever until stopped. Each cycle: fetch a new
-/// wss URL (old ones expire), connect, ACK every envelope immediately, then
-/// hand displayable messages to the UI thread.
 pub fn socketThreadMain(config: SocketConfig) void {
     var backoff_seconds: u64 = 1;
     while (!config.stop.load(.acquire)) {
@@ -695,7 +637,6 @@ pub fn socketThreadMain(config: SocketConfig) void {
         runOneSession(config, &connected_here) catch {};
         _ = config.connected.swap(false, .acq_rel);
         if (config.stop.load(.acquire)) return;
-        // Fresh connections reset the backoff; failures grow it.
         win.Sleep(@intCast(if (connected_here) 1000 else backoff_seconds * 1000));
         backoff_seconds = @min(if (connected_here) @as(u64, 1) else backoff_seconds * 2, 30);
     }
@@ -720,9 +661,6 @@ fn runOneSession(config: SocketConfig, connected_here: *bool) !void {
         var classify_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer classify_arena.deinit();
         const envelope = (slack.classifyEnvelope(classify_arena.allocator(), message) catch return error.BadEnvelope) orelse continue;
-        // ACK before any parsing/UI work so Slack does not redeliver. A real
-        // event envelope carries both envelope_id and an event object, so the
-        // decision to ACK must not depend on the classified kind.
         if (envelope.envelope_id.len > 0) {
             const ack = slack.buildAckBody(classify_arena.allocator(), envelope.envelope_id) catch return error.OutOfMemory;
             socketSend(classify_arena.allocator(), sock, ack) catch return error.NetworkFailed;
@@ -739,19 +677,17 @@ fn runOneSession(config: SocketConfig, connected_here: *bool) !void {
     }
 }
 
-// --- worker-thread jobs (run on the shared background queue) ---
-
 pub const JobKind = enum(u8) {
-    workspace, // conversations.list page: args = [types, cursor]
-    users, // users.list page: args = [cursor]
-    history, // conversations.history: args = [channel]
-    replies, // conversations.replies: args = [channel, parent_ts]
-    send_text, // chat.postMessage: args = [channel, text, thread_ts]
+    workspace,
+    users,
+    history,
+    replies,
+    send_text,
     upload_image,
     share_image,
-    download, // file to media cache: args = [url, file_id, filename, channel, ts]
-    auth, // auth.test: no args
-    mark, // conversations.mark: args = [channel, ts] (WAZI-104)
+    download,
+    auth,
+    mark,
 };
 
 pub const JobContext = struct {
@@ -772,9 +708,6 @@ fn httpOk(allocator: std.mem.Allocator, body: []const u8) bool {
     return slack.responseIsOk(allocator, body);
 }
 
-/// Run one Slack HTTP job on the worker thread. Returns heap-allocated
-/// response data (raw JSON, or the local file path for downloads).
-/// One 429 retry honoring Retry-After, capped at 30 seconds.
 pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args: []const []const u8) ![]u8 {
     switch (kind) {
         .workspace => {
@@ -848,9 +781,6 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
             return bodyOnly(allocator, response);
         },
         .mark => {
-            // WAZI-104: mark the viewed channel read at its newest displayed
-            // ts. Works in native and bridge mode: both ride ctx.host via
-            // slackContext, the bridge substitutes its own upstream.
             if (args.len < 2) return error.BadArguments;
             const body = try slack.buildMarkBody(allocator, args[0], args[1]);
             defer allocator.free(body);
@@ -869,13 +799,11 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
             defer dest.deinit(allocator);
             try dest.appendSlice(allocator, ctx.media_dir);
             try dest.append(allocator, '\\');
-            try dest.appendSlice(allocator, args[3]); // channel id
+            try dest.appendSlice(allocator, args[3]);
             try dest.append(allocator, '-');
-            try dest.appendSlice(allocator, args[4]); // message ts
+            try dest.appendSlice(allocator, args[4]);
             try dest.append(allocator, '-');
-            try dest.appendSlice(allocator, args[1]); // file id
-            // Generated name: channel, ts and file id are collision-free and
-            // trusted; only the suffix comes from the remote name.
+            try dest.appendSlice(allocator, args[1]);
             const dot = std.mem.lastIndexOfScalar(u8, safe_name, '.');
             const suffix = if (dot) |dot_index| safe_name[dot_index..] else "";
             if (suffix.len > 0) {
@@ -890,8 +818,6 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
     }
 }
 
-/// A conversations.list or users.list page: a non-200 answer or ok:false
-/// is an error, never an empty list that looks like success.
 fn listPage(allocator: std.mem.Allocator, response: Response) ![]u8 {
     var owned = response;
     errdefer owned.deinit(allocator);
@@ -900,8 +826,6 @@ fn listPage(allocator: std.mem.Allocator, response: Response) ![]u8 {
     return bodyOnly(allocator, owned);
 }
 
-/// Keep a response's body and free its header block, which callApi allocates
-/// with the same allocator (dropping it leaked once per call).
 fn bodyOnly(allocator: std.mem.Allocator, response: Response) []u8 {
     if (response.headers.len > 0) allocator.free(response.headers);
     return response.body;

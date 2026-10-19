@@ -1,6 +1,3 @@
-// Voice-note recording: WASAPI microphone capture on a worker thread, then
-// in-process Opus encoding (voice_note.zig). The UI polls level, elapsed time
-// and state; it never blocks on audio.
 const std = @import("std");
 const mic_choice = @import("mic_choice.zig");
 const voice_note = @import("voice_note.zig");
@@ -15,7 +12,6 @@ const win = @cImport({
 
 pub const State = enum(u8) { idle, recording, encoding, ready, failed };
 
-/// Longest note we record; the capture stops by itself at this point.
 pub const max_seconds: u32 = 300;
 
 const guid_mmdevice_enumerator = win.GUID{ .Data1 = 0xbcde0395, .Data2 = 0xe52f, .Data3 = 0x467c, .Data4 = .{ 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e } };
@@ -29,8 +25,6 @@ pub const Session = struct {
     stop_requested: std.atomic.Value(bool) = .init(false),
     cancelled: std.atomic.Value(bool) = .init(false),
     state_value: std.atomic.Value(u8) = .init(@intFromEnum(State.idle)),
-    // 48 kHz mono samples captured so far, and the loudest sample of the
-    // last block (0..32767), both written by the worker and read by the UI.
     samples: std.atomic.Value(usize) = .init(0),
     level: std.atomic.Value(u32) = .init(0),
     result: ?voice_note.Result = null,
@@ -57,7 +51,6 @@ pub const Session = struct {
         return @as(u64, self.samples.load(.acquire)) * 1000 / voice_note.sample_rate;
     }
 
-    /// Peak of the latest audio, 0..100 for the level meter.
     pub fn levelPercent(self: *const Session) u32 {
         return @min(100, self.level.load(.acquire) * 100 / 16384);
     }
@@ -78,18 +71,15 @@ pub const Session = struct {
         return true;
     }
 
-    /// Ends the recording; the worker encodes and the state turns `ready`.
     pub fn finish(self: *Session) void {
         self.stop_requested.store(true, .release);
     }
 
-    /// Ends the recording and throws the audio away.
     pub fn cancel(self: *Session) void {
         self.cancelled.store(true, .release);
         self.stop_requested.store(true, .release);
     }
 
-    /// Joins a finished worker and returns to idle. Safe in any non-running state.
     pub fn reap(self: *Session) void {
         if (self.thread) |thread| {
             thread.join();
@@ -102,7 +92,6 @@ pub const Session = struct {
         self.state_value.store(@intFromEnum(State.idle), .release);
     }
 
-    /// Takes the encoded note (caller frees `ogg`). Only valid in `ready`.
     pub fn take(self: *Session) ?voice_note.Result {
         if (self.state() != .ready) return null;
         const result = self.result;
@@ -127,7 +116,6 @@ fn workerMain(self: *Session) void {
         self.state_value.store(@intFromEnum(State.idle), .release);
         return;
     }
-    // Under a quarter second is an accidental click, not a note.
     if (pcm.items.len < voice_note.sample_rate / 4) {
         self.state_value.store(@intFromEnum(State.failed), .release);
         return;
@@ -149,7 +137,6 @@ fn capture(self: *Session, pcm: *std.ArrayList(i16)) !void {
     defer _ = enumerator.?.*.lpVtbl.*.Release.?(enumerator);
 
     var device: ?*win.IMMDevice = null;
-    // The microphone picked in the palette, else the Windows default.
     if (mic_choice.openChosen()) |picked| device = @ptrCast(@alignCast(picked));
     if (device == null and (enumerator.?.*.lpVtbl.*.GetDefaultAudioEndpoint.?(enumerator.?, win.eCapture, win.eCommunications, &device) < 0 or device == null)) return error.NoMicrophone;
     defer _ = device.?.*.lpVtbl.*.Release.?(device);
@@ -164,8 +151,6 @@ fn capture(self: *Session, pcm: *std.ArrayList(i16)) !void {
     const wave_format = format.?;
     if (wave_format.nBlockAlign == 0 or wave_format.nChannels == 0 or wave_format.nSamplesPerSec == 0) return error.UnsupportedFormat;
 
-    // The shared-mode mix format is float32 on virtually every machine; 16-bit
-    // PCM is the other shape worth handling. Anything else fails cleanly.
     var is_float = wave_format.wFormatTag == win.WAVE_FORMAT_IEEE_FLOAT;
     if (wave_format.wFormatTag == 0xFFFE and wave_format.cbSize >= 22) {
         const bytes: [*]const u8 = @ptrCast(wave_format);

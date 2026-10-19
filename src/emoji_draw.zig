@@ -1,18 +1,3 @@
-//! Colour emoji with plain GDI: Segoe UI Emoji's COLRv0 layers (colr.zig)
-//! drawn one by one with ExtTextOutW(ETO_GLYPH_INDEX). No Direct2D or
-//! DirectWrite, so d2d1.dll, dwrite.dll and the D3D10Warp software rasterizer
-//! never load (the app's premise is a small memory footprint).
-//!
-//! Uniscribe (usp10) shapes each run so ZWJ families, skin tones and keycaps
-//! become the font's single composed glyph. Every layer is rendered as a
-//! grayscale-antialiased coverage mask, tinted with its CPAL colour, composed
-//! into a premultiplied bitmap and AlphaBlended onto the caller's DC, so the
-//! emoji sits correctly on any bubble colour. Composed bitmaps are cached per
-//! (glyph, size, text colour). Measuring and drawing share one shaping call,
-//! so wrapping always matches what is painted.
-//!
-//! Every failure returns null and the caller falls back to the GDI monochrome
-//! path; the reason is recorded (failureNotice) and logged to emoji.log.
 const std = @import("std");
 const build_info = @import("build_info");
 const colr = @import("colr.zig");
@@ -21,18 +6,15 @@ const win = @import("win32.zig").c;
 pub const Metrics = struct { width: i32, baseline: i32 };
 
 const max_sequence_units = 32;
-// Uniscribe's documented worst case for the glyph buffer is 1.5n + 16.
 const max_glyphs = max_sequence_units * 3 / 2 + 16;
 const font_cache_size = 8;
 const bitmap_cache_size = 128;
 
-const tag_colr: win.DWORD = 0x524C4F43; // 'COLR' as GetFontData wants it
-const tag_cpal: win.DWORD = 0x4C415043; // 'CPAL'
+const tag_colr: win.DWORD = 0x524C4F43;
+const tag_cpal: win.DWORD = 0x4C415043;
 const gdi_error: win.DWORD = 0xFFFFFFFF;
 const usp_e_script_not_in_font: win.HRESULT = @bitCast(@as(u32, 0x80040200));
 
-// usp10.h's SCRIPT_ANALYSIS and SCRIPT_VISATTR are bitfield structs that
-// translate-c cannot express, so declare the ABI-equal shapes here.
 const ScriptAnalysis = extern struct { bits: u16 = 0, state: u16 = 0 };
 const ScriptItem = extern struct { char_pos: c_int, analysis: ScriptAnalysis };
 const ScriptVisAttr = extern struct { bits: u16 };
@@ -44,8 +26,6 @@ extern "usp10" fn ScriptShape(hdc: win.HDC, cache: *ScriptCache, chars: [*]const
 extern "usp10" fn ScriptPlace(hdc: win.HDC, cache: *ScriptCache, glyphs: [*]const u16, glyph_count: c_int, attributes: [*]const ScriptVisAttr, analysis: *ScriptAnalysis, advances: [*]c_int, offsets: [*]GOffset, abc: ?*win.ABC) callconv(.c) win.HRESULT;
 extern "usp10" fn ScriptFreeCache(cache: *ScriptCache) callconv(.c) win.HRESULT;
 
-/// Stages where the colour path can bail, in call order. Each maps to a
-/// plain-language reason the status bar and Ctrl+K palette can show (WAZI-65).
 const ErrorStage = enum { surface, font, colour_tables, colour_parse, shape, bitmap };
 
 const FontEntry = struct {
@@ -69,8 +49,6 @@ const BitmapEntry = struct {
 const ColourLoad = enum { pending, ready, failed };
 
 const State = struct {
-    // One memory DC for shaping, measuring and layer rendering; metrics()
-    // has no caller DC, and the scratch bitmap lives here too.
     dc: ?win.HDC = null,
     scratch: ?win.HBITMAP = null,
     scratch_bits: ?[*]u8 = null,
@@ -78,15 +56,12 @@ const State = struct {
     scratch_height: i32 = 0,
     selected_em: i32 = 0,
     fonts: [font_cache_size]FontEntry = [_]FontEntry{.{}} ** font_cache_size,
-    // Only the COLR v0 arrays and CPAL palette 0 are kept (one allocation);
-    // the table's v1 paint data is never read.
     colour: ColourLoad = .pending,
     table: colr.Colr = .{ .base = &.{}, .layers = &.{}, .palette = &.{} },
     bitmaps: [bitmap_cache_size]BitmapEntry = [_]BitmapEntry{.{}} ** bitmap_cache_size,
     clock: u64 = 0,
     last_error: ?ErrorStage = null,
     last_code: u32 = 0,
-    // One-shot announcement: the status bar shows each new reason once.
     announced: bool = false,
     notice_buf: [128]u8 = undefined,
 };
@@ -101,10 +76,6 @@ fn fail(stage: ErrorStage, code: u32) void {
     }
 }
 
-/// Every new failure stage gets a timestamped line with the failing call's
-/// code in %LOCALAPPDATA%\Wazig\emoji.log (WAZI-65): the diagnosis must not
-/// depend on anyone running the "Why are emoji black and white?" palette
-/// command, and the stage alone cannot tell two failing calls apart.
 fn logStage(stage: ErrorStage, code: u32) void {
     var path: [280]u16 = undefined;
     const local_label = std.unicode.utf8ToUtf16LeStringLiteral("LOCALAPPDATA");
@@ -114,9 +85,6 @@ fn logStage(stage: ErrorStage, code: u32) void {
     @memcpy(path[local_len..][0..suffix.len], suffix);
     const total = local_len + suffix.len;
     path[total] = 0;
-    // Ignore the "already exists" error; only a missing directory matters.
-    // Temporarily terminate the "\Wazig" prefix so the directory path, not
-    // the log path, is what CreateDirectoryW sees.
     const after_dir = path[local_len + 7];
     path[local_len + 7] = 0;
     _ = win.CreateDirectoryW(path[0 .. local_len + 7 :0].ptr, null);
@@ -155,23 +123,17 @@ fn noticeText(stage: ErrorStage) []const u8 {
     return text;
 }
 
-/// The current reason the colour path is off, if any; stays until the colour
-/// path works again. Shown by the "Why are emoji black and white?" command.
 pub fn failureNotice() ?[]const u8 {
     const stage = state.last_error orelse return null;
     return noticeText(stage);
 }
 
-/// The reason once per new failure stage, for the status bar.
 pub fn takeNotice() ?[]const u8 {
     if (state.last_error == null or state.announced) return null;
     state.announced = true;
     return failureNotice();
 }
 
-/// The one bounds check for an emoji sequence and its em size, shared by the
-/// measure and draw funnels so the two can never disagree about what takes
-/// the colour path versus the GDI fallback.
 fn validSequence(text: []const u16, em: i32) bool {
     return text.len != 0 and text.len <= max_sequence_units and em > 0 and em <= 256;
 }
@@ -189,9 +151,6 @@ fn ensureDc() ?win.HDC {
     return dc;
 }
 
-/// Selects the emoji font at `em` pixels into the module DC, creating it on
-/// first use. Grayscale AA (not ClearType): the layers become alpha masks,
-/// and per-channel ClearType coverage would leave colour fringes.
 fn selectFont(dc: win.HDC, em: i32) ?*FontEntry {
     var slot: usize = 0;
     for (&state.fonts, 0..) |*entry, index| {
@@ -202,8 +161,6 @@ fn selectFont(dc: win.HDC, em: i32) ?*FontEntry {
             }
             return entry;
         }
-        // Reuse an empty slot, else overwrite the smallest em without
-        // ceremony (an app uses a handful of sizes).
         if (entry.font == null or (state.fonts[slot].font != null and entry.em < state.fonts[slot].em)) slot = index;
     }
     const family: [:0]const u16 = std.unicode.utf8ToUtf16LeStringLiteral("Segoe UI Emoji");
@@ -224,10 +181,6 @@ fn selectFont(dc: win.HDC, em: i32) ?*FontEntry {
     return entry;
 }
 
-/// Loads the COLR v0 arrays and CPAL palette 0 once, from the font GDI
-/// already has open (GetFontData with offsets, so the multi-megabyte v1
-/// paint data is never copied). A missing or broken table latches the
-/// colour path off for the session: the font will not change under us.
 fn ensureColour(dc: win.HDC) bool {
     switch (state.colour) {
         .ready => return true,
@@ -238,8 +191,6 @@ fn ensureColour(dc: win.HDC) bool {
     const face_len = win.GetTextFaceW(dc, face.len, &face);
     const expected = std.unicode.utf8ToUtf16LeStringLiteral("Segoe UI Emoji");
     if (face_len <= 0 or !std.mem.eql(u16, face[0..@intCast(face_len - 1)], expected)) {
-        // Font substitution handed us some other face: its glyph ids mean
-        // nothing to a COLR table we would read from it.
         state.colour = .failed;
         fail(.font, @intCast(@max(face_len, 0)));
         return false;
@@ -253,7 +204,6 @@ fn ensureColour(dc: win.HDC) bool {
     return true;
 }
 
-/// Returns null on success, else the failing code (gdi_error = table absent).
 fn loadTables(dc: win.HDC) ?u32 {
     var header_bytes: [colr.header_len]u8 = undefined;
     if (win.GetFontData(dc, tag_colr, 0, &header_bytes, header_bytes.len) != header_bytes.len) return gdi_error;
@@ -288,10 +238,6 @@ const Shaped = struct {
     width: i32 = 0,
 };
 
-/// The one shaping call behind both metrics() and draw(): Uniscribe maps the
-/// run to the font's glyphs, applying its ligatures so a ZWJ or skin-tone
-/// sequence becomes one composed glyph. null when the font lacks a glyph
-/// (GDI font fallback may still find one) or Uniscribe fails.
 fn shape(dc: win.HDC, font: *FontEntry, text: []const u16, out: *Shaped) bool {
     var items: [max_sequence_units + 1]ScriptItem = undefined;
     var item_count: c_int = 0;
@@ -319,7 +265,6 @@ fn shape(dc: win.HDC, font: *FontEntry, text: []const u16, out: *Shaped) bool {
             return false;
         }
         const placed: usize = @intCast(glyph_count);
-        // Glyph 0 is .notdef: this font cannot draw the sequence.
         for (out.glyphs[out.count..][0..placed]) |glyph| if (glyph == 0) return false;
         const place_hr = ScriptPlace(dc, &font.cache, glyphs, glyph_count, &attributes, &items[index].analysis, out.advances[out.count..].ptr, &offsets, null);
         if (place_hr != 0) {
@@ -332,8 +277,6 @@ fn shape(dc: win.HDC, font: *FontEntry, text: []const u16, out: *Shaped) bool {
     return out.count != 0;
 }
 
-/// Grows the scratch DIB that layers are rendered into and bitmaps are
-/// blitted from; it stays selected in the module DC.
 fn ensureScratch(dc: win.HDC, width: i32, height: i32) bool {
     if (state.scratch != null and state.scratch_width >= width and state.scratch_height >= height) return true;
     const new_width = @max(width, state.scratch_width);
@@ -364,15 +307,10 @@ fn ensureScratch(dc: win.HDC, width: i32, height: i32) bool {
     return true;
 }
 
-/// Horizontal room either side of the advance for glyph overhang.
 fn padFor(em: i32) i32 {
     return @divTrunc(em, 8) + 1;
 }
 
-/// The composed premultiplied BGRA bitmap for one glyph, from the cache or
-/// rendered now: each COLR layer (or the glyph itself when it has none) is
-/// drawn white-on-black to get its coverage, then tinted and composited
-/// source-over in paint order.
 fn glyphBitmap(dc: win.HDC, font: *FontEntry, glyph: u16, advance: i32, foreground: win.COLORREF) ?*BitmapEntry {
     state.clock += 1;
     var victim = &state.bitmaps[0];
@@ -446,8 +384,6 @@ fn blit(target: win.HDC, dc: win.HDC, entry: *const BitmapEntry, x: i32, y: i32)
     return win.AlphaBlend(target, x, y, entry.width, entry.height, dc, 0, 0, entry.width, entry.height, blend) != 0;
 }
 
-/// Shared front half of metrics() and draw(): the DC, font and colour tables
-/// ready, and the run shaped. null means "use the GDI fallback".
 fn prepare(text: []const u16, em: i32, shaped: *Shaped) ?*FontEntry {
     if (!validSequence(text, em)) return null;
     if (state.colour == .failed) return null;
@@ -458,21 +394,12 @@ fn prepare(text: []const u16, em: i32, shaped: *Shaped) ?*FontEntry {
     return font;
 }
 
-/// Width and baseline distance of one emoji sequence at the given em size in
-/// pixels. null means the color path is unavailable for this sequence and the
-/// caller should measure and draw with GDI instead.
 pub fn metrics(text: []const u16, em: i32) ?Metrics {
     var shaped: Shaped = .{};
     const font = prepare(text, em, &shaped) orelse return null;
     return .{ .width = shaped.width, .baseline = font.ascent };
 }
 
-/// Draws one emoji sequence with color glyphs and returns its measured run
-/// width. `top_y` is the top of the text line's character cell and `ascent`
-/// the text font's ascent, matching how GDI TextOutW positions the
-/// neighbouring runs; the emoji baseline lands on the text baseline. null on
-/// any failure (the reason lands in emoji.log via failureNotice), meaning the
-/// caller should fall back to the GDI monochrome path.
 pub fn draw(hdc: win.HDC, text: []const u16, x: i32, top_y: i32, text_ascent: i32, em: i32) ?Metrics {
     var shaped: Shaped = .{};
     const font = prepare(text, em, &shaped) orelse return null;
@@ -482,7 +409,6 @@ pub fn draw(hdc: win.HDC, text: []const u16, x: i32, top_y: i32, text_ascent: i3
     const pad = padFor(em);
     var pen = x;
     for (shaped.glyphs[0..shaped.count], shaped.advances[0..shaped.count]) |glyph, advance| {
-        // Zero-width glyphs (an unjoined ZWJ, a variation selector) are blank.
         if (advance > 0) {
             const entry = glyphBitmap(dc, font, glyph, advance, foreground) orelse return null;
             if (!blit(hdc, dc, entry, pen - pad, top)) {

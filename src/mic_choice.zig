@@ -1,6 +1,3 @@
-//! Which microphone voice notes and dictation record from. The choice is the
-//! device's friendly name, kept in the registry; "System default" (empty
-//! name), or a device that is no longer plugged in, uses the Windows default.
 const std = @import("std");
 const win = @cImport({
     @cDefine("WIN32_LEAN_AND_MEAN", "1");
@@ -25,13 +22,11 @@ var chosen: Name = .{};
 
 const guid_mmdevice_enumerator = win.GUID{ .Data1 = 0xbcde0395, .Data2 = 0xe52f, .Data3 = 0x467c, .Data4 = .{ 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e } };
 const guid_immdevice_enumerator = win.GUID{ .Data1 = 0xa95664d2, .Data2 = 0x9614, .Data3 = 0x4f35, .Data4 = .{ 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6 } };
-// PKEY_Device_FriendlyName
 const key_friendly_name = win.PROPERTYKEY{
     .fmtid = .{ .Data1 = 0xa45c254e, .Data2 = 0xdf1c, .Data3 = 0x4efd, .Data4 = .{ 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0 } },
     .pid = 14,
 };
 
-/// True when `name` should be used instead of the system default.
 pub fn wantsDevice(name: []const u8) bool {
     return name.len > 0 and name.len <= name_cap;
 }
@@ -40,7 +35,6 @@ pub fn current() []const u8 {
     return chosen.slice();
 }
 
-/// Pick a device by name ("" = System default) and remember it.
 pub fn choose(name: []const u8) void {
     chosen.len = @min(name.len, name_cap);
     @memcpy(chosen.buf[0..chosen.len], name[0..chosen.len]);
@@ -79,8 +73,6 @@ fn friendlyName(device: *win.IMMDevice, out: *Name) bool {
     var variant = std.mem.zeroes(win.PROPVARIANT);
     if (store.?.lpVtbl.*.GetValue.?(store, &key_friendly_name, &variant) < 0) return false;
     defer _ = win.PropVariantClear(&variant);
-    // PROPVARIANT: vt (u16) + 6 reserved bytes, then the value; for VT_LPWSTR
-    // (31) that is a pointer to a NUL-terminated UTF-16 string.
     const bytes: [*]const u8 = @ptrCast(&variant);
     if (std.mem.readInt(u16, bytes[0..2], .little) != 31) return false;
     const text: ?[*:0]const u16 = @as(*const ?[*:0]const u16, @ptrCast(@alignCast(bytes + 8))).*;
@@ -101,7 +93,6 @@ fn makeEnumerator() ?*win.IMMDeviceEnumerator {
     return enumerator;
 }
 
-/// Names of the active input devices (for the picker). Safe on the UI thread.
 pub fn list(out: *[max_devices]Name) usize {
     _ = win.CoInitializeEx(null, win.COINIT_APARTMENTTHREADED);
     const enumerator = makeEnumerator() orelse return 0;
@@ -121,10 +112,6 @@ pub fn list(out: *[max_devices]Name) usize {
     return found;
 }
 
-/// The chosen device as an owned IMMDevice (release it), or null to use the
-/// system default (no choice made, or the device is gone). The caller has
-/// already initialised COM on its thread. Returned untyped because each
-/// capture module has its own Win32 import.
 pub fn openChosen() ?*anyopaque {
     if (!wantsDevice(chosen.slice())) return null;
     const enumerator = makeEnumerator() orelse return null;

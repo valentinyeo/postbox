@@ -1,15 +1,7 @@
-//! WAZI-68: classify YouTube, Instagram and Facebook video links so the chat
-//! can unfurl them into inline cards. Pure functions only: no Win32, no
-//! allocation, so the classifier and the page scrapers are unit-testable.
-//! Security posture: an exact host allowlist (no suffix matches for pages),
-//! userinfo rejection, and https-only canonical URLs. Stream and CDN URLs use
-//! a separate suffix allowlist because provider CDNs rotate hostnames.
-
 const std = @import("std");
 
 pub const Provider = enum { none, youtube, instagram, facebook };
 
-/// What kind of remote fetch is about to run; picks the allowlist.
 pub const FetchKind = enum { page, image };
 
 pub const max_id_len = 40;
@@ -31,7 +23,6 @@ pub const Info = struct {
     }
 };
 
-// Exact page hosts only; "youtube.com.evil.com" must never match.
 const youtube_hosts = [_][]const u8{
     "youtube.com", "www.youtube.com",      "m.youtube.com", "music.youtube.com",
     "youtu.be",    "youtube-nocookie.com",
@@ -73,18 +64,15 @@ fn store(info: *Info, provider: Provider, id: []const u8, canonical: []const u8)
     return true;
 }
 
-/// Trim punctuation that linkification routinely glues onto URLs.
 fn trimTrailingPunctuation(url: []const u8) []const u8 {
     return std.mem.trimEnd(u8, url, ".,;:!?)]}>\"'");
 }
 
 fn splitHostPath(rest: []const u8) ?struct { host: []const u8, path: []const u8 } {
-    // Reject userinfo ("user:pass@host") outright.
     if (std.mem.indexOfScalar(u8, rest, '@') != null) return null;
     const host_end = std.mem.indexOfAny(u8, rest, "/?#") orelse rest.len;
     var host = rest[0..host_end];
     const path_and_more = if (host_end < rest.len) rest[host_end..] else "";
-    // Drop a port if present; nothing on the allowlist needs one.
     if (std.mem.indexOfScalar(u8, host, ':')) |at| host = host[0..at];
     host = std.mem.trimEnd(u8, host, ".");
     if (host.len == 0) return null;
@@ -165,7 +153,6 @@ fn classifyInstagram(path: []const u8, info: *Info) bool {
         const id = idUntilStop(path[prefix.len..], .instagram);
         if (id.len < 5) return false;
         var canonical_buffer: [max_canonical_len]u8 = undefined;
-        // /reels/ normalizes to /reel/ so thumbnails and scrapes have one URL.
         const used_prefix: []const u8 = if (std.ascii.eqlIgnoreCase(prefix, "/reels/")) "/reel/" else prefix;
         const canonical = std.fmt.bufPrint(&canonical_buffer, "https://www.instagram.com{s}{s}/", .{ used_prefix, id }) catch return false;
         return store(info, .instagram, id, canonical);
@@ -199,7 +186,6 @@ fn classifyFacebook(host: []const u8, path_and_more: []const u8, info: *Info) bo
         const canonical = std.fmt.bufPrint(&canonical_buffer, "https://www.facebook.com/share/v/{s}/", .{id}) catch return false;
         return store(info, .facebook, id, canonical);
     }
-    // /videos/<id> or /videos/<who>/<id>: the id is the final numeric segment.
     if (std.mem.indexOf(u8, path, "/videos/") != null) {
         var last: []const u8 = "";
         var it = std.mem.splitScalar(u8, path, '/');
@@ -219,13 +205,10 @@ fn classifyFacebook(host: []const u8, path_and_more: []const u8, info: *Info) bo
     return false;
 }
 
-/// Classify a pasted link. Anything that is not a video link from the three
-/// providers yields provider == .none and the message keeps rendering as text.
 pub fn classify(url: []const u8) Info {
     var info = Info{};
     var cleaned = std.mem.trim(u8, url, " \t\r\n");
     cleaned = trimTrailingPunctuation(cleaned);
-    // Case-insensitive scheme strip; both schemes map onto https canonicals.
     if (std.ascii.startsWithIgnoreCase(cleaned, "https://")) {
         cleaned = cleaned[8..];
     } else if (std.ascii.startsWithIgnoreCase(cleaned, "http://")) {
@@ -245,7 +228,6 @@ pub fn classify(url: []const u8) Info {
     return info;
 }
 
-/// YouTube thumbnails are anonymous; Instagram and Facebook gate theirs.
 pub fn thumbnailUrl(info: *const Info, buffer: []u8) ?[]const u8 {
     if (info.provider != .youtube) return null;
     return std.fmt.bufPrint(buffer, "https://img.youtube.com/vi/{s}/hqdefault.jpg", .{info.idSlice()}) catch null;
@@ -268,7 +250,6 @@ fn percentEncode(out: []u8, text: []const u8) ?[]const u8 {
     return out[0..length];
 }
 
-/// Percent-encoded oEmbed endpoint: https://www.youtube.com/oembed?url=<enc>&format=json
 pub fn oembedEndpoint(info: *const Info, buffer: []u8) ?[]const u8 {
     if (info.provider != .youtube) return null;
     const head = "https://www.youtube.com/oembed?url=";
@@ -284,7 +265,6 @@ fn suffixMatches(host: []const u8, suffix: []const u8) bool {
     return host.len > suffix.len and std.ascii.endsWithIgnoreCase(host, suffix);
 }
 
-/// Pages are fetched only from the exact provider hosts.
 pub fn isPageFetchAllowed(url: []const u8) bool {
     const cleaned = trimTrailingPunctuation(url);
     if (!std.ascii.startsWithIgnoreCase(cleaned, "https://")) return false;
@@ -294,8 +274,6 @@ pub fn isPageFetchAllowed(url: []const u8) bool {
     return providerForHost(host) != .none;
 }
 
-/// Thumbnails come from YouTube's image hosts or the provider CDNs that
-/// og:image tags point at (rotating scontent-*.cdninstagram.com / fbcdn.net).
 pub fn isImageFetchAllowed(url: []const u8) bool {
     const cleaned = trimTrailingPunctuation(url);
     if (!std.ascii.startsWithIgnoreCase(cleaned, "https://")) return false;
@@ -307,7 +285,6 @@ pub fn isImageFetchAllowed(url: []const u8) bool {
     return suffixMatches(host, ".cdninstagram.com") or suffixMatches(host, ".fbcdn.net");
 }
 
-/// Playable streams: YouTube's googlevideo CDN and the provider CDNs.
 pub fn isStreamUrlAllowed(url: []const u8) bool {
     const cleaned = trimTrailingPunctuation(url);
     if (!std.ascii.startsWithIgnoreCase(cleaned, "https://")) return false;
@@ -319,10 +296,6 @@ pub fn isStreamUrlAllowed(url: []const u8) bool {
         suffixMatches(host, ".fbcdn.net");
 }
 
-/// Pull `content` out of an og: meta tag regardless of attribute order.
-/// `key` is the full property, e.g. "og:video" or "og:image". Each <meta>
-/// tag is parsed as a unit so a content= from a neighbouring tag is never
-/// attributed to the wrong key.
 pub fn scrapeOgMeta(page: []const u8, key: []const u8) ?[]const u8 {
     var search_from: usize = 0;
     while (std.mem.indexOfPos(u8, page, search_from, "<meta")) |tag_start| {
@@ -330,7 +303,6 @@ pub fn scrapeOgMeta(page: []const u8, key: []const u8) ?[]const u8 {
         search_from = tag_start + 5;
         const tag = page[tag_start..tag_end];
         const has_key = std.mem.indexOf(u8, tag, key) orelse continue;
-        // The key must appear as a property/name value, not inside a URL.
         const before_ok = has_key == 0 or tag[has_key - 1] == '"' or tag[has_key - 1] == '\'';
         const after = has_key + key.len;
         const after_ok = after >= tag.len or tag[after] == '"' or tag[after] == '\'';
@@ -344,13 +316,10 @@ pub fn scrapeOgMeta(page: []const u8, key: []const u8) ?[]const u8 {
     return null;
 }
 
-/// Extract a direct progressive stream URL from a YouTube watch page. Best
-/// effort by design: when YouTube refuses, the card falls back to opening
-/// the video externally.
 pub fn extractYoutubeStream(page: []const u8, buffer: []u8) ?[]const u8 {
     const marker = "\"https://www.googlevideo.com/videoplayback";
     const at = std.mem.indexOf(u8, page, marker) orelse return null;
-    const start = at + 1; // skip the leading quote
+    const start = at + 1;
     var length: usize = 0;
     var index = start;
     while (index < page.len and page[index] != '"' and length < buffer.len) {
@@ -382,7 +351,7 @@ test "classify youtube watch, share and shorts" {
     try std.testing.expectEqualStrings("dQw4w9WgXcQ", watch.idSlice());
     try std.testing.expectEqualStrings("https://www.youtube.com/watch?v=dQw4w9WgXcQ", watch.canonicalSlice());
 
-    const share = classify("youtu.be/dQw4w9WgXcQ?t=42"); // no scheme: rejected
+    const share = classify("youtu.be/dQw4w9WgXcQ?t=42");
     try std.testing.expectEqual(Provider.none, share.provider);
 
     const short = classify("https://youtu.be/dQw4w9WgXcQ?t=42");
@@ -428,18 +397,12 @@ test "classify instagram and facebook" {
 test "classify rejects non-video pages and hostile hosts" {
     try std.testing.expectEqual(Provider.none, classify("https://www.instagram.com/").provider);
     try std.testing.expectEqual(Provider.none, classify("https://www.facebook.com/photo/?fbid=123").provider);
-    // Suffix-lookalike host must never match the allowlist.
     try std.testing.expectEqual(Provider.none, classify("https://youtube.com.evil.com/watch?v=dQw4w9WgXcQ").provider);
     try std.testing.expectEqual(Provider.none, classify("https://notyoutube.com/watch?v=dQw4w9WgXcQ").provider);
-    // Userinfo is rejected outright.
-    try std.testing.expectEqual(Provider.none, classify("https://user:pass@youtube.com/watch?v=dQw4w9WgXcQ").provider);
-    // Non-video YouTube paths.
+    try std.testing.expectEqual(Provider.none, classify("https://user:pass@youtube.com/watch?v=dQw4w9WgXcQ").provider); // trufflehog:ignore
     try std.testing.expectEqual(Provider.none, classify("https://www.youtube.com/channel/UC1234567890").provider);
-    // Too-short id.
     try std.testing.expectEqual(Provider.none, classify("https://youtu.be/ab").provider);
-    // Id with illegal characters (query overflow).
     try std.testing.expectEqual(Provider.none, classify("https://www.youtube.com/watch?v=../../etc").provider);
-    // Plain links stay plain.
     try std.testing.expectEqual(Provider.none, classify("https://example.com/watch?v=dQw4w9WgXcQ").provider);
     try std.testing.expectEqual(Provider.none, classify("").provider);
 }
@@ -499,7 +462,6 @@ test "og scraping and stream extraction" {
     try std.testing.expectEqualStrings("https://scontent-1.cdninstagram.com/v.jpg", scrapeOgMeta(page, "og:image").?);
     try std.testing.expect(scrapeOgMeta(page, "og:title") == null);
 
-    // content-before-property ordering also works.
     const swapped = "<meta content=\"https://scontent-1.cdninstagram.com/v.mp4\" property=\"og:video\">";
     try std.testing.expectEqualStrings("https://scontent-1.cdninstagram.com/v.mp4", scrapeOgMeta(swapped, "og:video").?);
 

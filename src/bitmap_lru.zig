@@ -1,10 +1,3 @@
-// Pure size/recency accounting for the message-image bitmap cache.
-//
-// main.zig owns the actual HBITMAP objects; this module only tracks how
-// many bytes each one costs and when it was last shown, and decides which
-// ones to evict once the total goes over budget. Keeping it free of any
-// Win32 type makes it possible to unit test the eviction order without a
-// Windows target.
 const std = @import("std");
 
 pub fn Lru(comptime max_entries: usize) type {
@@ -30,9 +23,6 @@ pub fn Lru(comptime max_entries: usize) type {
             return null;
         }
 
-        /// Records that `key` (e.g. a message slot's address) now holds a
-        /// bitmap of `bytes` size and was just shown. Advances the clock so
-        /// this becomes the most-recently-used entry.
         pub fn touch(self: *Self, key: usize, bytes: usize) void {
             self.clock += 1;
             if (self.indexOf(key)) |i| {
@@ -49,9 +39,6 @@ pub fn Lru(comptime max_entries: usize) type {
             }
         }
 
-        /// Drops `key` from accounting without evicting anything else, e.g.
-        /// because the caller already freed that bitmap itself (message
-        /// list cleared, chat switched).
         pub fn remove(self: *Self, key: usize) void {
             const i = self.indexOf(key) orelse return;
             self.total_bytes -= self.entries[i].bytes;
@@ -59,11 +46,6 @@ pub fn Lru(comptime max_entries: usize) type {
             self.count -= 1;
         }
 
-        /// Picks least-recently-used entries to drop so total_bytes fits
-        /// budget, writes their keys into `out` (caller-owned, sized to
-        /// max_entries) and removes them from accounting. Returns the
-        /// number of keys written. The caller is responsible for freeing
-        /// the actual bitmap for each returned key.
         pub fn evict(self: *Self, budget: usize, out: []usize) usize {
             var evicted: usize = 0;
             while (self.total_bytes > budget and self.count > 0 and evicted < out.len) {
@@ -98,7 +80,7 @@ test "touch tracks total bytes and updates existing entries" {
     lru.touch(1, 100);
     lru.touch(2, 200);
     try testing.expectEqual(@as(usize, 300), lru.total_bytes);
-    lru.touch(1, 150); // resize key 1, also refreshes recency
+    lru.touch(1, 150);
     try testing.expectEqual(@as(usize, 350), lru.total_bytes);
 }
 
@@ -107,12 +89,10 @@ test "evict drops least-recently-used entries first" {
     lru.touch(1, 100);
     lru.touch(2, 100);
     lru.touch(3, 100);
-    // Re-touch key 1 so key 2 becomes the oldest.
     lru.touch(1, 100);
     var out: [8]usize = undefined;
     const n = lru.evict(150, &out);
     try testing.expectEqual(@as(usize, 2), n);
-    // key 2 (oldest) and key 3 (next oldest) should be evicted, key 1 kept.
     var saw_key1 = false;
     for (out[0..n]) |k| {
         try testing.expect(k != 1);

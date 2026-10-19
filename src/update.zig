@@ -1,15 +1,5 @@
-// Self-update logic for WAZI-27: pure, testable parts of the GitHub Releases
-// updater. The Win32 transport (WinHTTP, file swap, relaunch) lives in main.zig.
-//
-// Release contract with the live WAZI-26 release workflow: a release tagged
-// "vMAJOR.MINOR.PATCH" (no pre-release suffix) with one asset named
-// "Messages-<something>.zip" that contains the zig-out/bin contents, plus
-// "Messages_arm64-<something>.zip" for Windows on ARM. The "_" keeps x64
-// builds from before the ARM zip existed from ever matching it.
 const std = @import("std");
 
-/// The release channel is picked by CPU: x64 and ARM64 builds each take only
-/// their own zip, so one never installs the other's binary.
 pub fn zipPrefixFor(arm64: bool) []const u8 {
     return if (arm64) "Messages_arm64-" else "Messages-";
 }
@@ -32,10 +22,6 @@ test "channel pick: each CPU takes only its own zip" {
     try std.testing.expect(!isZipAssetNameFor("Messages-0.9.92.zip.sig", false));
 }
 
-/// Test hook for the update card: an environment value naming an OLDER
-/// version makes the app believe it is behind, so the card can be shown
-/// without waiting for a real release. A value that is malformed or not
-/// older is ignored, so the hook can only ever lower the version.
 pub fn effectiveCurrent(real: Version, fake_text: ?[]const u8) Version {
     const text = fake_text orelse return real;
     const fake = parseVersion(text) orelse return real;
@@ -58,9 +44,6 @@ test effectiveCurrent {
     try std.testing.expectEqual(real, effectiveCurrent(real, "v0.9.92"));
 }
 
-/// The staged download is marked by a small file written after the archive
-/// was verified and extracted: line one is the release tag, line two the
-/// archive's top folder (may be empty). No marker means nothing is staged.
 pub const StageMarker = struct { tag: []const u8, inner_root: []const u8 };
 
 pub fn parseStageMarker(text: []const u8) ?StageMarker {
@@ -81,7 +64,6 @@ test parseStageMarker {
     try std.testing.expect(parseStageMarker("junk\nx") == null);
 }
 
-/// Whole-number percent for the card's progress bar; 0 when the size is unknown.
 pub fn percent(done: u64, total: u64) u32 {
     if (total == 0) return 0;
     return @intCast(@min(100, done * 100 / total));
@@ -107,9 +89,6 @@ pub const Asset = struct {
     digest: []const u8,
 };
 
-/// Strict release tag grammar: "v" prefix optional, three numeric components,
-/// no build or pre-release suffix. Anything else is rejected so pre-releases
-/// and malformed tags never trigger an update.
 pub fn parseVersion(tag: []const u8) ?Version {
     var rest = tag;
     if (rest.len > 0 and rest[0] == 'v') rest = rest[1..];
@@ -132,9 +111,6 @@ pub fn isNewer(latest_tag: []const u8, current: Version) bool {
     return latest.patch > current.patch;
 }
 
-/// A check that re-finds an update the user already declined must not pop
-/// the modal prompt again: it returns true only when the pending update is
-/// new (or none was offered yet), so the offer happens once per release.
 pub fn isNewOffer(pending_tag: ?[]const u8, found_tag: []const u8) bool {
     const pending = pending_tag orelse return true;
     return !std.mem.eql(u8, pending, found_tag);
@@ -146,8 +122,6 @@ test isNewOffer {
     try std.testing.expect(!isNewOffer("v0.9.44", "v0.9.44"));
 }
 
-/// Checks the SHA-256 of `data` against a GitHub asset digest field
-/// ("sha256:<64 lowercase hex chars>").
 pub fn digestMatches(data: []const u8, digest_field: []const u8) bool {
     const prefix = "sha256:";
     if (digest_field.len != prefix.len + 64) return false;
@@ -159,8 +133,6 @@ pub fn digestMatches(data: []const u8, digest_field: []const u8) bool {
     return std.crypto.timing_safe.eql([32]u8, expected, actual);
 }
 
-/// Returns the release body (markdown notes) of a /releases/latest response,
-/// or "" when absent (WAZI-60 shows these notes in the update prompt).
 pub fn releaseBody(root: std.json.Value) []const u8 {
     if (root != .object) return "";
     const body = root.object.get("body") orelse return "";
@@ -183,16 +155,11 @@ fn flagTrue(value: ?std.json.Value) bool {
     return v == .bool and v.bool;
 }
 
-/// Finds the release asset this updater consumes in a
-/// /releases/latest JSON response. Caller owns the returned strings
-/// (allocated from `allocator` as part of `parsed`).
 pub fn pickAsset(
     allocator: std.mem.Allocator,
     json_text: []const u8,
     parsed: *std.json.Parsed(std.json.Value),
 ) !?Asset {
-    // `parsed` stays valid on both the asset and no-asset paths; the caller
-    // deinits it exactly once (nothing to clean up on a parse error).
     parsed.* = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
     return findAsset(parsed.value);
 }
@@ -215,16 +182,13 @@ fn findAsset(root: std.json.Value) ?Asset {
         if (name != .string or !isZipAssetName(name.string)) continue;
         const url = asset.get("browser_download_url") orelse continue;
         if (url != .string) continue;
-        // No digest means no verification is possible: refuse the update.
         const digest = asset.get("digest") orelse continue;
         if (digest != .string) continue;
-        // Refuse what we cannot cross-check, same as a missing digest.
         const size_value = asset.get("size") orelse continue;
         if (size_value != .integer) continue;
         if (size_value.integer < 0) continue;
-        if (matched != null) return null; // ambiguous release: refuse rather than guess
+        if (matched != null) return null;
         matched = .{
-            // Strings live inside the caller's `parsed`; it stays alive while the asset is used.
             .tag = tag,
             .version = version,
             .url = url.string,
@@ -296,7 +260,6 @@ test pickAsset {
     try std.testing.expectEqual(12345, asset.size);
     try std.testing.expect(asset.url.len > 0);
 
-    // Pre-release with the same asset name must be ignored.
     const draft =
         \\{
         \\  "tag_name": "v0.2.0",
@@ -316,7 +279,6 @@ test pickAsset {
     try std.testing.expectEqual(@as(?Asset, null), try pickAsset(std.testing.allocator, draft, &parsed2));
     parsed2.deinit();
 
-    // Asset without a digest must be refused, not trusted.
     const no_digest =
         \\{
         \\  "tag_name": "v0.2.0",
@@ -341,7 +303,6 @@ test pickAsset {
     try std.testing.expectEqual(@as(?Asset, null), try pickAsset(std.testing.allocator, "{}", &parsed5));
     parsed5.deinit();
 
-    // Asset without a size must be refused: nothing to cross-check.
     const no_size =
         \\{
         \\  "tag_name": "v0.2.0",
@@ -360,7 +321,6 @@ test pickAsset {
     try std.testing.expectEqual(@as(?Asset, null), try pickAsset(std.testing.allocator, no_size, &parsed6));
     parsed6.deinit();
 
-    // Two matching assets is an ambiguous release: refuse rather than guess.
     const two_assets =
         \\{
         \\  "tag_name": "v0.2.0",
@@ -393,46 +353,27 @@ test isZipAssetName {
     try std.testing.expect(!isZipAssetName("Messages-v0.0.0"));
     try std.testing.expect(!isZipAssetName("SHA256SUMS.txt"));
     try std.testing.expect(!isZipAssetName("Other-v1.0.0.zip"));
-    // An x64 install must never update itself to the ARM build.
     if (@import("builtin").cpu.arch != .aarch64) try std.testing.expect(!isZipAssetName("Messages_arm64-v0.0.0.zip"));
 }
 
-/// WAZI-66: outcome of waiting on the global updater mutex. WAIT_ABANDONED
-/// (0x80) still grants ownership because the previous holder died; a timeout
-/// or failure means a live copy holds it. Contention must surface as a
-/// distinct blocked outcome, never as a silent "no update available".
 pub const wait_abandoned: u32 = 0x80;
 
 pub const MutexWait = enum { acquired, busy, failed };
 
-/// WAZI-66: WAIT_ABANDONED (0x80) still grants ownership because the
-/// previous holder died. A timeout is contention; a wait failure is not
-/// contention and must not surface as "another copy is running".
 pub fn classifyMutexWait(result: u32) MutexWait {
     if (result == 0 or result == wait_abandoned) return .acquired;
-    if (result == 0xFFFFFFFF) return .failed; // WAIT_FAILED
+    if (result == 0xFFFFFFFF) return .failed;
     return .busy;
 }
 
-/// A running copy of the app is a stale orphan (WAZI-66) when it is not us,
-/// shows no visible window, and has been alive long enough to rule out the
-/// windowless startup (or --tdlib-smoke) window of a healthy copy: it was
-/// left behind by an earlier update swap, still locks the old binary, and
-/// can hold the update mutex indefinitely.
 pub const orphan_min_age_seconds: u64 = 5 * 60;
 
 pub fn isStaleOrphan(self_pid: u32, pid: u32, has_visible_window: bool, age_seconds: u64) bool {
     return pid != self_pid and !has_visible_window and age_seconds >= orphan_min_age_seconds;
 }
 
-/// WAZI-71: which leftover copy brings a runnable exe back after an
-/// interrupted swap left the install without one. The digest-verified
-/// replacement wins over the backup: it is the newest runnable copy and the
-/// backup may still be locked by a stale orphan.
 pub const RestoreSource = enum { replacement, backup };
 
-/// Returns the leftover copy to restore from when the live exe is missing,
-/// or null when neither leftover exists.
 pub fn restoreSource(new_present: bool, old_present: bool) ?RestoreSource {
     if (new_present) return .replacement;
     if (old_present) return .backup;
@@ -445,10 +386,6 @@ test restoreSource {
     try std.testing.expect(restoreSource(false, false) == null);
 }
 
-/// WAZI-71: a copied-out replacement exe counts as verified only when its
-/// size matches the staged exe exactly (those staged bytes were already
-/// digest-checked) and is not empty. Anything else aborts the swap before
-/// the live exe is touched, so a bad copy can never replace a working app.
 pub fn replacementVerified(staged_size: u64, temp_size: ?u64) bool {
     const size = temp_size orelse return false;
     return size == staged_size and size > 0;
@@ -462,21 +399,16 @@ test replacementVerified {
 }
 
 test classifyMutexWait {
-    try std.testing.expectEqual(MutexWait.acquired, classifyMutexWait(0)); // WAIT_OBJECT_0
-    try std.testing.expectEqual(MutexWait.acquired, classifyMutexWait(0x80)); // WAIT_ABANDONED
-    // Contention is a blocked outcome, never "no update".
-    try std.testing.expectEqual(MutexWait.busy, classifyMutexWait(0x102)); // WAIT_TIMEOUT
+    try std.testing.expectEqual(MutexWait.acquired, classifyMutexWait(0));
+    try std.testing.expectEqual(MutexWait.acquired, classifyMutexWait(0x80));
+    try std.testing.expectEqual(MutexWait.busy, classifyMutexWait(0x102));
     try std.testing.expectEqual(MutexWait.busy, classifyMutexWait(7));
-    // A failed wait is not contention and must not claim another copy is running.
     try std.testing.expectEqual(MutexWait.failed, classifyMutexWait(0xFFFFFFFF));
 }
 
 test isStaleOrphan {
-    // The real app always has a visible window and is never killed.
     try std.testing.expect(!isStaleOrphan(100, 100, true, 0));
     try std.testing.expect(!isStaleOrphan(100, 200, true, 0));
-    // A windowless other copy is only an orphan once it has been alive long
-    // enough: a fresh copy starting up is also windowless for a while.
     try std.testing.expect(!isStaleOrphan(100, 200, false, 60));
     try std.testing.expect(isStaleOrphan(100, 200, false, orphan_min_age_seconds));
 }

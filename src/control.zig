@@ -1,13 +1,3 @@
-//! wazigctl control channel: the command table, the request/response JSON
-//! and the pipe name, shared by the app (Messages.exe) and the CLI
-//! (wazigctl.exe). Windows-free so the unit tests run on any host.
-//!
-//! Wire format: one JSON line in, one JSON line out, per pipe connection.
-//! Request:  {"cmd":"chats","messenger":"slack","all":true,"limit":20}
-//! Response: {"ok":true,"result":...} or {"ok":false,"error":"..."}
-//! Responses are ASCII only (everything past 0x7f is \uXXXX-escaped), so a
-//! remote PowerShell session prints them intact whatever its code page.
-
 const std = @import("std");
 
 pub const pipe_prefix = "\\\\.\\pipe\\wazig-control-";
@@ -63,8 +53,6 @@ pub const help_text = blk: {
 
 pub const ParseError = error{ Usage, OutOfMemory };
 
-/// Parse wazigctl argv (without the program name) into a request. On
-/// `error.Usage`, `message.*` names the problem for stderr.
 pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message: *[]const u8) ParseError!Request {
     if (args.len == 0) return usage(message, "missing command");
     const cmd = std.meta.stringToEnum(Command, args[0]) orelse return usage(message, "unknown command");
@@ -100,7 +88,6 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
             }
             return usage(message, "unknown option");
         }
-        // Chat ids never start with "--"; search text may.
         if (cmd != .search and std.mem.startsWith(u8, arg, "--")) return usage(message, "unknown option");
         try positional.append(allocator, arg);
     }
@@ -112,7 +99,6 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
             if (items.len == 1) request.id = try allocator.dupe(u8, items[0]);
         },
         .search => {
-            // Words join with spaces, so `search foo bar` needs no quoting.
             if (items.len == 0) return usage(message, "search needs text (\"\" clears it)");
             request.text = try std.mem.join(allocator, " ", items);
         },
@@ -142,23 +128,19 @@ fn usage(message: *[]const u8, text: []const u8) ParseError {
     return error.Usage;
 }
 
-/// The request as one JSON line (with the trailing newline).
 pub fn writeRequest(writer: *std.Io.Writer, request: Request) !void {
     try std.json.Stringify.value(request, .{ .emit_null_optional_fields = false }, writer);
     try writer.writeByte('\n');
 }
 
-/// Parse one request line. The result owns its strings through the arena.
 pub fn parseRequest(allocator: std.mem.Allocator, line: []const u8) !std.json.Parsed(Request) {
     return std.json.parseFromSlice(Request, allocator, std.mem.trim(u8, line, " \t\r\n"), .{ .allocate = .alloc_always });
 }
 
-/// True for a success reply; the app always starts one with exactly this.
 pub fn responseOk(line: []const u8) bool {
     return std.mem.startsWith(u8, line, "{\"ok\":true");
 }
 
-/// The error text of a failure reply, still JSON-escaped; empty when absent.
 pub fn responseError(line: []const u8) []const u8 {
     const key = "\"error\":\"";
     const start = (std.mem.indexOf(u8, line, key) orelse return "") + key.len;
@@ -175,8 +157,6 @@ pub fn writeError(writer: *std.Io.Writer, text: []const u8) !void {
     try writer.writeAll("}\n");
 }
 
-/// A JSON string from UTF-8. Control characters and everything past 0x7f
-/// are escaped; invalid UTF-8 bytes become U+FFFD.
 pub fn writeString(writer: *std.Io.Writer, text: []const u8) !void {
     try writer.writeByte('"');
     var index: usize = 0;
@@ -208,8 +188,6 @@ pub fn writeString(writer: *std.Io.Writer, text: []const u8) !void {
     try writer.writeByte('"');
 }
 
-/// A JSON string from UTF-16 (the app's display text). Valid surrogate
-/// pairs pass through as \uXXXX pairs; a lone surrogate becomes U+FFFD.
 pub fn writeStringUtf16(writer: *std.Io.Writer, text: []const u16) !void {
     try writer.writeByte('"');
     var index: usize = 0;
@@ -248,8 +226,6 @@ fn writeCodepoint(writer: *std.Io.Writer, codepoint: u21) !void {
     try writer.print("\\u{x:0>4}\\u{x:0>4}", .{ 0xd800 + (offset >> 10), 0xdc00 + (offset & 0x3ff) });
 }
 
-// ------------------------------------------------------------------ tests
-
 fn parseForTest(args: []const []const u8) !Request {
     var message: []const u8 = "";
     return parseArgs(std.testing.allocator, args, &message);
@@ -274,7 +250,6 @@ test "usage errors name the problem instead of guessing" {
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{"select"}, &message));
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "view", "slack", "extra" }, &message));
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{"archive-many"}, &message));
-    // Flags belong to chats/messages only: `archive --all` must not pass.
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "archive", "--all" }, &message));
 }
 
@@ -309,7 +284,6 @@ test "a request with a quote and a newline in the search text round trips" {
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
     try writeRequest(&out.writer, .{ .cmd = .search, .text = "a\"b\nc" });
-    // One line on the wire: the embedded newline must be escaped.
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, out.written(), "\n"));
     const parsed = try parseRequest(allocator, out.written());
     defer parsed.deinit();
@@ -334,11 +308,9 @@ test "output escaping keeps the reply one ASCII line" {
     const plain = try escapedForTest("a\"b\\c\nd\te\x01");
     defer allocator.free(plain);
     try std.testing.expectEqualStrings("\"a\\\"b\\\\c\\nd\\te\\u0001\"", plain);
-    // é (2 bytes) and an emoji (4 bytes, surrogate pair in JSON).
     const unicode = try escapedForTest("\xc3\xa9\xf0\x9f\x98\x80");
     defer allocator.free(unicode);
     try std.testing.expectEqualStrings("\"\\u00e9\\ud83d\\ude00\"", unicode);
-    // A truncated sequence must not swallow the closing quote.
     const broken = try escapedForTest("x\xe2\x82");
     defer allocator.free(broken);
     try std.testing.expectEqualStrings("\"x\\ufffd\\ufffd\"", broken);
@@ -351,7 +323,6 @@ test "UTF-16 display text escapes pairs and replaces lone surrogates" {
     const text = [_]u16{ 'H', 0xe9, 0xd83d, 0xde00, 0xd800, '"' };
     try writeStringUtf16(&out.writer, &text);
     try std.testing.expectEqualStrings("\"H\\u00e9\\ud83d\\ude00\\ufffd\\\"\"", out.written());
-    // The escaped output parses back to the same text.
     const parsed = try std.json.parseFromSlice([]const u8, allocator, out.written()[0..out.written().len], .{});
     defer parsed.deinit();
     try std.testing.expectEqualStrings("H\xc3\xa9\xf0\x9f\x98\x80\xef\xbf\xbd\"", parsed.value);

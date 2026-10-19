@@ -1,42 +1,25 @@
-//! Pure height math for the composer strip. No Win32 dependencies so it can
-//! be unit-tested on the host (see build.zig test step, like webp.zig).
-
 pub const edit_min_height: i32 = 44;
-/// Content growth cap when the user never dragged the handle taller.
 pub const default_max_height: i32 = 240;
-/// The message pane never shrinks below this.
 pub const canvas_min_height: i32 = 160;
-/// Total strip height padding around the edit control.
 pub const strip_padding: i32 = 22;
 
 pub const Composer = struct {
     edit_height: i32,
-    /// Window height consumed by the composer strip (edit + padding).
     strip_height: i32,
 };
 
-/// Extra vertical band reserved above the edit while a pasted image waits
-/// to be sent (WAZI-37).
 pub const preview_band: i32 = 54;
 
-/// The dragged height is a floor; content grows above it up to
-/// cap = max(default_max_height, dragged), and everything is clamped so the
-/// message pane keeps at least canvas_min_height.
 pub fn compute(dragged: i32, content_height: i32, client_height: i32, preview: bool) Composer {
     return computeScaled(dragged, content_height, client_height, preview, 96);
 }
 
-/// Same math as compute() with the 96-DPI design constants scaled to the
-/// monitor DPI. All heights are physical pixels once a dpi is passed.
-/// A dpi of 96 returns exactly compute()'s result so the tests stay valid.
 pub fn computeScaled(dragged: i32, content_height: i32, client_height: i32, preview: bool, dpi: i32) Composer {
     const band: i32 = if (preview) scale(preview_band, dpi) else 0;
     const min_height = scale(edit_min_height, dpi);
     const cap: i32 = @max(scale(default_max_height, dpi), dragged);
     var edit: i32 = @max(@max(min_height, dragged), content_height);
     edit = @min(edit, cap);
-    // Clamp: even a squeezed edit never pushes the message pane below
-    // canvas_min_height (the preview band shrinks away first).
     const room_for_edit: i32 = client_height - scale(canvas_min_height, dpi) - scale(strip_padding, dpi) - band;
     if (room_for_edit > 0 and edit > room_for_edit) edit = room_for_edit;
     if (edit < min_height) edit = @min(min_height, @max(0, room_for_edit));

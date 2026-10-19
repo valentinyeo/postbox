@@ -1,8 +1,3 @@
-//! Archived-chat rules, pure so they are unit testable on the host: when an
-//! archived WhatsApp chat comes back to the inbox, the "Keep archived" set,
-//! the per-chat baseline it is compared against, and the Ctrl+A selection.
-//! The app persists State as a small text file in %LOCALAPPDATA%\Messages.
-
 const std = @import("std");
 
 pub const max_entries = 2048;
@@ -43,9 +38,6 @@ pub const Action = enum {
     }
 };
 
-/// What the app knows about one archived chat: whether it must stay archived
-/// and the last-message stamp seen when it was archived (or first seen
-/// archived). A newer incoming message than the baseline brings it back.
 pub const Entry = struct {
     jid: [max_jid]u8 = undefined,
     jid_len: u8 = 0,
@@ -77,15 +69,12 @@ pub const State = struct {
         return self.entries[index].keep;
     }
 
-    /// Baseline stamp, or null when the chat has none yet.
     pub fn baseline(self: *const State, jid: []const u8) ?[]const u8 {
         const index = self.find(jid) orelse return null;
         const ts = self.entries[index].tsSlice();
         return if (ts.len == 0) null else ts;
     }
 
-    /// Entry for jid, created when missing. A full table drops the oldest
-    /// entry that is not kept; a table of only kept chats refuses (null).
     fn slot(self: *State, jid: []const u8) ?*Entry {
         if (jid.len == 0 or jid.len > max_jid) return null;
         if (self.find(jid)) |index| return &self.entries[index];
@@ -115,8 +104,6 @@ pub const State = struct {
         entry.ts_len = @intCast(n);
     }
 
-    /// Reserve kept state before queuing the write: a full kept table must
-    /// not silently turn "Keep archived" into regular archiving.
     pub fn archive(self: *State, jid: []const u8, ts: []const u8, keep: bool) bool {
         const entry = self.slot(jid) orelse return false;
         entry.keep = keep;
@@ -140,12 +127,10 @@ pub const State = struct {
         self.count -= 1;
     }
 
-    /// Forget a chat entirely (it was unarchived).
     pub fn remove(self: *State, jid: []const u8) void {
         if (self.find(jid)) |index| self.removeAt(index);
     }
 
-    /// Text form: one chat per line, "jid<TAB>keep<TAB>baseline".
     pub fn format(self: *const State, out: []u8) []const u8 {
         var len: usize = 0;
         for (self.entries[0..self.count]) |*entry| {
@@ -172,26 +157,17 @@ pub const State = struct {
     }
 };
 
-/// A list row for an archived chat moved past its baseline: worth one probe
-/// of its newest message. Kept chats never resurface, so they are never
-/// probed. wacli stamps are fixed-width ISO strings, so byte order is time
-/// order (same convention as chat_reconcile).
 pub fn needsProbe(kept: bool, last_ts: []const u8, baseline_ts: []const u8) bool {
     if (kept or last_ts.len == 0 or baseline_ts.len == 0) return false;
     return std.mem.order(u8, last_ts, baseline_ts) == .gt;
 }
 
-/// The decision itself: bring an archived chat back to the inbox when its
-/// newest message is from someone else, arrived after the baseline, and the
-/// chat is not kept archived.
 pub fn shouldResurface(newest_from_me: bool, kept: bool, newest_ts: []const u8, baseline_ts: []const u8) bool {
     if (newest_from_me or kept) return false;
     if (newest_ts.len == 0 or baseline_ts.len == 0) return false;
     return std.mem.order(u8, newest_ts, baseline_ts) == .gt;
 }
 
-/// Ctrl+A in the chat list: a snapshot of the jids on screen, so a row that
-/// appears afterwards is never archived by a later Ctrl+E.
 pub fn Selection(comptime capacity: usize) type {
     return struct {
         const Self = @This();
@@ -224,9 +200,6 @@ pub fn Selection(comptime capacity: usize) type {
     };
 }
 
-/// After rows were removed, does the open pane still show the selected row?
-/// True when the pane must be re-read at once: the open chat left the list
-/// (or the list is empty).
 pub fn paneNeedsSwitch(open_jid: []const u8, selected_jid: ?[]const u8) bool {
     const now = selected_jid orelse return true;
     return !std.mem.eql(u8, open_jid, now);

@@ -1,13 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Per-user MSI for WAZI-31, built with wixl (msitools) on the Linux release runner.
-
-  Installs to %LOCALAPPDATA%\Programs\Messages, the standard per-user install
-  location, on purpose: the in-app updater (src/main.zig) swaps Messages.exe in
-  its own directory, which needs no elevation there but would fail in
-  Program Files. Windows Installer registers the product in Add/Remove
-  Programs itself; no custom uninstall key is authored.
--->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
            Name="Wazig Messages"
@@ -52,8 +43,6 @@
     </DirectoryRef>
 
     <DirectoryRef Id="ProgramMenuFolder">
-      <!-- HKCU value is the component keypath so the shortcut is removed on
-           uninstall; MSI per-user ARP registration comes from Product metadata. -->
       <Component Id="StartMenuShortcut" Guid="29415F78-0826-52C8-9F9D-2457573E2144">
         <RegistryValue Root="HKCU" Key="Software\Wazig\Messages"
                        Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />

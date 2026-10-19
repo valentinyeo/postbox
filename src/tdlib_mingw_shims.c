@@ -1,8 +1,3 @@
-// Shims for the mingw-built TDLib/OpenSSL static libraries: they reference
-// the dllimport forms of a few msvcrt symbols that zig's bundled import
-// libraries do not carry. Only used on the Telegram build path.
-// ponytail: _timezone is fixed to 0 (UTC) because TDLib only reads it for
-// local log formatting; upgrade path: link mingw's real oldnames import lib.
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>

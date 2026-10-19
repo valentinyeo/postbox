@@ -1,4 +1,3 @@
-# agent-template: owned v3.12.1 sha256:52a84dceca091c27ebb26a3caa31852e45190daab50b51231556382f1c66c7ff
 name: pr-title
 on:
   pull_request:
@@ -13,8 +12,6 @@ jobs:
         with:
           script: |
             const title = (context.payload.pull_request?.title || "").trim();
-            // A title this short or this generic tells the next reader
-            // nothing about what changed in the agent's own memory repo.
             const genericRe = /^(update|fix|wip|changes?|misc)\.?$/i;
             if (title.length < 8) {
               core.setFailed(`PR title "${title}" is too short to say what changed`);

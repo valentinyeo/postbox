@@ -1,8 +1,3 @@
-//! Win32 side of the wazigctl control channel: the per-user named pipe the
-//! app serves and the CLI connects to, and the hand-off from a pipe thread
-//! to the UI thread. Nothing here touches windows beyond PostMessageW, so
-//! no request can focus, show or activate the app.
-
 const std = @import("std");
 const win = @import("win32.zig").c;
 const control = @import("control.zig");
@@ -10,7 +5,6 @@ const control = @import("control.zig");
 pub const max_request_bytes: usize = 64 * 1024;
 pub const max_response_bytes: usize = 16 * 1024 * 1024;
 
-/// `\\.\pipe\wazig-control-<USERNAME>` as UTF-16; null when USERNAME is unset.
 pub fn pipeName(buffer: *[200]u16) ?[:0]const u16 {
     const prefix = std.unicode.utf8ToUtf16LeStringLiteral(control.pipe_prefix);
     const rest = buffer[prefix.len..];
@@ -22,13 +16,8 @@ pub fn pipeName(buffer: *[200]u16) ?[:0]const u16 {
     return buffer[0..len :0];
 }
 
-/// Handles one request line and writes the one-line reply into `out`. Runs
-/// on a pipe connection thread, never on the UI thread.
 pub const Handler = *const fn (context: *anyopaque, line: []const u8, out: *std.Io.Writer.Allocating) void;
 
-/// Accept loop; runs for the life of the process on its own thread. Each
-/// client gets its own short-lived thread, so a stalled client can never
-/// hold up the next one.
 pub fn serve(allocator: std.mem.Allocator, context: *anyopaque, handler: Handler) void {
     var name_buffer: [200]u16 = undefined;
     const name = pipeName(&name_buffer) orelse return;
@@ -84,8 +73,6 @@ const Connection = struct {
     }
 };
 
-/// Read up to the first newline. False on a read error, an oversized
-/// request, or a client that hung up before sending anything.
 fn readLine(allocator: std.mem.Allocator, pipe: win.HANDLE, line: *std.ArrayList(u8)) bool {
     var chunk: [4096]u8 = undefined;
     while (line.items.len <= max_request_bytes) {
@@ -113,9 +100,6 @@ pub fn writeAll(handle: win.HANDLE, bytes: []const u8) void {
 
 pub const UiResult = enum { done, timeout, gone };
 
-/// Post `payload` to the UI thread as `message` and wait for it to signal
-/// `event`. On .timeout the UI thread still owns `payload` until it signals:
-/// the caller must `waitForever(event)` before freeing it.
 pub fn callUi(hwnd: win.HWND, message: win.UINT, payload: *anyopaque, event: win.HANDLE, timeout_ms: u32) UiResult {
     if (win.PostMessageW(hwnd, message, 0, @bitCast(@intFromPtr(payload))) == 0) return .gone;
     return if (win.WaitForSingleObject(event, timeout_ms) == win.WAIT_OBJECT_0) .done else .timeout;

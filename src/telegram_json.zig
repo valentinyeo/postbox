@@ -1,7 +1,3 @@
-//! Pure JSON event parsing for the TDLib td_json_client API. No Windows APIs,
-//! no C linkage: unit tests run on any host. telegram.zig feeds raw JSON from
-//! td_json_client_receive in and applies the parsed events to its state.
-
 const std = @import("std");
 
 pub const MediaKind = enum { none, photo, voice, sticker, video, document, other };
@@ -71,8 +67,6 @@ pub const Connection = enum { unknown, connecting, ready, failed };
 pub const Event = union(enum) {
     auth: struct { state: AuthState, error_text: []u8 = &.{} },
     chat: ChatInfo,
-    /// One message from a history response, a new-message update, or a send
-    /// success/failure. `history_done` marks the end of a getChatHistory batch.
     message: Msg,
     history_done,
     deleted: struct { chat_id: i64, message_id: i64 },
@@ -96,11 +90,6 @@ pub const Event = union(enum) {
     }
 };
 
-// TDLib numbers that can exceed 2^53 (Telegram chat ids, chat order) arrive as
-// JSON strings in the tdlib output; ids inside "message_ids" arrays are plain
-// numbers. std.json parses integers into .integer exactly, and string ids we
-// parse with std.fmt, so 64-bit ids stay exact either way.
-
 fn getString(object: std.json.ObjectMap, key: []const u8) []const u8 {
     const value = object.get(key) orelse return "";
     return switch (value) {
@@ -123,7 +112,6 @@ fn getInt(object: std.json.ObjectMap, key: []const u8) i64 {
 }
 
 fn getId(object: std.json.ObjectMap, key: []const u8) i64 {
-    // Telegram ids arrive either as numbers or as strings; both must stay exact.
     return getInt(object, key);
 }
 
@@ -131,8 +119,6 @@ fn dupe(allocator: std.mem.Allocator, text: []const u8) []u8 {
     return allocator.dupe(u8, text) catch &.{};
 }
 
-/// Formats a Unix timestamp as "YYYY-MM-DD HH:MM:SS" (UTC) so Telegram chats
-/// sort identically to the wacli `last_message_ts` strings.
 pub fn formatTimestamp(buffer: *[20]u8, unix_seconds: i64) []const u8 {
     const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @intCast(@max(0, unix_seconds)) };
     const day = epoch_seconds.getEpochDay();
@@ -150,8 +136,6 @@ pub fn formatTimestamp(buffer: *[20]u8, unix_seconds: i64) []const u8 {
     return text;
 }
 
-/// Maps TDLib error codes to plain-language text. The wording is load-bearing:
-/// main.zig routes the user back to the right login step by matching it.
 fn friendlyTgError(message: []const u8) []const u8 {
     const map = std.StaticStringMap([]const u8).initComptime(.{
         .{ "API_ID_INVALID", "Telegram rejected the app keys. Check api_id and api_hash and enter them again." },
@@ -221,12 +205,7 @@ fn localPathOf(file: std.json.ObjectMap) []const u8 {
     }
 }
 
-// TDLib nests one level: messageVoiceNote.voice is a voiceNote object whose
-// own "voice" field is the file, messageSticker.sticker is a sticker object,
-// and so on. fileOf only matches objects whose @type is exactly "file".
 fn mimeOf(content: std.json.ObjectMap) []const u8 {
-    // The mime type lives on the intermediate voiceNote/sticker/video object,
-    // not on the file it wraps.
     for ([_][]const u8{ "voice", "sticker", "video", "document" }) |key| {
         const value = content.get(key) orelse continue;
         switch (value) {
@@ -272,8 +251,6 @@ fn parseContent(allocator: std.mem.Allocator, message_object: std.json.ObjectMap
     if (std.mem.eql(u8, content_type, "messagePhoto")) {
         msg.media_kind = .photo;
         msg.text = dupe(allocator, formattedText(content, "caption"));
-        // Download the largest variant: TDLib sorts sizes ascending, so the
-        // last entry with a file is the biggest.
         if (content.get("photo")) |sizes| {
             switch (sizes) {
                 .array => |items| {
@@ -367,8 +344,6 @@ pub fn parseMessage(allocator: std.mem.Allocator, value: std.json.Value) !?Msg {
             else => {},
         }
     }
-    // The real display name is resolved from updateUser by the client when
-    // one arrives; messages surface "user <id>" until then.
     const user_id = senderUserId(message_object);
     if (msg.from_me) {
         msg.sender_name = dupe(allocator, "You");
@@ -431,9 +406,6 @@ fn parseChat(allocator: std.mem.Allocator, object: std.json.ObjectMap) !Event {
     return .{ .chat = info };
 }
 
-/// Parses one raw JSON string from td_json_client_receive. Returns .ignored
-/// for everything the app does not consume. Caller owns the returned event
-/// and must call event.deinit(allocator).
 pub fn parseEvent(allocator: std.mem.Allocator, json_text: []const u8) !Event {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, json_text, .{}) catch return .ignored;
     defer parsed.deinit();
@@ -444,8 +416,6 @@ pub fn parseEvent(allocator: std.mem.Allocator, json_text: []const u8) !Event {
     const type_name = getString(object, "@type");
     if (std.mem.startsWith(u8, type_name, "authorizationState")) {
         const state = parseAuthState(type_name);
-        // authorizationStateWaitOtherDeviceConfirmation and error payloads
-        // carry no secrets worth keeping; only error messages surface.
         return .{ .auth = .{ .state = state } };
     }
     if (std.mem.eql(u8, type_name, "error")) {
@@ -466,7 +436,6 @@ pub fn parseEvent(allocator: std.mem.Allocator, json_text: []const u8) !Event {
         std.mem.eql(u8, type_name, "updateChatReadInbox"))
     {
         const chat_value = object.get("chat") orelse {
-            // updateChatReadInbox carries unread_count on the top level.
             if (std.mem.eql(u8, type_name, "updateChatReadInbox")) {
                 const info = ChatInfo{ .id = getId(object, "chat_id"), .unread_count = @intCast(getInt(object, "unread_count")) };
                 return .{ .chat = info };
@@ -508,8 +477,6 @@ pub fn parseEvent(allocator: std.mem.Allocator, json_text: []const u8) !Event {
         return .ignored;
     }
     if (std.mem.eql(u8, type_name, "messages")) {
-        // getChatHistory response. Individual messages are emitted by the
-        // caller via parseHistoryMessage; here we only signal the batch end.
         return .history_done;
     }
     if (std.mem.eql(u8, type_name, "updateDeleteMessages")) {
@@ -551,9 +518,6 @@ pub fn parseEvent(allocator: std.mem.Allocator, json_text: []const u8) !Event {
     return .ignored;
 }
 
-/// Parses one raw JSON string into zero or more events: a getChatHistory
-/// "messages" batch becomes one .message event per entry plus .history_done.
-/// Caller owns every event and must call deinit on each.
 pub fn parseEventBatch(allocator: std.mem.Allocator, json_text: []const u8) !std.ArrayList(Event) {
     var list = std.ArrayList(Event).empty;
     errdefer {

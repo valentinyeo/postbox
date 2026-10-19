@@ -1,5 +1,3 @@
-//! Host tests of the archive handlers extracted from main.zig by build.zig.
-//! Only Windows UI, persistence and the child-process queue are stubbed.
 const std = @import("std");
 const chat_key = @import("chat_key");
 const archive_rules = @import("archive_rules");

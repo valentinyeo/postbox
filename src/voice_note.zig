@@ -1,24 +1,19 @@
-// Voice-note encoding: mono 48 kHz PCM -> Ogg Opus (libopus, vendored), plus
-// the length and 64-bar waveform WhatsApp shows for a voice note. No Windows
-// APIs here, so everything is unit-tested on any host.
 const std = @import("std");
 pub const c = @cImport({
     @cInclude("opus.h");
 });
 
 pub const sample_rate: u32 = 48000;
-pub const frame_samples: usize = 960; // 20 ms
+pub const frame_samples: usize = 960;
 pub const waveform_bars: usize = 64;
 const bitrate: i32 = 24000;
-const packets_per_page: usize = 50; // about one second
+const packets_per_page: usize = 50;
 
 pub const Result = struct {
     ogg: []u8,
     seconds: u32,
     waveform: [waveform_bars]u8,
 };
-
-// ---------------------------------------------------------------- Ogg
 
 const crc_table = blk: {
     @setEvalBranchQuota(10000);
@@ -45,7 +40,6 @@ pub const OggWriter = struct {
     out: std.ArrayList(u8) = .empty,
     serial: u32,
     sequence: u32 = 0,
-    // Pending page: lacing values and packet bytes not yet flushed.
     lacing: [255]u8 = undefined,
     lacing_len: usize = 0,
     body: std.ArrayList(u8) = .empty,
@@ -60,11 +54,9 @@ pub const OggWriter = struct {
         self.body.deinit(self.allocator);
     }
 
-    /// Queue one packet on the pending page.
     pub fn addPacket(self: *OggWriter, packet: []const u8) !void {
         const segments = packet.len / 255 + 1;
         if (self.lacing_len + segments > 255 or self.packets_in_page >= packets_per_page) {
-            // Callers check wouldOverflow and flush first.
             return error.PageFull;
         }
         var remaining = packet.len;
@@ -107,12 +99,12 @@ pub const OggWriter = struct {
 
 pub fn writeOpusHead(buffer: *[19]u8, pre_skip: u16, input_rate: u32) void {
     @memcpy(buffer[0..8], "OpusHead");
-    buffer[8] = 1; // version
-    buffer[9] = 1; // mono
+    buffer[8] = 1;
+    buffer[9] = 1;
     std.mem.writeInt(u16, buffer[10..12], pre_skip, .little);
     std.mem.writeInt(u32, buffer[12..16], input_rate, .little);
-    std.mem.writeInt(i16, buffer[16..18], 0, .little); // output gain
-    buffer[18] = 0; // channel mapping family 0
+    std.mem.writeInt(i16, buffer[16..18], 0, .little);
+    buffer[18] = 0;
 }
 
 pub const opus_tags = blk: {
@@ -121,13 +113,10 @@ pub const opus_tags = blk: {
     @memcpy(bytes[0..8], "OpusTags");
     std.mem.writeInt(u32, bytes[8..12], vendor.len, .little);
     @memcpy(bytes[12 .. 12 + vendor.len], vendor);
-    std.mem.writeInt(u32, bytes[12 + vendor.len ..][0..4], 0, .little); // no comments
+    std.mem.writeInt(u32, bytes[12 + vendor.len ..][0..4], 0, .little);
     break :blk bytes;
 };
 
-// ---------------------------------------------------------------- Encode
-
-/// Encodes mono 48 kHz PCM. The caller owns `Result.ogg`.
 pub fn encode(allocator: std.mem.Allocator, pcm: []const i16) !Result {
     if (pcm.len == 0) return error.Empty;
     var err: c_int = 0;
@@ -151,8 +140,6 @@ pub fn encode(allocator: std.mem.Allocator, pcm: []const i16) !Result {
     try writer.addPacket(&opus_tags);
     try writer.flush(0, 0);
 
-    // Granule position counts 48 kHz samples including the pre-skip; the
-    // final page carries the true end so decoders trim the padding.
     const total_frames = (pcm.len + pre_skip + frame_samples - 1) / frame_samples;
     var frame: [frame_samples]i16 = undefined;
     var packet: [1275]u8 = undefined;
@@ -186,9 +173,6 @@ pub fn durationSeconds(samples: usize) u32 {
     return @intCast(@max(1, (samples + rate - 1) / rate));
 }
 
-/// 64 bars, each the mean absolute level of its slice of the recording,
-/// scaled so the loudest bar is 100 (the same shape wacli derives with
-/// ffmpeg). Silence gives all zeros.
 pub fn waveform(pcm: []const i16) [waveform_bars]u8 {
     var bars = [_]u8{0} ** waveform_bars;
     if (pcm.len == 0) return bars;
@@ -210,15 +194,11 @@ pub fn waveform(pcm: []const i16) [waveform_bars]u8 {
     return bars;
 }
 
-/// Converts interleaved capture frames to mono 48 kHz PCM, one block at a
-/// time. Linear interpolation is plenty for speech.
 pub const Converter = struct {
     in_rate: u32,
     channels: u32,
     float_samples: bool,
     bits: u32,
-    // Fractional read position into the input stream, and the last input
-    // sample (so interpolation can span blocks).
     position: f64 = 0,
     previous: f32 = 0,
 
@@ -226,7 +206,6 @@ pub const Converter = struct {
         const step = @as(f64, @floatFromInt(self.in_rate)) / @as(f64, @floatFromInt(sample_rate));
         const bytes_per = self.bits / 8;
         const frame_bytes = bytes_per * self.channels;
-        // position is relative to the first frame of this block; previous is frame -1.
         while (self.position < @as(f64, @floatFromInt(frames))) {
             const whole: usize = @intFromFloat(@floor(self.position));
             const frac: f32 = @floatCast(self.position - @floor(self.position));
@@ -261,8 +240,6 @@ fn floatToI16(value: f32) i16 {
     return @intFromFloat(@round(scaled));
 }
 
-// ---------------------------------------------------------------- Tests
-
 const testing = std.testing;
 
 fn tone(allocator: std.mem.Allocator, hz: f64, seconds: f64) ![]i16 {
@@ -286,7 +263,6 @@ fn parsePage(data: []const u8) !Page {
     for (segments) |s| body_len += s;
     const total = 27 + count + body_len;
     if (data.len < total) return error.BadPage;
-    // CRC is computed with the checksum field zeroed.
     var copy: [65307]u8 = undefined;
     @memcpy(copy[0..total], data[0..total]);
     const stored = std.mem.readInt(u32, copy[22..26], .little);
@@ -304,7 +280,6 @@ fn parsePage(data: []const u8) !Page {
 }
 
 test "ogg crc matches the known check value" {
-    // CRC-32/MPEG-2 style Ogg checksum of "123456789" (poly 0x04c11db7, init 0, no reflection).
     try testing.expectEqual(@as(u32, 0x89a1897f), oggCrc("123456789"));
 }
 
@@ -331,7 +306,7 @@ test "ogg opus stream has valid headers, crc, sequence and granules" {
             try testing.expectEqual(@as(usize, 19), page.body.len);
             try testing.expectEqualStrings("OpusHead", page.body[0..8]);
             try testing.expectEqual(@as(u8, 1), page.body[8]);
-            try testing.expectEqual(@as(u8, 1), page.body[9]); // mono
+            try testing.expectEqual(@as(u8, 1), page.body[9]);
             pre_skip = std.mem.readInt(u16, page.body[10..12], .little);
             try testing.expect(pre_skip > 0 and pre_skip < 1000);
             try testing.expectEqual(@as(u32, 48000), std.mem.readInt(u32, page.body[12..16], .little));
@@ -352,7 +327,6 @@ test "ogg opus stream has valid headers, crc, sequence and granules" {
     }
     try testing.expectEqual(result.ogg.len, offset);
     try testing.expect(saw_eos);
-    // Final granule = pre-skip + exact sample count (padding is trimmed).
     try testing.expectEqual(@as(u64, pre_skip) + pcm.len, last_granule);
     try testing.expectEqual((pcm.len + pre_skip + frame_samples - 1) / frame_samples, packets);
     try testing.expectEqual(@as(u32, 3), result.seconds);
@@ -387,7 +361,6 @@ test "round trip: libopus decodes the stream back to the same tone" {
         var start: usize = 0;
         for (page.segments, 0..) |s, i| {
             at += s;
-            // every packet here is below 255 bytes, so one segment each
             if (s < 255) {
                 var out: [5760]i16 = undefined;
                 const n = c.opus_decode(decoder, page.body[start..at].ptr, @intCast(at - start), &out, 5760, 0);
@@ -400,7 +373,6 @@ test "round trip: libopus decodes the stream back to the same tone" {
     }
     const usable = decoded.items[pre_skip..@min(decoded.items.len, @as(usize, @intCast(final_granule)))];
     try testing.expectEqual(pcm.len, usable.len);
-    // Count rising zero crossings in the middle second: must match the pitch.
     var crossings: usize = 0;
     var prev = usable[1000];
     for (usable[1001..40000]) |s| {
@@ -409,7 +381,6 @@ test "round trip: libopus decodes the stream back to the same tone" {
     }
     const expected = hz * 39000.0 / 48000.0;
     try testing.expect(@abs(@as(f64, @floatFromInt(crossings)) - expected) <= 2);
-    // And the level survived (input amplitude 12000).
     var peak: i16 = 0;
     for (usable[2000..40000]) |s| peak = @max(peak, @as(i16, @intCast(@min(@abs(@as(i32, s)), 32767))));
     try testing.expect(peak > 9000 and peak < 15000);
@@ -438,10 +409,9 @@ test "converter resamples 44.1 kHz stereo float to 48 kHz mono" {
     var converter = Converter{ .in_rate = 44100, .channels = 2, .float_samples = true, .bits = 32 };
     var out: std.ArrayList(i16) = .empty;
     defer out.deinit(testing.allocator);
-    // 0.1 s of a constant 0.5 on both channels, delivered in two blocks.
     var block: [2205 * 8]u8 = undefined;
     for (0..2205 * 2) |i| std.mem.writeInt(u32, block[i * 4 ..][0..4], @bitCast(@as(f32, 0.5)), .little);
     try converter.push(testing.allocator, &out, &block, 2205);
     try converter.push(testing.allocator, &out, &block, 2205);
-    try testing.expect(out.items.len >= 4795 and out.items.len <= 4805); // 0.1 s at 48 kHz
+    try testing.expect(out.items.len >= 4795 and out.items.len <= 4805);
 }

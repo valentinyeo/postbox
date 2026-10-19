@@ -8,7 +8,7 @@
 
 ## Build and test (Zig 0.16.0, on the VPS at `~/.local/zig-0.16.0/zig`; the `zig` on PATH is too old)
 - `tools/preflight.sh`: the same format, test, Windows build and lint steps CI runs.
-- `python3 tools/check_new_comments.py origin/main`: CI fails a PR that adds code comments; put the why in the commit or PR.
+- `node tools/strip-comments.mjs --check`: CI rejects code comments; put the why in the commit or PR.
 - build.zig harnesses slice `src/main.zig` by text markers; editing near them breaks `unfurl-verification`.
 
 ## Rules and what enforces them (WAZI-123)

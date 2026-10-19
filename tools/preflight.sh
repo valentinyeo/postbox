@@ -19,7 +19,8 @@ run du -h zig-out/bin/Messages.exe
 run bash tools/lint-repeats.sh .
 run python3 -m unittest discover -s tools -p 'test_*.py'
 run python3 tools/check_cache_keys.py
-run python3 tools/check_new_comments.py origin/main
+run node --test tools/strip-comments.test.js
+run node tools/strip-comments.mjs --check
 run git fetch --quiet --no-tags origin '+refs/pull/*/head:refs/remotes/pr/*'
 run bash tools/test-preflight-guard.sh
 run bash tools/test-agent-setup.sh

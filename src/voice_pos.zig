@@ -1,8 +1,3 @@
-//! Where each voice note was last left, so reopening a chat (or restarting
-//! the app) shows the progress bar there and play resumes from it. A tiny
-//! on-device text file, one "<key hex> <position ms> <duration ms>" line per
-//! note, rewritten only on pause, stop or chat switch.
-
 const std = @import("std");
 
 pub const capacity = 64;
@@ -20,9 +15,6 @@ pub const Store = struct {
         return null;
     }
 
-    /// Remember a position. A position of 0 (never played, or finished and
-    /// reset to the start) forgets the note. The oldest entry makes room.
-    /// Returns true when the store changed.
     pub fn set(self: *Store, key: u64, pos_ms: u32, dur_ms: u32) bool {
         for (self.entries[0..self.count], 0..) |*entry, index| {
             if (entry.key != key) continue;
@@ -48,7 +40,6 @@ pub const Store = struct {
         return true;
     }
 
-    /// Parse the file; malformed or truncated lines are skipped.
     pub fn load(self: *Store, contents: []const u8) void {
         var lines = std.mem.tokenizeAny(u8, contents, "\r\n");
         while (lines.next()) |line| {
@@ -62,7 +53,6 @@ pub const Store = struct {
         }
     }
 
-    /// The whole file contents, or null when the buffer is too small.
     pub fn serialize(self: *const Store, buffer: []u8) ?[]const u8 {
         var length: usize = 0;
         for (self.entries[0..self.count]) |entry| {
@@ -80,7 +70,6 @@ test "remember, update and reset a position" {
     try std.testing.expect(!store.set(1, 4000, 10000));
     try std.testing.expect(store.set(1, 7000, 10000));
     try std.testing.expectEqual(@as(u32, 7000), store.get(1).?.pos_ms);
-    // Finished: reset to the start forgets the note.
     try std.testing.expect(store.set(1, 0, 10000));
     try std.testing.expect(store.get(1) == null);
     try std.testing.expect(!store.set(2, 0, 5000));

@@ -1,12 +1,6 @@
-//! Status labels for the Manage accounts screen: pure functions so CI can
-//! test the state-to-text mapping without Windows.
-
 const std = @import("std");
 const tj = @import("telegram_json.zig");
 
-// WAZI-82: a sync child that dies within seconds of spawn is not a transient
-// blip; after three consecutive fast deaths sync cannot run at all, so the
-// restart loop must halt and probe the WhatsApp login state instead.
 pub const sync_fast_death_secs: i64 = 30;
 pub const sync_halt_after_fast_deaths: u32 = 3;
 
@@ -26,7 +20,6 @@ pub fn telegramLabel(state: tj.AuthState) []const u8 {
 }
 
 pub fn whatsappLabel(buffer: []u8, sync_running: bool, last_refresh_unix: i64) []const u8 {
-    // Keep the longest result under the 63-character palette label cap.
     if (!sync_running) return "WhatsApp - live sync stopped";
     if (last_refresh_unix <= 0) return "WhatsApp - live sync running, never refreshed";
     var stamp: [20]u8 = undefined;

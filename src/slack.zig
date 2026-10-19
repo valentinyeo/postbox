@@ -1,6 +1,3 @@
-// Slack provider core: pure helpers over Slack Web API / Socket Mode JSON.
-// No Windows calls here, so the unit tests run on the CI host. The WinHTTP
-// transport and token storage live in slack_win.zig (Windows only).
 const std = @import("std");
 
 pub const max_text = 4095;
@@ -9,16 +6,10 @@ pub const Provider = enum(u8) { whatsapp = 0, slack = 1 };
 pub const max_channel_id = 31;
 pub const max_user_id = 31;
 
-/// A new message resurfaces an archived chat (WAZI-62): the chat comes back
-/// unless the message is my own. A chat missing from the current list counts
-/// as archived, because the inbox read filters archived chats out.
 pub fn resurfacesChat(from_me: bool, visible: bool, archived: bool) bool {
     return !from_me and (!visible or archived);
 }
 
-/// Numeric order of Slack timestamps ("1740000000.000123"). Seconds compare
-/// numerically, then the fraction compares by zero-padded width. Malformed
-/// values fall back to lexicographic order so sorting never breaks.
 pub fn compareTs(a: []const u8, b: []const u8) std.math.Order {
     const left = splitTs(a);
     const right = splitTs(b);
@@ -37,8 +28,6 @@ fn splitTs(value: []const u8) TsParts {
         const digits = value[dot + 1 ..];
         var fraction: u64 = 0;
         var consumed: usize = 0;
-        // Pad the fraction to a fixed width so "1234.5" and "1234.05" order
-        // by value instead of by digit count.
         for (digits) |character| {
             if (consumed >= 9) break;
             if (character < '0' or character > '9') break;
@@ -51,8 +40,6 @@ fn splitTs(value: []const u8) TsParts {
     return parts;
 }
 
-/// True when a Socket Mode envelope must be acknowledged (has envelope_id).
-/// The payload slice borrows the caller's buffer.
 pub const Kind = enum { ack, events, hello, other };
 
 pub const Envelope = struct {
@@ -76,9 +63,6 @@ pub const Envelope = struct {
 
 pub const classification_error = error{OutOfMemory};
 
-/// Classify a raw Socket Mode message. Returned slices stay valid until
-/// `arena` is freed (JSON parsing may copy into it); copy anything that must
-/// outlive the envelope.
 pub fn classifyEnvelope(arena: std.mem.Allocator, text: []const u8) classification_error!?Envelope {
     const root_value = std.json.parseFromSliceLeaky(std.json.Value, arena, text, .{}) catch return null;
     const root = switch (root_value) {
@@ -112,7 +96,6 @@ pub fn classifyEnvelope(arena: std.mem.Allocator, text: []const u8) classificati
     envelope.event_type = objectString(event, "type") orelse "";
     const subtype = objectString(event, "subtype") orelse "";
     envelope.subtype = subtype;
-    // Edited messages carry the new body one level down.
     if (std.mem.eql(u8, subtype, "message_changed")) {
         if (event.get("message")) |inner_value| {
             if (inner_value == .object) event = inner_value.object;
@@ -156,8 +139,6 @@ pub fn objectStringField(object: std.json.ObjectMap, key: []const u8) []const u8
     return objectString(object, key) orelse "";
 }
 
-/// Whole unix seconds of a Slack ts ("1740000000.000123"), or null when the
-/// value is empty, malformed or out of range.
 pub fn tsSeconds(ts: []const u8) ?i64 {
     const dot = std.mem.indexOfScalar(u8, ts, '.') orelse ts.len;
     const seconds = std.fmt.parseInt(i64, ts[0..dot], 10) catch return null;
@@ -174,16 +155,12 @@ fn numberField(object: std.json.ObjectMap, key: []const u8) ?i64 {
     };
 }
 
-/// Best recency for a conversations.list entry, in unix seconds: the newest
-/// message (`latest.ts`) when the listing carries it, else `updated` (ms),
-/// else `created` (seconds). 0 when none is usable.
 pub fn conversationSeconds(object: std.json.ObjectMap) i64 {
     if (object.get("latest")) |latest| switch (latest) {
         .object => |latest_object| if (tsSeconds(objectStringField(latest_object, "ts"))) |seconds| return seconds,
         else => {},
     };
     if (numberField(object, "updated")) |updated| {
-        // Slack sends `updated` in milliseconds; tolerate a seconds value.
         const seconds = if (updated > 100_000_000_000) @divTrunc(updated, 1000) else updated;
         if (seconds > 0) return seconds;
     }
@@ -191,7 +168,6 @@ pub fn conversationSeconds(object: std.json.ObjectMap) i64 {
     return 0;
 }
 
-/// One conversations.history item (already filtered to real messages).
 pub const HistoryItem = struct {
     ts: []const u8 = "",
     user: []const u8 = "",
@@ -204,19 +180,13 @@ pub const HistoryItem = struct {
     file_name: []const u8 = "",
     file_mime: []const u8 = "",
     file_size: i64 = 0,
-    // A shared/forwarded message ("is_share"/"is_msg_unfurl") renders as a
-    // quote block above the body.
     share_sender: []const u8 = "",
     share_text: []const u8 = "",
-    // A link unfurl (or other attachment) fills in for an empty body.
     link_title: []const u8 = "",
     link_text: []const u8 = "",
     link_fallback: []const u8 = "",
 };
 
-/// Extract displayable fields from a history item. Messages with a subtype
-/// other than bot_message or message_changed are join/leave/reminder noise
-/// and are reported as skippable.
 pub fn readHistoryItem(value: std.json.Value) ?HistoryItem {
     var item = HistoryItem{};
     var object = switch (value) {
@@ -257,11 +227,6 @@ pub fn readHistoryItem(value: std.json.Value) ?HistoryItem {
             }
         }
     }
-    // Slack messages with empty `text` and an `attachments` array are either
-    // a shared/forwarded message (quote block) or a link unfurl (fills the
-    // body). A message can carry several attachments; take the first share
-    // and the first attachment with any content, whichever comes first of
-    // each kind, so a body with any text never renders blank.
     if (object.get("attachments")) |attachments_value| {
         if (attachments_value == .array) {
             for (attachments_value.array.items) |attachment_value| {
@@ -295,9 +260,6 @@ fn boolField(object: std.json.ObjectMap, key: []const u8) bool {
     };
 }
 
-/// The message body Wazig shows: the message's own text, else the shared
-/// file's name, else a compact line built from a link-unfurl/other
-/// attachment. Never blank when the item carries any recoverable text.
 pub fn historyItemBody(item: HistoryItem, buffer: []u8) []const u8 {
     if (item.text.len > 0) return item.text;
     if (item.file_name.len > 0) return item.file_name;
@@ -306,12 +268,6 @@ pub fn historyItemBody(item: HistoryItem, buffer: []u8) []const u8 {
     return "";
 }
 
-/// Compact one-line summary for a link-unfurl/other attachment, used only
-/// when the message's own text is empty. Prefers "title: text", falls back
-/// to whichever half is present, then to Slack's plain-text fallback. Writes
-/// into `buffer` and returns the slice actually used; truncates rather than
-/// dropping content when the combined text overflows the buffer, and never
-/// splits a multi-byte UTF-8 character at the cut point.
 pub fn attachmentSummary(buffer: []u8, title: []const u8, text: []const u8, fallback: []const u8) []const u8 {
     if (buffer.len == 0) return "";
     if (title.len > 0 and text.len > 0) {
@@ -327,7 +283,6 @@ pub fn attachmentSummary(buffer: []u8, title: []const u8, text: []const u8, fall
             @memcpy(buffer[offset..][0..text_end], text[0..text_end]);
             return buffer[0 .. offset + text_end];
         }
-        // Not enough room for the separator: show what fits of the title alone.
         return truncateInto(buffer, title);
     }
     if (title.len > 0) return truncateInto(buffer, title);
@@ -335,8 +290,6 @@ pub fn attachmentSummary(buffer: []u8, title: []const u8, text: []const u8, fall
     return truncateInto(buffer, fallback);
 }
 
-/// The largest n <= max such that text[0..n] does not split a multi-byte
-/// UTF-8 character (a continuation byte, 0b10xxxxxx, never starts a rune).
 fn utf8Boundary(text: []const u8, max: usize) usize {
     var n = @min(max, text.len);
     while (n > 0 and n < text.len and (text[n] & 0xC0) == 0x80) n -= 1;
@@ -349,10 +302,6 @@ fn truncateInto(buffer: []u8, text: []const u8) []const u8 {
     return buffer[0..n];
 }
 
-/// A callback for resolving a Slack user id ("U123") to a display name, used
-/// by `convertMrkdwn` for `<@U123>` mentions. A plain function pointer can't
-/// close over the caller's user list, so the caller (the app, which owns the
-/// user table) is passed through as an opaque context.
 pub const UserLookup = struct {
     context: *anyopaque,
     lookupFn: *const fn (context: *anyopaque, user_id: []const u8) ?[]const u8,
@@ -362,23 +311,6 @@ pub const UserLookup = struct {
     }
 };
 
-/// Convert raw Slack mrkdwn markup to the plain display text Wazig shows in
-/// a message bubble:
-///   `<url|label>`      -> the url (Wazig's link detection only recognizes
-///                         visible URL text, so the label is dropped in
-///                         favor of keeping the link clickable)
-///   `<url>`             -> the url, unchanged
-///   `<@U123>`           -> `@<name>`, resolved through `users`; falls back
-///   `<@U123|name>`         to `@<given name>`, then to the raw id
-///   `<#C123|name>`      -> `#<name>`
-///   `<!here>` etc.      -> `@here` / `@channel` / `@everyone`
-///   `<!subteam^ID|@g>`  -> `@g`
-///   `<!date^...|text>`  -> `text` (the fallback)
-/// HTML entities (`&amp;` `&lt;` `&gt;`) are decoded in a second pass, after
-/// the angle-bracket markup is resolved, so a literal `&lt;` in the source
-/// text can never be mistaken for the start of markup. Writes into `buffer`
-/// and returns the slice used; truncates rather than splitting a multi-byte
-/// UTF-8 character when the result does not fit.
 pub fn convertMrkdwn(buffer: []u8, text: []const u8, users: ?UserLookup) []const u8 {
     var stage1: [max_text + 1]u8 = undefined;
     var stage1_len: usize = 0;
@@ -401,9 +333,6 @@ pub fn convertMrkdwn(buffer: []u8, text: []const u8, users: ?UserLookup) []const
     return decodeHtmlEntities(buffer, stage1[0..stage1_len]);
 }
 
-/// Render the content of a single `<...>` Slack markup token (excluding the
-/// angle brackets). Unrecognized or malformed tokens pass through as their
-/// raw content so nothing silently disappears.
 fn renderMrkdwnToken(dest: []u8, token: []const u8, users: ?UserLookup) []const u8 {
     if (token.len == 0) return copyClamped(dest, "<>");
     switch (token[0]) {
@@ -443,8 +372,6 @@ fn renderMrkdwnToken(dest: []u8, token: []const u8, users: ?UserLookup) []const 
     }
 }
 
-/// The byte length of the UTF-8 rune starting at `byte`. Falls back to 1 for
-/// an invalid lead byte so callers always make forward progress.
 fn utf8RuneLen(byte: u8) usize {
     if (byte & 0x80 == 0) return 1;
     if (byte & 0xE0 == 0xC0) return 2;
@@ -468,8 +395,6 @@ fn copyClampedPrefixed(dest: []u8, prefix: []const u8, text: []const u8) []const
     return dest[0 .. prefix.len + n];
 }
 
-/// Append as much of `text` as fits after `dest[0..dest_len]`, without
-/// splitting a multi-byte UTF-8 character, and return the new length.
 fn appendClamped(dest: []u8, dest_len: usize, text: []const u8) usize {
     if (dest_len >= dest.len) return dest_len;
     const remaining = dest.len - dest_len;
@@ -504,8 +429,6 @@ fn decodeHtmlEntities(buffer: []u8, text: []const u8) []const u8 {
     return buffer[0..out_len];
 }
 
-/// Pull {"ok":true,"url":"wss://..."} into connection parts. Slices borrow
-/// the response buffer.
 pub const WsEndpoint = struct { host: []const u8, path_query: []const u8 };
 
 pub fn parseWsUrl(arena: std.mem.Allocator, response: []const u8) ?WsEndpoint {
@@ -531,8 +454,6 @@ pub fn parseWsUrl(arena: std.mem.Allocator, response: []const u8) ?WsEndpoint {
     return .{ .host = host, .path_query = path_query };
 }
 
-/// Value for the Retry-After header of a raw WinHTTP header block, in
-/// seconds. Missing or malformed values mean "retry soon" (null).
 pub fn parseRetryAfter(headers: []const u8) ?u64 {
     const marker = "Retry-After:";
     const index = std.ascii.indexOfIgnoreCase(headers, marker) orelse return null;
@@ -542,7 +463,6 @@ pub fn parseRetryAfter(headers: []const u8) ?u64 {
     return std.fmt.parseInt(u64, text, 10) catch null;
 }
 
-/// Escape a UTF-8 string for embedding in a JSON request body.
 pub fn escapeJson(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
     var out = std.ArrayList(u8).empty;
     errdefer out.deinit(allocator);
@@ -575,7 +495,6 @@ pub const ReplyTo = struct {
     channel_id: []const u8,
     text: []const u8,
     thread_ts: []const u8 = "",
-    // WAZI-61: correlates our optimistic bubble with Slack's echo.
     client_msg_id: []const u8 = "",
 };
 
@@ -606,16 +525,10 @@ pub fn buildCompleteUploadBody(allocator: std.mem.Allocator, file_id: []const u8
     return std.fmt.allocPrint(allocator, "{{\"files\":[{{\"id\":\"{s}\"}}],\"channel_id\":\"{s}\",\"thread_ts\":\"{s}\",\"initial_comment\":\"{s}\"}}", .{ file_id, channel_id, thread_ts, escaped_caption });
 }
 
-// --- conversations.mark (WAZI-104): mark the viewed Slack chat read ---
-
-/// Body for conversations.mark: the channel and the newest message ts the
-/// user has on screen.
 pub fn buildMarkBody(allocator: std.mem.Allocator, channel_id: []const u8, ts: []const u8) ![]u8 {
     return std.fmt.allocPrint(allocator, "{{\"channel\":\"{s}\",\"ts\":\"{s}\"}}", .{ channel_id, ts });
 }
 
-/// A ts worth marking has numeric seconds and a nonempty numeric fraction;
-/// optimistic bubbles carry an empty id and malformed values stay local.
 fn isMarkTs(ts: []const u8) bool {
     if (ts.len == 0) return false;
     const dot = std.mem.indexOfScalar(u8, ts, '.') orelse return false;
@@ -625,19 +538,12 @@ fn isMarkTs(ts: []const u8) bool {
     return true;
 }
 
-/// Fold step picking the ts to mark: the newest real message ts displayed.
-/// Empty or malformed candidates (queued sends, junk) never win.
 pub fn newerMarkTs(current: []const u8, candidate: []const u8) []const u8 {
     if (!isMarkTs(candidate)) return current;
     if (current.len == 0) return candidate;
     return if (compareTs(candidate, current) == .gt) candidate else current;
 }
 
-/// One debounce decision for mark-as-read. The open chat keeps refreshing
-/// its history, and quick chat switches replace the pending target, so the
-/// caller stores the target and (re)starts one quiet-period timer on arm
-/// and rearm, fires when the timer expires, and keeps the target stored
-/// afterwards: an unchanged view must not send the same mark twice.
 pub const MarkStep = enum { skip, arm, rearm };
 
 pub fn markDebounce(stored_channel: []const u8, stored_ts: []const u8, channel: []const u8, ts: []const u8) MarkStep {
@@ -649,8 +555,6 @@ pub fn markDebounce(stored_channel: []const u8, stored_ts: []const u8, channel: 
 
 pub const UploadGrant = struct { upload_url: []const u8, file_id: []const u8 };
 
-/// Read files.getUploadURLExternal response {upload_url, file_id}. Both
-/// strings are duplicated into `allocator`; the caller owns and frees them.
 pub fn parseUploadGrant(allocator: std.mem.Allocator, response: []const u8) ?UploadGrant {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, response, .{}) catch return null;
     defer parsed.deinit();
@@ -669,8 +573,6 @@ pub fn parseUploadGrant(allocator: std.mem.Allocator, response: []const u8) ?Upl
     return .{ .upload_url = url_copy, .file_id = id_copy };
 }
 
-/// Read files.info response and return the download URL; the caller owns
-/// the duplicated string.
 pub fn parseFileInfo(allocator: std.mem.Allocator, response: []const u8) ?[]const u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, response, .{}) catch return null;
     defer parsed.deinit();
@@ -686,8 +588,6 @@ pub fn parseFileInfo(allocator: std.mem.Allocator, response: []const u8) ?[]cons
     return allocator.dupe(u8, url) catch null;
 }
 
-/// True when the response body parses as a Slack object with ok == true.
-/// Substring checks fail both on echoed text and whitespace variants.
 pub fn responseIsOk(allocator: std.mem.Allocator, body: []const u8) bool {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return false;
     defer parsed.deinit();
@@ -702,9 +602,6 @@ pub fn responseIsOk(allocator: std.mem.Allocator, body: []const u8) bool {
     };
 }
 
-/// Copy the message ts out of a chat.postMessage response body, so the
-/// optimistic bubble can adopt Slack's authoritative timestamp. Returns a
-/// heap slice; null when the body has no usable ts.
 pub fn parseSentTs(allocator: std.mem.Allocator, body: []const u8) ?[]u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return null;
     defer parsed.deinit();
@@ -720,7 +617,6 @@ pub fn parseSentTs(allocator: std.mem.Allocator, body: []const u8) ?[]u8 {
     return allocator.dupe(u8, ts) catch null;
 }
 
-/// Percent-encode a query value (Slack cursors are base64 with +/=).
 pub fn percentEncode(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
     var out = std.ArrayList(u8).empty;
     errdefer out.deinit(allocator);
@@ -740,8 +636,6 @@ pub fn percentEncode(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
     return out.toOwnedSlice(allocator);
 }
 
-/// True when the host is slack.com itself or a subdomain of slack.com or
-/// slack-edge.com. The leading dot is required, so "evilslack.com" fails.
 pub fn isSlackFileHost(host: []const u8) bool {
     if (std.mem.eql(u8, host, "slack.com")) return true;
     if (std.mem.endsWith(u8, host, ".slack.com")) return true;
@@ -749,8 +643,6 @@ pub fn isSlackFileHost(host: []const u8) bool {
     return false;
 }
 
-/// A bridge host is a bare lowercase hostname: letters, digits, dots and
-/// hyphens only. No scheme, path, port, credentials or spaces.
 pub fn isValidBridgeHost(host: []const u8) bool {
     if (host.len == 0) return false;
     for (host) |character| {
@@ -762,8 +654,6 @@ pub fn isValidBridgeHost(host: []const u8) bool {
     return true;
 }
 
-/// A bridge key is copied straight into an Authorization header, so it must be
-/// printable ASCII with no space, CR or LF that could smuggle in new headers.
 pub fn isValidBridgeKey(key: []const u8) bool {
     if (key.len == 0) return false;
     for (key) |character| {
@@ -773,21 +663,16 @@ pub fn isValidBridgeKey(key: []const u8) bool {
     return true;
 }
 
-/// Build the local bridge file path ("/file?url=<encoded>") for an original
-/// Slack file URL, percent-encoding the URL as a query value.
 pub fn bridgeFilePath(allocator: std.mem.Allocator, original_url: []const u8) ![]u8 {
     const encoded = try percentEncode(allocator, original_url);
     defer allocator.free(encoded);
     return std.fmt.allocPrint(allocator, "/file?url={s}", .{encoded});
 }
 
-/// Read {"url_private_download": ...} straight off a message file object.
 pub fn fileDownloadUrl(file: std.json.ObjectMap) []const u8 {
     return objectString(file, "url_private_download") orelse objectString(file, "url_private") orelse "";
 }
 
-/// Strip path separators and control characters from a remote file name and
-/// cap the length, so remote names can never escape the media cache.
 pub fn sanitizeFilename(dest: []u8, name: []const u8) []const u8 {
     var out_len: usize = 0;
     for (name) |character| {
@@ -802,8 +687,6 @@ pub fn sanitizeFilename(dest: []u8, name: []const u8) []const u8 {
     return dest[0..out_len];
 }
 
-/// Exactly-once record for Socket Mode deliveries. Slack redelivers events
-/// after reconnects; without this the same message lands twice.
 pub const Log = struct {
     pub const entry_max_channel = 40;
     pub const entry_max_ts = 40;
@@ -819,7 +702,6 @@ pub const Log = struct {
     head: usize = 0,
     count: usize = 0,
 
-    /// Returns true the first time a (channel, ts) pair is seen.
     pub fn mark(self: *Log, channel: []const u8, ts: []const u8) bool {
         if (channel.len == 0 or ts.len == 0 or channel.len > entry_max_channel or ts.len > entry_max_ts) return true;
         var index: usize = 0;
@@ -840,8 +722,6 @@ pub const Log = struct {
     }
 };
 
-/// One conversations.list entry, borrowed from the parsed JSON. DMs carry
-/// the other person's user id instead of a name; the caller maps it.
 pub const WorkspaceChannel = struct {
     id: []const u8,
     name: []const u8,
@@ -850,10 +730,6 @@ pub const WorkspaceChannel = struct {
     seconds: i64,
 };
 
-/// Read one conversations.list entry; null when it has no id, or when it is
-/// a channel the user has not joined. Unjoined public channels are most of a
-/// large workspace; listing them used to fill the chat table before the DMs,
-/// which Slack returns last, ever got a slot.
 pub fn workspaceChannel(object: std.json.ObjectMap) ?WorkspaceChannel {
     const id = objectStringField(object, "id");
     if (id.len == 0) return null;
@@ -872,7 +748,6 @@ pub fn workspaceChannel(object: std.json.ObjectMap) ?WorkspaceChannel {
     };
 }
 
-/// response_metadata.next_cursor, or "" on the last page.
 pub fn nextCursor(root: std.json.ObjectMap) []const u8 {
     const metadata = switch (root.get("response_metadata") orelse return "") {
         .object => |object| object,
@@ -881,19 +756,12 @@ pub fn nextCursor(root: std.json.ObjectMap) []const u8 {
     return objectStringField(metadata, "next_cursor");
 }
 
-/// Hard stop for list pagination, so a server that keeps returning a cursor
-/// can never loop forever (50 pages of 200 is 10,000 entries).
 pub const max_list_pages = 50;
 
-/// Fetch another page only when the cursor fits a job argument and the page
-/// cap is not reached.
 pub fn wantsNextPage(cursor: []const u8, pages_done: u32, max_cursor_len: usize) bool {
     return cursor.len > 0 and cursor.len <= max_cursor_len and pages_done < max_list_pages;
 }
 
-/// Launch-log lines from the minute poll repeat at most once per 10 minutes
-/// per job kind, and at once when what they say changes (another error, a
-/// different chat count), so the poll cannot flood the log.
 pub const log_repeat_interval_ms: u64 = 10 * 60 * 1000;
 
 pub fn logDue(last_logged_ms: u64, last_hash: u64, now_ms: u64, hash: u64) bool {
@@ -901,8 +769,6 @@ pub fn logDue(last_logged_ms: u64, last_hash: u64, now_ms: u64, hash: u64) bool 
     return now_ms -| last_logged_ms >= log_repeat_interval_ms;
 }
 
-/// "slack: workspace failed: NetworkFailed (HTTP 200)". Only the job kind,
-/// the error name and the status: never a token or message text.
 pub fn formatJobFailure(buffer: []u8, kind: []const u8, error_name: []const u8, http_status: u32) []const u8 {
     if (http_status == 0) return std.fmt.bufPrint(buffer, "slack: {s} failed: {s}", .{ kind, error_name }) catch "slack: job failed";
     return std.fmt.bufPrint(buffer, "slack: {s} failed: {s} (HTTP {d})", .{ kind, error_name, http_status }) catch "slack: job failed";
@@ -1020,16 +886,11 @@ test "attachmentSummary builds a compact line, falling back as needed" {
 }
 
 test "attachmentSummary truncates instead of splitting a multi-byte character" {
-    // "caf" + e-acute (2 bytes) landing right at the buffer's last byte: a
-    // byte-count cut would keep only the lead byte of the accented e and
-    // produce invalid UTF-8.
     var buffer: [4]u8 = undefined;
     const out = attachmentSummary(&buffer, "", "caf\u{e9}", "fallback");
     try std.testing.expect(std.unicode.utf8ValidateSlice(out));
     try std.testing.expectEqualStrings("caf", out);
 
-    // The combined "title: text" overflows the buffer: truncate the whole
-    // thing rather than discarding it for the fallback.
     var small: [10]u8 = undefined;
     const combined = attachmentSummary(&small, "Title", "a whole lot of text that will not fit", "fallback");
     try std.testing.expect(std.unicode.utf8ValidateSlice(combined));
@@ -1095,7 +956,6 @@ test "convertMrkdwn converts channel mentions, special mentions and subteam/date
     try std.testing.expectEqualStrings("@everyone", convertMrkdwn(&buffer, "<!everyone>", null));
     try std.testing.expectEqualStrings("@dev-team", convertMrkdwn(&buffer, "<!subteam^S123|@dev-team>", null));
     try std.testing.expectEqualStrings("Feb 18th, 2014", convertMrkdwn(&buffer, "<!date^1392734382^{date}|Feb 18th, 2014>", null));
-    // Slack's older clients send a label alongside here/channel/everyone too.
     try std.testing.expectEqualStrings("@here", convertMrkdwn(&buffer, "<!here|here>", null));
     try std.testing.expectEqualStrings("@channel", convertMrkdwn(&buffer, "<!channel|channel>", null));
 }
@@ -1111,7 +971,6 @@ test "convertMrkdwn never truncates within the app's max message length" {
 
 test "convertMrkdwn decodes html entities only after angle-bracket markup is resolved" {
     var buffer: [256]u8 = undefined;
-    // An escaped `&lt;` must never turn into a live `<...>` token.
     try std.testing.expectEqualStrings("<@U1> is not a mention", convertMrkdwn(&buffer, "&lt;@U1&gt; is not a mention", null));
     try std.testing.expectEqualStrings("Tom & Jerry", convertMrkdwn(&buffer, "Tom &amp; Jerry", null));
 }
@@ -1200,7 +1059,6 @@ test "Log is exactly-once per channel and ts" {
     try std.testing.expect(!log.mark("C1", "5.1"));
     try std.testing.expect(log.mark("C1", "5.2"));
     try std.testing.expect(log.mark("C2", "5.1"));
-    // The ring forgets the oldest entry once full.
     var buffer: [16]u8 = undefined;
     var index: usize = 0;
     while (index < Log.capacity) : (index += 1) {
@@ -1279,8 +1137,6 @@ test "tsSeconds rejects empty and malformed ts" {
     try std.testing.expectEqual(@as(?i64, null), tsSeconds("abc.1"));
 }
 
-// Shaped like a real conversations.list page: channels with names, a DM with
-// only a user id, an entry without an id, and a next_cursor.
 const workspace_fixture =
     \\{"ok":true,"channels":[
     \\{"id":"C0001","name":"general","is_channel":true,"is_im":false,"created":1700000000,"updated":1750000000123,"purpose":{"value":"x"}},
@@ -1305,8 +1161,6 @@ test "workspace page yields every channel with an id, DMs by user, and the next 
             try std.testing.expectEqualStrings("", channel.name);
         }
     }
-    // The empty view came from zero channels reaching the list: every entry
-    // with an id must survive parsing.
     try std.testing.expectEqual(@as(usize, 3), count);
     try std.testing.expectEqualStrings("C0001", ids[0]);
     try std.testing.expectEqualStrings("D0003", ids[2]);
@@ -1320,9 +1174,7 @@ test "a last page has no cursor, and pagination stops at the cap" {
     try std.testing.expectEqualStrings("", nextCursor(parsed.value.object));
     try std.testing.expect(!wantsNextPage("", 1, 512));
     try std.testing.expect(wantsNextPage("abc", 1, 512));
-    // A server that never stops sending cursors must not loop forever.
     try std.testing.expect(!wantsNextPage("abc", max_list_pages, 512));
-    // A cursor too long for a job argument would be cut and refetch page 1.
     try std.testing.expect(!wantsNextPage("abcd", 1, 3));
 }
 
@@ -1330,9 +1182,7 @@ test "poll log lines are rate limited, but a new error or count logs at once" {
     const hash_a: u64 = 1;
     const hash_b: u64 = 2;
     try std.testing.expect(logDue(0, 0, 5_000, hash_a));
-    // Same error on the next minute poll: quiet.
     try std.testing.expect(!logDue(5_000, hash_a, 65_000, hash_a));
-    // A different error is news: log it at once.
     try std.testing.expect(logDue(5_000, hash_a, 65_000, hash_b));
     try std.testing.expect(logDue(5_000, hash_a, 5_000 + log_repeat_interval_ms, hash_a));
 }
@@ -1364,11 +1214,9 @@ test "workspaceChannel skips unjoined channels but keeps DMs and joined channels
 test "newerMarkTs picks the newest real ts and skips bubbles without one" {
     try std.testing.expectEqualStrings("", newerMarkTs("", ""));
     try std.testing.expectEqualStrings("1740000000.000123", newerMarkTs("", "1740000000.000123"));
-    // A pending send bubble has no ts yet and must never win the fold.
     try std.testing.expectEqualStrings("1740000000.000123", newerMarkTs("1740000000.000123", ""));
     try std.testing.expectEqualStrings("1740000000.000123", newerMarkTs("1740000000.000123", "1740000000.000122"));
     try std.testing.expectEqualStrings("1740000000.000123", newerMarkTs("1740000000.000123", "1739999999.999999"));
-    // Malformed values lose to every real ts and stay out of an empty fold.
     try std.testing.expectEqualStrings("1740000000.000123", newerMarkTs("1740000000.000123", "garbage"));
     try std.testing.expectEqualStrings("", newerMarkTs("", "garbage"));
     try std.testing.expectEqualStrings("1740000000.000123", newerMarkTs("1740000000.000123", ".000123"));
@@ -1376,15 +1224,9 @@ test "newerMarkTs picks the newest real ts and skips bubbles without one" {
 
 test "markDebounce arms a fresh target, skips a repeated one and re-arms a changed one" {
     try std.testing.expectEqual(MarkStep.arm, markDebounce("", "", "C123", "1740000000.000123"));
-    // A history refresh that finds the same newest ts must not restart the
-    // quiet-period timer: a re-arm per poll would starve it of ever firing.
     try std.testing.expectEqual(MarkStep.skip, markDebounce("C123", "1740000000.000123", "C123", "1740000000.000123"));
-    // A new message in the open chat raises the target and restarts the wait.
     try std.testing.expectEqual(MarkStep.rearm, markDebounce("C123", "1740000000.000123", "C123", "1740000000.000124"));
-    // Switching chats replaces the pending target; the quiet period restarts
-    // so one request covers the last chat the user looked at.
     try std.testing.expectEqual(MarkStep.rearm, markDebounce("C123", "1740000000.000123", "C456", "1740000000.000123"));
-    // Nothing to mark: no displayed ts, or no channel.
     try std.testing.expectEqual(MarkStep.skip, markDebounce("", "", "C123", ""));
     try std.testing.expectEqual(MarkStep.skip, markDebounce("", "", "", "1740000000.000123"));
     try std.testing.expectEqual(MarkStep.skip, markDebounce("C123", "1740000000.000123", "C123", "garbage"));

@@ -1,14 +1,7 @@
-//! Pure wheel-accumulation math for chat list mouse scrolling. No Win32
-//! dependencies so it can be unit-tested on the host (see build.zig test
-//! step, like scrollbar.zig and message_scroll.zig).
 const std = @import("std");
 
 pub const WheelStep = struct { rows: i32, remainder: i32 };
 
-/// Accumulates a WM_MOUSEWHEEL delta (which can be smaller than one notch on
-/// smooth/precision touchpads) and converts whole notches into list rows to
-/// scroll. `remainder` carries the leftover delta into the next event so no
-/// motion is lost between calls.
 pub fn wheelRows(accumulated: i32, delta: i32, wheel_delta: i32, lines_per_notch: i32) WheelStep {
     const total = accumulated + delta;
     const notches = @divTrunc(total, wheel_delta);

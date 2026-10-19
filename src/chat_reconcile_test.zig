@@ -1,6 +1,3 @@
-//! Host harness for the actual UI read/retry handlers extracted by build.zig.
-//! Windows painting, disk I/O and the queue are stubbed; decisions, JSON
-//! validation and result generation guards are production code.
 const std = @import("std");
 const chat_key = @import("chat_key");
 const chat_reconcile = @import("chat_reconcile");
@@ -112,18 +109,12 @@ fn msgCacheStore(a: *App, _: chat_key.Key, _: []const u8) void {
     a.cached += 1;
 }
 fn applyChats(a: *App, raw: []const u8, _: bool) bool {
-    // Only chat-list painting is stubbed: supply the fresh row's stamp.
     a.chats[0].timestamp.set(raw);
     return true;
 }
 fn saveChatsCache(_: *App, _: []const u8) void {}
 fn setStatus(_: *App, _: []const u8) void {}
 fn appendLaunchLog(_: *App, _: []const u8) void {}
-
-// Generated below: refreshMessages, reconcileOpenChat, scheduleMessageReadRetry,
-// the worker's job-to-result copy, the chats/messages result handlers, and the JSON
-// validation/stamp portions of applyMessageData. The latter's rendering body
-// alone is replaced, so the host never calls Windows APIs.
 
 test "fresh sidebar row triggers one generation-guarded read" {
     var a = fixture();
@@ -168,7 +159,6 @@ test "an identical fresh read for the open chat is not repainted" {
     deliver(&a, &result);
     try std.testing.expectEqual(painted, a.painted);
     try std.testing.expectEqual(@as(u32, 0), a.cached);
-    // A changed payload still paints and caches.
     refreshMessages(&a);
     result = resultFor(a.last_job);
     result.data = "{\"data\":{\"messages\":[{}]}}";
@@ -224,7 +214,6 @@ test "stale success and failure never paint, cache or consume retry budget" {
     deliver(&a, &old);
     try std.testing.expectEqual(@as(u32, 0), a.painted);
     try std.testing.expectEqual(@as(u32, 0), a.cached);
-    // A stale same-chat generation is rejected as well.
     a.selected_chat = 0;
     refreshMessages(&a);
     old.ok = false;

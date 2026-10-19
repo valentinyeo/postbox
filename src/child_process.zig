@@ -1,6 +1,5 @@
 const std = @import("std");
 
-// Serialize creation so Windows children cannot inherit another spawn's pipe handles.
 var spawn_mutex: std.Io.Mutex = .init;
 
 pub fn spawn(io: std.Io, options: std.process.SpawnOptions) std.process.SpawnError!std.process.Child {

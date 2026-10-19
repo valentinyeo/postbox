@@ -124,7 +124,7 @@ FNR == 1 {
     if (status_call && code ~ /\$LASTEXITCODE[[:space:]]+-ne[[:space:]]+3([^0-9]|$)/) expected_three = FNR
     if (expected_three && code ~ /^[[:space:]]*exit[[:space:]]+0([[:space:];]|$)/) success_exit = 1
     if (file == ".github/workflows/automerge.yml" && code ~ /required=/ && code ~ /code-review/)
-        fail(FNR, "B5", "automerge requires the AI code-review check, so an AI reviewer blocks merges", "required='\''[\"ci\",\"tdlib\",\"windows-smoke\"]'\''; an AI reviewer may comment but never gates a merge")
+        fail(FNR, "B5", "automerge requires the AI code-review check, so an AI reviewer blocks merges", "required='\''[\"ci\",\"tdlib\",\"windows-smoke\",\"no-comments\"]'\''; an AI reviewer may comment but never gates a merge")
     if (command == "") command_line = FNR
     command = command " " code
     if (code ~ /\\[[:space:]]*$/) next
