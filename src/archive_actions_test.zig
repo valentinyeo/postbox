@@ -58,6 +58,7 @@ const App = struct {
     archive_batch_total: usize = 0,
     chats_hwnd: ?usize = null,
     canvas: ?usize = null,
+    compose: ?usize = null,
     status: Utf8Text(191) = .{},
     saved: [4096]u8 = undefined,
     saved_len: usize = 0,
@@ -98,7 +99,7 @@ const win = struct {
     }
 };
 fn fixture(state: *archive_rules.State) App {
-    var a = App{ .archive_state = state, .chats_hwnd = 4, .canvas = 6, .hwnd = 5 };
+    var a = App{ .archive_state = state, .chats_hwnd = 4, .canvas = 6, .hwnd = 5, .compose = 1 };
     a.chats[0].jid.set("a@g.us");
     a.chats[1].jid.set("b@g.us");
     for (a.chats[0..2]) |*chat| chat.timestamp.set("2026-10-10T10:00:00Z");
@@ -359,8 +360,34 @@ test "pending unarchives stay hidden in archived view and share batch accounting
     try std.testing.expectEqualStrings("Chat unarchived", a.status.slice());
 }
 
+test "Ctrl+E archives from the compose box" {
+    for ([_]bool{ false, true }) |keep| {
+        var state = archive_rules.State{};
+        var a = fixture(&state);
+        const message = win.MSG{};
+        try std.testing.expect(!archiveKey(&a, 'E', true, true, keep, a.compose, &message));
+        try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+        try std.testing.expect(archiveKey(&a, 'E', true, false, keep, a.compose, &message));
+        try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+        try std.testing.expectEqualStrings("a@g.us", a.pending_archives[0].jid.slice());
+        try std.testing.expect(!a.pending_archives[0].should_unarchive);
+        try std.testing.expectEqual(keep, state.isKept("a@g.us"));
+        const repeated = win.MSG{ .lParam = 1 << 30 };
+        try std.testing.expect(!archiveKey(&a, 'E', true, false, keep, a.compose, &repeated));
+        try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+    }
+}
+
 test "archive shortcuts ignore composer search and other edit fields" {
-    for ([_]usize{ 1, 2, 3 }) |focus| {
+    {
+        var state = archive_rules.State{};
+        var a = fixture(&state);
+        const message = win.MSG{};
+        try std.testing.expect(!archiveKey(&a, 'E', false, false, false, a.compose, &message));
+        try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+        try std.testing.expectEqual(@as(usize, 0), a.log_count);
+    }
+    for ([_]usize{ 2, 3 }) |focus| {
         for ([_]bool{ false, true }) |keep| {
             var state = archive_rules.State{};
             var a = fixture(&state);
