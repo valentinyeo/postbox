@@ -7754,9 +7754,9 @@ fn unfurlProviderLabel(provider: unfurl.Provider) []const u8 {
 
 fn unfurlPlaceholderColor(provider: unfurl.Provider) u32 {
     return switch (provider) {
-        .youtube => theme.primary_container,
-        .instagram => theme.secondary_container,
-        .facebook => theme.surface_container_highest,
+        .youtube => rgb(197, 40, 40),
+        .instagram => rgb(225, 48, 108),
+        .facebook => rgb(24, 119, 242),
         .none => theme.surface_container_highest,
     };
 }
