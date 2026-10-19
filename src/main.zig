@@ -11570,9 +11570,9 @@ fn paneFollowSelection(a: *App, open_jid: []const u8) void {
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
 }
 
-fn archiveShortcutAllowed(a: *const App, focus: ?win.HWND, lparam: win.LPARAM) bool {
+fn archiveShortcutAllowed(a: *const App, focus: ?win.HWND, lparam: win.LPARAM, allow_compose: bool) bool {
     if ((@as(usize, @bitCast(lparam)) & (@as(usize, 1) << 30)) != 0) return false;
-    return focus != null and (focus == a.chats_hwnd or focus == a.canvas or focus == a.hwnd);
+    return focus != null and (focus == a.chats_hwnd or focus == a.canvas or focus == a.hwnd or (allow_compose and focus == a.compose));
 }
 
 fn unarchiveSentChat(a: *App, jid: []const u8) void {
@@ -16796,7 +16796,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (control and !alt and key == 'E') {
-        if (!archiveShortcutAllowed(a, focus, message.lParam)) return false;
+        if (!archiveShortcutAllowed(a, focus, message.lParam, true)) return false;
         archiveSelectedChat(a, shift, .shortcut);
         return true;
     }
@@ -16932,7 +16932,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (key == 'E') {
-        if (control or alt or shift or !archiveShortcutAllowed(a, focus, message.lParam)) return false;
+        if (control or alt or shift or !archiveShortcutAllowed(a, focus, message.lParam, false)) return false;
         archiveSelectedChat(a, false, .shortcut);
         return true;
     }
