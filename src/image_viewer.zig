@@ -1,3 +1,4 @@
+const theme = @import("theme.zig");
 const std = @import("std");
 const win = @import("win32.zig").c;
 const webp_detect = @import("webp.zig");
@@ -229,7 +230,7 @@ fn contains(rect: win.RECT, x: i32, y: i32) bool {
 }
 
 fn label(hdc: win.HDC, text: [*:0]const u16, rect: *win.RECT, enabled: bool) void {
-    _ = win.SetTextColor(hdc, if (enabled) 0x00eeeeee else 0x00666666);
+    _ = win.SetTextColor(hdc, if (enabled) theme.on_surface else theme.outline);
     _ = win.DrawTextW(hdc, text, -1, rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
 }
 
@@ -242,7 +243,7 @@ pub fn windowProc(a: anytype, hwnd: win.HWND, message: win.UINT, wparam: win.WPA
             defer _ = win.EndPaint(hwnd, &ps);
             var client = std.mem.zeroes(win.RECT);
             _ = win.GetClientRect(hwnd, &client);
-            if (win.CreateSolidBrush(0x00090909)) |brush| {
+            if (win.CreateSolidBrush(theme.surface)) |brush| {
                 _ = win.FillRect(hdc, &client, brush);
                 _ = win.DeleteObject(brush);
             }

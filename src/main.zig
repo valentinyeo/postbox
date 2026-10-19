@@ -1,4 +1,5 @@
 const std = @import("std");
+const theme = @import("theme.zig");
 const child_process = @import("child_process.zig");
 const auth_status = @import("auth_status.zig");
 const audio = @import("audio.zig");
@@ -223,15 +224,15 @@ const emoji_draw = @import("emoji_draw.zig");
 const shortcodes = @import("shortcodes.zig");
 const accounts = @import("accounts.zig");
 
-const color_bg = rgb(11, 20, 26);
-const color_panel = rgb(17, 27, 33);
-const color_raised = rgb(32, 44, 51);
-const color_selected = rgb(42, 57, 66);
-const color_text = rgb(233, 237, 239);
-const color_muted = rgb(134, 150, 160);
-const color_accent = rgb(0, 168, 132);
-const color_incoming = rgb(32, 44, 51);
-const color_outgoing = rgb(0, 92, 75);
+const color_bg = theme.surface;
+const color_panel = theme.surface_container_low;
+const color_raised = theme.surface_container_high;
+const color_selected = theme.secondary_container;
+const color_text = theme.on_surface;
+const color_muted = theme.on_surface_variant;
+const color_accent = theme.primary;
+const color_incoming = theme.surface_container_high;
+const color_outgoing = theme.primary_container;
 
 fn rgb(r: u8, g: u8, b: u8) win.COLORREF {
     return @as(win.COLORREF, r) | (@as(win.COLORREF, g) << 8) | (@as(win.COLORREF, b) << 16);
@@ -680,6 +681,7 @@ const App = struct {
     voice_jid: Utf8Text(191) = .{},
     // 0-2: composer buttons, 3-4: Slack setup dialog, 5-7: Telegram login dialog.
     btn_hover: [9]bool = .{ false, false, false, false, false, false, false, false, false },
+    search_prev_proc: usize = 0,
     btn_prev_proc: [9]usize = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0 },
     tooltips: ?win.HWND = null,
     status: ?win.HWND = null,
@@ -1184,8 +1186,32 @@ fn subclassComposerButton(a: *App, hwnd: ?win.HWND, index: usize) void {
     a.btn_prev_proc[index] = @bitCast(prev);
 }
 
-fn paintRoundedButton(hdc: win.HDC, rect: win.RECT, face: win.COLORREF, text_color: win.COLORREF, font: win.HFONT, frame: ?win.COLORREF, text: []const u16) void {
-    const radius: i32 = 10;
+fn searchFieldProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
+    const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    const result = win.CallWindowProcW(@ptrFromInt(a.search_prev_proc), hwnd, message, wparam, lparam);
+    if (message == win.WM_PAINT and win.GetWindowTextLengthW(hwnd) == 0) {
+        var cue: [64]u16 = @splat(0);
+        if (win.SendMessageW(hwnd, win.EM_GETCUEBANNER, @intFromPtr(&cue), cue.len) != 0) {
+            const hdc = win.GetDC(hwnd) orelse return result;
+            defer _ = win.ReleaseDC(hwnd, hdc);
+            const saved = win.SaveDC(hdc);
+            defer _ = win.RestoreDC(hdc, saved);
+            var rect: win.RECT = undefined;
+            _ = win.GetClientRect(hwnd, &rect);
+            _ = win.FillRect(hdc, &rect, a.brush_raised.?);
+            rect.left += px(a, 16);
+            rect.right -= px(a, 16);
+            _ = win.SetBkMode(hdc, win.TRANSPARENT);
+            _ = win.SetTextColor(hdc, theme.on_surface_variant);
+            _ = win.SelectObject(hdc, a.font.?);
+            _ = win.DrawTextW(hdc, &cue, -1, &rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
+        }
+    }
+    return result;
+}
+
+fn paintRoundedButton(a: *App, hdc: win.HDC, rect: win.RECT, face: win.COLORREF, text_color: win.COLORREF, font: win.HFONT, frame: ?win.COLORREF, text: []const u16) void {
+    const radius = @min(@min(rect.right - rect.left, rect.bottom - rect.top), px(a, theme.radius_field * 2));
     const rgn = win.CreateRoundRectRgn(rect.left, rect.top, rect.right + 1, rect.bottom + 1, radius, radius) orelse return;
     defer _ = win.DeleteObject(rgn);
     const brush = win.CreateSolidBrush(face) orelse return;
@@ -1210,7 +1236,7 @@ fn buttonLabel(item: *win.DRAWITEMSTRUCT, buffer: []u16) []const u16 {
     return buffer[0..@intCast(text_len)];
 }
 
-const color_recording = rgb(229, 57, 53);
+const color_recording = theme.@"error";
 
 fn drawMicIcon(a: *App, hdc: win.HDC, cx: i32, cy: i32, color: win.COLORREF) void {
     const brush = win.CreateSolidBrush(color) orelse return;
@@ -1240,11 +1266,11 @@ fn drawVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     const hdc = item.hDC;
     _ = win.FillRect(hdc, &item.rcItem, a.brush_bg.?);
     const recording = a.voice_active;
-    const face: win.COLORREF = if (pressed) color_outgoing else if (a.btn_hover[8]) color_selected else color_raised;
-    paintRoundedButton(hdc, item.rcItem, face, color_text, a.font_bold.?, if (recording) color_recording else if (focused) color_accent else null, &.{});
+    const face: win.COLORREF = if (pressed) theme.primary_container else if (a.btn_hover[8]) theme.surface_container_highest else theme.secondary_container;
+    paintRoundedButton(a, hdc, item.rcItem, face, if (pressed) theme.on_primary_container else theme.on_secondary_container, a.font_bold.?, if (recording) color_recording else if (focused) color_accent else null, &.{});
     const mid_y = @divTrunc(item.rcItem.top + item.rcItem.bottom, 2);
     if (!recording) {
-        drawMicIcon(a, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, color_text);
+        drawMicIcon(a, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, if (pressed) theme.on_primary_container else theme.on_secondary_container);
         return;
     }
     // Red dot, elapsed time, live level, and the mic at the right end.
@@ -1299,15 +1325,16 @@ fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     // The strip behind the buttons is the main-window background; paint it so
     // the rounded corners don't leave square artifacts.
     _ = win.FillRect(item.hDC, &item.rcItem, a.brush_bg.?);
-    const face: win.COLORREF = if (pressed or (index == 0 and dictating)) color_outgoing else if (a.btn_hover[index]) color_selected else color_raised;
+    const face: win.COLORREF = if (index == 1 and !pressed) theme.primary else if (pressed or (index == 0 and dictating)) theme.primary_container else if (a.btn_hover[index]) theme.surface_container_highest else theme.secondary_container;
     var text_buffer: [32]u16 = undefined;
     paintRoundedButton(
+        a,
         item.hDC,
         item.rcItem,
         face,
-        if (index == 0 and dictating and !pressed) color_accent else color_text,
+        if (index == 1 and !pressed) theme.on_primary else if (pressed or (index == 0 and dictating)) theme.on_primary_container else theme.on_secondary_container,
         if (index == 2) a.font_emoji.? else a.font_bold.?,
-        if (focused) color_accent else null,
+        if (focused) (if (index == 1 and !pressed) theme.on_primary else theme.primary) else null,
         buttonLabel(item, &text_buffer),
     );
 }
@@ -1329,7 +1356,7 @@ fn drawSetupButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     // without focus.
     const frame: ?win.COLORREF = if (index == 3 or index == 5 or focused) color_accent else null;
     var text_buffer: [32]u16 = undefined;
-    paintRoundedButton(item.hDC, item.rcItem, face, color_text, a.font_bold.?, frame, buttonLabel(item, &text_buffer));
+    paintRoundedButton(a, item.hDC, item.rcItem, face, color_text, a.font_bold.?, frame, buttonLabel(item, &text_buffer));
 }
 
 fn setFont(hwnd: ?win.HWND, font: ?win.HFONT) void {
@@ -7727,10 +7754,10 @@ fn unfurlProviderLabel(provider: unfurl.Provider) []const u8 {
 
 fn unfurlPlaceholderColor(provider: unfurl.Provider) u32 {
     return switch (provider) {
-        .youtube => rgb(197, 40, 40),
-        .instagram => rgb(225, 48, 108),
-        .facebook => rgb(24, 119, 242),
-        .none => rgb(59, 74, 84),
+        .youtube => theme.primary_container,
+        .instagram => theme.secondary_container,
+        .facebook => theme.surface_container_highest,
+        .none => theme.surface_container_highest,
     };
 }
 
@@ -7739,9 +7766,11 @@ fn drawUnfurlCard(hdc: win.HDC, a: *App, message: *Message, x: i32, top: i32, wi
     const entry = unfurlEntryFor(a, message) orelse return;
     const bottom = top + unfurl_card_height;
     message.unfurl_card_hit = .{ .left = x, .top = top, .right = x + card_width, .bottom = bottom };
-    const card_brush = win.CreateSolidBrush(rgb(24, 34, 41)) orelse return;
+    const card_brush = win.CreateSolidBrush(theme.surface_container) orelse return;
     defer _ = win.DeleteObject(card_brush);
     const old_card = win.SelectObject(hdc, card_brush);
+    const old_pen = win.SelectObject(hdc, win.GetStockObject(win.NULL_PEN));
+    defer _ = win.SelectObject(hdc, old_pen);
     _ = win.RoundRect(hdc, x, top, x + card_width, bottom, 10, 10);
     _ = win.SelectObject(hdc, old_card);
 
@@ -7761,7 +7790,7 @@ fn drawUnfurlCard(hdc: win.HDC, a: *App, message: *Message, x: i32, top: i32, wi
         _ = win.FillRect(hdc, &.{ .left = x, .top = top, .right = thumb_right, .bottom = bottom }, tint);
     }
     // Play affordance over the thumbnail half.
-    const play_brush = win.CreateSolidBrush(rgb(255, 255, 255)) orelse return;
+    const play_brush = win.CreateSolidBrush(theme.on_surface) orelse return;
     defer _ = win.DeleteObject(play_brush);
     const old_play = win.SelectObject(hdc, play_brush);
     const center_x = x + @divTrunc(unfurl_thumb_width, 2);
@@ -13741,11 +13770,19 @@ fn layout(a: *App, width: i32, height: i32) void {
     a.compose_strip_top = height - sizes.strip_height;
     if (a.search) |hwnd| {
         _ = win.MoveWindow(hwnd, px(a, 12), header_height + px(a, 8), left_width - px(a, 24), px(a, 34), win.TRUE);
-        // Child EDIT controls can't use DWM corner rounding, so clip to a rounded region instead.
-        if (win.CreateRoundRectRgn(0, 0, left_width - px(a, 24) + 1, px(a, 34) + 1, px(a, 12), px(a, 12))) |rgn| {
-            // On success the system owns the region; only free it if the call failed.
+        _ = win.SendMessageW(hwnd, win.EM_SETMARGINS, win.EC_LEFTMARGIN | win.EC_RIGHTMARGIN, @as(win.LPARAM, px(a, 16)) | (@as(win.LPARAM, px(a, 16)) << 16));
+        if (win.CreateRoundRectRgn(0, 0, left_width - px(a, 24) + 1, px(a, 34) + 1, @min(px(a, theme.radius_field * 2), px(a, 34)), @min(px(a, theme.radius_field * 2), px(a, 34)))) |rgn| {
             if (win.SetWindowRgn(hwnd, rgn, win.TRUE) == 0) _ = win.DeleteObject(rgn);
         }
+    }
+    if (a.compose) |hwnd| {
+        const edit_width = width - left_width - px(a, 310) - scrollbar_width;
+        const diameter = @min(px(a, theme.radius_field * 2), sizes.edit_height);
+        if (win.CreateRoundRectRgn(0, 0, edit_width + 1, sizes.edit_height + 1, diameter, diameter)) |rgn| {
+            if (win.SetWindowRgn(hwnd, rgn, win.TRUE) == 0) _ = win.DeleteObject(rgn);
+        }
+        var rect = win.RECT{ .left = @divTrunc(diameter, 2), .top = px(a, 8), .right = edit_width - @divTrunc(diameter, 2), .bottom = sizes.edit_height - px(a, 8) };
+        _ = win.SendMessageW(hwnd, win.EM_SETRECTNP, 0, @bitCast(@intFromPtr(&rect)));
     }
     if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + search_height + status_row_height, left_width - scrollbar_width, height - header_height - search_height - status_row_height - status_height - updateCardSpan(a), win.TRUE);
     if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);
@@ -14108,6 +14145,8 @@ fn mixedSliceWidth(hdc: win.HDC, text_font: win.HFONT, emoji_font: win.HFONT, li
 // A link slice is underlined and accent-colored; the caller records the hit
 // rect against the whole word so every chunk of a broken URL stays a link.
 fn drawWordSlice(hdc: win.HDC, a: *App, text_font: win.HFONT, emoji_font: win.HFONT, line_height: i32, text_ascent: i32, slice: []const u16, cursor_x_in: i32, line_top: i32, link: bool) i32 {
+    const text_color = win.GetTextColor(hdc);
+    defer _ = win.SetTextColor(hdc, text_color);
     var runs: [max_text_runs]TextRun = undefined;
     const count = splitRuns(slice, &runs);
     var cursor_x = cursor_x_in;
@@ -14126,7 +14165,6 @@ fn drawWordSlice(hdc: win.HDC, a: *App, text_font: win.HFONT, emoji_font: win.HF
         _ = win.TextOutW(hdc, cursor_x, line_top, part.ptr, @intCast(part.len));
         cursor_x += runWidth(hdc, part);
     }
-    if (link) _ = win.SetTextColor(hdc, color_text);
     return cursor_x;
 }
 
@@ -14349,9 +14387,20 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
     const selected = (item.itemState & win.ODS_SELECTED) != 0;
     // Ctrl+A marks every row: green fill plus an accent bar on the left.
     const bulk_selected = a.bulk.count > 0 and a.bulk.contains(chat.jid.slice());
-    const background = win.CreateSolidBrush(if (bulk_selected) color_outgoing else if (selected) color_selected else color_panel) orelse return;
+    const background = win.CreateSolidBrush(theme.surface_container_low) orelse return;
     defer _ = win.DeleteObject(background);
     _ = win.FillRect(item.hDC, &item.rcItem, background);
+    if (selected or bulk_selected) {
+        const brush = win.CreateSolidBrush(if (bulk_selected) theme.primary_container else theme.secondary_container) orelse return;
+        defer _ = win.DeleteObject(brush);
+        const old_brush = win.SelectObject(item.hDC, brush);
+        const old_pen = win.SelectObject(item.hDC, win.GetStockObject(win.NULL_PEN));
+        _ = win.RoundRect(item.hDC, item.rcItem.left + px(a, 8), item.rcItem.top + px(a, 2), item.rcItem.right - px(a, 8), item.rcItem.bottom - px(a, 2), px(a, theme.radius_row * 2), px(a, theme.radius_row * 2));
+        _ = win.SelectObject(item.hDC, old_pen);
+        _ = win.SelectObject(item.hDC, old_brush);
+    }
+    const row_text = if (bulk_selected) theme.on_primary_container else if (selected) theme.on_secondary_container else theme.on_surface;
+    const row_muted = if (selected or bulk_selected) row_text else theme.on_surface_variant;
     _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
     if (bulk_selected) {
         if (win.CreateSolidBrush(color_accent)) |bar_brush| {
@@ -14373,7 +14422,7 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
         drawAvatarBitmap(item.hDC, avatar_entry.?.bitmap.?, avatar_left, avatar_top, 42);
     } else {
         // Anti-aliased circle via per-pixel alpha; GDI Ellipse has a hard edge.
-        if (createAvatarCircleDib(59, 74, 84)) |circle| {
+        if (createAvatarCircleDib(@truncate(theme.surface_container_highest), @truncate(theme.surface_container_highest >> 8), @truncate(theme.surface_container_highest >> 16))) |circle| {
             defer _ = win.DeleteObject(circle);
             drawAvatarBitmap(item.hDC, circle, avatar_left, avatar_top, 42);
         }
@@ -14390,14 +14439,14 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
     const name_text = chat.name.slice();
     if (containsEmoji(name_text)) {
         _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
-        _ = win.SetTextColor(item.hDC, color_text);
+        _ = win.SetTextColor(item.hDC, row_text);
         const line_h = textLineHeight(item.hDC, a.font_bold.?);
         const name_y = item.rcItem.top + px(a, 10) + @divTrunc(px(a, 24) - line_h, 2);
         _ = drawMixedLine(item.hDC, a.font_bold.?, a.font_emoji orelse a.font_bold.?, name_text, item.rcItem.left + px(a, 66), name_y);
     }
 
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
-    _ = win.SetTextColor(item.hDC, color_text);
+    _ = win.SetTextColor(item.hDC, row_text);
     const pinned_chat = isChatPinned(a, chat.jid.slice());
     var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 34) };
     _ = win.DrawTextW(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
@@ -14406,25 +14455,27 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
         _ = drawMixedLine(item.hDC, a.font_bold.?, a.font_emoji orelse a.font_bold.?, &pin_glyph, item.rcItem.right - px(a, 76), item.rcItem.top + px(a, 12));
     }
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
-    _ = win.SetTextColor(item.hDC, color_muted);
+    _ = win.SetTextColor(item.hDC, row_muted);
     var time_rect = win.RECT{ .left = item.rcItem.right - px(a, 52), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, 10), .bottom = item.rcItem.top + px(a, 32) };
     _ = win.DrawTextW(item.hDC, chat.time.ptr(), @intCast(chat.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
     const marker = archiveMarker(a, chat);
     var kind_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, if (marker != null) @as(i32, 130) else 42), .bottom = item.rcItem.top + px(a, 56) };
     _ = win.DrawTextW(item.hDC, chat.kind.ptr(), @intCast(chat.kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
     if (marker) |text| {
-        _ = win.SetTextColor(item.hDC, color_accent);
+        _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else theme.primary);
         var marker_rect = win.RECT{ .left = item.rcItem.right - px(a, 128), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, 40), .bottom = item.rcItem.top + px(a, 56) };
         _ = win.DrawTextW(item.hDC, text, -1, &marker_rect, win.DT_RIGHT | win.DT_SINGLELINE);
-        _ = win.SetTextColor(item.hDC, color_muted);
+        _ = win.SetTextColor(item.hDC, row_muted);
     }
 
     if (chat.unread or chat.unread_count > 0) {
-        const unread_brush = win.CreateSolidBrush(color_accent) orelse return;
-        defer _ = win.DeleteObject(unread_brush);
-        const previous = win.SelectObject(item.hDC, unread_brush);
-        _ = win.Ellipse(item.hDC, item.rcItem.right - px(a, 30), item.rcItem.top + px(a, 36), item.rcItem.right - px(a, 12), item.rcItem.top + px(a, 54));
-        _ = win.SelectObject(item.hDC, previous);
+        const diameter = px(a, theme.unread_dot_px);
+        const dot_right = item.rcItem.right - px(a, 12);
+        const dot_top = @divTrunc(kind_rect.top + kind_rect.bottom - diameter, 2);
+        if (createAvatarCircleDib(@truncate(theme.primary), @truncate(theme.primary >> 8), @truncate(theme.primary >> 16))) |dot| {
+            defer _ = win.DeleteObject(dot);
+            drawAvatarBitmap(item.hDC, dot, dot_right - diameter, dot_top, diameter);
+        }
     }
 }
 
@@ -14465,7 +14516,7 @@ fn transcriptRender(hdc: win.HDC, a: *App, message: *const Message, shown: c_int
                 .blank => y += 8,
                 .rule => {
                     if (draw) {
-                        const rule_brush = win.CreateSolidBrush(rgb(59, 74, 84)) orelse return y - top;
+                        const rule_brush = win.CreateSolidBrush(theme.outline_variant) orelse return y - top;
                         defer _ = win.DeleteObject(rule_brush);
                         var rule_rect = win.RECT{ .left = left, .top = y + 3, .right = left + width, .bottom = y + 5 };
                         _ = win.FillRect(hdc, &rule_rect, rule_brush);
@@ -14487,12 +14538,12 @@ fn transcriptRender(hdc: win.HDC, a: *App, message: *const Message, shown: c_int
                     _ = win.SetTextColor(hdc, color_accent);
                     if (draw) _ = win.TextOutW(hdc, left, y, &bullet_char, 1);
                     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
-                    _ = win.SetTextColor(hdc, color_text);
+                    _ = win.SetTextColor(hdc, if (message.from_me) theme.on_primary_container else theme.on_surface);
                     y += wrapMixedSink(hdc, a, content.ptr, @intCast(content.len), width - 16, draw, left + 16, y, null) + 2;
                 },
                 .text => {
                     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
-                    _ = win.SetTextColor(hdc, color_text);
+                    _ = win.SetTextColor(hdc, if (message.from_me) theme.on_primary_container else theme.on_surface);
                     y += wrapMixedSink(hdc, a, line.ptr, @intCast(line.len), width, draw, left, y, null) + 2;
                 },
             }
@@ -14897,7 +14948,7 @@ fn drawQuoteBlock(hdc: win.HDC, a: *App, message: *const Message, left: i32, rig
         var body_rect = win.RECT{ .left = text_left, .top = cursor, .right = text_right, .bottom = cursor + body_height };
         _ = win.DrawTextW(hdc, message.quote.ptr(), @intCast(message.quote.len), &body_rect, win.DT_LEFT | win.DT_WORDBREAK | win.DT_EDITCONTROL | win.DT_WORD_ELLIPSIS | win.DT_NOPREFIX);
     }
-    _ = win.SetTextColor(hdc, color_text);
+    _ = win.SetTextColor(hdc, if (message.from_me) theme.on_primary_container else theme.on_surface);
     return block_bottom + px(a, quote_after_gap);
 }
 
@@ -14987,13 +15038,12 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         const left: i32 = if (message.from_me) client.right - bubble_width - px(a, 24) else if (in_group) px(a, 62) else px(a, 24);
         const right = left + bubble_width;
         message.bubble_hit = .{ .left = left, .top = y, .right = right, .bottom = y + height };
-        const failed = message.send_state == .failed;
-        const brush = win.CreateSolidBrush(if (failed) color_muted else if (message.from_me) color_outgoing else color_incoming) orelse continue;
+        const brush = win.CreateSolidBrush(if (message.from_me) color_outgoing else color_incoming) orelse continue;
         const old_brush = win.SelectObject(hdc, brush);
         const selected = if (a.selected_message) |selected_index| selected_index == index else false;
-        const selection_pen = if (selected) win.CreatePen(win.PS_SOLID, 2, color_accent) else null;
+        const selection_pen = if (selected) win.CreatePen(win.PS_SOLID, px(a, 2), theme.primary) else null;
         const old_pen = win.SelectObject(hdc, if (selection_pen) |pen| @ptrCast(pen) else win.GetStockObject(win.NULL_PEN));
-        _ = win.RoundRect(hdc, left, y, right, y + height, px(a, 18), px(a, 18));
+        _ = win.RoundRect(hdc, left, y, right, y + height, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2));
         _ = win.SelectObject(hdc, old_brush);
         _ = win.SelectObject(hdc, old_pen);
         if (selection_pen) |pen| _ = win.DeleteObject(pen);
@@ -15009,11 +15059,11 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             else
                 null;
             _ = win.SetTextColor(hdc, if (message.from_me)
-                color_text
+                theme.on_primary_container
             else if (name_tint) |tint|
                 rgb(tint.r, tint.g, tint.b)
             else
-                rgb(83, 189, 235));
+                theme.primary);
             const sender_band = senderBandHeight(hdc, a);
             var sender_rect = win.RECT{ .left = left + px(a, 12), .top = y + px(a, 6), .right = right - px(a, 52), .bottom = y + px(a, 6) + sender_band };
             const sender_text = message.sender.slice();
@@ -15053,7 +15103,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                     if (button_pen) |pen| _ = win.DeleteObject(pen);
                     if (button_brush) |dead_brush| _ = win.DeleteObject(dead_brush);
                     _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
-                    _ = win.SetTextColor(hdc, color_text);
+                    _ = win.SetTextColor(hdc, if (message.from_me) theme.on_primary_container else theme.on_surface);
                     var play_rect = win.RECT{ .left = center_x - radius, .top = center_y - radius, .right = center_x + radius, .bottom = center_y + radius };
                     _ = win.DrawTextW(hdc, lit("▶"), -1, &play_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
                 }
@@ -15075,7 +15125,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             } else {
                 const playing_now = active and a.audio_state == .playing;
                 const button_brush = win.CreateSolidBrush(color_accent) orelse continue;
-                const glyph_brush = win.CreateSolidBrush(color_text) orelse {
+                const glyph_brush = win.CreateSolidBrush(theme.on_primary) orelse {
                     _ = win.DeleteObject(button_brush);
                     continue;
                 };
@@ -15109,7 +15159,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
 
                 const track_left = left + px(a, 94);
                 const track_right = right - px(a, 64);
-                const track_brush = win.CreateSolidBrush(rgb(59, 74, 84)) orelse continue;
+                const track_brush = win.CreateSolidBrush(theme.outline_variant) orelse continue;
                 var track = win.RECT{ .left = track_left, .top = button_cy - 3, .right = track_right, .bottom = button_cy + 3 };
                 _ = win.FillRect(hdc, &track, track_brush);
                 if (active and a.audio_duration_ms > 0) {
@@ -15203,7 +15253,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             text_top += px(a, 54);
         }
         _ = win.SelectObject(hdc, @ptrCast(a.font.?));
-        _ = win.SetTextColor(hdc, color_text);
+        _ = win.SetTextColor(hdc, if (message.from_me) theme.on_primary_container else theme.on_surface);
         // Matches measureMessage's skip_body_line: a quote block with an
         // empty body draws no placeholder line beneath it.
         const skip_body_line = message.text.len == 0 and message.quote.len > 0;
@@ -15219,14 +15269,14 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             const lo = @min(a.sel_anchor_word, a.sel_focus_word);
             const hi = @max(a.sel_anchor_word, a.sel_focus_word);
             if (hi < message.word_count) {
-                const highlight = win.CreateSolidBrush(rgb(0, 105, 85)) orelse return;
+                const highlight = win.CreateSolidBrush(theme.secondary_container) orelse return;
                 defer _ = win.DeleteObject(highlight);
                 var word_index = lo;
                 while (word_index <= hi) : (word_index += 1) {
                     const span = &message.word_rects[word_index];
                     _ = win.FillRect(hdc, &span.rect, highlight);
                     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
-                    _ = win.SetTextColor(hdc, color_text);
+                    _ = win.SetTextColor(hdc, theme.on_secondary_container);
                     const slice = message.text.slice()[span.start..][0..span.len];
                     _ = win.TextOutW(hdc, span.rect.left, span.rect.top, slice.ptr, @intCast(slice.len));
                 }
@@ -15235,12 +15285,12 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         if (message.reaction.len > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font.?));
             // Muted until wacli confirms an optimistic reaction.
-            _ = win.SetTextColor(hdc, if (message.reaction_pending) color_muted else color_text);
+            _ = win.SetTextColor(hdc, if (message.reaction_pending) color_muted else if (message.from_me) theme.on_primary_container else theme.on_surface);
             var reaction_rect = win.RECT{ .left = left + px(a, 12), .top = y + height - px(a, 30), .right = left + px(a, 52), .bottom = y + height - px(a, 6) };
             _ = win.DrawTextW(hdc, message.reaction.ptr(), @intCast(message.reaction.len), &reaction_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
         }
         _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-        _ = win.SetTextColor(hdc, color_muted);
+        _ = win.SetTextColor(hdc, if (message.send_state == .failed) theme.@"error" else color_muted);
         const time_band = timeBandHeight(hdc, a);
         var time_rect = win.RECT{ .left = right - px(a, 52), .top = y + height - px(a, 5) - time_band, .right = right - px(a, 10), .bottom = y + height - px(a, 5) };
         _ = win.DrawTextW(hdc, message.time.ptr(), @intCast(message.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE);
@@ -15911,8 +15961,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             a.brush_bg = win.CreateSolidBrush(color_bg);
             a.brush_panel = win.CreateSolidBrush(color_panel);
             a.brush_raised = win.CreateSolidBrush(color_raised);
-            a.brush_muted = win.CreateSolidBrush(color_muted);
+            a.brush_muted = win.CreateSolidBrush(theme.outline);
             a.search = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 0, 0, 0, 0, hwnd, controlId(id_search), a.instance, null);
+            if (a.search) |search| {
+                a.search_prev_proc = @bitCast(win.SetWindowLongPtrW(search, win.GWLP_WNDPROC, @intCast(@intFromPtr(&searchFieldProc))));
+            }
             a.chats_hwnd = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 0, 0, 0, 0, hwnd, controlId(id_chats), a.instance, null);
             a.status_row = win.CreateWindowExW(0, lit("BUTTON"), lit("Status"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_status_row), a.instance, null);
             a.canvas = win.CreateWindowExW(0, lit("WacliMessageCanvas"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, hwnd, controlId(id_canvas), a.instance, null);
@@ -16012,7 +16065,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             var left_rect = win.RECT{ .left = 0, .top = 0, .right = left_width, .bottom = client.bottom };
             _ = win.FillRect(hdc, &left_rect, a.brush_panel.?);
             var composer_rect = win.RECT{ .left = left_width + 1, .top = a.compose_strip_top, .right = client.right, .bottom = client.bottom };
-            _ = win.FillRect(hdc, &composer_rect, a.brush_raised.?);
+            _ = win.FillRect(hdc, &composer_rect, a.brush_bg.?);
             // Drag-handle affordance: a short grip line centered on the strip's top padding.
             if (a.compose != null) {
                 const cx = @divTrunc(left_width + 1 + client.right, 2);
@@ -16330,7 +16383,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             _ = win.SetBkColor(hdc, color_raised);
             const control_value: usize = @bitCast(lparam);
             if (a.status) |status| {
-                if (control_value == @intFromPtr(status)) return @bitCast(@intFromPtr(a.brush_panel.?));
+                if (control_value == @intFromPtr(status)) {
+                    _ = win.SetBkColor(hdc, color_panel);
+                    return @bitCast(@intFromPtr(a.brush_panel.?));
+                }
             }
             return @bitCast(@intFromPtr(a.brush_raised.?));
         },
@@ -18040,7 +18096,7 @@ fn paintUpdateCard(a: *App, hdc: win.HDC) void {
     if (!updateCardVisible(a)) return;
     const pending = a.update_pending orelse return;
     const card = updateCardRect(a);
-    paintRoundedButton(hdc, card, color_raised, color_text, a.font.?, color_selected, &[_]u16{});
+    paintRoundedButton(a, hdc, card, color_raised, color_text, a.font.?, color_selected, &[_]u16{});
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
 
     // Title.
@@ -18102,7 +18158,7 @@ fn paintUpdateCard(a: *App, hdc: win.HDC) void {
 
     // Button.
     const label: []const u16 = if (failed) std.unicode.utf8ToUtf16LeStringLiteral("Retry") else std.unicode.utf8ToUtf16LeStringLiteral("Update now");
-    paintRoundedButton(hdc, updateCardButtonRect(a, card), color_accent, rgb(255, 255, 255), a.font_bold.?, null, label);
+    paintRoundedButton(a, hdc, updateCardButtonRect(a, card), color_accent, theme.on_primary, a.font_bold.?, null, label);
 }
 
 fn startUpdateCheck(hwnd: win.HWND, manual: bool) void {
