@@ -88,3 +88,4 @@ test "load wraps so the newest entries survive the ring capacity" {
     try std.testing.expect(set.wasPlayedRaw(0x22));
     try std.testing.expect(set.wasPlayedRaw(0x33));
 }
+// planted comment to prove the no-comments check fails
