@@ -21,6 +21,7 @@ const chat_order = @import("chat_order.zig");
 const chat_menu = @import("chat_menu.zig");
 const chat_reconcile = @import("chat_reconcile.zig");
 const compose_layout = @import("compose_layout.zig");
+const field_pill = @import("field_pill.zig");
 const media_age = @import("media_age.zig");
 const media_drain = @import("media_drain.zig");
 const video_alias = @import("video_alias.zig");
@@ -552,6 +553,7 @@ const App = struct {
     avatar_dir: []u8,
     hwnd: ?win.HWND = null,
     search: ?win.HWND = null,
+    search_pill: win.RECT = std.mem.zeroes(win.RECT),
     chats_hwnd: ?win.HWND = null,
     status_row: ?win.HWND = null,
     status_list: ?status_view.List = null,
@@ -564,6 +566,7 @@ const App = struct {
     status_gen: u64 = 0,
     canvas: ?win.HWND = null,
     compose: ?win.HWND = null,
+    compose_pill: win.RECT = std.mem.zeroes(win.RECT),
     compose_dragged: i32 = 0,
     compose_dragging: bool = false,
     compose_client_width: i32 = 0,
@@ -978,8 +981,8 @@ fn searchFieldProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam
             var rect: win.RECT = undefined;
             _ = win.GetClientRect(hwnd, &rect);
             _ = win.FillRect(hdc, &rect, a.brush_raised.?);
-            rect.left += px(a, 16);
-            rect.right -= px(a, 16);
+            rect.left += px(a, 2);
+            rect.right -= px(a, 2);
             _ = win.SetBkMode(hdc, win.TRANSPARENT);
             _ = win.SetTextColor(hdc, theme.on_surface_variant);
             _ = win.SelectObject(hdc, a.font.?);
@@ -12439,26 +12442,28 @@ fn layout(a: *App, width: i32, height: i32) void {
     }
     var sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
     if (a.compose) |hwnd| {
-        _ = win.MoveWindow(hwnd, left_width + px(a, 14), height - px(a, 11) - sizes.edit_height, width - left_width - px(a, 310) - scrollbar_width, sizes.edit_height, win.TRUE);
-        sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
-        _ = win.MoveWindow(hwnd, left_width + px(a, 14), height - px(a, 11) - sizes.edit_height, width - left_width - px(a, 310) - scrollbar_width, sizes.edit_height, win.TRUE);
+        for (0..2) |pass| {
+            if (pass > 0) sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
+            a.compose_pill = .{
+                .left = left_width + px(a, 14),
+                .top = height - px(a, 11) - sizes.edit_height,
+                .right = width + px(a, 14) - px(a, 310) - scrollbar_width,
+                .bottom = height - px(a, 11),
+            };
+            const pill = field_pill.compute(a.compose_pill, px(a, theme.radius_field * 2));
+            const inner = pill.inner;
+            _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
+            var rect = win.RECT{ .left = px(a, 2), .top = px(a, 8), .right = @max(px(a, 2), inner.right - inner.left - px(a, 2)), .bottom = @max(px(a, 8), sizes.edit_height - px(a, 8)) };
+            _ = win.SendMessageW(hwnd, win.EM_SETRECTNP, 0, @bitCast(@intFromPtr(&rect)));
+        }
     }
     a.compose_strip_top = height - sizes.strip_height;
+    a.search_pill = .{ .left = px(a, 12), .top = header_height + px(a, 8), .right = px(a, 12) + left_width - px(a, 24), .bottom = header_height + px(a, 8) + px(a, 34) };
     if (a.search) |hwnd| {
-        _ = win.MoveWindow(hwnd, px(a, 12), header_height + px(a, 8), left_width - px(a, 24), px(a, 34), win.TRUE);
-        _ = win.SendMessageW(hwnd, win.EM_SETMARGINS, win.EC_LEFTMARGIN | win.EC_RIGHTMARGIN, @as(win.LPARAM, px(a, 16)) | (@as(win.LPARAM, px(a, 16)) << 16));
-        if (win.CreateRoundRectRgn(0, 0, left_width - px(a, 24) + 1, px(a, 34) + 1, @min(px(a, theme.radius_field * 2), px(a, 34)), @min(px(a, theme.radius_field * 2), px(a, 34)))) |rgn| {
-            if (win.SetWindowRgn(hwnd, rgn, win.TRUE) == 0) _ = win.DeleteObject(rgn);
-        }
-    }
-    if (a.compose) |hwnd| {
-        const edit_width = width - left_width - px(a, 310) - scrollbar_width;
-        const diameter = @min(px(a, theme.radius_field * 2), sizes.edit_height);
-        if (win.CreateRoundRectRgn(0, 0, edit_width + 1, sizes.edit_height + 1, diameter, diameter)) |rgn| {
-            if (win.SetWindowRgn(hwnd, rgn, win.TRUE) == 0) _ = win.DeleteObject(rgn);
-        }
-        var rect = win.RECT{ .left = @divTrunc(diameter, 2), .top = px(a, 8), .right = edit_width - @divTrunc(diameter, 2), .bottom = sizes.edit_height - px(a, 8) };
-        _ = win.SendMessageW(hwnd, win.EM_SETRECTNP, 0, @bitCast(@intFromPtr(&rect)));
+        const pill = field_pill.compute(a.search_pill, px(a, theme.radius_field * 2));
+        const inner = pill.inner;
+        _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
+        _ = win.SendMessageW(hwnd, win.EM_SETMARGINS, win.EC_LEFTMARGIN | win.EC_RIGHTMARGIN, @as(win.LPARAM, px(a, 2)) | (@as(win.LPARAM, px(a, 2)) << 16));
     }
     if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + search_height + status_row_height, left_width - scrollbar_width, height - header_height - search_height - status_row_height - status_height - updateCardSpan(a), win.TRUE);
     if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);
@@ -14510,6 +14515,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             _ = win.FillRect(hdc, &left_rect, a.brush_panel.?);
             var composer_rect = win.RECT{ .left = left_width + 1, .top = a.compose_strip_top, .right = client.right, .bottom = client.bottom };
             _ = win.FillRect(hdc, &composer_rect, a.brush_bg.?);
+            if (a.search != null) paintRoundedButton(a, hdc, a.search_pill, color_raised, color_text, a.font.?, null, &.{});
+            if (a.compose != null and a.status_ui.mode == .closed) paintRoundedButton(a, hdc, a.compose_pill, color_raised, color_text, a.font.?, null, &.{});
             if (a.compose != null) {
                 const cx = @divTrunc(left_width + 1 + client.right, 2);
                 var grip = win.RECT{ .left = cx - px(a, 22), .top = a.compose_strip_top + px(a, 4), .right = cx + px(a, 22), .bottom = a.compose_strip_top + px(a, 6) };
@@ -14580,12 +14587,24 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     return 0;
                 }
             }
+            const point = win.POINT{ .x = x, .y = y };
+            if (a.search) |edit| {
+                if (win.PtInRect(&a.search_pill, point) != 0) {
+                    _ = win.SetFocus(edit);
+                    return 0;
+                }
+            }
             if (a.compose) |edit| {
                 const strip = stripRightOf(edit, hwnd);
                 if (hitStrip(strip, x, y)) {
+                    _ = win.SetFocus(edit);
                     const info = composeScrollInfo(a, edit);
                     if (scrollbar.thumbGeom(trackOf(strip).top, trackOf(strip).h, info.total, info.page, info.top, scrollbar_min_thumb) != null)
                         beginStripDrag(a, hwnd, strip, info, y, .compose, setComposeScroll);
+                    return 0;
+                }
+                if (a.status_ui.mode == .closed and win.PtInRect(&a.compose_pill, point) != 0) {
+                    _ = win.SetFocus(edit);
                     return 0;
                 }
             }
