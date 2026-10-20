@@ -1,6 +1,7 @@
 const std = @import("std");
 const mic_choice = @import("mic_choice.zig");
 const format_request = @import("format_request.zig");
+const dictation_policy = @import("dictation_policy.zig");
 const win = @cImport({
     @cDefine("WIN32_LEAN_AND_MEAN", "1");
     @cDefine("COBJMACROS", "1");
@@ -12,7 +13,7 @@ const win = @cImport({
 });
 
 pub const State = enum(u8) { idle, recording, transcribing, ready, failed };
-pub const Language = enum(u8) { automatic, english, german };
+pub const Language = dictation_policy.Language;
 
 const guid_mmdevice_enumerator = win.GUID{ .Data1 = 0xbcde0395, .Data2 = 0xe52f, .Data3 = 0x467c, .Data4 = .{ 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e } };
 const guid_immdevice_enumerator = win.GUID{ .Data1 = 0xa95664d2, .Data2 = 0x9614, .Data3 = 0x4f35, .Data4 = .{ 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6 } };
@@ -177,14 +178,19 @@ fn captureMicrophone(self: *Session) ![]u8 {
 }
 
 fn transcribe(allocator: std.mem.Allocator, api_key: []const u8, language: Language, content_type: []const u8, body: []const u8) ![]u8 {
-    return switch (language) {
-        .automatic => transcribeAt(allocator, api_key, lit("/v1/listen?model=nova-3&smart_format=true&detect_language=true"), content_type, body) catch |err| switch (err) {
-            error.NoSpeech => transcribeAt(allocator, api_key, lit("/v1/listen?model=nova-3&smart_format=true&language=multi"), content_type, body),
-            else => err,
-        },
-        .english => transcribeAt(allocator, api_key, lit("/v1/listen?model=nova-3&smart_format=true&language=en"), content_type, body),
-        .german => transcribeAt(allocator, api_key, lit("/v1/listen?model=nova-3&smart_format=true&language=de"), content_type, body),
+    const Transport = struct {
+        allocator: std.mem.Allocator,
+        api_key: []const u8,
+
+        pub fn send(self: @This(), selected: Language, mime: []const u8, audio: []const u8) ![]u8 {
+            return switch (selected) {
+                .automatic => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.automatic)), mime, audio),
+                .english => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.english)), mime, audio),
+                .german => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.german)), mime, audio),
+            };
+        }
     };
+    return dictation_policy.transcribe(Transport{ .allocator = allocator, .api_key = api_key }, language, content_type, body);
 }
 
 fn transcribeAt(allocator: std.mem.Allocator, api_key: []const u8, request_path: [*:0]const u16, content_type: []const u8, body: []const u8) ![]u8 {
