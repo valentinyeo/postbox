@@ -25,4 +25,5 @@ run git fetch --quiet --no-tags origin '+refs/pull/*/head:refs/remotes/pr/*'
 run bash tools/test-preflight-guard.sh
 run bash tools/test-agent-setup.sh
 run bash tools/test-lint-repeats.sh
+run bash tools/test-people-index-speed.sh
 run bash tools/test-ci-green.sh
