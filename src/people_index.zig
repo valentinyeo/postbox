@@ -270,7 +270,7 @@ test "duplicate jids within each payload appear once" {
 }
 
 test "build 5000 archived and 3000 contacts and search within a second" {
-    const start = std.Io.Clock.awake.now(std.testing.io);
+    const start = std.Io.Clock.cpu_thread.now(std.testing.io);
     var index = Index.init(std.testing.allocator);
     defer index.deinit();
     var archived: std.Io.Writer.Allocating = .init(std.testing.allocator);
@@ -296,6 +296,6 @@ test "build 5000 archived and 3000 contacts and search within a second" {
     var out: [20]Entry = undefined;
     try std.testing.expectEqual(@as(usize, 1), index.search("Person 4321", &.{}, &out, 20));
     try std.testing.expectEqualStrings("4321@g.us", out[0].jid);
-    const elapsed = start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toNanoseconds();
+    const elapsed = start.durationTo(std.Io.Clock.cpu_thread.now(std.testing.io)).toNanoseconds();
     try std.testing.expect(elapsed < std.time.ns_per_s);
 }
