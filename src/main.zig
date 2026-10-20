@@ -468,7 +468,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe, contacts_index, statuses, status_seen };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe, contacts_index, statuses, status_seen, background_media };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 
 const WacliJob = struct {
@@ -514,6 +514,27 @@ const MediaDownload = struct {
     jid: Utf8Text(191) = .{},
     id: Utf8Text(191) = .{},
     started_ms: u64 = 0,
+};
+
+const background_media_limit = 16;
+const BackgroundMediaChat = struct {
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
+    jid: Utf8Text(191) = .{},
+    timestamp: Utf8Text(63) = .{},
+    swept: Utf8Text(63) = .{},
+};
+const BackgroundMedia = struct {
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
+    jid: Utf8Text(191) = .{},
+    timestamp: Utf8Text(63) = .{},
+    phase: enum { idle, listing, downloading, caching } = .idle,
+    ids: [background_media_limit]Utf8Text(191) = [_]Utf8Text(191){.{}} ** background_media_limit,
+    sizes: [background_media_limit]u64 = [_]u64{0} ** background_media_limit,
+    count: usize = 0,
+    read_failures: u8 = 0,
+    retry_after_ms: u64 = 0,
 };
 
 const MediaFailure = struct { hash: u64 = 0, count: u8 = 0, retry_after_ms: u64 = 0 };
@@ -719,6 +740,9 @@ const App = struct {
     audio_chain_waiting: bool = false,
     audio_chain_id: Utf8Text(191) = .{},
     media_downloads: [max_media_children]MediaDownload = [_]MediaDownload{.{}} ** max_media_children,
+    background_media_chats: [max_chats]BackgroundMediaChat = [_]BackgroundMediaChat{.{}} ** max_chats,
+    background_media_count: usize = 0,
+    background_media: BackgroundMedia = .{},
     read_child: ?std.process.Child = null,
     read_spawn_failures: u32 = 0,
     read_started_ms: u64 = 0,
@@ -1938,6 +1962,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         .array => |items| items,
         else => return false,
     };
+    if (fresh) observeBackgroundMediaChats(a, data.items);
     if (!a.pins_loaded and data.items.len > 0) {
         a.pins_loaded = true;
         if (!loadPins(a)) {
@@ -5859,6 +5884,13 @@ fn autoDownloadNextMedia(a: *App) bool {
         !sync_gate.gapElapsed(a.last_sync_stop_ms, win.GetTickCount64(), sync_gate.media_stop_gap_ms))) return false;
     if (a.selected_chat >= a.chat_count or a.chats[a.selected_chat].provider != .whatsapp) return false;
     if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]))) return false;
+    const pick = nextOpenMediaCandidate(a, now_ms) orelse return false;
+    return downloadMedia(a, pick, true);
+}
+
+fn nextOpenMediaCandidate(a: *App, now_ms: u64) ?usize {
+    if (a.selected_chat >= a.chat_count or a.chats[a.selected_chat].provider != .whatsapp) return null;
+    if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]))) return null;
     const chat_jid = a.chats[a.selected_chat].jid.slice();
     var candidates: [max_messages]media_drain.Candidate = undefined;
     var count: usize = 0;
@@ -5885,8 +5917,7 @@ fn autoDownloadNextMedia(a: *App) bool {
         };
         count += 1;
     }
-    const pick = media_drain.selectNext(candidates[0..count], now_ms) orelse return false;
-    return downloadMedia(a, pick, true);
+    return media_drain.selectNext(candidates[0..count], now_ms);
 }
 
 fn drainMediaDownloads(a: *App) void {
@@ -5895,8 +5926,159 @@ fn drainMediaDownloads(a: *App) void {
     var started = true;
     while (media_drain.mayDrainStep(steps, started) and freeMediaSlot(a) != null) {
         started = autoDownloadNextMedia(a);
+        if (!started) started = autoDownloadBackgroundMedia(a);
         steps += 1;
     }
+}
+
+fn observeBackgroundMediaChats(a: *App, rows: []const std.json.Value) void {
+    if (a.background_media_count > 0 and !std.mem.eql(u8, a.background_media_chats[0].account.slice(), a.cache_tag.slice())) a.background_media_count = 0;
+    for (rows) |row| {
+        const object = switch (row) {
+            .object => |o| o,
+            else => continue,
+        };
+        var chat = BackgroundMediaChat{ .account = a.cache_tag };
+        chat.jid.set(getString(object, "jid"));
+        chat.timestamp.set(getString(object, "last_message_ts"));
+        if (chat.jid.len == 0 or chat.timestamp.len == 0) continue;
+        if (chat_key.indexOf(BackgroundMediaChat, a.background_media_chats[0..a.background_media_count], chat_key.of(&chat))) |index| {
+            a.background_media_chats[index].timestamp = chat.timestamp;
+        } else {
+            var index: usize = 0;
+            if (a.background_media_count < a.background_media_chats.len) {
+                index = a.background_media_count;
+                a.background_media_count += 1;
+            } else {
+                for (a.background_media_chats[0..a.background_media_count], 0..) |*previous, i| {
+                    if (std.mem.order(u8, previous.timestamp.slice(), a.background_media_chats[index].timestamp.slice()) == .lt) index = i;
+                }
+            }
+            a.background_media_chats[index] = chat;
+        }
+    }
+}
+
+fn enqueueBackgroundMedia(a: *App) bool {
+    const batch = &a.background_media;
+    var job = WacliJob{ .account = batch.account, .kind = .background_media, .jid = batch.jid, .extra = batch.timestamp };
+    wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "messages", "list", "--chat", batch.jid.slice(), "--limit", if (batch.phase == .caching) "80" else "16" });
+    return wacliEnqueue(a, job, false);
+}
+
+fn applyBackgroundMedia(a: *App, result: *const WacliResult) void {
+    const batch = &a.background_media;
+    if (!chat_key.Key.eql(chat_key.of(batch), chat_key.of(result)) or !std.mem.eql(u8, batch.timestamp.slice(), result.extra.slice())) return;
+    if (a.selected_chat < a.chat_count and chat_key.Key.eql(chat_key.of(batch), chat_key.of(&a.chats[a.selected_chat]))) {
+        batch.* = .{};
+        return;
+    }
+    batch.retry_after_ms = win.GetTickCount64() + 30_000;
+    batch.read_failures += 1;
+    defer {
+        if (media_drain.backgroundReadExhausted(batch.read_failures)) {
+            if (chat_key.indexOf(BackgroundMediaChat, a.background_media_chats[0..a.background_media_count], chat_key.of(batch))) |index| {
+                a.background_media_chats[index].swept = batch.timestamp;
+            }
+            batch.* = .{};
+        }
+    }
+    if (!result.ok) return;
+    var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, result.data, .{}) catch return;
+    defer parsed.deinit();
+    if (parsed.value != .object) return;
+    const data = parsed.value.object.get("data") orelse return;
+    if (data != .object) return;
+    const messages = data.object.get("messages") orelse return;
+    if (messages != .array) return;
+    batch.read_failures = 0;
+    if (batch.phase == .caching) {
+        msgCacheStore(a, chat_key.of(result), result.data);
+        if (chat_key.indexOf(BackgroundMediaChat, a.background_media_chats[0..a.background_media_count], chat_key.of(batch))) |index| {
+            a.background_media_chats[index].swept = batch.timestamp;
+        }
+        batch.* = .{};
+        return;
+    }
+    batch.count = 0;
+    for (messages.array.items[0..@min(messages.array.items.len, background_media_limit)]) |row| {
+        const object = switch (row) {
+            .object => |o| o,
+            else => continue,
+        };
+        const id = getString(object, "MsgID");
+        const path = getString(object, "LocalPath");
+        const size = media_drain.sizeFromJson(object);
+        const candidate = media_drain.Candidate{
+            .index = 0,
+            .downloadable = !getBool(object, "Revoked") and media_drain.downloadable(getString(object, "MediaType")),
+            .has_id = id.len > 0,
+            .has_local_path = path.len > 0 and fileExistsUtf8(path),
+            .size_bytes = size,
+            .whatsapp_store = true,
+        };
+        if (media_drain.backgroundSelectNext(&.{candidate}, win.GetTickCount64()) == null) continue;
+        batch.ids[batch.count].set(id);
+        batch.sizes[batch.count] = size;
+        batch.count += 1;
+    }
+    batch.phase = .downloading;
+    drainMediaDownloads(a);
+}
+
+fn autoDownloadBackgroundMedia(a: *App) bool {
+    const now_ms = win.GetTickCount64();
+    if (a.cache_tag.len == 0 or a.startup_probe_pending or a.sync_logged_out or a.accounts_maintenance or a.status_ui.mode == .viewer) return false;
+    if (!media_drain.backgroundMayStart(if (mediaBusy(a)) 1 else 0, nextOpenMediaCandidate(a, now_ms) != null, a.media_burst_files, a.media_burst_started_ms, now_ms, a.sync_child != null, a.media_resume_after_ms, a.last_sync_stop_ms)) return false;
+    if (wacliPendingGet(a, .background_media) > 0 or wacliPendingGet(a, .messages) > 0) return false;
+    if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp and
+        !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]))) return false;
+    const batch = &a.background_media;
+    if (batch.phase != .idle and (!std.mem.eql(u8, batch.account.slice(), a.cache_tag.slice()) or
+        (a.selected_chat < a.chat_count and chat_key.Key.eql(chat_key.of(batch), chat_key.of(&a.chats[a.selected_chat]))))) batch.* = .{};
+    if (batch.phase == .idle) {
+        var pick: ?usize = null;
+        const now_unix = nowUnixSeconds();
+        for (a.background_media_chats[0..a.background_media_count], 0..) |*chat, i| {
+            if (!std.mem.eql(u8, chat.account.slice(), a.cache_tag.slice())) continue;
+            const open = a.selected_chat < a.chat_count and chat_key.Key.eql(chat_key.of(chat), chat_key.of(&a.chats[a.selected_chat]));
+            if (!media_drain.backgroundChatDue(chat.timestamp.slice(), chat.swept.slice(), open, now_unix, media_cache_eviction_days)) continue;
+            if (pick == null or std.mem.order(u8, chat.timestamp.slice(), a.background_media_chats[pick.?].timestamp.slice()) == .gt) pick = i;
+        }
+        const chat = &a.background_media_chats[pick orelse return false];
+        batch.* = .{ .account = chat.account, .jid = chat.jid, .timestamp = chat.timestamp, .phase = .listing };
+    }
+    if (batch.phase == .downloading) {
+        var candidates: [background_media_limit]media_drain.Candidate = undefined;
+        for (batch.ids[0..batch.count], 0..) |*id, i| {
+            var retry_after_ms: u64 = 0;
+            const hash = played.Set.pairKey(batch.jid.slice(), id.slice());
+            for (a.media_failures) |failure| {
+                if (failure.hash == hash) retry_after_ms = failure.retry_after_ms;
+            }
+            candidates[i] = .{
+                .index = i,
+                .downloadable = true,
+                .has_id = id.len > 0,
+                .size_bytes = batch.sizes[i],
+                .whatsapp_store = true,
+                .in_flight = mediaDownloading(a, batch.jid.slice(), id.slice()),
+                .attempted = mediaAttempted(a, batch.jid.slice(), id.slice()),
+                .retry_after_ms = retry_after_ms,
+            };
+        }
+        if (media_drain.backgroundSelectNext(candidates[0..batch.count], now_ms)) |index| {
+            return startMediaDownload(a, batch.jid.slice(), batch.ids[index].slice());
+        }
+        if (media_drain.backgroundSelectNext(candidates[0..batch.count], std.math.maxInt(u64)) != null) return false;
+        batch.phase = .caching;
+        batch.retry_after_ms = 0;
+    }
+    if (now_ms >= batch.retry_after_ms) {
+        batch.retry_after_ms = now_ms + 30_000;
+        _ = enqueueBackgroundMedia(a);
+    }
+    return false;
 }
 
 fn ensureAvatarSession(a: *App) ?*avatar.Session {
@@ -14281,6 +14463,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         }
                     }
                 },
+                .background_media => applyBackgroundMedia(a, result),
                 .reaction => applyReaction(a, result),
                 .archived_scan => if (result.ok) applyArchivedScan(a, result.data),
                 .resurface_probe => if (result.ok) applyResurfaceProbe(a, result.jid.slice(), result.extra.slice(), result.data),
@@ -14764,7 +14947,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 retryPendingDownload(a);
                 retryUnarchiveChat(a);
                 tickArchivedScan(a, changed);
-                _ = autoDownloadNextMedia(a);
+                drainMediaDownloads(a);
             } else if (wparam == timer_search) {
                 _ = clearBulkSelection(a);
                 _ = win.KillTimer(hwnd, timer_search);

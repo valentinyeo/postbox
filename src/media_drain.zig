@@ -47,6 +47,26 @@ pub fn selectNext(candidates: []const Candidate, now_ms: u64) ?usize {
     return null;
 }
 
+pub fn backgroundChatDue(timestamp: []const u8, swept: []const u8, open: bool, now_unix: i64, age_days: i64) bool {
+    return !open and timestamp.len > 0 and !std.mem.eql(u8, timestamp, swept) and
+        @import("media_age.zig").withinDays(timestamp, now_unix, age_days);
+}
+
+pub fn backgroundReadExhausted(failures: u8) bool {
+    return failures >= 3;
+}
+
+pub fn backgroundSelectNext(candidates: []const Candidate, now_ms: u64) ?usize {
+    return selectNext(candidates, now_ms);
+}
+
+pub fn backgroundMayStart(children: usize, open_candidate: bool, files_started: usize, started_ms: u64, now_ms: u64, syncing: bool, resume_after_ms: u64, last_stop_ms: ?u64) bool {
+    const gate = @import("sync_gate.zig");
+    if (children >= max_children or open_candidate) return false;
+    if (!syncing and files_started > 0 and !mayContinueBurst(files_started, started_ms, now_ms)) return false;
+    return !syncing or (now_ms >= resume_after_ms and gate.gapElapsed(last_stop_ms, now_ms, gate.media_stop_gap_ms));
+}
+
 pub fn mayContinueBurst(files_started: usize, started_ms: u64, now_ms: u64) bool {
     return files_started < max_burst_files and now_ms -| started_ms < burst_budget_ms;
 }
@@ -257,4 +277,50 @@ test "confirmed cache hits clear success suppression so later eviction refills" 
     var candidate = ready(0);
     candidate.attempted = std.mem.indexOfScalar(u64, attempts[0..count], 11) != null;
     try std.testing.expectEqual(@as(?usize, 0), selectNext(&.{candidate}, 0));
+}
+
+test "background newer activity is due but an already swept timestamp is not" {
+    const stamp = "2026-09-06T13:34:39";
+    const now = @import("media_age.zig").unixSeconds(stamp).?;
+    try std.testing.expect(backgroundChatDue(stamp, "2026-09-06T12:00:00", false, now, 14));
+    try std.testing.expect(!backgroundChatDue(stamp, stamp, false, now, 14));
+    try std.testing.expect(!backgroundChatDue("", "", false, now, 14));
+}
+
+test "background skips chats outside the age window and leaves the open chat alone" {
+    const stamp = "2026-09-06T13:34:39";
+    const now = @import("media_age.zig").unixSeconds(stamp).?;
+    try std.testing.expect(backgroundChatDue(stamp, "", false, now + 14 * 86400, 14));
+    try std.testing.expect(!backgroundChatDue(stamp, "", false, now + 15 * 86400, 14));
+    try std.testing.expect(!backgroundChatDue(stamp, "", true, now, 14));
+}
+
+test "background skips local oversized attempted in-flight and delayed messages" {
+    var candidates = [_]Candidate{ ready(0), ready(1), ready(2), ready(3), ready(4), ready(5) };
+    candidates[0].has_local_path = true;
+    candidates[1].size_bytes = max_auto_bytes + 1;
+    candidates[2].attempted = true;
+    candidates[3].in_flight = true;
+    candidates[4].retry_after_ms = 200;
+    try std.testing.expectEqual(@as(?usize, 5), backgroundSelectNext(&candidates, 100));
+    candidates[5].whatsapp_store = false;
+    try std.testing.expectEqual(@as(?usize, null), backgroundSelectNext(&candidates, 100));
+    try std.testing.expectEqual(@as(?usize, 4), backgroundSelectNext(&candidates, 200));
+}
+
+test "background serial pacing yields to open candidates burst limits and sync gaps" {
+    try std.testing.expect(backgroundMayStart(0, false, 0, 0, 100, false, 0, null));
+    try std.testing.expect(!backgroundMayStart(1, false, 0, 0, 100, false, 0, null));
+    try std.testing.expect(!backgroundMayStart(0, true, 0, 0, 100, false, 0, null));
+    try std.testing.expect(!backgroundMayStart(0, false, max_burst_files, 100, 100, false, 0, null));
+    try std.testing.expect(!backgroundMayStart(0, false, 1, 100, 100 + burst_budget_ms, false, 0, null));
+    try std.testing.expect(!backgroundMayStart(0, false, 0, 0, 15_100, true, 15_101, 100));
+    try std.testing.expect(!backgroundMayStart(0, false, 0, 0, 15_099, true, 0, 100));
+    try std.testing.expect(backgroundMayStart(0, false, 0, 0, 15_100, true, 15_100, 100));
+}
+
+test "background reads give up after three failures" {
+    for (0..3) |failures| try std.testing.expect(!backgroundReadExhausted(@intCast(failures)));
+    try std.testing.expect(backgroundReadExhausted(3));
+    try std.testing.expect(backgroundReadExhausted(std.math.maxInt(u8)));
 }
