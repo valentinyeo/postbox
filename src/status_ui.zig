@@ -1,4 +1,5 @@
 const theme = @import("theme.zig");
+const smooth = @import("smooth_shapes.zig");
 const std = @import("std");
 const win = @import("win32.zig").c;
 const status = @import("status_view.zig");
@@ -143,6 +144,8 @@ pub fn paint(a: anytype, hwnd: win.HWND, comptime actions: anytype) void {
     const saved = win.SaveDC(hdc);
     defer _ = win.RestoreDC(hdc, saved);
     _ = win.IntersectClipRect(hdc, 0, actions.px(a, 72), client.right, client.bottom);
+    var shapes = smooth.Context.init(hdc);
+    defer shapes.deinit();
     const heading = actions.px(a, 40);
     const row_height = actions.px(a, 76);
     const total = actions.px(a, 88) + 2 * heading + @as(i32, @intCast(groups.count)) * row_height;
@@ -164,15 +167,7 @@ pub fn paint(a: anytype, hwnd: win.HWND, comptime actions: anytype) void {
                 if (i == a.status_ui.selected) _ = win.FillRect(hdc, &hit, a.brush_panel.?);
                 const left = margin + actions.px(a, 8);
                 const top = y + actions.px(a, 12);
-                const pen = win.CreatePen(win.PS_SOLID, actions.px(a, 3), if (contact.unseen) theme.current.primary else theme.current.outline);
-                if (pen) |p| {
-                    const old_pen = win.SelectObject(hdc, p);
-                    const old_brush = win.SelectObject(hdc, win.GetStockObject(win.NULL_BRUSH));
-                    _ = win.Ellipse(hdc, left - 4, top - 4, left + 46, top + 46);
-                    _ = win.SelectObject(hdc, old_brush);
-                    _ = win.SelectObject(hdc, old_pen);
-                    _ = win.DeleteObject(p);
-                }
+                smooth.strokeEllipse(&shapes, .{ .left = left - 4, .top = top - 4, .right = left + 46, .bottom = top + 46 }, if (contact.unseen) theme.current.primary else theme.current.outline, actions.px(a, 3));
                 const entry = actions.avatar(a, row.sender_jid);
                 if (entry != null and entry.?.bitmap != null) {
                     actions.drawAvatar(hdc, entry.?.bitmap.?, left, top, 42);

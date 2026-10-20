@@ -24,6 +24,7 @@ cases=(
     '0e7c320d44f1 C1 HEAD'
     '55e826b E1 HEAD'
     '1f5853e^ D1 HEAD'
+    'a735c9f F1 HEAD'
 )
 
 "$lint" "$repo"
@@ -36,7 +37,7 @@ for entry in "${cases[@]}"; do
         else
             tree="$temp/$sha"
             mkdir -p -- "$tree"
-            git -C "$repo" archive "$sha" src/main.zig .github/workflows | tar -x -C "$tree"
+            git -C "$repo" archive "$sha" src .github/workflows | tar -x -C "$tree"
         fi
         status=0
         "$lint" "$tree" > "$temp/output" 2>&1 || status=$?

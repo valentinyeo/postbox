@@ -67,6 +67,20 @@ END { exit failed ? 1 : 0 }
     failed=1
 fi
 
+if ! awk '
+FILENAME != "src/smooth_shapes.zig" {
+    code = $0
+    sub(/\/\/.*$/, "", code)
+    if (code ~ /win\.(RoundRect|Ellipse|CreateRoundRectRgn)[[:space:]]*\(/) {
+        printf "lint-repeats: %s:%d: [F1] raw GDI rounded edges are jagged. Use smooth_shapes.fillRoundRect and friends with explicit colours and a paint-level Context.\n", FILENAME, FNR
+        failed = 1
+    }
+}
+END { exit failed ? 1 : 0 }
+' src/*.zig; then
+    failed=1
+fi
+
 shopt -s nullglob
 workflows=(.github/workflows/*.yml .github/workflows/*.yaml)
 if (( ${#workflows[@]} == 0 )); then
