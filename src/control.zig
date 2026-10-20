@@ -1,12 +1,14 @@
 const std = @import("std");
+const theme = @import("theme.zig");
 
 pub const pipe_prefix = "\\\\.\\pipe\\wazig-control-";
 
-pub const Command = enum { status, statuses, @"open-status", chats, search, view, select, messages, archive, unarchive, @"archive-many" };
+pub const Command = enum { theme, status, statuses, @"open-status", chats, search, view, select, messages, archive, unarchive, @"archive-many" };
 pub const Messenger = enum { whatsapp, slack, telegram };
 
 pub const Request = struct {
     cmd: Command,
+    theme: ?theme.Choice = null,
     id: []const u8 = "",
     ids: []const []const u8 = &.{},
     text: []const u8 = "",
@@ -19,7 +21,8 @@ pub const Request = struct {
 pub const CommandInfo = struct { cmd: Command, usage: []const u8, summary: []const u8 };
 
 pub const commands = [_]CommandInfo{
-    .{ .cmd = .status, .usage = "status", .summary = "version, active messenger, selected chat, sync state, pending sends, search text" },
+    .{ .cmd = .theme, .usage = "theme <green|amoled>", .summary = "switch and save the app theme without focusing it" },
+    .{ .cmd = .status, .usage = "status", .summary = "version, theme, active messenger, selected chat, sync state, pending sends, search text" },
     .{ .cmd = .statuses, .usage = "statuses", .summary = "loaded WhatsApp Status updates and local viewed state" },
     .{ .cmd = .@"open-status", .usage = "open-status [SENDER_JID]", .summary = "open WhatsApp Status without focusing the app" },
     .{ .cmd = .chats, .usage = "chats [--messenger whatsapp|slack|telegram] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
@@ -93,6 +96,10 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
     }
     const items = positional.items;
     switch (cmd) {
+        .theme => {
+            if (items.len != 1) return usage(message, "theme needs green or amoled");
+            request.theme = std.meta.stringToEnum(theme.Choice, items[0]) orelse return usage(message, "theme needs green or amoled");
+        },
         .status, .statuses, .chats => if (items.len != 0) return usage(message, "unexpected argument"),
         .@"open-status" => {
             if (items.len > 1) return usage(message, "open-status takes at most one sender jid");
@@ -368,4 +375,28 @@ test "status commands parse without focus or mutation arguments" {
     try std.testing.expectEqual(Command.@"open-status", (try parseForTest(&.{"open-status"})).cmd);
     var message: []const u8 = "";
     try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{ "statuses", "extra" }, &message));
+}
+
+test "theme accepts both choices and rejects invalid or missing choices" {
+    for ([_]theme.Choice{ .green, .amoled }) |choice| {
+        const request = try parseForTest(&.{ "theme", @tagName(choice) });
+        try std.testing.expectEqual(Command.theme, request.cmd);
+        try std.testing.expectEqual(@as(?theme.Choice, choice), request.theme);
+    }
+    var message: []const u8 = "";
+    try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{ "theme", "purple" }, &message));
+    try std.testing.expectEqualStrings("theme needs green or amoled", message);
+    try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{"theme"}, &message));
+    try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{ "theme", "amoled", "extra" }, &message));
+}
+
+test "theme choice survives the control JSON round trip" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeRequest(&out.writer, .{ .cmd = .theme, .theme = .amoled });
+    const parsed = try parseRequest(std.testing.allocator, out.written());
+    defer parsed.deinit();
+    try std.testing.expectEqual(Command.theme, parsed.value.cmd);
+    try std.testing.expectEqual(@as(?theme.Choice, .amoled), parsed.value.theme);
+    try std.testing.expectError(error.InvalidEnumTag, parseRequest(std.testing.allocator, "{\"cmd\":\"theme\",\"theme\":\"purple\"}"));
 }

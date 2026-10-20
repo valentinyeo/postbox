@@ -47,7 +47,7 @@ pub fn drawPinned(a: anytype, item: *win.DRAWITEMSTRUCT, comptime actions: anyty
     _ = win.FillRect(item.hDC, &item.rcItem, a.brush_panel.?);
     _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
     _ = win.SelectObject(item.hDC, a.font_bold.?);
-    _ = win.SetTextColor(item.hDC, theme.on_surface);
+    _ = win.SetTextColor(item.hDC, theme.current.on_surface);
     var box = item.rcItem;
     box.left += actions.px(a, 16);
     box.top += actions.px(a, 7);
@@ -56,7 +56,7 @@ pub fn drawPinned(a: anytype, item: *win.DRAWITEMSTRUCT, comptime actions: anyty
     box.top = box.bottom;
     box.bottom = item.rcItem.bottom;
     _ = win.SelectObject(item.hDC, a.font_small.?);
-    _ = win.SetTextColor(item.hDC, theme.primary);
+    _ = win.SetTextColor(item.hDC, theme.current.primary);
     var buffer: [100]u8 = undefined;
     const groups = status.group(actions.rows(a), &a.status_viewed);
     const label = std.fmt.bufPrint(&buffer, "{d} contacts with unseen updates", .{groups.recent}) catch "";
@@ -72,7 +72,7 @@ pub fn paint(a: anytype, hwnd: win.HWND, comptime actions: anytype) void {
     _ = win.GetClientRect(hwnd, &client);
     _ = win.FillRect(hdc, &client, a.brush_bg.?);
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
-    _ = win.SetTextColor(hdc, theme.on_surface);
+    _ = win.SetTextColor(hdc, theme.current.on_surface);
     _ = win.SelectObject(hdc, a.font_bold.?);
     const margin = actions.px(a, 24);
     var box = win.RECT{ .left = margin, .top = margin, .right = client.right - margin, .bottom = actions.px(a, 58) };
@@ -150,7 +150,7 @@ pub fn paint(a: anytype, hwnd: win.HWND, comptime actions: anytype) void {
     var y = actions.px(a, 88) - a.status_ui.scroll;
     for (0..2) |section| {
         _ = win.SelectObject(hdc, a.font_bold.?);
-        _ = win.SetTextColor(hdc, theme.on_surface);
+        _ = win.SetTextColor(hdc, theme.current.on_surface);
         box = .{ .left = margin, .top = y, .right = client.right - margin, .bottom = y + heading };
         textAt(a, hdc, if (section == 0) "Recent updates" else "Viewed updates", box, win.DT_SINGLELINE | win.DT_VCENTER);
         y += heading;
@@ -164,7 +164,7 @@ pub fn paint(a: anytype, hwnd: win.HWND, comptime actions: anytype) void {
                 if (i == a.status_ui.selected) _ = win.FillRect(hdc, &hit, a.brush_panel.?);
                 const left = margin + actions.px(a, 8);
                 const top = y + actions.px(a, 12);
-                const pen = win.CreatePen(win.PS_SOLID, actions.px(a, 3), if (contact.unseen) theme.primary else theme.outline);
+                const pen = win.CreatePen(win.PS_SOLID, actions.px(a, 3), if (contact.unseen) theme.current.primary else theme.current.outline);
                 if (pen) |p| {
                     const old_pen = win.SelectObject(hdc, p);
                     const old_brush = win.SelectObject(hdc, win.GetStockObject(win.NULL_BRUSH));
@@ -183,19 +183,19 @@ pub fn paint(a: anytype, hwnd: win.HWND, comptime actions: anytype) void {
                         if (value.len > 0) {
                             var initial_box = win.RECT{ .left = left, .top = top, .right = left + 42, .bottom = top + 42 };
                             _ = win.SelectObject(hdc, a.font_bold.?);
-                            _ = win.SetTextColor(hdc, theme.on_surface);
+                            _ = win.SetTextColor(hdc, theme.current.on_surface);
                             _ = win.DrawTextW(hdc, value.ptr, if (value[0] >= 0xd800 and value[0] <= 0xdbff and value.len > 1) 2 else 1, &initial_box, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
                         }
                     }
                 }
                 box = .{ .left = left + actions.px(a, 64), .top = y + actions.px(a, 10), .right = client.right - margin, .bottom = y + actions.px(a, 36) };
                 _ = win.SelectObject(hdc, a.font.?);
-                _ = win.SetTextColor(hdc, theme.on_surface);
+                _ = win.SetTextColor(hdc, theme.current.on_surface);
                 textAt(a, hdc, row.name(), box, win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
                 box.top = box.bottom;
                 box.bottom = y + row_height;
                 _ = win.SelectObject(hdc, a.font_small.?);
-                _ = win.SetTextColor(hdc, theme.on_surface_variant);
+                _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
                 var buffer: [48]u8 = undefined;
                 textAt(a, hdc, timeLabel(&buffer, row.ts, actions.now()), box, win.DT_SINGLELINE);
             }
