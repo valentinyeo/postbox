@@ -352,7 +352,7 @@ pub fn build(b: *std.Build) void {
         "return storage; }\nfn deliverChats(a: *App, result: *const WacliResult) void {\n",
         sourceSection("                    if (!result.ok and result.gen == a.chats_gen) {", "                },\n                .messages =>"),
         "}\nfn deliver(a: *App, result: *WacliResult) void { a.pending -= 1;\n",
-        sourceSection("                    var kind: []const u8 = \"unknown\";", "                },\n                .reaction =>"),
+        sourceSection("                    var kind: []const u8 = \"unknown\";", "                },\n                .background_media =>"),
         "}\nfn tick(a: *App) void {\n",
         sourceSection("                if (a.msg_read_retry_ticks > 0)", "                if (changed and"),
         "}\n",
@@ -460,7 +460,7 @@ pub fn build(b: *std.Build) void {
         "return attachment_state; }\n",
     }) catch @panic("Out of memory building media failure harness");
     const media_failure_files = b.addWriteFiles();
-    for ([_][]const u8{ "media_drain.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {
+    for ([_][]const u8{ "media_drain.zig", "media_age.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {
         _ = media_failure_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
     }
     const media_failure_harness = media_failure_files.add("media_failure_test.zig", media_failure_source);
@@ -469,6 +469,26 @@ pub fn build(b: *std.Build) void {
         .target = b.resolveTargetQuery(.{}),
     }) });
     test_step.dependOn(&b.addRunArtifact(media_failure_tests).step);
+
+    const background_media_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("src/background_media_test.zig"),
+        sourceSection("fn Utf8Text(", "const Chat = struct"),
+        sourceSection("const WacliJobKind = enum", "const MsgCacheEntry = struct {"),
+        sourceSection("const background_media_limit =", "fn mediaBusy("),
+        sourceSection("fn mediaAttempted(", "fn isDownloadableMedia("),
+        sourceSection("fn wacliJobArgs(", "fn wacliPendingGet("),
+        sourceSection("fn observeBackgroundMediaChats(", "fn ensureAvatarSession("),
+    }) catch @panic("Out of memory building background media harness");
+    const background_media_files = b.addWriteFiles();
+    for ([_][]const u8{ "media_drain.zig", "media_age.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {
+        _ = background_media_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
+    }
+    const background_media_harness = background_media_files.add("background_media_test.zig", background_media_source);
+    const background_media_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = background_media_harness,
+        .target = b.resolveTargetQuery(.{}),
+    }) });
+    test_step.dependOn(&b.addRunArtifact(background_media_tests).step);
 
     const webp_tests = b.addTest(.{
         .root_module = b.createModule(.{
