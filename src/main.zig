@@ -390,6 +390,7 @@ const PendingArchive = struct {
     jid: Utf8Text(191) = .{},
     should_unarchive: bool = false,
     source: archive_rules.Source = .shortcut,
+    retry_at_ms: u64 = 0,
 };
 
 const AvatarEntry = struct {
@@ -485,11 +486,13 @@ const PendingReaction = struct {
 
 const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
+const WacliLane = enum { wacli, slack, hub_media };
 
 const WacliJob = struct {
     provider: transport.Provider = .whatsapp,
     account: Utf8Text(32) = .{},
     kind: WacliJobKind = .chats,
+    hub_account: Utf8Text(32) = .{},
     gen: u64 = 0,
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
@@ -903,6 +906,7 @@ const App = struct {
     launch_log_mutex: std.Io.Mutex = .init,
     wacli_thread: ?std.Thread = null,
     wacli_slack_thread: ?std.Thread = null,
+    hub_media_thread: ?std.Thread = null,
     wacli_mutex: std.Io.Mutex = .init,
     wacli_cond: std.Io.Condition = .init,
     wacli_queue: [wacli_queue_size]WacliJob = [_]WacliJob{.{}} ** wacli_queue_size,
@@ -1753,6 +1757,14 @@ fn jobIsWrite(kind: WacliJobKind) bool {
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
     if (verification_fixture and !hubConfigured(a)) return false;
     if (hubConfigured(a) and !hubJobReady(a, job)) return false;
+    if (job.kind == .hub_media or job.kind == .hub_avatar) {
+        if (a.hub_media_thread == null) {
+            setStatus(a, "Media worker unavailable; restart Messages");
+            return false;
+        }
+    }
+    var queued_job = job;
+    if (hubConfigured(a) and job.provider == .whatsapp) queued_job.hub_account = a.hub_account;
     if (jobIsSlack(job.kind) and a.wacli_slack_thread == null) {
         setStatus(a, "Slack worker unavailable; restart Messages");
         return false;
@@ -1784,9 +1796,9 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
             (a.wacli_queue[insert].kind == .slack_send or a.wacli_queue[insert].kind == .slack_attach or a.wacli_queue[insert].kind == .slack_share or a.wacli_queue[insert].kind == .reaction)) insert += 1;
         var shift = a.wacli_queue_len;
         while (shift > insert) : (shift -= 1) a.wacli_queue[shift] = a.wacli_queue[shift - 1];
-        a.wacli_queue[insert] = job;
+        a.wacli_queue[insert] = queued_job;
     } else {
-        a.wacli_queue[a.wacli_queue_len] = job;
+        a.wacli_queue[a.wacli_queue_len] = queued_job;
     }
     a.wacli_queue_len += 1;
     a.wacli_pending[@intFromEnum(job.kind)] += 1;
@@ -1820,8 +1832,8 @@ fn wacliPumpSync(a: *App) void {
             a.wacli_mutex.unlock(a.io);
             return;
         }
-        const job = if (pump_wacli) wacliTakeJob(a, false) else null;
-        const chosen = job orelse (if (pump_slack) wacliTakeJob(a, true) else null);
+        const job = if (pump_wacli) wacliTakeJob(a, .wacli) else null;
+        const chosen = job orelse (if (pump_slack) wacliTakeJob(a, .slack) else null);
         if (chosen == null) {
             a.wacli_mutex.unlock(a.io);
             return;
@@ -1840,6 +1852,8 @@ fn wacliShutdown(a: *App) void {
     a.wacli_thread = null;
     if (a.wacli_slack_thread) |thread| thread.join();
     a.wacli_slack_thread = null;
+    if (a.hub_media_thread) |thread| thread.join();
+    a.hub_media_thread = null;
     for (a.msg_cache[0..a.msg_cache_len]) |*entry| {
         if (entry.data) |data| a.allocator.free(data);
         entry.data = null;
@@ -1854,10 +1868,12 @@ fn jobIsSlack(kind: WacliJobKind) bool {
     };
 }
 
-fn wacliTakeJob(a: *App, slack_lane: bool) ?WacliJob {
+fn wacliTakeJob(a: *App, lane: WacliLane) ?WacliJob {
     var index: usize = 0;
     while (index < a.wacli_queue_len) : (index += 1) {
-        if (jobIsSlack(a.wacli_queue[index].kind) != slack_lane) continue;
+        const kind = a.wacli_queue[index].kind;
+        const job_lane: WacliLane = if (jobIsSlack(kind)) .slack else if (kind == .hub_media or kind == .hub_avatar) .hub_media else .wacli;
+        if (job_lane != lane) continue;
         const job = a.wacli_queue[index];
         var shift = index;
         while (shift + 1 < a.wacli_queue_len) : (shift += 1) a.wacli_queue[shift] = a.wacli_queue[shift + 1];
@@ -1867,13 +1883,13 @@ fn wacliTakeJob(a: *App, slack_lane: bool) ?WacliJob {
     return null;
 }
 
-fn wacliWorkerMain(a: *App, slack_lane: bool) void {
+fn wacliWorkerMain(a: *App, lane: WacliLane) void {
     while (true) {
         a.wacli_mutex.lockUncancelable(a.io);
-        var job = wacliTakeJob(a, slack_lane);
+        var job = wacliTakeJob(a, lane);
         while (job == null and !a.wacli_quit) {
             a.wacli_cond.waitUncancelable(a.io, &a.wacli_mutex);
-            job = wacliTakeJob(a, slack_lane);
+            job = wacliTakeJob(a, lane);
         }
         if (job == null or a.wacli_quit) {
             a.wacli_mutex.unlock(a.io);
@@ -1885,7 +1901,7 @@ fn wacliWorkerMain(a: *App, slack_lane: bool) void {
 }
 
 fn wacliRunJob(a: *App, job: WacliJob) void {
-    if (job.kind != .cache_tag and job.provider == .whatsapp and !std.mem.eql(u8, job.account.slice(), a.cache_tag.slice())) {
+    if (!hubConfigured(a) and job.kind != .cache_tag and job.provider == .whatsapp and !std.mem.eql(u8, job.account.slice(), a.cache_tag.slice())) {
         wacliPendingSub(a, job.kind);
         return;
     }
@@ -4880,7 +4896,9 @@ fn loadOutbox(a: *App) void {
 fn bindOutboxAccount(a: *App) void {
     if (a.outbox_load_failed or a.cache_tag.len == 0) return;
     for (a.pending_sends[0..a.pending_send_count]) |*pending| {
-        if (pending.provider == .whatsapp and pending.account.len == 0) {
+        if (pending.provider == .whatsapp and (pending.account.len == 0 or
+            (hubConfigured(a) and a.hub_account.len > 0 and !std.mem.eql(u8, pending.account.slice(), a.cache_tag.slice()))))
+        {
             pending.account = a.cache_tag;
             a.slack_outbox_dirty = true;
         }
@@ -10697,7 +10715,11 @@ fn applyReaction(a: *App, result: *WacliResult) void {
     const entry = findPendingReaction(a, result.msg_id.slice()) orelse return;
     if (!std.mem.eql(u8, entry.emoji.slice(), result.extra.slice())) return;
     const message = findLoadedMessage(a, result.msg_id.slice());
-    if (result.ok) {
+    if (hubConfigured(a) and result.http_status == 409) {
+        if (message) |target| target.reaction_pending = false;
+        removePendingReaction(a, entry);
+        setStatus(a, "Reaction delivery unknown; check the chat");
+    } else if (result.ok) {
         if (message) |target| target.reaction_pending = false;
         removePendingReaction(a, entry);
         setStatus(a, if (result.extra.len == 0) "Reaction removed" else "Reaction sent");
@@ -15584,7 +15606,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 } else |_| return -1;
                 loadDrafts(a);
                 if (hubConfigured(a)) {
-                    a.wacli_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, false }) catch return -1;
+                    a.wacli_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .wacli }) catch return -1;
+                    a.hub_media_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .hub_media }) catch return -1;
                     enqueueCacheTagProbe(a);
                     startSync(a);
                 } else {
@@ -15595,14 +15618,18 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 return 0;
             }
             if (a.wacli_thread == null) {
-                a.wacli_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, false }) catch null;
+                a.wacli_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .wacli }) catch null;
             }
             if (a.wacli_thread == null) setStatus(a, "Background reader failed to start");
+            if (hubConfigured(a) and a.hub_media_thread == null) {
+                a.hub_media_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .hub_media }) catch null;
+                if (a.hub_media_thread == null) setStatus(a, "Media worker unavailable; restart Messages");
+            }
             if (std.Thread.spawn(.{ .stack_size = 256 * 1024 }, controlThreadMain, .{a})) |thread| {
                 thread.detach();
             } else |_| appendLaunchLog(a, "control pipe: thread failed to start");
             if (a.wacli_slack_thread == null) {
-                a.wacli_slack_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, true }) catch null;
+                a.wacli_slack_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .slack }) catch null;
                 if (a.wacli_slack_thread == null) setStatus(a, "Slack worker unavailable; restart Messages");
             }
             if (hubConfigured(a)) {
@@ -18535,26 +18562,20 @@ fn hubConfigured(a: *const App) bool {
     return wa_hub.igsh_532_hub_whatsapp and a.hub_client != null;
 }
 
-fn hubKey(a: *const App, jid: []const u8) chat_key.Key {
-    return .{ .provider = .whatsapp, .account = a.hub_account.slice(), .id = jid };
-}
-
 fn hubMediaPath(a: *App, allocator: std.mem.Allocator, key: chat_key.Key, id: []const u8) ![]u8 {
-    var cache_key = key;
-    cache_key.account = a.cache_tag.slice();
-    const name = try wa_hub.cacheName(allocator, cache_key, id);
+    const name = try wa_hub.cacheName(allocator, key, id);
     return std.fs.path.join(allocator, &.{ std.fs.path.dirname(a.avatar_dir) orelse return error.MissingMessagesDir, "hub-media", name });
 }
 
-fn hubNormalized(a: *App, allocator: std.mem.Allocator, raw: []const u8, kind: wa_hub.Rows, jid: []const u8) ![]u8 {
-    const normalized = try wa_hub.normalize(allocator, raw, a.hub_account.slice(), kind);
+fn hubNormalized(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, raw: []const u8, kind: wa_hub.Rows, jid: []const u8) ![]u8 {
+    const normalized = try wa_hub.normalize(allocator, raw, job.hub_account.slice(), kind);
     if (kind != .messages and kind != .statuses) return normalized;
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, normalized, .{});
     defer parsed.deinit();
     const rows = parsed.value.object.getPtr("data").?.object.getPtr(if (kind == .messages) "messages" else "statuses").?;
     for (rows.array.items) |*row| {
         const id = getString(row.object, if (kind == .messages) "MsgID" else "msg_id");
-        const path = try hubMediaPath(a, allocator, hubKey(a, jid), id);
+        const path = try hubMediaPath(a, allocator, .{ .provider = .whatsapp, .account = job.account.slice(), .id = jid }, id);
         var local_path: []const u8 = if (fileExistsUtf8(path)) path else "";
         if (local_path.len > 0) {
             const extension = wa_hub.mediaExtension(getString(row.object, if (kind == .messages) "Filename" else "filename"), getString(row.object, if (kind == .messages) "MimeType" else "mime_type"), getString(row.object, if (kind == .messages) "MediaType" else "media_type"));
@@ -18598,12 +18619,13 @@ fn runHubJob(a: *App, job: WacliJob, result: *WacliResult) void {
 
 fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, result: *WacliResult) ![]const u8 {
     const client = a.hub_client orelse return error.HubNotConfigured;
-    if (job.kind != .cache_tag and a.hub_account.len == 0) return error.AccountNotReady;
-    const key = hubKey(a, job.jid.slice());
+    if (job.kind != .cache_tag and job.hub_account.len == 0) return error.AccountNotReady;
+    const key = chat_key.Key{ .provider = .whatsapp, .account = job.hub_account.slice(), .id = job.jid.slice() };
     const request: wa_hub.Request = switch (job.kind) {
         .cache_tag => wa_hub.accounts(),
         .chats, .archived_scan, .contacts_index => try wa_hub.chats(allocator, key.account, hubHasArg(job, "--archived"), 500),
-        .messages, .resurface_probe, .unread_probe, .background_media => try wa_hub.messages(allocator, key, std.fmt.parseInt(usize, hubArg(job, "--limit", "80"), 10) catch 80, ""),
+        .messages, .resurface_probe, .background_media => try wa_hub.messages(allocator, key, std.fmt.parseInt(usize, hubArg(job, "--limit", "80"), 10) catch 80, ""),
+        .unread_probe => try wa_hub.messages(allocator, key, 20, ""),
         .groups => try wa_hub.list(allocator, key.account, .groups),
         .statuses => try wa_hub.list(allocator, key.account, .statuses),
         .reaction => try wa_hub.react(allocator, key, job.msg_id.slice(), job.extra.slice(), job.client_id.slice()),
@@ -18629,7 +18651,7 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
             .pending => return "",
             .unavailable => return error.MediaUnavailable,
             .ready => {
-                const path = try hubMediaPath(a, allocator, key, job.msg_id.slice());
+                const path = try hubMediaPath(a, allocator, .{ .provider = .whatsapp, .account = job.account.slice(), .id = key.id }, job.msg_id.slice());
                 if (!writeCacheFileAtomic(a, path, response.body)) return error.MediaCacheWriteFailed;
                 return path;
             },
@@ -18648,10 +18670,10 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
         return "";
     }
     return switch (job.kind) {
-        .chats, .archived_scan, .contacts_index => hubNormalized(a, allocator, response.body, .chats, ""),
-        .groups => hubNormalized(a, allocator, response.body, .groups, ""),
-        .messages, .resurface_probe, .unread_probe, .background_media => hubNormalized(a, allocator, response.body, .messages, key.id),
-        .statuses => hubNormalized(a, allocator, response.body, .statuses, status_view.broadcast),
+        .chats, .archived_scan, .contacts_index => hubNormalized(a, allocator, job, response.body, .chats, ""),
+        .groups => hubNormalized(a, allocator, job, response.body, .groups, ""),
+        .messages, .resurface_probe, .unread_probe, .background_media => hubNormalized(a, allocator, job, response.body, .messages, key.id),
+        .statuses => hubNormalized(a, allocator, job, response.body, .statuses, status_view.broadcast),
         else => response.body,
     };
 }
@@ -18668,11 +18690,13 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
         if (!std.mem.eql(u8, account.state, "linked") or account.account.len == 0 or account.account.len > 32) continue;
         if (a.hub_account.len > 0 and !std.mem.eql(u8, a.hub_account.slice(), account.account)) continue;
         if (a.hub_account.len == 0) {
-            a.hub_account.set(account.account);
             const hash = std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, a.wa_bridge_url), account.account);
             var tag_buffer: [16]u8 = undefined;
             const tag = std.fmt.bufPrint(&tag_buffer, "{x:0>16}", .{hash}) catch return;
+            a.wacli_mutex.lockUncancelable(a.io);
+            a.hub_account.set(account.account);
             a.cache_tag.set(tag);
+            a.wacli_mutex.unlock(a.io);
             persistTag(a, tag);
             bindOutboxAccount(a);
             loadChatsCache(a);
@@ -18707,7 +18731,7 @@ fn startHubMarkRead(a: *App) void {
 }
 
 fn startHubArchive(a: *App) void {
-    if (a.hub_account.len == 0 or a.pending_archive_count == 0 or wacliPendingGet(a, .hub_archive) > 0) return;
+    if (a.hub_account.len == 0 or a.pending_archive_count == 0 or wacliPendingGet(a, .hub_archive) > 0 or a.pending_archives[0].retry_at_ms > win.GetTickCount64()) return;
     _ = hubTransport(a).archive(a.pending_archives[0].jid.slice(), !a.pending_archives[0].should_unarchive);
 }
 
@@ -18756,10 +18780,8 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 refreshMessages(a);
                 setStatus(a, "Sent");
             } else if (result.http_status == 409) {
-                a.pending_sends[0].ambiguous = true;
-                a.pending_sends[0].not_before_ms = std.math.maxInt(u64);
+                failHeadPendingSend(a, 409, true, "delivery unknown", false);
                 _ = persistOutbox(a);
-                setStatus(a, "Delivery unknown; check the hub before sending again");
             } else if (result.http_status >= 500 or result.http_status == 200 or
                 (result.http_status == 0 and std.mem.eql(u8, result.extra.slice(), "NetworkFailed")))
             {
@@ -18781,25 +18803,32 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
         },
         .hub_archive => {
             if (a.pending_archive_count == 0 or !chat_key.Key.eql(.{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = a.pending_archives[0].jid.slice() }, chat_key.of(result))) return;
-            removeFirstPendingArchive(a);
-            refreshChats(a);
-            setStatus(a, if (result.ok) "Archive operation completed" else "Archive operation failed");
+            if (result.ok) {
+                removeFirstPendingArchive(a);
+                refreshChats(a);
+                setStatus(a, "Archive operation completed");
+            } else {
+                a.pending_archives[0].retry_at_ms = win.GetTickCount64() + 3_000;
+                setStatus(a, "Archive operation failed; retrying");
+            }
         },
         .hub_media => {
             for (&a.media_downloads) |*slot| {
                 if (!slot.hub_pending or !chat_key.Key.eql(.{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = slot.jid.slice() }, chat_key.of(result)) or !std.mem.eql(u8, slot.id.slice(), result.msg_id.slice())) continue;
-                if (result.ok and result.http_status == 202) {
+                if (result.ok and result.http_status == 202 and win.GetTickCount64() -| slot.started_ms < 120_000) {
                     slot.hub_retry_ms = win.GetTickCount64() + 1000;
                     return;
                 }
                 slot.hub_pending = false;
-                if (result.ok) {
+                const ok = result.ok and result.http_status != 202;
+                if (ok) {
                     clearMediaFailure(a, slot.jid.slice(), slot.id.slice());
                 } else {
                     noteMediaFailure(a, slot.jid.slice(), slot.id.slice());
+                    setStatus(a, if (result.http_status == 202) "Media download timed out" else "Media download failed");
                     if (std.mem.eql(u8, slot.id.slice(), a.audio_chain_id.slice())) a.audio_chain_waiting = false;
                 }
-                image_viewer.downloadFinished(a, slot.jid.slice(), slot.id.slice(), result.ok);
+                image_viewer.downloadFinished(a, slot.jid.slice(), slot.id.slice(), ok);
                 if (std.mem.eql(u8, slot.jid.slice(), status_view.broadcast)) refreshStatuses(a, true) else refreshMessages(a);
                 slot.* = .{};
                 break;
@@ -18825,11 +18854,14 @@ fn readHubChats(a: *App, archived: bool) ?[]u8 {
     var arena = std.heap.ArenaAllocator.init(a.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const request = wa_hub.chats(allocator, a.hub_account.slice(), archived, 250) catch return null;
+    a.wacli_mutex.lockUncancelable(a.io);
+    const account = a.hub_account;
+    a.wacli_mutex.unlock(a.io);
+    const request = wa_hub.chats(allocator, account.slice(), archived, 250) catch return null;
     var response = a.hub_client.?.call(allocator, request) catch return null;
     defer response.deinit(allocator);
     if (response.status != 200) return null;
-    const normalized = wa_hub.normalize(allocator, response.body, a.hub_account.slice(), .chats) catch return null;
+    const normalized = wa_hub.normalize(allocator, response.body, account.slice(), .chats) catch return null;
     return a.allocator.dupe(u8, normalized) catch null;
 }
 
@@ -18848,10 +18880,19 @@ fn hubEventsMain(a: *App) void {
     }
 }
 
+fn postHubEvent(a: *App, reset: bool) void {
+    if (reset) a.hub_reset_pending.store(true, .release);
+    if (!a.hub_event_pending.swap(true, .acq_rel)) {
+        const posted = if (a.hwnd) |hwnd| win.PostMessageW(hwnd, wm_hub_event, 0, 0) != 0 else false;
+        if (!posted) a.hub_event_pending.store(false, .release);
+    }
+}
+
 fn hubEventSession(a: *App, allocator: std.mem.Allocator, sse: *wa_hub.Sse) !void {
     const stream = try a.hub_client.?.open(allocator, wa_hub.events(sse.lastId()), &a.hub_cancel);
     defer stream.deinit();
     if (stream.status != 200) return error.HubHttpFailed;
+    postHubEvent(a, true);
     sse.len = 0;
     var buffer: [4096]u8 = undefined;
     while (!a.hub_stop.load(.acquire)) {
@@ -18861,11 +18902,7 @@ fn hubEventSession(a: *App, allocator: std.mem.Allocator, sse: *wa_hub.Sse) !voi
             if (try sse.push(byte)) |frame| {
                 var event = (try sse.parse(allocator, frame)) orelse continue;
                 defer event.deinit();
-                if (std.mem.eql(u8, event.value.kind, "reset")) a.hub_reset_pending.store(true, .release);
-                if (!a.hub_event_pending.swap(true, .acq_rel)) {
-                    const posted = if (a.hwnd) |hwnd| win.PostMessageW(hwnd, wm_hub_event, 0, 0) != 0 else false;
-                    if (!posted) a.hub_event_pending.store(false, .release);
-                }
+                postHubEvent(a, std.mem.eql(u8, event.value.kind, "reset"));
             }
         }
     }
@@ -18873,22 +18910,30 @@ fn hubEventSession(a: *App, allocator: std.mem.Allocator, sse: *wa_hub.Sse) !voi
 
 fn loadWaBridgeKey(init: std.process.Init) ?[]u8 {
     const allocator = init.gpa;
-    var stored = slack_win.loadSecret(allocator, lit("WaBridgeKey"));
+    const stored = slack_win.loadSecret(allocator, lit("WaBridgeKey"));
+    defer if (stored) |secret| allocator.free(secret.value);
     const path = if (init.environ_map.get("USERPROFILE")) |profile| std.fs.path.join(allocator, &.{ profile, ".wacli", "bridge-send.key" }) catch null else null;
     defer if (path) |p| allocator.free(p);
     const file_key = if (path) |p| readFileWin(allocator, p, 4096) else null;
     defer if (file_key) |bytes| allocator.free(bytes);
-    const environment = init.environ_map.get("WA_BRIDGE_KEY") orelse "";
-    const plain = std.mem.trim(u8, if (environment.len > 0) environment else if (file_key) |bytes| bytes else "", " \t\r\n");
-    if (stored == null and plain.len > 0 and slack_win.saveSecret(lit("WaBridgeKey"), plain)) stored = slack_win.loadSecret(allocator, lit("WaBridgeKey"));
-    if (stored) |secret| {
-        if (secret.outcome == .migration_failed) {
-            allocator.free(secret.value);
-            return null;
-        }
+    const environment = slack_win.loadUserEnvironment(allocator, lit("WA_BRIDGE_KEY"));
+    defer if (environment) |value| allocator.free(value);
+    const plain = std.mem.trim(u8, environment orelse file_key orelse "", " \t\r\n");
+    if (plain.len > 0) {
+        if (!slack_win.saveSecret(lit("WaBridgeKey"), plain)) return null;
+        const key = allocator.dupe(u8, plain) catch return null;
         if (file_key != null) deleteFileUtf8(path.?);
+        var user_environment: win.HKEY = null;
+        if (win.RegOpenKeyExW(winHandle(win.HKEY, 0x80000001), lit("Environment"), 0, win.KEY_SET_VALUE, &user_environment) == win.ERROR_SUCCESS) {
+            defer _ = win.RegCloseKey(user_environment);
+            _ = win.RegDeleteValueW(user_environment, lit("WA_BRIDGE_KEY"));
+        }
         _ = win.SetEnvironmentVariableW(lit("WA_BRIDGE_KEY"), null);
-        return secret.value;
+        return key;
+    }
+    if (stored) |secret| {
+        if (secret.outcome == .migration_failed) return null;
+        return allocator.dupe(u8, secret.value) catch null;
     }
     return null;
 }
@@ -18996,4 +19041,47 @@ fn enqueueHubReaction(a: *App, entry: *PendingReaction) void {
 
 fn hubJobReady(a: *const App, job: WacliJob) bool {
     return job.kind == .cache_tag or a.hub_account.len > 0;
+}
+
+test "hub send conflict schedules bounded ambiguous recovery without blocking later sends" {
+    const a = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(a);
+    a.* = .{
+        .allocator = std.testing.allocator,
+        .people = people_index.Index.init(std.testing.allocator),
+        .io = std.testing.io,
+        .instance = null,
+        .wacli_path = &.{},
+        .avatar_dir = &.{},
+        .hub_client = .{ .endpoint = .{ .host = "", .port = 443, .secure = true }, .key = "" },
+    };
+    a.hub_stop.store(true, .release);
+    a.pending_send_count = 2;
+    a.pending_sends[1].id = @splat('1');
+    var result = WacliResult{ .kind = .hub_send, .http_status = 409 };
+    result.msg_id.set(&a.pending_sends[0].id);
+    const before = win.GetTickCount64();
+    applyHubResult(a, &result);
+    try std.testing.expectEqual(@as(usize, 2), a.pending_send_count);
+    try std.testing.expect(a.pending_sends[0].ambiguous);
+    try std.testing.expectEqual(@as(u8, 1), a.pending_sends[0].retries);
+    try std.testing.expect(a.pending_sends[0].not_before_ms >= before + 3_000);
+    try std.testing.expect(a.pending_sends[0].not_before_ms <= win.GetTickCount64() + 3_000);
+    try std.testing.expectEqual(@as(u8, '1'), a.pending_sends[1].id[0]);
+}
+
+test "hub stream open reset survives event coalescing without a reset frame" {
+    const a = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(a);
+    a.hub_reset_pending = .init(false);
+    a.hub_event_pending = .init(true);
+    postHubEvent(a, true);
+    try std.testing.expect(a.hub_reset_pending.load(.acquire));
+    try std.testing.expect(a.hub_event_pending.load(.acquire));
+    a.hub_event_pending.store(false, .release);
+    a.hub_reset_pending.store(false, .release);
+    a.hwnd = null;
+    postHubEvent(a, true);
+    try std.testing.expect(a.hub_reset_pending.load(.acquire));
+    try std.testing.expect(!a.hub_event_pending.load(.acquire));
 }

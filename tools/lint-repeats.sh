@@ -85,12 +85,12 @@ if ! awk '
 function scan(    rest, line, prefix, token) {
     rest = source
     line = 1
-    while (match(rest, /environ_map[[:space:]]*\.[[:space:]]*get[[:space:]]*\([[:space:]]*"DEEPGRAM_API_KEY"[[:space:]]*\)/)) {
+    while (match(rest, /environ_map[[:space:]]*\.[[:space:]]*get[[:space:]]*\([[:space:]]*"(DEEPGRAM_API_KEY|WA_BRIDGE_KEY)"[[:space:]]*\)/)) {
         prefix = substr(rest, 1, RSTART - 1)
         token = substr(rest, RSTART, RLENGTH)
         rest = substr(rest, RSTART + RLENGTH)
         line += gsub(/\n/, "", prefix)
-        printf "lint-repeats: %s:%d: [C2] Deepgram key read from the inherited process environment, which can hold an old key. Use slack_win.loadUserEnvironment plus slack_win.loadSecret.\n", file, line
+        printf "lint-repeats: %s:%d: [C2] Secret key read from the inherited process environment, which can hold an old key. Use slack_win.loadUserEnvironment plus slack_win.loadSecret.\n", file, line
         line += gsub(/\n/, "", token)
         failed = 1
     }
