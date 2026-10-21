@@ -18934,6 +18934,9 @@ fn loadWaBridgeKey(init: std.process.Init) ?[]u8 {
 fn configureWaHub(a: *App, init: std.process.Init) void {
     if (verification_fixture) {
         if (init.environ_map.get("WAZIG_VERIFY_HUB_URL")) |url| {
+            if (init.environ_map.get("WA_BRIDGE_KEY")) |seed| {
+                if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;
+            }
             const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, url) catch return;
             defer a.allocator.free(wide);
             var key: win.HKEY = null;

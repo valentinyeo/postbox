@@ -30,6 +30,13 @@ assert 'if (verification_fixture and !hubConfigured(a)) return false;' in source
 assert 'if (verification_fixture) return;' in source
 assert 'whatsapp-hub' in workflow
 assert (root / 'tools/verify-wazig/fake-wa-bridge.py').is_file()
+fixture_config = source.split('fn configureWaHub(', 1)[1].split('    a.wa_bridge_url =', 1)[0]
+assert 'if (verification_fixture)' in fixture_config
+assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
+assert 'if (init.environ_map.get("WA_BRIDGE_KEY")) |seed|' in fixture_config
+assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
+runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
+assert "if ($Feature -ne 'whatsapp-hub') {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 for proof in ['chats', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof

@@ -168,10 +168,16 @@ function Hub-Pass($Session, [string]$Gate) {
 
 function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
     $state = Read-Control $Session status
-    Assert-That ($state.chat_count -eq 2 -and $state.selected.name -eq 'Verification Alpha') 'Hub chats did not reach the sidebar'
+    Assert-That ($state.chat_count -eq 2 -and $state.selected.name -eq 'Verification Alpha' -and $state.selected.id -eq '15550000001@s.whatsapp.net' -and $state.selected.provider -eq 'whatsapp') 'Hub chats did not reach the sidebar'
+    $requests = @(Read-BridgeRequests $Session)
+    foreach ($path in @('/v1/accounts', '/v1/chats?')) {
+        Assert-That (@($requests | Where-Object { $_.path.StartsWith($path) -and $_.status -eq 200 }).Count -gt 0) "Missing hub list request: $path"
+    }
     Hub-Pass $Session chats
     Send-Keys $Session '^{TAB}'
+    $null = Wait-Until { (Read-Control $Session status).selected.id -eq '15550000002@s.whatsapp.net' } 'hub Beta selected'
     Send-Keys $Session '^+{TAB}'
+    $null = Wait-Until { (Read-Control $Session status).selected.id -eq '15550000001@s.whatsapp.net' } 'hub Alpha selected'
     $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object id -eq 'BASELINE').Count -eq 1 } 'hub history visible'
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'history.messages.json')
     Save-Screen $Session history

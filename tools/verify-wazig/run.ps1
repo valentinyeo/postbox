@@ -16,11 +16,13 @@ $profile = Join-Path $root 'profile'
 $messages = Join-Path $local 'Messages'
 New-Item $messages, $profile -ItemType Directory -Force | Out-Null
 $tag = '0000000000000526'
-Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
-@{ data = @(
-    @{ jid = 'verify-alpha'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = '' },
-    @{ jid = 'verify-beta'; name = 'Verification Beta'; kind = 'direct'; last_message_ts = '' }
-) } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $messages "chats-$tag.json")
+if ($Feature -ne 'whatsapp-hub') {
+    Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
+    @{ data = @(
+        @{ jid = 'verify-alpha'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = '' },
+        @{ jid = 'verify-beta'; name = 'Verification Beta'; kind = 'direct'; last_message_ts = '' }
+    ) } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $messages "chats-$tag.json")
+}
 $exe = (Resolve-Path (Join-Path $Bin 'Messages.exe')).Path
 foreach ($case in @('not-actions', 'not-isolated')) {
     $rejected = [Diagnostics.ProcessStartInfo]::new($exe)

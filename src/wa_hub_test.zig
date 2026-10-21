@@ -72,7 +72,8 @@ test "kept_check hub inbox rows retain the fields needed to rearchive kept chats
     const request = try hub.chats(allocator, key.account, false, 500);
     try std.testing.expectEqualStrings("GET", request.method);
     try std.testing.expectEqualStrings("/v1/chats?account=personal&archived=false&limit=500", request.path);
-    const normalized = try hub.normalize(allocator,
+    const normalized = try hub.normalize(
+        allocator,
         "[{\"jid\":\"personal:15550000001@s.whatsapp.net\",\"archived\":false,\"last_message_ts\":\"2026-01-01T01:00:00Z\"}]",
         key.account,
         .chats,
