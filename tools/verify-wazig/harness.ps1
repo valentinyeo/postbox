@@ -86,7 +86,7 @@ function Get-Edit($Window, [string]$Id) {
 
 function Read-Edit($Edit) {
     $handle = [IntPtr]$Edit.Current.NativeWindowHandle
-    Assert-That ($handle -ne [IntPtr]::Zero -and $Edit.Current.ClassName -eq 'Edit') 'Expected a native edit control'
+    Assert-That ($handle -ne [IntPtr]::Zero -and $Edit.Current.ClassName -eq 'MessagesDirectWriteEdit') 'Expected a DirectWrite RichEdit host'
     $text = [Text.StringBuilder]::new(65537)
     $length = [UIntPtr]::Zero
     $ok = [VerifyWindow]::ReadText($handle, 13, [UIntPtr]65537, $text, 2, 2000, [ref]$length)

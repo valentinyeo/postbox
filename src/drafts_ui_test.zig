@@ -1,6 +1,7 @@
 const std = @import("std");
 const drafts = @import("drafts.zig");
 const chat_key = @import("chat_key.zig");
+const edit_contract = @import("edit_contract.zig");
 const allocator = std.testing.allocator;
 
 const Text = struct {
@@ -55,6 +56,8 @@ const App = struct {
     enabled: bool = true,
     invalidated_row: ?win.RECT = null,
     full_list_invalidations: usize = 0,
+    selection_start: usize = 0,
+    selection_end: usize = 0,
 
     fn deinit(self: *App) void {
         self.draft_store.deinit(self.allocator);
@@ -72,7 +75,8 @@ const win = struct {
     const EM_SETSEL = 2;
     const EM_SCROLLCARET = 3;
     const EM_REPLACESEL = 4;
-    const LB_GETITEMRECT = 5;
+    const EM_GETSEL = 5;
+    const LB_GETITEMRECT = 6;
     const LB_ERR = -1;
     const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
 
@@ -90,8 +94,13 @@ const win = struct {
         const text = std.mem.span(@as([*:0]const u16, @ptrCast(value)));
         @memcpy(current.?.text[0..text.len], text);
         current.?.text[text.len] = 0;
+        current.?.selection_start = text.len;
+        current.?.selection_end = text.len;
         saveComposerDraft(current.?);
         return TRUE;
+    }
+    fn SetFocus(_: usize) usize {
+        return 1;
     }
     fn SendMessageW(_: usize, message: u32, wparam: usize, lparam: isize) isize {
         if (message == LB_GETITEMRECT) {
@@ -100,13 +109,31 @@ const win = struct {
             const top: i32 = @as(i32, @intCast(wparam)) * 64;
             rect.* = .{ .left = 0, .top = top, .right = 380, .bottom = top + 64 };
         }
+        if (message == EM_GETSEL) {
+            @as(*u32, @ptrFromInt(wparam)).* = @intCast(current.?.selection_start);
+            @as(*u32, @ptrFromInt(@as(usize, @bitCast(lparam)))).* = @intCast(current.?.selection_end);
+        }
+        if (message == EM_SETSEL) {
+            current.?.selection_start = wparam;
+            current.?.selection_end = @intCast(lparam);
+        }
         if (message == EM_EMPTYUNDOBUFFER) current.?.undo_clears += 1;
         if (message == EM_REPLACESEL) {
             const value: [*:0]const u16 = @ptrFromInt(@as(usize, @bitCast(lparam)));
             const text = std.mem.span(value);
             const length: usize = @intCast(GetWindowTextLengthW(1));
-            @memcpy(current.?.text[length..][0..text.len], text);
-            current.?.text[length + text.len] = 0;
+            const first = @min(current.?.selection_start, length);
+            const last = @min(current.?.selection_end, length);
+            const tail = current.?.text[last .. length + 1];
+            const destination = current.?.text[first + text.len ..][0..tail.len];
+            if (first + text.len >= last) {
+                std.mem.copyBackwards(u16, destination, tail);
+            } else {
+                std.mem.copyForwards(u16, destination, tail);
+            }
+            @memcpy(current.?.text[first..][0..text.len], text);
+            current.?.selection_start = first + text.len;
+            current.?.selection_end = first + text.len;
             saveComposerDraft(current.?);
         }
         return 0;
@@ -225,6 +252,24 @@ test "IGSH-497 UI dictation and delayed transcript paste restore only their orig
     switchComposerDraft(&app);
     try expectComposer(&app, "A pasted transcript spoken transcript");
     app.dictation_session = null;
+}
+
+test "IGSH-466 UI dictation replaces the selection at the caret and remains undoable" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    switchComposerDraft(&app);
+    _ = win.SetWindowTextW(1, lit("one old two"));
+    app.selection_start = 4;
+    app.selection_end = 7;
+    const undo_clears = app.undo_clears;
+    var session = Session{ .origin = app.draft_store.open.? };
+    app.dictation_session = &session;
+    updateDictation(&app);
+    try expectComposer(&app, "one spoken transcript two");
+    try std.testing.expectEqual(undo_clears, app.undo_clears);
+    try std.testing.expectEqual(@as(usize, 21), app.selection_start);
+    try std.testing.expectEqualStrings("one spoken transcript two", app.draft_store.get(session.origin.key()));
 }
 
 test "IGSH-510 draft edits invalidate only their visible chat row" {

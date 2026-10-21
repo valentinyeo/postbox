@@ -68,6 +68,8 @@ const webp = @cImport({
 
 const win = @import("win32.zig").c;
 const text_draw = @import("text_draw.zig");
+const directwrite_edit = @import("directwrite_edit.zig");
+const edit_contract = @import("edit_contract.zig");
 
 const build_info = @import("build_info");
 const app_version = build_info.version;
@@ -1068,31 +1070,7 @@ fn composeFieldProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lpara
 
 fn searchFieldProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
-    const result = win.CallWindowProcW(@ptrFromInt(a.search_prev_proc), hwnd, message, wparam, lparam);
-    if (message == win.WM_PAINT and win.GetWindowTextLengthW(hwnd) == 0) {
-        var cue: [64]u16 = @splat(0);
-        if (win.SendMessageW(hwnd, win.EM_GETCUEBANNER, @intFromPtr(&cue), cue.len) != 0) {
-            const focused = win.GetFocus() == hwnd;
-            if (focused) _ = win.HideCaret(hwnd);
-            defer {
-                if (focused) _ = win.ShowCaret(hwnd);
-            }
-            const hdc = win.GetDC(hwnd) orelse return result;
-            defer _ = win.ReleaseDC(hwnd, hdc);
-            const saved = win.SaveDC(hdc);
-            defer _ = win.RestoreDC(hdc, saved);
-            var rect: win.RECT = undefined;
-            _ = win.GetClientRect(hwnd, &rect);
-            _ = win.FillRect(hdc, &rect, a.brush_raised.?);
-            rect.left += px(a, 2);
-            rect.right -= px(a, 2);
-            _ = win.SetBkMode(hdc, win.TRANSPARENT);
-            _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-            _ = win.SelectObject(hdc, a.font.?);
-            _ = text_draw.drawText(hdc, &cue, -1, &rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
-        }
-    }
-    return result;
+    return win.CallWindowProcW(@ptrFromInt(a.search_prev_proc), hwnd, message, wparam, lparam);
 }
 
 fn paintRoundedButton(a: *App, shapes: *const smooth.Context, hdc: win.HDC, rect: win.RECT, face: win.COLORREF, text_color: win.COLORREF, font: win.HFONT, frame: ?win.COLORREF, text: []const u16) void {
@@ -1748,6 +1726,7 @@ fn recreateFonts(a: *App) void {
     setFont(a.status, a.font_small);
     setFont(a.palette_edit, a.font);
     setFont(a.palette_list, a.font);
+    setFont(a.emoji_edit, a.font);
     if (old_font) |font| _ = win.DeleteObject(font);
     if (old_small) |font| _ = win.DeleteObject(font);
     if (old_bold) |font| _ = win.DeleteObject(font);
@@ -10393,17 +10372,37 @@ fn updateDictation(a: *App) void {
         if (session.takeTranscript(&transcript_buffer)) |transcript| {
             const composer = composerText(a) orelse return;
             defer a.allocator.free(composer);
-            const restored = a.draft_store.transcript(a.allocator, session.origin.key(), composer, transcript) catch {
-                setStatus(a, "Could not insert dictation: draft limit reached");
-                return;
-            };
-            if (restored) |text| {
-                setComposerDraft(a, text);
-                focusCompose(a);
+            const same_chat = a.draft_store.isOpen(session.origin.key());
+            if (same_chat) {
+                const compose = a.compose orelse return;
+                var start: u32 = 0;
+                var end: u32 = 0;
+                _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
+                const current = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, composer) catch return;
+                defer a.allocator.free(current);
+                const padding = edit_contract.dictationPadding(current, start, end);
+                var wide: [8195]u16 = undefined;
+                const offset: usize = @intFromBool(padding.before);
+                if (padding.before) wide[0] = ' ';
+                const count = std.unicode.utf8ToUtf16Le(wide[offset .. wide.len - 2], transcript) catch return;
+                var length = offset + count;
+                if (padding.after) {
+                    wide[length] = ' ';
+                    length += 1;
+                }
+                wide[length] = 0;
+                _ = win.SendMessageW(compose, win.EM_REPLACESEL, win.TRUE, @bitCast(@intFromPtr(&wide)));
+                _ = win.SendMessageW(compose, win.EM_SCROLLCARET, 0, 0);
+                _ = win.SetFocus(compose);
+            } else {
+                _ = a.draft_store.transcript(a.allocator, session.origin.key(), composer, transcript) catch {
+                    setStatus(a, "Could not insert dictation: draft limit reached");
+                    return;
+                };
             }
             persistDrafts(a);
             if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
-            setStatus(a, if (restored != null) "Dictation inserted" else "Dictation saved to its chat draft");
+            setStatus(a, if (same_chat) "Dictation inserted" else "Dictation saved to its chat draft");
         }
         updateDictateButton(a, .idle);
         return;
@@ -11228,7 +11227,11 @@ fn showEmojiPickerWindow(a: *App) void {
     var margins = win.MARGINS{ .cxLeftWidth = 0, .cxRightWidth = 0, .cyTopHeight = 0, .cyBottomHeight = 1 };
     _ = win.DwmExtendFrameIntoClientArea(picker, &margins);
     const edit_height = px(a, 36);
-    a.emoji_edit = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, px(a, 16), @divTrunc(edit_zone - edit_height, 2), width - px(a, 32), edit_height, picker, controlId(id_emoji_edit), a.instance, null);
+    a.emoji_edit = directwrite_edit.create(a.instance, picker, controlId(id_emoji_edit), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, px(a, 16), @divTrunc(edit_zone - edit_height, 2), width - px(a, 32), edit_height);
+    if (a.emoji_edit == null) {
+        _ = win.DestroyWindow(picker);
+        return;
+    }
     a.emoji_list = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 1, edit_zone, width - 2 - scrollbar_width, grid_height, picker, controlId(id_emoji_list), a.instance, null);
     setFont(a.emoji_edit, a.font);
     setFont(a.emoji_list, a.font);
@@ -13067,7 +13070,11 @@ fn showPaletteWindow(a: *App) void {
     _ = win.DwmSetWindowAttribute(palette, 33, &corner, @sizeOf(win.DWORD));
     var margins = win.MARGINS{ .cxLeftWidth = 0, .cxRightWidth = 0, .cyTopHeight = 0, .cyBottomHeight = 1 };
     _ = win.DwmExtendFrameIntoClientArea(palette, &margins);
-    a.palette_edit = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 16, 13, palette_width - 32, 36, palette, controlId(id_palette_edit), a.instance, null);
+    a.palette_edit = directwrite_edit.create(a.instance, palette, controlId(id_palette_edit), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 16, 13, palette_width - 32, 36);
+    if (a.palette_edit == null) {
+        _ = win.DestroyWindow(palette);
+        return;
+    }
     a.palette_list = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 1, palette_edit_zone, palette_width - 2 - scrollbar_width, palette_max_rows * palette_row_height + 12, palette, controlId(id_palette_list), a.instance, null);
     setFont(a.palette_edit, a.font);
     setFont(a.palette_list, a.font);
@@ -13660,26 +13667,9 @@ fn runCommand(a: *App, command: u16) void {
     }
 }
 
-fn composerNonClientY(compose: win.HWND) i32 {
-    var rc_win: win.RECT = undefined;
-    var rc_cli: win.RECT = undefined;
-    _ = win.GetWindowRect(compose, &rc_win);
-    _ = win.GetClientRect(compose, &rc_cli);
-    return (rc_win.bottom - rc_win.top) - (rc_cli.bottom - rc_cli.top);
-}
-
 fn composerContentHeight(a: *App) i32 {
     const compose = a.compose orelse return compose_layout.edit_min_height;
-    var fmt: win.RECT = undefined;
-    _ = win.SendMessageW(compose, win.EM_GETRECT, 0, @bitCast(@intFromPtr(&fmt)));
-    var rc_cli: win.RECT = undefined;
-    _ = win.GetClientRect(compose, &rc_cli);
-    const margins = (fmt.top - rc_cli.top) + (rc_cli.bottom - fmt.bottom);
-    const hdc = win.GetDC(compose);
-    defer _ = win.ReleaseDC(compose, hdc);
-    const line_h = textLineHeight(hdc, a.font.?);
-    const lines: i32 = @intCast(win.SendMessageW(compose, win.EM_GETLINECOUNT, 0, 0));
-    return @max(compose_layout.edit_min_height, lines * line_h + margins + composerNonClientY(compose));
+    return directwrite_edit.contentHeight(compose, compose_layout.edit_min_height);
 }
 
 fn layoutComposer(a: *App) void {
@@ -15759,14 +15749,16 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             const window_dpi = win.GetDpiForWindow(hwnd);
             a.dpi = if (window_dpi == 0) 96 else window_dpi;
             if (!recreateThemeBrushes(a)) return -1;
-            a.search = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 0, 0, 0, 0, hwnd, controlId(id_search), a.instance, null);
+            a.search = directwrite_edit.create(a.instance, hwnd, controlId(id_search), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 0, 0, 0, 0);
+            if (a.search == null) return -1;
             if (a.search) |search| {
                 a.search_prev_proc = @bitCast(win.SetWindowLongPtrW(search, win.GWLP_WNDPROC, @intCast(@intFromPtr(&searchFieldProc))));
             }
             a.chats_hwnd = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 0, 0, 0, 0, hwnd, controlId(id_chats), a.instance, null);
             a.canvas = win.CreateWindowExW(0, lit("WacliMessageCanvas"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, hwnd, controlId(id_canvas), a.instance, null);
             a.attach_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("Attach photo or file"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_attach), a.instance, null);
-            a.compose = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 0, 0, hwnd, controlId(id_compose), a.instance, null);
+            a.compose = directwrite_edit.create(a.instance, hwnd, controlId(id_compose), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 0, 0);
+            if (a.compose == null) return -1;
             if (a.compose) |compose| {
                 a.compose_prev_proc = @bitCast(win.SetWindowLongPtrW(compose, win.GWLP_WNDPROC, @intCast(@intFromPtr(&composeFieldProc))));
                 _ = win.SendMessageW(compose, win.EM_SETLIMITTEXT, drafts.max_text, 0);
@@ -16350,10 +16342,6 @@ fn restoreComposeCaret(a: *App) void {
     _ = win.SendMessageW(compose, win.EM_SETSEL, @bitCast(start), @bitCast(end));
 }
 
-fn isWordBreakChar(c: u16) bool {
-    return c == ' ' or c == '\t' or c == '\r' or c == '\n';
-}
-
 fn deleteWordBeforeCaret(edit: win.HWND) void {
     var start: usize = 0;
     var end: usize = 0;
@@ -16363,12 +16351,10 @@ fn deleteWordBeforeCaret(edit: win.HWND) void {
         return;
     }
     if (start == 0) return;
-    var wide_buffer: [4096]u16 = undefined;
+    var wide_buffer: [drafts.max_text + 1]u16 = undefined;
     const length: usize = @intCast(win.GetWindowTextW(edit, &wide_buffer, wide_buffer.len));
     if (start > length) return;
-    var word_start = start;
-    while (word_start > 0 and isWordBreakChar(wide_buffer[word_start - 1])) word_start -= 1;
-    while (word_start > 0 and !isWordBreakChar(wide_buffer[word_start - 1])) word_start -= 1;
+    const word_start = edit_contract.wordStart(wide_buffer[0..length], start);
     _ = win.SendMessageW(edit, win.EM_SETSEL, @bitCast(word_start), @bitCast(start));
     _ = win.SendMessageW(edit, win.EM_REPLACESEL, win.TRUE, @bitCast(@intFromPtr(lit(""))));
 }
@@ -16380,6 +16366,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     const control = win.GetKeyState(win.VK_CONTROL) < 0;
     const shift = win.GetKeyState(win.VK_SHIFT) < 0;
     const alt = win.GetKeyState(win.VK_MENU) < 0;
+    if (directwrite_edit.isComposing(focus)) return false;
     if (alt and key == win.VK_MENU) return true;
     if (a.tg_login_window != null) return false;
     if (a.image_viewer_window != null) return false;
@@ -16459,7 +16446,8 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     if (control and !alt and !shift and key == 'A') {
         const in_text_field = (a.compose != null and focus == a.compose.?) or
             (a.search != null and focus == a.search.?) or
-            (a.emoji_edit != null and focus == a.emoji_edit.?);
+            (a.emoji_edit != null and focus == a.emoji_edit.?) or
+            (a.palette_edit != null and focus == a.palette_edit.?);
         if (in_text_field) {
             _ = win.SendMessageW(focus.?, win.EM_SETSEL, 0, @bitCast(@as(isize, -1)));
             return true;
@@ -16472,7 +16460,8 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     if (control and !alt and key == win.VK_BACK) {
         const in_text_field = (a.compose != null and focus == a.compose.?) or
             (a.search != null and focus == a.search.?) or
-            (a.emoji_edit != null and focus == a.emoji_edit.?);
+            (a.emoji_edit != null and focus == a.emoji_edit.?) or
+            (a.palette_edit != null and focus == a.palette_edit.?);
         if (in_text_field) {
             deleteWordBeforeCaret(focus.?);
             return true;
@@ -17528,8 +17517,8 @@ pub fn main(init: std.process.Init) !void {
             }
         }
     }
-    _ = win.CoInitializeEx(null, win.COINIT_APARTMENTTHREADED);
-    defer win.CoUninitialize();
+    if (win.OleInitialize(null) < 0) return error.OleInitializeFailed;
+    defer win.OleUninitialize();
     defer text_draw.reset();
     defer mf_lazy.unloadIfStarted();
     _ = win.CoCreateInstance(
