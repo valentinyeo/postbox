@@ -144,6 +144,7 @@ const id_palette_edit = 1064;
 const id_palette_list = 1072;
 const id_emoji = 1080;
 const id_voice = 1104;
+const id_attach = 1136;
 const id_emoji_edit = 1088;
 const id_emoji_list = 1096;
 const command_search = 2001;
@@ -631,6 +632,7 @@ const App = struct {
     canvas: ?win.HWND = null,
     compose: ?win.HWND = null,
     compose_pill: win.RECT = std.mem.zeroes(win.RECT),
+    compose_geometry: compose_layout.Layout = .{},
     compose_dragged: i32 = 0,
     compose_dragging: bool = false,
     compose_client_width: i32 = 0,
@@ -640,6 +642,7 @@ const App = struct {
     emoji_btn: ?win.HWND = null,
     dictate: ?win.HWND = null,
     voice_btn: ?win.HWND = null,
+    attach_btn: ?win.HWND = null,
     voice_session: ?*voice_capture.Session = null,
     voice_active: bool = false,
     voice_finishing: bool = false,
@@ -648,10 +651,10 @@ const App = struct {
     voice_origin: drafts.Identity = .{},
     voice_reply_to: Utf8Text(191) = .{},
     voice_reply_sender: Utf8Text(191) = .{},
-    btn_hover: [9]bool = .{ false, false, false, false, false, false, false, false, false },
+    btn_hover: [10]bool = @splat(false),
     search_prev_proc: usize = 0,
     compose_prev_proc: usize = 0,
-    btn_prev_proc: [9]usize = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    btn_prev_proc: [10]usize = @splat(0),
     tooltips: ?win.HWND = null,
     status: ?win.HWND = null,
     palette: ?win.HWND = null,
@@ -1186,11 +1189,11 @@ fn paintVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     const pressed = (item.itemState & win.ODS_SELECTED) != 0;
     const focused = (item.itemState & win.ODS_FOCUS) != 0;
     const hdc = item.hDC;
-    _ = win.FillRect(hdc, &item.rcItem, a.brush_bg.?);
+    _ = win.FillRect(hdc, &item.rcItem, a.brush_raised.?);
     const recording = a.voice_active;
-    const face: win.COLORREF = if (theme.choice == .amoled) (if (pressed) theme.amoled_button_pressed else if (a.btn_hover[8]) theme.amoled_button_hover else theme.amoled_button) else if (pressed) theme.current.primary_container else if (a.btn_hover[8]) theme.current.surface_container_highest else theme.current.secondary_container;
+    const face: win.COLORREF = if (theme.choice == .amoled) (if (pressed) theme.amoled_button_pressed else if (a.btn_hover[8]) theme.amoled_button_hover else theme.current.surface_container_high) else if (pressed) theme.current.primary_container else if (a.btn_hover[8]) theme.current.surface_container_highest else theme.current.surface_container_high;
     const foreground = if (theme.choice == .amoled) theme.amoled_button_text else if (pressed) theme.current.on_primary_container else theme.current.on_secondary_container;
-    paintRoundedButton(a, &shapes, hdc, item.rcItem, face, foreground, a.font_bold.?, if (recording) theme.current.@"error" else if (focused) theme.current.primary else if (theme.choice == .amoled) theme.current.outline_variant else null, &.{});
+    paintRoundedButton(a, &shapes, hdc, item.rcItem, face, foreground, a.font_bold.?, if (recording) theme.current.@"error" else if (focused) theme.current.primary else if (theme.choice == .amoled and a.btn_hover[8]) theme.current.outline_variant else null, &.{});
     const mid_y = @divTrunc(item.rcItem.top + item.rcItem.bottom, 2);
     if (!recording) {
         drawMicIcon(a, &shapes, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, foreground);
@@ -1264,26 +1267,40 @@ fn drawComposerButton(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     const item = &buffered;
     var shapes = smooth.Context.init(item.hDC);
     defer shapes.deinit();
-    const index: usize = if (item.CtlID == id_dictate) 0 else if (item.CtlID == id_send) 1 else 2;
+    const index: usize = if (item.CtlID == id_dictate) 0 else if (item.CtlID == id_send) 1 else if (item.CtlID == id_emoji) 2 else 9;
     const pressed = (item.itemState & win.ODS_SELECTED) != 0;
     const focused = (item.itemState & win.ODS_FOCUS) != 0;
     const dictating = a.last_dictation_state == .recording or a.last_dictation_state == .transcribing;
-    _ = win.FillRect(item.hDC, &item.rcItem, a.brush_bg.?);
-    const face: win.COLORREF = if (theme.choice == .amoled) (if (index == 1) (if (pressed) theme.amoled_send_pressed else if (a.btn_hover[index]) theme.amoled_send_hover else theme.amoled_send) else if (pressed or (index == 0 and dictating)) theme.amoled_button_pressed else if (a.btn_hover[index]) theme.amoled_button_hover else theme.amoled_button) else if (index == 1 and !pressed) theme.current.primary else if (pressed or (index == 0 and dictating)) theme.current.primary_container else if (a.btn_hover[index]) theme.current.surface_container_highest else theme.current.secondary_container;
-    const foreground = if (theme.choice == .amoled) theme.amoled_button_text else if (index == 1 and !pressed) theme.current.on_primary else if (pressed or (index == 0 and dictating)) theme.current.on_primary_container else theme.current.on_secondary_container;
-    var text_buffer: [32]u16 = undefined;
-    paintRoundedButton(
-        a,
-        &shapes,
-        item.hDC,
-        item.rcItem,
-        face,
-        foreground,
-        if (index == 2 and theme.choice != .amoled) a.font_emoji.? else a.font_bold.?,
-        if (focused) (if (index == 1 and !pressed and theme.choice != .amoled) theme.current.on_primary else theme.current.primary) else if (theme.choice == .amoled) theme.current.outline_variant else null,
-        if (index == 0) &.{} else if (index == 2 and theme.choice == .amoled) std.mem.span(lit("☺︎")) else buttonLabel(item, &text_buffer),
-    );
-    if (index == 0) drawDictationIcon(a, &shapes, @divTrunc(item.rcItem.left + item.rcItem.right, 2), @divTrunc(item.rcItem.top + item.rcItem.bottom, 2), foreground);
+    _ = win.FillRect(item.hDC, &item.rcItem, a.brush_raised.?);
+    const face: win.COLORREF = if (theme.choice == .amoled) (if (index == 1) (if (pressed) theme.amoled_send_pressed else if (a.btn_hover[index]) theme.amoled_send_hover else theme.amoled_send) else if (pressed or (index == 0 and dictating)) theme.amoled_button_pressed else if (a.btn_hover[index]) theme.amoled_button_hover else theme.current.surface_container_high) else if (index == 1 and !pressed) theme.current.primary else if (pressed or (index == 0 and dictating)) theme.current.primary_container else if (a.btn_hover[index]) theme.current.surface_container_highest else theme.current.surface_container_high;
+    const foreground = if (theme.choice == .amoled) theme.amoled_button_text else if (index == 1 and !pressed) theme.current.on_primary else if (pressed or (index == 0 and dictating)) theme.current.on_primary_container else theme.current.on_surface;
+    paintRoundedButton(a, &shapes, item.hDC, item.rcItem, face, foreground, a.font_bold.?, if (focused) theme.current.primary else if (theme.choice == .amoled and a.btn_hover[index]) theme.current.outline_variant else null, &.{});
+    if (index == 0) {
+        drawDictationIcon(a, &shapes, @divTrunc(item.rcItem.left + item.rcItem.right, 2), @divTrunc(item.rcItem.top + item.rcItem.bottom, 2), foreground);
+        return;
+    }
+    const cx: f32 = @floatFromInt(@divTrunc(item.rcItem.left + item.rcItem.right, 2));
+    const cy: f32 = @floatFromInt(@divTrunc(item.rcItem.top + item.rcItem.bottom, 2));
+    const unit = @as(f32, @floatFromInt(px(a, 24))) / 24;
+    const stroke: f32 = @floatFromInt(@max(1, px(a, smooth_geometry.icon_stroke_width)));
+    if (index == 9) {
+        smooth.strokePolyline(&shapes, &.{ .{ cx - 8 * unit, cy }, .{ cx + 8 * unit, cy } }, foreground, stroke);
+        smooth.strokePolyline(&shapes, &.{ .{ cx, cy - 8 * unit }, .{ cx, cy + 8 * unit } }, foreground, stroke);
+    } else if (index == 1) {
+        smooth.strokePolyline(&shapes, &.{ .{ cx - 7 * unit, cy + 7 * unit }, .{ cx + 7 * unit, cy - 7 * unit }, .{ cx - 5 * unit, cy - 7 * unit } }, foreground, stroke);
+        smooth.strokePolyline(&shapes, &.{ .{ cx + 7 * unit, cy - 7 * unit }, .{ cx + 7 * unit, cy + 5 * unit } }, foreground, stroke);
+    } else {
+        const x: i32 = @intFromFloat(cx);
+        const y: i32 = @intFromFloat(cy);
+        const radius = px(a, 10);
+        const circle = win.RECT{ .left = x - radius, .top = y - radius, .right = x + radius, .bottom = y + radius };
+        smooth.strokeArc(&shapes, circle, 0, 360, foreground, @intFromFloat(stroke));
+        for ([_]i32{ -1, 1 }) |side| {
+            const eye = x + side * px(a, 3);
+            smooth.fillEllipse(&shapes, .{ .left = eye - px(a, 1), .top = y - px(a, 4), .right = eye + px(a, 1), .bottom = y - px(a, 2) }, foreground);
+        }
+        smooth.strokeArc(&shapes, .{ .left = x - px(a, 5), .top = y - px(a, 3), .right = x + px(a, 5), .bottom = y + px(a, 6) }, 20, 140, foreground, @intFromFloat(stroke));
+    }
 }
 
 fn drawSetupButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
@@ -1362,6 +1379,7 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
     addTooltip(tt, a.send, lit("Send message  Enter"));
     addTooltip(tt, a.emoji_btn, lit("Emoji menu"));
     addTooltip(tt, a.voice_btn, lit("Record a voice note  Enter sends · Esc cancels"));
+    addTooltip(tt, a.attach_btn, lit("Attach photo or file"));
 }
 
 fn loadRegistryString(allocator: std.mem.Allocator, name: [*:0]const u16) ?[]const u8 {
@@ -12053,6 +12071,20 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\"", .{@tagName(theme.choice)});
+    const box = a.compose_pill;
+    try w.print(",\"composer\":{{\"box\":{{\"left\":{d},\"top\":{d},\"right\":{d},\"bottom\":{d}}},\"lines\":{d},\"controls\":[", .{ box.left, box.top, box.right, box.bottom, if (a.compose) |edit| win.SendMessageW(edit, win.EM_GETLINECOUNT, 0, 0) else 0 });
+    const controls = [_]?win.HWND{ a.attach_btn, a.compose, a.voice_btn, a.dictate, a.emoji_btn, a.send };
+    const names = [_][]const u8{ "attach", "text", "mic", "dictate", "emoji", "send" };
+    for (controls, names, 0..) |control, name, index| {
+        if (index > 0) try w.writeByte(',');
+        var rect = std.mem.zeroes(win.RECT);
+        if (control) |child| {
+            _ = win.GetWindowRect(child, &rect);
+            _ = win.MapWindowPoints(null, a.hwnd.?, @ptrCast(&rect), 2);
+        }
+        try w.print("{{\"name\":\"{s}\",\"left\":{d},\"top\":{d},\"right\":{d},\"bottom\":{d}}}", .{ name, rect.left, rect.top, rect.right, rect.bottom });
+    }
+    try w.writeAll("]}");
     const memory = readMemorySnapshot();
     try w.print(",\"memory\":{{\"working_set_kb\":{d},\"private_kb\":{d},\"module_count\":{d},\"media_foundation_loaded\":{}}}", .{
         memory.working_set_bytes / 1024,
@@ -13549,13 +13581,6 @@ fn layout(a: *App, width: i32, height: i32) void {
 fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void {
     a.compose_client_width = width;
     a.compose_client_height = height;
-    const composer_gap = px(a, 8);
-    const composer_icon_size = px(a, 44);
-    const send_left = width - px(a, 82);
-    const dictate_left = send_left - composer_gap - composer_icon_size;
-    const emoji_left = dictate_left - composer_gap - composer_icon_size;
-    const voice_width = if (a.voice_active) px(a, 200) else composer_icon_size;
-    const voice_left = emoji_left - composer_gap - voice_width;
     const left_width = std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 390));
     const header_height: i32 = 0;
     const search_height: i32 = px(a, 48);
@@ -13564,16 +13589,9 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
     if (a.compose) |hwnd| {
         for (0..2) |pass| {
             if (pass > 0) sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
-            a.compose_pill = .{
-                .left = left_width + px(a, 14),
-                .top = height - px(a, 11) - sizes.edit_height,
-                .right = voice_left - composer_gap,
-                .bottom = height - px(a, 11),
-            };
-            const pill = field_pill.compute(a.compose_pill, px(a, theme.radius_field * 2));
-            var inner = pill.inner;
-            inner.top += 1;
-            inner.bottom = @max(inner.top, inner.bottom - 1);
+            a.compose_geometry = compose_layout.arrange(.{ .left = left_width + 1, .top = 0, .right = width, .bottom = height }, sizes.edit_height, @intCast(a.dpi), a.voice_active);
+            a.compose_pill = @bitCast(a.compose_geometry.box);
+            const inner = a.compose_geometry.text;
             _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
             var rect = win.RECT{ .left = px(a, 2), .top = px(a, 8), .right = @max(px(a, 2), inner.right - inner.left - px(a, 2)), .bottom = @max(px(a, 8), inner.bottom - inner.top - px(a, 8)) };
             _ = win.SendMessageW(hwnd, win.EM_SETRECTNP, 0, @bitCast(@intFromPtr(&rect)));
@@ -13592,10 +13610,11 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
     if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, height - header_height - search_height - status_height - updateCardSpan(a), win.TRUE);
     if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);
     if (a.canvas) |hwnd| _ = win.MoveWindow(hwnd, left_width + 1, header_height, width - left_width - 1, height - header_height - sizes.strip_height, win.TRUE);
-    if (a.emoji_btn) |hwnd| _ = win.MoveWindow(hwnd, emoji_left, height - px(a, 55), composer_icon_size, composer_icon_size, win.TRUE);
-    if (a.dictate) |hwnd| _ = win.MoveWindow(hwnd, dictate_left, height - px(a, 55), composer_icon_size, composer_icon_size, win.TRUE);
-    if (a.voice_btn) |hwnd| _ = win.MoveWindow(hwnd, voice_left, height - px(a, 55), voice_width, composer_icon_size, win.TRUE);
-    if (a.send) |hwnd| _ = win.MoveWindow(hwnd, send_left, height - px(a, 55), px(a, 68), composer_icon_size, win.TRUE);
+    const buttons = [_]?win.HWND{ a.attach_btn, a.voice_btn, a.dictate, a.emoji_btn, a.send };
+    const rects = [_]compose_layout.Rect{ a.compose_geometry.attach, a.compose_geometry.voice, a.compose_geometry.dictate, a.compose_geometry.emoji, a.compose_geometry.send };
+    for (buttons, rects) |button, rect| {
+        if (button) |hwnd| _ = win.MoveWindow(hwnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, win.TRUE);
+    }
     if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, dirty, win.FALSE);
 }
 
@@ -15633,6 +15652,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             a.send = win.CreateWindowExW(0, lit("BUTTON"), lit("Send"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_send), a.instance, null);
             a.emoji_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("😊"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_emoji), a.instance, null);
             a.voice_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("Voice"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_voice), a.instance, null);
+            a.attach_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("Attach photo or file"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_attach), a.instance, null);
+            subclassComposerButton(a, a.attach_btn, 9);
             subclassComposerButton(a, a.voice_btn, 8);
             subclassComposerButton(a, a.dictate, 0);
             subclassComposerButton(a, a.send, 1);
@@ -15890,7 +15911,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 drawChat(a, item);
             } else if (item.CtlID == id_voice) {
                 drawVoiceButton(a, item);
-            } else if (item.CtlID == id_dictate or item.CtlID == id_send or item.CtlID == id_emoji) {
+            } else if (item.CtlID == id_dictate or item.CtlID == id_send or item.CtlID == id_emoji or item.CtlID == id_attach) {
                 drawComposerButton(a, item);
             }
             return 1;
@@ -15924,6 +15945,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 runCommand(a, command_dictate);
             } else if (id == id_voice and notification == win.BN_CLICKED) {
                 toggleVoice(a);
+            } else if (id == id_attach and notification == win.BN_CLICKED) {
+                runCommand(a, command_slack_attach);
             } else if (id == id_emoji and notification == win.BN_CLICKED) {
                 openEmojiMenu(a);
             } else if ((id == id_compose or id == id_search) and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {

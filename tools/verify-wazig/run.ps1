@@ -124,6 +124,23 @@ try {
             $null = Wait-Until { (Test-Path $draft) -and (Get-Content $draft -Raw).Contains('Verification draft') } 'persisted draft'
             Copy-Item $draft (Join-Path $Evidence 'drafts.json')
             Save-Screen $session after
+            foreach ($theme in @('AMOLED black', 'Green')) {
+                Send-Keys $session '^k'
+                Send-Keys $session "Theme: $theme"
+                Send-Keys $session '{ENTER}'
+                $themeId = if ($theme -eq 'Green') { 'green' } else { 'amoled' }
+                $null = Wait-Until { (Read-Control $session status).theme -eq $themeId } 'composer theme applied'
+                Send-Keys $session '^a'
+                Send-Keys $session 'Verification draft'
+                $null = Wait-Until { (Read-Control $session status).composer.lines -eq 1 } 'one composer line'
+                $baseline = Assert-ComposerLayout $session "composer-$themeId-one" 1
+                Send-Keys $session '+{ENTER}'
+                Send-Keys $session 'Second line'
+                Send-Keys $session '+{ENTER}'
+                Send-Keys $session 'Third line'
+                $null = Wait-Until { (Read-Control $session status).composer.lines -eq 3 } 'three composer lines'
+                $null = Assert-ComposerLayout $session "composer-$themeId-multiline" 3 $baseline
+            }
         }
         palette {
             Send-Keys $session '^k'

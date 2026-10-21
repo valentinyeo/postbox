@@ -232,3 +232,50 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
     Assert-That ($registry.GetValueKind('WaBridgeKey') -eq [Microsoft.Win32.RegistryValueKind]::Binary) 'Bridge key is not DPAPI storage'
     Hub-Pass $Session auth-dpapi-backend
 }
+
+function Assert-ComposerLayout($Session, [string]$Name, [int]$Lines, $Baseline = $null) {
+    $state = Read-Control $Session status
+    $layout = $state.composer
+    Assert-That ($null -ne $layout -and $layout.lines -eq $Lines) "composer-one-box $Name wrong line count"
+    $box = $layout.box
+    Assert-That ($box.right -gt $box.left -and $box.bottom -gt $box.top) "composer-one-box $Name empty box"
+    $names = @('attach', 'text', 'mic', 'dictate', 'emoji', 'send')
+    $ids = @('1136', '1032', '1104', '1056', '1080', '1040')
+    Assert-That ($layout.controls.Count -eq $names.Count) "composer-one-box $Name missing controls"
+    $window = Get-Window $Session
+    $text = $layout.controls[1]
+    $textBounds = (Get-Edit $window '1032').Current.BoundingRectangle
+    $offsetX = $textBounds.Left - $text.left
+    $offsetY = $textBounds.Top - $text.top
+    for ($i = 0; $i -lt $names.Count; $i++) {
+        $rect = $layout.controls[$i]
+        Assert-That ($rect.name -eq $names[$i]) "composer-one-box $Name unexpected control order"
+        Assert-That ($rect.right -gt $rect.left -and $rect.bottom -gt $rect.top) "composer-one-box $Name empty $($rect.name)"
+        Assert-That ($rect.left -ge $box.left -and $rect.right -le $box.right -and $rect.top -ge $box.top -and $rect.bottom -le $box.bottom) "composer-one-box $Name $($rect.name) outside box"
+        $element = Get-Edit $window $ids[$i]
+        Assert-That (-not $element.Current.IsOffscreen) "composer-one-box $Name hidden $($rect.name)"
+        if ($rect.name -ne 'text') {
+            Assert-That (-not [string]::IsNullOrWhiteSpace($element.Current.Name)) "composer-one-box $Name unnamed icon"
+            Assert-That ($rect.bottom -eq $layout.controls[0].bottom) "composer-one-box $Name icon not bottom aligned"
+        }
+        $bounds = $element.Current.BoundingRectangle
+        Assert-That ([Math]::Abs($bounds.Left - $offsetX - $rect.left) -le 1 -and [Math]::Abs($bounds.Top - $offsetY - $rect.top) -le 1 -and [Math]::Abs($bounds.Right - $offsetX - $rect.right) -le 1 -and [Math]::Abs($bounds.Bottom - $offsetY - $rect.bottom) -le 1) "composer-one-box $Name UIA mismatch $($rect.name)"
+        for ($j = $i + 1; $j -lt $names.Count; $j++) {
+            $other = $layout.controls[$j]
+            Assert-That ($rect.right -le $other.left -or $other.right -le $rect.left -or $rect.bottom -le $other.top -or $other.bottom -le $rect.top) "composer-one-box $Name overlapping controls"
+        }
+        if ($null -ne $Baseline -and $rect.name -ne 'text') {
+            $initial = $Baseline.controls[$i]
+            Assert-That ($rect.left -eq $initial.left -and $rect.right -eq $initial.right -and $rect.top -eq $initial.top -and $rect.bottom -eq $initial.bottom) "composer-one-box $Name icon moved while growing"
+        }
+    }
+    if ($null -ne $Baseline) {
+        Assert-That ($box.bottom -eq $Baseline.box.bottom -and $box.top -lt $Baseline.box.top) "composer-one-box $Name box did not grow upwards"
+    }
+    $layout | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.layout.json")
+    Save-Screen $Session $Name
+    $message = "composer-one-box $Name lines=$Lines theme=$($state.theme) PASS"
+    Add-Content (Join-Path $Session.evidence 'composer-one-box.log') $message
+    Write-Host $message
+    return $layout
+}
