@@ -94,7 +94,7 @@ pub fn messages(allocator: std.mem.Allocator, key: chat_key.Key, limit: usize, b
     return .{ .path = try std.fmt.allocPrint(allocator, "/v1/messages?account={s}&chat={s}&limit={d}&before={s}", .{ a, c, limit, b }) };
 }
 
-pub fn list(allocator: std.mem.Allocator, account: []const u8, kind: enum { groups, statuses }) !Request {
+pub fn list(allocator: std.mem.Allocator, account: []const u8, kind: enum { groups }) !Request {
     const a = try encode(allocator, account);
     defer allocator.free(a);
     return .{ .path = try std.fmt.allocPrint(allocator, "/v1/{s}?account={s}&limit=200", .{ @tagName(kind), a }) };
@@ -183,7 +183,7 @@ pub fn bare(account: []const u8, id: []const u8) []const u8 {
     return id;
 }
 
-pub const Rows = enum { chats, messages, groups, statuses };
+pub const Rows = enum { chats, messages, groups };
 
 pub fn normalize(allocator: std.mem.Allocator, raw: []const u8, account: []const u8, kind: Rows) ![]u8 {
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, raw, .{ .allocate = .alloc_always });
@@ -194,7 +194,6 @@ pub fn normalize(allocator: std.mem.Allocator, raw: []const u8, account: []const
         const fields: []const []const u8 = switch (kind) {
             .chats => &.{"jid"},
             .messages => &.{ "MsgID", "ChatJID", "ReactionToID" },
-            .statuses => &.{ "msg_id", "sender_jid" },
             .groups => &.{ "JID", "jid" },
         };
         for (fields) |field| {
@@ -207,7 +206,6 @@ pub fn normalize(allocator: std.mem.Allocator, raw: []const u8, account: []const
     }
     return switch (kind) {
         .messages => std.json.Stringify.valueAlloc(allocator, .{ .success = true, .data = .{ .messages = parsed.value } }, .{}),
-        .statuses => std.json.Stringify.valueAlloc(allocator, .{ .success = true, .data = .{ .statuses = parsed.value } }, .{}),
         else => std.json.Stringify.valueAlloc(allocator, .{ .success = true, .data = parsed.value }, .{}),
     };
 }

@@ -15264,10 +15264,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         wm_hub_event => {
             a.hub_event_pending.store(false, .release);
             const reset = a.hub_reset_pending.swap(false, .acq_rel);
-            if (reset) {
-                refreshGroups(a);
-                refreshStatuses(a, true);
-            }
+            if (reset) refreshGroups(a);
             const backend = hubTransport(a);
             backend.refreshChats();
             if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp) backend.refreshMessages(a.chats[a.selected_chat].jid.slice());
@@ -18569,16 +18566,16 @@ fn hubMediaPath(a: *App, allocator: std.mem.Allocator, key: chat_key.Key, id: []
 
 fn hubNormalized(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, raw: []const u8, kind: wa_hub.Rows, jid: []const u8) ![]u8 {
     const normalized = try wa_hub.normalize(allocator, raw, job.hub_account.slice(), kind);
-    if (kind != .messages and kind != .statuses) return normalized;
+    if (kind != .messages) return normalized;
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, normalized, .{});
     defer parsed.deinit();
-    const rows = parsed.value.object.getPtr("data").?.object.getPtr(if (kind == .messages) "messages" else "statuses").?;
+    const rows = parsed.value.object.getPtr("data").?.object.getPtr("messages").?;
     for (rows.array.items) |*row| {
-        const id = getString(row.object, if (kind == .messages) "MsgID" else "msg_id");
+        const id = getString(row.object, "MsgID");
         const path = try hubMediaPath(a, allocator, .{ .provider = .whatsapp, .account = job.account.slice(), .id = jid }, id);
         var local_path: []const u8 = if (fileExistsUtf8(path)) path else "";
         if (local_path.len > 0) {
-            const extension = wa_hub.mediaExtension(getString(row.object, if (kind == .messages) "Filename" else "filename"), getString(row.object, if (kind == .messages) "MimeType" else "mime_type"), getString(row.object, if (kind == .messages) "MediaType" else "media_type"));
+            const extension = wa_hub.mediaExtension(getString(row.object, "Filename"), getString(row.object, "MimeType"), getString(row.object, "MediaType"));
             if (!std.mem.eql(u8, extension, ".bin")) {
                 const alias = try std.fmt.allocPrint(allocator, "{s}{s}", .{ path, extension });
                 if (!fileExistsUtf8(alias)) {
@@ -18589,7 +18586,7 @@ fn hubNormalized(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, ra
                 if (fileExistsUtf8(alias)) local_path = alias;
             }
         }
-        try row.object.put(allocator, if (kind == .messages) "LocalPath" else "local_path", .{ .string = local_path });
+        try row.object.put(allocator, "LocalPath", .{ .string = local_path });
     }
     return std.json.Stringify.valueAlloc(allocator, parsed.value, .{});
 }
@@ -18627,7 +18624,6 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
         .messages, .resurface_probe, .background_media => try wa_hub.messages(allocator, key, std.fmt.parseInt(usize, hubArg(job, "--limit", "80"), 10) catch 80, ""),
         .unread_probe => try wa_hub.messages(allocator, key, 20, ""),
         .groups => try wa_hub.list(allocator, key.account, .groups),
-        .statuses => try wa_hub.list(allocator, key.account, .statuses),
         .reaction => try wa_hub.react(allocator, key, job.msg_id.slice(), job.extra.slice(), job.client_id.slice()),
         .hub_send => blk: {
             if (job.args[1].len == 0) break :blk try wa_hub.send(allocator, key, job.args[0].slice(), job.args[2].slice(), job.msg_id.slice());
@@ -18641,7 +18637,6 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
         .hub_archive => try wa_hub.archive(allocator, key, std.mem.eql(u8, job.extra.slice(), "true")),
         .hub_media => try wa_hub.binary(allocator, key, job.msg_id.slice()),
         .hub_avatar => try wa_hub.binary(allocator, key, null),
-        .status_seen => return error.HubStatusReceiptsUnsupported,
         else => return error.UnsupportedHubAction,
     };
     const response = try client.call(allocator, request);
@@ -18673,7 +18668,6 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
         .chats, .archived_scan, .contacts_index => hubNormalized(a, allocator, job, response.body, .chats, ""),
         .groups => hubNormalized(a, allocator, job, response.body, .groups, ""),
         .messages, .resurface_probe, .unread_probe, .background_media => hubNormalized(a, allocator, job, response.body, .messages, key.id),
-        .statuses => hubNormalized(a, allocator, job, response.body, .statuses, status_view.broadcast),
         else => response.body,
     };
 }
@@ -18705,7 +18699,6 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
         refreshGroups(a);
         refreshChats(a);
         refreshContactsIndex(a);
-        refreshStatuses(a, true);
         refreshMessages(a);
         setStatus(a, "WhatsApp hub connected");
         return;
@@ -18829,7 +18822,7 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                     if (std.mem.eql(u8, slot.id.slice(), a.audio_chain_id.slice())) a.audio_chain_waiting = false;
                 }
                 image_viewer.downloadFinished(a, slot.jid.slice(), slot.id.slice(), ok);
-                if (std.mem.eql(u8, slot.jid.slice(), status_view.broadcast)) refreshStatuses(a, true) else refreshMessages(a);
+                refreshMessages(a);
                 slot.* = .{};
                 break;
             }

@@ -115,7 +115,7 @@ class Handler(BaseHTTPRequestHandler):
                         row['FromMe'] = True
                         rows.insert(0, row)
             self.respond(200, rows)
-        elif url.path in ('/v1/groups', '/v1/statuses'):
+        elif url.path == '/v1/groups':
             self.respond(200, [])
         elif url.path.startswith('/v1/media/'):
             with state.lock:

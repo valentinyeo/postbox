@@ -31,7 +31,6 @@ test "request paths encode query values and pagination boundaries" {
     const messages = try hub.messages(allocator, key, 80, "MSG:2026-01-01T00:00:00Z");
     try std.testing.expectEqualStrings("/v1/messages?account=personal&chat=15550000001%40s.whatsapp.net&limit=80&before=MSG%3A2026-01-01T00%3A00%3A00Z", messages.path);
     try std.testing.expectEqualStrings("/v1/groups?account=personal&limit=200", (try hub.list(allocator, "personal", .groups)).path);
-    try std.testing.expectEqualStrings("/v1/statuses?account=personal&limit=200", (try hub.list(allocator, "personal", .statuses)).path);
     var wrong = key;
     wrong.provider = .slack;
     try std.testing.expectError(error.WrongProvider, hub.messages(allocator, wrong, 80, ""));
@@ -84,8 +83,6 @@ test "message and group replies retain production parser fields" {
     try std.testing.expectEqualStrings("QUOTE", row.get("quoted_msg_id").?.string);
     const groups = try hub.normalize(allocator, "[{\"JID\":\"personal:fixture@g.us\",\"Name\":\"Fixture Group\"}]", "personal", .groups);
     try std.testing.expect(std.mem.indexOf(u8, groups, "personal:") == null);
-    const statuses = try hub.normalize(allocator, "[{\"msg_id\":\"STATUS\",\"sender_jid\":\"personal:15550000001@s.whatsapp.net\",\"ts\":\"2026-01-01T00:00:00Z\"}]", "personal", .statuses);
-    try std.testing.expect(std.mem.indexOf(u8, statuses, "\"statuses\":[") != null);
 }
 
 test "text and reply retries carry the persisted outbox id and JSON escaping" {

@@ -33,5 +33,5 @@ Use the production hub backend against a synthetic authenticated bridge on the G
 - The bridge is a runner-only Python fixture, not a bundled client runtime. Non-HTTPS transport is rejected outside the isolated loopback fixture.
 - Only keyboard input drives the app. The fixture trigger changes upstream provider state; it never writes app state or invokes a control mutation.
 - The first linked bridge account is selected and namespaced into the existing account-scoped cache. This journey has one fake account; simultaneous multi-account UI is not covered.
-- The frozen bridge has no pairing, account-removal, contact-directory or status-receipt endpoint. Hub mode directs account administration to the hub, derives searchable contacts from chats, and keeps status viewing local.
+- The frozen bridge has no pairing, account-removal, or contact-directory endpoint. Hub mode directs account administration to the hub and derives searchable contacts from chats.
 - This proves contract integration, not real WhatsApp delivery, voice playback, transcription, external TLS availability or production deployment. Inspect screenshots before claiming visible behavior.
