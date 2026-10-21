@@ -1,4 +1,4 @@
-Add-Type -Path "$PSScriptRoot/menus.cs"
+Add-Type -Path "$PSScriptRoot/menus.cs" -ReferencedAssemblies System.Drawing.Common, System.Drawing.Primitives, System.Collections, System.Linq, System.Runtime
 
 function Find-Popup($Session, [string]$Class) {
     [VerifyMenus]::Find($Session.pid, $Class)
@@ -103,6 +103,8 @@ function Invoke-Menus($Session) {
         foreach ($edit in $edits) {
             $rect = [VerifyMenus]::Bounds([IntPtr]$edit.Current.NativeWindowHandle)
             $metric = [VerifyMenus]::Measure((Join-Path $Session.evidence "amoled-$($entry.name)-after.png"), $rect, $screen.Left, $screen.Top, 4)
+            $script:menuMeasurements += [ordered]@{ screenshot = "amoled-$($entry.name)-after.png"; expected = 'dark-edit'; automationId = $edit.Current.AutomationId; measurement = $metric }
+            $script:menuMeasurements | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'menu-luminances.json')
             Assert-That ($metric.background -le 0.05126945837404324 -and $metric.lightTileFraction -le 0.02) "$($entry.name) has a light edit field"
         }
         if ($entry.class -eq 'SlackSetup') { Close-Popup $Session $entry.class '%{F4}' } else { Close-Popup $Session $entry.class }

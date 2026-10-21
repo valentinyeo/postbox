@@ -114,9 +114,16 @@ public static class VerifyMenus {
     }
     public static Point MessageText(string path, Rect canvas, int screenX, int screenY) {
         using (var image = new Bitmap(path)) {
-            for (int y = canvas.Bottom - 100; y < canvas.Bottom - 12; y++) for (int x = canvas.Left + 24; x < canvas.Left + 250; x++) {
-                Color color = image.GetPixel(x - screenX, y - screenY);
-                if (color.R > 180 && color.G > 180 && color.B > 180) return new Point(x, y + 2);
+            int bands = 0; bool previous = false;
+            for (int y = Math.Max(canvas.Top, canvas.Bottom - 100); y < canvas.Bottom - 12; y++) {
+                int first = -1;
+                for (int x = canvas.Left + 24; x < Math.Min(canvas.Right, canvas.Left + 250); x++) {
+                    Color color = image.GetPixel(x - screenX, y - screenY);
+                    if (color.R > 180 && color.G > 180 && color.B > 180) { first = x; break; }
+                }
+                if (first >= 0 && !previous) bands++;
+                if (first >= 0 && bands == 2) return new Point(first, y + 3);
+                previous = first >= 0;
             }
         }
         throw new Exception("Synthetic message text was not painted");

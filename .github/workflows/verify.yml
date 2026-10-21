@@ -65,6 +65,12 @@ jobs:
         if: always()
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
+      - name: Validate menus evidence
+        if: success() && inputs.feature == 'menus'
+        shell: pwsh
+        run: |
+          python tools/verify-wazig/check-evidence.py verification-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid menus evidence' }
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
