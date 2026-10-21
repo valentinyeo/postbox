@@ -81,6 +81,35 @@ END {
 fi
 
 if ! awk '
+function finish() {
+    if (body ~ /theme[[:space:]]*\.[[:space:]]*set[[:space:]]*\(/ && !apply)
+        fail("theme selection bypasses native menu colours", "applyTheme(choice) for startup, theme switches and rollback")
+    if (apply && (body !~ /menu_theme\.preferredAppMode[[:space:]]*\(/ || body !~ /set_preferred_app_mode[[:space:]]*\(/ || body !~ /flush_menu_themes[[:space:]]*\(/))
+        fail("theme apply point no longer updates and flushes native menus", "SetPreferredAppMode and FlushMenuThemes in applyTheme")
+    body = ""
+    apply = 0
+}
+function fail(problem, fix) {
+    printf "lint-repeats: %s:%d: [I1] %s. Use %s.\n", FILENAME, start, problem, fix
+    failed = 1
+}
+{
+    code = $0
+    sub(/\/\/.*$/, "", code)
+    if (code ~ /^(pub[[:space:]]+)?fn[[:space:]]+/) {
+        finish()
+        start = FNR
+        apply = code ~ /^fn applyTheme\(/
+    }
+    body = body code "\n"
+    if (code ~ /^}/) finish()
+}
+END { finish(); exit failed ? 1 : 0 }
+' src/main.zig; then
+    failed=1
+fi
+
+if ! awk '
 function scan(    rest, line, prefix, token) {
     rest = source
     line = 1

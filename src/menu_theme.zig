@@ -7,8 +7,10 @@ pub const PreferredAppMode = enum(i32) {
 };
 
 pub fn preferredAppMode(choice: theme.Choice) PreferredAppMode {
-    _ = choice;
-    return .default;
+    return switch (choice) {
+        .amoled => .force_dark,
+        .green => .default,
+    };
 }
 
 test "IGSH-505 AMOLED forces dark native menus" {
