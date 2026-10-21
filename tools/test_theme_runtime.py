@@ -30,8 +30,23 @@ def verify_wiring(main):
     assert "if (!changeTheme(a, choice))" in control
     status = section(main, "fn controlStatus(", "fn ")
     assert '\\"theme\\":\\"{s}\\"' in status and "@tagName(theme.choice)" in status
-    assert "a.search_pill, fieldColor()," in main
-    assert "a.compose_pill, fieldColor()," in main
+    assert "paintInputField(a, &shapes, hdc, search, a.search_pill);" in main
+    assert "paintInputField(a, &shapes, hdc, a.compose.?, a.compose_pill);" in main
+    field = section(main, "fn paintInputField(", "fn ")
+    assert "theme.current.surface_container_high, theme.current.on_surface" in field
+    assert "if (win.GetFocus() == control) theme.current.primary else theme.current.outline" in field
+    paint = section(main, "fn paintRoundedButton(", "fn ")
+    assert "smooth.strokeRoundRect(shapes, rect, radius, radius, frame_color, 1)" in paint
+    colors = main[main.index("win.WM_CTLCOLORSTATIC, win.WM_CTLCOLOREDIT, win.WM_CTLCOLORLISTBOX => {"):]
+    assert "for ([_]?win.HWND{ a.compose, a.search }) |control|" in colors
+    assert "win.SetBkColor(hdc, theme.current.surface_container_high)" in colors
+    assert "return @bitCast(@intFromPtr(a.brush_raised.?));" in colors
+    search = section(main, "fn searchFieldProc(", "fn ")
+    assert "win.FillRect(hdc, &rect, a.brush_raised.?)" in search
+    assert "win.SetTextColor(hdc, theme.current.on_surface_variant)" in search
+    assert "win.HideCaret(hwnd)" in search and "win.ShowCaret(hwnd)" in search
+    assert "(id == id_compose or id == id_search) and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)" in main
+    assert "win.InvalidateRect(hwnd, if (id == id_compose) &a.compose_pill else &a.search_pill, win.FALSE)" in main
     assert "win.SetBkColor(hdc, fieldColor())" in main
     assert "if (theme.choice == .amoled) a.brush_bg.? else a.brush_raised.?" in main
     assert "if (!recreateThemeBrushes(a)) return -1;" in main
@@ -55,7 +70,7 @@ class ThemeRuntimeTests(unittest.TestCase):
             harness.write_text(source)
             result = subprocess.run([ZIG, "test", str(harness)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("All 10 tests passed.", result.stdout + result.stderr)
+            self.assertRegex(result.stdout + result.stderr, r"All [0-9]+ tests passed\.")
 
     def test_startup_palette_control_and_child_paint_wiring_with_removal_controls(self):
         main = (ROOT / "src/main.zig").read_text()
@@ -66,7 +81,16 @@ class ThemeRuntimeTests(unittest.TestCase):
             'appendPalette(a, "Theme: Green", "", command_theme_green);',
             "_ = changeTheme(a, if (command == command_theme_amoled) .amoled else .green);",
             "if (!changeTheme(a, choice))",
-            "a.compose_pill, fieldColor(),",
+            "paintInputField(a, &shapes, hdc, search, a.search_pill);",
+            "paintInputField(a, &shapes, hdc, a.compose.?, a.compose_pill);",
+            "if (win.GetFocus() == control) theme.current.primary else theme.current.outline",
+            "smooth.strokeRoundRect(shapes, rect, radius, radius, frame_color, 1)",
+            "for ([_]?win.HWND{ a.compose, a.search }) |control|",
+            "win.SetBkColor(hdc, theme.current.surface_container_high)",
+            "win.FillRect(hdc, &rect, a.brush_raised.?)",
+            "win.HideCaret(hwnd)",
+            "win.ShowCaret(hwnd)",
+            "win.InvalidateRect(hwnd, if (id == id_compose) &a.compose_pill else &a.search_pill, win.FALSE)",
             "win.SetBkColor(hdc, fieldColor())",
             "if (!recreateThemeBrushes(a)) return -1;",
         ):

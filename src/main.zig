@@ -993,13 +993,18 @@ fn searchFieldProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam
     if (message == win.WM_PAINT and win.GetWindowTextLengthW(hwnd) == 0) {
         var cue: [64]u16 = @splat(0);
         if (win.SendMessageW(hwnd, win.EM_GETCUEBANNER, @intFromPtr(&cue), cue.len) != 0) {
+            const focused = win.GetFocus() == hwnd;
+            if (focused) _ = win.HideCaret(hwnd);
+            defer {
+                if (focused) _ = win.ShowCaret(hwnd);
+            }
             const hdc = win.GetDC(hwnd) orelse return result;
             defer _ = win.ReleaseDC(hwnd, hdc);
             const saved = win.SaveDC(hdc);
             defer _ = win.RestoreDC(hdc, saved);
             var rect: win.RECT = undefined;
             _ = win.GetClientRect(hwnd, &rect);
-            _ = win.FillRect(hdc, &rect, if (theme.choice == .amoled) a.brush_bg.? else a.brush_raised.?);
+            _ = win.FillRect(hdc, &rect, a.brush_raised.?);
             rect.left += px(a, 2);
             rect.right -= px(a, 2);
             _ = win.SetBkMode(hdc, win.TRANSPARENT);
@@ -1022,6 +1027,10 @@ fn paintRoundedButton(a: *App, shapes: *const smooth.Context, hdc: win.HDC, rect
         var label_rect = rect;
         _ = text_draw.drawText(hdc, text.ptr, @intCast(text.len), &label_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     }
+}
+
+fn paintInputField(a: *App, shapes: *const smooth.Context, hdc: win.HDC, control: win.HWND, rect: win.RECT) void {
+    paintRoundedButton(a, shapes, hdc, rect, theme.current.surface_container_high, theme.current.on_surface, a.font.?, if (win.GetFocus() == control) theme.current.primary else theme.current.outline, &.{});
 }
 
 fn buttonLabel(item: *win.DRAWITEMSTRUCT, buffer: []u16) []const u16 {
@@ -12757,9 +12766,11 @@ fn layout(a: *App, width: i32, height: i32) void {
                 .bottom = height - px(a, 11),
             };
             const pill = field_pill.compute(a.compose_pill, px(a, theme.radius_field * 2));
-            const inner = pill.inner;
+            var inner = pill.inner;
+            inner.top += 1;
+            inner.bottom = @max(inner.top, inner.bottom - 1);
             _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
-            var rect = win.RECT{ .left = px(a, 2), .top = px(a, 8), .right = @max(px(a, 2), inner.right - inner.left - px(a, 2)), .bottom = @max(px(a, 8), sizes.edit_height - px(a, 8)) };
+            var rect = win.RECT{ .left = px(a, 2), .top = px(a, 8), .right = @max(px(a, 2), inner.right - inner.left - px(a, 2)), .bottom = @max(px(a, 8), inner.bottom - inner.top - px(a, 8)) };
             _ = win.SendMessageW(hwnd, win.EM_SETRECTNP, 0, @bitCast(@intFromPtr(&rect)));
         }
     }
@@ -12767,7 +12778,9 @@ fn layout(a: *App, width: i32, height: i32) void {
     a.search_pill = .{ .left = px(a, 12), .top = header_height + px(a, 8), .right = px(a, 12) + left_width - px(a, 24), .bottom = header_height + px(a, 8) + px(a, 34) };
     if (a.search) |hwnd| {
         const pill = field_pill.compute(a.search_pill, px(a, theme.radius_field * 2));
-        const inner = pill.inner;
+        var inner = pill.inner;
+        inner.top += 1;
+        inner.bottom = @max(inner.top, inner.bottom - 1);
         _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
         _ = win.SendMessageW(hwnd, win.EM_SETMARGINS, win.EC_LEFTMARGIN | win.EC_RIGHTMARGIN, @as(win.LPARAM, px(a, 2)) | (@as(win.LPARAM, px(a, 2)) << 16));
     }
@@ -13310,10 +13323,10 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
     defer _ = win.DeleteObject(background);
     _ = win.FillRect(item.hDC, &item.rcItem, background);
     if (selected or bulk_selected) {
-        smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.radius_row * 2), px(a, theme.radius_row * 2), if (bulk_selected) theme.current.primary_container else theme.current.secondary_container);
+        smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius * 2), px(a, theme.selected_row_radius * 2), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
     }
-    const row_text = if (bulk_selected) theme.current.on_primary_container else if (selected) theme.current.on_secondary_container else theme.current.on_surface;
-    const row_muted = if (selected or bulk_selected) row_text else theme.current.on_surface_variant;
+    const row_text = if (bulk_selected) theme.current.on_primary_container else theme.current.on_surface;
+    const row_muted = if (bulk_selected) row_text else theme.current.on_surface_variant;
     _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
     if (bulk_selected) {
         if (win.CreateSolidBrush(theme.current.primary)) |bar_brush| {
@@ -14793,8 +14806,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             _ = win.FillRect(hdc, &composer_rect, a.brush_bg.?);
             var shapes = smooth.Context.init(hdc);
             defer shapes.deinit();
-            if (a.search != null) paintRoundedButton(a, &shapes, hdc, a.search_pill, fieldColor(), theme.current.on_surface, a.font.?, null, &.{});
-            if (a.compose != null and a.status_ui.mode == .closed) paintRoundedButton(a, &shapes, hdc, a.compose_pill, fieldColor(), theme.current.on_surface, a.font.?, null, &.{});
+            if (a.search) |search| paintInputField(a, &shapes, hdc, search, a.search_pill);
+            if (a.compose != null and a.status_ui.mode == .closed) paintInputField(a, &shapes, hdc, a.compose.?, a.compose_pill);
             if (a.compose != null) {
                 const cx = @divTrunc(left_width + 1 + client.right, 2);
                 var grip = win.RECT{ .left = cx - px(a, 22), .top = a.compose_strip_top + px(a, 4), .right = cx + px(a, 22), .bottom = a.compose_strip_top + px(a, 6) };
@@ -14972,6 +14985,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 toggleVoice(a);
             } else if (id == id_emoji and notification == win.BN_CLICKED) {
                 openEmojiMenu(a);
+            } else if ((id == id_compose or id == id_search) and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {
+                _ = win.InvalidateRect(hwnd, if (id == id_compose) &a.compose_pill else &a.search_pill, win.FALSE);
             } else if (id == id_compose and notification == win.EN_CHANGE) {
                 layout(a, a.compose_client_width, a.compose_client_height);
                 shortcodeUpdate(a);
@@ -15095,6 +15110,12 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             _ = win.SetTextColor(hdc, theme.current.on_surface);
             _ = win.SetBkColor(hdc, fieldColor());
             const control_value: usize = @bitCast(lparam);
+            for ([_]?win.HWND{ a.compose, a.search }) |control| {
+                if (control != null and control_value == @intFromPtr(control.?)) {
+                    _ = win.SetBkColor(hdc, theme.current.surface_container_high);
+                    return @bitCast(@intFromPtr(a.brush_raised.?));
+                }
+            }
             if (a.status) |status| {
                 if (control_value == @intFromPtr(status)) {
                     _ = win.SetBkColor(hdc, theme.current.surface_container_low);
