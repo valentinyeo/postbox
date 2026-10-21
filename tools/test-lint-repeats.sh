@@ -80,10 +80,16 @@ for api in RoundRect Ellipse Pie Chord Arc CreateEllipticRgn CreateRoundRectRgn;
             exit 1
         fi
         mv "$fixture/src/bypass.zig" "$fixture/src/smooth_shapes.zig"
-        "$lint" "$fixture" > "$temp/output" 2>&1
+        status=0
+        "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+        if (( status != 1 )) || ! grep -Eq '^lint-repeats: src/smooth_shapes.zig:[0-9]+: \[F1\] ' "$temp/output"; then
+            cat "$temp/output" >&2
+            printf 'test-lint-repeats: FAIL F1 %s %s in smooth_shapes must exit 1 with [F1], got exit %s\n' "$api" "$form" "$status" >&2
+            exit 1
+        fi
         rm "$fixture/src/smooth_shapes.zig"
-        f1_cases=$((f1_cases + 1))
-        printf 'test-lint-repeats: F1 rejects %s %s outside smooth_shapes\n' "$api" "$form"
+        f1_cases=$((f1_cases + 2))
+        printf 'test-lint-repeats: F1 rejects %s %s including smooth_shapes\n' "$api" "$form"
     done
 done
 printf 'const safe = win.RoundRectangle;\nconst shape = smooth.fillRoundRect;\n' > "$fixture/src/bypass.zig"
