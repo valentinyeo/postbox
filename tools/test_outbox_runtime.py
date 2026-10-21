@@ -26,6 +26,7 @@ def mutate(source, name):
     if name in ("short-job-args", "nul-field", "negative-time", "evict-write"):
         return source
     replacements = {
+        "inline-slack-network": ('if (jobIsSlack(job.kind) and a.wacli_slack_thread == null) {\n        setStatus(a, "Slack worker unavailable; restart Messages");\n        return false;\n    }', ""),
         "ignored-swap": ("if (win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) == 0) return false;", "_ = win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH);"),
         "unflushed-write": ("win.FlushFileBuffers(handle) != 0", "true"),
         "local-zero": ("a.send_seq += 1;\n            pending.seq = a.send_seq;", "pending.seq = 0;"),
@@ -75,7 +76,7 @@ def main():
         fixture = re.sub(pattern, lambda _: declaration, fixture, flags=re.M | re.S)
     mutants = [None]
     if args.negative_controls:
-        mutants += ["ignored-swap", "unflushed-write", "local-zero", "no-credentials",
+        mutants += ["inline-slack-network", "ignored-swap", "unflushed-write", "local-zero", "no-credentials",
                     "wrong-retirement", "wrong-failed-bubble", "slack-paste-to-whatsapp",
                     "same-text-reload", "restored-resend", "delete-before-retirement", "silent-admission",
                     "utf8-truncation", "partial-load", "overtake-refused", "short-job-args",

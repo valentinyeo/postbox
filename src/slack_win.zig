@@ -220,6 +220,20 @@ pub fn deleteInstallation(team_id: []const u8) void {
     deleteSecret(wide);
 }
 
+pub fn validClientId(value: []const u8) bool {
+    if (value.len == 0 or value.len > 128) return false;
+    for (value) |c| if (!std.ascii.isDigit(c) and c != '.') return false;
+    return true;
+}
+
+pub fn saveClientId(value: []const u8) bool {
+    return validClientId(value) and regSetString(wideLiteral("SlackClientId"), value);
+}
+
+pub fn loadClientId(allocator: std.mem.Allocator) ?[]u8 {
+    return regGetString(allocator, wideLiteral("SlackClientId"));
+}
+
 pub fn saveTokens(user: []const u8, app: []const u8) bool {
     const allocator = std.heap.page_allocator;
     const user_blob = protect(allocator, user) orelse return false;
@@ -417,6 +431,31 @@ pub fn callApi(allocator: std.mem.Allocator, host: []const u8, token: []const u8
     return .{ .status = status, .body = data, .headers = raw_headers };
 }
 
+pub fn exchangeOAuth(allocator: std.mem.Allocator, body: []const u8) ![]u8 {
+    return exchangeOAuthAt(allocator, "slack.com", win.INTERNET_DEFAULT_HTTPS_PORT, true, body);
+}
+
+pub fn exchangeOAuthAt(allocator: std.mem.Allocator, host: []const u8, port: u16, secure: bool, body: []const u8) ![]u8 {
+    if (!enabled) return error.Unsupported;
+    const wide_host = try toWide(allocator, host);
+    defer allocator.free(wide_host);
+    const session = win.WinHttpOpen(wideLiteral("Wazig Messages/1.0"), if (secure) win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY else win.WINHTTP_ACCESS_TYPE_NO_PROXY, null, null, 0) orelse return error.NetworkFailed;
+    defer _ = win.WinHttpCloseHandle(session);
+    _ = win.WinHttpSetTimeouts(session, 10_000, 10_000, 15_000, 15_000);
+    const connection = win.WinHttpConnect(session, wide_host, port, 0) orelse return error.NetworkFailed;
+    defer _ = win.WinHttpCloseHandle(connection);
+    const request = win.WinHttpOpenRequest(connection, wideLiteral("POST"), wideLiteral("/api/oauth.v2.access"), null, null, null, if (secure) win.WINHTTP_FLAG_SECURE else 0) orelse return error.NetworkFailed;
+    defer _ = win.WinHttpCloseHandle(request);
+    var redirect_policy: win.DWORD = win.WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+    if (win.WinHttpSetOption(request, win.WINHTTP_OPTION_REDIRECT_POLICY, &redirect_policy, @sizeOf(win.DWORD)) == 0) return error.NetworkFailed;
+    const headers = std.unicode.utf8ToUtf16LeStringLiteral("Content-Type: application/x-www-form-urlencoded\r\n");
+    if (win.WinHttpSendRequest(request, headers, @intCast(headers.len), @constCast(body.ptr), @intCast(body.len), @intCast(body.len), 0) == 0 or win.WinHttpReceiveResponse(request, null) == 0) return error.NetworkFailed;
+    var status: win.DWORD = 0;
+    var size: win.DWORD = @sizeOf(win.DWORD);
+    if (win.WinHttpQueryHeaders(request, win.WINHTTP_QUERY_STATUS_CODE | win.WINHTTP_QUERY_FLAG_NUMBER, null, &status, &size, null) == 0 or status != 200) return error.OAuthHttpFailed;
+    return readResponse(allocator, request, 64 * 1024);
+}
+
 pub fn putFile(allocator: std.mem.Allocator, url: []const u8, bytes: []const u8) !void {
     last_status = 0;
     last_error = [_]u8{0} ** 64;
@@ -528,7 +567,7 @@ pub fn socketConnect(allocator: std.mem.Allocator, endpoint: slack.WsEndpoint) !
 
     const session = win.WinHttpOpen(wideLiteral("Wazig Messages/1.0"), win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, null, null, 0) orelse return error.NetworkFailed;
     errdefer _ = win.WinHttpCloseHandle(session);
-    _ = win.WinHttpSetTimeouts(session, 10_000, 10_000, 30_000, 0);
+    _ = win.WinHttpSetTimeouts(session, 10_000, 10_000, 30_000, 15_000);
     const connection = win.WinHttpConnect(session, wide_host.ptr, win.INTERNET_DEFAULT_HTTPS_PORT, 0) orelse return error.NetworkFailed;
     errdefer _ = win.WinHttpCloseHandle(connection);
     const request = win.WinHttpOpenRequest(connection, wideLiteral("GET"), wide_path.ptr, null, null, null, win.WINHTTP_FLAG_SECURE) orelse return error.NetworkFailed;
@@ -542,6 +581,8 @@ pub fn socketConnect(allocator: std.mem.Allocator, endpoint: slack.WsEndpoint) !
     _ = win.WinHttpQueryHeaders(request, win.WINHTTP_QUERY_STATUS_CODE | win.WINHTTP_QUERY_FLAG_NUMBER, null, &status, &status_size, null);
     if (status != 101 and status != 200) return error.WebSocketRejected;
     const socket = win.WinHttpWebSocketCompleteUpgrade(request, 0) orelse return error.NetworkFailed;
+    var receive_timeout: win.DWORD = 1000;
+    _ = win.WinHttpSetOption(socket, win.WINHTTP_OPTION_RECEIVE_TIMEOUT, &receive_timeout, @sizeOf(win.DWORD));
     return .{ .session = session, .connection = connection, .request = request, .socket = socket };
 }
 
@@ -563,14 +604,17 @@ pub fn socketSend(allocator: std.mem.Allocator, sock: Socket, bytes: []const u8)
     if (win.WinHttpWebSocketSend(sock.socket, web_socket_utf8_message, @constCast(bytes.ptr), @intCast(bytes.len)) != 0) return error.NetworkFailed;
 }
 
-pub fn socketReceive(sock: Socket, buf: []u8) ![]u8 {
+pub fn socketReceive(sock: Socket, buf: []u8, stop: *std.atomic.Value(bool)) ![]u8 {
     if (!enabled) return error.Unsupported;
     var offset: usize = 0;
     while (true) {
         if (offset >= buf.len) return error.TooLarge;
         var kind: c_int = 0;
         var read: win.DWORD = 0;
-        if (win.WinHttpWebSocketReceive(sock.socket, buf.ptr + offset, @intCast(buf.len - offset), &read, @ptrCast(&kind)) != 0) return error.NetworkFailed;
+        if (stop.load(.acquire)) return error.Closed;
+        const status = win.WinHttpWebSocketReceive(sock.socket, buf.ptr + offset, @intCast(buf.len - offset), &read, @ptrCast(&kind));
+        if (status == win.ERROR_WINHTTP_TIMEOUT) continue;
+        if (status != 0) return error.NetworkFailed;
         offset += read;
         if (kind == web_socket_close) return error.Closed;
         if (kind == web_socket_utf8_message or kind == web_socket_binary_message) return buf[0..offset];
@@ -704,7 +748,9 @@ pub fn socketThreadMain(config: SocketConfig) void {
         runOneSession(config, &connected_here) catch {};
         _ = config.connected.swap(false, .acq_rel);
         if (config.stop.load(.acquire)) return;
-        win.Sleep(@intCast(if (connected_here) 1000 else backoff_seconds * 1000));
+        const delay = if (connected_here) 1000 else backoff_seconds * 1000;
+        var waited: u64 = 0;
+        while (waited < delay and !config.stop.load(.acquire)) : (waited += 250) win.Sleep(250);
         backoff_seconds = @min(if (connected_here) @as(u64, 1) else backoff_seconds * 2, 30);
     }
 }
@@ -724,7 +770,7 @@ fn runOneSession(config: SocketConfig, connected_here: *bool) !void {
 
     var buffer: [128 * 1024]u8 = undefined;
     while (!config.stop.load(.acquire)) {
-        const message = socketReceive(sock, &buffer) catch |err| return err;
+        const message = socketReceive(sock, &buffer, config.stop) catch |err| return err;
         var classify_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer classify_arena.deinit();
         const envelope = (slack.classifyEnvelope(classify_arena.allocator(), message) catch return error.BadEnvelope) orelse continue;

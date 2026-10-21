@@ -255,6 +255,7 @@ pub fn build(b: *std.Build) void {
         "dwmapi",
         "mfuuid",
         "winhttp",
+        "ws2_32",
         "crypt32",
         "msimg32",
     }) |library| {

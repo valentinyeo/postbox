@@ -150,8 +150,18 @@ const Harness = struct {
         try equal(oauth.user_scopes, response.scope);
         try require(response.expires_in == 3600);
         const refresh = try oauth.buildRefreshBody(self.allocator, "desktop-fixture", response.refresh_token);
-        const rotated = try oauth.parseResponse(self.allocator, try self.request("/api/oauth.v2.access", refresh, "", "application/x-www-form-urlencoded"));
-        try equal("user-fixture-rotated", rotated.access_token);
+        const rotated = try oauth.parseRefreshResponse(self.allocator, try self.request("/api/oauth.v2.access", refresh, "", "application/x-www-form-urlencoded"));
+        try equal("xoxe.xoxp-00000000000000000002", rotated.access_token);
+    }
+
+    fn refreshTokens(self: Harness) !void {
+        try require(!oauth.refreshDue(699, 1000, true, ""));
+        try require(oauth.refreshDue(700, 1000, true, ""));
+        const body = try oauth.buildRefreshBody(self.allocator, "desktop-fixture", "refresh-fixture-1");
+        const rotated = try oauth.parseRefreshResponse(self.allocator, try self.request("/api/oauth.v2.access", body, "", "application/x-www-form-urlencoded"));
+        try equal("xoxe.xoxp-00000000000000000002", rotated.access_token);
+        try equal("refresh-fixture-rotated", rotated.refresh_token);
+        try require(rotated.expires_in == 3600);
     }
 
     fn live(self: Harness, missing_ack: bool) !void {
@@ -238,5 +248,5 @@ pub fn main(init: std.process.Init) !void {
     defer client.deinit();
     const harness = Harness{ .allocator = allocator, .client = &client, .base = args[1] };
     const scenario = args[2];
-    if (std.mem.eql(u8, scenario, "list")) try harness.list() else if (std.mem.eql(u8, scenario, "history")) try harness.history() else if (std.mem.eql(u8, scenario, "send")) try harness.send() else if (std.mem.eql(u8, scenario, "live")) try harness.live(std.mem.eql(u8, args[3], "missing_ack")) else if (std.mem.eql(u8, scenario, "two_workspaces")) try harness.twoWorkspaces() else if (std.mem.eql(u8, scenario, "oauth_pkce")) try harness.oauthPkce(std.mem.eql(u8, args[3], "wrong_verifier")) else return error.UnknownScenario;
+    if (std.mem.eql(u8, scenario, "list")) try harness.list() else if (std.mem.eql(u8, scenario, "history")) try harness.history() else if (std.mem.eql(u8, scenario, "send")) try harness.send() else if (std.mem.eql(u8, scenario, "live")) try harness.live(std.mem.eql(u8, args[3], "missing_ack")) else if (std.mem.eql(u8, scenario, "two_workspaces")) try harness.twoWorkspaces() else if (std.mem.eql(u8, scenario, "oauth_pkce")) try harness.oauthPkce(std.mem.eql(u8, args[3], "wrong_verifier")) else if (std.mem.eql(u8, scenario, "refresh")) try harness.refreshTokens() else return error.UnknownScenario;
 }

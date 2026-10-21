@@ -846,3 +846,10 @@ test "removing one Slack workspace pauses only its durable sends" {
     try std.testing.expectEqual(@as(usize, 1), app.wacli_queue_len);
     try std.testing.expectEqualStrings("T0000000001", app.wacli_queue[0].account.slice());
 }
+
+test "Slack jobs never fall back to UI-thread networking when the worker is unavailable" {
+    var app = fixture();
+    app.wacli_slack_thread = null;
+    try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .slack_auth, .provider = .slack }, false));
+    try std.testing.expectEqual(@as(usize, 0), app.wacli_queue_len);
+}
