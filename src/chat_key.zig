@@ -13,6 +13,33 @@ pub const Key = struct {
     }
 };
 
+pub const Stored = struct {
+    provider: transport.Provider = .whatsapp,
+    account: [max_account_len]u8 = @splat(0),
+    account_len: usize = 0,
+    id: [191]u8 = @splat(0),
+    id_len: usize = 0,
+
+    pub fn set(self: *Stored, value: Key) void {
+        self.provider = value.provider;
+        self.account_len = @min(value.account.len, self.account.len);
+        self.id_len = @min(value.id.len, self.id.len);
+        @memcpy(self.account[0..self.account_len], value.account[0..self.account_len]);
+        @memcpy(self.id[0..self.id_len], value.id[0..self.id_len]);
+    }
+
+    pub fn key(self: *const Stored) Key {
+        return .{ .provider = self.provider, .account = self.account[0..self.account_len], .id = self.id[0..self.id_len] };
+    }
+};
+
+pub fn order(a: Key, b: Key) std.math.Order {
+    const provider = std.math.order(@intFromEnum(a.provider), @intFromEnum(b.provider));
+    if (provider != .eq) return provider;
+    const account = std.mem.order(u8, a.account, b.account);
+    return if (account != .eq) account else std.mem.order(u8, a.id, b.id);
+}
+
 pub fn of(item: anytype) Key {
     if (@typeInfo(@TypeOf(item)) != .pointer) @compileError("chat_key.of needs a pointer so key slices retain their owner");
     return .{ .provider = std.meta.stringToEnum(transport.Provider, @tagName(item.provider)).?, .account = item.account.slice(), .id = item.jid.slice() };
@@ -50,4 +77,14 @@ test "two WhatsApp accounts that share a contact keep their chats apart" {
     try std.testing.expect(!Key.eql(of(&chats[0]), of(&chats[1])));
     try std.testing.expect(!Key.eql(of(&pending), .{ .provider = .slack, .account = pending.account.slice(), .id = jid.slice() }));
     try std.testing.expect(Key.eql(of(&pending), of(&chats[1])));
+}
+
+test "stored selection and pin keys retain provider account and id" {
+    var first = Stored{};
+    first.set(.{ .provider = .slack, .account = "T0000000001", .id = "C0000000001" });
+    var second = first;
+    second.set(.{ .provider = .slack, .account = "T0000000002", .id = "C0000000001" });
+    try std.testing.expect(!Key.eql(first.key(), second.key()));
+    try std.testing.expectEqual(std.math.Order.lt, order(first.key(), second.key()));
+    try std.testing.expect(Key.eql(first.key(), first.key()));
 }

@@ -79,7 +79,7 @@ const NoLock = struct {
     fn lockUncancelable(_: *@This(), _: std.Io) void {}
     fn unlock(_: *@This(), _: std.Io) void {}
     fn broadcast(_: *@This(), _: std.Io) void {}
-    fn mark(_: *@This(), _: []const u8, _: []const u8) bool {
+    fn markAccount(_: *@This(), _: []const u8, _: []const u8, _: []const u8) bool {
         return true;
     }
 };
@@ -103,6 +103,7 @@ const App = struct {
     sent_voice: [voice_sent.max_entries]voice_sent.Entry = @splat(.{}),
     sent_voice_count: usize = 0,
     slack_tokens: ?bool = true,
+    slack_account_available: bool = true,
     slack_bridge: ?bool = null,
     wacli_mutex: NoLock = .{},
     wacli_cond: NoLock = .{},
@@ -123,6 +124,7 @@ const App = struct {
     staged_image: struct { provider: transport.Provider = .whatsapp, account: Utf8Text(32) = .{}, path: Utf8Text(519) = .{}, jid: Utf8Text(191) = .{} } = .{},
     slack_attach: WideText(519) = .{},
     slack_attach_jid: Utf8Text(191) = .{},
+    slack_attach_account: Utf8Text(32) = .{},
     telegram: ?*TelegramClient = null,
     user_viewed: bool = false,
     scroll_y: i32 = 0,
@@ -281,6 +283,12 @@ fn selectedChatIsSlack(a: *App) bool {
 }
 fn selectedChatIsTelegram(a: *App) bool {
     return a.chats[0].provider == .telegram;
+}
+fn slackAccountConfigured(a: *App, _: []const u8) bool {
+    return a.slack_account_available;
+}
+fn slackAccountIsBridge(a: *App, _: []const u8) bool {
+    return a.slack_bridge != null;
 }
 fn slackConfigured(a: *App) bool {
     return a.slack_tokens != null or a.slack_bridge != null;
@@ -726,7 +734,6 @@ test "queued Status seen receipts are retained when the shared queue is full" {
     for (app.wacli_queue) |job| try std.testing.expectEqual(WacliJobKind.status_seen, job.kind);
 }
 
-
 test "legacy outbox migration retains every send with immediate or delayed account discovery" {
     const legacy = "{\"id\":\"01010101010101010101010101010101\",\"provider\":\"whatsapp\",\"jid\":\"synthetic-chat\",\"text\":\"synthetic text\",\"file\":\"synthetic.ogg\",\"reply_to\":\"quoted-id\",\"reply_sender\":\"sender\",\"client_msg_id\":\"\",\"attempts\":0,\"upload_file_id\":\"\",\"state\":\"queued\",\"queued_unix\":42,\"ptt\":true,\"voice_seconds\":7}\n";
     for ([_]bool{ false, true }) |delayed| {
@@ -822,4 +829,20 @@ test "queued send for another account waits and cannot dedup against the shared 
     app.chats[0].account = app.cache_tag;
     appendWhatsAppPending(&app, pending, true);
     try std.testing.expectEqual(@as(usize, 2), app.message_count);
+}
+
+test "removing one Slack workspace pauses only its durable sends" {
+    reset();
+    var app = fixture();
+    app.slack_outbox_count = 1;
+    app.slack_outbox[0].entry = sampleEntry(1);
+    app.slack_outbox[0].entry.account.set("T0000000001");
+    app.slack_account_available = false;
+    retrySlackOutbox(&app);
+    try std.testing.expectEqual(@as(usize, 0), app.wacli_queue_len);
+    try std.testing.expect(!app.slack_outbox[0].inflight);
+    app.slack_account_available = true;
+    retrySlackOutbox(&app);
+    try std.testing.expectEqual(@as(usize, 1), app.wacli_queue_len);
+    try std.testing.expectEqualStrings("T0000000001", app.wacli_queue[0].account.slice());
 }

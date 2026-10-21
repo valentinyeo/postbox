@@ -42,6 +42,7 @@ const App = struct {
     outbox_load_failed: bool = false,
     fail_writes: bool = false,
     queue_full: bool = false,
+    disconnected_account: Utf8Text(32) = .{},
     jobs: usize = 0,
     last_job: WacliJob = .{},
     journal: [128 * 1024]u8 = undefined,
@@ -58,6 +59,10 @@ const App = struct {
 
 fn selectedChatIsSlack(_: *App) bool {
     return true;
+}
+
+fn slackAccountConfigured(a: *App, account: []const u8) bool {
+    return a.disconnected_account.len == 0 or !std.mem.eql(u8, a.disconnected_account.slice(), account);
 }
 
 fn slackConfigured(_: *App) bool {
@@ -363,4 +368,24 @@ test "Slack successful share is not requeued when retirement persistence fails" 
     a.fail_writes = false;
     retrySlackOutbox(&a);
     try std.testing.expectEqual(@as(usize, 0), a.slack_outbox_count);
+}
+
+test "outbox keeps colliding channel ids isolated and one disconnected workspace cannot block another" {
+    var a = App{};
+    const first = addEntry(&a, false);
+    first.entry.account.set("T0000000001");
+    const second = addEntry(&a, false);
+    second.entry.account.set("T0000000002");
+    a.disconnected_account.set("T0000000001");
+    retrySlackOutbox(&a);
+    try std.testing.expect(!first.inflight);
+    try std.testing.expect(second.inflight);
+    try std.testing.expectEqual(@as(usize, 1), a.jobs);
+    try std.testing.expectEqualStrings("T0000000002", a.last_job.account.slice());
+    try std.testing.expectEqualStrings(first.entry.jid.slice(), a.last_job.jid.slice());
+    var result = resultFor(first, .slack_send);
+    result.extra.set("WorkspaceDisconnected");
+    handleSlackSendResult(&a, &result);
+    try std.testing.expectEqual(@as(u8, 0), first.entry.attempts);
+    try std.testing.expectEqual(outbox.SendState.queued, first.entry.state);
 }

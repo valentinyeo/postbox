@@ -51,7 +51,7 @@ pub const groups = [_]Group{
         .{ .key = "Arrows / Enter / Esc, emoji picker open", .desc = "Move, insert or close the emoji picker" },
     } },
     .{ .name = "Messengers", .items = &[_]Shortcut{
-        .{ .key = "Alt+1..9", .desc = "Switch between WhatsApp, Slack and Telegram" },
+        .{ .key = "Alt+0 / Alt+1..3", .desc = "All networks / configured WhatsApp, Slack, Telegram" },
     } },
     .{ .name = "Open and view", .items = &[_]Shortcut{
         .{ .key = "Ctrl+O", .desc = "Open links and media in the selected message" },

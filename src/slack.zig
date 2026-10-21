@@ -45,6 +45,11 @@ pub const Kind = enum { ack, events, hello, other };
 pub const Envelope = struct {
     kind: Kind,
     envelope_id: []const u8 = "",
+    team_id: []const u8 = "",
+    teams: [8][]const u8 = @splat(""),
+    team_count: usize = 0,
+    event_id: []const u8 = "",
+    reaction: []const u8 = "",
     event_type: []const u8 = "",
     subtype: []const u8 = "",
     channel: []const u8 = "",
@@ -87,6 +92,27 @@ pub fn classifyEnvelope(arena: std.mem.Allocator, text: []const u8) classificati
     };
     const payload_type = objectString(payload, "type") orelse return envelope;
     if (!std.mem.eql(u8, payload_type, "events_api")) return envelope;
+    envelope.team_id = objectString(payload, "team_id") orelse objectString(root, "team_id") orelse "";
+    if (envelope.team_id.len > 0) {
+        envelope.teams[0] = envelope.team_id;
+        envelope.team_count = 1;
+    } else if (payload.get("authorizations")) |authorizations| {
+        if (authorizations == .array) for (authorizations.array.items) |authorization| {
+            if (authorization != .object) continue;
+            const team = objectStringField(authorization.object, "team_id");
+            if (team.len == 0 or envelope.team_count == envelope.teams.len) continue;
+            var known = false;
+            for (envelope.teams[0..envelope.team_count]) |existing| if (std.mem.eql(u8, existing, team)) {
+                known = true;
+            };
+            if (!known) {
+                envelope.teams[envelope.team_count] = team;
+                envelope.team_count += 1;
+            }
+        };
+        if (envelope.team_count > 0) envelope.team_id = envelope.teams[0];
+    }
+    envelope.event_id = objectStringField(payload, "event_id");
     const event_value = payload.get("event") orelse return envelope;
     var event = switch (event_value) {
         .object => |object| object,
@@ -103,6 +129,13 @@ pub fn classifyEnvelope(arena: std.mem.Allocator, text: []const u8) classificati
     }
     envelope.channel = objectString(event, "channel") orelse "";
     envelope.ts = objectString(event, "ts") orelse "";
+    envelope.reaction = objectStringField(event, "reaction");
+    if (std.mem.eql(u8, envelope.event_type, "reaction_added") or std.mem.eql(u8, envelope.event_type, "reaction_removed")) {
+        if (event.get("item")) |item| if (item == .object) {
+            envelope.channel = objectStringField(item.object, "channel");
+            envelope.ts = objectStringField(item.object, "ts");
+        };
+    }
     envelope.thread_ts = objectString(event, "thread_ts") orelse "";
     envelope.user = objectString(event, "user") orelse "";
     envelope.bot_id = objectString(event, "bot_id") orelse "";
@@ -168,11 +201,65 @@ pub fn conversationSeconds(object: std.json.ObjectMap) i64 {
     return 0;
 }
 
+pub const max_reactions = 24;
+pub const Reaction = struct {
+    name: []const u8 = "",
+    count: i64 = 0,
+};
+
+pub fn readReactions(object: std.json.ObjectMap, output: []Reaction) usize {
+    const value = object.get("reactions") orelse return 0;
+    if (value != .array) return 0;
+    var count: usize = 0;
+    for (value.array.items) |entry| {
+        if (entry != .object or count == output.len) continue;
+        const name = objectStringField(entry.object, "name");
+        const total = numberField(entry.object, "count") orelse 0;
+        if (name.len == 0 or total <= 0) continue;
+        output[count] = .{ .name = name, .count = total };
+        count += 1;
+    }
+    return count;
+}
+
+pub fn formatReactions(buffer: []u8, reactions: []const Reaction) []const u8 {
+    var writer = std.Io.Writer.fixed(buffer);
+    for (reactions) |reaction| {
+        if (reaction.count <= 0 or reaction.name.len == 0) continue;
+        if (writer.end > 0) writer.writeAll("  ") catch break;
+        const shortcodes = @import("shortcodes.zig");
+        var found: [1]shortcodes.Match = undefined;
+        if (shortcodes.matches(reaction.name, &found) > 0 and std.mem.eql(u8, found[0].name(), reaction.name)) {
+            writer.writeAll(found[0].emoji) catch break;
+        } else writer.print(":{s}:", .{reaction.name}) catch break;
+        writer.print(" {d}", .{reaction.count}) catch break;
+    }
+    return buffer[0..writer.end];
+}
+
+pub const InstallationIdentity = struct { team_id: []const u8, team_name: []const u8, user_id: []const u8 };
+
+pub fn installationIdentity(object: std.json.ObjectMap) ?InstallationIdentity {
+    if (!boolField(object, "ok")) return null;
+    const team = objectStringField(object, "team_id");
+    const user = objectStringField(object, "user_id");
+    if (!validTeamId(team) or user.len == 0) return null;
+    return .{ .team_id = team, .team_name = objectStringField(object, "team"), .user_id = user };
+}
+
+pub fn validTeamId(team: []const u8) bool {
+    if (team.len < 2 or team.len > 32 or team[0] != 'T') return false;
+    for (team[1..]) |byte| if (!std.ascii.isAlphanumeric(byte)) return false;
+    return true;
+}
+
 pub const HistoryItem = struct {
     ts: []const u8 = "",
     user: []const u8 = "",
     text: []const u8 = "",
     thread_ts: []const u8 = "",
+    reactions: [max_reactions]Reaction = @splat(.{}),
+    reaction_count: usize = 0,
     reply_count: i64 = 0,
     subtype: []const u8 = "",
     file_id: []const u8 = "",
@@ -200,9 +287,10 @@ pub fn readHistoryItem(value: std.json.Value) ?HistoryItem {
             .object => |inner_object| inner_object,
             else => return null,
         };
-    } else if (item.subtype.len > 0 and !std.mem.eql(u8, item.subtype, "bot_message")) {
+    } else if (item.subtype.len > 0 and !std.mem.eql(u8, item.subtype, "bot_message") and !std.mem.eql(u8, item.subtype, "file_share")) {
         return null;
     }
+    item.reaction_count = readReactions(object, &item.reactions);
     item.ts = objectString(object, "ts") orelse return null;
     item.user = objectString(object, "user") orelse "";
     item.text = objectString(object, "text") orelse "";
@@ -691,6 +779,8 @@ pub const Log = struct {
     pub const entry_max_channel = 40;
     pub const entry_max_ts = 40;
     const Entry = struct {
+        account: [32]u8 = undefined,
+        account_len: u8 = 0,
         channel: [entry_max_channel]u8 = undefined,
         channel_len: u8 = 0,
         ts: [entry_max_ts]u8 = undefined,
@@ -703,16 +793,23 @@ pub const Log = struct {
     count: usize = 0,
 
     pub fn mark(self: *Log, channel: []const u8, ts: []const u8) bool {
+        return self.markAccount("", channel, ts);
+    }
+
+    pub fn markAccount(self: *Log, account: []const u8, channel: []const u8, ts: []const u8) bool {
+        if (account.len > 32) return true;
         if (channel.len == 0 or ts.len == 0 or channel.len > entry_max_channel or ts.len > entry_max_ts) return true;
         var index: usize = 0;
         while (index < self.count) : (index += 1) {
             const entry = &self.entries[(self.head + capacity - 1 - index) % capacity];
-            if (entry.channel_len == channel.len and entry.ts_len == ts.len and
+            if (entry.account_len == account.len and std.mem.eql(u8, entry.account[0..entry.account_len], account) and entry.channel_len == channel.len and entry.ts_len == ts.len and
                 std.mem.eql(u8, entry.channel[0..entry.channel_len], channel) and
                 std.mem.eql(u8, entry.ts[0..entry.ts_len], ts)) return false;
         }
         const slot = &self.entries[self.head];
         self.head = (self.head + 1) % capacity;
+        @memcpy(slot.account[0..account.len], account);
+        slot.account_len = @intCast(account.len);
         @memcpy(slot.channel[0..channel.len], channel);
         slot.channel_len = @intCast(channel.len);
         @memcpy(slot.ts[0..ts.len], ts);
@@ -728,6 +825,8 @@ pub const WorkspaceChannel = struct {
     user: []const u8,
     is_im: bool,
     seconds: i64,
+    unread_count: ?i64 = null,
+    last_read: []const u8 = "",
 };
 
 pub fn workspaceChannel(object: std.json.ObjectMap) ?WorkspaceChannel {
@@ -745,6 +844,8 @@ pub fn workspaceChannel(object: std.json.ObjectMap) ?WorkspaceChannel {
         .user = objectStringField(object, "user"),
         .is_im = id[0] == 'D',
         .seconds = conversationSeconds(object),
+        .unread_count = numberField(object, "unread_count_display") orelse numberField(object, "unread_count"),
+        .last_read = objectStringField(object, "last_read"),
     };
 }
 
@@ -1094,7 +1195,7 @@ test "isSlackFileHost matches only slack file hosts" {
 }
 
 test "isValidBridgeHost accepts bare hostnames only" {
-    try std.testing.expect(isValidBridgeHost("slack-bridge.crolab.org"));
+    try std.testing.expect(isValidBridgeHost("bridge.example.test"));
     try std.testing.expect(!isValidBridgeHost("https://x.com"));
     try std.testing.expect(!isValidBridgeHost("a b"));
     try std.testing.expect(!isValidBridgeHost("a:1"));
@@ -1249,4 +1350,80 @@ test "mark body carries channel and ts" {
     const body = try buildMarkBody(std.testing.allocator, "C123", "1740000000.000123");
     defer std.testing.allocator.free(body);
     try std.testing.expectEqualStrings("{\"channel\":\"C123\",\"ts\":\"1740000000.000123\"}", body);
+}
+
+test "envelope routes by team with authorization fallback and reaction target" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const event = (try classifyEnvelope(arena.allocator(),
+        \\{"envelope_id":"env","payload":{"type":"events_api","team_id":"T0000000001","event_id":"Ev0001","event":{"type":"reaction_added","user":"U0000000001","reaction":"thumbsup","item":{"type":"message","channel":"C0000000001","ts":"1740000000.1"}}}}
+    )).?;
+    try std.testing.expectEqualStrings("T0000000001", event.team_id);
+    try std.testing.expectEqualStrings("C0000000001", event.channel);
+    try std.testing.expectEqualStrings("thumbsup", event.reaction);
+    const fallback = (try classifyEnvelope(arena.allocator(),
+        \\{"payload":{"type":"events_api","authorizations":[{"team_id":"T0000000002"}],"event":{"type":"message","channel":"C0000000001","ts":"1740000000.1"}}}
+    )).?;
+    try std.testing.expectEqualStrings("T0000000002", fallback.team_id);
+    var log = Log{};
+    try std.testing.expect(log.markAccount(event.team_id, event.channel, event.ts));
+    try std.testing.expect(log.markAccount(fallback.team_id, fallback.channel, fallback.ts));
+    try std.testing.expect(!log.markAccount(event.team_id, event.channel, event.ts));
+}
+
+test "history and replies retain reaction names and counts" {
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator,
+        \\{"ts":"1740000000.1","thread_ts":"1740000000.0","reactions":[{"name":"thumbsup","count":3},{"name":"custom_emoji","count":2},{"name":"empty","count":0}]}
+    , .{});
+    defer parsed.deinit();
+    const item = readHistoryItem(parsed.value).?;
+    try std.testing.expectEqual(@as(usize, 2), item.reaction_count);
+    try std.testing.expectEqualStrings("thumbsup", item.reactions[0].name);
+    try std.testing.expectEqual(@as(i64, 3), item.reactions[0].count);
+    try std.testing.expectEqualStrings("custom_emoji", item.reactions[1].name);
+}
+
+test "singleton auth migration obtains stable workspace identity without changing credentials" {
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator,
+        \\{"ok":true,"team_id":"T0000000001","team":"Example workspace","user_id":"U0000000001"}
+    , .{});
+    defer parsed.deinit();
+    const identity = installationIdentity(parsed.value.object).?;
+    try std.testing.expectEqualStrings("T0000000001", identity.team_id);
+    try std.testing.expectEqualStrings("Example workspace", identity.team_name);
+    try std.testing.expectEqualStrings("U0000000001", identity.user_id);
+    try std.testing.expect(!validTeamId("../bad"));
+}
+
+test "workspace imports authoritative unread count and last read" {
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator,
+        \\{"id":"C0000000001","name":"example","is_member":true,"unread_count":9,"unread_count_display":4,"last_read":"1740000000.1"}
+    , .{});
+    defer parsed.deinit();
+    const channel = workspaceChannel(parsed.value.object).?;
+    try std.testing.expectEqual(@as(?i64, 4), channel.unread_count);
+    try std.testing.expectEqualStrings("1740000000.1", channel.last_read);
+}
+
+test "reaction display maps known emoji and preserves custom names with counts" {
+    var buffer: [256]u8 = undefined;
+    const rendered = formatReactions(&buffer, &.{ .{ .name = "thumbsup", .count = 3 }, .{ .name = "example_custom_emoji", .count = 2 }, .{ .name = "thumb", .count = 1 } });
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "👍 3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, ":example_custom_emoji: 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, ":thumb: 1") != null);
+}
+
+test "authorization fallback routes every distinct workspace but canonical team takes precedence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const event = (try classifyEnvelope(arena.allocator(),
+        \\{"payload":{"type":"events_api","authorizations":[{"team_id":"T0000000001"},{"team_id":"T0000000002"},{"team_id":"T0000000001"}],"event":{"type":"message","channel":"C0000000001","ts":"1740000000.1"}}}
+    )).?;
+    try std.testing.expectEqual(@as(usize, 2), event.team_count);
+    try std.testing.expectEqualStrings("T0000000002", event.teams[1]);
+    const canonical = (try classifyEnvelope(arena.allocator(),
+        \\{"payload":{"type":"events_api","team_id":"T0000000002","authorizations":[{"team_id":"T0000000001"}],"event":{"type":"message","channel":"C0000000001","ts":"1740000000.1"}}}
+    )).?;
+    try std.testing.expectEqual(@as(usize, 1), canonical.team_count);
+    try std.testing.expectEqualStrings("T0000000002", canonical.teams[0]);
 }
