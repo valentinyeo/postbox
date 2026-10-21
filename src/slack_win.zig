@@ -120,6 +120,24 @@ fn regGetString(allocator: std.mem.Allocator, name: [*:0]const u16) ?[]u8 {
     return text;
 }
 
+pub fn loadUserEnvironment(allocator: std.mem.Allocator, name: [*:0]const u16) ?[]u8 {
+    if (!enabled) return null;
+    const flags = win.RRF_RT_REG_SZ | win.RRF_RT_REG_EXPAND_SZ | win.RRF_NOEXPAND;
+    var size: win.DWORD = 0;
+    if (win.RegGetValueW(winHandleHkey(0x80000001), wideLiteral("Environment"), name, flags, null, null, &size) != win.ERROR_SUCCESS or size == 0 or size > 64 * 1024 or size % 2 != 0) return null;
+    const wide = allocator.alloc(u16, size / 2) catch return null;
+    defer allocator.free(wide);
+    var real_size = size;
+    if (win.RegGetValueW(winHandleHkey(0x80000001), wideLiteral("Environment"), name, flags, null, wide.ptr, &real_size) != win.ERROR_SUCCESS or real_size > size or real_size % 2 != 0) return null;
+    const value = wide[0 .. real_size / 2];
+    const end = std.mem.indexOfScalar(u16, value, 0) orelse value.len;
+    const text = std.unicode.utf16LeToUtf8Alloc(allocator, value[0..end]) catch return null;
+    defer allocator.free(text);
+    const trimmed = std.mem.trim(u8, text, &std.ascii.whitespace);
+    if (trimmed.len == 0) return null;
+    return allocator.dupe(u8, trimmed) catch null;
+}
+
 fn regDelete(name: [*:0]const u16) void {
     var key: win.HKEY = null;
     if (win.RegCreateKeyExW(winHandleHkey(0x80000001), wideLiteral("Software\\Messages"), 0, null, 0, win.KEY_SET_VALUE, null, &key, null) != win.ERROR_SUCCESS) return;

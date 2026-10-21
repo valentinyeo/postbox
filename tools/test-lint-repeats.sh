@@ -24,6 +24,7 @@ cases=(
     'dc9bdce C1 HEAD'
     '0e7c320d44f1 C1 HEAD'
     '914331e C2 HEAD'
+    'c641316 C2 HEAD'
     '55e826b E1 HEAD'
     '1f5853e^ D1 HEAD'
     'a735c9f F1 HEAD'
@@ -94,6 +95,24 @@ done
 cp "$repo/.github/workflows/automerge.yml" "$fixture/.github/workflows/automerge.yml"
 "$lint" "$fixture"
 printf 'test-lint-repeats: IGSH-504 B8 rejects %s incomplete check policies and permits the fixed workflow\n' "$b8_cases"
+mkdir -p "$fixture/src/nested"
+for file in main.zig bypass.zig nested/bypass.zig; do
+    for read in 'init.environ_map.get("DEEPGRAM_API_KEY")' $'init.environ_map\n    .get(\n        "DEEPGRAM_API_KEY"\n    )'; do
+        printf 'const stored = slack_win.loadSecret(init.gpa, lit("DeepgramApiKey"));\nconst seed = %s;\n' "$read" > "$fixture/src/$file"
+        status=0
+        "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+        if (( status != 1 )) || ! grep -Fq '[C2]' "$temp/output"; then
+            cat "$temp/output" >&2
+            printf 'test-lint-repeats: FAIL C2 must reject inherited environment read in %s, got exit %s\n' "$file" "$status" >&2
+            exit 1
+        fi
+    done
+    rm "$fixture/src/$file"
+    : > "$fixture/src/main.zig"
+done
+printf 'const seed = slack_win.loadUserEnvironment(init.gpa, lit("DEEPGRAM_API_KEY"));\nconst stored = slack_win.loadSecret(init.gpa, lit("DeepgramApiKey"));\n' > "$fixture/src/main.zig"
+"$lint" "$fixture"
+printf 'test-lint-repeats: C2 rejects inherited reads throughout src even with loadSecret and permits the saved user environment reader\n'
 f1_cases=0
 for api in RoundRect Ellipse Pie Chord Arc CreateEllipticRgn CreateRoundRectRgn; do
     for form in direct alias import_alias field field_alias multiline_alias multiline_field; do
