@@ -17,6 +17,7 @@ const max_wacli_args = 4;
 const wacli_arg_cap = 4095;
 const wacli_queue_size = 4;
 const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, cache_tag, slack_mark };
+const WacliLane = enum { wacli, slack, hub_media };
 const WacliJob = struct {
     kind: WacliJobKind = .chats,
     gen: u64 = 0,
@@ -116,6 +117,8 @@ const App = struct {
     wacli_cond: NoLock = .{},
     wacli_thread: ?bool = true,
     wacli_slack_thread: ?bool = true,
+    hub_media_thread: ?bool = null,
+    hub_account: Utf8Text(32) = .{},
     wacli_queue: [wacli_queue_size]WacliJob = @splat(.{}),
     wacli_queue_len: usize = 0,
     wacli_refresh_again: bool = false,
@@ -560,7 +563,7 @@ test "refused write cannot be overtaken and full queue preserves writes" {
     try std.testing.expectEqual(app.wacli_queue.len, app.wacli_queue_len);
     try std.testing.expect(!app.slack_outbox[0].inflight);
     try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .chats }, false));
-    _ = wacliTakeJob(&app, true);
+    _ = wacliTakeJob(&app, .slack);
     enqueueSlackOutbox(&app, &app.slack_outbox[1]);
     try std.testing.expect(!app.slack_outbox[1].inflight);
     app.slack_outbox[0].not_before_ms = 0;
@@ -677,7 +680,7 @@ test "chat read refused by writes retries after the queue drains" {
     try std.testing.expect(app.wacli_refresh_again);
     retryWacliRefreshes(&app);
     try std.testing.expectEqual(@as(usize, 0), refreshed);
-    while (wacliTakeJob(&app, true) != null) {}
+    while (wacliTakeJob(&app, .slack) != null) {}
     retryWacliRefreshes(&app);
     try std.testing.expectEqual(@as(usize, 1), refreshed);
     try std.testing.expect(!app.wacli_refresh_again);
