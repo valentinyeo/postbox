@@ -338,6 +338,7 @@ const App = struct {
     allocator: std.mem.Allocator = alloc,
     telegram: ?*tg.Client,
     tg_auth: tg.AuthState = .ready,
+    tg_account: Utf8Text(32) = .{},
     tg_chats: []TgChat,
     tg_chat_count: usize = 0,
     chats: []Chat,
@@ -366,7 +367,10 @@ fn fixture(client: *tg.Client) !*App {
     app.* = .{ .telegram = client, .chats = try alloc.alloc(Chat, 256), .tg_chats = try alloc.alloc(TgChat, max_tg_chats) };
     @memset(app.tg_chats, .{});
     @memset(app.chats, .{});
+    app.tg_account.set("fixture-account");
     app.chats[0].provider = .telegram;
+    app.chats[0].account = app.tg_account;
+    app.displayed_account = app.tg_account;
     app.chats[0].jid.set("7");
     app.displayed_jid.set("7");
     return app;
@@ -391,6 +395,7 @@ fn stopAudio(_: *App) void {}
 fn markChatRead(_: *App) void {}
 fn setStatus(_: *App, _: []const u8) void {}
 fn focusCompose(_: *App) void {}
+fn saveComposerDraft(_: *App) void {}
 fn clearReply(app: *App) void {
     app.reply_to.set("");
 }

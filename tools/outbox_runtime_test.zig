@@ -1,4 +1,7 @@
 const std = @import("std");
+const drafts = struct {
+    const max_text = 64 * 1024;
+};
 const outbox = @import("outbox.zig");
 const chat_key = @import("chat_key.zig");
 const transport = @import("transport.zig");
@@ -306,6 +309,7 @@ fn clearReply(a: *App) void {
     a.reply_to = .{};
     a.reply_sender = .{};
 }
+fn saveComposerDraft(_: *App) void {}
 fn focusCompose(_: *App) void {}
 fn layout(_: *App, _: i32, _: i32) void {}
 fn releaseStagedImage(a: *App) void {

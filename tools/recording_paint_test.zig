@@ -1,7 +1,8 @@
 const std = @import("std");
+const chat_key = @import("chat_key");
 const tick_interval_ms = recording_paint.tick_interval_ms;
 const Text = struct {
-    fn slice(_: Text) []const u8 {
+    pub fn slice(_: Text) []const u8 {
         return "chat";
     }
 };
@@ -32,7 +33,12 @@ const App = struct {
     voice_finishing: bool = false,
     voice_session: ?*Session = null,
     voice_jid: Text = .{},
-    chats: [1]struct { jid: Text = .{} } = .{.{}},
+    voice_origin: chat_key.Stored = blk: {
+        var key = chat_key.Stored{};
+        key.set(.{ .provider = .whatsapp, .account = "chat", .id = "chat" });
+        break :blk key;
+    },
+    chats: [1]struct { provider: enum { whatsapp } = .whatsapp, account: Text = .{}, jid: Text = .{} } = .{.{}},
     selected_chat: usize = 0,
     allowed: bool = true,
     ended: usize = 0,

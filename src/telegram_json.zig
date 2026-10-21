@@ -77,6 +77,7 @@ pub const Event = union(enum) {
     deleted: struct { chat_id: i64, message_id: i64 },
     file: FileUpdate,
     conn: Connection,
+    account: i64,
     chats_synced,
     chat_last_date: struct { chat_id: i64, timestamp: []u8, date: i64 = 0 },
     user: struct { user_id: i64, name: []u8 },
@@ -435,6 +436,11 @@ pub fn parseEvent(allocator: std.mem.Allocator, json_text: []const u8) !Event {
         else => return .ignored,
     };
     const type_name = getString(object, "@type");
+    if (std.mem.eql(u8, type_name, "updateOption") and std.mem.eql(u8, getString(object, "name"), "my_id")) {
+        const value = object.get("value") orelse return .ignored;
+        if (value != .object) return .ignored;
+        return .{ .account = getInt(value.object, "value") };
+    }
     if (std.mem.startsWith(u8, type_name, "authorizationState")) {
         const state = parseAuthState(type_name);
         return .{ .auth = .{ .state = state } };
@@ -675,4 +681,16 @@ test "error messages are mapped to plain language" {
     var moved_keys = keys;
     defer moved_keys.deinit(std.testing.allocator);
     try std.testing.expect(std.mem.startsWith(u8, moved_keys.auth.error_text, "Telegram rejected the app keys."));
+}
+
+test "IGSH-497 Telegram account identity keeps persist drafts separate across logins" {
+    const first = try parseEvent(std.testing.allocator,
+        \\{"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":"12345"}}
+    );
+    const second = try parseEvent(std.testing.allocator,
+        \\{"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":67890}}
+    );
+    try std.testing.expectEqual(@as(i64, 12345), first.account);
+    try std.testing.expectEqual(@as(i64, 67890), second.account);
+    try std.testing.expect(first.account != second.account);
 }
