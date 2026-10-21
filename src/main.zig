@@ -1210,6 +1210,28 @@ fn paintVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     drawMicIcon(a, &shapes, hdc, item.rcItem.right - px(a, 20), mid_y, theme.current.@"error");
 }
 
+fn drawDictationIcon(a: *App, shapes: *const smooth.Context, cx: i32, cy: i32, color: win.COLORREF) void {
+    const left = cx - px(a, 12);
+    const top = cy - px(a, 12);
+    const stroke = @max(1, px(a, smooth_geometry.icon_stroke_width));
+    smooth.fillRoundRect(shapes, .{ .left = left + px(a, 4), .top = top + px(a, 2), .right = left + px(a, 10), .bottom = top + px(a, 14) }, px(a, 6), px(a, 6), color);
+    smooth.strokeArc(shapes, .{ .left = left + px(a, 1), .top = top + px(a, 5), .right = left + px(a, 13), .bottom = top + px(a, 19) }, 0, 180, color, stroke);
+    inline for (.{
+        [2][2]f32{ .{ 7, 19 }, .{ 7, 22 } },
+        [2][2]f32{ .{ 4, 22 }, .{ 10, 22 } },
+        [2][2]f32{ .{ 17, 6 }, .{ 23, 6 } },
+        [2][2]f32{ .{ 17, 12 }, .{ 21, 12 } },
+        [2][2]f32{ .{ 17, 18 }, .{ 23, 18 } },
+    }) |points| {
+        var scaled: [2][2]f32 = undefined;
+        const scale = @as(f32, @floatFromInt(px(a, 24))) / 24;
+        for (points, &scaled) |point, *target| {
+            target.* = .{ @as(f32, @floatFromInt(left)) + point[0] * scale, @as(f32, @floatFromInt(top)) + point[1] * scale };
+        }
+        smooth.strokePolyline(shapes, &scaled, color, @floatFromInt(stroke));
+    }
+}
+
 fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     var shapes = smooth.Context.init(item.hDC);
     defer shapes.deinit();
@@ -1219,6 +1241,7 @@ fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     const dictating = a.last_dictation_state == .recording or a.last_dictation_state == .transcribing;
     _ = win.FillRect(item.hDC, &item.rcItem, a.brush_bg.?);
     const face: win.COLORREF = if (theme.choice == .amoled) (if (index == 1) (if (pressed) theme.amoled_send_pressed else if (a.btn_hover[index]) theme.amoled_send_hover else theme.amoled_send) else if (pressed or (index == 0 and dictating)) theme.amoled_button_pressed else if (a.btn_hover[index]) theme.amoled_button_hover else theme.amoled_button) else if (index == 1 and !pressed) theme.current.primary else if (pressed or (index == 0 and dictating)) theme.current.primary_container else if (a.btn_hover[index]) theme.current.surface_container_highest else theme.current.secondary_container;
+    const foreground = if (theme.choice == .amoled) theme.amoled_button_text else if (index == 1 and !pressed) theme.current.on_primary else if (pressed or (index == 0 and dictating)) theme.current.on_primary_container else theme.current.on_secondary_container;
     var text_buffer: [32]u16 = undefined;
     paintRoundedButton(
         a,
@@ -1226,11 +1249,12 @@ fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
         item.hDC,
         item.rcItem,
         face,
-        if (theme.choice == .amoled) theme.amoled_button_text else if (index == 1 and !pressed) theme.current.on_primary else if (pressed or (index == 0 and dictating)) theme.current.on_primary_container else theme.current.on_secondary_container,
+        foreground,
         if (index == 2 and theme.choice != .amoled) a.font_emoji.? else a.font_bold.?,
         if (focused) (if (index == 1 and !pressed and theme.choice != .amoled) theme.current.on_primary else theme.current.primary) else if (theme.choice == .amoled) theme.current.outline_variant else null,
-        if (index == 2 and theme.choice == .amoled) std.mem.span(lit("☺︎")) else buttonLabel(item, &text_buffer),
+        if (index == 0) &.{} else if (index == 2 and theme.choice == .amoled) std.mem.span(lit("☺︎")) else buttonLabel(item, &text_buffer),
     );
+    if (index == 0) drawDictationIcon(a, &shapes, @divTrunc(item.rcItem.left + item.rcItem.right, 2), @divTrunc(item.rcItem.top + item.rcItem.bottom, 2), foreground);
 }
 
 fn drawSetupButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
@@ -10170,13 +10194,15 @@ fn toggleDictation(a: *App) void {
         .idle, .failed => {
             if (a.selected_chat >= a.chat_count or a.chats[a.selected_chat].account.len == 0) return;
             if (session.start(a.deepgram_key, a.dictation_language, chat_key.of(&a.chats[a.selected_chat]))) {
-                _ = win.SetWindowTextW(a.dictate.?, lit("Stop"));
+                a.last_dictation_state = .recording;
+                _ = win.InvalidateRect(a.dictate.?, null, win.TRUE);
                 setStatus(a, "Listening... press Ctrl+D to stop");
             } else setStatus(a, "Could not start microphone capture");
         },
         .recording => {
             session.requestStop();
-            _ = win.SetWindowTextW(a.dictate.?, lit("Wait..."));
+            a.last_dictation_state = .transcribing;
+            _ = win.InvalidateRect(a.dictate.?, null, win.TRUE);
             setStatus(a, "Transcribing...");
         },
         .transcribing => setStatus(a, "Transcription is still running"),
@@ -10204,23 +10230,17 @@ fn updateDictation(a: *App) void {
             if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
             setStatus(a, if (restored != null) "Dictation inserted" else "Dictation saved to its chat draft");
         }
-        _ = win.SetWindowTextW(a.dictate.?, lit("Dictate"));
         a.last_dictation_state = .idle;
+        _ = win.InvalidateRect(a.dictate.?, null, win.TRUE);
         return;
     }
     if (state == a.last_dictation_state) return;
     a.last_dictation_state = state;
+    _ = win.InvalidateRect(a.dictate.?, null, win.TRUE);
     switch (state) {
-        .idle => _ = win.SetWindowTextW(a.dictate.?, lit("Dictate")),
-        .recording => _ = win.SetWindowTextW(a.dictate.?, lit("Stop")),
-        .transcribing => {
-            _ = win.SetWindowTextW(a.dictate.?, lit("Wait..."));
-            setStatus(a, "Transcribing...");
-        },
-        .failed => {
-            _ = win.SetWindowTextW(a.dictate.?, lit("Dictate"));
-            setStatus(a, "Dictation failed; check the microphone and DEEPGRAM_API_KEY");
-        },
+        .idle, .recording => {},
+        .transcribing => setStatus(a, "Transcribing..."),
+        .failed => setStatus(a, "Dictation failed; check the microphone and DEEPGRAM_API_KEY"),
         .ready => unreachable,
     }
 }
@@ -13350,6 +13370,13 @@ fn composerContentHeight(a: *App) i32 {
 fn layout(a: *App, width: i32, height: i32) void {
     a.compose_client_width = width;
     a.compose_client_height = height;
+    const composer_gap = px(a, 8);
+    const composer_icon_size = px(a, 44);
+    const send_left = width - px(a, 82);
+    const dictate_left = send_left - composer_gap - composer_icon_size;
+    const emoji_left = dictate_left - composer_gap - composer_icon_size;
+    const voice_width = if (a.voice_active) px(a, 200) else composer_icon_size;
+    const voice_left = emoji_left - composer_gap - voice_width;
     const left_width = std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 390));
     const header_height: i32 = 0;
     const search_height: i32 = px(a, 48);
@@ -13361,7 +13388,7 @@ fn layout(a: *App, width: i32, height: i32) void {
             a.compose_pill = .{
                 .left = left_width + px(a, 14),
                 .top = height - px(a, 11) - sizes.edit_height,
-                .right = width + px(a, 14) - px(a, 310) - scrollbar_width,
+                .right = voice_left - composer_gap,
                 .bottom = height - px(a, 11),
             };
             const pill = field_pill.compute(a.compose_pill, px(a, theme.radius_field * 2));
@@ -13386,13 +13413,10 @@ fn layout(a: *App, width: i32, height: i32) void {
     if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, height - header_height - search_height - status_height - updateCardSpan(a), win.TRUE);
     if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);
     if (a.canvas) |hwnd| _ = win.MoveWindow(hwnd, left_width + 1, header_height, width - left_width - 1, height - header_height - sizes.strip_height, win.TRUE);
-    if (a.emoji_btn) |hwnd| _ = win.MoveWindow(hwnd, width - px(a, 236), height - px(a, 55), px(a, 44), px(a, 44), win.TRUE);
-    if (a.dictate) |hwnd| _ = win.MoveWindow(hwnd, width - px(a, 176), height - px(a, 55), px(a, 84), px(a, 44), win.TRUE);
-    if (a.voice_btn) |hwnd| {
-        const voice_width: i32 = if (a.voice_active) px(a, 200) else px(a, 44);
-        _ = win.MoveWindow(hwnd, width - px(a, 244) - voice_width, height - px(a, 55), voice_width, px(a, 44), win.TRUE);
-    }
-    if (a.send) |hwnd| _ = win.MoveWindow(hwnd, width - px(a, 82), height - px(a, 55), px(a, 68), px(a, 44), win.TRUE);
+    if (a.emoji_btn) |hwnd| _ = win.MoveWindow(hwnd, emoji_left, height - px(a, 55), composer_icon_size, composer_icon_size, win.TRUE);
+    if (a.dictate) |hwnd| _ = win.MoveWindow(hwnd, dictate_left, height - px(a, 55), composer_icon_size, composer_icon_size, win.TRUE);
+    if (a.voice_btn) |hwnd| _ = win.MoveWindow(hwnd, voice_left, height - px(a, 55), voice_width, composer_icon_size, win.TRUE);
+    if (a.send) |hwnd| _ = win.MoveWindow(hwnd, send_left, height - px(a, 55), px(a, 68), composer_icon_size, win.TRUE);
     if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.TRUE);
 }
 

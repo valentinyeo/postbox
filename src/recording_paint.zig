@@ -19,7 +19,7 @@ const Rect = struct { left: i32, top: i32, right: i32, bottom: i32 };
 test "IGSH-482 every tick dirty rectangle stays inside the strip and client without erase" {
     for ([_]i32{ 96, 120, 144, 192 }) |dpi| {
         const client = Rect{ .left = 0, .top = 0, .right = @divTrunc(1200 * dpi, 96), .bottom = @divTrunc(800 * dpi, 96) };
-        const strip = Rect{ .left = client.right - @divTrunc(444 * dpi, 96), .top = client.bottom - @divTrunc(55 * dpi, 96), .right = client.right - @divTrunc(244 * dpi, 96), .bottom = client.bottom - @divTrunc(11 * dpi, 96) };
+        const strip = Rect{ .left = client.right - @divTrunc(394 * dpi, 96), .top = client.bottom - @divTrunc(55 * dpi, 96), .right = client.right - @divTrunc(194 * dpi, 96), .bottom = client.bottom - @divTrunc(11 * dpi, 96) };
         const dirty = tickDirtyRect(client, strip).?;
         try std.testing.expectEqualDeep(strip, dirty.rect);
         try std.testing.expect(!dirty.erase);

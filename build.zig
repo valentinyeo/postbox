@@ -566,6 +566,25 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(background_media_tests).step);
 
+    const composer_button_files = b.addWriteFiles();
+    _ = composer_button_files.addCopyFile(b.path("src/main.zig"), "main-source.zig");
+    _ = composer_button_files.addCopyFile(b.path("src/theme.zig"), "theme.zig");
+    const composer_button_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("src/composer_button_test.zig"),
+        sourceSection("fn drawDictationIcon(", "fn drawSetupButton("),
+        "fn layoutComposer(a: *App, width: i32, height: i32) void {\n",
+        sourceSection("    const composer_gap =", "    const header_height:"),
+        "    const sizes = .{ .edit_height = px(a, 44) };\n",
+        sourceSection("            a.compose_pill = .{", "            const pill = field_pill.compute(a.compose_pill"),
+        sourceSection("    if (a.emoji_btn) |hwnd| _ = win.MoveWindow", "    if (a.hwnd) |main_hwnd| _ = win.InvalidateRect"),
+        "}\n",
+    }) catch @panic("Out of memory building composer button harness");
+    const composer_button_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = composer_button_files.add("composer_button_test.zig", composer_button_source),
+        .target = b.resolveTargetQuery(.{}),
+    }) });
+    test_step.dependOn(&b.addRunArtifact(composer_button_tests).step);
+
     const drafts_ui_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/drafts_ui_test.zig"),
         sourceSection("fn composerText(", "fn ensureDictation("),
