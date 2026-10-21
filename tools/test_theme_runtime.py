@@ -77,7 +77,7 @@ def verify_amoled_surfaces(main):
     field = section(main, "fn paintPopupInput(", "fn ")
     assert "if (theme.choice != .amoled) return;" in field
     assert "theme.current.surface_container_high" in field
-    assert "theme.current.outline, 1)" in field
+    assert "if (win.GetFocus() == edit) theme.current.primary else theme.current.outline, 1)" in field
     for procedure, edit in (("fn emojiProc(", "a.emoji_edit"), ("fn paletteProc(", "a.palette_edit")):
         popup = section(main, procedure, "fn ")
         assert "paintPopupInput(&shapes, hwnd, " + edit + ");" in popup
@@ -89,7 +89,66 @@ def verify_amoled_surfaces(main):
     assert "updateTooltipTheme(a);" in section(main, "fn changeTheme(", "fn ")
 
 
+def verify_popup_focus(main):
+    field = section(main, "fn paintPopupInput(", "fn ")
+    assert "if (win.GetFocus() == edit) theme.current.primary else theme.current.outline" in field
+    for procedure, condition in (
+        ("telegramLoginProc", "id == id_tg_edit"),
+        ("slackSetupProc", "(id == id_slack_user_edit or id == id_slack_app_edit)"),
+        ("emojiProc", "id == id_emoji_edit"),
+        ("paletteProc", "id == id_palette_edit"),
+    ):
+        popup = section(main, "fn " + procedure + "(", "\nfn ")
+        command = section(popup, "win.WM_COMMAND => {", "return 0;")
+        assert "if (" + condition + " and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS))" in command
+        assert "win.InvalidateRect(hwnd, null, win.FALSE);" in command
+    dialog = section(main, "fn telegramLoginProc(", "\nfn ")
+    colors = section(dialog, "win.WM_CTLCOLORSTATIC, win.WM_CTLCOLOREDIT => {", "win.WM_COMMAND => {")
+    assert "theme.choice == .amoled and win.GetDlgItem(hwnd, id_tg_edit) == winHandle(win.HWND, @as(usize, @bitCast(lparam)))" in colors
+    assert "win.SetBkColor(hdc, theme.current.surface_container_high)" in colors
+    assert "return @bitCast(@intFromPtr(a.brush_raised.?));" in colors
+
+
 class ThemeRuntimeTests(unittest.TestCase):
+    def test_IGSH_461_popup_focus_and_disabled_input_wiring_with_negative_controls(self):
+        main = (ROOT / "src/main.zig").read_text()
+        verify_popup_focus(main)
+        for token in (
+            "if (win.GetFocus() == edit) theme.current.primary else theme.current.outline",
+            "id == id_tg_edit and (notification == win.EN_SETFOCUS",
+            "(id == id_slack_user_edit or id == id_slack_app_edit) and (notification == win.EN_SETFOCUS",
+            "id == id_emoji_edit and (notification == win.EN_SETFOCUS",
+            "id == id_palette_edit and (notification == win.EN_SETFOCUS",
+            "win.InvalidateRect(hwnd, null, win.FALSE);",
+            "theme.choice == .amoled and win.GetDlgItem(hwnd, id_tg_edit) == winHandle(win.HWND, @as(usize, @bitCast(lparam)))",
+        ):
+            with self.subTest(token=token), self.assertRaises((AssertionError, ValueError)):
+                verify_popup_focus(main.replace(token, ""))
+
+    @unittest.skipUnless(ZIG, "Zig compiler not found; install Zig or set ZIG")
+    def test_IGSH_461_popup_paint_passes_and_rejects_main_before_fix(self):
+        current = (ROOT / "src/main.zig").read_text()
+        baseline = subprocess.check_output(["git", "show", "3b7591c:src/main.zig"], cwd=ROOT, text=True)
+        harness = (ROOT / "tools/theme_popup_test.zig").read_text()
+        with tempfile.TemporaryDirectory(prefix="theme-popup-") as directory:
+            root = Path(directory)
+            (root / "theme.zig").write_text((ROOT / "src/theme.zig").read_text())
+            for source, passes in ((current, True), (baseline, False)):
+                with self.subTest(passes=passes):
+                    path = root / "popup.zig"
+                    path.write_text(harness + section(source, "fn paintPopupInput(", "\nfn "))
+                    result = subprocess.run([ZIG, "test", str(path), "--test-filter", "IGSH-461"], capture_output=True, text=True)
+                    output = result.stdout + result.stderr
+                    if passes:
+                        self.assertEqual(result.returncode, 0, output)
+                        self.assertRegex(output, r"All [0-9]+ tests passed\.")
+                    else:
+                        self.assertNotEqual(result.returncode, 0, output)
+                        self.assertIn("FAIL (TestExpectedEqual)", output)
+                        self.assertIn("IGSH-461 AMOLED popup input keeps its raised fill and follows focus in both directions", output)
+        with self.assertRaises(AssertionError):
+            verify_popup_focus(baseline)
+
     def test_IGSH_461_amoled_surface_wiring_with_negative_controls(self):
         main = (ROOT / "src/main.zig").read_text()
         verify_amoled_surfaces(main)
