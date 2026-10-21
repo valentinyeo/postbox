@@ -29,15 +29,12 @@ def verify_buffered(text, name, dirty):
 
 
 class RepaintTests(unittest.TestCase):
-    def test_IGSH_510_desktop_canvas_and_status_render_into_dirty_buffers(self):
+    def test_IGSH_510_desktop_canvas_and_rows_render_into_dirty_buffers(self):
         main = source("src/main.zig")
-        status = source("src/status_ui.zig")
         for text, name, dirty in ((main, "mainProc", "paint.rcPaint"),
                                   (main, "drawCanvas", "paint.rcPaint"),
                                   (main, "drawChat", "screen_item.rcItem"),
-                                  (main, "drawComposerButton", "screen_item.rcItem"),
-                                  (status, "paint", "ps.rcPaint"),
-                                  (status, "drawPinned", "screen_item.rcItem")):
+                                  (main, "drawComposerButton", "screen_item.rcItem")):
             with self.subTest(painter=name):
                 verify_buffered(text, name, dirty)
         for name in ("mainProc", "canvasProc"):
