@@ -50,12 +50,12 @@ $start.Environment['LOCALAPPDATA'] = $local
 $start.Environment['APPDATA'] = $local
 $start.Environment['USERPROFILE'] = $profile
 $start.Environment['USERNAME'] = "verify-$id"
-foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL')) { $null = $start.Environment.Remove($name) }
+foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY')) { $null = $start.Environment.Remove($name) }
 $bridge = $null
 if ($Feature -eq 'whatsapp-hub') {
     $bridge = Start-FakeBridge $Evidence $root
     $start.Environment['WAZIG_VERIFY_HUB_URL'] = $bridge.url
-    $start.Environment['WA_BRIDGE_KEY'] = 'fixture-key-not-a-secret'
+    $start.Environment['WAZIG_VERIFY_HUB_KEY'] = 'fixture-key-not-a-secret'
 }
 try {
     $app = [Diagnostics.Process]::Start($start)
