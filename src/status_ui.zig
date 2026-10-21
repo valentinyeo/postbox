@@ -2,6 +2,7 @@ const theme = @import("theme.zig");
 const smooth = @import("smooth_shapes.zig");
 const std = @import("std");
 const win = @import("win32.zig").c;
+const text_draw = @import("text_draw.zig");
 const status = @import("status_view.zig");
 
 pub const State = struct {
@@ -26,7 +27,7 @@ fn textAt(a: anytype, hdc: win.HDC, text: []const u8, rect: win.RECT, flags: win
     const text_wide = wide(a, text) orelse return;
     defer a.allocator.free(text_wide);
     var box = rect;
-    _ = win.DrawTextW(hdc, text_wide.ptr, @intCast(text_wide.len), &box, flags);
+    _ = text_draw.drawText(hdc, text_wide.ptr, @intCast(text_wide.len), &box, flags);
 }
 
 fn timeLabel(buffer: []u8, timestamp: i64, now: i64) []const u8 {
@@ -99,9 +100,9 @@ pub fn paint(a: anytype, hwnd: win.HWND, comptime actions: anytype) void {
             var measured = content;
             const value = wide(a, row.text) orelse return;
             defer a.allocator.free(value);
-            _ = win.DrawTextW(hdc, value.ptr, @intCast(value.len), &measured, win.DT_CENTER | win.DT_WORDBREAK | win.DT_CALCRECT);
+            _ = text_draw.drawText(hdc, value.ptr, @intCast(value.len), &measured, win.DT_CENTER | win.DT_WORDBREAK | win.DT_CALCRECT);
             content.top += @max(0, @divTrunc(content.bottom - content.top - (measured.bottom - measured.top), 2));
-            _ = win.DrawTextW(hdc, value.ptr, @intCast(value.len), &content, win.DT_CENTER | win.DT_WORDBREAK);
+            _ = text_draw.drawText(hdc, value.ptr, @intCast(value.len), &content, win.DT_CENTER | win.DT_WORDBREAK);
             actions.viewed(a);
         } else if (a.status_ui.bitmap) |bitmap| {
             const width = @max(1, content.right - content.left);
@@ -179,7 +180,7 @@ pub fn paint(a: anytype, hwnd: win.HWND, comptime actions: anytype) void {
                             var initial_box = win.RECT{ .left = left, .top = top, .right = left + 42, .bottom = top + 42 };
                             _ = win.SelectObject(hdc, a.font_bold.?);
                             _ = win.SetTextColor(hdc, theme.current.on_surface);
-                            _ = win.DrawTextW(hdc, value.ptr, if (value[0] >= 0xd800 and value[0] <= 0xdbff and value.len > 1) 2 else 1, &initial_box, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+                            _ = text_draw.drawText(hdc, value.ptr, if (value[0] >= 0xd800 and value[0] <= 0xdbff and value.len > 1) 2 else 1, &initial_box, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
                         }
                     }
                 }

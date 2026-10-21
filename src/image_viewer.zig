@@ -1,6 +1,7 @@
 const theme = @import("theme.zig");
 const std = @import("std");
 const win = @import("win32.zig").c;
+const text_draw = @import("text_draw.zig");
 const webp_detect = @import("webp.zig");
 const gallery = @import("image_gallery.zig");
 
@@ -224,7 +225,7 @@ fn contains(rect: win.RECT, x: i32, y: i32) bool {
 
 fn label(hdc: win.HDC, text: [*:0]const u16, rect: *win.RECT, enabled: bool) void {
     _ = win.SetTextColor(hdc, if (enabled) theme.current.on_surface else theme.current.outline);
-    _ = win.DrawTextW(hdc, text, -1, rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
+    _ = text_draw.drawText(hdc, text, -1, rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
 }
 
 pub fn windowProc(a: anytype, hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM, comptime actions: anytype) win.LRESULT {
