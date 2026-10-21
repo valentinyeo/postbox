@@ -70,6 +70,7 @@ const WacliResult = struct {
     msg_id: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
     ok: bool = true,
+    http_status: u32 = 0,
 };
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
