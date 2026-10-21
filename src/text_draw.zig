@@ -5,7 +5,6 @@ const c = @cImport({
     @cDefine("WIN32_LEAN_AND_MEAN", "1");
     @cDefine("COBJMACROS", "1");
     @cInclude("dwrite_3.h");
-    @cInclude("d2d1.h");
 });
 
 const Flags = struct {
@@ -72,20 +71,12 @@ pub var directwrite = false;
 var failed = false;
 var initialized = false;
 var dll_write: win.HMODULE = null;
-var dll_draw: win.HMODULE = null;
 var factory: ?*c.IDWriteFactory = null;
-var d2d: ?*c.ID2D1Factory = null;
-var target: ?*c.ID2D1DCRenderTarget = null;
+var target: ?*c.IDWriteBitmapRenderTarget = null;
 var collection: ?*c.IDWriteFontCollection = null;
 var rendering: ?*c.IDWriteRenderingParams = null;
-var brush: ?*c.ID2D1SolidColorBrush = null;
-var backdrop: ?*c.ID2D1Bitmap = null;
-var backdrop_dc: win.HDC = null;
-var backdrop_bitmap: win.HBITMAP = null;
-var backdrop_old: win.HGDIOBJ = null;
-var backdrop_bits: ?*anyopaque = null;
-var backdrop_width: i32 = 0;
-var backdrop_height: i32 = 0;
+var bitmap_width: i32 = 0;
+var bitmap_height: i32 = 0;
 var files: [4]?*c.IDWriteFontFile = .{null} ** 4;
 var paths: [4][1024:0]u16 = .{std.mem.zeroes([1024:0]u16)} ** 4;
 var path_count: usize = 0;
@@ -127,7 +118,7 @@ fn clearLayouts() void {
     layout_clock = 0;
 }
 
-const ProfileStage = enum { font, string, format, layout, metrics, bounds, bind, backdrop, begin, draw, end };
+const ProfileStage = enum { font, string, format, layout, metrics, bounds, backdrop_blit, draw, blit_back };
 const Profile = struct {
     enabled: bool = false,
     ticks: [@typeInfo(ProfileStage).@"enum".fields.len]i64 = @splat(0),
@@ -181,7 +172,8 @@ fn guid(comptime text: []const u8) c.GUID {
 const iid_factory = guid("b859ee5a-d838-4b5b-a2e8-1adc7d93db48");
 const iid_factory3 = guid("9a1b41c3-d3bb-466a-87fc-fe67556a3b65");
 const iid_factory5 = guid("958db99a-be2a-4f09-af7d-65189803d1d3");
-const iid_d2d = guid("06152247-6f50-465a-9245-118bfd3b6007");
+const iid_renderer = guid("ef8a8135-5cc6-45fe-8825-c5a0724eb819");
+const iid_snapping = guid("eaf3a2da-ecf4-4d24-b644-b34f6842024b");
 const iid_unknown = guid("00000000-0000-0000-c000-000000000046");
 const iid_loader = guid("cca920e4-52f0-492b-bfa8-29c72ee0a468");
 const iid_enumerator = guid("72755049-5ff7-435d-8348-4be97cfa6c7c");
@@ -203,19 +195,8 @@ pub fn reset() void {
         entry.* = .{};
     }
     next_format = 0;
-    release(brush);
-    brush = null;
-    release(backdrop);
-    backdrop = null;
-    if (backdrop_dc != null) _ = win.SelectObject(backdrop_dc, backdrop_old);
-    if (backdrop_bitmap != null) _ = win.DeleteObject(backdrop_bitmap);
-    if (backdrop_dc != null) _ = win.DeleteDC(backdrop_dc);
-    backdrop_dc = null;
-    backdrop_bitmap = null;
-    backdrop_old = null;
-    backdrop_bits = null;
-    backdrop_width = 0;
-    backdrop_height = 0;
+    bitmap_width = 0;
+    bitmap_height = 0;
     release(target);
     target = null;
     release(rendering);
@@ -230,13 +211,9 @@ pub fn reset() void {
         release(file.*);
         file.* = null;
     }
-    release(d2d);
-    d2d = null;
     release(factory);
     factory = null;
-    if (dll_draw != null) _ = win.FreeLibrary(dll_draw);
     if (dll_write != null) _ = win.FreeLibrary(dll_write);
-    dll_draw = null;
     dll_write = null;
     initialized = false;
     directwrite = false;
@@ -334,35 +311,26 @@ fn ensure() !void {
         failed = true;
     }
     dll_write = win.LoadLibraryW(wide("dwrite.dll")) orelse return error.DirectWriteUnavailable;
-    dll_draw = win.LoadLibraryW(wide("d2d1.dll")) orelse return error.Direct2DUnavailable;
     const create_write: *const fn (c.DWRITE_FACTORY_TYPE, *const c.GUID, *?*c.IUnknown) callconv(.winapi) c.HRESULT = @ptrCast(win.GetProcAddress(dll_write, "DWriteCreateFactory") orelse return error.DirectWriteUnavailable);
-    const create_draw: *const fn (c.D2D1_FACTORY_TYPE, *const c.GUID, ?*const c.D2D1_FACTORY_OPTIONS, *?*c.ID2D1Factory) callconv(.winapi) c.HRESULT = @ptrCast(win.GetProcAddress(dll_draw, "D2D1CreateFactory") orelse return error.Direct2DUnavailable);
     try check(create_write(c.DWRITE_FACTORY_TYPE_SHARED, &iid_factory, @ptrCast(&factory)));
-    try check(create_draw(c.D2D1_FACTORY_TYPE_SINGLE_THREADED, &iid_d2d, null, &d2d));
     try makeCollection();
     var family_index: u32 = 0;
     var family_exists: c.BOOL = 0;
     try check(collection.?.lpVtbl.*.FindFamilyName.?(collection.?, wide("IBM Plex Sans"), &family_index, &family_exists));
     if (family_exists == 0) return error.BundledFamilyMissing;
-    const properties = c.D2D1_RENDER_TARGET_PROPERTIES{
-        .type = c.D2D1_RENDER_TARGET_TYPE_DEFAULT,
-        .pixelFormat = .{ .format = c.DXGI_FORMAT_B8G8R8A8_UNORM, .alphaMode = c.D2D1_ALPHA_MODE_IGNORE },
-        .dpiX = 96,
-        .dpiY = 96,
-        .usage = c.D2D1_RENDER_TARGET_USAGE_NONE,
-        .minLevel = c.D2D1_FEATURE_LEVEL_DEFAULT,
-    };
-    try check(d2d.?.lpVtbl.*.CreateDCRenderTarget.?(d2d.?, &properties, &target));
+    var interop: ?*c.IDWriteGdiInterop = null;
+    try check(factory.?.lpVtbl.*.GetGdiInterop.?(factory.?, &interop));
+    defer release(interop);
+    try check(interop.?.lpVtbl.*.CreateBitmapRenderTarget.?(interop.?, null, 1, 1, &target));
+    bitmap_width = 1;
+    bitmap_height = 1;
+    try check(target.?.lpVtbl.*.SetPixelsPerDip.?(target.?, 1));
     var defaults: ?*c.IDWriteRenderingParams = null;
     try check(factory.?.lpVtbl.*.CreateRenderingParams.?(factory.?, &defaults));
     defer release(defaults);
     const params = defaults.?;
     const p = params.lpVtbl.*;
     try check(factory.?.lpVtbl.*.CreateCustomRenderingParams.?(factory.?, p.GetGamma.?(params), p.GetEnhancedContrast.?(params), p.GetClearTypeLevel.?(params), p.GetPixelGeometry.?(params), c.DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC, &rendering));
-    const rt: *c.ID2D1RenderTarget = @ptrCast(target.?);
-    rt.lpVtbl.*.SetTextAntialiasMode.?(rt, c.D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
-    rt.lpVtbl.*.SetTextRenderingParams.?(rt, rendering);
-    try check(rt.lpVtbl.*.CreateSolidColorBrush.?(rt, &@as(c.D2D1_COLOR_F, @bitCast([4]f32{ 0, 0, 0, 1 })), null, &brush));
     initialized = true;
     directwrite = true;
 }
@@ -456,37 +424,89 @@ fn layoutFor(text: []const u16, key: FormatKey, rect: win.RECT, flags: u32) !Lay
     }
     return result;
 }
-fn captureBackdrop(dc: win.HDC, binding: win.RECT) !void {
-    const width = binding.right - binding.left;
-    const height = binding.bottom - binding.top;
-    const rt: *c.ID2D1RenderTarget = @ptrCast(target.?);
-    if (backdrop_dc == null) backdrop_dc = win.CreateCompatibleDC(dc) orelse return error.BackdropDCFailed;
-    if (width > backdrop_width or height > backdrop_height) {
-        release(backdrop);
-        backdrop = null;
-        if (backdrop_bitmap != null) {
-            _ = win.SelectObject(backdrop_dc, backdrop_old);
-            _ = win.DeleteObject(backdrop_bitmap);
-            backdrop_bitmap = null;
-        }
-        backdrop_width = @max(width, backdrop_width);
-        backdrop_height = @max(height, backdrop_height);
-        var info = std.mem.zeroes(win.BITMAPINFO);
-        info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
-        info.bmiHeader.biWidth = backdrop_width;
-        info.bmiHeader.biHeight = -backdrop_height;
-        info.bmiHeader.biPlanes = 1;
-        info.bmiHeader.biBitCount = 32;
-        backdrop_bitmap = win.CreateDIBSection(backdrop_dc, &info, win.DIB_RGB_COLORS, &backdrop_bits, null, 0) orelse return error.BackdropBitmapFailed;
-        backdrop_old = win.SelectObject(backdrop_dc, backdrop_bitmap);
-        const properties = c.D2D1_BITMAP_PROPERTIES{ .pixelFormat = .{ .format = c.DXGI_FORMAT_B8G8R8A8_UNORM, .alphaMode = c.D2D1_ALPHA_MODE_IGNORE }, .dpiX = 96, .dpiY = 96 };
-        try check(rt.lpVtbl.*.CreateBitmap.?(rt, .{ .width = @intCast(backdrop_width), .height = @intCast(backdrop_height) }, null, 0, &properties, &backdrop));
+fn bitmapDC(width: i32, height: i32) !win.HDC {
+    if (width > bitmap_width or height > bitmap_height) {
+        const grown_width = @max(width, bitmap_width);
+        const grown_height = @max(height, bitmap_height);
+        try check(target.?.lpVtbl.*.Resize.?(target.?, @intCast(grown_width), @intCast(grown_height)));
+        bitmap_width = grown_width;
+        bitmap_height = grown_height;
     }
-    if (win.BitBlt(backdrop_dc, 0, 0, width, height, dc, binding.left, binding.top, win.SRCCOPY) == 0) return error.BackdropCopyFailed;
-    _ = win.GdiFlush();
-    const copy = c.D2D1_RECT_U{ .left = 0, .top = 0, .right = @intCast(width), .bottom = @intCast(height) };
-    try check(backdrop.?.lpVtbl.*.CopyFromMemory.?(backdrop.?, &copy, backdrop_bits, @intCast(backdrop_width * 4)));
+    return @ptrCast(target.?.lpVtbl.*.GetMemoryDC.?(target.?) orelse return error.BitmapDCFailed);
 }
+const Renderer = struct {
+    interface: c.IDWriteTextRenderer = .{ .lpVtbl = &renderer_vtable },
+    refs: u32 = 1,
+    dc: win.HDC,
+    color: win.COLORREF,
+};
+fn rendererFrom(this: [*c]c.IDWriteTextRenderer) *Renderer {
+    return @fieldParentPtr("interface", @as(*c.IDWriteTextRenderer, @ptrCast(this)));
+}
+fn rendererQuery(this: [*c]c.IDWriteTextRenderer, iid: [*c]const c.GUID, out: [*c]?*anyopaque) callconv(.winapi) c.HRESULT {
+    out.* = null;
+    if (!sameGuid(iid, &iid_unknown) and !sameGuid(iid, &iid_renderer) and !sameGuid(iid, &iid_snapping)) return c.E_NOINTERFACE;
+    out.* = this;
+    _ = rendererAddRef(this);
+    return c.S_OK;
+}
+fn rendererAddRef(this: [*c]c.IDWriteTextRenderer) callconv(.winapi) c.ULONG {
+    const r = rendererFrom(this);
+    r.refs += 1;
+    return r.refs;
+}
+fn rendererRelease(this: [*c]c.IDWriteTextRenderer) callconv(.winapi) c.ULONG {
+    const r = rendererFrom(this);
+    r.refs -= 1;
+    return r.refs;
+}
+fn snappingDisabled(_: [*c]c.IDWriteTextRenderer, _: ?*anyopaque, disabled: [*c]c.BOOL) callconv(.winapi) c.HRESULT {
+    disabled.* = 0;
+    return c.S_OK;
+}
+fn currentTransform(_: [*c]c.IDWriteTextRenderer, _: ?*anyopaque, transform: [*c]c.DWRITE_MATRIX) callconv(.winapi) c.HRESULT {
+    transform.* = .{ .m11 = 1, .m12 = 0, .m21 = 0, .m22 = 1, .dx = 0, .dy = 0 };
+    return c.S_OK;
+}
+fn pixelsPerDip(_: [*c]c.IDWriteTextRenderer, _: ?*anyopaque, value: [*c]f32) callconv(.winapi) c.HRESULT {
+    value.* = 1;
+    return c.S_OK;
+}
+fn glyphRun(this: [*c]c.IDWriteTextRenderer, _: ?*anyopaque, x: f32, y: f32, mode: c.DWRITE_MEASURING_MODE, run: [*c]const c.DWRITE_GLYPH_RUN, _: [*c]const c.DWRITE_GLYPH_RUN_DESCRIPTION, _: [*c]c.IUnknown) callconv(.winapi) c.HRESULT {
+    return target.?.lpVtbl.*.DrawGlyphRun.?(target.?, x, y, mode, run, rendering, rendererFrom(this).color, null);
+}
+fn decoration(this: [*c]c.IDWriteTextRenderer, x: f32, y: f32, width: f32, offset: f32, thickness: f32) c.HRESULT {
+    const r = rendererFrom(this);
+    const rect = win.RECT{
+        .left = @intFromFloat(@floor(x)),
+        .top = @intFromFloat(@floor(y + offset)),
+        .right = @intFromFloat(@ceil(x + width)),
+        .bottom = @intFromFloat(@ceil(y + offset + thickness)),
+    };
+    _ = win.SetDCBrushColor(r.dc, r.color);
+    return if (win.FillRect(r.dc, &rect, @ptrCast(@alignCast(win.GetStockObject(win.DC_BRUSH)))) != 0) c.S_OK else c.E_FAIL;
+}
+fn underline(this: [*c]c.IDWriteTextRenderer, _: ?*anyopaque, x: f32, y: f32, line: [*c]const c.DWRITE_UNDERLINE, _: [*c]c.IUnknown) callconv(.winapi) c.HRESULT {
+    return decoration(this, x, y, line.*.width, line.*.offset, line.*.thickness);
+}
+fn strikethrough(this: [*c]c.IDWriteTextRenderer, _: ?*anyopaque, x: f32, y: f32, line: [*c]const c.DWRITE_STRIKETHROUGH, _: [*c]c.IUnknown) callconv(.winapi) c.HRESULT {
+    return decoration(this, x, y, line.*.width, line.*.offset, line.*.thickness);
+}
+fn inlineObject(_: [*c]c.IDWriteTextRenderer, _: ?*anyopaque, _: f32, _: f32, _: [*c]c.IDWriteInlineObject, _: c.BOOL, _: c.BOOL, _: [*c]c.IUnknown) callconv(.winapi) c.HRESULT {
+    return c.S_OK;
+}
+var renderer_vtable = c.IDWriteTextRendererVtbl{
+    .QueryInterface = rendererQuery,
+    .AddRef = rendererAddRef,
+    .Release = rendererRelease,
+    .IsPixelSnappingDisabled = snappingDisabled,
+    .GetCurrentTransform = currentTransform,
+    .GetPixelsPerDip = pixelsPerDip,
+    .DrawGlyphRun = glyphRun,
+    .DrawUnderline = underline,
+    .DrawStrikethrough = strikethrough,
+    .DrawInlineObject = inlineObject,
+};
 fn render(dc: win.HDC, text_ptr: [*c]const u16, len: i32, rect: *win.RECT, flags: u32) !i32 {
     try ensure();
     const count: usize = if (len < 0) std.mem.len(@as([*:0]const u16, @ptrCast(text_ptr))) else @intCast(len);
@@ -569,23 +589,18 @@ fn render(dc: win.HDC, text_ptr: [*c]const u16, len: i32, rect: *win.RECT, flags
     defer _ = win.RestoreDC(dc, saved);
     _ = win.SetViewportOrgEx(dc, 0, 0, null);
     _ = win.SetWindowOrgEx(dc, 0, 0, null);
-    _ = win.GdiFlush();
-    const rt: *c.ID2D1RenderTarget = @ptrCast(target.?);
+    const width = bounds.right - bounds.left;
+    const bitmap_height_needed = bounds.bottom - bounds.top;
+    const memory_dc = try bitmapDC(width, bitmap_height_needed);
     mark(.bounds, &stamp);
-    try check(target.?.lpVtbl.*.BindDC.?(target.?, @ptrCast(dc), @ptrCast(&binding)));
-    mark(.bind, &stamp);
-    try captureBackdrop(dc, binding);
-    mark(.backdrop, &stamp);
-    const color = win.GetTextColor(dc);
-    brush.?.lpVtbl.*.SetColor.?(brush.?, &@as(c.D2D1_COLOR_F, @bitCast([4]f32{ @as(f32, @floatFromInt(color & 255)) / 255, @as(f32, @floatFromInt((color >> 8) & 255)) / 255, @as(f32, @floatFromInt((color >> 16) & 255)) / 255, 1 })));
-    rt.lpVtbl.*.BeginDraw.?(rt);
-    mark(.begin, &stamp);
-    const surface = c.D2D1_RECT_F{ .left = 0, .top = 0, .right = @floatFromInt(bounds.right - bounds.left), .bottom = @floatFromInt(bounds.bottom - bounds.top) };
-    rt.lpVtbl.*.DrawBitmap.?(rt, backdrop, &surface, 1, c.D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, &surface);
-    rt.lpVtbl.*.DrawTextLayout.?(rt, .{ .x = @floatFromInt(rect.left - bounds.left), .y = @floatFromInt(rect.top + offset - bounds.top) }, layout, @ptrCast(brush.?), c.D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    if (win.BitBlt(memory_dc, 0, 0, width, bitmap_height_needed, dc, binding.left, binding.top, win.SRCCOPY) == 0) return error.BackdropCopyFailed;
+    _ = win.GdiFlush();
+    mark(.backdrop_blit, &stamp);
+    var renderer = Renderer{ .dc = memory_dc, .color = win.GetTextColor(dc) };
+    try check(layout.lpVtbl.*.Draw.?(layout, null, &renderer.interface, @floatFromInt(rect.left - bounds.left), @floatFromInt(rect.top + offset - bounds.top)));
     mark(.draw, &stamp);
-    try check(rt.lpVtbl.*.EndDraw.?(rt, null, null));
-    mark(.end, &stamp);
+    if (win.BitBlt(dc, binding.left, binding.top, width, bitmap_height_needed, memory_dc, 0, 0, win.SRCCOPY) == 0) return error.BitmapCopyFailed;
+    mark(.blit_back, &stamp);
     return height;
 }
 pub fn drawText(dc: win.HDC, text: [*c]const u16, len: i32, rect: *win.RECT, flags: u32) i32 {
@@ -769,6 +784,64 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
     bundled_paths[0][0] = first_path_unit;
     defer reset();
     _ = available();
+    try std.testing.expect(directwrite);
+    {
+        const original_target = target.?;
+        try std.testing.expectEqual(@as(i32, 1), bitmap_width);
+        try std.testing.expectEqual(@as(i32, 1), bitmap_height);
+        _ = try bitmapDC(128, 96);
+        _ = try bitmapDC(64, 32);
+        try std.testing.expectEqual(@as(i32, 128), bitmap_width);
+        try std.testing.expectEqual(@as(i32, 96), bitmap_height);
+        _ = try bitmapDC(160, 40);
+        const memory_dc = try bitmapDC(32, 128);
+        try std.testing.expect(target.? == original_target);
+        var actual_size: c.SIZE = undefined;
+        try check(target.?.lpVtbl.*.GetSize.?(target.?, &actual_size));
+        try std.testing.expectEqual(@as(i32, 160), actual_size.cx);
+        try std.testing.expectEqual(@as(i32, 128), actual_size.cy);
+        try std.testing.expectEqual(@as(f32, 1), target.?.lpVtbl.*.GetPixelsPerDip.?(target.?));
+        try std.testing.expectEqual(@as(c.DWRITE_RENDERING_MODE, c.DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC), rendering.?.lpVtbl.*.GetRenderingMode.?(rendering.?));
+        var renderer = Renderer{ .dc = memory_dc, .color = 0x00854321 };
+        const v = renderer.interface.lpVtbl.*;
+        var object: ?*anyopaque = null;
+        for ([_]c.GUID{ iid_unknown, iid_renderer, iid_snapping }) |iid| {
+            try check(v.QueryInterface.?(&renderer.interface, &iid, &object));
+            try std.testing.expect(object == @as(?*anyopaque, @ptrCast(&renderer.interface)));
+            try std.testing.expectEqual(@as(u32, 1), v.Release.?(&renderer.interface));
+        }
+        try std.testing.expectEqual(c.E_NOINTERFACE, v.QueryInterface.?(&renderer.interface, &iid_factory, &object));
+        try std.testing.expect(object == null);
+        var disabled: c.BOOL = 1;
+        try check(v.IsPixelSnappingDisabled.?(&renderer.interface, null, &disabled));
+        try std.testing.expectEqual(@as(c.BOOL, 0), disabled);
+        var transform: c.DWRITE_MATRIX = undefined;
+        try check(v.GetCurrentTransform.?(&renderer.interface, null, &transform));
+        try std.testing.expectEqualSlices(f32, &.{ 1, 0, 0, 1, 0, 0 }, std.mem.bytesAsSlice(f32, std.mem.asBytes(&transform)));
+        var dip: f32 = 0;
+        try check(v.GetPixelsPerDip.?(&renderer.interface, null, &dip));
+        try std.testing.expectEqual(@as(f32, 1), dip);
+        _ = win.PatBlt(memory_dc, 0, 0, 160, 128, win.WHITENESS);
+        var line = std.mem.zeroes(c.DWRITE_UNDERLINE);
+        line.width = 9.2;
+        line.offset = 1.3;
+        line.thickness = 0.8;
+        try check(v.DrawUnderline.?(&renderer.interface, null, 4.3, 10, &line, null));
+        var strike = std.mem.zeroes(c.DWRITE_STRIKETHROUGH);
+        strike.width = 9.2;
+        strike.offset = -6.2;
+        strike.thickness = 0.8;
+        try check(v.DrawStrikethrough.?(&renderer.interface, null, 40.3, 20, &strike, null));
+        try check(v.DrawInlineObject.?(&renderer.interface, null, 0, 0, null, 0, 0, null));
+        try std.testing.expectEqual(renderer.color, win.GetPixel(memory_dc, 4, 11));
+        try std.testing.expectEqual(renderer.color, win.GetPixel(memory_dc, 13, 12));
+        try std.testing.expectEqual(renderer.color, win.GetPixel(memory_dc, 40, 13));
+        try std.testing.expectEqual(renderer.color, win.GetPixel(memory_dc, 49, 14));
+        try std.testing.expectEqual(@as(u32, 0x00ffffff), win.GetPixel(memory_dc, 3, 11));
+        try std.testing.expectEqual(@as(u32, 0x00ffffff), win.GetPixel(memory_dc, 14, 12));
+        try std.testing.expectEqual(@as(u32, 1), renderer.refs);
+        std.debug.print("bitmap target grows without shrinking; renderer COM, snapping, transform, DPI, decorations and rendering mode verified\n", .{});
+    }
     const sample = wide("Smooth readable text IBM Plex Sans at seventeen pixels today");
     var drawn = win.RECT{ .left = 8, .top = 8, .right = 188, .bottom = 300 };
     var frequency: win.LARGE_INTEGER = undefined;
@@ -851,6 +924,31 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
     try std.testing.expect(ink > 0);
     try std.testing.expect(levels >= 8);
     {
+        const mask = try std.testing.allocator.alloc(u32, pixels.len);
+        defer std.testing.allocator.free(mask);
+        @memcpy(mask, pixels);
+        const background: u32 = 0x00315793;
+        const text_color: u32 = 0x00d9b581;
+        @memset(pixels, background);
+        _ = win.SetTextColor(dc, text_color);
+        _ = drawText(dc, sample, -1, &drawn, win.DT_WORDBREAK | win.DT_NOPREFIX);
+        try std.testing.expect(directwrite);
+        _ = win.GdiFlush();
+        var untouched: usize = 0;
+        var changed: usize = 0;
+        for (pixels, mask, 0..) |pixel, white, i| {
+            if (white & 0xffffff == 0xffffff) {
+                try std.testing.expectEqual(background, pixel);
+                const x = i % size;
+                const y = i / size;
+                if (x >= 8 and x < 188 and y >= 8 and y < 300) untouched += 1;
+            } else if (pixel != background) changed += 1;
+        }
+        try std.testing.expect(untouched > 1000 and changed > 0);
+        _ = win.SetTextColor(dc, 0);
+        std.debug.print("coloured backdrop preserved exactly outside glyphs: {d} untouched pixels inside text box, {d} ink pixels\n", .{ untouched, changed });
+    }
+    {
         const saved = win.SaveDC(dc);
         defer _ = win.RestoreDC(dc, saved);
         _ = win.SetViewportOrgEx(dc, 31, 23, null);
@@ -870,6 +968,27 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
         }
         try std.testing.expect(ink > 0);
         std.debug.print("viewport/window origins and intersected DC clip verified\n", .{});
+    }
+    {
+        const saved = win.SaveDC(dc);
+        defer _ = win.RestoreDC(dc, saved);
+        _ = win.IntersectClipRect(dc, 8, 8, 188, 60);
+        _ = win.ExcludeClipRect(dc, 30, 8, 70, 60);
+        @memset(pixels, 0x00315793);
+        var clipped = win.RECT{ .left = 8, .top = 8, .right = 188, .bottom = 60 };
+        _ = drawText(dc, sample, -1, &clipped, win.DT_SINGLELINE | win.DT_NOPREFIX);
+        try std.testing.expect(directwrite);
+        _ = win.GdiFlush();
+        var visible_ink: usize = 0;
+        for (pixels, 0..) |pixel, i| {
+            const x = i % size;
+            const y = i / size;
+            if (x < 8 or x >= 188 or y < 8 or y >= 60 or (x >= 30 and x < 70)) {
+                try std.testing.expectEqual(@as(u32, 0x00315793), pixel);
+            } else if (pixel != 0x00315793) visible_ink += 1;
+        }
+        try std.testing.expect(visible_ink > 0);
+        std.debug.print("complex DC clip preserves excluded backdrop pixels\n", .{});
     }
     {
         const cases = [_]u32{
@@ -1030,7 +1149,9 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
     try std.testing.expect(!available());
     try std.testing.expect(last_failure != null and last_failure.? == error.NoBundledFonts);
     reset();
+    try std.testing.expect(target == null and bitmap_width == 0 and bitmap_height == 0);
     try std.testing.expect(available());
+    try std.testing.expect(bitmap_width == 1 and bitmap_height == 1);
     try std.testing.expectEqual(@as(u32, 1), loader_refs.load(.acquire));
     std.debug.print("GDI failure fallback is sticky until reset, then DirectWrite recovers\n", .{});
 }
