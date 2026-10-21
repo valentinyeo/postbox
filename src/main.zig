@@ -1106,7 +1106,7 @@ fn paintPopupInput(shapes: *const smooth.Context, owner: win.HWND, control: ?win
     _ = win.MapWindowPoints(null, owner, @ptrCast(&rect), 2);
     _ = win.InflateRect(&rect, 4, 4);
     smooth.fillRoundRect(shapes, rect, 8, 8, theme.current.surface_container_high);
-    smooth.strokeRoundRect(shapes, rect, 8, 8, theme.current.outline, 1);
+    smooth.strokeRoundRect(shapes, rect, 8, 8, if (win.GetFocus() == edit) theme.current.primary else theme.current.outline, 1);
 }
 
 fn buttonLabel(item: *win.DRAWITEMSTRUCT, buffer: []u16) []const u16 {
@@ -2930,7 +2930,7 @@ fn telegramLoginProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lpar
         win.WM_CTLCOLORSTATIC, win.WM_CTLCOLOREDIT => {
             const hdc: win.HDC = winHandle(win.HDC, wparam);
             _ = win.SetTextColor(hdc, theme.current.on_surface);
-            if (message == win.WM_CTLCOLOREDIT and theme.choice == .amoled) {
+            if (theme.choice == .amoled and win.GetDlgItem(hwnd, id_tg_edit) == winHandle(win.HWND, @as(usize, @bitCast(lparam)))) {
                 _ = win.SetBkColor(hdc, theme.current.surface_container_high);
                 return @bitCast(@intFromPtr(a.brush_raised.?));
             }
@@ -2940,6 +2940,11 @@ fn telegramLoginProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lpar
         },
         win.WM_COMMAND => {
             const id = loword(wparam);
+            const notification = hiword(wparam);
+            if (id == id_tg_edit and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {
+                _ = win.InvalidateRect(hwnd, null, win.FALSE);
+                return 0;
+            }
             if (id == id_tg_next or id == 1) {
                 tgLoginSubmit(a);
                 return 0;
@@ -5470,6 +5475,11 @@ fn slackSetupProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam:
         },
         win.WM_COMMAND => {
             const id = loword(wparam);
+            const notification = hiword(wparam);
+            if ((id == id_slack_user_edit or id == id_slack_app_edit) and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {
+                _ = win.InvalidateRect(hwnd, null, win.FALSE);
+                return 0;
+            }
             if (id == id_slack_cancel) {
                 _ = win.DestroyWindow(hwnd);
                 return 0;
@@ -11072,6 +11082,10 @@ fn emojiProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
         win.WM_COMMAND => {
             const id = loword(wparam);
             const notification = hiword(wparam);
+            if (id == id_emoji_edit and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {
+                _ = win.InvalidateRect(hwnd, null, win.FALSE);
+                return 0;
+            }
             if (id == id_emoji_edit and notification == win.EN_CHANGE) {
                 emojiFilter(a);
             } else if (id == id_emoji_list and notification == win.LBN_SELCHANGE) {
@@ -12833,6 +12847,10 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
         win.WM_COMMAND => {
             const id = loword(wparam);
             const notification = hiword(wparam);
+            if (id == id_palette_edit and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {
+                _ = win.InvalidateRect(hwnd, null, win.FALSE);
+                return 0;
+            }
             if (id == id_palette_edit and notification == win.EN_CHANGE) {
                 paletteFilter(a);
             } else if (id == id_palette_list and notification == win.LBN_SELCHANGE) {
