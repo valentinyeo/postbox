@@ -8,6 +8,7 @@ Assert-That ($env:GITHUB_ACTIONS -eq 'true') 'Verification runs only on GitHub A
 New-Item $Evidence -ItemType Directory -Force | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
 Start-Transcript (Join-Path $Evidence 'run.log') | Out-Null
+Assert-That (-not (Test-Path 'HKCU:\Software\Messages')) 'Hosted runner already has production app preferences'
 $id = [Guid]::NewGuid().ToString()
 $root = Join-Path $env:RUNNER_TEMP "wazig-verify-$id"
 $local = Join-Path $root 'local'
@@ -111,6 +112,7 @@ try {
     Assert-That (-not (Test-Path (Join-Path $profile '.wacli'))) 'Provider store was created'
     Assert-That (-not (Test-Path (Join-Path $messages 'telegram'))) 'Telegram store was created'
     Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
+    Assert-That (-not (Test-Path 'HKCU:\Software\Messages')) 'Production app preferences were touched'
     $final | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'side-effects.json')
     "JOURNEY PASSED: $Feature" | Set-Content (Join-Path $Evidence 'result.txt')
 } catch {
