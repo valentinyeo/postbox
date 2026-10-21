@@ -3231,7 +3231,9 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     defer mf_lazy.unloadIfStarted();
 
     var scratch: [1]u8 = .{0};
-    var app = App{
+    const app = allocator.create(App) catch return 1;
+    defer allocator.destroy(app);
+    app.* = .{
         .allocator = allocator,
         .people = people_index.Index.init(allocator),
         .io = init.io,
@@ -3242,11 +3244,11 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     defer app.allocator.free(app.chats);
     defer app.people.deinit();
     defer if (app.chats_raw) |raw| allocator.free(raw);
-    app_ptr = &app;
+    app_ptr = app;
     defer app_ptr = null;
     _ = win.CoCreateInstance(&win.CLSID_WICImagingFactory, null, win.CLSCTX_INPROC_SERVER, &win.IID_IWICImagingFactory, @ptrCast(&app.wic_factory));
     text_draw.reset();
-    recreateFonts(&app);
+    recreateFonts(app);
 
     var smoke_class = win.WNDCLASSEXW{
         .cbSize = @sizeOf(win.WNDCLASSEXW),
@@ -3272,7 +3274,7 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         app.unfurl_entries[index].id.set(target.id);
         app.unfurl_entry_count = index + 1;
     }
-    for (targets, 0..) |target, index| startUnfurlFetch(&app, &app.unfurl_entries[index], target.url);
+    for (targets, 0..) |target, index| startUnfurlFetch(app, &app.unfurl_entries[index], target.url);
     smokePump(init.io, 45_000, targets.len);
     if (@atomicLoad(u32, &smoke_unfurl_done_count, .monotonic) < targets.len) {
         failures += 1;
@@ -3293,7 +3295,7 @@ fn unfurlSmoke(init: std.process.Init) u8 {
 
     const card_names = [_][]const u8{ "card-youtube.bmp", "card-instagram.bmp", "card-facebook.bmp" };
     for (targets, card_names) |spec, name| {
-        const drawn = smokeDrawCard(allocator, init.io, &app, out_dir, name, spec.provider, spec.id, spec.url);
+        const drawn = smokeDrawCard(allocator, init.io, app, out_dir, name, spec.provider, spec.id, spec.url);
         if (!drawn) failures += 1;
         smoke_log.line("render {s}: {s}", .{ name, if (drawn) "PASS" else "FAIL" });
     }
@@ -3301,15 +3303,15 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     const clip_path = init.environ_map.get("UNFURL_SMOKE_VIDEO") orelse "";
     var play_entry = UnfurlEntry{};
     play_entry.play_url.set(allocator, clip_path);
-    if (clip_path.len > 0) playUnfurlVideo(&app, &play_entry);
-    const playback = smokeWaitPlaying(init.io, &app, 8_000);
+    if (clip_path.len > 0) playUnfurlVideo(app, &play_entry);
+    const playback = smokeWaitPlaying(init.io, app, 8_000);
     const media_opened = app.player_window != null and app.mf_player != null;
     if (clip_path.len == 0) {
         failures += 1;
         smoke_log.line("FAIL: the test clip path is not set (UNFURL_SMOKE_VIDEO)", .{});
     } else if (!media_opened) {
         failures += 1;
-        const hr = smokeMfProbe(&app, play_entry.play_url.ptr());
+        const hr = smokeMfProbe(app, play_entry.play_url.ptr());
         smoke_log.line("FAIL: the test clip {s} did not open in the player: MFPlay returned hr=0x{x:0>8}", .{ clip_path, @as(u32, @bitCast(hr)) });
     } else {
         const playing = playback.state == win.MFP_MEDIAPLAYER_STATE_PLAYING and playback.width > 0 and playback.height > 0;
@@ -3318,7 +3320,7 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     }
     var player_hwnd = app.player_window;
     if (player_hwnd == null) {
-        player_hwnd = openPlayerWindow(&app, 800, 450);
+        player_hwnd = openPlayerWindow(app, 800, 450);
         if (player_hwnd) |hwnd| _ = win.ShowWindow(hwnd, win.SW_SHOW);
     }
     const bare_window = player_hwnd orelse {
@@ -3333,7 +3335,7 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     smoke_log.line("capture player-windowed.bmp: {}", .{windowed_shot});
 
     const caption_before = smokeHasCaption(bare_window);
-    togglePlayerFullscreen(&app, bare_window);
+    togglePlayerFullscreen(app, bare_window);
     const entered = !smokeHasCaption(bare_window) and smokeRectsClose(smokeWindowRect(bare_window), smokeMonitorRect(bare_window), 8);
     if (!entered or !caption_before) failures += 1;
     smoke_log.line("fullscreen enter: had caption before = {}, borderless and covering monitor after = {}: {s}", .{ caption_before, entered, if (entered and caption_before) "PASS" else "FAIL" });
@@ -3341,7 +3343,7 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     const fullscreen_shot = smokeCaptureWindow(allocator, init.io, out_dir, "player-fullscreen.bmp", bare_window);
     smoke_log.line("capture player-fullscreen.bmp: {}", .{fullscreen_shot});
 
-    togglePlayerFullscreen(&app, bare_window);
+    togglePlayerFullscreen(app, bare_window);
     const restored = smokeHasCaption(bare_window) and
         smokeRectsClose(smokeWindowRect(bare_window), app.player_saved_placement.rcNormalPosition, 8);
     if (!restored) failures += 1;
@@ -16491,12 +16493,14 @@ pub fn main(init: std.process.Init) !void {
         format_workspace = loadRegistryString(init.gpa, lit("AnthropicWorkspaceId")) orelse "";
     }
     theme.set(loadTheme());
-    var app = App{ .allocator = init.gpa, .people = people_index.Index.init(init.gpa), .io = init.io, .instance = instance, .wacli_path = wacli_path, .avatar_dir = avatar_dir, .slack_media_dir = slack_media_dir, .deepgram_configured = deepgram_key.len > 0, .deepgram_key = deepgram_key, .openrouter_key = openrouter_key, .openrouter_model = openrouter_model, .openrouter_configured = openrouter_key.len > 0, .format_workspace = format_workspace, .dictation_language = loadDictationLanguage(), .font_scale = loadFontScale(), .chat_view = loadChatView() };
+    const app = try init.gpa.create(App);
+    defer init.gpa.destroy(app);
+    app.* = .{ .allocator = init.gpa, .people = people_index.Index.init(init.gpa), .io = init.io, .instance = instance, .wacli_path = wacli_path, .avatar_dir = avatar_dir, .slack_media_dir = slack_media_dir, .deepgram_configured = deepgram_key.len > 0, .deepgram_key = deepgram_key, .openrouter_key = openrouter_key, .openrouter_model = openrouter_model, .openrouter_configured = openrouter_key.len > 0, .format_workspace = format_workspace, .dictation_language = loadDictationLanguage(), .font_scale = loadFontScale(), .chat_view = loadChatView() };
     defer app.allocator.free(app.chats);
     defer app.people.deinit();
     defer if (app.status_list) |*list| list.deinit(init.gpa);
     defer app.status_viewed.deinit(init.gpa);
-    if (messagesDirPath(&app, "status-viewed.txt")) |path| {
+    if (messagesDirPath(app, "status-viewed.txt")) |path| {
         defer init.gpa.free(path);
         if (readFileWin(init.gpa, path, 4 * 1024 * 1024)) |data| {
             defer init.gpa.free(data);
@@ -16509,41 +16513,41 @@ pub fn main(init: std.process.Init) !void {
     app.startup_probe_pending = true;
     if (cache_tag) |tag| {
         app.cache_tag.set(&tag);
-        appendLaunchLog(&app, "startup: saved account tag loaded");
-    } else appendLaunchLog(&app, "startup: no saved account tag, caches wait for auth status");
+        appendLaunchLog(app, "startup: saved account tag loaded");
+    } else appendLaunchLog(app, "startup: no saved account tag, caches wait for auth status");
     if (stored_openrouter) |stored| {
         switch (stored.outcome) {
-            .encrypted => appendLaunchLog(&app, "startup: openrouter key loaded (encrypted)"),
+            .encrypted => appendLaunchLog(app, "startup: openrouter key loaded (encrypted)"),
             .migrated => {
-                appendLaunchLog(&app, "startup: openrouter key migrated to encrypted storage");
-                appendLaunchLog(&app, "startup: openrouter key loaded (encrypted)");
+                appendLaunchLog(app, "startup: openrouter key migrated to encrypted storage");
+                appendLaunchLog(app, "startup: openrouter key loaded (encrypted)");
             },
-            .migration_failed => appendLaunchLog(&app, "startup: openrouter key left plain, encryption failed"),
+            .migration_failed => appendLaunchLog(app, "startup: openrouter key left plain, encryption failed"),
         }
     }
     if (stored_anthropic) |stored| {
         switch (stored.outcome) {
-            .encrypted => appendLaunchLog(&app, "startup: anthropic key loaded (encrypted)"),
+            .encrypted => appendLaunchLog(app, "startup: anthropic key loaded (encrypted)"),
             .migrated => {
-                appendLaunchLog(&app, "startup: anthropic key migrated to encrypted storage");
-                appendLaunchLog(&app, "startup: anthropic key loaded (encrypted)");
+                appendLaunchLog(app, "startup: anthropic key migrated to encrypted storage");
+                appendLaunchLog(app, "startup: anthropic key loaded (encrypted)");
             },
-            .migration_failed => appendLaunchLog(&app, "startup: anthropic key left plain, encryption failed"),
+            .migration_failed => appendLaunchLog(app, "startup: anthropic key left plain, encryption failed"),
         }
     }
-    loadEmojiRecents(&app);
+    loadEmojiRecents(app);
     if (init.environ_map.get("LOCALAPPDATA")) |local| {
         if (std.fs.path.join(init.gpa, &.{ local, "Messages", "telegram" })) |telegram_dir| {
             const stored_hash = slack_win.loadSecret(init.gpa, lit("TelegramApiHash"));
             defer if (stored_hash) |stored| init.gpa.free(stored.value);
             if (stored_hash) |stored| {
                 switch (stored.outcome) {
-                    .encrypted => appendLaunchLog(&app, "startup: telegram key loaded (encrypted)"),
+                    .encrypted => appendLaunchLog(app, "startup: telegram key loaded (encrypted)"),
                     .migrated => {
-                        appendLaunchLog(&app, "startup: telegram key migrated to encrypted storage");
-                        appendLaunchLog(&app, "startup: telegram key loaded (encrypted)");
+                        appendLaunchLog(app, "startup: telegram key migrated to encrypted storage");
+                        appendLaunchLog(app, "startup: telegram key loaded (encrypted)");
                     },
-                    .migration_failed => appendLaunchLog(&app, "startup: telegram key left plain, encryption failed"),
+                    .migration_failed => appendLaunchLog(app, "startup: telegram key left plain, encryption failed"),
                 }
             }
             if (loadRegistryString(init.gpa, lit("TelegramApiId"))) |stored| {
@@ -16568,11 +16572,11 @@ pub fn main(init: std.process.Init) !void {
         } else |_| {}
     }
     app.played_path = findPlayedPath(init, init.gpa);
-    loadPlayed(&app);
-    loadArchiveState(&app);
+    loadPlayed(app);
+    loadArchiveState(app);
     app.read_path = hashStorePath(init, init.gpa, "pending-reads.txt");
-    loadPendingReads(&app);
-    if (messagesDirPath(&app, "read-state.txt")) |path| {
+    loadPendingReads(app);
+    if (messagesDirPath(app, "read-state.txt")) |path| {
         defer init.gpa.free(path);
         if (readFileWin(init.gpa, path, 4 * 1024 * 1024)) |data| {
             defer init.gpa.free(data);
@@ -16582,11 +16586,11 @@ pub fn main(init: std.process.Init) !void {
     defer app.read_state.deinit(init.gpa);
     app.outbox_path = hashStorePath(init, init.gpa, "outbox.jsonl");
     defer if (app.outbox_path.len > 0) init.gpa.free(app.outbox_path);
-    loadOutbox(&app);
-    loadFileOutbox(&app);
+    loadOutbox(app);
+    loadFileOutbox(app);
     app.store_watch_path.set(init.gpa, store_watch_path);
     app.sync_heartbeat_path.set(init.gpa, sync_heartbeat_path);
-    app_ptr = &app;
+    app_ptr = app;
     defer app_ptr = null;
 
     _ = win.SetProcessDpiAwarenessContext(win.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -16761,7 +16765,7 @@ pub fn main(init: std.process.Init) !void {
     if (win.RegisterClassExW(&viewer_class) == 0) return error.RegisterImageViewerClassFailed;
 
     var pre_window_buffer: [64]u8 = undefined;
-    appendLaunchLog(&app, std.fmt.bufPrint(&pre_window_buffer, "startup-timing: pre-window work done {d} ms", .{win.GetTickCount64() -% process_start_ms}) catch "startup-timing: pre-window work done");
+    appendLaunchLog(app, std.fmt.bufPrint(&pre_window_buffer, "startup-timing: pre-window work done {d} ms", .{win.GetTickCount64() -% process_start_ms}) catch "startup-timing: pre-window work done");
     const hwnd = win.CreateWindowExW(
         0,
         lit("MessagesZig"),
@@ -16780,8 +16784,8 @@ pub fn main(init: std.process.Init) !void {
     _ = win.DwmSetWindowAttribute(hwnd, 20, &dark, @sizeOf(win.BOOL));
     _ = win.ShowWindow(hwnd, win.SW_SHOW);
     _ = win.UpdateWindow(hwnd);
-    focusCompose(&app);
-    logStartupMilestone(&app, .window, "window shown");
+    focusCompose(app);
+    logStartupMilestone(app, .window, "window shown");
     if (std.heap.page_allocator.create(ProbeThread)) |probe| {
         probe.* = .{ .io = init.io, .hwnd = hwnd, .wacli_path = wacli_path, .scratch_dir = messages_dir };
         if (std.Thread.spawn(.{ .stack_size = 512 * 1024 }, startupProbeMain, .{probe})) |thread| {
@@ -16831,14 +16835,14 @@ pub fn main(init: std.process.Init) !void {
         if (app.tg_login_window) |login_wnd| {
             if (win.IsDialogMessageW(login_wnd, &message) != 0) continue;
         }
-        if (handleKeyboard(&app, &message)) continue;
+        if (handleKeyboard(app, &message)) continue;
         const clicked_chat_list = message.message == win.WM_LBUTTONDOWN and
             app.chats_hwnd != null and message.hwnd == app.chats_hwnd.?;
         _ = win.TranslateMessage(&message);
         _ = win.DispatchMessageW(&message);
         if (clicked_chat_list) {
-            closeStatuses(&app);
-            focusCompose(&app);
+            closeStatuses(app);
+            focusCompose(app);
         }
     }
 }
@@ -17796,7 +17800,8 @@ test "a send-failure snippet collapses newlines and stays on one UTF-8 boundary"
 }
 
 test "sender name shows only at the start of a same-sender run" {
-    var a: App = undefined;
+    const a = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(a);
     a.message_count = 3;
     a.messages[0] = .{ .sender_jid = .{}, .sender = .{} };
     a.messages[0].sender_jid.set("111@g.us");
@@ -17805,35 +17810,36 @@ test "sender name shows only at the start of a same-sender run" {
     a.messages[2] = .{ .sender_jid = .{}, .sender = .{} };
     a.messages[2].sender_jid.set("222@g.us");
 
-    try std.testing.expect(showSenderName(&a, 0));
-    try std.testing.expect(!showSenderName(&a, 1));
-    try std.testing.expect(showSenderName(&a, 2));
+    try std.testing.expect(showSenderName(a, 0));
+    try std.testing.expect(!showSenderName(a, 1));
+    try std.testing.expect(showSenderName(a, 2));
 
     const testing = std.testing;
     a.messages[2].sender_jid.set("111@g.us");
     a.messages[2].sender.set(testing.allocator, "Same Name");
     a.messages[1].sender_jid.set("999@g.us");
     a.messages[1].sender.set(testing.allocator, "Same Name");
-    try std.testing.expect(showSenderName(&a, 2));
+    try std.testing.expect(showSenderName(a, 2));
 
     a.messages[2].sender_jid.set("");
     a.messages[1].sender_jid.set("");
-    try std.testing.expect(!showSenderName(&a, 2));
+    try std.testing.expect(!showSenderName(a, 2));
 
     a.messages[2].sender_jid.set("111@g.us");
     a.messages[2].sender.set(testing.allocator, "");
     a.messages[1].sender_jid.set("");
     a.messages[1].sender.set(testing.allocator, "");
     a.messages[1].from_me = true;
-    try std.testing.expect(showSenderName(&a, 2));
+    try std.testing.expect(showSenderName(a, 2));
     a.messages[1].from_me = false;
     a.messages[1].sender_jid.set("111@g.us");
-    try std.testing.expect(!showSenderName(&a, 2));
+    try std.testing.expect(!showSenderName(a, 2));
 }
 
 test "reuseContactAvatar matches a group participant to their contact's cached jid" {
     var scratch: [1]u8 = .{0};
-    var a: App = undefined;
+    const a = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(a);
     a.allocator = std.testing.allocator;
     a.avatar_dir = scratch[0..0];
     a.avatar_count = 0;
@@ -17846,15 +17852,15 @@ test "reuseContactAvatar matches a group participant to their contact's cached j
     a.chats[2] = .{};
     a.chats[2].jid.set("999@s.whatsapp.net");
 
-    const entry = reuseContactAvatar(&a, "15551234567@lid") orelse return error.TestExpectedEntry;
+    const entry = reuseContactAvatar(a, "15551234567@lid") orelse return error.TestExpectedEntry;
     try std.testing.expectEqualStrings("15551234567@s.whatsapp.net", entry.jid.slice());
 
-    try std.testing.expect(reuseContactAvatar(&a, "77777@lid") == null);
+    try std.testing.expect(reuseContactAvatar(a, "77777@lid") == null);
 
-    const same_domain = reuseContactAvatar(&a, "999@s.whatsapp.net:5") orelse return error.TestExpectedEntry;
+    const same_domain = reuseContactAvatar(a, "999@s.whatsapp.net:5") orelse return error.TestExpectedEntry;
     try std.testing.expectEqualStrings("999@s.whatsapp.net", same_domain.jid.slice());
 
-    try std.testing.expect(reuseContactAvatar(&a, "") == null);
+    try std.testing.expect(reuseContactAvatar(a, "") == null);
 }
 
 test "telegram api_id parsing accepts positive numbers only" {

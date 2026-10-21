@@ -26,6 +26,7 @@ cases=(
     '1f5853e^ D1 HEAD'
     'a735c9f F1 HEAD'
     '0c67e093c2a85bd9b42b73d2d4433551cad39b85 G1 HEAD'
+    '4064743 H1 HEAD'
 )
 
 "$lint" "$repo"
@@ -133,6 +134,28 @@ fi
 rm "$fixture/src/nested/bypass.zig"
 printf 'const safe = win.DrawTextWrap;\nconst quality = win.CLEARTYPE_NATURAL_QUALITY;\nconst draw = text_draw.drawText;\n' > "$fixture/src/bypass.zig"
 "$lint" "$fixture"
+h1_cases=0
+for storage in \
+    'var app = App{};' \
+    'const state = App{};' \
+    'var app: App = undefined;' \
+    'var state: App = .{};' \
+    'const state:App=.{};' \
+    $'var app = App\n{};' \
+    $'var app:\nApp =\nundefined;'; do
+    printf '%s\n' "$storage" > "$fixture/src/main.zig"
+    status=0
+    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+    if (( status != 1 )) || ! grep -Eq '^lint-repeats: src/main.zig:[0-9]+: \[H1\] .*allocator.create\(App\)' "$temp/output"; then
+        cat "$temp/output" >&2
+        printf 'test-lint-repeats: FAIL H1 must reject App by-value storage, got exit %s\n' "$status" >&2
+        exit 1
+    fi
+    h1_cases=$((h1_cases + 1))
+done
+printf 'const app = try allocator.create(App);\ndefer allocator.destroy(app);\napp.* = .{};\nvar pointer: *App = app;\nconst SmallApp = struct {};\nvar small = SmallApp{};\n' > "$fixture/src/main.zig"
+"$lint" "$fixture"
+printf 'test-lint-repeats: H1 rejects %s App by-value forms and permits heap storage\n' "$h1_cases"
 if (( SECONDS >= 60 )); then
     printf 'test-lint-repeats: FAIL runtime %ss must be under 60s\n' "$SECONDS" >&2
     exit 1
