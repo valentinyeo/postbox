@@ -3,6 +3,7 @@ const theme = @import("theme.zig");
 const menu_theme = @import("menu_theme.zig");
 const smooth = @import("smooth_shapes.zig");
 const smooth_geometry = @import("smooth_geometry.zig");
+const pin_icon = @import("pin_icon.zig");
 const child_process = @import("child_process.zig");
 const auth_status = @import("auth_status.zig");
 const audio = @import("audio.zig");
@@ -1086,10 +1087,24 @@ fn buttonLabel(item: *win.DRAWITEMSTRUCT, buffer: []u16) []const u16 {
     return buffer[0..@intCast(text_len)];
 }
 
+fn drawPinIcon(a: *App, shapes: *const smooth.Context, left: i32, top: i32, color: win.COLORREF, unpin: bool) void {
+    const scale = @as(f32, @floatFromInt(px(a, 24))) / pin_icon.grid_size;
+    const width: f32 = @floatFromInt(@max(1, px(a, @intFromFloat(pin_icon.stroke_width))));
+    inline for (.{ pin_icon.outline, pin_icon.needle, pin_icon.slash }, 0..) |points, index| {
+        if (index != 2 or unpin) {
+            var scaled: [points.len][2]f32 = undefined;
+            for (points, &scaled) |point, *target| {
+                target.* = .{ @as(f32, @floatFromInt(left)) + point[0] * scale, @as(f32, @floatFromInt(top)) + point[1] * scale };
+            }
+            smooth.strokePolyline(shapes, &scaled, color, width);
+        }
+    }
+}
+
 fn drawMicIcon(a: *App, shapes: *const smooth.Context, hdc: win.HDC, cx: i32, cy: i32, color: win.COLORREF) void {
     const brush = win.CreateSolidBrush(color) orelse return;
     defer _ = win.DeleteObject(brush);
-    const pen = win.CreatePen(win.PS_SOLID, @max(1, px(a, 2)), color) orelse return;
+    const pen = win.CreatePen(win.PS_SOLID, @max(1, px(a, smooth_geometry.icon_stroke_width)), color) orelse return;
     defer _ = win.DeleteObject(pen);
     const old_brush = win.SelectObject(hdc, brush);
     const old_pen = win.SelectObject(hdc, pen);
@@ -1100,12 +1115,12 @@ fn drawMicIcon(a: *App, shapes: *const smooth.Context, hdc: win.HDC, cx: i32, cy
     const half = px(a, 4);
     const capsule = win.RECT{ .left = cx - half, .top = cy - px(a, 10), .right = cx + half + 1, .bottom = cy + px(a, 3) };
     smooth.fillRoundRect(shapes, capsule, half * 2, half * 2, color);
-    smooth.strokeRoundRect(shapes, capsule, half * 2, half * 2, color, @max(1, px(a, 2)));
+    smooth.strokeRoundRect(shapes, capsule, half * 2, half * 2, color, @max(1, px(a, smooth_geometry.icon_stroke_width)));
     _ = win.SelectObject(hdc, win.GetStockObject(win.NULL_BRUSH));
     const arc = px(a, 7);
     const cradle = win.RECT{ .left = cx - arc, .top = cy - px(a, 7), .right = cx + arc + 1, .bottom = cy + px(a, 6) };
     const angles = smooth_geometry.counterclockwiseArc(@bitCast(cradle), .{ cx - arc, cy - px(a, 1) }, .{ cx + arc + 1, cy - px(a, 1) });
-    smooth.strokeArc(shapes, cradle, angles.start, angles.sweep, color, @max(1, px(a, 2)));
+    smooth.strokeArc(shapes, cradle, angles.start, angles.sweep, color, @max(1, px(a, smooth_geometry.icon_stroke_width)));
     _ = win.MoveToEx(hdc, cx, cy + px(a, 6), null);
     _ = win.LineTo(hdc, cx, cy + px(a, 10));
     _ = win.MoveToEx(hdc, cx - px(a, 4), cy + px(a, 10), null);
@@ -14124,8 +14139,7 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
     var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 34) };
     _ = text_draw.drawText(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     if (pinned_chat) {
-        const pin_glyph = [_]u16{ 0xD83D, 0xDCCC };
-        _ = drawMixedLine(item.hDC, a.font_bold.?, a.font_emoji orelse a.font_bold.?, &pin_glyph, item.rcItem.right - px(a, 76), item.rcItem.top + px(a, 12));
+        drawPinIcon(a, &shapes, item.rcItem.right - px(a, 78), item.rcItem.top + px(a, 10), row_muted, false);
     }
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, row_muted);

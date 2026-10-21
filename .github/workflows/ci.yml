@@ -14,6 +14,21 @@ permissions:
   contents: read
 
 jobs:
+  pin-icon-tests:
+    name: pin-icon-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: IGSH-494 pin geometry
+        run: zig test src/pin_icon_test.zig
+      - name: IGSH-494 pin source regression and negative controls
+        if: ${{ !cancelled() }}
+        run: python3 tools/test_pin_icon.py
+
   ci:
     name: ci
     runs-on: ubuntu-latest
