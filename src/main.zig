@@ -656,7 +656,6 @@ const App = struct {
     voice_reply_to: Utf8Text(191) = .{},
     voice_reply_sender: Utf8Text(191) = .{},
     btn_hover: [10]bool = @splat(false),
-    search_prev_proc: usize = 0,
     compose_prev_proc: usize = 0,
     btn_prev_proc: [10]usize = @splat(0),
     tooltips: ?win.HWND = null,
@@ -1061,16 +1060,11 @@ fn subclassComposerButton(a: *App, hwnd: ?win.HWND, index: usize) void {
 
 fn composeFieldProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
-    if (message == win.WM_PASTE or (message == win.WM_CHAR and wparam == 0x16)) {
+    if (message == win.WM_PASTE) {
         pasteComposerText(a);
         return 0;
     }
     return win.CallWindowProcW(@ptrFromInt(a.compose_prev_proc), hwnd, message, wparam, lparam);
-}
-
-fn searchFieldProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
-    const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
-    return win.CallWindowProcW(@ptrFromInt(a.search_prev_proc), hwnd, message, wparam, lparam);
 }
 
 fn paintRoundedButton(a: *App, shapes: *const smooth.Context, hdc: win.HDC, rect: win.RECT, face: win.COLORREF, text_color: win.COLORREF, font: win.HFONT, frame: ?win.COLORREF, text: []const u16) void {
@@ -10224,6 +10218,12 @@ fn composerText(a: *App) ?[]u8 {
     return std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..got]) catch null;
 }
 
+fn handleComposerPaste(a: *App, key: u32, control: bool, shift: bool, alt: bool) bool {
+    if (!edit_contract.pasteShortcut(key, control, shift, alt)) return false;
+    if (!stageImageFromClipboard(a)) pasteComposerText(a);
+    return true;
+}
+
 fn pasteComposerText(a: *App) void {
     const origin = a.draft_store.open orelse return;
     const compose = a.compose orelse return;
@@ -15751,9 +15751,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (!recreateThemeBrushes(a)) return -1;
             a.search = directwrite_edit.create(a.instance, hwnd, controlId(id_search), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 0, 0, 0, 0);
             if (a.search == null) return -1;
-            if (a.search) |search| {
-                a.search_prev_proc = @bitCast(win.SetWindowLongPtrW(search, win.GWLP_WNDPROC, @intCast(@intFromPtr(&searchFieldProc))));
-            }
             a.chats_hwnd = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 0, 0, 0, 0, hwnd, controlId(id_chats), a.instance, null);
             a.canvas = win.CreateWindowExW(0, lit("WacliMessageCanvas"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, hwnd, controlId(id_canvas), a.instance, null);
             a.attach_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("Attach photo or file"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_attach), a.instance, null);
@@ -16667,7 +16664,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
                     else => {},
                 }
             }
-            if (control and key == 'V' and stageImageFromClipboard(a)) return true;
+            if (handleComposerPaste(a, key, control, shift, alt)) return true;
             if (key == win.VK_RETURN and !shift) {
                 sendMessage(a);
                 return true;

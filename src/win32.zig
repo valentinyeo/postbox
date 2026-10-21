@@ -9,6 +9,7 @@ pub const c = @cImport({
     @cInclude("richedit.h");
     @cInclude("imm.h");
     @cInclude("ole2.h");
+    @cInclude("oleacc.h");
     @cInclude("dwmapi.h");
     @cInclude("shellapi.h");
     @cInclude("shobjidl.h");

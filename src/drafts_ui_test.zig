@@ -288,3 +288,26 @@ test "IGSH-510 draft edits invalidate only their visible chat row" {
     _ = win.SetWindowTextW(1, lit("second draft"));
     try std.testing.expectEqualDeep(win.RECT{ .left = 0, .top = 64, .right = 380, .bottom = 128 }, app.invalidated_row.?);
 }
+
+fn stageImageFromClipboard(_: *App) bool {
+    return false;
+}
+
+test "IGSH-466 Ctrl V and Shift Insert paste once and keep the cross-chat draft guard" {
+    const shortcuts = .{ .{ @as(u32, 'V'), true, false }, .{ @as(u32, 0x2d), false, true } };
+    inline for (shortcuts) |shortcut| {
+        var app = App{};
+        current = &app;
+        defer app.deinit();
+        switchComposerDraft(&app);
+        try std.testing.expect(handleComposerPaste(&app, shortcut[0], shortcut[1], shortcut[2], false));
+        try expectComposer(&app, "pasted transcript");
+        _ = win.SetWindowTextW(1, lit("A "));
+        app.switch_during_paste = true;
+        try std.testing.expect(handleComposerPaste(&app, shortcut[0], shortcut[1], shortcut[2], false));
+        try expectComposer(&app, "");
+        app.selected_chat = 0;
+        switchComposerDraft(&app);
+        try expectComposer(&app, "A pasted transcript");
+    }
+}

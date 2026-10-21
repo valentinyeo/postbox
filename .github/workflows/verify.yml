@@ -31,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: verify-${{ github.ref }}
+  group: verify-${{ github.ref }}-${{ inputs.feature || 'search' }}
   cancel-in-progress: true
 
 jobs:

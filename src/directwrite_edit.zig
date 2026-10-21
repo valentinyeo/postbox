@@ -1,346 +1,212 @@
 const std = @import("std");
 const win = @import("win32.zig").c;
-const contract = @import("edit_contract.zig");
 const text_draw = @import("text_draw.zig");
 const theme = @import("theme.zig");
 
-pub const class_name = std.unicode.utf8ToUtf16LeStringLiteral(contract.class_name);
-const ok: win.HRESULT = 0;
-const no_interface: win.HRESULT = @bitCast(@as(u32, 0x80004002));
-const failed: win.HRESULT = @bitCast(@as(u32, 0x80004005));
-const iid_unknown = guid(0, 0, 0, .{ 0xc0, 0, 0, 0, 0, 0, 0, 0x46 });
-const iid_host = guid(0x13e670f4, 0x1a5a, 0x11cf, .{ 0xab, 0xeb, 0, 0xaa, 0, 0xb6, 0x5e, 0xa1 });
-const iid_host2 = guid(0x13e670f5, 0x1a5a, 0x11cf, .{ 0xab, 0xeb, 0, 0xaa, 0, 0xb6, 0x5e, 0xa1 });
-const iid_services2 = guid(0x8d33f741, 0xcf58, 0x11ce, .{ 0xa8, 0x9d, 0, 0xaa, 0, 0x6c, 0xad, 0xc5 });
-const iid_d2d_factory = guid(0x06152247, 0x6f50, 0x465a, .{ 0x92, 0x45, 0x11, 0x8b, 0xfd, 0x3b, 0x60, 0x07 });
-
-const Object = extern struct {
-    vtable: [*]const *const anyopaque,
-
-    fn method(self: *Object, comptime index: usize, comptime T: type) T {
-        return @ptrCast(self.vtable[index]);
-    }
-
-    fn release(self: *Object) void {
-        _ = self.method(2, *const fn (*Object) callconv(.winapi) u32)(self);
-    }
-
-    fn query(self: *Object, iid: *const win.GUID, out: *?*Object) win.HRESULT {
-        return self.method(0, *const fn (*Object, *const win.GUID, *?*Object) callconv(.winapi) win.HRESULT)(self, iid, out);
-    }
-
-    fn send(self: *Object, message: u32, wparam: usize, lparam: isize) win.LRESULT {
-        var result: win.LRESULT = 0;
-        _ = self.method(3, *const fn (*Object, u32, usize, isize, *win.LRESULT) callconv(.winapi) win.HRESULT)(self, message, wparam, lparam, &result);
-        return result;
-    }
-
-    fn property(self: *Object, mask: u32, bits: u32) void {
-        _ = self.method(19, *const fn (*Object, u32, u32) callconv(.winapi) win.HRESULT)(self, mask, bits);
-    }
-
-    fn activate(self: *Object, rect: *const win.RECT) win.HRESULT {
-        return self.method(9, *const fn (*Object, *const win.RECT) callconv(.winapi) win.HRESULT)(self, rect);
-    }
-
-    fn deactivate(self: *Object) void {
-        _ = self.method(10, *const fn (*Object) callconv(.winapi) win.HRESULT)(self);
-    }
-
-    fn uiActivate(self: *Object, active: bool) void {
-        const index: usize = if (active) 11 else 12;
-        const activate_fn: *const fn (*Object) callconv(.winapi) win.HRESULT = @ptrCast(self.vtable[index]);
-        _ = activate_fn(self);
-    }
-
-    fn draw(self: *Object, target: *win.ID2D1DCRenderTarget, rect: *const win.RECT, update: ?*win.RECT) win.HRESULT {
-        return self.method(22, *const fn (*Object, *win.ID2D1DCRenderTarget, *const win.RECT, ?*win.RECT, i32) callconv(.winapi) win.HRESULT)(self, target, rect, update, 0);
-    }
-
-    fn naturalHeight(self: *Object, width: i32, height: i32) ?i32 {
-        var w: win.LONG = @max(1, width);
-        var h: win.LONG = @max(1, height);
-        var ascent: win.LONG = 0;
-        const extent = win.SIZEL{ .cx = contract.himetric(w), .cy = contract.himetric(h) };
-        const hr = self.method(21, *const fn (*Object, u32, win.HDC, win.HDC, ?*anyopaque, u32, *const win.SIZEL, *win.LONG, *win.LONG, *win.LONG) callconv(.winapi) win.HRESULT)(self, 1, null, null, null, 0x40000001, &extent, &w, &h, &ascent);
-        return if (hr >= 0) h else null;
-    }
-};
-
-const CreateServices = *const fn (?*Object, *Host, *?*Object) callconv(.winapi) win.HRESULT;
-const ShutdownServices = *const fn (*Object) callconv(.winapi) win.HRESULT;
-var create_services: ?CreateServices = null;
-var shutdown_services: ?ShutdownServices = null;
-var factory: ?*win.ID2D1Factory = null;
-var registered = false;
-
-fn guid(a: u32, b: u16, c: u16, d: [8]u8) win.GUID {
-    return .{ .Data1 = a, .Data2 = b, .Data3 = c, .Data4 = d };
-}
-
-fn load(instance: win.HINSTANCE) bool {
-    if (registered) return true;
-    if (create_services == null) {
-        const module = win.LoadLibraryExW(std.unicode.utf8ToUtf16LeStringLiteral("msftedit.dll"), null, win.LOAD_LIBRARY_SEARCH_SYSTEM32) orelse return false;
-        var loaded = false;
-        defer if (!loaded) {
-            _ = win.FreeLibrary(module);
-        };
-        const create_fn: CreateServices = @ptrCast(win.GetProcAddress(module, "CreateTextServices") orelse return false);
-        const shutdown_fn: ShutdownServices = @ptrCast(win.GetProcAddress(module, "ShutdownTextServices") orelse return false);
-        create_services = create_fn;
-        shutdown_services = shutdown_fn;
-        loaded = true;
-    }
-    if (factory == null) {
-        const module = win.LoadLibraryExW(std.unicode.utf8ToUtf16LeStringLiteral("d2d1.dll"), null, win.LOAD_LIBRARY_SEARCH_SYSTEM32) orelse return false;
-        var loaded = false;
-        defer if (!loaded) {
-            _ = win.FreeLibrary(module);
-        };
-        const create_factory: *const fn (u32, *const win.GUID, ?*const anyopaque, *?*win.ID2D1Factory) callconv(.winapi) win.HRESULT = @ptrCast(win.GetProcAddress(module, "D2D1CreateFactory") orelse return false);
-        if (create_factory(0, &iid_d2d_factory, null, &factory) < 0 or factory == null) return false;
-        loaded = true;
-    }
-    var cls = std.mem.zeroes(win.WNDCLASSW);
-    cls.style = win.CS_DBLCLKS;
-    cls.lpfnWndProc = windowProc;
-    cls.hInstance = instance;
-    cls.hCursor = win.LoadCursorA(null, @ptrFromInt(32513));
-    cls.lpszClassName = class_name;
-    if (win.RegisterClassW(&cls) == 0) return false;
-    registered = true;
-    return true;
-}
+pub const class_name = std.unicode.utf8ToUtf16LeStringLiteral("RICHEDIT50W");
+const property_name = std.unicode.utf8ToUtf16LeStringLiteral("Messages.DirectWriteEdit");
+var module: win.HMODULE = null;
 
 pub fn create(instance: win.HINSTANCE, parent: win.HWND, id: win.HMENU, style: u32, x: i32, y: i32, width: i32, height: i32) ?win.HWND {
-    if (!load(instance)) return null;
-    return win.CreateWindowExW(0, class_name, null, style, x, y, width, height, parent, id, instance, null);
+    if (module == null) module = win.LoadLibraryExW(std.unicode.utf8ToUtf16LeStringLiteral("msftedit.dll"), null, win.LOAD_LIBRARY_SEARCH_SYSTEM32) orelse return null;
+    const hwnd = win.CreateWindowExW(0, class_name, null, style, x, y, width, height, parent, id, instance, null) orelse return null;
+    const host = std.heap.page_allocator.create(Host) catch {
+        _ = win.DestroyWindow(hwnd);
+        return null;
+    };
+    host.* = .{ .hwnd = hwnd };
+    if (win.SetPropW(hwnd, property_name, host) == 0) {
+        std.heap.page_allocator.destroy(host);
+        _ = win.DestroyWindow(hwnd);
+        return null;
+    }
+    const previous = win.SetWindowLongPtrW(hwnd, win.GWLP_WNDPROC, @bitCast(@intFromPtr(&windowProc)));
+    host.previous = @ptrFromInt(@as(usize, @bitCast(previous)));
+    _ = host.send(win.EM_SETTEXTMODE, win.TM_PLAINTEXT | win.TM_MULTILEVELUNDO, 0);
+    _ = host.send(win.EM_SETEVENTMASK, 0, win.ENM_CHANGE | win.ENM_UPDATE);
+    _ = host.send(win.EM_SETEDITSTYLE, win.SES_LOGICALCARET, win.SES_LOGICALCARET);
+    return hwnd;
+}
+
+pub fn isComposing(hwnd: ?win.HWND) bool {
+    const host = fromWindow(hwnd orelse return false) orelse return false;
+    return host.composing;
 }
 
 pub fn contentHeight(hwnd: win.HWND, minimum: i32) i32 {
     const host = fromWindow(hwnd) orelse return minimum;
-    const services = host.services orelse return minimum;
+    const dc = win.GetDC(hwnd);
+    defer _ = win.ReleaseDC(hwnd, dc);
+    const saved = win.SaveDC(dc);
+    defer _ = win.RestoreDC(dc, saved);
+    _ = win.SelectObject(dc, host.font());
     const rect = host.textRect();
-    const natural = services.naturalHeight(rect.right - rect.left, rect.bottom - rect.top) orelse return minimum;
     var client: win.RECT = undefined;
     _ = win.GetClientRect(hwnd, &client);
-    return contract.contentHeight(natural, rect.top, client.bottom - rect.bottom, minimum);
+    const lines = @max(1, host.send(win.EM_GETLINECOUNT, 0, 0));
+    return @max(minimum, @as(i32, @intCast(lines)) * host.lineHeight(dc) + rect.top + client.bottom - rect.bottom);
 }
 
-pub fn isComposing(hwnd: ?win.HWND) bool {
-    const window = hwnd orelse return false;
-    var name: [64]u16 = undefined;
-    const count: usize = @intCast(win.GetClassNameW(window, &name, name.len));
-    if (!std.mem.eql(u16, name[0..count], class_name)) return false;
-    const host = fromWindow(window) orelse return false;
-    return host.composing;
-}
-
-const Host = extern struct {
-    vtable: [*]const *const anyopaque = &host_vtable,
-    refs: u32 = 1,
+const Host = struct {
     hwnd: win.HWND,
-    services: ?*Object = null,
-    target: ?*win.ID2D1DCRenderTarget = null,
-    font: win.HFONT = null,
-    background: win.COLORREF = 0,
-    char_format: win.CHARFORMAT2W = std.mem.zeroes(win.CHARFORMAT2W),
-    para_format: win.PARAFORMAT = std.mem.zeroes(win.PARAFORMAT),
-    multi: bool,
-    enabled: bool = true,
+    previous: win.WNDPROC = null,
     composing: bool = false,
-    caret_null: bool = false,
-    active: bool = false,
-    limit: u32 = 65536,
-    inset: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     cue: [256:0]u16 = @splat(0),
     cue_focused: bool = false,
-    notifying: bool = false,
+
+    fn send(self: *Host, message: u32, wparam: usize, lparam: isize) win.LRESULT {
+        return win.CallWindowProcW(self.previous, self.hwnd, message, wparam, lparam);
+    }
+
+    fn font(self: *Host) win.HFONT {
+        return @ptrFromInt(@as(usize, @bitCast(self.send(win.WM_GETFONT, 0, 0))));
+    }
 
     fn textRect(self: *Host) win.RECT {
         var rect: win.RECT = undefined;
-        _ = win.GetClientRect(self.hwnd, &rect);
-        rect.left += self.inset.left;
-        rect.top += self.inset.top;
-        rect.right = @max(rect.left, rect.right - self.inset.right);
-        rect.bottom = @max(rect.top, rect.bottom - self.inset.bottom);
+        _ = self.send(win.EM_GETRECT, 0, @bitCast(@intFromPtr(&rect)));
         return rect;
     }
 
-    fn notify(self: *Host, code: u32) void {
-        if (self.notifying) return;
-        self.notifying = true;
-        defer self.notifying = false;
-        const id: usize = @intCast(win.GetDlgCtrlID(self.hwnd));
-        _ = win.SendMessageW(win.GetParent(self.hwnd), win.WM_COMMAND, id | (@as(usize, code) << 16), @bitCast(@intFromPtr(self.hwnd)));
+    fn position(self: *Host, index: usize) win.POINTL {
+        var point = win.POINTL{ .x = 0, .y = 0 };
+        _ = self.send(win.WM_USER + 38, @intFromPtr(&point), @intCast(index));
+        return point;
     }
 
-    fn invalidate(self: *Host) void {
-        _ = win.InvalidateRect(self.hwnd, null, win.FALSE);
+    fn lineHeight(self: *Host, dc: win.HDC) i32 {
+        if (self.send(win.EM_GETLINECOUNT, 0, 0) > 1) {
+            const next: usize = @intCast(self.send(win.EM_LINEINDEX, 1, 0));
+            const delta = self.position(next).y - self.position(0).y;
+            if (delta > 0) return delta;
+        }
+        var metrics: win.TEXTMETRICW = undefined;
+        if (win.GetTextMetricsW(dc, &metrics) == 0) return 1;
+        return @max(1, metrics.tmHeight);
     }
 
-    fn setFont(self: *Host, font: win.HFONT) void {
-        self.font = font;
-        var lf: win.LOGFONTW = std.mem.zeroes(win.LOGFONTW);
-        if (win.GetObjectW(font, @sizeOf(win.LOGFONTW), &lf) == 0) return;
-        self.char_format.dwMask = @as(u32, win.CFM_FACE) | win.CFM_SIZE | win.CFM_WEIGHT | win.CFM_COLOR | win.CFM_CHARSET;
-        self.char_format.yHeight = contract.fontTwips(lf.lfHeight);
-        self.char_format.wWeight = @intCast(lf.lfWeight);
-        self.char_format.bCharSet = lf.lfCharSet;
-        self.char_format.bPitchAndFamily = lf.lfPitchAndFamily;
-        self.char_format.szFaceName = lf.lfFaceName;
-        self.char_format.crTextColor = theme.current.on_surface;
-        if (self.services) |services| {
-            services.property(0x20000, 0x20000);
-            _ = services.send(win.EM_SETCHARFORMAT, win.SCF_ALL, @bitCast(@intFromPtr(&self.char_format)));
-            _ = services.send(win.EM_SETCHARFORMAT, win.SCF_DEFAULT, @bitCast(@intFromPtr(&self.char_format)));
-        }
-        self.invalidate();
-    }
-
-    fn updateColours(self: *Host, dc: win.HDC) void {
-        _ = win.SetTextColor(dc, theme.current.on_surface);
-        _ = win.SetBkColor(dc, theme.current.surface_container_high);
-        _ = win.SendMessageW(win.GetParent(self.hwnd), win.WM_CTLCOLOREDIT, @intFromPtr(dc), @bitCast(@intFromPtr(self.hwnd)));
-        const background = win.GetBkColor(dc);
-        if (self.background != background) {
-            self.background = background;
-            if (self.services) |services| services.property(0x4000, 0x4000);
-        }
-        const foreground = win.GetTextColor(dc);
-        if (self.char_format.crTextColor == foreground) return;
-        self.char_format.crTextColor = foreground;
-        if (self.services) |services| {
-            var format = self.char_format;
-            format.dwMask = win.CFM_COLOR;
-            _ = services.send(win.EM_SETCHARFORMAT, win.SCF_ALL, @bitCast(@intFromPtr(&format)));
-            _ = services.send(win.EM_SETCHARFORMAT, win.SCF_DEFAULT, @bitCast(@intFromPtr(&format)));
-            services.property(0x4000, 0x4000);
-        }
+    fn setFont(self: *Host, wparam: usize, lparam: isize) win.LRESULT {
+        const mask = self.send(win.EM_SETEVENTMASK, 0, 0);
+        defer _ = self.send(win.EM_SETEVENTMASK, 0, mask);
+        var ole: ?*Object = null;
+        _ = self.send(win.EM_GETOLEINTERFACE, 0, @bitCast(@intFromPtr(&ole)));
+        defer if (ole) |object| object.release();
+        var document: ?*Object = null;
+        if (ole) |object| _ = object.query(&iid_document, &document);
+        defer if (document) |object| object.release();
+        if (document) |object| object.undo(-9999995);
+        defer if (document) |object| object.undo(-9999994);
+        const modified = self.send(win.EM_GETMODIFY, 0, 0);
+        const result = self.send(win.WM_SETFONT, wparam, lparam);
+        _ = self.send(win.EM_SETMODIFY, @intCast(modified), 0);
+        return result;
     }
 
     fn paint(self: *Host, dc: win.HDC) void {
-        self.updateColours(dc);
+        const saved = win.SaveDC(dc);
+        defer _ = win.RestoreDC(dc, saved);
+        _ = win.SetTextColor(dc, theme.current.on_surface);
+        _ = win.SetBkColor(dc, theme.current.surface_container_high);
+        _ = win.SendMessageW(win.GetParent(self.hwnd), win.WM_CTLCOLOREDIT, @intFromPtr(dc), @bitCast(@intFromPtr(self.hwnd)));
+        const foreground = win.GetTextColor(dc);
         var client: win.RECT = undefined;
         _ = win.GetClientRect(self.hwnd, &client);
-        if (client.right <= 0 or client.bottom <= 0) return;
-        if (self.target == null) {
-            const properties = win.D2D1_RENDER_TARGET_PROPERTIES{
-                .type = win.D2D1_RENDER_TARGET_TYPE_SOFTWARE,
-                .pixelFormat = .{ .format = win.DXGI_FORMAT_B8G8R8A8_UNORM, .alphaMode = win.D2D1_ALPHA_MODE_IGNORE },
-                .dpiX = 96,
-                .dpiY = 96,
-                .usage = win.D2D1_RENDER_TARGET_USAGE_NONE,
-                .minLevel = win.D2D1_FEATURE_LEVEL_DEFAULT,
-            };
-            if (factory.?.lpVtbl.*.CreateDCRenderTarget.?(factory.?, &properties, &self.target) < 0) return;
-        }
-        const target = self.target.?;
-        if (target.lpVtbl.*.BindDC.?(target, dc, &client) < 0) return;
-        const rt: *win.ID2D1RenderTarget = @ptrCast(target);
-        const background = self.background;
-        const colour = win.D2D1_COLOR_F{ .r = @as(f32, @floatFromInt(background & 255)) / 255, .g = @as(f32, @floatFromInt((background >> 8) & 255)) / 255, .b = @as(f32, @floatFromInt((background >> 16) & 255)) / 255, .a = 1 };
-        if (text_draw.renderingParameters()) |parameters| rt.lpVtbl.*.SetTextRenderingParams.?(rt, @ptrCast(parameters));
-        rt.lpVtbl.*.SetTextAntialiasMode.?(rt, win.D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
-        rt.lpVtbl.*.BeginDraw.?(rt);
-        rt.lpVtbl.*.Clear.?(rt, &colour);
-        const hr = self.services.?.draw(target, &client, null);
-        const end_hr = rt.lpVtbl.*.EndDraw.?(rt, null, null);
-        if (hr < 0 or end_hr < 0) {
-            _ = target.lpVtbl.*.Base.Base.Base.Release.?(@ptrCast(target));
-            self.target = null;
-            self.invalidate();
+        _ = win.SetDCBrushColor(dc, win.GetBkColor(dc));
+        _ = win.FillRect(dc, &client, @ptrCast(@alignCast(win.GetStockObject(win.DC_BRUSH))));
+        _ = win.SelectObject(dc, self.font());
+        _ = win.SetBkMode(dc, win.TRANSPARENT);
+        const rect = self.textRect();
+        _ = win.IntersectClipRect(dc, rect.left, rect.top, rect.right, rect.bottom);
+        const length: usize = @intCast(self.send(win.WM_GETTEXTLENGTH, 0, 0));
+        if (length == 0) {
+            if (self.cue[0] != 0 and (self.cue_focused or win.GetFocus() != self.hwnd)) {
+                _ = win.SetTextColor(dc, theme.current.on_surface_variant);
+                var cue_rect = rect;
+                _ = text_draw.drawText(dc, &self.cue, -1, &cue_rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_END_ELLIPSIS);
+            }
             return;
         }
-        if (self.cue[0] != 0 and self.services.?.send(win.WM_GETTEXTLENGTH, 0, 0) == 0 and (self.cue_focused or win.GetFocus() != self.hwnd)) {
-            const saved = win.SaveDC(dc);
-            defer _ = win.RestoreDC(dc, saved);
-            _ = win.SelectObject(dc, self.font);
-            _ = win.SetTextColor(dc, theme.current.on_surface_variant);
-            _ = win.SetBkMode(dc, win.TRANSPARENT);
-            var rect = self.textRect();
-            _ = text_draw.drawText(dc, &self.cue, -1, &rect, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
+        const text = std.heap.page_allocator.alloc(u16, length + 1) catch return;
+        defer std.heap.page_allocator.free(text);
+        const request = win.GETTEXTEX{ .cb = @intCast(text.len * 2), .flags = win.GT_DEFAULT, .codepage = 1200, .lpDefaultChar = null, .lpUsedDefChar = null };
+        const count: usize = @intCast(self.send(win.EM_GETTEXTEX, @intFromPtr(&request), @bitCast(@intFromPtr(text.ptr))));
+        var selection = win.CHARRANGE{ .cpMin = 0, .cpMax = 0 };
+        _ = self.send(win.EM_EXGETSEL, 0, @bitCast(@intFromPtr(&selection)));
+        const height = self.lineHeight(dc);
+        const lines: usize = @intCast(self.send(win.EM_GETLINECOUNT, 0, 0));
+        for (0..lines) |line| {
+            const first: usize = @intCast(self.send(win.EM_LINEINDEX, line, 0));
+            if (first > count) break;
+            const size: usize = @intCast(self.send(win.EM_LINELENGTH, first, 0));
+            const last = @min(count, first + size);
+            const point = self.position(first);
+            if (point.y + height <= rect.top) continue;
+            if (point.y >= rect.bottom) break;
+            var line_rect = win.RECT{ .left = point.x, .top = point.y, .right = @max(rect.right, point.x + 1), .bottom = point.y + height };
+            _ = text_draw.drawText(dc, text.ptr + first, @intCast(last - first), &line_rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_NOCLIP);
+            const start = @max(first, @as(usize, @intCast(@max(0, selection.cpMin))));
+            const end = @min(last, @as(usize, @intCast(@max(0, selection.cpMax))));
+            if (end > start) {
+                const left = self.position(start).x;
+                const right = self.position(end).x;
+                const selected = win.RECT{ .left = left, .top = point.y, .right = @max(left + 1, right), .bottom = point.y + height };
+                _ = win.SetDCBrushColor(dc, theme.current.primary_container);
+                _ = win.FillRect(dc, &selected, @ptrCast(@alignCast(win.GetStockObject(win.DC_BRUSH))));
+                const selection_dc = win.SaveDC(dc);
+                _ = win.IntersectClipRect(dc, selected.left, selected.top, selected.right, selected.bottom);
+                _ = win.SetTextColor(dc, theme.current.on_primary_container);
+                _ = text_draw.drawText(dc, text.ptr + first, @intCast(last - first), &line_rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_NOCLIP);
+                _ = win.RestoreDC(dc, selection_dc);
+                _ = win.SetTextColor(dc, foreground);
+            }
         }
+    }
+
+    fn contextMenu(self: *Host, lparam: isize) void {
+        _ = win.SetFocus(self.hwnd);
+        var point = win.POINT{ .x = @as(i16, @bitCast(@as(u16, @truncate(@as(usize, @bitCast(lparam)))))), .y = @as(i16, @bitCast(@as(u16, @truncate(@as(usize, @bitCast(lparam)) >> 16)))) };
+        if (lparam == -1) {
+            _ = win.GetCaretPos(&point);
+            _ = win.ClientToScreen(self.hwnd, &point);
+        }
+        const menu = win.CreatePopupMenu() orelse return;
+        defer _ = win.DestroyMenu(menu);
+        var selection = win.CHARRANGE{ .cpMin = 0, .cpMax = 0 };
+        _ = self.send(win.EM_EXGETSEL, 0, @bitCast(@intFromPtr(&selection)));
+        const selected = selection.cpMin != selection.cpMax;
+        const editable = win.IsWindowEnabled(self.hwnd) != 0 and self.send(win.EM_GETOPTIONS, 0, 0) & win.ECO_READONLY == 0;
+        const items = .{
+            .{ "Undo", win.EM_UNDO, editable and self.send(win.EM_CANUNDO, 0, 0) != 0 },
+            .{ "Cut", win.WM_CUT, editable and selected },
+            .{ "Copy", win.WM_COPY, selected },
+            .{ "Paste", win.WM_PASTE, editable and self.send(win.EM_CANPASTE, win.CF_UNICODETEXT, 0) != 0 },
+            .{ "Select all", win.EM_SETSEL, self.send(win.WM_GETTEXTLENGTH, 0, 0) > 0 },
+        };
+        inline for (items) |item| _ = win.AppendMenuW(menu, win.MF_STRING | @as(u32, if (item[2]) win.MF_ENABLED else win.MF_GRAYED), item[1], std.unicode.utf8ToUtf16LeStringLiteral(item[0]));
+        const choice = win.TrackPopupMenu(menu, win.TPM_RETURNCMD | win.TPM_NONOTIFY | win.TPM_RIGHTBUTTON, point.x, point.y, 0, self.hwnd, null);
+        if (choice != 0) _ = win.SendMessageW(self.hwnd, @intCast(choice), 0, if (choice == win.EM_SETSEL) -1 else 0);
     }
 };
 
 fn fromWindow(hwnd: win.HWND) ?*Host {
-    const value = win.GetWindowLongPtrW(hwnd, win.GWLP_USERDATA);
-    return if (value == 0) null else @ptrFromInt(@as(usize, @bitCast(value)));
+    return @ptrCast(@alignCast(win.GetPropW(hwnd, property_name)));
 }
 
 fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
-    if (message == win.WM_NCCREATE) {
-        const cs: *const win.CREATESTRUCTW = @ptrFromInt(@as(usize, @bitCast(lparam)));
-        const host = std.heap.page_allocator.create(Host) catch return 0;
-        host.* = .{ .hwnd = hwnd, .multi = cs.style & win.ES_MULTILINE != 0, .enabled = cs.style & win.WS_DISABLED == 0, .background = theme.current.surface_container_high };
-        host.char_format.cbSize = @sizeOf(win.CHARFORMAT2W);
-        host.char_format.dwMask = @as(u32, win.CFM_FACE) | win.CFM_SIZE | win.CFM_WEIGHT | win.CFM_COLOR;
-        host.char_format.yHeight = 255;
-        host.char_format.wWeight = @intCast(@import("font_config.zig").body_weight);
-        const face = std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans");
-        @memcpy(host.char_format.szFaceName[0..face.len], face);
-        host.char_format.crTextColor = theme.current.on_surface;
-        host.para_format.cbSize = @sizeOf(win.PARAFORMAT);
-        host.para_format.dwMask = win.PFM_ALIGNMENT;
-        host.para_format.wAlignment = win.PFA_LEFT;
-        _ = win.SetWindowLongPtrW(hwnd, win.GWLP_USERDATA, @bitCast(@intFromPtr(host)));
-        var unknown: ?*Object = null;
-        if (create_services.?(null, host, &unknown) < 0 or unknown == null) {
-            _ = win.SetWindowLongPtrW(hwnd, win.GWLP_USERDATA, 0);
-            _ = hostRelease(host);
-            return 0;
-        }
-        const hr = unknown.?.query(&iid_services2, &host.services);
-        unknown.?.release();
-        if (hr < 0 or host.services == null) {
-            _ = win.SetWindowLongPtrW(hwnd, win.GWLP_USERDATA, 0);
-            _ = hostRelease(host);
-            return 0;
-        }
-        const services = host.services.?;
-        _ = services.send(win.EM_SETTEXTMODE, win.TM_PLAINTEXT | win.TM_MULTILEVELUNDO, 0);
-        _ = services.send(win.EM_SETEVENTMASK, 0, win.ENM_CHANGE | win.ENM_SELCHANGE);
-        _ = services.send(win.EM_SETEDITSTYLE, win.SES_LOGICALCARET, win.SES_LOGICALCARET);
-        services.property(contract.d2d_write | contract.advanced_input, contract.d2d_write | contract.advanced_input);
-        var rect: win.RECT = undefined;
-        _ = win.GetClientRect(hwnd, &rect);
-        rect.right = @max(rect.right, 1);
-        rect.bottom = @max(rect.bottom, 1);
-        if (services.activate(&rect) < 0) {
-            _ = shutdown_services.?(services);
-            services.release();
-            host.services = null;
-            _ = win.SetWindowLongPtrW(hwnd, win.GWLP_USERDATA, 0);
-            _ = hostRelease(host);
-            return 0;
-        }
-        host.active = true;
-        return 1;
-    }
     const host = fromWindow(hwnd) orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
-    const services = host.services orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
     switch (message) {
         win.WM_NCDESTROY => {
-            if (host.active) services.deactivate();
-            _ = shutdown_services.?(services);
-            services.release();
-            host.services = null;
-            if (host.target) |target| _ = target.lpVtbl.*.Base.Base.Base.Release.?(@ptrCast(target));
-            _ = win.SetWindowLongPtrW(hwnd, win.GWLP_USERDATA, 0);
-            _ = hostRelease(host);
-            return win.DefWindowProcW(hwnd, message, wparam, lparam);
+            const previous = host.previous;
+            _ = win.RemovePropW(hwnd, property_name);
+            std.heap.page_allocator.destroy(host);
+            return win.CallWindowProcW(previous, hwnd, message, wparam, lparam);
         },
         win.WM_PAINT => {
             var ps: win.PAINTSTRUCT = undefined;
             const dc = win.BeginPaint(hwnd, &ps);
             defer _ = win.EndPaint(hwnd, &ps);
-            const focused = win.GetFocus() == hwnd;
-            if (focused) _ = win.HideCaret(hwnd);
-            defer if (focused) {
-                _ = win.ShowCaret(hwnd);
-            };
+            _ = win.HideCaret(hwnd);
+            defer _ = win.ShowCaret(hwnd);
             host.paint(dc);
             return 0;
         },
@@ -349,417 +215,65 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             return 0;
         },
         win.WM_ERASEBKGND => return 1,
-        win.WM_SIZE => {
-            services.property(0x100000 | 0x2000 | 0x80000, 0x100000 | 0x2000 | 0x80000);
-            host.invalidate();
+        win.WM_CONTEXTMENU => {
+            host.contextMenu(lparam);
             return 0;
         },
-        win.WM_ENABLE => {
-            host.enabled = wparam != 0;
-            services.property(4, if (host.enabled) 0 else 4);
-            host.invalidate();
-            return 0;
-        },
-        win.WM_SETFOCUS, win.WM_KILLFOCUS => {
-            if (message == win.WM_SETFOCUS) services.uiActivate(true);
-            const result = services.send(message, wparam, lparam);
-            if (message == win.WM_KILLFOCUS) {
-                services.uiActivate(false);
-                host.composing = false;
-            }
-            host.notify(if (message == win.WM_SETFOCUS) win.EN_SETFOCUS else win.EN_KILLFOCUS);
-            host.invalidate();
-            return result;
-        },
+        win.WM_SETFONT => return host.setFont(wparam, lparam),
         win.WM_IME_STARTCOMPOSITION => host.composing = true,
-        win.WM_IME_ENDCOMPOSITION => host.composing = false,
-        win.WM_GETDLGCODE => return win.DLGC_WANTCHARS | win.DLGC_WANTARROWS | win.DLGC_HASSETSEL,
-        win.WM_GETOBJECT => return win.DefWindowProcW(hwnd, message, wparam, lparam),
-        win.WM_SETCURSOR => {
-            _ = win.SetCursor(win.LoadCursorA(null, @ptrFromInt(32513)));
+        win.WM_IME_ENDCOMPOSITION, win.WM_KILLFOCUS => host.composing = false,
+        win.EM_SETCUEBANNER => {
+            const input: [*:0]const u16 = @ptrFromInt(@as(usize, @bitCast(lparam)));
+            const count = @min(std.mem.len(input), host.cue.len - 1);
+            @memcpy(host.cue[0..count], input[0..count]);
+            host.cue[count] = 0;
+            host.cue_focused = wparam != 0;
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return 1;
         },
-        else => {},
-    }
-    switch (contract.messageRoute(message)) {
-        .font => {
-            if (message == win.WM_GETFONT) return @bitCast(@intFromPtr(host.font));
-            host.setFont(@ptrFromInt(wparam));
-            return 0;
-        },
-        .cue => {
-            if (message == win.EM_SETCUEBANNER) {
-                const input: [*:0]const u16 = @ptrFromInt(@as(usize, @bitCast(lparam)));
-                const count = @min(std.mem.len(input), host.cue.len - 1);
-                @memcpy(host.cue[0..count], input[0..count]);
-                host.cue[count] = 0;
-                host.cue_focused = wparam != 0;
-                host.invalidate();
-                return 1;
-            }
-            if (wparam == 0 or lparam <= 0) return 0;
-            const out: [*]u16 = @ptrFromInt(wparam);
-            const count = @min(std.mem.len(@as([*:0]const u16, &host.cue)), @as(usize, @intCast(lparam)) - 1);
-            @memcpy(out[0..count], host.cue[0..count]);
-            out[count] = 0;
-            return 1;
-        },
-        .rectangle => {
-            if (lparam == 0) return 0;
-            const rect: *win.RECT = @ptrFromInt(@as(usize, @bitCast(lparam)));
-            if (message == win.EM_GETRECT) {
-                rect.* = host.textRect();
-            } else {
-                var client: win.RECT = undefined;
-                _ = win.GetClientRect(hwnd, &client);
-                host.inset = .{ .left = rect.left, .top = rect.top, .right = client.right - rect.right, .bottom = client.bottom - rect.bottom };
-                services.property(0x2000, 0x2000);
-                if (message == win.EM_SETRECT) host.invalidate();
-            }
-            return 0;
-        },
-        .margins => {
-            if (message == win.EM_GETMARGINS) return @as(isize, host.inset.left) | (@as(isize, host.inset.right) << 16);
-            if (wparam & win.EC_LEFTMARGIN != 0) host.inset.left = @intCast(@as(usize, @bitCast(lparam)) & 0xffff);
-            if (wparam & win.EC_RIGHTMARGIN != 0) host.inset.right = @intCast((@as(usize, @bitCast(lparam)) >> 16) & 0xffff);
-            services.property(0x2000, 0x2000);
-            host.invalidate();
-            return 0;
-        },
-        .limit => {
-            host.limit = if (wparam == 0) 0x7ffffffe else @intCast(@min(wparam, 0x7ffffffe));
-            services.property(0x8000, 0x8000);
-            return services.send(win.EM_EXLIMITTEXT, 0, host.limit);
-        },
-        .position => {
-            var point: win.POINTL = .{ .x = 0, .y = 0 };
-            _ = services.send(win.WM_USER + 38, @intFromPtr(&point), @intCast(wparam));
+        win.EM_POSFROMCHAR => {
+            const point = host.position(wparam);
             const x: u16 = @bitCast(@as(i16, @intCast(std.math.clamp(point.x, -32768, 32767))));
             const y: u16 = @bitCast(@as(i16, @intCast(std.math.clamp(point.y, -32768, 32767))));
             return @as(isize, x) | (@as(isize, y) << 16);
         },
-        .text => {
-            if (message == win.WM_SETTEXT) {
-                const result = services.send(message, wparam, lparam);
-                host.notify(win.EN_CHANGE);
-                host.invalidate();
-                return result;
-            }
-            if (message == win.WM_GETTEXTLENGTH) {
-                const request = win.GETTEXTLENGTHEX{ .flags = win.GTL_PRECISE | win.GTL_NUMCHARS, .codepage = 1200 };
-                return services.send(win.EM_GETTEXTLENGTHEX, @intFromPtr(&request), 0);
-            }
+        win.WM_GETTEXTLENGTH => {
+            const request = win.GETTEXTLENGTHEX{ .flags = win.GTL_PRECISE | win.GTL_NUMCHARS, .codepage = 1200 };
+            return host.send(win.EM_GETTEXTLENGTHEX, @intFromPtr(&request), 0);
+        },
+        win.WM_GETTEXT => {
             if (wparam == 0) return 0;
             const request = win.GETTEXTEX{ .cb = @intCast(@min(wparam, 0x7fffffff) * 2), .flags = win.GT_DEFAULT, .codepage = 1200, .lpDefaultChar = null, .lpUsedDefChar = null };
-            const count = services.send(win.EM_GETTEXTEX, @intFromPtr(&request), lparam);
+            const count = host.send(win.EM_GETTEXTEX, @intFromPtr(&request), lparam);
             if (count > 0) {
                 const text: [*]u16 = @ptrFromInt(@as(usize, @bitCast(lparam)));
-                for (text[0..@intCast(count)]) |*unit| {
-                    if (unit.* == '\r') unit.* = '\n';
-                }
+                for (text[0..@intCast(count)]) |*unit| if (unit.* == '\r') {
+                    unit.* = '\n';
+                };
             }
             return count;
         },
-        .native => {},
+        else => {},
     }
-    var result: win.LRESULT = 0;
-    const hr = services.method(3, *const fn (*Object, u32, usize, isize, *win.LRESULT) callconv(.winapi) win.HRESULT)(services, message, wparam, lparam, &result);
-    if (hr != 0) return win.DefWindowProcW(hwnd, message, wparam, lparam);
-    return result;
+    return host.send(message, wparam, lparam);
 }
 
-fn hostQuery(self: *Host, iid: *const win.GUID, out: *?*anyopaque) callconv(.winapi) win.HRESULT {
-    out.* = null;
-    for ([_]win.GUID{ iid_unknown, iid_host, iid_host2 }) |supported| {
-        if (std.mem.eql(u8, std.mem.asBytes(iid), std.mem.asBytes(&supported))) {
-            out.* = self;
-            _ = hostAddRef(self);
-            return ok;
-        }
-    }
-    return no_interface;
-}
-fn hostAddRef(self: *Host) callconv(.winapi) u32 {
-    self.refs += 1;
-    return self.refs;
-}
-fn hostRelease(self: *Host) callconv(.winapi) u32 {
-    self.refs -= 1;
-    const refs = self.refs;
-    if (refs == 0) std.heap.page_allocator.destroy(self);
-    return refs;
-}
-fn getDC(self: *Host) callconv(.winapi) win.HDC {
-    return win.GetDC(self.hwnd);
-}
-fn releaseDC(self: *Host, dc: win.HDC) callconv(.winapi) i32 {
-    return win.ReleaseDC(self.hwnd, dc);
-}
-fn showScrollBar(_: *Host, _: i32, _: win.BOOL) callconv(.winapi) win.BOOL {
-    return win.TRUE;
-}
-fn enableScrollBar(_: *Host, _: i32, _: i32) callconv(.winapi) win.BOOL {
-    return win.TRUE;
-}
-fn setScrollRange(_: *Host, _: i32, _: i32, _: i32, _: win.BOOL) callconv(.winapi) win.BOOL {
-    return win.TRUE;
-}
-fn setScrollPos(_: *Host, _: i32, _: i32, _: win.BOOL) callconv(.winapi) win.BOOL {
-    return win.TRUE;
-}
-fn invalidateRect(self: *Host, rect: [*c]const win.RECT, _: win.BOOL) callconv(.winapi) void {
-    _ = win.InvalidateRect(self.hwnd, rect, win.FALSE);
-}
-fn viewChange(self: *Host, _: win.BOOL) callconv(.winapi) void {
-    self.invalidate();
-}
-fn createCaret(self: *Host, flags: win.HBITMAP, width: i32, height: i32) callconv(.winapi) win.BOOL {
-    self.caret_null = @intFromPtr(flags) & 64 != 0;
-    return win.CreateCaret(self.hwnd, null, @max(1, width), @max(1, height));
-}
-fn showCaret(self: *Host, show: win.BOOL) callconv(.winapi) win.BOOL {
-    if (show != 0 and self.caret_null) return win.TRUE;
-    return if (show != 0) win.ShowCaret(self.hwnd) else win.HideCaret(self.hwnd);
-}
-fn setCaretPos(_: *Host, x: i32, y: i32) callconv(.winapi) win.BOOL {
-    return win.SetCaretPos(x, y);
-}
-fn setTimer(self: *Host, id: u32, timeout: u32) callconv(.winapi) win.BOOL {
-    return if (win.SetTimer(self.hwnd, id, timeout, null) != 0) win.TRUE else win.FALSE;
-}
-fn killTimer(self: *Host, id: u32) callconv(.winapi) void {
-    _ = win.KillTimer(self.hwnd, id);
-}
-fn scrollWindow(self: *Host, _: i32, _: i32, _: [*c]const win.RECT, _: [*c]const win.RECT, _: win.HRGN, update: [*c]win.RECT, _: u32) callconv(.winapi) void {
-    if (update != null) _ = win.GetClientRect(self.hwnd, update);
-    self.invalidate();
-}
-fn setCapture(self: *Host, capture: win.BOOL) callconv(.winapi) void {
-    if (capture != 0) {
-        _ = win.SetCapture(self.hwnd);
-    } else {
-        _ = win.ReleaseCapture();
-    }
-}
-fn setFocus(self: *Host) callconv(.winapi) void {
-    _ = win.SetFocus(self.hwnd);
-}
-fn setCursor(_: *Host, cursor: win.HCURSOR, _: win.BOOL) callconv(.winapi) void {
-    _ = win.SetCursor(cursor);
-}
-fn screenToClient(self: *Host, point: *win.POINT) callconv(.winapi) win.BOOL {
-    return win.ScreenToClient(self.hwnd, point);
-}
-fn clientToScreen(self: *Host, point: *win.POINT) callconv(.winapi) win.BOOL {
-    return win.ClientToScreen(self.hwnd, point);
-}
-fn activate(_: *Host, old: [*c]i32) callconv(.winapi) win.HRESULT {
-    if (old != null) old.* = 0;
-    return ok;
-}
-fn deactivate(_: *Host, _: i32) callconv(.winapi) win.HRESULT {
-    return ok;
-}
-fn getClientRect(self: *Host, rect: *win.RECT) callconv(.winapi) win.HRESULT {
-    if (win.GetClientRect(self.hwnd, rect) == 0) return failed;
-    rect.right = @max(rect.left + 1, rect.right);
-    rect.bottom = @max(rect.top + 1, rect.bottom);
-    return ok;
-}
-fn getViewInset(self: *Host, rect: *win.RECT) callconv(.winapi) win.HRESULT {
-    rect.* = .{
-        .left = contract.himetric(self.inset.left),
-        .top = contract.himetric(self.inset.top),
-        .right = contract.himetric(self.inset.right),
-        .bottom = contract.himetric(self.inset.bottom),
-    };
-    return ok;
-}
-fn getCharFormat(self: *Host, out: **const win.CHARFORMATW) callconv(.winapi) win.HRESULT {
-    out.* = @ptrCast(&self.char_format);
-    return ok;
-}
-fn getParaFormat(self: *Host, out: **const win.PARAFORMAT) callconv(.winapi) win.HRESULT {
-    out.* = &self.para_format;
-    return ok;
-}
-fn getSysColor(self: *Host, index: i32) callconv(.winapi) win.COLORREF {
-    return switch (index) {
-        win.COLOR_WINDOW => self.background,
-        win.COLOR_WINDOWTEXT => self.char_format.crTextColor,
-        else => win.GetSysColor(index),
-    };
-}
-fn getBackStyle(_: *Host, out: *i32) callconv(.winapi) win.HRESULT {
-    out.* = 1;
-    return ok;
-}
-fn getMaxLength(self: *Host, out: *u32) callconv(.winapi) win.HRESULT {
-    out.* = self.limit;
-    return ok;
-}
-fn getScrollBars(self: *Host, out: *u32) callconv(.winapi) win.HRESULT {
-    out.* = if (self.multi) win.ES_AUTOVSCROLL else win.ES_AUTOHSCROLL;
-    return ok;
-}
-fn getPasswordChar(_: *Host, out: *u16) callconv(.winapi) win.HRESULT {
-    out.* = 0;
-    return ok;
-}
-fn getAcceleratorPos(_: *Host, out: *i32) callconv(.winapi) win.HRESULT {
-    out.* = -1;
-    return ok;
-}
-fn getExtent(self: *Host, out: *win.SIZEL) callconv(.winapi) win.HRESULT {
-    var rect: win.RECT = undefined;
-    _ = win.GetClientRect(self.hwnd, &rect);
-    out.* = .{ .cx = contract.himetric(@max(1, rect.right)), .cy = contract.himetric(@max(1, rect.bottom)) };
-    return ok;
-}
-fn charFormatChange(self: *Host, format: *const win.CHARFORMATW) callconv(.winapi) win.HRESULT {
-    const count = @min(format.cbSize, @sizeOf(win.CHARFORMAT2W));
-    @memcpy(std.mem.asBytes(&self.char_format)[0..count], @as([*]const u8, @ptrCast(format))[0..count]);
-    self.char_format.cbSize = @sizeOf(win.CHARFORMAT2W);
-    return ok;
-}
-fn paraFormatChange(self: *Host, format: *const win.PARAFORMAT) callconv(.winapi) win.HRESULT {
-    const count = @min(format.cbSize, @sizeOf(win.PARAFORMAT));
-    @memcpy(std.mem.asBytes(&self.para_format)[0..count], @as([*]const u8, @ptrCast(format))[0..count]);
-    self.para_format.cbSize = @sizeOf(win.PARAFORMAT);
-    return ok;
-}
-fn getPropertyBits(self: *Host, mask: u32, out: *u32) callconv(.winapi) win.HRESULT {
-    out.* = contract.propertyBits(self.multi, self.enabled) & mask;
-    return ok;
-}
-fn notify(self: *Host, code: u32, data: ?*anyopaque) callconv(.winapi) win.HRESULT {
-    if (code == win.EN_CHANGE or code == win.EN_UPDATE or code == win.EN_HSCROLL or code == win.EN_VSCROLL) {
-        self.notify(code);
-    } else if (data) |value| {
-        const header: *win.NMHDR = @ptrCast(@alignCast(value));
-        header.* = .{ .hwndFrom = self.hwnd, .idFrom = @intCast(win.GetDlgCtrlID(self.hwnd)), .code = code };
-        _ = win.SendMessageW(win.GetParent(self.hwnd), win.WM_NOTIFY, header.idFrom, @bitCast(@intFromPtr(value)));
-    }
-    return ok;
-}
-fn immGetContext(self: *Host) callconv(.winapi) win.HIMC {
-    return win.ImmGetContext(self.hwnd);
-}
-fn immReleaseContext(self: *Host, context: win.HIMC) callconv(.winapi) void {
-    _ = win.ImmReleaseContext(self.hwnd, context);
-}
-fn getSelectionBarWidth(_: *Host, out: *i32) callconv(.winapi) win.HRESULT {
-    out.* = 0;
-    return ok;
-}
-fn isDoubleClickPending(self: *Host) callconv(.winapi) win.BOOL {
-    var message: win.MSG = undefined;
-    return win.PeekMessageW(&message, self.hwnd, win.WM_LBUTTONDBLCLK, win.WM_LBUTTONDBLCLK, win.PM_NOREMOVE);
-}
-fn getWindow(self: *Host, out: *win.HWND) callconv(.winapi) win.HRESULT {
-    out.* = self.hwnd;
-    return ok;
-}
-fn setForegroundWindow(self: *Host) callconv(.winapi) win.HRESULT {
-    return if (win.SetForegroundWindow(win.GetAncestor(self.hwnd, win.GA_ROOT)) != 0) ok else failed;
-}
-fn getPalette(_: *Host) callconv(.winapi) win.HPALETTE {
-    return null;
-}
-fn getEastAsianFlags(_: *Host, out: *i32) callconv(.winapi) win.HRESULT {
-    out.* = 0;
-    return ok;
-}
-fn setCursor2(_: *Host, cursor: win.HCURSOR, _: win.BOOL) callconv(.winapi) win.HCURSOR {
-    return win.SetCursor(cursor);
-}
-fn freeTextServicesNotification(self: *Host) callconv(.winapi) void {
-    self.services = null;
-}
-fn getEditStyle(_: *Host, _: u32, out: *u32) callconv(.winapi) win.HRESULT {
-    out.* = 0;
-    return ok;
-}
-fn getWindowStyles(self: *Host, style: *u32, ex_style: *u32) callconv(.winapi) win.HRESULT {
-    style.* = @truncate(@as(usize, @bitCast(win.GetWindowLongPtrW(self.hwnd, win.GWL_STYLE))));
-    ex_style.* = @truncate(@as(usize, @bitCast(win.GetWindowLongPtrW(self.hwnd, win.GWL_EXSTYLE))));
-    return ok;
-}
-fn showDropCaret(self: *Host, show: win.BOOL, _: win.HDC, rect: [*c]const win.RECT) callconv(.winapi) win.HRESULT {
-    if (show == 0) return destroyCaret(self);
-    if (rect == null) return failed;
-    if (win.CreateCaret(self.hwnd, null, @max(1, rect.*.right - rect.*.left), @max(1, rect.*.bottom - rect.*.top)) == 0) return failed;
-    _ = win.SetCaretPos(rect.*.left, rect.*.top);
-    return if (win.ShowCaret(self.hwnd) != 0) ok else failed;
-}
-fn destroyCaret(_: *Host) callconv(.winapi) win.HRESULT {
-    return if (win.DestroyCaret() != 0) ok else failed;
-}
-fn getHorzExtent(_: *Host, out: *i32) callconv(.winapi) win.HRESULT {
-    out.* = 0;
-    return ok;
-}
+const iid_document = win.GUID{ .Data1 = 0x8cc497c0, .Data2 = 0xa1df, .Data3 = 0x11ce, .Data4 = .{ 0x80, 0x98, 0, 0xaa, 0, 0x47, 0xbe, 0x5d } };
+const Object = extern struct {
+    vtable: [*]const *const anyopaque,
 
-const host_vtable = blk: {
-    const methods = .{
-        hostQuery,
-        hostAddRef,
-        hostRelease,
-        getDC,
-        releaseDC,
-        showScrollBar,
-        enableScrollBar,
-        setScrollRange,
-        setScrollPos,
-        invalidateRect,
-        viewChange,
-        createCaret,
-        showCaret,
-        setCaretPos,
-        setTimer,
-        killTimer,
-        scrollWindow,
-        setCapture,
-        setFocus,
-        setCursor,
-        screenToClient,
-        clientToScreen,
-        activate,
-        deactivate,
-        getClientRect,
-        getViewInset,
-        getCharFormat,
-        getParaFormat,
-        getSysColor,
-        getBackStyle,
-        getMaxLength,
-        getScrollBars,
-        getPasswordChar,
-        getAcceleratorPos,
-        getExtent,
-        charFormatChange,
-        paraFormatChange,
-        getPropertyBits,
-        notify,
-        immGetContext,
-        immReleaseContext,
-        getSelectionBarWidth,
-        isDoubleClickPending,
-        getWindow,
-        setForegroundWindow,
-        getPalette,
-        getEastAsianFlags,
-        setCursor2,
-        freeTextServicesNotification,
-        getEditStyle,
-        getWindowStyles,
-        showDropCaret,
-        destroyCaret,
-        getHorzExtent,
-    };
-    var table: [methods.len]*const anyopaque = undefined;
-    for (methods, 0..) |method, i| table[i] = @ptrCast(&method);
-    break :blk table;
+    fn release(self: *Object) void {
+        const call: *const fn (*Object) callconv(.winapi) u32 = @ptrCast(self.vtable[2]);
+        _ = call(self);
+    }
+    fn query(self: *Object, iid: *const win.GUID, out: *?*Object) win.HRESULT {
+        const call: *const fn (*Object, *const win.GUID, *?*Object) callconv(.winapi) win.HRESULT = @ptrCast(self.vtable[0]);
+        return call(self, iid, out);
+    }
+    fn undo(self: *Object, count: i32) void {
+        const call: *const fn (*Object, i32, ?*i32) callconv(.winapi) win.HRESULT = @ptrCast(self.vtable[22]);
+        _ = call(self, count, null);
+    }
 };
 
 test "IGSH-466 native DirectWrite host maps text selection undo rectangles limits and rendering" {
@@ -781,24 +295,25 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
         for (&paths) |*path| _ = win.RemoveFontResourceExW(path, win.FR_PRIVATE, null);
     }
     text_draw.setBundledFontPaths(&pointers);
-    const parent = win.CreateWindowExW(0, std.unicode.utf8ToUtf16LeStringLiteral("STATIC"), null, win.WS_POPUP, 0, 0, 320, 200, null, null, instance, null) orelse return error.CreateWindowFailed;
+    const parent = win.CreateWindowExW(0, std.unicode.utf8ToUtf16LeStringLiteral("STATIC"), null, win.WS_POPUP | win.WS_VISIBLE, 0, 0, 320, 200, null, null, instance, null) orelse return error.CreateWindowFailed;
     defer _ = win.DestroyWindow(parent);
     _ = win.SetWindowLongPtrW(parent, win.GWLP_WNDPROC, @bitCast(@intFromPtr(&testParentProc)));
-    const edit = create(instance, parent, @ptrFromInt(1), win.WS_CHILD | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 200, 80) orelse return error.CreateEditFailed;
+    const edit = create(instance, parent, null, win.WS_CHILD | win.WS_VISIBLE | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 200, 80) orelse return error.CreateEditFailed;
     defer _ = win.DestroyWindow(edit);
     const host = fromWindow(edit).?;
-    _ = win.SetWindowLongPtrW(parent, win.GWLP_USERDATA, 1);
+    _ = win.SetWindowLongPtrW(edit, win.GWLP_ID, 1);
     try std.testing.expect(!isComposing(parent));
     try std.testing.expect(!isComposing(null));
-    try std.testing.expectEqual(@as(usize, 0), @offsetOf(Host, "vtable"));
-    try std.testing.expectEqual(@as(usize, 54), host_vtable.len);
+    var name: [64]u16 = undefined;
+    const name_len: usize = @intCast(win.GetClassNameW(edit, &name, name.len));
+    try std.testing.expectEqualSlices(u16, class_name, name[0..name_len]);
     const font = win.CreateFontW(-17, 0, 0, 0, @import("font_config.zig").body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans")) orelse return error.CreateFontFailed;
     defer _ = win.DeleteObject(font);
     _ = win.SendMessageW(edit, win.WM_SETFONT, @intFromPtr(font), 1);
     try std.testing.expectEqual(@as(win.LRESULT, @bitCast(@intFromPtr(font))), win.SendMessageW(edit, win.WM_GETFONT, 0, 0));
     var format = std.mem.zeroes(win.CHARFORMAT2W);
     format.cbSize = @sizeOf(win.CHARFORMAT2W);
-    _ = host.services.?.send(win.EM_GETCHARFORMAT, win.SCF_DEFAULT, @bitCast(@intFromPtr(&format)));
+    _ = host.send(win.EM_GETCHARFORMAT, win.SCF_DEFAULT, @bitCast(@intFromPtr(&format)));
     try std.testing.expectEqual(@as(u16, 500), format.wWeight);
     try std.testing.expectEqual(@as(i32, 255), format.yHeight);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans"), std.mem.sliceTo(&format.szFaceName, 0));
@@ -844,11 +359,10 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     try std.testing.expectEqual(@as(isize, 4 | (6 << 16)), win.SendMessageW(edit, win.EM_GETMARGINS, 0, 0));
     _ = win.SendMessageW(edit, win.EM_SETRECTNP, 0, @bitCast(@intFromPtr(&rect)));
     _ = win.SendMessageW(edit, win.EM_SETLIMITTEXT, 128, 0);
-    try std.testing.expectEqual(@as(u32, 128), host.limit);
+    try std.testing.expectEqual(@as(isize, 128), host.send(win.EM_GETLIMITTEXT, 0, 0));
     const cue = std.unicode.utf8ToUtf16LeStringLiteral("Filter");
     _ = win.SendMessageW(edit, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(cue)));
-    try std.testing.expect(win.SendMessageW(edit, win.EM_GETCUEBANNER, @intFromPtr(&buffer), buffer.len) != 0);
-    try std.testing.expectEqualSlices(u16, cue, std.mem.sliceTo(&buffer, 0));
+    try std.testing.expectEqualSlices(u16, cue, std.mem.sliceTo(&host.cue, 0));
     _ = win.SetWindowTextW(edit, std.unicode.utf8ToUtf16LeStringLiteral("one two three four five six seven eight nine ten"));
     const wide_height = contentHeight(edit, 1);
     _ = win.MoveWindow(edit, 0, 0, 70, 80, 0);
@@ -873,7 +387,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     @memset(pixels, 0xffffffff);
     _ = win.SendMessageW(edit, win.WM_PRINTCLIENT, @intFromPtr(dc), win.PRF_CLIENT);
     _ = win.GdiFlush();
-    try std.testing.expect(host.target != null);
+    try std.testing.expect(text_draw.directwrite);
     const colour = theme.current.surface_container_high;
     const background = ((colour & 255) << 16) | (colour & 0xff00) | ((colour >> 16) & 255);
     try std.testing.expectEqual(background, pixels[0] & 0xffffff);
@@ -882,9 +396,144 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
         if (pixel & 0xffffff != background) ink += 1;
     }
     try std.testing.expect(ink > 100);
+
+    _ = win.SetWindowTextW(edit, std.unicode.utf8ToUtf16LeStringLiteral("before"));
+    _ = win.SendMessageW(edit, win.EM_SETSEL, 6, 6);
+    _ = win.SendMessageW(edit, win.EM_REPLACESEL, 1, @bitCast(@intFromPtr(std.unicode.utf8ToUtf16LeStringLiteral(" after"))));
+    const changes_before_style = test_changes;
+    _ = win.SendMessageW(edit, win.WM_SETFONT, @intFromPtr(font), 1);
+    theme.set(.green);
+    _ = win.SendMessageW(edit, win.WM_PRINTCLIENT, @intFromPtr(dc), win.PRF_CLIENT);
+    try std.testing.expectEqual(changes_before_style, test_changes);
+    try std.testing.expect(win.SendMessageW(edit, win.EM_UNDO, 0, 0) != 0);
+    const undone: usize = @intCast(win.GetWindowTextW(edit, &buffer, buffer.len));
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("before"), buffer[0..undone]);
+    const changes_before_set = test_changes;
+    _ = win.SetWindowTextW(edit, std.unicode.utf8ToUtf16LeStringLiteral("accessible value"));
+    try std.testing.expectEqual(changes_before_set + 1, test_changes);
+    test_revert = true;
+    _ = win.SetWindowTextW(edit, std.unicode.utf8ToUtf16LeStringLiteral("rejected"));
+    try std.testing.expectEqual(changes_before_set + 3, test_changes);
+    const reverted: usize = @intCast(win.GetWindowTextW(edit, &buffer, buffer.len));
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("accessible value"), buffer[0..reverted]);
+    const iid_accessible = win.GUID{ .Data1 = 0x618736e0, .Data2 = 0x3c3d, .Data3 = 0x11cf, .Data4 = .{ 0x81, 0x0c, 0, 0xaa, 0, 0x38, 0x9b, 0x71 } };
+    var accessible: ?*Object = null;
+    try std.testing.expect(win.AccessibleObjectFromWindow(edit, @bitCast(@as(i32, -4)), &iid_accessible, @ptrCast(&accessible)) >= 0);
+    const provider = accessible orelse return error.MissingAccessibleProvider;
+    defer provider.release();
+    var child = std.mem.zeroes(win.VARIANT);
+    @as(*u16, @ptrCast(&child)).* = win.VT_I4;
+    var value: win.BSTR = null;
+    const get_value: *const fn (*Object, win.VARIANT, *win.BSTR) callconv(.winapi) win.HRESULT = @ptrCast(provider.vtable[11]);
+    try std.testing.expect(get_value(provider, child, &value) >= 0);
+    defer win.SysFreeString(value);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("accessible value"), std.mem.span(value));
+    _ = win.SetFocus(edit);
+    var gui = std.mem.zeroes(win.GUITHREADINFO);
+    gui.cbSize = @sizeOf(win.GUITHREADINFO);
+    try std.testing.expect(win.GetGUIThreadInfo(0, &gui) != 0);
+    try std.testing.expectEqual(edit, gui.hwndCaret);
+    _ = win.InvalidateRect(edit, null, win.FALSE);
+    _ = win.UpdateWindow(edit);
+    try std.testing.expectEqual(@as(win.BOOL, 0), win.GetUpdateRect(edit, null, win.FALSE));
+
+    const sample = std.unicode.utf8ToUtf16LeStringLiteral("Plex agQW 0123");
+    const rendered = try std.testing.allocator.alloc(u32, pixels.len);
+    defer std.testing.allocator.free(rendered);
+    for ([_]i32{ 96, 144 }) |dpi| {
+        const scaled_font = win.CreateFontW(-@divTrunc(17 * dpi + 48, 96), 0, 0, 0, @import("font_config.zig").body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans")) orelse return error.CreateFontFailed;
+        defer _ = win.DeleteObject(scaled_font);
+        _ = win.SendMessageW(edit, win.WM_SETFONT, @intFromPtr(scaled_font), 1);
+        _ = win.SetWindowTextW(edit, sample);
+        _ = win.SendMessageW(edit, win.EM_SETSEL, 0, 0);
+        _ = win.SendMessageW(edit, win.EM_LINESCROLL, 0, -100);
+        const origin = host.position(0);
+        for ([_]theme.Choice{ .green, .amoled }) |choice| {
+            theme.set(choice);
+            _ = win.SendMessageW(edit, win.WM_PRINTCLIENT, @intFromPtr(dc), win.PRF_CLIENT);
+            _ = win.GdiFlush();
+            @memcpy(rendered, pixels);
+            const saved = win.SaveDC(dc);
+            _ = win.SelectObject(dc, scaled_font);
+            _ = win.SetBkMode(dc, win.TRANSPARENT);
+            _ = win.SetTextColor(dc, theme.current.on_surface);
+            _ = win.SetDCBrushColor(dc, theme.current.surface_container_high);
+            const client = win.RECT{ .left = 0, .top = 0, .right = 200, .bottom = 80 };
+            _ = win.FillRect(dc, &client, @ptrCast(@alignCast(win.GetStockObject(win.DC_BRUSH))));
+            const clip = host.textRect();
+            _ = win.IntersectClipRect(dc, clip.left, clip.top, clip.right, clip.bottom);
+            var reference_rect = win.RECT{ .left = origin.x, .top = origin.y, .right = clip.right, .bottom = origin.y + host.lineHeight(dc) };
+            _ = text_draw.drawText(dc, sample, sample.len, &reference_rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_NOCLIP);
+            _ = win.GdiFlush();
+            try std.testing.expect(text_draw.directwrite);
+            const bg = rgbPixel(theme.current.surface_container_high);
+            var ink_count: usize = 0;
+            var left: usize = 200;
+            var right: usize = 0;
+            for (rendered, pixels, 0..) |actual_pixel, reference_pixel, i| {
+                try std.testing.expectEqual(reference_pixel & 0xffffff, actual_pixel & 0xffffff);
+                if (actual_pixel & 0xffffff != bg) {
+                    ink_count += 1;
+                    left = @min(left, i % 200);
+                    right = @max(right, i % 200);
+                }
+            }
+            try std.testing.expect(ink_count > 100);
+            try std.testing.expect(right - left > 70);
+            const wrong_font = win.CreateFontW(-@divTrunc(17 * dpi + 48, 96), 0, 0, 0, 500, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, std.unicode.utf8ToUtf16LeStringLiteral("Segoe UI")) orelse return error.CreateFontFailed;
+            _ = win.SelectObject(dc, wrong_font);
+            _ = win.FillRect(dc, &client, @ptrCast(@alignCast(win.GetStockObject(win.DC_BRUSH))));
+            _ = text_draw.drawText(dc, sample, sample.len, &reference_rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_NOCLIP);
+            _ = win.GdiFlush();
+            var different: usize = 0;
+            for (rendered, pixels) |actual_pixel, wrong_pixel| {
+                if (actual_pixel & 0xffffff != wrong_pixel & 0xffffff) different += 1;
+            }
+            try std.testing.expect(different > 100);
+            _ = win.RestoreDC(dc, saved);
+            _ = win.DeleteObject(wrong_font);
+        }
+        _ = win.SetWindowTextW(edit, std.unicode.utf8ToUtf16LeStringLiteral("Plex\r\nPlex"));
+        const next: usize = @intCast(host.send(win.EM_LINEINDEX, 1, 0));
+        const line_height = host.position(next).y - host.position(0).y;
+        try std.testing.expect(line_height >= @divTrunc(17 * dpi, 96));
+        var client: win.RECT = undefined;
+        _ = win.GetClientRect(edit, &client);
+        const text_rect = host.textRect();
+        try std.testing.expectEqual(2 * line_height + text_rect.top + client.bottom - text_rect.bottom, contentHeight(edit, 1));
+        _ = win.SendMessageW(edit, win.WM_PRINTCLIENT, @intFromPtr(dc), win.PRF_CLIENT);
+        _ = win.GdiFlush();
+        var top: usize = 80;
+        var bottom: usize = 0;
+        for (pixels, 0..) |pixel, i| {
+            if (pixel & 0xffffff != rgbPixel(theme.current.surface_container_high)) {
+                top = @min(top, i / 200);
+                bottom = @max(bottom, i / 200);
+            }
+        }
+        try std.testing.expect(bottom - top > @as(usize, @intCast(line_height)));
+        try std.testing.expect(bottom - top < @as(usize, @intCast(contentHeight(edit, 1))));
+        _ = win.SendMessageW(edit, win.WM_SETFONT, @intFromPtr(font), 0);
+    }
+    std.debug.print("IGSH-466 font pixel equality, fallback negative control and 96/144 DPI ink/content-height passed\n", .{});
 }
 
+fn rgbPixel(colour: win.COLORREF) u32 {
+    return ((colour & 255) << 16) | (colour & 0xff00) | ((colour >> 16) & 255);
+}
+
+var test_changes: usize = 0;
+var test_revert = false;
+
 fn testParentProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
+    if (message == win.WM_COMMAND and (wparam >> 16) & 0xffff == win.EN_CHANGE) {
+        test_changes += 1;
+        if (test_revert) {
+            test_revert = false;
+            _ = win.SetWindowTextW(@ptrFromInt(@as(usize, @bitCast(lparam))), std.unicode.utf8ToUtf16LeStringLiteral("accessible value"));
+        }
+        return 0;
+    }
     if (message == win.WM_CTLCOLOREDIT) {
         const dc: win.HDC = @ptrFromInt(wparam);
         _ = win.SetTextColor(dc, theme.current.on_surface);

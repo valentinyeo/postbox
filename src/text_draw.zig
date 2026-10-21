@@ -603,11 +603,6 @@ fn render(dc: win.HDC, text_ptr: [*c]const u16, len: i32, rect: *win.RECT, flags
     mark(.blit_back, &stamp);
     return height;
 }
-pub fn renderingParameters() ?*anyopaque {
-    if (!available()) return null;
-    return rendering;
-}
-
 pub fn drawText(dc: win.HDC, text: [*c]const u16, len: i32, rect: *win.RECT, flags: u32) i32 {
     if (!failed) {
         return render(dc, text, len, rect, flags) catch |err| {

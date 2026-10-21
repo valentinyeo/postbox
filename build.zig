@@ -316,7 +316,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }) });
     edit_tests.root_module.link_libc = true;
-    for ([_][]const u8{ "user32", "gdi32", "ole32", "imm32" }) |library| edit_tests.root_module.linkSystemLibrary(library, .{});
+    for ([_][]const u8{ "user32", "gdi32", "ole32", "oleacc", "oleaut32", "imm32" }) |library| edit_tests.root_module.linkSystemLibrary(library, .{});
     b.step("test-edit", "Run native DirectWrite editing tests on Windows").dependOn(&b.addRunArtifact(edit_tests).step);
 
     const test_step = b.step("test", "Run unit tests");
@@ -641,7 +641,7 @@ pub fn build(b: *std.Build) void {
         sourceSection("fn updateDictation(", "fn selectChat("),
     }) catch @panic("Out of memory building drafts UI harness");
     const drafts_ui_files = b.addWriteFiles();
-    for ([_][]const u8{ "drafts.zig", "chat_key.zig", "transport.zig", "theme.zig", "edit_contract.zig", "main.zig" }) |name| {
+    for ([_][]const u8{ "drafts.zig", "chat_key.zig", "transport.zig", "theme.zig", "edit_contract.zig" }) |name| {
         _ = drafts_ui_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
     }
     const drafts_ui_harness = drafts_ui_files.add("drafts_ui_test.zig", drafts_ui_source);
