@@ -9,7 +9,8 @@ fn body(allocator: std.mem.Allocator, request: hub.Request) !std.json.Parsed(std
 }
 
 test "accounts retain linked state and account identity" {
-    var accounts = try hub.parseAccounts(std.testing.allocator,
+    var accounts = try hub.parseAccounts(
+        std.testing.allocator,
         "[{\"account\":\"personal\",\"jid\":\"15550000002@s.whatsapp.net\",\"state\":\"linked\",\"last_event_at\":\"2026-01-01T00:00:00Z\"},{\"account\":\"business\",\"state\":\"logged_out\"}]",
     );
     defer accounts.deinit();
@@ -38,7 +39,8 @@ test "request paths encode query values and pagination boundaries" {
 
 test "chat rows normalize into existing summary and envelope without merging accounts" {
     const allocator = std.testing.allocator;
-    const normalized = try hub.normalize(allocator,
+    const normalized = try hub.normalize(
+        allocator,
         "[{\"jid\":\"personal:15550000001@s.whatsapp.net\",\"name\":\"Fixture Chat\",\"kind\":\"direct\",\"last_message_ts\":\"2026-01-01T00:00:00Z\",\"unread_count\":2}]",
         "personal",
         .chats,
@@ -67,7 +69,8 @@ test "message and group replies retain production parser fields" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const normalized = try hub.normalize(allocator,
+    const normalized = try hub.normalize(
+        allocator,
         "[{\"MsgID\":\"personal:MSG\",\"ChatJID\":\"personal:15550000001@s.whatsapp.net\",\"Timestamp\":\"2026-01-01T00:00:00Z\",\"Text\":\"Fixture message\",\"FromMe\":false,\"MediaType\":\"image\",\"Filename\":\"fixture.png\",\"MimeType\":\"image/png\",\"quoted_msg_id\":\"QUOTE\"}]",
         "personal",
         .messages,
