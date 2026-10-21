@@ -1,34 +1,40 @@
 display_information:
-  name: Messages
+  name: Wazig
   description: Slack in the Wazig Messages desktop client
   background_color: "#1F2328"
-features:
-  bot_user:
-    display_name: Messages
-    always_online: false
 oauth_config:
-  user_token_scopes:
-    - channels:history
-    - channels:read
-    - groups:history
-    - groups:read
-    - im:history
-    - im:read
-    - mpim:history
-    - mpim:read
-    - users:read
-    - files:read
-    - files:write
-    - chat:write
+  redirect_urls:
+    - http://localhost:53682/slack/oauth/callback
+  pkce_enabled: true
+  scopes:
+    user:
+      - channels:read
+      - channels:history
+      - groups:read
+      - groups:history
+      - im:read
+      - im:history
+      - mpim:read
+      - mpim:history
+      - users:read
+      - chat:write
+      - files:read
+      - files:write
+      - reactions:read
+      - channels:write
+      - groups:write
+      - im:write
+      - mpim:write
 settings:
-  socket_mode:
-    enabled: true
+  socket_mode_enabled: true
+  token_rotation_enabled: true
   event_subscriptions:
     user_events:
       - message.channels
       - message.groups
       - message.im
       - message.mpim
+      - reaction_added
+      - reaction_removed
   org_deploy_enabled: false
   is_hosted: false
-  token_management_enabled: false

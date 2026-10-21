@@ -14,6 +14,11 @@ run "$ZIG" fmt --check src build.zig
 run node tools/check-fonts.mjs
 run node --test tools/check-fonts.test.mjs
 run "$ZIG" build test
+(
+    slack_temp=$(mktemp -d)
+    trap 'rm -rf -- "$slack_temp"' EXIT
+    run python3 tools/test_slack_integration.py --zig "$ZIG" --cache-dir "$slack_temp"
+)
 if [ "${WAZIG_WINE_TESTS:-0}" = "1" ]; then
     raster_temp=$(mktemp -d)
     trap 'rm -rf -- "$raster_temp"' EXIT
