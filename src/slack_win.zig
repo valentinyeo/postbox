@@ -1126,3 +1126,94 @@ fn shareImage(allocator: std.mem.Allocator, ctx: JobContext, channel: []const u8
     if (complete.status != 200 or !httpOk(allocator, complete.body)) return error.UploadRejected;
     return bodyOnly(allocator, complete);
 }
+
+pub const HttpCancel = struct {
+    lock: win.SRWLOCK = .{},
+    request: win.HINTERNET = null,
+    stopped: bool = false,
+
+    pub fn stop(self: *HttpCancel) void {
+        win.AcquireSRWLockExclusive(&self.lock);
+        defer win.ReleaseSRWLockExclusive(&self.lock);
+        self.stopped = true;
+        if (self.request) |request| _ = win.WinHttpCloseHandle(request);
+        self.request = null;
+    }
+
+    fn attach(self: *HttpCancel, request: win.HINTERNET) bool {
+        win.AcquireSRWLockExclusive(&self.lock);
+        defer win.ReleaseSRWLockExclusive(&self.lock);
+        if (self.stopped) return false;
+        self.request = request;
+        return true;
+    }
+
+    fn close(self: *HttpCancel, request: win.HINTERNET) void {
+        win.AcquireSRWLockExclusive(&self.lock);
+        defer win.ReleaseSRWLockExclusive(&self.lock);
+        if (self.request == request) {
+            _ = win.WinHttpCloseHandle(request);
+            self.request = null;
+        }
+    }
+};
+
+pub const HttpStream = struct {
+    session: win.HINTERNET,
+    connection: win.HINTERNET,
+    request: win.HINTERNET,
+    cancel: ?*HttpCancel,
+    status: u32,
+
+    pub fn deinit(self: HttpStream) void {
+        if (self.cancel) |cancel| cancel.close(self.request) else _ = win.WinHttpCloseHandle(self.request);
+        _ = win.WinHttpCloseHandle(self.connection);
+        _ = win.WinHttpCloseHandle(self.session);
+    }
+
+    pub fn read(self: HttpStream, buffer: []u8) !usize {
+        var got: win.DWORD = 0;
+        if (win.WinHttpReadData(self.request, buffer.ptr, @intCast(buffer.len), &got) == 0) return error.NetworkFailed;
+        return got;
+    }
+
+    pub fn response(self: HttpStream, allocator: std.mem.Allocator, max_bytes: usize) !Response {
+        return .{ .status = self.status, .body = try readResponse(allocator, self.request, max_bytes) };
+    }
+};
+
+pub fn openHttp(allocator: std.mem.Allocator, host: []const u8, port: u16, secure: bool, token: []const u8, method: []const u8, path: []const u8, content_type: []const u8, payload: []const u8, last_event_id: []const u8, cancel: ?*HttpCancel) !HttpStream {
+    if (!enabled) return error.Unsupported;
+    for (token) |byte| if (byte < 0x21 or byte > 0x7e) return error.InvalidToken;
+    for (last_event_id) |byte| if (!std.ascii.isDigit(byte)) return error.InvalidEventId;
+    const wide_host = try toWide(allocator, host);
+    defer allocator.free(wide_host);
+    const wide_path = try toWide(allocator, path);
+    defer allocator.free(wide_path);
+    const wide_method = try toWide(allocator, method);
+    defer allocator.free(wide_method);
+    const session = win.WinHttpOpen(wideLiteral("Wazig Messages/1.0"), if (secure) win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY else win.WINHTTP_ACCESS_TYPE_NO_PROXY, null, null, 0) orelse return error.NetworkFailed;
+    errdefer _ = win.WinHttpCloseHandle(session);
+    _ = win.WinHttpSetTimeouts(session, 10_000, 10_000, 30_000, 30_000);
+    const connection = win.WinHttpConnect(session, wide_host.ptr, port, 0) orelse return error.NetworkFailed;
+    errdefer _ = win.WinHttpCloseHandle(connection);
+    const request = win.WinHttpOpenRequest(connection, wide_method.ptr, wide_path.ptr, null, null, null, if (secure) win.WINHTTP_FLAG_SECURE else 0) orelse return error.NetworkFailed;
+    if (cancel) |control| {
+        if (!control.attach(request)) {
+            _ = win.WinHttpCloseHandle(request);
+            return error.Cancelled;
+        }
+    }
+    errdefer if (cancel) |control| control.close(request) else _ = win.WinHttpCloseHandle(request);
+    var redirect_policy: win.DWORD = win.WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+    if (win.WinHttpSetOption(request, win.WINHTTP_OPTION_REDIRECT_POLICY, &redirect_policy, @sizeOf(win.DWORD)) == 0) return error.NetworkFailed;
+    const headers = try std.fmt.allocPrint(allocator, "Authorization: Bearer {s}\r\nContent-Type: {s}\r\nAccept: */*\r\n{s}{s}{s}", .{ token, content_type, if (last_event_id.len > 0) "Last-Event-ID: " else "", last_event_id, if (last_event_id.len > 0) "\r\n" else "" });
+    defer allocator.free(headers);
+    const wide_headers = try toWide(allocator, headers);
+    defer allocator.free(wide_headers);
+    if (win.WinHttpSendRequest(request, wide_headers.ptr, @intCast(wide_headers.len), if (payload.len > 0) @constCast(payload.ptr) else null, @intCast(payload.len), @intCast(payload.len), 0) == 0 or win.WinHttpReceiveResponse(request, null) == 0) return error.NetworkFailed;
+    var status: win.DWORD = 0;
+    var size: win.DWORD = @sizeOf(win.DWORD);
+    if (win.WinHttpQueryHeaders(request, win.WINHTTP_QUERY_STATUS_CODE | win.WINHTTP_QUERY_FLAG_NUMBER, null, &status, &size, null) == 0) return error.NetworkFailed;
+    return .{ .session = session, .connection = connection, .request = request, .cancel = cancel, .status = status };
+}

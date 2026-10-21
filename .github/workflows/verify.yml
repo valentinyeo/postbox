@@ -7,13 +7,17 @@ on:
         description: User journey to drive
         type: choice
         default: search
-        options: [search, navigation, drafts, palette, appearance]
+        options: [search, navigation, drafts, palette, appearance, whatsapp-hub]
   pull_request:
     paths:
       - .github/workflows/verify.yml
       - .claude/skills/verify-wazig/**
       - tools/verify-wazig/**
       - src/main.zig
+      - src/wa_hub*.zig
+      - src/slack_win.zig
+      - src/transport.zig
+      - build.zig
 
 permissions:
   contents: read
@@ -26,6 +30,10 @@ jobs:
   verify:
     runs-on: windows-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["search","whatsapp-hub"]' || format('["{0}"]', inputs.feature || 'search')) }}
     steps:
       - uses: actions/checkout@v4
       - name: Check skill map and PowerShell syntax
@@ -46,7 +54,13 @@ jobs:
         run: zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
       - name: Launch, doctor and drive
         shell: pwsh
-        run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ inputs.feature || 'search' }}' -Bin zig-out/bin -Evidence verification-evidence
+        run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence
+      - name: Validate surviving journey evidence
+        if: matrix.feature == 'search' || matrix.feature == 'whatsapp-hub'
+        shell: pwsh
+        run: |
+          python tools/verify-wazig/check-evidence.py verification-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid journey evidence' }
       - name: Cleanup even after a failed journey
         if: always()
         shell: pwsh
@@ -55,6 +69,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: verify-wazig-${{ inputs.feature || 'search' }}
+          name: verify-wazig-${{ matrix.feature }}
           path: verification-evidence/
           if-no-files-found: error

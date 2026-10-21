@@ -11,6 +11,14 @@ if ($app) {
         Assert-That ($app.WaitForExit(5000)) 'Owned process did not exit'
     }
 }
+if ($session.PSObject.Properties.Name -contains 'bridge_pid') {
+    $bridge = Get-Process -Id $session.bridge_pid -ErrorAction SilentlyContinue
+    if ($bridge) {
+        Assert-That ($bridge.StartTime.ToUniversalTime().Ticks.ToString() -eq $session.bridge_start_ticks -and $bridge.Path -eq $session.bridge_exe) 'Fake bridge PID was reused'
+        Stop-Process -Id $bridge.Id -Force
+        Assert-That ($bridge.WaitForExit(5000)) 'Fake bridge survived cleanup'
+    }
+}
 if (Test-Path "$($session.root)/local/Messages") {
     Copy-Item "$($session.root)/local/Messages" (Join-Path $session.evidence 'final-data') -Recurse -Force
 }

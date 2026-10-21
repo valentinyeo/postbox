@@ -123,10 +123,106 @@ function Invoke-Doctor($Session) {
     $compose = Get-Edit $window '1032'
     Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable'
     $null = Read-Edit $search
+    if ($Session.feature -eq 'whatsapp-hub') {
+        $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'hub baseline'
+    }
     $status = Read-Control $Session status
     Assert-That ($status.version -eq '0.0.526') 'Wrong control build'
     Assert-That ($status.sync -eq 'stopped' -and -not $status.slack_connected) 'Provider unexpectedly connected'
     Assert-That ($status.pending_sends -eq 0 -and $status.pending_archives -eq 0) 'Unexpected pending writes'
     $status | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'doctor.json')
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
+}
+
+function Start-FakeBridge([string]$Evidence, [string]$Root) {
+    $portFile = Join-Path $Root 'bridge-port.txt'
+    $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
+    $start.UseShellExecute = $false
+    $start.ArgumentList.Add((Join-Path $PSScriptRoot 'fake-wa-bridge.py'))
+    $start.ArgumentList.Add('--port-file')
+    $start.ArgumentList.Add($portFile)
+    $start.ArgumentList.Add('--log')
+    $start.ArgumentList.Add((Join-Path $Evidence 'bridge-requests.jsonl'))
+    $process = [Diagnostics.Process]::Start($start)
+    try {
+        $null = Wait-Until { if ($process.HasExited) { throw 'Fake bridge exited' }; (Test-Path $portFile) -and (Get-Item $portFile).Length -gt 0 } 'fake bridge listening'
+        $port = [int](Get-Content $portFile -Raw)
+        return @{ process = $process; url = "http://127.0.0.1:$port" }
+    } catch {
+        if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+        throw
+    }
+}
+
+function Read-BridgeRequests($Session) {
+    $path = Join-Path $Session.evidence 'bridge-requests.jsonl'
+    if (-not (Test-Path $path)) { return @() }
+    return @(Get-Content $path | Where-Object { $_.EndsWith('}') } | ForEach-Object { $_ | ConvertFrom-Json })
+}
+
+function Hub-Pass($Session, [string]$Gate) {
+    $line = "whatsapp-hub $Gate PASS"
+    Write-Output $line
+    Add-Content (Join-Path $Session.evidence 'hub-proof.log') $line
+}
+
+function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
+    $state = Read-Control $Session status
+    Assert-That ($state.chat_count -eq 2 -and $state.selected.name -eq 'Verification Alpha') 'Hub chats did not reach the sidebar'
+    Hub-Pass $Session chats
+    Send-Keys $Session '^{TAB}'
+    Send-Keys $Session '^+{TAB}'
+    $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object id -eq 'BASELINE').Count -eq 1 } 'hub history visible'
+    Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'history.messages.json')
+    Save-Screen $Session history
+    Hub-Pass $Session history
+    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/mark-read' -and $_.body.chat -eq '15550000001@s.whatsapp.net' -and $_.status -eq 200 }).Count -gt 0 } 'hub mark-read'
+    Hub-Pass $Session mark-read
+    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/events' -and $_.last_event_id -eq '1' }).Count -gt 0 } 'SSE baseline resume'
+    $headers = @{ Authorization = 'Bearer fixture-key-not-a-secret' }
+    Invoke-RestMethod "$($Session.bridge_url)/fixture/live" -Method Post -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
+    $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object id -eq 'LIVE').Count -eq 1 } 'live SSE message visible'
+    Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'live.messages.json')
+    Save-Screen $Session live
+    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/events' -and $_.last_event_id -eq '2' }).Count -gt 0 } 'SSE live resume'
+    Hub-Pass $Session live-sse-replay
+    Send-Keys $Session '^k'
+    Send-Keys $Session 'Compose message'
+    Send-Keys $Session '{ENTER}'
+    Send-Keys $Session 'Fixture outgoing'
+    Send-Keys $Session '{ENTER}'
+    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/send' -and $_.duplicate -eq $true -and $_.status -eq 200 }).Count -eq 1 } 'deduplicated hub retry'
+    $sends = @(Read-BridgeRequests $Session | Where-Object path -eq '/v1/send')
+    Assert-That ($sends.Count -ge 2 -and @($sends.body.client_id | Select-Object -Unique).Count -eq 1) 'Send retry changed client_id'
+    Assert-That (@($sends | Where-Object accepted -eq $true).Count -eq 1) 'Send delivered more than once'
+    Assert-That ($sends[0].body.client_id -match '^[a-f0-9]{32}$') 'Send did not use the outbox id'
+    $null = Wait-Until { (Read-Control $Session status).pending_sends -eq 0 } 'outbox acknowledged'
+    Hub-Pass $Session send-client-id-dedupe
+    $null = Wait-Until {
+        $media = @(Read-BridgeRequests $Session | Where-Object { $_.path.StartsWith('/v1/media/') })
+        @($media | Where-Object status -eq 202).Count -gt 0 -and @($media | Where-Object status -eq 200).Count -gt 0
+    } 'pending then ready media'
+    $null = Wait-Until { @(Get-ChildItem (Join-Path $Messages 'hub-media') -Filter '*.bin' | Where-Object Length -gt 0).Count -gt 0 } 'durable media cache'
+    $ready = @(Read-BridgeRequests $Session | Where-Object { $_.path.StartsWith('/v1/media/') -and $_.status -eq 200 })[0]
+    $cached = @(Get-ChildItem (Join-Path $Messages 'hub-media') -Filter '*.bin' | Where-Object { (Get-FileHash $_.FullName).Hash.ToLowerInvariant() -eq $ready.sha256 })
+    Assert-That ($cached.Count -gt 0) 'Downloaded media bytes differ from bridge response'
+    Hub-Pass $Session media-202-ready-cache
+    Save-Screen $Session sent
+    Send-Keys $Session '^k'
+    Send-Keys $Session 'Archive selected chat'
+    Send-Keys $Session '{ENTER}'
+    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/archive' -and $_.body.archived -eq $true -and $_.body.chat -eq '15550000001@s.whatsapp.net' -and $_.status -eq 200 }).Count -gt 0 } 'hub archive'
+    $null = Wait-Until { (Read-Control $Session status).chat_count -eq 1 -and (Read-Control $Session status).pending_archives -eq 0 } 'archived chat removed'
+    Hub-Pass $Session archive
+    Save-Screen $Session after
+    $requests = @(Read-BridgeRequests $Session | Where-Object { $_.method -ne 'SSE' })
+    Assert-That (@($requests | Where-Object authorized -ne $true).Count -eq 0) 'Unauthenticated hub request'
+    $launch = Get-Content (Join-Path $Messages 'launch-log.txt')
+    Assert-That (@($launch | Where-Object { $_ -match 'whatsapp backend:' }).Count -eq 1) 'Backend was logged more than once'
+    Assert-That (@($launch | Where-Object { $_ -match 'whatsapp backend: hub$' }).Count -eq 1) 'Hub was not selected'
+    Assert-That (-not (($launch -join "`n").Contains('fixture-key-not-a-secret'))) 'Launch log leaked key'
+    $preferences = "HKCU:\Software\MessagesVerification\$($Session.id)\Software\Messages"
+    $registry = Get-Item $preferences
+    Assert-That ($registry.GetValueKind('WaBridgeKey') -eq [Microsoft.Win32.RegistryValueKind]::Binary) 'Bridge key is not DPAPI storage'
+    Hub-Pass $Session auth-dpapi-backend
 }

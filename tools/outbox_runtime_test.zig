@@ -340,6 +340,14 @@ fn oldestPendingSend(a: *App) ?usize {
 }
 fn removeMessageAt(_: *App, _: usize) void {}
 fn formatSlackTime(_: *WideText(15), _: std.mem.Allocator, _: []const u8) void {}
+fn hubConfigured(_: *const App) bool {
+    return false;
+}
+
+fn hubJobReady(_: *const App, _: WacliJob) bool {
+    return true;
+}
+
 fn mediaBusy(_: *App) bool {
     return false;
 }

@@ -113,6 +113,18 @@ done
 printf 'const seed = slack_win.loadUserEnvironment(init.gpa, lit("DEEPGRAM_API_KEY"));\nconst stored = slack_win.loadSecret(init.gpa, lit("DeepgramApiKey"));\n' > "$fixture/src/main.zig"
 "$lint" "$fixture"
 printf 'test-lint-repeats: C2 rejects inherited reads throughout src even with loadSecret and permits the saved user environment reader\n'
+printf 'const key = loadRegistryString(allocator, lit("WaBridgeKey"));\n' > "$fixture/src/main.zig"
+status=0
+"$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+if (( status != 1 )) || ! grep -Fq '[C1]' "$temp/output"; then
+    cat "$temp/output" >&2
+    printf 'test-lint-repeats: FAIL C1 must reject a plain WaBridgeKey read\n' >&2
+    exit 1
+fi
+printf 'const key = slack_win.loadSecret(allocator, lit("WaBridgeKey"));\n' > "$fixture/src/main.zig"
+"$lint" "$fixture"
+: > "$fixture/src/main.zig"
+printf 'test-lint-repeats: C1 rejects plain WaBridgeKey and permits DPAPI\n'
 f1_cases=0
 for api in RoundRect Ellipse Pie Chord Arc CreateEllipticRgn CreateRoundRectRgn; do
     for form in direct alias import_alias field field_alias multiline_alias multiline_field; do
