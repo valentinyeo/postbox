@@ -32,6 +32,7 @@ const chat_order = @import("chat_order.zig");
 const chat_menu = @import("chat_menu.zig");
 const chat_reconcile = @import("chat_reconcile.zig");
 const compose_layout = @import("compose_layout.zig");
+const update_card_layout = @import("update_card_layout.zig");
 const field_pill = @import("field_pill.zig");
 const media_age = @import("media_age.zig");
 const media_drain = @import("media_drain.zig");
@@ -17406,7 +17407,7 @@ fn updateCardVisible(a: *const App) bool {
 }
 
 fn updateCardHeight(a: *const App) i32 {
-    return px(a, 78);
+    return px(a, update_card_layout.height);
 }
 
 fn updateCardSpan(a: *const App) i32 {
@@ -17420,12 +17421,20 @@ fn updateCardRect(a: *const App) win.RECT {
     return .{ .left = px(a, 12), .top = bottom - updateCardHeight(a), .right = left_width - px(a, 12), .bottom = bottom };
 }
 
+fn updateCardLayout(a: *const App, card: win.RECT) update_card_layout.Layout {
+    return update_card_layout.compute(.{ .left = card.left, .top = card.top, .right = card.right, .bottom = card.bottom }, @intCast(a.dpi));
+}
+
+fn updateCardWinRect(r: update_card_layout.Rect) win.RECT {
+    return .{ .left = r.left, .top = r.top, .right = r.right, .bottom = r.bottom };
+}
+
 fn updateCardButtonRect(a: *const App, card: win.RECT) win.RECT {
-    return .{ .left = card.left + px(a, 12), .top = card.bottom - px(a, 36), .right = card.left + px(a, 124), .bottom = card.bottom - px(a, 10) };
+    return updateCardWinRect(updateCardLayout(a, card).button);
 }
 
 fn updateCardCloseRect(a: *const App, card: win.RECT) win.RECT {
-    return .{ .left = card.right - px(a, 28), .top = card.top + px(a, 4), .right = card.right - px(a, 4), .bottom = card.top + px(a, 28) };
+    return updateCardWinRect(updateCardLayout(a, card).close);
 }
 
 fn updateCardPtIn(r: win.RECT, x: i32, y: i32) bool {
@@ -17516,7 +17525,8 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
         std.fmt.bufPrint(&title_buf, "New version v{s}", .{tag}) catch "New version available";
     _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
     _ = win.SetTextColor(hdc, theme.current.on_surface);
-    var title_rc = win.RECT{ .left = card.left + px(a, 12), .top = card.top + px(a, 8), .right = card.right - px(a, 32), .bottom = card.top + px(a, 30) };
+    const card_layout = updateCardLayout(a, card);
+    var title_rc = updateCardWinRect(card_layout.title);
     drawAscii(hdc, &title_rc, title, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX | win.DT_END_ELLIPSIS);
 
     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
@@ -17534,11 +17544,11 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     else
         "Downloading in the background...";
     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-    var line_rc = win.RECT{ .left = card.left + px(a, 12), .top = card.top + px(a, 30), .right = card.right - px(a, 12), .bottom = card.top + px(a, 50) };
+    var line_rc = updateCardWinRect(card_layout.line);
     drawAscii(hdc, &line_rc, line, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX | win.DT_END_ELLIPSIS);
 
     if (busy) {
-        const bar = win.RECT{ .left = card.left + px(a, 12), .top = card.bottom - px(a, 22), .right = card.right - px(a, 12), .bottom = card.bottom - px(a, 14) };
+        const bar = updateCardWinRect(card_layout.bar);
         var track = bar;
         if (win.CreateSolidBrush(theme.current.secondary_container)) |brush| {
             _ = win.FillRect(hdc, &track, brush);
