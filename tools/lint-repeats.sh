@@ -154,6 +154,7 @@ function finish() {
 FNR == 1 {
     finish()
     file = FILENAME
+    if (file == ".github/workflows/automerge.yml") automerge_line = 1
 }
 {
     code = $0
@@ -191,7 +192,7 @@ FNR == 1 {
         if (code ~ /required=/) {
             automerge_line = FNR
             all_required = 1
-            count = split("ci tdlib windows-smoke no-comments unfurl-verification private-markers secret-scan pr-title notify-release", required_checks, " ")
+            count = split("ci|tdlib|windows-smoke|no-comments|unfurl-verification|private-markers|secret-scan|pr-title|notify-release|tdlib-cache / cache", required_checks, "[|]")
             for (i = 1; i <= count; i++)
                 if (!index(code, "\"" required_checks[i] "\"")) all_required = 0
         }

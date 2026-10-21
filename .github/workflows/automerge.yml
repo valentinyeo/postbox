@@ -26,7 +26,7 @@ jobs:
         run: |
           set -uo pipefail
           merged_any=0
-          required='["ci","tdlib","windows-smoke","no-comments","unfurl-verification","private-markers","secret-scan","pr-title","notify-release"]'
+          required='["ci","tdlib","windows-smoke","no-comments","unfurl-verification","private-markers","secret-scan","pr-title","notify-release","tdlib-cache / cache"]'
           for pr in $(gh pr list -R "$REPO" --state open --json number -q '.[].number'); do
             info=$(gh pr view "$pr" -R "$REPO" --json isDraft,labels,additions,deletions,files,mergeable,statusCheckRollup,headRefOid) || { echo "#$pr: could not read PR head checks"; continue; }
             head_oid=$(echo "$info" | jq -er '.headRefOid | select(test("^[0-9a-f]{40}$"))') || { echo "#$pr: invalid PR head"; continue; }

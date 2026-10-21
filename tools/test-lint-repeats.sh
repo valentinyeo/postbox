@@ -78,7 +78,7 @@ for missing in ci tdlib windows-smoke no-comments unfurl-verification private-ma
     fi
     b8_cases=$((b8_cases + 1))
 done
-for guard in 'as \$names' 'COMPLETED' 'match-head-commit' 'could not evaluate head checks' 'length) == 0' '!= "code-review"'; do
+for guard in 'required=' 'as \$names' 'COMPLETED' 'match-head-commit' 'could not evaluate head checks' 'length) == 0' '!= "code-review"'; do
     sed "/$guard/d" "$repo/.github/workflows/automerge.yml" > "$fixture/.github/workflows/automerge.yml"
     status=0
     "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
