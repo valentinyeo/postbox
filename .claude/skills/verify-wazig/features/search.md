@@ -12,7 +12,7 @@ Find a chat by its displayed name or identifier, distinguish a no-match result a
 ## How to get to it (user POV)
 
 - Press Ctrl+F, or `/` outside an editable field.
-- Click the sidebar search field, whose cue is `Search All networks  Ctrl+F` in the baseline view.
+- Click the sidebar search field, whose cue is `Search All  Ctrl+F` in the baseline view.
 - Ctrl+K → `Search chats` focuses that same field.
 
 ## Driving it with PowerShell UI Automation
