@@ -45,6 +45,9 @@ class NoStoriesTests(unittest.TestCase):
     def test_IGSH_538_both_themes_share_gap_free_sidebar_layout(self):
         main = (ROOT / 'src/main.zig').read_text()
         start = main.index('fn layout(')
+        wrapper = main[start:main.index('\nfn ', start + 1)]
+        self.assertIn('layoutRegion(a, width, height, null)', wrapper)
+        start = main.index('fn layoutRegion(')
         layout = main[start:main.index('\nfn ', start + 1)]
         self.assertIn('const search_height: i32 = px(a, 48);', layout)
         self.assertIn('win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, height - header_height - search_height - status_height - updateCardSpan(a), win.TRUE)', layout)

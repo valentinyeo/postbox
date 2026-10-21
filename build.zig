@@ -393,6 +393,24 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(recording_tests).step);
 
+    const repaint_files = b.addWriteFiles();
+    _ = repaint_files.add("compose_layout.zig", @embedFile("src/compose_layout.zig"));
+    _ = repaint_files.add("theme.zig", @embedFile("src/theme.zig"));
+    const buffer_source = @embedFile("src/paint_buffer.zig");
+    const repaint_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("tools/repaint_test.zig"),
+        buffer_source[(std.mem.indexOfScalar(u8, buffer_source, '\n') orelse unreachable) + 1 ..],
+        sourceSection("fn layoutComposer(", "fn layout(a:"),
+        "fn composeChanged(a: *App) void {\n",
+        sourceSection("\n                saveComposerDraft(a);", "            } else if (id == id_search"),
+        "}\n",
+    }) catch @panic("Out of memory building repaint harness");
+    const repaint_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = repaint_files.add("repaint_test.zig", repaint_source),
+        .target = b.resolveTargetQuery(.{}),
+    }) });
+    test_step.dependOn(&b.addRunArtifact(repaint_tests).step);
+
     const slack_worker_source = @embedFile("src/slack_win.zig");
     const slack_send_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/slack_send_test.zig"),
@@ -569,9 +587,13 @@ pub fn build(b: *std.Build) void {
     const composer_button_files = b.addWriteFiles();
     _ = composer_button_files.addCopyFile(b.path("src/main.zig"), "main-source.zig");
     _ = composer_button_files.addCopyFile(b.path("src/theme.zig"), "theme.zig");
+    const composer_paint_source = sourceSection("fn drawComposerButton(", "fn drawSetupButton(");
+    const composer_paint_start = std.mem.indexOf(u8, composer_paint_source, "    var shapes =") orelse @panic("Missing composer painting body");
     const composer_button_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/composer_button_test.zig"),
-        sourceSection("fn drawDictationIcon(", "fn drawSetupButton("),
+        sourceSection("fn drawDictationIcon(", "fn drawComposerButton("),
+        "fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {\n",
+        composer_paint_source[composer_paint_start..],
         "fn layoutComposer(a: *App, width: i32, height: i32) void {\n",
         sourceSection("    const composer_gap =", "    const header_height:"),
         "    const sizes = .{ .edit_height = px(a, 44) };\n",
@@ -587,6 +609,7 @@ pub fn build(b: *std.Build) void {
 
     const drafts_ui_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/drafts_ui_test.zig"),
+        sourceSection("fn visibleChatIndex(", "fn chatProvider("),
         sourceSection("fn composerText(", "fn ensureDictation("),
         sourceSection("fn updateDictation(", "fn selectChat("),
     }) catch @panic("Out of memory building drafts UI harness");
