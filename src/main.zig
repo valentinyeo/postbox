@@ -10261,6 +10261,19 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
 
 fn handleCanvasDoubleClick(a: *App, x: i32, y: i32) bool {
     for (a.messages[0..a.message_count], 0..) |*item, index| {
+        const media = item.media_hit;
+        if (x >= media.left and x <= media.right and y >= media.top and y <= media.bottom) {
+            if (!isImage(item) and (!isGif(item) or isVideoGif(item))) return false;
+            a.selected_message = index;
+            if (item.local_path.len == 0) {
+                setStatus(a, "Downloading image...");
+                _ = downloadMedia(a, index, false);
+                return true;
+            }
+            if (isImage(item)) return true;
+            openImageViewer(a, item);
+            return true;
+        }
         const bubble = item.bubble_hit;
         if (x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom and
             a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp)
@@ -10272,18 +10285,6 @@ fn handleCanvasDoubleClick(a: *App, x: i32, y: i32) bool {
                 return true;
             }
         }
-        const media = item.media_hit;
-        if (x < media.left or x > media.right or y < media.top or y > media.bottom) continue;
-        if (!isImage(item) and (!isGif(item) or isVideoGif(item))) return false;
-        a.selected_message = index;
-        if (item.local_path.len == 0) {
-            setStatus(a, "Downloading image...");
-            _ = downloadMedia(a, index, false);
-            return true;
-        }
-        if (isImage(item)) return true;
-        openImageViewer(a, item);
-        return true;
     }
     return false;
 }
@@ -10400,7 +10401,6 @@ fn enqueueReactionJob(a: *App, entry: *PendingReaction) void {
     job.msg_id.set(entry.msg_id.slice());
     job.extra.set(entry.emoji.slice());
     wacliJobArgs(&job, args[0..count]);
-    stopSync(a, "reaction");
     if (!wacliEnqueue(a, job, true)) {
         if (entry.retry_at_ms == 0) entry.retry_at_ms = win.GetTickCount64() + 3_000;
         setStatus(a, "Reaction queue is full; retrying");

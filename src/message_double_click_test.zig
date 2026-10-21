@@ -140,7 +140,6 @@ fn wacliJobArgs(job: *WacliJob, args: []const []const u8) void {
     for (args, 0..) |arg, i| job.args[i].set(arg);
 }
 fn wacliEnqueue(a: *App, job: WacliJob, _: bool) bool {
-    std.debug.assert(!a.sync_running);
     if (a.queue_full) return false;
     a.jobs[a.job_count] = job;
     a.job_count += 1;
@@ -179,8 +178,6 @@ test "IGSH-463 double-click sends exactly one thumbs up to the clicked message a
     try std.testing.expectEqualStrings("received-message", a.jobs[0].args[9].slice());
     try expectReaction(&a, "👍");
     try std.testing.expect(a.messages[0].reaction_pending);
-    try std.testing.expectEqual(@as(usize, 1), a.sync_pauses);
-    try std.testing.expect(!a.sync_running);
 }
 
 test "IGSH-463 second double-click removes thumbs up before or after delivery" {
@@ -216,14 +213,58 @@ test "IGSH-463 someone else's thumbs up does not remove my reaction" {
     try std.testing.expectEqualStrings("👍", a.jobs[0].extra.slice());
 }
 
-test "IGSH-463 received media reacts before opening an image viewer" {
+test "IGSH-463 received photo and GIF double-click preserves media handling instead of reacting" {
+    for ([_]bool{ false, true }) |image| {
+        for ([_]bool{ false, true }) |cached| {
+            var a = fixture();
+            a.messages[0].image = image;
+            a.messages[0].gif = !image;
+            a.messages[0].media_hit = .{ .left = 30, .top = 30, .right = 180, .bottom = 80 };
+            if (cached) a.messages[0].local_path.set(a.allocator, "cached-media");
+            try std.testing.expect(handleCanvasDoubleClick(&a, 40, 40));
+            try std.testing.expectEqual(@as(usize, 0), a.job_count);
+            try std.testing.expectEqual(@as(?usize, 0), a.selected_message);
+            try std.testing.expectEqual(@as(usize, if (cached and !image) 1 else 0), a.viewer_opens);
+            try std.testing.expectEqual(@as(usize, if (cached) 0 else 1), a.downloads);
+            try expectReaction(&a, "");
+        }
+    }
+}
+
+test "IGSH-463 media bubble outside media still toggles thumbs up" {
     var a = fixture();
-    a.messages[0].gif = true;
-    a.messages[0].media_hit = a.messages[0].bubble_hit;
-    a.messages[0].local_path.set(a.allocator, "cached.gif");
+    a.messages[0].image = true;
+    a.messages[0].media_hit = .{ .left = 30, .top = 30, .right = 180, .bottom = 80 };
     try std.testing.expect(handleCanvasDoubleClick(&a, 20, 20));
     try std.testing.expectEqual(@as(usize, 1), a.job_count);
     try std.testing.expectEqual(@as(usize, 0), a.viewer_opens);
+    try std.testing.expectEqual(@as(usize, 0), a.downloads);
+    try expectReaction(&a, "👍");
+}
+
+test "IGSH-463 non-image media double-click does not react" {
+    var a = fixture();
+    a.messages[0].media_hit = a.messages[0].bubble_hit;
+    try std.testing.expect(!handleCanvasDoubleClick(&a, 20, 20));
+    try std.testing.expectEqual(@as(usize, 0), a.job_count);
+    try std.testing.expectEqual(@as(usize, 0), a.viewer_opens);
+    try std.testing.expectEqual(@as(usize, 0), a.downloads);
+}
+
+test "IGSH-463 enqueueing menu reactions leaves sync unchanged even when the queue is full" {
+    for ([_]bool{ false, true }) |full| {
+        var a = fixture();
+        a.queue_full = full;
+        var entry = PendingReaction{};
+        entry.jid = a.chats[0].jid;
+        entry.msg_id = a.messages[0].id;
+        entry.emoji.set("❤️");
+        enqueueReactionJob(&a, &entry);
+        try std.testing.expectEqual(@as(usize, 0), a.sync_pauses);
+        try std.testing.expect(a.sync_running);
+        try std.testing.expectEqual(@as(usize, if (full) 0 else 1), a.job_count);
+        try std.testing.expectEqual(@as(u64, if (full) 3100 else 0), entry.retry_at_ms);
+    }
 }
 
 test "IGSH-463 unsupported providers never enqueue a WhatsApp reaction" {
