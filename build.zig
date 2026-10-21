@@ -310,7 +310,7 @@ pub fn build(b: *std.Build) void {
     b.installFile("assets/IBM-Plex-LICENSE.txt", "bin/IBM-Plex-LICENSE.txt");
 
     const test_step = b.step("test", "Run unit tests");
-    for ([_][]const u8{ "src/pin_icon_test.zig", "src/message_double_click.zig", "src/recording_paint.zig", "src/font_config.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/status_view.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/slack_oauth.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
+    for ([_][]const u8{ "src/pin_icon_test.zig", "src/message_double_click.zig", "src/recording_paint.zig", "src/font_config.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/status_view.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/slack_oauth.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/environment_keys.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(test_root),
@@ -321,6 +321,26 @@ pub fn build(b: *std.Build) void {
         const run_tests = b.addRunArtifact(tests);
         test_step.dependOn(&run_tests.step);
     }
+    const transcription_retry_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("src/transcription_retry_test.zig"),
+        sourceSection("fn beginTranscriptionOpen(", "fn appendDebugLog("),
+        blk: {
+            const source = @embedFile("src/dictation.zig");
+            const first = std.mem.indexOf(u8, source, "const Transport = struct {") orelse @panic("Missing transcription transport");
+            const rest = source[first..];
+            const last = std.mem.indexOf(u8, rest, "fn transcribeAt(") orelse @panic("Missing transcription transport end");
+            break :blk rest[0..last];
+        },
+    }) catch @panic("Out of memory building transcription retry harness");
+    const transcription_retry_harness = b.addWriteFiles().add("transcription_retry_test.zig", transcription_retry_source);
+    const transcription_retry_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = transcription_retry_harness,
+        .target = b.resolveTargetQuery(.{}),
+        .imports = &.{
+            .{ .name = "dictation_policy", .module = b.createModule(.{ .root_source_file = b.path("src/dictation_policy.zig"), .target = b.resolveTargetQuery(.{}) }) },
+        },
+    }) });
+    test_step.dependOn(&b.addRunArtifact(transcription_retry_tests).step);
     const canvas_source = sourceSection("fn canvasProc(", "fn selectChatRow(");
     const canvas_input_start = std.mem.indexOf(u8, canvas_source, "            a.click_origin =") orelse @panic("Missing canvas input start");
     const canvas_input_end = std.mem.indexOf(u8, canvas_source, "        win.WM_RBUTTONUP =>") orelse @panic("Missing canvas input end");
@@ -400,6 +420,7 @@ pub fn build(b: *std.Build) void {
 
     const read_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/chat_reconcile_test.zig"),
+        sourceSection("fn beginTranscriptionOpen(", "fn appendDebugLog("),
         sourceSection("fn refreshMessages(", "fn reconcileOpenChat(a: *App) void {"),
         sourceSection("fn reconcileOpenChat(", "fn youSender("),
         "fn resultFor(job: WacliJob) WacliResult { var storage = WacliResult{}; const result = &storage;\n",

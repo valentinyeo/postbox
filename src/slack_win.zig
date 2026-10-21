@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const slack = @import("slack.zig");
 const slack_send = @import("slack_send.zig");
+const deepgram_key = @import("deepgram_key.zig");
 
 pub const enabled = builtin.os.tag == .windows;
 
@@ -122,7 +123,7 @@ fn regGetString(allocator: std.mem.Allocator, name: [*:0]const u16) ?[]u8 {
 
 pub fn loadUserEnvironment(allocator: std.mem.Allocator, name: [*:0]const u16) ?[]u8 {
     if (!enabled) return null;
-    const flags = win.RRF_RT_REG_SZ | win.RRF_RT_REG_EXPAND_SZ | win.RRF_NOEXPAND;
+    const flags = win.RRF_RT_REG_SZ | win.RRF_RT_REG_EXPAND_SZ;
     var size: win.DWORD = 0;
     if (win.RegGetValueW(winHandleHkey(0x80000001), wideLiteral("Environment"), name, flags, null, null, &size) != win.ERROR_SUCCESS or size == 0 or size > 64 * 1024 or size % 2 != 0) return null;
     const wide = allocator.alloc(u16, size / 2) catch return null;
@@ -185,6 +186,32 @@ pub fn loadSecret(allocator: std.mem.Allocator, name: [*:0]const u16) ?SecretLoa
     if (!std.mem.eql(u8, verified, plain)) return failed;
     if (!regSetBinary(name, blob)) return failed;
     return .{ .value = plain, .outcome = .migrated };
+}
+
+pub const DeepgramKey = struct {
+    key: []u8,
+    action: deepgram_key.Action,
+    stored_outcome: ?@FieldType(SecretLoad, "outcome"),
+    seed_saved: bool,
+};
+
+pub fn loadDeepgramKey(allocator: std.mem.Allocator) !DeepgramKey {
+    const stored = loadSecret(allocator, wideLiteral("DeepgramApiKey"));
+    defer if (stored) |previous| allocator.free(previous.value);
+    const seed = loadUserEnvironment(allocator, wideLiteral("DEEPGRAM_API_KEY"));
+    defer if (seed) |value| allocator.free(value);
+    const decision = deepgram_key.decide(if (stored) |previous| previous.value else null, seed);
+    const key = try allocator.dupe(u8, decision.key);
+    const saved = switch (decision.action) {
+        .save, .update => saveSecret(wideLiteral("DeepgramApiKey"), key),
+        .none, .load => false,
+    };
+    return .{
+        .key = key,
+        .action = decision.action,
+        .stored_outcome = if (stored) |previous| previous.outcome else null,
+        .seed_saved = saved,
+    };
 }
 
 pub const Installation = struct {

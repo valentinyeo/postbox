@@ -72,6 +72,10 @@ const App = struct {
     painted: u32 = 0,
     cached: u32 = 0,
     message_count: usize = 0,
+    messages: [1]struct { transcript_state: enum { none, loading, ready, failed } = .none } = .{.{}},
+    transcribe_attempts: [512]u64 = [_]u64{0} ** 512,
+    transcribe_attempt_count: usize = 0,
+    transcribe_active_id: Utf8Text(191) = .{},
     pending_send_count: usize = 0,
     failed_send_count: usize = 0,
     msg_applied_hash: u64 = 0,
@@ -269,4 +273,18 @@ test "same jid from another WhatsApp account cannot paint or retry the current c
         deliver(&a, &result);
         try std.testing.expectEqual(@as(u32, 1), a.cached);
     }
+}
+
+test "ISSUE-517 chat refresh keeps failed attempts until the next chat open" {
+    var a = fixture();
+    a.message_count = 1;
+    a.messages[0].transcript_state = .failed;
+    try std.testing.expect(!transcribeWasAttempted(&a, "failed-note"));
+    refreshMessages(&a);
+    try std.testing.expectEqual(.failed, a.messages[0].transcript_state);
+    try std.testing.expect(transcribeWasAttempted(&a, "failed-note"));
+    a.chats[0].jid.set("another-chat@g.us");
+    refreshMessages(&a);
+    try std.testing.expectEqual(.none, a.messages[0].transcript_state);
+    try std.testing.expect(!transcribeWasAttempted(&a, "failed-note"));
 }
