@@ -130,16 +130,30 @@ try {
                 Send-Keys $session '{ENTER}'
                 $themeId = if ($theme -eq 'Green') { 'green' } else { 'amoled' }
                 $null = Wait-Until { (Read-Control $session status).theme -eq $themeId } 'composer theme applied'
-                Send-Keys $session '^a'
-                Send-Keys $session 'Verification draft'
-                $null = Wait-Until { (Read-Control $session status).composer.lines -eq 1 } 'one composer line'
-                $baseline = Assert-ComposerLayout $session "composer-$themeId-one" 1
-                Send-Keys $session '+{ENTER}'
-                Send-Keys $session 'Second line'
-                Send-Keys $session '+{ENTER}'
-                Send-Keys $session 'Third line'
-                $null = Wait-Until { (Read-Control $session status).composer.lines -eq 3 } 'three composer lines'
-                $null = Assert-ComposerLayout $session "composer-$themeId-multiline" 3 $baseline
+                foreach ($windowSize in @('wide', 'narrow')) {
+                    if ($windowSize -eq 'wide') {
+                        [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
+                    } else {
+                        [VerifyWindow]::ShowWindow($app.MainWindowHandle, 9) | Out-Null
+                        $dpi = [VerifyWindow]::GetDpiForWindow($app.MainWindowHandle)
+                        $width = [int][Math]::Floor((600 * $dpi + 48) / 96)
+                        $height = [int][Math]::Floor((700 * $dpi + 48) / 96)
+                        Assert-That ([VerifyWindow]::SetWindowPos($app.MainWindowHandle, [IntPtr]::Zero, 0, 0, $width, $height, 6)) 'Cannot resize narrow verification window'
+                        $null = Wait-Until { [Math]::Abs((Get-Window $session).Current.BoundingRectangle.Width - $width) -le 1 } 'narrow native window'
+                        $narrowBox = (Read-Control $session status).composer.box
+                        Assert-That (($narrowBox.right - $narrowBox.left) -lt 360 * $dpi / 96) 'Composer did not reach narrow width'
+                    }
+                    Send-Keys $session '^a'
+                    Send-Keys $session 'One'
+                    $null = Wait-Until { (Read-Control $session status).composer.lines -eq 1 } 'one composer line'
+                    $baseline = Assert-ComposerLayout $session "composer-$themeId-$windowSize-one" 1
+                    Send-Keys $session '+{ENTER}'
+                    Send-Keys $session 'Two'
+                    Send-Keys $session '+{ENTER}'
+                    Send-Keys $session 'Three'
+                    $null = Wait-Until { (Read-Control $session status).composer.lines -eq 3 } 'three composer lines'
+                    $null = Assert-ComposerLayout $session "composer-$themeId-$windowSize-multiline" 3 $baseline
+                }
             }
         }
         palette {

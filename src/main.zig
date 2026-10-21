@@ -643,6 +643,7 @@ const App = struct {
     dictate: ?win.HWND = null,
     voice_btn: ?win.HWND = null,
     attach_btn: ?win.HWND = null,
+    attach_tooltip: WideText(128) = .{},
     voice_session: ?*voice_capture.Session = null,
     voice_active: bool = false,
     voice_finishing: bool = false,
@@ -1199,6 +1200,10 @@ fn paintVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
         drawMicIcon(a, &shapes, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, foreground);
         return;
     }
+    if (!compose_layout.recordingTimerVisible(@bitCast(item.rcItem), @intCast(a.dpi))) {
+        drawMicIcon(a, &shapes, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, theme.current.@"error");
+        return;
+    }
     const dot = px(a, 5);
     const dot_x = item.rcItem.left + px(a, 16);
     smooth.fillEllipse(&shapes, .{ .left = dot_x - dot, .top = mid_y - dot, .right = dot_x + dot, .bottom = mid_y + dot }, theme.current.@"error");
@@ -1268,13 +1273,14 @@ fn drawComposerButton(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     var shapes = smooth.Context.init(item.hDC);
     defer shapes.deinit();
     const index: usize = if (item.CtlID == id_dictate) 0 else if (item.CtlID == id_send) 1 else if (item.CtlID == id_emoji) 2 else 9;
-    const pressed = (item.itemState & win.ODS_SELECTED) != 0;
+    const disabled = (item.itemState & win.ODS_DISABLED) != 0;
+    const pressed = !disabled and (item.itemState & win.ODS_SELECTED) != 0;
     const focused = (item.itemState & win.ODS_FOCUS) != 0;
     const dictating = a.last_dictation_state == .recording or a.last_dictation_state == .transcribing;
     _ = win.FillRect(item.hDC, &item.rcItem, a.brush_raised.?);
-    const face: win.COLORREF = if (theme.choice == .amoled) (if (index == 1) (if (pressed) theme.amoled_send_pressed else if (a.btn_hover[index]) theme.amoled_send_hover else theme.amoled_send) else if (pressed or (index == 0 and dictating)) theme.amoled_button_pressed else if (a.btn_hover[index]) theme.amoled_button_hover else theme.current.surface_container_high) else if (index == 1 and !pressed) theme.current.primary else if (pressed or (index == 0 and dictating)) theme.current.primary_container else if (a.btn_hover[index]) theme.current.surface_container_highest else theme.current.surface_container_high;
-    const foreground = if (theme.choice == .amoled) theme.amoled_button_text else if (index == 1 and !pressed) theme.current.on_primary else if (pressed or (index == 0 and dictating)) theme.current.on_primary_container else theme.current.on_surface;
-    paintRoundedButton(a, &shapes, item.hDC, item.rcItem, face, foreground, a.font_bold.?, if (focused) theme.current.primary else if (theme.choice == .amoled and a.btn_hover[index]) theme.current.outline_variant else null, &.{});
+    const face: win.COLORREF = if (theme.choice == .amoled) (if (index == 1) (if (pressed) theme.amoled_send_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_send_hover else theme.amoled_send) else if (pressed or (index == 0 and dictating)) theme.amoled_button_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_button_hover else theme.current.surface_container_high) else if (index == 1 and !pressed) theme.current.primary else if (pressed or (index == 0 and dictating)) theme.current.primary_container else if (!disabled and a.btn_hover[index]) theme.current.surface_container_highest else theme.current.surface_container_high;
+    const foreground = if (disabled) theme.current.on_surface_variant else if (theme.choice == .amoled) theme.amoled_button_text else if (index == 1 and !pressed) theme.current.on_primary else if (pressed or (index == 0 and dictating)) theme.current.on_primary_container else theme.current.on_surface;
+    paintRoundedButton(a, &shapes, item.hDC, item.rcItem, face, foreground, a.font_bold.?, if (focused) theme.current.primary else if (theme.choice == .amoled and (!disabled and a.btn_hover[index])) theme.current.outline_variant else null, &.{});
     if (index == 0) {
         drawDictationIcon(a, &shapes, @divTrunc(item.rcItem.left + item.rcItem.right, 2), @divTrunc(item.rcItem.top + item.rcItem.bottom, 2), foreground);
         return;
@@ -1380,6 +1386,51 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
     addTooltip(tt, a.emoji_btn, lit("Emoji menu"));
     addTooltip(tt, a.voice_btn, lit("Record a voice note  Enter sends · Esc cancels"));
     addTooltip(tt, a.attach_btn, lit("Attach photo or file"));
+    var attach_info = win.TOOLINFOW{
+        .cbSize = @sizeOf(win.TOOLINFOW),
+        .uFlags = win.TTF_SUBCLASS,
+        .hwnd = hwnd,
+        .uId = id_attach,
+        .lpszText = @constCast(a.attach_tooltip.ptr()),
+    };
+    _ = win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @bitCast(@intFromPtr(&attach_info)));
+    updateAttachButton(a);
+}
+
+fn attachUnavailableReason(a: *App) ?[]const u8 {
+    if (selectedChatIsSlack(a)) {
+        if (slackAccountIsBridge(a, a.chats[a.selected_chat].account.slice())) return "File upload not available over the Slack bridge";
+        return null;
+    }
+    if (selectedChatIsTelegram(a)) return null;
+    return "Open a Slack or Telegram chat first";
+}
+
+fn updateAttachButton(a: *App) void {
+    const button = a.attach_btn orelse return;
+    const reason = attachUnavailableReason(a);
+    if ((win.IsWindowEnabled(button) != 0) != (reason == null)) {
+        _ = win.EnableWindow(button, if (reason == null) win.TRUE else win.FALSE);
+        _ = win.InvalidateRect(button, null, win.TRUE);
+    }
+    const tt = a.tooltips orelse return;
+    a.attach_tooltip.len = std.unicode.utf8ToUtf16Le(&a.attach_tooltip.buf, reason orelse "Attach photo or file") catch 0;
+    a.attach_tooltip.buf[a.attach_tooltip.len] = 0;
+    var info = win.TOOLINFOW{
+        .cbSize = @sizeOf(win.TOOLINFOW),
+        .hwnd = a.hwnd,
+        .uId = id_attach,
+        .rect = if (reason != null) @bitCast(a.compose_geometry.attach) else std.mem.zeroes(win.RECT),
+        .lpszText = @constCast(a.attach_tooltip.ptr()),
+    };
+    _ = win.SendMessageW(tt, win.TTM_NEWTOOLRECTW, 0, @bitCast(@intFromPtr(&info)));
+    _ = win.SendMessageW(tt, win.TTM_UPDATETIPTEXTW, 0, @bitCast(@intFromPtr(&info)));
+}
+
+fn updateDictateButton(a: *App, state: dictation.State) void {
+    a.last_dictation_state = state;
+    const button = a.dictate orelse return;
+    _ = win.InvalidateRect(button, null, win.TRUE);
 }
 
 fn loadRegistryString(allocator: std.mem.Allocator, name: [*:0]const u16) ?[]const u8 {
@@ -10276,6 +10327,7 @@ fn setComposerDraft(a: *App, text: []const u8) void {
 }
 
 fn switchComposerDraft(a: *App) void {
+    updateAttachButton(a);
     const next: ?chat_key.Key = if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].account.len > 0) chat_key.of(&a.chats[a.selected_chat]) else null;
     if (a.draft_store.open) |*open| {
         if (next) |key| {
@@ -10317,15 +10369,13 @@ fn toggleDictation(a: *App) void {
         .idle, .failed => {
             if (a.selected_chat >= a.chat_count or a.chats[a.selected_chat].account.len == 0) return;
             if (session.start(a.deepgram_key, a.dictation_language, chat_key.of(&a.chats[a.selected_chat]))) {
-                a.last_dictation_state = .recording;
-                _ = win.InvalidateRect(a.dictate.?, null, win.TRUE);
+                updateDictateButton(a, .recording);
                 setStatus(a, "Listening... press Ctrl+D to stop");
             } else setStatus(a, "Could not start microphone capture");
         },
         .recording => {
             session.requestStop();
-            a.last_dictation_state = .transcribing;
-            _ = win.InvalidateRect(a.dictate.?, null, win.TRUE);
+            updateDictateButton(a, .transcribing);
             setStatus(a, "Transcribing...");
         },
         .transcribing => setStatus(a, "Transcription is still running"),
@@ -10353,17 +10403,19 @@ fn updateDictation(a: *App) void {
             if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
             setStatus(a, if (restored != null) "Dictation inserted" else "Dictation saved to its chat draft");
         }
-        a.last_dictation_state = .idle;
-        _ = win.InvalidateRect(a.dictate.?, null, win.TRUE);
+        updateDictateButton(a, .idle);
         return;
     }
     if (state == a.last_dictation_state) return;
-    a.last_dictation_state = state;
-    _ = win.InvalidateRect(a.dictate.?, null, win.TRUE);
+    updateDictateButton(a, state);
     switch (state) {
         .idle, .recording => {},
-        .transcribing => setStatus(a, "Transcribing..."),
-        .failed => setStatus(a, "Dictation failed; check the microphone and DEEPGRAM_API_KEY"),
+        .transcribing => {
+            setStatus(a, "Transcribing...");
+        },
+        .failed => {
+            setStatus(a, "Dictation failed; check the microphone and DEEPGRAM_API_KEY");
+        },
         .ready => unreachable,
     }
 }
@@ -13439,8 +13491,8 @@ fn runCommand(a: *App, command: u16) void {
             if (removeSlackInstallation(account.slice())) setStatus(a, "Slack workspace disconnected") else setStatus(a, "Could not disconnect Slack workspace");
         },
         command_slack_attach => {
-            if (selectedChatIsSlack(a) and slackAccountIsBridge(a, a.chats[a.selected_chat].account.slice())) {
-                setStatus(a, "File upload not available over the Slack bridge");
+            if (attachUnavailableReason(a)) |reason| {
+                setStatus(a, reason);
                 return;
             }
             if (selectedChatIsTelegram(a)) {
@@ -13449,10 +13501,6 @@ fn runCommand(a: *App, command: u16) void {
                     defer a.allocator.free(utf8);
                     _ = stageTelegramFile(a, utf8);
                 }
-                return;
-            }
-            if (!selectedChatIsSlack(a)) {
-                setStatus(a, "Open a Slack or Telegram chat first");
                 return;
             }
             if (pickImageFile(a)) |path| {
@@ -13615,6 +13663,7 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
     for (buttons, rects) |button, rect| {
         if (button) |hwnd| _ = win.MoveWindow(hwnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, win.TRUE);
     }
+    updateAttachButton(a);
     if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, dirty, win.FALSE);
 }
 
@@ -15642,17 +15691,17 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             a.chats_hwnd = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 0, 0, 0, 0, hwnd, controlId(id_chats), a.instance, null);
             a.canvas = win.CreateWindowExW(0, lit("WacliMessageCanvas"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, hwnd, controlId(id_canvas), a.instance, null);
+            a.attach_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("Attach photo or file"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_attach), a.instance, null);
             a.compose = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 0, 0, hwnd, controlId(id_compose), a.instance, null);
             if (a.compose) |compose| {
                 a.compose_prev_proc = @bitCast(win.SetWindowLongPtrW(compose, win.GWLP_WNDPROC, @intCast(@intFromPtr(&composeFieldProc))));
                 _ = win.SendMessageW(compose, win.EM_SETLIMITTEXT, drafts.max_text, 0);
                 _ = win.EnableWindow(compose, win.FALSE);
             }
-            a.dictate = win.CreateWindowExW(0, lit("BUTTON"), lit("Dictate"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_dictate), a.instance, null);
-            a.send = win.CreateWindowExW(0, lit("BUTTON"), lit("Send"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_send), a.instance, null);
-            a.emoji_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("😊"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_emoji), a.instance, null);
             a.voice_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("Voice"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_voice), a.instance, null);
-            a.attach_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("Attach photo or file"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_attach), a.instance, null);
+            a.dictate = win.CreateWindowExW(0, lit("BUTTON"), lit("Dictate"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_dictate), a.instance, null);
+            a.emoji_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("😊"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_emoji), a.instance, null);
+            a.send = win.CreateWindowExW(0, lit("BUTTON"), lit("Send"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_send), a.instance, null);
             subclassComposerButton(a, a.attach_btn, 9);
             subclassComposerButton(a, a.voice_btn, 8);
             subclassComposerButton(a, a.dictate, 0);
@@ -15966,6 +16015,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 tickVoice(a);
             } else if (wparam == timer_refresh) {
                 persistDrafts(a);
+                updateAttachButton(a);
                 if (verification_fixture and !hubConfigured(a)) return 0;
                 updateVoiceButton(a);
                 a.paint_minute_ticks += 1;

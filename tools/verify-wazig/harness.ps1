@@ -8,6 +8,12 @@ public static class VerifyWindow {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
+    [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out Rect rect);
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window, ref Point point);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode)]
     public static extern IntPtr ReadText(IntPtr window, uint message, UIntPtr capacity, StringBuilder text, uint flags, uint timeout, out UIntPtr length);
 }
@@ -243,10 +249,19 @@ function Assert-ComposerLayout($Session, [string]$Name, [int]$Lines, $Baseline =
     $ids = @('1136', '1032', '1104', '1056', '1080', '1040')
     Assert-That ($layout.controls.Count -eq $names.Count) "composer-one-box $Name missing controls"
     $window = Get-Window $Session
-    $text = $layout.controls[1]
-    $textBounds = (Get-Edit $window '1032').Current.BoundingRectangle
-    $offsetX = $textBounds.Left - $text.left
-    $offsetY = $textBounds.Top - $text.top
+    $handle = [IntPtr]$window.Current.NativeWindowHandle
+    $client = [VerifyWindow+Rect]::new()
+    $origin = [VerifyWindow+Point]::new()
+    Assert-That ([VerifyWindow]::GetClientRect($handle, [ref]$client)) 'Cannot measure native client area'
+    Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$origin)) 'Cannot measure native client origin'
+    $dpi = [VerifyWindow]::GetDpiForWindow($handle)
+    Assert-That ($dpi -gt 0) 'Cannot measure window DPI'
+    $bottomInset = [Math]::Floor((11 * $dpi + 48) / 96)
+    $iconInset = [Math]::Floor((4 * $dpi + 48) / 96)
+    $boxBottom = $client.Bottom - $bottomInset
+    Assert-That ($box.bottom -eq $boxBottom) "composer-one-box $Name box not anchored to native client bottom"
+    $offsetX = $origin.X
+    $offsetY = $origin.Y
     for ($i = 0; $i -lt $names.Count; $i++) {
         $rect = $layout.controls[$i]
         Assert-That ($rect.name -eq $names[$i]) "composer-one-box $Name unexpected control order"
@@ -256,9 +271,12 @@ function Assert-ComposerLayout($Session, [string]$Name, [int]$Lines, $Baseline =
         Assert-That (-not $element.Current.IsOffscreen) "composer-one-box $Name hidden $($rect.name)"
         if ($rect.name -ne 'text') {
             Assert-That (-not [string]::IsNullOrWhiteSpace($element.Current.Name)) "composer-one-box $Name unnamed icon"
-            Assert-That ($rect.bottom -eq $layout.controls[0].bottom) "composer-one-box $Name icon not bottom aligned"
+            Assert-That ($rect.bottom -eq $box.bottom - $iconInset) "composer-one-box $Name icon not anchored to box bottom"
         }
         $bounds = $element.Current.BoundingRectangle
+        if ($rect.name -ne 'text') {
+            Assert-That ([Math]::Abs($bounds.Bottom - ($origin.Y + $boxBottom - $iconInset)) -le 1) "composer-one-box $Name UIA icon not anchored to native bottom"
+        }
         Assert-That ([Math]::Abs($bounds.Left - $offsetX - $rect.left) -le 1 -and [Math]::Abs($bounds.Top - $offsetY - $rect.top) -le 1 -and [Math]::Abs($bounds.Right - $offsetX - $rect.right) -le 1 -and [Math]::Abs($bounds.Bottom - $offsetY - $rect.bottom) -le 1) "composer-one-box $Name UIA mismatch $($rect.name)"
         for ($j = $i + 1; $j -lt $names.Count; $j++) {
             $other = $layout.controls[$j]

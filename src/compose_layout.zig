@@ -67,6 +67,10 @@ pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool) Layout {
     return .{ .box = box, .attach = attach, .text = text, .voice = voice, .dictate = dictate, .emoji = emoji, .send = send };
 }
 
+pub fn recordingTimerVisible(rect: Rect, dpi: i32) bool {
+    return rect.right - rect.left >= scale(120, dpi);
+}
+
 fn scale(v: i32, dpi: i32) i32 {
     return @divTrunc(v * dpi + 48, 96);
 }
@@ -109,6 +113,11 @@ test "one box contains disjoint text and bottom anchored icons at narrow and wid
                 for ([_]i32{ 1, 2, 8 }) |lines| {
                     const size = computeScaled(0, scale(lines * 20 + 16, dpi), pane.bottom, false, dpi);
                     const slots = arrange(pane, size.edit_height, dpi, recording);
+                    if (recording) {
+                        try testing.expectEqual(width == 900, recordingTimerVisible(slots.voice, dpi));
+                        try testing.expect(!recordingTimerVisible(.{ .right = scale(120, dpi) - 1 }, dpi));
+                        try testing.expect(recordingTimerVisible(.{ .right = scale(120, dpi) }, dpi));
+                    }
                     const icons = [_]Rect{ slots.attach, slots.voice, slots.dictate, slots.emoji, slots.send };
                     const baseline_icons = [_]Rect{ baseline.attach, baseline.voice, baseline.dictate, baseline.emoji, baseline.send };
                     const all = [_]Rect{ slots.attach, slots.text, slots.voice, slots.dictate, slots.emoji, slots.send };
