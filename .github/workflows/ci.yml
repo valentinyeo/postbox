@@ -161,6 +161,9 @@ jobs:
       - name: ISSUE-517 isolated Windows user key loading
         run: zig test src/environment_keys.zig -lc -ladvapi32 -lkernel32 -lcrypt32 --test-filter ISSUE-517
 
+      - name: ISSUE-545 row-sized paint buffer pixel placement
+        run: zig test src/smooth_shapes.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-545
+
       - name: Build Messages.exe
         run: zig build -Dtarget=x86_64-windows-gnu --release=small
 

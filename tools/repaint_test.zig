@@ -9,12 +9,17 @@ const win = struct {
     const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
     const ERROR = 0;
     const SRCCOPY = 0x00cc0020;
-    var failure: enum { none, dc, bitmap, selection, clip } = .none;
+    var failure: enum { none, dc, bitmap, selection, viewport, clip } = .none;
     var dc_count: usize = 0;
     var bitmap_count: usize = 0;
     var blits: usize = 0;
     var clipped: ?RECT = null;
     var copied: ?RECT = null;
+    var bitmap_size: ?[2]i32 = null;
+    var bitmap_bytes: usize = 0;
+    var origin: ?[2]i32 = null;
+    var calls: [8]u8 = undefined;
+    var call_count: usize = 0;
     var selected: HGDIOBJ = @ptrFromInt(4);
 
     fn reset() void {
@@ -24,6 +29,10 @@ const win = struct {
         blits = 0;
         clipped = null;
         copied = null;
+        bitmap_size = null;
+        bitmap_bytes = 0;
+        origin = null;
+        call_count = 0;
         selected = @ptrFromInt(4);
     }
 
@@ -37,6 +46,8 @@ const win = struct {
         std.debug.assert(width > 0 and height > 0);
         if (failure == .bitmap) return null;
         bitmap_count += 1;
+        bitmap_size = .{ width, height };
+        bitmap_bytes = @as(usize, @intCast(width)) * @as(usize, @intCast(height)) * 4;
         return @ptrFromInt(3);
     }
 
@@ -47,8 +58,18 @@ const win = struct {
         return previous;
     }
 
+    fn SetViewportOrgEx(_: HDC, x: i32, y: i32, _: ?*anyopaque) i32 {
+        if (failure == .viewport) return 0;
+        origin = .{ x, y };
+        calls[call_count] = 'v';
+        call_count += 1;
+        return 1;
+    }
+
     fn IntersectClipRect(_: HDC, left: i32, top: i32, right: i32, bottom: i32) i32 {
         if (failure == .clip) return ERROR;
+        calls[call_count] = 'c';
+        call_count += 1;
         clipped = .{ .left = left, .top = top, .right = right, .bottom = bottom };
         return 2;
     }
@@ -201,7 +222,7 @@ test "IGSH-510 exposure paints fully while empty and outside dirty regions alloc
 
 test "IGSH-510 allocation selection and clipping failures clean up and retain the paint DC" {
     const client = win.RECT{ .left = 0, .top = 0, .right = 1200, .bottom = 800 };
-    inline for (.{ .dc, .bitmap, .selection, .clip }) |failure| {
+    inline for (.{ .dc, .bitmap, .selection, .viewport, .clip }) |failure| {
         win.reset();
         win.failure = failure;
         var buffer = Buffer.init(@ptrFromInt(1), client, client);
@@ -210,5 +231,47 @@ test "IGSH-510 allocation selection and clipping failures clean up and retain th
         try std.testing.expectEqual(@as(usize, 0), win.dc_count);
         try std.testing.expectEqual(@as(usize, 0), win.bitmap_count);
         try std.testing.expectEqual(@as(usize, 0), win.blits);
+    }
+}
+
+test "ISSUE_545 dirty-rect sizing bounds bitmap memory by the row and not the window" {
+    const row_height = 64 * 2;
+    for ([_]win.RECT{
+        .{ .left = 0, .top = 0, .right = 1200, .bottom = 800 },
+        .{ .left = 0, .top = 0, .right = 3840, .bottom = 2160 },
+        .{ .left = 0, .top = 0, .right = 7680, .bottom = 4320 },
+    }) |client| {
+        const row = win.RECT{ .left = 0, .top = 5 * row_height, .right = 760, .bottom = 6 * row_height };
+        win.reset();
+        var buffer = Buffer.init(@ptrFromInt(1), client, row);
+        try std.testing.expectEqual([2]i32{ 760, row_height }, win.bitmap_size.?);
+        try std.testing.expectEqual(@as(usize, 760 * row_height * 4), win.bitmap_bytes);
+        var rows: usize = 0;
+        var total: usize = 0;
+        while (rows < 15) : (rows += 1) total += win.bitmap_bytes;
+        try std.testing.expect(total < 6 * 1024 * 1024);
+        buffer.deinit();
+        try std.testing.expectEqual(@as(usize, 0), win.bitmap_count);
+        std.debug.print("ISSUE_545 client {d}x{d} row bitmap {d}x{d} = {d} bytes, 15 rows {d} bytes\n", .{ client.right, client.bottom, win.bitmap_size.?[0], win.bitmap_size.?[1], win.bitmap_bytes, total });
+    }
+}
+
+test "ISSUE_545 viewport offset keeps window coordinates for drawing clipping and presenting" {
+    const client = win.RECT{ .left = 0, .top = 0, .right = 3840, .bottom = 2160 };
+    for ([_]win.RECT{
+        .{ .left = 0, .top = 640, .right = 760, .bottom = 768 },
+        .{ .left = 1200, .top = 1900, .right = 3840, .bottom = 2160 },
+        .{ .left = -40, .top = 2100, .right = 100, .bottom = 2400 },
+    }) |dirty| {
+        win.reset();
+        var buffer = Buffer.init(@ptrFromInt(1), client, dirty);
+        const rect = buffer.rect;
+        try std.testing.expectEqual([2]i32{ rect.right - rect.left, rect.bottom - rect.top }, win.bitmap_size.?);
+        try std.testing.expectEqual([2]i32{ -rect.left, -rect.top }, win.origin.?);
+        try std.testing.expectEqualSlices(u8, "vc", win.calls[0..win.call_count]);
+        try std.testing.expectEqualDeep(rect, win.clipped.?);
+        buffer.deinit();
+        try std.testing.expectEqualDeep(rect, win.copied.?);
+        try std.testing.expectEqual(@as(usize, 1), win.blits);
     }
 }

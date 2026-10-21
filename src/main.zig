@@ -14012,6 +14012,8 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     if (screen_item.itemID == @as(win.UINT, @bitCast(@as(c_int, -1)))) return;
     const index: usize = @intCast(screen_item.itemID);
     if (index >= a.chat_count) return;
+    const background = win.CreateSolidBrush(theme.current.surface_container_low) orelse return;
+    defer _ = win.DeleteObject(background);
     var client: win.RECT = undefined;
     _ = win.GetClientRect(screen_item.hwndItem, &client);
     var surface = paint_buffer.Buffer.init(screen_item.hDC, client, screen_item.rcItem);
@@ -14024,8 +14026,6 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     const chat = &a.chats[index];
     const selected = (item.itemState & win.ODS_SELECTED) != 0;
     const bulk_selected = a.bulk.count > 0 and a.bulk.containsKey(chat_key.of(chat));
-    const background = win.CreateSolidBrush(theme.current.surface_container_low) orelse return;
-    defer _ = win.DeleteObject(background);
     _ = win.FillRect(item.hDC, &item.rcItem, background);
     if (selected or bulk_selected) {
         smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius * 2), px(a, theme.selected_row_radius * 2), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);

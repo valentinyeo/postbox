@@ -84,6 +84,36 @@ class RepaintTests(unittest.TestCase):
             with self.subTest(regression=new), self.assertRaises(AssertionError):
                 verify_buffered(main.replace(old, new), "drawCanvas", "paint.rcPaint")
 
+    def test_ISSUE_545_brush_failure_never_blits_an_undrawn_buffer(self):
+        main = source("src/main.zig")
+        for name in ("mainProc", "drawCanvas", "drawChat", "drawComposerButton"):
+            painter = function(main, name)
+            if name == "mainProc":
+                painter = painter[painter.index("win.WM_PAINT => {"):]
+            start = painter.index("paint_buffer.Buffer.init(")
+            before_fill = painter[start:painter.index("win.FillRect(", start)]
+            with self.subTest(painter=name):
+                self.assertNotIn("return", before_fill)
+                self.assertNotIn("orelse", before_fill)
+        chat = function(main, "drawChat")
+        brush = chat.index("win.CreateSolidBrush(theme.current.surface_container_low) orelse return;")
+        self.assertLess(brush, chat.index("paint_buffer.Buffer.init("))
+
+    def test_ISSUE_545_row_sized_buffer_offsets_the_viewport_and_ci_runs_the_pixel_test(self):
+        buffer = source("src/paint_buffer.zig")
+        self.assertIn("win.CreateCompatibleBitmap(target, rect.right - rect.left, rect.bottom - rect.top)", buffer)
+        self.assertNotIn("client.right, client.bottom", buffer)
+        self.assertLess(buffer.index("win.SetViewportOrgEx(memory, -rect.left, -rect.top, null)"),
+                        buffer.index("win.IntersectClipRect(memory"))
+        shapes = source("src/smooth_shapes.zig")
+        self.assertIn('test "ISSUE-545 row-sized buffer places GDI and GDI+ pixels where unbuffered painting does"', shapes)
+        self.assertIn('@import("paint_buffer.zig")', shapes)
+        ci = source(".github/workflows/ci.yml")
+        windows = ci.split("  unfurl-verification:", 1)[1].split("\n  notify-release:", 1)[0]
+        self.assertIn("runs-on: windows-latest", windows)
+        self.assertIn("zig test src/smooth_shapes.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-545", windows)
+        self.assertIn("ISSUE_545", source("tools/repaint_test.zig"))
+
 
 if __name__ == "__main__":
     unittest.main()

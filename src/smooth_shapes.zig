@@ -629,3 +629,97 @@ test "forced GDI fallback preserves solid pixels edge bands coverage area and ev
     }
     try std.testing.expect(!failed);
 }
+
+const Ink = struct {
+    dc: win.HDC,
+    bitmap: win.HBITMAP,
+    previous: win.HGDIOBJ,
+    pixels: []u32,
+
+    fn init(size: i32) !Ink {
+        const dc = win.CreateCompatibleDC(null) orelse return error.CreateDCFailed;
+        var info = std.mem.zeroes(win.BITMAPINFO);
+        info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = size;
+        info.bmiHeader.biHeight = -size;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        var bits: ?*anyopaque = null;
+        const bitmap = win.CreateDIBSection(dc, &info, win.DIB_RGB_COLORS, &bits, null, 0) orelse {
+            _ = win.DeleteDC(dc);
+            return error.CreateBitmapFailed;
+        };
+        const count: usize = @intCast(size * size);
+        const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0..count];
+        @memset(pixels, 0x00123456);
+        return .{ .dc = dc, .bitmap = bitmap, .previous = win.SelectObject(dc, bitmap), .pixels = pixels };
+    }
+
+    fn deinit(self: *Ink) void {
+        _ = win.SelectObject(self.dc, self.previous);
+        _ = win.DeleteObject(self.bitmap);
+        _ = win.DeleteDC(self.dc);
+    }
+};
+
+fn paintIssue545Row(dc: win.HDC, row: win.RECT, antialias: bool) !void {
+    var smooth_context = Context.init(dc);
+    defer smooth_context.deinit();
+    if (antialias) try std.testing.expect(smooth_context.graphics != null);
+    const fallback = Context{ .hdc = dc };
+    const ctx = if (antialias) &smooth_context else &fallback;
+    const background = win.CreateSolidBrush(0x00141210) orelse return error.BrushFailed;
+    defer _ = win.DeleteObject(background);
+    _ = win.FillRect(dc, &row, background);
+    fillRoundRect(ctx, .{ .left = row.left + 8, .top = row.top + 2, .right = row.right - 8, .bottom = row.bottom - 2 }, 24, 24, 0x00403a36);
+    fillEllipse(ctx, .{ .left = row.left + 12, .top = row.top + 10, .right = row.left + 54, .bottom = row.top + 52 }, 0x00b0e0a0);
+    strokeArc(ctx, .{ .left = row.left + 70, .top = row.top + 8, .right = row.left + 110, .bottom = row.top + 48 }, 180, 180, 0x0060c0ff, 3);
+    strokePolyline(ctx, &.{ .{ @floatFromInt(row.left + 130), @floatFromInt(row.top + 12) }, .{ @floatFromInt(row.left + 160), @floatFromInt(row.top + 40) } }, 0x00f0f0f0, 2);
+    fillRoundRect(ctx, .{ .left = row.left - 20, .top = row.top - 10, .right = row.left + 30, .bottom = row.top + 20 }, 16, 16, 0x000000ff);
+    _ = win.GdiFlush();
+}
+
+test "ISSUE-545 row-sized buffer places GDI and GDI+ pixels where unbuffered painting does" {
+    const paint_buffer = @import("paint_buffer.zig");
+    const size = 256;
+    const client = win.RECT{ .left = 0, .top = 0, .right = size, .bottom = size };
+    for ([_]win.RECT{
+        .{ .left = 0, .top = 128, .right = 220, .bottom = 192 },
+        .{ .left = 37, .top = 61, .right = 251, .bottom = 125 },
+        .{ .left = 200, .top = 230, .right = 300, .bottom = 300 },
+    }) |dirty| {
+        for ([_]bool{ true, false }) |antialias| {
+            var direct = try Ink.init(size);
+            defer direct.deinit();
+            var buffered = try Ink.init(size);
+            defer buffered.deinit();
+            const saved = win.SaveDC(direct.dc);
+            _ = win.IntersectClipRect(direct.dc, dirty.left, dirty.top, dirty.right, dirty.bottom);
+            try paintIssue545Row(direct.dc, dirty, antialias);
+            _ = win.RestoreDC(direct.dc, saved);
+            {
+                var surface = paint_buffer.Buffer.init(buffered.dc, client, dirty);
+                defer surface.deinit();
+                try std.testing.expect(surface.hdc != buffered.dc);
+                var bitmap: win.BITMAP = undefined;
+                const selected = win.GetCurrentObject(surface.hdc, win.OBJ_BITMAP) orelse return error.NoBitmap;
+                try std.testing.expect(win.GetObjectW(selected, @sizeOf(win.BITMAP), &bitmap) != 0);
+                try std.testing.expectEqual(surface.rect.right - surface.rect.left, bitmap.bmWidth);
+                try std.testing.expectEqual(surface.rect.bottom - surface.rect.top, bitmap.bmHeight);
+                try paintIssue545Row(surface.hdc, dirty, antialias);
+            }
+            _ = win.GdiFlush();
+            var ink: usize = 0;
+            var mismatched: usize = 0;
+            for (direct.pixels, buffered.pixels, 0..) |want, got, i| {
+                if (want & 0xffffff != got & 0xffffff) {
+                    if (mismatched < 8) std.debug.print("ISSUE-545 mismatch antialias={} dirty={any} at ({d},{d}): want {x} got {x}\n", .{ antialias, dirty, i % size, i / size, want, got });
+                    mismatched += 1;
+                }
+                if (want & 0xffffff != 0x123456) ink += 1;
+            }
+            try std.testing.expect(ink > 0);
+            try std.testing.expectEqual(@as(usize, 0), mismatched);
+        }
+    }
+}
