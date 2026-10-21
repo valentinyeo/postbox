@@ -11,7 +11,7 @@ const avatar = @import("avatar.zig");
 const avatar_mask = @import("avatar_mask.zig");
 const dictation = @import("dictation.zig");
 const dictation_policy = @import("dictation_policy.zig");
-const deepgram_key_policy = @import("deepgram_key.zig");
+const environment_keys = @import("environment_keys.zig");
 const drafts = @import("drafts.zig");
 const voice_capture = @import("voice_capture.zig");
 const recording_paint = @import("recording_paint.zig");
@@ -7324,10 +7324,18 @@ fn ensureTranscribeSession(a: *App) ?*dictation.FileSession {
     return a.transcribe_session;
 }
 
+fn beginTranscriptionOpen(a: *App) void {
+    a.transcribe_attempt_count = 0;
+    if (a.transcribe_active_id.len > 0) _ = transcribeWasAttempted(a, a.transcribe_active_id.slice());
+    for (a.messages[0..a.message_count]) |*message| {
+        if (message.transcript_state == .failed) message.transcript_state = .none;
+    }
+}
+
 fn transcribeWasAttempted(a: *App, id: []const u8) bool {
     const hash = std.hash.Wyhash.hash(0, id);
     for (a.transcribe_attempts[0..a.transcribe_attempt_count]) |attempt| if (attempt == hash) return true;
-    if (a.transcribe_attempt_count >= a.transcribe_attempts.len) a.transcribe_attempt_count = 0;
+    if (a.transcribe_attempt_count >= a.transcribe_attempts.len) return true;
     a.transcribe_attempts[a.transcribe_attempt_count] = hash;
     a.transcribe_attempt_count += 1;
     return false;
@@ -7348,7 +7356,8 @@ fn appendDebugLog(a: *App, comptime format: []const u8, args: anytype) void {
 }
 
 fn scheduleNextTranscription(a: *App) void {
-    if (!a.deepgram_configured) return;
+    if (!a.deepgram_configured or a.chat_selection_pending or a.selected_chat >= a.chat_count) return;
+    if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]))) return;
     if (a.openrouter_session) |format_session| {
         const format_state = format_session.state();
         if (format_state == .recording or format_state == .transcribing) return;
@@ -8454,7 +8463,10 @@ fn refreshMessages(a: *App) void {
     if (chat.provider == .telegram) return refreshTelegramMessages(a);
     if (chat.provider == .slack) return refreshSlackHistory(a);
     const chat_changed = !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat));
-    if (chat_changed) stopAudio(a);
+    if (chat_changed) {
+        stopAudio(a);
+        beginTranscriptionOpen(a);
+    }
     if (msgCacheGet(a, chat_key.of(chat))) |cached| {
         _ = applyMessageData(a, cached, false);
     } else if (loadMsgCacheDisk(a, chat.jid.slice())) |cached| {
@@ -15352,6 +15364,7 @@ fn selectChatRow(a: *App, row: usize) void {
     a.selected_chat = row;
     switchComposerDraft(a);
     a.user_viewed = true;
+    beginTranscriptionOpen(a);
     refreshMessages(a);
     focusCompose(a);
     _ = win.InvalidateRect(a.hwnd.?, null, win.TRUE);
@@ -16192,6 +16205,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             } else if (wparam == timer_chat_select) {
                 _ = win.KillTimer(hwnd, timer_chat_select);
                 a.chat_selection_pending = false;
+                beginTranscriptionOpen(a);
                 refreshMessages(a);
             } else if (wparam == timer_slack_mark) {
                 _ = win.KillTimer(hwnd, timer_slack_mark);
@@ -17305,17 +17319,12 @@ pub fn main(init: std.process.Init) !void {
     const sync_heartbeat_path = try createSyncHeartbeatPath(init, init.gpa);
     defer init.gpa.free(sync_heartbeat_path);
     const wacli_dir = std.fs.path.dirname(store_watch_path) orelse return error.MissingUserProfile;
-    const stored_deepgram = slack_win.loadSecret(init.gpa, lit("DeepgramApiKey"));
-    defer if (stored_deepgram) |stored| init.gpa.free(stored.value);
-    const deepgram_seed = slack_win.loadUserEnvironment(init.gpa, lit("DEEPGRAM_API_KEY"));
-    defer if (deepgram_seed) |seed| init.gpa.free(seed);
-    const deepgram_decision = deepgram_key_policy.decide(if (stored_deepgram) |stored| stored.value else null, deepgram_seed);
-    const deepgram_key = deepgram_decision.key;
-    const deepgram_seed_saved = switch (deepgram_decision.action) {
-        .save, .update => slack_win.saveSecret(lit("DeepgramApiKey"), deepgram_key),
-        .none, .load => false,
-    };
-    var openrouter_key = init.environ_map.get("OPENROUTER_API_KEY") orelse "";
+    const deepgram = try slack_win.loadDeepgramKey(init.gpa);
+    defer init.gpa.free(deepgram.key);
+    const deepgram_key = deepgram.key;
+    const environment_openrouter = try environment_keys.load(init.gpa, "OPENROUTER_API_KEY", if (verification_fixture) null else init.environ_map.get("OPENROUTER_API_KEY"));
+    defer init.gpa.free(environment_openrouter);
+    var openrouter_key: []const u8 = environment_openrouter;
     var stored_openrouter: ?slack_win.SecretLoad = null;
     if (openrouter_key.len == 0) {
         stored_openrouter = slack_win.loadSecret(init.gpa, lit("OpenRouterApiKey"));
@@ -17363,8 +17372,8 @@ pub fn main(init: std.process.Init) !void {
         app.cache_tag.set(&tag);
         appendLaunchLog(app, "startup: saved account tag loaded");
     } else appendLaunchLog(app, "startup: no saved account tag, caches wait for auth status");
-    switch (deepgram_decision.action) {
-        .load => switch (stored_deepgram.?.outcome) {
+    switch (deepgram.action) {
+        .load => switch (deepgram.stored_outcome.?) {
             .encrypted => appendLaunchLog(app, "startup: deepgram key loaded (encrypted)"),
             .migrated => {
                 appendLaunchLog(app, "startup: deepgram key migrated to encrypted storage");
@@ -17373,9 +17382,9 @@ pub fn main(init: std.process.Init) !void {
             .migration_failed => appendLaunchLog(app, "startup: deepgram key left plain, encryption failed"),
         },
         .save, .update => {
-            if (!deepgram_seed_saved) {
+            if (!deepgram.seed_saved) {
                 appendLaunchLog(app, "startup: deepgram key from environment, encryption failed");
-            } else if (deepgram_decision.action == .update) {
+            } else if (deepgram.action == .update) {
                 appendLaunchLog(app, "startup: deepgram key updated from environment");
             } else {
                 appendLaunchLog(app, "startup: deepgram key saved to encrypted storage from environment");
