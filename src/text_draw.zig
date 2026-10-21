@@ -881,7 +881,7 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
             win.DT_WORDBREAK | win.DT_NOPREFIX,
             win.DT_SINGLELINE | win.DT_NOCLIP,
         };
-        const texts = [_][:0]const u16{ sample, wide("&Italic && underline Äg jfy\r\nsecond line"), wide("Short label") };
+        const texts = [_][:0]const u16{ sample, wide("&Italic && underline Äg jfy\r\nsecond line"), wide("Short label"), wide("g̣̣̣̣̣̣ j̣̣̣̣̣̣"), wide("Á́́́́́ x̂̂̂̂̂̂") };
         const expected = try std.testing.allocator.alloc(u32, pixels.len);
         defer std.testing.allocator.free(expected);
         for ([_]i32{ 13, 17, 26 }, 0..) |font_size, style| {
@@ -911,7 +911,7 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
                 }
             };
         }
-        std.debug.print("pixel-equivalent cached and tight-bound rendering: 63 style/flag/text cases, cold and warm\n", .{});
+        std.debug.print("pixel-equivalent cached and tight-bound rendering: 105 style/flag/text cases, cold and warm\n", .{});
     }
     {
         clearLayouts();
