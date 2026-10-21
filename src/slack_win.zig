@@ -1105,28 +1105,6 @@ test "singleton credentials migrate through auth identity into isolated DPAPI wo
     try std.testing.expectEqualStrings(user_token, first.value.user_token);
 }
 
-fn shareImage(allocator: std.mem.Allocator, ctx: JobContext, channel: []const u8, thread_ts: []const u8, file_id: []const u8, caption: []const u8) ![]u8 {
-    const encoded = try slack.percentEncode(allocator, file_id);
-    defer allocator.free(encoded);
-    const path = try std.fmt.allocPrint(allocator, "/api/files.info?file={s}", .{encoded});
-    defer allocator.free(path);
-    var info = try callWithRetry(allocator, ctx.host, ctx.user_token, path, null);
-    defer info.deinit(allocator);
-    if (info.status != 200) return error.HttpFailed;
-    switch (slack_send.sharedIn(allocator, info.body, channel)) {
-        .shared => return allocator.dupe(u8, "{\"ok\":true,\"already_shared\":true}"),
-        .not_shared => {},
-        .missing => return error.FileMissing,
-        .unknown => return error.HttpFailed,
-    }
-    const complete_body = try slack.buildCompleteUploadBody(allocator, file_id, channel, thread_ts, caption);
-    defer allocator.free(complete_body);
-    var complete = try callWithRetry(allocator, ctx.host, ctx.user_token, "/api/files.completeUploadExternal", complete_body);
-    errdefer complete.deinit(allocator);
-    if (complete.status != 200 or !httpOk(allocator, complete.body)) return error.UploadRejected;
-    return bodyOnly(allocator, complete);
-}
-
 pub const HttpCancel = struct {
     lock: win.SRWLOCK = .{},
     request: win.HINTERNET = null,
@@ -1204,7 +1182,9 @@ pub fn openHttp(allocator: std.mem.Allocator, host: []const u8, port: u16, secur
             return error.Cancelled;
         }
     }
-    errdefer if (cancel) |control| control.close(request) else _ = win.WinHttpCloseHandle(request);
+    errdefer if (cancel) |control| control.close(request) else {
+        _ = win.WinHttpCloseHandle(request);
+    };
     var redirect_policy: win.DWORD = win.WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
     if (win.WinHttpSetOption(request, win.WINHTTP_OPTION_REDIRECT_POLICY, &redirect_policy, @sizeOf(win.DWORD)) == 0) return error.NetworkFailed;
     const headers = try std.fmt.allocPrint(allocator, "Authorization: Bearer {s}\r\nContent-Type: {s}\r\nAccept: */*\r\n{s}{s}{s}", .{ token, content_type, if (last_event_id.len > 0) "Last-Event-ID: " else "", last_event_id, if (last_event_id.len > 0) "\r\n" else "" });
@@ -1216,4 +1196,26 @@ pub fn openHttp(allocator: std.mem.Allocator, host: []const u8, port: u16, secur
     var size: win.DWORD = @sizeOf(win.DWORD);
     if (win.WinHttpQueryHeaders(request, win.WINHTTP_QUERY_STATUS_CODE | win.WINHTTP_QUERY_FLAG_NUMBER, null, &status, &size, null) == 0) return error.NetworkFailed;
     return .{ .session = session, .connection = connection, .request = request, .cancel = cancel, .status = status };
+}
+
+fn shareImage(allocator: std.mem.Allocator, ctx: JobContext, channel: []const u8, thread_ts: []const u8, file_id: []const u8, caption: []const u8) ![]u8 {
+    const encoded = try slack.percentEncode(allocator, file_id);
+    defer allocator.free(encoded);
+    const path = try std.fmt.allocPrint(allocator, "/api/files.info?file={s}", .{encoded});
+    defer allocator.free(path);
+    var info = try callWithRetry(allocator, ctx.host, ctx.user_token, path, null);
+    defer info.deinit(allocator);
+    if (info.status != 200) return error.HttpFailed;
+    switch (slack_send.sharedIn(allocator, info.body, channel)) {
+        .shared => return allocator.dupe(u8, "{\"ok\":true,\"already_shared\":true}"),
+        .not_shared => {},
+        .missing => return error.FileMissing,
+        .unknown => return error.HttpFailed,
+    }
+    const complete_body = try slack.buildCompleteUploadBody(allocator, file_id, channel, thread_ts, caption);
+    defer allocator.free(complete_body);
+    var complete = try callWithRetry(allocator, ctx.host, ctx.user_token, "/api/files.completeUploadExternal", complete_body);
+    errdefer complete.deinit(allocator);
+    if (complete.status != 200 or !httpOk(allocator, complete.body)) return error.UploadRejected;
+    return bodyOnly(allocator, complete);
 }

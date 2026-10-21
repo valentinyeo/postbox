@@ -18662,9 +18662,9 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
         setStatus(a, "Unable to read WhatsApp hub accounts");
         return;
     }
-    var accounts = wa_hub.parseAccounts(a.allocator, result.data) catch return;
-    defer accounts.deinit();
-    for (accounts.value) |account| {
+    var hub_accounts = wa_hub.parseAccounts(a.allocator, result.data) catch return;
+    defer hub_accounts.deinit();
+    for (hub_accounts.value) |account| {
         if (!std.mem.eql(u8, account.state, "linked") or account.account.len == 0 or account.account.len > 32) continue;
         if (a.hub_account.len > 0 and !std.mem.eql(u8, a.hub_account.slice(), account.account)) continue;
         if (a.hub_account.len == 0) {
@@ -18863,7 +18863,8 @@ fn hubEventSession(a: *App, allocator: std.mem.Allocator, sse: *wa_hub.Sse) !voi
                 defer event.deinit();
                 if (std.mem.eql(u8, event.value.kind, "reset")) a.hub_reset_pending.store(true, .release);
                 if (!a.hub_event_pending.swap(true, .acq_rel)) {
-                    if (win.PostMessageW(a.hwnd, wm_hub_event, 0, 0) == 0) a.hub_event_pending.store(false, .release);
+                    const posted = if (a.hwnd) |hwnd| win.PostMessageW(hwnd, wm_hub_event, 0, 0) != 0 else false;
+                    if (!posted) a.hub_event_pending.store(false, .release);
                 }
             }
         }
