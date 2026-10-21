@@ -20,7 +20,7 @@ def section(source, start, end):
 def verify_wiring(main):
     startup = main[main.index("pub fn main(init: std.process.Init) !void {"):]
     assert startup.index("applyTheme(loadTheme());") < startup.index("win.CreateWindowExW(")
-    apply = section(main, "fn applyTheme(", "fn ")
+    apply = section(main, "fn applyTheme(", "fn changeTheme(")
     for token in ("theme.set(choice);", "@ptrFromInt(135)", "@ptrFromInt(136)",
                   "set_preferred_app_mode(menu_theme.preferredAppMode(choice))", "flush_menu_themes();"):
         assert token in apply
