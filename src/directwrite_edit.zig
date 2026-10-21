@@ -248,7 +248,7 @@ const Host = extern struct {
         const hr = self.services.?.draw(target, &client, null);
         const end_hr = rt.lpVtbl.*.EndDraw.?(rt, null, null);
         if (hr < 0 or end_hr < 0) {
-            target.lpVtbl.*.Base.Base.Base.Release.?(@ptrCast(target));
+            _ = target.lpVtbl.*.Base.Base.Base.Release.?(@ptrCast(target));
             self.target = null;
             self.invalidate();
             return;
@@ -327,7 +327,7 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             _ = shutdown_services.?(services);
             services.release();
             host.services = null;
-            if (host.target) |target| target.lpVtbl.*.Base.Base.Base.Release.?(@ptrCast(target));
+            if (host.target) |target| _ = target.lpVtbl.*.Base.Base.Base.Release.?(@ptrCast(target));
             _ = win.SetWindowLongPtrW(hwnd, win.GWLP_USERDATA, 0);
             _ = hostRelease(host);
             return win.DefWindowProcW(hwnd, message, wparam, lparam);
