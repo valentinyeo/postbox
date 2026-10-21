@@ -14260,6 +14260,15 @@ fn measureMessageStore(hdc: win.HDC, a: *App, message: *Message, width: i32, sho
     return height;
 }
 
+fn reactionChipSize(hdc: win.HDC, a: *App, message: *const Message, width: i32) win.SIZE {
+    if (message.reaction.len == 0) return .{ .cx = 0, .cy = 0 };
+    const font = a.font.?;
+    _ = win.SelectObject(hdc, @ptrCast(font));
+    const text_width = @max(1, @min(width - px(a, 36), mixedSliceWidth(hdc, font, a.font_emoji orelse font, textLineHeight(hdc, font), fontAscent(hdc, font), message.reaction.slice())));
+    const text_height = wrapMixedSink(hdc, a, message.reaction.ptr(), @intCast(message.reaction.len), text_width, false, 0, 0, null);
+    return .{ .cx = text_width + px(a, 12), .cy = text_height + px(a, 8) };
+}
+
 fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, show_sender: bool) i32 {
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
     const header_height = messageHeaderHeight(hdc, a, show_sender);
@@ -14279,9 +14288,8 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, sh
         const shown: c_int = if (message.transcript_expanded) @intCast(message.transcript.len) else @intCast(@min(message.transcript.len, 400));
         height += transcriptRender(hdc, a, message, shown, width - px(a, 24), false, 0, 0) + px(a, 22);
     }
-    if (message.reaction.len > 0) height += wrapMixedSink(hdc, a, message.reaction.ptr(), @intCast(message.reaction.len), width - px(a, 24), false, 0, 0, null) + px(a, 4);
     const min_height: i32 = header_height + timeBandHeight(hdc, a) + px(a, 5);
-    return @max(height, min_height);
+    return @max(height, min_height) + @max(0, reactionChipSize(hdc, a, message, width).cy - px(a, 4));
 }
 
 const SenderColor = struct { r: u8, g: u8, b: u8 };
@@ -14600,7 +14608,9 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         if (y > client.bottom or y + height < client.top) continue;
         const left: i32 = if (message.from_me) client.right - bubble_width - px(a, 24) else if (in_group) px(a, 62) else px(a, 24);
         const right = left + bubble_width;
-        message.bubble_hit = .{ .left = left, .top = y, .right = right, .bottom = y + height };
+        const reaction_size = reactionChipSize(hdc, a, message, bubble_width);
+        const bubble_height = height - @max(0, reaction_size.cy - px(a, 4));
+        message.bubble_hit = .{ .left = left, .top = y, .right = right, .bottom = y + bubble_height };
         const selected = if (a.selected_message) |selected_index| selected_index == index else false;
         smooth.fillRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), if (message.from_me) theme.current.primary_container else theme.current.surface_container_high);
         if (selected) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), theme.current.primary, px(a, 2));
@@ -14839,14 +14849,17 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         if (message.reaction.len > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font.?));
             _ = win.SetTextColor(hdc, if (message.reaction_pending) theme.current.on_surface_variant else if (message.from_me) theme.current.on_primary_container else theme.current.on_surface);
-            const reaction_width = right - left - px(a, 24);
-            const reaction_height = wrapMixedSink(hdc, a, message.reaction.ptr(), @intCast(message.reaction.len), reaction_width, false, 0, 0, null);
-            _ = wrapMixedSink(hdc, a, message.reaction.ptr(), @intCast(message.reaction.len), reaction_width, true, left + px(a, 12), y + height - timeBandHeight(hdc, a) - px(a, 5) - reaction_height, null);
+            const chip_left = if (message.from_me) right - px(a, 12) - reaction_size.cx else left + px(a, 12);
+            const chip_top = message.bubble_hit.bottom - px(a, 4);
+            const chip = win.RECT{ .left = chip_left, .top = chip_top, .right = chip_left + reaction_size.cx, .bottom = chip_top + reaction_size.cy };
+            smooth.fillRoundRect(&shapes, chip, px(a, 12), px(a, 12), if (message.from_me) theme.current.primary_container else theme.current.surface_container_high);
+            smooth.strokeRoundRect(&shapes, chip, px(a, 12), px(a, 12), theme.current.outline_variant, px(a, 1));
+            _ = wrapMixedSink(hdc, a, message.reaction.ptr(), @intCast(message.reaction.len), reaction_size.cx - px(a, 12), true, chip.left + px(a, 6), chip.top + px(a, 4), null);
         }
         _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
         _ = win.SetTextColor(hdc, if (message.send_state == .failed) theme.current.@"error" else theme.current.on_surface_variant);
         const time_band = timeBandHeight(hdc, a);
-        var time_rect = win.RECT{ .left = right - px(a, 52), .top = y + height - px(a, 5) - time_band, .right = right - px(a, 10), .bottom = y + height - px(a, 5) };
+        var time_rect = win.RECT{ .left = right - px(a, 52), .top = y + bubble_height - px(a, 5) - time_band, .right = right - px(a, 10), .bottom = y + bubble_height - px(a, 5) };
         _ = text_draw.drawText(hdc, message.time.ptr(), @intCast(message.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE);
     }
     if (a.selected_chat < a.chat_count) {
