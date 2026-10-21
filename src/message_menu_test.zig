@@ -44,7 +44,7 @@ const win = struct {
     const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 320, bottom: i32 = 24 };
     const POINT = struct { x: i32 = 0, y: i32 = 0 };
     const SIZE = struct { cx: i32, cy: i32 };
-    const MENUINFO = struct { cbSize: u32, fMask: u32, hbrBack: ?usize };
+    const MENUINFO = struct { cbSize: u32, fMask: u32, hbrBack: usize };
     const MEASUREITEMSTRUCT = struct { itemData: usize, itemWidth: u32 = 0, itemHeight: u32 = 0 };
     const DRAWITEMSTRUCT = struct { itemData: usize, itemState: u32 = 0, hDC: usize = 1, rcItem: RECT = .{} };
     fn CreatePopupMenu() ?usize {
@@ -136,7 +136,7 @@ test "IGSH-505 message menu sets AMOLED background and owner draws every row" {
     const info = menu_info orelse return error.MissingAmoledMenuBackground;
     try std.testing.expectEqual(@as(u32, @sizeOf(win.MENUINFO)), info.cbSize);
     try std.testing.expectEqual(@as(u32, win.MIM_BACKGROUND) | win.MIM_APPLYTOSUBMENUS, info.fMask);
-    try std.testing.expectEqual(app.brush_panel, info.hbrBack);
+    try std.testing.expectEqual(app.brush_panel.?, info.hbrBack);
     try std.testing.expectEqual(@as(usize, 8), row_count);
     for (rows) |row| try std.testing.expectEqual(@as(u32, win.MF_OWNERDRAW), row.flags);
     try std.testing.expectEqual(@as(usize, reaction_row), rows[2].command);

@@ -11332,7 +11332,7 @@ fn openReactionMenu(a: *App, x: i32, y: i32) void {
         var info = std.mem.zeroes(win.MENUINFO);
         info.cbSize = @sizeOf(win.MENUINFO);
         info.fMask = @as(win.DWORD, win.MIM_BACKGROUND) | win.MIM_APPLYTOSUBMENUS;
-        info.hbrBack = a.brush_panel;
+        info.hbrBack = a.brush_panel.?;
         _ = win.SetMenuInfo(menu, &info);
     }
     appendMessageMenuItem(menu, command_reply, lit("Reply                Ctrl+Shift+R"));
