@@ -12,6 +12,7 @@ The interface uses Win32, Windows Imaging Component, and Windows shell thumbnail
 - Colour emoji in chat names and message text; if the Windows text engine cannot draw them, messages fall back to monochrome emoji instead of stopping
 - Click-to-download videos and click-to-open local attachments
 - Per-message WhatsApp reactions from the message context menu
+- Green Material 3 (default) and AMOLED black themes, switched live and saved through Ctrl+K or `wazigctl theme green|amoled`
 - IBM Plex Sans bundled as a private application font
 - Deepgram dictation control prepared for `DEEPGRAM_API_KEY`; microphone capture and streaming are not implemented yet
 
