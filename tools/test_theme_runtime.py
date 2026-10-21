@@ -85,13 +85,13 @@ class ThemeRuntimeTests(unittest.TestCase):
                 self.assertNotRegex(path.read_text(), r"(?m)^const \w+ = theme\.current\.")
 
     @unittest.skipUnless(ZIG, "Zig compiler not found; install Zig or set ZIG")
-    def test_new_zig_tests_reject_origin_main(self):
+    def test_new_zig_tests_reject_pre_theme_code(self):
         with tempfile.TemporaryDirectory(prefix="theme-regression-") as directory:
             root = Path(directory)
             current_theme = (ROOT / "src/theme.zig").read_text()
             current_control = (ROOT / "src/control.zig").read_text()
-            baseline_theme = subprocess.check_output(["git", "show", "origin/main:src/theme.zig"], cwd=ROOT, text=True)
-            baseline_control = subprocess.check_output(["git", "show", "origin/main:src/control.zig"], cwd=ROOT, text=True)
+            baseline_theme = subprocess.check_output(["git", "show", "a735c9f:src/theme.zig"], cwd=ROOT, text=True)
+            baseline_control = subprocess.check_output(["git", "show", "a735c9f:src/control.zig"], cwd=ROOT, text=True)
             (root / "theme.zig").write_text(baseline_theme + current_theme[current_theme.index('test "green palette preserves'):])
             result = subprocess.run([ZIG, "test", str(root / "theme.zig")], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
