@@ -77,7 +77,7 @@ elif args[:2] == ['pr', 'view']:
         print(sha)
     else:
         checks = ['ci', 'tdlib', 'windows-smoke', 'no-comments', 'unfurl-verification',
-                  'private-markers', 'secret-scan', 'pr-title', 'notify-release']
+                  'private-markers', 'secret-scan', 'pr-title', 'notify-release', 'tdlib-cache / cache']
         if mode == 'missing-check': checks.remove('no-comments')
         if mode == 'read-failure': sys.exit(1)
         if mode == 'invalid-json': print('{'); sys.exit(0)
@@ -144,7 +144,7 @@ else:
 
     def test_IGSH_504_every_head_check_must_be_green(self):
         checks = ('ci', 'tdlib', 'windows-smoke', 'no-comments', 'unfurl-verification',
-                  'private-markers', 'secret-scan', 'pr-title', 'notify-release')
+                  'private-markers', 'secret-scan', 'pr-title', 'notify-release', 'tdlib-cache / cache')
         modes = [f'{state}:{name}' for name in checks
                  for state in ('missing', 'pending', 'FAILURE', 'SKIPPED', 'CANCELLED', 'stale-success')]
         modes += ['FAILURE:future-check', 'FAILURE:tdlib-cache / cache', 'pending:future-check', 'status:PENDING', 'status:FAILURE']
@@ -179,3 +179,17 @@ else:
         self.assertIn("github.event_name == 'workflow_dispatch'", steps)
         self.assertIn("github.ref == 'refs/heads/main'", steps)
         self.assertIn('        if: >-', steps)
+
+    def test_IGSH_504_lint_rejects_historical_automerge(self):
+        workflow = subprocess.run(['git', 'show', '4064743:.github/workflows/automerge.yml'],
+                                  cwd=ROOT, capture_output=True, text=True, check=True).stdout
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/main.zig').write_text('')
+            (root / '.github/workflows').mkdir(parents=True)
+            (root / '.github/workflows/automerge.yml').write_text(workflow)
+            result = subprocess.run(['bash', str(ROOT / 'tools/lint-repeats.sh'), directory],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn('[B8]', result.stdout)

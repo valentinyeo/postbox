@@ -67,8 +67,8 @@ mkdir -p "$fixture/src" "$fixture/.github/workflows"
 printf 'name: fixture\n' > "$fixture/.github/workflows/fixture.yml"
 : > "$fixture/src/main.zig"
 b8_cases=0
-for missing in ci tdlib windows-smoke no-comments unfurl-verification private-markers secret-scan pr-title notify-release; do
-    sed "s/\"$missing\"//g" "$repo/.github/workflows/automerge.yml" > "$fixture/.github/workflows/automerge.yml"
+for missing in ci tdlib windows-smoke no-comments unfurl-verification private-markers secret-scan pr-title notify-release "tdlib-cache / cache"; do
+    sed "s|\"$missing\"||g" "$repo/.github/workflows/automerge.yml" > "$fixture/.github/workflows/automerge.yml"
     status=0
     "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
     if (( status != 1 )) || ! grep -Fq '[B8]' "$temp/output"; then

@@ -275,7 +275,7 @@ pub fn build(b: *std.Build) void {
             const path = b.pathJoin(&.{ tdlib_dir, "lib", archive });
             exe.root_module.addObjectFile(.{ .cwd_relative = path });
         }
-        const mingw_lib_dir = b.option([]const u8, "mingw-lib-dir", "Path to the mingw win32-threads gcc lib directory") orelse "/usr/lib/gcc/x86_64-w64-mingw32/13-win32";
+        const mingw_lib_dir = b.option([]const u8, "mingw-lib-dir", "Path to the mingw win32-threads gcc lib directory") orelse b.pathJoin(&.{ tdlib_dir, "lib" });
         exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libstdc++.a" }) });
         exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libgcc_eh.a" }) });
         exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libgcc.a" }) });
@@ -310,7 +310,7 @@ pub fn build(b: *std.Build) void {
     b.installFile("assets/IBM-Plex-LICENSE.txt", "bin/IBM-Plex-LICENSE.txt");
 
     const test_step = b.step("test", "Run unit tests");
-    for ([_][]const u8{ "src/font_config.zig", "src/theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/status_view.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/slack_oauth.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
+    for ([_][]const u8{ "src/message_double_click.zig", "src/font_config.zig", "src/theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/status_view.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/slack_oauth.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(test_root),
@@ -321,6 +321,42 @@ pub fn build(b: *std.Build) void {
         const run_tests = b.addRunArtifact(tests);
         test_step.dependOn(&run_tests.step);
     }
+    const canvas_source = sourceSection("fn canvasProc(", "fn selectChatRow(");
+    const canvas_input_start = std.mem.indexOf(u8, canvas_source, "            a.click_origin =") orelse @panic("Missing canvas input start");
+    const canvas_input_end = std.mem.indexOf(u8, canvas_source, "        win.WM_RBUTTONUP =>") orelse @panic("Missing canvas input end");
+    const double_click_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("src/message_double_click_test.zig"),
+        sourceSection("fn WideText(", "const Chat = struct"),
+        sourceSection("const max_pending_reactions =", "const WacliJobKind = enum"),
+        sourceSection("fn handleCanvasDoubleClick(", "fn reactToSelected("),
+        sourceSection("fn findPendingReaction(", "fn insertEmoji("),
+        "fn foldReactions(a: *App) void {\n",
+        sourceSection("    var reaction_index: usize = 0;", "    reapplyPendingReactions(a, chat.jid.slice());"),
+        "}\n",
+        "fn canvasProc(hwnd: usize, message: u32, wparam: usize, lparam: isize) isize { const a = app_ptr.?; switch (message) { win.WM_LBUTTONDOWN => { const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))); const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));\n",
+        canvas_source[canvas_input_start..canvas_input_end],
+        "else => return 0, } }\n",
+        "fn loadReaction(a: *App, message: *Message, object: std.json.ObjectMap) void { const reaction_to = getString(object, \"ReactionToID\");\n",
+        sourceSection("        message.reaction_to.set(reaction_to);", "        message.timestamp.set(getString(object, \"Timestamp\"));"),
+        "}\n",
+    }) catch @panic("Out of memory building double-click harness");
+    const double_click_harness = b.addWriteFiles().add("message_double_click_test.zig", double_click_source);
+    const double_click_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = double_click_harness,
+        .target = b.resolveTargetQuery(.{}),
+        .imports = &.{
+            .{ .name = "send_args", .module = b.createModule(.{
+                .root_source_file = b.path("src/send_args.zig"),
+                .target = b.resolveTargetQuery(.{}),
+            }) },
+            .{ .name = "message_double_click", .module = b.createModule(.{
+                .root_source_file = b.path("src/message_double_click.zig"),
+                .target = b.resolveTargetQuery(.{}),
+            }) },
+        },
+    }) });
+    test_step.dependOn(&b.addRunArtifact(double_click_tests).step);
+
     const slack_worker_source = @embedFile("src/slack_win.zig");
     const slack_send_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/slack_send_test.zig"),
