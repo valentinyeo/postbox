@@ -97,6 +97,75 @@ var next_format: usize = 0;
 var collection_backend: enum { none, font_set, loader } = .none;
 var last_failure: ?anyerror = null;
 
+const LayoutEntry = struct {
+    key: FormatKey = .{},
+    width: i32 = 0,
+    height: i32 = 0,
+    flags: u32 = 0,
+    hash: u64 = 0,
+    text: [1024]u16 = undefined,
+    len: usize = 0,
+    used: u64 = 0,
+    layout: ?*c.IDWriteTextLayout = null,
+    metrics: c.DWRITE_TEXT_METRICS = undefined,
+    overhang: c.DWRITE_OVERHANG_METRICS = undefined,
+};
+const Layout = struct {
+    object: *c.IDWriteTextLayout,
+    metrics: c.DWRITE_TEXT_METRICS,
+    overhang: c.DWRITE_OVERHANG_METRICS,
+};
+var layouts: [64]LayoutEntry = .{LayoutEntry{}} ** 64;
+var layout_clock: u64 = 0;
+var reference_render = false;
+
+fn clearLayouts() void {
+    for (&layouts) |*entry| {
+        release(entry.layout);
+        entry.layout = null;
+    }
+    layout_clock = 0;
+}
+
+const ProfileStage = enum { font, string, format, layout, metrics, bounds, bind, backdrop, begin, draw, end };
+const Profile = struct {
+    enabled: bool = false,
+    ticks: [@typeInfo(ProfileStage).@"enum".fields.len]i64 = @splat(0),
+    calls: usize = 0,
+    hits: usize = 0,
+    misses: usize = 0,
+};
+var profile: Profile = .{};
+fn timestamp() i64 {
+    if (!builtin.is_test or !profile.enabled) return 0;
+    var value: win.LARGE_INTEGER = undefined;
+    _ = win.QueryPerformanceCounter(&value);
+    return value.QuadPart;
+}
+fn mark(stage: ProfileStage, previous: *i64) void {
+    if (!builtin.is_test or !profile.enabled) return;
+    const now = timestamp();
+    profile.ticks[@intFromEnum(stage)] += now - previous.*;
+    previous.* = now;
+}
+fn printProfile(label: []const u8, elapsed: i64, frequency: i64) void {
+    const scale = 1000000 / @as(f64, @floatFromInt(frequency)) / @as(f64, @floatFromInt(profile.calls));
+    std.debug.print("text bench {s}: {d} calls, {d:.2} us/call, hits={d} misses={d}\n", .{ label, profile.calls, @as(f64, @floatFromInt(elapsed)) * scale, profile.hits, profile.misses });
+    inline for (@typeInfo(ProfileStage).@"enum".fields, 0..) |field, i| {
+        std.debug.print("  {s}: {d:.2} us/call\n", .{ field.name, @as(f64, @floatFromInt(profile.ticks[i])) * scale });
+    }
+}
+fn windowsPathsEqual(a: []const u16, b: []const u16) bool {
+    if (a.len != b.len or a.len > 1024) return false;
+    var left: [1024]u16 = undefined;
+    var right: [1024]u16 = undefined;
+    for (a, b, 0..) |x, y, i| {
+        left[i] = if (x == '/') '\\' else x;
+        right[i] = if (y == '/') '\\' else y;
+    }
+    return c.CompareStringOrdinal(&left, @intCast(a.len), &right, @intCast(b.len), 1) == c.CSTR_EQUAL;
+}
+
 fn wide(comptime text: []const u8) [:0]const u16 {
     return std.unicode.utf8ToUtf16LeStringLiteral(text);
 }
@@ -127,6 +196,7 @@ fn release(object: anytype) void {
     }
 }
 pub fn reset() void {
+    clearLayouts();
     for (&formats) |*entry| {
         release(entry.ellipsis);
         release(entry.format);
@@ -328,14 +398,32 @@ fn getFormat(key: FormatKey) !*FormatEntry {
     next_format = (next_format + 1) % formats.len;
     return slot;
 }
-fn layoutFor(text: []const u16, key: FormatKey, rect: win.RECT, flags: u32) !*c.IDWriteTextLayout {
+fn layoutFor(text: []const u16, key: FormatKey, rect: win.RECT, flags: u32) !Layout {
+    var stamp = timestamp();
     const entry = try getFormat(key);
+    mark(.format, &stamp);
     const format = entry.format.?;
     const opts = options(flags);
-    const width: f32 = @floatFromInt(@max(1, rect.right - rect.left));
-    const height: f32 = if (flags & Flags.calcrect == 0 and rect.bottom > rect.top) @floatFromInt(rect.bottom - rect.top) else 10000000;
+    const width = @max(1, rect.right - rect.left);
+    const height = if (flags & Flags.calcrect == 0 and rect.bottom > rect.top) rect.bottom - rect.top else 10000000;
+    const layout_flags = flags & (Flags.center | Flags.right | Flags.wordbreak | Flags.singleline | Flags.word_ellipsis | Flags.end_ellipsis);
+    const hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(text));
+    const cacheable = text.len <= layouts[0].text.len and !(builtin.is_test and reference_render);
+    layout_clock += 1;
+    if (cacheable) for (&layouts) |*cached| {
+        if (cached.layout == null or cached.hash != hash or cached.len != text.len or cached.width != width or cached.flags != layout_flags or !cached.key.eql(key)) continue;
+        const fits = opts.trimming == 0 and cached.metrics.height <= @as(f32, @floatFromInt(@min(cached.height, height)));
+        if (cached.height != height and !fits) continue;
+        if (!std.mem.eql(u16, cached.text[0..cached.len], text)) continue;
+        cached.used = layout_clock;
+        _ = cached.layout.?.lpVtbl.*.AddRef.?(cached.layout.?);
+        if (builtin.is_test and profile.enabled) profile.hits += 1;
+        mark(.layout, &stamp);
+        return .{ .object = cached.layout.?, .metrics = cached.metrics, .overhang = cached.overhang };
+    };
+    if (builtin.is_test and profile.enabled) profile.misses += 1;
     var layout: ?*c.IDWriteTextLayout = null;
-    try check(factory.?.lpVtbl.*.CreateTextLayout.?(factory.?, text.ptr, @intCast(text.len), format, width, height, &layout));
+    try check(factory.?.lpVtbl.*.CreateTextLayout.?(factory.?, text.ptr, @intCast(text.len), format, @floatFromInt(width), @floatFromInt(height), &layout));
     errdefer release(layout);
     const l = layout.?;
     const v = l.lpVtbl.*;
@@ -347,7 +435,26 @@ fn layoutFor(text: []const u16, key: FormatKey, rect: win.RECT, flags: u32) !*c.
         try check(v.SetTrimming.?(l, &trimming, entry.ellipsis));
     }
     if (key.underline) try check(v.SetUnderline.?(l, 1, .{ .startPosition = 0, .length = @intCast(text.len) }));
-    return l;
+    mark(.layout, &stamp);
+    var result = Layout{ .object = l, .metrics = undefined, .overhang = undefined };
+    try check(v.GetMetrics.?(l, &result.metrics));
+    try check(v.GetOverhangMetrics.?(l, &result.overhang));
+    mark(.metrics, &stamp);
+    if (cacheable) {
+        var slot = &layouts[0];
+        for (&layouts) |*candidate| {
+            if (candidate.layout == null) {
+                slot = candidate;
+                break;
+            }
+            if (candidate.used < slot.used) slot = candidate;
+        }
+        release(slot.layout);
+        slot.* = .{ .key = key, .width = width, .height = height, .flags = layout_flags, .hash = hash, .len = text.len, .used = layout_clock, .layout = l, .metrics = result.metrics, .overhang = result.overhang };
+        @memcpy(slot.text[0..text.len], text);
+        _ = v.AddRef.?(l);
+    }
+    return result;
 }
 fn captureBackdrop(dc: win.HDC, binding: win.RECT) !void {
     const width = binding.right - binding.left;
@@ -387,29 +494,37 @@ fn render(dc: win.HDC, text_ptr: [*c]const u16, len: i32, rect: *win.RECT, flags
         if (flags & Flags.calcrect != 0) return updateRect(rect, 0, 0);
         return 0;
     }
+    var stamp = timestamp();
+    if (builtin.is_test and profile.enabled) profile.calls += 1;
     const key = try keyForDC(dc);
+    mark(.font, &stamp);
     var text: []const u16 = text_ptr[0..count];
     var local: [1024]u16 = undefined;
     var allocated: ?[]u16 = null;
     defer if (allocated) |buffer| std.heap.page_allocator.free(buffer);
-    if (flags & Flags.noprefix == 0 or flags & Flags.singleline != 0) {
+    const prefix = flags & Flags.noprefix == 0 and std.mem.indexOfScalar(u16, text, '&') != null;
+    const newlines = flags & Flags.singleline != 0 and (std.mem.indexOfScalar(u16, text, '\r') != null or std.mem.indexOfScalar(u16, text, '\n') != null);
+    if (prefix or newlines) {
         const buffer = if (count <= local.len) local[0..count] else blk: {
             allocated = try std.heap.page_allocator.alloc(u16, count);
             break :blk allocated.?;
         };
-        if (flags & Flags.noprefix == 0) text = stripPrefix(text, buffer) else {
+        if (prefix) text = stripPrefix(text, buffer) else {
             @memcpy(buffer, text);
             text = buffer;
         }
-        if (flags & Flags.singleline != 0) for (buffer[0..text.len]) |*unit| {
+        if (newlines) for (buffer[0..text.len]) |*unit| {
             if (unit.* == '\r' or unit.* == '\n') unit.* = ' ';
         };
     }
-    const layout = try layoutFor(text, key, rect.*, flags);
+    mark(.string, &stamp);
+    const shaped = try layoutFor(text, key, rect.*, flags);
+    const layout = shaped.object;
+    stamp = timestamp();
     defer release(layout);
-    var metrics: c.DWRITE_TEXT_METRICS = undefined;
-    try check(layout.lpVtbl.*.GetMetrics.?(layout, &metrics));
+    const metrics = shaped.metrics;
     const height: i32 = @intFromFloat(@ceil(metrics.height));
+    mark(.metrics, &stamp);
     if (flags & Flags.calcrect != 0) return updateRect(rect, metrics.widthIncludingTrailingWhitespace, metrics.height);
     const opts = options(flags);
     const offset: i32 = switch (opts.vertical) {
@@ -421,13 +536,12 @@ fn render(dc: win.HDC, text_ptr: [*c]const u16, len: i32, rect: *win.RECT, flags
     const clip_kind = win.GetClipBox(dc, &clip);
     if (clip_kind == win.ERROR) return error.ClipFailed;
     if (clip_kind == win.NULLREGION) return height;
-    var overhang: c.DWRITE_OVERHANG_METRICS = undefined;
-    try check(layout.lpVtbl.*.GetOverhangMetrics.?(layout, &overhang));
+    const overhang = shaped.overhang;
     var bounds = win.RECT{
         .left = rect.left + @as(i32, @intFromFloat(@floor(@min(metrics.left, -overhang.left)))),
         .top = rect.top + offset + @as(i32, @intFromFloat(@floor(@min(metrics.top, -overhang.top)))),
         .right = rect.left + @as(i32, @intFromFloat(@ceil(@max(metrics.left + metrics.widthIncludingTrailingWhitespace, layout.lpVtbl.*.GetMaxWidth.?(layout) + overhang.right)))),
-        .bottom = rect.top + offset + @as(i32, @intFromFloat(@ceil(@max(metrics.top + metrics.height, layout.lpVtbl.*.GetMaxHeight.?(layout) + overhang.bottom)))),
+        .bottom = rect.top + offset + @as(i32, @intFromFloat(@ceil(if ((builtin.is_test and reference_render) or overhang.bottom > 0) @max(metrics.top + metrics.height, layout.lpVtbl.*.GetMaxHeight.?(layout) + overhang.bottom) else metrics.top + metrics.height))),
     };
     if (opts.clip) {
         bounds.left = @max(bounds.left, rect.left);
@@ -457,15 +571,21 @@ fn render(dc: win.HDC, text_ptr: [*c]const u16, len: i32, rect: *win.RECT, flags
     _ = win.SetWindowOrgEx(dc, 0, 0, null);
     _ = win.GdiFlush();
     const rt: *c.ID2D1RenderTarget = @ptrCast(target.?);
+    mark(.bounds, &stamp);
     try check(target.?.lpVtbl.*.BindDC.?(target.?, @ptrCast(dc), @ptrCast(&binding)));
+    mark(.bind, &stamp);
     try captureBackdrop(dc, binding);
+    mark(.backdrop, &stamp);
     const color = win.GetTextColor(dc);
     brush.?.lpVtbl.*.SetColor.?(brush.?, &@as(c.D2D1_COLOR_F, @bitCast([4]f32{ @as(f32, @floatFromInt(color & 255)) / 255, @as(f32, @floatFromInt((color >> 8) & 255)) / 255, @as(f32, @floatFromInt((color >> 16) & 255)) / 255, 1 })));
     rt.lpVtbl.*.BeginDraw.?(rt);
+    mark(.begin, &stamp);
     const surface = c.D2D1_RECT_F{ .left = 0, .top = 0, .right = @floatFromInt(bounds.right - bounds.left), .bottom = @floatFromInt(bounds.bottom - bounds.top) };
     rt.lpVtbl.*.DrawBitmap.?(rt, backdrop, &surface, 1, c.D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, &surface);
     rt.lpVtbl.*.DrawTextLayout.?(rt, .{ .x = @floatFromInt(rect.left - bounds.left), .y = @floatFromInt(rect.top + offset - bounds.top) }, layout, @ptrCast(brush.?), c.D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    mark(.draw, &stamp);
     try check(rt.lpVtbl.*.EndDraw.?(rt, null, null));
+    mark(.end, &stamp);
     return height;
 }
 pub fn drawText(dc: win.HDC, text: [*c]const u16, len: i32, rect: *win.RECT, flags: u32) i32 {
@@ -627,18 +747,47 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
     const old = win.SelectObject(dc, bitmap);
     defer _ = win.SelectObject(dc, old);
     const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. size * size];
-    const font = win.CreateFontW(-17, 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, wide("IBM Plex Sans")) orelse return error.CreateFontFailed;
+    const font = win.CreateFontW(-17, 0, 0, 0, @import("font_config.zig").body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, wide("IBM Plex Sans")) orelse return error.CreateFontFailed;
     defer _ = win.DeleteObject(font);
     const previous_font = win.SelectObject(dc, font);
     defer _ = win.SelectObject(dc, previous_font);
     _ = win.SetTextColor(dc, 0);
     _ = win.SetBkMode(dc, win.TRANSPARENT);
     var font_path: [1024:0]u16 = undefined;
-    const path_len = win.GetFullPathNameW(wide("assets\\IBMPlexSans-Regular.ttf"), font_path.len, &font_path, null);
-    try std.testing.expect(path_len > 0 and path_len < font_path.len);
-    setBundledFontPaths(&.{ &font_path, wide("missing-font.ttf") });
+    const path_len = win.GetFullPathNameW(wide("assets\\IBMPlexSans-Medium.ttf"), font_path.len, &font_path, null);
+    const font_files = @import("font_config.zig").files;
+    var bundled_paths: [font_files.len][1024:0]u16 = undefined;
+    var font_pointers: [font_files.len][*:0]const u16 = undefined;
+    inline for (font_files, 0..) |file, i| {
+        _ = win.GetFullPathNameW(wide("assets\\" ++ file), bundled_paths[i].len, &bundled_paths[i], null);
+        font_pointers[i] = &bundled_paths[i];
+    }
+    setBundledFontPaths(&font_pointers);
+    const first_path_unit = bundled_paths[0][0];
+    bundled_paths[0][0] = '?';
+    const paths_owned = paths[0][0] == first_path_unit;
+    bundled_paths[0][0] = first_path_unit;
     defer reset();
-    try std.testing.expect(available());
+    _ = available();
+    const sample = wide("Smooth readable text IBM Plex Sans at seventeen pixels today");
+    var drawn = win.RECT{ .left = 8, .top = 8, .right = 188, .bottom = 300 };
+    var frequency: win.LARGE_INTEGER = undefined;
+    _ = win.QueryPerformanceFrequency(&frequency);
+    @memset(pixels, 0xffffffff);
+    _ = drawText(dc, sample, @intCast(sample.len), &drawn, win.DT_WORDBREAK | win.DT_NOPREFIX);
+    for ([_]bool{ true, false }) |reference| {
+        reference_render = reference;
+        defer reference_render = false;
+        profile = .{ .enabled = true };
+        const start = timestamp();
+        for (0..200) |_| _ = drawText(dc, sample, @intCast(sample.len), &drawn, win.DT_WORDBREAK | win.DT_NOPREFIX);
+        const end = timestamp();
+        printProfile(if (reference) "repeated_before" else "repeated_after", end - start, frequency.QuadPart);
+        profile.enabled = false;
+    }
+    try std.testing.expect(path_len > 0 and path_len < font_path.len);
+    try std.testing.expect(paths_owned);
+    try std.testing.expect(directwrite);
     std.debug.print("text: directwrite = {}, collection = {s}\n", .{ directwrite, @tagName(collection_backend) });
     {
         const key = try keyForDC(dc);
@@ -655,7 +804,7 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
         try check(actual_collection.?.lpVtbl.*.GetFontFamily.?(actual_collection.?, family_index, &family));
         defer release(family);
         var resolved_font: ?*c.IDWriteFont = null;
-        try check(family.?.lpVtbl.*.GetFirstMatchingFont.?(family.?, c.DWRITE_FONT_WEIGHT_NORMAL, c.DWRITE_FONT_STRETCH_NORMAL, c.DWRITE_FONT_STYLE_NORMAL, &resolved_font));
+        try check(family.?.lpVtbl.*.GetFirstMatchingFont.?(family.?, c.DWRITE_FONT_WEIGHT_MEDIUM, c.DWRITE_FONT_STRETCH_NORMAL, c.DWRITE_FONT_STYLE_NORMAL, &resolved_font));
         defer release(resolved_font);
         var face: ?*c.IDWriteFontFace = null;
         try check(resolved_font.?.lpVtbl.*.CreateFontFace.?(resolved_font.?, &face));
@@ -676,15 +825,13 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
         defer release(local_loader);
         var resolved_path: [1024:0]u16 = undefined;
         try check(local_loader.?.lpVtbl.*.GetFilePathFromKey.?(local_loader.?, reference_key, reference_size, &resolved_path, resolved_path.len));
-        try std.testing.expectEqualSlices(u16, std.mem.sliceTo(&font_path, 0), std.mem.sliceTo(&resolved_path, 0));
+        try std.testing.expect(windowsPathsEqual(std.mem.sliceTo(&font_path, 0), std.mem.sliceTo(&resolved_path, 0)));
         std.debug.print("bundled font reference key matches requested file\n", .{});
     }
     @memset(pixels, 0xffffffff);
-    const sample = wide("Smooth readable text IBM Plex Sans at seventeen pixels today");
     try std.testing.expectEqual(@as(usize, 60), sample.len);
     var measured = win.RECT{ .left = 8, .top = 8, .right = 188, .bottom = 0 };
     const measured_height = drawText(dc, sample, @intCast(sample.len), &measured, win.DT_WORDBREAK | win.DT_CALCRECT | win.DT_NOPREFIX);
-    var drawn = win.RECT{ .left = 8, .top = 8, .right = 188, .bottom = 300 };
     const drawn_height = drawText(dc, sample, @intCast(sample.len), &drawn, win.DT_WORDBREAK | win.DT_NOPREFIX);
     if (!directwrite) std.debug.print("DirectWrite failure: {any}\n", .{last_failure});
     try std.testing.expect(directwrite);
@@ -703,16 +850,6 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
     std.debug.print("raster: ink={d}, intermediate grey levels={d}, wrapped height={d}\n", .{ ink, levels, drawn_height });
     try std.testing.expect(ink > 0);
     try std.testing.expect(levels >= 8);
-    var frequency: win.LARGE_INTEGER = undefined;
-    var start: win.LARGE_INTEGER = undefined;
-    var end: win.LARGE_INTEGER = undefined;
-    try std.testing.expect(win.QueryPerformanceFrequency(&frequency) != 0);
-    _ = win.QueryPerformanceCounter(&start);
-    for (0..200) |_| _ = drawText(dc, sample, @intCast(sample.len), &drawn, win.DT_WORDBREAK | win.DT_NOPREFIX);
-    _ = win.QueryPerformanceCounter(&end);
-    try std.testing.expect(directwrite);
-    const average = @as(f64, @floatFromInt(end.QuadPart - start.QuadPart)) * 1000000 / @as(f64, @floatFromInt(frequency.QuadPart)) / 200;
-    std.debug.print("text_draw: 200 calls, 60 UTF16 units, average {d:.2} us/call\n", .{average});
     {
         const saved = win.SaveDC(dc);
         defer _ = win.RestoreDC(dc, saved);
@@ -734,7 +871,129 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
         try std.testing.expect(ink > 0);
         std.debug.print("viewport/window origins and intersected DC clip verified\n", .{});
     }
+    {
+        const cases = [_]u32{
+            win.DT_SINGLELINE | win.DT_NOPREFIX,
+            win.DT_SINGLELINE | win.DT_CENTER | win.DT_VCENTER | win.DT_NOPREFIX,
+            win.DT_SINGLELINE | win.DT_RIGHT | win.DT_BOTTOM | win.DT_NOPREFIX,
+            win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_CENTER | win.DT_NOPREFIX,
+            win.DT_WORDBREAK | win.DT_WORD_ELLIPSIS | win.DT_NOPREFIX,
+            win.DT_WORDBREAK | win.DT_NOPREFIX,
+            win.DT_SINGLELINE | win.DT_NOCLIP,
+        };
+        const texts = [_][:0]const u16{ sample, wide("&Italic && underline Äg jfy\r\nsecond line"), wide("Short label") };
+        const expected = try std.testing.allocator.alloc(u32, pixels.len);
+        defer std.testing.allocator.free(expected);
+        for ([_]i32{ 13, 17, 26 }, 0..) |font_size, style| {
+            const variant = win.CreateFontW(-font_size, 0, 0, 0, if (style == 1) win.FW_SEMIBOLD else @import("font_config.zig").body_weight, @intFromBool(style == 2), @intFromBool(style == 2), 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, wide("IBM Plex Sans")) orelse return error.CreateFontFailed;
+            defer _ = win.DeleteObject(variant);
+            const previous = win.SelectObject(dc, variant);
+            defer _ = win.SelectObject(dc, previous);
+            for (cases) |flags| for (texts) |text| {
+                clearLayouts();
+                var expected_height: i32 = 0;
+                for ([_]bool{ true, false, false }) |reference| {
+                    reference_render = reference;
+                    defer reference_render = false;
+                    for (pixels, 0..) |*pixel, i| pixel.* = 0xff000000 | @as(u32, @intCast((i * 331) & 0xffffff));
+                    var rect = win.RECT{ .left = 11, .top = 9, .right = 193, .bottom = 149 };
+                    const actual_height = drawText(dc, text, -1, &rect, flags);
+                    try std.testing.expect(directwrite);
+                    _ = win.GdiFlush();
+                    if (reference) {
+                        @memcpy(expected, pixels);
+                        expected_height = actual_height;
+                    } else {
+                        try std.testing.expectEqual(expected_height, actual_height);
+                        if (!std.mem.eql(u32, expected, pixels)) std.debug.print("pixel mismatch style={d} flags={x} text_units={d} reference={}\n", .{ style, flags, text.len, reference });
+                        try std.testing.expectEqualSlices(u32, expected, pixels);
+                    }
+                }
+            };
+        }
+        std.debug.print("pixel-equivalent cached and tight-bound rendering: 63 style/flag/text cases, cold and warm\n", .{});
+    }
+    {
+        clearLayouts();
+        const key = try keyForDC(dc);
+        const flags = win.DT_WORDBREAK | win.DT_NOPREFIX;
+        const measure_rect = win.RECT{ .left = 8, .top = 8, .right = 188, .bottom = 0 };
+        const first = try layoutFor(sample, key, measure_rect, flags | win.DT_CALCRECT);
+        defer release(first.object);
+        const second = try layoutFor(sample, key, drawn, flags);
+        defer release(second.object);
+        try std.testing.expect(first.object == second.object);
+        const narrow = try layoutFor(sample, key, .{ .left = 8, .top = 8, .right = 88, .bottom = 300 }, flags);
+        defer release(narrow.object);
+        try std.testing.expect(narrow.object != first.object);
+        const short = try layoutFor(sample, key, .{ .left = 8, .top = 8, .right = 188, .bottom = 20 }, flags);
+        defer release(short.object);
+        try std.testing.expect(short.object != first.object);
+        const trimmed = try layoutFor(sample, key, drawn, flags | win.DT_WORD_ELLIPSIS);
+        defer release(trimmed.object);
+        try std.testing.expect(trimmed.object != first.object);
+        var changed_key = key;
+        changed_key.weight = win.FW_SEMIBOLD;
+        const changed = try layoutFor(sample, changed_key, drawn, flags);
+        defer release(changed.object);
+        try std.testing.expect(changed.object != first.object);
+        clearLayouts();
+        var input = [_]u16{ 'a', 'b', 'c' };
+        const original = try layoutFor(&input, key, drawn, flags);
+        defer release(original.object);
+        input[0] = 'z';
+        const modified = try layoutFor(&input, key, drawn, flags);
+        defer release(modified.object);
+        try std.testing.expect(original.object != modified.object);
+        const copied = try layoutFor(wide("abc"), key, drawn, flags);
+        defer release(copied.object);
+        try std.testing.expect(original.object == copied.object);
+        layouts[0].hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(wide("xyz")));
+        const collision = try layoutFor(wide("xyz"), key, drawn, flags);
+        defer release(collision.object);
+        try std.testing.expect(original.object != collision.object);
+        clearLayouts();
+        for (0..layouts.len) |i| {
+            const value = [_]u16{ @intCast('A' + i), 'x' };
+            const item = try layoutFor(&value, key, drawn, flags);
+            release(item.object);
+        }
+        const oldest = layouts[0].layout.?;
+        const victim = layouts[1].layout.?;
+        _ = victim.lpVtbl.*.AddRef.?(victim);
+        defer release(victim);
+        const recent = try layoutFor(&[_]u16{ 'A', 'x' }, key, drawn, flags);
+        defer release(recent.object);
+        try std.testing.expect(recent.object == oldest);
+        const extra = try layoutFor(wide("one more"), key, drawn, flags);
+        defer release(extra.object);
+        try std.testing.expect(layouts[0].layout.? == oldest);
+        const evicted = try layoutFor(&[_]u16{ 'B', 'x' }, key, drawn, flags);
+        defer release(evicted.object);
+        try std.testing.expect(evicted.object != victim);
+        var long_text: [1025]u16 = @splat('a');
+        const long_first = try layoutFor(&long_text, key, drawn, flags);
+        defer release(long_first.object);
+        const long_second = try layoutFor(&long_text, key, drawn, flags);
+        defer release(long_second.object);
+        try std.testing.expect(long_first.object != long_second.object);
+        clearLayouts();
+        const retained = try layoutFor(sample, key, drawn, flags);
+        defer release(retained.object);
+        for (0..formats.len + 1) |i| {
+            var varied = key;
+            varied.height = @intCast(i + 10);
+            _ = try getFormat(varied);
+        }
+        const after_eviction = try layoutFor(sample, key, drawn, flags);
+        defer release(after_eviction.object);
+        try std.testing.expect(retained.object == after_eviction.object);
+        clearLayouts();
+        for (layouts) |entry| try std.testing.expect(entry.layout == null);
+        std.debug.print("layout cache: CALCRECT reuse, width/height/flags/font keys, owned text, hash collisions, long text, format/LRU eviction and reset verified\n", .{});
+    }
     for (0..2) |backend| {
+        clearLayouts();
         for (&formats) |*entry| {
             release(entry.ellipsis);
             release(entry.format);
@@ -774,4 +1033,74 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
     try std.testing.expect(available());
     try std.testing.expectEqual(@as(u32, 1), loader_refs.load(.acquire));
     std.debug.print("GDI failure fallback is sticky until reset, then DirectWrite recovers\n", .{});
+}
+
+test "Windows font provenance ignores case and separator spelling only" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
+    try std.testing.expect(windowsPathsEqual(wide("C:\\Fonts\\Plex.ttf"), wide("c:/FONTS/plex.TTF")));
+    try std.testing.expect(windowsPathsEqual(wide("C:\\Ä\\Plex.ttf"), wide("c:/ä/plex.TTF")));
+    try std.testing.expect(!windowsPathsEqual(wide("C:\\Fonts\\Plex.ttf"), wide("C:/Fonts/Other.ttf")));
+    try std.testing.expect(!windowsPathsEqual(wide("C:\\Fonts\\Plex.ttf"), wide("D:/Fonts/Plex.ttf")));
+}
+
+test "DirectWrite fifty distinct strings frame benchmark" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
+    const dc = win.CreateCompatibleDC(null) orelse return error.CreateDCFailed;
+    defer _ = win.DeleteDC(dc);
+    var info = std.mem.zeroes(win.BITMAPINFO);
+    info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = 1200;
+    info.bmiHeader.biHeight = -800;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    var bits: ?*anyopaque = null;
+    const bitmap = win.CreateDIBSection(dc, &info, win.DIB_RGB_COLORS, &bits, null, 0) orelse return error.CreateBitmapFailed;
+    defer _ = win.DeleteObject(bitmap);
+    const old = win.SelectObject(dc, bitmap);
+    defer _ = win.SelectObject(dc, old);
+    const font = win.CreateFontW(-17, 0, 0, 0, @import("font_config.zig").body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, wide("IBM Plex Sans")) orelse return error.CreateFontFailed;
+    defer _ = win.DeleteObject(font);
+    const previous = win.SelectObject(dc, font);
+    defer _ = win.SelectObject(dc, previous);
+    _ = win.SetTextColor(dc, 0);
+    _ = win.SetBkMode(dc, win.TRANSPARENT);
+    var font_path: [1024:0]u16 = undefined;
+    _ = win.GetFullPathNameW(wide("assets\\IBMPlexSans-Medium.ttf"), font_path.len, &font_path, null);
+    setBundledFontPaths(&.{&font_path});
+    defer reset();
+    _ = available();
+    var strings: [50][200]u16 = undefined;
+    var lengths: [50]usize = undefined;
+    const paragraph = wide("Readable wrapped paragraphs exercise realistic message layouts with varied words, punctuation, and spacing. Each message uses the same bundled font and wraps naturally without changing its text or scale. ");
+    for (&strings, &lengths, 0..) |*text, *len, i| {
+        len.* = if (i % 2 == 0) 12 else 200;
+        for (text[0..len.*], 0..) |*unit, j| unit.* = paragraph[j % paragraph.len];
+        text[0] = 'A' + @as(u16, @intCast(i / 26));
+        text[1] = 'a' + @as(u16, @intCast(i % 26));
+    }
+    var frequency: win.LARGE_INTEGER = undefined;
+    _ = win.QueryPerformanceFrequency(&frequency);
+    const frames = 10;
+    for ([_]bool{ true, false }) |reference| {
+        reference_render = reference;
+        defer reference_render = false;
+        clearLayouts();
+        profile = .{ .enabled = true };
+        const start = timestamp();
+        for (0..frames) |_| {
+            @memset(@as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. 1200 * 800], 0xffffffff);
+            for (&strings, lengths, 0..) |*text, len, i| {
+                const x: i32 = @intCast((i / 10) * 240);
+                const y: i32 = @intCast((i % 10) * 80);
+                var rect = win.RECT{ .left = x, .top = y, .right = x + 232, .bottom = y + 78 };
+                _ = drawText(dc, text, @intCast(len), &rect, win.DT_WORDBREAK | win.DT_NOPREFIX);
+            }
+        }
+        const end = timestamp();
+        printProfile(if (reference) "frame_before" else "frame_after", end - start, frequency.QuadPart);
+        profile.enabled = false;
+        const ms = @as(f64, @floatFromInt(end - start)) * 1000 / @as(f64, @floatFromInt(frequency.QuadPart)) / frames;
+        std.debug.print("text frame {s}: 1200x800, 50 distinct strings (25 labels, 25 200-unit paragraphs), {d} frames, {d:.2} ms/frame\n", .{ if (reference) "before" else "after", frames, ms });
+        try std.testing.expect(directwrite);
+    }
 }
