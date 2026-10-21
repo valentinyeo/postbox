@@ -17,7 +17,7 @@ def section(source, start, end):
     return source[first:source.index(end, first + len(start))]
 
 
-def verify_wiring(main):
+def verify_wiring(main, edit):
     startup = main[main.index("pub fn main(init: std.process.Init) !void {"):]
     assert startup.index("applyTheme(loadTheme());") < startup.index("win.CreateWindowExW(")
     apply = section(main, "fn applyTheme(", "fn changeTheme(")
@@ -48,10 +48,19 @@ def verify_wiring(main):
     assert "for ([_]?win.HWND{ a.compose, a.search }) |control|" in colors
     assert "win.SetBkColor(hdc, theme.current.surface_container_high)" in colors
     assert "return @bitCast(@intFromPtr(a.brush_raised.?));" in colors
-    search = section(main, "fn searchFieldProc(", "fn ")
-    assert "win.FillRect(hdc, &rect, a.brush_raised.?)" in search
-    assert "win.SetTextColor(hdc, theme.current.on_surface_variant)" in search
-    assert "win.HideCaret(hwnd)" in search and "win.ShowCaret(hwnd)" in search
+    assert "a.search = directwrite_edit.create(" in main
+    colors = section(edit, "    fn updateColours(", "    fn paint(")
+    assert "win.WM_CTLCOLOREDIT" in colors
+    assert "self.background = background;" in colors
+    assert "self.char_format.crTextColor = foreground;" in colors
+    paint = section(edit, "    fn paint(", "fn fromWindow(")
+    assert "self.updateColours(dc);" in paint
+    assert "const background = self.background;" in paint
+    assert "rt.lpVtbl.*.Clear.?(rt, &colour);" in paint
+    assert "self.services.?.send(win.WM_GETTEXTLENGTH, 0, 0) == 0" in paint
+    assert "win.SetTextColor(dc, theme.current.on_surface_variant)" in paint
+    assert "text_draw.drawText(dc, &self.cue" in paint
+    assert "win.HideCaret(hwnd)" in edit and "win.ShowCaret(hwnd)" in edit
     assert "(id == id_compose or id == id_search) and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)" in main
     assert "win.InvalidateRect(hwnd, if (id == id_compose) &a.compose_pill else &a.search_pill, win.FALSE)" in main
     assert "win.SetBkColor(hdc, fieldColor())" in main
@@ -184,7 +193,8 @@ class ThemeRuntimeTests(unittest.TestCase):
 
     def test_IGSH_505_startup_palette_control_and_child_paint_wiring_with_removal_controls(self):
         main = (ROOT / "src/main.zig").read_text()
-        verify_wiring(main)
+        edit = (ROOT / "src/directwrite_edit.zig").read_text()
+        verify_wiring(main, edit)
         for token in (
             "applyTheme(loadTheme());",
             "applyTheme(choice);",
@@ -204,17 +214,30 @@ class ThemeRuntimeTests(unittest.TestCase):
             "smooth.strokeRoundRect(shapes, rect, radius, radius, frame_color, 1)",
             "for ([_]?win.HWND{ a.compose, a.search }) |control|",
             "win.SetBkColor(hdc, theme.current.surface_container_high)",
-            "win.FillRect(hdc, &rect, a.brush_raised.?)",
-            "win.HideCaret(hwnd)",
-            "win.ShowCaret(hwnd)",
+            "a.search = directwrite_edit.create(",
             "win.InvalidateRect(hwnd, if (id == id_compose) &a.compose_pill else &a.search_pill, win.FALSE)",
             "win.SetBkColor(hdc, fieldColor())",
             "if (!recreateThemeBrushes(a)) return -1;",
         ):
             with self.subTest(token=token), self.assertRaises((AssertionError, ValueError)):
-                verify_wiring(main.replace(token, ""))
+                verify_wiring(main.replace(token, ""), edit)
+        for token in (
+            "win.WM_CTLCOLOREDIT",
+            "self.background = background;",
+            "self.char_format.crTextColor = foreground;",
+            "self.updateColours(dc);",
+            "const background = self.background;",
+            "rt.lpVtbl.*.Clear.?(rt, &colour);",
+            "self.services.?.send(win.WM_GETTEXTLENGTH, 0, 0) == 0",
+            "win.SetTextColor(dc, theme.current.on_surface_variant)",
+            "text_draw.drawText(dc, &self.cue",
+            "win.HideCaret(hwnd)",
+            "win.ShowCaret(hwnd)",
+        ):
+            with self.subTest(token=token), self.assertRaises((AssertionError, ValueError)):
+                verify_wiring(main, edit.replace(token, ""))
         with self.assertRaises(AssertionError):
-            verify_wiring(main + "\nconst class_brush = 1;\n")
+            verify_wiring(main + "\nconst class_brush = 1;\n", edit)
 
     def test_no_compile_time_or_noncurrent_theme_colors(self):
         colors = set(re.findall(r"^    (\w+): u32,", (ROOT / "src/theme.zig").read_text(), re.MULTILINE))

@@ -7,7 +7,6 @@ pub const c = @cImport({
     @cInclude("tlhelp32.h");
     @cInclude("commctrl.h");
     @cInclude("richedit.h");
-    @cInclude("d2d1.h");
     @cInclude("imm.h");
     @cInclude("ole2.h");
     @cInclude("dwmapi.h");
@@ -19,4 +18,5 @@ pub const c = @cImport({
     @cInclude("mfreadwrite.h");
     @cInclude("mfplay.h");
     @cInclude("winhttp.h");
+    @cInclude("d2d1.h");
 });
