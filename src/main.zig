@@ -11331,7 +11331,7 @@ fn openReactionMenu(a: *App, x: i32, y: i32) void {
     if (theme.choice == .amoled) {
         var info = std.mem.zeroes(win.MENUINFO);
         info.cbSize = @sizeOf(win.MENUINFO);
-        info.fMask = win.MIM_BACKGROUND | win.MIM_APPLYTOSUBMENUS;
+        info.fMask = @as(win.DWORD, win.MIM_BACKGROUND) | win.MIM_APPLYTOSUBMENUS;
         info.hbrBack = a.brush_panel;
         _ = win.SetMenuInfo(menu, &info);
     }
@@ -11358,8 +11358,9 @@ fn measureMessageMenuItem(a: *const App, item: *win.MEASUREITEMSTRUCT) void {
         return;
     }
     const label: [*:0]const u16 = @ptrFromInt(item.itemData);
-    const hdc = win.GetDC(a.hwnd) orelse return;
-    defer _ = win.ReleaseDC(a.hwnd, hdc);
+    const hwnd = a.hwnd orelse return;
+    const hdc = win.GetDC(hwnd) orelse return;
+    defer _ = win.ReleaseDC(hwnd, hdc);
     const saved = win.SaveDC(hdc);
     defer _ = win.RestoreDC(hdc, saved);
     _ = win.SelectObject(hdc, @ptrCast(a.font orelse return));

@@ -25,11 +25,12 @@ var text_color: u32 = 0;
 var drawn_text: ?[*:0]const u16 = null;
 const win = struct {
     const UINT = u32;
+    const DWORD = u32;
     const HMENU = usize;
     const MF_STRING = 0;
     const MF_SEPARATOR = 0x800;
     const MF_OWNERDRAW = 0x100;
-    const MIM_BACKGROUND = 2;
+    const MIM_BACKGROUND = @as(i32, 2);
     const MIM_APPLYTOSUBMENUS = 0x80000000;
     const TPM_RETURNCMD = 0x100;
     const TPM_NONOTIFY = 0x80;
@@ -71,10 +72,10 @@ const win = struct {
     fn GetCursorPos(_: *POINT) i32 {
         return 0;
     }
-    fn GetDC(_: ?usize) ?usize {
+    fn GetDC(_: usize) ?usize {
         return 1;
     }
-    fn ReleaseDC(_: ?usize, _: usize) i32 {
+    fn ReleaseDC(_: usize, _: usize) i32 {
         return 1;
     }
     fn SaveDC(_: usize) i32 {
@@ -134,7 +135,7 @@ test "IGSH-505 message menu sets AMOLED background and owner draws every row" {
     try std.testing.expect(destroyed);
     const info = menu_info orelse return error.MissingAmoledMenuBackground;
     try std.testing.expectEqual(@as(u32, @sizeOf(win.MENUINFO)), info.cbSize);
-    try std.testing.expectEqual(@as(u32, win.MIM_BACKGROUND | win.MIM_APPLYTOSUBMENUS), info.fMask);
+    try std.testing.expectEqual(@as(u32, win.MIM_BACKGROUND) | win.MIM_APPLYTOSUBMENUS, info.fMask);
     try std.testing.expectEqual(app.brush_panel, info.hbrBack);
     try std.testing.expectEqual(@as(usize, 8), row_count);
     for (rows) |row| try std.testing.expectEqual(@as(u32, win.MF_OWNERDRAW), row.flags);
