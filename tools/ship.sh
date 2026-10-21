@@ -38,7 +38,7 @@ if [[ ! "$wait_seconds" =~ ^[1-9][0-9]*$ ]]; then
     exit 1
 fi
 
-tools/preflight.sh
+nice -n 19 ionice -c3 tools/preflight-light.sh
 git push -u origin HEAD
 pr="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
 if [[ -z "$pr" ]]; then
