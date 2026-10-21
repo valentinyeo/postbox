@@ -1,9 +1,0 @@
-[Unit]
-Description=Poll for advisory AI pull request reviews
-
-[Service]
-Type=oneshot
-WorkingDirectory=%h/projects/wazig-review
-ExecStart=/usr/bin/env bash tools/ai-review-poll.sh
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-Nice=10

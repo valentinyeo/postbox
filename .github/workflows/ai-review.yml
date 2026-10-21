@@ -1,0 +1,96 @@
+name: AI review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  code-review:
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       !github.event.pull_request.draft) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       startsWith(github.event.comment.body, '/ai-review') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Resolve eligible PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          info=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")
+          if ! jq -e --arg repo "$GITHUB_REPOSITORY" --arg head "$EVENT_HEAD" '
+            .state == "open" and .draft == false and .head.repo.full_name == $repo
+            and ($head == "" or .head.sha == $head)' <<< "$info" > /dev/null; then
+            echo '::notice::AI review skipped: fork, draft, closed PR, or superseded head.'
+            exit 0
+          fi
+          base=$(jq -er '.base.sha | select(test("^[0-9a-f]{40}$"))' <<< "$info")
+          head=$(jq -er '.head.sha | select(test("^[0-9a-f]{40}$"))' <<< "$info")
+          printf 'number=%s\nbase=%s\nhead=%s\n' "$PR_NUMBER" "$base" "$head" >> "$GITHUB_OUTPUT"
+
+      - name: Check API key availability
+        if: steps.pr.outputs.number != ''
+        id: key
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [[ -z "$OPENAI_API_KEY" ]]; then
+            echo '::notice::AI review skipped: OPENAI_API_KEY is not configured; a maintainer must set it.'
+            exit 0
+          fi
+          echo 'available=true' >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.available == 'true'
+        with:
+          ref: ${{ steps.pr.outputs.base }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.available == 'true'
+        with:
+          node-version: '22'
+
+      - name: Install Codex CLI
+        if: steps.key.outputs.available == 'true'
+        run: npm i -g @openai/codex@0.163.0
+
+      - name: Log in to Codex
+        if: steps.key.outputs.available == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_HOME: ${{ runner.temp }}/ai-review-codex
+        run: printenv OPENAI_API_KEY | codex login --with-api-key
+
+      - name: Review and post advisory comment
+        if: steps.key.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEX_HOME: ${{ runner.temp }}/ai-review-codex
+          AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+          AI_REVIEW_HEAD_SHA: ${{ steps.pr.outputs.head }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: bash tools/ai-review.sh "$PR_NUMBER"
+
+      - name: Remove Codex credentials
+        if: always() && steps.key.outputs.available == 'true'
+        run: rm -rf -- "$RUNNER_TEMP/ai-review-codex"
