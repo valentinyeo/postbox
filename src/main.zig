@@ -3058,7 +3058,10 @@ fn tdlibSmoke(io: std.Io) u8 {
         if (client.poll()) |event_in| {
             var event = event_in;
             defer event.deinit(std.heap.page_allocator);
-            if (event == .auth) return 0;
+            if (event == .auth) switch (event.auth.state) {
+                .wait_parameters, .wait_phone, .wait_code, .wait_password, .wait_registration, .wait_email, .ready => return 0,
+                else => return 1,
+            };
         }
         io.sleep(std.Io.Duration.fromMilliseconds(100), .awake) catch return 1;
         waited_ms += 100;
