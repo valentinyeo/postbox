@@ -22,6 +22,21 @@ Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
     @{ jid = 'verify-beta'; name = 'Verification Beta'; kind = 'direct'; last_message_ts = '' }
 ) } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $messages "chats-$tag.json")
 $exe = (Resolve-Path (Join-Path $Bin 'Messages.exe')).Path
+foreach ($case in @('not-actions', 'not-isolated')) {
+    $rejected = [Diagnostics.ProcessStartInfo]::new($exe)
+    $rejected.UseShellExecute = $false
+    $rejected.ArgumentList.Add('--verify-fixture')
+    if ($case -eq 'not-actions') { $rejected.Environment['GITHUB_ACTIONS'] = 'false' }
+    $null = $rejected.Environment.Remove('WAZIG_VERIFY_ROOT')
+    $child = [Diagnostics.Process]::Start($rejected)
+    try {
+        Assert-That ($child.WaitForExit(10000)) "Unsafe fixture launch did not reject: $case"
+        Assert-That ($child.ExitCode -ne 0) "Unsafe fixture launch succeeded: $case"
+    } finally {
+        if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
+    }
+    Add-Content (Join-Path $Evidence 'launch-guards.log') "REJECTED: $case"
+}
 $ctl = (Resolve-Path (Join-Path $Bin 'wazigctl.exe')).Path
 $start = [Diagnostics.ProcessStartInfo]::new($exe)
 $start.UseShellExecute = $false

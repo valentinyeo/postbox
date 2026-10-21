@@ -43,7 +43,7 @@ jobs:
         with:
           version: 0.16.0
       - name: Build real desktop and control client
-        run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526
+        run: zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
       - name: Launch, doctor and drive
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ inputs.feature || 'search' }}' -Bin zig-out/bin -Evidence verification-evidence
