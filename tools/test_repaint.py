@@ -75,7 +75,7 @@ class RepaintTests(unittest.TestCase):
         self.assertIn("@floatFromInt(clip.top)", init)
         build = source("build.zig")
         self.assertIn('@embedFile("tools/repaint_test.zig")', build)
-        self.assertIn('sourceSection("                saveComposerDraft(a);"', build)
+        self.assertIn('sourceSection("\\n                saveComposerDraft(a);"', build)
         self.assertIn("test_step.dependOn(&b.addRunArtifact(repaint_tests).step)", build)
 
     def test_IGSH_510_source_guards_reject_unbuffered_and_whole_surface_regressions(self):

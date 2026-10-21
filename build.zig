@@ -402,7 +402,7 @@ pub fn build(b: *std.Build) void {
         buffer_source[(std.mem.indexOfScalar(u8, buffer_source, '\n') orelse unreachable) + 1 ..],
         sourceSection("fn layoutComposer(", "fn layout(a:"),
         "fn composeChanged(a: *App) void {\n",
-        sourceSection("                saveComposerDraft(a);", "            } else if (id == id_search"),
+        sourceSection("\n                saveComposerDraft(a);", "            } else if (id == id_search"),
         "}\n",
     }) catch @panic("Out of memory building repaint harness");
     const repaint_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -586,6 +586,7 @@ pub fn build(b: *std.Build) void {
 
     const drafts_ui_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/drafts_ui_test.zig"),
+        sourceSection("fn visibleChatIndex(", "fn chatProvider("),
         sourceSection("fn composerText(", "fn ensureDictation("),
         sourceSection("fn updateDictation(", "fn selectChat("),
     }) catch @panic("Out of memory building drafts UI harness");

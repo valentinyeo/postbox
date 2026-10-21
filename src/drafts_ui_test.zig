@@ -53,6 +53,8 @@ const App = struct {
     switch_during_paste: bool = false,
     undo_clears: usize = 0,
     enabled: bool = true,
+    invalidated_row: ?win.RECT = null,
+    full_list_invalidations: usize = 0,
 
     fn deinit(self: *App) void {
         self.draft_store.deinit(self.allocator);
@@ -70,6 +72,9 @@ const win = struct {
     const EM_SETSEL = 2;
     const EM_SCROLLCARET = 3;
     const EM_REPLACESEL = 4;
+    const LB_GETITEMRECT = 5;
+    const LB_ERR = -1;
+    const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
 
     fn GetWindowTextLengthW(_: usize) i32 {
         return @intCast(std.mem.indexOfScalar(u16, &current.?.text, 0).?);
@@ -88,7 +93,13 @@ const win = struct {
         saveComposerDraft(current.?);
         return TRUE;
     }
-    fn SendMessageW(_: usize, message: u32, _: usize, lparam: isize) isize {
+    fn SendMessageW(_: usize, message: u32, wparam: usize, lparam: isize) isize {
+        if (message == LB_GETITEMRECT) {
+            if (wparam >= current.?.chat_count) return LB_ERR;
+            const rect: *RECT = @ptrFromInt(@as(usize, @bitCast(lparam)));
+            const top: i32 = @as(i32, @intCast(wparam)) * 64;
+            rect.* = .{ .left = 0, .top = top, .right = 380, .bottom = top + 64 };
+        }
         if (message == EM_EMPTYUNDOBUFFER) current.?.undo_clears += 1;
         if (message == EM_REPLACESEL) {
             const value: [*:0]const u16 = @ptrFromInt(@as(usize, @bitCast(lparam)));
@@ -104,7 +115,13 @@ const win = struct {
         current.?.enabled = enabled != FALSE;
         return TRUE;
     }
-    fn InvalidateRect(_: usize, _: ?*const u8, _: i32) i32 {
+    fn InvalidateRect(hwnd: usize, rect: ?*const RECT, erase: i32) i32 {
+        if (hwnd == 3) {
+            if (rect) |row| {
+                std.debug.assert(erase == FALSE);
+                current.?.invalidated_row = row.*;
+            } else current.?.full_list_invalidations += 1;
+        }
         return TRUE;
     }
     fn OpenClipboard(_: ?usize) i32 {
@@ -204,4 +221,21 @@ test "IGSH-497 UI dictation and delayed transcript paste restore only their orig
     switchComposerDraft(&app);
     try expectComposer(&app, "A pasted transcript spoken transcript");
     app.dictation_session = null;
+}
+
+test "IGSH-510 draft edits invalidate only their visible chat row" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    switchComposerDraft(&app);
+    app.invalidated_row = null;
+    app.full_list_invalidations = 0;
+    _ = win.SetWindowTextW(1, lit("draft"));
+    try std.testing.expectEqualDeep(win.RECT{ .left = 0, .top = 0, .right = 380, .bottom = 64 }, app.invalidated_row.?);
+    try std.testing.expectEqual(@as(usize, 0), app.full_list_invalidations);
+    app.selected_chat = 1;
+    switchComposerDraft(&app);
+    app.invalidated_row = null;
+    _ = win.SetWindowTextW(1, lit("second draft"));
+    try std.testing.expectEqualDeep(win.RECT{ .left = 0, .top = 64, .right = 380, .bottom = 128 }, app.invalidated_row.?);
 }
