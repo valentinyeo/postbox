@@ -10378,9 +10378,9 @@ fn updateDictation(a: *App) void {
                 var start: u32 = 0;
                 var end: u32 = 0;
                 _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
-                const current = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, composer) catch return;
-                defer a.allocator.free(current);
-                const padding = edit_contract.dictationPadding(current, start, end);
+                const composer_wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, composer) catch return;
+                defer a.allocator.free(composer_wide);
+                const padding = edit_contract.dictationPadding(composer_wide, start, end);
                 var wide: [8195]u16 = undefined;
                 const offset: usize = @intFromBool(padding.before);
                 if (padding.before) wide[0] = ' ';

@@ -106,7 +106,7 @@ fn load(instance: win.HINSTANCE) bool {
     cls.style = win.CS_DBLCLKS;
     cls.lpfnWndProc = windowProc;
     cls.hInstance = instance;
-    cls.hCursor = win.LoadCursorW(null, @ptrFromInt(32513));
+    cls.hCursor = win.LoadCursorA(null, @ptrFromInt(32513));
     cls.lpszClassName = class_name;
     if (win.RegisterClassW(&cls) == 0) return false;
     registered = true;
@@ -184,7 +184,7 @@ const Host = extern struct {
         self.font = font;
         var lf: win.LOGFONTW = std.mem.zeroes(win.LOGFONTW);
         if (win.GetObjectW(font, @sizeOf(win.LOGFONTW), &lf) == 0) return;
-        self.char_format.dwMask = win.CFM_FACE | win.CFM_SIZE | win.CFM_WEIGHT | win.CFM_COLOR | win.CFM_CHARSET;
+        self.char_format.dwMask = @as(u32, win.CFM_FACE) | win.CFM_SIZE | win.CFM_WEIGHT | win.CFM_COLOR | win.CFM_CHARSET;
         self.char_format.yHeight = contract.fontTwips(lf.lfHeight);
         self.char_format.wWeight = @intCast(lf.lfWeight);
         self.char_format.bCharSet = lf.lfCharSet;
@@ -276,7 +276,7 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         const host = std.heap.page_allocator.create(Host) catch return 0;
         host.* = .{ .hwnd = hwnd, .multi = cs.style & win.ES_MULTILINE != 0, .enabled = cs.style & win.WS_DISABLED == 0, .background = theme.current.surface_container_high };
         host.char_format.cbSize = @sizeOf(win.CHARFORMAT2W);
-        host.char_format.dwMask = win.CFM_FACE | win.CFM_SIZE | win.CFM_WEIGHT | win.CFM_COLOR;
+        host.char_format.dwMask = @as(u32, win.CFM_FACE) | win.CFM_SIZE | win.CFM_WEIGHT | win.CFM_COLOR;
         host.char_format.yHeight = 255;
         host.char_format.wWeight = @intCast(@import("font_config.zig").body_weight);
         const face = std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans");
@@ -376,7 +376,7 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         win.WM_GETDLGCODE => return win.DLGC_WANTCHARS | win.DLGC_WANTARROWS | win.DLGC_HASSETSEL,
         win.WM_GETOBJECT => return win.DefWindowProcW(hwnd, message, wparam, lparam),
         win.WM_SETCURSOR => {
-            _ = win.SetCursor(win.LoadCursorW(null, @ptrFromInt(32513)));
+            _ = win.SetCursor(win.LoadCursorA(null, @ptrFromInt(32513)));
             return 1;
         },
         else => {},
