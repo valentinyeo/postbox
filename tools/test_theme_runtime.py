@@ -19,7 +19,14 @@ def section(source, start, end):
 
 def verify_wiring(main):
     startup = main[main.index("pub fn main(init: std.process.Init) !void {"):]
-    assert startup.index("theme.set(loadTheme());") < startup.index("win.CreateWindowExW(")
+    assert startup.index("applyTheme(loadTheme());") < startup.index("win.CreateWindowExW(")
+    apply = section(main, "fn applyTheme(", "fn ")
+    for token in ("theme.set(choice);", "@ptrFromInt(135)", "@ptrFromInt(136)",
+                  "set_preferred_app_mode(menu_theme.preferredAppMode(choice))", "flush_menu_themes();"):
+        assert token in apply
+    switch = section(main, "fn changeTheme(", "fn ")
+    assert switch.index("applyTheme(choice);") < switch.index("recreateThemeBrushes(a)")
+    assert "applyTheme(previous);" in switch
     palette = section(main, "fn buildPaletteItems(", "fn ")
     assert 'appendPalette(a, "Theme: AMOLED black", "", command_theme_amoled);' in palette
     assert 'appendPalette(a, "Theme: Green", "", command_theme_green);' in palette
@@ -117,17 +124,25 @@ class ThemeRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="theme-runtime-") as directory:
             root = Path(directory)
             (root / "theme.zig").write_text((ROOT / "src/theme.zig").read_text())
+            (root / "menu_theme.zig").write_text((ROOT / "src/menu_theme.zig").read_text())
             harness = root / "runtime.zig"
             harness.write_text(source)
             result = subprocess.run([ZIG, "test", str(harness)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertRegex(result.stdout + result.stderr, r"All [0-9]+ tests passed\.")
 
-    def test_startup_palette_control_and_child_paint_wiring_with_removal_controls(self):
+    def test_IGSH_505_startup_palette_control_and_child_paint_wiring_with_removal_controls(self):
         main = (ROOT / "src/main.zig").read_text()
         verify_wiring(main)
         for token in (
-            "theme.set(loadTheme());",
+            "applyTheme(loadTheme());",
+            "applyTheme(choice);",
+            "applyTheme(previous);",
+            "theme.set(choice);",
+            "@ptrFromInt(135)",
+            "@ptrFromInt(136)",
+            "set_preferred_app_mode(menu_theme.preferredAppMode(choice))",
+            "flush_menu_themes();",
             'appendPalette(a, "Theme: AMOLED black", "", command_theme_amoled);',
             'appendPalette(a, "Theme: Green", "", command_theme_green);',
             "_ = changeTheme(a, if (command == command_theme_amoled) .amoled else .green);",
