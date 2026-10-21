@@ -421,6 +421,7 @@ pub fn build(b: *std.Build) void {
 
     const read_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/chat_reconcile_test.zig"),
+        sourceSection("fn beginTranscriptionOpen(", "fn appendDebugLog("),
         sourceSection("fn refreshMessages(", "fn reconcileOpenChat(a: *App) void {"),
         sourceSection("fn reconcileOpenChat(", "fn youSender("),
         "fn resultFor(job: WacliJob) WacliResult { var storage = WacliResult{}; const result = &storage;\n",
