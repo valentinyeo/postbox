@@ -45,6 +45,11 @@ pub const Msg = struct {
     duration_ms: i32 = 0,
     sender_user_id: i64 = 0,
     animated_sticker: bool = false,
+    reply_to: i64 = 0,
+    reply_chat_id: i64 = 0,
+    old_message_id: i64 = 0,
+    content_update: bool = false,
+    date: i64 = 0,
 
     pub fn deinit(self: *Msg, allocator: std.mem.Allocator) void {
         if (self.sender_name.len > 0) allocator.free(self.sender_name);
@@ -73,7 +78,7 @@ pub const Event = union(enum) {
     file: FileUpdate,
     conn: Connection,
     chats_synced,
-    chat_last_date: struct { chat_id: i64, timestamp: []u8 },
+    chat_last_date: struct { chat_id: i64, timestamp: []u8, date: i64 = 0 },
     user: struct { user_id: i64, name: []u8 },
     ignored,
 
@@ -200,13 +205,13 @@ fn fileIdOf(object: std.json.ObjectMap, key: []const u8) i32 {
 fn localPathOf(file: std.json.ObjectMap) []const u8 {
     const local = file.get("local") orelse return "";
     switch (local) {
-        .object => |local_object| return getString(local_object, "path"),
+        .object => |local_object| return if (getBool(local_object, "is_downloading_completed")) getString(local_object, "path") else "",
         else => return "",
     }
 }
 
 fn mimeOf(content: std.json.ObjectMap) []const u8 {
-    for ([_][]const u8{ "voice", "sticker", "video", "document" }) |key| {
+    for ([_][]const u8{ "voice_note", "sticker", "video", "document" }) |key| {
         const value = content.get(key) orelse continue;
         switch (value) {
             .object => |media| return getString(media, "mime_type"),
@@ -232,7 +237,7 @@ fn nestedOf(object: std.json.ObjectMap, key: []const u8, outer_type: []const u8,
 }
 
 fn parseContent(allocator: std.mem.Allocator, message_object: std.json.ObjectMap, msg: *Msg) void {
-    const content_value = message_object.get("content") orelse return;
+    const content_value = message_object.get("content") orelse message_object.get("new_content") orelse return;
     const content = switch (content_value) {
         .object => |c| c,
         else => return,
@@ -251,38 +256,45 @@ fn parseContent(allocator: std.mem.Allocator, message_object: std.json.ObjectMap
     if (std.mem.eql(u8, content_type, "messagePhoto")) {
         msg.media_kind = .photo;
         msg.text = dupe(allocator, formattedText(content, "caption"));
-        if (content.get("photo")) |sizes| {
-            switch (sizes) {
-                .array => |items| {
-                    var index = items.items.len;
-                    while (index > 0) : (index -= 1) {
-                        switch (items.items[index - 1]) {
-                            .object => |size| {
-                                msg.file_id = fileIdOf(size, "photo");
-                                if (msg.file_id != 0) break;
-                            },
-                            else => {},
+        if (content.get("photo")) |photo| {
+            const sizes = switch (photo) {
+                .object => |object| object.get("sizes") orelse return,
+                else => return,
+            };
+            if (sizes == .array) {
+                var index = sizes.array.items.len;
+                while (index > 0) : (index -= 1) {
+                    const size = sizes.array.items[index - 1];
+                    if (size == .object) {
+                        if (fileOf(size.object, "photo")) |file| {
+                            msg.file_id = clampI32(getInt(file, "id"));
+                            msg.local_path = dupe(allocator, localPathOf(file));
+                            if (msg.file_id != 0) break;
                         }
                     }
-                },
-                else => {},
+                }
             }
         }
         return;
     }
     if (std.mem.eql(u8, content_type, "messageVoiceNote")) {
         msg.media_kind = .voice;
-        const seconds = getInt(content, "duration");
-        msg.duration_ms = @intCast(seconds * 1000);
-        if (nestedOf(content, "voice", "voiceNote", "voice")) |file| {
+        if (content.get("voice_note")) |voice| {
+            if (voice == .object) msg.duration_ms = clampI32(getInt(voice.object, "duration") * 1000);
+        }
+        if (nestedOf(content, "voice_note", "voiceNote", "voice")) |file| {
             msg.file_id = clampI32(getInt(file, "id"));
+            msg.local_path = dupe(allocator, localPathOf(file));
         }
         return;
     }
     if (std.mem.eql(u8, content_type, "messageSticker")) {
         msg.media_kind = .sticker;
         msg.animated_sticker = getBool(content, "is_animated") or getBool(content, "is_video");
-        if (nestedOf(content, "sticker", "sticker", "sticker")) |file| msg.file_id = clampI32(getInt(file, "id"));
+        if (nestedOf(content, "sticker", "sticker", "sticker")) |file| {
+            msg.file_id = clampI32(getInt(file, "id"));
+            msg.local_path = dupe(allocator, localPathOf(file));
+        }
         return;
     }
     if (std.mem.eql(u8, content_type, "messageVideo")) {
@@ -290,6 +302,7 @@ fn parseContent(allocator: std.mem.Allocator, message_object: std.json.ObjectMap
         msg.text = dupe(allocator, formattedText(content, "caption"));
         if (nestedOf(content, "video", "video", "video")) |file| {
             msg.file_id = clampI32(getInt(file, "id"));
+            msg.local_path = dupe(allocator, localPathOf(file));
         }
         return;
     }
@@ -302,6 +315,7 @@ fn parseContent(allocator: std.mem.Allocator, message_object: std.json.ObjectMap
         if (msg.text.len == 0) msg.text = dupe(allocator, formattedText(content, "caption"));
         if (msg.text.len == 0) msg.text = dupe(allocator, getString(document, "file_name"));
         msg.file_id = fileIdOf(document, "document");
+        if (fileOf(document, "document")) |file| msg.local_path = dupe(allocator, localPathOf(file));
         return;
     }
     msg.media_kind = .other;
@@ -335,8 +349,14 @@ pub fn parseMessage(allocator: std.mem.Allocator, value: std.json.Value) !?Msg {
     msg.chat_id = getId(message_object, "chat_id");
     msg.id = getId(message_object, "id");
     msg.from_me = getBool(message_object, "is_outgoing");
+    if (message_object.get("reply_to")) |reply| {
+        if (reply == .object) {
+            msg.reply_to = getId(reply.object, "message_id");
+            msg.reply_chat_id = getId(reply.object, "chat_id");
+        }
+    }
     if (message_object.get("sending_state")) |sending| {
-        msg.sending = true;
+        msg.sending = sending == .object;
         switch (sending) {
             .object => |sending_object| {
                 if (std.mem.eql(u8, getString(sending_object, "@type"), "messageSendingStateFailed")) msg.failed = true;
@@ -354,6 +374,7 @@ pub fn parseMessage(allocator: std.mem.Allocator, value: std.json.Value) !?Msg {
     }
     msg.sender_user_id = user_id;
     const date = getInt(message_object, "date");
+    msg.date = date;
     if (date != 0) {
         var timestamp_buffer: [20]u8 = undefined;
         const timestamp = formatTimestamp(&timestamp_buffer, date);
@@ -369,9 +390,9 @@ fn parseFileUpdate(allocator: std.mem.Allocator, object: std.json.ObjectMap) !Ev
     const local = file.get("local") orelse return .ignored;
     switch (local) {
         .object => |local_object| {
-            update.downloading = getInt(local_object, "is_downloading_active") != 0;
+            update.downloading = getBool(local_object, "is_downloading_active");
             const path = getString(local_object, "path");
-            const completed = getInt(local_object, "is_downloading_completed") != 0;
+            const completed = getBool(local_object, "is_downloading_completed");
             if (completed and path.len > 0) update.local_path = dupe(allocator, path);
         },
         else => {},
@@ -432,7 +453,20 @@ pub fn parseEvent(allocator: std.mem.Allocator, json_text: []const u8) !Event {
             else => return .ignored,
         }
     }
-    if (std.mem.eql(u8, type_name, "updateNewChat") or std.mem.eql(u8, type_name, "updateChatLastMessage") or
+    if (std.mem.eql(u8, type_name, "updateChatLastMessage")) {
+        const last = object.get("last_message") orelse return .ignored;
+        if (last == .object) {
+            var buffer: [20]u8 = undefined;
+            return .{ .chat_last_date = .{ .chat_id = getId(object, "chat_id"), .timestamp = dupe(allocator, formatTimestamp(&buffer, getInt(last.object, "date"))), .date = getInt(last.object, "date") } };
+        }
+        return .ignored;
+    }
+    if (std.mem.eql(u8, type_name, "updateMessageContent")) {
+        var msg = Msg{ .chat_id = getId(object, "chat_id"), .id = getId(object, "message_id"), .content_update = true };
+        parseContent(allocator, object, &msg);
+        return .{ .message = msg };
+    }
+    if (std.mem.eql(u8, type_name, "updateNewChat") or
         std.mem.eql(u8, type_name, "updateChatReadInbox"))
     {
         const chat_value = object.get("chat") orelse {
@@ -473,7 +507,11 @@ pub fn parseEvent(allocator: std.mem.Allocator, json_text: []const u8) !Event {
             parsed.value
         else
             object.get("message") orelse return .ignored;
-        if (try parseMessage(allocator, message_value)) |msg| return .{ .message = msg };
+        if (try parseMessage(allocator, message_value)) |parsed_message| {
+            var msg = parsed_message;
+            msg.old_message_id = getId(object, "old_message_id");
+            return .{ .message = msg };
+        }
         return .ignored;
     }
     if (std.mem.eql(u8, type_name, "messages")) {
@@ -530,6 +568,14 @@ pub fn parseEventBatch(allocator: std.mem.Allocator, json_text: []const u8) !std
         .object => |o| getString(o, "@type"),
         else => "",
     };
+    if (std.mem.eql(u8, root_type, "updateDeleteMessages")) {
+        const object = probe.value.object;
+        const ids = object.get("message_ids") orelse return list;
+        if (ids == .array) for (ids.array.items) |id| {
+            if (id == .integer) try list.append(allocator, .{ .deleted = .{ .chat_id = getId(object, "chat_id"), .message_id = id.integer } });
+        };
+        return list;
+    }
     if (std.mem.eql(u8, root_type, "messages")) {
         const items = switch (probe.value) {
             .object => |o| o.get("messages") orelse std.json.Value{ .null = {} },
@@ -578,7 +624,7 @@ test "parses text message with timestamp" {
 
 test "parses voice note with file id and duration" {
     const event = try parseEvent(std.testing.allocator,
-        \\{"@type":"updateNewMessage","message":{"@type":"message","id":9,"chat_id":5,"date":1767139200,"content":{"@type":"messageVoiceNote","duration":12,"voice":{"@type":"voiceNote","duration":12,"mime_type":"audio/ogg","voice":{"@type":"file","id":777,"local":{"@type":"localFile","path":""}}}}}}
+        \\{"@type":"updateNewMessage","message":{"@type":"message","id":9,"chat_id":5,"date":1767139200,"content":{"@type":"messageVoiceNote","voice_note":{"@type":"voiceNote","duration":12,"mime_type":"audio/ogg","voice":{"@type":"file","id":777,"local":{"@type":"localFile","path":""}}}}}}
     );
     var moved = event;
     defer moved.deinit(std.testing.allocator);
@@ -610,7 +656,7 @@ test "formats timestamps" {
 
 test "parses photo caption and largest size" {
     const event = try parseEvent(std.testing.allocator,
-        \\{"@type":"updateNewMessage","message":{"@type":"message","id":11,"chat_id":5,"date":1767139200,"content":{"@type":"messagePhoto","caption":{"@type":"formattedText","text":"look at this"},"photo":[{"@type":"photoSize","photo":{"@type":"file","id":50}},{"@type":"photoSize","photo":{"@type":"file","id":51}}]}}}
+        \\{"@type":"updateNewMessage","message":{"@type":"message","id":11,"chat_id":5,"date":1767139200,"content":{"@type":"messagePhoto","caption":{"@type":"formattedText","text":"look at this"},"photo":{"sizes":[{"@type":"photoSize","photo":{"@type":"file","id":50}},{"@type":"photoSize","photo":{"@type":"file","id":51}}]}}}}
     );
     var moved = event;
     defer moved.deinit(std.testing.allocator);

@@ -84,7 +84,10 @@ const NoLock = struct {
     }
 };
 const TelegramClient = struct {
-    fn sendText(_: *@This(), _: i64, _: []const u8) bool {
+    fn sendTextReply(_: *@This(), _: i64, _: []const u8, _: i64) bool {
+        return false;
+    }
+    fn sendFile(_: *@This(), _: i64, _: []const u8, _: []const u8, _: i64) bool {
         return false;
     }
 };

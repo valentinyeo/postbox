@@ -63,6 +63,20 @@ pub const Client = struct {
         return false;
     }
 
+    pub fn sendTextReply(self: *Client, chat_id: i64, text: []const u8, reply_to: i64) bool {
+        _ = reply_to;
+        return self.sendText(chat_id, text);
+    }
+
+    pub fn sendFile(self: *Client, chat_id: i64, path: []const u8, caption: []const u8, reply_to: i64) bool {
+        _ = self;
+        _ = chat_id;
+        _ = path;
+        _ = caption;
+        _ = reply_to;
+        return false;
+    }
+
     pub fn markRead(self: *Client, chat_id: i64, message_id: i64) void {
         _ = self;
         _ = chat_id;
