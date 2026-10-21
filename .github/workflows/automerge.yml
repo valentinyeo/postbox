@@ -1,7 +1,7 @@
 name: automerge
 on:
   workflow_run:
-    workflows: ["ci", "No code comments"]
+    workflows: ["ci", "No code comments", "private-markers", "Gitleaks", "pr-title"]
     types: [completed]
   schedule:
     - cron: "0 */6 * * *"
@@ -26,17 +26,20 @@ jobs:
         run: |
           set -uo pipefail
           merged_any=0
-          required='["ci","tdlib","windows-smoke","no-comments"]'
+          required='["ci","tdlib","windows-smoke","no-comments","unfurl-verification","private-markers","secret-scan","pr-title","notify-release"]'
           for pr in $(gh pr list -R "$REPO" --state open --json number -q '.[].number'); do
-            info=$(gh pr view "$pr" -R "$REPO" --json isDraft,labels,additions,deletions,files,mergeable,statusCheckRollup,headRefOid)
-            head_oid=$(echo "$info" | jq -r .headRefOid)
+            info=$(gh pr view "$pr" -R "$REPO" --json isDraft,labels,additions,deletions,files,mergeable,statusCheckRollup,headRefOid) || { echo "#$pr: could not read PR head checks"; continue; }
+            head_oid=$(echo "$info" | jq -er '.headRefOid | select(test("^[0-9a-f]{40}$"))') || { echo "#$pr: invalid PR head"; continue; }
             blocked=$(echo "$info" | jq -r --argjson req "$required" '
-              ([.statusCheckRollup[]] as $roll
-               | [ $req[] as $r
-                   | if ([ $roll[] | select(.name == $r and .conclusion == "SUCCESS") ] | length) == 0
-                       or ([ $roll[] | select(.name == $r and .conclusion != "SUCCESS") ] | length) > 0
+              ([.statusCheckRollup[] | select((.name // .context) != "code-review")] as $roll
+               | ($req + [$roll[] | .name // .context] | unique) as $names
+               | [ $names[] as $r
+                   | [$roll[] | select((.name // .context) == $r)] as $checks
+                   | if ($checks | length) == 0
+                       or any($checks[]; if .__typename == "StatusContext" then .state != "SUCCESS"
+                              else .status != "COMPLETED" or .conclusion != "SUCCESS" end)
                      then $r else empty end ] )
-              | join(",")')
+              | join(",")') || blocked="could not evaluate head checks"
             gating='[".github/workflows/automerge.yml", ".github/workflows/ci.yml", ".github/workflows/no-comments.yml", ".github/workflows/release.yml", ".github/workflows/auto-release.yml"]'
             files_json=$(gh api "repos/$REPO/pulls/$pr/files?per_page=100" --paginate --jq '.[].filename' 2>/dev/null | jq -R . | jq -cs .) || files_json=""
             reason=$(echo "$info" | jq -r '
