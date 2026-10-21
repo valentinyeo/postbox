@@ -18620,7 +18620,7 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
     const key = chat_key.Key{ .provider = .whatsapp, .account = job.hub_account.slice(), .id = job.jid.slice() };
     const request: wa_hub.Request = switch (job.kind) {
         .cache_tag => wa_hub.accounts(),
-        .chats, .archived_scan, .contacts_index => try wa_hub.chats(allocator, key.account, hubHasArg(job, "--archived"), 500),
+        .chats, .archived_scan, .kept_check, .contacts_index => try wa_hub.chats(allocator, key.account, hubHasArg(job, "--archived"), 500),
         .messages, .resurface_probe, .background_media => try wa_hub.messages(allocator, key, std.fmt.parseInt(usize, hubArg(job, "--limit", "80"), 10) catch 80, ""),
         .unread_probe => try wa_hub.messages(allocator, key, 20, ""),
         .groups => try wa_hub.list(allocator, key.account, .groups),
@@ -18665,7 +18665,7 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
         return "";
     }
     return switch (job.kind) {
-        .chats, .archived_scan, .contacts_index => hubNormalized(a, allocator, job, response.body, .chats, ""),
+        .chats, .archived_scan, .kept_check, .contacts_index => hubNormalized(a, allocator, job, response.body, .chats, ""),
         .groups => hubNormalized(a, allocator, job, response.body, .groups, ""),
         .messages, .resurface_probe, .unread_probe, .background_media => hubNormalized(a, allocator, job, response.body, .messages, key.id),
         else => response.body,

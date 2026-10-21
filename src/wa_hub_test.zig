@@ -64,6 +64,42 @@ test "chat rows normalize into existing summary and envelope without merging acc
     try std.testing.expect(!std.mem.eql(u8, first, second));
 }
 
+test "kept_check hub inbox rows retain the fields needed to rearchive kept chats" {
+    const archive_rules = @import("archive_rules.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const request = try hub.chats(allocator, key.account, false, 500);
+    try std.testing.expectEqualStrings("GET", request.method);
+    try std.testing.expectEqualStrings("/v1/chats?account=personal&archived=false&limit=500", request.path);
+    const normalized = try hub.normalize(allocator,
+        "[{\"jid\":\"personal:15550000001@s.whatsapp.net\",\"archived\":false,\"last_message_ts\":\"2026-01-01T01:00:00Z\"}]",
+        key.account,
+        .chats,
+    );
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, normalized, .{});
+    defer parsed.deinit();
+    try std.testing.expect(parsed.value.object.get("success").?.bool);
+    const row = parsed.value.object.get("data").?.array.items[0].object;
+    const jid = row.get("jid").?.string;
+    const archived = row.get("archived").?.bool;
+    const stamp = row.get("last_message_ts").?.string;
+    try std.testing.expectEqualStrings(key.id, jid);
+    try std.testing.expect(!archived);
+    try std.testing.expectEqualStrings("2026-01-01T01:00:00Z", stamp);
+    var state = archive_rules.State{};
+    try std.testing.expect(state.archive(jid, "2026-01-01T00:00:00Z", true));
+    try std.testing.expect(state.holdKept(jid, archived, stamp));
+    try std.testing.expect(!state.holdKept(jid, archived, stamp));
+    const rearchive = try hub.archive(allocator, .{ .provider = .whatsapp, .account = key.account, .id = jid }, true);
+    var payload = try body(allocator, rearchive);
+    defer payload.deinit();
+    try std.testing.expectEqualStrings("/v1/archive", rearchive.path);
+    try std.testing.expectEqualStrings(key.account, payload.value.object.get("account").?.string);
+    try std.testing.expectEqualStrings(key.id, payload.value.object.get("chat").?.string);
+    try std.testing.expect(payload.value.object.get("archived").?.bool);
+}
+
 test "message and group replies retain production parser fields" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
