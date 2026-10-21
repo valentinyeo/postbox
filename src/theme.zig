@@ -57,19 +57,27 @@ pub const amoled: Palette = .{
     .on_primary = hex(0x1a1a1a),
     .primary_container = hex(0x333333),
     .on_primary_container = hex(0xffffff),
-    .secondary_container = hex(0xbfbfbf),
-    .on_secondary_container = hex(0x181818),
+    .secondary_container = hex(0x333333),
+    .on_secondary_container = hex(0xffffff),
     .@"error" = hex(0xffb4ab),
 };
 
 pub const Choice = enum(u32) { green = 0, amoled = 1 };
 
-pub var current: *const Palette = &green;
-pub var choice: Choice = .green;
+pub var current: *const Palette = &amoled;
+pub var choice: Choice = .amoled;
 
-pub fn choiceFromDword(value: u32) Choice {
-    return std.enums.fromInt(Choice, value) orelse .green;
+pub fn choiceFromSaved(value: ?u32) Choice {
+    return std.enums.fromInt(Choice, value orelse return .amoled) orelse .amoled;
 }
+
+pub const amoled_button = hex(0x262626);
+pub const amoled_button_hover = hex(0x333333);
+pub const amoled_button_pressed = hex(0x404040);
+pub const amoled_send = hex(0x555555);
+pub const amoled_send_hover = hex(0x606060);
+pub const amoled_send_pressed = hex(0x666666);
+pub const amoled_button_text = hex(0xffffff);
 
 pub fn set(selected: Choice) void {
     choice = selected;
@@ -183,19 +191,58 @@ test "AMOLED has pure black surfaces and distinct neutral bubbles" {
     }
 }
 
-test "theme DWORD selection defaults unknown values to green" {
-    try std.testing.expectEqual(Choice.green, choiceFromDword(0));
-    try std.testing.expectEqual(Choice.amoled, choiceFromDword(1));
-    try std.testing.expectEqual(Choice.green, choiceFromDword(2));
-    try std.testing.expectEqual(Choice.green, choiceFromDword(std.math.maxInt(u32)));
+test "theme DWORD selection defaults unknown values to AMOLED" {
+    try std.testing.expectEqual(Choice.green, choiceFromSaved(0));
+    try std.testing.expectEqual(Choice.amoled, choiceFromSaved(1));
+    try std.testing.expectEqual(Choice.amoled, choiceFromSaved(2));
+    try std.testing.expectEqual(Choice.amoled, choiceFromSaved(std.math.maxInt(u32)));
 }
 
 test "runtime selection updates every palette field" {
-    defer set(.green);
+    defer set(.amoled);
     for ([_]Choice{ .amoled, .green }) |selected| {
         set(selected);
         try std.testing.expectEqual(selected, choice);
         const expected = if (selected == .amoled) amoled else green;
         try std.testing.expectEqualDeep(expected, current.*);
     }
+}
+
+test "IGSH-461 default missing theme is AMOLED" {
+    try std.testing.expectEqual(Choice.amoled, choiceFromSaved(null));
+}
+
+test "IGSH-461 default preserves explicit saved green" {
+    try std.testing.expectEqual(Choice.green, choiceFromSaved(0));
+}
+
+test "IGSH-461 default preserves explicit saved AMOLED" {
+    try std.testing.expectEqual(Choice.amoled, choiceFromSaved(1));
+}
+
+test "IGSH-461 AMOLED composer button states are visible without glare and have readable text" {
+    for ([_]u32{ amoled_button, amoled_button_hover, amoled_button_pressed, amoled_send, amoled_send_hover, amoled_send_pressed }) |fill| {
+        const contrast = contrastRatio(fill, amoled.surface);
+        try std.testing.expect(contrast >= 1.2 and contrast <= 4.0);
+        try std.testing.expect(contrastRatio(amoled_button_text, fill) >= 4.5);
+    }
+    try std.testing.expect(luminance(amoled_button) < luminance(amoled_button_hover));
+    try std.testing.expect(luminance(amoled_button_hover) < luminance(amoled_button_pressed));
+    try std.testing.expect(luminance(amoled_send) < luminance(amoled_send_hover));
+    try std.testing.expect(luminance(amoled_send_hover) < luminance(amoled_send_pressed));
+    try std.testing.expect(luminance(amoled_send) > luminance(amoled_button_pressed));
+}
+
+test "IGSH-461 AMOLED control boundaries and popup selections are visible without light slabs" {
+    try std.testing.expect(contrastRatio(amoled.outline, amoled.surface) >= 3.0);
+    try std.testing.expect(contrastRatio(amoled.outline, amoled.surface_container_high) >= 3.0);
+    try std.testing.expect(contrastRatio(amoled.outline_variant, amoled.surface) >= 3.0);
+    const selection_contrast = contrastRatio(amoled.secondary_container, amoled.surface);
+    try std.testing.expect(selection_contrast >= 1.2 and selection_contrast <= 4.0);
+    try std.testing.expect(contrastRatio(amoled.on_secondary_container, amoled.secondary_container) >= 4.5);
+}
+
+test "IGSH-461 default initial palette is AMOLED" {
+    try std.testing.expectEqual(Choice.amoled, choice);
+    try std.testing.expectEqual(&amoled, current);
 }

@@ -56,7 +56,58 @@ def verify_wiring(main):
     assert "a.brush_bg.?" not in player
 
 
+def verify_amoled_surfaces(main):
+    voice = section(main, "fn drawVoiceButton(", "fn ")
+    composer = section(main, "fn drawComposerButton(", "fn ")
+    setup = section(main, "fn drawSetupButton(", "fn ")
+    for paint in (voice, composer, setup):
+        assert "if (theme.choice == .amoled)" in paint
+        for state in ("amoled_button", "amoled_button_hover", "amoled_button_pressed"):
+            assert "theme." + state in paint
+        assert "theme.current.outline_variant" in paint
+    for state in ("amoled_send", "amoled_send_hover", "amoled_send_pressed", "amoled_button_text"):
+        assert "theme." + state in composer
+    field = section(main, "fn paintPopupInput(", "fn ")
+    assert "if (theme.choice != .amoled) return;" in field
+    assert "theme.current.surface_container_high" in field
+    assert "theme.current.outline, 1)" in field
+    for procedure, edit in (("fn emojiProc(", "a.emoji_edit"), ("fn paletteProc(", "a.palette_edit")):
+        popup = section(main, procedure, "fn ")
+        assert "paintPopupInput(&shapes, hwnd, " + edit + ");" in popup
+        assert "win.FrameRect(hdc, &client, a.brush_muted.?)" in popup
+        assert "message == win.WM_CTLCOLOREDIT and theme.choice == .amoled" in popup
+    tooltip = section(main, "fn updateTooltipTheme(", "fn createTooltips(")
+    assert 'win.GetProcAddress(module, "SetWindowTheme")' in tooltip
+    assert "win.TTM_SETTIPBKCOLOR" in tooltip and "win.TTM_SETTIPTEXTCOLOR" in tooltip
+    assert "updateTooltipTheme(a);" in section(main, "fn changeTheme(", "fn ")
+
+
 class ThemeRuntimeTests(unittest.TestCase):
+    def test_IGSH_461_status_selection_has_visible_fill_and_outline(self):
+        source = (ROOT / "src/status_ui.zig").read_text()
+        selection = section(source, "if (i == a.status_ui.selected)", "const left =")
+        self.assertIn("if (theme.choice == .amoled)", selection)
+        self.assertIn("theme.current.surface_container_highest", selection)
+        self.assertIn("theme.current.outline_variant", selection)
+        self.assertIn("else _ = win.FillRect(hdc, &hit, a.brush_panel.?)", selection)
+
+    def test_IGSH_461_amoled_surface_wiring_with_negative_controls(self):
+        main = (ROOT / "src/main.zig").read_text()
+        verify_amoled_surfaces(main)
+        for token in (
+            "theme.amoled_button_hover",
+            "theme.amoled_button_pressed",
+            "theme.amoled_send_hover",
+            "theme.amoled_send_pressed",
+            "paintPopupInput(&shapes, hwnd, a.emoji_edit);",
+            "paintPopupInput(&shapes, hwnd, a.palette_edit);",
+            "if (theme.choice != .amoled) return;",
+            "win.TTM_SETTIPBKCOLOR",
+            "updateTooltipTheme(a);",
+        ):
+            with self.subTest(token=token), self.assertRaises((AssertionError, ValueError)):
+                verify_amoled_surfaces(main.replace(token, ""))
+
     @unittest.skipUnless(ZIG, "Zig compiler not found; install Zig or set ZIG")
     def test_actual_registry_brush_switch_and_redraw_functions(self):
         main = (ROOT / "src/main.zig").read_text()
@@ -95,7 +146,7 @@ class ThemeRuntimeTests(unittest.TestCase):
             "if (!recreateThemeBrushes(a)) return -1;",
         ):
             with self.subTest(token=token), self.assertRaises((AssertionError, ValueError)):
-                verify_wiring(main.replace(token, "", 1))
+                verify_wiring(main.replace(token, ""))
         with self.assertRaises(AssertionError):
             verify_wiring(main + "\nconst class_brush = 1;\n")
 
@@ -107,6 +158,22 @@ class ThemeRuntimeTests(unittest.TestCase):
             if path.name != "theme.zig":
                 self.assertIsNone(pattern.search(path.read_text()), str(path))
                 self.assertNotRegex(path.read_text(), r"(?m)^const \w+ = theme\.current\.")
+
+    @unittest.skipUnless(ZIG, "Zig compiler not found; install Zig or set ZIG")
+    def test_IGSH_461_tests_reject_old_default_and_glaring_fills(self):
+        source = (ROOT / "src/theme.zig").read_text()
+        for original, broken, test_name in (
+            ("value orelse return .amoled", "value orelse return .green", "IGSH-461 default missing"),
+            ("amoled_button = hex(0x262626)", "amoled_button = hex(0xbfbfbf)", "IGSH-461 AMOLED composer button"),
+            ("amoled_send = hex(0x555555)", "amoled_send = hex(0xe6e6e6)", "IGSH-461 AMOLED composer button"),
+        ):
+            self.assertIn(original, source)
+            with self.subTest(original=original), tempfile.TemporaryDirectory(prefix="amoled-control-") as directory:
+                path = Path(directory) / "theme.zig"
+                path.write_text(source.replace(original, broken))
+                result = subprocess.run([ZIG, "test", str(path), "--test-filter", test_name], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertRegex(result.stdout + result.stderr, r"FAIL \(Test(?:UnexpectedResult|ExpectedEqual)\)")
 
     @unittest.skipUnless(ZIG, "Zig compiler not found; install Zig or set ZIG")
     def test_new_zig_tests_reject_pre_theme_code(self):
