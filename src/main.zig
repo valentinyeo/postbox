@@ -1414,11 +1414,12 @@ fn updateAttachButton(a: *App) void {
         _ = win.InvalidateRect(button, null, win.TRUE);
     }
     const tt = a.tooltips orelse return;
+    const owner = a.hwnd orelse return;
     a.attach_tooltip.len = std.unicode.utf8ToUtf16Le(&a.attach_tooltip.buf, reason orelse "Attach photo or file") catch 0;
     a.attach_tooltip.buf[a.attach_tooltip.len] = 0;
     var info = win.TOOLINFOW{
         .cbSize = @sizeOf(win.TOOLINFOW),
-        .hwnd = a.hwnd,
+        .hwnd = owner,
         .uId = id_attach,
         .rect = if (reason != null) @bitCast(a.compose_geometry.attach) else std.mem.zeroes(win.RECT),
         .lpszText = @constCast(a.attach_tooltip.ptr()),
