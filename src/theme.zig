@@ -82,7 +82,7 @@ pub fn set(selected: Choice) void {
 pub const unread_dot_px: i32 = 8;
 pub const radius_bubble: i32 = 16;
 pub const radius_field: i32 = 28;
-pub const radius_row: i32 = 32;
+pub const selected_row_radius: i32 = 8;
 
 fn linear(channel: u8) f64 {
     const value = @as(f64, @floatFromInt(channel)) / 255.0;
@@ -91,6 +91,45 @@ fn linear(channel: u8) f64 {
 
 fn luminance(color: u32) f64 {
     return 0.2126 * linear(@truncate(color)) + 0.7152 * linear(@truncate(color >> 8)) + 0.0722 * linear(@truncate(color >> 16));
+}
+
+pub fn contrastRatio(a: u32, b: u32) f64 {
+    const la = luminance(a);
+    const lb = luminance(b);
+    return (@max(la, lb) + 0.05) / (@min(la, lb) + 0.05);
+}
+
+test "IGSH-461 WCAG contrast reference values" {
+    try std.testing.expectApproxEqAbs(@as(f64, 21), contrastRatio(hex(0x000000), hex(0xffffff)), 0.000001);
+    try std.testing.expectEqual(@as(f64, 1), contrastRatio(hex(0x252b28), hex(0x252b28)));
+    try std.testing.expectApproxEqAbs(@as(f64, 4.478089), contrastRatio(hex(0x777777), hex(0xffffff)), 0.000001);
+    try std.testing.expectEqual(contrastRatio(hex(0x123456), hex(0xabcdef)), contrastRatio(hex(0xabcdef), hex(0x123456)));
+}
+
+test "IGSH-461 composer contrast on every theme" {
+    const palettes = [_]Palette{ green, amoled };
+    try std.testing.expectEqual(@typeInfo(Choice).@"enum".fields.len, palettes.len);
+    for (palettes) |palette| {
+        const composer_surface = palette.surface_container_high;
+        const composer_border = palette.outline;
+        try std.testing.expect(contrastRatio(composer_border, palette.surface) >= 3.0);
+        try std.testing.expect(contrastRatio(palette.on_surface, composer_surface) >= 4.5);
+        try std.testing.expect(contrastRatio(palette.on_surface_variant, composer_surface) >= 4.5);
+        try std.testing.expect(contrastRatio(palette.primary, composer_surface) >= 3.0);
+        try std.testing.expect(luminance(palette.primary) > luminance(composer_border));
+    }
+}
+
+test "IGSH-461 selected row contrast and rectangle radius on every theme" {
+    try std.testing.expectEqual(@as(i32, 8), selected_row_radius);
+    const palettes = [_]Palette{ green, amoled };
+    try std.testing.expectEqual(@typeInfo(Choice).@"enum".fields.len, palettes.len);
+    for (palettes) |palette| {
+        const selected_fill = palette.surface_container_highest;
+        try std.testing.expect(contrastRatio(selected_fill, palette.surface_container_low) >= 1.15);
+        try std.testing.expect(contrastRatio(palette.on_surface, selected_fill) >= 4.5);
+        try std.testing.expect(contrastRatio(palette.on_surface_variant, selected_fill) >= 4.5);
+    }
 }
 
 test "COLORREF conversion" {
@@ -113,9 +152,7 @@ test "Material 3 text contrast" {
             .{ palette.on_primary, palette.primary },
         };
         for (pairs) |pair| {
-            const a = luminance(pair[0]);
-            const b = luminance(pair[1]);
-            try std.testing.expect((@max(a, b) + 0.05) / (@min(a, b) + 0.05) >= 4.5);
+            try std.testing.expect(contrastRatio(pair[0], pair[1]) >= 4.5);
         }
     }
 }
