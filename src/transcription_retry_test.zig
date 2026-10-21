@@ -1,5 +1,4 @@
 const std = @import("std");
-const keys = @import("environment_keys");
 const dictation_policy = @import("dictation_policy");
 const Language = dictation_policy.Language;
 const Text = struct {
@@ -19,22 +18,23 @@ const App = struct {
     messages: [4]Message = .{ .{}, .{}, .{}, .{} },
     message_count: usize = 4,
 };
-const environment_keys = struct {
-    const shouldRetry = keys.shouldRetry;
-    fn readUser(allocator: std.mem.Allocator, comptime _: []const u8) ?[]u8 {
+const slack_win = struct {
+    fn loadDeepgramKey(allocator: std.mem.Allocator) !struct { key: []u8 } {
         reads += 1;
-        return allocator.dupe(u8, fixture_saved) catch unreachable;
+        return .{ .key = try allocator.dupe(u8, fixture_saved) };
     }
 };
 var calls: usize = 0;
 var reads: usize = 0;
 var fixture_saved: []const u8 = "replacement-value";
 var reject_replacement = false;
+var fixture_failure: ?error{ NetworkFailed, NoSpeech } = null;
 fn lit(comptime text: []const u8) [*:0]const u16 {
     return std.unicode.utf8ToUtf16LeStringLiteral(text);
 }
 fn transcribeAt(allocator: std.mem.Allocator, key: []const u8, _: [*:0]const u16, _: []const u8, _: []const u8) ![]u8 {
     calls += 1;
+    if (fixture_failure) |err| return err;
     if (std.mem.eql(u8, key, "inherited-value") or reject_replacement) return error.Unauthorized;
     return allocator.dupe(u8, "transcript");
 }
@@ -43,6 +43,7 @@ fn reset() void {
     reads = 0;
     fixture_saved = "replacement-value";
     reject_replacement = false;
+    fixture_failure = null;
 }
 
 test "ISSUE-517 failed voice notes retry once per chat open without redoing cached or active notes" {
@@ -97,4 +98,23 @@ test "ISSUE-517 rejected replacement and unchanged keys do not loop" {
     try std.testing.expectError(error.Unauthorized, unchanged.send(.automatic, "audio/ogg", "audio"));
     try std.testing.expectEqual(@as(usize, 1), calls);
     try std.testing.expectEqual(@as(usize, 1), reads);
+}
+
+test "ISSUE-517 missing keys and non-Unauthorized failures never retry" {
+    for ([_][]const u8{ "", "inherited-value" }) |saved| {
+        reset();
+        fixture_saved = saved;
+        var transport = Transport{ .allocator = std.testing.allocator, .api_key = "inherited-value" };
+        try std.testing.expectError(error.Unauthorized, transport.send(.automatic, "audio/ogg", "audio"));
+        try std.testing.expectEqual(@as(usize, 1), calls);
+        try std.testing.expectEqual(@as(usize, 1), reads);
+    }
+    for ([_]error{ NetworkFailed, NoSpeech }{ error.NetworkFailed, error.NoSpeech }) |failure| {
+        reset();
+        fixture_failure = failure;
+        var transport = Transport{ .allocator = std.testing.allocator, .api_key = "inherited-value" };
+        try std.testing.expectError(failure, transport.send(.english, "audio/ogg", "audio"));
+        try std.testing.expectEqual(@as(usize, 1), calls);
+        try std.testing.expectEqual(@as(usize, 0), reads);
+    }
 }

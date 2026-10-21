@@ -337,7 +337,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = transcription_retry_harness,
         .target = b.resolveTargetQuery(.{}),
         .imports = &.{
-            .{ .name = "environment_keys", .module = b.createModule(.{ .root_source_file = b.path("src/environment_keys.zig"), .target = b.resolveTargetQuery(.{}) }) },
             .{ .name = "dictation_policy", .module = b.createModule(.{ .root_source_file = b.path("src/dictation_policy.zig"), .target = b.resolveTargetQuery(.{}) }) },
         },
     }) });

@@ -4,7 +4,7 @@ const chat_key = @import("chat_key.zig");
 const mic_choice = @import("mic_choice.zig");
 const format_request = @import("format_request.zig");
 const dictation_policy = @import("dictation_policy.zig");
-const environment_keys = @import("environment_keys.zig");
+const slack_win = @import("slack_win.zig");
 const win = @cImport({
     @cDefine("WIN32_LEAN_AND_MEAN", "1");
     @cDefine("COBJMACROS", "1");
@@ -196,8 +196,9 @@ const Transport = struct {
     fn sendAt(self: *@This(), request_path: [*:0]const u16, mime: []const u8, audio: []const u8) ![]u8 {
         return transcribeAt(self.allocator, self.api_key, request_path, mime, audio) catch |err| {
             if (err != error.Unauthorized or self.refreshed_key != null) return err;
-            const saved = environment_keys.readUser(self.allocator, "DEEPGRAM_API_KEY") orelse return err;
-            if (!environment_keys.shouldRetry(err, false, self.api_key, saved)) {
+            const refreshed = slack_win.loadDeepgramKey(self.allocator) catch return err;
+            const saved = refreshed.key;
+            if (saved.len == 0 or std.mem.eql(u8, self.api_key, saved)) {
                 self.allocator.free(saved);
                 return err;
             }
