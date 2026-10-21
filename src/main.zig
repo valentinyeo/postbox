@@ -34,6 +34,7 @@ const webp_detect = @import("webp.zig");
 const paste_image = @import("paste_image.zig");
 const scrollbar = @import("scrollbar.zig");
 const message_scroll = @import("message_scroll.zig");
+const message_double_click = @import("message_double_click.zig");
 const sidebar_nav = @import("sidebar_nav.zig");
 const archive_rules = @import("archive_rules.zig");
 const message_filter = @import("message_filter.zig");
@@ -431,6 +432,7 @@ const Message = struct {
     media_size: u64 = 0,
     reaction_to: Utf8Text(191) = .{},
     reaction: WideText(1023) = .{},
+    my_reaction: Utf8Text(63) = .{},
     from_me: bool = false,
     revoked: bool = false,
     send_state: enum { none, pending, failed } = .none,
@@ -469,6 +471,7 @@ const PendingReaction = struct {
     sender: Utf8Text(191) = .{},
     emoji: Utf8Text(63) = .{},
     previous: WideText(1023) = .{},
+    previous_my_reaction: Utf8Text(63) = .{},
     retries: u8 = 0,
     retry_at_ms: u64 = 0,
 };
@@ -815,6 +818,7 @@ const App = struct {
     drag_origin: win.POINT = .{ .x = 0, .y = 0 },
     click_origin: win.POINT = .{ .x = 0, .y = 0 },
     click_moved: bool = false,
+    canvas_double_click_handled: bool = false,
     openrouter_session: ?*dictation.TextSession = null,
     openrouter_active_id: Utf8Text(191) = .{},
     openrouter_active_chat: Utf8Text(191) = .{},
@@ -8510,6 +8514,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         message.filename.set(a.allocator, if (filename.len > 0) filename else std.fs.path.basename(local_path));
         message.reaction_to.set(reaction_to);
         message.reaction.set(a.allocator, getString(object, "ReactionEmoji"));
+        if (message.from_me and reaction_to.len > 0) message.my_reaction.set(getString(object, "ReactionEmoji"));
         message.timestamp.set(getString(object, "Timestamp"));
         formatTime(&message.time, a.allocator, getString(object, "Timestamp"));
         a.messages[a.message_count] = message;
@@ -8527,6 +8532,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         for (a.messages[0..a.message_count]) |*target| {
             if (std.mem.eql(u8, target.id.slice(), reaction_to)) {
                 target.reaction = a.messages[reaction_index].reaction;
+                if (a.messages[reaction_index].from_me) target.my_reaction = a.messages[reaction_index].my_reaction;
                 break;
             }
         }
@@ -10256,17 +10262,29 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
 fn handleCanvasDoubleClick(a: *App, x: i32, y: i32) bool {
     for (a.messages[0..a.message_count], 0..) |*item, index| {
         const media = item.media_hit;
-        if (x < media.left or x > media.right or y < media.top or y > media.bottom) continue;
-        if (!isImage(item) and (!isGif(item) or isVideoGif(item))) return false;
-        a.selected_message = index;
-        if (item.local_path.len == 0) {
-            setStatus(a, "Downloading image...");
-            _ = downloadMedia(a, index, false);
+        if (x >= media.left and x <= media.right and y >= media.top and y <= media.bottom) {
+            if (!isImage(item) and (!isGif(item) or isVideoGif(item))) return false;
+            a.selected_message = index;
+            if (item.local_path.len == 0) {
+                setStatus(a, "Downloading image...");
+                _ = downloadMedia(a, index, false);
+                return true;
+            }
+            if (isImage(item)) return true;
+            openImageViewer(a, item);
             return true;
         }
-        if (isImage(item)) return true;
-        openImageViewer(a, item);
-        return true;
+        const bubble = item.bubble_hit;
+        if (x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom and
+            a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp)
+        {
+            const action = message_double_click.decide(item.from_me, item.my_reaction.slice());
+            if (action != .ignore) {
+                a.selected_message = index;
+                reactToMessage(a, a.chats[a.selected_chat].jid.slice(), item.id.slice(), if (action == .add) message_double_click.thumbs_up else "");
+                return true;
+            }
+        }
     }
     return false;
 }
@@ -10352,7 +10370,7 @@ fn reactToMessage(a: *App, jid: []const u8, msg_id: []const u8, emoji: []const u
         }
         const fresh = &a.pending_reactions[a.pending_reaction_count];
         a.pending_reaction_count += 1;
-        fresh.* = .{ .account = chat.account, .previous = message.reaction };
+        fresh.* = .{ .account = chat.account, .previous = message.reaction, .previous_my_reaction = message.my_reaction };
         fresh.jid.set(jid);
         fresh.msg_id.set(msg_id);
         if (std.mem.endsWith(u8, jid, "@g.us")) fresh.sender.set(message.sender_jid.slice());
@@ -10362,6 +10380,7 @@ fn reactToMessage(a: *App, jid: []const u8, msg_id: []const u8, emoji: []const u
     entry.retries = 0;
     entry.retry_at_ms = 0;
     message.reaction.set(a.allocator, emoji);
+    message.my_reaction.set(emoji);
     message.reaction_pending = true;
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     if (emoji.len > 0) {
@@ -10406,6 +10425,7 @@ fn applyReaction(a: *App, result: *WacliResult) void {
         }
         if (message) |target| {
             target.reaction = entry.previous;
+            target.my_reaction = entry.previous_my_reaction;
             target.reaction_pending = false;
         }
         removePendingReaction(a, entry);
@@ -10428,6 +10448,7 @@ fn reapplyPendingReactions(a: *App, jid: []const u8) void {
         if (!std.mem.eql(u8, entry.jid.slice(), jid)) continue;
         const message = findLoadedMessage(a, entry.msg_id.slice()) orelse continue;
         message.reaction.set(a.allocator, entry.emoji.slice());
+        message.my_reaction.set(entry.emoji.slice());
         message.reaction_pending = true;
     }
 }
@@ -14917,6 +14938,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             }
             a.click_origin = .{ .x = x, .y = y };
             a.click_moved = false;
+            a.canvas_double_click_handled = false;
             for (a.messages[0..a.message_count], 0..) |*item, index| {
                 const bubble = item.bubble_hit;
                 if (x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom) {
@@ -14939,6 +14961,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
             if (handleCanvasDoubleClick(a, x, y)) {
+                a.canvas_double_click_handled = true;
                 a.click_moved = true;
                 return 0;
             }
@@ -14978,6 +15001,10 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             if (a.sb_drag == .canvas) {
                 _ = win.ReleaseCapture();
                 a.sb_drag = .none;
+                return 0;
+            }
+            if (a.canvas_double_click_handled) {
+                a.canvas_double_click_handled = false;
                 return 0;
             }
             if (a.text_dragging) {
