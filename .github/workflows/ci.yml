@@ -51,6 +51,9 @@ jobs:
       - name: Zig version
         run: zig version
 
+      - name: ISSUE-517 voice transcription and historical negative control
+        run: python3 tools/check_voice_transcription_regression.py --zig "$(command -v zig)"
+
       - name: Preflight
         run: ZIG=zig bash tools/preflight.sh
 

@@ -10,6 +10,7 @@ const audio = @import("audio.zig");
 const avatar = @import("avatar.zig");
 const avatar_mask = @import("avatar_mask.zig");
 const dictation = @import("dictation.zig");
+const dictation_policy = @import("dictation_policy.zig");
 const drafts = @import("drafts.zig");
 const voice_capture = @import("voice_capture.zig");
 const recording_paint = @import("recording_paint.zig");
@@ -449,6 +450,7 @@ const Message = struct {
     gif_reader: [*c]win.IMFSourceReader = null,
     transcript: WideText(2047) = .{},
     transcript_state: enum { none, loading, ready, failed } = .none,
+    transcript_error: WideText(95) = .{},
     links: [8]LinkSpan = [_]LinkSpan{.{}} ** 8,
     link_count: usize = 0,
     unfurl_provider: unfurl.Provider = .none,
@@ -7358,7 +7360,11 @@ fn scheduleNextTranscription(a: *App) void {
         index -= 1;
         const message = &a.messages[index];
         if (!isAudio(message) or message.local_path.len == 0 or message.transcript_state != .none) continue;
-        if (message.id.len == 0 or transcribeWasAttempted(a, message.id.slice())) continue;
+        if (message.id.len == 0) continue;
+        if (transcribeWasAttempted(a, message.id.slice())) {
+            message.transcript_state = if (std.mem.eql(u8, a.transcribe_active_id.slice(), message.id.slice())) .loading else .failed;
+            continue;
+        }
         candidate = index;
         break;
     }
@@ -7372,6 +7378,8 @@ fn scheduleNextTranscription(a: *App) void {
         a.transcribe_active_id.set(message.id.slice());
         appendDebugLog(a, "schedule: started path_len={d} language={s}", .{ path_utf8.len, @tagName(language) });
     } else {
+        message.transcript_state = .failed;
+        message.transcript_error.set(a.allocator, "Transcription could not start");
         appendDebugLog(a, "schedule: start returned false", .{});
     }
 }
@@ -7401,12 +7409,15 @@ fn pollTranscription(a: *App) void {
                     appendDebugLog(a, "poll: ready len={d}", .{transcript.len});
                 } else {
                     message.transcript_state = .failed;
+                    message.transcript_error.set(a.allocator, dictation_policy.failureText(error.NoSpeech));
                     appendDebugLog(a, "poll: ready but empty transcript", .{});
                 }
             }
         } else {
             message.transcript_state = .failed;
-            appendDebugLog(a, "poll: failed for one message", .{});
+            const failure = session.failure orelse error.TranscriptionFailed;
+            message.transcript_error.set(a.allocator, dictation_policy.failureText(failure));
+            appendDebugLog(a, "poll: failed reason={s}", .{@errorName(failure)});
             setStatus(a, "Transcription failed for a voice message");
         }
         break;
@@ -14561,7 +14572,7 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, sh
     if (message.bitmap_height > 0) {
         height += message.bitmap_height + px(a, 8);
     } else if (message.media_type.len > 0) height += px(a, 54);
-    if (message.transcript_state == .loading) height += px(a, 24);
+    if (message.transcript_state == .loading or message.transcript_state == .failed) height += px(a, 24);
     if (message.transcript.len > 0) {
         _ = win.SelectObject(hdc, @ptrCast(a.font.?));
         const shown: c_int = if (message.transcript_expanded) @intCast(message.transcript.len) else @intCast(@min(message.transcript.len, 400));
@@ -15039,6 +15050,12 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
                 var loading_rect = win.RECT{ .left = left + px(a, 12), .top = text_top, .right = right - px(a, 12), .bottom = text_top + px(a, 20) };
                 _ = text_draw.drawText(hdc, lit("Transcribing…"), -1, &loading_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+                text_top += px(a, 24);
+            } else if (message.transcript_state == .failed) {
+                _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+                _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+                var error_rect = win.RECT{ .left = left + px(a, 12), .top = text_top, .right = right - px(a, 12), .bottom = text_top + px(a, 20) };
+                _ = text_draw.drawText(hdc, if (message.transcript_error.len > 0) message.transcript_error.ptr() else lit("Transcription failed"), -1, &error_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
                 text_top += px(a, 24);
             } else if (message.transcript.len > 0) {
                 const shown: c_int = if (message.transcript_expanded) @intCast(message.transcript.len) else @intCast(@min(message.transcript.len, 400));

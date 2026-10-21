@@ -82,8 +82,35 @@ pub fn transcribe(transport: anytype, language: Language, content_type: []const 
     return transport.send(language, content_type, body);
 }
 
+pub const multilingual_path = "/v1/listen?model=nova-3&smart_format=true&language=multi&tag=wazig";
+
+pub fn transcribeFile(transport: anytype, language: Language, content_type: []const u8, body: []const u8) ![]u8 {
+    return transcribe(transport, language, content_type, body) catch |err| {
+        if (err == error.NoSpeech and language == .automatic and std.mem.eql(u8, content_type, "audio/ogg")) {
+            return transport.sendMultilingual(content_type, body);
+        }
+        return err;
+    };
+}
+
+pub fn failureText(failure: anyerror) []const u8 {
+    return switch (failure) {
+        error.NoSpeech => "No speech recognized",
+        error.LocalFileUnavailable => "Voice file could not be read",
+        error.BadAudio => "Voice audio was rejected",
+        error.Unauthorized => "Transcription key rejected",
+        error.PaymentRequired => "Transcription credits exhausted",
+        error.RateLimited => "Transcription limit reached",
+        error.NetworkFailed => "Transcription connection failed",
+        error.TranscriptionUnavailable => "Transcription service unavailable",
+        else => "Transcription failed",
+    };
+}
+
 const FakeTransport = struct {
     calls: usize = 0,
+    multilingual_calls: usize = 0,
+    multilingual_failure: ?error{ NoSpeech, NetworkFailed } = null,
     failure: ?error{ NoSpeech, NetworkFailed } = null,
     language: ?Language = null,
     content_type: []const u8 = "",
@@ -96,6 +123,14 @@ const FakeTransport = struct {
         self.content_type = content_type;
         self.body = body;
         if (self.failure) |err| return err;
+        return &self.response;
+    }
+
+    pub fn sendMultilingual(self: *FakeTransport, content_type: []const u8, body: []const u8) ![]u8 {
+        self.multilingual_calls += 1;
+        self.content_type = content_type;
+        self.body = body;
+        if (self.multilingual_failure) |err| return err;
         return &self.response;
     }
 };
@@ -280,4 +315,40 @@ test "transport errors other than NoSpeech also propagate without retry" {
     var transport: FakeTransport = .{ .failure = error.NetworkFailed };
     try std.testing.expectError(error.NetworkFailed, transcribe(&transport, .automatic, "audio/ogg", "OggS"));
     try std.testing.expectEqual(@as(usize, 1), transport.calls);
+}
+
+test "ISSUE-517 stored own Ogg falls back after empty automatic recognition" {
+    var transport: FakeTransport = .{ .failure = error.NoSpeech };
+    try std.testing.expectEqualStrings("test", try transcribeFile(&transport, .automatic, "audio/ogg", "OggS"));
+    try std.testing.expectEqual(@as(usize, 1), transport.calls);
+    try std.testing.expectEqual(@as(usize, 1), transport.multilingual_calls);
+    try std.testing.expectEqualStrings("audio/ogg", transport.content_type);
+    try std.testing.expectEqualStrings("OggS", transport.body);
+    try std.testing.expectEqualStrings("/v1/listen?model=nova-3&smart_format=true&language=multi&tag=wazig", multilingual_path);
+}
+
+test "ISSUE-517 stored voice fallback never retries success network errors or fixed languages" {
+    var success: FakeTransport = .{};
+    _ = try transcribeFile(&success, .automatic, "audio/ogg", "OggS");
+    try std.testing.expectEqual(@as(usize, 0), success.multilingual_calls);
+    var network: FakeTransport = .{ .failure = error.NetworkFailed };
+    try std.testing.expectError(error.NetworkFailed, transcribeFile(&network, .automatic, "audio/ogg", "OggS"));
+    try std.testing.expectEqual(@as(usize, 0), network.multilingual_calls);
+    for ([_]Language{ .english, .german }) |language| {
+        var selected: FakeTransport = .{ .failure = error.NoSpeech };
+        try std.testing.expectError(error.NoSpeech, transcribeFile(&selected, language, "audio/ogg", "OggS"));
+        try std.testing.expectEqual(@as(usize, 0), selected.multilingual_calls);
+    }
+    var microphone: FakeTransport = .{ .failure = error.NoSpeech };
+    try std.testing.expectError(error.NoSpeech, transcribeFile(&microphone, .automatic, "audio/wav", "RIFF"));
+    try std.testing.expectEqual(@as(usize, 0), microphone.multilingual_calls);
+    var empty: FakeTransport = .{ .failure = error.NoSpeech, .multilingual_failure = error.NoSpeech };
+    try std.testing.expectError(error.NoSpeech, transcribeFile(&empty, .automatic, "audio/ogg", "OggS"));
+    try std.testing.expectEqual(@as(usize, 1), empty.multilingual_calls);
+    try std.testing.expectEqualStrings("No speech recognized", failureText(error.NoSpeech));
+    try std.testing.expectEqualStrings("Voice file could not be read", failureText(error.LocalFileUnavailable));
+    try std.testing.expectEqualStrings("Transcription key rejected", failureText(error.Unauthorized));
+    try std.testing.expectEqualStrings("Transcription limit reached", failureText(error.RateLimited));
+    try std.testing.expectEqualStrings("Transcription connection failed", failureText(error.NetworkFailed));
+    try std.testing.expectEqualStrings("Transcription failed", failureText(error.ApiFailed));
 }
