@@ -56,12 +56,14 @@ jobs:
           name: Messages-windows-x86_64
           path: zig-out/bin/
 
+  tdlib-cache:
+    uses: ./.github/workflows/tdlib-cache.yml
+
   tdlib:
+    needs: tdlib-cache
     name: tdlib
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    env:
-      TDLIB_COMMIT: d1085f9cebc5a62379991ae1652673954f229c1f
     steps:
       - uses: actions/checkout@v4
 
@@ -74,14 +76,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++-mingw-w64-x86-64 gperf php-cli cmake ninja-build
 
+      - name: TDLib revision
+        id: tdlib
+        run: echo "commit=$(cat tools/TDLIB_COMMIT)" >> "$GITHUB_OUTPUT"
+
       - name: Restore TDLib
         id: tdcache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          path: |
-            /tmp/tdlib-install
-            /tmp/tdbuild-prefix
-          key: tdlib-${{ env.TDLIB_COMMIT }}-${{ hashFiles('tools/build-tdlib.sh') }}
+          path: /tmp/tdlib-install
+          key: tdlib-${{ steps.tdlib.outputs.commit }}-${{ hashFiles('tools/build-tdlib.sh') }}
 
       - name: Build TDLib
         if: steps.tdcache.outputs.cache-hit != 'true'
@@ -93,6 +97,9 @@ jobs:
             -Dtdlib=/tmp/tdlib-install \
             -Dtelegram-api-id=1 \
             -Dtelegram-api-hash=smoke-placeholder
+
+      - name: Verify x64 TDLib
+        run: python3 -c 'from pathlib import Path; assert b"setTdlibParameters" in Path("zig-out/bin/Messages.exe").read_bytes(), "x64 build is missing TDLib"'
 
       - name: Exe size report
         run: |

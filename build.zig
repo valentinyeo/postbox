@@ -275,7 +275,7 @@ pub fn build(b: *std.Build) void {
             const path = b.pathJoin(&.{ tdlib_dir, "lib", archive });
             exe.root_module.addObjectFile(.{ .cwd_relative = path });
         }
-        const mingw_lib_dir = b.option([]const u8, "mingw-lib-dir", "Path to the mingw win32-threads gcc lib directory") orelse "/usr/lib/gcc/x86_64-w64-mingw32/13-win32";
+        const mingw_lib_dir = b.option([]const u8, "mingw-lib-dir", "Path to the mingw win32-threads gcc lib directory") orelse b.pathJoin(&.{ tdlib_dir, "lib" });
         exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libstdc++.a" }) });
         exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libgcc_eh.a" }) });
         exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libgcc.a" }) });
