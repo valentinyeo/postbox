@@ -18,7 +18,7 @@ pub fn progressStatus(out: []u8, should_unarchive: bool, total: usize, remaining
     }) catch null;
 }
 
-pub const Source = enum { shortcut, menu, control, resurface, send };
+pub const Source = enum { shortcut, menu, control, resurface, send, kept };
 
 pub fn logLine(out: []u8, jid: []const u8, archived: bool, source: Source) []const u8 {
     return std.fmt.bufPrint(out, "archive: jid={s} archived={} source={s}", .{ jid, archived, @tagName(source) }) catch unreachable;
@@ -44,6 +44,9 @@ pub const Entry = struct {
     ts: [max_ts]u8 = undefined,
     ts_len: u8 = 0,
     keep: bool = false,
+    held: bool = false,
+    held_ts: [max_ts]u8 = undefined,
+    held_ts_len: u8 = 0,
 
     pub fn jidSlice(self: *const Entry) []const u8 {
         return self.jid[0..self.jid_len];
@@ -73,6 +76,24 @@ pub const State = struct {
         const index = self.find(jid) orelse return null;
         const ts = self.entries[index].tsSlice();
         return if (ts.len == 0) null else ts;
+    }
+
+    pub fn holdKept(self: *State, jid: []const u8, provider_archived: bool, ts: []const u8) bool {
+        if (provider_archived) return false;
+        const index = self.find(jid) orelse return false;
+        const entry = &self.entries[index];
+        if (!entry.keep) return false;
+        const n = @min(ts.len, max_ts);
+        if (entry.held and std.mem.eql(u8, entry.held_ts[0..entry.held_ts_len], ts[0..n])) return false;
+        @memcpy(entry.held_ts[0..n], ts[0..n]);
+        entry.held_ts_len = @intCast(n);
+        entry.held = true;
+        return true;
+    }
+
+    pub fn releaseHold(self: *State, jid: []const u8) void {
+        const index = self.find(jid) orelse return;
+        self.entries[index].held = false;
     }
 
     fn slot(self: *State, jid: []const u8) ?*Entry {
@@ -272,6 +293,26 @@ test "state keeps, forgets and round-trips through text" {
     try std.testing.expect(!loaded.isKept("b@s.whatsapp.net"));
     loaded.remove("a@g.us");
     try std.testing.expect(loaded.baseline("a@g.us") == null);
+}
+
+test "a kept chat the provider unarchived is held once per new message and plain archives are not" {
+    var state = State{};
+    try std.testing.expect(state.archive("kept@g.us", "2026-10-10T10:00:00Z", true));
+    try std.testing.expect(state.archive("plain@g.us", "2026-10-10T10:00:00Z", false));
+    try std.testing.expect(!state.holdKept("kept@g.us", true, "2026-10-10T11:00:00Z"));
+    try std.testing.expect(state.holdKept("kept@g.us", false, "2026-10-10T11:00:00Z"));
+    try std.testing.expect(!state.holdKept("kept@g.us", false, "2026-10-10T11:00:00Z"));
+    try std.testing.expect(state.holdKept("kept@g.us", false, "2026-10-10T12:00:00Z"));
+    try std.testing.expect(!state.holdKept("plain@g.us", false, "2026-10-10T12:00:00Z"));
+    try std.testing.expect(!state.holdKept("other@g.us", false, "2026-10-10T12:00:00Z"));
+    state.releaseHold("kept@g.us");
+    try std.testing.expect(state.holdKept("kept@g.us", false, "2026-10-10T12:00:00Z"));
+    var buffer: [512]u8 = undefined;
+    var loaded = State{};
+    loaded.parse(state.format(&buffer));
+    try std.testing.expect(loaded.holdKept("kept@g.us", false, "2026-10-10T12:00:00Z"));
+    loaded.setKeep("kept@g.us", false);
+    try std.testing.expect(!loaded.holdKept("kept@g.us", false, "2026-10-10T13:00:00Z"));
 }
 
 test "a full table drops unkept entries first" {
