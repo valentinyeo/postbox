@@ -76,10 +76,26 @@ elif args[:2] == ['pr', 'view']:
     if 'mergeCommit' in args:
         print(sha)
     else:
-        checks = ['ci', 'tdlib', 'windows-smoke', 'no-comments']
+        checks = ['ci', 'tdlib', 'windows-smoke', 'no-comments', 'unfurl-verification',
+                  'private-markers', 'secret-scan', 'pr-title', 'notify-release', 'tdlib-cache / cache']
         if mode == 'missing-check': checks.remove('no-comments')
+        if mode == 'read-failure': sys.exit(1)
+        if mode == 'invalid-json': print('{'); sys.exit(0)
+        if mode == 'invalid-head': sha = 'not-a-commit'
+        rollup = [dict(name=n, status='COMPLETED', conclusion='SUCCESS') for n in checks]
+        if ':' in mode:
+            action, name = mode.split(':', 1)
+            if action == 'missing': rollup = [c for c in rollup if c['name'] != name]
+            elif action == 'pending':
+                if name not in checks: rollup.append(dict(name=name))
+                rollup = [dict(c, status='IN_PROGRESS', conclusion='') if c['name'] == name else c for c in rollup]
+            elif action == 'stale-success':
+                rollup = [dict(c, status='IN_PROGRESS') if c['name'] == name else c for c in rollup]
+            elif action == 'invalid-rollup': rollup = None
+            elif action == 'status': rollup.append(dict(__typename='StatusContext', context='external', state=name))
+            else: rollup.append(dict(name=name, status='COMPLETED', conclusion=action))
         print(json.dumps(dict(isDraft=False, labels=[], mergeable='MERGEABLE', headRefOid=sha,
-            statusCheckRollup=[dict(name=n, conclusion='SUCCESS') for n in checks])))
+            statusCheckRollup=rollup)))
 elif args[:2] == ['pr', 'merge']:
     pass
 elif args[0] == 'api':
@@ -125,3 +141,55 @@ else:
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(sum(args[:3] == ['workflow', 'run', 'no-comments.yml'] for args in calls), 3)
         self.assertIn('could not start no-comments.yml', result.stderr)
+
+    def test_IGSH_504_every_head_check_must_be_green(self):
+        checks = ('ci', 'tdlib', 'windows-smoke', 'no-comments', 'unfurl-verification',
+                  'private-markers', 'secret-scan', 'pr-title', 'notify-release', 'tdlib-cache / cache')
+        modes = [f'{state}:{name}' for name in checks
+                 for state in ('missing', 'pending', 'FAILURE', 'SKIPPED', 'CANCELLED', 'stale-success')]
+        modes += ['FAILURE:future-check', 'FAILURE:tdlib-cache / cache', 'pending:future-check', 'status:PENDING', 'status:FAILURE']
+        for mode in modes:
+            with self.subTest(mode=mode):
+                result, calls = self.run_workflow(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('required checks not green:', result.stdout)
+                self.assertFalse(any(args[:2] == ['pr', 'merge'] for args in calls), result.stdout)
+
+    def test_IGSH_504_ai_review_never_blocks_and_head_is_pinned(self):
+        for mode in ('merge', 'SUCCESS:future-check', 'FAILURE:code-review', 'SKIPPED:code-review', 'pending:code-review', 'status:SUCCESS'):
+            with self.subTest(mode=mode):
+                result, calls = self.run_workflow(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                merges = [args for args in calls if args[:2] == ['pr', 'merge']]
+                self.assertEqual(len(merges), 1, result.stdout)
+                self.assertEqual(merges[0][merges[0].index('--match-head-commit') + 1], 'a' * 40)
+
+    def test_IGSH_504_unreadable_head_checks_fail_closed(self):
+        for mode in ('read-failure', 'invalid-json', 'invalid-head', 'invalid-rollup:all'):
+            with self.subTest(mode=mode):
+                result, calls = self.run_workflow(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any(args[:2] == ['pr', 'merge'] for args in calls), result.stdout)
+                self.assertTrue('could not' in result.stdout or 'invalid PR head' in result.stdout, result.stdout)
+
+    def test_IGSH_504_notification_is_a_successful_noop_on_prs(self):
+        job = (ROOT / '.github/workflows/ci.yml').read_text().split('  notify-release:', 1)[1]
+        before_steps, steps = job.split('    steps:', 1)
+        self.assertNotIn('    if:', before_steps)
+        self.assertIn("github.event_name == 'workflow_dispatch'", steps)
+        self.assertIn("github.ref == 'refs/heads/main'", steps)
+        self.assertIn('        if: >-', steps)
+
+    def test_IGSH_504_lint_rejects_historical_automerge(self):
+        workflow = subprocess.run(['git', 'show', '4064743:.github/workflows/automerge.yml'],
+                                  cwd=ROOT, capture_output=True, text=True, check=True).stdout
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/main.zig').write_text('')
+            (root / '.github/workflows').mkdir(parents=True)
+            (root / '.github/workflows/automerge.yml').write_text(workflow)
+            result = subprocess.run(['bash', str(ROOT / 'tools/lint-repeats.sh'), directory],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn('[B8]', result.stdout)
