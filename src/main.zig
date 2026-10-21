@@ -11,6 +11,7 @@ const avatar = @import("avatar.zig");
 const avatar_mask = @import("avatar_mask.zig");
 const dictation = @import("dictation.zig");
 const voice_capture = @import("voice_capture.zig");
+const recording_paint = @import("recording_paint.zig");
 const format_request = @import("format_request.zig");
 const format_cache = @import("format_cache.zig");
 const slack = @import("slack.zig");
@@ -997,6 +998,11 @@ fn composerButtonProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lpa
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
     const index: usize = @intCast(@as(usize, @bitCast(win.GetWindowLongPtrW(hwnd, win.GWLP_USERDATA))) - 1);
     switch (message) {
+        win.WM_ERASEBKGND => {
+            if (a.voice_btn) |button| {
+                if (button == hwnd) return 1;
+            }
+        },
         win.WM_MOUSEMOVE => {
             if (!a.btn_hover[index]) {
                 a.btn_hover[index] = true;
@@ -1128,6 +1134,23 @@ fn drawMicIcon(a: *App, shapes: *const smooth.Context, hdc: win.HDC, cx: i32, cy
 }
 
 fn drawVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
+    const width = item.rcItem.right - item.rcItem.left;
+    const height = item.rcItem.bottom - item.rcItem.top;
+    if (width <= 0 or height <= 0) return;
+    const memory = win.CreateCompatibleDC(item.hDC) orelse return;
+    defer _ = win.DeleteDC(memory);
+    const bitmap = win.CreateCompatibleBitmap(item.hDC, width, height) orelse return;
+    defer _ = win.DeleteObject(bitmap);
+    const previous = win.SelectObject(memory, @ptrCast(bitmap));
+    defer _ = win.SelectObject(memory, previous);
+    var buffered = item.*;
+    buffered.hDC = memory;
+    buffered.rcItem = .{ .left = 0, .top = 0, .right = width, .bottom = height };
+    paintVoiceButton(a, &buffered);
+    _ = win.BitBlt(item.hDC, item.rcItem.left, item.rcItem.top, width, height, memory, 0, 0, win.SRCCOPY);
+}
+
+fn paintVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     var shapes = smooth.Context.init(item.hDC);
     defer shapes.deinit();
     const pressed = (item.itemState & win.ODS_SELECTED) != 0;
@@ -9643,7 +9666,7 @@ fn toggleVoice(a: *App) void {
     a.voice_jid.set(a.chats[a.selected_chat].jid.slice());
     a.voice_active = true;
     a.voice_finishing = false;
-    if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_voice, 100, null);
+    if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_voice, recording_paint.tick_interval_ms, null);
     layout(a, a.compose_client_width, a.compose_client_height);
     setStatus(a, "Recording... Enter sends, Esc cancels");
     focusCompose(a);
@@ -9673,6 +9696,19 @@ fn cancelVoice(a: *App, status: []const u8) void {
     setStatus(a, status);
 }
 
+fn invalidateRecordingTick(a: *App) void {
+    const owner = a.hwnd orelse return;
+    const button = a.voice_btn orelse return;
+    var client: win.RECT = undefined;
+    var strip: win.RECT = undefined;
+    if (win.GetClientRect(owner, &client) == 0 or win.GetWindowRect(button, &strip) == 0) return;
+    _ = win.MapWindowPoints(null, owner, @ptrCast(&strip), 2);
+    const dirty = recording_paint.tickDirtyRect(client, strip) orelse return;
+    var rect = dirty.rect;
+    _ = win.MapWindowPoints(owner, button, @ptrCast(&rect), 2);
+    _ = win.InvalidateRect(button, &rect, if (dirty.erase) win.TRUE else win.FALSE);
+}
+
 fn tickVoice(a: *App) void {
     if (!a.voice_active) return;
     const session = a.voice_session orelse return;
@@ -9681,9 +9717,7 @@ fn tickVoice(a: *App) void {
         return;
     }
     switch (session.state()) {
-        .recording, .encoding => {
-            if (a.voice_btn) |button| _ = win.InvalidateRect(button, null, win.FALSE);
-        },
+        .recording, .encoding => invalidateRecordingTick(a),
         .ready => {
             const result = session.take();
             endVoiceUi(a);
