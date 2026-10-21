@@ -64,7 +64,7 @@ def verify_wiring(main):
 
 
 def verify_amoled_surfaces(main):
-    voice = section(main, "fn drawVoiceButton(", "fn ")
+    voice = section(main, "fn paintVoiceButton(", "fn ")
     composer = section(main, "fn drawComposerButton(", "fn ")
     setup = section(main, "fn drawSetupButton(", "fn ")
     for paint in (voice, composer, setup):
