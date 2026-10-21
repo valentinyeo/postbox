@@ -7,7 +7,7 @@ on:
         description: User journey to drive
         type: choice
         default: search
-        options: [search, navigation, drafts, palette, appearance, whatsapp-hub]
+        options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub]
   pull_request:
     paths:
       - .github/workflows/verify.yml

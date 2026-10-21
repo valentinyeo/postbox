@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'whatsapp-hub')][string]$Feature = 'search',
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'whatsapp-hub')][string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence'
 )
@@ -22,6 +22,12 @@ if ($Feature -ne 'whatsapp-hub') {
         @{ jid = 'verify-alpha'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = '' },
         @{ jid = 'verify-beta'; name = 'Verification Beta'; kind = 'direct'; last_message_ts = '' }
     ) } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $messages "chats-$tag.json")
+}
+if ($Feature -eq 'menus') {
+    $cache = Join-Path $messages "msg-cache-$tag"
+    New-Item $cache -ItemType Directory -Force | Out-Null
+    $payload = @{ data = @{ messages = @(@{ MsgID = 'verify-menu-message'; Text = 'Synthetic menu verification'; SenderName = 'Verification Alpha'; FromMe = $false; Timestamp = '2026-01-01T12:00:00Z' }) } } | ConvertTo-Json -Depth 6 -Compress
+    "wazig-msg-cache v2`n$tag`nverify-alpha`n$payload" | Set-Content (Join-Path $cache '82d67c3e0292bfc0.msg') -NoNewline
 }
 $exe = (Resolve-Path (Join-Path $Bin 'Messages.exe')).Path
 foreach ($case in @('not-actions', 'not-isolated')) {
@@ -136,6 +142,10 @@ try {
             } 'keyboard shortcut overlay'
             Save-Screen $session after
             Send-Keys $session '{ESC}'
+        }
+        menus {
+            . "$PSScriptRoot/menus.ps1"
+            Invoke-Menus $session
         }
         appearance {
             Send-Keys $session '^k'

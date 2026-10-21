@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == ['appearance', 'drafts', 'navigation', 'palette', 'search', 'whatsapp-hub']
+assert features == ['appearance', 'drafts', 'menus', 'navigation', 'palette', 'search', 'whatsapp-hub']
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
     assert re.findall(r'^## (.+)$', entry, re.M) == [
@@ -40,4 +40,4 @@ assert "if ($Feature -ne 'whatsapp-hub') {\n    Set-Content (Join-Path $messages
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 for proof in ['chats', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
-print('MAP VERIFIED: six complete feature entries, source labels, stable controls, hub journey and GitHub triggers')
+print('MAP VERIFIED: seven complete feature entries, source labels, stable controls, hub journey and GitHub triggers')

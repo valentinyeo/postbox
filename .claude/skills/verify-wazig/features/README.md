@@ -1,6 +1,6 @@
 # Wazig Messages verification map
 
-Start with [the skill](../SKILL.md). The five offline desktop features use the real native window, not the existing headless smoke modes. Each run creates a separate profile and synthetic cached chats `Verification Alpha` and `Verification Beta`, with no messages or provider login. The baseline is the AMOLED theme, saved-scale default of 82%, All networks, Alpha selected and an empty composer. Never change the product's default font or scale to suit the harness.
+Start with [the skill](../SKILL.md). The six offline desktop features use the real native window, not the existing headless smoke modes. Each run creates a separate profile and synthetic cached chats `Verification Alpha` and `Verification Beta`, without provider login. Only menus seeds one synthetic cached message to reach both message menus. The baseline is the AMOLED theme, saved-scale default of 82%, All networks, Alpha selected and an empty composer. Never change the product's default font or scale to suit the harness.
 
 | ID / workflow input | User-facing feature | Automated recipe |
 | --- | --- | --- |
@@ -8,6 +8,7 @@ Start with [the skill](../SKILL.md). The five offline desktop features use the r
 | [navigation](navigation.md) | Keyboard chat navigation | Next chat, previous chat |
 | [drafts](drafts.md) | Composer and per-chat drafts | Type, switch away/back, check disk |
 | [palette](palette.md) | Command palette and shortcut discovery | Filter a command, activate the help overlay |
+| [menus](menus.md) | Native menus and custom popups | Measure AMOLED darkness and text contrast, then Green native-menu lightness |
 | [whatsapp-hub](whatsapp-hub.md) | WhatsApp hub transport | Chats, history, live SSE replay, idempotent retry, reads, archive, pending media and DPAPI |
 | [appearance](appearance.md) | Theme and saved text size | Choose Green through the palette, check persistence |
 
