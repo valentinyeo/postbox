@@ -41,7 +41,7 @@ class RecordingPaintTests(unittest.TestCase):
 
     def test_IGSH_482_voice_background_erase_never_reaches_button_default(self):
         proc = extract(read_source("src/main.zig"), "composerButtonProc")
-        self.assertRegex(proc, r"win\.WM_ERASEBKGND\s*=>\s*\{\s*if \(a\.voice_btn == hwnd\) return 1;")
+        self.assertRegex(proc, r"win\.WM_ERASEBKGND\s*=>\s*\{\s*if \(a\.voice_btn\) \|button\| \{\s*if \(button == hwnd\) return 1;\s*\}")
         self.assertLess(proc.index("win.WM_ERASEBKGND"), proc.index("win.CallWindowProcW"))
 
     def verify_IGSH_482_real_tick_and_lifecycle_runtime(self):
