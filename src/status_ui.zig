@@ -4,6 +4,7 @@ const std = @import("std");
 const win = @import("win32.zig").c;
 const text_draw = @import("text_draw.zig");
 const status = @import("status_view.zig");
+const paint_buffer = @import("paint_buffer.zig");
 
 pub const State = struct {
     mode: enum { closed, list, viewer } = .closed,
@@ -45,7 +46,14 @@ pub fn clearMedia(a: anytype) void {
     a.status_ui.displayed = false;
 }
 
-pub fn drawPinned(a: anytype, item: *win.DRAWITEMSTRUCT, comptime actions: anytype) void {
+pub fn drawPinned(a: anytype, screen_item: *win.DRAWITEMSTRUCT, comptime actions: anytype) void {
+    var client: win.RECT = undefined;
+    _ = win.GetClientRect(screen_item.hwndItem, &client);
+    var surface = paint_buffer.Buffer.init(screen_item.hDC, client, screen_item.rcItem);
+    defer surface.deinit();
+    var buffered = screen_item.*;
+    buffered.hDC = surface.hdc;
+    const item = &buffered;
     _ = win.FillRect(item.hDC, &item.rcItem, a.brush_panel.?);
     _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
     _ = win.SelectObject(item.hDC, a.font_bold.?);
@@ -68,11 +76,14 @@ pub fn drawPinned(a: anytype, item: *win.DRAWITEMSTRUCT, comptime actions: anyty
 
 pub fn paint(a: anytype, hwnd: win.HWND, comptime actions: anytype) void {
     var ps = win.PAINTSTRUCT{};
-    const hdc = win.BeginPaint(hwnd, &ps);
+    const screen_dc = win.BeginPaint(hwnd, &ps);
     defer _ = win.EndPaint(hwnd, &ps);
     var client: win.RECT = undefined;
     _ = win.GetClientRect(hwnd, &client);
-    _ = win.FillRect(hdc, &client, a.brush_bg.?);
+    var surface = paint_buffer.Buffer.init(screen_dc, client, ps.rcPaint);
+    defer surface.deinit();
+    const hdc = surface.hdc;
+    _ = win.FillRect(hdc, &ps.rcPaint, a.brush_bg.?);
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
     _ = win.SetTextColor(hdc, theme.current.on_surface);
     _ = win.SelectObject(hdc, a.font_bold.?);

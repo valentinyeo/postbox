@@ -78,7 +78,11 @@ pub const Context = struct {
         var result = Context{ .hdc = hdc };
         if (api) |f| {
             if (f.GdipCreateFromHDC(hdc, &result.graphics) == 0 and result.graphics != null) {
-                if (f.GdipSetSmoothingMode(result.graphics, 4) == 0 and f.GdipSetPixelOffsetMode(result.graphics, 4) == 0) return result;
+                var clip: win.RECT = undefined;
+                const kind = win.GetClipBox(hdc, &clip);
+                if (kind != win.ERROR and
+                    f.GdipSetClipRect(result.graphics, @floatFromInt(clip.left), @floatFromInt(clip.top), @floatFromInt(@max(0, clip.right - clip.left)), @floatFromInt(@max(0, clip.bottom - clip.top)), 0) == 0 and
+                    f.GdipSetSmoothingMode(result.graphics, 4) == 0 and f.GdipSetPixelOffsetMode(result.graphics, 4) == 0) return result;
                 _ = f.GdipDeleteGraphics(result.graphics);
             }
         }

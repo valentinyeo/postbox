@@ -373,6 +373,24 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(recording_tests).step);
 
+    const repaint_files = b.addWriteFiles();
+    _ = repaint_files.add("compose_layout.zig", @embedFile("src/compose_layout.zig"));
+    _ = repaint_files.add("theme.zig", @embedFile("src/theme.zig"));
+    const buffer_source = @embedFile("src/paint_buffer.zig");
+    const repaint_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("tools/repaint_test.zig"),
+        buffer_source[(std.mem.indexOfScalar(u8, buffer_source, '\n') orelse unreachable) + 1 ..],
+        sourceSection("fn layoutComposer(", "fn layout(a:"),
+        "fn composeChanged(a: *App) void {\n",
+        sourceSection("                saveComposerDraft(a);", "            } else if (id == id_search"),
+        "}\n",
+    }) catch @panic("Out of memory building repaint harness");
+    const repaint_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = repaint_files.add("repaint_test.zig", repaint_source),
+        .target = b.resolveTargetQuery(.{}),
+    }) });
+    test_step.dependOn(&b.addRunArtifact(repaint_tests).step);
+
     const slack_worker_source = @embedFile("src/slack_win.zig");
     const slack_send_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/slack_send_test.zig"),

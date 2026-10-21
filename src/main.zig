@@ -15,6 +15,7 @@ const deepgram_key_policy = @import("deepgram_key.zig");
 const drafts = @import("drafts.zig");
 const voice_capture = @import("voice_capture.zig");
 const recording_paint = @import("recording_paint.zig");
+const paint_buffer = @import("paint_buffer.zig");
 const format_request = @import("format_request.zig");
 const format_cache = @import("format_cache.zig");
 const slack = @import("slack.zig");
@@ -1014,6 +1015,7 @@ fn composerButtonProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lpa
             if (a.voice_btn) |button| {
                 if (button == hwnd) return 1;
             }
+            return 1;
         },
         win.WM_MOUSEMOVE => {
             if (!a.btn_hover[index]) {
@@ -1223,7 +1225,14 @@ fn paintVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     drawMicIcon(a, &shapes, hdc, item.rcItem.right - px(a, 20), mid_y, theme.current.@"error");
 }
 
-fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
+fn drawComposerButton(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
+    var client: win.RECT = undefined;
+    _ = win.GetClientRect(screen_item.hwndItem, &client);
+    var surface = paint_buffer.Buffer.init(screen_item.hDC, client, screen_item.rcItem);
+    defer surface.deinit();
+    var buffered = screen_item.*;
+    buffered.hDC = surface.hdc;
+    const item = &buffered;
     var shapes = smooth.Context.init(item.hDC);
     defer shapes.deinit();
     const index: usize = if (item.CtlID == id_dictate) 0 else if (item.CtlID == id_send) 1 else 2;
@@ -10123,7 +10132,12 @@ fn saveComposerDraft(a: *App) void {
         return;
     };
     if (a.draft_store.get(open).len == 0) persistDrafts(a);
-    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+    if (a.chats_hwnd) |list| {
+        if (visibleChatIndex(a, open)) |index| {
+            var row: win.RECT = undefined;
+            if (win.SendMessageW(list, win.LB_GETITEMRECT, index, @bitCast(@intFromPtr(&row))) != win.LB_ERR) _ = win.InvalidateRect(list, &row, win.FALSE);
+        }
+    }
 }
 
 fn persistDrafts(a: *App) void {
@@ -13717,7 +13731,16 @@ fn composerContentHeight(a: *App) i32 {
     return @max(compose_layout.edit_min_height, lines * line_h + margins + composerNonClientY(compose));
 }
 
+fn layoutComposer(a: *App) void {
+    const height = a.compose_client_height;
+    const sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
+    if (a.compose_strip_top == height - sizes.strip_height and a.compose_pill.top == height - px(a, 11) - sizes.edit_height) return;
+    layout(a, a.compose_client_width, height);
+}
+
 fn layout(a: *App, width: i32, height: i32) void {
+    const resized = width != a.compose_client_width or height != a.compose_client_height;
+    const old_strip_top = a.compose_strip_top;
     a.compose_client_width = width;
     a.compose_client_height = height;
     const left_width = std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 390));
@@ -13776,7 +13799,10 @@ fn layout(a: *App, width: i32, height: i32) void {
         a.compose_strip_top = height;
         if (a.canvas) |hwnd| _ = win.MoveWindow(hwnd, left_width + 1, 0, width - left_width - 1, height, win.TRUE);
     }
-    if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.TRUE);
+    if (a.hwnd) |main_hwnd| {
+        var dirty = win.RECT{ .left = left_width + 1, .top = @min(old_strip_top, a.compose_strip_top), .right = width, .bottom = height };
+        _ = win.InvalidateRect(main_hwnd, if (resized) null else &dirty, win.FALSE);
+    }
 }
 
 fn loadAvatarBitmap(a: *App, path: [*:0]const u16) ?win.HBITMAP {
@@ -14284,10 +14310,17 @@ fn wrapMixedSink(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int, max_
     return line_height + (line_top - top);
 }
 
-fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
-    if (item.itemID == @as(win.UINT, @bitCast(@as(c_int, -1)))) return;
-    const index: usize = @intCast(item.itemID);
+fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
+    if (screen_item.itemID == @as(win.UINT, @bitCast(@as(c_int, -1)))) return;
+    const index: usize = @intCast(screen_item.itemID);
     if (index >= a.chat_count) return;
+    var client: win.RECT = undefined;
+    _ = win.GetClientRect(screen_item.hwndItem, &client);
+    var surface = paint_buffer.Buffer.init(screen_item.hDC, client, screen_item.rcItem);
+    defer surface.deinit();
+    var buffered = screen_item.*;
+    buffered.hDC = surface.hdc;
+    const item = &buffered;
     var shapes = smooth.Context.init(item.hDC);
     defer shapes.deinit();
     const chat = &a.chats[index];
@@ -14831,24 +14864,9 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     defer _ = win.EndPaint(hwnd, &paint);
     var client: win.RECT = undefined;
     _ = win.GetClientRect(hwnd, &client);
-    const canvas_width = @max(1, client.right - client.left);
-    const canvas_height = @max(1, client.bottom - client.top);
-    const memory_dc = win.CreateCompatibleDC(screen_dc);
-    var memory_bitmap: win.HBITMAP = null;
-    var old_bitmap: ?win.HGDIOBJ = null;
-    const hdc = if (memory_dc) |dc| block: {
-        memory_bitmap = win.CreateCompatibleBitmap(screen_dc, canvas_width, canvas_height);
-        old_bitmap = win.SelectObject(dc, @ptrCast(memory_bitmap));
-        break :block dc;
-    } else screen_dc;
-    defer {
-        if (memory_dc != null) {
-            _ = win.BitBlt(screen_dc, 0, 0, canvas_width, canvas_height, hdc, 0, 0, win.SRCCOPY);
-            if (old_bitmap) |bitmap| _ = win.SelectObject(memory_dc.?, bitmap);
-            if (memory_bitmap != null) _ = win.DeleteObject(memory_bitmap);
-            _ = win.DeleteDC(memory_dc.?);
-        }
-    }
+    var surface = paint_buffer.Buffer.init(screen_dc, client, paint.rcPaint);
+    defer surface.deinit();
+    const hdc = surface.hdc;
     var shapes = smooth.Context.init(hdc);
     defer shapes.deinit();
     _ = win.FillRect(hdc, &client, a.brush_bg.?);
@@ -15905,11 +15923,14 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         win.WM_PAINT => {
             a.paints_window +%= 1;
             var paint: win.PAINTSTRUCT = undefined;
-            const hdc = win.BeginPaint(hwnd, &paint);
+            const screen_dc = win.BeginPaint(hwnd, &paint);
             defer _ = win.EndPaint(hwnd, &paint);
             var client: win.RECT = undefined;
             _ = win.GetClientRect(hwnd, &client);
-            _ = win.FillRect(hdc, &client, a.brush_bg.?);
+            var surface = paint_buffer.Buffer.init(screen_dc, client, paint.rcPaint);
+            defer surface.deinit();
+            const hdc = surface.hdc;
+            _ = win.FillRect(hdc, &paint.rcPaint, a.brush_bg.?);
             const left_width = std.math.clamp(@divTrunc(client.right, 3), px(a, 280), px(a, 390));
             var left_rect = win.RECT{ .left = 0, .top = 0, .right = left_width, .bottom = client.bottom };
             _ = win.FillRect(hdc, &left_rect, a.brush_panel.?);
@@ -16100,7 +16121,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 _ = win.InvalidateRect(hwnd, if (id == id_compose) &a.compose_pill else &a.search_pill, win.FALSE);
             } else if (id == id_compose and notification == win.EN_CHANGE) {
                 saveComposerDraft(a);
-                layout(a, a.compose_client_width, a.compose_client_height);
+                layoutComposer(a);
                 shortcodeUpdate(a);
             } else if (id == id_search and notification == win.EN_CHANGE) {
                 _ = win.KillTimer(hwnd, timer_search);
