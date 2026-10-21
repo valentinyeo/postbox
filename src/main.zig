@@ -1,6 +1,7 @@
 const std = @import("std");
 const theme = @import("theme.zig");
 const smooth = @import("smooth_shapes.zig");
+const smooth_geometry = @import("smooth_geometry.zig");
 const child_process = @import("child_process.zig");
 const auth_status = @import("auth_status.zig");
 const audio = @import("audio.zig");
@@ -1044,7 +1045,9 @@ fn drawMicIcon(a: *App, shapes: *const smooth.Context, hdc: win.HDC, cx: i32, cy
     smooth.strokeRoundRect(shapes, capsule, half * 2, half * 2, color, @max(1, px(a, 2)));
     _ = win.SelectObject(hdc, win.GetStockObject(win.NULL_BRUSH));
     const arc = px(a, 7);
-    smooth.strokeArc(shapes, .{ .left = cx - arc, .top = cy - px(a, 7), .right = cx + arc + 1, .bottom = cy + px(a, 6) }, 180, 180, color, @max(1, px(a, 2)));
+    const cradle = win.RECT{ .left = cx - arc, .top = cy - px(a, 7), .right = cx + arc + 1, .bottom = cy + px(a, 6) };
+    const angles = smooth_geometry.counterclockwiseArc(@bitCast(cradle), .{ cx - arc, cy - px(a, 1) }, .{ cx + arc + 1, cy - px(a, 1) });
+    smooth.strokeArc(shapes, cradle, angles.start, angles.sweep, color, @max(1, px(a, 2)));
     _ = win.MoveToEx(hdc, cx, cy + px(a, 6), null);
     _ = win.LineTo(hdc, cx, cy + px(a, 10));
     _ = win.MoveToEx(hdc, cx - px(a, 4), cy + px(a, 10), null);
@@ -13622,7 +13625,7 @@ fn drawScrollbar(shapes: *const smooth.Context, strip: win.RECT, info: ScrollInf
     const t = trackOf(strip);
     const geom = scrollbar.thumbGeom(t.top, t.h, info.total, info.page, info.top, scrollbar_min_thumb) orelse return;
     const width = strip.right - strip.left - 2;
-    smooth.fillRoundRect(shapes, .{ .left = strip.left + 1, .top = geom.top, .right = strip.right - 1, .bottom = geom.top + geom.height }, width, width, color);
+    smooth.fillRoundRect(shapes, .{ .left = strip.left + 1, .top = geom.top, .right = strip.right - 2, .bottom = geom.top + geom.height - 1 }, width, width, color);
 }
 
 fn listboxScrollInfo(hwnd: win.HWND) ScrollInfo {

@@ -68,15 +68,34 @@ END { exit failed ? 1 : 0 }
 fi
 
 if ! awk '
-FILENAME != "src/smooth_shapes.zig" {
-    code = $0
-    sub(/\/\/.*$/, "", code)
-    if (code ~ /win\.(RoundRect|Ellipse|CreateRoundRectRgn)[[:space:]]*\(/) {
-        printf "lint-repeats: %s:%d: [F1] raw GDI rounded edges are jagged. Use smooth_shapes.fillRoundRect and friends with explicit colours and a paint-level Context.\n", FILENAME, FNR
+function scan(    rest, line, prefix, token) {
+    rest = source
+    line = 1
+    while (match(rest, pattern)) {
+        prefix = substr(rest, 1, RSTART - 1)
+        token = substr(rest, RSTART, RLENGTH)
+        rest = substr(rest, RSTART + RLENGTH)
+        line += gsub(/\n/, "", prefix)
+        printf "lint-repeats: %s:%d: [F1] raw GDI rounded edges are jagged. Use smooth_shapes.fillRoundRect and friends with explicit colours and a paint-level Context.\n", file, line
+        line += gsub(/\n/, "", token)
         failed = 1
     }
 }
-END { exit failed ? 1 : 0 }
+BEGIN {
+    names = "(RoundRect|Ellipse|Pie|Chord|Arc|CreateEllipticRgn|CreateRoundRectRgn)"
+    pattern = "(\\.[[:space:]]*" names "([^[:alnum:]_]|$)|@field[[:space:]]*\\([^,]+,[[:space:]]*\"" names "\")"
+}
+FNR == 1 {
+    scan()
+    file = FILENAME
+    source = ""
+}
+FILENAME != "src/smooth_shapes.zig" {
+    code = $0
+    sub(/\/\/.*$/, "", code)
+    source = source code "\n"
+}
+END { scan(); exit failed ? 1 : 0 }
 ' src/*.zig; then
     failed=1
 fi

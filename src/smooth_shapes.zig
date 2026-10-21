@@ -400,3 +400,54 @@ test "hybrid fills match full paths at edges and exactly inside with odd corners
         }
     }
 }
+
+test "scrollbar fill keeps the pixel bounds of an uncompensated GDI rounded region" {
+    const size = 96;
+    const dc = win.CreateCompatibleDC(null) orelse return error.CreateDCFailed;
+    defer _ = win.DeleteDC(dc);
+    var info = std.mem.zeroes(win.BITMAPINFO);
+    info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = size;
+    info.bmiHeader.biHeight = -size;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    var bits: ?*anyopaque = null;
+    const bitmap = win.CreateDIBSection(dc, &info, win.DIB_RGB_COLORS, &bits, null, 0) orelse return error.CreateBitmapFailed;
+    defer _ = win.DeleteObject(bitmap);
+    const old = win.SelectObject(dc, bitmap);
+    defer _ = win.SelectObject(dc, old);
+    const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. size * size];
+    const color = 0x00332211;
+    const brush = win.CreateSolidBrush(color) orelse return error.CreateBrushFailed;
+    defer _ = win.DeleteObject(brush);
+    for ([_]i32{ 6, 9 }) |width| {
+        const rect = win.RECT{ .left = 10, .top = 12, .right = 10 + width, .bottom = 60 };
+        const region = win.CreateRoundRectRgn(rect.left, rect.top, rect.right, rect.bottom, width, width) orelse return error.CreateRegionFailed;
+        defer _ = win.DeleteObject(region);
+        var reference: win.RECT = undefined;
+        try std.testing.expect(win.GetRgnBox(region, &reference) != win.ERROR);
+        for ([_]bool{ false, true }) |antialias| {
+            @memset(pixels, 0xffffffff);
+            if (antialias) {
+                var ctx = Context.init(dc);
+                defer ctx.deinit();
+                try std.testing.expect(ctx.graphics != null);
+                fillRoundRect(&ctx, .{ .left = rect.left, .top = rect.top, .right = rect.right - 1, .bottom = rect.bottom - 1 }, width, width, color);
+            } else try std.testing.expect(win.FillRgn(dc, region, brush) != 0);
+            _ = win.GdiFlush();
+            var bounds = win.RECT{ .left = size, .top = size, .right = 0, .bottom = 0 };
+            for (pixels, 0..) |pixel, i| {
+                if (pixel & 0xffffff == 0xffffff) continue;
+                const x: i32 = @intCast(i % size);
+                const y: i32 = @intCast(i / size);
+                bounds.left = @min(bounds.left, x);
+                bounds.top = @min(bounds.top, y);
+                bounds.right = @max(bounds.right, x + 1);
+                bounds.bottom = @max(bounds.bottom, y + 1);
+            }
+            try std.testing.expectEqualDeep(reference, bounds);
+            try std.testing.expectEqual(width - 1, bounds.right - bounds.left);
+            try std.testing.expectEqual(rect.bottom - rect.top - 1, bounds.bottom - bounds.top);
+        }
+    }
+}

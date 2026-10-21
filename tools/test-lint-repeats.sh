@@ -56,8 +56,40 @@ for entry in "${cases[@]}"; do
         fi
     done
 done
+fixture="$temp/f1-fixtures"
+mkdir -p "$fixture/src" "$fixture/.github/workflows"
+printf 'name: fixture\n' > "$fixture/.github/workflows/fixture.yml"
+: > "$fixture/src/main.zig"
+f1_cases=0
+for api in RoundRect Ellipse Pie Chord Arc CreateEllipticRgn CreateRoundRectRgn; do
+    for form in direct alias import_alias field field_alias multiline_alias multiline_field; do
+        case "$form" in
+            direct) printf '_ = win.%s();\n' "$api" ;;
+            alias) printf 'const Raw = win.%s;\n' "$api" ;;
+            import_alias) printf 'const gdi = @import("win32.zig").c;\nconst Raw = gdi.%s;\n' "$api" ;;
+            field) printf '_ = @field(win, "%s")();\n' "$api" ;;
+            field_alias) printf 'const Raw = @field(@import("win32.zig").c, "%s");\n' "$api" ;;
+            multiline_alias) printf 'const Raw = win.\n    %s;\n' "$api" ;;
+            multiline_field) printf 'const Raw = @field(\n    win,\n    "%s",\n);\n' "$api" ;;
+        esac > "$fixture/src/bypass.zig"
+        status=0
+        "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+        if (( status != 1 )) || ! grep -Eq '^lint-repeats: src/bypass.zig:[0-9]+: \[F1\] ' "$temp/output"; then
+            cat "$temp/output" >&2
+            printf 'test-lint-repeats: FAIL F1 %s %s must exit 1 with [F1], got exit %s\n' "$api" "$form" "$status" >&2
+            exit 1
+        fi
+        mv "$fixture/src/bypass.zig" "$fixture/src/smooth_shapes.zig"
+        "$lint" "$fixture" > "$temp/output" 2>&1
+        rm "$fixture/src/smooth_shapes.zig"
+        f1_cases=$((f1_cases + 1))
+        printf 'test-lint-repeats: F1 rejects %s %s outside smooth_shapes\n' "$api" "$form"
+    done
+done
+printf 'const safe = win.RoundRectangle;\nconst shape = smooth.fillRoundRect;\n' > "$fixture/src/bypass.zig"
+"$lint" "$fixture"
 if (( SECONDS >= 60 )); then
     printf 'test-lint-repeats: FAIL runtime %ss must be under 60s\n' "$SECONDS" >&2
     exit 1
 fi
-printf 'test-lint-repeats: PASS (%s bad commits rejected, their fixes clear their rules, %ss < 60s)\n' "${#cases[@]}" "$SECONDS"
+printf 'test-lint-repeats: PASS (%s bad commits rejected, %s F1 bypasses rejected, their fixes clear their rules, %ss < 60s)\n' "${#cases[@]}" "$f1_cases" "$SECONDS"

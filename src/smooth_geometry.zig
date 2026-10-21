@@ -81,3 +81,34 @@ test "small full-path shapes and invalid or square corners do not use hybrid ban
     try std.testing.expect(partition(.{ .left = 3, .top = 5, .right = 25, .bottom = 4 }, 10, 10) == null);
     try std.testing.expect(partition(rect, 19, 20) != null);
 }
+
+pub fn counterclockwiseArc(rect: Rect, from: [2]i32, to: [2]i32) struct { start: f32, sweep: f32 } {
+    const cx = (@as(f32, @floatFromInt(rect.left)) + @as(f32, @floatFromInt(rect.right))) / 2;
+    const cy = (@as(f32, @floatFromInt(rect.top)) + @as(f32, @floatFromInt(rect.bottom))) / 2;
+    const start = @mod(std.math.atan2(@as(f32, @floatFromInt(from[1])) - cy, @as(f32, @floatFromInt(from[0])) - cx) * 180 / std.math.pi, 360);
+    const end = @mod(std.math.atan2(@as(f32, @floatFromInt(to[1])) - cy, @as(f32, @floatFromInt(to[0])) - cx) * 180 / std.math.pi, 360);
+    const sweep = end - start;
+    return .{ .start = start, .sweep = if (sweep >= 0) sweep - 360 else sweep };
+}
+
+test "GDI counterclockwise endpoint rays convert to lower microphone cradle at both scales" {
+    for ([_]i32{ 96, 144 }) |dpi| {
+        const arc = @divTrunc(7 * dpi + 48, 96);
+        const top = -@divTrunc(7 * dpi + 48, 96);
+        const bottom = @divTrunc(6 * dpi + 48, 96);
+        const y = -@divTrunc(dpi + 48, 96);
+        const angles = counterclockwiseArc(.{ .left = 20 - arc, .top = 30 + top, .right = 20 + arc + 1, .bottom = 30 + bottom }, .{ 20 - arc, 30 + y }, .{ 20 + arc + 1, 30 + y });
+        try std.testing.expectApproxEqAbs(@as(f32, if (dpi == 96) 183.814075 else 184.969741), angles.start, 0.0001);
+        try std.testing.expectApproxEqAbs(@as(f32, if (dpi == 96) -187.628150 else -189.939482), angles.sweep, 0.0001);
+        try std.testing.expect(@sin((angles.start + angles.sweep / 2) * std.math.pi / 180) > 0.99);
+    }
+}
+
+test "GDI counterclockwise arcs wrap around zero and identical rays draw a full ellipse" {
+    const rect = Rect{ .left = -10, .top = -5, .right = 10, .bottom = 5 };
+    const quarter = counterclockwiseArc(rect, .{ 10, 0 }, .{ 0, -5 });
+    try std.testing.expectEqual(@as(f32, 0), quarter.start);
+    try std.testing.expectEqual(@as(f32, -90), quarter.sweep);
+    const full = counterclockwiseArc(rect, .{ 10, 0 }, .{ 20, 0 });
+    try std.testing.expectEqual(@as(f32, -360), full.sweep);
+}
