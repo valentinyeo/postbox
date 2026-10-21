@@ -3345,7 +3345,7 @@ fn unfurlSmoke(init: std.process.Init) u8 {
 
     const Case = struct { url: []const u8, provider: unfurl.Provider, id: []const u8 = "" };
     const cases = [_]Case{
-        .{ .url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ", .provider = .youtube, .id = "dQw4w9WgXcQ" },
+        .{ .url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ", .provider = .youtube, .id = "dQw4w9WgXcR" },
         .{ .url = "https://youtu.be/dQw4w9WgXcQ?t=42", .provider = .youtube, .id = "dQw4w9WgXcQ" },
         .{ .url = "https://www.youtube.com/shorts/dQw4w9WgXcQ?feature=share", .provider = .youtube, .id = "dQw4w9WgXcQ" },
         .{ .url = "https://www.instagram.com/reel/Cabcdefghij/", .provider = .instagram, .id = "Cabcdefghij" },
