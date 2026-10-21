@@ -69,7 +69,7 @@ test "ISSUE-517 saved user keys expand inside the overridden fixture registry" {
     var disposition: win.DWORD = 0;
     try std.testing.expectEqual(win.ERROR_SUCCESS, win.RegCreateKeyExW(hkcu, fixture_path, 0, null, 0, win.KEY_ALL_ACCESS, null, &fixture, &disposition));
     defer _ = win.RegCloseKey(fixture);
-    try std.testing.expectEqual(win.REG_CREATED_NEW_KEY, disposition);
+    try std.testing.expect(disposition == win.REG_CREATED_NEW_KEY);
     defer _ = win.RegDeleteTreeW(hkcu, fixture_path);
     try std.testing.expectEqual(win.ERROR_SUCCESS, win.RegOverridePredefKey(hkcu, fixture));
     defer _ = win.RegOverridePredefKey(hkcu, null);
