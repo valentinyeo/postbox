@@ -79,12 +79,12 @@ jobs:
       - name: Package zip
         run: |
           cd zig-out/bin
-          zip -r "${GITHUB_WORKSPACE}/Messages-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe *.ttf *LICENSE*
+          zip -r "${GITHUB_WORKSPACE}/Messages-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf *LICENSE*
       - name: Build and package ARM64
         run: |
           zig build -Dtarget=aarch64-windows-gnu --release=small -Dversion="${GITHUB_REF_NAME#v}" -p zig-out-arm64
           cd zig-out-arm64/bin
-          zip -r "${GITHUB_WORKSPACE}/Messages_arm64-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe *.ttf *LICENSE*
+          zip -r "${GITHUB_WORKSPACE}/Messages_arm64-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf *LICENSE*
       - name: Package MSI
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq wixl wixl-data
@@ -131,7 +131,9 @@ jobs:
           $exe = "$env:LOCALAPPDATA\Programs\Messages\Messages.exe"
           $lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Messages.lnk"
           if (-not (Test-Path $exe)) { throw "missing $exe" }
-          if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Messages\IBMPlexSans-Regular.ttf")) { throw "missing bundled font" }
+          foreach ($font in @('IBMPlexSans-Regular.ttf', 'IBMPlexSans-Medium.ttf', 'IBMPlexSans-SemiBold.ttf', 'IBMPlexSans-Bold.ttf')) {
+            if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Messages\$font")) { throw "missing bundled font $font" }
+          }
           if (-not (Test-Path $lnk)) { throw "missing Start menu shortcut $lnk" }
           $ctl = "$env:LOCALAPPDATA\Programs\Messages\wazigctl.exe"
           if (-not (Test-Path $ctl)) { throw "missing $ctl" }

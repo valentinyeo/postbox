@@ -11,12 +11,16 @@ if [ "$version" != "0.16.0" ]; then
 fi
 run() { echo "preflight: $*"; "$@"; }
 run "$ZIG" fmt --check src build.zig
+run node tools/check-fonts.mjs
+run node --test tools/check-fonts.test.mjs
 run "$ZIG" build test
 if [ "${WAZIG_WINE_TESTS:-0}" = "1" ]; then
     raster_temp=$(mktemp -d)
     trap 'rm -rf -- "$raster_temp"' EXIT
     run "$ZIG" test src/smooth_shapes.zig -target x86_64-windows-gnu -lc -lgdi32 -luser32 -lmsimg32 --test-no-exec -femit-bin="$raster_temp/smooth-test.exe"
     run xvfb-run -a wine "$raster_temp/smooth-test.exe"
+    run "$ZIG" test src/text_draw.zig -O ReleaseSmall -target x86_64-windows-gnu -lc -lgdi32 -luser32 --test-no-exec -femit-bin="$raster_temp/text-test.exe"
+    run xvfb-run -a wine "$raster_temp/text-test.exe"
 fi
 run python3 tools/test_outbox_runtime.py --zig "$ZIG" --negative-controls
 run "$ZIG" test src/stretch.zig

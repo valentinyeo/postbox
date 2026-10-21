@@ -56,6 +56,7 @@ const webp = @cImport({
 });
 
 const win = @import("win32.zig").c;
+const text_draw = @import("text_draw.zig");
 
 const build_info = @import("build_info");
 const app_version = build_info.version;
@@ -1004,7 +1005,7 @@ fn searchFieldProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam
             _ = win.SetBkMode(hdc, win.TRANSPARENT);
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             _ = win.SelectObject(hdc, a.font.?);
-            _ = win.DrawTextW(hdc, &cue, -1, &rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
+            _ = text_draw.drawText(hdc, &cue, -1, &rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
         }
     }
     return result;
@@ -1019,7 +1020,7 @@ fn paintRoundedButton(a: *App, shapes: *const smooth.Context, hdc: win.HDC, rect
         _ = win.SetTextColor(hdc, text_color);
         _ = win.SelectObject(hdc, @ptrCast(font));
         var label_rect = rect;
-        _ = win.DrawTextW(hdc, text.ptr, @intCast(text.len), &label_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+        _ = text_draw.drawText(hdc, text.ptr, @intCast(text.len), &label_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     }
 }
 
@@ -1087,7 +1088,7 @@ fn drawVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     _ = win.SetTextColor(hdc, if (theme.choice == .amoled) foreground else theme.current.on_surface);
     _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
     var text_rect = win.RECT{ .left = dot_x + px(a, 12), .top = item.rcItem.top, .right = dot_x + px(a, 62), .bottom = item.rcItem.bottom };
-    _ = win.DrawTextW(hdc, &wide, @intCast(label.len), &text_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
+    _ = text_draw.drawText(hdc, &wide, @intCast(label.len), &text_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
     const meter_left = text_rect.right + px(a, 4);
     const meter_right = item.rcItem.right - px(a, 38);
     if (meter_right > meter_left) {
@@ -1457,17 +1458,19 @@ fn scaledFontHeight(base: i32, scale: i32, dpi: i32) i32 {
 }
 
 fn recreateFonts(a: *App) void {
+    const body_weight = @import("font_config.zig").body_weight;
+    comptime std.debug.assert(body_weight == win.FW_MEDIUM);
     const dpi: i32 = @intCast(a.dpi);
     const old_font = a.font;
     const old_small = a.font_small;
     const old_bold = a.font_bold;
     const old_underline = a.font_underline;
     const old_emoji = a.font_emoji;
-    a.font = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_small = win.CreateFontW(scaledFontHeight(13, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_bold = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_emoji = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
-    a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_small = win.CreateFontW(scaledFontHeight(13, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_bold = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_emoji = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
+    a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     setFont(a.search, a.font);
     setFont(a.chats_hwnd, a.font);
     setFont(a.status_row, a.font);
@@ -1491,6 +1494,7 @@ fn changeFontScale(a: *App, delta: i32) void {
     const next = std.math.clamp(a.font_scale + delta, 60, 160);
     if (next == a.font_scale) return;
     a.font_scale = next;
+    text_draw.reset();
     recreateFonts(a);
     saveFontScale(next);
     var buffer: [48]u8 = undefined;
@@ -3165,14 +3169,22 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     };
 
     _ = win.SetProcessDpiAwarenessContext(win.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    var plex_regular = bundledFilePath("IBMPlexSans-Regular.ttf");
-    var plex_semibold = bundledFilePath("IBMPlexSans-SemiBold.ttf");
-    const plex_loaded = win.AddFontResourceExW(plex_regular.ptr(), win.FR_PRIVATE, null) > 0 and
-        win.AddFontResourceExW(plex_semibold.ptr(), win.FR_PRIVATE, null) > 0;
-    smoke_log.line("fonts: private IBM Plex loaded = {}", .{plex_loaded});
-
+    const font_files = @import("font_config.zig").files;
+    var plex_loaded: usize = 0;
+    var font_paths: [font_files.len]WideText(519) = undefined;
+    var font_pointers: [font_files.len][*:0]const u16 = undefined;
+    inline for (font_files, 0..) |file, i| {
+        font_paths[i] = bundledFilePath(file);
+        const font_path = &font_paths[i];
+        font_pointers[i] = font_path.ptr();
+        if (win.AddFontResourceExW(font_path.ptr(), win.FR_PRIVATE, null) > 0) plex_loaded += 1;
+    }
+    smoke_log.line("fonts: private IBM Plex loaded = {} ({}/{})", .{ plex_loaded == font_files.len, plex_loaded, font_files.len });
+    text_draw.setBundledFontPaths(&font_pointers);
     _ = win.CoInitializeEx(null, win.COINIT_APARTMENTTHREADED);
     defer win.CoUninitialize();
+    defer text_draw.reset();
+    smoke_log.line("text: directwrite = {}", .{text_draw.available()});
     _ = mf_lazy.ensureStarted();
     defer mf_lazy.unloadIfStarted();
 
@@ -3190,6 +3202,7 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     app_ptr = &app;
     defer app_ptr = null;
     _ = win.CoCreateInstance(&win.CLSID_WICImagingFactory, null, win.CLSCTX_INPROC_SERVER, &win.IID_IWICImagingFactory, @ptrCast(&app.wic_factory));
+    text_draw.reset();
     recreateFonts(&app);
 
     var smoke_class = win.WNDCLASSEXW{
@@ -7297,7 +7310,7 @@ fn drawUnfurlCard(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
         title = std.unicode.utf8ToUtf16LeStringLiteral("Open in browser")[0..];
     }
     var title_rect = win.RECT{ .left = thumb_right + 10, .top = top + 10, .right = x + card_width - 10, .bottom = top + unfurl_card_height - 34 };
-    _ = win.DrawTextW(hdc, title.ptr, @intCast(title.len), &title_rect, win.DT_WORDBREAK | win.DT_END_ELLIPSIS);
+    _ = text_draw.drawText(hdc, title.ptr, @intCast(title.len), &title_rect, win.DT_WORDBREAK | win.DT_END_ELLIPSIS);
     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
     var label_buffer: [96]u8 = undefined;
     var author_utf8: [128]u8 = undefined;
@@ -7310,7 +7323,7 @@ fn drawUnfurlCard(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     var label_wide = WideText(96){};
     label_wide.set(a.allocator, label);
     var label_rect = win.RECT{ .left = thumb_right + 10, .top = bottom - 28, .right = x + card_width - 10, .bottom = bottom - 8 };
-    _ = win.DrawTextW(hdc, label_wide.ptr(), @intCast(label_wide.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
 }
 
@@ -9919,7 +9932,7 @@ fn shortcodeProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: 
                 _ = win.SelectObject(hdc, @ptrCast(a.font.?));
                 _ = win.SetTextColor(hdc, if (index == a.sc_sel and theme.choice == .amoled) theme.current.on_secondary_container else theme.current.on_surface);
                 cell.left = px(a, 12) + em + px(a, 12);
-                _ = win.DrawTextW(hdc, label.ptr(), -1, &cell, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);
+                _ = text_draw.drawText(hdc, label.ptr(), -1, &cell, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);
             }
             return 0;
         },
@@ -10188,7 +10201,7 @@ fn emojiProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
                 _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
                 _ = win.SelectObject(hdc, @ptrCast(a.font.?));
                 var empty_rect = win.RECT{ .left = px(a, 20), .top = edit_zone + px(a, 4), .right = client.right - px(a, 20), .bottom = edit_zone + px(a, 36) };
-                _ = win.DrawTextW(hdc, lit("No matching emoji"), -1, &empty_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
+                _ = text_draw.drawText(hdc, lit("No matching emoji"), -1, &empty_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
             }
             var shapes = smooth.Context.init(hdc);
             defer shapes.deinit();
@@ -10326,7 +10339,7 @@ fn drawReactionRow(a: *App, item: *win.DRAWITEMSTRUCT) void {
         if (index == quick_reactions.len or emoji_draw.draw(item.hDC, wide.slice(), left, top, em, em) == null) {
             _ = win.SelectObject(item.hDC, @ptrCast((if (a.font_emoji != null) a.font_emoji else a.font) orelse return));
             var box = win.RECT{ .left = item.rcItem.left + @as(i32, @intCast(index)) * cell, .top = item.rcItem.top, .right = item.rcItem.left + @as(i32, @intCast(index + 1)) * cell, .bottom = item.rcItem.bottom };
-            _ = win.DrawTextW(item.hDC, wide.ptr(), -1, &box, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+            _ = text_draw.drawText(item.hDC, wide.ptr(), -1, &box, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
     }
 }
@@ -11851,12 +11864,12 @@ fn drawPaletteItem(a: *App, item: *win.DRAWITEMSTRUCT) void {
     _ = win.SetTextColor(item.hDC, if (selected and theme.choice == .amoled) theme.current.on_secondary_container else theme.current.on_surface);
     const label_right = if (palette_item.shortcut.len > 0) item.rcItem.right - 130 else item.rcItem.right - 20;
     var label_rect = win.RECT{ .left = item.rcItem.left + 20, .top = item.rcItem.top, .right = label_right, .bottom = item.rcItem.bottom };
-    _ = win.DrawTextW(item.hDC, palette_item.label.ptr(), @intCast(palette_item.label.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
+    _ = text_draw.drawText(item.hDC, palette_item.label.ptr(), @intCast(palette_item.label.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     if (palette_item.shortcut.len > 0) {
         _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
         _ = win.SetTextColor(item.hDC, if (selected and theme.choice == .amoled) theme.current.on_secondary_container else theme.current.on_surface_variant);
         var shortcut_rect = win.RECT{ .left = item.rcItem.right - 120, .top = item.rcItem.top, .right = item.rcItem.right - 16, .bottom = item.rcItem.bottom };
-        _ = win.DrawTextW(item.hDC, palette_item.shortcut.ptr(), @intCast(palette_item.shortcut.len), &shortcut_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
+        _ = text_draw.drawText(item.hDC, palette_item.shortcut.ptr(), @intCast(palette_item.shortcut.len), &shortcut_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
     }
 }
 
@@ -11908,7 +11921,7 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
                 else
                     lit("No matching commands");
                 var empty_rect = win.RECT{ .left = 20, .top = palette_edit_zone + 4, .right = client.right - 20, .bottom = palette_edit_zone + 36 };
-                _ = win.DrawTextW(hdc, empty_text, -1, &empty_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
+                _ = text_draw.drawText(hdc, empty_text, -1, &empty_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
             }
             var shapes = smooth.Context.init(hdc);
             defer shapes.deinit();
@@ -12021,7 +12034,7 @@ fn drawAscii(hdc: win.HDC, rect: *win.RECT, text: []const u8, flags: c_uint) voi
     const len = @min(text.len, buffer.len - 1);
     for (text[0..len], 0..) |byte, index| buffer[index] = byte;
     buffer[len] = 0;
-    _ = win.DrawTextW(hdc, &buffer, @intCast(len), rect, flags);
+    _ = text_draw.drawText(hdc, &buffer, @intCast(len), rect, flags);
 }
 
 fn drawShortcutHelp(a: *App, hwnd: win.HWND) void {
@@ -12232,6 +12245,7 @@ fn runCommand(a: *App, command: u16) void {
         command_font_larger => changeFontScale(a, 10),
         command_font_reset => {
             a.font_scale = 82;
+            text_draw.reset();
             recreateFonts(a);
             saveFontScale(a.font_scale);
             setStatus(a, "Font size 82%");
@@ -12957,9 +12971,9 @@ fn containsEmoji(text: []const u16) bool {
 }
 
 fn runWidth(hdc: win.HDC, text: []const u16) i32 {
-    var size: win.SIZE = undefined;
-    if (win.GetTextExtentPoint32W(hdc, text.ptr, @intCast(text.len), &size) == 0) return 0;
-    return size.cx;
+    var rect = win.RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+    _ = text_draw.drawText(hdc, text.ptr, @intCast(text.len), &rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_CALCRECT);
+    return rect.right;
 }
 
 fn drawEmojiRun(hdc: win.HDC, emoji_font: win.HFONT, text_ascent: i32, line_height: i32, slice: []const u16, cursor: i32, y: i32, draw: bool) i32 {
@@ -12979,7 +12993,9 @@ fn drawEmojiRun(hdc: win.HDC, emoji_font: win.HFONT, text_ascent: i32, line_heig
     }
     _ = win.SelectObject(hdc, @ptrCast(emoji_font));
     if (draw) _ = win.TextOutW(hdc, cursor, y, slice.ptr, @intCast(slice.len));
-    return runWidth(hdc, slice);
+    var size: win.SIZE = undefined;
+    _ = win.GetTextExtentPoint32W(hdc, slice.ptr, @intCast(slice.len), &size);
+    return size.cx;
 }
 
 fn drawMixedLine(hdc: win.HDC, text_font: win.HFONT, emoji_font: win.HFONT, text: []const u16, x: i32, y: i32) i32 {
@@ -12995,7 +13011,7 @@ fn drawMixedLine(hdc: win.HDC, text_font: win.HFONT, emoji_font: win.HFONT, text
             cursor += drawEmojiRun(hdc, emoji_font, text_ascent, line_height, slice, cursor, y, true);
         } else {
             _ = win.SelectObject(hdc, @ptrCast(text_font));
-            _ = win.TextOutW(hdc, cursor, y, slice.ptr, @intCast(slice.len));
+            _ = text_draw.drawRun(hdc, cursor, y, slice.ptr, @intCast(slice.len));
             cursor += runWidth(hdc, slice);
         }
     }
@@ -13093,8 +13109,15 @@ fn drawWordSlice(hdc: win.HDC, a: *App, text_font: win.HFONT, emoji_font: win.HF
         } else {
             _ = win.SelectObject(hdc, @ptrCast(text_font));
         }
-        _ = win.TextOutW(hdc, cursor_x, line_top, part.ptr, @intCast(part.len));
-        cursor_x += runWidth(hdc, part);
+        if (run.emoji) {
+            _ = win.TextOutW(hdc, cursor_x, line_top, part.ptr, @intCast(part.len));
+            var size: win.SIZE = undefined;
+            _ = win.GetTextExtentPoint32W(hdc, part.ptr, @intCast(part.len), &size);
+            cursor_x += size.cx;
+        } else {
+            _ = text_draw.drawRun(hdc, cursor_x, line_top, part.ptr, @intCast(part.len));
+            cursor_x += runWidth(hdc, part);
+        }
     }
     return cursor_x;
 }
@@ -13123,15 +13146,6 @@ fn previousCharStart(word: []const u16, index: usize) usize {
 
 fn fittingPrefixLen(hdc: win.HDC, text_font: win.HFONT, emoji_font: win.HFONT, line_height: i32, text_ascent: i32, word: []const u16, max_width: i32) usize {
     if (word.len == 0) return 0;
-    if (!containsEmoji(word) and !containsSurrogateUnit(word)) {
-        _ = win.SelectObject(hdc, @ptrCast(text_font));
-        var fit: c_int = 0;
-        var size: win.SIZE = undefined;
-        _ = win.GetTextExtentExPointW(hdc, word.ptr, @intCast(word.len), max_width, &fit, null, &size);
-        var len: usize = if (fit > 0) @as(usize, @intCast(fit)) else 0;
-        while (len > 0 and mixedSliceWidth(hdc, text_font, emoji_font, line_height, text_ascent, word[0..len]) > max_width) len -= 1;
-        return @max(1, len);
-    }
     if (mixedSliceWidth(hdc, text_font, emoji_font, line_height, text_ascent, word[0..1]) > max_width) return 1;
     var lo: usize = 1;
     var hi: usize = word.len;
@@ -13180,10 +13194,10 @@ fn wrapMixedSink(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int, max_
     if (sink == null and !containsEmoji(text) and !containsUrlHint(text)) {
         var rect = win.RECT{ .left = 0, .top = 0, .right = max_width, .bottom = 0 };
         const flags: win.UINT = win.DT_CALCRECT | win.DT_WORDBREAK | win.DT_EDITCONTROL | win.DT_NOPREFIX;
-        _ = win.DrawTextW(hdc, text_ptr, len, &rect, flags);
+        _ = text_draw.drawText(hdc, text_ptr, len, &rect, flags);
         if (draw) {
             var target = win.RECT{ .left = left, .top = top, .right = left + max_width, .bottom = top + (rect.bottom - rect.top) + 4 };
-            _ = win.DrawTextW(hdc, text_ptr, len, &target, win.DT_WORDBREAK | win.DT_EDITCONTROL | win.DT_NOPREFIX);
+            _ = text_draw.drawText(hdc, text_ptr, len, &target, win.DT_WORDBREAK | win.DT_EDITCONTROL | win.DT_NOPREFIX);
         }
         return rect.bottom - rect.top;
     }
@@ -13266,7 +13280,7 @@ fn wrapMixedSink(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int, max_
             if (!at_end) {
                 if (draw) {
                     _ = win.SelectObject(hdc, @ptrCast(text_font));
-                    _ = win.TextOutW(hdc, cursor_x, line_top, &[_]u16{' '}, 1);
+                    _ = text_draw.drawRun(hdc, cursor_x, line_top, &[_]u16{' '}, 1);
                 }
                 cursor_x += space_width;
             }
@@ -13322,7 +13336,7 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
             _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
             _ = win.SetTextColor(item.hDC, theme.current.on_surface);
             var avatar_rect = win.RECT{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 };
-            _ = win.DrawTextW(item.hDC, chat.name.ptr(), initial_length, &avatar_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+            _ = text_draw.drawText(item.hDC, chat.name.ptr(), initial_length, &avatar_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
     }
 
@@ -13339,7 +13353,7 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
     _ = win.SetTextColor(item.hDC, row_text);
     const pinned_chat = isChatPinned(a, chat.jid.slice());
     var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 34) };
-    _ = win.DrawTextW(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
+    _ = text_draw.drawText(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     if (pinned_chat) {
         const pin_glyph = [_]u16{ 0xD83D, 0xDCCC };
         _ = drawMixedLine(item.hDC, a.font_bold.?, a.font_emoji orelse a.font_bold.?, &pin_glyph, item.rcItem.right - px(a, 76), item.rcItem.top + px(a, 12));
@@ -13347,14 +13361,14 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, row_muted);
     var time_rect = win.RECT{ .left = item.rcItem.right - px(a, 52), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, 10), .bottom = item.rcItem.top + px(a, 32) };
-    _ = win.DrawTextW(item.hDC, chat.time.ptr(), @intCast(chat.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
+    _ = text_draw.drawText(item.hDC, chat.time.ptr(), @intCast(chat.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
     const marker = archiveMarker(a, chat);
     var kind_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, if (marker != null) @as(i32, 130) else 42), .bottom = item.rcItem.top + px(a, 56) };
-    _ = win.DrawTextW(item.hDC, chat.kind.ptr(), @intCast(chat.kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    _ = text_draw.drawText(item.hDC, chat.kind.ptr(), @intCast(chat.kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
     if (marker) |text| {
         _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else theme.current.primary);
         var marker_rect = win.RECT{ .left = item.rcItem.right - px(a, 128), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, 40), .bottom = item.rcItem.top + px(a, 56) };
-        _ = win.DrawTextW(item.hDC, text, -1, &marker_rect, win.DT_RIGHT | win.DT_SINGLELINE);
+        _ = text_draw.drawText(item.hDC, text, -1, &marker_rect, win.DT_RIGHT | win.DT_SINGLELINE);
         _ = win.SetTextColor(item.hDC, row_muted);
     }
 
@@ -13419,7 +13433,7 @@ fn transcriptRender(hdc: win.HDC, a: *App, message: *const Message, shown: c_int
                     while (content.len > 0 and content[0] == ' ') content = content[1..];
                     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
                     _ = win.SetTextColor(hdc, theme.current.primary);
-                    if (draw) _ = win.TextOutW(hdc, left, y, &bullet_char, 1);
+                    if (draw) _ = text_draw.drawRun(hdc, left, y, &bullet_char, 1);
                     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
                     _ = win.SetTextColor(hdc, if (message.from_me) theme.current.on_primary_container else theme.current.on_surface);
                     y += wrapMixedSink(hdc, a, content.ptr, @intCast(content.len), width - 16, draw, left + 16, y, null) + 2;
@@ -13470,7 +13484,7 @@ fn quoteBodyHeight(hdc: win.HDC, a: *App, text: []const u16, width: i32) i32 {
     _ = win.SelectObject(hdc, @ptrCast(font));
     const line_height = textLineHeight(hdc, font);
     var rect = win.RECT{ .left = 0, .top = 0, .right = width, .bottom = 0 };
-    _ = win.DrawTextW(hdc, text.ptr, @intCast(text.len), &rect, win.DT_CALCRECT | win.DT_WORDBREAK | win.DT_EDITCONTROL | win.DT_NOPREFIX);
+    _ = text_draw.drawText(hdc, text.ptr, @intCast(text.len), &rect, win.DT_CALCRECT | win.DT_WORDBREAK | win.DT_EDITCONTROL | win.DT_NOPREFIX);
     return @min(rect.bottom - rect.top, line_height * quote_max_lines);
 }
 
@@ -13596,7 +13610,7 @@ fn drawSenderAvatar(shapes: *const smooth.Context, hdc: win.HDC, a: *App, x: i32
     const old_font = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
     const old_color = win.SetTextColor(hdc, theme.current.on_surface);
     var rect = win.RECT{ .left = x, .top = top, .right = x + px(a, 30), .bottom = top + px(a, 30) };
-    _ = win.DrawTextW(hdc, @ptrCast(initial.ptr), @intCast(initial.len), &rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+    _ = text_draw.drawText(hdc, @ptrCast(initial.ptr), @intCast(initial.len), &rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     _ = win.SetTextColor(hdc, old_color);
     _ = win.SelectObject(hdc, old_font);
 }
@@ -13770,13 +13784,13 @@ fn drawQuoteBlock(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     if (message.quote_sender.len > 0) {
         _ = win.SetTextColor(hdc, accent_color);
         var name_rect = win.RECT{ .left = text_left, .top = cursor, .right = text_right, .bottom = cursor + name_height };
-        _ = win.DrawTextW(hdc, message.quote_sender.ptr(), @intCast(message.quote_sender.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
+        _ = text_draw.drawText(hdc, message.quote_sender.ptr(), @intCast(message.quote_sender.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
         cursor += name_height;
     }
     if (body_height > 0) {
         _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
         var body_rect = win.RECT{ .left = text_left, .top = cursor, .right = text_right, .bottom = cursor + body_height };
-        _ = win.DrawTextW(hdc, message.quote.ptr(), @intCast(message.quote.len), &body_rect, win.DT_LEFT | win.DT_WORDBREAK | win.DT_EDITCONTROL | win.DT_WORD_ELLIPSIS | win.DT_NOPREFIX);
+        _ = text_draw.drawText(hdc, message.quote.ptr(), @intCast(message.quote.len), &body_rect, win.DT_LEFT | win.DT_WORDBREAK | win.DT_EDITCONTROL | win.DT_WORD_ELLIPSIS | win.DT_NOPREFIX);
     }
     _ = win.SetTextColor(hdc, if (message.from_me) theme.current.on_primary_container else theme.current.on_surface);
     return block_bottom + px(a, quote_after_gap);
@@ -13884,7 +13898,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             if (containsEmoji(sender_text)) {
                 _ = drawMixedLine(hdc, a.font_bold.?, a.font_emoji orelse a.font_bold.?, sender_text, left + px(a, 12), y + px(a, 6));
             } else {
-                _ = win.DrawTextW(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+                _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
             }
         }
         if (show_sender and in_group and !message.from_me and message.sender.len > 0) drawSenderAvatar(&shapes, hdc, a, left - px(a, 38), y + px(a, 6), message);
@@ -13911,7 +13925,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                     _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
                     _ = win.SetTextColor(hdc, if (message.from_me) theme.current.on_primary_container else theme.current.on_surface);
                     var play_rect = win.RECT{ .left = center_x - radius, .top = center_y - radius, .right = center_x + radius, .bottom = center_y + radius };
-                    _ = win.DrawTextW(hdc, lit("▶"), -1, &play_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+                    _ = text_draw.drawText(hdc, lit("▶"), -1, &play_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
                 }
             }
             text_top += message.bitmap_height + px(a, 8);
@@ -13927,7 +13941,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 var label_buffer: [128]u8 = undefined;
                 var label_wide = WideText(127){};
                 label_wide.set(a.allocator, media_drain.attachmentLabel(&label_buffer, "Voice message", message.media_size, if (media_drain.oversized(message.media_size)) .oversized else .downloading));
-                _ = win.DrawTextW(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+                _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
             } else {
                 const playing_now = active and a.audio_state == .playing;
                 const glyph_brush = win.CreateSolidBrush(theme.current.on_primary) orelse continue;
@@ -13953,7 +13967,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 const speed_active = a.audio_player != null and a.audio_player.?.speed() != 100;
                 _ = win.SetTextColor(hdc, if (speed_active) theme.current.primary else theme.current.on_surface_variant);
                 var speed_rect = win.RECT{ .left = left + px(a, 48), .top = strip_top + px(a, 4), .right = left + px(a, 90), .bottom = strip_top + px(a, 32) };
-                _ = win.DrawTextW(hdc, speedLabel(a.audio_player), -1, &speed_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+                _ = text_draw.drawText(hdc, speedLabel(a.audio_player), -1, &speed_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
 
                 const track_left = left + px(a, 94);
                 const track_right = right - px(a, 64);
@@ -13988,7 +14002,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
                     var played_rect = win.RECT{ .left = right - px(a, 60), .top = strip_top, .right = right - px(a, 10), .bottom = strip_top + px(a, 42) };
-                    _ = win.DrawTextW(hdc, lit("✓ played"), -1, &played_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
+                    _ = text_draw.drawText(hdc, lit("✓ played"), -1, &played_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
                 }
                 if (active and a.audio_duration_ms > 0) {
                     var time_buffer: [24]u8 = undefined;
@@ -14000,7 +14014,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
                     var time_rect = win.RECT{ .left = right - px(a, 60), .top = strip_top, .right = right - px(a, 10), .bottom = strip_top + px(a, 42) };
-                    _ = win.DrawTextW(hdc, time_wide.ptr(), @intCast(time_wide.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
+                    _ = text_draw.drawText(hdc, time_wide.ptr(), @intCast(time_wide.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
                 }
             }
             message.media_hit = .{ .left = left + px(a, 8), .top = strip_top, .right = right - px(a, 8), .bottom = strip_top + px(a, 42) };
@@ -14009,7 +14023,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                 _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
                 var loading_rect = win.RECT{ .left = left + px(a, 12), .top = text_top, .right = right - px(a, 12), .bottom = text_top + px(a, 20) };
-                _ = win.DrawTextW(hdc, lit("Transcribing…"), -1, &loading_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+                _ = text_draw.drawText(hdc, lit("Transcribing…"), -1, &loading_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
                 text_top += px(a, 24);
             } else if (message.transcript.len > 0) {
                 const shown: c_int = if (message.transcript_expanded) @intCast(message.transcript.len) else @intCast(@min(message.transcript.len, 400));
@@ -14018,7 +14032,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                 _ = win.SetTextColor(hdc, theme.current.primary);
                 var toggle_rect = win.RECT{ .left = left + px(a, 12), .top = text_top, .right = right - px(a, 12), .bottom = text_top + px(a, 18) };
-                _ = win.DrawTextW(hdc, if (message.transcript_expanded) lit("Show less") else lit("Show more"), -1, &toggle_rect, win.DT_LEFT | win.DT_SINGLELINE);
+                _ = text_draw.drawText(hdc, if (message.transcript_expanded) lit("Show less") else lit("Show more"), -1, &toggle_rect, win.DT_LEFT | win.DT_SINGLELINE);
                 message.toggle_hit = toggle_rect;
                 text_top += px(a, 20);
             }
@@ -14045,7 +14059,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             const label = media_drain.attachmentLabel(&label_buffer, if (name > 0) name_buffer[0..name] else kind, message.media_size, attachment_state);
             var label_wide = WideText(1023){};
             label_wide.set(a.allocator, label);
-            _ = win.DrawTextW(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);
+            _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);
             message.media_hit = media_rect;
             text_top += px(a, 54);
         }
@@ -14071,7 +14085,21 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
                     _ = win.SetTextColor(hdc, theme.current.on_secondary_container);
                     const slice = message.text.slice()[span.start..][0..span.len];
-                    _ = win.TextOutW(hdc, span.rect.left, span.rect.top, slice.ptr, @intCast(slice.len));
+                    var runs: [max_text_runs]TextRun = undefined;
+                    const count = splitRuns(slice, &runs);
+                    var cursor = span.rect.left;
+                    for (runs[0..count]) |run| {
+                        const part = slice[run.start..][0..run.len];
+                        if (run.emoji) {
+                            _ = win.TextOutW(hdc, cursor, span.rect.top, part.ptr, @intCast(part.len));
+                            var size: win.SIZE = undefined;
+                            _ = win.GetTextExtentPoint32W(hdc, part.ptr, @intCast(part.len), &size);
+                            cursor += size.cx;
+                        } else {
+                            _ = text_draw.drawRun(hdc, cursor, span.rect.top, part.ptr, @intCast(part.len));
+                            cursor += runWidth(hdc, part);
+                        }
+                    }
                 }
             }
         }
@@ -14079,13 +14107,13 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = win.SelectObject(hdc, @ptrCast(a.font.?));
             _ = win.SetTextColor(hdc, if (message.reaction_pending) theme.current.on_surface_variant else if (message.from_me) theme.current.on_primary_container else theme.current.on_surface);
             var reaction_rect = win.RECT{ .left = left + px(a, 12), .top = y + height - px(a, 30), .right = left + px(a, 52), .bottom = y + height - px(a, 6) };
-            _ = win.DrawTextW(hdc, message.reaction.ptr(), @intCast(message.reaction.len), &reaction_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
+            _ = text_draw.drawText(hdc, message.reaction.ptr(), @intCast(message.reaction.len), &reaction_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
         }
         _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
         _ = win.SetTextColor(hdc, if (message.send_state == .failed) theme.current.@"error" else theme.current.on_surface_variant);
         const time_band = timeBandHeight(hdc, a);
         var time_rect = win.RECT{ .left = right - px(a, 52), .top = y + height - px(a, 5) - time_band, .right = right - px(a, 10), .bottom = y + height - px(a, 5) };
-        _ = win.DrawTextW(hdc, message.time.ptr(), @intCast(message.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE);
+        _ = text_draw.drawText(hdc, message.time.ptr(), @intCast(message.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE);
     }
     if (a.selected_chat < a.chat_count) {
         if (archiveMarker(a, &a.chats[a.selected_chat])) |text| {
@@ -14096,7 +14124,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 _ = win.FillRect(hdc, &badge, badge_brush);
             }
             _ = win.SetTextColor(hdc, theme.current.primary);
-            _ = win.DrawTextW(hdc, text, -1, &badge, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+            _ = text_draw.drawText(hdc, text, -1, &badge, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
     }
     drawScrollbar(&shapes, canvasStripRect(a), canvasScrollInfo(a), theme.current.outline);
@@ -14683,6 +14711,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             subclassComposerButton(a, a.emoji_btn, 2);
             a.status = win.CreateWindowExW(0, lit("STATIC"), lit("Loading..."), win.WS_CHILD | win.WS_VISIBLE | win.SS_LEFT, 0, 0, 0, 0, hwnd, controlId(id_status), a.instance, null);
             createTooltips(a, hwnd);
+            text_draw.reset();
             recreateFonts(a);
             createTooltips(a, hwnd);
             updateSearchCue(a, activeChatView(a));
@@ -14738,6 +14767,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 a.compose_dragged = @divTrunc(a.compose_dragged * @as(i32, new_dpi) + @divTrunc(old_dpi, 2), old_dpi);
                 a.dpi = new_dpi;
             }
+            text_draw.reset();
             recreateFonts(a);
             if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, px(a, 64));
             const suggested: *const win.RECT = @ptrFromInt(@as(usize, @bitCast(lparam)));
@@ -16216,16 +16246,28 @@ pub fn main(init: std.process.Init) !void {
     defer app_ptr = null;
 
     _ = win.SetProcessDpiAwarenessContext(win.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    var plex_regular = bundledFilePath("IBMPlexSans-Regular.ttf");
-    var plex_semibold = bundledFilePath("IBMPlexSans-SemiBold.ttf");
-    const regular_loaded = win.AddFontResourceExW(plex_regular.ptr(), win.FR_PRIVATE, null) > 0;
-    const semibold_loaded = win.AddFontResourceExW(plex_semibold.ptr(), win.FR_PRIVATE, null) > 0;
+    const font_files = @import("font_config.zig").files;
+    var fonts_loaded: [font_files.len]bool = @splat(false);
+    var font_paths: [font_files.len]WideText(519) = undefined;
+    var font_pointers: [font_files.len][*:0]const u16 = undefined;
+    inline for (font_files, 0..) |file, i| {
+        font_paths[i] = bundledFilePath(file);
+        const font_path = &font_paths[i];
+        font_pointers[i] = font_path.ptr();
+        fonts_loaded[i] = win.AddFontResourceExW(font_path.ptr(), win.FR_PRIVATE, null) > 0;
+    }
+    text_draw.setBundledFontPaths(&font_pointers);
     defer {
-        if (regular_loaded) _ = win.RemoveFontResourceExW(plex_regular.ptr(), win.FR_PRIVATE, null);
-        if (semibold_loaded) _ = win.RemoveFontResourceExW(plex_semibold.ptr(), win.FR_PRIVATE, null);
+        inline for (font_files, 0..) |file, i| {
+            if (fonts_loaded[i]) {
+                var font_path = bundledFilePath(file);
+                _ = win.RemoveFontResourceExW(font_path.ptr(), win.FR_PRIVATE, null);
+            }
+        }
     }
     _ = win.CoInitializeEx(null, win.COINIT_APARTMENTTHREADED);
     defer win.CoUninitialize();
+    defer text_draw.reset();
     defer mf_lazy.unloadIfStarted();
     _ = win.CoCreateInstance(
         &win.CLSID_WICImagingFactory,

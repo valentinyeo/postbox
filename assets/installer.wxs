@@ -34,6 +34,12 @@
       <Component Id="PlexRegular" Guid="1A96D346-DF77-5C8D-AF3B-857F10E50DFF">
         <File Id="PlexRegularFile" Name="IBMPlexSans-Regular.ttf" Source="$(var.BinDir)IBMPlexSans-Regular.ttf" KeyPath="yes" />
       </Component>
+      <Component Id="PlexMedium" Guid="6C5075B7-AB0D-4BBE-A823-911F0ACED023">
+        <File Id="PlexMediumFile" Name="IBMPlexSans-Medium.ttf" Source="$(var.BinDir)IBMPlexSans-Medium.ttf" KeyPath="yes" />
+      </Component>
+      <Component Id="PlexBold" Guid="7C3FE2DF-B02E-432B-9AF5-45B0919D1566">
+        <File Id="PlexBoldFile" Name="IBMPlexSans-Bold.ttf" Source="$(var.BinDir)IBMPlexSans-Bold.ttf" KeyPath="yes" />
+      </Component>
       <Component Id="PlexSemiBold" Guid="E8332C91-8C69-5F65-8A73-FA273D2713CE">
         <File Id="PlexSemiBoldFile" Name="IBMPlexSans-SemiBold.ttf" Source="$(var.BinDir)IBMPlexSans-SemiBold.ttf" KeyPath="yes" />
       </Component>
@@ -59,7 +65,9 @@
       <ComponentRef Id="MessagesExe" />
       <ComponentRef Id="WazigCtlExe" />
       <ComponentRef Id="PlexRegular" />
+      <ComponentRef Id="PlexMedium" />
       <ComponentRef Id="PlexSemiBold" />
+      <ComponentRef Id="PlexBold" />
       <ComponentRef Id="PlexLicense" />
       <ComponentRef Id="StartMenuShortcut" />
     </Feature>

@@ -100,6 +100,21 @@ END { scan(); exit failed ? 1 : 0 }
     failed=1
 fi
 
+mapfile -d '' text_sources < <(find src -type f -name '*.zig' ! -path 'src/text_draw.zig' -print0)
+if ! awk '
+{
+    code = $0
+    sub(/\/\/.*$/, "", code)
+    if (code ~ /(^|[^[:alnum:]_])(DrawTextW|CLEARTYPE_QUALITY)([^[:alnum:]_]|$)/) {
+        printf "lint-repeats: %s:%d: [G1] GDI text bypasses smooth bundled DirectWrite rendering. Use text_draw.drawText and CLEARTYPE_NATURAL_QUALITY.\n", FILENAME, FNR
+        failed = 1
+    }
+}
+END { exit failed ? 1 : 0 }
+' "${text_sources[@]}"; then
+    failed=1
+fi
+
 shopt -s nullglob
 workflows=(.github/workflows/*.yml .github/workflows/*.yaml)
 if (( ${#workflows[@]} == 0 )); then
