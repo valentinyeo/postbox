@@ -108,9 +108,10 @@ function Send-Keys($Session, [string]$Keys) {
 
 function Invoke-PaletteCommand($Session, [string]$Command, [string]$Capture = '') {
     Send-Keys $Session '^k'
+    $owner = Get-Window $Session
     $palette = Wait-Until {
         $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MessagesPalette')
-        $windows = [Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children, $condition)
+        $windows = $owner.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
         foreach ($window in $windows) { if ($window.Current.ProcessId -eq $Session.pid) { return $window } }
     } 'owned command palette'
     $edit = Get-Edit $palette '1064'
