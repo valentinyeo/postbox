@@ -17,6 +17,7 @@ function fail(line, rule, problem, fix) {
 {
     code = $0
     sub(/\/\/.*$/, "", code)
+    source = source code "\n"
     if (code ~ /std\.mem\.eql\(u8, [A-Za-z0-9_.\[\]]*\.jid\.slice\(\), [A-Za-z0-9_.\[\]]*\.jid\.slice\(\)\)/)
         fail(FNR, "E1", "two chat ids compared without provider and account, so two accounts that share a contact mix", "chat_key.Key.eql(chat_key.of(x), chat_key.of(y))")
     if (code ~ /loadRegistryString[[:space:]]*\(|REG_SZ/ && code ~ /lit[[:space:]]*\([[:space:]]*"([^"]*ApiKey|TelegramApiHash)"[[:space:]]*\)/)
@@ -62,7 +63,19 @@ function fail(line, rule, problem, fix) {
         condition = ""
     }
 }
-END { exit failed ? 1 : 0 }
+END {
+    line = 1
+    pattern = "(^|[^[:alnum:]_])App[[:space:]]*\\{|:[[:space:]]*App[[:space:]]*(=|;)"
+    while (match(source, pattern)) {
+        prefix = substr(source, 1, RSTART - 1)
+        token = substr(source, RSTART, RLENGTH)
+        source = substr(source, RSTART + RLENGTH)
+        line += gsub(/\n/, "", prefix)
+        fail(line, "H1", "App by-value storage overflows the Windows startup stack", "allocator.create(App), defer allocator.destroy(app), and app.* = .{...}")
+        line += gsub(/\n/, "", token)
+    }
+    exit failed ? 1 : 0
+}
 ' src/main.zig; then
     failed=1
 fi
