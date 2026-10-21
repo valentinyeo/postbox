@@ -7,6 +7,8 @@ const App = struct {
     brush_raised: ?usize = null,
     brush_muted: ?usize = null,
     status: []const u8 = "",
+    slack_setup_window: ?usize = null,
+    tg_login_window: ?usize = null,
 };
 
 const win = struct {
@@ -18,6 +20,7 @@ const win = struct {
     const COLORREF = u32;
     const ERROR_SUCCESS = 0;
     const TRUE = 1;
+    const FALSE = 0;
     const RRF_RT_REG_DWORD = 16;
     const REG_DWORD = 4;
     const KEY_SET_VALUE = 2;
@@ -32,6 +35,13 @@ const win = struct {
     var fail_at: ?usize = null;
     var redraws: usize = 0;
     var saves: usize = 0;
+    var dialog_dark: [2]?BOOL = @splat(null);
+
+    fn DwmSetWindowAttribute(hwnd: HWND, attribute: DWORD, value: *BOOL, size: usize) i32 {
+        std.debug.assert(attribute == 20 and size == @sizeOf(BOOL));
+        dialog_dark[hwnd - 1] = value.*;
+        return 0;
+    }
 
     fn RegGetValueW(key: HKEY, path: [*:0]const u16, name: [*:0]const u16, flags: u32, _: ?*anyopaque, out: *u32, size: *u32) i32 {
         std.debug.assert(key == 0x80000001 and flags == RRF_RT_REG_DWORD);
@@ -106,6 +116,8 @@ fn setStatus(a: *App, value: []const u8) void {
     a.status = value;
 }
 
+fn updateTooltipTheme(_: *App) void {}
+
 fn reset() void {
     theme.set(.green);
     win.stored = null;
@@ -114,6 +126,7 @@ fn reset() void {
     win.fail_at = null;
     win.redraws = 0;
     win.saves = 0;
+    win.dialog_dark = @splat(null);
 }
 
 fn expectBrushes(a: *const App, palette: theme.Palette) !void {
@@ -130,11 +143,11 @@ fn expectBrushes(a: *const App, palette: theme.Palette) !void {
 
 test "startup loads valid DWORD themes and defaults missing or unknown values" {
     reset();
-    defer theme.set(.green);
+    defer theme.set(.amoled);
     for ([_]?u32{ null, 0, 1, 2, std.math.maxInt(u32) }) |stored| {
         win.stored = stored;
         theme.set(loadTheme());
-        const expected: theme.Choice = if (stored == 1) .amoled else .green;
+        const expected: theme.Choice = if (stored == 0) .green else .amoled;
         try std.testing.expectEqual(expected, theme.choice);
         try std.testing.expectEqual(if (expected == .amoled) theme.amoled.surface else theme.green.surface_container_high, fieldColor());
     }
@@ -142,10 +155,12 @@ test "startup loads valid DWORD themes and defaults missing or unknown values" {
 
 test "live theme changes replace all brushes, save and redraw every top-level window with children" {
     reset();
-    defer theme.set(.green);
+    defer theme.set(.amoled);
     var app = App{};
     try std.testing.expect(recreateThemeBrushes(&app));
     try expectBrushes(&app, theme.green);
+    app.slack_setup_window = 1;
+    app.tg_login_window = 2;
     for ([_]theme.Choice{ .amoled, .green, .amoled }) |choice| {
         const old = app.brush_bg.?;
         try std.testing.expect(changeTheme(&app, choice));
@@ -154,6 +169,7 @@ test "live theme changes replace all brushes, save and redraw every top-level wi
         try std.testing.expectEqual(@as(?u32, null), win.live[old]);
         try expectBrushes(&app, theme.current.*);
         try std.testing.expectEqual(@as(usize, 4), win.redraws);
+        for (win.dialog_dark) |dark| try std.testing.expectEqual(@as(?win.BOOL, if (choice == .amoled) win.TRUE else 0), dark);
         try std.testing.expectEqualStrings(if (choice == .amoled) "Theme: AMOLED black" else "Theme: Green", app.status);
     }
     try std.testing.expectEqual(@as(usize, 3), win.saves);
@@ -162,7 +178,7 @@ test "live theme changes replace all brushes, save and redraw every top-level wi
 test "brush allocation failure preserves the previous palette, resources and saved choice" {
     for (1..5) |failure| {
         reset();
-        defer theme.set(.green);
+        defer theme.set(.amoled);
         var app = App{};
         try std.testing.expect(recreateThemeBrushes(&app));
         const old = app.brush_bg;

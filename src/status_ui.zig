@@ -165,7 +165,12 @@ pub fn paint(a: anytype, hwnd: win.HWND, comptime actions: anytype) void {
             const hit = win.RECT{ .left = margin, .top = y, .right = client.right - margin, .bottom = y + row_height };
             a.status_ui.hits[i] = hit;
             if (y + row_height >= 0 and y < client.bottom) {
-                if (i == a.status_ui.selected) _ = win.FillRect(hdc, &hit, a.brush_panel.?);
+                if (i == a.status_ui.selected) {
+                    if (theme.choice == .amoled) {
+                        smooth.fillRoundRect(&shapes, hit, 16, 16, theme.current.surface_container_highest);
+                        smooth.strokeRoundRect(&shapes, hit, 16, 16, theme.current.outline_variant, 1);
+                    } else _ = win.FillRect(hdc, &hit, a.brush_panel.?);
+                }
                 const left = margin + actions.px(a, 8);
                 const top = y + actions.px(a, 12);
                 smooth.strokeEllipse(&shapes, .{ .left = left - 4, .top = top - 4, .right = left + 46, .bottom = top + 46 }, if (contact.unseen) theme.current.primary else theme.current.outline, actions.px(a, 3));
