@@ -11,6 +11,8 @@ if [ "$version" != "0.16.0" ]; then
 fi
 run() { echo "preflight: $*"; "$@"; }
 run "$ZIG" fmt --check src build.zig
+run node tools/check-fonts.mjs
+run node --test tools/check-fonts.test.mjs
 run "$ZIG" build test
 if [ "${WAZIG_WINE_TESTS:-0}" = "1" ]; then
     raster_temp=$(mktemp -d)
