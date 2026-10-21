@@ -1,5 +1,6 @@
 const std = @import("std");
 const theme = @import("theme.zig");
+const menu_theme = @import("menu_theme.zig");
 
 const App = struct {
     brush_bg: ?usize = null,
@@ -14,6 +15,7 @@ const App = struct {
 const win = struct {
     const DWORD = u32;
     const HKEY = ?usize;
+    const HMODULE = ?usize;
     const HWND = usize;
     const LPARAM = isize;
     const BOOL = i32;
@@ -36,6 +38,40 @@ const win = struct {
     var redraws: usize = 0;
     var saves: usize = 0;
     var dialog_dark: [2]?BOOL = @splat(null);
+
+    var menu_library_available = true;
+    var mode_export_available = true;
+    var flush_export_available = true;
+    var menu_loads: usize = 0;
+    var mode_calls: usize = 0;
+    var menu_flushes: usize = 0;
+    var menu_mode: menu_theme.PreferredAppMode = .default;
+
+    fn LoadLibraryW(path: [*:0]const u16) HMODULE {
+        std.debug.assert(std.mem.eql(u16, std.mem.span(path), std.mem.span(lit("uxtheme.dll"))));
+        menu_loads += 1;
+        return if (menu_library_available) 1 else null;
+    }
+
+    fn GetProcAddress(module: usize, ordinal: [*c]const u8) ?*const anyopaque {
+        std.debug.assert(module == 1);
+        return switch (@intFromPtr(ordinal)) {
+            135 => if (mode_export_available) @ptrCast(&SetPreferredAppMode) else null,
+            136 => if (flush_export_available) @ptrCast(&FlushMenuThemes) else null,
+            else => unreachable,
+        };
+    }
+
+    fn SetPreferredAppMode(mode: menu_theme.PreferredAppMode) callconv(.winapi) menu_theme.PreferredAppMode {
+        const previous = menu_mode;
+        menu_mode = mode;
+        mode_calls += 1;
+        return previous;
+    }
+
+    fn FlushMenuThemes() callconv(.winapi) void {
+        menu_flushes += 1;
+    }
 
     fn DwmSetWindowAttribute(hwnd: HWND, attribute: DWORD, value: *BOOL, size: usize) i32 {
         std.debug.assert(attribute == 20 and size == @sizeOf(BOOL));
@@ -127,6 +163,14 @@ fn reset() void {
     win.redraws = 0;
     win.saves = 0;
     win.dialog_dark = @splat(null);
+    menu_theme_module = null;
+    win.menu_library_available = true;
+    win.mode_export_available = true;
+    win.flush_export_available = true;
+    win.menu_loads = 0;
+    win.mode_calls = 0;
+    win.menu_flushes = 0;
+    win.menu_mode = .default;
 }
 
 fn expectBrushes(a: *const App, palette: theme.Palette) !void {
@@ -146,9 +190,10 @@ test "startup loads valid DWORD themes and defaults missing or unknown values" {
     defer theme.set(.amoled);
     for ([_]?u32{ null, 0, 1, 2, std.math.maxInt(u32) }) |stored| {
         win.stored = stored;
-        theme.set(loadTheme());
+        applyTheme(loadTheme());
         const expected: theme.Choice = if (stored == 0) .green else .amoled;
         try std.testing.expectEqual(expected, theme.choice);
+        try std.testing.expectEqual(menu_theme.preferredAppMode(expected), win.menu_mode);
         try std.testing.expectEqual(if (expected == .amoled) theme.amoled.surface else theme.green.surface_container_high, fieldColor());
     }
 }
@@ -165,6 +210,7 @@ test "live theme changes replace all brushes, save and redraw every top-level wi
         const old = app.brush_bg.?;
         try std.testing.expect(changeTheme(&app, choice));
         try std.testing.expectEqual(choice, theme.choice);
+        try std.testing.expectEqual(menu_theme.preferredAppMode(choice), win.menu_mode);
         try std.testing.expectEqual(@intFromEnum(choice), win.stored.?);
         try std.testing.expectEqual(@as(?u32, null), win.live[old]);
         try expectBrushes(&app, theme.current.*);
@@ -173,6 +219,9 @@ test "live theme changes replace all brushes, save and redraw every top-level wi
         try std.testing.expectEqualStrings(if (choice == .amoled) "Theme: AMOLED black" else "Theme: Green", app.status);
     }
     try std.testing.expectEqual(@as(usize, 3), win.saves);
+    try std.testing.expectEqual(@as(usize, 1), win.menu_loads);
+    try std.testing.expectEqual(@as(usize, 3), win.mode_calls);
+    try std.testing.expectEqual(@as(usize, 3), win.menu_flushes);
 }
 
 test "brush allocation failure preserves the previous palette, resources and saved choice" {
@@ -185,10 +234,33 @@ test "brush allocation failure preserves the previous palette, resources and sav
         win.fail_at = win.allocations + failure;
         try std.testing.expect(!changeTheme(&app, .amoled));
         try std.testing.expectEqual(theme.Choice.green, theme.choice);
+        try std.testing.expectEqual(menu_theme.PreferredAppMode.default, win.menu_mode);
+        try std.testing.expectEqual(@as(usize, 2), win.mode_calls);
+        try std.testing.expectEqual(@as(usize, 2), win.menu_flushes);
         try std.testing.expectEqual(old, app.brush_bg);
         try expectBrushes(&app, theme.green);
         try std.testing.expectEqual(@as(usize, 0), win.saves);
         try std.testing.expectEqual(@as(usize, 0), win.redraws);
         try std.testing.expectEqualStrings("Could not change theme", app.status);
+    }
+}
+
+test "IGSH-505 missing native menu DLL or ordinal exports are harmless" {
+    for ([_]bool{ false, true }) |library| {
+        for ([_]bool{ false, true }) |mode| {
+            for ([_]bool{ false, true }) |flush| {
+                reset();
+                defer theme.set(.amoled);
+                win.menu_library_available = library;
+                win.mode_export_available = mode;
+                win.flush_export_available = flush;
+                applyTheme(.amoled);
+                try std.testing.expectEqual(theme.Choice.amoled, theme.choice);
+                try std.testing.expectEqual(@as(usize, 1), win.menu_loads);
+                try std.testing.expectEqual(@as(usize, if (library and mode) 1 else 0), win.mode_calls);
+                try std.testing.expectEqual(@as(usize, if (library and flush) 1 else 0), win.menu_flushes);
+                try std.testing.expectEqual(if (library and mode) menu_theme.PreferredAppMode.force_dark else .default, win.menu_mode);
+            }
+        }
     }
 }

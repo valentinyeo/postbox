@@ -1,5 +1,6 @@
 const std = @import("std");
 const theme = @import("theme.zig");
+const menu_theme = @import("menu_theme.zig");
 const smooth = @import("smooth_shapes.zig");
 const smooth_geometry = @import("smooth_geometry.zig");
 const child_process = @import("child_process.zig");
@@ -1493,11 +1494,30 @@ fn redrawThemeWindow(hwnd: win.HWND, _: win.LPARAM) callconv(.winapi) win.BOOL {
     return win.TRUE;
 }
 
+var menu_theme_module: win.HMODULE = null;
+
+fn applyTheme(choice: theme.Choice) void {
+    theme.set(choice);
+    const module = menu_theme_module orelse blk: {
+        const loaded = win.LoadLibraryW(lit("uxtheme.dll")) orelse return;
+        menu_theme_module = loaded;
+        break :blk loaded;
+    };
+    if (win.GetProcAddress(module, @ptrFromInt(135))) |raw| {
+        const set_preferred_app_mode: *const fn (menu_theme.PreferredAppMode) callconv(.winapi) menu_theme.PreferredAppMode = @ptrCast(@alignCast(raw));
+        _ = set_preferred_app_mode(menu_theme.preferredAppMode(choice));
+    }
+    if (win.GetProcAddress(module, @ptrFromInt(136))) |raw| {
+        const flush_menu_themes: *const fn () callconv(.winapi) void = @ptrCast(@alignCast(raw));
+        flush_menu_themes();
+    }
+}
+
 fn changeTheme(a: *App, choice: theme.Choice) bool {
     const previous = theme.choice;
-    theme.set(choice);
+    applyTheme(choice);
     if (!recreateThemeBrushes(a)) {
-        theme.set(previous);
+        applyTheme(previous);
         setStatus(a, "Could not change theme");
         return false;
     }
@@ -16996,7 +17016,7 @@ pub fn main(init: std.process.Init) !void {
         openrouter_model = "claude-haiku-5-5";
         format_workspace = loadRegistryString(init.gpa, lit("AnthropicWorkspaceId")) orelse "";
     }
-    theme.set(loadTheme());
+    applyTheme(loadTheme());
     const app = try init.gpa.create(App);
     defer init.gpa.destroy(app);
     app.* = .{ .allocator = init.gpa, .people = people_index.Index.init(init.gpa), .io = init.io, .instance = instance, .wacli_path = wacli_path, .avatar_dir = avatar_dir, .slack_media_dir = slack_media_dir, .deepgram_configured = deepgram_key.len > 0, .deepgram_key = deepgram_key, .openrouter_key = openrouter_key, .openrouter_model = openrouter_model, .openrouter_configured = openrouter_key.len > 0, .format_workspace = format_workspace, .dictation_language = loadDictationLanguage(), .font_scale = loadFontScale(), .chat_view = loadChatView() };

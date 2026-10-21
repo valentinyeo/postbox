@@ -27,6 +27,7 @@ cases=(
     'a735c9f F1 HEAD'
     '0c67e093c2a85bd9b42b73d2d4433551cad39b85 G1 HEAD'
     '4064743 H1 HEAD'
+    '1a638c6 I1 HEAD'
 )
 
 "$lint" "$repo"
@@ -156,6 +157,34 @@ done
 printf 'const app = try allocator.create(App);\ndefer allocator.destroy(app);\napp.* = .{};\nvar pointer: *App = app;\nconst SmallApp = struct {};\nvar small = SmallApp{};\n' > "$fixture/src/main.zig"
 "$lint" "$fixture"
 printf 'test-lint-repeats: H1 rejects %s App by-value forms and permits heap storage\n' "$h1_cases"
+i1_cases=0
+for mutation in startup switch rollback multiline_switch mode flush; do
+    case "$mutation" in
+        startup) sed 's/applyTheme(loadTheme());/theme.set(loadTheme());/' "$repo/src/main.zig" ;;
+        switch) sed 's/applyTheme(choice);/theme.set(choice);/' "$repo/src/main.zig" ;;
+        rollback) sed 's/applyTheme(previous);/theme.set(previous);/' "$repo/src/main.zig" ;;
+        multiline_switch) sed 's/applyTheme(choice);/theme.\
+        set(choice);/' "$repo/src/main.zig" ;;
+        mode) sed 's/_ = set_preferred_app_mode(menu_theme.preferredAppMode(choice));/_ = choice;/' "$repo/src/main.zig" ;;
+        flush) sed 's/        flush_menu_themes();/        _ = raw;/' "$repo/src/main.zig" ;;
+    esac > "$fixture/src/main.zig"
+    if cmp -s "$repo/src/main.zig" "$fixture/src/main.zig"; then
+        printf 'test-lint-repeats: FAIL IGSH-505 %s mutation changed nothing\n' "$mutation" >&2
+        exit 1
+    fi
+    status=0
+    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+    if (( status != 1 )) || ! grep -Eq '^lint-repeats: src/main.zig:[0-9]+: \[I1\] .*applyTheme' "$temp/output"; then
+        cat "$temp/output" >&2
+        printf 'test-lint-repeats: FAIL IGSH-505 I1 must reject %s, got exit %s\n' "$mutation" "$status" >&2
+        exit 1
+    fi
+    i1_cases=$((i1_cases + 1))
+    printf 'test-lint-repeats: IGSH-505 I1 rejects %s bypass\n' "$mutation"
+done
+cp "$repo/src/main.zig" "$fixture/src/main.zig"
+"$lint" "$fixture"
+printf 'test-lint-repeats: IGSH-505 I1 rejects %s bypasses and permits the single apply point\n' "$i1_cases"
 if (( SECONDS >= 60 )); then
     printf 'test-lint-repeats: FAIL runtime %ss must be under 60s\n' "$SECONDS" >&2
     exit 1
