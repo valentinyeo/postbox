@@ -1457,17 +1457,19 @@ fn scaledFontHeight(base: i32, scale: i32, dpi: i32) i32 {
 }
 
 fn recreateFonts(a: *App) void {
+    const body_weight = @import("font_config.zig").body_weight;
+    comptime std.debug.assert(body_weight == win.FW_MEDIUM);
     const dpi: i32 = @intCast(a.dpi);
     const old_font = a.font;
     const old_small = a.font_small;
     const old_bold = a.font_bold;
     const old_underline = a.font_underline;
     const old_emoji = a.font_emoji;
-    a.font = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_small = win.CreateFontW(scaledFontHeight(13, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_bold = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_emoji = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
-    a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_small = win.CreateFontW(scaledFontHeight(13, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_bold = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_emoji = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
+    a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     setFont(a.search, a.font);
     setFont(a.chats_hwnd, a.font);
     setFont(a.status_row, a.font);
@@ -3165,11 +3167,13 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     };
 
     _ = win.SetProcessDpiAwarenessContext(win.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    var plex_regular = bundledFilePath("IBMPlexSans-Regular.ttf");
-    var plex_semibold = bundledFilePath("IBMPlexSans-SemiBold.ttf");
-    const plex_loaded = win.AddFontResourceExW(plex_regular.ptr(), win.FR_PRIVATE, null) > 0 and
-        win.AddFontResourceExW(plex_semibold.ptr(), win.FR_PRIVATE, null) > 0;
-    smoke_log.line("fonts: private IBM Plex loaded = {}", .{plex_loaded});
+    const font_files = @import("font_config.zig").files;
+    var plex_loaded: usize = 0;
+    inline for (font_files) |file| {
+        var font_path = bundledFilePath(file);
+        if (win.AddFontResourceExW(font_path.ptr(), win.FR_PRIVATE, null) > 0) plex_loaded += 1;
+    }
+    smoke_log.line("fonts: private IBM Plex loaded = {} ({}/{})", .{ plex_loaded == font_files.len, plex_loaded, font_files.len });
 
     _ = win.CoInitializeEx(null, win.COINIT_APARTMENTTHREADED);
     defer win.CoUninitialize();
@@ -16216,13 +16220,19 @@ pub fn main(init: std.process.Init) !void {
     defer app_ptr = null;
 
     _ = win.SetProcessDpiAwarenessContext(win.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    var plex_regular = bundledFilePath("IBMPlexSans-Regular.ttf");
-    var plex_semibold = bundledFilePath("IBMPlexSans-SemiBold.ttf");
-    const regular_loaded = win.AddFontResourceExW(plex_regular.ptr(), win.FR_PRIVATE, null) > 0;
-    const semibold_loaded = win.AddFontResourceExW(plex_semibold.ptr(), win.FR_PRIVATE, null) > 0;
+    const font_files = @import("font_config.zig").files;
+    var fonts_loaded: [font_files.len]bool = @splat(false);
+    inline for (font_files, 0..) |file, i| {
+        var font_path = bundledFilePath(file);
+        fonts_loaded[i] = win.AddFontResourceExW(font_path.ptr(), win.FR_PRIVATE, null) > 0;
+    }
     defer {
-        if (regular_loaded) _ = win.RemoveFontResourceExW(plex_regular.ptr(), win.FR_PRIVATE, null);
-        if (semibold_loaded) _ = win.RemoveFontResourceExW(plex_semibold.ptr(), win.FR_PRIVATE, null);
+        inline for (font_files, 0..) |file, i| {
+            if (fonts_loaded[i]) {
+                var font_path = bundledFilePath(file);
+                _ = win.RemoveFontResourceExW(font_path.ptr(), win.FR_PRIVATE, null);
+            }
+        }
     }
     _ = win.CoInitializeEx(null, win.COINIT_APARTMENTTHREADED);
     defer win.CoUninitialize();
