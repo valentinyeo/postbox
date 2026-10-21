@@ -42,7 +42,7 @@ def main():
                 assert "stored own Ogg falls back" in result.stdout, "wrong regression failed"
     worker = (ROOT / "src/dictation.zig").read_text()
     ui = (ROOT / "src/main.zig").read_text()
-    assert "dictation_policy.transcribeFile(Transport{" in worker
+    assert "dictation_policy.transcribeFile(&transport," in worker
     assert "lit(dictation_policy.multilingual_path)" in worker
     assert "self.failure = err;" in worker
     assert "poll: failed reason={s}" in ui

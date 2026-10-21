@@ -158,6 +158,9 @@ jobs:
         with:
           version: 0.16.0
 
+      - name: ISSUE-517 isolated Windows user key loading
+        run: zig test src/environment_keys.zig -lc -ladvapi32 -lkernel32
+
       - name: Build Messages.exe
         run: zig build -Dtarget=x86_64-windows-gnu --release=small
 
