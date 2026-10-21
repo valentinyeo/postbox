@@ -3,7 +3,8 @@ $ErrorActionPreference = 'Stop'
 $evidence = $Session.evidence
 $window = Get-Window $Session
 $bounds = $window.Current.BoundingRectangle
-$native = [ordered]@{ x = [int]$bounds.X; y = [int]$bounds.Y; width = [int]$bounds.Width; height = [int]$bounds.Height }
+$visible = [Drawing.Rectangle]::Intersect([Drawing.Rectangle]::new([int]$bounds.X, [int]$bounds.Y, [int]$bounds.Width, [int]$bounds.Height), [Windows.Forms.SystemInformation]::VirtualScreen)
+$native = [ordered]@{ x = $visible.X; y = $visible.Y; width = $visible.Width; height = $visible.Height }
 $native | ConvertTo-Json | Set-Content (Join-Path $evidence 'native-capture.json')
 $image = [Drawing.Bitmap]::new($native.width, $native.height)
 $graphics = [Drawing.Graphics]::FromImage($image)

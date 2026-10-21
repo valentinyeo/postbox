@@ -17116,6 +17116,8 @@ fn saveVerificationTextMetrics(a: *App, hdc: win.HDC, message: *const Message, x
     defer a.allocator.free(text);
     var origin = win.POINT{ .x = x, .y = y };
     _ = win.ClientToScreen(a.canvas, &origin);
+    var canvas: win.RECT = undefined;
+    _ = win.GetClientRect(a.canvas, &canvas);
     const dpi: i32 = @intCast(a.dpi);
     const data = std.json.Stringify.valueAlloc(a.allocator, .{
         .text = text,
@@ -17124,6 +17126,7 @@ fn saveVerificationTextMetrics(a: *App, hdc: win.HDC, message: *const Message, x
         .directwrite = text_draw.directwrite,
         .body = .{ .px = -scaledFontHeight(17, a.font_scale, dpi), .weight = @import("font_config.zig").body_weight, .line_height = textLineHeight(hdc, a.font.?) },
         .heading = .{ .px = -scaledFontHeight(16, a.font_scale, dpi), .weight = win.FW_SEMIBOLD, .line_height = textLineHeight(hdc, a.font_bold.?) },
+        .canvas = .{ .width = canvas.right, .height = canvas.bottom },
         .paragraph = .{ .x = origin.x, .y = origin.y, .width = width, .height = height },
         .foreground = theme.current.on_surface,
         .background = theme.current.surface_container_high,
