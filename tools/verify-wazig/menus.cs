@@ -75,10 +75,13 @@ public static class VerifyMenus {
                 int offset = py * stride + px * 4;
                 int b = image[offset], g = image[offset + 1], r = image[offset + 2];
                 double value = 0.2126 * Linear(r) + 0.7152 * Linear(g) + 0.0722 * Linear(b);
-                values[used++] = value; tile[tileCount++] = value;
-                if (Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b)) <= 12) neutral[neutralCount++] = value;
+                values[used++] = value;
+                // Colour emoji are foreground, not evidence of a light menu background.
+                if (Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b)) <= 12) {
+                    neutral[neutralCount++] = value; tile[tileCount++] = value;
+                }
             }
-            Array.Sort(tile, 0, tileCount); tiles++; if (tile[tileCount / 2] > 0.5) lightTiles++;
+            Array.Sort(tile, 0, tileCount); tiles++; if (tileCount > 0 && tile[tileCount / 2] > 0.5) lightTiles++;
         }
         Array.Sort(values); Array.Sort(neutral, 0, neutralCount);
         if (neutralCount < 24) throw new Exception("No measurable neutral text");
@@ -110,6 +113,21 @@ public static class VerifyMenus {
                 try { Validate(metric, expectedLight); } catch { accepted = false; }
                 if (accepted != (text && light == expectedLight)) throw new Exception("Pixel oracle control failed");
             }
+        }
+        foreach (bool neutralPatch in new[] { false, true }) {
+            var image = new byte[240 * 100 * 4];
+            for (int y = 0; y < 100; y++) for (int x = 0; x < 240; x++) {
+                bool foreground = y >= 20 && y < 36 && x >= 20 && x < 120 && x % 8 < 3;
+                bool patch = x >= 160 && y >= 48 && y < 80;
+                byte value = (byte)(foreground || patch ? 255 : 26);
+                int offset = (y * 240 + x) * 4;
+                image[offset] = patch && !neutralPatch ? (byte)0 : value;
+                image[offset + 1] = image[offset + 2] = value; image[offset + 3] = 255;
+            }
+            var metric = Measure(image, 240, 100, 960, new Rect { Right = 240, Bottom = 100 }, 0, 0, 8);
+            bool accepted = true;
+            try { Validate(metric, false); } catch { accepted = false; }
+            if (accepted == neutralPatch) throw new Exception("Colour foreground/light background control failed");
         }
     }
     public static Point MessageText(byte[] image, int stride, Rect canvas, int screenX, int screenY) {
