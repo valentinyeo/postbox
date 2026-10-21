@@ -4,7 +4,7 @@ const transport = @import("transport.zig");
 
 pub const pipe_prefix = "\\\\.\\pipe\\wazig-control-";
 
-pub const Command = enum { theme, status, statuses, @"open-status", chats, search, view, select, messages, archive, unarchive, @"archive-many" };
+pub const Command = enum { theme, status, chats, search, view, select, messages, archive, unarchive, @"archive-many" };
 pub const Messenger = enum { whatsapp, slack, telegram, all };
 
 pub const Request = struct {
@@ -26,8 +26,6 @@ pub const CommandInfo = struct { cmd: Command, usage: []const u8, summary: []con
 pub const commands = [_]CommandInfo{
     .{ .cmd = .theme, .usage = "theme <green|amoled>", .summary = "switch and save the app theme without focusing it" },
     .{ .cmd = .status, .usage = "status", .summary = "version, theme, active messenger, selected chat, sync state, pending sends, search text" },
-    .{ .cmd = .statuses, .usage = "statuses", .summary = "loaded WhatsApp Status updates and local viewed state" },
-    .{ .cmd = .@"open-status", .usage = "open-status [SENDER_JID]", .summary = "open WhatsApp Status without focusing the app" },
     .{ .cmd = .chats, .usage = "chats [--json] [--messenger all|whatsapp|slack|telegram] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
     .{ .cmd = .search, .usage = "search <text>", .summary = "set the sidebar search text (\"\" clears it)" },
     .{ .cmd = .view, .usage = "view <all|whatsapp|slack|telegram>", .summary = "switch the sidebar messenger, like Alt+0/Alt+1/Alt+2/Alt+3" },
@@ -112,11 +110,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
             if (items.len != 1) return usage(message, "theme needs green or amoled");
             request.theme = std.meta.stringToEnum(theme.Choice, items[0]) orelse return usage(message, "theme needs green or amoled");
         },
-        .status, .statuses, .chats => if (items.len != 0) return usage(message, "unexpected argument"),
-        .@"open-status" => {
-            if (items.len > 1) return usage(message, "open-status takes at most one sender jid");
-            if (items.len == 1) request.id = try allocator.dupe(u8, items[0]);
-        },
+        .status, .chats => if (items.len != 0) return usage(message, "unexpected argument"),
         .search => {
             if (items.len == 0) return usage(message, "search needs text (\"\" clears it)");
             request.text = try std.mem.join(allocator, " ", items);
@@ -363,32 +357,6 @@ test "help lists every command and says nothing sends" {
     try std.testing.expectEqual(@typeInfo(Command).@"enum".fields.len, commands.len);
 }
 
-test "open-status without a sender opens the list" {
-    const request = try parseForTest(&.{"open-status"});
-    try std.testing.expectEqual(Command.@"open-status", request.cmd);
-    try std.testing.expectEqualStrings("", request.id);
-}
-
-test "open-status with one sender sets the request id" {
-    const request = try parseForTest(&.{ "open-status", "123@s.whatsapp.net" });
-    defer std.testing.allocator.free(request.id);
-    try std.testing.expectEqual(Command.@"open-status", request.cmd);
-    try std.testing.expectEqualStrings("123@s.whatsapp.net", request.id);
-}
-
-test "open-status rejects two senders as a usage error" {
-    var message: []const u8 = "";
-    try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{ "open-status", "123@s.whatsapp.net", "456@s.whatsapp.net" }, &message));
-    try std.testing.expectEqualStrings("open-status takes at most one sender jid", message);
-}
-
-test "status commands parse without focus or mutation arguments" {
-    try std.testing.expectEqual(Command.statuses, (try parseForTest(&.{"statuses"})).cmd);
-    try std.testing.expectEqual(Command.@"open-status", (try parseForTest(&.{"open-status"})).cmd);
-    var message: []const u8 = "";
-    try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{ "statuses", "extra" }, &message));
-}
-
 test "theme accepts both choices and rejects invalid or missing choices" {
     for ([_]theme.Choice{ .green, .amoled }) |choice| {
         const request = try parseForTest(&.{ "theme", @tagName(choice) });
@@ -429,4 +397,26 @@ test "select accepts a full workspace identity and chats accepts explicit JSON" 
     defer parsed.deinit();
     try std.testing.expectEqualStrings(request.account, parsed.value.account);
     try std.testing.expectEqual(request.provider, parsed.value.provider);
+}
+
+test "IGSH-538 removed stories commands reject CLI and pipe requests" {
+    for ([_][]const u8{ "statuses", "open-status" }) |command| {
+        var message: []const u8 = "";
+        try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{command}, &message));
+        try std.testing.expectEqualStrings("unknown command", message);
+        var request = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer request.deinit();
+        try request.writer.print("{{\"cmd\":\"{s}\"}}", .{command});
+        try std.testing.expectError(error.InvalidEnumTag, parseRequest(std.testing.allocator, request.written()));
+        try std.testing.expect(std.mem.indexOf(u8, help_text, command) == null);
+    }
+}
+
+test "IGSH-538 app diagnostics and messenger controls remain available" {
+    try std.testing.expectEqual(Command.status, (try parseForTest(&.{"status"})).cmd);
+    for ([_][]const u8{ "all", "whatsapp", "slack", "telegram" }) |messenger| {
+        const request = try parseForTest(&.{ "view", messenger });
+        try std.testing.expectEqual(Command.view, request.cmd);
+        try std.testing.expectEqualStrings(messenger, @tagName(request.messenger.?));
+    }
 }

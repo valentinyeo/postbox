@@ -149,14 +149,6 @@ class ThemeRuntimeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             verify_popup_focus(baseline)
 
-    def test_IGSH_461_status_selection_has_visible_fill_and_outline(self):
-        source = (ROOT / "src/status_ui.zig").read_text()
-        selection = section(source, "if (i == a.status_ui.selected)", "const left =")
-        self.assertIn("if (theme.choice == .amoled)", selection)
-        self.assertIn("theme.current.surface_container_highest", selection)
-        self.assertIn("theme.current.outline_variant", selection)
-        self.assertIn("else _ = win.FillRect(hdc, &hit, a.brush_panel.?)", selection)
-
     def test_IGSH_461_amoled_surface_wiring_with_negative_controls(self):
         main = (ROOT / "src/main.zig").read_text()
         verify_amoled_surfaces(main)

@@ -16,7 +16,7 @@ const max_slack_outbox = 16;
 const max_wacli_args = 4;
 const wacli_arg_cap = 4095;
 const wacli_queue_size = 4;
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, cache_tag, slack_mark, status_seen };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, cache_tag, slack_mark };
 const WacliJob = struct {
     kind: WacliJobKind = .chats,
     gen: u64 = 0,
@@ -731,15 +731,15 @@ test "failed file retirement keeps its source without unarchiving or caching del
     try std.testing.expectEqual(@as(usize, 0), disk_len);
 }
 
-test "queued Status seen receipts are retained when the shared queue is full" {
+test "queued reactions are retained when the shared queue is full" {
     reset();
     var app = fixture();
     for (0..app.wacli_queue.len) |_| {
-        try std.testing.expect(wacliEnqueue(&app, .{ .kind = .status_seen }, true));
+        try std.testing.expect(wacliEnqueue(&app, .{ .kind = .reaction }, true));
     }
     try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .slack_send }, true));
     try std.testing.expectEqual(app.wacli_queue.len, app.wacli_queue_len);
-    for (app.wacli_queue) |job| try std.testing.expectEqual(WacliJobKind.status_seen, job.kind);
+    for (app.wacli_queue) |job| try std.testing.expectEqual(WacliJobKind.reaction, job.kind);
 }
 
 test "legacy outbox migration retains every send with immediate or delayed account discovery" {
