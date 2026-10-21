@@ -1,13 +1,15 @@
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ZIG = os.environ.get("ZIG", str(Path.home() / ".local/zig-0.16.0/zig"))
+DEFAULT_ZIG = Path.home() / ".local/zig-0.16.0/zig"
+ZIG = shutil.which(os.environ.get("ZIG", str(DEFAULT_ZIG) if DEFAULT_ZIG.exists() else "zig"))
 
 
 def section(source, start, end):
@@ -40,6 +42,7 @@ def verify_wiring(main):
 
 
 class ThemeRuntimeTests(unittest.TestCase):
+    @unittest.skipUnless(ZIG, "Zig compiler not found; install Zig or set ZIG")
     def test_actual_registry_brush_switch_and_redraw_functions(self):
         main = (ROOT / "src/main.zig").read_text()
         source = (ROOT / "tools/theme_runtime_test.zig").read_text()
@@ -81,6 +84,7 @@ class ThemeRuntimeTests(unittest.TestCase):
                 self.assertIsNone(pattern.search(path.read_text()), str(path))
                 self.assertNotRegex(path.read_text(), r"(?m)^const \w+ = theme\.current\.")
 
+    @unittest.skipUnless(ZIG, "Zig compiler not found; install Zig or set ZIG")
     def test_new_zig_tests_reject_origin_main(self):
         with tempfile.TemporaryDirectory(prefix="theme-regression-") as directory:
             root = Path(directory)
