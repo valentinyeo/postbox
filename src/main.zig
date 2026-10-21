@@ -10,6 +10,7 @@ const audio = @import("audio.zig");
 const avatar = @import("avatar.zig");
 const avatar_mask = @import("avatar_mask.zig");
 const dictation = @import("dictation.zig");
+const drafts = @import("drafts.zig");
 const voice_capture = @import("voice_capture.zig");
 const recording_paint = @import("recording_paint.zig");
 const format_request = @import("format_request.zig");
@@ -634,8 +635,12 @@ const App = struct {
     voice_finishing: bool = false,
     voice_visible: bool = true,
     voice_jid: Utf8Text(191) = .{},
+    voice_origin: drafts.Identity = .{},
+    voice_reply_to: Utf8Text(191) = .{},
+    voice_reply_sender: Utf8Text(191) = .{},
     btn_hover: [9]bool = .{ false, false, false, false, false, false, false, false, false },
     search_prev_proc: usize = 0,
+    compose_prev_proc: usize = 0,
     btn_prev_proc: [9]usize = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0 },
     tooltips: ?win.HWND = null,
     status: ?win.HWND = null,
@@ -662,6 +667,7 @@ const App = struct {
     emoji_selected: usize = 0,
     emoji_ever_active: bool = false,
     emoji_react: bool = false,
+    emoji_origin: drafts.Identity = .{},
     sc_wnd: ?win.HWND = null,
     sc_matches: [shortcodes.max_matches]shortcodes.Match = undefined,
     sc_count: usize = 0,
@@ -728,6 +734,7 @@ const App = struct {
     tg_api_id: i32 = 0,
     tg_api_hash: Utf8Text(64) = .{},
     tg_data_dir: Utf8Text(259) = .{},
+    tg_account: Utf8Text(32) = .{},
     accounts_confirm_remove_tg: bool = false,
     groups: [max_groups]Group = [_]Group{.{}} ** max_groups,
     group_count: usize = 0,
@@ -753,6 +760,8 @@ const App = struct {
     group_refresh_ticks: u8 = 0,
     deepgram_configured: bool = false,
     deepgram_key: []const u8 = "",
+    draft_store: drafts.Store = .{},
+    draft_loading: bool = false,
     dictation_session: ?*dictation.Session = null,
     dictation_language: dictation.Language = .automatic,
     last_dictation_state: dictation.State = .idle,
@@ -1029,6 +1038,15 @@ fn subclassComposerButton(a: *App, hwnd: ?win.HWND, index: usize) void {
     _ = win.SetWindowLongPtrW(window, win.GWLP_USERDATA, @intCast(index + 1));
     const prev = win.SetWindowLongPtrW(window, win.GWLP_WNDPROC, @intCast(@intFromPtr(&composerButtonProc)));
     a.btn_prev_proc[index] = @bitCast(prev);
+}
+
+fn composeFieldProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
+    const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    if (message == win.WM_PASTE or (message == win.WM_CHAR and wparam == 0x16)) {
+        pasteComposerText(a);
+        return 0;
+    }
+    return win.CallWindowProcW(@ptrFromInt(a.compose_prev_proc), hwnd, message, wparam, lparam);
 }
 
 fn searchFieldProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
@@ -2325,6 +2343,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         a.user_viewed = false;
         cancelSlackMark(a);
     }
+    switchComposerDraft(a);
     if (a.selected_chat < a.chat_count) a.view_selected[@intFromEnum(view)].set(chat_key.of(&a.chats[a.selected_chat]));
     updateSearchCue(a, view);
     if (a.chats_hwnd) |list| {
@@ -2451,7 +2470,7 @@ fn upsertTgChat(a: *App, info: *tg.ChatInfo) void {
 }
 
 fn appendTelegramChats(a: *App, query_utf8: ?[]const u8) void {
-    if (a.telegram == null or a.tg_auth != .ready) return;
+    if (a.telegram == null or a.tg_auth != .ready or a.tg_account.len == 0) return;
     for (a.tg_chats[0..a.tg_chat_count]) |cached| {
         if (a.chat_count >= a.chats.len) break;
         const name_bytes = std.unicode.utf16LeToUtf8Alloc(a.allocator, cached.name.slice()) catch continue;
@@ -2465,7 +2484,7 @@ fn appendTelegramChats(a: *App, query_utf8: ?[]const u8) void {
         chat.unread = cached.unread_count > 0;
         chat.unread_count = cached.unread_count;
         chat.provider = .telegram;
-        chat.account.set("");
+        chat.account = a.tg_account;
         if (!messenger_view.matches(activeChatView(a), .telegram, a.unread_only, chat.unread, query_utf8 orelse "", name_bytes, chat.jid.slice())) continue;
         messenger_view.merge(Chat, a.chats, &a.chat_count, &.{chat});
     }
@@ -2499,6 +2518,7 @@ fn drainTelegram(a: *App) void {
                         setStatus(a, "Telegram connected");
                     },
                     .closed => {
+                        a.tg_account.set("");
                         a.tg_login = .none;
                         if (a.tg_login_window) |window| _ = win.DestroyWindow(window);
                         a.tg_chat_count = 0;
@@ -2550,6 +2570,11 @@ fn drainTelegram(a: *App) void {
                         break;
                     }
                 }
+            },
+            .account => |id| {
+                var buffer: [32]u8 = undefined;
+                a.tg_account.set(if (id > 0) std.fmt.bufPrint(&buffer, "{d}", .{id}) catch "" else "");
+                a.tg_dirty = true;
             },
             .user => {},
             .conn, .ignored => {},
@@ -3098,6 +3123,7 @@ fn removeTelegramAccount(a: *App) void {
     a.tg_login = .none;
     if (a.tg_login_window) |window| _ = win.DestroyWindow(window);
     a.tg_auth = .unknown;
+    a.tg_account.set("");
     a.tg_chat_count = 0;
     @memset(a.tg_chats, .{});
     var removed = true;
@@ -3405,6 +3431,10 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     };
     defer app.allocator.free(app.chats);
     defer app.allocator.free(app.tg_chats);
+    defer {
+        persistDrafts(app);
+        app.draft_store.deinit(app.allocator);
+    }
     defer app.people.deinit();
     defer if (app.chats_raw) |raw| allocator.free(raw);
     app_ptr = app;
@@ -4474,17 +4504,16 @@ fn pruneFailedSends(a: *App, key: chat_key.Key) void {
 
 fn restoreFailedSendText(a: *App, failed: *const PendingSend) void {
     if (failed.file.len > 0 or failed.text.len == 0) return;
-    if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
-    if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(failed))) return;
-    const compose = a.compose orelse return;
-    var probe: [2]u16 = undefined;
-    if (win.GetWindowTextW(compose, &probe, probe.len) != 0) return;
-    var wide_buffer: [4096]u16 = undefined;
-    const length = std.unicode.utf8ToUtf16Le(&wide_buffer, failed.text.slice()) catch return;
-    wide_buffer[length] = 0;
-    _ = win.SetWindowTextW(compose, &wide_buffer);
-    layout(a, a.compose_client_width, a.compose_client_height);
-    focusCompose(a);
+    const key = chat_key.of(failed);
+    if (a.draft_store.get(key).len > 0) return;
+    a.draft_store.save(a.allocator, key, failed.text.slice()) catch return;
+    if (a.draft_store.isOpen(key)) {
+        setComposerDraft(a, a.draft_store.get(key));
+        layout(a, a.compose_client_width, a.compose_client_height);
+        focusCompose(a);
+    }
+    persistDrafts(a);
+    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
 }
 
 fn resendFailedMessage(a: *App, index: usize) bool {
@@ -4616,7 +4645,10 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         if (length > 0) {
             if (std.unicode.utf16LeToUtf8Alloc(a.allocator, wide_buffer[0..length])) |compose_text| {
                 defer a.allocator.free(compose_text);
-                if (std.mem.eql(u8, compose_text, original)) _ = win.SetWindowTextW(compose, lit(""));
+                if (std.mem.eql(u8, compose_text, original)) {
+                    _ = win.SetWindowTextW(compose, lit(""));
+                    saveComposerDraft(a);
+                }
             } else |_| {}
         }
     }
@@ -9664,6 +9696,9 @@ fn toggleVoice(a: *App) void {
         return;
     }
     a.voice_jid.set(a.chats[a.selected_chat].jid.slice());
+    a.voice_origin = drafts.Identity.init(chat_key.of(&a.chats[a.selected_chat]));
+    a.voice_reply_to = a.reply_to;
+    a.voice_reply_sender = a.reply_sender;
     a.voice_active = true;
     a.voice_finishing = false;
     if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_voice, recording_paint.tick_interval_ms, null);
@@ -9712,7 +9747,7 @@ fn invalidateRecordingTick(a: *App) void {
 fn tickVoice(a: *App) void {
     if (!a.voice_active) return;
     const session = a.voice_session orelse return;
-    if (!a.voice_finishing and !std.mem.eql(u8, a.voice_jid.slice(), if (voiceChatAllowed(a)) a.chats[a.selected_chat].jid.slice() else "")) {
+    if (!a.voice_finishing and (!voiceChatAllowed(a) or !chat_key.Key.eql(a.voice_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) {
         cancelVoice(a, "Voice note cancelled: you switched chats");
         return;
     }
@@ -9749,13 +9784,13 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
     const pending = &a.pending_sends[a.pending_send_count];
     pending.* = .{};
     pending.provider = .whatsapp;
-    pending.account = a.cache_tag;
+    pending.account.set(a.voice_origin.key().account);
     pending.jid.set(jid);
     pending.file.set(path);
     pending.ptt = true;
     pending.voice_seconds = seconds;
-    pending.reply_to.set(a.reply_to.slice());
-    pending.reply_sender.set(a.reply_sender.slice());
+    pending.reply_to = a.voice_reply_to;
+    pending.reply_sender = a.voice_reply_sender;
     a.send_seq += 1;
     pending.seq = a.send_seq;
     pending.queued_unix = nowUnixSeconds();
@@ -9767,7 +9802,7 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
         deleteFileUtf8(path);
         return false;
     }
-    clearReply(a);
+    if (a.draft_store.isOpen(a.voice_origin.key())) clearReply(a);
     a.user_viewed = true;
     a.scroll_y = 0;
     appendWhatsAppPending(a, pending, false);
@@ -9787,7 +9822,7 @@ fn sendMessage(a: *App) void {
         setStatus(a, "Send queue is full");
         return;
     }
-    var wide_buffer: [4096]u16 = [_]u16{0} ** 4096;
+    var wide_buffer: [drafts.max_text + 1]u16 = undefined;
     const length: usize = @intCast(win.GetWindowTextW(a.compose.?, &wide_buffer, wide_buffer.len));
     if (length == 0 and a.staged_image.path.len == 0) return;
     var staged_file: []const u8 = "";
@@ -9836,6 +9871,7 @@ fn sendMessage(a: *App) void {
         appendWhatsAppPending(a, pending, false);
         persistFileOutbox(a);
         _ = win.SetWindowTextW(a.compose.?, lit(""));
+        saveComposerDraft(a);
         layout(a, a.compose_client_width, a.compose_client_height);
         if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.TRUE);
         startNextSend(a);
@@ -9854,6 +9890,7 @@ fn sendMessage(a: *App) void {
             releaseStagedImage(a);
             clearReply(a);
             _ = win.SetWindowTextW(a.compose.?, lit(""));
+            saveComposerDraft(a);
             layout(a, a.compose_client_width, a.compose_client_height);
             focusCompose(a);
             setStatus(a, "Sending...");
@@ -9943,6 +9980,7 @@ fn sendMessage(a: *App) void {
         clearReply(a);
         a.user_viewed = true;
         _ = win.SetWindowTextW(a.compose.?, lit(""));
+        saveComposerDraft(a);
         layout(a, a.compose_client_width, a.compose_client_height);
         focusCompose(a);
         return;
@@ -9973,6 +10011,7 @@ fn sendMessage(a: *App) void {
     a.scroll_y = 0;
     appendWhatsAppPending(a, pending, false);
     _ = win.SetWindowTextW(a.compose.?, lit(""));
+    saveComposerDraft(a);
     focusCompose(a);
     startNextSend(a);
 }
@@ -10016,22 +10055,120 @@ fn focusCompose(a: *App) void {
     }
 }
 
+fn composerText(a: *App) ?[]u8 {
+    const compose = a.compose orelse return null;
+    const length: usize = @intCast(win.GetWindowTextLengthW(compose));
+    const wide = a.allocator.alloc(u16, length + 1) catch return null;
+    defer a.allocator.free(wide);
+    const got: usize = @intCast(win.GetWindowTextW(compose, wide.ptr, @intCast(wide.len)));
+    return std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..got]) catch null;
+}
+
+fn pasteComposerText(a: *App) void {
+    const origin = a.draft_store.open orelse return;
+    const compose = a.compose orelse return;
+    const text = blk: {
+        if (win.OpenClipboard(a.hwnd orelse null) == 0) return;
+        defer _ = win.CloseClipboard();
+        const handle = win.GetClipboardData(win.CF_UNICODETEXT) orelse return;
+        const size = win.GlobalSize(handle) / @sizeOf(u16);
+        const locked = win.GlobalLock(handle) orelse return;
+        defer _ = win.GlobalUnlock(handle);
+        const wide: [*]const u16 = @ptrCast(@alignCast(locked));
+        const length = std.mem.indexOfScalar(u16, wide[0..@min(size, drafts.max_text + 1)], 0) orelse return;
+        break :blk std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length]) catch return;
+    };
+    defer a.allocator.free(text);
+    if (a.draft_store.isOpen(origin.key())) {
+        const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, text) catch return;
+        defer a.allocator.free(wide);
+        _ = win.SendMessageW(compose, win.EM_REPLACESEL, win.TRUE, @bitCast(@intFromPtr(wide.ptr)));
+        saveComposerDraft(a);
+    } else {
+        _ = a.draft_store.append(a.allocator, origin.key(), "", text, false) catch {
+            setStatus(a, "Could not paste: draft limit reached");
+            return;
+        };
+        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+    }
+    persistDrafts(a);
+}
+
+fn saveComposerDraft(a: *App) void {
+    if (a.draft_loading) return;
+    const open = if (a.draft_store.open) |*key| key.key() else {
+        setComposerDraft(a, "");
+        return;
+    };
+    const text = composerText(a) orelse return;
+    defer a.allocator.free(text);
+    a.draft_store.save(a.allocator, open, text) catch {
+        setComposerDraft(a, a.draft_store.get(open));
+        setStatus(a, "Could not save draft: storage limit reached");
+        return;
+    };
+    if (a.draft_store.get(open).len == 0) persistDrafts(a);
+    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+}
+
+fn persistDrafts(a: *App) void {
+    if (!a.draft_store.dirty) return;
+    const path = messagesDirPath(a, "drafts.json") orelse return;
+    defer a.allocator.free(path);
+    const bytes = a.draft_store.encode(a.allocator) catch return;
+    defer a.allocator.free(bytes);
+    if (writeCacheFileAtomic(a, path, bytes)) a.draft_store.dirty = false;
+}
+
+fn loadDrafts(a: *App) void {
+    const path = messagesDirPath(a, "drafts.json") orelse return;
+    defer a.allocator.free(path);
+    const bytes = readFileWin(a.allocator, path, drafts.max_file) orelse return;
+    defer a.allocator.free(bytes);
+    a.draft_store.load(a.allocator, bytes);
+}
+
+fn setComposerDraft(a: *App, text: []const u8) void {
+    const compose = a.compose orelse return;
+    var wide: [drafts.max_text + 1]u16 = undefined;
+    const length = std.unicode.utf8ToUtf16Le(wide[0..drafts.max_text], text) catch 0;
+    wide[length] = 0;
+    a.draft_loading = true;
+    defer a.draft_loading = false;
+    _ = win.SetWindowTextW(compose, &wide);
+    _ = win.SendMessageW(compose, win.EM_EMPTYUNDOBUFFER, 0, 0);
+    _ = win.SendMessageW(compose, win.EM_SETSEL, length, @intCast(length));
+    _ = win.SendMessageW(compose, win.EM_SCROLLCARET, 0, 0);
+    layout(a, a.compose_client_width, a.compose_client_height);
+}
+
+fn switchComposerDraft(a: *App) void {
+    const next: ?chat_key.Key = if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].account.len > 0) chat_key.of(&a.chats[a.selected_chat]) else null;
+    if (a.draft_store.open) |*open| {
+        if (next) |key| {
+            if (chat_key.Key.eql(open.key(), key)) return;
+        }
+    } else if (next == null) return;
+    const text = composerText(a);
+    defer if (text) |value| a.allocator.free(value);
+    const previous = if (a.draft_store.open) |*open| a.draft_store.get(open.key()) else "";
+    const restored = a.draft_store.switchTo(a.allocator, next, text orelse previous) catch blk: {
+        a.draft_store.open = if (next) |key| drafts.Identity.init(key) else null;
+        setStatus(a, "Could not save previous draft: storage limit reached");
+        break :blk if (next) |key| a.draft_store.get(key) else "";
+    };
+    clearReply(a);
+    shortcodeHide(a);
+    setComposerDraft(a, restored);
+    if (a.compose) |compose| _ = win.EnableWindow(compose, if (next != null) win.TRUE else win.FALSE);
+    persistDrafts(a);
+    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+}
+
 fn ensureDictation(a: *App) ?*dictation.Session {
     if (a.dictation_session) |session| return session;
     a.dictation_session = dictation.Session.create(a.allocator) catch null;
     return a.dictation_session;
-}
-
-fn insertTranscript(a: *App, transcript: []const u8) void {
-    const compose = a.compose orelse return;
-    const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, transcript) catch return;
-    defer a.allocator.free(wide);
-    const length: usize = @intCast(win.GetWindowTextLengthW(compose));
-    const caret: isize = @intCast(length);
-    _ = win.SendMessageW(compose, win.EM_SETSEL, @bitCast(caret), @bitCast(caret));
-    if (length > 0) _ = win.SendMessageW(compose, win.EM_REPLACESEL, 1, @bitCast(@intFromPtr(lit(" "))));
-    _ = win.SendMessageW(compose, win.EM_REPLACESEL, 1, @bitCast(@intFromPtr(wide.ptr)));
-    focusCompose(a);
 }
 
 fn toggleDictation(a: *App) void {
@@ -10045,7 +10182,8 @@ fn toggleDictation(a: *App) void {
     };
     switch (session.state()) {
         .idle, .failed => {
-            if (session.start(a.deepgram_key, a.dictation_language)) {
+            if (a.selected_chat >= a.chat_count or a.chats[a.selected_chat].account.len == 0) return;
+            if (session.start(a.deepgram_key, a.dictation_language, chat_key.of(&a.chats[a.selected_chat]))) {
                 _ = win.SetWindowTextW(a.dictate.?, lit("Stop"));
                 setStatus(a, "Listening... press Ctrl+D to stop");
             } else setStatus(a, "Could not start microphone capture");
@@ -10066,8 +10204,19 @@ fn updateDictation(a: *App) void {
     if (state == .ready) {
         var transcript_buffer: [8192]u8 = undefined;
         if (session.takeTranscript(&transcript_buffer)) |transcript| {
-            insertTranscript(a, transcript);
-            setStatus(a, "Dictation inserted");
+            const composer = composerText(a) orelse return;
+            defer a.allocator.free(composer);
+            const restored = a.draft_store.transcript(a.allocator, session.origin.key(), composer, transcript) catch {
+                setStatus(a, "Could not insert dictation: draft limit reached");
+                return;
+            };
+            if (restored) |text| {
+                setComposerDraft(a, text);
+                focusCompose(a);
+            }
+            persistDrafts(a);
+            if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+            setStatus(a, if (restored != null) "Dictation inserted" else "Dictation saved to its chat draft");
         }
         _ = win.SetWindowTextW(a.dictate.?, lit("Dictate"));
         a.last_dictation_state = .idle;
@@ -10107,6 +10256,7 @@ fn selectChat(a: *App, delta: i32, wrap: bool) void {
     if (next != a.selected_chat) discardStagedImage(a);
     cancelSlackMark(a);
     a.selected_chat = @intCast(next);
+    switchComposerDraft(a);
     a.user_viewed = true;
     if (a.chats_hwnd) |list| {
         _ = win.SendMessageW(list, win.LB_SETCURSEL, a.selected_chat, 0);
@@ -10526,6 +10676,15 @@ fn reapplyPendingReactions(a: *App, jid: []const u8) void {
 }
 
 fn insertEmoji(a: *App, emoji: []const u8) void {
+    if (!a.draft_store.isOpen(a.emoji_origin.key())) {
+        _ = a.draft_store.append(a.allocator, a.emoji_origin.key(), "", emoji, false) catch {
+            setStatus(a, "Could not insert emoji: draft limit reached");
+            return;
+        };
+        persistDrafts(a);
+        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+        return;
+    }
     const compose = a.compose orelse return;
     var wide = WideText(31){};
     wide.set(a.allocator, emoji);
@@ -10680,7 +10839,9 @@ fn openEmojiPicker(a: *App) void {
         closeEmojiPicker(a);
         return;
     }
+    if (a.selected_chat >= a.chat_count) return;
     a.emoji_react = false;
+    a.emoji_origin = drafts.Identity.init(chat_key.of(&a.chats[a.selected_chat]));
     showEmojiPickerWindow(a);
 }
 
@@ -11351,6 +11512,7 @@ fn removeChatRow(a: *App, removed: usize) void {
     a.chat_count -= 1;
     if (removed < a.selected_chat) a.selected_chat -= 1;
     if (a.chat_count > 0 and a.selected_chat >= a.chat_count) a.selected_chat = a.chat_count - 1;
+    switchComposerDraft(a);
     if (a.chats_hwnd) |list| {
         _ = win.SendMessageW(list, win.LB_DELETESTRING, removed, 0);
         if (a.chat_count > 0) _ = win.SendMessageW(list, win.LB_SETCURSEL, a.selected_chat, 0);
@@ -11787,9 +11949,9 @@ fn controlChats(a: *App, call: *ControlCall) !void {
                 }
             }
         }
-        if (messenger_view.includes(view, .telegram) and !request.archived and telegramReady(a)) {
+        if (messenger_view.includes(view, .telegram) and !request.archived and telegramReady(a) and a.tg_account.len > 0) {
             for (a.tg_chats[0..a.tg_chat_count]) |*cached| {
-                var chat = Chat{ .name = cached.name, .unread = cached.unread_count > 0, .unread_count = cached.unread_count, .provider = .telegram };
+                var chat = Chat{ .name = cached.name, .unread = cached.unread_count > 0, .unread_count = cached.unread_count, .provider = .telegram, .account = a.tg_account };
                 var id_buffer: [24]u8 = undefined;
                 chat.jid.set(tgChatIdString(&id_buffer, cached.id));
                 chat.kind.set(a.allocator, cached.kind.slice());
@@ -11904,6 +12066,7 @@ fn controlSelectIndex(a: *App, index: usize) void {
         discardStagedImage(a);
     }
     a.selected_chat = index;
+    switchComposerDraft(a);
     a.user_viewed = true;
     a.view_selected[@intFromEnum(activeChatView(a))].set(chat_key.of(&a.chats[index]));
     if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, index, 0);
@@ -12304,6 +12467,7 @@ fn paletteActivate(a: *App) void {
         closeStatuses(a);
         discardStagedImage(a);
         a.selected_chat = @intCast(selected);
+        switchComposerDraft(a);
         if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, selected, 0);
         a.user_viewed = true;
         refreshMessages(a);
@@ -12534,6 +12698,7 @@ fn removeWhatsAppAccount(a: *App) void {
     a.chat_view_switched = true;
     a.chat_count = 0;
     a.selected_chat = 0;
+    switchComposerDraft(a);
     a.selected_message = null;
     a.scroll_y = 0;
     a.max_scroll = 0;
@@ -13499,6 +13664,7 @@ fn replyToStatus(a: *App) void {
     clearReply(a);
     controlSelectIndex(a, selected.?);
     if (a.compose) |compose| _ = win.SetWindowTextW(compose, quoted.ptr());
+    saveComposerDraft(a);
     focusCompose(a);
 }
 
@@ -14181,20 +14347,38 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
     _ = text_draw.drawText(item.hDC, chat.time.ptr(), @intCast(chat.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
     const marker = archiveMarker(a, chat);
     var kind_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, if (marker != null) @as(i32, 130) else 42), .bottom = item.rcItem.top + px(a, 56) };
-    var kind = WideText(255){};
-    if (chat.provider == .slack and slackWorkspaceCount(a) > 1) {
-        if (slackInstallation(a, chat.account.slice())) |installation| {
-            var kind_utf8: [96]u8 = undefined;
-            const kind_len = std.unicode.utf16LeToUtf8(&kind_utf8, chat.kind.slice()) catch 0;
-            var label: [320]u8 = undefined;
-            kind.set(a.allocator, std.fmt.bufPrint(&label, "{s} · {s}", .{ kind_utf8[0..kind_len], if (installation.team_name.len > 0) installation.team_name.slice() else installation.team_id.slice() }) catch installation.team_name.slice());
+    const draft_text = a.draft_store.get(chat_key.of(chat));
+    if (draft_text.len > 0) {
+        if (drafts.label(a.allocator, draft_text)) |label| {
+            defer a.allocator.free(label);
+            var wide_label = WideText(191){};
+            wide_label.set(a.allocator, label);
+            const row_background = if (bulk_selected) theme.current.primary_container else if (selected) theme.current.surface_container_highest else theme.current.surface_container_low;
+            _ = win.SetTextColor(item.hDC, drafts.labelColor(theme.current.*, row_background));
+            var prefix_rect = kind_rect;
+            _ = text_draw.drawText(item.hDC, wide_label.ptr(), 7, &prefix_rect, win.DT_CALCRECT | win.DT_SINGLELINE | win.DT_NOPREFIX);
+            _ = text_draw.drawText(item.hDC, wide_label.ptr(), 7, &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
+            var preview_rect = kind_rect;
+            preview_rect.left = @min(kind_rect.right, kind_rect.left + prefix_rect.right - prefix_rect.left);
+            _ = win.SetTextColor(item.hDC, row_muted);
+            _ = text_draw.drawText(item.hDC, wide_label.ptr() + 7, @intCast(wide_label.len - 7), &preview_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
+        } else |_| {}
+    } else {
+        var kind = WideText(255){};
+        if (chat.provider == .slack and slackWorkspaceCount(a) > 1) {
+            if (slackInstallation(a, chat.account.slice())) |installation| {
+                var kind_utf8: [96]u8 = undefined;
+                const kind_len = std.unicode.utf16LeToUtf8(&kind_utf8, chat.kind.slice()) catch 0;
+                var label: [320]u8 = undefined;
+                kind.set(a.allocator, std.fmt.bufPrint(&label, "{s} · {s}", .{ kind_utf8[0..kind_len], if (installation.team_name.len > 0) installation.team_name.slice() else installation.team_id.slice() }) catch installation.team_name.slice());
+            }
         }
+        if (kind.len == 0) {
+            @memcpy(kind.buf[0..chat.kind.len], chat.kind.slice());
+            kind.len = chat.kind.len;
+        }
+        _ = text_draw.drawText(item.hDC, kind.ptr(), @intCast(kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
     }
-    if (kind.len == 0) {
-        @memcpy(kind.buf[0..chat.kind.len], chat.kind.slice());
-        kind.len = chat.kind.len;
-    }
-    _ = text_draw.drawText(item.hDC, kind.ptr(), @intCast(kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
     if (marker) |text| {
         _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else theme.current.primary);
         var marker_rect = win.RECT{ .left = item.rcItem.right - px(a, 128), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, 40), .bottom = item.rcItem.top + px(a, 56) };
@@ -15145,6 +15329,7 @@ fn selectChatRow(a: *App, row: usize) void {
     closeStatuses(a);
     discardStagedImage(a);
     a.selected_chat = row;
+    switchComposerDraft(a);
     a.user_viewed = true;
     refreshMessages(a);
     focusCompose(a);
@@ -15603,6 +15788,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             a.status_row = win.CreateWindowExW(0, lit("BUTTON"), lit("Status"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_status_row), a.instance, null);
             a.canvas = win.CreateWindowExW(0, lit("WacliMessageCanvas"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, hwnd, controlId(id_canvas), a.instance, null);
             a.compose = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 0, 0, hwnd, controlId(id_compose), a.instance, null);
+            if (a.compose) |compose| {
+                a.compose_prev_proc = @bitCast(win.SetWindowLongPtrW(compose, win.GWLP_WNDPROC, @intCast(@intFromPtr(&composeFieldProc))));
+                _ = win.SendMessageW(compose, win.EM_SETLIMITTEXT, drafts.max_text, 0);
+                _ = win.EnableWindow(compose, win.FALSE);
+            }
             a.dictate = win.CreateWindowExW(0, lit("BUTTON"), lit("Dictate"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_dictate), a.instance, null);
             a.send = win.CreateWindowExW(0, lit("BUTTON"), lit("Send"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_send), a.instance, null);
             a.emoji_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("😊"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_emoji), a.instance, null);
@@ -15639,6 +15829,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 if (a.wacli_slack_thread == null) setStatus(a, "Slack worker unavailable; restart Messages");
             }
             refreshGroups(a);
+            loadDrafts(a);
             loadChatsCache(a);
             pruneStaleMsgCache(a);
             refreshChats(a);
@@ -15877,6 +16068,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             } else if ((id == id_compose or id == id_search) and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {
                 _ = win.InvalidateRect(hwnd, if (id == id_compose) &a.compose_pill else &a.search_pill, win.FALSE);
             } else if (id == id_compose and notification == win.EN_CHANGE) {
+                saveComposerDraft(a);
                 layout(a, a.compose_client_width, a.compose_client_height);
                 shortcodeUpdate(a);
             } else if (id == id_search and notification == win.EN_CHANGE) {
@@ -15889,6 +16081,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (wparam == timer_voice) {
                 tickVoice(a);
             } else if (wparam == timer_refresh) {
+                persistDrafts(a);
                 updateVoiceButton(a);
                 refreshStatuses(a, false);
                 if (a.status_ui.mode == .viewer) showStatusMedia(a);
@@ -16014,6 +16207,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return @bitCast(@intFromPtr(if (theme.choice == .amoled) a.brush_bg.? else a.brush_raised.?));
         },
         win.WM_CLOSE => {
+            saveComposerDraft(a);
+            persistDrafts(a);
             _ = win.DestroyWindow(hwnd);
             return 0;
         },
@@ -16021,6 +16216,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             a.slack_oauth_stop.store(true, .release);
             if (a.slack_oauth_task) |task| _ = win.SetEvent(task.applied);
             finishSlackSignIn(a);
+            persistDrafts(a);
+            a.draft_store.deinit(a.allocator);
             wacliShutdown(a);
             closePlayer(a);
             closeImageViewer(a);
@@ -17070,6 +17267,10 @@ pub fn main(init: std.process.Init) !void {
     app.* = .{ .allocator = init.gpa, .people = people_index.Index.init(init.gpa), .io = init.io, .instance = instance, .wacli_path = wacli_path, .avatar_dir = avatar_dir, .slack_media_dir = slack_media_dir, .deepgram_configured = deepgram_key.len > 0, .deepgram_key = deepgram_key, .openrouter_key = openrouter_key, .openrouter_model = openrouter_model, .openrouter_configured = openrouter_key.len > 0, .format_workspace = format_workspace, .dictation_language = loadDictationLanguage(), .font_scale = loadFontScale(), .chat_view = loadChatView() };
     defer app.allocator.free(app.chats);
     defer app.allocator.free(app.tg_chats);
+    defer {
+        persistDrafts(app);
+        app.draft_store.deinit(app.allocator);
+    }
     defer app.people.deinit();
     defer if (app.status_list) |*list| list.deinit(init.gpa);
     defer app.status_viewed.deinit(init.gpa);
@@ -18316,6 +18517,8 @@ fn relaunchIntoUpdate(a: *App) void {
     @memcpy(command_template[1..][0..exe_len], exe_buf[0..exe_len]);
     const suffix = std.mem.span(lit("\" --update-relaunch"));
     @memcpy(command_template[exe_len + 1 ..][0..suffix.len], suffix);
+    saveComposerDraft(a);
+    persistDrafts(a);
     var command_line = command_template;
     var launched = win.CreateProcessW(exe_buf[0..exe_len :0].ptr, &command_line, null, null, win.FALSE, 0, null, null, &startup, &process) != 0;
     if (!launched) {

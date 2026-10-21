@@ -1,4 +1,6 @@
 const std = @import("std");
+const drafts = @import("drafts.zig");
+const chat_key = @import("chat_key.zig");
 const mic_choice = @import("mic_choice.zig");
 const format_request = @import("format_request.zig");
 const dictation_policy = @import("dictation_policy.zig");
@@ -27,6 +29,7 @@ pub const Session = struct {
     state_value: std.atomic.Value(u8) = .init(@intFromEnum(State.idle)),
     result: [8192]u8 = [_]u8{0} ** 8192,
     result_len: usize = 0,
+    origin: drafts.Identity = .{},
 
     pub fn create(allocator: std.mem.Allocator) !*Session {
         const self = try allocator.create(Session);
@@ -44,13 +47,14 @@ pub const Session = struct {
         return @enumFromInt(self.state_value.load(.acquire));
     }
 
-    pub fn start(self: *Session, api_key: []const u8, language: Language) bool {
+    pub fn start(self: *Session, api_key: []const u8, language: Language, origin: chat_key.Key) bool {
         if (self.state() != .idle and self.state() != .failed) return false;
         if (self.thread) |thread| {
             thread.join();
             self.thread = null;
         }
         const key = self.allocator.dupe(u8, api_key) catch return false;
+        self.origin = drafts.Identity.init(origin);
         self.result_len = 0;
         self.stop_requested.store(false, .release);
         self.state_value.store(@intFromEnum(State.recording), .release);

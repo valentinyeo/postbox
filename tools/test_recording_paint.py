@@ -71,7 +71,7 @@ class RecordingPaintTests(unittest.TestCase):
                 (directory / "recording_paint.zig").write_text(read_source("src/recording_paint.zig"))
             path = directory / "test.zig"
             path.write_text(fixture + "\n" + "\n".join(pieces))
-            run = subprocess.run([zig, "test", str(path)], cwd=ROOT, text=True,
+            run = subprocess.run([zig, "test", "--dep", "chat_key", f"-Mroot={path}", f"-Mchat_key={ROOT / 'src/chat_key.zig'}"], cwd=ROOT, text=True,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             print(run.stdout, end="")
             self.assertEqual(run.returncode, 0, run.stdout)
