@@ -12,6 +12,12 @@ fi
 run() { echo "preflight: $*"; "$@"; }
 run "$ZIG" fmt --check src build.zig
 run "$ZIG" build test
+if [ "${WAZIG_WINE_TESTS:-0}" = "1" ]; then
+    raster_temp=$(mktemp -d)
+    trap 'rm -rf -- "$raster_temp"' EXIT
+    run "$ZIG" test src/smooth_shapes.zig -target x86_64-windows-gnu -lc -lgdi32 -luser32 --test-no-exec -femit-bin="$raster_temp/smooth-test.exe"
+    run xvfb-run -a wine "$raster_temp/smooth-test.exe"
+fi
 run python3 tools/test_outbox_runtime.py --zig "$ZIG" --negative-controls
 run "$ZIG" test src/stretch.zig
 run "$ZIG" build -Dtarget=x86_64-windows-gnu --release=small

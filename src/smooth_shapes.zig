@@ -1,5 +1,6 @@
 const std = @import("std");
 const win = @import("win32.zig").c;
+const geometry = @import("smooth_geometry.zig");
 
 const Handle = ?*anyopaque;
 const Status = c_int;
@@ -11,6 +12,11 @@ const StartupInput = extern struct {
 };
 const Api = struct {
     GdipCreateFromHDC: *const fn (win.HDC, *Handle) callconv(.winapi) Status,
+    GdipGetDC: *const fn (Handle, *win.HDC) callconv(.winapi) Status,
+    GdipReleaseDC: *const fn (Handle, win.HDC) callconv(.winapi) Status,
+    GdipSaveGraphics: *const fn (Handle, *u32) callconv(.winapi) Status,
+    GdipRestoreGraphics: *const fn (Handle, u32) callconv(.winapi) Status,
+    GdipSetClipRect: *const fn (Handle, f32, f32, f32, f32, c_int) callconv(.winapi) Status,
     GdipDeleteGraphics: *const fn (Handle) callconv(.winapi) Status,
     GdipSetSmoothingMode: *const fn (Handle, c_int) callconv(.winapi) Status,
     GdipSetPixelOffsetMode: *const fn (Handle, c_int) callconv(.winapi) Status,
@@ -153,7 +159,63 @@ fn draw(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i
     }
 }
 
+fn fillHybrid(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i32, color: win.COLORREF, parts: geometry.Partition) bool {
+    const f = api.?;
+    const graphics = ctx.graphics.?;
+    const brush = win.CreateSolidBrush(color) orelse return false;
+    defer _ = win.DeleteObject(brush);
+    var aa_brush: Handle = null;
+    if (f.GdipCreateSolidFill(argb(color), &aa_brush) != 0 or aa_brush == null) return false;
+    defer _ = f.GdipDeleteBrush(aa_brush);
+    {
+        var dc: win.HDC = null;
+        if (f.GdipGetDC(graphics, &dc) != 0 or dc == null) return false;
+        defer _ = f.GdipReleaseDC(graphics, dc);
+        for (parts.bands) |band| {
+            if (band.right == band.left or band.bottom == band.top) continue;
+            const bounds: win.RECT = @bitCast(band);
+            if (win.FillRect(dc, &bounds, brush) == 0) return false;
+        }
+        _ = win.GdiFlush();
+    }
+    const w: f32 = @floatFromInt(std.math.clamp(corner_width, 0, rect.right - rect.left));
+    const h: f32 = @floatFromInt(std.math.clamp(corner_height, 0, rect.bottom - rect.top));
+    for (parts.corners, 0..) |box, orientation| {
+        if (box.right == box.left or box.bottom == box.top) continue;
+        var state: u32 = 0;
+        if (f.GdipSaveGraphics(graphics, &state) != 0) return false;
+        defer _ = f.GdipRestoreGraphics(graphics, state);
+        if (f.GdipSetClipRect(graphics, @floatFromInt(box.left), @floatFromInt(box.top), @floatFromInt(box.right - box.left), @floatFromInt(box.bottom - box.top), 1) != 0) return false;
+        var path: Handle = null;
+        if (f.GdipCreatePath(0, &path) != 0 or path == null) return false;
+        defer _ = f.GdipDeletePath(path);
+        const right = orientation == 1 or orientation == 2;
+        const bottom = orientation >= 2;
+        const ax = if (right) @as(f32, @floatFromInt(rect.right)) - w else @as(f32, @floatFromInt(rect.left));
+        const ay = if (bottom) @as(f32, @floatFromInt(rect.bottom)) - h else @as(f32, @floatFromInt(rect.top));
+        const ix: f32 = @floatFromInt(if (right) box.left - 1 else box.right + 1);
+        const iy: f32 = @floatFromInt(if (bottom) box.top - 1 else box.bottom + 1);
+        const ex = ax + w / 2;
+        const ey = if (bottom) ay + h else ay;
+        const sx = if (right) ax + w else ax;
+        const sy = ay + h / 2;
+        const start = ([_]f32{ 180, 270, 0, 90 })[orientation];
+        if (f.GdipAddPathArc(path, ax, ay, w, h, start, 90) != 0) return false;
+        const status = if (orientation == 0 or orientation == 2)
+            f.GdipAddPathLine(path, ex, ey, ix, ey) | f.GdipAddPathLine(path, ix, ey, ix, iy) | f.GdipAddPathLine(path, ix, iy, sx, iy) | f.GdipAddPathLine(path, sx, iy, sx, sy)
+        else
+            f.GdipAddPathLine(path, sx, sy, sx, iy) | f.GdipAddPathLine(path, sx, iy, ix, iy) | f.GdipAddPathLine(path, ix, iy, ix, ey) | f.GdipAddPathLine(path, ix, ey, ex, ey);
+        if (status != 0 or f.GdipClosePathFigure(path) != 0 or f.GdipFillPath(graphics, aa_brush, path) != 0) return false;
+    }
+    return true;
+}
+
 pub fn fillRoundRect(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i32, color: win.COLORREF) void {
+    if (ctx.graphics != null) {
+        if (geometry.partition(@bitCast(rect), corner_width, corner_height)) |parts| {
+            if (fillHybrid(ctx, rect, corner_width, corner_height, color, parts)) return;
+        }
+    }
     draw(ctx, rect, corner_width, corner_height, color, null, false);
 }
 
@@ -242,6 +304,7 @@ test "rounded shapes preserve solid colours and bounds with partial edge coverag
                     }
                     try std.testing.expect(solid > 0);
                     if (antialias) {
+                        if (partial == 0) std.debug.print("no AA coverage: kind={s} scale={d} stroke={any} solid={d}\n", .{ @tagName(kind), scale, stroke, solid });
                         try std.testing.expect(partial > 0);
                         const reference = reference_bounds.?;
                         try std.testing.expect(@abs(bounds.left - reference.left) <= 1);
@@ -251,6 +314,86 @@ test "rounded shapes preserve solid colours and bounds with partial edge coverag
                     } else {
                         try std.testing.expectEqual(@as(usize, 0), partial);
                         reference_bounds = bounds;
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "hybrid fills match full paths at edges and exactly inside with odd corners clipping and overlaps" {
+    const size = 256;
+    const dc = win.CreateCompatibleDC(null) orelse return error.CreateDCFailed;
+    defer _ = win.DeleteDC(dc);
+    var info = std.mem.zeroes(win.BITMAPINFO);
+    info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = size;
+    info.bmiHeader.biHeight = -size;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    var bits: ?*anyopaque = null;
+    const bitmap = win.CreateDIBSection(dc, &info, win.DIB_RGB_COLORS, &bits, null, 0) orelse return error.CreateBitmapFailed;
+    defer _ = win.DeleteObject(bitmap);
+    const old = win.SelectObject(dc, bitmap);
+    defer _ = win.SelectObject(dc, old);
+    const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. size * size];
+    var reference: [size * size]u32 = undefined;
+    const colors = [_]win.COLORREF{ 0x00332211, 0x00b4d8ed };
+    for ([_]i32{ 2, 3 }) |scale| {
+        for ([_][4]i32{
+            .{ 150, 50, 32, 32 },
+            .{ 150, 90, 32, 32 },
+            .{ 120, 40, 32, 32 },
+            .{ 31, 47, 15, 21 },
+            .{ 9, 60, 9, 9 },
+            .{ 60, 9, 9, 9 },
+            .{ 9, 60, 99, 9 },
+            .{ 21, 21, 21, 21 },
+            .{ 22, 22, 20, 20 },
+            .{ 120, 40, 0, 0 },
+        }) |dimensions| {
+            for ([_]bool{ false, true }) |clipped| {
+                for ([_]u32{ 0xffffffff, 0xff304050 }) |background| {
+                    for ([_]bool{ false, true }) |hybrid| {
+                        @memset(pixels, background);
+                        const saved = win.SaveDC(dc);
+                        try std.testing.expect(saved != 0);
+                        defer _ = win.RestoreDC(dc, saved);
+                        if (clipped) _ = win.IntersectClipRect(dc, 25, 22, 210, 180);
+                        var ctx = Context.init(dc);
+                        defer ctx.deinit();
+                        try std.testing.expect(ctx.graphics != null);
+                        for (colors, 0..) |color, i| {
+                            const offset: i32 = @intCast(i * 13);
+                            const rect = win.RECT{ .left = 8 + offset, .top = 11 + offset, .right = 8 + offset + @divTrunc(dimensions[0] * scale, 2), .bottom = 11 + offset + @divTrunc(dimensions[1] * scale, 2) };
+                            const cw = @divTrunc(dimensions[2] * scale, 2);
+                            const ch = @divTrunc(dimensions[3] * scale, 2);
+                            if (hybrid) {
+                                if (geometry.partition(@bitCast(rect), cw, ch)) |parts| {
+                                    try std.testing.expect(fillHybrid(&ctx, rect, cw, ch, color, parts));
+                                } else fillRoundRect(&ctx, rect, cw, ch, color);
+                            } else draw(&ctx, rect, cw, ch, color, null, false);
+                        }
+                        draw(&ctx, .{ .left = 2, .top = 2, .right = 35, .bottom = 35 }, 4, 4, 0x00806040, null, false);
+                        ctx.deinit();
+                        _ = win.GdiFlush();
+                        if (!hybrid) {
+                            @memcpy(&reference, pixels);
+                            continue;
+                        }
+                        for (reference, pixels, 0..) |expected, actual, index| {
+                            const solid = for (colors) |color| {
+                                if ((expected & 0xffffff) == (argb(color) & 0xffffff)) break true;
+                            } else false;
+                            inline for (.{ 0, 8, 16 }) |shift| {
+                                const a: i32 = @intCast((actual >> shift) & 255);
+                                const b: i32 = @intCast((expected >> shift) & 255);
+                                if (@abs(a - b) > @as(u32, if (solid) 0 else 1)) {
+                                    std.debug.print("scale={d} dimensions={any} clipped={} background={x} pixel={d},{d} expected={x} actual={x}\n", .{ scale, dimensions, clipped, background, index % size, index / size, expected, actual });
+                                    return error.HybridPixelMismatch;
+                                }
+                            }
+                        }
                     }
                 }
             }
