@@ -182,20 +182,25 @@ fn captureMicrophone(self: *Session) ![]u8 {
 }
 
 fn transcribe(allocator: std.mem.Allocator, api_key: []const u8, language: Language, content_type: []const u8, body: []const u8) ![]u8 {
-    const Transport = struct {
-        allocator: std.mem.Allocator,
-        api_key: []const u8,
-
-        pub fn send(self: @This(), selected: Language, mime: []const u8, audio: []const u8) ![]u8 {
-            return switch (selected) {
-                .automatic => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.automatic)), mime, audio),
-                .english => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.english)), mime, audio),
-                .german => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.german)), mime, audio),
-            };
-        }
-    };
     return dictation_policy.transcribe(Transport{ .allocator = allocator, .api_key = api_key }, language, content_type, body);
 }
+
+const Transport = struct {
+    allocator: std.mem.Allocator,
+    api_key: []const u8,
+
+    pub fn send(self: @This(), selected: Language, mime: []const u8, audio: []const u8) ![]u8 {
+        return switch (selected) {
+            .automatic => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.automatic)), mime, audio),
+            .english => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.english)), mime, audio),
+            .german => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.german)), mime, audio),
+        };
+    }
+
+    pub fn sendMultilingual(self: @This(), mime: []const u8, audio: []const u8) ![]u8 {
+        return transcribeAt(self.allocator, self.api_key, lit(dictation_policy.multilingual_path), mime, audio);
+    }
+};
 
 fn transcribeAt(allocator: std.mem.Allocator, api_key: []const u8, request_path: [*:0]const u16, content_type: []const u8, body: []const u8) ![]u8 {
     const session = win.WinHttpOpen(lit("Wazig Messages/0.3"), win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, null, null, 0) orelse return error.NetworkFailed;
@@ -214,7 +219,13 @@ fn transcribeAt(allocator: std.mem.Allocator, api_key: []const u8, request_path:
     if (win.WinHttpReceiveResponse(request, null) == 0) return error.NetworkFailed;
     var status_code: win.DWORD = 0;
     var status_size: win.DWORD = @sizeOf(win.DWORD);
-    if (win.WinHttpQueryHeaders(request, win.WINHTTP_QUERY_STATUS_CODE | win.WINHTTP_QUERY_FLAG_NUMBER, null, &status_code, &status_size, null) == 0 or status_code < 200 or status_code >= 300) return error.ApiFailed;
+    if (win.WinHttpQueryHeaders(request, win.WINHTTP_QUERY_STATUS_CODE | win.WINHTTP_QUERY_FLAG_NUMBER, null, &status_code, &status_size, null) == 0) return error.NetworkFailed;
+    if (status_code == 400) return error.BadAudio;
+    if (status_code == 401 or status_code == 403) return error.Unauthorized;
+    if (status_code == 402) return error.PaymentRequired;
+    if (status_code == 429) return error.RateLimited;
+    if (status_code >= 500) return error.TranscriptionUnavailable;
+    if (status_code < 200 or status_code >= 300) return error.ApiFailed;
 
     var response: std.ArrayList(u8) = .empty;
     defer response.deinit(allocator);
@@ -275,6 +286,7 @@ pub const FileSession = struct {
     state_value: std.atomic.Value(u8) = .init(@intFromEnum(State.idle)),
     result: [8192]u8 = [_]u8{0} ** 8192,
     result_len: usize = 0,
+    failure: ?anyerror = null,
 
     pub fn create(allocator: std.mem.Allocator) !*FileSession {
         const self = try allocator.create(FileSession);
@@ -303,6 +315,7 @@ pub const FileSession = struct {
             return false;
         };
         self.result_len = 0;
+        self.failure = null;
         self.state_value.store(@intFromEnum(State.recording), .release);
         self.thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, fileWorker, .{ self, path_copy, key, language }) catch {
             self.allocator.free(path_copy);
@@ -330,12 +343,14 @@ fn fileWorker(self: *FileSession, path: []u8, api_key: []u8, language: Language)
     defer self.allocator.free(path);
     defer self.allocator.free(api_key);
     const data = readSmallFile(self.allocator, path, 24 * 1024 * 1024) orelse {
+        self.failure = error.LocalFileUnavailable;
         self.state_value.store(@intFromEnum(State.failed), .release);
         return;
     };
     defer self.allocator.free(data);
     self.state_value.store(@intFromEnum(State.transcribing), .release);
-    const transcript = transcribe(self.allocator, api_key, language, "audio/ogg", data) catch {
+    const transcript = dictation_policy.transcribeFile(Transport{ .allocator = self.allocator, .api_key = api_key }, language, "audio/ogg", data) catch |err| {
+        self.failure = err;
         self.state_value.store(@intFromEnum(State.failed), .release);
         return;
     };
