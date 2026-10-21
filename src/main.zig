@@ -479,7 +479,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, unread_probe, contacts_index, background_media };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, kept_check, unread_probe, contacts_index, background_media };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 
 const WacliJob = struct {
@@ -2231,6 +2231,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         };
         var chat = Chat{ .account = a.cache_tag };
         const jid = getString(object, "jid");
+        if (fresh and !a.show_archived) _ = holdKeptArchived(a, jid, getBool(object, "archived"), getString(object, "last_message_ts"));
         if (pendingArchiveHidesChat(a, jid, a.show_archived)) continue;
         const raw_name = getString(object, "name");
         const display_name = groupName(a, jid) orelse raw_name;
@@ -11291,6 +11292,14 @@ fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) vo
     startNextArchive(a);
 }
 
+fn holdKeptArchived(a: *App, jid: []const u8, provider_archived: bool, ts: []const u8) bool {
+    const state = a.archive_state orelse return false;
+    if (!state.holdKept(jid, provider_archived, ts)) return false;
+    if (archiveChat(a, jid, .keep, .kept) == null) return true;
+    state.releaseHold(jid);
+    return false;
+}
+
 const archived_scan_min_ticks = 20;
 const archived_scan_idle_ticks = 300;
 const max_probes_per_scan = 4;
@@ -11333,6 +11342,7 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
         else => return,
     };
     var changed = false;
+    var missing_kept = false;
     var probes: usize = 0;
     for (rows[0..@min(rows.len, archive_rules.max_entries)]) |item| {
         const object = switch (item) {
@@ -11364,7 +11374,6 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
         while (index > 0) {
             index -= 1;
             const entry = &state.entries[index];
-            if (entry.keep) continue;
             var present = false;
             for (rows) |item| {
                 const object = switch (item) {
@@ -11376,15 +11385,43 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
                     break;
                 }
             }
-            if (!present) {
-                state.remove(entry.jidSlice());
-                changed = true;
+            if (present) continue;
+            if (entry.keep) {
+                missing_kept = true;
+                continue;
             }
+            state.remove(entry.jidSlice());
+            changed = true;
         }
     }
     if (changed) saveArchiveState(a);
+    if (missing_kept and a.show_archived and wacliPendingGet(a, .kept_check) == 0) {
+        var job = WacliJob{ .account = a.cache_tag, .kind = .kept_check };
+        wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--limit", "250", "--no-archived" });
+        _ = wacliEnqueue(a, job, false);
+    }
     var log_buffer: [96]u8 = undefined;
     appendLaunchLog(a, std.fmt.bufPrint(&log_buffer, "archive-scan: {d} archived, {d} to probe", .{ rows.len, probes }) catch "archive-scan");
+}
+
+fn applyKeptCheck(a: *App, raw: []const u8) void {
+    var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
+    defer parsed.deinit();
+    const root = switch (parsed.value) {
+        .object => |o| o,
+        else => return,
+    };
+    const rows = switch (root.get("data") orelse return) {
+        .array => |items| items.items,
+        else => return,
+    };
+    for (rows) |item| {
+        const object = switch (item) {
+            .object => |o| o,
+            else => continue,
+        };
+        _ = holdKeptArchived(a, getString(object, "jid"), getBool(object, "archived"), getString(object, "last_message_ts"));
+    }
 }
 
 fn applyResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8, raw: []const u8) void {
@@ -11477,6 +11514,7 @@ fn checkArchive(a: *App) void {
         a.archive_child = null;
         const completed = &a.pending_archives[0];
         const action: archive_rules.Action = if (completed.should_unarchive) .unarchive else if (isKeptArchived(a, completed.jid.slice())) .keep else .archive;
+        const quiet = completed.source == .kept and code == 0;
         removeFirstPendingArchive(a);
         if (a.pending_archive_count > 0) {
             startNextArchive(a);
@@ -11485,7 +11523,7 @@ fn checkArchive(a: *App) void {
             startSync(a);
             refreshChats(a);
             refreshMessages(a);
-            setStatus(a, if (code == 0) action.status() else "Archive operation failed");
+            if (!quiet) setStatus(a, if (code == 0) action.status() else "Archive operation failed");
         }
     } else startNextArchive(a);
 }
@@ -15206,6 +15244,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 .reaction => applyReaction(a, result),
                 .archived_scan => if (result.ok) applyArchivedScan(a, result.data),
                 .resurface_probe => if (result.ok) applyResurfaceProbe(a, result.jid.slice(), result.extra.slice(), result.data),
+                .kept_check => if (result.ok) applyKeptCheck(a, result.data),
                 .unread_probe => applyUnreadProbe(a, result),
                 .cache_tag => {
                     if (a.sync_auth_probe and result.gen == a.cache_tag_gen) applySyncAuthProbe(a, result.ok, result.data);
