@@ -2,6 +2,27 @@ const std = @import("std");
 const geometry = @import("smooth_geometry.zig");
 const mask = @import("avatar_mask.zig");
 
+pub const Polyline = struct {
+    points: []const [2]f32,
+    width: f32,
+
+    pub fn alphaAt(self: Polyline, x: i32, y: i32) u8 {
+        if (self.points.len < 2) return 0;
+        var distance_squared = std.math.inf(f32);
+        const sample = [2]f32{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5 };
+        for (self.points[0 .. self.points.len - 1], self.points[1..]) |start, end| {
+            const dx = end[0] - start[0];
+            const dy = end[1] - start[1];
+            const length_squared = dx * dx + dy * dy;
+            const t = if (length_squared > 0) std.math.clamp(((sample[0] - start[0]) * dx + (sample[1] - start[1]) * dy) / length_squared, 0, 1) else 0;
+            const ox = sample[0] - start[0] - t * dx;
+            const oy = sample[1] - start[1] - t * dy;
+            distance_squared = @min(distance_squared, ox * ox + oy * oy);
+        }
+        return mask.distanceAlpha(@sqrt(distance_squared) - self.width / 2);
+    }
+};
+
 const Edge = struct { distance: f32, nx: f32, ny: f32 };
 
 pub const Shape = struct {

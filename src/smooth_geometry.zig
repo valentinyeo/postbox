@@ -1,5 +1,7 @@
 const std = @import("std");
 
+pub const icon_stroke_width: i32 = 2;
+
 pub const Rect = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
 
 pub const Partition = struct {

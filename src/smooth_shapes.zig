@@ -30,6 +30,9 @@ const Api = struct {
     GdipDeleteBrush: *const fn (Handle) callconv(.winapi) Status,
     GdipCreatePen1: *const fn (u32, f32, c_int, *Handle) callconv(.winapi) Status,
     GdipDeletePen: *const fn (Handle) callconv(.winapi) Status,
+    GdipSetPenLineJoin: *const fn (Handle, c_int) callconv(.winapi) Status,
+    GdipSetPenStartCap: *const fn (Handle, c_int) callconv(.winapi) Status,
+    GdipSetPenEndCap: *const fn (Handle, c_int) callconv(.winapi) Status,
     GdipFillPath: *const fn (Handle, Handle, Handle) callconv(.winapi) Status,
     GdipDrawPath: *const fn (Handle, Handle, Handle) callconv(.winapi) Status,
     GdipFillEllipse: *const fn (Handle, Handle, f32, f32, f32, f32) callconv(.winapi) Status,
@@ -142,7 +145,52 @@ fn draw(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i
     fillCoverage(ctx, .{ .rect = @bitCast(rect), .corner_width = corner_width, .corner_height = corner_height, .ellipse = ellipse, .stroke = stroke }, color);
 }
 
-fn blendCoverage(dc: win.HDC, box: geometry.Rect, shape: coverage.Shape, color: win.COLORREF) void {
+pub fn strokePolyline(ctx: *const Context, points: []const [2]f32, color: win.COLORREF, width: f32) void {
+    if (points.len < 2) return;
+    const stroke = @max(1, width);
+    if (ctx.graphics) |graphics| {
+        const f = api.?;
+        var path: Handle = null;
+        if (f.GdipCreatePath(0, &path) == 0 and path != null) {
+            defer _ = f.GdipDeletePath(path);
+            var status: Status = 0;
+            for (points[0 .. points.len - 1], points[1..]) |start, end| {
+                status |= f.GdipAddPathLine(path, start[0], start[1], end[0], end[1]);
+            }
+            var pen: Handle = null;
+            if (status == 0 and f.GdipCreatePen1(argb(color), stroke, 2, &pen) == 0 and pen != null) {
+                defer _ = f.GdipDeletePen(pen);
+                status |= f.GdipSetPenLineJoin(pen, 2) | f.GdipSetPenStartCap(pen, 2) | f.GdipSetPenEndCap(pen, 2);
+                if (status == 0 and f.GdipDrawPath(graphics, pen, path) == 0) return;
+            }
+        }
+    }
+    var low = points[0];
+    var high = points[0];
+    for (points[1..]) |point| {
+        inline for (0..2) |axis| {
+            low[axis] = @min(low[axis], point[axis]);
+            high[axis] = @max(high[axis], point[axis]);
+        }
+    }
+    const padding = stroke / 2 + 1;
+    const box = geometry.Rect{
+        .left = @intFromFloat(@floor(low[0] - padding)),
+        .top = @intFromFloat(@floor(low[1] - padding)),
+        .right = @intFromFloat(@ceil(high[0] + padding)),
+        .bottom = @intFromFloat(@ceil(high[1] + padding)),
+    };
+    var dc = ctx.hdc;
+    if (ctx.graphics) |graphics| {
+        if (api.?.GdipGetDC(graphics, &dc) != 0 or dc == null) return;
+    }
+    defer if (ctx.graphics) |graphics| {
+        _ = api.?.GdipReleaseDC(graphics, dc);
+    };
+    blendCoverage(dc, box, coverage.Polyline{ .points = points, .width = stroke }, color);
+}
+
+fn blendCoverage(dc: win.HDC, box: geometry.Rect, shape: anytype, color: win.COLORREF) void {
     const width = box.right - box.left;
     const height = box.bottom - box.top;
     if (width <= 0 or height <= 0) return;

@@ -25,7 +25,7 @@ def verify(source, smooth):
     helper = section(source, 'drawPinIcon')
     for name in ('outline', 'needle', 'slash'):
         assert 'pin_icon.' + name in helper, 'IGSH-494 missing ' + name
-    assert 'if (unpin)' in helper, 'IGSH-494 unpin must add a slash'
+    assert 'index != 2 or unpin' in helper, 'IGSH-494 unpin must add a slash'
     assert 'smooth.strokePolyline' in helper, 'IGSH-494 pin must use smooth paths'
     assert 'pin_icon.stroke_width' in helper
     assert not re.search(r'win\.(CreatePen|MoveToEx|LineTo|Polygon|Polyline)', helper)
