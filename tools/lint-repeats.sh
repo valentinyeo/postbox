@@ -18,7 +18,6 @@ function fail(line, rule, problem, fix) {
     code = $0
     sub(/\/\/.*$/, "", code)
     source = source code "\n"
-    if (code ~ /environ_map\.get[[:space:]]*\([[:space:]]*"DEEPGRAM_API_KEY"[[:space:]]*\)/) deepgram_env_line = FNR
     if (code ~ /std\.mem\.eql\(u8, [A-Za-z0-9_.\[\]]*\.jid\.slice\(\), [A-Za-z0-9_.\[\]]*\.jid\.slice\(\)\)/)
         fail(FNR, "E1", "two chat ids compared without provider and account, so two accounts that share a contact mix", "chat_key.Key.eql(chat_key.of(x), chat_key.of(y))")
     if (code ~ /loadRegistryString[[:space:]]*\(|REG_SZ/ && code ~ /lit[[:space:]]*\([[:space:]]*"([^"]*ApiKey|TelegramApiHash)"[[:space:]]*\)/)
@@ -65,8 +64,6 @@ function fail(line, rule, problem, fix) {
     }
 }
 END {
-    if (deepgram_env_line && source !~ /slack_win\.loadSecret[[:space:]]*\([[:space:]]*init\.gpa[[:space:]]*,[[:space:]]*lit[[:space:]]*\([[:space:]]*"DeepgramApiKey"[[:space:]]*\)[[:space:]]*\)/)
-        fail(deepgram_env_line, "C2", "Deepgram key uses only the environment without encrypted storage", "slack_win.loadSecret(init.gpa, lit(\"DeepgramApiKey\")) with the environment only as a one-time seed")
     line = 1
     pattern = "(^|[^[:alnum:]_])App[[:space:]]*\\{|:[[:space:]]*App[[:space:]]*(=|;)"
     while (match(source, pattern)) {
@@ -80,6 +77,36 @@ END {
     exit failed ? 1 : 0
 }
 ' src/main.zig; then
+    failed=1
+fi
+
+mapfile -d '' zig_sources < <(find src -type f -name '*.zig' -print0)
+if ! awk '
+function scan(    rest, line, prefix, token) {
+    rest = source
+    line = 1
+    while (match(rest, /environ_map[[:space:]]*\.[[:space:]]*get[[:space:]]*\([[:space:]]*"DEEPGRAM_API_KEY"[[:space:]]*\)/)) {
+        prefix = substr(rest, 1, RSTART - 1)
+        token = substr(rest, RSTART, RLENGTH)
+        rest = substr(rest, RSTART + RLENGTH)
+        line += gsub(/\n/, "", prefix)
+        printf "lint-repeats: %s:%d: [C2] Deepgram key read from the inherited process environment, which can hold an old key. Use slack_win.loadUserEnvironment plus slack_win.loadSecret.\n", file, line
+        line += gsub(/\n/, "", token)
+        failed = 1
+    }
+}
+FNR == 1 {
+    scan()
+    file = FILENAME
+    source = ""
+}
+{
+    code = $0
+    sub(/\/\/.*$/, "", code)
+    source = source code "\n"
+}
+END { scan(); exit failed ? 1 : 0 }
+' "${zig_sources[@]}"; then
     failed=1
 fi
 
