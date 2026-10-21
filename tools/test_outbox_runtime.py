@@ -41,7 +41,7 @@ def mutate(source, name):
         "utf8-truncation": ("if (text.len > outbox.max_text_len)", "if (false)"),
         "hidden-restored-bubble": ("if (from_reload and !pending.from_disk)", "if (from_reload)"),
         "voice-metadata": ("entry.ptt = pending.ptt;", "entry.ptt = false;"),
-        "status-seen-eviction": (".reaction, .status_seen, .slack_send, .slack_attach, .slack_share => true,", ".reaction, .slack_send, .slack_attach, .slack_share => true,"),
+        "reaction-eviction": (".reaction, .slack_send, .slack_attach, .slack_share => true,", ".slack_send, .slack_attach, .slack_share => true,"),
         "lost-refresh": ("if (!jobIsWrite(job.kind)) a.wacli_refresh_again = true;", ""),
         "no-account-migration": ("if (pending.provider == .whatsapp and pending.account.len == 0)", "if (false)"),
         "overwrite-known-account": ("pending.provider == .whatsapp and pending.account.len == 0", "pending.provider == .whatsapp"),
@@ -80,7 +80,7 @@ def main():
                     "wrong-retirement", "wrong-failed-bubble", "slack-paste-to-whatsapp",
                     "same-text-reload", "restored-resend", "delete-before-retirement", "silent-admission",
                     "utf8-truncation", "partial-load", "overtake-refused", "short-job-args",
-                    "nul-field", "negative-time", "lost-refresh", "evict-write", "hidden-restored-bubble", "voice-metadata", "status-seen-eviction", "no-account-migration", "overwrite-known-account", "send-wrong-account", "jid-only-dedup"]
+                    "nul-field", "negative-time", "lost-refresh", "evict-write", "hidden-restored-bubble", "voice-metadata", "reaction-eviction", "no-account-migration", "overwrite-known-account", "send-wrong-account", "jid-only-dedup"]
     (ROOT / ".zig-cache").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="outbox-runtime-", dir=ROOT / ".zig-cache") as directory:
         directory = Path(directory)

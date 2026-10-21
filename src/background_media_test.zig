@@ -29,7 +29,6 @@ const App = struct {
     startup_probe_pending: bool = false,
     sync_logged_out: bool = false,
     accounts_maintenance: bool = false,
-    status_ui: struct { mode: enum { idle, viewer } = .idle } = .{},
     media_burst_files: usize = 0,
     media_burst_started_ms: u64 = 0,
     media_resume_after_ms: u64 = 0,
