@@ -999,7 +999,9 @@ fn composerButtonProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lpa
     const index: usize = @intCast(@as(usize, @bitCast(win.GetWindowLongPtrW(hwnd, win.GWLP_USERDATA))) - 1);
     switch (message) {
         win.WM_ERASEBKGND => {
-            if (a.voice_btn == hwnd) return 1;
+            if (a.voice_btn) |button| {
+                if (button == hwnd) return 1;
+            }
         },
         win.WM_MOUSEMOVE => {
             if (!a.btn_hover[index]) {
