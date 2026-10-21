@@ -56,9 +56,12 @@ class RepaintTests(unittest.TestCase):
         self.assertIn("win.LB_GETITEMRECT", draft)
         self.assertIn("win.InvalidateRect(list, &row, win.FALSE)", draft)
         self.assertNotIn("win.InvalidateRect(list, null", draft)
-        layout = function(main, "layout")
-        self.assertIn("if (resized) null else &dirty, win.FALSE", layout)
-        self.assertIn("@min(old_strip_top, a.compose_strip_top)", layout)
+        layout = function(main, "layoutRegion")
+        self.assertIn("win.InvalidateRect(main_hwnd, dirty, win.FALSE)", layout)
+        self.assertIn("layoutRegion(a, width, height, null)", function(main, "layout"))
+        composer = function(main, "layoutComposer")
+        self.assertIn("@min(a.compose_strip_top, height - sizes.strip_height)", composer)
+        self.assertIn("layoutRegion(a, a.compose_client_width, height, &dirty)", composer)
 
     def test_IGSH_510_gdi_and_smooth_shapes_share_the_dirty_clip(self):
         buffer = source("src/paint_buffer.zig")

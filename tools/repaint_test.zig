@@ -97,6 +97,13 @@ fn px(a: *const App, value: i32) i32 {
 }
 
 fn layout(a: *App, width: i32, height: i32) void {
+    layoutRegion(a, width, height, null);
+}
+
+fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void {
+    if (dirty) |rect| {
+        std.debug.assert(rect.left > 0 and rect.top >= 0 and rect.right == width and rect.bottom == height);
+    }
     std.debug.assert(width == a.compose_client_width and height == a.compose_client_height);
     a.layouts += 1;
     const sizes = compose_layout.computeScaled(a.compose_dragged, a.content_height, height, a.staged_image.path.len > 0, @intCast(a.dpi));

@@ -13747,12 +13747,16 @@ fn layoutComposer(a: *App) void {
     const height = a.compose_client_height;
     const sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
     if (a.compose_strip_top == height - sizes.strip_height and a.compose_pill.top == height - px(a, 11) - sizes.edit_height) return;
-    layout(a, a.compose_client_width, height);
+    const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 390));
+    var dirty = win.RECT{ .left = left_width + 1, .top = @min(a.compose_strip_top, height - sizes.strip_height), .right = a.compose_client_width, .bottom = height };
+    layoutRegion(a, a.compose_client_width, height, &dirty);
 }
 
 fn layout(a: *App, width: i32, height: i32) void {
-    const resized = width != a.compose_client_width or height != a.compose_client_height;
-    const old_strip_top = a.compose_strip_top;
+    layoutRegion(a, width, height, null);
+}
+
+fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void {
     a.compose_client_width = width;
     a.compose_client_height = height;
     const left_width = std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 390));
@@ -13811,10 +13815,7 @@ fn layout(a: *App, width: i32, height: i32) void {
         a.compose_strip_top = height;
         if (a.canvas) |hwnd| _ = win.MoveWindow(hwnd, left_width + 1, 0, width - left_width - 1, height, win.TRUE);
     }
-    if (a.hwnd) |main_hwnd| {
-        var dirty = win.RECT{ .left = left_width + 1, .top = @min(old_strip_top, a.compose_strip_top), .right = width, .bottom = height };
-        _ = win.InvalidateRect(main_hwnd, if (resized) null else &dirty, win.FALSE);
-    }
+    if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, dirty, win.FALSE);
 }
 
 fn loadAvatarBitmap(a: *App, path: [*:0]const u16) ?win.HBITMAP {
