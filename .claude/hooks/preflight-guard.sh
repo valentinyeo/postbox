@@ -21,11 +21,11 @@ if match:
 
 [ -n "$CWD" ] || exit 0
 ROOT="$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null)" || exit 0
-[ -x "$ROOT/tools/preflight.sh" ] || exit 0
+[ -x "$ROOT/tools/preflight-light.sh" ] || exit 0
 
-if ! OUT="$(nice -n 10 "$ROOT/tools/preflight.sh" "$ROOT" 2>&1)"; then
+if ! OUT="$(nice -n 19 ionice -c3 "$ROOT/tools/preflight-light.sh" "$ROOT" 2>&1)"; then
     {
-        echo "BLOCKED: tools/preflight.sh failed in $ROOT, so this push or PR would break CI. Fix the errors below, run tools/preflight.sh until it passes, then retry."
+        echo "BLOCKED: tools/preflight-light.sh failed in $ROOT. Fix the errors below, run tools/preflight-light.sh until it passes, then retry. GitHub CI runs the full preflight."
         printf '%s\n' "$OUT" | tail -n 40
     } >&2
     exit 2
