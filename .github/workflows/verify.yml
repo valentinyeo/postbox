@@ -7,12 +7,15 @@ on:
         description: User journey to drive
         type: choice
         default: search
-        options: [search, navigation, drafts, palette, appearance, whatsapp-hub]
+        options: [search, navigation, drafts, palette, appearance, whatsapp-hub, text-comparison]
   pull_request:
     paths:
       - .github/workflows/verify.yml
       - .claude/skills/verify-wazig/**
       - tools/verify-wazig/**
+      - src/verify_text.json
+      - src/font_config.zig
+      - src/text_draw.zig
       - src/main.zig
       - src/wa_hub*.zig
       - src/slack_win.zig
@@ -34,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["search","drafts","whatsapp-hub"]' || format('["{0}"]', inputs.feature || 'search')) }}
+        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["search","drafts","whatsapp-hub","text-comparison"]' || format('["{0}"]', inputs.feature || 'search')) }}
     steps:
       - uses: actions/checkout@v4
       - name: Check skill map and PowerShell syntax
@@ -48,6 +51,15 @@ jobs:
             $null = [Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
             if ($errors.Count) { throw ($errors | Out-String) }
           }
+      - name: ISSUE-462 fixture text and native font metric parity with negative controls
+        shell: pwsh
+        run: node --test tools/verify-wazig/text-comparison.test.cjs
+      - name: Install Chrome screenshot driver
+        if: matrix.feature == 'text-comparison'
+        shell: pwsh
+        run: |
+          npm install --prefix "$env:RUNNER_TEMP/text-compare" --no-save playwright-core@1.58.2
+          if ($LASTEXITCODE -ne 0) { throw 'Chrome driver installation failed' }
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
@@ -62,6 +74,12 @@ jobs:
         run: |
           python tools/verify-wazig/check-evidence.py verification-evidence
           if ($LASTEXITCODE -ne 0) { throw 'Invalid journey evidence' }
+      - name: ISSUE-462 validate text comparison artifact
+        if: matrix.feature == 'text-comparison'
+        shell: pwsh
+        run: |
+          node tools/verify-wazig/check-text-comparison.cjs verification-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid comparison evidence' }
       - name: Cleanup even after a failed journey
         if: always()
         shell: pwsh

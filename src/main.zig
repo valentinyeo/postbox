@@ -14995,6 +14995,9 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         const skip_body_line = message.text.len == 0 and message.quote.len > 0;
         const text_len: c_int = if (message.text.len > 0) @intCast(message.text.len) else 1;
         const text_height: i32 = if (skip_body_line) 0 else wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), text_len, right - left - px(a, 24), true, left + px(a, 12), text_top, message);
+        if (verification_fixture and verification_text_comparison and std.mem.eql(u8, message.id.slice(), "ISSUE-462-PARAGRAPH")) {
+            saveVerificationTextMetrics(a, hdc, message, left + px(a, 12), text_top, right - left - px(a, 24), text_height);
+        }
         if (message.unfurl_provider != .none) {
             drawUnfurlCard(&shapes, hdc, a, message, left + px(a, 12), text_top + text_height + px(a, 4), right - left - px(a, 24));
             text_top += text_height + unfurl_card_height + px(a, 6);
@@ -15737,6 +15740,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 } else {
                     loadChatsCache(a);
                     refreshMessages(a);
+                    if (verification_text_comparison) _ = applyMessageData(a, @embedFile("verify_text.json"), false);
                 }
                 appendLaunchLog(a, if (hubConfigured(a)) "verification: hub fixture ready" else "verification: offline fixture ready");
                 return 0;
@@ -17103,6 +17107,31 @@ fn LoadAppIcon(instance: win.HINSTANCE, cx: i32, cy: i32, flags: u32) win.HICON 
 }
 
 var verification_fixture = false;
+var verification_text_comparison = false;
+
+fn saveVerificationTextMetrics(a: *App, hdc: win.HDC, message: *const Message, x: i32, y: i32, width: i32, height: i32) void {
+    const path = std.fs.path.join(a.allocator, &.{ std.fs.path.dirname(a.avatar_dir) orelse return, "text-metrics.json" }) catch return;
+    defer a.allocator.free(path);
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch return;
+    defer a.allocator.free(text);
+    var origin = win.POINT{ .x = x, .y = y };
+    _ = win.ClientToScreen(a.canvas, &origin);
+    const dpi: i32 = @intCast(a.dpi);
+    const data = std.json.Stringify.valueAlloc(a.allocator, .{
+        .text = text,
+        .dpi = dpi,
+        .scale = a.font_scale,
+        .directwrite = text_draw.directwrite,
+        .body = .{ .px = -scaledFontHeight(17, a.font_scale, dpi), .weight = @import("font_config.zig").body_weight, .line_height = textLineHeight(hdc, a.font.?) },
+        .heading = .{ .px = -scaledFontHeight(16, a.font_scale, dpi), .weight = win.FW_SEMIBOLD, .line_height = textLineHeight(hdc, a.font_bold.?) },
+        .paragraph = .{ .x = origin.x, .y = origin.y, .width = width, .height = height },
+        .foreground = theme.current.on_surface,
+        .background = theme.current.surface_container_high,
+        .surface = theme.current.surface,
+    }, .{}) catch return;
+    defer a.allocator.free(data);
+    _ = writeCacheFileAtomic(a, path, data);
+}
 
 fn prepareVerification(init: std.process.Init) !win.HKEY {
     if (!std.mem.eql(u8, init.environ_map.get("GITHUB_ACTIONS") orelse "", "true")) return error.VerificationRequiresActions;
@@ -17137,6 +17166,7 @@ pub fn main(init: std.process.Init) !void {
     while (argument_iterator.next()) |argument| {
         if (std.mem.eql(u8, argument, "--update-relaunch")) update_relaunch = true;
         if (std.mem.eql(u8, argument, "--verify-fixture")) verification_fixture = true;
+        if (std.mem.eql(u8, argument, "--verify-text-comparison")) verification_text_comparison = true;
         if (std.mem.eql(u8, argument, "--tdlib-smoke")) {
             if (!tg.enabled) std.process.exit(2);
             std.process.exit(tdlibSmoke(init.io));

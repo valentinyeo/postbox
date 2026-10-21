@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'whatsapp-hub')][string]$Feature = 'search',
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'whatsapp-hub', 'text-comparison')][string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence'
 )
@@ -44,6 +44,7 @@ $start = [Diagnostics.ProcessStartInfo]::new($exe)
 $start.UseShellExecute = $false
 $start.RedirectStandardError = $true
 $start.ArgumentList.Add('--verify-fixture')
+if ($Feature -eq 'text-comparison') { $start.ArgumentList.Add('--verify-text-comparison') }
 $start.Environment['WAZIG_VERIFY_ROOT'] = $root
 $start.Environment['WAZIG_VERIFY_ID'] = $id
 $start.Environment['LOCALAPPDATA'] = $local
@@ -78,7 +79,7 @@ $session | ConvertTo-Json | Set-Content (Join-Path $Evidence 'session.json')
 $session = Read-Session $Evidence
 try {
     $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window'
-    [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
+    [VerifyWindow]::ShowWindow($app.MainWindowHandle, $(if ($Feature -eq 'text-comparison') { 1 } else { 3 })) | Out-Null
     if ($Feature -eq 'whatsapp-hub') {
         $null = Wait-Until { (Read-Control $session status).chat_count -eq 2 } 'hub chat list'
     }
@@ -88,6 +89,13 @@ try {
     $search = Get-Edit $window '1008'
     Save-Screen $session before
     switch ($Feature) {
+        text-comparison {
+            $metrics = Join-Path $messages 'text-metrics.json'
+            $null = Wait-Until { (Test-Path $metrics) -and (Get-Item $metrics).Length -gt 0 } 'painted fixture paragraph'
+            Copy-Item $metrics (Join-Path $Evidence 'text-metrics.json')
+            Save-Screen $session after
+            & "$PSScriptRoot/compare-text.ps1" -Session $session -Bin $Bin
+        }
         whatsapp-hub {
             Invoke-WhatsAppHubJourney $session $messages
         }

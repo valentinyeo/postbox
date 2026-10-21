@@ -1,0 +1,12 @@
+{
+  "chats": ["Verification Alpha", "Verification Beta"],
+  "data": {
+    "messages": [{
+      "MsgID": "ISSUE-462-PARAGRAPH",
+      "SenderName": "Verification Alpha",
+      "Text": "Clear letters make everyday messages easy to read. The quick brown fox jumps over the lazy dog. Compare smooth curves, straight stems, and balanced spacing at the same size and weight. Numbers 0123456789 and punctuation: clean, calm, readable.",
+      "Timestamp": "2026-01-01T12:34:00Z",
+      "FromMe": false
+    }]
+  }
+}
