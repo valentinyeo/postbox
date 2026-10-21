@@ -1,6 +1,7 @@
 const std = @import("std");
 const win = @import("win32.zig").c;
 const geometry = @import("smooth_geometry.zig");
+const coverage = @import("smooth_coverage.zig");
 
 const Handle = ?*anyopaque;
 const Status = c_int;
@@ -138,25 +139,74 @@ fn draw(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i
             }
         }
     }
-    const brush = if (stroke == null) win.CreateSolidBrush(color) orelse return else null;
-    defer if (brush) |b| {
-        _ = win.DeleteObject(b);
-    };
-    const pen = if (stroke) |width| win.CreatePen(win.PS_SOLID, @max(1, width), color) orelse return else null;
-    defer if (pen) |p| {
-        _ = win.DeleteObject(p);
-    };
-    const old_brush = win.SelectObject(ctx.hdc, if (brush) |b| @ptrCast(b) else win.GetStockObject(win.NULL_BRUSH));
-    const old_pen = win.SelectObject(ctx.hdc, if (pen) |p| @ptrCast(p) else win.GetStockObject(win.NULL_PEN));
-    defer {
-        _ = win.SelectObject(ctx.hdc, old_brush);
-        _ = win.SelectObject(ctx.hdc, old_pen);
+    fillCoverage(ctx, .{ .rect = @bitCast(rect), .corner_width = corner_width, .corner_height = corner_height, .ellipse = ellipse, .stroke = stroke }, color);
+}
+
+fn blendCoverage(dc: win.HDC, box: geometry.Rect, shape: coverage.Shape, color: win.COLORREF) void {
+    const width = box.right - box.left;
+    const height = box.bottom - box.top;
+    if (width <= 0 or height <= 0) return;
+    const memory = win.CreateCompatibleDC(dc) orelse return;
+    defer _ = win.DeleteDC(memory);
+    var info = std.mem.zeroes(win.BITMAPINFO);
+    info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    var bits: ?*anyopaque = null;
+    const bitmap = win.CreateDIBSection(memory, &info, win.DIB_RGB_COLORS, &bits, null, 0) orelse return;
+    defer _ = win.DeleteObject(bitmap);
+    const previous = win.SelectObject(memory, bitmap);
+    defer _ = win.SelectObject(memory, previous);
+    const pixels: [*]u32 = @ptrCast(@alignCast(bits orelse return));
+    var y: i32 = 0;
+    while (y < height) : (y += 1) {
+        var x: i32 = 0;
+        while (x < width) : (x += 1) {
+            pixels[@intCast(y * width + x)] = coverage.premultiplied(color, shape.alphaAt(box.left + x, box.top + y));
+        }
     }
-    if (ellipse) {
-        _ = win.Ellipse(ctx.hdc, rect.left, rect.top, rect.right, rect.bottom);
-    } else {
-        _ = win.RoundRect(ctx.hdc, rect.left, rect.top, rect.right, rect.bottom, corner_width, corner_height);
+    _ = win.AlphaBlend(dc, box.left, box.top, width, height, memory, 0, 0, width, height, .{ .BlendOp = win.AC_SRC_OVER, .BlendFlags = 0, .SourceConstantAlpha = 255, .AlphaFormat = win.AC_SRC_ALPHA });
+}
+
+fn fillCoverage(ctx: *const Context, shape: coverage.Shape, color: win.COLORREF) void {
+    if (shape.rect.right <= shape.rect.left or shape.rect.bottom <= shape.rect.top) return;
+    var dc = ctx.hdc;
+    if (ctx.graphics) |graphics| {
+        if (api.?.GdipGetDC(graphics, &dc) != 0 or dc == null) return;
     }
+    defer if (ctx.graphics) |graphics| {
+        _ = api.?.GdipReleaseDC(graphics, dc);
+    };
+    if (shape.stroke == null and !shape.ellipse) {
+        if (shape.corner_width <= 0 or shape.corner_height <= 0) {
+            const brush = win.CreateSolidBrush(color) orelse return;
+            defer _ = win.DeleteObject(brush);
+            const bounds: win.RECT = @bitCast(shape.rect);
+            _ = win.FillRect(dc, &bounds, brush);
+            return;
+        }
+        if (geometry.partition(shape.rect, shape.corner_width, shape.corner_height)) |parts| {
+            const brush = win.CreateSolidBrush(color) orelse return;
+            defer _ = win.DeleteObject(brush);
+            for (parts.bands) |band| {
+                const bounds: win.RECT = @bitCast(band);
+                _ = win.FillRect(dc, &bounds, brush);
+            }
+            for (parts.corners) |corner| blendCoverage(dc, corner, shape, color);
+            return;
+        }
+    }
+    var box = shape.rect;
+    if (shape.stroke) |stroke| {
+        const padding = @divTrunc(@max(1, stroke) + 1, 2);
+        box.left -= padding;
+        box.top -= padding;
+        box.right += padding;
+        box.bottom += padding;
+    }
+    blendCoverage(dc, box, shape, color);
 }
 
 fn fillHybrid(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i32, color: win.COLORREF, parts: geometry.Partition) bool {
@@ -240,22 +290,10 @@ pub fn strokeArc(ctx: *const Context, rect: win.RECT, start: f32, sweep: f32, co
             if (f.GdipDrawArc(graphics, pen, @floatFromInt(rect.left), @floatFromInt(rect.top), @floatFromInt(rect.right - rect.left - 1), @floatFromInt(rect.bottom - rect.top - 1), start, sweep) == 0) return;
         }
     }
-    const pen = win.CreatePen(win.PS_SOLID, @max(1, width), color) orelse return;
-    defer _ = win.DeleteObject(pen);
-    const previous = win.SelectObject(ctx.hdc, pen);
-    defer _ = win.SelectObject(ctx.hdc, previous);
-    const direction = win.SetArcDirection(ctx.hdc, if (sweep > 0) win.AD_CLOCKWISE else win.AD_COUNTERCLOCKWISE);
-    defer _ = win.SetArcDirection(ctx.hdc, direction);
-    const cx: f32 = @as(f32, @floatFromInt(rect.left + rect.right - 1)) / 2;
-    const cy: f32 = @as(f32, @floatFromInt(rect.top + rect.bottom - 1)) / 2;
-    const rx: f32 = @as(f32, @floatFromInt(rect.right - rect.left)) / 2;
-    const ry: f32 = @as(f32, @floatFromInt(rect.bottom - rect.top)) / 2;
-    const a = start * std.math.pi / 180;
-    const b = (start + sweep) * std.math.pi / 180;
-    _ = win.Arc(ctx.hdc, rect.left, rect.top, rect.right, rect.bottom, @intFromFloat(cx + rx * @cos(a)), @intFromFloat(cy + ry * @sin(a)), @intFromFloat(cx + rx * @cos(b)), @intFromFloat(cy + ry * @sin(b)));
+    fillCoverage(ctx, .{ .rect = @bitCast(rect), .ellipse = true, .stroke = width, .arc = .{ .start = start, .sweep = sweep } }, color);
 }
 
-test "rounded shapes preserve solid colours and bounds with partial edge coverage at both scales" {
+test "rounded shapes and forced fallback preserve solid colours and bounds with partial edge coverage at both scales" {
     const size = 192;
     const dc = win.CreateCompatibleDC(null) orelse return error.CreateDCFailed;
     defer _ = win.DeleteDC(dc);
@@ -303,16 +341,14 @@ test "rounded shapes preserve solid colours and bounds with partial edge coverag
                         if (rgb == expected) solid += 1 else partial += 1;
                     }
                     try std.testing.expect(solid > 0);
+                    try std.testing.expect(partial > 0);
                     if (antialias) {
-                        if (partial == 0) std.debug.print("no AA coverage: kind={s} scale={d} stroke={any} solid={d}\n", .{ @tagName(kind), scale, stroke, solid });
-                        try std.testing.expect(partial > 0);
                         const reference = reference_bounds.?;
                         try std.testing.expect(@abs(bounds.left - reference.left) <= 1);
                         try std.testing.expect(@abs(bounds.top - reference.top) <= 1);
                         try std.testing.expect(@abs(bounds.right - reference.right) <= 1);
                         try std.testing.expect(@abs(bounds.bottom - reference.bottom) <= 1);
                     } else {
-                        try std.testing.expectEqual(@as(usize, 0), partial);
                         reference_bounds = bounds;
                     }
                 }
@@ -401,7 +437,7 @@ test "hybrid fills match full paths at edges and exactly inside with odd corners
     }
 }
 
-test "scrollbar fill keeps the pixel bounds of an uncompensated GDI rounded region" {
+test "scrollbar fill keeps the exclusive pixel bounds at both scales" {
     const size = 96;
     const dc = win.CreateCompatibleDC(null) orelse return error.CreateDCFailed;
     defer _ = win.DeleteDC(dc);
@@ -418,22 +454,14 @@ test "scrollbar fill keeps the pixel bounds of an uncompensated GDI rounded regi
     defer _ = win.SelectObject(dc, old);
     const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. size * size];
     const color = 0x00332211;
-    const brush = win.CreateSolidBrush(color) orelse return error.CreateBrushFailed;
-    defer _ = win.DeleteObject(brush);
     for ([_]i32{ 6, 9 }) |width| {
         const rect = win.RECT{ .left = 10, .top = 12, .right = 10 + width, .bottom = 60 };
-        const region = win.CreateRoundRectRgn(rect.left, rect.top, rect.right, rect.bottom, width, width) orelse return error.CreateRegionFailed;
-        defer _ = win.DeleteObject(region);
-        var reference: win.RECT = undefined;
-        try std.testing.expect(win.GetRgnBox(region, &reference) != win.ERROR);
+        const reference = win.RECT{ .left = rect.left, .top = rect.top, .right = rect.right - 1, .bottom = rect.bottom - 1 };
         for ([_]bool{ false, true }) |antialias| {
             @memset(pixels, 0xffffffff);
-            if (antialias) {
-                var ctx = Context.init(dc);
-                defer ctx.deinit();
-                try std.testing.expect(ctx.graphics != null);
-                fillRoundRect(&ctx, .{ .left = rect.left, .top = rect.top, .right = rect.right - 1, .bottom = rect.bottom - 1 }, width, width, color);
-            } else try std.testing.expect(win.FillRgn(dc, region, brush) != 0);
+            var ctx = if (antialias) Context.init(dc) else Context{ .hdc = dc };
+            defer ctx.deinit();
+            fillRoundRect(&ctx, reference, width, width, color);
             _ = win.GdiFlush();
             var bounds = win.RECT{ .left = size, .top = size, .right = 0, .bottom = 0 };
             for (pixels, 0..) |pixel, i| {
@@ -450,4 +478,102 @@ test "scrollbar fill keeps the pixel bounds of an uncompensated GDI rounded regi
             try std.testing.expectEqual(rect.bottom - rect.top - 1, bounds.bottom - bounds.top);
         }
     }
+}
+
+test "forced GDI fallback preserves solid pixels edge bands coverage area and every curved edge" {
+    const size = 192;
+    const dc = win.CreateCompatibleDC(null) orelse return error.CreateDCFailed;
+    defer _ = win.DeleteDC(dc);
+    var info = std.mem.zeroes(win.BITMAPINFO);
+    info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = size;
+    info.bmiHeader.biHeight = -size;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    var bits: ?*anyopaque = null;
+    const bitmap = win.CreateDIBSection(dc, &info, win.DIB_RGB_COLORS, &bits, null, 0) orelse return error.CreateBitmapFailed;
+    defer _ = win.DeleteObject(bitmap);
+    const old = win.SelectObject(dc, bitmap);
+    defer _ = win.SelectObject(dc, old);
+    const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. size * size];
+    var reference: [size * size]u32 = undefined;
+    var failed = false;
+    for ([_]i32{ 2, 3 }) |scale| {
+        const rect = win.RECT{ .left = 10 * scale, .top = 10 * scale, .right = 50 * scale, .bottom = 40 * scale };
+        for ([_]enum { rounded, ellipse, arc }{ .rounded, .ellipse, .arc }) |kind| {
+            for ([_]i32{ 4, 12, 21 }) |diameter| {
+                if (kind != .rounded and diameter != 12) continue;
+                for ([_]?i32{ null, 1, scale }) |stroke| {
+                    if (kind == .arc and stroke == null) continue;
+                    for ([_]bool{ false, true }) |fallback| {
+                        @memset(pixels, 0xff000000);
+                        var ctx = if (fallback) Context{ .hdc = dc } else Context.init(dc);
+                        defer ctx.deinit();
+                        if (!fallback) try std.testing.expect(ctx.graphics != null);
+                        if (kind == .arc) strokeArc(&ctx, rect, 183.814075, -187.628150, 0x00ffffff, stroke.?) else if (kind == .ellipse) {
+                            if (stroke) |width| strokeEllipse(&ctx, rect, 0x00ffffff, width) else fillEllipse(&ctx, rect, 0x00ffffff);
+                        } else if (stroke) |width| strokeRoundRect(&ctx, rect, diameter * scale, diameter * scale, 0x00ffffff, width) else fillRoundRect(&ctx, rect, diameter * scale, diameter * scale, 0x00ffffff);
+                        ctx.deinit();
+                        _ = win.GdiFlush();
+                        if (!fallback) @memcpy(&reference, pixels);
+                    }
+                    var native_area: u64 = 0;
+                    var fallback_area: u64 = 0;
+                    var solid_mismatches: usize = 0;
+                    var off_edge: usize = 0;
+                    var different: usize = 0;
+                    var partial_edges = [_]usize{0} ** 8;
+                    const inset: f32 = if (stroke != null) 1 else 0;
+                    const w = @as(f32, @floatFromInt(rect.right - rect.left)) - inset;
+                    const h = @as(f32, @floatFromInt(rect.bottom - rect.top)) - inset;
+                    const rx = if (kind == .rounded) @as(f32, @floatFromInt(diameter * scale)) / 2 else w / 2;
+                    const ry = if (kind == .rounded) rx else h / 2;
+                    for (reference, pixels, 0..) |expected, actual, i| {
+                        const a = actual & 255;
+                        const b = expected & 255;
+                        native_area += b;
+                        fallback_area += a;
+                        if ((a >= 250 and b >= 250 or a <= 5 and b <= 5) and (actual & 0xffffff) != (expected & 0xffffff)) {
+                            solid_mismatches += 1;
+                        }
+                        if ((actual & 0xffffff) != (expected & 0xffffff)) {
+                            different += 1;
+                            const x: i32 = @intCast(i % size);
+                            const y: i32 = @intCast(i / size);
+                            var edge = false;
+                            for ([_]i32{ -1, 0, 1 }) |dy| {
+                                for ([_]i32{ -1, 0, 1 }) |dx| {
+                                    const nx = x + dx;
+                                    const ny = y + dy;
+                                    if (nx < 0 or ny < 0 or nx >= size or ny >= size) continue;
+                                    const j: usize = @intCast(ny * size + nx);
+                                    const na = pixels[j] & 255;
+                                    const nb = reference[j] & 255;
+                                    if (na > 0 and na < 255 or nb > 0 and nb < 255) edge = true;
+                                }
+                            }
+                            if (!edge) off_edge += 1;
+                        }
+                        if (a > 0 and a < 255) {
+                            const px = @as(f32, @floatFromInt(i % size)) + 0.5 - @as(f32, @floatFromInt(rect.left)) - w / 2;
+                            const py = @as(f32, @floatFromInt(i / size)) + 0.5 - @as(f32, @floatFromInt(rect.top)) - h / 2;
+                            const qx = @abs(px) - (w / 2 - rx);
+                            const qy = @abs(py) - (h / 2 - ry);
+                            if (kind == .rounded and (qx <= 0 or qy <= 0)) continue;
+                            const inside = qx * qx / (rx * rx) + qy * qy / (ry * ry) < 1;
+                            const quadrant: usize = @as(usize, if (px >= 0) 1 else 0) + @as(usize, if (kind != .arc and py >= 0) 2 else 0);
+                            const edge_index = quadrant * @as(usize, if (stroke != null) 2 else 1) + @as(usize, if (stroke != null and inside) 1 else 0);
+                            partial_edges[edge_index] += 1;
+                        }
+                    }
+                    const edge_count: usize = @as(usize, if (kind == .arc) 2 else 4) * @as(usize, if (stroke != null) 2 else 1);
+                    const min_partial = std.mem.min(usize, partial_edges[0..edge_count]);
+                    const area_difference = @abs(@as(i64, @intCast(fallback_area)) - @as(i64, @intCast(native_area)));
+                    std.debug.print("scale={d}% kind={s} diameter={d} stroke={any} native={d} fallback={d} area_error={d:.3}% solid_mismatch={d} off_edge={d} different={d} min_partial={d}\n", .{ scale * 50, @tagName(kind), diameter * scale, stroke, native_area, fallback_area, @as(f64, @floatFromInt(area_difference)) * 100 / @as(f64, @floatFromInt(native_area)), solid_mismatches, off_edge, different, min_partial });
+                    if (solid_mismatches != 0 or off_edge != 0 or native_area == 0 or area_difference * 100 > native_area * 2 or min_partial == 0) failed = true;
+                }
+            }
+        }
+    }
+    try std.testing.expect(!failed);
 }

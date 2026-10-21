@@ -7,8 +7,11 @@ pub fn alphaAt(x: usize, y: usize, size: usize) u8 {
     const dx = px - radius;
     const dy = py - radius;
     const dist = @sqrt(dx * dx + dy * dy);
-    const coverage = std.math.clamp(radius - dist + 0.5, 0.0, 1.0);
-    return @intFromFloat(coverage * 255.0);
+    return distanceAlpha(dist - radius);
+}
+
+pub fn distanceAlpha(distance: f32) u8 {
+    return @intFromFloat(std.math.clamp(0.5 - distance, 0.0, 1.0) * 255.0);
 }
 
 pub fn applyMask(pixels: []u8, size: usize) void {

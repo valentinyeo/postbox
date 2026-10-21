@@ -90,7 +90,7 @@ FNR == 1 {
     file = FILENAME
     source = ""
 }
-FILENAME != "src/smooth_shapes.zig" {
+{
     code = $0
     sub(/\/\/.*$/, "", code)
     source = source code "\n"
