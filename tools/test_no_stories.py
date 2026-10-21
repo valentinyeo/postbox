@@ -19,7 +19,7 @@ class NoStoriesTests(unittest.TestCase):
             if path.name.endswith('_test.zig'):
                 continue
             with self.subTest(ticket='IGSH-538', source=path.name):
-                source = path.read_text().split('\ntest "', 1)[0]
+                source = re.sub(r'(?ms)^test "[^\n]*\n.*?^}\n', '', path.read_text())
                 reject(source, UI)
         self.assertFalse((ROOT / 'src/status_ui.zig').exists())
         self.assertFalse((ROOT / 'src/status_view.zig').exists())
@@ -30,7 +30,7 @@ class NoStoriesTests(unittest.TestCase):
             if path.name.endswith('_test.zig'):
                 continue
             with self.subTest(ticket='IGSH-538', source=path.name):
-                reject(path.read_text().split('\ntest "', 1)[0], TRANSPORT)
+                reject(re.sub(r'(?ms)^test "[^\n]*\n.*?^}\n', '', path.read_text()), TRANSPORT)
 
     def test_IGSH_538_guards_reject_reintroduced_entry_points_and_fetches(self):
         for token in ('command_status', 'id_status_row', 'status_ui.paint(a)', '"Status"', '"open-status"', '"statuses"'):
