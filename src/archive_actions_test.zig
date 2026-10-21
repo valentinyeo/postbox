@@ -169,6 +169,10 @@ fn resurfaceRequest(a: *App, jid: []const u8) void {
     if (@typeInfo(@TypeOf(queueUnarchiveChat)).@"fn".params.len == 3) queueUnarchiveChat(a, jid, .resurface) else queueUnarchiveChat(a, jid);
 }
 fn paneFollowSelection(_: *App, _: []const u8) void {}
+fn holdKept(a: *App, jid: []const u8, provider_archived: bool, ts: []const u8) bool {
+    if (comptime @hasDecl(@This(), "holdKeptArchived")) return @field(@This(), "holdKeptArchived")(a, jid, provider_archived, ts);
+    return false;
+}
 fn visibleChatIndex(a: *const App, key: chat_key.Key) ?usize {
     return chat_key.indexOf(Chat, a.chats[0..a.chat_count], key);
 }
@@ -183,6 +187,66 @@ fn removeChatRow(a: *App, removed: usize) void {
     while (i < a.chat_count) : (i += 1) a.chats[i - 1] = a.chats[i];
     a.chat_count -= 1;
     if (a.chat_count > 0 and a.selected_chat >= a.chat_count) a.selected_chat = a.chat_count - 1;
+}
+
+test "a new message that unarchives a kept chat sends it straight back to the archive" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    try std.testing.expect(state.archive("a@g.us", "2026-10-10T10:00:00Z", true));
+    try std.testing.expect(state.archive("b@g.us", "2026-10-10T10:00:00Z", false));
+    try std.testing.expect(!holdKept(&a, "a@g.us", true, "2026-10-10T11:00:00Z"));
+    try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+    try std.testing.expect(holdKept(&a, "a@g.us", false, "2026-10-10T11:00:00Z"));
+    try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+    try std.testing.expect(!a.pending_archives[0].should_unarchive);
+    try std.testing.expectEqualStrings("a@g.us", a.spawned_jid.slice());
+    try std.testing.expectEqualStrings("archive: jid=a@g.us archived=true source=kept", a.log.slice());
+    try std.testing.expect(pendingArchiveHidesChat(&a, "a@g.us", false));
+    try std.testing.expect(!pendingArchiveHidesChat(&a, "a@g.us", true));
+    try std.testing.expect(state.isKept("a@g.us"));
+    try std.testing.expectEqual(@as(usize, 1), a.chat_count);
+    try std.testing.expectEqualStrings("b@g.us", a.chats[0].jid.slice());
+    try std.testing.expect(!holdKept(&a, "a@g.us", false, "2026-10-10T11:00:00Z"));
+    try std.testing.expect(!holdKept(&a, "b@g.us", false, "2026-10-10T11:00:00Z"));
+    try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+}
+
+test "a kept chat refused by a full archive queue is tried again for the same message" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    try std.testing.expect(state.archive("kept@g.us", "2026-10-10T10:00:00Z", true));
+    var name: [16]u8 = undefined;
+    for (0..a.pending_archives.len) |i| {
+        try std.testing.expect(archiveRequest(&a, try std.fmt.bufPrint(&name, "{d}@g.us", .{i}), .archive) == null);
+    }
+    try std.testing.expect(!holdKept(&a, "kept@g.us", false, "2026-10-10T11:00:00Z"));
+    try std.testing.expectEqual(a.pending_archives.len, a.pending_archive_count);
+    a.archive_child = null;
+    removeFirstPendingArchive(&a);
+    try std.testing.expect(holdKept(&a, "kept@g.us", false, "2026-10-10T11:00:00Z"));
+    try std.testing.expectEqualStrings("kept@g.us", a.pending_archives[a.pending_archive_count - 1].jid.slice());
+}
+
+test "a kept chat stays kept through a restart and is archived again on the next new message" {
+    var state = archive_rules.State{};
+    var before = fixture(&state);
+    archiveSelected(&before, true);
+    var restarted = archive_rules.State{};
+    restarted.parse(before.saved[0..before.saved_len]);
+    var a = fixture(&restarted);
+    try std.testing.expect(holdKept(&a, "a@g.us", false, "2026-10-10T11:00:00Z"));
+    try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+    try std.testing.expect(!a.pending_archives[0].should_unarchive);
+    var again = archive_rules.State{};
+    again.parse(a.saved[0..a.saved_len]);
+    try std.testing.expect(again.isKept("a@g.us"));
+    again.setKeep("a@g.us", false);
+    var reloaded = archive_rules.State{};
+    var buffer: [512]u8 = undefined;
+    reloaded.parse(again.format(&buffer));
+    var b = fixture(&reloaded);
+    try std.testing.expect(!holdKept(&b, "a@g.us", false, "2026-10-10T12:00:00Z"));
+    try std.testing.expectEqual(@as(usize, 0), b.pending_archive_count);
 }
 
 test "keep archives the selected chat and persists before the child starts" {
