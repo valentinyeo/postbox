@@ -13,6 +13,8 @@ const format_request = @import("format_request.zig");
 const format_cache = @import("format_cache.zig");
 const slack = @import("slack.zig");
 const slack_win = @import("slack_win.zig");
+const slack_oauth = @import("slack_oauth.zig");
+const slack_oauth_win = @import("slack_oauth_win.zig");
 const slack_send = @import("slack_send.zig");
 const played = @import("played.zig");
 const voice_pos = @import("voice_pos.zig");
@@ -102,6 +104,8 @@ const wm_update_ready = win.WM_APP + 2;
 const wm_wacli_done = win.WM_APP + 3;
 const wm_slack_event = win.WM_APP + 4;
 const wm_slack_reload = win.WM_APP + 5;
+const wm_slack_oauth_done = win.WM_APP + 40;
+const wm_slack_oauth_finished = win.WM_APP + 41;
 const wm_unfurl_done = win.WM_APP + 6;
 const wm_control = win.WM_APP + 7;
 const wm_startup_probe = win.WM_APP + 8;
@@ -176,6 +180,8 @@ const command_accounts_remove_confirm = 2042;
 const command_pin = 2043;
 const max_pins = 16;
 const command_slack_setup = 2046;
+const command_slack_connect = 2066;
+const command_slack_disconnect_workspace = 2450;
 const command_slack_disconnect = 2047;
 const command_slack_attach = 2048;
 const command_accounts_tg_remove = 2049;
@@ -569,6 +575,8 @@ const SlackInstallation = struct {
     user_token: []u8 = &.{},
     refresh_token: []u8 = &.{},
     expires_at: i64 = 0,
+    generation: u64 = 0,
+    needs_signin: std.atomic.Value(bool) = .init(false),
     is_bridge: bool = false,
     media_dir: Utf8Text(519) = .{},
     users: [512]SlackUser = @splat(.{}),
@@ -898,6 +906,9 @@ const App = struct {
     slack_app_token: []u8 = &.{},
     slack_mark_account: Utf8Text(32) = .{},
     slack_setup_window: ?win.HWND = null,
+    slack_oauth_thread: ?std.Thread = null,
+    slack_oauth_task: ?*SlackOAuthTask = null,
+    slack_oauth_stop: std.atomic.Value(bool) = .init(false),
     slack_fail_log_ms: [wacli_kind_count]u64 = [_]u64{0} ** wacli_kind_count,
     slack_fail_log_hash: [wacli_kind_count]u64 = [_]u64{0} ** wacli_kind_count,
     slack_count_log_ms: u64 = 0,
@@ -1653,6 +1664,10 @@ fn jobIsWrite(kind: WacliJobKind) bool {
 }
 
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
+    if (jobIsSlack(job.kind) and a.wacli_slack_thread == null) {
+        setStatus(a, "Slack worker unavailable; restart Messages");
+        return false;
+    }
     a.wacli_mutex.lockUncancelable(a.io);
     if (a.wacli_queue_len >= a.wacli_queue.len) {
         if (job.kind == .slack_mark) {
@@ -1820,7 +1835,7 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
             defer a.allocator.free(context.user_token);
             defer a.allocator.free(context.host);
             defer a.allocator.free(context.media_dir);
-            if (slack_win.runJob(a.allocator, context, kind, slack_args[0..slack_count])) |data| {
+            if (runSlackJob(a, job.account.slice(), context, kind, slack_args[0..slack_count])) |data| {
                 result.data = data;
                 result.ok = true;
             } else |err| {
@@ -3466,6 +3481,119 @@ fn slackContext(a: *App, account: []const u8, legacy_bridge: bool) ?slack_win.Jo
     return .{ .user_token = owned_token, .host = owned_host, .is_bridge = bridge, .media_dir = owned_dir, .io = a.io };
 }
 
+fn requireSlackSignIn(a: *App, account: []const u8, failed_token: []const u8) void {
+    a.slack_install_mutex.lockUncancelable(a.io);
+    defer a.slack_install_mutex.unlock(a.io);
+    if (slackInstallation(a, account)) |installation| {
+        if (std.mem.eql(u8, installation.user_token, failed_token)) installation.needs_signin.store(true, .release);
+    }
+}
+
+fn refreshSlackCredentials(a: *App, account: []const u8, auth_error: []const u8, failed_token: []const u8) !void {
+    var arena_state = std.heap.ArenaAllocator.init(a.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    a.slack_install_mutex.lockUncancelable(a.io);
+    const installation = slackInstallation(a, account) orelse {
+        a.slack_install_mutex.unlock(a.io);
+        return error.WorkspaceDisconnected;
+    };
+    if (installation.is_bridge) {
+        a.slack_install_mutex.unlock(a.io);
+        return;
+    }
+    if (auth_error.len > 0 and !std.mem.eql(u8, installation.user_token, failed_token)) {
+        a.slack_install_mutex.unlock(a.io);
+        return;
+    }
+    if (installation.needs_signin.load(.acquire)) {
+        a.slack_install_mutex.unlock(a.io);
+        return error.SignInRequired;
+    }
+    if (!slack_oauth.refreshDue(nowUnixSeconds(), installation.expires_at, installation.refresh_token.len > 0, auth_error)) {
+        const invalid = auth_error.len > 0 or (installation.expires_at > 0 and nowUnixSeconds() >= installation.expires_at);
+        if (invalid) installation.needs_signin.store(true, .release);
+        a.slack_install_mutex.unlock(a.io);
+        if (invalid) return error.SignInRequired;
+        return;
+    }
+    const generation = installation.generation;
+    const saved: slack_win.Installation = snapshot: {
+        defer a.slack_install_mutex.unlock(a.io);
+        break :snapshot .{
+            .team_id = try arena.dupe(u8, installation.team_id.slice()),
+            .team_name = try arena.dupe(u8, installation.team_name.slice()),
+            .user_id = try arena.dupe(u8, installation.user_id.slice()),
+            .user_token = try arena.dupe(u8, installation.user_token),
+            .refresh_token = try arena.dupe(u8, installation.refresh_token),
+            .expires_at = installation.expires_at,
+        };
+    };
+    const client_id = slack_win.loadClientId(arena) orelse {
+        requireSlackSignIn(a, account, saved.user_token);
+        return error.SignInRequired;
+    };
+    const rotated: anyerror!slack_oauth.RefreshedTokens = exchange: {
+        const body = slack_oauth.buildRefreshBody(arena, client_id, saved.refresh_token) catch |err| break :exchange err;
+        const json = slack_win.exchangeOAuth(arena, body) catch |err| break :exchange err;
+        break :exchange slack_oauth.parseRefreshResponse(arena, json);
+    };
+    a.slack_install_mutex.lockUncancelable(a.io);
+    defer a.slack_install_mutex.unlock(a.io);
+    const current = slackInstallation(a, account) orelse return error.WorkspaceDisconnected;
+    if (current.generation != generation) return error.WorkspaceChanged;
+    const tokens = rotated catch {
+        current.needs_signin.store(true, .release);
+        return error.SignInRequired;
+    };
+    if (!slack_win.isUserToken(tokens.access_token)) {
+        current.needs_signin.store(true, .release);
+        return error.SignInRequired;
+    }
+    const access = a.allocator.dupe(u8, tokens.access_token) catch {
+        current.needs_signin.store(true, .release);
+        return error.SignInRequired;
+    };
+    errdefer a.allocator.free(access);
+    const refresh = a.allocator.dupe(u8, tokens.refresh_token) catch {
+        current.needs_signin.store(true, .release);
+        return error.SignInRequired;
+    };
+    errdefer a.allocator.free(refresh);
+    const expiry = nowUnixSeconds() + @as(i64, @intCast(tokens.expires_in));
+    if (!slack_win.saveInstallation(.{ .team_id = saved.team_id, .team_name = saved.team_name, .user_id = saved.user_id, .user_token = access, .refresh_token = refresh, .expires_at = expiry })) {
+        current.needs_signin.store(true, .release);
+        return error.SignInRequired;
+    }
+    a.allocator.free(current.user_token);
+    a.allocator.free(current.refresh_token);
+    current.user_token = access;
+    current.refresh_token = refresh;
+    current.expires_at = expiry;
+}
+
+fn runSlackJob(a: *App, account: []const u8, initial: slack_win.JobContext, kind: slack_win.JobKind, args: []const []const u8) ![]u8 {
+    if (account.len == 0 or initial.is_bridge) return slack_win.runJob(a.allocator, initial, kind, args);
+    try refreshSlackCredentials(a, account, "", "");
+    var attempt: usize = 0;
+    while (attempt < 2) : (attempt += 1) {
+        const context = slackContext(a, account, false) orelse return error.WorkspaceDisconnected;
+        defer a.allocator.free(context.user_token);
+        defer a.allocator.free(context.host);
+        defer a.allocator.free(context.media_dir);
+        const outcome = slack_win.runJob(a.allocator, context, kind, args);
+        const auth_error = std.mem.sliceTo(&slack_win.last_error, 0);
+        if (!std.mem.eql(u8, auth_error, "invalid_auth") and !std.mem.eql(u8, auth_error, "token_expired")) return outcome;
+        if (outcome) |data| a.allocator.free(data) else |_| {}
+        if (attempt == 1) {
+            requireSlackSignIn(a, account, context.user_token);
+            return error.SignInRequired;
+        }
+        try refreshSlackCredentials(a, account, auth_error, context.user_token);
+    }
+    unreachable;
+}
+
 fn slackUserName(installation: *SlackInstallation, user_id: []const u8) ?[]const u8 {
     for (installation.users[0..installation.user_count]) |*user| {
         if (std.mem.eql(u8, user.id.slice(), user_id)) return user.name.slice();
@@ -3773,9 +3901,23 @@ fn refreshSlackHistory(a: *App) void {
 }
 
 fn pollSlackBridge(a: *App) void {
+    a.slack_poll_ticks += 1;
+    if (a.slack_poll_ticks % 60 == 0) {
+        for (&a.slack_installations) |*installation| {
+            a.slack_install_mutex.lockUncancelable(a.io);
+            const due = installation.active and !installation.is_bridge and !installation.needs_signin.load(.acquire) and
+                (slack_oauth.refreshDue(nowUnixSeconds(), installation.expires_at, installation.refresh_token.len > 0, "") or
+                    (installation.expires_at > 0 and nowUnixSeconds() >= installation.expires_at));
+            const account = installation.team_id;
+            a.slack_install_mutex.unlock(a.io);
+            if (!due) continue;
+            var job = WacliJob{ .provider = .slack, .kind = .slack_auth };
+            job.account = account;
+            _ = wacliEnqueue(a, job, false);
+        }
+    }
     if (a.slack_bridge == null) return;
     if (a.hwnd) |hwnd| if (win.IsIconic(hwnd) != 0) return;
-    a.slack_poll_ticks += 1;
     if (selectedChatIsSlack(a)) {
         const installation = slackInstallation(a, a.chats[a.selected_chat].account.slice());
         if (installation != null and installation.?.is_bridge and a.slack_poll_ticks % 5 == 0 and wacliPendingGet(a, .slack_history) == 0) refreshSlackHistory(a);
@@ -4856,6 +4998,8 @@ fn installSlackWorkspace(a: *App, team_id: []const u8, team_name: []const u8, us
     installation.user_token = user;
     installation.refresh_token = refresh;
     installation.expires_at = expires_at;
+    installation.generation +%= 1;
+    installation.needs_signin.store(false, .release);
     installation.team_id.set(team_id);
     installation.team_name.set(team_name);
     installation.user_id.set(user_id);
@@ -4880,22 +5024,38 @@ pub fn addSlackInstallation(team_id: []const u8, team_name: []const u8, user_id:
         available = true;
     };
     if (!available) return false;
-    if (!slack_win.saveInstallation(.{ .team_id = team_id, .team_name = team_name, .user_id = user_id, .user_token = user_token, .refresh_token = refresh_token, .expires_at = expires_at })) return false;
-    if (!saveSlackInstallationIndex(a, team_id, "")) return false;
+    a.slack_install_mutex.lockUncancelable(a.io);
+    const saved = slack_win.saveInstallation(.{ .team_id = team_id, .team_name = team_name, .user_id = user_id, .user_token = user_token, .refresh_token = refresh_token, .expires_at = expires_at }) and saveSlackInstallationIndex(a, team_id, "");
+    if (saved) if (slackInstallation(a, team_id)) |installation| {
+        installation.generation +%= 1;
+    };
+    a.slack_install_mutex.unlock(a.io);
+    if (!saved) return false;
     return installSlackWorkspace(a, team_id, team_name, user_id, user_token, refresh_token, expires_at, false);
 }
 
 pub fn removeSlackInstallation(team_id: []const u8) bool {
     const a = app_ptr orelse return false;
-    const installation = slackInstallation(a, team_id) orelse return false;
+    a.slack_install_mutex.lockUncancelable(a.io);
+    const installation = slackInstallation(a, team_id) orelse {
+        a.slack_install_mutex.unlock(a.io);
+        return false;
+    };
     if (installation.is_bridge) {
         slack_win.clearBridge();
     } else {
-        if (!saveSlackInstallationIndex(a, "", team_id)) return false;
+        if (!saveSlackInstallationIndex(a, "", team_id)) {
+            a.slack_install_mutex.unlock(a.io);
+            return false;
+        }
         slack_win.deleteInstallation(team_id);
     }
-    a.slack_install_mutex.lockUncancelable(a.io);
     installation.active = false;
+    installation.generation +%= 1;
+    a.allocator.free(installation.user_token);
+    a.allocator.free(installation.refresh_token);
+    installation.user_token = &.{};
+    installation.refresh_token = &.{};
     installation.chat_count = 0;
     installation.user_count = 0;
     a.slack_install_mutex.unlock(a.io);
@@ -4949,6 +5109,92 @@ fn loadSlackTokens(a: *App) void {
     }
     startSlackSocket(a);
     retrySlackOutbox(a);
+}
+
+const SlackOAuthTask = struct {
+    arena: std.heap.ArenaAllocator,
+    client_id: []const u8,
+    applied: win.HANDLE,
+    response: ?slack_oauth.TokenResponse = null,
+    failure: []const u8 = "",
+    saved: std.atomic.Value(bool) = .init(false),
+    app_token: []const u8 = "",
+    socket_stopped: bool = false,
+};
+
+fn finishSlackSignIn(a: *App) void {
+    if (a.slack_oauth_thread) |thread| thread.join();
+    a.slack_oauth_thread = null;
+    if (a.slack_oauth_task) |task| {
+        _ = win.CloseHandle(task.applied);
+        task.arena.deinit();
+        a.allocator.destroy(task);
+    }
+    a.slack_oauth_task = null;
+}
+
+fn slackSignInWorker(a: *App, task: *SlackOAuthTask) void {
+    var callback: ?slack_oauth_win.Callback = null;
+    defer if (callback) |connection| connection.close();
+    const allocator = task.arena.allocator();
+    if (!std.mem.eql(u8, a.slack_app_token, task.app_token)) {
+        a.slack_stop.store(true, .release);
+        if (a.slack_socket_thread) |thread| thread.join();
+        task.socket_stopped = true;
+    }
+    const outcome: anyerror!slack_oauth.TokenResponse = blk: {
+        callback = slack_oauth_win.authorize(allocator, a.io, task.client_id, &a.slack_oauth_stop) catch |err| break :blk err;
+        const connection = callback.?;
+        const body = slack_oauth.buildAccessBody(allocator, task.client_id, connection.code, &connection.attempt.code_verifier) catch |err| break :blk err;
+        const json = slack_win.exchangeOAuth(allocator, body) catch |err| break :blk err;
+        const response = slack_oauth.parseResponse(allocator, json) catch |err| break :blk err;
+        if (!slack.validTeamId(response.team_id) or response.user_id.len > 32 or response.user_id.len < 2 or
+            response.user_id[0] != 'U' or !slack_win.isUserToken(response.access_token)) break :blk error.UserTokenRequired;
+        break :blk response;
+    };
+    if (outcome) |response| task.response = response else |err| task.failure = @errorName(err);
+    if (!a.slack_oauth_stop.load(.acquire)) {
+        if (a.hwnd) |hwnd| {
+            if (win.PostMessageW(hwnd, wm_slack_oauth_done, 0, 0) != 0) _ = win.WaitForSingleObject(task.applied, win.INFINITE);
+        }
+    }
+    if (callback) |connection| connection.respond(task.saved.load(.acquire), if (task.saved.load(.acquire)) "Return to Messages to view your workspace." else "Return to Messages for details and try connecting again.");
+    if (a.hwnd) |hwnd| _ = win.PostMessageW(hwnd, wm_slack_oauth_finished, 0, 0);
+}
+
+fn startSlackSignIn(a: *App, client_id: []const u8) void {
+    if (a.slack_oauth_thread != null) return setStatus(a, "Slack sign-in is already in progress");
+    const app_token = slack_win.loadSecret(a.allocator, lit("SlackAppToken")) orelse return setStatus(a, "Enter a Socket Mode app token in Slack sign-in settings");
+    if (!slack_win.isAppToken(app_token.value)) {
+        a.allocator.free(app_token.value);
+        return setStatus(a, "Invalid Socket Mode app token; open Slack sign-in settings");
+    }
+    defer a.allocator.free(app_token.value);
+    const task = a.allocator.create(SlackOAuthTask) catch return setStatus(a, "Could not start Slack sign-in");
+    const event = win.CreateEventW(null, win.TRUE, win.FALSE, null) orelse {
+        a.allocator.destroy(task);
+        return setStatus(a, "Could not start Slack sign-in");
+    };
+    task.* = .{ .arena = std.heap.ArenaAllocator.init(a.allocator), .client_id = "", .applied = event };
+    task.client_id = task.arena.allocator().dupe(u8, client_id) catch {
+        _ = win.CloseHandle(event);
+        task.arena.deinit();
+        a.allocator.destroy(task);
+        return setStatus(a, "Could not start Slack sign-in");
+    };
+    task.app_token = task.arena.allocator().dupe(u8, app_token.value) catch {
+        _ = win.CloseHandle(event);
+        task.arena.deinit();
+        a.allocator.destroy(task);
+        return setStatus(a, "Could not start Slack sign-in");
+    };
+    a.slack_oauth_task = task;
+    a.slack_oauth_stop.store(false, .release);
+    a.slack_oauth_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, slackSignInWorker, .{ a, task }) catch {
+        finishSlackSignIn(a);
+        return setStatus(a, "Could not start Slack sign-in worker");
+    };
+    setStatus(a, "Sign in with Slack in your browser (5 minute timeout)...");
 }
 
 const id_slack_user_edit = 100;
@@ -5022,16 +5268,30 @@ fn slackSetupProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam:
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, @bitCast(wparam), @bitCast(lparam));
     switch (message) {
         win.WM_CREATE => {
-            _ = win.CreateWindowExW(0, lit("STATIC"), lit("User token (xoxp-)"), win.WS_CHILD | win.WS_VISIBLE, 16, 16, 360, 20, hwnd, null, a.instance, null);
-            _ = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_BORDER | win.ES_AUTOHSCROLL | win.ES_PASSWORD, 16, 38, 360, 26, hwnd, controlId(id_slack_user_edit), a.instance, null);
+            _ = win.CreateWindowExW(0, lit("STATIC"), lit("Slack app Client ID"), win.WS_CHILD | win.WS_VISIBLE, 16, 16, 360, 20, hwnd, null, a.instance, null);
+            _ = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_BORDER | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 16, 38, 360, 26, hwnd, controlId(id_slack_user_edit), a.instance, null);
             _ = win.CreateWindowExW(0, lit("STATIC"), lit("App token (xapp-) for Socket Mode"), win.WS_CHILD | win.WS_VISIBLE, 16, 74, 360, 20, hwnd, null, a.instance, null);
-            _ = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_BORDER | win.ES_AUTOHSCROLL | win.ES_PASSWORD, 16, 96, 360, 26, hwnd, controlId(id_slack_app_edit), a.instance, null);
-            const save = win.CreateWindowExW(0, lit("BUTTON"), lit("Save"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW | win.BS_DEFPUSHBUTTON, 0, 0, 90, 30, hwnd, controlId(id_slack_save), a.instance, null);
+            _ = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_BORDER | win.WS_TABSTOP | win.ES_AUTOHSCROLL | win.ES_PASSWORD, 16, 96, 360, 26, hwnd, controlId(id_slack_app_edit), a.instance, null);
+            const save = win.CreateWindowExW(0, lit("BUTTON"), lit("Sign in"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW | win.BS_DEFPUSHBUTTON, 0, 0, 90, 30, hwnd, controlId(id_slack_save), a.instance, null);
             const cancel = win.CreateWindowExW(0, lit("BUTTON"), lit("Cancel"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 90, 30, hwnd, controlId(id_slack_cancel), a.instance, null);
             setFont(save, a.font_bold);
             setFont(cancel, a.font_bold);
             subclassComposerButton(a, save, 3);
             subclassComposerButton(a, cancel, 4);
+            if (slack_win.loadClientId(a.allocator)) |client| {
+                defer a.allocator.free(client);
+                var text: WideText(511) = .{};
+                text.set(a.allocator, client);
+                _ = win.SetDlgItemTextW(hwnd, id_slack_user_edit, text.ptr());
+            }
+            if (slack_win.loadSecret(a.allocator, lit("SlackAppToken"))) |stored| {
+                defer a.allocator.free(stored.value);
+                var text: WideText(511) = .{};
+                text.set(a.allocator, stored.value);
+                _ = win.SetDlgItemTextW(hwnd, id_slack_app_edit, text.ptr());
+            }
+            setFont(win.GetDlgItem(hwnd, id_slack_user_edit), a.font);
+            setFont(win.GetDlgItem(hwnd, id_slack_app_edit), a.font);
             layoutSetupButtons(hwnd);
             return 0;
         },
@@ -5087,16 +5347,16 @@ fn slackSetupProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam:
             defer a.allocator.free(user);
             const app = std.unicode.utf16LeToUtf8Alloc(a.allocator, app_wide[0..app_len]) catch return 0;
             defer a.allocator.free(app);
-            if (!slack_win.isUserToken(user) or !slack_win.isAppToken(app)) {
-                setStatus(a, "Slack tokens must start with xoxp- and xapp-");
+            if (!slack_win.validClientId(user) or !slack_win.isAppToken(app)) {
+                setStatus(a, "Enter a Slack Client ID and an xapp- Socket Mode token");
                 return 0;
             }
-            if (!slack_win.saveTokens(user, app)) {
-                setStatus(a, "Could not store Slack tokens");
+            if (!slack_win.saveClientId(user) or !slack_win.saveSecret(lit("SlackAppToken"), app)) {
+                setStatus(a, "Could not store Slack sign-in settings");
                 return 0;
             }
             _ = win.DestroyWindow(hwnd);
-            if (a.hwnd) |main_hwnd| _ = win.PostMessageW(main_hwnd, wm_slack_reload, 0, 0);
+            startSlackSignIn(a, user);
             return 0;
         },
         win.WM_CLOSE => {
@@ -11713,8 +11973,13 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Open video in external player", "", command_open_video_external);
     appendPalette(a, "Open image in Windows viewer", "", command_open_image_external);
     appendPalette(a, "Attach image to send", "", command_slack_attach);
-    appendPalette(a, "Set up Slack...", "", command_slack_setup);
-    appendPalette(a, "Disconnect Slack", "", command_slack_disconnect);
+    appendPalette(a, "Connect Slack workspace", "", command_slack_connect);
+    appendPalette(a, "Slack sign-in settings", "", command_slack_setup);
+    for (&a.slack_installations, 0..) |*installation, index| {
+        if (!installation.active) continue;
+        var label: [256]u8 = undefined;
+        appendPalette(a, std.fmt.bufPrint(&label, "Disconnect Slack workspace: {s}", .{installation.team_name.slice()}) catch "Disconnect Slack workspace", "", @intCast(command_slack_disconnect_workspace + index));
+    }
     appendPalette(a, "Check for updates now", "", command_update_check);
     if (a.update_pending != null) appendPalette(a, "Restart now to install update", "", command_update_install);
     appendPalette(a, "Quit Messages", "Q", command_quit);
@@ -12646,8 +12911,28 @@ fn runCommand(a: *App, command: u16) void {
             if (a.telegram) |client| client.logOut();
             setStatus(a, "Logging out of Telegram...");
         },
-        command_slack_setup => {
+        command_slack_connect => {
+            if (slack_win.loadClientId(a.allocator)) |client| {
+                defer a.allocator.free(client);
+                if (slack_win.loadSecret(a.allocator, lit("SlackAppToken"))) |stored| {
+                    defer a.allocator.free(stored.value);
+                    if (slack_win.validClientId(client) and slack_win.isAppToken(stored.value)) {
+                        startSlackSignIn(a, client);
+                        return;
+                    }
+                }
+            }
             openSlackSetup(a);
+        },
+        command_slack_setup => {
+            if (a.slack_oauth_thread != null) return setStatus(a, "Slack sign-in is already in progress");
+            openSlackSetup(a);
+        },
+        command_slack_disconnect_workspace...command_slack_disconnect_workspace + max_slack_installations - 1 => {
+            const installation = &a.slack_installations[command - command_slack_disconnect_workspace];
+            if (!installation.active) return;
+            const account = installation.team_id;
+            if (removeSlackInstallation(account.slice())) setStatus(a, "Slack workspace disconnected") else setStatus(a, "Could not disconnect Slack workspace");
         },
         command_accounts_tg_remove => {
             a.accounts_confirm_remove_tg = true;
@@ -14861,6 +15146,16 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 a.allocator.destroy(result);
             }
             wacliPendingSub(a, result.kind);
+            defer {
+                if (result.provider == .slack and std.mem.eql(u8, result.extra.slice(), "SignInRequired")) {
+                    if (slackInstallation(a, result.account.slice())) |installation| {
+                        if (installation.needs_signin.load(.acquire)) {
+                            var buffer: [256]u8 = undefined;
+                            setStatus(a, std.fmt.bufPrint(&buffer, "Slack workspace {s} needs sign-in; use Connect Slack workspace", .{installation.team_name.slice()}) catch "Slack workspace needs sign-in; use Connect Slack workspace");
+                        }
+                    }
+                }
+            }
             if (jobIsSlack(result.kind) and !result.ok) logSlackFailure(a, result.kind, result.extra.slice(), result.http_status);
             if (result.kind != .cache_tag and result.provider == .whatsapp and !std.mem.eql(u8, result.account.slice(), a.cache_tag.slice())) return 0;
             switch (result.kind) {
@@ -15053,6 +15348,34 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             return 0;
         },
+        wm_slack_oauth_done => {
+            const task = a.slack_oauth_task orelse return 0;
+            if (task.socket_stopped) {
+                a.slack_socket_thread = null;
+                const token = a.allocator.dupe(u8, task.app_token) catch null;
+                if (token) |value| {
+                    a.allocator.free(a.slack_app_token);
+                    a.slack_app_token = value;
+                }
+                startSlackSocket(a);
+            }
+            if (task.response) |response| {
+                if (addSlackInstallation(response.team_id, response.team_name, response.user_id, response.access_token, response.refresh_token, if (response.expires_in == 0) 0 else nowUnixSeconds() + @as(i64, @intCast(response.expires_in)))) {
+                    task.saved.store(true, .release);
+                    setStatus(a, "Slack workspace connected");
+                } else setStatus(a, "Could not save Slack workspace; try connecting again");
+            } else {
+                var buffer: [256]u8 = undefined;
+                const detail = if (std.mem.eql(u8, task.failure, "CallbackPortBusy")) "port 53682 is busy; close the other listener and try again" else if (std.mem.eql(u8, task.failure, "CallbackTimedOut")) "browser authorization timed out after 5 minutes" else task.failure;
+                setStatus(a, std.fmt.bufPrint(&buffer, "Slack sign-in failed: {s}", .{detail}) catch "Slack sign-in failed");
+            }
+            _ = win.SetEvent(task.applied);
+            return 0;
+        },
+        wm_slack_oauth_finished => {
+            finishSlackSignIn(a);
+            return 0;
+        },
         wm_slack_event => {
             const event: *slack_win.Event = @ptrFromInt(@as(usize, @bitCast(lparam)));
             _ = a.slack_event_pending.fetchSub(1, .acq_rel);
@@ -15150,7 +15473,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             } else |_| appendLaunchLog(a, "control pipe: thread failed to start");
             if (a.wacli_slack_thread == null) {
                 a.wacli_slack_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, true }) catch null;
-                if (a.wacli_slack_thread == null) setStatus(a, "Slack worker failed to start; sends run inline");
+                if (a.wacli_slack_thread == null) setStatus(a, "Slack worker unavailable; restart Messages");
             }
             refreshGroups(a);
             loadChatsCache(a);
@@ -15532,6 +15855,9 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return 0;
         },
         win.WM_DESTROY => {
+            a.slack_oauth_stop.store(true, .release);
+            if (a.slack_oauth_task) |task| _ = win.SetEvent(task.applied);
+            finishSlackSignIn(a);
             wacliShutdown(a);
             closePlayer(a);
             closeImageViewer(a);

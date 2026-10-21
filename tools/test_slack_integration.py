@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCENARIOS = ("list", "history", "send", "live", "two_workspaces", "oauth_pkce")
+SCENARIOS = ("list", "history", "send", "live", "two_workspaces", "oauth_pkce", "refresh")
 SCOPES = "channels:read,channels:history,groups:read,groups:history,im:read,im:history,mpim:read,mpim:history,users:read,chat:write,files:read,files:write,reactions:read,channels:write,groups:write,im:write,mpim:write"
 REDIRECT = "http://localhost:53682/slack/oauth/callback"
 CHANNEL = "C0000000001"
@@ -100,7 +100,7 @@ class HTTPHandler(BaseHTTPRequestHandler):
             data = self.rfile.read(int(self.headers.get("Content-Length", "0")))
             state.requests.append((self.command, url.path))
             if url.path in ("/oauth/v2/authorize", "/slack/oauth/callback", "/api/oauth.v2.access"):
-                require(state.scenario == "oauth_pkce", "OAuth in wrong scenario")
+                require(state.scenario in ("oauth_pkce", "refresh"), "OAuth in wrong scenario")
                 require(self.headers.get("Authorization") is None, "OAuth must not send bearer token")
                 return self.oauth(state, url.path, query, data)
             token = self.headers.get("Authorization")
@@ -176,7 +176,8 @@ class HTTPHandler(BaseHTTPRequestHandler):
         fields = parameters(data.decode())
         if fields.get("grant_type") == "refresh_token":
             require(fields == {"grant_type": "refresh_token", "client_id": "desktop-fixture", "refresh_token": "refresh-fixture-1"}, "refresh body")
-            return self.reply(state.token_response(rotated=True))
+            return self.reply({"ok": True, "token_type": "user", "access_token": "xoxe.xoxp-00000000000000000002",
+                               "refresh_token": "refresh-fixture-rotated", "expires_in": 3600})
         require(fields.keys() == {"client_id", "code", "code_verifier", "redirect_uri", "grant_type"}, "token fields")
         require(fields["client_id"] == "desktop-fixture" and fields["code"] == CODE, "token client/code")
         require(fields["redirect_uri"] == REDIRECT and fields["grant_type"] == "authorization_code", "token grant/redirect")
@@ -296,11 +297,41 @@ def run_scenario(zig, cache, scenario, mutation="none"):
             "send": [("POST", "/api/chat.postMessage")],
             "live": [("POST", "/api/apps.connections.open")],
             "two_workspaces": [("GET", "/api/auth.test"), ("GET", "/api/conversations.history")] * 2,
+            "refresh": [("POST", "/api/oauth.v2.access")],
             "oauth_pkce": [("GET", "/oauth/v2/authorize"), ("GET", "/slack/oauth/callback")] + [("POST", "/api/oauth.v2.access")] * 2,
         }
         require(state.requests == expected_requests[scenario], f"{scenario} missing or unexpected requests: {state.requests}")
         if scenario == "live":
             require(state.ack_verified.is_set(), "server did not verify ack")
+
+
+def run_winhttp_refresh(zig, cache):
+    executable = cache / "slack-oauth-http.exe"
+    build = subprocess.run([zig, "build-exe", str(ROOT / "src/slack_oauth_http_test.zig"),
+                            "-target", "x86_64-windows-gnu", "-O", "ReleaseSmall", "-lc", "-lwinhttp", "-lcrypt32", "-ladvapi32",
+                            "--cache-dir", str(cache / "local"), "--global-cache-dir", str(cache / "global"),
+                            "-femit-bin=" + str(executable)], capture_output=True, text=True, timeout=180)
+    require(build.returncode == 0, "WinHTTP harness build failed:\n" + build.stdout + build.stderr)
+    with fake_slack("refresh") as state:
+        environment = {**os.environ, "WINEPREFIX": str(cache / "wine"), "WINEDEBUG": "-all"}
+        result = subprocess.run(["xvfb-run", "-a", "wine", str(executable), str(urlsplit(state.http_url).port)],
+                                env=environment, capture_output=True, text=True, timeout=120)
+        require(result.returncode == 0 and "SLACK_WINHTTP_OK refresh" in result.stdout + result.stderr,
+                "WinHTTP refresh failed:\n" + result.stdout + result.stderr)
+        require(not state.failures and state.requests == [("POST", "/api/oauth.v2.access")],
+                f"WinHTTP fake requests: {state.requests}, failures: {state.failures}")
+    callback_test = cache / "slack-oauth-callback-test.exe"
+    build = subprocess.run([zig, "test", str(ROOT / "src/slack_oauth_win.zig"), "--test-no-exec",
+                            "-target", "x86_64-windows-gnu", "-O", "ReleaseSmall", "-lc", "-lws2_32", "--test-filter", "exclusive loopback",
+                            "--cache-dir", str(cache / "local"), "--global-cache-dir", str(cache / "global"),
+                            "-femit-bin=" + str(callback_test)], capture_output=True, text=True, timeout=180)
+    require(build.returncode == 0, "Callback harness build failed:\n" + build.stdout + build.stderr)
+    result = subprocess.run(["xvfb-run", "-a", "wine", str(callback_test)], env=environment,
+                            capture_output=True, text=True, timeout=120)
+    require(result.returncode == 0 and re.search(r"All [0-9]+ tests passed", result.stdout + result.stderr),
+            "Callback tests failed:\n" + result.stdout + result.stderr)
+    print("SLACK_WINHTTP_OK refresh")
+    print("SLACK_LOOPBACK_OK port_conflict")
 
 
 def main():
@@ -321,6 +352,8 @@ def main():
             run_scenario(zig, directory, scenario)
         run_scenario(zig, directory, "oauth_pkce", "wrong_verifier")
         run_scenario(zig, directory, "live", "missing_ack")
+        if os.environ.get("WAZIG_WINE_TESTS") == "1":
+            run_winhttp_refresh(zig, directory)
     for scenario in SCENARIOS:
         print("SLACK_FAKE_OK " + scenario)
 

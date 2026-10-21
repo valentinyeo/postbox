@@ -43,19 +43,35 @@ Use `Win+.` in the composer for the Windows emoji picker. Right-click a message 
 Install Zig 0.16, then run:
 
 ```powershell
-## Slack
-
-Slack workspaces connect through the Web API plus a Socket Mode websocket
-(`src/slack_win.zig`), no runtime involved. Create an app from
-`slack-app-manifest.yml` at https://api.slack.com/apps, then enter the user
-token (xoxp-) and app token (xapp-) once via Ctrl+K > "Set up Slack...".
-Tokens are stored DPAPI-encrypted in the registry. Channels and DMs appear in
-the sidebar, messages arrive live, text replies (threads inline) and image
-attachments send, and file attachments download to
-`%LOCALAPPDATA%\Messages\slack`.
-
 zig build --release=small
 ```
+
+## Slack
+
+Use Ctrl+K > **Connect Slack workspace** to sign in with Slack in your browser.
+On first use, enter your Slack app's Client ID and its `xapp-` app-level token
+with `connections:write` for Socket Mode. Existing saved app tokens are reused.
+Change either value through Ctrl+K > **Slack sign-in settings**.
+
+Create your app at https://api.slack.com/apps using `slack-app-manifest.yml`,
+enable PKCE (this makes the app a public client and is not freely reversible),
+Socket Mode and distribution for multiple workspaces, and register exactly
+`http://localhost:53682/slack/oauth/callback` as an OAuth redirect URL. Approve
+the requested user scopes in each workspace; administrator approval may be
+needed. No client secret is used. Messages listens only on `127.0.0.1:53682`
+for one callback, for up to five minutes; a busy port fails without opening a
+browser. The Client ID is saved per-user; tokens are DPAPI-encrypted in the
+registry. Rotating user tokens refresh before expiry. If refresh fails, use
+**Connect Slack workspace** to sign in again.
+
+Ctrl+K > **Disconnect Slack workspace: <name>** removes that workspace and its
+saved credentials without disconnecting other workspaces. The Client ID and
+shared Socket Mode token remain available for the next connection.
+
+Slack uses the native Web API and Socket Mode websocket, without a bundled
+runtime. Channels and DMs appear in the sidebar, messages arrive live, text
+replies (threads inline) and image attachments send, and file attachments
+download to `%LOCALAPPDATA%\Messages\slack`.
 
 The executable and IBM Plex font files are written to `zig-out\bin`. The app expects the official `wacli.exe` at `%LOCALAPPDATA%\Programs\wacli\wacli.exe`.
 

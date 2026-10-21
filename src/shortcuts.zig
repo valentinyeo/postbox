@@ -51,6 +51,9 @@ pub const groups = [_]Group{
         .{ .key = "Arrows / Enter / Esc, emoji picker open", .desc = "Move, insert or close the emoji picker" },
     } },
     .{ .name = "Messengers", .items = &[_]Shortcut{
+        .{ .key = "Ctrl+K > Connect Slack workspace", .desc = "Sign in with Slack in the browser" },
+        .{ .key = "Ctrl+K > Slack sign-in settings", .desc = "Change the Slack Client ID and Socket Mode token" },
+        .{ .key = "Ctrl+K > Disconnect Slack workspace", .desc = "Remove a workspace and its saved credentials" },
         .{ .key = "Alt+0 / Alt+1..3", .desc = "All networks / configured WhatsApp, Slack, Telegram" },
     } },
     .{ .name = "Open and view", .items = &[_]Shortcut{
