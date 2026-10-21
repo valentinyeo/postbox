@@ -180,14 +180,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [ci, tdlib, windows-smoke]
-    if: >-
-      success() &&
-      github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/main'
     permissions:
       actions: write
     steps:
       - name: Hand off to auto-release
+        if: >-
+          success() &&
+          github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

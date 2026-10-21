@@ -20,6 +20,7 @@ cases=(
     'f169d18 B5 e955d363'
     '7ea1b5b B6 HEAD'
     'a701837 B7 HEAD'
+    '4064743 B8 HEAD'
     'dc9bdce C1 HEAD'
     '0e7c320d44f1 C1 HEAD'
     '55e826b E1 HEAD'
@@ -30,20 +31,23 @@ cases=(
     '1a638c6 I1 HEAD'
 )
 
-"$lint" "$repo"
+"$lint" "$repo" > "$temp/head-output" 2>&1
+cat "$temp/head-output"
 printf 'test-lint-repeats: HEAD passes\n'
 for entry in "${cases[@]}"; do
     read -r bad rule fixed <<< "$entry"
     for sha in "$bad" "$fixed"; do
+        status=0
         if [[ $sha == HEAD ]]; then
-            tree="$repo"
+            cp "$temp/head-output" "$temp/output"
         else
             tree="$temp/$sha"
-            mkdir -p -- "$tree"
-            git -C "$repo" archive "$sha" src .github/workflows | tar -x -C "$tree"
+            if [[ ! -d $tree ]]; then
+                mkdir -p -- "$tree"
+                git -C "$repo" archive "$sha" src .github/workflows | tar -x -C "$tree"
+            fi
+            "$lint" "$tree" > "$temp/output" 2>&1 || status=$?
         fi
-        status=0
-        "$lint" "$tree" > "$temp/output" 2>&1 || status=$?
         if [[ $sha == "$bad" ]]; then
             if (( status != 1 )) || ! grep -Eq "^lint-repeats: [^:]+:[0-9]+: \\[$rule\\] " "$temp/output"; then
                 cat "$temp/output" >&2
@@ -63,6 +67,32 @@ fixture="$temp/f1-fixtures"
 mkdir -p "$fixture/src" "$fixture/.github/workflows"
 printf 'name: fixture\n' > "$fixture/.github/workflows/fixture.yml"
 : > "$fixture/src/main.zig"
+b8_cases=0
+for missing in ci tdlib windows-smoke no-comments unfurl-verification private-markers secret-scan pr-title notify-release "tdlib-cache / cache"; do
+    sed "s|\"$missing\"||g" "$repo/.github/workflows/automerge.yml" > "$fixture/.github/workflows/automerge.yml"
+    status=0
+    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+    if (( status != 1 )) || ! grep -Fq '[B8]' "$temp/output"; then
+        cat "$temp/output" >&2
+        printf 'test-lint-repeats: FAIL IGSH-504 B8 must reject missing %s, got exit %s\n' "$missing" "$status" >&2
+        exit 1
+    fi
+    b8_cases=$((b8_cases + 1))
+done
+for guard in 'required=' 'as \$names' 'COMPLETED' 'match-head-commit' 'could not evaluate head checks' 'length) == 0' '!= "code-review"'; do
+    sed "/$guard/d" "$repo/.github/workflows/automerge.yml" > "$fixture/.github/workflows/automerge.yml"
+    status=0
+    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+    if (( status != 1 )) || ! grep -Fq '[B8]' "$temp/output"; then
+        cat "$temp/output" >&2
+        printf 'test-lint-repeats: FAIL IGSH-504 B8 must reject missing guard %s, got exit %s\n' "$guard" "$status" >&2
+        exit 1
+    fi
+    b8_cases=$((b8_cases + 1))
+done
+cp "$repo/.github/workflows/automerge.yml" "$fixture/.github/workflows/automerge.yml"
+"$lint" "$fixture"
+printf 'test-lint-repeats: IGSH-504 B8 rejects %s incomplete check policies and permits the fixed workflow\n' "$b8_cases"
 f1_cases=0
 for api in RoundRect Ellipse Pie Chord Arc CreateEllipticRgn CreateRoundRectRgn; do
     for form in direct alias import_alias field field_alias multiline_alias multiline_field; do

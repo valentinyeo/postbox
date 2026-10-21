@@ -173,6 +173,9 @@ function finish() {
         fail(tag_line, "B1", "bot-created release tag has no explicit release dispatch in its script", "gh workflow run release.yml --ref \"${next_tag}\" -R \"${GITHUB_REPOSITORY}\"")
     if (expected_three && !success_exit)
         fail(expected_three, "B3", "expected wazigctl exit 3 remains the PowerShell step exit status", "exit 0 after checking $LASTEXITCODE -ne 3")
+    if (automerge_line && (!all_required || !all_checks || !completed_checks || !head_pinned || !checks_fail_closed || !missing_checks || !ai_optional))
+        fail(automerge_line, "B8", "automerge can merge before every non-AI PR head check succeeds", "all required checks including unfurl-verification, every discovered non-AI check, COMPLETED and SUCCESS, fail-closed evaluation, and --match-head-commit")
+    automerge_line = all_required = all_checks = completed_checks = head_pinned = checks_fail_closed = missing_checks = ai_optional = 0
     tag_line = dispatch = gui_exe = gui_call = expected_three = success_exit = status_call = 0
     running = 0
     command = ""
@@ -180,6 +183,7 @@ function finish() {
 FNR == 1 {
     finish()
     file = FILENAME
+    if (file == ".github/workflows/automerge.yml") automerge_line = 1
 }
 {
     code = $0
@@ -213,8 +217,23 @@ FNR == 1 {
     }
     if (status_call && code ~ /\$LASTEXITCODE[[:space:]]+-ne[[:space:]]+3([^0-9]|$)/) expected_three = FNR
     if (expected_three && code ~ /^[[:space:]]*exit[[:space:]]+0([[:space:];]|$)/) success_exit = 1
+    if (file == ".github/workflows/automerge.yml") {
+        if (code ~ /required=/) {
+            automerge_line = FNR
+            all_required = 1
+            count = split("ci|tdlib|windows-smoke|no-comments|unfurl-verification|private-markers|secret-scan|pr-title|notify-release|tdlib-cache / cache", required_checks, "[|]")
+            for (i = 1; i <= count; i++)
+                if (!index(code, "\"" required_checks[i] "\"")) all_required = 0
+        }
+        if (code ~ /\(\$checks \| length\) == 0/) missing_checks = 1
+        if (code ~ /select\(\(\.name \/\/ \.context\) != "code-review"\)/) ai_optional = 1
+        if (code ~ /\$req[[:space:]]*\+[[:space:]]*\[\$roll\[\]/) all_checks = 1
+        if (code ~ /\.status != "COMPLETED" or \.conclusion != "SUCCESS"/) completed_checks = 1
+        if (code ~ /gh pr merge/ && code ~ /--match-head-commit "\$head_oid"/) head_pinned = 1
+        if (code ~ /\|\| blocked="could not evaluate head checks"/) checks_fail_closed = 1
+    }
     if (file == ".github/workflows/automerge.yml" && code ~ /required=/ && code ~ /code-review/)
-        fail(FNR, "B5", "automerge requires the AI code-review check, so an AI reviewer blocks merges", "required='\''[\"ci\",\"tdlib\",\"windows-smoke\",\"no-comments\"]'\''; an AI reviewer may comment but never gates a merge")
+        fail(FNR, "B5", "automerge requires the AI code-review check, so an AI reviewer blocks merges", "all non-AI head checks; an AI reviewer may comment but never gates a merge")
     if (command == "") command_line = FNR
     command = command " " code
     if (code ~ /\\[[:space:]]*$/) next
