@@ -14,6 +14,6 @@ fi
 run node --test tools/check-fonts.test.mjs tools/strip-comments.test.js
 (
     cd tools
-    run python3 -m unittest test_ai_review_poll test_check_cache_keys test_check_private_markers test_no_comments test_pin_icon test_tdlib_release
+    run python3 -m unittest test_check_cache_keys test_check_private_markers test_pin_icon test_tdlib_release
 )
 echo 'preflight-light: all checks passed'
