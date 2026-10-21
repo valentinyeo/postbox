@@ -66,3 +66,18 @@ if (cd "$foreign" && bash tools/agent-setup.sh 2>/dev/null); then
 fi
 [ "$(cat "$foreign/.git/hooks/post-checkout")" = 'exit 0' ] || fail "the unrelated post-checkout hook changed"
 printf 'test-agent-setup: unrelated hook kept\n'
+
+public="$temp/public"
+git init -q -b main "$public"
+mkdir -p "$public/tools" "$public/.claude/skills/verify-wazig"
+cp "$script_dir/agent-setup.sh" "$public/tools/agent-setup.sh"
+printf 'public skill\n' > "$public/.claude/skills/verify-wazig/SKILL.md"
+git -C "$public" add tools/agent-setup.sh .claude/skills/verify-wazig/SKILL.md
+git -C "$public" commit -q -m public
+(cd "$public" && bash tools/agent-setup.sh >/dev/null)
+[ ! -L "$public/.claude/skills" ] || fail "public skills directory was replaced"
+[ "$(cat "$public/.claude/skills/verify-wazig/SKILL.md")" = 'public skill' ] || fail "public skill changed"
+[ -L "$public/.claude/skills/INDEX.md" ] || fail "private entries were not linked beside public skill"
+(cd "$public" && bash tools/agent-setup.sh >/dev/null)
+git -C "$public" diff --exit-code || fail "setup changed tracked public skill"
+printf 'test-agent-setup: public skill preserved beside private links across repeated setup\n'

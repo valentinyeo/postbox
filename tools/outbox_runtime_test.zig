@@ -1,4 +1,5 @@
 const std = @import("std");
+var verification_fixture = false;
 const drafts = struct {
     const max_text = 64 * 1024;
 };
@@ -858,5 +859,19 @@ test "Slack jobs never fall back to UI-thread networking when the worker is unav
     var app = fixture();
     app.wacli_slack_thread = null;
     try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .slack_auth, .provider = .slack }, false));
+    try std.testing.expectEqual(@as(usize, 0), app.wacli_queue_len);
+}
+
+test "verification fixture refuses provider queues and sends without losing a draft" {
+    reset();
+    verification_fixture = true;
+    defer verification_fixture = false;
+    var app = fixture();
+    setCompose("Verification draft");
+    sendMessage(&app);
+    try std.testing.expectEqual(@as(usize, 0), app.pending_send_count);
+    try std.testing.expectEqual(@as(usize, 0), app.slack_outbox_count);
+    try std.testing.expect(compose_len > 0);
+    try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .messages }, true));
     try std.testing.expectEqual(@as(usize, 0), app.wacli_queue_len);
 }

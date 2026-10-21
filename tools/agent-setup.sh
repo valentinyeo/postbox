@@ -7,13 +7,25 @@ if [ ! -d "$private" ]; then
 fi
 mkdir -p "$root/.claude/hooks"
 if [ -d "$root/.claude/skills" ] && [ ! -L "$root/.claude/skills" ]; then
-  echo "agent-setup: $root/.claude/skills is a real folder. Move its changes to the private repo, delete it, then rerun." >&2
-  exit 1
+  if ! git ls-files --error-unmatch .claude/skills/verify-wazig/SKILL.md >/dev/null 2>&1; then
+    echo "agent-setup: $root/.claude/skills is an untracked real folder; refusing to replace it." >&2
+    exit 1
+  fi
+  for entry in "$private/.claude/skills/"*; do
+    [ -e "$entry" ] || continue
+    destination="$root/.claude/skills/$(basename "$entry")"
+    if [ -e "$destination" ] && [ ! -L "$destination" ]; then
+      echo "agent-setup: private skill conflicts with tracked path $destination; refusing to replace it." >&2
+      exit 1
+    fi
+    ln -sfn "$entry" "$destination"
+  done
+else
+  ln -sfn "$private/.claude/skills" "$root/.claude/skills"
 fi
 ln -sfn "$private/CLAUDE.md" "$root/CLAUDE.local.md"
 ln -sfn "$private/HANDOFF.md" "$root/HANDOFF.md"
 ln -sfn "$private/board.yml" "$root/board.yml"
-ln -sfn "$private/.claude/skills" "$root/.claude/skills"
 ln -sfn "$private/hooks/agent-scope-guard.sh" "$root/.claude/hooks/agent-scope-guard.sh"
 echo "agent-setup: linked private agent files from $private"
 hooks="$(git rev-parse --path-format=absolute --git-common-dir)/hooks"
