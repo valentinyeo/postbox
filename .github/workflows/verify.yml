@@ -1,0 +1,60 @@
+name: verify-wazig
+
+on:
+  workflow_dispatch:
+    inputs:
+      feature:
+        description: User journey to drive
+        type: choice
+        default: search
+        options: [search, navigation, drafts, palette, appearance]
+  pull_request:
+    paths:
+      - .github/workflows/verify.yml
+      - .claude/skills/verify-wazig/**
+      - tools/verify-wazig/**
+      - src/main.zig
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check skill map and PowerShell syntax
+        shell: pwsh
+        run: |
+          python tools/verify-wazig/check-map.py
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid skill map' }
+          foreach ($file in Get-ChildItem tools/verify-wazig/*.ps1) {
+            $tokens = $null
+            $errors = $null
+            $null = [Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count) { throw ($errors | Out-String) }
+          }
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Build real desktop and control client
+        run: zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
+      - name: Launch, doctor and drive
+        shell: pwsh
+        run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ inputs.feature || 'search' }}' -Bin zig-out/bin -Evidence verification-evidence
+      - name: Cleanup even after a failed journey
+        if: always()
+        shell: pwsh
+        run: pwsh -NoProfile -File tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-wazig-${{ inputs.feature || 'search' }}
+          path: verification-evidence/
+          if-no-files-found: error

@@ -1747,6 +1747,7 @@ fn jobIsWrite(kind: WacliJobKind) bool {
 }
 
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
+    if (verification_fixture) return false;
     if (jobIsSlack(job.kind) and a.wacli_slack_thread == null) {
         setStatus(a, "Slack worker unavailable; restart Messages");
         return false;
@@ -8730,6 +8731,7 @@ fn syncStderrMain(a: *App, stderr: std.Io.File) void {
 }
 
 fn startSync(a: *App) void {
+    if (verification_fixture) return;
     if (a.sync_logged_out or a.pairing_process != null) return;
     if (a.accounts_maintenance) {
         if (!whatsappStorePresent(a)) return;
@@ -9824,6 +9826,7 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
 }
 
 fn sendMessage(a: *App) void {
+    if (verification_fixture) return setStatus(a, "Verification is offline; sending is disabled");
     if (a.compose == null or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
     if (a.outbox_load_failed) {
         setStatus(a, "Outbox could not be loaded; sends paused");
@@ -15834,6 +15837,16 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             _ = win.SetTimer(hwnd, timer_telegram, 250, null);
             _ = win.SetTimer(hwnd, timer_update_first_check, update_first_check_delay_ms, null);
             _ = win.SetTimer(hwnd, timer_update_check, update_check_interval_ms, null);
+            if (verification_fixture) {
+                if (std.Thread.spawn(.{ .stack_size = 256 * 1024 }, controlThreadMain, .{a})) |thread| {
+                    thread.detach();
+                } else |_| return -1;
+                loadDrafts(a);
+                loadChatsCache(a);
+                refreshMessages(a);
+                appendLaunchLog(a, "verification: offline fixture ready");
+                return 0;
+            }
             if (a.wacli_thread == null) {
                 a.wacli_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, false }) catch null;
             }
@@ -16099,6 +16112,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 tickVoice(a);
             } else if (wparam == timer_refresh) {
                 persistDrafts(a);
+                if (verification_fixture) return 0;
                 updateVoiceButton(a);
                 refreshStatuses(a, false);
                 if (a.status_ui.mode == .viewer) showStatusMedia(a);
@@ -17215,6 +17229,33 @@ fn LoadAppIcon(instance: win.HINSTANCE, cx: i32, cy: i32, flags: u32) win.HICON 
     return LoadImageW(instance, 1, win.IMAGE_ICON, cx, cy, flags);
 }
 
+var verification_fixture = false;
+
+fn prepareVerification(init: std.process.Init) !win.HKEY {
+    if (!std.mem.eql(u8, init.environ_map.get("GITHUB_ACTIONS") orelse "", "true")) return error.VerificationRequiresActions;
+    const root = init.environ_map.get("WAZIG_VERIFY_ROOT") orelse return error.MissingVerificationRoot;
+    const local = try std.fs.path.join(init.gpa, &.{ root, "local" });
+    defer init.gpa.free(local);
+    const profile = try std.fs.path.join(init.gpa, &.{ root, "profile" });
+    defer init.gpa.free(profile);
+    if (!std.mem.eql(u8, local, init.environ_map.get("LOCALAPPDATA") orelse "") or
+        !std.mem.eql(u8, profile, init.environ_map.get("USERPROFILE") orelse "")) return error.VerificationRequiresIsolatedPaths;
+    const id = init.environ_map.get("WAZIG_VERIFY_ID") orelse return error.MissingVerificationId;
+    if (id.len != 36) return error.InvalidVerificationId;
+    for (id) |c| if (!std.ascii.isHex(c) and c != '-') return error.InvalidVerificationId;
+    const path = try std.fmt.allocPrint(init.gpa, "Software\\MessagesVerification\\{s}", .{id});
+    defer init.gpa.free(path);
+    const wide = try std.unicode.utf8ToUtf16LeAllocZ(init.gpa, path);
+    defer init.gpa.free(wide);
+    var key: win.HKEY = null;
+    var disposition: win.DWORD = 0;
+    if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), wide.ptr, 0, null, 0, win.KEY_ALL_ACCESS, null, &key, &disposition) != win.ERROR_SUCCESS) return error.VerificationRegistryFailed;
+    errdefer _ = win.RegCloseKey(key);
+    if (disposition != win.REG_CREATED_NEW_KEY) return error.VerificationRegistryAlreadyExists;
+    if (win.RegOverridePredefKey(winHandle(win.HKEY, @bitCast(@as(isize, -2147483647))), key) != win.ERROR_SUCCESS) return error.VerificationRegistryOverrideFailed;
+    return key;
+}
+
 pub fn main(init: std.process.Init) !void {
     process_start_ms = win.GetTickCount64();
     var update_relaunch = false;
@@ -17222,6 +17263,7 @@ pub fn main(init: std.process.Init) !void {
     defer argument_iterator.deinit();
     while (argument_iterator.next()) |argument| {
         if (std.mem.eql(u8, argument, "--update-relaunch")) update_relaunch = true;
+        if (std.mem.eql(u8, argument, "--verify-fixture")) verification_fixture = true;
         if (std.mem.eql(u8, argument, "--tdlib-smoke")) {
             if (!tg.enabled) std.process.exit(2);
             std.process.exit(tdlibSmoke(init.io));
@@ -17230,6 +17272,11 @@ pub fn main(init: std.process.Init) !void {
             std.process.exit(unfurlSmoke(init));
         }
     }
+    const verification_key = if (verification_fixture) try prepareVerification(init) else null;
+    defer if (verification_key) |key| {
+        _ = win.RegOverridePredefKey(winHandle(win.HKEY, @bitCast(@as(isize, -2147483647))), null);
+        _ = win.RegCloseKey(key);
+    };
     const instance = win.GetModuleHandleW(null) orelse return error.NoModuleHandle;
     installCrashFilter();
     const outbox_store = init.environ_map.get("LOCALAPPDATA") orelse return error.MissingLocalAppData;
@@ -17327,7 +17374,7 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     loadEmojiRecents(app);
-    if (init.environ_map.get("LOCALAPPDATA")) |local| {
+    if (!verification_fixture) if (init.environ_map.get("LOCALAPPDATA")) |local| {
         if (std.fs.path.join(init.gpa, &.{ local, "Messages", "telegram" })) |telegram_dir| {
             const stored_hash = slack_win.loadSecret(init.gpa, lit("TelegramApiHash"));
             defer if (stored_hash) |stored| init.gpa.free(stored.value);
@@ -17361,7 +17408,7 @@ pub fn main(init: std.process.Init) !void {
                 }
             }
         } else |_| {}
-    }
+    };
     app.played_path = findPlayedPath(init, init.gpa);
     loadPlayed(app);
     loadArchiveState(app);
@@ -17577,15 +17624,17 @@ pub fn main(init: std.process.Init) !void {
     _ = win.UpdateWindow(hwnd);
     focusCompose(app);
     logStartupMilestone(app, .window, "window shown");
-    if (std.heap.page_allocator.create(ProbeThread)) |probe| {
-        probe.* = .{ .io = init.io, .hwnd = hwnd, .wacli_path = wacli_path, .scratch_dir = messages_dir };
-        if (std.Thread.spawn(.{ .stack_size = 512 * 1024 }, startupProbeMain, .{probe})) |thread| {
-            thread.detach();
-        } else |_| {
-            std.heap.page_allocator.destroy(probe);
-            app.startup_probe_pending = false;
-        }
-    } else |_| app.startup_probe_pending = false;
+    if (!verification_fixture) {
+        if (std.heap.page_allocator.create(ProbeThread)) |probe| {
+            probe.* = .{ .io = init.io, .hwnd = hwnd, .wacli_path = wacli_path, .scratch_dir = messages_dir };
+            if (std.Thread.spawn(.{ .stack_size = 512 * 1024 }, startupProbeMain, .{probe})) |thread| {
+                thread.detach();
+            } else |_| {
+                std.heap.page_allocator.destroy(probe);
+                app.startup_probe_pending = false;
+            }
+        } else |_| app.startup_probe_pending = false;
+    }
 
     var message: win.MSG = undefined;
     while (win.GetMessageW(&message, null, 0, 0) > 0) {
@@ -17839,6 +17888,7 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
 }
 
 fn startUpdateCheck(hwnd: win.HWND, manual: bool) void {
+    if (verification_fixture) return;
     const a = app_ptr orelse return;
     if (a.update_installed) return;
     const now = win.GetTickCount64();

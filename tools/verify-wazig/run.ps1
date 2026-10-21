@@ -1,0 +1,145 @@
+param(
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance')][string]$Feature = 'search',
+    [string]$Bin = 'zig-out/bin',
+    [string]$Evidence = 'verification-evidence'
+)
+. "$PSScriptRoot/harness.ps1"
+Assert-That ($env:GITHUB_ACTIONS -eq 'true') 'Verification runs only on GitHub Actions'
+New-Item $Evidence -ItemType Directory -Force | Out-Null
+$Evidence = (Resolve-Path $Evidence).Path
+Start-Transcript (Join-Path $Evidence 'run.log') | Out-Null
+Assert-That (-not (Test-Path 'HKCU:\Software\Messages')) 'Hosted runner already has production app preferences'
+$id = [Guid]::NewGuid().ToString()
+$root = Join-Path $env:RUNNER_TEMP "wazig-verify-$id"
+$local = Join-Path $root 'local'
+$profile = Join-Path $root 'profile'
+$messages = Join-Path $local 'Messages'
+New-Item $messages, $profile -ItemType Directory -Force | Out-Null
+$tag = '0000000000000526'
+Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
+@{ data = @(
+    @{ jid = 'verify-alpha'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = '' },
+    @{ jid = 'verify-beta'; name = 'Verification Beta'; kind = 'direct'; last_message_ts = '' }
+) } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $messages "chats-$tag.json")
+$exe = (Resolve-Path (Join-Path $Bin 'Messages.exe')).Path
+foreach ($case in @('not-actions', 'not-isolated')) {
+    $rejected = [Diagnostics.ProcessStartInfo]::new($exe)
+    $rejected.UseShellExecute = $false
+    $rejected.ArgumentList.Add('--verify-fixture')
+    if ($case -eq 'not-actions') { $rejected.Environment['GITHUB_ACTIONS'] = 'false' }
+    $null = $rejected.Environment.Remove('WAZIG_VERIFY_ROOT')
+    $child = [Diagnostics.Process]::Start($rejected)
+    try {
+        Assert-That ($child.WaitForExit(10000)) "Unsafe fixture launch did not reject: $case"
+        Assert-That ($child.ExitCode -ne 0) "Unsafe fixture launch succeeded: $case"
+    } finally {
+        if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
+    }
+    Add-Content (Join-Path $Evidence 'launch-guards.log') "REJECTED: $case"
+}
+$ctl = (Resolve-Path (Join-Path $Bin 'wazigctl.exe')).Path
+$start = [Diagnostics.ProcessStartInfo]::new($exe)
+$start.UseShellExecute = $false
+$start.RedirectStandardError = $true
+$start.ArgumentList.Add('--verify-fixture')
+$start.Environment['WAZIG_VERIFY_ROOT'] = $root
+$start.Environment['WAZIG_VERIFY_ID'] = $id
+$start.Environment['LOCALAPPDATA'] = $local
+$start.Environment['APPDATA'] = $local
+$start.Environment['USERPROFILE'] = $profile
+$start.Environment['USERNAME'] = "verify-$id"
+foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION')) { $null = $start.Environment.Remove($name) }
+$app = [Diagnostics.Process]::Start($start)
+$session = [ordered]@{
+    id = $id; pid = $app.Id; startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
+    root = $root; evidence = $Evidence; exe = $exe; ctl = $ctl; username = "verify-$id"
+    sha256 = (Get-FileHash $exe).Hash; commit = $env:GITHUB_SHA; feature = $Feature
+}
+$session | ConvertTo-Json | Set-Content (Join-Path $Evidence 'session.json')
+$session = Read-Session $Evidence
+try {
+    $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window'
+    [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
+    Invoke-Doctor $session
+    $window = Get-Window $session
+    $compose = Get-Edit $window '1032'
+    $search = Get-Edit $window '1008'
+    Save-Screen $session before
+    switch ($Feature) {
+        search {
+            Send-Keys $session '^f'
+            Send-Keys $session 'Beta'
+            $null = Wait-Until { (Read-Control $session status).chat_count -eq 1 } 'one filtered chat'
+            $state = Read-Control $session status
+            Assert-That ($state.search -eq 'Beta' -and $state.selected.name -eq 'Verification Beta') 'Search did not select the matching fixture'
+            Save-Screen $session after
+            Send-Keys $session '{ESC}'
+            $null = Wait-Until { (Read-Control $session status).chat_count -eq 2 } 'search cleared'
+            Send-Keys $session '^f'
+            Send-Keys $session 'NoSuchFixture'
+            $null = Wait-Until { (Read-Control $session status).chat_count -eq 0 } 'empty search result'
+            Save-Screen $session empty
+            Send-Keys $session '{ESC}'
+            $null = Wait-Until { (Read-Control $session status).chat_count -eq 2 } 'baseline restored'
+        }
+        navigation {
+            Send-Keys $session '^{TAB}'
+            $null = Wait-Until { (Read-Control $session status).selected.name -eq 'Verification Beta' } 'next chat'
+            Save-Screen $session after
+            Send-Keys $session '^+{TAB}'
+            $null = Wait-Until { (Read-Control $session status).selected.name -eq 'Verification Alpha' } 'previous chat'
+        }
+        drafts {
+            Send-Keys $session 'Verification draft'
+            Send-Keys $session '^{TAB}'
+            Assert-That ((Read-Edit $compose) -eq '') 'Draft leaked to the next chat'
+            Send-Keys $session '^+{TAB}'
+            $null = Wait-Until { (Read-Edit $compose) -eq 'Verification draft' } 'restored per-chat draft'
+            $draft = Join-Path $messages 'drafts.json'
+            $null = Wait-Until { (Test-Path $draft) -and (Get-Content $draft -Raw).Contains('Verification draft') } 'persisted draft'
+            Copy-Item $draft (Join-Path $Evidence 'drafts.json')
+            Save-Screen $session after
+        }
+        palette {
+            Send-Keys $session '^k'
+            Send-Keys $session 'Keyboard shortcuts'
+            Save-Screen $session action
+            Send-Keys $session '{ENTER}'
+            $null = Wait-Until {
+                $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MessagesShortcutHelp')
+                [Windows.Automation.AutomationElement]::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, $condition)
+            } 'keyboard shortcut overlay'
+            Save-Screen $session after
+            Send-Keys $session '{ESC}'
+        }
+        appearance {
+            Send-Keys $session '^k'
+            Send-Keys $session 'Theme: Green'
+            Save-Screen $session action
+            Send-Keys $session '{ENTER}'
+            $null = Wait-Until { (Read-Control $session status).theme -eq 'green' } 'green theme'
+            $preferences = "HKCU:\Software\MessagesVerification\$id\Software\Messages"
+            Assert-That ((Get-ItemProperty $preferences).Theme -eq 0) 'Theme preference was not saved'
+            Save-Screen $session after
+        }
+    }
+    $final = Read-Control $session status
+    Assert-That ($final.pending_sends -eq 0 -and $final.pending_archives -eq 0 -and $final.sync -eq 'stopped') 'Unexpected transport side effect'
+    Assert-That (-not (Test-Path (Join-Path $profile '.wacli'))) 'Provider store was created'
+    Assert-That (-not (Test-Path (Join-Path $messages 'telegram'))) 'Telegram store was created'
+    Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
+    $final | Add-Member -NotePropertyName production_preferences_absent -NotePropertyValue (-not (Test-Path 'HKCU:\Software\Messages'))
+    $final | Add-Member -NotePropertyName whatsapp_store_absent -NotePropertyValue (-not (Test-Path (Join-Path $profile '.wacli')))
+    $final | Add-Member -NotePropertyName telegram_store_absent -NotePropertyValue (-not (Test-Path (Join-Path $messages 'telegram')))
+    Assert-That $final.production_preferences_absent 'Production app preferences were touched'
+    $final | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'side-effects.json')
+    "JOURNEY PASSED: $Feature" | Set-Content (Join-Path $Evidence 'result.txt')
+} catch {
+    $_ | Out-String | Set-Content (Join-Path $Evidence 'failure.txt')
+    try { Save-Screen $session failure } catch { $_ | Out-String | Add-Content (Join-Path $Evidence 'failure.txt') }
+    throw
+} finally {
+    & "$PSScriptRoot/cleanup.ps1" -Evidence $Evidence
+    $app.StandardError.ReadToEnd() | Set-Content (Join-Path $Evidence 'app.stderr.log')
+    Stop-Transcript | Out-Null
+}

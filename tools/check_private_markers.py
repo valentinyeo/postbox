@@ -6,6 +6,16 @@ import sys
 SKIP_DIRS = ("vendor/",)
 PRIVATE_PATHS = ("CLAUDE.local.md", "HANDOFF.md", "board.yml", ".claude/skills/", ".claude/hooks/agent-scope-guard.sh", ".claude/handoffs/")
 
+PUBLIC_SKILL_PATHS = (
+    ".claude/skills/verify-wazig/SKILL.md",
+    ".claude/skills/verify-wazig/features/README.md",
+    ".claude/skills/verify-wazig/features/search.md",
+    ".claude/skills/verify-wazig/features/navigation.md",
+    ".claude/skills/verify-wazig/features/drafts.md",
+    ".claude/skills/verify-wazig/features/palette.md",
+    ".claude/skills/verify-wazig/features/appearance.md",
+)
+
 
 def load_markers(text):
     return [re.compile(line.strip()) for line in text.splitlines() if line.strip()]
@@ -31,7 +41,7 @@ def readable(data):
 
 
 def private_paths(paths):
-    return [path for path in paths if path == ".claude/skills" or path.startswith(PRIVATE_PATHS)]
+    return [path for path in paths if (path == ".claude/skills" or path.startswith(PRIVATE_PATHS)) and path not in PUBLIC_SKILL_PATHS]
 
 
 def scan_tree(markers):
