@@ -65,4 +65,6 @@ Cleanup closes only the recorded PID after verifying start time/path/hash, waits
 
 All helpers are repository-owned PowerShell scripts executed explicitly with `pwsh -NoProfile -File`; no execution-policy changes or installed runtime are needed on Windows Actions. `run.ps1`, `doctor.ps1` and `cleanup.ps1` invocations are above. `harness.ps1` is their shared library, dot-sourced by those entry points, not a separate launcher. Launch/Drive are GitHub-only, even when an agent has access to another Windows machine.
 
+Read-only validators (no app launch): `python3 tools/verify-wazig/check-map.py` checks map structure and source labels; `python3 tools/verify-wazig/check-evidence.py evidence/<id>` checks downloaded search evidence, state transitions and surviving proof files. On Windows Actions use `python` in place of `python3`. Artifact validation does not replace looking at the images. Launch also writes `launch-guards.log`, proving that non-Actions and non-isolated fixture launches are rejected, and checks that the runner's production preferences are never created.
+
 Maintain the map when shortcuts or commands change; `/maintain-verification-skill` is the maintenance loop.

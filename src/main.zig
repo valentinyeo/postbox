@@ -17252,7 +17252,7 @@ fn prepareVerification(init: std.process.Init) !win.HKEY {
     if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), wide.ptr, 0, null, 0, win.KEY_ALL_ACCESS, null, &key, &disposition) != win.ERROR_SUCCESS) return error.VerificationRegistryFailed;
     errdefer _ = win.RegCloseKey(key);
     if (disposition != win.REG_CREATED_NEW_KEY) return error.VerificationRegistryAlreadyExists;
-    if (win.RegOverridePredefKey(winHandle(win.HKEY, 0x80000001), key) != win.ERROR_SUCCESS) return error.VerificationRegistryFailed;
+    if (win.RegOverridePredefKey(win.HKEY_CURRENT_USER, key) != win.ERROR_SUCCESS) return error.VerificationRegistryOverrideFailed;
     return key;
 }
 
@@ -17274,7 +17274,7 @@ pub fn main(init: std.process.Init) !void {
     }
     const verification_key = if (verification_fixture) try prepareVerification(init) else null;
     defer if (verification_key) |key| {
-        _ = win.RegOverridePredefKey(winHandle(win.HKEY, 0x80000001), null);
+        _ = win.RegOverridePredefKey(win.HKEY_CURRENT_USER, null);
         _ = win.RegCloseKey(key);
     };
     const instance = win.GetModuleHandleW(null) orelse return error.NoModuleHandle;

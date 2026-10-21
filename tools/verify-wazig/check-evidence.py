@@ -21,6 +21,9 @@ assert after['chat_count'] == 1 and after['search'] == 'Beta'
 assert after['selected']['name'] == 'Verification Beta'
 assert empty['chat_count'] == 0 and empty['search'] == 'NoSuchFixture'
 assert final['chat_count'] == 2 and final['search'] == ''
+assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
+guards = (folder / 'launch-guards.log').read_text(encoding='utf-8-sig')
+assert 'REJECTED: not-actions' in guards and 'REJECTED: not-isolated' in guards
 assert 'JOURNEY PASSED: search' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
 assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
 assert not (folder / 'failure.txt').exists()

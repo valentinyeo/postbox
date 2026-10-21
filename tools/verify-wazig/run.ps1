@@ -40,6 +40,7 @@ foreach ($case in @('not-actions', 'not-isolated')) {
 $ctl = (Resolve-Path (Join-Path $Bin 'wazigctl.exe')).Path
 $start = [Diagnostics.ProcessStartInfo]::new($exe)
 $start.UseShellExecute = $false
+$start.RedirectStandardError = $true
 $start.ArgumentList.Add('--verify-fixture')
 $start.Environment['WAZIG_VERIFY_ROOT'] = $root
 $start.Environment['WAZIG_VERIFY_ID'] = $id
@@ -127,7 +128,10 @@ try {
     Assert-That (-not (Test-Path (Join-Path $profile '.wacli'))) 'Provider store was created'
     Assert-That (-not (Test-Path (Join-Path $messages 'telegram'))) 'Telegram store was created'
     Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
-    Assert-That (-not (Test-Path 'HKCU:\Software\Messages')) 'Production app preferences were touched'
+    $final | Add-Member -NotePropertyName production_preferences_absent -NotePropertyValue (-not (Test-Path 'HKCU:\Software\Messages'))
+    $final | Add-Member -NotePropertyName whatsapp_store_absent -NotePropertyValue (-not (Test-Path (Join-Path $profile '.wacli')))
+    $final | Add-Member -NotePropertyName telegram_store_absent -NotePropertyValue (-not (Test-Path (Join-Path $messages 'telegram')))
+    Assert-That $final.production_preferences_absent 'Production app preferences were touched'
     $final | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'side-effects.json')
     "JOURNEY PASSED: $Feature" | Set-Content (Join-Path $Evidence 'result.txt')
 } catch {
@@ -136,5 +140,6 @@ try {
     throw
 } finally {
     & "$PSScriptRoot/cleanup.ps1" -Evidence $Evidence
+    $app.StandardError.ReadToEnd() | Set-Content (Join-Path $Evidence 'app.stderr.log')
     Stop-Transcript | Out-Null
 }
