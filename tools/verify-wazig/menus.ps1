@@ -1,4 +1,5 @@
-Add-Type -Path "$PSScriptRoot/menus.cs" -ReferencedAssemblies System.Drawing.Common, System.Drawing.Primitives, System.Collections, System.Linq, System.Runtime
+$references = @([AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { -not $_.IsDynamic -and $_.Location } | ForEach-Object Location)
+Add-Type -Path "$PSScriptRoot/menus.cs" -ReferencedAssemblies $references
 
 function Find-Popup($Session, [string]$Class) {
     [VerifyMenus]::Find($Session.pid, $Class)
@@ -64,10 +65,23 @@ function Invoke-Menus($Session) {
     $loaded = Read-Control $Session messages
     Assert-That ($loaded.messages.Count -eq 1 -and $loaded.messages[0].id -eq 'verify-menu-message') 'Synthetic message cache did not load'
     foreach ($entry in @(@{ name = 'chat'; id = '1016' }, @{ name = 'composer'; id = '1032' }, @{ name = 'search'; id = '1008' })) {
+        if ($entry.name -eq 'composer') {
+            Click-Control $Session '1032'
+            Send-Keys $Session 'Menu draft'
+        } elseif ($entry.name -eq 'search') {
+            Send-Keys $Session '^f'
+            Send-Keys $Session 'Verification'
+            $null = Wait-Until { (Read-Control $Session status).search -eq 'Verification' } 'synthetic search text'
+        }
         Save-Screen $Session "amoled-$($entry.name)-before"
         Click-Control $Session $entry.id $true
         $null = Capture-Popup $Session "amoled-$($entry.name)" '#32768'
         Close-Popup $Session '#32768'
+        if ($entry.name -eq 'composer') { Send-Keys $Session '^a{BACKSPACE}' }
+        if ($entry.name -eq 'search') {
+            Send-Keys $Session '{ESC}'
+            $null = Wait-Until { (Read-Control $Session status).search -eq '' } 'search restored'
+        }
     }
     Save-Screen $Session 'amoled-message-before'
     $canvas = Get-Edit (Get-Window $Session) '1024'
@@ -97,6 +111,10 @@ function Invoke-Menus($Session) {
     )) {
         Save-Screen $Session "amoled-$($entry.name)-before"
         if ($entry.command) { Open-PaletteCommand $Session $entry.command } else { Send-Keys $Session '^k' }
+        if ($entry.name -eq 'emoji') {
+            $null = Wait-Popup $Session $entry.class
+            Send-Keys $Session 'heart'
+        }
         $popup = Capture-Popup $Session "amoled-$($entry.name)" $entry.class
         $window = [Windows.Automation.AutomationElement]::FromHandle($popup)
         $edits = $window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit'))
@@ -105,6 +123,7 @@ function Invoke-Menus($Session) {
             $metric = [VerifyMenus]::Measure((Join-Path $Session.evidence "amoled-$($entry.name)-after.png"), $rect, $screen.Left, $screen.Top, 4)
             $script:menuMeasurements += [ordered]@{ screenshot = "amoled-$($entry.name)-after.png"; expected = 'dark-edit'; automationId = $edit.Current.AutomationId; measurement = $metric }
             $script:menuMeasurements | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'menu-luminances.json')
+            if ($entry.name -eq 'emoji') { [VerifyMenus]::Validate($metric, $false) }
             Assert-That ($metric.background -le 0.05126945837404324 -and $metric.lightTileFraction -le 0.02) "$($entry.name) has a light edit field"
         }
         if ($entry.class -eq 'SlackSetup') { Close-Popup $Session $entry.class '%{F4}' } else { Close-Popup $Session $entry.class }
