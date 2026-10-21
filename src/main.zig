@@ -11302,13 +11302,18 @@ fn reactionCellWidth(a: *const App) i32 {
     return px(a, 36);
 }
 
+fn appendMessageMenuItem(menu: win.HMENU, command: u16, label: ?[*:0]const u16) void {
+    const flags: win.UINT = if (theme.choice == .amoled) win.MF_OWNERDRAW else if (label == null) win.MF_SEPARATOR else win.MF_STRING;
+    _ = win.AppendMenuW(menu, flags, command, label);
+}
+
 fn addReactionItems(menu: win.HMENU) void {
     _ = win.AppendMenuW(menu, win.MF_OWNERDRAW, reaction_row, null);
-    _ = win.AppendMenuW(menu, win.MF_SEPARATOR, 0, null);
-    _ = win.AppendMenuW(menu, win.MF_STRING, reaction_remove, lit("Remove reaction"));
-    _ = win.AppendMenuW(menu, win.MF_SEPARATOR, 0, null);
-    _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_text, lit("Copy text"));
-    _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_link, lit("Copy link address"));
+    appendMessageMenuItem(menu, 0, null);
+    appendMessageMenuItem(menu, reaction_remove, lit("Remove reaction"));
+    appendMessageMenuItem(menu, 0, null);
+    appendMessageMenuItem(menu, command_copy_text, lit("Copy text"));
+    appendMessageMenuItem(menu, command_copy_link, lit("Copy link address"));
 }
 
 fn openUrlWide(a: *App, url: [*:0]const u16) void {
@@ -11323,8 +11328,15 @@ fn openUrlWide(a: *App, url: [*:0]const u16) void {
 fn openReactionMenu(a: *App, x: i32, y: i32) void {
     const menu = win.CreatePopupMenu() orelse return;
     defer _ = win.DestroyMenu(menu);
-    _ = win.AppendMenuW(menu, win.MF_STRING, command_reply, lit("Reply                Ctrl+Shift+R"));
-    _ = win.AppendMenuW(menu, win.MF_SEPARATOR, 0, null);
+    if (theme.choice == .amoled) {
+        var info = std.mem.zeroes(win.MENUINFO);
+        info.cbSize = @sizeOf(win.MENUINFO);
+        info.fMask = win.MIM_BACKGROUND | win.MIM_APPLYTOSUBMENUS;
+        info.hbrBack = a.brush_panel;
+        _ = win.SetMenuInfo(menu, &info);
+    }
+    appendMessageMenuItem(menu, command_reply, lit("Reply                Ctrl+Shift+R"));
+    appendMessageMenuItem(menu, 0, null);
     addReactionItems(menu);
     const choice = win.TrackPopupMenu(menu, win.TPM_RETURNCMD | win.TPM_NONOTIFY, x, y, 0, a.hwnd.?, null);
     if (choice == command_reply) {
@@ -11337,6 +11349,45 @@ fn openReactionMenu(a: *App, x: i32, y: i32) void {
             cell = @divTrunc(mouse.x - rect.left, reactionCellWidth(a));
         if (cell >= quick_reactions.len) openReactionPicker(a) else reactToSelected(a, quick_reactions[@intCast(@max(cell, 0))]);
     } else reactToSelected(a, @intCast(choice));
+}
+
+fn measureMessageMenuItem(a: *const App, item: *win.MEASUREITEMSTRUCT) void {
+    if (item.itemData == 0) {
+        item.itemWidth = 0;
+        item.itemHeight = @intCast(px(a, 8));
+        return;
+    }
+    const label: [*:0]const u16 = @ptrFromInt(item.itemData);
+    const hdc = win.GetDC(a.hwnd) orelse return;
+    defer _ = win.ReleaseDC(a.hwnd, hdc);
+    const saved = win.SaveDC(hdc);
+    defer _ = win.RestoreDC(hdc, saved);
+    _ = win.SelectObject(hdc, @ptrCast(a.font orelse return));
+    var size: win.SIZE = .{ .cx = 0, .cy = 0 };
+    _ = win.GetTextExtentPoint32W(hdc, label, @intCast(std.mem.len(label)), &size);
+    item.itemWidth = @intCast(size.cx + px(a, 40));
+    item.itemHeight = @intCast(@max(px(a, 24), size.cy + px(a, 8)));
+}
+
+fn drawMessageMenuItem(a: *App, item: *win.DRAWITEMSTRUCT) void {
+    const saved = win.SaveDC(item.hDC);
+    defer _ = win.RestoreDC(item.hDC, saved);
+    const selected = item.itemState & win.ODS_SELECTED != 0;
+    _ = win.FillRect(item.hDC, &item.rcItem, if (selected) a.brush_raised.? else a.brush_panel.?);
+    var rect = item.rcItem;
+    rect.left += px(a, 16);
+    rect.right -= px(a, 16);
+    if (item.itemData == 0) {
+        rect.top = @divTrunc(rect.top + rect.bottom, 2);
+        rect.bottom = rect.top + 1;
+        _ = win.FillRect(item.hDC, &rect, a.brush_muted.?);
+        return;
+    }
+    _ = win.SelectObject(item.hDC, @ptrCast(a.font orelse return));
+    _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
+    _ = win.SetTextColor(item.hDC, if (item.itemState & win.ODS_DISABLED != 0) theme.current.on_surface_variant else theme.current.on_surface);
+    const label: [*:0]const u16 = @ptrFromInt(item.itemData);
+    _ = text_draw.drawText(item.hDC, label, -1, &rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
 }
 
 fn measureReactionRow(a: *const App, item: *win.MEASUREITEMSTRUCT) void {
@@ -15885,7 +15936,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         win.WM_DRAWITEM => {
             const item: *win.DRAWITEMSTRUCT = winHandle(*win.DRAWITEMSTRUCT, @as(usize, @bitCast(lparam)));
             if (item.CtlType == win.ODT_MENU) {
-                if (item.itemID == reaction_row) drawReactionRow(a, item);
+                if (item.itemID == reaction_row) drawReactionRow(a, item) else if (theme.choice == .amoled) drawMessageMenuItem(a, item);
             } else if (item.CtlID == id_chats) {
                 drawChat(a, item);
             } else if (item.CtlID == id_voice) {
@@ -15898,7 +15949,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         win.WM_MEASUREITEM => {
             const item: *win.MEASUREITEMSTRUCT = winHandle(*win.MEASUREITEMSTRUCT, @as(usize, @bitCast(lparam)));
             if (item.CtlType != win.ODT_MENU) return win.DefWindowProcW(hwnd, message, wparam, lparam);
-            if (item.itemID == reaction_row) measureReactionRow(a, item);
+            if (item.itemID == reaction_row) measureReactionRow(a, item) else if (theme.choice == .amoled) measureMessageMenuItem(a, item);
             return 1;
         },
         win.WM_PARENTNOTIFY => {
