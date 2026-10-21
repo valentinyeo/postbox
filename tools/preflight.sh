@@ -14,6 +14,7 @@ run "$ZIG" fmt --check src build.zig
 run node tools/check-fonts.mjs
 run node --test tools/check-fonts.test.mjs
 run "$ZIG" build test
+run bash tools/test_telegram_fake.sh
 (
     slack_temp=$(mktemp -d)
     trap 'rm -rf -- "$slack_temp"' EXIT

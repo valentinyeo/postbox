@@ -346,6 +346,7 @@ const StagedImage = struct {
     preview: ?win.HBITMAP = null,
     preview_width: i32 = 0,
     preview_height: i32 = 0,
+    owned: bool = true,
 };
 
 const max_link_chunk_rects = 16;
@@ -712,7 +713,7 @@ const App = struct {
     chats: []Chat = &.{},
     chat_count: usize = 0,
     telegram: ?*tg.Client = null,
-    tg_chats: [max_tg_chats]TgChat = [_]TgChat{.{}} ** max_tg_chats,
+    tg_chats: []TgChat = &.{},
     tg_chat_count: usize = 0,
     tg_login: TgLoginMode = .none,
     tg_login_window: ?win.HWND = null,
@@ -2368,15 +2369,19 @@ fn upsertTgChat(a: *App, info: *tg.ChatInfo) void {
         if (a.tg_chats[index].id == info.id) break;
     }
     if (index == a.tg_chat_count) {
-        if (a.tg_chat_count >= max_tg_chats) return;
+        if (a.tg_chat_count == a.tg_chats.len) {
+            a.tg_chats = a.allocator.realloc(a.tg_chats, @max(max_tg_chats, a.tg_chats.len * 2)) catch return;
+        }
         a.tg_chat_count += 1;
         a.tg_chats[index] = .{ .id = info.id };
     }
     const cached = &a.tg_chats[index];
-    if (info.title.len > 0) cached.name.set(a.allocator, info.title);
-    cached.kind.set(if (info.is_group) "Telegram group" else "Telegram");
+    if (info.title.len > 0) {
+        cached.name.set(a.allocator, info.title);
+        cached.kind.set(if (info.is_channel) "Telegram channel" else if (info.is_group) "Telegram group" else "Telegram");
+        cached.is_group = info.is_group or info.is_channel;
+    }
     cached.unread_count = info.unread_count;
-    cached.is_group = info.is_group or info.is_channel;
     if (info.last_date != 0) {
         var buffer: [20]u8 = undefined;
         cached.timestamp.set(tj.formatTimestamp(&buffer, info.last_date));
@@ -2450,6 +2455,14 @@ fn drainTelegram(a: *App) void {
                 a.tg_dirty = true;
             },
             .message => |msg| {
+                if (msg.timestamp.len > 0) {
+                    for (a.tg_chats[0..a.tg_chat_count]) |*cached| {
+                        if (cached.id == msg.chat_id and std.mem.order(u8, msg.timestamp, cached.timestamp.slice()) == .gt) {
+                            cached.timestamp.set(msg.timestamp);
+                            a.tg_dirty = true;
+                        }
+                    }
+                }
                 if (tgSelectedChatId(a)) |selected_id| {
                     if (msg.chat_id == selected_id) refreshMessages(a);
                 }
@@ -2465,7 +2478,6 @@ fn drainTelegram(a: *App) void {
             },
             .chats_synced => {
                 a.tg_dirty = true;
-                client.requestChats();
             },
             .chat_last_date => |last_message| {
                 var index: usize = 0;
@@ -2482,6 +2494,12 @@ fn drainTelegram(a: *App) void {
         }
     }
     if (a.tg_dirty and !a.show_archived) {
+        const snapshot = client.chatSnapshot(a.allocator);
+        defer client.freeChatSnapshot(a.allocator, snapshot);
+        for (snapshot) |info| {
+            var cached = info;
+            upsertTgChat(a, &cached);
+        }
         a.tg_dirty = false;
         refreshVisibleChats(a);
     } else a.tg_dirty = false;
@@ -2501,6 +2519,10 @@ fn refreshTelegramMessages(a: *App) void {
     const snapshot = client.historySnapshot(a.allocator, chat_id);
     defer client.freeHistorySnapshot(a.allocator, snapshot);
     const chat_changed = !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]));
+    if (chat_changed) {
+        stopAudio(a);
+        client.requestHistory(chat_id);
+    }
     var selected_id = Utf8Text(191){};
     if (a.selected_message) |selected| {
         if (selected < a.message_count) selected_id.set(a.messages[selected].id.slice());
@@ -2519,6 +2541,19 @@ fn refreshTelegramMessages(a: *App) void {
         message.sender.set(a.allocator, if (msg.sender_name.len > 0) msg.sender_name else "Unknown");
         message.from_me = msg.from_me;
         message.text.set(a.allocator, tgDisplayText(msg));
+        if (msg.reply_to != 0) {
+            message.quote.set(a.allocator, "[Original message]");
+            const reply_chat_id = if (msg.reply_chat_id != 0) msg.reply_chat_id else chat_id;
+            const originals = if (reply_chat_id == chat_id) snapshot else client.historySnapshot(a.allocator, reply_chat_id);
+            defer if (reply_chat_id != chat_id) client.freeHistorySnapshot(a.allocator, originals);
+            for (originals) |*original| {
+                if (original.id == msg.reply_to) {
+                    message.quote.set(a.allocator, tgDisplayText(original));
+                    message.quote_sender.set(a.allocator, original.sender_name);
+                    break;
+                }
+            }
+        }
         message.mime_type.set(msg.mime);
         message.local_path.set(a.allocator, msg.local_path);
         message.tg_file_id = msg.file_id;
@@ -2531,7 +2566,6 @@ fn refreshTelegramMessages(a: *App) void {
             else => "",
         });
         if (msg.media_kind == .sticker and msg.animated_sticker) {
-            message.tg_file_id = 0;
             message.text.set(a.allocator, "[Animated sticker]");
         }
         if (msg.duration_ms > 0) {
@@ -3003,7 +3037,7 @@ fn removeTelegramAccount(a: *App) void {
     if (a.tg_login_window) |window| _ = win.DestroyWindow(window);
     a.tg_auth = .unknown;
     a.tg_chat_count = 0;
-    a.tg_chats = [_]TgChat{.{}} ** max_tg_chats;
+    @memset(a.tg_chats, .{});
     var removed = true;
     if (a.tg_data_dir.len > 0) {
         std.Io.Dir.cwd().deleteTree(a.io, a.tg_data_dir.slice()) catch {
@@ -3305,6 +3339,7 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         .avatar_dir = scratch[0..0],
     };
     defer app.allocator.free(app.chats);
+    defer app.allocator.free(app.tg_chats);
     defer app.people.deinit();
     defer if (app.chats_raw) |raw| allocator.free(raw);
     app_ptr = app;
@@ -9252,8 +9287,9 @@ fn deleteFileUtf8(path_utf8: []const u8) void {
 
 fn discardStagedImage(a: *App) void {
     const path = a.staged_image.path;
+    const owned = a.staged_image.owned;
     releaseStagedImage(a);
-    if (path.len > 0) deleteFileUtf8(path.slice());
+    if (owned and path.len > 0) deleteFileUtf8(path.slice());
     layout(a, a.compose_client_width, a.compose_client_height);
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
 }
@@ -9371,10 +9407,6 @@ fn stageImageFromClipboard(a: *App) bool {
     if (a.compose == null or a.wic_factory == null or a.chat_count == 0 or a.selected_chat >= a.chat_count) return false;
     if (win.IsClipboardFormatAvailable(win.CF_DIB) == 0 and win.IsClipboardFormatAvailable(win.CF_BITMAP) == 0 and win.IsClipboardFormatAvailable(win.CF_HDROP) == 0) return false;
     if (win.IsClipboardFormatAvailable(win.CF_UNICODETEXT) != 0 or win.IsClipboardFormatAvailable(win.CF_TEXT) != 0) return false;
-    if (selectedChatIsTelegram(a)) {
-        setStatus(a, "Sending pasted images is not available for Telegram chats");
-        return true;
-    }
     if (win.OpenClipboard(a.hwnd orelse null) == 0) return false;
     var path_buffer: [520]u8 = undefined;
     var path_len: usize = 0;
@@ -9438,6 +9470,10 @@ fn stageImageFromClipboard(a: *App) bool {
         const file_extension = std.fs.path.extension(name_len);
         for ([_][]const u8{ "png", "jpg", "jpeg" }) |ext| {
             if (file_extension.len == ext.len + 1 and std.ascii.eqlIgnoreCase(file_extension[1..], ext)) extension = ext;
+        }
+        if (selectedChatIsTelegram(a)) {
+            _ = stageTelegramFile(a, name_len);
+            return true;
         }
         if (extension.len == 0) {
             setStatus(a, "Only PNG and JPEG files can be pasted as images");
@@ -9507,6 +9543,23 @@ fn stageImageFromClipboard(a: *App) bool {
     layout(a, a.compose_client_width, a.compose_client_height);
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
     setStatus(a, "Image ready... Enter sends, Esc discards");
+    focusCompose(a);
+    return true;
+}
+
+fn stageTelegramFile(a: *App, path: []const u8) bool {
+    if (path.len > 519) {
+        setStatus(a, "The file path is too long");
+        return false;
+    }
+    discardStagedImage(a);
+    a.staged_image.path.set(path);
+    a.staged_image.owned = false;
+    a.staged_image.provider = .telegram;
+    a.staged_image.account = a.chats[a.selected_chat].account;
+    a.staged_image.jid = a.chats[a.selected_chat].jid;
+    layout(a, a.compose_client_width, a.compose_client_height);
+    setStatus(a, "File attached - Enter sends, Esc discards");
     focusCompose(a);
     return true;
 }
@@ -9712,16 +9765,20 @@ fn sendMessage(a: *App) void {
     }
 
     if (selectedChatIsTelegram(a)) {
-        if (tgSelectedChatIsGroup(a)) {
-            setStatus(a, "Telegram groups are read-only in this version");
-            return;
-        }
         const chat_id = tgSelectedChatId(a) orelse return;
         const client = a.telegram orelse return;
-        if (client.sendText(chat_id, text)) {
+        const reply_to = std.fmt.parseInt(i64, a.reply_to.slice(), 10) catch 0;
+        const sent = if (staged_file.len > 0)
+            client.sendFile(chat_id, staged_file, text, reply_to)
+        else
+            client.sendTextReply(chat_id, text, reply_to);
+        if (sent) {
+            releaseStagedImage(a);
+            clearReply(a);
             _ = win.SetWindowTextW(a.compose.?, lit(""));
+            layout(a, a.compose_client_width, a.compose_client_height);
             focusCompose(a);
-            setStatus(a, "Sent");
+            setStatus(a, "Sending...");
         } else setStatus(a, "Telegram refused the message");
         return;
     }
@@ -11968,11 +12025,11 @@ fn buildPaletteItems(a: *App) void {
     if (a.tg_auth == .ready) {
         appendPalette(a, "Log out of Telegram", "", command_telegram_logout);
     } else {
-        appendPalette(a, "Add Telegram account", "", command_telegram_login);
+        appendPalette(a, "Connect Telegram account", "", command_telegram_login);
     }
     appendPalette(a, "Open video in external player", "", command_open_video_external);
     appendPalette(a, "Open image in Windows viewer", "", command_open_image_external);
-    appendPalette(a, "Attach image to send", "", command_slack_attach);
+    appendPalette(a, "Attach photo or file", "", command_slack_attach);
     appendPalette(a, "Connect Slack workspace", "", command_slack_connect);
     appendPalette(a, "Slack sign-in settings", "", command_slack_setup);
     for (&a.slack_installations, 0..) |*installation, index| {
@@ -12318,7 +12375,7 @@ fn buildAccountsItems(a: *App) void {
     if (a.tg_auth == .ready) {
         appendPalette(a, "Log out of Telegram", "", command_telegram_logout);
     } else {
-        appendPalette(a, "Add Telegram account", "", command_telegram_login);
+        appendPalette(a, "Connect Telegram account", "", command_telegram_login);
     }
     if (a.telegram != null or a.tg_auth == .ready) {
         if (a.accounts_confirm_remove_tg) {
@@ -12952,8 +13009,16 @@ fn runCommand(a: *App, command: u16) void {
                 setStatus(a, "File upload not available over the Slack bridge");
                 return;
             }
+            if (selectedChatIsTelegram(a)) {
+                if (pickImageFile(a)) |path| {
+                    const utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, path.slice()) catch return;
+                    defer a.allocator.free(utf8);
+                    _ = stageTelegramFile(a, utf8);
+                }
+                return;
+            }
             if (!selectedChatIsSlack(a)) {
-                setStatus(a, "Open a Slack chat first");
+                setStatus(a, "Open a Slack or Telegram chat first");
                 return;
             }
             if (pickImageFile(a)) |path| {
@@ -16906,6 +16971,7 @@ pub fn main(init: std.process.Init) !void {
     defer init.gpa.destroy(app);
     app.* = .{ .allocator = init.gpa, .people = people_index.Index.init(init.gpa), .io = init.io, .instance = instance, .wacli_path = wacli_path, .avatar_dir = avatar_dir, .slack_media_dir = slack_media_dir, .deepgram_configured = deepgram_key.len > 0, .deepgram_key = deepgram_key, .openrouter_key = openrouter_key, .openrouter_model = openrouter_model, .openrouter_configured = openrouter_key.len > 0, .format_workspace = format_workspace, .dictation_language = loadDictationLanguage(), .font_scale = loadFontScale(), .chat_view = loadChatView() };
     defer app.allocator.free(app.chats);
+    defer app.allocator.free(app.tg_chats);
     defer app.people.deinit();
     defer if (app.status_list) |*list| list.deinit(init.gpa);
     defer app.status_viewed.deinit(init.gpa);
