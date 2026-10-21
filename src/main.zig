@@ -16155,8 +16155,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 a.paint_minute_ticks += 1;
                 if (a.paint_minute_ticks >= 60) {
                     a.paint_minute_ticks = 0;
-                    var paint_buffer: [64]u8 = undefined;
-                    appendLaunchLog(a, std.fmt.bufPrint(&paint_buffer, "paints: canvas={d} window={d} per min", .{ a.paints_canvas, a.paints_window }) catch "paints");
+                    var paint_log_buffer: [64]u8 = undefined;
+                    appendLaunchLog(a, std.fmt.bufPrint(&paint_log_buffer, "paints: canvas={d} window={d} per min", .{ a.paints_canvas, a.paints_window }) catch "paints");
                     a.paints_canvas = 0;
                     a.paints_window = 0;
                 }
