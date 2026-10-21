@@ -1,5 +1,23 @@
-$references = @([AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { -not $_.IsDynamic -and $_.Location } | ForEach-Object Location)
-Add-Type -Path "$PSScriptRoot/menus.cs" -ReferencedAssemblies $references
+Add-Type -Path "$PSScriptRoot/menus.cs"
+
+function Read-ScreenshotPixels([string]$Path) {
+    $image = [Drawing.Bitmap]::new($Path)
+    try {
+        $rect = [Drawing.Rectangle]::new(0, 0, $image.Width, $image.Height)
+        $bits = $image.LockBits($rect, [Drawing.Imaging.ImageLockMode]::ReadOnly, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        try {
+            Assert-That ($bits.Stride -gt 0) 'Screenshot must have top-down pixels'
+            $bytes = [byte[]]::new($bits.Stride * $image.Height)
+            [Runtime.InteropServices.Marshal]::Copy($bits.Scan0, $bytes, 0, $bytes.Length)
+            return @{ bytes = $bytes; width = $image.Width; height = $image.Height; stride = $bits.Stride }
+        } finally { $image.UnlockBits($bits) }
+    } finally { $image.Dispose() }
+}
+
+function Measure-Screenshot([string]$Path, $Rect, [int]$ScreenX, [int]$ScreenY, [int]$Inset) {
+    $image = Read-ScreenshotPixels $Path
+    [VerifyMenus]::Measure($image.bytes, $image.width, $image.height, $image.stride, $Rect, $ScreenX, $ScreenY, $Inset)
+}
 
 function Find-Popup($Session, [string]$Class) {
     [VerifyMenus]::Find($Session.pid, $Class)
@@ -22,7 +40,7 @@ function Click-Control($Session, [string]$Id, [bool]$Right = $false) {
 function Assert-PopupPixels($Session, [string]$Name, [IntPtr]$Handle, [bool]$Light = $false, [int]$Inset = 8) {
     $screen = [Windows.Forms.SystemInformation]::VirtualScreen
     $rect = [VerifyMenus]::Bounds($Handle)
-    $measurement = [VerifyMenus]::Measure((Join-Path $Session.evidence "$Name.png"), $rect, $screen.Left, $screen.Top, $Inset)
+    $measurement = Measure-Screenshot (Join-Path $Session.evidence "$Name.png") $rect $screen.Left $screen.Top $Inset
     $record = [ordered]@{
         screenshot = "$Name.png"; expected = $(if ($Light) { 'light' } else { 'dark' })
         handle = $Handle.ToInt64(); screen = @{ left = $screen.Left; top = $screen.Top }
@@ -38,7 +56,7 @@ function Capture-Popup($Session, [string]$Name, [string]$Class, [bool]$Light = $
     $null = Wait-Until {
         Save-Screen $Session "$Name-after"
         $screen = [Windows.Forms.SystemInformation]::VirtualScreen
-        $metric = [VerifyMenus]::Measure((Join-Path $Session.evidence "$Name-after.png"), [VerifyMenus]::Bounds($handle), $screen.Left, $screen.Top, 8)
+        $metric = Measure-Screenshot (Join-Path $Session.evidence "$Name-after.png") ([VerifyMenus]::Bounds($handle)) $screen.Left $screen.Top 8
         $metric.textPixels -ge 24
     } "$Name painted text"
     Assert-PopupPixels $Session "$Name-after" $handle $Light
@@ -59,7 +77,7 @@ function Open-PaletteCommand($Session, [string]$Command) {
 
 function Invoke-Menus($Session) {
     $script:menuMeasurements = @()
-    [VerifyMenus]::TestOracle($Session.evidence)
+    [VerifyMenus]::TestOracle()
     'PIXEL ORACLE PASSED: readable dark/light controls accepted; swapped themes and blank text rejected' | Set-Content (Join-Path $Session.evidence 'pixel-oracle-controls.txt')
     Assert-That ((Read-Control $Session status).theme -eq 'amoled') 'Menus must start in default AMOLED'
     $loaded = Read-Control $Session messages
@@ -87,7 +105,8 @@ function Invoke-Menus($Session) {
     $canvas = Get-Edit (Get-Window $Session) '1024'
     $canvasRect = [VerifyMenus]::Bounds([IntPtr]$canvas.Current.NativeWindowHandle)
     $screen = [Windows.Forms.SystemInformation]::VirtualScreen
-    $point = [VerifyMenus]::MessageText((Join-Path $Session.evidence 'amoled-message-before.png'), $canvasRect, $screen.Left, $screen.Top)
+    $image = Read-ScreenshotPixels (Join-Path $Session.evidence 'amoled-message-before.png')
+    $point = [VerifyMenus]::MessageText($image.bytes, $image.stride, $canvasRect, $screen.Left, $screen.Top)
     [VerifyMenus]::Click($Session.pid, $point.X, $point.Y, $true)
     Add-Content (Join-Path $Session.evidence 'actions.log') 'SendInput: right-click synthetic message text'
     $null = Capture-Popup $Session 'amoled-message' '#32768'
@@ -111,6 +130,14 @@ function Invoke-Menus($Session) {
     )) {
         Save-Screen $Session "amoled-$($entry.name)-before"
         if ($entry.command) { Open-PaletteCommand $Session $entry.command } else { Send-Keys $Session '^k' }
+        if ($entry.name -eq 'accounts') {
+            $null = Wait-Until {
+                $handle = Find-Popup $Session 'MessagesPalette'
+                if ($handle -eq [IntPtr]::Zero) { return $false }
+                $accountWindow = [Windows.Automation.AutomationElement]::FromHandle($handle)
+                (Read-Edit (Get-Edit $accountWindow '1064')) -eq ''
+            } 'accounts palette replaced command filter'
+        }
         if ($entry.name -eq 'emoji') {
             $null = Wait-Popup $Session $entry.class
             Send-Keys $Session 'heart'
@@ -120,7 +147,7 @@ function Invoke-Menus($Session) {
         $edits = $window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit'))
         foreach ($edit in $edits) {
             $rect = [VerifyMenus]::Bounds([IntPtr]$edit.Current.NativeWindowHandle)
-            $metric = [VerifyMenus]::Measure((Join-Path $Session.evidence "amoled-$($entry.name)-after.png"), $rect, $screen.Left, $screen.Top, 4)
+            $metric = Measure-Screenshot (Join-Path $Session.evidence "amoled-$($entry.name)-after.png") $rect $screen.Left $screen.Top 4
             $script:menuMeasurements += [ordered]@{ screenshot = "amoled-$($entry.name)-after.png"; expected = 'dark-edit'; automationId = $edit.Current.AutomationId; measurement = $metric }
             $script:menuMeasurements | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'menu-luminances.json')
             if ($entry.name -eq 'emoji') { [VerifyMenus]::Validate($metric, $false) }
