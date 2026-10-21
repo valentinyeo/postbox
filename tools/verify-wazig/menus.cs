@@ -47,7 +47,11 @@ public static class VerifyMenus {
     public static void Drag(int pid, int x, int y, int endX) {
         Mouse(pid, x, y, 2);
         try {
-            for (int next = x + 2; next <= endX; next += 2) Mouse(pid, next, y, 1);
+            System.Threading.Thread.Sleep(40);
+            for (int next = x + 2; next <= endX; next += 2) {
+                Mouse(pid, next, y, 0x2001);
+                System.Threading.Thread.Sleep(10);
+            }
         } finally { Mouse(pid, endX, y, 4); }
     }
     static double Linear(int value) {

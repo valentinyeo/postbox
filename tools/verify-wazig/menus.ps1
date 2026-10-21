@@ -113,8 +113,9 @@ function Invoke-Menus($Session) {
     Close-Popup $Session '#32768'
     Save-Screen $Session 'amoled-selection-before'
     [VerifyMenus]::Drag($Session.pid, $point.X, $point.Y, $point.X + 120)
+    Save-Screen $Session 'amoled-selection-dragged'
     [VerifyMenus]::Click($Session.pid, $point.X + 40, $point.Y, $true)
-    Add-Content (Join-Path $Session.evidence 'actions.log') 'SendInput: drag-select synthetic message text and right-click'
+    Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: drag-select synthetic message text and right-click x=$($point.X) y=$($point.Y) endX=$($point.X + 120)"
     $selection = Capture-Popup $Session 'amoled-selection' '#32768'
     $menu = [Windows.Automation.AutomationElement]::FromHandle($selection)
     Assert-That ($menu.Current.Name -ne $null) 'Selection menu is not readable by UI Automation'
