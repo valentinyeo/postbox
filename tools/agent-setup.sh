@@ -7,7 +7,7 @@ if [ ! -d "$private" ]; then
 fi
 mkdir -p "$root/.claude/hooks"
 if [ -d "$root/.claude/skills" ] && [ ! -L "$root/.claude/skills" ]; then
-  if ! git ls-files --error-unmatch .claude/skills/verify-wazig/SKILL.md >/dev/null 2>&1; then
+  if ! git -C "$root" ls-files --error-unmatch .claude/skills/verify-wazig/SKILL.md >/dev/null 2>&1; then
     echo "agent-setup: $root/.claude/skills is an untracked real folder; refusing to replace it." >&2
     exit 1
   fi

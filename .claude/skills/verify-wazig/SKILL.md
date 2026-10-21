@@ -36,7 +36,7 @@ This checks PID plus start time, absolute executable path and SHA-256, exact bui
 
 ## Drive
 
-Harness: **PowerShell UI Automation + SendKeys**. UI Automation resolves native controls by AutomationId and reads their values; keyboard input goes through Windows Forms `SendKeys.SendWait` after checking foreground-process ownership. No `WM_COMMAND`, internal state setter, control-client mutation or coordinate click replaces the user action. Palette rows and the message canvas are custom drawn; do not invent accessible row names. Filter the palette with its actual label and press Enter. Screenshots are the visual oracle for custom-drawn content.
+Harness: **PowerShell UI Automation + SendKeys**. UI Automation resolves native controls by AutomationId; bounded read-only `WM_GETTEXT` reads their text because these subclassed edits do not expose ValuePattern; keyboard input goes through Windows Forms `SendKeys.SendWait` after checking foreground-process ownership. No `WM_COMMAND`, text-setting window message, internal state setter, control-client mutation or coordinate click replaces the user action. Palette rows and the message canvas are custom drawn; do not invent accessible row names. Filter the palette with its actual label and press Enter. Screenshots are the visual oracle for custom-drawn content.
 
 Select one recipe via `feature=search|navigation|drafts|palette|appearance`. Each recipe starts from its own empty fixture profile. See the feature map for exact shortcuts, entry points, assertions and limitations. The helper logs every keyboard action and waits on resulting readable state rather than accepting a fixed delay as proof. Read-only `wazigctl status` supplements screenshots; it is not the driving harness.
 

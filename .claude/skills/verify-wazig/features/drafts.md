@@ -21,8 +21,8 @@ Preconditions: doctor passes; Alpha selected, both chats have empty drafts, comp
 
 - **Run:** dispatch `feature=drafts`; GitHub helper: `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature drafts`.
 - **Type:** `Send-Keys $session 'Verification draft'` into the focused composer after capturing `before.png`.
-- **Switch:** `Send-Keys $session '^{TAB}'`; read composer through ValuePattern and require empty text in Beta.
-- **Restore:** `Send-Keys $session '^+{TAB}'`; wait for ValuePattern text `Verification draft`. Capture `after.png` showing the draft in Alpha.
+- **Switch:** `Send-Keys $session '^{TAB}'`; read composer through bounded read-only `WM_GETTEXT` and require empty text in Beta.
+- **Restore:** `Send-Keys $session '^+{TAB}'`; wait for native edit text `Verification draft`. Capture `after.png` showing the draft in Alpha.
 - **Persistence:** wait for `Messages/drafts.json` containing the synthetic text; preserve it as `drafts.json` and in `final-data/`. Require zero pending sends and no provider store. The recipe proves disk save plus in-session restoration, not restoration after process restart.
 
 ## Gotchas

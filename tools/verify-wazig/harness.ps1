@@ -3,10 +3,13 @@ Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.For
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class VerifyWindow {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode)]
+    public static extern IntPtr ReadText(IntPtr window, uint message, UIntPtr capacity, StringBuilder text, uint flags, uint timeout, out UIntPtr length);
 }
 '@
 
@@ -72,8 +75,13 @@ function Get-Edit($Window, [string]$Id) {
 }
 
 function Read-Edit($Edit) {
-    $pattern = $Edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
-    return $pattern.Current.Value
+    $handle = [IntPtr]$Edit.Current.NativeWindowHandle
+    Assert-That ($handle -ne [IntPtr]::Zero -and $Edit.Current.ClassName -eq 'Edit') 'Expected a native edit control'
+    $text = [Text.StringBuilder]::new(65537)
+    $length = [UIntPtr]::Zero
+    $ok = [VerifyWindow]::ReadText($handle, 13, [UIntPtr]65537, $text, 2, 2000, [ref]$length)
+    Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only WM_GETTEXT timed out'
+    return $text.ToString()
 }
 
 function Send-Keys($Session, [string]$Keys) {
