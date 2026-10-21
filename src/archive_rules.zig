@@ -173,14 +173,40 @@ pub fn Selection(comptime capacity: usize) type {
         const Self = @This();
         jids: [capacity][max_jid]u8 = undefined,
         lens: [capacity]u8 = [_]u8{0} ** capacity,
+        providers: [capacity]u8 = @splat(0),
+        accounts: [capacity][32]u8 = undefined,
+        account_lens: [capacity]u8 = @splat(0),
         count: usize = 0,
 
         pub fn clear(self: *Self) void {
             self.count = 0;
         }
 
+        pub fn addKey(self: *Self, key: anytype) void {
+            if (key.id.len == 0 or key.id.len > max_jid or self.count >= capacity) return;
+            self.providers[self.count] = @intFromEnum(key.provider);
+            const account_len = @min(key.account.len, 32);
+            @memcpy(self.accounts[self.count][0..account_len], key.account[0..account_len]);
+            self.account_lens[self.count] = @intCast(account_len);
+            @memcpy(self.jids[self.count][0..key.id.len], key.id);
+            self.lens[self.count] = @intCast(key.id.len);
+            self.count += 1;
+        }
+
+        pub fn atKey(self: *const Self, comptime Key: type, index: usize) Key {
+            return .{ .provider = @enumFromInt(self.providers[index]), .account = self.accounts[index][0..self.account_lens[index]], .id = self.at(index) };
+        }
+
+        pub fn containsKey(self: *const Self, key: anytype) bool {
+            const Key = @TypeOf(key);
+            for (0..self.count) |index| if (Key.eql(self.atKey(Key, index), key)) return true;
+            return false;
+        }
+
         pub fn add(self: *Self, jid: []const u8) void {
             if (jid.len == 0 or jid.len > max_jid or self.count >= capacity) return;
+            self.providers[self.count] = 0;
+            self.account_lens[self.count] = 0;
             @memcpy(self.jids[self.count][0..jid.len], jid);
             self.lens[self.count] = @intCast(jid.len);
             self.count += 1;

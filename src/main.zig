@@ -185,6 +185,7 @@ const command_update_install = 2053;
 const command_emoji_diag = 2054;
 const command_open_image_external = 2055;
 const command_resend = 2056;
+const command_show_all = 2065;
 const command_show_whatsapp = 2057;
 const command_show_slack = 2058;
 const command_show_telegram = 2059;
@@ -265,6 +266,8 @@ const Chat = struct {
     unread_count: i64 = 0,
     unread: bool = false,
     provider_unread: bool = false,
+    slack_last_read: Utf8Text(40) = .{},
+    slack_user_id: Utf8Text(32) = .{},
     pinned: bool = false,
     archived: bool = false,
     provider: transport.Provider = .whatsapp,
@@ -420,7 +423,7 @@ const Message = struct {
     filename: WideText(259) = .{},
     media_size: u64 = 0,
     reaction_to: Utf8Text(191) = .{},
-    reaction: WideText(31) = .{},
+    reaction: WideText(1023) = .{},
     from_me: bool = false,
     revoked: bool = false,
     send_state: enum { none, pending, failed } = .none,
@@ -458,7 +461,7 @@ const PendingReaction = struct {
     msg_id: Utf8Text(191) = .{},
     sender: Utf8Text(191) = .{},
     emoji: Utf8Text(63) = .{},
-    previous: WideText(31) = .{},
+    previous: WideText(1023) = .{},
     retries: u8 = 0,
     retry_at_ms: u64 = 0,
 };
@@ -555,6 +558,25 @@ fn freeMediaSlot(a: *App) ?*MediaDownload {
 const SlackUser = struct {
     id: Utf8Text(32) = .{},
     name: Utf8Text(128) = .{},
+};
+
+const max_slack_installations = 8;
+const SlackInstallation = struct {
+    active: bool = false,
+    team_id: Utf8Text(32) = .{},
+    team_name: Utf8Text(159) = .{},
+    user_id: Utf8Text(32) = .{},
+    user_token: []u8 = &.{},
+    refresh_token: []u8 = &.{},
+    expires_at: i64 = 0,
+    is_bridge: bool = false,
+    media_dir: Utf8Text(519) = .{},
+    users: [512]SlackUser = @splat(.{}),
+    user_count: usize = 0,
+    chats: [max_chats]Chat = @splat(.{}),
+    chat_count: usize = 0,
+    workspace_pages: u32 = 0,
+    user_pages: u32 = 0,
 };
 
 const App = struct {
@@ -679,7 +701,7 @@ const App = struct {
     update_card_error_len: usize = 0,
     update_dismissed: [32]u8 = undefined,
     update_dismissed_len: usize = 0,
-    chats: [max_chats]Chat = [_]Chat{.{}} ** max_chats,
+    chats: []Chat = &.{},
     chat_count: usize = 0,
     telegram: ?*tg.Client = null,
     tg_chats: [max_tg_chats]TgChat = [_]TgChat{.{}} ** max_tg_chats,
@@ -747,7 +769,7 @@ const App = struct {
     read_retries: [max_pending_reads]u8 = [_]u8{0} ** max_pending_reads,
     pending_download_jid: Utf8Text(191) = .{},
     pending_download_id: Utf8Text(191) = .{},
-    pins: [max_pins]Utf8Text(191) = [_]Utf8Text(191){.{}} ** max_pins,
+    pins: [max_pins]chat_key.Stored = @splat(.{}),
     pin_count: usize = 0,
     pins_loaded: bool = false,
     send_child: ?std.process.Child = null,
@@ -871,23 +893,21 @@ const App = struct {
     slack_socket_thread: ?std.Thread = null,
     slack_log: slack.Log = .{},
     slack_log_mutex: std.Io.Mutex = .init,
-    slack_user_id: Utf8Text(32) = .{},
+    slack_installations: [max_slack_installations]SlackInstallation = @splat(.{}),
+    slack_install_mutex: std.Io.Mutex = .init,
+    slack_app_token: []u8 = &.{},
+    slack_mark_account: Utf8Text(32) = .{},
     slack_setup_window: ?win.HWND = null,
-    slack_chats: [max_chats]Chat = [_]Chat{.{}} ** max_chats,
-    slack_chat_count: usize = 0,
-    slack_workspace_pages: u32 = 0,
-    slack_user_pages: u32 = 0,
     slack_fail_log_ms: [wacli_kind_count]u64 = [_]u64{0} ** wacli_kind_count,
     slack_fail_log_hash: [wacli_kind_count]u64 = [_]u64{0} ** wacli_kind_count,
     slack_count_log_ms: u64 = 0,
     slack_count_log_hash: u64 = 0,
-    chat_view: transport.Provider = .whatsapp,
-    view_selected: [3]Utf8Text(191) = [_]Utf8Text(191){.{}} ** 3,
+    chat_view: messenger_view.View = .all,
+    view_selected: [4]chat_key.Stored = @splat(.{}),
     chat_view_switched: bool = false,
-    slack_users: [512]SlackUser = [_]SlackUser{.{}} ** 512,
-    slack_user_count: usize = 0,
     slack_attach: WideText(519) = .{},
     slack_attach_jid: Utf8Text(191) = .{},
+    slack_attach_account: Utf8Text(32) = .{},
     slack_media_dir: []u8 = &.{},
     messages_gen: u64 = 0,
     chats_gen: u64 = 0,
@@ -1205,12 +1225,13 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
 }
 
 fn loadRegistryString(allocator: std.mem.Allocator, name: [*:0]const u16) ?[]const u8 {
-    var wide: [1024]u16 = undefined;
-    var size: win.DWORD = @intCast(wide.len * 2);
-    const result = win.RegGetValueW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), name, win.RRF_RT_REG_SZ, null, &wide, &size);
-    if (result != win.ERROR_SUCCESS or size < 2) return null;
-    const char_count = (size - 1) / 2;
-    return std.unicode.utf16LeToUtf8Alloc(allocator, wide[0..char_count]) catch null;
+    var size: win.DWORD = 0;
+    if (win.RegGetValueW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), name, win.RRF_RT_REG_SZ, null, null, &size) != win.ERROR_SUCCESS or size < 2 or size > 64 * 1024) return null;
+    const wide = allocator.alloc(u16, (size + 1) / 2) catch return null;
+    defer allocator.free(wide);
+    if (win.RegGetValueW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), name, win.RRF_RT_REG_SZ, null, wide.ptr, &size) != win.ERROR_SUCCESS) return null;
+    const char_count = @min(wide.len, size / 2);
+    return std.unicode.utf16LeToUtf8Alloc(allocator, std.mem.trimEnd(u16, wide[0..char_count], &.{0})) catch null;
 }
 
 fn loadTheme() theme.Choice {
@@ -1236,17 +1257,14 @@ fn loadDictationLanguage() dictation.Language {
     return @enumFromInt(value);
 }
 
-fn isChatPinned(a: *const App, jid: []const u8) bool {
-    for (a.pins[0..a.pin_count]) |*pin| {
-        if (std.mem.eql(u8, pin.slice(), jid)) return true;
-    }
+fn isChatPinned(a: *const App, key: chat_key.Key) bool {
+    for (a.pins[0..a.pin_count]) |*pin| if (chat_key.Key.eql(pin.key(), key)) return true;
     return false;
 }
 
-fn addPin(a: *App, jid: []const u8) void {
-    if (jid.len == 0 or jid.len > 190 or a.pin_count >= a.pins.len) return;
-    if (isChatPinned(a, jid)) return;
-    a.pins[a.pin_count].set(jid);
+fn addPin(a: *App, key: chat_key.Key) void {
+    if (key.id.len == 0 or key.id.len > 190 or a.pin_count >= a.pins.len or isChatPinned(a, key)) return;
+    a.pins[a.pin_count].set(key);
     a.pin_count += 1;
 }
 
@@ -1254,28 +1272,33 @@ fn loadPins(a: *App) bool {
     const stored = loadRegistryString(a.allocator, lit("PinnedChats")) orelse return false;
     defer a.allocator.free(stored);
     var lines = std.mem.tokenizeScalar(u8, stored, '\n');
-    while (lines.next()) |jid| addPin(a, jid);
+    while (lines.next()) |line| {
+        var fields = std.mem.splitScalar(u8, line, '\t');
+        const first = fields.next() orelse continue;
+        if (std.meta.stringToEnum(transport.Provider, first)) |provider| {
+            const account = fields.next() orelse continue;
+            const id = fields.next() orelse continue;
+            addPin(a, .{ .provider = provider, .account = account, .id = id });
+        } else addPin(a, .{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = line });
+    }
     return true;
 }
 
 fn savePins(a: *App) bool {
-    var key: win.HKEY = null;
-    var disposition: win.DWORD = 0;
-    if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), 0, null, 0, win.KEY_SET_VALUE, null, &key, &disposition) != win.ERROR_SUCCESS) return false;
-    defer _ = win.RegCloseKey(key);
-    var wide: [max_pins * 200]u16 = undefined;
-    var len: usize = 0;
-    for (a.pins[0..a.pin_count]) |pin| {
-        if (len + pin.len + 2 > wide.len) break;
-        if (len > 0) {
-            wide[len] = '\n';
-            len += 1;
-        }
-        const written = std.unicode.utf8ToUtf16Le(wide[len..], pin.slice()) catch continue;
-        len += written;
+    var text = std.ArrayList(u8).empty;
+    defer text.deinit(a.allocator);
+    for (a.pins[0..a.pin_count]) |*pin| {
+        const key = pin.key();
+        const line = std.fmt.allocPrint(a.allocator, "{s}\t{s}\t{s}\n", .{ @tagName(key.provider), key.account, key.id }) catch return false;
+        defer a.allocator.free(line);
+        text.appendSlice(a.allocator, line) catch return false;
     }
-    wide[len] = 0;
-    return win.RegSetValueExW(key, lit("PinnedChats"), 0, win.REG_SZ, @ptrCast(&wide), @intCast((len + 1) * 2)) == win.ERROR_SUCCESS;
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, text.items) catch return false;
+    defer a.allocator.free(wide);
+    var key: win.HKEY = null;
+    if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), 0, null, 0, win.KEY_SET_VALUE, null, &key, null) != win.ERROR_SUCCESS) return false;
+    defer _ = win.RegCloseKey(key);
+    return win.RegSetValueExW(key, lit("PinnedChats"), 0, win.REG_SZ, @ptrCast(wide.ptr), @intCast((wide.len + 1) * 2)) == win.ERROR_SUCCESS;
 }
 
 fn togglePinSelected(a: *App) void {
@@ -1283,18 +1306,18 @@ fn togglePinSelected(a: *App) void {
         setStatus(a, "Select a chat to pin");
         return;
     }
-    const jid = a.chats[a.selected_chat].jid.slice();
-    if (isChatPinned(a, jid)) {
+    const key = chat_key.of(&a.chats[a.selected_chat]);
+    if (isChatPinned(a, key)) {
         var index: usize = 0;
         while (index < a.pin_count) : (index += 1) {
-            if (std.mem.eql(u8, a.pins[index].slice(), jid)) break;
+            if (chat_key.Key.eql(a.pins[index].key(), key)) break;
         }
         if (index < a.pin_count) {
             while (index + 1 < a.pin_count) : (index += 1) a.pins[index] = a.pins[index + 1];
             a.pin_count -= 1;
         }
         if (!savePins(a)) {
-            addPin(a, jid);
+            addPin(a, key);
             setStatus(a, "Could not save pin");
             return;
         }
@@ -1305,7 +1328,7 @@ fn togglePinSelected(a: *App) void {
             return;
         }
         const before = a.pin_count;
-        addPin(a, jid);
+        addPin(a, key);
         if (a.pin_count == before) return;
         if (!savePins(a)) {
             a.pin_count -= 1;
@@ -1314,7 +1337,7 @@ fn togglePinSelected(a: *App) void {
         }
         setStatus(a, "Chat pinned to top");
     }
-    refreshChats(a);
+    refreshVisibleChats(a);
 }
 
 fn saveDictationLanguage(language: dictation.Language) void {
@@ -1326,21 +1349,21 @@ fn saveDictationLanguage(language: dictation.Language) void {
     _ = win.RegSetValueExW(key, lit("DictationLanguage"), 0, win.REG_DWORD, @ptrCast(&value), @sizeOf(win.DWORD));
 }
 
-fn loadChatView() transport.Provider {
+fn loadChatView() messenger_view.View {
     var value: win.DWORD = 0;
     var size: win.DWORD = @sizeOf(win.DWORD);
-    const result = win.RegGetValueW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), lit("Messenger"), win.RRF_RT_REG_DWORD, null, &value, &size);
-    if (result != win.ERROR_SUCCESS or value > 2) return .whatsapp;
+    const result = win.RegGetValueW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), lit("InboxView"), win.RRF_RT_REG_DWORD, null, &value, &size);
+    if (result != win.ERROR_SUCCESS or value > 3) return .all;
     return @enumFromInt(value);
 }
 
-fn saveChatView(view: transport.Provider) void {
+fn saveChatView(view: messenger_view.View) void {
     var key: win.HKEY = null;
     var disposition: win.DWORD = 0;
     if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), 0, null, 0, win.KEY_SET_VALUE, null, &key, &disposition) != win.ERROR_SUCCESS) return;
     defer _ = win.RegCloseKey(key);
     const value: win.DWORD = @intFromEnum(view);
-    _ = win.RegSetValueExW(key, lit("Messenger"), 0, win.REG_DWORD, @ptrCast(&value), @sizeOf(win.DWORD));
+    _ = win.RegSetValueExW(key, lit("InboxView"), 0, win.REG_DWORD, @ptrCast(&value), @sizeOf(win.DWORD));
 }
 
 fn loadComposeDragged(hwnd: win.HWND) i32 {
@@ -1650,7 +1673,6 @@ fn retryWacliRefreshes(a: *App) void {
     refreshMessages(a);
     if (slackConfigured(a)) {
         refreshSlackWorkspace(a);
-        _ = wacliEnqueue(a, .{ .kind = .slack_auth }, false);
     }
     enqueueCacheTagProbe(a);
 }
@@ -1760,7 +1782,15 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
             };
             slack_win.last_status = 0;
             slack_win.last_error = [_]u8{0} ** 64;
-            if (slack_win.runJob(a.allocator, slackContext(a), kind, slack_args[0..slack_count])) |data| {
+            const context = slackContext(a, job.account.slice(), job.kind == .slack_auth and std.mem.eql(u8, job.extra.slice(), "bridge")) orelse {
+                result.extra.set("WorkspaceDisconnected");
+                wacliPost(a, result);
+                return;
+            };
+            defer a.allocator.free(context.user_token);
+            defer a.allocator.free(context.host);
+            defer a.allocator.free(context.media_dir);
+            if (slack_win.runJob(a.allocator, context, kind, slack_args[0..slack_count])) |data| {
                 result.data = data;
                 result.ok = true;
             } else |err| {
@@ -1937,7 +1967,7 @@ fn refreshContactsIndex(a: *App) void {
 }
 
 fn refreshPeopleSearch(a: *App) void {
-    if (activeChatView(a) != .whatsapp) return;
+    if (!messenger_view.includes(activeChatView(a), .whatsapp)) return;
     if (!a.show_archived) {
         if (a.search) |search| {
             if (win.GetWindowTextLengthW(search) > 0) {
@@ -1988,17 +2018,13 @@ fn applyGroups(a: *App, raw: []const u8) void {
 }
 
 fn refreshChats(a: *App) void {
-    const flags: u8 = (if (a.unread_only) @as(u8, 1) else 0) | (if (a.show_archived) @as(u8, 2) else 0);
+    const flags: u8 = if (a.show_archived) @as(u8, 2) else 0;
     if (wacliPendingGet(a, .chats) > 0 and a.chats_pending_flags == flags) return;
     var job = WacliJob{ .account = a.cache_tag, .kind = .chats };
     wacliJobArgs(&job, &.{
         a.wacli_path,                                           "--json", "--read-only", "chats", "list", "--limit", "250",
         if (a.show_archived) "--archived" else "--no-archived",
     });
-    if (a.unread_only) {
-        job.args[job.arg_count].set("--unread");
-        job.arg_count += 1;
-    }
     a.chats_gen += 1;
     job.gen = a.chats_gen;
     _ = wacliEnqueue(a, job, wacliPendingGet(a, .chats) > 0);
@@ -2032,30 +2058,34 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         else => return false,
     };
     if (fresh) observeBackgroundMediaChats(a, data.items);
-    if (!a.pins_loaded and data.items.len > 0) {
-        a.pins_loaded = true;
-        if (!loadPins(a)) {
+    if (!a.pins_loaded) {
+        if (loadPins(a)) {
+            a.pins_loaded = true;
+        } else if (data.items.len > 0) {
+            a.pins_loaded = true;
             for (data.items) |item| {
                 const object = switch (item) {
                     .object => |o| o,
                     else => continue,
                 };
-                if (getBool(object, "pinned")) addPin(a, getString(object, "jid"));
+                if (getBool(object, "pinned")) addPin(a, .{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = getString(object, "jid") });
             }
             _ = savePins(a);
         }
     }
     const view = activeChatView(a);
+    var needed = data.items.len + a.tg_chat_count + max_chats;
+    for (&a.slack_installations) |*installation| if (installation.active) {
+        needed += installation.chat_count;
+    };
+    if (a.chats.len < needed) a.chats = a.allocator.realloc(a.chats, needed) catch return false;
+    var selected_key = a.view_selected[@intFromEnum(view)];
+    if (!a.chat_view_switched and a.selected_chat < a.chat_count) selected_key.set(chat_key.of(&a.chats[a.selected_chat]));
+    var anchor_key = chat_key.Stored{};
     var selected_jid: [192]u8 = [_]u8{0} ** 192;
     var selected_len: usize = 0;
-    if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == view) {
-        selected_len = a.chats[a.selected_chat].jid.len;
-        @memcpy(selected_jid[0..selected_len], a.chats[a.selected_chat].jid.slice());
-    } else {
-        const remembered = &a.view_selected[@intFromEnum(view)];
-        selected_len = remembered.len;
-        @memcpy(selected_jid[0..selected_len], remembered.slice());
-    }
+    selected_len = selected_key.id_len;
+    @memcpy(selected_jid[0..selected_len], selected_key.key().id);
 
     var anchor_jid: [192]u8 = [_]u8{0} ** 192;
     var anchor_len: usize = 0;
@@ -2066,6 +2096,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         const current_top = win.SendMessageW(list, win.LB_GETTOPINDEX, 0, 0);
         if (current_top >= 0 and @as(usize, @intCast(current_top)) < a.chat_count) {
             const top_chat = &a.chats[@intCast(current_top)];
+            anchor_key.set(chat_key.of(top_chat));
             if (top_chat.jid.len <= anchor_jid.len) {
                 top_index = @intCast(current_top);
                 anchor_len = top_chat.jid.len;
@@ -2076,8 +2107,8 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     a.chat_count = 0;
     a.last_refresh_unix = nowUnixSeconds();
     for (data.items) |item| {
-        if (view != .whatsapp) break;
-        if (a.chat_count >= max_chats) break;
+        if (!messenger_view.includes(view, .whatsapp)) break;
+        if (a.chat_count >= a.chats.len) break;
         const object = switch (item) {
             .object => |o| o,
             else => continue,
@@ -2107,20 +2138,19 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         a.chats[a.chat_count] = chat;
         a.chat_count += 1;
     }
-    if (!a.show_archived) switch (view) {
-        .whatsapp => {},
-        .telegram => appendTelegramChats(a, query_utf8),
-        .slack => appendSlackChats(a, query_utf8),
-    };
+    if (!a.show_archived) {
+        if (messenger_view.includes(view, .slack)) appendSlackChats(a, query_utf8);
+        if (messenger_view.includes(view, .telegram)) appendTelegramChats(a, query_utf8);
+    }
     var i: usize = 1;
     while (i < a.chat_count) : (i += 1) {
         var j = i;
         while (j > 0) : (j -= 1) {
             const by_time = std.mem.order(u8, a.chats[j - 1].timestamp.slice(), a.chats[j].timestamp.slice());
-            const jid_order = std.mem.order(u8, a.chats[j - 1].jid.slice(), a.chats[j].jid.slice());
+            const jid_order = chat_key.order(chat_key.of(&a.chats[j - 1]), chat_key.of(&a.chats[j]));
             const should_move = chat_order.shouldMoveUp(
-                isChatPinned(a, a.chats[j - 1].jid.slice()),
-                isChatPinned(a, a.chats[j].jid.slice()),
+                isChatPinned(a, chat_key.of(&a.chats[j - 1])),
+                isChatPinned(a, chat_key.of(&a.chats[j])),
                 by_time,
                 jid_order,
             );
@@ -2130,12 +2160,18 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
             a.chats[j] = temporary;
         }
     }
-    if (view == .whatsapp and !a.show_archived) {
+    if (messenger_view.includes(view, .whatsapp) and !a.show_archived and !a.unread_only) {
         if (query_utf8) |query| {
-            var exclude: [max_chats][]const u8 = undefined;
-            for (a.chats[0..a.chat_count], 0..) |*chat, index| exclude[index] = chat.jid.slice();
+            const exclude = a.allocator.alloc([]const u8, a.chat_count) catch return false;
+            defer a.allocator.free(exclude);
+            var exclude_count: usize = 0;
+            for (a.chats[0..a.chat_count]) |*chat| {
+                if (chat.provider != .whatsapp) continue;
+                exclude[exclude_count] = chat.jid.slice();
+                exclude_count += 1;
+            }
             var matches: [max_chats]people_index.Entry = undefined;
-            const count = a.people.search(query, exclude[0..a.chat_count], &matches, max_chats - a.chat_count);
+            const count = a.people.search(query, exclude[0..exclude_count], &matches, @min(max_chats, a.chats.len - a.chat_count));
             for (matches[0..count]) |entry| {
                 if (pendingArchiveHidesChat(a, entry.jid, entry.origin == .archived)) continue;
                 a.chats[a.chat_count] = peopleChat(a, entry);
@@ -2144,7 +2180,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         }
     }
     if (a.people_open_jid.len > 0) {
-        if (view != .whatsapp or a.show_archived or query_len > 0 or
+        if (!messenger_view.includes(view, .whatsapp) or selected_key.provider != .whatsapp or a.show_archived or query_len > 0 or
             !std.mem.eql(u8, selected_jid[0..selected_len], a.people_open_jid.slice()))
         {
             a.people_open_jid.set("");
@@ -2153,7 +2189,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
             for (a.chats[0..a.chat_count]) |*chat| {
                 if (std.mem.eql(u8, chat.jid.slice(), a.people_open_jid.slice())) shown = true;
             }
-            if (!shown and a.chat_count < max_chats) {
+            if (!shown and a.chat_count < a.chats.len) {
                 if (a.people.find(a.people_open_jid.slice())) |entry| {
                     a.chats[a.chat_count] = peopleChat(a, entry);
                     a.chat_count += 1;
@@ -2169,19 +2205,19 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     a.selected_chat = 0;
     if (selected_len > 0) {
         for (a.chats[0..a.chat_count], 0..) |chat, index| {
-            if (std.mem.eql(u8, selected_jid[0..selected_len], chat.jid.slice())) {
+            if (chat_key.Key.eql(selected_key.key(), chat_key.of(&chat))) {
                 a.selected_chat = index;
                 break;
             }
         }
     }
-    if (view == .slack and (a.selected_chat >= a.chat_count or
-        !std.mem.eql(u8, selected_jid[0..selected_len], a.chats[a.selected_chat].jid.slice())))
+    if (a.selected_chat >= a.chat_count or
+        !chat_key.Key.eql(selected_key.key(), chat_key.of(&a.chats[a.selected_chat])))
     {
         a.user_viewed = false;
         cancelSlackMark(a);
     }
-    if (a.selected_chat < a.chat_count) a.view_selected[@intFromEnum(view)].set(a.chats[a.selected_chat].jid.slice());
+    if (a.selected_chat < a.chat_count) a.view_selected[@intFromEnum(view)].set(chat_key.of(&a.chats[a.selected_chat]));
     updateSearchCue(a, view);
     if (a.chats_hwnd) |list| {
         _ = win.SendMessageW(list, win.WM_SETREDRAW, 0, 0);
@@ -2192,7 +2228,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         if (a.chat_count > 0) {
             var restore_top = top_index;
             for (a.chats[0..a.chat_count], 0..) |*chat, index| {
-                if (anchor_len > 0 and std.mem.eql(u8, anchor_jid[0..anchor_len], chat.jid.slice())) {
+                if (anchor_len > 0 and chat_key.Key.eql(anchor_key.key(), chat_key.of(chat))) {
                     restore_top = @intCast(index);
                     break;
                 }
@@ -2305,13 +2341,9 @@ fn upsertTgChat(a: *App, info: *tg.ChatInfo) void {
 fn appendTelegramChats(a: *App, query_utf8: ?[]const u8) void {
     if (a.telegram == null or a.tg_auth != .ready) return;
     for (a.tg_chats[0..a.tg_chat_count]) |cached| {
-        if (a.chat_count >= max_chats) break;
+        if (a.chat_count >= a.chats.len) break;
         const name_bytes = std.unicode.utf16LeToUtf8Alloc(a.allocator, cached.name.slice()) catch continue;
         defer a.allocator.free(name_bytes);
-        if (query_utf8) |query| {
-            if (!containsIgnoreCase(name_bytes, query) and
-                !containsIgnoreCase(cached.timestamp.slice(), query)) continue;
-        }
         var chat = Chat{};
         var id_buffer: [24]u8 = undefined;
         chat.jid.set(tgChatIdString(&id_buffer, cached.id));
@@ -2322,8 +2354,8 @@ fn appendTelegramChats(a: *App, query_utf8: ?[]const u8) void {
         chat.unread_count = cached.unread_count;
         chat.provider = .telegram;
         chat.account.set("");
-        a.chats[a.chat_count] = chat;
-        a.chat_count += 1;
+        if (!messenger_view.matches(activeChatView(a), .telegram, a.unread_only, chat.unread, query_utf8 orelse "", name_bytes, chat.jid.slice())) continue;
+        messenger_view.merge(Chat, a.chats, &a.chat_count, &.{chat});
     }
 }
 
@@ -2358,7 +2390,7 @@ fn drainTelegram(a: *App) void {
                         a.tg_login = .none;
                         if (a.tg_login_window) |window| _ = win.DestroyWindow(window);
                         a.tg_chat_count = 0;
-                        refreshChats(a);
+                        refreshVisibleChats(a);
                         setStatus(a, "Telegram disconnected");
                     },
                     else => {},
@@ -2406,7 +2438,7 @@ fn drainTelegram(a: *App) void {
     }
     if (a.tg_dirty and !a.show_archived) {
         a.tg_dirty = false;
-        refreshChats(a);
+        refreshVisibleChats(a);
     } else a.tg_dirty = false;
 }
 
@@ -2915,7 +2947,8 @@ fn removeTelegramAccount(a: *App) void {
             removed = false;
         };
     }
-    refreshChats(a);
+    refreshVisibleChats(a);
+    if (!messagesAreCurrent(a)) refreshMessages(a);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
     setStatus(a, if (removed) "Telegram removed from this PC" else "Telegram signed out, but its files could not be deleted");
 }
@@ -3206,6 +3239,7 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         .wacli_path = scratch[0..0],
         .avatar_dir = scratch[0..0],
     };
+    defer app.allocator.free(app.chats);
     defer app.people.deinit();
     defer if (app.chats_raw) |raw| allocator.free(raw);
     app_ptr = &app;
@@ -3324,34 +3358,84 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     return if (failures == 0) 0 else 1;
 }
 
+fn slackInstallation(a: *App, account: []const u8) ?*SlackInstallation {
+    for (&a.slack_installations) |*installation| {
+        if (installation.active and std.mem.eql(u8, installation.team_id.slice(), account)) return installation;
+    }
+    return null;
+}
+
+fn slackChatCount(a: *App) usize {
+    var count: usize = 0;
+    for (&a.slack_installations) |*installation| if (installation.active) {
+        count += installation.chat_count;
+    };
+    return count;
+}
+
+fn slackWorkspaceCount(a: *App) usize {
+    var count: usize = 0;
+    for (&a.slack_installations) |*installation| if (installation.active) {
+        count += 1;
+    };
+    return count;
+}
+
+fn slackAccountConfigured(a: *App, account: []const u8) bool {
+    return slackInstallation(a, account) != null;
+}
+
+fn slackAccountIsBridge(a: *App, account: []const u8) bool {
+    const installation = slackInstallation(a, account) orelse return false;
+    return installation.is_bridge;
+}
+
 fn slackConfigured(a: *App) bool {
+    for (&a.slack_installations) |*installation| if (installation.active) return true;
     return a.slack_tokens != null or a.slack_bridge != null;
 }
 
-fn slackContext(a: *App) slack_win.JobContext {
-    if (a.slack_bridge) |bridge| return .{ .user_token = bridge.key, .host = bridge.host, .is_bridge = true, .media_dir = a.slack_media_dir, .io = a.io };
-    return .{ .user_token = if (a.slack_tokens) |t| t.user else "", .host = "slack.com", .is_bridge = false, .media_dir = a.slack_media_dir, .io = a.io };
+fn slackContext(a: *App, account: []const u8, legacy_bridge: bool) ?slack_win.JobContext {
+    a.slack_install_mutex.lockUncancelable(a.io);
+    defer a.slack_install_mutex.unlock(a.io);
+    const installation = slackInstallation(a, account);
+    const bridge = if (installation) |install| install.is_bridge else legacy_bridge and a.slack_bridge != null and account.len == 0;
+    const token = if (bridge) (if (a.slack_bridge) |config| config.key else return null) else if (installation) |install| install.user_token else if (account.len == 0 and a.slack_tokens != null) a.slack_tokens.?.user else return null;
+    const host = if (bridge) a.slack_bridge.?.host else "slack.com";
+    const media_dir = if (installation) |install| install.media_dir.slice() else a.slack_media_dir;
+    const owned_token = a.allocator.dupe(u8, token) catch return null;
+    const owned_host = a.allocator.dupe(u8, host) catch {
+        a.allocator.free(owned_token);
+        return null;
+    };
+    const owned_dir = a.allocator.dupe(u8, media_dir) catch {
+        a.allocator.free(owned_token);
+        a.allocator.free(owned_host);
+        return null;
+    };
+    return .{ .user_token = owned_token, .host = owned_host, .is_bridge = bridge, .media_dir = owned_dir, .io = a.io };
 }
 
-fn slackUserName(a: *App, user_id: []const u8) ?[]const u8 {
-    for (a.slack_users[0..a.slack_user_count]) |*user| {
+fn slackUserName(installation: *SlackInstallation, user_id: []const u8) ?[]const u8 {
+    for (installation.users[0..installation.user_count]) |*user| {
         if (std.mem.eql(u8, user.id.slice(), user_id)) return user.name.slice();
     }
     return null;
 }
 
 fn slackUserLookupFn(context: *anyopaque, user_id: []const u8) ?[]const u8 {
-    const a: *App = @ptrCast(@alignCast(context));
-    return slackUserName(a, user_id);
+    const installation: *SlackInstallation = @ptrCast(@alignCast(context));
+    return slackUserName(installation, user_id);
 }
 
-fn slackUserLookup(a: *App) slack.UserLookup {
-    return .{ .context = a, .lookupFn = slackUserLookupFn };
+fn slackUserLookup(installation: *SlackInstallation) slack.UserLookup {
+    return .{ .context = installation, .lookupFn = slackUserLookupFn };
 }
 
-fn slackChatById(a: *App, channel_id: []const u8) ?*Chat {
-    const index = chat_key.indexOf(Chat, a.slack_chats[0..a.slack_chat_count], .{ .provider = .slack, .account = "", .id = channel_id }) orelse return null;
-    return &a.slack_chats[index];
+fn slackChatById(a: *App, account: []const u8, channel_id: []const u8) ?*Chat {
+    const installation = slackInstallation(a, account) orelse return null;
+    const index = chat_key.indexOf(Chat, installation.chats[0..installation.chat_count], .{ .provider = .slack, .account = account, .id = channel_id }) orelse return null;
+    return &installation.chats[index];
 }
 
 fn selectedChatIsSlack(a: *App) bool {
@@ -3375,10 +3459,10 @@ fn raiseSlackTimestamp(chat: *Chat, seconds: i64) bool {
     return true;
 }
 
-fn noteSlackActivity(a: *App, channel: []const u8, seconds: i64) void {
-    if (slackChatById(a, channel)) |cached| _ = raiseSlackTimestamp(cached, seconds);
+fn noteSlackActivity(a: *App, account: []const u8, channel: []const u8, seconds: i64) void {
+    if (slackChatById(a, account, channel)) |cached| _ = raiseSlackTimestamp(cached, seconds);
     for (a.chats[0..a.chat_count]) |*chat| {
-        if (chat.provider != .slack or !std.mem.eql(u8, chat.jid.slice(), channel)) continue;
+        if (!chat_key.Key.eql(chat_key.of(chat), .{ .provider = .slack, .account = account, .id = channel })) continue;
         const was_displayed = chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat)) and
             std.mem.eql(u8, a.displayed_timestamp.slice(), chat.timestamp.slice());
         if (raiseSlackTimestamp(chat, seconds) and was_displayed) a.displayed_timestamp.set(chat.timestamp.slice());
@@ -3390,11 +3474,11 @@ fn telegramReady(a: *App) bool {
     return a.telegram != null and a.tg_auth == .ready;
 }
 
-fn activeChatView(a: *App) transport.Provider {
+fn activeChatView(a: *App) messenger_view.View {
     return messenger_view.effective(a.chat_view, slackConfigured(a), telegramReady(a));
 }
 
-fn updateSearchCue(a: *App, view: transport.Provider) void {
+fn updateSearchCue(a: *App, view: messenger_view.View) void {
     const search = a.search orelse return;
     var buffer: [64]u8 = undefined;
     const text = std.fmt.bufPrint(&buffer, "Search {s}  Ctrl+F", .{messenger_view.label(view)}) catch return;
@@ -3412,26 +3496,22 @@ fn clearSearch(a: *App) bool {
 }
 
 fn refreshVisibleChats(a: *App) void {
-    if (activeChatView(a) == .whatsapp) return refreshChats(a);
-    _ = applyChats(a, "{\"data\":[]}", false);
+    _ = applyChats(a, a.chats_raw orelse "{\"data\":[]}", false);
 }
 
 fn refilterChats(a: *App) void {
-    if (activeChatView(a) != .whatsapp) {
-        _ = applyChats(a, "{\"data\":[]}", false);
-        return;
-    }
-    const flags: u8 = (if (a.unread_only) @as(u8, 1) else 0) | (if (a.show_archived) @as(u8, 2) else 0);
+    const flags: u8 = if (a.show_archived) @as(u8, 2) else 0;
     if (a.chats_raw) |raw| {
         if (a.chats_raw_flags == flags) {
             _ = applyChats(a, raw, false);
             return;
         }
     }
+    refreshVisibleChats(a);
     refreshChats(a);
 }
 
-fn switchChatView(a: *App, view: transport.Provider) void {
+fn switchChatView(a: *App, view: messenger_view.View) void {
     if (a.status_ui.mode != .closed) closeStatuses(a);
     _ = clearBulkSelection(a);
     const current = activeChatView(a);
@@ -3439,8 +3519,8 @@ fn switchChatView(a: *App, view: transport.Provider) void {
         setStatus(a, if (view == .slack) "Slack is not set up" else "Telegram is not signed in");
         return;
     }
-    if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == current) {
-        a.view_selected[@intFromEnum(current)].set(a.chats[a.selected_chat].jid.slice());
+    if (a.selected_chat < a.chat_count and messenger_view.includes(current, a.chats[a.selected_chat].provider)) {
+        a.view_selected[@intFromEnum(current)].set(chat_key.of(&a.chats[a.selected_chat]));
     }
     a.chat_view = view;
     layout(a, a.compose_client_width, a.compose_client_height);
@@ -3449,32 +3529,27 @@ fn switchChatView(a: *App, view: transport.Provider) void {
     a.chat_view_switched = true;
     clearReply(a);
     discardStagedImage(a);
-    if (view == .whatsapp) {
-        _ = applyChats(a, "{\"data\":[]}", false);
-        loadChatsCache(a);
-        refreshChats(a);
-    } else refreshVisibleChats(a);
+    refreshVisibleChats(a);
+    if (messenger_view.includes(view, .whatsapp)) refreshChats(a);
     refreshMessages(a);
     var buffer: [48]u8 = undefined;
     setStatus(a, std.fmt.bufPrint(&buffer, "Showing {s}", .{messenger_view.label(view)}) catch "");
 }
 
 fn appendSlackChats(a: *App, query_utf8: ?[]const u8) void {
-    if (!slackConfigured(a)) return;
-    for (a.slack_chats[0..a.slack_chat_count]) |cached| {
-        if (a.chat_count >= max_chats) break;
-        if (a.unread_only and !cached.unread) continue;
-        if (query_utf8) |query| {
-            const name_bytes = std.unicode.utf16LeToUtf8Alloc(a.allocator, cached.name.slice()) catch continue;
-            defer a.allocator.free(name_bytes);
-            if (!containsIgnoreCase(name_bytes, query) and !containsIgnoreCase(cached.jid.slice(), query)) continue;
+    for (&a.slack_installations) |*installation| {
+        if (!installation.active) continue;
+        for (installation.chats[0..installation.chat_count]) |*cached| {
+            const name = std.unicode.utf16LeToUtf8Alloc(a.allocator, cached.name.slice()) catch continue;
+            defer a.allocator.free(name);
+            if (!messenger_view.matches(activeChatView(a), .slack, a.unread_only, cached.unread, query_utf8 orelse "", name, cached.jid.slice())) continue;
+            messenger_view.merge(Chat, a.chats, &a.chat_count, &.{cached.*});
         }
-        a.chats[a.chat_count] = cached;
-        a.chat_count += 1;
     }
 }
 
-fn applySlackWorkspace(a: *App, raw: []const u8) bool {
+fn applySlackWorkspace(a: *App, account: []const u8, raw: []const u8) bool {
+    const installation = slackInstallation(a, account) orelse return false;
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return false;
     defer parsed.deinit();
     const root = switch (parsed.value) {
@@ -3494,40 +3569,53 @@ fn applySlackWorkspace(a: *App, raw: []const u8) bool {
         const id = channel.id;
         const is_im = channel.is_im;
         var name: []const u8 = channel.name;
-        if (is_im) name = slackUserName(a, channel.user) orelse channel.user;
+        if (is_im) name = slackUserName(installation, channel.user) orelse channel.user;
         if (name.len == 0) continue;
         var chat = Chat{ .provider = .slack };
+        chat.account.set(account);
+        chat.slack_user_id.set(channel.user);
+        chat.slack_last_read.set(channel.last_read);
+        chat.unread_count = channel.unread_count orelse 0;
+        chat.unread = chat.unread_count > 0;
         chat.jid.set(id);
         const hash_prefix = id[0] == 'C' or id[0] == 'G';
         const shown = if (hash_prefix) std.fmt.allocPrint(a.allocator, "#{s}", .{name}) catch a.allocator.dupe(u8, name) catch continue else a.allocator.dupe(u8, name) catch continue;
         defer a.allocator.free(shown);
         const seconds = channel.seconds;
-        if (slackChatById(a, id)) |existing| {
+        if (slackChatById(a, account, id)) |existing| {
             existing.name.set(a.allocator, shown);
             _ = raiseSlackTimestamp(existing, seconds);
+            if (channel.unread_count) |unread| {
+                if (existing.slack_last_read.len == 0 or slack.compareTs(channel.last_read, existing.slack_last_read.slice()) != .lt) {
+                    existing.unread_count = unread;
+                    existing.unread = unread > 0;
+                    existing.slack_last_read.set(channel.last_read);
+                }
+            }
             continue;
         }
         chat.name.set(a.allocator, shown);
         chat.kind.set(a.allocator, if (is_im) "Slack DM" else "Slack channel");
         _ = raiseSlackTimestamp(&chat, seconds);
-        if (a.slack_chat_count >= a.slack_chats.len) break;
-        a.slack_chats[a.slack_chat_count] = chat;
-        a.slack_chat_count += 1;
+        if (installation.chat_count >= installation.chats.len) break;
+        installation.chats[installation.chat_count] = chat;
+        installation.chat_count += 1;
     }
-    a.slack_workspace_pages += 1;
+    installation.workspace_pages += 1;
     const cursor = slack.nextCursor(root);
-    if (slack.wantsNextPage(cursor, a.slack_workspace_pages, wacli_arg_cap)) {
+    if (slack.wantsNextPage(cursor, installation.workspace_pages, wacli_arg_cap)) {
         var job = WacliJob{ .provider = .slack, .kind = .slack_workspace };
+        job.account.set(account);
         wacliJobArgs(&job, &.{ slack_workspace_types, cursor });
         _ = wacliEnqueue(a, job, false);
         return true;
     }
     const now = win.GetTickCount64();
-    if (slack.logDue(a.slack_count_log_ms, a.slack_count_log_hash, now, a.slack_chat_count)) {
+    if (slack.logDue(a.slack_count_log_ms, a.slack_count_log_hash, now, installation.chat_count)) {
         a.slack_count_log_ms = now;
-        a.slack_count_log_hash = a.slack_chat_count;
+        a.slack_count_log_hash = installation.chat_count;
         var buffer: [96]u8 = undefined;
-        appendLaunchLog(a, std.fmt.bufPrint(&buffer, "slack: workspace loaded, {d} chats in {d} pages", .{ a.slack_chat_count, a.slack_workspace_pages }) catch "slack: workspace loaded");
+        appendLaunchLog(a, std.fmt.bufPrint(&buffer, "slack: workspace loaded, {d} chats in {d} pages", .{ installation.chat_count, installation.workspace_pages }) catch "slack: workspace loaded");
     }
     return true;
 }
@@ -3545,7 +3633,8 @@ fn logSlackFailure(a: *App, kind: WacliJobKind, error_name: []const u8, http_sta
     appendLaunchLog(a, slack.formatJobFailure(&buffer, name, if (error_name.len > 0) error_name else "Unknown", http_status));
 }
 
-fn applySlackUsers(a: *App, raw: []const u8) bool {
+fn applySlackUsers(a: *App, account: []const u8, raw: []const u8) bool {
+    const installation = slackInstallation(a, account) orelse return false;
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return false;
     defer parsed.deinit();
     const root = switch (parsed.value) {
@@ -3573,23 +3662,29 @@ fn applySlackUsers(a: *App, raw: []const u8) bool {
             if (name.len == 0) name = getString(profile, "real_name");
         }
         var known = false;
-        for (a.slack_users[0..a.slack_user_count]) |*user| {
+        for (installation.users[0..installation.user_count]) |*user| {
             if (std.mem.eql(u8, user.id.slice(), id)) {
                 if (name.len > 0) user.name.set(name);
                 known = true;
             }
         }
-        if (known or a.slack_user_count >= a.slack_users.len) continue;
+        if (known or installation.user_count >= installation.users.len) continue;
         var user = SlackUser{};
         user.id.set(id);
         user.name.set(name);
-        a.slack_users[a.slack_user_count] = user;
-        a.slack_user_count += 1;
+        installation.users[installation.user_count] = user;
+        installation.user_count += 1;
     }
-    a.slack_user_pages += 1;
+    for (installation.chats[0..installation.chat_count]) |*chat| {
+        if (chat.slack_user_id.len > 0) {
+            if (slackUserName(installation, chat.slack_user_id.slice())) |name| chat.name.set(a.allocator, name);
+        }
+    }
+    installation.user_pages += 1;
     const cursor = slack.nextCursor(root);
-    if (slack.wantsNextPage(cursor, a.slack_user_pages, wacli_arg_cap)) {
+    if (slack.wantsNextPage(cursor, installation.user_pages, wacli_arg_cap)) {
         var job = WacliJob{ .provider = .slack, .kind = .slack_users };
+        job.account.set(account);
         wacliJobArgs(&job, &.{cursor});
         _ = wacliEnqueue(a, job, false);
     }
@@ -3598,17 +3693,21 @@ fn applySlackUsers(a: *App, raw: []const u8) bool {
 
 const slack_workspace_types = "public_channel,private_channel,mpim,im";
 
-fn refreshSlackWorkspace(a: *App) void {
-    if (!slackConfigured(a)) return;
-    a.slack_workspace_pages = 0;
+fn refreshSlackInstallation(a: *App, installation: *SlackInstallation) void {
+    installation.workspace_pages = 0;
     var job = WacliJob{ .provider = .slack, .kind = .slack_workspace };
+    job.account = installation.team_id;
     wacliJobArgs(&job, &.{ slack_workspace_types, "" });
     _ = wacliEnqueue(a, job, false);
-    if (wacliPendingGet(a, .slack_users) != 0) return;
-    a.slack_user_pages = 0;
+    installation.user_pages = 0;
     var users_job = WacliJob{ .provider = .slack, .kind = .slack_users };
+    users_job.account = installation.team_id;
     wacliJobArgs(&users_job, &.{""});
     _ = wacliEnqueue(a, users_job, false);
+}
+
+fn refreshSlackWorkspace(a: *App) void {
+    for (&a.slack_installations) |*installation| if (installation.active) refreshSlackInstallation(a, installation);
 }
 
 fn refreshSlackHistory(a: *App) void {
@@ -3627,7 +3726,10 @@ fn pollSlackBridge(a: *App) void {
     if (a.slack_bridge == null) return;
     if (a.hwnd) |hwnd| if (win.IsIconic(hwnd) != 0) return;
     a.slack_poll_ticks += 1;
-    if (a.slack_poll_ticks % 5 == 0 and wacliPendingGet(a, .slack_history) == 0) refreshSlackHistory(a);
+    if (selectedChatIsSlack(a)) {
+        const installation = slackInstallation(a, a.chats[a.selected_chat].account.slice());
+        if (installation != null and installation.?.is_bridge and a.slack_poll_ticks % 5 == 0 and wacliPendingGet(a, .slack_history) == 0) refreshSlackHistory(a);
+    }
     if (a.slack_poll_ticks % 60 == 0 and wacliPendingGet(a, .slack_workspace) == 0) refreshSlackWorkspace(a);
 }
 
@@ -3638,15 +3740,18 @@ fn slackMediaKind(mime: []const u8) []const u8 {
     return "file";
 }
 
-fn buildSlackMessage(a: *App, item: slack.HistoryItem) Message {
+fn buildSlackMessage(a: *App, account: []const u8, item: slack.HistoryItem) Message {
     var message = Message{};
+    const installation = slackInstallation(a, account) orelse return message;
     message.id.set(item.ts);
     message.sender_jid.set(item.user);
-    const from_me = a.slack_user_id.len > 0 and std.mem.eql(u8, item.user, a.slack_user_id.slice());
+    var reaction_buffer: [2048]u8 = undefined;
+    message.reaction.set(a.allocator, slack.formatReactions(&reaction_buffer, item.reactions[0..item.reaction_count]));
+    const from_me = installation.user_id.len > 0 and std.mem.eql(u8, item.user, installation.user_id.slice());
     message.from_me = from_me;
-    const name = if (from_me) "You" else (slackUserName(a, item.user) orelse (if (item.user.len > 0) item.user else "Slack"));
+    const name = if (from_me) "You" else (slackUserName(installation, item.user) orelse (if (item.user.len > 0) item.user else "Slack"));
     message.sender.set(a.allocator, name);
-    const lookup = slackUserLookup(a);
+    const lookup = slackUserLookup(installation);
     if (item.share_text.len > 0 or item.share_sender.len > 0) {
         var quote_buffer: [slack.max_text + 1]u8 = undefined;
         message.quote.set(a.allocator, slack.convertMrkdwn(&quote_buffer, item.share_text, lookup));
@@ -3748,7 +3853,7 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
         item_index -= 1;
         const item = slack.readHistoryItem(list.items[item_index]) orelse continue;
         newest_seconds = @max(newest_seconds, slack.tsSeconds(item.ts) orelse 0);
-        const message = buildSlackMessage(a, item);
+        const message = buildSlackMessage(a, chat.account.slice(), item);
         a.messages[a.message_count] = message;
         a.message_count += 1;
         count += 1;
@@ -3756,8 +3861,8 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
             reply_parents[reply_parent_count].set(item.ts);
             reply_parent_count += 1;
         }
-        if (item.file_url.len > 0 and count <= 20) {
-            requestSlackDownload(a, chat.jid.slice(), item);
+        if (item.file_url.len > 0) {
+            requestSlackDownload(a, chat.account.slice(), chat.jid.slice(), item);
         }
     }
     for (saved[0..saved_count]) |message| {
@@ -3773,7 +3878,7 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
             }
         }
     }
-    noteSlackActivity(a, chat.jid.slice(), newest_seconds);
+    noteSlackActivity(a, chat.account.slice(), chat.jid.slice(), newest_seconds);
     a.displayed_jid.set(chat.jid.slice());
     a.displayed_account = chat.account;
     a.displayed_provider = chat.provider;
@@ -3840,8 +3945,9 @@ fn applySlackReplies(a: *App, raw: []const u8) void {
             if (std.mem.eql(u8, existing.id.slice(), item.ts)) known = true;
         }
         if (known) continue;
-        const message = buildSlackMessage(a, item);
+        const message = buildSlackMessage(a, chat.account.slice(), item);
         insertSlackMessageSorted(a, message);
+        if (item.file_url.len > 0) requestSlackDownload(a, chat.account.slice(), chat.jid.slice(), item);
     }
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
     if (a.user_viewed) requestSlackMark(a, chat.jid.slice());
@@ -4319,7 +4425,7 @@ fn resolveSlackSend(a: *App, result: *WacliResult) void {
     formatSlackTime(&message.time, a.allocator, ts);
     message.send_state = .none;
     a.slack_log_mutex.lockUncancelable(a.io);
-    _ = a.slack_log.mark(result.jid.slice(), ts);
+    _ = a.slack_log.markAccount(result.account.slice(), result.jid.slice(), ts);
     a.slack_log_mutex.unlock(a.io);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
 }
@@ -4446,10 +4552,11 @@ fn bindOutboxAccount(a: *App) void {
 }
 
 fn enqueueSlackOutbox(a: *App, slot: *SlackOutbox) void {
-    if (a.outbox_load_failed or a.slack_outbox_dirty or !slackConfigured(a) or slot.inflight or slot.completed or slot.entry.state == .failed) return;
+    if (a.outbox_load_failed or a.slack_outbox_dirty or !slackConfigured(a) or !slackAccountConfigured(a, slot.entry.account.slice()) or slot.inflight or slot.completed or slot.entry.state == .failed) return;
     for (a.slack_outbox[0..a.slack_outbox_count]) |*earlier| {
         if (earlier == slot) break;
-        if (!earlier.inflight and !earlier.completed and earlier.entry.state != .failed) return;
+        if (!earlier.inflight and !earlier.completed and earlier.entry.state != .failed and
+            std.mem.eql(u8, earlier.entry.account.slice(), slot.entry.account.slice())) return;
     }
     if (win.GetTickCount64() < slot.not_before_ms) return;
     const entry = &slot.entry;
@@ -4512,6 +4619,7 @@ fn handleSlackSendResult(a: *App, result: *WacliResult) void {
     for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
         if (!std.mem.eql(u8, slot.entry.idSlice(), result.msg_id.slice()) or slot.completed) continue;
         slot.inflight = false;
+        if (!result.ok and std.mem.eql(u8, result.extra.slice(), "WorkspaceDisconnected")) return;
         const entry = &slot.entry;
         if (result.ok and result.kind != .slack_attach) {
             if (result.kind == .slack_send) resolveSlackSend(a, result);
@@ -4586,9 +4694,10 @@ fn evictOldestFailedSlackOutbox(a: *App) bool {
     return a.slack_outbox_count < before;
 }
 
-fn requestSlackDownload(a: *App, channel: []const u8, item: slack.HistoryItem) void {
+fn requestSlackDownload(a: *App, account: []const u8, channel: []const u8, item: slack.HistoryItem) void {
     if (item.file_id.len == 0 or item.file_url.len == 0) return;
     var job = WacliJob{ .provider = .slack, .kind = .slack_download };
+    job.account.set(account);
     job.jid.set(channel);
     job.msg_id.set(item.ts);
     wacliJobArgs(&job, &.{ item.file_url, item.file_id, item.file_name, channel, item.ts });
@@ -4597,14 +4706,21 @@ fn requestSlackDownload(a: *App, channel: []const u8, item: slack.HistoryItem) v
 
 fn applySlackEvent(a: *App, event: *slack_win.Event) void {
     defer slack_win.destroyEvent(event);
+    const account = event.teamIdSlice();
+    const installation = slackInstallation(a, account) orelse return;
+    const key = chat_key.Key{ .provider = .slack, .account = account, .id = event.channelSlice() };
+    const is_open = a.selected_chat < a.chat_count and chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), key);
+    if (std.mem.startsWith(u8, event.eventTypeSlice(), "reaction_")) {
+        if (is_open) refreshSlackHistory(a);
+        return;
+    }
     a.slack_log_mutex.lockUncancelable(a.io);
-    const fresh = a.slack_log.mark(event.channelSlice(), event.tsSlice());
+    const fresh = a.slack_log.markAccount(account, event.channelSlice(), event.tsSlice());
     a.slack_log_mutex.unlock(a.io);
-    const from_me = a.slack_user_id.len > 0 and std.mem.eql(u8, event.userSlice(), a.slack_user_id.slice());
+    const from_me = installation.user_id.len > 0 and std.mem.eql(u8, event.userSlice(), installation.user_id.slice());
     if (from_me and event.clientMsgIdSlice().len > 0) {
         for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
-            if (slot.entry.file.len == 0 and
-                std.mem.eql(u8, slot.entry.jid.slice(), event.channelSlice()) and
+            if (slot.entry.file.len == 0 and chat_key.Key.eql(chat_key.of(&slot.entry), key) and
                 std.mem.eql(u8, slot.entry.client_msg_id.slice(), event.clientMsgIdSlice()))
             {
                 const id = slot.entry.id;
@@ -4615,30 +4731,17 @@ fn applySlackEvent(a: *App, event: *slack_win.Event) void {
         }
     }
     if (!fresh) return;
-
     const channel = event.channelSlice();
-    const is_open = a.selected_chat < a.chat_count and
-        std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), channel) and
-        a.chats[a.selected_chat].provider == .slack;
-    noteSlackActivity(a, channel, slack.tsSeconds(event.tsSlice()) orelse 0);
-    if (slackChatById(a, channel)) |chat| {
-        if (!from_me and !is_open) {
+    noteSlackActivity(a, account, channel, slack.tsSeconds(event.tsSlice()) orelse 0);
+    const viewed = is_open and a.user_viewed and a.hwnd != null and win.IsIconic(a.hwnd.?) == 0;
+    if (slackChatById(a, account, channel)) |chat| {
+        if (!from_me and !viewed and slack.compareTs(event.tsSlice(), chat.slack_last_read.slice()) == .gt) {
             chat.unread = true;
             chat.unread_count += 1;
         }
-    }
-    if (!is_open) {
-        var visible = false;
-        for (a.chats[0..a.chat_count]) |*chat| {
-            if (std.mem.eql(u8, chat.jid.slice(), channel)) {
-                visible = true;
-                break;
-            }
-        }
-        if (!visible and !from_me and activeChatView(a) == .slack) refreshVisibleChats(a);
-    }
-    if (is_open) {
-        var item = slack.HistoryItem{
+    } else refreshSlackInstallation(a, installation);
+    if (is_open and chat_key.Key.eql(chat_key.displayed(a), key)) {
+        const item = slack.HistoryItem{
             .ts = event.tsSlice(),
             .user = event.userSlice(),
             .text = event.textSlice(),
@@ -4649,30 +4752,152 @@ fn applySlackEvent(a: *App, event: *slack_win.Event) void {
             .file_mime = event.fileMimeSlice(),
             .file_size = event.file_size,
         };
-        _ = &item;
         if (from_me) dropPendingForEcho(a, event);
-        const message = buildSlackMessage(a, item);
-        insertSlackMessageSorted(a, message);
-        if (a.user_viewed) requestSlackMark(a, channel);
-        if (item.file_url.len > 0) requestSlackDownload(a, channel, item);
+        insertSlackMessageSorted(a, buildSlackMessage(a, account, item));
+        if (viewed) requestSlackMark(a, channel);
+        if (item.file_url.len > 0) requestSlackDownload(a, account, channel, item);
         if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
-    } else {
-        refreshVisibleChats(a);
     }
+    refreshVisibleChats(a);
+}
+
+fn saveSlackInstallationIndex(a: *App, extra: []const u8, removed: []const u8) bool {
+    var list = std.ArrayList(u8).empty;
+    defer list.deinit(a.allocator);
+    var has_extra = false;
+    for (&a.slack_installations) |*installation| {
+        if (!installation.active or installation.is_bridge or std.mem.eql(u8, installation.team_id.slice(), removed)) continue;
+        if (std.mem.eql(u8, installation.team_id.slice(), extra)) has_extra = true;
+        list.appendSlice(a.allocator, installation.team_id.slice()) catch return false;
+        list.append(a.allocator, '\n') catch return false;
+    }
+    if (extra.len > 0 and !has_extra) list.appendSlice(a.allocator, extra) catch return false;
+    return slack_win.saveSecret(lit("SlackInstallations"), list.items);
+}
+
+fn installSlackWorkspace(a: *App, team_id: []const u8, team_name: []const u8, user_id: []const u8, user_token: []const u8, refresh_token: []const u8, expires_at: i64, is_bridge: bool) bool {
+    if (!slack.validTeamId(team_id)) return false;
+    var target = slackInstallation(a, team_id);
+    if (target == null) for (&a.slack_installations) |*installation| {
+        if (!installation.active) {
+            target = installation;
+            break;
+        }
+    };
+    const installation = target orelse return false;
+    const user = a.allocator.dupe(u8, user_token) catch return false;
+    const refresh = a.allocator.dupe(u8, refresh_token) catch {
+        a.allocator.free(user);
+        return false;
+    };
+    var path_buffer: [519]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buffer, "{s}\\{s}", .{ a.slack_media_dir, team_id }) catch {
+        a.allocator.free(user);
+        a.allocator.free(refresh);
+        return false;
+    };
+    a.slack_install_mutex.lockUncancelable(a.io);
+    a.allocator.free(installation.user_token);
+    a.allocator.free(installation.refresh_token);
+    if (!installation.active) {
+        installation.chat_count = 0;
+        installation.user_count = 0;
+    }
+    installation.user_token = user;
+    installation.refresh_token = refresh;
+    installation.expires_at = expires_at;
+    installation.team_id.set(team_id);
+    installation.team_name.set(team_name);
+    installation.user_id.set(user_id);
+    installation.media_dir.set(path);
+    installation.is_bridge = is_bridge;
+    installation.active = true;
+    a.slack_install_mutex.unlock(a.io);
+    if (std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path)) |wide| {
+        defer a.allocator.free(wide);
+        _ = win.CreateDirectoryW(wide, null);
+    } else |_| {}
+    refreshSlackInstallation(a, installation);
+    startSlackSocket(a);
+    retrySlackOutbox(a);
+    return true;
+}
+
+pub fn addSlackInstallation(team_id: []const u8, team_name: []const u8, user_id: []const u8, user_token: []const u8, refresh_token: []const u8, expires_at: i64) bool {
+    const a = app_ptr orelse return false;
+    var available = slackInstallation(a, team_id) != null;
+    for (&a.slack_installations) |*installation| if (!installation.active) {
+        available = true;
+    };
+    if (!available) return false;
+    if (!slack_win.saveInstallation(.{ .team_id = team_id, .team_name = team_name, .user_id = user_id, .user_token = user_token, .refresh_token = refresh_token, .expires_at = expires_at })) return false;
+    if (!saveSlackInstallationIndex(a, team_id, "")) return false;
+    return installSlackWorkspace(a, team_id, team_name, user_id, user_token, refresh_token, expires_at, false);
+}
+
+pub fn removeSlackInstallation(team_id: []const u8) bool {
+    const a = app_ptr orelse return false;
+    const installation = slackInstallation(a, team_id) orelse return false;
+    if (installation.is_bridge) {
+        slack_win.clearBridge();
+    } else {
+        if (!saveSlackInstallationIndex(a, "", team_id)) return false;
+        slack_win.deleteInstallation(team_id);
+    }
+    a.slack_install_mutex.lockUncancelable(a.io);
+    installation.active = false;
+    installation.chat_count = 0;
+    installation.user_count = 0;
+    a.slack_install_mutex.unlock(a.io);
+    slack_win.deleteSecret(lit("SlackUserToken"));
+    a.slack_install_mutex.lockUncancelable(a.io);
+    a.slack_tokens = null;
+    if (installation.is_bridge) a.slack_bridge = null;
+    a.slack_install_mutex.unlock(a.io);
+    cancelSlackMark(a);
+    refreshVisibleChats(a);
+    if (!messagesAreCurrent(a)) refreshMessages(a);
+    return true;
+}
+
+fn bindSlackOutboxAccount(a: *App, team_id: []const u8) void {
+    for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
+        if (slot.entry.account.len == 0) {
+            slot.entry.account.set(team_id);
+            a.slack_outbox_dirty = true;
+        }
+    }
+    if (a.slack_outbox_dirty) _ = persistOutbox(a);
 }
 
 fn loadSlackTokens(a: *App) void {
-    if (a.slack_tokens) |tokens| {
-        a.allocator.free(tokens.user);
-        a.allocator.free(tokens.app);
-        a.slack_tokens = null;
+    if (a.slack_app_token.len == 0) {
+        if (slack_win.loadSecret(a.allocator, lit("SlackAppToken"))) |stored| a.slack_app_token = stored.value;
     }
-    a.slack_bridge = null;
-    a.slack_tokens = slack_win.loadTokens(a.allocator);
-    a.slack_bridge = slack_win.loadBridge(a.allocator);
-    if (a.slack_tokens == null and a.slack_bridge == null) return;
-    const job = WacliJob{ .provider = .slack, .kind = .slack_auth };
-    _ = wacliEnqueue(a, job, false);
+    if (slack_win.loadSecret(a.allocator, lit("SlackInstallations"))) |stored| {
+        defer a.allocator.free(stored.value);
+        var ids = std.mem.tokenizeScalar(u8, stored.value, '\n');
+        while (ids.next()) |id| {
+            const saved = slack_win.loadInstallation(a.allocator, id) orelse continue;
+            defer saved.deinit();
+            const value = saved.value;
+            _ = installSlackWorkspace(a, value.team_id, value.team_name, value.user_id, value.user_token, value.refresh_token, value.expires_at, false);
+        }
+    }
+    a.slack_install_mutex.lockUncancelable(a.io);
+    if (a.slack_tokens == null) a.slack_tokens = slack_win.loadTokens(a.allocator);
+    if (a.slack_bridge == null) a.slack_bridge = slack_win.loadBridge(a.allocator);
+    a.slack_install_mutex.unlock(a.io);
+    if (a.slack_tokens != null) {
+        const job = WacliJob{ .provider = .slack, .kind = .slack_auth };
+        _ = wacliEnqueue(a, job, false);
+    }
+    if (a.slack_bridge != null) {
+        var job = WacliJob{ .provider = .slack, .kind = .slack_auth };
+        job.extra.set("bridge");
+        _ = wacliEnqueue(a, job, false);
+    }
+    startSlackSocket(a);
     retrySlackOutbox(a);
 }
 
@@ -4871,12 +5096,11 @@ fn openSlackSetup(a: *App) void {
 
 fn startSlackSocket(a: *App) void {
     if (!slackConfigured(a) or a.slack_socket_thread != null) return;
-    if (a.slack_bridge != null) return;
-    const tokens = a.slack_tokens.?;
+    if (a.slack_app_token.len == 0) return;
     a.slack_stop.store(false, .release);
     const config = slack_win.SocketConfig{
-        .user_token = tokens.user,
-        .app_token = tokens.app,
+        .user_token = "",
+        .app_token = a.slack_app_token,
         .stop = &a.slack_stop,
         .connected = &a.slack_connected,
         .sink = .{
@@ -4901,12 +5125,16 @@ fn markChatRead(a: *App) void {
         }
         chat.unread = false;
         chat.unread_count = 0;
+        const id = std.fmt.parseInt(i64, chat.jid.slice(), 10) catch return;
+        for (a.tg_chats[0..a.tg_chat_count]) |*cached| if (cached.id == id) {
+            cached.unread_count = 0;
+        };
         return;
     }
     if (chat.provider == .slack) {
         chat.unread = false;
         chat.unread_count = 0;
-        if (slackChatById(a, chat.jid.slice())) |cached| {
+        if (slackChatById(a, chat.account.slice(), chat.jid.slice())) |cached| {
             cached.unread = false;
             cached.unread_count = 0;
         }
@@ -4947,6 +5175,7 @@ const slack_mark_debounce_ms: u32 = 750;
 
 fn cancelSlackMark(a: *App) void {
     if (a.hwnd) |hwnd| _ = win.KillTimer(hwnd, timer_slack_mark);
+    a.slack_mark_account.set("");
     a.slack_mark_channel.set("");
     a.slack_mark_ts.set("");
     a.slack_mark_gen += 1;
@@ -4965,7 +5194,10 @@ fn requestSlackMark(a: *App, channel: []const u8) void {
     for (a.messages[0..a.message_count]) |*message| {
         newest = slack.newerMarkTs(newest, message.id.slice());
     }
+    const account = a.chats[a.selected_chat].account;
+    if (!std.mem.eql(u8, a.slack_mark_account.slice(), account.slice())) cancelSlackMark(a);
     if (slack.markDebounce(a.slack_mark_channel.slice(), a.slack_mark_ts.slice(), channel, newest) == .skip) return;
+    a.slack_mark_account = account;
     a.slack_mark_channel.set(channel);
     a.slack_mark_ts.set(newest);
     a.slack_mark_due_ms = win.GetTickCount64() + slack_mark_debounce_ms;
@@ -4982,7 +5214,7 @@ fn fireSlackMark(a: *App) void {
     const channel = a.slack_mark_channel.slice();
     const ts = a.slack_mark_ts.slice();
     if (channel.len == 0 or ts.len == 0 or a.slack_mark_due_ms == 0) return;
-    if (!slackMarkViewMatches(a, channel) or !slackConfigured(a)) {
+    if (!slackMarkViewMatches(a, channel) or !std.mem.eql(u8, a.chats[a.selected_chat].account.slice(), a.slack_mark_account.slice()) or !slackConfigured(a)) {
         cancelSlackMark(a);
         return;
     }
@@ -4998,6 +5230,7 @@ fn fireSlackMark(a: *App) void {
     }
     a.slack_mark_due_ms = 0;
     var job = WacliJob{ .provider = .slack, .kind = .slack_mark, .gen = a.slack_mark_gen };
+    job.account = a.slack_mark_account;
     job.jid.set(channel);
     job.msg_id.set(ts);
     wacliJobArgs(&job, &.{ channel, ts });
@@ -6515,7 +6748,14 @@ fn loadChatsCache(a: *App) void {
     };
     defer a.allocator.free(data);
     const applied = applyChats(a, data, false);
-    if (applied) logStartupMilestone(a, .chats, "chat list from cache");
+    if (applied) {
+        if (a.allocator.dupe(u8, data)) |copy| {
+            if (a.chats_raw) |old| a.allocator.free(old);
+            a.chats_raw = copy;
+            a.chats_raw_flags = if (a.show_archived) 2 else 0;
+        } else |_| {}
+        logStartupMilestone(a, .chats, "chat list from cache");
+    }
     var log_buffer: [64]u8 = undefined;
     const log_line = std.fmt.bufPrint(&log_buffer, "cache-load: {d} bytes, applied={}", .{ data.len, applied }) catch "cache-load: logged";
     appendLaunchLog(a, log_line);
@@ -9164,12 +9404,12 @@ fn sendMessage(a: *App) void {
         var attach: []const u8 = "";
         var staged_attach_buffer: [520]u8 = undefined;
         if (a.slack_attach.len > 0) {
-            if (std.mem.eql(u8, a.slack_attach_jid.slice(), chat.jid.slice())) {
+            if (std.mem.eql(u8, a.slack_attach_account.slice(), chat.account.slice()) and std.mem.eql(u8, a.slack_attach_jid.slice(), chat.jid.slice())) {
                 const attach_len = std.unicode.utf16LeToUtf8(&attach_path_buffer, a.slack_attach.slice()) catch 0;
                 attach = attach_path_buffer[0..attach_len];
             } else setStatus(a, "Attached image dropped: chat changed");
         } else if (staged_file.len > 0) {
-            if (a.slack_bridge != null) {
+            if (slackAccountIsBridge(a, chat.account.slice())) {
                 setStatus(a, "File upload not available over the Slack bridge");
                 return;
             }
@@ -10635,9 +10875,12 @@ fn visibleChatIndex(a: *const App, key: chat_key.Key) ?usize {
 }
 
 fn chatProvider(a: *App, jid: []const u8) transport.Provider {
-    const view = activeChatView(a);
-    if (visibleChatIndex(a, .{ .provider = view, .account = if (view == .whatsapp) a.cache_tag.slice() else "", .id = jid })) |index| return a.chats[index].provider;
-    if (slackChatById(a, jid) != null) return .slack;
+    if (a.selected_chat < a.chat_count and std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), jid)) return a.chats[a.selected_chat].provider;
+    for (a.chats[0..a.chat_count]) |*chat| if (std.mem.eql(u8, chat.jid.slice(), jid)) return chat.provider;
+    if (std.mem.indexOfScalar(u8, jid, '@') != null) return .whatsapp;
+    for (&a.slack_installations) |*installation| {
+        if (slackChatById(a, installation.team_id.slice(), jid) != null) return .slack;
+    }
     if (std.fmt.parseInt(i64, jid, 10)) |id| {
         for (a.tg_chats[0..a.tg_chat_count]) |*chat| if (chat.id == id) return .telegram;
     } else |_| {}
@@ -10735,7 +10978,7 @@ fn archiveSelectedChat(a: *App, keep: bool, source: archive_rules.Source) void {
 
 fn selectAllChats(a: *App) void {
     a.bulk.clear();
-    for (a.chats[0..a.chat_count]) |*chat| a.bulk.add(chat.jid.slice());
+    for (a.chats[0..a.chat_count]) |*chat| a.bulk.addKey(chat_key.of(chat));
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
     var buffer: [128]u8 = undefined;
     setStatus(a, std.fmt.bufPrint(&buffer, "{d} chats selected - Ctrl+E archives, Ctrl+Shift+E keeps archived, Esc cancels", .{a.bulk.count}) catch "Chats selected");
@@ -10755,9 +10998,12 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void 
     var problem: ?[]const u8 = null;
     var index: usize = 0;
     while (index < a.bulk.count) : (index += 1) {
-        if (archiveChat(a, a.bulk.at(index), action, source)) |why| {
-            problem = why;
+        const key = a.bulk.atKey(chat_key.Key, index);
+        if (key.provider != .whatsapp or !std.mem.eql(u8, key.account, a.cache_tag.slice())) {
+            problem = "Archiving is only available for the active WhatsApp account";
+            continue;
         }
+        if (archiveChat(a, key.id, action, source)) |why| problem = why;
     }
     a.bulk.clear();
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
@@ -10967,8 +11213,9 @@ fn controlDispatch(a: *App, call: *ControlCall) !void {
     }
 }
 
-fn controlProvider(messenger: control_api.Messenger) transport.Provider {
+fn controlProvider(messenger: control_api.Messenger) messenger_view.View {
     return switch (messenger) {
+        .all => .all,
         .whatsapp => .whatsapp,
         .slack => .slack,
         .telegram => .telegram,
@@ -10978,13 +11225,15 @@ fn controlProvider(messenger: control_api.Messenger) transport.Provider {
 fn controlWriteChat(a: *const App, w: *std.Io.Writer, chat: *const Chat) !void {
     try w.writeAll("{\"id\":");
     try control_api.writeString(w, chat.jid.slice());
+    try w.print(",\"provider\":\"{s}\",\"account\":", .{@tagName(chat.provider)});
+    try control_api.writeString(w, chat.account.slice());
     try w.writeAll(",\"name\":");
     try control_api.writeStringUtf16(w, chat.name.slice());
     try w.writeAll(",\"kind\":");
     try control_api.writeStringUtf16(w, chat.kind.slice());
     try w.print(",\"messenger\":\"{s}\",\"unread\":{},\"unread_count\":{d},\"pinned\":{},\"archived\":{},\"last_message_time\":", .{
-        @tagName(chat.provider),           chat.unread or chat.unread_count > 0, chat.unread_count,
-        isChatPinned(a, chat.jid.slice()), chat.archived,
+        @tagName(chat.provider),            chat.unread or chat.unread_count > 0, chat.unread_count,
+        isChatPinned(a, chat_key.of(chat)), chat.archived,
     });
     try control_api.writeString(w, chat.timestamp.slice());
     try w.writeByte('}');
@@ -11005,8 +11254,8 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     if (a.selected_chat < a.chat_count) try controlWriteChat(a, w, &a.chats[a.selected_chat]) else try w.writeAll("null");
     var buffer: [1024]u8 = undefined;
     try w.print(",\"sync\":\"{s}\",\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
-        sync,               a.slack_connected.load(.acquire), pending_sends,   a.pending_archive_count,
-        a.slack_chat_count, a.chat_count,                     a.show_archived, a.unread_only,
+        sync,              a.slack_connected.load(.acquire), pending_sends,   a.pending_archive_count,
+        slackChatCount(a), a.chat_count,                     a.show_archived, a.unread_only,
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\"", .{@tagName(theme.choice)});
@@ -11043,28 +11292,33 @@ fn controlChats(a: *App, call: *ControlCall) !void {
         filtered = filtered or a.unread_only;
     } else {
         const wanted = if (request.all) "" else query;
-        switch (view) {
-            .slack => if (!request.archived) for (a.slack_chats[0..a.slack_chat_count]) |*chat| {
-                if (controlMatches(a, chat, wanted)) try list.append(a.allocator, chat.*);
-            },
-            .telegram => if (!request.archived and telegramReady(a)) for (a.tg_chats[0..a.tg_chat_count]) |*cached| {
+        if (messenger_view.includes(view, .slack) and !request.archived) {
+            for (&a.slack_installations) |*installation| {
+                if (!installation.active) continue;
+                for (installation.chats[0..installation.chat_count]) |*chat| {
+                    if (controlMatches(a, chat, wanted)) try list.append(a.allocator, chat.*);
+                }
+            }
+        }
+        if (messenger_view.includes(view, .telegram) and !request.archived and telegramReady(a)) {
+            for (a.tg_chats[0..a.tg_chat_count]) |*cached| {
                 var chat = Chat{ .name = cached.name, .unread = cached.unread_count > 0, .unread_count = cached.unread_count, .provider = .telegram };
                 var id_buffer: [24]u8 = undefined;
                 chat.jid.set(tgChatIdString(&id_buffer, cached.id));
                 chat.kind.set(a.allocator, cached.kind.slice());
                 chat.timestamp.set(cached.timestamp.slice());
                 if (controlMatches(a, &chat, wanted)) try list.append(a.allocator, chat);
-            },
-            .whatsapp => {
-                if (call.whatsapp_raw.len == 0) {
-                    call.need_whatsapp = true;
-                    return;
-                }
-                controlWhatsAppChats(a, call.whatsapp_raw, request.archived, wanted, &list) catch |err| switch (err) {
-                    error.OutOfMemory => return err,
-                    else => return control_api.writeError(w, "could not parse the WhatsApp chat list"),
-                };
-            },
+            }
+        }
+        if (messenger_view.includes(view, .whatsapp)) {
+            if (call.whatsapp_raw.len == 0) {
+                call.need_whatsapp = true;
+                return;
+            }
+            controlWhatsAppChats(a, call.whatsapp_raw, request.archived, wanted, &list) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => return control_api.writeError(w, "could not parse the WhatsApp chat list"),
+            };
         }
         controlSortChats(a, list.items);
     }
@@ -11116,8 +11370,8 @@ fn controlSortChats(a: *const App, chats: []Chat) void {
         var j = i;
         while (j > 0) : (j -= 1) {
             const by_time = std.mem.order(u8, chats[j - 1].timestamp.slice(), chats[j].timestamp.slice());
-            const jid_order = std.mem.order(u8, chats[j - 1].jid.slice(), chats[j].jid.slice());
-            if (!chat_order.shouldMoveUp(isChatPinned(a, chats[j - 1].jid.slice()), isChatPinned(a, chats[j].jid.slice()), by_time, jid_order)) break;
+            const jid_order = chat_key.order(chat_key.of(&chats[j - 1]), chat_key.of(&chats[j]));
+            if (!chat_order.shouldMoveUp(isChatPinned(a, chat_key.of(&chats[j - 1])), isChatPinned(a, chat_key.of(&chats[j])), by_time, jid_order)) break;
             std.mem.swap(Chat, &chats[j - 1], &chats[j]);
         }
     }
@@ -11149,7 +11403,7 @@ fn controlSearch(a: *App, call: *ControlCall) !void {
 }
 
 fn controlView(a: *App, w: *std.Io.Writer, messenger: ?control_api.Messenger) !void {
-    const view = controlProvider(messenger orelse return control_api.writeError(w, "view needs whatsapp, slack or telegram"));
+    const view = controlProvider(messenger orelse return control_api.writeError(w, "view needs all, whatsapp, slack or telegram"));
     if (messenger_view.effective(view, slackConfigured(a), telegramReady(a)) != view)
         return control_api.writeError(w, if (view == .slack) "Slack is not set up" else "Telegram is not signed in");
     switchChatView(a, view);
@@ -11164,7 +11418,7 @@ fn controlSelectIndex(a: *App, index: usize) void {
     }
     a.selected_chat = index;
     a.user_viewed = true;
-    a.view_selected[@intFromEnum(a.chats[index].provider)].set(a.chats[index].jid.slice());
+    a.view_selected[@intFromEnum(activeChatView(a))].set(chat_key.of(&a.chats[index]));
     if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, index, 0);
     refreshMessages(a);
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
@@ -11172,29 +11426,43 @@ fn controlSelectIndex(a: *App, index: usize) void {
 
 fn controlSelect(a: *App, call: *ControlCall) !void {
     const w = &call.out.writer;
-    const id = call.parsed.value.id;
-    if (id.len == 0) return control_api.writeError(w, "needs a chat id");
-    var index = visibleChatIndex(a, .{ .provider = activeChatView(a), .account = if (activeChatView(a) == .whatsapp) a.cache_tag.slice() else "", .id = id });
-    if (index == null) {
-        const provider = chatProvider(a, id);
-        if (provider != activeChatView(a)) {
-            if (messenger_view.effective(provider, slackConfigured(a), telegramReady(a)) != provider)
-                return control_api.writeError(w, if (provider == .slack) "Slack is not set up" else "Telegram is not signed in");
-            a.view_selected[@intFromEnum(provider)].set(id);
-            switchChatView(a, provider);
-            index = visibleChatIndex(a, .{ .provider = activeChatView(a), .account = if (activeChatView(a) == .whatsapp) a.cache_tag.slice() else "", .id = id });
+    const request = &call.parsed.value;
+    if (request.id.len == 0) return control_api.writeError(w, "needs a chat id");
+    var selected: ?chat_key.Stored = null;
+    var ambiguous = false;
+    for (a.chats[0..a.chat_count]) |*chat| {
+        const key = chat_key.of(chat);
+        if (!std.mem.eql(u8, key.id, request.id)) continue;
+        if (request.provider) |provider| if (key.provider != provider) continue;
+        if (request.account.len > 0 and !std.mem.eql(u8, request.account, key.account)) continue;
+        if (selected != null) {
+            ambiguous = true;
+            break;
         }
+        selected = .{};
+        selected.?.set(key);
     }
-    const found = index orelse {
+    if (ambiguous) return control_api.writeError(w, "ambiguous chat id: specify --provider and --account");
+    if (selected == null and request.provider != null) {
+        const provider = request.provider.?;
+        const account = if (request.account.len > 0) request.account else if (provider == .whatsapp) a.cache_tag.slice() else "";
+        var wanted = chat_key.Stored{};
+        wanted.set(.{ .provider = provider, .account = account, .id = request.id });
+        a.view_selected[@intFromEnum(messenger_view.View.all)] = wanted;
+        switchChatView(a, .all);
+        if (visibleChatIndex(a, wanted.key()) != null) selected = wanted;
+    }
+    const found = if (selected) |*key| visibleChatIndex(a, key.key()) else null;
+    const index = found orelse {
         if (wacliPendingGet(a, .chats) > 0) {
             call.retry = true;
             return;
         }
-        return control_api.writeError(w, "chat is not in the sidebar list (clear the search with: wazigctl search \"\", or check it is not archived)");
+        return control_api.writeError(w, "chat is not in the sidebar list (clear search or select All networks)");
     };
-    controlSelectIndex(a, found);
+    controlSelectIndex(a, index);
     try w.writeAll("{\"ok\":true,\"result\":{\"selected\":");
-    try controlWriteChat(a, w, &a.chats[found]);
+    try controlWriteChat(a, w, &a.chats[index]);
     try w.writeAll("}}\n");
 }
 
@@ -11319,13 +11587,14 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Theme: AMOLED black", "", command_theme_amoled);
     appendPalette(a, "Theme: Green", "", command_theme_green);
     appendPalette(a, "Toggle unread chats", "U", command_unread);
-    inline for (.{ .{ transport.Provider.whatsapp, "Show WhatsApp", command_show_whatsapp }, .{ transport.Provider.slack, "Show Slack", command_show_slack }, .{ transport.Provider.telegram, "Show Telegram", command_show_telegram } }) |entry| {
+    appendPalette(a, "Show All networks", "Alt+0", command_show_all);
+    inline for (.{ .{ messenger_view.View.whatsapp, "Show WhatsApp", command_show_whatsapp }, .{ messenger_view.View.slack, "Show Slack", command_show_slack }, .{ messenger_view.View.telegram, "Show Telegram", command_show_telegram } }) |entry| {
         if (messenger_view.numberFor(entry[0], slackConfigured(a), telegramReady(a))) |number| {
             var shortcut: [8]u8 = undefined;
             appendPalette(a, entry[1], std.fmt.bufPrint(&shortcut, "Alt+{d}", .{number}) catch "", entry[2]);
         }
     }
-    appendPalette(a, if (a.selected_chat < a.chat_count and isChatPinned(a, a.chats[a.selected_chat].jid.slice())) "Unpin selected chat" else "Pin chat to top", "", command_pin);
+    appendPalette(a, if (a.selected_chat < a.chat_count and isChatPinned(a, chat_key.of(&a.chats[a.selected_chat]))) "Unpin selected chat" else "Pin chat to top", "", command_pin);
     appendPalette(a, if (a.show_archived) "Show inbox chats" else "Show archived chats", "", command_archived);
     appendPalette(a, if (a.show_archived) "Unarchive selected chat" else "Archive selected chat", "Ctrl+E", command_archive);
     if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp) {
@@ -11442,7 +11711,7 @@ fn paletteFilter(a: *App) void {
             std.mem.swap(i32, &scores[j - 1], &scores[j]);
         }
     }
-    if (!a.palette_links_mode and !a.palette_accounts_mode and activeChatView(a) == .whatsapp and query_len > 0) {
+    if (!a.palette_links_mode and !a.palette_accounts_mode and messenger_view.includes(activeChatView(a), .whatsapp) and query_len > 0) {
         const query = std.unicode.utf16LeToUtf8Alloc(a.allocator, query_buf[0..query_len]) catch null;
         defer if (query) |text| a.allocator.free(text);
         if (query) |text| {
@@ -11513,7 +11782,7 @@ fn paletteActivate(a: *App) void {
                 break;
             }
         }
-        if (chat_index == null and activeChatView(a) == .whatsapp and !a.palette_links_mode and !a.palette_accounts_mode) {
+        if (chat_index == null and messenger_view.includes(activeChatView(a), .whatsapp) and !a.palette_links_mode and !a.palette_accounts_mode) {
             if (a.people.find(item.chat_jid.slice())) |entry| {
                 const index = @min(a.chat_count, max_chats - 1);
                 a.chats[index] = peopleChat(a, entry);
@@ -11769,6 +12038,8 @@ fn removeWhatsAppAccount(a: *App) void {
     a.chats_raw = null;
     a.cache_tag.set("");
     a.cache_tag_gen += 1;
+    if (a.selected_chat < a.chat_count) a.view_selected[@intFromEnum(activeChatView(a))].set(chat_key.of(&a.chats[a.selected_chat]));
+    a.chat_view_switched = true;
     a.chat_count = 0;
     a.selected_chat = 0;
     a.selected_message = null;
@@ -11777,6 +12048,8 @@ fn removeWhatsAppAccount(a: *App) void {
     a.message_count = 0;
     a.last_refresh_unix = 0;
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    refreshVisibleChats(a);
+    refreshMessages(a);
     setStatus(a, "WhatsApp signed out - its data was kept as a backup folder; pair again with Add account");
 }
 
@@ -12182,7 +12455,7 @@ fn runCommand(a: *App, command: u16) void {
         command_unread => {
             _ = clearBulkSelection(a);
             a.unread_only = !a.unread_only;
-            refreshChats(a);
+            refilterChats(a);
             refreshMessages(a);
         },
         command_archive => archiveSelectedChat(a, false, .menu),
@@ -12200,6 +12473,7 @@ fn runCommand(a: *App, command: u16) void {
             }
             if (!resendFailedMessage(a, selected)) setStatus(a, "Only a failed WhatsApp message can be resent");
         },
+        command_show_all => switchChatView(a, .all),
         command_show_whatsapp => switchChatView(a, .whatsapp),
         command_show_slack => switchChatView(a, .slack),
         command_show_telegram => switchChatView(a, .telegram),
@@ -12300,21 +12574,12 @@ fn runCommand(a: *App, command: u16) void {
             removeTelegramAccount(a);
         },
         command_slack_disconnect => {
-            slack_win.clearTokens();
-            slack_win.clearBridge();
-            a.slack_stop.store(true, .release);
-            if (a.slack_socket_thread) |thread| thread.detach();
-            a.slack_socket_thread = null;
-            a.slack_tokens = null;
-            a.slack_bridge = null;
-            a.slack_user_id.set("");
-            a.slack_chat_count = 0;
-            a.slack_user_count = 0;
-            refreshChats(a);
-            setStatus(a, "Slack disconnected");
+            if (!selectedChatIsSlack(a)) return setStatus(a, "Select a Slack workspace chat to disconnect");
+            const account = a.chats[a.selected_chat].account;
+            if (removeSlackInstallation(account.slice())) setStatus(a, "Slack workspace disconnected") else setStatus(a, "Could not disconnect Slack workspace");
         },
         command_slack_attach => {
-            if (a.slack_bridge != null) {
+            if (selectedChatIsSlack(a) and slackAccountIsBridge(a, a.chats[a.selected_chat].account.slice())) {
                 setStatus(a, "File upload not available over the Slack bridge");
                 return;
             }
@@ -12324,6 +12589,7 @@ fn runCommand(a: *App, command: u16) void {
             }
             if (pickImageFile(a)) |path| {
                 a.slack_attach = path;
+                a.slack_attach_account = a.chats[a.selected_chat].account;
                 a.slack_attach_jid.set(a.chats[a.selected_chat].jid.slice());
                 setStatus(a, "Image attached - press Send");
             }
@@ -12750,7 +13016,7 @@ fn layout(a: *App, width: i32, height: i32) void {
     const header_height: i32 = 0;
     const search_height: i32 = px(a, 48);
     const status_height: i32 = px(a, 26);
-    const status_row_height: i32 = if (activeChatView(a) == .whatsapp) px(a, 64) else 0;
+    const status_row_height: i32 = if (messenger_view.includes(activeChatView(a), .whatsapp)) px(a, 64) else 0;
     if (a.status_row) |row| {
         _ = win.ShowWindow(row, if (status_row_height > 0) win.SW_SHOWNA else win.SW_HIDE);
         _ = win.MoveWindow(row, 0, search_height, left_width - scrollbar_width, status_row_height, win.TRUE);
@@ -13318,7 +13584,7 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
     defer shapes.deinit();
     const chat = &a.chats[index];
     const selected = (item.itemState & win.ODS_SELECTED) != 0;
-    const bulk_selected = a.bulk.count > 0 and a.bulk.contains(chat.jid.slice());
+    const bulk_selected = a.bulk.count > 0 and a.bulk.containsKey(chat_key.of(chat));
     const background = win.CreateSolidBrush(theme.current.surface_container_low) orelse return;
     defer _ = win.DeleteObject(background);
     _ = win.FillRect(item.hDC, &item.rcItem, background);
@@ -13364,7 +13630,19 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
 
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
     _ = win.SetTextColor(item.hDC, row_text);
-    const pinned_chat = isChatPinned(a, chat.jid.slice());
+    const badge = win.RECT{ .left = avatar_left + px(a, 27), .top = avatar_top + px(a, 28), .right = avatar_left + px(a, 48), .bottom = avatar_top + px(a, 46) };
+    smooth.fillRoundRect(&shapes, badge, px(a, 8), px(a, 8), theme.current.primary_container);
+    _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
+    _ = win.SetTextColor(item.hDC, theme.current.on_primary_container);
+    var badge_text = badge;
+    _ = text_draw.drawText(item.hDC, switch (chat.provider) {
+        .whatsapp => lit("W"),
+        .slack => lit("S"),
+        .telegram => lit("T"),
+    }, 1, &badge_text, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+    _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
+    _ = win.SetTextColor(item.hDC, row_text);
+    const pinned_chat = isChatPinned(a, chat_key.of(chat));
     var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 34) };
     _ = text_draw.drawText(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     if (pinned_chat) {
@@ -13377,7 +13655,20 @@ fn drawChat(a: *App, item: *win.DRAWITEMSTRUCT) void {
     _ = text_draw.drawText(item.hDC, chat.time.ptr(), @intCast(chat.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
     const marker = archiveMarker(a, chat);
     var kind_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, if (marker != null) @as(i32, 130) else 42), .bottom = item.rcItem.top + px(a, 56) };
-    _ = text_draw.drawText(item.hDC, chat.kind.ptr(), @intCast(chat.kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    var kind = WideText(255){};
+    if (chat.provider == .slack and slackWorkspaceCount(a) > 1) {
+        if (slackInstallation(a, chat.account.slice())) |installation| {
+            var kind_utf8: [96]u8 = undefined;
+            const kind_len = std.unicode.utf16LeToUtf8(&kind_utf8, chat.kind.slice()) catch 0;
+            var label: [320]u8 = undefined;
+            kind.set(a.allocator, std.fmt.bufPrint(&label, "{s} · {s}", .{ kind_utf8[0..kind_len], if (installation.team_name.len > 0) installation.team_name.slice() else installation.team_id.slice() }) catch installation.team_name.slice());
+        }
+    }
+    if (kind.len == 0) {
+        @memcpy(kind.buf[0..chat.kind.len], chat.kind.slice());
+        kind.len = chat.kind.len;
+    }
+    _ = text_draw.drawText(item.hDC, kind.ptr(), @intCast(kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
     if (marker) |text| {
         _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else theme.current.primary);
         var marker_rect = win.RECT{ .left = item.rcItem.right - px(a, 128), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, 40), .bottom = item.rcItem.top + px(a, 56) };
@@ -13566,7 +13857,7 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, sh
         const shown: c_int = if (message.transcript_expanded) @intCast(message.transcript.len) else @intCast(@min(message.transcript.len, 400));
         height += transcriptRender(hdc, a, message, shown, width - px(a, 24), false, 0, 0) + px(a, 22);
     }
-    if (message.reaction.len > 0) height += px(a, 18);
+    if (message.reaction.len > 0) height += wrapMixedSink(hdc, a, message.reaction.ptr(), @intCast(message.reaction.len), width - px(a, 24), false, 0, 0, null) + px(a, 4);
     const min_height: i32 = header_height + timeBandHeight(hdc, a) + px(a, 5);
     return @max(height, min_height);
 }
@@ -14119,8 +14410,9 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         if (message.reaction.len > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font.?));
             _ = win.SetTextColor(hdc, if (message.reaction_pending) theme.current.on_surface_variant else if (message.from_me) theme.current.on_primary_container else theme.current.on_surface);
-            var reaction_rect = win.RECT{ .left = left + px(a, 12), .top = y + height - px(a, 30), .right = left + px(a, 52), .bottom = y + height - px(a, 6) };
-            _ = text_draw.drawText(hdc, message.reaction.ptr(), @intCast(message.reaction.len), &reaction_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
+            const reaction_width = right - left - px(a, 24);
+            const reaction_height = wrapMixedSink(hdc, a, message.reaction.ptr(), @intCast(message.reaction.len), reaction_width, false, 0, 0, null);
+            _ = wrapMixedSink(hdc, a, message.reaction.ptr(), @intCast(message.reaction.len), reaction_width, true, left + px(a, 12), y + height - timeBandHeight(hdc, a) - px(a, 5) - reaction_height, null);
         }
         _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
         _ = win.SetTextColor(hdc, if (message.send_state == .failed) theme.current.@"error" else theme.current.on_surface_variant);
@@ -14354,7 +14646,7 @@ fn openChatMenu(a: *App, lparam: win.LPARAM) void {
         if (win.SendMessageW(list, win.LB_GETITEMRECT, row, @intCast(@intFromPtr(&rect))) == win.LB_ERR) return;
         if (client.x < rect.left or client.x >= rect.right or client.y < rect.top or client.y >= rect.bottom) return;
     }
-    if (row != a.selected_chat and !(a.bulk.count > 0 and a.bulk.contains(a.chats[row].jid.slice())))
+    if (row != a.selected_chat and !(a.bulk.count > 0 and a.bulk.containsKey(chat_key.of(&a.chats[row]))))
         selectChatRow(a, row);
     const chat = &a.chats[row];
     const choice = menu: {
@@ -14365,7 +14657,7 @@ fn openChatMenu(a: *App, lparam: win.LPARAM) void {
             .whatsapp = chat.provider == .whatsapp,
             .archived = chat.archived,
             .kept = isKeptArchived(a, chat.jid.slice()),
-            .pinned = isChatPinned(a, chat.jid.slice()),
+            .pinned = isChatPinned(a, chat_key.of(chat)),
             .show_archived = a.show_archived,
         }, .{ .archive = command_archive, .keep = command_keep_archived, .pin = command_pin }, &out);
         for (rows) |item| _ = win.AppendMenuW(popup, win.MF_STRING, item.command, item.label.ptr);
@@ -14595,11 +14887,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     }
                 },
                 .slack_workspace => if (result.ok) {
-                    if (!applySlackWorkspace(a, result.data)) logSlackFailure(a, result.kind, "ParseFailed", result.http_status);
+                    if (!applySlackWorkspace(a, result.account.slice(), result.data)) logSlackFailure(a, result.kind, "ParseFailed", result.http_status);
                     refreshVisibleChats(a);
                 } else if (slackConfigured(a)) setStatus(a, "Unable to read Slack channels"),
                 .slack_users => if (result.ok) {
-                    if (!applySlackUsers(a, result.data)) logSlackFailure(a, result.kind, "ParseFailed", result.http_status);
+                    if (!applySlackUsers(a, result.account.slice(), result.data)) logSlackFailure(a, result.kind, "ParseFailed", result.http_status);
                     refreshVisibleChats(a);
                 },
                 .slack_auth => if (result.ok) {
@@ -14609,7 +14901,22 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         .object => |object| object,
                         else => return 0,
                     };
-                    a.slack_user_id.set(getString(root, "user_id"));
+                    const identity = slack.installationIdentity(root) orelse return 0;
+                    if (result.account.len == 0) {
+                        if (std.mem.eql(u8, result.extra.slice(), "bridge")) {
+                            if (slackInstallation(a, identity.team_id) != null or installSlackWorkspace(a, identity.team_id, identity.team_name, identity.user_id, "", "", 0, true)) bindSlackOutboxAccount(a, identity.team_id);
+                        } else if (a.slack_tokens) |tokens| {
+                            if (addSlackInstallation(identity.team_id, identity.team_name, identity.user_id, tokens.user, "", 0)) {
+                                if (a.slack_bridge == null) bindSlackOutboxAccount(a, identity.team_id);
+                                slack_win.deleteSecret(lit("SlackUserToken"));
+                                a.slack_install_mutex.lockUncancelable(a.io);
+                                a.allocator.free(tokens.user);
+                                a.allocator.free(tokens.app);
+                                a.slack_tokens = null;
+                                a.slack_install_mutex.unlock(a.io);
+                            }
+                        }
+                    }
                     const team = getString(root, "team");
                     var status_buffer: [96]u8 = undefined;
                     setStatus(a, std.fmt.bufPrint(&status_buffer, "Slack connected: {s}", .{if (team.len > 0) team else "workspace"}) catch "Slack connected");
@@ -14621,7 +14928,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)))
                     {
                         const hash = std.hash.Wyhash.hash(0, result.data);
-                        const unchanged = a.slack_bridge != null and hash == a.slack_history_hash and
+                        const unchanged = hash == a.slack_history_hash and
                             chat_key.Key.eql(chat_key.displayed(a), chat_key.of(result));
                         if (!unchanged) {
                             applySlackHistory(a, result.data);
@@ -14638,7 +14945,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 },
                 .slack_send, .slack_attach, .slack_share => handleSlackSendResult(a, result),
                 .slack_download => {
-                    if (result.ok) {
+                    if (result.ok and chat_key.Key.eql(chat_key.displayed(a), chat_key.of(result))) {
                         const ts = result.msg_id.slice();
                         for (a.messages[0..a.message_count]) |*stored| {
                             if (std.mem.eql(u8, stored.id.slice(), ts)) {
@@ -14650,7 +14957,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     }
                 },
                 .slack_mark => {
+                    if (result.ok) if (slackChatById(a, result.account.slice(), result.jid.slice())) |chat| {
+                        chat.slack_last_read.set(slack.newerMarkTs(chat.slack_last_read.slice(), result.msg_id.slice()));
+                    };
                     if (!result.ok and result.gen == a.slack_mark_gen and
+                        std.mem.eql(u8, result.account.slice(), a.slack_mark_account.slice()) and
                         std.mem.eql(u8, result.jid.slice(), a.slack_mark_channel.slice()) and
                         std.mem.eql(u8, result.msg_id.slice(), a.slack_mark_ts.slice())) cancelSlackMark(a);
                 },
@@ -14664,6 +14975,13 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return 0;
         },
         wm_slack_reload => {
+            a.slack_install_mutex.lockUncancelable(a.io);
+            if (a.slack_tokens) |tokens| {
+                a.allocator.free(tokens.user);
+                a.allocator.free(tokens.app);
+                a.slack_tokens = null;
+            }
+            a.slack_install_mutex.unlock(a.io);
             loadSlackTokens(a);
             refreshSlackWorkspace(a);
             startSlackSocket(a);
@@ -15333,7 +15651,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         walkMessageHighlight(a, key);
         return true;
     }
-    if (alt and !control and !shift and key >= '1' and key <= '9') {
+    if (alt and !control and !shift and key >= '0' and key <= '9') {
         if (messenger_view.forNumber(key - '0', slackConfigured(a), telegramReady(a))) |view| switchChatView(a, view);
         return true;
     }
@@ -16005,7 +16323,7 @@ fn applyStartupProbe(a: *App, code: usize, hash: u64) void {
     logStartupMilestone(a, .auth, std.fmt.bufPrint(&label_buffer, "auth status done ({s})", .{@tagName(kind)}) catch "auth status done");
     if (kind == .failed) {
         appendLaunchLog(a, "startup: auth status failed, keeping saved account tag");
-        if (activeChatView(a) == .whatsapp) {
+        if (messenger_view.includes(activeChatView(a), .whatsapp)) {
             refreshChats(a);
             refreshMessages(a);
         }
@@ -16014,6 +16332,10 @@ fn applyStartupProbe(a: *App, code: usize, hash: u64) void {
     var tag_buffer: [16]u8 = undefined;
     const new_tag: []const u8 = if (kind == .linked) (std.fmt.bufPrint(&tag_buffer, "{x:0>16}", .{hash}) catch "") else "";
     const changed = !std.mem.eql(u8, a.cache_tag.slice(), new_tag);
+    if (changed) {
+        if (a.chats_raw) |raw| a.allocator.free(raw);
+        a.chats_raw = null;
+    }
     a.cache_tag.set(new_tag);
     bindOutboxAccount(a);
     if (changed) clearStatusAccount(a);
@@ -16023,12 +16345,12 @@ fn applyStartupProbe(a: *App, code: usize, hash: u64) void {
         appendLaunchLog(a, "startup: WhatsApp logged out, live sync halted");
         markWhatsAppLoggedOut(a);
     }
-    if (changed and activeChatView(a) == .whatsapp) {
+    if (changed and messenger_view.includes(activeChatView(a), .whatsapp)) {
         appendLaunchLog(a, "startup: account changed, reloading caches");
         _ = applyChats(a, "{\"data\":[]}", false);
         loadChatsCache(a);
     }
-    if (activeChatView(a) == .whatsapp) {
+    if (messenger_view.includes(activeChatView(a), .whatsapp)) {
         refreshChats(a);
         refreshMessages(a);
     }
@@ -16170,6 +16492,7 @@ pub fn main(init: std.process.Init) !void {
     }
     theme.set(loadTheme());
     var app = App{ .allocator = init.gpa, .people = people_index.Index.init(init.gpa), .io = init.io, .instance = instance, .wacli_path = wacli_path, .avatar_dir = avatar_dir, .slack_media_dir = slack_media_dir, .deepgram_configured = deepgram_key.len > 0, .deepgram_key = deepgram_key, .openrouter_key = openrouter_key, .openrouter_model = openrouter_model, .openrouter_configured = openrouter_key.len > 0, .format_workspace = format_workspace, .dictation_language = loadDictationLanguage(), .font_scale = loadFontScale(), .chat_view = loadChatView() };
+    defer app.allocator.free(app.chats);
     defer app.people.deinit();
     defer if (app.status_list) |*list| list.deinit(init.gpa);
     defer app.status_viewed.deinit(init.gpa);

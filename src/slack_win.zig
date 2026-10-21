@@ -37,7 +37,7 @@ pub const Bridge = struct {
 pub const max_download_bytes: u64 = 100 * 1024 * 1024;
 
 pub fn isUserToken(token: []const u8) bool {
-    return std.mem.startsWith(u8, token, "xoxp-") and token.len >= 20 and token.len <= 512;
+    return (std.mem.startsWith(u8, token, "xoxp-") or std.mem.startsWith(u8, token, "xoxe.xoxp-")) and token.len >= 20 and token.len <= 4096;
 }
 
 pub fn isAppToken(token: []const u8) bool {
@@ -128,6 +128,7 @@ fn regDelete(name: [*:0]const u16) void {
 }
 
 fn winHandleHkey(value: usize) win.HKEY {
+    @setRuntimeSafety(false);
     return @ptrFromInt(value);
 }
 
@@ -166,6 +167,57 @@ pub fn loadSecret(allocator: std.mem.Allocator, name: [*:0]const u16) ?SecretLoa
     if (!std.mem.eql(u8, verified, plain)) return failed;
     if (!regSetBinary(name, blob)) return failed;
     return .{ .value = plain, .outcome = .migrated };
+}
+
+pub const Installation = struct {
+    team_id: []const u8,
+    team_name: []const u8,
+    user_id: []const u8,
+    user_token: []const u8,
+    refresh_token: []const u8 = "",
+    expires_at: i64 = 0,
+};
+
+pub fn deleteSecret(name: [*:0]const u16) void {
+    if (enabled) regDelete(name);
+}
+
+pub fn saveInstallation(installation: Installation) bool {
+    if (!slack.validTeamId(installation.team_id) or !isUserToken(installation.user_token)) return false;
+    const allocator = std.heap.page_allocator;
+    const name = std.fmt.allocPrintSentinel(allocator, "SlackInstallation-{s}", .{installation.team_id}, 0) catch return false;
+    defer allocator.free(name);
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(allocator, name) catch return false;
+    defer allocator.free(wide);
+    const json = std.json.Stringify.valueAlloc(allocator, installation, .{}) catch return false;
+    defer allocator.free(json);
+    return saveSecret(wide, json);
+}
+
+pub fn loadInstallation(allocator: std.mem.Allocator, team_id: []const u8) ?std.json.Parsed(Installation) {
+    if (!slack.validTeamId(team_id)) return null;
+    const name = std.fmt.allocPrint(allocator, "SlackInstallation-{s}", .{team_id}) catch return null;
+    defer allocator.free(name);
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(allocator, name) catch return null;
+    defer allocator.free(wide);
+    const stored = loadSecret(allocator, wide) orelse return null;
+    defer allocator.free(stored.value);
+    const parsed = std.json.parseFromSlice(Installation, allocator, stored.value, .{ .allocate = .alloc_always }) catch return null;
+    if (!std.mem.eql(u8, parsed.value.team_id, team_id) or !isUserToken(parsed.value.user_token)) {
+        parsed.deinit();
+        return null;
+    }
+    return parsed;
+}
+
+pub fn deleteInstallation(team_id: []const u8) void {
+    if (!slack.validTeamId(team_id)) return;
+    const allocator = std.heap.page_allocator;
+    const name = std.fmt.allocPrint(allocator, "SlackInstallation-{s}", .{team_id}) catch return;
+    defer allocator.free(name);
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(allocator, name) catch return;
+    defer allocator.free(wide);
+    deleteSecret(wide);
 }
 
 pub fn saveTokens(user: []const u8, app: []const u8) bool {
@@ -527,6 +579,12 @@ pub fn socketReceive(sock: Socket, buf: []u8) ![]u8 {
 }
 
 pub const Event = struct {
+    team_id: [32]u8 = undefined,
+    team_id_len: u8 = 0,
+    event_type: [32]u8 = undefined,
+    event_type_len: u8 = 0,
+    reaction: [96]u8 = undefined,
+    reaction_len: u8 = 0,
     channel: [slack.max_channel_id + 1]u8 = undefined,
     channel_len: u8 = 0,
     ts: [40]u8 = undefined,
@@ -549,6 +607,12 @@ pub const Event = struct {
     file_mime_len: u8 = 0,
     file_size: i64 = 0,
 
+    pub fn teamIdSlice(self: *const Event) []const u8 {
+        return self.team_id[0..self.team_id_len];
+    }
+    pub fn eventTypeSlice(self: *const Event) []const u8 {
+        return self.event_type[0..self.event_type_len];
+    }
     pub fn channelSlice(self: *const Event) []const u8 {
         return self.channel[0..self.channel_len];
     }
@@ -604,6 +668,9 @@ pub fn buildEvent(envelope: slack.Envelope) ?*Event {
     if (envelope.ts.len != envelope.thread_ts.len or !std.mem.eql(u8, envelope.ts, envelope.thread_ts)) {}
     const event = std.heap.page_allocator.create(Event) catch return null;
     event.* = .{};
+    copyInto(&event.team_id, &event.team_id_len, envelope.team_id);
+    copyInto(&event.event_type, &event.event_type_len, envelope.event_type);
+    copyInto(&event.reaction, &event.reaction_len, envelope.reaction);
     copyInto(&event.channel, &event.channel_len, envelope.channel);
     copyInto(&event.ts, &event.ts_len, envelope.ts);
     copyInto(&event.thread_ts, &event.thread_ts_len, envelope.thread_ts);
@@ -666,13 +733,17 @@ fn runOneSession(config: SocketConfig, connected_here: *bool) !void {
             socketSend(classify_arena.allocator(), sock, ack) catch return error.NetworkFailed;
         }
         if (envelope.kind != .events) continue;
-        if (!std.mem.eql(u8, envelope.event_type, "message")) continue;
-        const event = buildEvent(envelope) orelse continue;
-        _ = config.sink.queue.fetchAdd(1, .acq_rel);
-        const hwnd: win.HWND = @ptrFromInt(@intFromPtr(config.sink.hwnd));
-        if (win.PostMessageW(hwnd, config.sink.message_id, 0, @bitCast(@intFromPtr(event))) == 0) {
-            _ = config.sink.queue.fetchSub(1, .acq_rel);
-            destroyEvent(event);
+        if (!std.mem.eql(u8, envelope.event_type, "message") and !std.mem.eql(u8, envelope.event_type, "reaction_added") and !std.mem.eql(u8, envelope.event_type, "reaction_removed")) continue;
+        for (envelope.teams[0..envelope.team_count]) |team| {
+            var routed = envelope;
+            routed.team_id = team;
+            const event = buildEvent(routed) orelse continue;
+            _ = config.sink.queue.fetchAdd(1, .acq_rel);
+            const hwnd: win.HWND = @ptrFromInt(@intFromPtr(config.sink.hwnd));
+            if (win.PostMessageW(hwnd, config.sink.message_id, 0, @bitCast(@intFromPtr(event))) == 0) {
+                _ = config.sink.queue.fetchSub(1, .acq_rel);
+                destroyEvent(event);
+            }
         }
     }
 }
@@ -708,6 +779,34 @@ fn httpOk(allocator: std.mem.Allocator, body: []const u8) bool {
     return slack.responseIsOk(allocator, body);
 }
 
+fn workspaceReadState(allocator: std.mem.Allocator, ctx: JobContext, page: []const u8) ![]u8 {
+    if (ctx.is_bridge) return allocator.dupe(u8, page);
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, page, .{ .allocate = .alloc_always });
+    defer parsed.deinit();
+    const root = &parsed.value.object;
+    if (root.getPtr("channels")) |channels| {
+        if (channels.* == .array) for (channels.array.items) |*channel| {
+            if (channel.* != .object) continue;
+            if (slack.workspaceChannel(channel.object) == null) continue;
+            const id = slack.objectStringField(channel.object, "id");
+            if (id.len == 0) continue;
+            const path = try std.fmt.allocPrint(allocator, "/api/conversations.info?channel={s}", .{id});
+            defer allocator.free(path);
+            var response = try callWithRetry(allocator, ctx.host, ctx.user_token, path, null);
+            defer response.deinit(allocator);
+            if (response.status != 200 or !httpOk(allocator, response.body)) return error.SlackReadStateFailed;
+            const info = try std.json.parseFromSliceLeaky(std.json.Value, parsed.arena.allocator(), response.body, .{ .allocate = .alloc_always });
+            if (info != .object) return error.BadResponse;
+            const details = info.object.get("channel") orelse return error.BadResponse;
+            if (details != .object) return error.BadResponse;
+            for ([_][]const u8{ "last_read", "unread_count", "unread_count_display", "latest" }) |field| {
+                if (details.object.get(field)) |value| try channel.object.put(parsed.arena.allocator(), field, value);
+            }
+        };
+    }
+    return std.json.Stringify.valueAlloc(allocator, parsed.value, .{});
+}
+
 pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args: []const []const u8) ![]u8 {
     switch (kind) {
         .workspace => {
@@ -721,7 +820,9 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
                 try path.appendSlice(allocator, "&cursor=");
                 try path.appendSlice(allocator, encoded);
             }
-            return listPage(allocator, try callWithRetry(allocator, ctx.host, ctx.user_token, path.items, null));
+            const page = try listPage(allocator, try callWithRetry(allocator, ctx.host, ctx.user_token, path.items, null));
+            defer allocator.free(page);
+            return workspaceReadState(allocator, ctx, page);
         },
         .users => {
             var path = std.ArrayList(u8).empty;
@@ -873,6 +974,44 @@ fn uploadImage(allocator: std.mem.Allocator, ctx: JobContext, file_path: []const
     try putFile(allocator, grant.upload_url, bytes);
     if (grant.file_id.len == 0 or grant.file_id.len > 63 or std.mem.indexOfScalar(u8, grant.file_id, 0) != null) return error.HttpFailed;
     return allocator.dupe(u8, grant.file_id);
+}
+
+test "singleton credentials migrate through auth identity into isolated DPAPI workspace records" {
+    if (!enabled) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    const user_token = "xoxp-00000000000000000001";
+    const app_token = "xapp-00000000000000000001";
+    try std.testing.expect(saveTokens(user_token, app_token));
+    defer clearTokens();
+    const singleton = loadTokens(allocator).?;
+    defer allocator.free(singleton.user);
+    defer allocator.free(singleton.app);
+    const auth = try std.json.parseFromSlice(std.json.Value, allocator,
+        \\{"ok":true,"team_id":"T0000000001","team":"Example workspace","user_id":"U0000000001"}
+    , .{});
+    defer auth.deinit();
+    const identity = slack.installationIdentity(auth.value.object).?;
+    const installation = Installation{ .team_id = identity.team_id, .team_name = identity.team_name, .user_id = identity.user_id, .user_token = singleton.user, .refresh_token = "example-refresh-token", .expires_at = 1740000000 };
+    try std.testing.expect(saveInstallation(installation));
+    defer deleteInstallation(identity.team_id);
+    const saved = loadInstallation(allocator, identity.team_id).?;
+    defer saved.deinit();
+    try std.testing.expectEqualStrings(user_token, saved.value.user_token);
+    try std.testing.expectEqualStrings("example-refresh-token", saved.value.refresh_token);
+    try std.testing.expectEqual(@as(i64, 1740000000), saved.value.expires_at);
+    deleteSecret(wideLiteral("SlackUserToken"));
+    try std.testing.expect(loadTokens(allocator) == null);
+    const shared_app = loadSecret(allocator, wideLiteral("SlackAppToken")).?;
+    defer allocator.free(shared_app.value);
+    try std.testing.expectEqualStrings(app_token, shared_app.value);
+    try std.testing.expect(saveInstallation(.{ .team_id = "T0000000002", .team_name = "Second workspace", .user_id = "U0000000002", .user_token = "xoxp-00000000000000000002" }));
+    defer deleteInstallation("T0000000002");
+    const second = loadInstallation(allocator, "T0000000002").?;
+    defer second.deinit();
+    try std.testing.expectEqualStrings("xoxp-00000000000000000002", second.value.user_token);
+    const first = loadInstallation(allocator, identity.team_id).?;
+    defer first.deinit();
+    try std.testing.expectEqualStrings(user_token, first.value.user_token);
 }
 
 fn shareImage(allocator: std.mem.Allocator, ctx: JobContext, channel: []const u8, thread_ts: []const u8, file_id: []const u8, caption: []const u8) ![]u8 {

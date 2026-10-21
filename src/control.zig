@@ -1,10 +1,11 @@
 const std = @import("std");
 const theme = @import("theme.zig");
+const transport = @import("transport.zig");
 
 pub const pipe_prefix = "\\\\.\\pipe\\wazig-control-";
 
 pub const Command = enum { theme, status, statuses, @"open-status", chats, search, view, select, messages, archive, unarchive, @"archive-many" };
-pub const Messenger = enum { whatsapp, slack, telegram };
+pub const Messenger = enum { whatsapp, slack, telegram, all };
 
 pub const Request = struct {
     cmd: Command,
@@ -13,6 +14,8 @@ pub const Request = struct {
     ids: []const []const u8 = &.{},
     text: []const u8 = "",
     messenger: ?Messenger = null,
+    provider: ?transport.Provider = null,
+    account: []const u8 = "",
     archived: bool = false,
     all: bool = false,
     limit: ?u32 = null,
@@ -25,10 +28,10 @@ pub const commands = [_]CommandInfo{
     .{ .cmd = .status, .usage = "status", .summary = "version, theme, active messenger, selected chat, sync state, pending sends, search text" },
     .{ .cmd = .statuses, .usage = "statuses", .summary = "loaded WhatsApp Status updates and local viewed state" },
     .{ .cmd = .@"open-status", .usage = "open-status [SENDER_JID]", .summary = "open WhatsApp Status without focusing the app" },
-    .{ .cmd = .chats, .usage = "chats [--messenger whatsapp|slack|telegram] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
+    .{ .cmd = .chats, .usage = "chats [--json] [--messenger all|whatsapp|slack|telegram] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
     .{ .cmd = .search, .usage = "search <text>", .summary = "set the sidebar search text (\"\" clears it)" },
-    .{ .cmd = .view, .usage = "view <whatsapp|slack|telegram>", .summary = "switch the sidebar messenger, like Alt+1/Alt+2" },
-    .{ .cmd = .select, .usage = "select <id>", .summary = "open that chat in the app" },
+    .{ .cmd = .view, .usage = "view <all|whatsapp|slack|telegram>", .summary = "switch the sidebar messenger, like Alt+0/Alt+1/Alt+2/Alt+3" },
+    .{ .cmd = .select, .usage = "select <id> [--provider whatsapp|slack|telegram --account ID]", .summary = "open that chat in the app" },
     .{ .cmd = .messages, .usage = "messages [<id>] [--limit N]", .summary = "recent loaded messages of the selected (or given) chat" },
     .{ .cmd = .archive, .usage = "archive <id>", .summary = "archive a chat (the app's own archive action)" },
     .{ .cmd = .unarchive, .usage = "unarchive <id>", .summary = "unarchive a chat" },
@@ -65,7 +68,16 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
     var index: usize = 1;
     while (index < args.len) : (index += 1) {
         const arg = args[index];
-        const takes_flags = cmd == .chats or cmd == .messages;
+        const takes_flags = cmd == .chats or cmd == .messages or cmd == .select;
+        if (takes_flags and std.mem.eql(u8, arg, "--json")) continue;
+        if (cmd == .select and (std.mem.eql(u8, arg, "--provider") or std.mem.eql(u8, arg, "--account"))) {
+            index += 1;
+            if (index >= args.len) return usage(message, "identity option needs a value");
+            if (std.mem.eql(u8, arg, "--provider")) {
+                request.provider = std.meta.stringToEnum(transport.Provider, args[index]) orelse return usage(message, "unknown provider");
+            } else request.account = try allocator.dupe(u8, args[index]);
+            continue;
+        }
         if (takes_flags and std.mem.startsWith(u8, arg, "--")) {
             if (std.mem.eql(u8, arg, "--limit")) {
                 index += 1;
@@ -110,8 +122,8 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
             request.text = try std.mem.join(allocator, " ", items);
         },
         .view => {
-            if (items.len != 1) return usage(message, "view needs whatsapp, slack or telegram");
-            request.messenger = std.meta.stringToEnum(Messenger, items[0]) orelse return usage(message, "view needs whatsapp, slack or telegram");
+            if (items.len != 1) return usage(message, "view needs all, whatsapp, slack or telegram");
+            request.messenger = std.meta.stringToEnum(Messenger, items[0]) orelse return usage(message, "view needs all, whatsapp, slack or telegram");
         },
         .select, .archive, .unarchive => {
             if (items.len != 1 or items[0].len == 0) return usage(message, "needs exactly one chat id");
@@ -399,4 +411,22 @@ test "theme choice survives the control JSON round trip" {
     try std.testing.expectEqual(Command.theme, parsed.value.cmd);
     try std.testing.expectEqual(@as(?theme.Choice, .amoled), parsed.value.theme);
     try std.testing.expectError(error.InvalidEnumTag, parseRequest(std.testing.allocator, "{\"cmd\":\"theme\",\"theme\":\"purple\"}"));
+}
+
+test "select accepts a full workspace identity and chats accepts explicit JSON" {
+    const request = try parseForTest(&.{ "select", "C0000000001", "--provider", "slack", "--account", "T0000000002" });
+    defer std.testing.allocator.free(request.id);
+    defer std.testing.allocator.free(request.account);
+    try std.testing.expectEqual(@as(?transport.Provider, .slack), request.provider);
+    try std.testing.expectEqualStrings("T0000000002", request.account);
+    try std.testing.expectEqualStrings("C0000000001", request.id);
+    try std.testing.expectEqual(Command.chats, (try parseForTest(&.{ "chats", "--json" })).cmd);
+    try std.testing.expectEqual(@as(?Messenger, .all), (try parseForTest(&.{ "view", "all" })).messenger);
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeRequest(&out.writer, request);
+    const parsed = try parseRequest(std.testing.allocator, out.written());
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings(request.account, parsed.value.account);
+    try std.testing.expectEqual(request.provider, parsed.value.provider);
 }
