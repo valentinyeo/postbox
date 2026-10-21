@@ -56,7 +56,11 @@ jobs:
           name: Messages-windows-x86_64
           path: zig-out/bin/
 
+  tdlib-cache:
+    uses: ./.github/workflows/tdlib-cache.yml
+
   tdlib:
+    needs: tdlib-cache
     name: tdlib
     runs-on: ubuntu-latest
     timeout-minutes: 120

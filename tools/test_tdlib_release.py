@@ -35,8 +35,10 @@ def verify(workflows):
     assert '-Dtarget=aarch64-windows-gnu' in arm
     assert '-Dtdlib' not in arm
     cache = workflows['tdlib-cache']
-    for trigger in ('branches: [main]', '- tools/build-tdlib.sh', '- tools/TDLIB_COMMIT', 'workflow_dispatch:', 'schedule:', 'cron:'):
+    for trigger in ('branches: [main]', '- tools/build-tdlib.sh', '- tools/TDLIB_COMMIT', 'workflow_dispatch:', 'workflow_call:', 'schedule:', 'cron:'):
         assert trigger in cache
+    assert 'uses: ./.github/workflows/tdlib-cache.yml' in workflows['ci']
+    assert 'needs: tdlib-cache' in workflows['ci']
 
 
 class TdlibReleaseTest(unittest.TestCase):
