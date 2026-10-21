@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IGSH-533: Reactions appear in small chips below message bubbles with their own row space, so emojis no longer overlap message text at 100% or 150% display scaling.
+
 - IGSH-461: AMOLED popup and account-dialog inputs show focus borders, and the Telegram input keeps its raised surface while checking credentials. AMOLED remains the default unless a theme was explicitly saved.
 - IGSH-538: Remove WhatsApp Status and stories, including the sidebar, viewer, commands, unread badges and background requests. Chats now start directly below search in both themes.
 - IGSH-517: Use saved Windows user API keys instead of stale inherited keys. Voice transcription recovers from a key rotation while the app is running, and failed voice notes try again when their chat is reopened.
