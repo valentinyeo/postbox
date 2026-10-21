@@ -1,5 +1,8 @@
 const std = @import("std");
 var verification_fixture = false;
+fn verificationEnqueue(_: *App, _: WacliJob) bool {
+    return false;
+}
 const drafts = struct {
     const max_text = 64 * 1024;
 };

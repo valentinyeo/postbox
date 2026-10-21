@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == ['appearance', 'drafts', 'menus', 'navigation', 'palette', 'search', 'whatsapp-hub']
+assert features == ['appearance', 'archive', 'drafts', 'menus', 'navigation', 'palette', 'search', 'whatsapp-hub']
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
     assert re.findall(r'^## (.+)$', entry, re.M) == [
@@ -16,17 +16,21 @@ for feature in features:
     assert f'feature={feature}' in entry
     assert f'({feature}.md)' in (skill / 'features/README.md').read_text(encoding="utf-8")
 source = (root / 'src/main.zig').read_text(encoding="utf-8")
-for label in ['Search chats', 'Next chat', 'Previous chat', 'Compose message', 'Keyboard shortcuts', 'Theme: Green', 'Make text larger', 'Reset text size']:
+for label in ['Search chats', 'Next chat', 'Previous chat', 'Compose message', 'Keyboard shortcuts', 'Theme: Green', 'Make text larger', 'Reset text size', 'Show archived chats', 'Show inbox chats', 'Archive selected chat', 'Unarchive selected chat', 'Archive and keep archived', 'Allow resurfacing']:
     assert f'"{label}"' in source, label
 for control in ['id_search = 1008', 'id_compose = 1032']:
     assert control in source
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
+assert 'options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, archive]' in workflow
+assert 'default: search' in workflow
+assert 'Keep archived\\tCtrl+Shift+E' in (root / 'src/chat_menu.zig').read_text(encoding='utf-8')
 for helper in ['run', 'doctor', 'cleanup', 'harness']:
     assert (root / 'tools/verify-wazig' / f'{helper}.ps1').is_file()
 assert 'RegOverridePredefKey' in source and 'VerificationRequiresActions' in source
-assert 'if (verification_fixture and !hubConfigured(a)) return false;' in source
+assert 'if (verification_fixture and !hubConfigured(a)) return verificationEnqueue(a, job);' in source
+assert 'if (!verification_fixture) return null;' in source
 assert 'if (verification_fixture) return;' in source
 assert 'whatsapp-hub' in workflow
 assert (root / 'tools/verify-wazig/fake-wa-bridge.py').is_file()
@@ -40,4 +44,4 @@ assert "if ($Feature -ne 'whatsapp-hub') {\n    Set-Content (Join-Path $messages
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 for proof in ['chats', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
-print('MAP VERIFIED: seven complete feature entries, source labels, stable controls, hub journey and GitHub triggers')
+print('MAP VERIFIED: eight complete feature entries, source labels, stable controls, hub journey and GitHub triggers')

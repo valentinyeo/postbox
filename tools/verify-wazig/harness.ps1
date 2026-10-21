@@ -45,12 +45,13 @@ function Get-App($Session) {
     return $app
 }
 
-function Read-Control($Session, [string]$Command) {
+function Read-Control($Session, [string]$Command, [string[]]$Arguments = @()) {
     $start = [Diagnostics.ProcessStartInfo]::new($Session.ctl)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     $start.ArgumentList.Add($Command)
+    foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
     $start.Environment['USERNAME'] = $Session.username
     $child = [Diagnostics.Process]::Start($start)
     $text = $child.StandardOutput.ReadToEnd()
@@ -105,6 +106,23 @@ function Send-Keys($Session, [string]$Keys) {
     Add-Content (Join-Path $Session.evidence 'actions.log') "keys: $Keys"
 }
 
+function Invoke-PaletteCommand($Session, [string]$Command, [string]$Capture = '') {
+    Send-Keys $Session '^k'
+    $palette = Wait-Until {
+        $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MessagesPalette')
+        $windows = [Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children, $condition)
+        foreach ($window in $windows) { if ($window.Current.ProcessId -eq $Session.pid) { return $window } }
+    } 'owned command palette'
+    $edit = Get-Edit $palette '1064'
+    Send-Keys $Session $Command
+    $null = Wait-Until { (Read-Edit $edit) -eq $Command } 'palette query'
+    if ($Capture) {
+        Save-Screen $Session $Capture
+        "MessagesPalette | $($palette.Current.ProcessId) | $(Read-Edit $edit)" | Set-Content (Join-Path $Session.evidence "$Capture.palette.uia.txt")
+    }
+    Send-Keys $Session '{ENTER}'
+}
+
 function Save-Screen($Session, [string]$Name) {
     $window = Get-Window $Session
     $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -123,7 +141,12 @@ function Save-Screen($Session, [string]$Name) {
         $tree += "$($element.Current.AutomationId) | $($element.Current.ClassName) | $($element.Current.Name)"
     }
     $tree | Set-Content (Join-Path $Session.evidence "$Name.uia.txt")
-    Read-Control $Session status | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.state.json")
+    $state = Read-Control $Session status
+    $state | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.state.json")
+    if ($Session.feature -eq 'archive') {
+        $arguments = if ($state.show_archived) { @('--archived') } else { @() }
+        Read-Control $Session chats -Arguments $arguments | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.chats.json")
+    }
 }
 
 function Invoke-Doctor($Session) {
