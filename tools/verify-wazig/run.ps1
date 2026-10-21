@@ -209,6 +209,12 @@ try {
             Send-Keys $session '^{BACKSPACE}'
             $null = Wait-Until { (Read-Edit $compose) -eq 'Verification ' } 'Ctrl-Backspace word deletion'
             Send-Keys $session 'draft'
+            Send-Keys $session '^a^c^v'
+            $null = Wait-Until { (Read-Edit $compose) -eq 'Verification draft' } 'Ctrl-V pastes exactly once'
+            Send-Keys $session '^a+{INSERT}'
+            $null = Wait-Until { (Read-Edit $compose) -eq 'Verification draft' } 'Shift-Insert uses the guarded paste path'
+            Save-Screen $session paste
+            Send-Keys $session '{END}'
             Send-Keys $session '+{ENTER}'
             Send-Keys $session 'second'
             $null = Wait-Until { (Read-Edit $compose) -eq "Verification draft`nsecond" } 'Shift-Enter multiline input'

@@ -86,11 +86,14 @@ function Get-Edit($Window, [string]$Id) {
 
 function Read-Edit($Edit) {
     $handle = [IntPtr]$Edit.Current.NativeWindowHandle
-    Assert-That ($handle -ne [IntPtr]::Zero -and $Edit.Current.ClassName -eq 'MessagesDirectWriteEdit') 'Expected a DirectWrite RichEdit host'
+    Assert-That ($handle -ne [IntPtr]::Zero -and $Edit.Current.ClassName -eq 'RICHEDIT50W') 'Expected a DirectWrite RichEdit host'
     $text = [Text.StringBuilder]::new(65537)
     $length = [UIntPtr]::Zero
     $ok = [VerifyWindow]::ReadText($handle, 13, [UIntPtr]65537, $text, 2, 2000, [ref]$length)
     Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only WM_GETTEXT timed out'
+    $value = $Edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
+    $value = $value.Replace("`r`n", "`n").Replace("`r", "`n")
+    Assert-That ($value -eq $text.ToString()) 'Screen-reader value differs from edit text'
     return $text.ToString()
 }
 

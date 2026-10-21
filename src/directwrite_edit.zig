@@ -146,9 +146,12 @@ const Host = struct {
             _ = text_draw.drawText(dc, text.ptr + first, @intCast(last - first), &line_rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_NOCLIP);
             const start = @max(first, @as(usize, @intCast(@max(0, selection.cpMin))));
             const end = @min(last, @as(usize, @intCast(@max(0, selection.cpMax))));
-            if (end > start) {
+            if (end > start and (win.GetFocus() == self.hwnd or win.GetWindowLongPtrW(self.hwnd, win.GWL_STYLE) & win.ES_NOHIDESEL != 0)) {
                 const left = self.position(start).x;
-                const right = self.position(end).x;
+                const end_point = self.position(end);
+                var measured = line_rect;
+                _ = text_draw.drawText(dc, text.ptr + first, @intCast(last - first), &measured, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_CALCRECT);
+                const right = if (end_point.y == point.y) end_point.x else measured.right;
                 const selected = win.RECT{ .left = left, .top = point.y, .right = @max(left + 1, right), .bottom = point.y + height };
                 _ = win.SetDCBrushColor(dc, theme.current.primary_container);
                 _ = win.FillRect(dc, &selected, @ptrCast(@alignCast(win.GetStockObject(win.DC_BRUSH))));

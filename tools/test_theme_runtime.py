@@ -49,15 +49,14 @@ def verify_wiring(main, edit):
     assert "win.SetBkColor(hdc, theme.current.surface_container_high)" in colors
     assert "return @bitCast(@intFromPtr(a.brush_raised.?));" in colors
     assert "a.search = directwrite_edit.create(" in main
-    colors = section(edit, "    fn updateColours(", "    fn paint(")
-    assert "win.WM_CTLCOLOREDIT" in colors
-    assert "self.background = background;" in colors
-    assert "self.char_format.crTextColor = foreground;" in colors
-    paint = section(edit, "    fn paint(", "fn fromWindow(")
-    assert "self.updateColours(dc);" in paint
-    assert "const background = self.background;" in paint
-    assert "rt.lpVtbl.*.Clear.?(rt, &colour);" in paint
-    assert "self.services.?.send(win.WM_GETTEXTLENGTH, 0, 0) == 0" in paint
+    paint = section(edit, "    fn paint(", "    fn contextMenu(")
+    assert "win.WM_CTLCOLOREDIT" in paint
+    assert "win.SetTextColor(dc, theme.current.on_surface)" in paint
+    assert "win.SetBkColor(dc, theme.current.surface_container_high)" in paint
+    assert "win.SetDCBrushColor(dc, win.GetBkColor(dc))" in paint
+    assert "win.FillRect(dc, &client" in paint
+    assert paint.index("win.WM_CTLCOLOREDIT") < paint.index("win.GetBkColor(dc)")
+    assert "if (length == 0)" in paint
     assert "win.SetTextColor(dc, theme.current.on_surface_variant)" in paint
     assert "text_draw.drawText(dc, &self.cue" in paint
     assert "win.HideCaret(hwnd)" in edit and "win.ShowCaret(hwnd)" in edit
@@ -223,12 +222,11 @@ class ThemeRuntimeTests(unittest.TestCase):
                 verify_wiring(main.replace(token, ""), edit)
         for token in (
             "win.WM_CTLCOLOREDIT",
-            "self.background = background;",
-            "self.char_format.crTextColor = foreground;",
-            "self.updateColours(dc);",
-            "const background = self.background;",
-            "rt.lpVtbl.*.Clear.?(rt, &colour);",
-            "self.services.?.send(win.WM_GETTEXTLENGTH, 0, 0) == 0",
+            "win.SetTextColor(dc, theme.current.on_surface)",
+            "win.SetBkColor(dc, theme.current.surface_container_high)",
+            "win.SetDCBrushColor(dc, win.GetBkColor(dc))",
+            "win.FillRect(dc, &client",
+            "if (length == 0)",
             "win.SetTextColor(dc, theme.current.on_surface_variant)",
             "text_draw.drawText(dc, &self.cue",
             "win.HideCaret(hwnd)",
