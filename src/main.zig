@@ -17257,7 +17257,15 @@ pub fn main(init: std.process.Init) !void {
     const sync_heartbeat_path = try createSyncHeartbeatPath(init, init.gpa);
     defer init.gpa.free(sync_heartbeat_path);
     const wacli_dir = std.fs.path.dirname(store_watch_path) orelse return error.MissingUserProfile;
-    const deepgram_key = init.environ_map.get("DEEPGRAM_API_KEY") orelse "";
+    var deepgram_key = init.environ_map.get("DEEPGRAM_API_KEY") orelse "";
+    const stored_deepgram = slack_win.loadSecret(init.gpa, lit("DeepgramApiKey"));
+    defer if (stored_deepgram) |stored| init.gpa.free(stored.value);
+    var deepgram_seed_saved = false;
+    if (stored_deepgram) |stored| {
+        deepgram_key = stored.value;
+    } else if (deepgram_key.len > 0) {
+        deepgram_seed_saved = slack_win.saveSecret(lit("DeepgramApiKey"), deepgram_key);
+    }
     var openrouter_key = init.environ_map.get("OPENROUTER_API_KEY") orelse "";
     var stored_openrouter: ?slack_win.SecretLoad = null;
     if (openrouter_key.len == 0) {
@@ -17306,6 +17314,22 @@ pub fn main(init: std.process.Init) !void {
         app.cache_tag.set(&tag);
         appendLaunchLog(app, "startup: saved account tag loaded");
     } else appendLaunchLog(app, "startup: no saved account tag, caches wait for auth status");
+    if (stored_deepgram) |stored| {
+        switch (stored.outcome) {
+            .encrypted => appendLaunchLog(app, "startup: deepgram key loaded (encrypted)"),
+            .migrated => {
+                appendLaunchLog(app, "startup: deepgram key migrated to encrypted storage");
+                appendLaunchLog(app, "startup: deepgram key loaded (encrypted)");
+            },
+            .migration_failed => appendLaunchLog(app, "startup: deepgram key left plain, encryption failed"),
+        }
+    } else if (deepgram_key.len > 0) {
+        if (deepgram_seed_saved) {
+            appendLaunchLog(app, "startup: deepgram key saved to encrypted storage from environment");
+        } else {
+            appendLaunchLog(app, "startup: deepgram key from environment, encryption failed");
+        }
+    } else appendLaunchLog(app, "startup: no deepgram key");
     if (stored_openrouter) |stored| {
         switch (stored.outcome) {
             .encrypted => appendLaunchLog(app, "startup: openrouter key loaded (encrypted)"),

@@ -14,7 +14,7 @@ The interface uses Win32, Windows Imaging Component, and Windows shell thumbnail
 - Per-message WhatsApp reactions from the message context menu
 - Green Material 3 (default) and AMOLED black themes, switched live and saved through Ctrl+K or `wazigctl theme green|amoled`
 - IBM Plex Sans bundled as a private application font
-- Deepgram dictation control prepared for `DEEPGRAM_API_KEY`; microphone capture and streaming are not implemented yet
+- Deepgram dictation uses a DPAPI-encrypted key, seeded on first start from the user environment variable `DEEPGRAM_API_KEY`, which can then be removed
 
 ## Keyboard
 
@@ -75,8 +75,10 @@ download to `%LOCALAPPDATA%\Messages\slack`.
 
 The executable and IBM Plex font files are written to `zig-out\bin`. The app expects the official `wacli.exe` at `%LOCALAPPDATA%\Programs\wacli\wacli.exe`.
 
-To prepare Deepgram dictation without committing a key:
+To enable Deepgram dictation without committing a key, seed it from the user environment:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('DEEPGRAM_API_KEY', 'your-key', 'User')
 ```
+
+On first start with this environment variable, Messages stores the key encrypted with Windows DPAPI. After the launch log confirms `startup: deepgram key saved to encrypted storage from environment`, the variable can be removed; later starts use the stored key.
