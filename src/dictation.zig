@@ -4,6 +4,7 @@ const chat_key = @import("chat_key.zig");
 const mic_choice = @import("mic_choice.zig");
 const format_request = @import("format_request.zig");
 const dictation_policy = @import("dictation_policy.zig");
+const slack_win = @import("slack_win.zig");
 const win = @cImport({
     @cDefine("WIN32_LEAN_AND_MEAN", "1");
     @cDefine("COBJMACROS", "1");
@@ -182,23 +183,41 @@ fn captureMicrophone(self: *Session) ![]u8 {
 }
 
 fn transcribe(allocator: std.mem.Allocator, api_key: []const u8, language: Language, content_type: []const u8, body: []const u8) ![]u8 {
-    return dictation_policy.transcribe(Transport{ .allocator = allocator, .api_key = api_key }, language, content_type, body);
+    var transport = Transport{ .allocator = allocator, .api_key = api_key };
+    defer if (transport.refreshed_key) |key| allocator.free(key);
+    return dictation_policy.transcribe(&transport, language, content_type, body);
 }
 
 const Transport = struct {
     allocator: std.mem.Allocator,
     api_key: []const u8,
+    refreshed_key: ?[]u8 = null,
 
-    pub fn send(self: @This(), selected: Language, mime: []const u8, audio: []const u8) ![]u8 {
-        return switch (selected) {
-            .automatic => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.automatic)), mime, audio),
-            .english => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.english)), mime, audio),
-            .german => transcribeAt(self.allocator, self.api_key, lit(dictation_policy.path(.german)), mime, audio),
+    fn sendAt(self: *@This(), request_path: [*:0]const u16, mime: []const u8, audio: []const u8) ![]u8 {
+        return transcribeAt(self.allocator, self.api_key, request_path, mime, audio) catch |err| {
+            if (err != error.Unauthorized or self.refreshed_key != null) return err;
+            const refreshed = slack_win.loadDeepgramKey(self.allocator) catch return err;
+            const saved = refreshed.key;
+            if (saved.len == 0 or std.mem.eql(u8, self.api_key, saved)) {
+                self.allocator.free(saved);
+                return err;
+            }
+            self.refreshed_key = saved;
+            self.api_key = saved;
+            return transcribeAt(self.allocator, saved, request_path, mime, audio);
         };
     }
 
-    pub fn sendMultilingual(self: @This(), mime: []const u8, audio: []const u8) ![]u8 {
-        return transcribeAt(self.allocator, self.api_key, lit(dictation_policy.multilingual_path), mime, audio);
+    pub fn send(self: *@This(), selected: Language, mime: []const u8, audio: []const u8) ![]u8 {
+        return switch (selected) {
+            .automatic => self.sendAt(lit(dictation_policy.path(.automatic)), mime, audio),
+            .english => self.sendAt(lit(dictation_policy.path(.english)), mime, audio),
+            .german => self.sendAt(lit(dictation_policy.path(.german)), mime, audio),
+        };
+    }
+
+    pub fn sendMultilingual(self: *@This(), mime: []const u8, audio: []const u8) ![]u8 {
+        return self.sendAt(lit(dictation_policy.multilingual_path), mime, audio);
     }
 };
 
@@ -349,7 +368,9 @@ fn fileWorker(self: *FileSession, path: []u8, api_key: []u8, language: Language)
     };
     defer self.allocator.free(data);
     self.state_value.store(@intFromEnum(State.transcribing), .release);
-    const transcript = dictation_policy.transcribeFile(Transport{ .allocator = self.allocator, .api_key = api_key }, language, "audio/ogg", data) catch |err| {
+    var transport = Transport{ .allocator = self.allocator, .api_key = api_key };
+    defer if (transport.refreshed_key) |key| self.allocator.free(key);
+    const transcript = dictation_policy.transcribeFile(&transport, language, "audio/ogg", data) catch |err| {
         self.failure = err;
         self.state_value.store(@intFromEnum(State.failed), .release);
         return;
