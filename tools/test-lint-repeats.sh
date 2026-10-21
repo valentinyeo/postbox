@@ -23,6 +23,7 @@ cases=(
     '4064743 B8 HEAD'
     'dc9bdce C1 HEAD'
     '0e7c320d44f1 C1 HEAD'
+    '914331e C2 HEAD'
     '55e826b E1 HEAD'
     '1f5853e^ D1 HEAD'
     'a735c9f F1 HEAD'
