@@ -4891,7 +4891,7 @@ fn persistOutbox(a: *App) bool {
         if (pending.completed) continue;
         var entry = outbox.Entry{ .queued_unix = pending.queued_unix };
         entry.id = pending.id;
-        entry.provider = pending.provider;
+        entry.provider = std.meta.stringToEnum(outbox.Provider, @tagName(pending.provider)) orelse return false;
         entry.account.set(pending.account.slice());
         entry.jid.set(pending.jid.slice());
         entry.text.set(pending.text.slice());
@@ -4964,7 +4964,7 @@ fn loadOutbox(a: *App) void {
             const pending = &a.pending_sends[a.pending_send_count];
             pending.* = .{};
             pending.id = entry.id;
-            pending.provider = entry.provider;
+            pending.provider = std.meta.stringToEnum(transport.Provider, @tagName(entry.provider)).?;
             pending.account.set(entry.account.slice());
             pending.jid.set(entry.jid.slice());
             pending.text.set(entry.text.slice());
@@ -7306,7 +7306,7 @@ fn chatsCachePath(a: *App) ?[]u8 {
     const tag = a.cache_tag.slice();
     if (tag.len == 0) return null;
     var name_buffer: [64]u8 = undefined;
-    const name = std.fmt.bufPrint(&name_buffer, if (unifiedHub(a)) "hub-chats-{s}.json" else "chats-{s}.json", .{tag}) catch return null;
+    const name = std.fmt.bufPrint(&name_buffer, "{s}chats-{s}.json", .{ if (unifiedHub(a)) "hub-" else "", tag }) catch return null;
     return messagesDirPath(a, name);
 }
 
@@ -7370,7 +7370,7 @@ fn loadChatsCache(a: *App) void {
 
 fn msgCacheDirName(a: *App, buffer: []u8) ?[]const u8 {
     if (a.cache_tag.len == 0) return null;
-    return std.fmt.bufPrint(buffer, if (unifiedHub(a)) "hub-msg-cache-{s}" else "msg-cache-{s}", .{a.cache_tag.slice()}) catch null;
+    return std.fmt.bufPrint(buffer, "{s}msg-cache-{s}", .{ if (unifiedHub(a)) "hub-" else "", a.cache_tag.slice() }) catch null;
 }
 
 fn msgCacheDiskPath(a: *App, jid: []const u8) ?[]u8 {

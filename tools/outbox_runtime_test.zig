@@ -122,6 +122,7 @@ const App = struct {
     wacli_slack_thread: ?bool = true,
     hub_media_thread: ?bool = null,
     hub_account: Utf8Text(32) = .{},
+    unified_hub: bool = false,
     wacli_queue: [wacli_queue_size]WacliJob = @splat(.{}),
     wacli_queue_len: usize = 0,
     wacli_refresh_again: bool = false,
@@ -346,8 +347,8 @@ fn oldestPendingSend(a: *App) ?usize {
 }
 fn removeMessageAt(_: *App, _: usize) void {}
 fn formatSlackTime(_: *WideText(15), _: std.mem.Allocator, _: []const u8) void {}
-fn unifiedHub(_: *const App) bool {
-    return false;
+fn unifiedHub(a: *const App) bool {
+    return a.unified_hub;
 }
 
 fn hubConfigured(_: *const App) bool {
@@ -459,6 +460,31 @@ test "completed file stays alive until journal retirement succeeds" {
     try std.testing.expectEqual(@as(usize, 0), deleted);
     try std.testing.expectEqual(@as(usize, 1), app.sent_voice_count);
     try std.testing.expectEqual(@as(usize, 0), disk_len);
+}
+
+test "IGSH-531 hub outbox preserves every transport provider through restart" {
+    for ([_]transport.Provider{ .whatsapp, .slack, .telegram }) |provider| {
+        reset();
+        var app = fixture();
+        app.unified_hub = true;
+        app.pending_send_count = 1;
+        const pending = &app.pending_sends[0];
+        pending.id = sampleEntry(1).id;
+        pending.provider = provider;
+        pending.account = app.cache_tag;
+        pending.jid.set("synthetic-chat");
+        pending.text.set("synthetic text");
+        try std.testing.expect(persistOutbox(&app));
+        var scanner = outbox.Scanner.init(std.testing.allocator, disk[0..disk_len]);
+        try std.testing.expectEqualStrings(@tagName(provider), @tagName(scanner.next().?.provider));
+        var restored = fixture();
+        restored.unified_hub = true;
+        loadOutbox(&restored);
+        try std.testing.expect(!restored.outbox_load_failed);
+        try std.testing.expectEqual(@as(usize, 1), restored.pending_send_count);
+        try std.testing.expectEqual(@as(usize, 0), restored.slack_outbox_count);
+        try std.testing.expectEqual(provider, restored.pending_sends[0].provider);
+    }
 }
 
 test "restored WhatsApp sends have unique bubble sequences" {

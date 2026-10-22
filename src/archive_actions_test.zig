@@ -28,7 +28,7 @@ fn Utf8Text(comptime capacity: usize) type {
         }
     };
 }
-const Provider = enum { whatsapp, slack, telegram };
+const Provider = @FieldType(chat_key.Key, "provider");
 const Chat = struct {
     account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
