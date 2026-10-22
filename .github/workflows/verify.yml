@@ -7,7 +7,7 @@ on:
         description: User journey to drive
         type: choice
         default: search
-        options: [search, navigation, drafts, palette, appearance, whatsapp-hub, text-comparison]
+        options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, text-comparison]
   pull_request:
     paths:
       - .github/workflows/verify.yml
@@ -84,6 +84,12 @@ jobs:
         if: always()
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
+      - name: Validate menus evidence
+        if: success() && inputs.feature == 'menus'
+        shell: pwsh
+        run: |
+          python tools/verify-wazig/check-evidence.py verification-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid menus evidence' }
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
