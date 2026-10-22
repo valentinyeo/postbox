@@ -24,7 +24,7 @@ pub fn Str(comptime capacity: usize) type {
 
         pub fn set(self: *@This(), text: []const u8) void {
             self.len = @min(text.len, capacity);
-            @memcpy(self.buf[0..self.len], text[0..self.len]);
+            std.mem.copyForwards(u8, self.buf[0..self.len], text[0..self.len]);
             self.buf[self.len] = 0;
         }
     };
@@ -192,6 +192,75 @@ pub const Scanner = struct {
         return null;
     }
 };
+
+pub const AdoptionTarget = struct {
+    account: []const u8,
+    unified: bool = false,
+    whatsapp_namespace: []const u8 = "personal",
+    slack_accounts: []const []const u8 = &.{},
+};
+
+fn adoptIdentity(entry: *Entry, target: AdoptionTarget, source_unified: bool) bool {
+    if (entry.state != .queued) return false;
+    if (entry.provider == .whatsapp) {
+        if (source_unified and !target.unified) {
+            const colon = std.mem.indexOfScalar(u8, entry.jid.slice(), ':');
+            const namespace = if (colon) |end| entry.jid.buf[0..end] else target.whatsapp_namespace;
+            for ([_]*Str(max_jid_len){ &entry.reply_to, &entry.reply_sender }) |field| {
+                if (std.mem.startsWith(u8, field.slice(), namespace) and field.len > namespace.len and field.buf[namespace.len] == ':') {
+                    field.set(field.slice()[namespace.len + 1 ..]);
+                }
+            }
+            if (colon) |end| entry.jid.set(entry.jid.slice()[end + 1 ..]);
+        } else if (!source_unified and target.unified) {
+            for ([_]*Str(max_jid_len){ &entry.jid, &entry.reply_to, &entry.reply_sender }) |field| {
+                if (field.len == 0) continue;
+                var buffer: [max_jid_len]u8 = undefined;
+                const prefixed = std.fmt.bufPrint(&buffer, "{s}:{s}", .{ target.whatsapp_namespace, field.slice() }) catch return false;
+                field.set(prefixed);
+            }
+        }
+        entry.account.set(target.account);
+    } else if (target.unified) {
+        if (!source_unified) {
+            if (entry.provider != .slack or entry.account.len == 0) return false;
+            var buffer: [max_jid_len]u8 = undefined;
+            const prefixed = std.fmt.bufPrint(&buffer, "slack:{s}:{s}", .{ entry.account.slice(), entry.jid.slice() }) catch return false;
+            entry.jid.set(prefixed);
+        }
+        entry.account.set(target.account);
+    } else {
+        if (entry.provider != .slack) return false;
+        if (source_unified) {
+            if (!std.mem.startsWith(u8, entry.jid.slice(), "slack:")) return false;
+            const rest = entry.jid.slice()["slack:".len..];
+            const colon = std.mem.indexOfScalar(u8, rest, ':') orelse return false;
+            if (colon > max_account_len) return false;
+            entry.account.set(rest[0..colon]);
+            entry.jid.set(rest[colon + 1 ..]);
+        }
+        for (target.slack_accounts) |account| {
+            if (std.mem.eql(u8, account, entry.account.slice())) break;
+        } else return false;
+    }
+    return entry.jid.len > 0;
+}
+
+fn replaceJournal(dir: std.Io.Dir, io: std.Io, name: []const u8, contents: []const u8) !void {
+    var atomic = try dir.createFileAtomic(io, name, .{ .replace = true });
+    defer atomic.deinit(io);
+    try atomic.file.writeStreamingAll(io, contents);
+    try atomic.file.sync(io);
+    try atomic.replace(io);
+}
+
+pub fn adopt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, active_name: []const u8, target: AdoptionTarget) !void {
+    _ = allocator;
+    _ = io;
+    _ = dir;
+    _ = active_name;
+    _ = target;
+}
 
 pub fn evictionVictim(keep: []const bool) ?usize {
     var index: usize = keep.len;
@@ -405,4 +474,217 @@ test "old line without account parses and keeps the send" {
     var scanner = Scanner.init(std.testing.allocator, line);
     try std.testing.expectEqualDeep(expected, scanner.next().?.*);
     try std.testing.expect(scanner.next() == null);
+}
+
+test "adopt loads foreign queued image and reply once" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    var active = Entry{};
+    active.id = hexId(@splat(1));
+    active.account.set("active-account");
+    active.jid.set("15550000000@s.whatsapp.net");
+    active.text.set("synthetic active");
+    var image = Entry{};
+    image.id = hexId(@splat(2));
+    image.account.set("foreign-account");
+    image.jid.set("personal:15550000001-1234567890@g.us");
+    image.text.set("synthetic caption");
+    image.file.set("synthetic-image.png");
+    image.queued_unix = 123;
+    var reply = image;
+    reply.id = hexId(@splat(3));
+    reply.file = .{};
+    reply.text = .{};
+    reply.text.set("synthetic reply");
+    reply.reply_to.set("personal:QUOTED");
+    reply.reply_sender.set("personal:15550000002@s.whatsapp.net");
+    reply.state = .queued;
+    reply.attempts = 2;
+    var writer = std.Io.Writer.Allocating.init(allocator);
+    defer writer.deinit();
+    try writeLine(&writer.writer, &active);
+    try tmp.dir.writeFile(io, .{ .sub_path = "outbox.jsonl", .data = writer.written() });
+    writer.clearRetainingCapacity();
+    try writeLine(&writer.writer, &image);
+    try writeLine(&writer.writer, &reply);
+    const foreign_name = "hub-1111111111111111-outbox.jsonl";
+    try tmp.dir.writeFile(io, .{ .sub_path = foreign_name, .data = writer.written() });
+    try tmp.dir.writeFile(io, .{ .sub_path = image.file.slice(), .data = "synthetic image bytes" });
+    try adopt(allocator, io, tmp.dir, "outbox.jsonl", .{ .account = "active-account" });
+    const loaded = try tmp.dir.readFileAlloc(io, "outbox.jsonl", allocator, .unlimited);
+    defer allocator.free(loaded);
+    var scanner = Scanner.init(allocator, loaded);
+    try std.testing.expectEqualDeep(active, scanner.next().?.*);
+    image.account = .{};
+    image.jid = .{};
+    image.account.set("active-account");
+    image.jid.set("15550000001-1234567890@g.us");
+    try std.testing.expectEqualDeep(image, scanner.next().?.*);
+    reply.account = image.account;
+    reply.jid = image.jid;
+    reply.reply_to = .{};
+    reply.reply_sender = .{};
+    reply.reply_to.set("QUOTED");
+    reply.reply_sender.set("15550000002@s.whatsapp.net");
+    try std.testing.expectEqualDeep(reply, scanner.next().?.*);
+    try std.testing.expect(scanner.next() == null);
+    const remaining = try tmp.dir.readFileAlloc(io, foreign_name, allocator, .unlimited);
+    defer allocator.free(remaining);
+    try std.testing.expectEqualStrings("", remaining);
+    try adopt(allocator, io, tmp.dir, "outbox.jsonl", .{ .account = "active-account" });
+    const reloaded = try tmp.dir.readFileAlloc(io, "outbox.jsonl", allocator, .unlimited);
+    defer allocator.free(reloaded);
+    try std.testing.expectEqualStrings(loaded, reloaded);
+}
+
+test "adopt preserves foreign sent and done records verbatim" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    const completed =
+        \\{"id":"11111111111111111111111111111111","provider":"whatsapp","jid":"personal:15550000001@s.whatsapp.net","text":"synthetic sent","state":"sent"}
+        \\{"id":"22222222222222222222222222222222","provider":"whatsapp","jid":"personal:15550000001@s.whatsapp.net","text":"synthetic done","state":"done"}
+    ;
+    const pending =
+        \\{"id":"33333333333333333333333333333333","provider":"whatsapp","jid":"personal:15550000001@s.whatsapp.net","text":"synthetic queued","state":"queued"}
+    ;
+    const foreign = try std.fmt.allocPrint(allocator, "{s}\n{s}", .{ pending, completed });
+    defer allocator.free(foreign);
+    const foreign_name = "hub-1111111111111111-outbox.jsonl";
+    try tmp.dir.writeFile(io, .{ .sub_path = "outbox.jsonl", .data = "" });
+    try tmp.dir.writeFile(io, .{ .sub_path = foreign_name, .data = foreign });
+    try adopt(allocator, io, tmp.dir, "outbox.jsonl", .{ .account = "active-account" });
+    const loaded = try tmp.dir.readFileAlloc(io, "outbox.jsonl", allocator, .unlimited);
+    defer allocator.free(loaded);
+    var scanner = Scanner.init(allocator, loaded);
+    try std.testing.expectEqualStrings("33333333333333333333333333333333", scanner.next().?.idSlice());
+    try std.testing.expect(scanner.next() == null);
+    const remaining = try tmp.dir.readFileAlloc(io, foreign_name, allocator, .unlimited);
+    defer allocator.free(remaining);
+    try std.testing.expectEqualStrings(completed, remaining);
+}
+
+test "adopt deduplicates active ids and preserves unsupported and corrupt lines" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    var entry = Entry{};
+    entry.id = hexId(@splat(4));
+    entry.account.set("active-account");
+    entry.jid.set("15550000001@s.whatsapp.net");
+    entry.text.set("synthetic duplicate");
+    var writer = std.Io.Writer.Allocating.init(allocator);
+    defer writer.deinit();
+    try writeLine(&writer.writer, &entry);
+    const original = try allocator.dupe(u8, writer.written());
+    defer allocator.free(original);
+    try tmp.dir.writeFile(io, .{ .sub_path = "outbox.jsonl", .data = original });
+    writer.clearRetainingCapacity();
+    entry.account.set("foreign-account");
+    entry.jid.set("personal:15550000001@s.whatsapp.net");
+    try writeLine(&writer.writer, &entry);
+    const retained =
+        \\not json
+        \\{"id":"55555555555555555555555555555555","provider":"telegram","jid":"opaque-chat","text":"synthetic unavailable","state":"queued"}
+        \\{"id":"66666666666666666666666666666666","provider":"whatsapp","jid":"personal:15550000001@s.whatsapp.net","text":"synthetic failed","state":"failed"}
+    ;
+    try writer.writer.writeAll(retained);
+    const foreign_name = "hub-1111111111111111-outbox.jsonl";
+    try tmp.dir.writeFile(io, .{ .sub_path = foreign_name, .data = writer.written() });
+    try adopt(allocator, io, tmp.dir, "outbox.jsonl", .{ .account = "active-account" });
+    const loaded = try tmp.dir.readFileAlloc(io, "outbox.jsonl", allocator, .unlimited);
+    defer allocator.free(loaded);
+    try std.testing.expectEqualStrings(original, loaded);
+    const remaining = try tmp.dir.readFileAlloc(io, foreign_name, allocator, .unlimited);
+    defer allocator.free(remaining);
+    try std.testing.expectEqualStrings(retained, remaining);
+}
+
+test "adopt retains missing attachment and restores unified WhatsApp namespace" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    var entry = Entry{ .state = .queued };
+    entry.id = hexId(@splat(7));
+    entry.account.set("old-account");
+    entry.jid.set("15550000001@s.whatsapp.net");
+    entry.file.set("missing-attachment.png");
+    entry.reply_to.set("QUOTED");
+    var writer = std.Io.Writer.Allocating.init(allocator);
+    defer writer.deinit();
+    try writeLine(&writer.writer, &entry);
+    try tmp.dir.writeFile(io, .{ .sub_path = "outbox.jsonl", .data = writer.written() });
+    const active_name = "hub-2222222222222222-outbox.jsonl";
+    try adopt(allocator, io, tmp.dir, active_name, .{ .account = "active-account", .unified = true });
+    const loaded = try tmp.dir.readFileAlloc(io, active_name, allocator, .unlimited);
+    defer allocator.free(loaded);
+    var scanner = Scanner.init(allocator, loaded);
+    const restored = scanner.next().?;
+    try std.testing.expectEqualStrings(entry.idSlice(), restored.idSlice());
+    try std.testing.expectEqualStrings("active-account", restored.account.slice());
+    try std.testing.expectEqualStrings("personal:15550000001@s.whatsapp.net", restored.jid.slice());
+    try std.testing.expectEqualStrings("personal:QUOTED", restored.reply_to.slice());
+    try std.testing.expectEqualStrings(entry.file.slice(), restored.file.slice());
+    try std.testing.expect(scanner.next() == null);
+}
+
+test "adopt leaves foreign journal intact when destination cannot be read" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.createDir(io, "outbox.jsonl", .default_dir);
+    const foreign_name = "hub-1111111111111111-outbox.jsonl";
+    const foreign =
+        \\{"id":"11111111111111111111111111111111","provider":"whatsapp","jid":"personal:15550000001@s.whatsapp.net","text":"synthetic pending","state":"queued"}
+    ;
+    try tmp.dir.writeFile(io, .{ .sub_path = foreign_name, .data = foreign });
+    if (adopt(allocator, io, tmp.dir, "outbox.jsonl", .{ .account = "active-account" })) |_| {
+        return error.TestUnexpectedResult;
+    } else |_| {}
+    const remaining = try tmp.dir.readFileAlloc(io, foreign_name, allocator, .unlimited);
+    defer allocator.free(remaining);
+    try std.testing.expectEqualStrings(foreign, remaining);
+}
+
+test "adopt routes configured Slack accounts and retains unavailable providers" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    var entry = Entry{ .provider = .slack };
+    entry.id = hexId(@splat(8));
+    entry.account.set("foreign-account");
+    entry.jid.set("slack:TTEST:C123");
+    entry.text.set("synthetic Slack pending");
+    entry.client_msg_id.set("synthetic-client-id");
+    entry.reply_to.set("1700000000.000100");
+    var writer = std.Io.Writer.Allocating.init(allocator);
+    defer writer.deinit();
+    try writeLine(&writer.writer, &entry);
+    const retained =
+        \\{"id":"99999999999999999999999999999999","provider":"slack","jid":"slack:TOTHER:C456","text":"synthetic disconnected","state":"queued"}
+        \\{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provider":"telegram","jid":"telegram:opaque","text":"synthetic unavailable","state":"queued"}
+    ;
+    try writer.writer.writeAll(retained);
+    const foreign_name = "hub-1111111111111111-outbox.jsonl";
+    try tmp.dir.writeFile(io, .{ .sub_path = foreign_name, .data = writer.written() });
+    try adopt(allocator, io, tmp.dir, "outbox.jsonl", .{ .account = "active-account", .slack_accounts = &.{"TTEST"} });
+    const loaded = try tmp.dir.readFileAlloc(io, "outbox.jsonl", allocator, .unlimited);
+    defer allocator.free(loaded);
+    var scanner = Scanner.init(allocator, loaded);
+    entry.account = .{};
+    entry.jid = .{};
+    entry.account.set("TTEST");
+    entry.jid.set("C123");
+    try std.testing.expectEqualDeep(entry, scanner.next().?.*);
+    try std.testing.expect(scanner.next() == null);
+    const remaining = try tmp.dir.readFileAlloc(io, foreign_name, allocator, .unlimited);
+    defer allocator.free(remaining);
+    try std.testing.expectEqualStrings(retained, remaining);
 }

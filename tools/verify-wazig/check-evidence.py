@@ -16,6 +16,15 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert all(row['authorized'] for row in requests if row['method'] != 'SSE')
     sends = [row for row in requests if row['path'] == '/v1/send']
+    if not unified:
+        assert f"{session['feature']} foreign-outbox-startup PASS" in proof
+        adopted = [row for row in sends if row['body']['client_id'] == '53200000000000000000000000000001']
+        assert len(adopted) == 1 and adopted[0]['status'] == 200 and adopted[0]['accepted']
+        assert adopted[0]['body']['account'] == 'personal'
+        assert adopted[0]['body']['chat'] == '15550000001@s.whatsapp.net'
+        assert adopted[0]['body']['reply_to'] == 'BASELINE'
+        assert not (folder / 'final-data/hub-1111111111111111-outbox.jsonl').read_bytes()
+        sends = [row for row in sends if row not in adopted]
     assert len(sends) >= 2 and len({row['body']['client_id'] for row in sends}) == 1
     assert sum(row['accepted'] for row in sends) == 1
     assert any(row.get('duplicate') and row['status'] == 200 for row in sends)
