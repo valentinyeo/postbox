@@ -89,7 +89,8 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(url.query)
         state = self.state
         if url.path == '/v1/accounts':
-            self.respond(200, [dict(account=ACCOUNT, jid=BETA, state='linked', last_event_at=state.stamp)])
+            self.respond(200, [dict(account='business', state='linked', last_event_at=state.stamp),
+                               dict(account=ACCOUNT, jid=BETA, state='linked', last_event_at=state.stamp)])
         elif url.path == '/v1/chats':
             archived = query.get('archived', ['false'])[0] == 'true'
             rows = []

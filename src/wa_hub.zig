@@ -174,6 +174,18 @@ pub fn parseAccounts(allocator: std.mem.Allocator, raw: []const u8) !std.json.Pa
     return std.json.parseFromSlice([]Account, allocator, raw, .{ .ignore_unknown_fields = true });
 }
 
+pub fn pickAccount(linked_accounts: []const Account, preferred: []const u8) ?[]const u8 {
+    var first: ?[]const u8 = null;
+    var personal: ?[]const u8 = null;
+    for (linked_accounts) |account| {
+        if (!std.mem.eql(u8, account.state, "linked") or account.account.len == 0 or account.account.len > 32) continue;
+        if (std.mem.eql(u8, account.account, preferred)) return account.account;
+        if (std.mem.eql(u8, account.account, "personal")) personal = account.account;
+        if (first == null) first = account.account;
+    }
+    return personal orelse first;
+}
+
 pub fn parseSend(allocator: std.mem.Allocator, raw: []const u8) !std.json.Parsed(SendReply) {
     return std.json.parseFromSlice(SendReply, allocator, raw, .{ .ignore_unknown_fields = true });
 }
