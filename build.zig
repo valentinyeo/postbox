@@ -315,7 +315,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }) });
     edit_tests.root_module.link_libc = true;
-    for ([_][]const u8{ "user32", "gdi32", "ole32", "oleacc", "oleaut32" }) |library| edit_tests.root_module.linkSystemLibrary(library, .{});
+    for ([_][]const u8{ "user32", "gdi32", "msimg32", "ole32", "oleacc", "oleaut32" }) |library| edit_tests.root_module.linkSystemLibrary(library, .{});
     b.step("test-edit", "Run native DirectWrite editing tests on Windows").dependOn(&b.addRunArtifact(edit_tests).step);
 
     const test_step = b.step("test", "Run unit tests");
