@@ -8,6 +8,11 @@ const win = if (builtin.os.tag == .windows) @cImport({
     @cInclude("windows.h");
 }) else struct {};
 
+fn registryHandle(address: usize) win.HKEY {
+    @setRuntimeSafety(false);
+    return @ptrFromInt(address);
+}
+
 fn context() !transport.JobContext {
     if (builtin.os.tag != .windows) return error.SkipZigTest;
     const port = try std.process.Environ.getAlloc(std.testing.environ, std.testing.allocator, "WAZIG_VERIFY_SLACK_PORT");
@@ -114,7 +119,7 @@ test "IGSH-464 session import file consumed and deleted with DPAPI workspace iso
     const io = std.testing.io;
     const registry = std.unicode.utf8ToUtf16LeStringLiteral("Software\\WazigFakeSlackSessionTests");
     var key: win.HKEY = null;
-    const hkcu: win.HKEY = @ptrFromInt(@as(usize, @bitCast(@as(isize, -2147483647))));
+    const hkcu = registryHandle(@bitCast(@as(isize, -2147483647)));
     try std.testing.expectEqual(@as(win.LSTATUS, 0), win.RegCreateKeyExW(hkcu, registry, 0, null, 0, win.KEY_ALL_ACCESS, null, &key, null));
     defer _ = win.RegDeleteTreeW(hkcu, registry);
     defer _ = win.RegCloseKey(key);

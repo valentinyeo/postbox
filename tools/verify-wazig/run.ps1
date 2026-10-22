@@ -88,7 +88,7 @@ try {
     if ($Feature -eq 'slack-session') {
         $env:WAZIG_VERIFY_SLACK_PORT = $port
         try {
-            & zig build test-slack-session '-Dtarget=x86_64-windows-gnu' --release=small 2>&1 | Tee-Object (Join-Path $Evidence 'slack-session-tests.log')
+            & zig build test-slack-session '-Dtarget=x86_64-windows-gnu' --release=small --summary all 2>&1 | Tee-Object (Join-Path $Evidence 'slack-session-tests.log')
             Assert-That ($LASTEXITCODE -eq 0) 'Slack session native regression tests failed'
         } finally {
             Remove-Item Env:WAZIG_VERIFY_SLACK_PORT
