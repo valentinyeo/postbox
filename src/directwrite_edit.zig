@@ -309,15 +309,15 @@ const Object = extern struct {
     vtable: [*]const *const anyopaque,
 
     fn release(self: *Object) void {
-        const call: *const fn (*Object) callconv(.winapi) u32 = @ptrCast(self.vtable[2]);
+        const call: *const fn (*Object) callconv(.winapi) u32 = @ptrCast(@alignCast(self.vtable[2]));
         _ = call(self);
     }
     fn query(self: *Object, iid: *const win.GUID, out: *?*Object) win.HRESULT {
-        const call: *const fn (*Object, *const win.GUID, *?*Object) callconv(.winapi) win.HRESULT = @ptrCast(self.vtable[0]);
+        const call: *const fn (*Object, *const win.GUID, *?*Object) callconv(.winapi) win.HRESULT = @ptrCast(@alignCast(self.vtable[0]));
         return call(self, iid, out);
     }
     fn undo(self: *Object, count: i32) void {
-        const call: *const fn (*Object, i32, ?*i32) callconv(.winapi) win.HRESULT = @ptrCast(self.vtable[22]);
+        const call: *const fn (*Object, i32, ?*i32) callconv(.winapi) win.HRESULT = @ptrCast(@alignCast(self.vtable[22]));
         _ = call(self, count, null);
     }
 };
@@ -481,7 +481,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     var child = std.mem.zeroes(win.VARIANT);
     @as(*u16, @ptrCast(&child)).* = win.VT_I4;
     var value: win.BSTR = null;
-    const get_value: *const fn (*Object, win.VARIANT, *win.BSTR) callconv(.winapi) win.HRESULT = @ptrCast(provider.vtable[11]);
+    const get_value: *const fn (*Object, win.VARIANT, *win.BSTR) callconv(.winapi) win.HRESULT = @ptrCast(@alignCast(provider.vtable[11]));
     try std.testing.expect(get_value(provider, child, &value) >= 0);
     defer win.SysFreeString(value);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("accessible value"), std.mem.span(value));
