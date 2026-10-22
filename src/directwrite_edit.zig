@@ -280,6 +280,7 @@ const Object = extern struct {
 };
 
 test "IGSH-466 native DirectWrite host maps text selection undo rectangles limits and rendering" {
+    @setEvalBranchQuota(10000);
     if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
     if (win.OleInitialize(null) < 0) return error.OleInitializeFailed;
     defer win.OleUninitialize();
@@ -320,6 +321,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     try std.testing.expectEqual(@as(u16, 500), format.wWeight);
     try std.testing.expectEqual(@as(i32, 255), format.yHeight);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans"), std.mem.sliceTo(&format.szFaceName, 0));
+    std.debug.print("IGSH-466 native body font contract passed\n", .{});
     const text = std.unicode.utf8ToUtf16LeStringLiteral("one\r\ntwo😀");
     _ = win.SetWindowTextW(edit, text);
     var buffer: [256]u16 = undefined;
@@ -346,6 +348,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     _ = win.SendMessageW(edit, win.WM_PASTE, 0, 0);
     const pasted: usize = @intCast(win.GetWindowTextW(edit, &buffer, buffer.len));
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("one\nmore😀"), buffer[0..pasted]);
+    std.debug.print("IGSH-466 native text, selection, undo/redo and clipboard passed\n", .{});
     var rect = win.RECT{ .left = 2, .top = 8, .right = 198, .bottom = 72 };
     _ = win.SendMessageW(edit, win.EM_SETRECTNP, 0, @bitCast(@intFromPtr(&rect)));
     var actual: win.RECT = undefined;
@@ -373,6 +376,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     try std.testing.expect(narrow_height > wide_height);
     _ = win.MoveWindow(edit, 0, 0, 200, 80, 0);
     try std.testing.expectEqual(wide_height, contentHeight(edit, 1));
+    std.debug.print("IGSH-466 native rectangle, limit and wrapping passed\n", .{});
     const dc = win.CreateCompatibleDC(null) orelse return error.CreateDCFailed;
     defer _ = win.DeleteDC(dc);
     var info = std.mem.zeroes(win.BITMAPINFO);
@@ -419,6 +423,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     try std.testing.expectEqual(changes_before_set + 3, test_changes);
     const reverted: usize = @intCast(win.GetWindowTextW(edit, &buffer, buffer.len));
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("accessible value"), buffer[0..reverted]);
+    std.debug.print("IGSH-466 style undo and nested change notifications passed\n", .{});
     const iid_accessible = win.GUID{ .Data1 = 0x618736e0, .Data2 = 0x3c3d, .Data3 = 0x11cf, .Data4 = .{ 0x81, 0x0c, 0, 0xaa, 0, 0x38, 0x9b, 0x71 } };
     var accessible: ?*Object = null;
     try std.testing.expect(win.AccessibleObjectFromWindow(edit, @bitCast(@as(i32, -4)), &iid_accessible, @ptrCast(&accessible)) >= 0);
@@ -440,6 +445,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     _ = win.UpdateWindow(edit);
     try std.testing.expectEqual(@as(win.BOOL, 0), win.GetUpdateRect(edit, null, win.FALSE));
 
+    std.debug.print("IGSH-466 native accessible value, caret and stable paint passed\n", .{});
     const sample = std.unicode.utf8ToUtf16LeStringLiteral("Plex agQW 0123");
     const rendered = try std.testing.allocator.alloc(u32, pixels.len);
     defer std.testing.allocator.free(rendered);
