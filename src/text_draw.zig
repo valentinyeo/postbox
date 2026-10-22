@@ -1250,6 +1250,8 @@ test "ISSUE-462 DirectWrite paints every row-sized chat buffer" {
     setBundledFontPaths(&.{&font_path});
     defer reset();
     const client = win.RECT{ .left = 0, .top = 0, .right = size, .bottom = size };
+    const background = win.CreateSolidBrush(0) orelse return error.BrushFailed;
+    defer _ = win.DeleteObject(background);
     const expected = try std.testing.allocator.alloc(u32, pixels.len);
     defer std.testing.allocator.free(expected);
     for ([_]i32{ 0, 64, 128, 256 }) |top| {
@@ -1261,7 +1263,7 @@ test "ISSUE-462 DirectWrite paints every row-sized chat buffer" {
                 defer surface.deinit();
                 var shapes = @import("smooth_shapes.zig").Context.init(surface.hdc);
                 defer shapes.deinit();
-                _ = win.FillRect(surface.hdc, &row, @ptrCast(@alignCast(win.GetStockObject(win.BLACK_BRUSH))));
+                _ = win.FillRect(surface.hdc, &row, background);
                 _ = win.SelectObject(surface.hdc, font);
                 _ = win.SetTextColor(surface.hdc, 0xffffff);
                 _ = win.SetBkMode(surface.hdc, win.TRANSPARENT);
