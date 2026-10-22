@@ -10,6 +10,7 @@ from pathlib import Path
 import socket
 import struct
 import threading
+import time
 from urllib.parse import parse_qs, unquote, urlsplit
 import zlib
 
@@ -37,6 +38,7 @@ class State:
         self.media_polls = {}
         self.sends = {}
         self.send_attempts = {}
+        self.beta_history_requests = 0
         self.stamp = datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
         self.image = png()
 
@@ -104,6 +106,16 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(200, rows)
         elif url.path == '/v1/messages':
             chat = query.get('chat', [''])[0].removeprefix(f'{ACCOUNT}:')
+            history = {}
+            if chat == BETA:
+                with state.lock:
+                    state.beta_history_requests += 1
+                    request = state.beta_history_requests
+                self.record(0, history_request=request, history_phase='requested')
+                started = time.monotonic()
+                if request == 1:
+                    time.sleep(3)
+                history = dict(history_request=request, history_delay_ms=(time.monotonic() - started) * 1000)
             rows = [state.message(chat, 'BASELINE' if chat == ALPHA else 'BASELINE_BETA',
                                   'Fixture history' if chat == ALPHA else 'Fixture Beta history')]
             if chat == ALPHA:
@@ -116,7 +128,7 @@ class Handler(BaseHTTPRequestHandler):
                         row = state.message(chat, reply['msg_id'], 'Fixture outgoing')
                         row['FromMe'] = True
                         rows.insert(0, row)
-            self.respond(200, rows)
+            self.respond(200, rows, **history)
         elif url.path == '/v1/groups':
             self.respond(200, [])
         elif url.path.startswith('/v1/media/'):

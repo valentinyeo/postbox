@@ -5,6 +5,7 @@ Use the production hub backend against a synthetic authenticated bridge on the G
 ## Sub-features
 
 - `hub-chats-history`: remote chat rows retain provider/account identity and load real message rows.
+- `chat-switch`: opening timestamped, uncached Beta clears Alpha immediately, before delayed Beta history arrives.
 - `hub-live-replay`: a new SSE message appears and reconnects carry Last-Event-ID.
 - `hub-send-dedupe`: a lost response retries the persisted outbox client_id with one accepted send.
 - `hub-read-archive`: viewing marks read; a palette archive reaches the bridge and removes the row.
@@ -21,7 +22,9 @@ Use the production hub backend against a synthetic authenticated bridge on the G
 
 - Run `feature=whatsapp-hub`, or `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature whatsapp-hub` on GitHub Actions only.
 - The helper starts tools/verify-wazig/fake-wa-bridge.py on an ephemeral loopback port. The guarded fixture seeds only its redirected registry WaBridgeUrl and fake key; all real provider paths remain disabled.
-- Require the owned-window doctor and two remote sidebar chats. Use Ctrl+Tab and Ctrl+Shift+Tab to open Alpha; preserve history.png and history.messages.json showing BASELINE before LIVE exists.
+- Require the owned-window doctor, two remote sidebar chats and Alpha's BASELINE. Beta has a nonempty last-message timestamp and no cached history in the fresh profile; reject any Beta history request before the switch and retain before-beta.requests.json. The fake delays only the first Beta history response by three seconds, recording its request number and measured delay.
+- Use Ctrl+Tab to select Beta. Within one second of keyboard input returning, require selected Beta and a read-only messages response with matching provider/account/id and zero messages. Both control processes share this deadline; a blocked messages request is killed and fails, not retried until history arrives. Retain beta-switch.json (elapsed time and selection), beta-empty.messages.json, beta-empty.png and its state/UIA snapshots.
+- Then require exactly BASELINE_BETA / Fixture Beta history in beta.messages.json and beta.png, plus the recorded three-second delay. Use Ctrl+Shift+Tab to return to Alpha; preserve history.png and history.messages.json showing BASELINE, no Beta messages and no LIVE yet.
 - The fake emits reset ID 1, closes, and requires a reconnect with Last-Event-ID 1. After history is proven, a fixture-only HTTP trigger adds a message upstream. Require LIVE in live.messages.json and live.png, then a reconnect with Last-Event-ID 2.
 - Use Ctrl+K → Compose message, type Fixture outgoing and Enter. The fake accepts once but loses the first response; require a retry with the same 32-character client_id and exactly one accepted send.
 - Require a mark-read request for Alpha, media requests at the same path returning 202 then 200, and a durable cache file with the response SHA-256. Save sent.png.
