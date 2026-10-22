@@ -36,3 +36,12 @@ test('WAZI-161 rejects a missing Medium asset', () => {
   verifySources(sources, exists);
   assert.throws(() => verifySources(sources, file => file !== 'assets/IBMPlexSans-Medium.ttf' && exists(file)), /missing assets\/IBMPlexSans-Medium\.ttf/);
 });
+
+test('IGSH-466 OLE initialization preserves both private font-loader boundaries', () => {
+  const main = sources['src/main.zig'].replaceAll('_ = win.CoInitializeEx(null, win.COINIT_APARTMENTTHREADED);', 'if (win.OleInitialize(null) < 0) return error.OleInitializeFailed;');
+  assert.notEqual(main, sources['src/main.zig']);
+  verifySources({ ...sources, 'src/main.zig': main }, exists);
+  const changed = main.replace('fonts_loaded[i] = win.AddFontResourceExW(font_path.ptr(), win.FR_PRIVATE, null) > 0;', 'fonts_loaded[i] = false;');
+  assert.notEqual(changed, main);
+  assert.throws(() => verifySources({ ...sources, 'src/main.zig': changed }, exists));
+});

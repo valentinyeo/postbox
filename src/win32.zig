@@ -6,6 +6,9 @@ pub const c = @cImport({
     @cInclude("windowsx.h");
     @cInclude("tlhelp32.h");
     @cInclude("commctrl.h");
+    @cInclude("richedit.h");
+    @cInclude("ole2.h");
+    @cInclude("oleacc.h");
     @cInclude("dwmapi.h");
     @cInclude("shellapi.h");
     @cInclude("shobjidl.h");

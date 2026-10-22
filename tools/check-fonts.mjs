@@ -41,7 +41,7 @@ export function verifySources(sources, exists) {
   assert.match(smoke, /Test-Path "\$env:LOCALAPPDATA\\Programs\\Messages\\\$font"/);
   assert.match(smoke, /throw "missing bundled font \$font"/);
   const main = sources['src/main.zig'];
-  const loads = [...main.matchAll(/const font_files = @import\("font_config\.zig"\)\.files;([\s\S]*?)(?=\n    _ = win\.CoInitializeEx)/g)];
+  const loads = [...main.matchAll(/const font_files = @import\("font_config\.zig"\)\.files;([\s\S]*?)(?=\n    (?:_ = win\.CoInitializeEx|if \(win\.OleInitialize))/g)];
   assert.equal(loads.length, 2, 'both private font loaders must use the full font list');
   for (const load of loads) {
     assert.match(load[1], /inline for \(font_files(?:, 0\.\.)?\)/);

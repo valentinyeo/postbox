@@ -309,8 +309,17 @@ pub fn build(b: *std.Build) void {
     b.installFile("assets/IBMPlexSans-Bold.ttf", "bin/IBMPlexSans-Bold.ttf");
     b.installFile("assets/IBM-Plex-LICENSE.txt", "bin/IBM-Plex-LICENSE.txt");
 
+    const edit_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/directwrite_edit.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    edit_tests.root_module.link_libc = true;
+    for ([_][]const u8{ "user32", "gdi32", "msimg32", "ole32", "oleacc", "oleaut32" }) |library| edit_tests.root_module.linkSystemLibrary(library, .{});
+    b.step("test-edit", "Run native DirectWrite editing tests on Windows").dependOn(&b.addRunArtifact(edit_tests).step);
+
     const test_step = b.step("test", "Run unit tests");
-    for ([_][]const u8{ "src/wa_hub_test.zig", "src/pin_icon_test.zig", "src/message_double_click.zig", "src/recording_paint.zig", "src/font_config.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/update_card_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/slack_oauth.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/environment_keys.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
+    for ([_][]const u8{ "src/wa_hub_test.zig", "src/pin_icon_test.zig", "src/message_double_click.zig", "src/recording_paint.zig", "src/font_config.zig", "src/edit_contract.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/update_card_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/slack_oauth.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/environment_keys.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(test_root),
@@ -631,7 +640,7 @@ pub fn build(b: *std.Build) void {
         sourceSection("fn updateDictation(", "fn selectChat("),
     }) catch @panic("Out of memory building drafts UI harness");
     const drafts_ui_files = b.addWriteFiles();
-    for ([_][]const u8{ "drafts.zig", "chat_key.zig", "transport.zig", "theme.zig" }) |name| {
+    for ([_][]const u8{ "drafts.zig", "chat_key.zig", "transport.zig", "theme.zig", "edit_contract.zig" }) |name| {
         _ = drafts_ui_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
     }
     const drafts_ui_harness = drafts_ui_files.add("drafts_ui_test.zig", drafts_ui_source);
