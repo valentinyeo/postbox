@@ -63,10 +63,13 @@ function Read-Control($Session, [string]$Command) {
 }
 
 function Get-Window($Session) {
-    $app = Get-App $Session
-    $app.Refresh()
-    Assert-That ($app.MainWindowHandle -ne [IntPtr]::Zero) 'App window is not up'
-    $window = [Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
+    $null = Get-App $Session
+    $condition = [Windows.Automation.AndCondition]::new(
+        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$Session.pid),
+        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MessagesZig')
+    )
+    $window = [Windows.Automation.AutomationElement]::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, $condition)
+    Assert-That ($null -ne $window) 'App window is not up'
     Assert-That ($window.Current.ProcessId -eq $Session.pid) 'UI Automation found another process'
     Assert-That ($window.Current.ClassName -eq 'MessagesZig') 'Wrong window class'
     Assert-That ($window.Current.Name -eq 'Wazig Messages v0.0.526') 'Wrong build title'

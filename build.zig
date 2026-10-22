@@ -321,6 +321,19 @@ pub fn build(b: *std.Build) void {
         const run_tests = b.addRunArtifact(tests);
         test_step.dependOn(&run_tests.step);
     }
+    const message_menu_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("src/message_menu_test.zig"),
+        sourceSection("fn appendMessageMenuItem(", "fn openUrlWide("),
+        sourceSection("fn openReactionMenu(", "fn measureReactionRow("),
+    }) catch @panic("Out of memory building message menu harness");
+    const message_menu_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.addWriteFiles().add("message_menu_test.zig", message_menu_source),
+        .target = b.resolveTargetQuery(.{}),
+        .imports = &.{
+            .{ .name = "theme", .module = b.createModule(.{ .root_source_file = b.path("src/theme.zig"), .target = b.resolveTargetQuery(.{}) }) },
+        },
+    }) });
+    test_step.dependOn(&b.addRunArtifact(message_menu_tests).step);
     const transcription_retry_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/transcription_retry_test.zig"),
         sourceSection("fn beginTranscriptionOpen(", "fn appendDebugLog("),
