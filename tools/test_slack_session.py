@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 import socket
 import struct
+import subprocess
+import sys
+import tempfile
 import threading
 import unittest
 from urllib.error import HTTPError
@@ -85,6 +88,10 @@ class SlackSessionTests(unittest.TestCase):
                     while reader.readline() != b'\r\n':
                         pass
                     self.assertEqual(read_frame(reader), dict(type='hello'))
+                    ping = json.dumps(dict(type='ping', id=1)).encode()
+                    mask = b'fake'
+                    stream.sendall(bytes([0x81, 0x80 | len(ping)]) + mask + bytes(byte ^ mask[i % 4] for i, byte in enumerate(ping)))
+                    self.assertEqual(read_frame(reader)['type'], 'message')
                     with urlopen(Request(base + '/fixture/live', data=b'')) as response:
                         self.assertTrue(json.load(response)['ok'])
                     event = read_frame(reader)
@@ -102,6 +109,51 @@ class SlackSessionTests(unittest.TestCase):
             self.assertNotIn(slack.TOKEN, log)
             self.assertNotIn(slack.COOKIE, log)
             self.assertTrue(http.state.requests[0]['authorized'])
+
+
+class EvidenceTests(unittest.TestCase):
+    def test_session_evidence_rejects_missing_import_socket_cookie_message_or_test_proof(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            def write(name, value):
+                (folder / name).write_text(json.dumps(value), encoding='utf-8')
+            write('session.json', dict(feature='slack-session', sha256='fake-build-hash', commit='fake-commit'))
+            state = dict(slack_connected=True, selected=dict(provider='slack'), chat_count=1, sync='stopped', pending_sends=0, pending_archives=0, production_preferences_absent=True, whatsapp_store_absent=True, telegram_store_absent=True)
+            for name in ['doctor.json', 'before.state.json', 'after.state.json', 'side-effects.json']:
+                write(name, state)
+            write('slack-server-state.json', dict(sent=1, acks=0, live=True))
+            for name, text in [('history', 'Fake Slack history'), ('sent', 'Fake Slack outgoing'), ('live', 'Fake Slack incoming')]:
+                write(name + '.messages.json', dict(messages=[dict(text=text)]))
+            for name in ['before', 'history', 'sent', 'after']:
+                (folder / (name + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + b'fake-image-fixture')
+            rows = [dict(path=path, authorized=True, cookie_present=True) for path in ['/api/conversations.list', '/api/conversations.history', '/api/chat.postMessage', '/api/rtm.connect', '/rtm']]
+            requests = folder / 'bridge-requests.jsonl'
+            requests.write_text('\n'.join(json.dumps(row) for row in rows), encoding='utf-8')
+            count = sum(path.read_text().count('test "IGSH-464 session') for path in [ROOT / 'src/slack_session.zig', ROOT / 'src/slack_session_test.zig'])
+            tests = folder / 'slack-session-tests.log'
+            tests.write_text(f'{count}/{count} tests passed', encoding='utf-8')
+            (folder / 'slack-proof.log').write_text('import-dpapi-list-badge-history-send-rtm-cookie PASS', encoding='utf-8')
+            (folder / 'cleanup.txt').write_text('CLEANUP PASSED', encoding='utf-8')
+            (folder / 'result.txt').write_text('JOURNEY PASSED: slack-session', encoding='utf-8')
+            command = [sys.executable, str(ROOT / 'tools/verify-wazig/check-evidence.py'), str(folder)]
+            passed = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(passed.returncode, 0, passed.stderr)
+            self.assertIn('EVIDENCE VERIFIED', passed.stdout)
+            for target, broken in [
+                (tests, b'0/0 tests passed'),
+                (folder / 'after.png', b'not a screenshot'),
+                (folder / 'live.messages.json', b'{"messages":[]}'),
+                (requests, '\n'.join(json.dumps(dict(row, cookie_present=False)) for row in rows).encode()),
+            ]:
+                with self.subTest(target=target.name):
+                    previous = target.read_bytes()
+                    target.write_bytes(broken)
+                    rejected = subprocess.run(command, capture_output=True, text=True)
+                    self.assertNotEqual(rejected.returncode, 0)
+                    target.write_bytes(previous)
+            (folder / 'final-data').mkdir()
+            (folder / 'final-data/slack-session-import.json').write_text('fake-unconsumed-import', encoding='utf-8')
+            self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
 
 
 if __name__ == '__main__':

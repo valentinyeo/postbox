@@ -1,6 +1,7 @@
 from pathlib import Path
 import hashlib
 import json
+import re
 import sys
 
 folder = Path(sys.argv[1])
@@ -8,6 +9,12 @@ session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
 if session['feature'] == 'slack-session':
     assert session['sha256'] and session['commit']
     assert not (folder / 'failure.txt').exists()
+    root = Path(__file__).resolve().parents[2]
+    count = sum(len(re.findall(r'^test "IGSH-464 session', (root / name).read_text(encoding='utf-8'), re.M)) for name in ['src/slack_session.zig', 'src/slack_session_test.zig'])
+    assert count >= 3
+    assert f'{count}/{count} tests passed' in (folder / 'slack-session-tests.log').read_text(encoding='utf-8-sig')
+    for name in ['before', 'history', 'sent', 'after']:
+        assert (folder / f'{name}.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n'), name
     assert 'import-dpapi-list-badge-history-send-rtm-cookie PASS' in (folder / 'slack-proof.log').read_text(encoding='utf-8-sig')
     assert not (folder / 'final-data/slack-session-import.json').exists()
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]

@@ -19,10 +19,10 @@ else
     struct {};
 
 const option_upgrade_to_web_socket = 114;
-const web_socket_utf8_message: c_int = 0;
-const web_socket_utf8_fragment: c_int = 1;
-const web_socket_binary_message: c_int = 2;
-const web_socket_binary_fragment: c_int = 3;
+const web_socket_utf8_message: c_int = 2;
+const web_socket_utf8_fragment: c_int = 3;
+const web_socket_binary_message: c_int = 0;
+const web_socket_binary_fragment: c_int = 1;
 const web_socket_close: c_int = 4;
 const web_socket_success_close_status: c_ushort = 1000;
 

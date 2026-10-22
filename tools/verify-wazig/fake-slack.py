@@ -159,6 +159,7 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 if mask:
                     data = bytes(byte ^ mask[i % 4] for i, byte in enumerate(data))
+                state.record(dict(method='RTM_FRAME', path='/rtm', authorized=True, cookie_present=True, opcode=opcode))
                 if opcode != 1:
                     continue
                 value = json.loads(data)
