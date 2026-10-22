@@ -8,15 +8,21 @@ fi
 pr=$1
 repo=${GITHUB_REPOSITORY:-valentinyeo/wazig}
 root=$(git rev-parse --show-toplevel)
-hax=${AI_REVIEW_HAX:-$HOME/.local/bin/hax}
 model=${AI_REVIEW_MODEL:-gpt-6.1-sol}
 marker='<!-- wazig-ai-review -->'
 max_diff=300000
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
-gh pr view "$pr" -R "$repo" --json title,body -q '"Title: " + .title + "\n\n" + (.body // "")' > "$work/pr.txt"
-head_sha=$(gh pr view "$pr" -R "$repo" --json headRefOid -q .headRefOid)
+gh api "repos/$repo/pulls/$pr" > "$work/pr.json"
+if ! jq -e --arg repo "$repo" --arg head "${AI_REVIEW_HEAD_SHA:-}" '
+    .state == "open" and .draft == false and .head.repo.full_name == $repo
+    and ($head == "" or .head.sha == $head)' "$work/pr.json" > /dev/null; then
+    printf 'ai-review: skipped fork, draft, closed PR, or superseded head for PR %s\n' "$pr"
+    exit 0
+fi
+jq -r '"Title: " + .title + "\n\n" + (.body // "")' "$work/pr.json" > "$work/pr.txt"
+head_sha=$(jq -er '.head.sha | select(test("^[0-9a-f]{40}$"))' "$work/pr.json")
 gh pr diff "$pr" -R "$repo" > "$work/diff.txt"
 diff_bytes=$(wc -c < "$work/diff.txt")
 truncated=""
@@ -39,25 +45,38 @@ fi
 
 ok=0
 for attempt in 1 2; do
-    if HAX_PROVIDER= HAX_MODEL= HAX_EFFORT= HAX_PRESET= timeout 900 \
-        "$hax" --provider=codex --model="$model" --effort=high --no-session --raw -p \
-        < "$work/prompt.txt" > "$work/review.md" 2> "$work/hax.$attempt.log" \
+    rm -f -- "$work/review.md"
+    if timeout 900 env -u GH_TOKEN -u GITHUB_TOKEN -u OPENAI_API_KEY \
+        codex exec --model "$model" --sandbox read-only --ephemeral \
+        --output-last-message "$work/review.md" - \
+        < "$work/prompt.txt" > "$work/codex.$attempt.log" 2>&1 \
         && grep -Eq '^Verdict: (APPROVE|CONCERNS)' "$work/review.md"; then
         ok=1
         break
     fi
 done
 if (( ! ok )); then
-    printf 'ai-review: hax failed twice for PR %s\n' "$pr" >&2
-    tail -n 5 "$work"/hax.*.log >&2 || true
+    printf 'ai-review: Codex failed or returned no verdict twice for PR %s\n' "$pr" >&2
     exit 1
 fi
 
 {
-    printf '%s\n### AI review (Codex %s on the review server, advisory)\n\nCommit %s\n\n' "$marker" "$model" "$head_sha"
+    printf '%s\n### AI review (Codex %s on GitHub, advisory)\n\nCommit %s\n\n' "$marker" "$model" "$head_sha"
     sed -n '/^Verdict:/,$p' "$work/review.md"
 } > "$work/comment.md"
 
-body=$(python3 -c 'import sys; sys.stdout.write(open(sys.argv[1], "rb").read(60000).decode("utf-8", "ignore"))' "$work/comment.md")
-gh workflow run ai-review-post.yml -R "$repo" --ref main -f pr="$pr" -f body="$body"
-grep -m 1 '^Verdict:' "$work/review.md"
+python3 -c 'import sys; sys.stdout.write(open(sys.argv[1], "rb").read(60000).decode("utf-8", "ignore"))' "$work/comment.md" > "$work/body.md"
+current_sha=$(gh api "repos/$repo/pulls/$pr" --jq .head.sha)
+if [[ $current_sha != "$head_sha" ]]; then
+    printf 'ai-review: skipped superseded head for PR %s\n' "$pr"
+    exit 0
+fi
+existing=$(gh api "repos/$repo/issues/$pr/comments" --paginate \
+    --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- wazig-ai-review -->"))) | {id, created_at}' \
+    | jq -sr 'max_by(.created_at, .id) | .id // empty')
+if [[ -n $existing ]]; then
+    gh api -X PATCH "repos/$repo/issues/comments/$existing" -F body=@"$work/body.md" > /dev/null
+else
+    gh api -X POST "repos/$repo/issues/$pr/comments" -F body=@"$work/body.md" > /dev/null
+fi
+printf 'wazig-ai-review posted PR %s commit %s\n' "$pr" "$head_sha"
