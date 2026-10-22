@@ -461,7 +461,9 @@ pub fn build(b: *std.Build) void {
 
     const read_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/chat_reconcile_test.zig"),
-        "fn unifiedHub(_: *const App) bool { return false; }\n",
+        sourceSection("fn unifiedHub(", "fn hubConfigured("),
+        sourceSection("fn applyHubAccounts(", "fn startHubSend("),
+        sourceSection("fn hubRefreshMessages(", "fn hubSendText("),
         sourceSection("fn beginTranscriptionOpen(", "fn appendDebugLog("),
         sourceSection("fn refreshMessages(", "fn reconcileOpenChat(a: *App) void {"),
         sourceSection("fn reconcileOpenChat(", "fn youSender("),
@@ -469,9 +471,10 @@ pub fn build(b: *std.Build) void {
         sourceSection("    result.* = .{ .kind = job.kind", "    switch (job.kind)"),
         "return storage; }\nfn deliverChats(a: *App, result: *const WacliResult) void {\n",
         sourceSection("                    if (!result.ok and result.gen == a.chats_gen) {", "                },\n                .messages =>"),
-        "}\nfn deliver(a: *App, result: *WacliResult) void { a.pending -= 1;\n",
+        "}\nfn deliver(a: *App, result: *WacliResult) void { a.pending -= 1; _ = deliverResult(a, result); }\nfn deliverResult(a: *App, result: *WacliResult) usize {\n",
+        sourceSection("            if (result.kind != .cache_tag and result.provider == .whatsapp", "            switch (result.kind) {"),
         sourceSection("                    var kind: []const u8 = \"unknown\";", "                },\n                .background_media =>"),
-        "}\nfn tick(a: *App) void {\n",
+        "return 0; }\nfn tick(a: *App) void {\n",
         sourceSection("                if (a.msg_read_retry_ticks > 0)", "                if (changed and"),
         "}\n",
         sourceSection("fn applyMessageData(", "    var selected_id = Utf8Text(191){};"),
@@ -479,7 +482,11 @@ pub fn build(b: *std.Build) void {
         sourceSection("    a.displayed_jid.set(chat.jid.slice());\n    a.displayed_account = chat.account;\n    a.displayed_provider = chat.provider;\n    if (fresh_read) a.displayed_timestamp.set(chat.timestamp.slice());", "    for (a.pending_sends[0..a.pending_send_count]) |*pending| {"),
         "return true; }\n",
     }) catch @panic("Out of memory building read harness");
-    const read_harness = b.addWriteFiles().add("chat_reconcile_test.zig", read_harness_source);
+    const read_files = b.addWriteFiles();
+    _ = read_files.addCopyFile(b.path("src/wa_hub.zig"), "wa_hub.zig");
+    _ = read_files.addCopyFile(b.path("src/transport.zig"), "transport.zig");
+    _ = read_files.addCopyFile(b.path("src/chat_key.zig"), "chat_key.zig");
+    const read_harness = read_files.add("chat_reconcile_test.zig", read_harness_source);
     const read_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = read_harness,
         .target = b.resolveTargetQuery(.{}),

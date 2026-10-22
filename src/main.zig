@@ -15529,7 +15529,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 }
             }
             if (jobIsSlack(result.kind) and !result.ok) logSlackFailure(a, result.kind, result.extra.slice(), result.http_status);
-            if (result.kind != .cache_tag and result.provider == .whatsapp and !std.mem.eql(u8, result.account.slice(), a.cache_tag.slice())) return 0;
+            if (result.kind != .cache_tag and result.provider == .whatsapp and !std.mem.eql(u8, result.account.slice(), a.cache_tag.slice())) {
+                var buffer: [128]u8 = undefined;
+                appendLaunchLog(a, std.fmt.bufPrint(&buffer, "wacli-result: dropped {s}, account mismatch", .{@tagName(result.kind)}) catch "wacli-result: dropped, account mismatch");
+                return 0;
+            }
             switch (result.kind) {
                 .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar => applyHubResult(a, result),
                 .groups => if (result.ok) applyGroups(a, result.data),
@@ -15603,6 +15607,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                             appendLaunchLog(a, fail_line);
                             scheduleMessageReadRetry(a);
                         }
+                    } else {
+                        appendLaunchLog(a, "messages-read: dropped reply, selection, identity or generation changed");
                     }
                 },
                 .background_media => applyBackgroundMedia(a, result),
@@ -17454,6 +17460,7 @@ pub fn main(init: std.process.Init) !void {
         var tag_buffer: [16]u8 = undefined;
         const tag = std.fmt.bufPrint(&tag_buffer, "{x:0>16}", .{std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, app.wa_bridge_url), "hub")}) catch unreachable;
         app.cache_tag.set(tag);
+        persistTag(app, tag);
     }
     switch (deepgram.action) {
         .load => switch (deepgram.stored_outcome.?) {
@@ -19063,7 +19070,8 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
     for (hub_accounts.value) |account| {
         if (!std.mem.eql(u8, account.state, "linked") or account.account.len == 0 or account.account.len > 32) continue;
         if (a.hub_account.len > 0 and !std.mem.eql(u8, a.hub_account.slice(), account.account)) continue;
-        if (a.hub_account.len == 0) {
+        const first_account = a.hub_account.len == 0;
+        if (first_account or unifiedHub(a)) {
             if (selected) |account_name| {
                 if (!std.mem.eql(u8, account.account, account_name)) continue;
             }
@@ -19074,9 +19082,9 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
             a.hub_account.set(account.account);
             a.cache_tag.set(tag);
             a.wacli_mutex.unlock(a.io);
-            if (!unifiedHub(a)) persistTag(a, tag);
+            persistTag(a, tag);
             bindOutboxAccount(a);
-            loadChatsCache(a);
+            if (first_account) loadChatsCache(a);
         }
         a.sync_logged_out = false;
         refreshGroups(a);
