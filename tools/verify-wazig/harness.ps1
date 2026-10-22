@@ -217,11 +217,20 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
         Assert-That (@($requests | Where-Object { $_.path.StartsWith($path) -and $_.status -eq 200 }).Count -gt 0) "Missing hub list request: $path"
     }
     Hub-Pass $Session chats
-    Send-Keys $Session '^{TAB}'
-    $null = Wait-Until { (Read-Control $Session status).selected.id -eq $beta } 'hub Beta selected'
-    Send-Keys $Session '^+{TAB}'
-    $null = Wait-Until { (Read-Control $Session status).selected.id -eq $alpha } 'hub Alpha selected'
     $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object id -eq 'BASELINE').Count -eq 1 } 'hub history visible'
+    Send-Keys $Session '^{TAB}'
+    $null = Wait-Until {
+        $shown = Read-Control $Session messages
+        (Read-Control $Session status).selected.id -eq $beta -and $shown.chat.id -eq $beta -and $shown.messages.Count -eq 1 -and $shown.messages[0].id -eq 'BASELINE_BETA' -and $shown.messages[0].text -eq 'Fixture Beta history'
+    } 'hub Beta selected with only Beta history'
+    Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'beta.messages.json')
+    Save-Screen $Session beta
+    Send-Keys $Session '^+{TAB}'
+    $null = Wait-Until {
+        $shown = Read-Control $Session messages
+        (Read-Control $Session status).selected.id -eq $alpha -and $shown.chat.id -eq $alpha -and @($shown.messages | Where-Object id -eq 'BASELINE').Count -eq 1 -and @($shown.messages | Where-Object id -eq 'BASELINE_BETA').Count -eq 0
+    } 'hub Alpha selected with only Alpha history'
+    Hub-Pass $Session chat-switch
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'history.messages.json')
     Save-Screen $Session history
     Hub-Pass $Session history
