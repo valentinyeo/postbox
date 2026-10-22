@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub fn pasteShortcut(key: u32, control: bool, shift: bool, alt: bool) bool {
-    return !alt and ((control and !shift and key == 'V') or (!control and shift and key == 0x2d));
+    return !alt and ((control and key == 'V') or (!control and shift and key == 0x2d));
 }
 
 pub fn wordStart(text: []const u16, caret: usize) usize {
@@ -27,6 +27,7 @@ fn wide(comptime text: []const u8) []const u16 {
 
 test "IGSH-466 both composer paste shortcuts are consumed before native key and char dispatch" {
     try std.testing.expect(pasteShortcut('V', true, false, false));
+    try std.testing.expect(pasteShortcut('V', true, true, false));
     try std.testing.expect(pasteShortcut(0x2d, false, true, false));
     try std.testing.expect(!pasteShortcut('V', false, false, false));
     try std.testing.expect(!pasteShortcut('V', true, false, true));

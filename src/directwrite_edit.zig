@@ -179,13 +179,13 @@ const Host = struct {
         const selected = selection.cpMin != selection.cpMax;
         const editable = win.IsWindowEnabled(self.hwnd) != 0 and self.send(win.EM_GETOPTIONS, 0, 0) & win.ECO_READONLY == 0;
         const items = .{
-            .{ "Undo", win.EM_UNDO, editable and self.send(win.EM_CANUNDO, 0, 0) != 0 },
-            .{ "Cut", win.WM_CUT, editable and selected },
-            .{ "Copy", win.WM_COPY, selected },
-            .{ "Paste", win.WM_PASTE, editable and self.send(win.EM_CANPASTE, win.CF_UNICODETEXT, 0) != 0 },
-            .{ "Select all", win.EM_SETSEL, self.send(win.WM_GETTEXTLENGTH, 0, 0) > 0 },
+            .{ std.unicode.utf8ToUtf16LeStringLiteral("Undo"), win.EM_UNDO, editable and self.send(win.EM_CANUNDO, 0, 0) != 0 },
+            .{ std.unicode.utf8ToUtf16LeStringLiteral("Cut"), win.WM_CUT, editable and selected },
+            .{ std.unicode.utf8ToUtf16LeStringLiteral("Copy"), win.WM_COPY, selected },
+            .{ std.unicode.utf8ToUtf16LeStringLiteral("Paste"), win.WM_PASTE, editable and self.send(win.EM_CANPASTE, win.CF_UNICODETEXT, 0) != 0 },
+            .{ std.unicode.utf8ToUtf16LeStringLiteral("Select all"), win.EM_SETSEL, self.send(win.WM_GETTEXTLENGTH, 0, 0) > 0 },
         };
-        inline for (items) |item| _ = win.AppendMenuW(menu, win.MF_STRING | @as(u32, if (item[2]) win.MF_ENABLED else win.MF_GRAYED), item[1], std.unicode.utf8ToUtf16LeStringLiteral(item[0]));
+        inline for (items) |item| _ = win.AppendMenuW(menu, @intCast(if (item[2]) win.MF_STRING | win.MF_ENABLED else win.MF_STRING | win.MF_GRAYED), item[1], item[0]);
         const choice = win.TrackPopupMenu(menu, win.TPM_RETURNCMD | win.TPM_NONOTIFY | win.TPM_RIGHTBUTTON, point.x, point.y, 0, self.hwnd, null);
         if (choice != 0) _ = win.SendMessageW(self.hwnd, @intCast(choice), 0, if (choice == win.EM_SETSEL) -1 else 0);
     }
