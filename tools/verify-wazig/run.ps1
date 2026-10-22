@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'whatsapp-hub', 'archive', 'text-comparison')][string]$Feature = 'search',
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'whatsapp-hub', 'hub', 'archive', 'text-comparison')][string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence'
 )
@@ -16,7 +16,7 @@ $profile = Join-Path $root 'profile'
 $messages = Join-Path $local 'Messages'
 New-Item $messages, $profile -ItemType Directory -Force | Out-Null
 $tag = '0000000000000526'
-if ($Feature -ne 'whatsapp-hub') {
+if ($Feature -notin @('whatsapp-hub', 'hub')) {
     Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
     @{ data = @(
         @{ jid = 'verify-alpha'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = '' },
@@ -66,12 +66,17 @@ $start.Environment['LOCALAPPDATA'] = $local
 $start.Environment['APPDATA'] = $local
 $start.Environment['USERPROFILE'] = $profile
 $start.Environment['USERNAME'] = "verify-$id"
-foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY')) { $null = $start.Environment.Remove($name) }
+foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN')) { $null = $start.Environment.Remove($name) }
 $bridge = $null
 if ($Feature -eq 'whatsapp-hub') {
     $bridge = Start-FakeBridge $Evidence $root
     $start.Environment['WAZIG_VERIFY_HUB_URL'] = $bridge.url
     $start.Environment['WAZIG_VERIFY_HUB_KEY'] = 'fixture-key-not-a-secret'
+}
+if ($Feature -eq 'hub') {
+    $bridge = Start-FakeBridge $Evidence $root -Unified
+    $start.Environment['WAZIG_HUB_URL'] = $bridge.url
+    $start.Environment['WAZIG_HUB_TOKEN'] = (Get-Content (Join-Path $PSScriptRoot 'fake-wa-bridge.py') | Where-Object { $_.StartsWith('KEY = ') }).Split("'")[1]
 }
 try {
     $app = [Diagnostics.Process]::Start($start)
@@ -95,10 +100,15 @@ $session = Read-Session $Evidence
 try {
     $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window'
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
-    if ($Feature -eq 'whatsapp-hub') {
+    if ($Feature -in @('whatsapp-hub', 'hub')) {
         $null = Wait-Until { (Read-Control $session status).chat_count -eq 2 } 'hub chat list'
     }
     Invoke-Doctor $session
+    if ($Feature -eq 'search') {
+        $launch = Get-Content (Join-Path $messages 'launch-log.txt') -Raw
+        Assert-That ($launch.Contains('whatsapp backend: wacli (URL not configured)') -and -not $launch.Contains('message backend: hub')) 'Unconfigured hub did not select direct fallback'
+        Add-Content (Join-Path $Evidence 'fallback-proof.log') 'hub no-url-direct-fallback PASS'
+    }
     $window = Get-Window $session
     $compose = Get-Edit $window '1032'
     $search = Get-Edit $window '1008'
@@ -120,6 +130,9 @@ try {
             & "$PSScriptRoot/compare-text.ps1" -Session $session -Bin $Bin
         }
         whatsapp-hub {
+            Invoke-WhatsAppHubJourney $session $messages
+        }
+        hub {
             Invoke-WhatsAppHubJourney $session $messages
         }
         search {
@@ -296,7 +309,7 @@ try {
     Assert-That (-not (Test-Path (Join-Path $messages 'telegram'))) 'Telegram store was created'
     if ($Feature -eq 'archive') {
         Assert-That ((Get-Content $provider -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture provider chat storage changed'
-    } elseif ($Feature -ne 'whatsapp-hub') {
+    } elseif ($Feature -notin @('whatsapp-hub', 'hub')) {
         Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
     }
     $final | Add-Member -NotePropertyName production_preferences_absent -NotePropertyValue (-not (Test-Path 'HKCU:\Software\Messages'))

@@ -9,6 +9,10 @@ const io = std.testing.io;
 extern fn tg_fake_push(text: [*:0]const u8) void;
 extern fn tg_fake_request() ?[*:0]const u8;
 
+fn unifiedHub(_: *const App) bool {
+    return false;
+}
+
 fn push(text: []const u8) !void {
     const z = try alloc.dupeZ(u8, text);
     defer alloc.free(z);

@@ -10,6 +10,7 @@ const Entry = struct {
 pub const State = struct {
     entries: std.StringHashMapUnmanaged(Entry) = .empty,
     dirty: bool = false,
+    allow_opaque: bool = false,
 
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
         var keys = self.entries.keyIterator();
@@ -17,23 +18,28 @@ pub const State = struct {
         self.entries.deinit(allocator);
     }
 
-    fn key(buffer: []u8, account: []const u8, jid: []const u8) ?[]const u8 {
+    fn key(self: *const State, buffer: []u8, account: []const u8, jid: []const u8) ?[]const u8 {
         if (account.len != 16 or jid.len == 0 or jid.len > 191) return null;
         for (account) |c| if (!std.ascii.isHex(c)) return null;
-        for (jid) |c| if (c <= ' ' or c == '/') return null;
-        if (std.mem.indexOfScalar(u8, jid, '@') == null) return null;
+        if (self.allow_opaque) {
+            if (!std.unicode.utf8ValidateSlice(jid)) return null;
+            for (jid) |c| if (c < 32 or c == 127) return null;
+        } else {
+            for (jid) |c| if (c <= ' ' or c == '/') return null;
+            if (std.mem.indexOfScalar(u8, jid, '@') == null) return null;
+        }
         return std.fmt.bufPrint(buffer, "{s}/{s}", .{ account, jid }) catch null;
     }
 
     fn get(self: *const State, account: []const u8, jid: []const u8) Entry {
         var buffer: [208]u8 = undefined;
-        const k = key(&buffer, account, jid) orelse return .{};
+        const k = self.key(&buffer, account, jid) orelse return .{};
         return self.entries.get(k) orelse .{};
     }
 
     fn entry(self: *State, allocator: std.mem.Allocator, account: []const u8, jid: []const u8) ?*Entry {
         var buffer: [208]u8 = undefined;
-        const k = key(&buffer, account, jid) orelse return null;
+        const k = self.key(&buffer, account, jid) orelse return null;
         if (self.entries.getPtr(k)) |value| return value;
         const owned = allocator.dupe(u8, k) catch return null;
         const result = self.entries.getOrPut(allocator, owned) catch {
@@ -63,7 +69,7 @@ pub const State = struct {
 
     pub fn needsProbe(self: *const State, account: []const u8, jid: []const u8, timestamp: i64, reported_unread: bool) bool {
         var buffer: [208]u8 = undefined;
-        if (key(&buffer, account, jid) == null) return false;
+        if (self.key(&buffer, account, jid) == null) return false;
         const value = self.get(account, jid);
         return reported_unread and timestamp > value.read and timestamp > value.checked;
     }
@@ -110,7 +116,7 @@ pub const State = struct {
     pub fn load(self: *State, allocator: std.mem.Allocator, contents: []const u8) void {
         var lines = std.mem.splitScalar(u8, contents, '\n');
         while (lines.next()) |line| {
-            const split = std.mem.indexOfScalar(u8, line, ' ') orelse continue;
+            const split = std.mem.lastIndexOfScalar(u8, line, ' ') orelse continue;
             const k = line[0..split];
             if (k.len < 18 or k[16] != '/') continue;
             const timestamp = std.fmt.parseInt(i64, line[split + 1 ..], 10) catch continue;
@@ -198,4 +204,26 @@ test "watermarks are monotonic and account scoped, malformed persistence and pro
     try std.testing.expect(!state.needsProbe("", test_jid, read_time, true));
     try std.testing.expect(state.acceptProbe(allocator, test_account, test_jid, read_time, "{\"data\":{\"messages\":[]}}"));
     try std.testing.expect(!state.needsProbe(test_account, test_jid, read_time, true));
+}
+
+test "IGSH-531 opaque hub read state survives restart with spaces and slashes" {
+    const allocator = std.testing.allocator;
+    const handle = "fixture/account:room +/";
+    var state = State{ .allow_opaque = true };
+    defer state.deinit(allocator);
+    try std.testing.expect(state.needsProbe(test_account, handle, read_time, true));
+    try std.testing.expect(state.acceptProbe(allocator, test_account, handle, read_time, incoming_old));
+    try std.testing.expect(state.isUnread(test_account, handle));
+    state.markRead(allocator, test_account, handle, read_time);
+    const encoded = try state.encode(allocator);
+    defer allocator.free(encoded);
+    var restored = State{ .allow_opaque = true };
+    defer restored.deinit(allocator);
+    restored.load(allocator, encoded);
+    try std.testing.expectEqual(read_time, restored.get(test_account, handle).read);
+    try std.testing.expect(!restored.needsProbe(test_account, handle, read_time, true));
+    var direct = State{};
+    defer direct.deinit(allocator);
+    direct.load(allocator, encoded);
+    try std.testing.expectEqual(@as(i64, 0), direct.get(test_account, handle).read);
 }
