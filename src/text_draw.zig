@@ -1225,3 +1225,87 @@ test "DirectWrite fifty distinct strings frame benchmark" {
         try std.testing.expect(directwrite);
     }
 }
+
+test "ISSUE-462 DirectWrite paints every row-sized chat buffer" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
+    const main = @embedFile("main.zig");
+    const chat_start = std.mem.indexOf(u8, main, "fn drawChat(").?;
+    const chat_end = std.mem.indexOf(u8, main[chat_start..], "fn transcriptLineKind(").?;
+    const chat_draw = main[chat_start..][0..chat_end];
+    const finish_before_text = std.mem.indexOf(u8, chat_draw, "    shapes.deinit();") != null;
+    if (finish_before_text) {
+        const finish = std.mem.lastIndexOf(u8, chat_draw, "    shapes.deinit();").?;
+        try std.testing.expect(std.mem.indexOf(u8, chat_draw[0..finish], "text_draw.draw") == null);
+        try std.testing.expect(std.mem.indexOf(u8, chat_draw[finish..], "&shapes") == null);
+    }
+    const screen = win.GetDC(null) orelse return error.CreateDCFailed;
+    defer _ = win.ReleaseDC(null, screen);
+    const size = 384;
+    const dc = win.CreateCompatibleDC(null) orelse return error.CreateDCFailed;
+    defer _ = win.DeleteDC(dc);
+    var info = std.mem.zeroes(win.BITMAPINFO);
+    info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = size;
+    info.bmiHeader.biHeight = -size;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    var bits: ?*anyopaque = null;
+    const bitmap = win.CreateDIBSection(dc, &info, win.DIB_RGB_COLORS, &bits, null, 0) orelse return error.CreateBitmapFailed;
+    defer _ = win.DeleteObject(bitmap);
+    const previous = win.SelectObject(dc, bitmap);
+    defer _ = win.SelectObject(dc, previous);
+    const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. size * size];
+    const font = win.CreateFontW(-14, 0, 0, 0, 600, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, wide("IBM Plex Sans")) orelse return error.CreateFontFailed;
+    defer _ = win.DeleteObject(font);
+    var font_path: [1024:0]u16 = undefined;
+    _ = win.GetFullPathNameW(wide("assets\\IBMPlexSans-SemiBold.ttf"), font_path.len, &font_path, null);
+    setBundledFontPaths(&.{&font_path});
+    defer reset();
+    const client = win.RECT{ .left = 0, .top = 0, .right = size, .bottom = size };
+    const background = win.CreateSolidBrush(0) orelse return error.BrushFailed;
+    defer _ = win.DeleteObject(background);
+    const expected = try std.testing.allocator.alloc(u32, pixels.len);
+    defer std.testing.allocator.free(expected);
+    for ([_]i32{ 0, 64, 128, 256 }) |top| {
+        const row = win.RECT{ .left = 0, .top = top, .right = 330, .bottom = top + 64 };
+        for ([_]bool{ false, true }) |buffered| {
+            @memset(pixels, 0);
+            var surface = if (buffered) @import("paint_buffer.zig").Buffer.init(screen, client, row) else @import("paint_buffer.zig").Buffer{ .hdc = dc, .target = dc, .rect = row };
+            surface.target = dc;
+            {
+                defer surface.deinit();
+                var shapes = @import("smooth_shapes.zig").Context.init(surface.hdc);
+                defer shapes.deinit();
+                _ = win.FillRect(surface.hdc, &row, background);
+                @import("smooth_shapes.zig").fillEllipse(&shapes, .{ .left = 12, .top = top + 10, .right = 54, .bottom = top + 52 }, 0x262626);
+                @import("smooth_shapes.zig").fillRoundRect(&shapes, .{ .left = 39, .top = top + 38, .right = 60, .bottom = top + 56 }, 8, 8, 0x333333);
+                if (finish_before_text) shapes.deinit();
+                _ = win.SelectObject(surface.hdc, font);
+                _ = win.SetTextColor(surface.hdc, 0xffffff);
+                _ = win.SetBkMode(surface.hdc, win.TRANSPARENT);
+                var initial = win.RECT{ .left = 12, .top = top + 10, .right = 54, .bottom = top + 52 };
+                _ = drawText(surface.hdc, wide("V"), -1, &initial, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+                var name = win.RECT{ .left = 66, .top = top + 10, .right = 276, .bottom = top + 34 };
+                var preview = win.RECT{ .left = 66, .top = top + 35, .right = 288, .bottom = top + 56 };
+                var clip: win.RECT = undefined;
+                _ = win.GetClipBox(surface.hdc, &clip);
+                std.debug.print("ISSUE-462 row top={d} buffered={} clip={any}\n", .{ top, buffered, clip });
+                _ = drawText(surface.hdc, wide("Verification Beta"), -1, &name, win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
+                _ = drawText(surface.hdc, wide("direct"), -1, &preview, win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+                try std.testing.expect(directwrite);
+            }
+            _ = win.GdiFlush();
+            var name_ink: usize = 0;
+            var preview_ink: usize = 0;
+            for (pixels, 0..) |pixel, i| {
+                if (pixel & 0xffffff == 0 or i % size < 66) continue;
+                const y = i / size;
+                if (y >= top + 10 and y < top + 34) name_ink += 1;
+                if (y >= top + 35 and y < top + 56) preview_ink += 1;
+            }
+            std.debug.print("ISSUE-462 row top={d} buffered={} name_ink={d} preview_ink={d}\n", .{ top, buffered, name_ink, preview_ink });
+            try std.testing.expect(name_ink > 100 and preview_ink > 20);
+            if (buffered) try std.testing.expectEqualSlices(u32, expected, pixels) else @memcpy(expected, pixels);
+        }
+    }
+}

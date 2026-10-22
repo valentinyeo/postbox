@@ -14254,17 +14254,10 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     var buffered = screen_item.*;
     buffered.hDC = surface.hdc;
     const item = &buffered;
-    var shapes = smooth.Context.init(item.hDC);
-    defer shapes.deinit();
     const chat = &a.chats[index];
     const selected = (item.itemState & win.ODS_SELECTED) != 0;
     const bulk_selected = a.bulk.count > 0 and a.bulk.containsKey(chat_key.of(chat));
     _ = win.FillRect(item.hDC, &item.rcItem, background);
-    if (selected or bulk_selected) {
-        smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius * 2), px(a, theme.selected_row_radius * 2), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
-    }
-    const row_text = if (bulk_selected) theme.current.on_primary_container else theme.current.on_surface;
-    const row_muted = if (bulk_selected) row_text else theme.current.on_surface_variant;
     _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
     if (bulk_selected) {
         if (win.CreateSolidBrush(theme.current.primary)) |bar_brush| {
@@ -14274,21 +14267,45 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         }
     }
 
+    var shapes = smooth.Context.init(item.hDC);
+    if (selected or bulk_selected) {
+        smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius * 2), px(a, theme.selected_row_radius * 2), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
+    }
+    const row_text = if (bulk_selected) theme.current.on_primary_container else theme.current.on_surface;
+    const row_muted = if (bulk_selected) row_text else theme.current.on_surface_variant;
+
     const avatar_left = item.rcItem.left + px(a, 12);
     const avatar_top = item.rcItem.top + px(a, 10);
     const avatar_entry = if (chat.provider == .whatsapp) avatarForChat(a, chat.jid.slice()) else null;
-    if (avatar_entry != null and avatar_entry.?.bitmap != null) {
-        drawAvatarBitmap(item.hDC, avatar_entry.?.bitmap.?, avatar_left, avatar_top, 42);
-    } else {
+    if (avatar_entry == null or avatar_entry.?.bitmap == null) {
         smooth.fillEllipse(&shapes, .{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 }, theme.current.surface_container_highest);
-        if (chat.name.len > 0) {
-            var initial_length: c_int = 1;
-            if (chat.name.buf[0] >= 0xd800 and chat.name.buf[0] <= 0xdbff and chat.name.len > 1) initial_length = 2;
-            _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
-            _ = win.SetTextColor(item.hDC, theme.current.on_surface);
-            var avatar_rect = win.RECT{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 };
-            _ = text_draw.drawText(item.hDC, chat.name.ptr(), initial_length, &avatar_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
-        }
+    }
+    if (avatar_entry != null and avatar_entry.?.bitmap != null) {
+        shapes.deinit();
+        drawAvatarBitmap(item.hDC, avatar_entry.?.bitmap.?, avatar_left, avatar_top, 42);
+        shapes = smooth.Context.init(item.hDC);
+    }
+    const badge = win.RECT{ .left = avatar_left + px(a, 27), .top = avatar_top + px(a, 28), .right = avatar_left + px(a, 48), .bottom = avatar_top + px(a, 46) };
+    smooth.fillRoundRect(&shapes, badge, px(a, 8), px(a, 8), theme.current.primary_container);
+    const pinned_chat = isChatPinned(a, chat_key.of(chat));
+    if (pinned_chat) {
+        drawPinIcon(a, &shapes, item.rcItem.right - px(a, 78), item.rcItem.top + px(a, 10), row_muted, false);
+    }
+    if (chat.unread or chat.unread_count > 0) {
+        const diameter = px(a, theme.unread_dot_px);
+        const dot_right = item.rcItem.right - px(a, 12);
+        const dot_top = item.rcItem.top + @divTrunc(px(a, 35) + px(a, 56) - diameter, 2);
+        smooth.fillEllipse(&shapes, .{ .left = dot_right - diameter, .top = dot_top, .right = dot_right, .bottom = dot_top + diameter }, theme.current.primary);
+    }
+    shapes.deinit();
+    _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
+    if ((avatar_entry == null or avatar_entry.?.bitmap == null) and chat.name.len > 0) {
+        var initial_length: c_int = 1;
+        if (chat.name.buf[0] >= 0xd800 and chat.name.buf[0] <= 0xdbff and chat.name.len > 1) initial_length = 2;
+        _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
+        _ = win.SetTextColor(item.hDC, theme.current.on_surface);
+        var avatar_rect = win.RECT{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 };
+        _ = text_draw.drawText(item.hDC, chat.name.ptr(), initial_length, &avatar_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     }
 
     const name_text = chat.name.slice();
@@ -14300,10 +14317,6 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         _ = drawMixedLine(item.hDC, a.font_bold.?, a.font_emoji orelse a.font_bold.?, name_text, item.rcItem.left + px(a, 66), name_y);
     }
 
-    _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
-    _ = win.SetTextColor(item.hDC, row_text);
-    const badge = win.RECT{ .left = avatar_left + px(a, 27), .top = avatar_top + px(a, 28), .right = avatar_left + px(a, 48), .bottom = avatar_top + px(a, 46) };
-    smooth.fillRoundRect(&shapes, badge, px(a, 8), px(a, 8), theme.current.primary_container);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, theme.current.on_primary_container);
     var badge_text = badge;
@@ -14314,12 +14327,8 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     }, 1, &badge_text, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
     _ = win.SetTextColor(item.hDC, row_text);
-    const pinned_chat = isChatPinned(a, chat_key.of(chat));
     var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 34) };
     _ = text_draw.drawText(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
-    if (pinned_chat) {
-        drawPinIcon(a, &shapes, item.rcItem.right - px(a, 78), item.rcItem.top + px(a, 10), row_muted, false);
-    }
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, row_muted);
     var time_rect = win.RECT{ .left = item.rcItem.right - px(a, 52), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, 10), .bottom = item.rcItem.top + px(a, 32) };
@@ -14363,13 +14372,6 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         var marker_rect = win.RECT{ .left = item.rcItem.right - px(a, 128), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, 40), .bottom = item.rcItem.top + px(a, 56) };
         _ = text_draw.drawText(item.hDC, text, -1, &marker_rect, win.DT_RIGHT | win.DT_SINGLELINE);
         _ = win.SetTextColor(item.hDC, row_muted);
-    }
-
-    if (chat.unread or chat.unread_count > 0) {
-        const diameter = px(a, theme.unread_dot_px);
-        const dot_right = item.rcItem.right - px(a, 12);
-        const dot_top = @divTrunc(kind_rect.top + kind_rect.bottom - diameter, 2);
-        smooth.fillEllipse(&shapes, .{ .left = dot_right - diameter, .top = dot_top, .right = dot_right, .bottom = dot_top + diameter }, theme.current.primary);
     }
 }
 
@@ -15063,6 +15065,9 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         const skip_body_line = message.text.len == 0 and message.quote.len > 0;
         const text_len: c_int = if (message.text.len > 0) @intCast(message.text.len) else 1;
         const text_height: i32 = if (skip_body_line) 0 else wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), text_len, right - left - px(a, 24), true, left + px(a, 12), text_top, message);
+        if (verification_fixture and verification_text_comparison and std.mem.eql(u8, message.id.slice(), "ISSUE-462-PARAGRAPH")) {
+            saveVerificationTextMetrics(a, hdc, message, left + px(a, 12), text_top, right - left - px(a, 24), text_height);
+        }
         if (message.unfurl_provider != .none) {
             drawUnfurlCard(&shapes, hdc, a, message, left + px(a, 12), text_top + text_height + px(a, 4), right - left - px(a, 24));
             text_top += text_height + unfurl_card_height + px(a, 6);
@@ -15805,6 +15810,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 } else {
                     loadChatsCache(a);
                     refreshMessages(a);
+                    if (verification_text_comparison) _ = applyMessageData(a, @embedFile("verify_text.json"), false);
                 }
                 appendLaunchLog(a, if (hubConfigured(a)) "verification: hub fixture ready" else "verification: offline fixture ready");
                 return 0;
@@ -17175,6 +17181,35 @@ fn LoadAppIcon(instance: win.HINSTANCE, cx: i32, cy: i32, flags: u32) win.HICON 
 }
 
 var verification_fixture = false;
+var verification_text_comparison = false;
+
+fn saveVerificationTextMetrics(a: *App, hdc: win.HDC, message: *const Message, x: i32, y: i32, width: i32, height: i32) void {
+    const path = std.fs.path.join(a.allocator, &.{ std.fs.path.dirname(a.avatar_dir) orelse return, "text-metrics.json" }) catch return;
+    defer a.allocator.free(path);
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch return;
+    defer a.allocator.free(text);
+    var origin = win.POINT{ .x = x, .y = y };
+    const canvas_hwnd = a.canvas orelse return;
+    _ = win.ClientToScreen(canvas_hwnd, &origin);
+    var canvas: win.RECT = undefined;
+    _ = win.GetClientRect(canvas_hwnd, &canvas);
+    const dpi: i32 = @intCast(a.dpi);
+    const data = std.json.Stringify.valueAlloc(a.allocator, .{
+        .text = text,
+        .dpi = dpi,
+        .scale = a.font_scale,
+        .directwrite = text_draw.directwrite,
+        .body = .{ .px = -scaledFontHeight(17, a.font_scale, dpi), .weight = @import("font_config.zig").body_weight, .line_height = textLineHeight(hdc, a.font.?) },
+        .heading = .{ .px = -scaledFontHeight(16, a.font_scale, dpi), .weight = win.FW_SEMIBOLD, .line_height = textLineHeight(hdc, a.font_bold.?) },
+        .canvas = .{ .width = canvas.right, .height = canvas.bottom },
+        .paragraph = .{ .x = origin.x, .y = origin.y, .width = width, .height = height },
+        .foreground = theme.current.on_surface,
+        .background = theme.current.surface_container_high,
+        .surface = theme.current.surface,
+    }, .{}) catch return;
+    defer a.allocator.free(data);
+    _ = writeCacheFileAtomic(a, path, data);
+}
 
 fn verificationEnqueue(a: *App, job: WacliJob) bool {
     if (job.kind != .chats and job.kind != .messages and job.kind != .unread_probe) return false;
@@ -17286,6 +17321,7 @@ pub fn main(init: std.process.Init) !void {
     while (argument_iterator.next()) |argument| {
         if (std.mem.eql(u8, argument, "--update-relaunch")) update_relaunch = true;
         if (std.mem.eql(u8, argument, "--verify-fixture")) verification_fixture = true;
+        if (std.mem.eql(u8, argument, "--verify-text-comparison")) verification_text_comparison = true;
         if (std.mem.eql(u8, argument, "--tdlib-smoke")) {
             if (!tg.enabled) std.process.exit(2);
             std.process.exit(tdlibSmoke(init.io));
