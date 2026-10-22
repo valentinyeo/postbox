@@ -1,5 +1,8 @@
 const std = @import("std");
 var verification_fixture = false;
+const slack_win = struct {
+    const verification_port: ?u16 = null;
+};
 fn verificationEnqueue(_: *App, _: WacliJob) bool {
     return false;
 }

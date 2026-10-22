@@ -3750,7 +3750,10 @@ fn requireSlackSignIn(a: *App, account: []const u8, failed_token: []const u8) vo
     a.slack_install_mutex.lockUncancelable(a.io);
     defer a.slack_install_mutex.unlock(a.io);
     if (slackInstallation(a, account)) |installation| {
-        if (std.mem.eql(u8, installation.user_token, failed_token)) installation.needs_signin.store(true, .release);
+        if (std.mem.eql(u8, installation.user_token, failed_token)) {
+            installation.needs_signin.store(true, .release);
+            if (installation.cookie.len > 0) installation.socket_stop.store(true, .release);
+        }
     }
 }
 
@@ -5729,7 +5732,7 @@ fn stopSlackSession(installation: *SlackInstallation) void {
 fn slackSocketConnected(a: *App) bool {
     if (a.slack_connected.load(.acquire)) return true;
     for (&a.slack_installations) |*installation| {
-        if (installation.active and installation.socket_connected.load(.acquire)) return true;
+        if (installation.active and !installation.needs_signin.load(.acquire) and installation.socket_connected.load(.acquire)) return true;
     }
     return false;
 }
