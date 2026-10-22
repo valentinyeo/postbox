@@ -7,6 +7,21 @@ pub const class_name = std.unicode.utf8ToUtf16LeStringLiteral("RICHEDIT50W");
 const property_name = std.unicode.utf8ToUtf16LeStringLiteral("Messages.DirectWriteEdit");
 var module: win.HMODULE = null;
 
+const CharacterFormat = extern struct {
+    base: win.CHARFORMATW,
+    wWeight: win.WORD,
+    sSpacing: win.SHORT,
+    crBackColor: win.COLORREF,
+    lcid: win.LCID,
+    dwReserved: win.DWORD,
+    sStyle: win.SHORT,
+    wKerning: win.WORD,
+    bUnderlineType: win.BYTE,
+    bAnimation: win.BYTE,
+    bRevAuthor: win.BYTE,
+    bUnderlineColor: win.BYTE,
+};
+
 pub fn create(instance: win.HINSTANCE, parent: win.HWND, id: win.HMENU, style: u32, x: i32, y: i32, width: i32, height: i32) ?win.HWND {
     if (module == null) module = win.LoadLibraryExW(std.unicode.utf8ToUtf16LeStringLiteral("msftedit.dll"), null, win.LOAD_LIBRARY_SEARCH_SYSTEM32) orelse return null;
     const hwnd = win.CreateWindowExW(0, class_name, null, style, x, y, width, height, parent, id, instance, null) orelse return null;
@@ -104,14 +119,14 @@ const Host = struct {
         if (win.GetObjectW(self.assigned_font, @sizeOf(win.LOGFONTW), &logical) != 0) {
             const dc = win.GetDC(self.hwnd);
             defer _ = win.ReleaseDC(self.hwnd, dc);
-            var format = std.mem.zeroes(win.CHARFORMAT2W);
-            format.cbSize = @sizeOf(win.CHARFORMAT2W);
-            format.dwMask = @as(u32, win.CFM_FACE) | @as(u32, win.CFM_SIZE) | @as(u32, win.CFM_WEIGHT) | @as(u32, win.CFM_ITALIC) | @as(u32, win.CFM_UNDERLINE);
-            format.dwEffects = (if (logical.lfItalic != 0) @as(u32, win.CFE_ITALIC) else 0) | (if (logical.lfUnderline != 0) @as(u32, win.CFE_UNDERLINE) else 0);
-            format.yHeight = win.MulDiv(@intCast(@abs(logical.lfHeight)), 1440, @max(1, win.GetDeviceCaps(dc, win.LOGPIXELSY)));
+            var format = std.mem.zeroes(CharacterFormat);
+            format.base.cbSize = @sizeOf(CharacterFormat);
+            format.base.dwMask = @as(u32, win.CFM_FACE) | @as(u32, win.CFM_SIZE) | @as(u32, win.CFM_WEIGHT) | @as(u32, win.CFM_ITALIC) | @as(u32, win.CFM_UNDERLINE);
+            format.base.dwEffects = (if (logical.lfItalic != 0) @as(u32, win.CFE_ITALIC) else 0) | (if (logical.lfUnderline != 0) @as(u32, win.CFE_UNDERLINE) else 0);
+            format.base.yHeight = win.MulDiv(@intCast(@abs(logical.lfHeight)), 1440, @max(1, win.GetDeviceCaps(dc, win.LOGPIXELSY)));
             format.wWeight = @intCast(logical.lfWeight);
-            format.bCharSet = logical.lfCharSet;
-            format.szFaceName = logical.lfFaceName;
+            format.base.bCharSet = logical.lfCharSet;
+            format.base.szFaceName = logical.lfFaceName;
             _ = self.send(win.EM_SETCHARFORMAT, 0, @bitCast(@intFromPtr(&format)));
             _ = self.send(win.EM_SETCHARFORMAT, win.SCF_ALL, @bitCast(@intFromPtr(&format)));
         }
@@ -343,16 +358,18 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     defer _ = win.DeleteObject(font);
     _ = win.SendMessageW(edit, win.WM_SETFONT, @intFromPtr(font), 1);
     try std.testing.expectEqual(@as(win.LRESULT, @bitCast(@intFromPtr(font))), win.SendMessageW(edit, win.WM_GETFONT, 0, 0));
-    var format = std.mem.zeroes(win.CHARFORMAT2W);
-    format.cbSize = @sizeOf(win.CHARFORMAT2W);
+    try std.testing.expectEqual(@as(usize, 116), @sizeOf(CharacterFormat));
+    try std.testing.expectEqual(@as(usize, 92), @offsetOf(CharacterFormat, "wWeight"));
+    var format = std.mem.zeroes(CharacterFormat);
+    format.base.cbSize = @sizeOf(CharacterFormat);
     const format_mask = host.send(win.EM_GETCHARFORMAT, win.SCF_DEFAULT, @bitCast(@intFromPtr(&format)));
     var logical = std.mem.zeroes(win.LOGFONTW);
     const font_bytes = win.GetObjectW(font, @sizeOf(win.LOGFONTW), &logical);
-    std.debug.print("IGSH-466 native font diagnostics: format size={d}, weight offset={d}, mask={x}/{x}, height={d}, weight={d}, font bytes={d}, logical height={d}, logical weight={d}, face={any}\n", .{ @sizeOf(win.CHARFORMAT2W), @offsetOf(win.CHARFORMAT2W, "wWeight"), format_mask, format.dwMask, format.yHeight, format.wWeight, font_bytes, logical.lfHeight, logical.lfWeight, format.szFaceName });
+    std.debug.print("IGSH-466 native font diagnostics: format size={d}, weight offset={d}, mask={x}/{x}, height={d}, weight={d}, font bytes={d}, logical height={d}, logical weight={d}, face={any}\n", .{ @sizeOf(CharacterFormat), @offsetOf(CharacterFormat, "wWeight"), format_mask, format.base.dwMask, format.base.yHeight, format.wWeight, font_bytes, logical.lfHeight, logical.lfWeight, format.base.szFaceName });
     try std.testing.expect(format_mask != 0);
     try std.testing.expectEqual(@as(u16, 500), format.wWeight);
-    try std.testing.expectEqual(@as(i32, 255), format.yHeight);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans"), std.mem.sliceTo(&format.szFaceName, 0));
+    try std.testing.expectEqual(@as(i32, 255), format.base.yHeight);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans"), std.mem.sliceTo(&format.base.szFaceName, 0));
     std.debug.print("IGSH-466 native body font contract passed\n", .{});
     const text = std.unicode.utf8ToUtf16LeStringLiteral("one\r\ntwo😀");
     _ = win.SetWindowTextW(edit, text);
