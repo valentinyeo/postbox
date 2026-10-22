@@ -96,23 +96,40 @@ cp "$repo/.github/workflows/automerge.yml" "$fixture/.github/workflows/automerge
 "$lint" "$fixture"
 printf 'test-lint-repeats: IGSH-504 B8 rejects %s incomplete check policies and permits the fixed workflow\n' "$b8_cases"
 mkdir -p "$fixture/src/nested"
-for file in main.zig bypass.zig nested/bypass.zig; do
-    for read in 'init.environ_map.get("DEEPGRAM_API_KEY")' $'init.environ_map\n    .get(\n        "DEEPGRAM_API_KEY"\n    )'; do
-        printf 'const stored = slack_win.loadSecret(init.gpa, lit("DeepgramApiKey"));\nconst seed = %s;\n' "$read" > "$fixture/src/$file"
-        status=0
-        "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
-        if (( status != 1 )) || ! grep -Fq '[C2]' "$temp/output"; then
-            cat "$temp/output" >&2
-            printf 'test-lint-repeats: FAIL C2 must reject inherited environment read in %s, got exit %s\n' "$file" "$status" >&2
-            exit 1
-        fi
+c2_cases=0
+for variable in DEEPGRAM_API_KEY WA_BRIDGE_KEY; do
+    for file in main.zig bypass.zig nested/bypass.zig; do
+        for read in "init.environ_map.get(\"$variable\")" "$(printf 'init.environ_map\n    .get(\n        "%s"\n    )' "$variable")"; do
+            printf 'const stored = slack_win.loadSecret(init.gpa, lit("WaBridgeKey"));\nconst seed = %s;\n' "$read" > "$fixture/src/$file"
+            status=0
+            "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+            if (( status != 1 )) || ! grep -Fq '[C2]' "$temp/output"; then
+                cat "$temp/output" >&2
+                printf 'test-lint-repeats: FAIL C2 must reject inherited %s read in %s, got exit %s\n' "$variable" "$file" "$status" >&2
+                exit 1
+            fi
+            c2_cases=$((c2_cases + 1))
+        done
+        rm "$fixture/src/$file"
+        : > "$fixture/src/main.zig"
     done
-    rm "$fixture/src/$file"
+    printf 'const seed = slack_win.loadUserEnvironment(init.gpa, lit("%s"));\nconst stored = slack_win.loadSecret(init.gpa, lit("WaBridgeKey"));\n' "$variable" > "$fixture/src/main.zig"
+    "$lint" "$fixture"
     : > "$fixture/src/main.zig"
 done
-printf 'const seed = slack_win.loadUserEnvironment(init.gpa, lit("DEEPGRAM_API_KEY"));\nconst stored = slack_win.loadSecret(init.gpa, lit("DeepgramApiKey"));\n' > "$fixture/src/main.zig"
+printf 'test-lint-repeats: C2 rejects %s inherited reads throughout src and permits saved user environment readers\n' "$c2_cases"
+printf 'const key = loadRegistryString(allocator, lit("WaBridgeKey"));\n' > "$fixture/src/main.zig"
+status=0
+"$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+if (( status != 1 )) || ! grep -Fq '[C1]' "$temp/output"; then
+    cat "$temp/output" >&2
+    printf 'test-lint-repeats: FAIL C1 must reject a plain WaBridgeKey read\n' >&2
+    exit 1
+fi
+printf 'const key = slack_win.loadSecret(allocator, lit("WaBridgeKey"));\n' > "$fixture/src/main.zig"
 "$lint" "$fixture"
-printf 'test-lint-repeats: C2 rejects inherited reads throughout src even with loadSecret and permits the saved user environment reader\n'
+: > "$fixture/src/main.zig"
+printf 'test-lint-repeats: C1 rejects plain WaBridgeKey and permits DPAPI\n'
 f1_cases=0
 for api in RoundRect Ellipse Pie Chord Arc CreateEllipticRgn CreateRoundRectRgn; do
     for form in direct alias import_alias field field_alias multiline_alias multiline_field; do
