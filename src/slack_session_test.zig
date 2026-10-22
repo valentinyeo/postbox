@@ -84,7 +84,10 @@ test "IGSH-464 session live receive over fake RTM socket sends Cookie without en
     const ctx = try context();
     const raw = try transport.connectRtm(a, ctx.user_token, ctx.cookie);
     const endpoint = slack.parseWsUrl(a, raw).?;
-    const socket = try transport.socketConnect(a, endpoint, ctx.cookie);
+    const socket = transport.socketConnect(a, endpoint, ctx.cookie) catch |err| {
+        std.debug.print("Fake RTM upgrade failed: {s}\n", .{@errorName(err)});
+        return err;
+    };
     defer transport.socketClose(socket);
     var stop: std.atomic.Value(bool) = .init(false);
     var buffer: [4096]u8 = undefined;
@@ -139,8 +142,8 @@ test "IGSH-464 session import file consumed and deleted with DPAPI workspace iso
         const saved = transport.loadInstallation(a, team).?;
         defer saved.deinit();
         try std.testing.expect(saved.value.mode == .session);
-        try std.testing.expectEqualStrings("xoxd-fake-shared-cookie", saved.value.cookie);
-        try std.testing.expectEqualStrings(if (std.mem.eql(u8, team, "TFAKE001")) "xoxc-fake-session-token" else "xoxc-fake-second-token", saved.value.user_token);
+        try std.testing.expect(std.mem.eql(u8, "xoxd-fake-shared-cookie", saved.value.cookie));
+        try std.testing.expect(std.mem.eql(u8, if (std.mem.eql(u8, team, "TFAKE001")) "xoxc-fake-session-token" else "xoxc-fake-second-token", saved.value.user_token));
     }
     var value_type: win.DWORD = 0;
     var size: win.DWORD = 0;

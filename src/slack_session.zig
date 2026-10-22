@@ -54,8 +54,8 @@ test "IGSH-464 session form encoding and cookie reject header injection" {
     const a = arena.allocator();
     const prepared = try request(a, "/api/chat.postMessage", "{\"text\":\"Fake + & message\",\"channel\":\"CFAKE001\"}", "xoxc-fake-token");
     try std.testing.expectEqualStrings("/api/chat.postMessage", prepared.path);
-    try std.testing.expectEqualStrings("token=xoxc-fake-token&text=Fake%20%2B%20%26%20message&channel=CFAKE001", prepared.body);
-    try std.testing.expectEqualStrings("Cookie: d=xoxd-fake-cookie\r\n", try cookieHeader(a, "xoxd-fake-cookie"));
+    try std.testing.expect(std.mem.eql(u8, "token=xoxc-fake-token&text=Fake%20%2B%20%26%20message&channel=CFAKE001", prepared.body));
+    try std.testing.expect(std.mem.eql(u8, "Cookie: d=xoxd-fake-cookie\r\n", try cookieHeader(a, "xoxd-fake-cookie")));
     try std.testing.expectError(error.InvalidSession, cookieHeader(a, "xoxd-fake\r\nInjected: yes"));
     try std.testing.expect(!validCookie("xoxd-fake; other=value"));
 }

@@ -702,8 +702,7 @@ pub fn socketConnect(allocator: std.mem.Allocator, endpoint: slack.WsEndpoint, c
         var policy: win.DWORD = win.WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
         if (win.WinHttpSetOption(request, win.WINHTTP_OPTION_REDIRECT_POLICY, &policy, @sizeOf(win.DWORD)) == 0) return error.NetworkFailed;
     }
-    var upgrade: win.BOOL = 1;
-    if (win.WinHttpSetOption(request, option_upgrade_to_web_socket, &upgrade, @sizeOf(win.BOOL)) == 0) return error.WebSocketUnsupported;
+    if (win.WinHttpSetOption(request, option_upgrade_to_web_socket, null, 0) == 0) return error.WebSocketUnsupported;
     const headers = try toWide(arena.allocator(), if (cookie.len > 0) try session_auth.cookieHeader(arena.allocator(), cookie) else "");
     if (win.WinHttpSendRequest(request, headers.ptr, @intCast(headers.len), null, 0, 0, 0) == 0) return error.NetworkFailed;
     if (win.WinHttpReceiveResponse(request, null) == 0) return error.NetworkFailed;
