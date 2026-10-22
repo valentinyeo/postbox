@@ -26,6 +26,7 @@ const WacliJobKind = enum { messages, chats };
 const WacliJob = struct {
     provider: Provider = .whatsapp,
     account: Utf8Text(32) = .{},
+    hub_account: Utf8Text(32) = .{},
     kind: WacliJobKind = .messages,
     gen: u64 = 0,
     jid: Utf8Text(191) = .{},
@@ -71,6 +72,7 @@ const App = struct {
     last_job: WacliJob = .{},
     painted: u32 = 0,
     cached: u32 = 0,
+    cache_data: ?[]const u8 = null,
     message_count: usize = 0,
     messages: [1]struct { transcript_state: enum { none, loading, ready, failed } = .none } = .{.{}},
     transcribe_attempts: [512]u64 = [_]u64{0} ** 512,
@@ -89,13 +91,15 @@ fn fixture() App {
     a.displayed_timestamp = a.chats[0].timestamp;
     return a;
 }
-fn clearMessages(_: *App) void {}
+fn clearMessages(a: *App) void {
+    a.message_count = 0;
+}
 fn cancelSlackMark(_: *App) void {}
 fn stopAudio(_: *App) void {}
 fn refreshTelegramMessages(_: *App) void {}
 fn refreshSlackHistory(_: *App) void {}
-fn msgCacheGet(_: *App, _: chat_key.Key) ?[]const u8 {
-    return null;
+fn msgCacheGet(a: *App, _: chat_key.Key) ?[]const u8 {
+    return a.cache_data;
 }
 fn loadMsgCacheDisk(_: *App, _: []const u8) ?[]u8 {
     return null;
@@ -215,8 +219,9 @@ test "stale success and failure never paint, cache or consume retry budget" {
     a.chat_count = 2;
     a.selected_chat = 1;
     refreshMessages(&a);
+    const painted = a.painted;
     deliver(&a, &old);
-    try std.testing.expectEqual(@as(u32, 0), a.painted);
+    try std.testing.expectEqual(painted, a.painted);
     try std.testing.expectEqual(@as(u32, 0), a.cached);
     a.selected_chat = 0;
     refreshMessages(&a);
@@ -287,4 +292,46 @@ test "ISSUE-517 chat refresh keeps failed attempts until the next chat open" {
     refreshMessages(&a);
     try std.testing.expectEqual(.none, a.messages[0].transcript_state);
     try std.testing.expect(!transcribeWasAttempted(&a, "failed-note"));
+}
+
+test "IGSH-575 timestamped hub chat clears old messages and accepts its cache-tagged result" {
+    var a = fixture();
+    a.cache_tag.set("aaaaaaaaaaaaaaaa");
+    a.chats[0].account = a.cache_tag;
+    a.displayed_account = a.cache_tag;
+    a.message_count = 1;
+    a.chats[1].account = a.cache_tag;
+    a.chats[1].jid.set("b@g.us");
+    a.chats[1].timestamp = a.chats[0].timestamp;
+    a.chat_count = 2;
+    a.selected_chat = 1;
+
+    refreshMessages(&a);
+    try std.testing.expectEqual(@as(usize, 0), a.message_count);
+    try std.testing.expectEqual(@as(u32, 1), a.painted);
+    try std.testing.expect(chat_key.Key.eql(chat_key.of(&a.chats[1]), chat_key.displayed(&a)));
+
+    a.last_job.hub_account.set("personal");
+    var result = resultFor(a.last_job);
+    result.data = "{\"data\":{\"messages\":[{\"MsgID\":\"BETA\",\"Text\":\"Fixture Beta\"}]}}";
+    try std.testing.expectEqualStrings(a.cache_tag.slice(), result.account.slice());
+    try std.testing.expect(!std.mem.eql(u8, a.last_job.hub_account.slice(), result.account.slice()));
+    deliver(&a, &result);
+    try std.testing.expectEqual(@as(usize, 1), a.message_count);
+    try std.testing.expectEqual(@as(u32, 2), a.painted);
+    try std.testing.expectEqual(@as(u32, 1), a.cached);
+    try std.testing.expect(chat_key.Key.eql(chat_key.of(&a.chats[1]), chat_key.displayed(&a)));
+    try std.testing.expectEqualStrings(a.chats[1].timestamp.slice(), a.displayed_timestamp.slice());
+}
+
+test "IGSH-575 switching to cached history displays it before the reply" {
+    var a = fixture();
+    a.chats[0].jid.set("cached@g.us");
+    a.cache_data = "{\"data\":{\"messages\":[{\"MsgID\":\"CACHED\",\"Text\":\"Fixture cached\"}]}}";
+    refreshMessages(&a);
+    try std.testing.expectEqual(@as(usize, 1), a.message_count);
+    try std.testing.expectEqual(@as(u32, 1), a.painted);
+    try std.testing.expectEqual(@as(u32, 0), a.cached);
+    try std.testing.expectEqual(@as(u32, 1), a.pending);
+    try std.testing.expect(chat_key.Key.eql(chat_key.of(&a.chats[0]), chat_key.displayed(&a)));
 }

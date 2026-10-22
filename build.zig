@@ -475,7 +475,7 @@ pub fn build(b: *std.Build) void {
         sourceSection("                if (a.msg_read_retry_ticks > 0)", "                if (changed and"),
         "}\n",
         sourceSection("fn applyMessageData(", "    var selected_id = Utf8Text(191){};"),
-        "_ = list; _ = chat_changed; a.painted += 1;\n",
+        "_ = chat_changed; clearMessages(a); a.message_count = list.items.len; a.painted += 1;\n",
         sourceSection("    a.displayed_jid.set(chat.jid.slice());\n    a.displayed_account = chat.account;\n    a.displayed_provider = chat.provider;\n    if (fresh_read) a.displayed_timestamp.set(chat.timestamp.slice());", "    for (a.pending_sends[0..a.pending_send_count]) |*pending| {"),
         "return true; }\n",
     }) catch @panic("Out of memory building read harness");

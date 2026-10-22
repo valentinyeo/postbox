@@ -42,6 +42,6 @@ assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
 assert "if ($Feature -notin @('whatsapp-hub', 'hub')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
-for proof in ['chats', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
+for proof in ['chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
 print('MAP VERIFIED: nine complete feature entries, source labels, stable controls, hub journey and GitHub triggers')

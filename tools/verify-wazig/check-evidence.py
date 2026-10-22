@@ -10,7 +10,7 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
     assert session['sha256'] and session['commit']
     assert not (folder / 'failure.txt').exists()
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
-    gates = ['chats', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']
+    gates = ['chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']
     for gate in gates:
         assert f"{session['feature']} {gate} PASS" in proof, gate
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
@@ -39,12 +39,22 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
     cached = list((folder / 'final-data/hub-media').glob('*.bin'))
     assert any(hashlib.sha256(path.read_bytes()).hexdigest() == ready[0]['sha256'] for path in cached)
     history = json.loads((folder / 'history.messages.json').read_text(encoding='utf-8-sig'))
+    beta = json.loads((folder / 'beta.messages.json').read_text(encoding='utf-8-sig'))
+    beta_state = json.loads((folder / 'beta.state.json').read_text(encoding='utf-8-sig'))
+    alpha_state = json.loads((folder / 'history.state.json').read_text(encoding='utf-8-sig'))
+    assert beta_state['selected']['name'] == 'Verification Beta'
+    assert alpha_state['selected']['name'] == 'Verification Alpha'
+    for shown, selected in [(beta, beta_state['selected']), (history, alpha_state['selected'])]:
+        assert all(shown['chat'][field] == selected[field] for field in ['id', 'provider', 'account'])
+    assert len(beta['messages']) == 1 and beta['messages'][0]['id'] == 'BASELINE_BETA'
+    assert beta['messages'][0]['text'] == 'Fixture Beta history'
+    assert not any(row['id'] == 'BASELINE_BETA' for row in history['messages'])
     live = json.loads((folder / 'live.messages.json').read_text(encoding='utf-8-sig'))
     assert any(row['id'] == 'BASELINE' for row in history['messages'])
     assert not any(row['id'] == 'LIVE' for row in history['messages'])
     assert any(row['id'] == 'LIVE' for row in live['messages'])
     images = []
-    for name in ['before', 'history', 'live', 'sent', 'after']:
+    for name in ['before', 'beta', 'history', 'live', 'sent', 'after']:
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
         assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')

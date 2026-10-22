@@ -8615,7 +8615,7 @@ fn refreshMessages(a: *App) void {
     } else if (loadMsgCacheDisk(a, chat.jid.slice())) |cached| {
         defer a.allocator.free(cached);
         _ = applyMessageData(a, cached, false);
-    } else if (chat_changed and chat.timestamp.len == 0) {
+    } else if (chat_changed) {
         _ = applyMessageData(a, "{\"data\":{\"messages\":[]}}", false);
     }
     a.messages_gen += 1;
@@ -19491,6 +19491,51 @@ test "hub send conflict schedules bounded ambiguous recovery without blocking la
     try std.testing.expect(a.pending_sends[0].not_before_ms >= before + 3_000);
     try std.testing.expect(a.pending_sends[0].not_before_ms <= win.GetTickCount64() + 3_000);
     try std.testing.expectEqual(@as(u8, '1'), a.pending_sends[1].id[0]);
+}
+
+test "IGSH-575 uncached timestamped hub selection clears the pane and applies its result" {
+    const a = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(a);
+    a.* = .{
+        .allocator = std.testing.allocator,
+        .people = people_index.Index.init(std.testing.allocator),
+        .io = std.testing.io,
+        .instance = null,
+        .wacli_path = &.{},
+        .avatar_dir = &.{},
+        .hub_client = .{ .endpoint = .{ .host = "", .port = 443, .secure = true }, .key = "" },
+    };
+    a.chats = try a.allocator.alloc(Chat, 1);
+    defer a.allocator.free(a.chats);
+    a.chats[0] = .{};
+    a.cache_tag.set("aaaaaaaaaaaaaaaa");
+    a.chats[0].account = a.cache_tag;
+    a.chats[0].jid.set("fixture-beta@g.us");
+    a.chats[0].timestamp.set("2026-01-01T00:00:00Z");
+    a.chat_count = 1;
+    a.displayed_account = a.cache_tag;
+    a.displayed_jid.set("fixture-alpha@g.us");
+    a.message_count = 1;
+    a.messages[0].id.set("ALPHA");
+
+    refreshMessages(a);
+    try std.testing.expectEqual(@as(usize, 0), a.message_count);
+    try std.testing.expect(chat_key.Key.eql(chat_key.of(&a.chats[0]), chat_key.displayed(a)));
+
+    a.hub_account.set("personal");
+    const result = try a.allocator.create(WacliResult);
+    result.* = .{ .kind = .messages, .account = a.cache_tag, .jid = a.chats[0].jid, .gen = a.messages_gen, .ok = true };
+    result.data = try a.allocator.dupe(u8, "{\"data\":{\"messages\":[{\"MsgID\":\"BETA\",\"Text\":\"Fixture Beta\"}]}}");
+    const previous = app_ptr;
+    defer app_ptr = previous;
+    app_ptr = a;
+    _ = mainProc(@ptrFromInt(1), wm_wacli_done, 0, @bitCast(@intFromPtr(result)));
+    defer for (a.msg_cache[0..a.msg_cache_len]) |entry| {
+        if (entry.data) |data| a.allocator.free(data);
+    };
+    try std.testing.expectEqual(@as(usize, 1), a.message_count);
+    try std.testing.expectEqualStrings("BETA", a.messages[0].id.slice());
+    try std.testing.expect(chat_key.Key.eql(chat_key.of(&a.chats[0]), chat_key.displayed(a)));
 }
 
 test "hub stream open reset survives event coalescing without a reset frame" {

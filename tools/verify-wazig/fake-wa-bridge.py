@@ -104,7 +104,8 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(200, rows)
         elif url.path == '/v1/messages':
             chat = query.get('chat', [''])[0].removeprefix(f'{ACCOUNT}:')
-            rows = [state.message(chat, 'BASELINE', 'Fixture history')]
+            rows = [state.message(chat, 'BASELINE' if chat == ALPHA else 'BASELINE_BETA',
+                                  'Fixture history' if chat == ALPHA else 'Fixture Beta history')]
             if chat == ALPHA:
                 rows.insert(0, state.message(chat, 'IMAGE', '', MediaType='image', MimeType='image/png',
                                              Filename='fixture.png', LocalPath='server-only-path'))
