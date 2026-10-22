@@ -63,6 +63,11 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+      - name: ISSUE-462 row-sized DirectWrite regression
+        shell: pwsh
+        run: |
+          zig test src/text_draw.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-462
+          if ($LASTEXITCODE -ne 0) { throw 'Chat row text regression' }
       - name: Build real desktop and control client
         run: zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
       - name: Launch, doctor and drive
