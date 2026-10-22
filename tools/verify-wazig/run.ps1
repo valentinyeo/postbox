@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'whatsapp-hub', 'hub', 'archive', 'text-comparison')][string]$Feature = 'search',
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'whatsapp-hub', 'hub', 'slack-session', 'archive', 'text-comparison')][string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence'
 )
@@ -16,7 +16,7 @@ $profile = Join-Path $root 'profile'
 $messages = Join-Path $local 'Messages'
 New-Item $messages, $profile -ItemType Directory -Force | Out-Null
 $tag = '0000000000000526'
-if ($Feature -notin @('whatsapp-hub', 'hub')) {
+if ($Feature -notin @('whatsapp-hub', 'hub', 'slack-session')) {
     Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
     @{ data = @(
         @{ jid = 'verify-alpha'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = '' },
@@ -66,7 +66,7 @@ $start.Environment['LOCALAPPDATA'] = $local
 $start.Environment['APPDATA'] = $local
 $start.Environment['USERPROFILE'] = $profile
 $start.Environment['USERNAME'] = "verify-$id"
-foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN')) { $null = $start.Environment.Remove($name) }
+foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN', 'WAZIG_VERIFY_SLACK_PORT')) { $null = $start.Environment.Remove($name) }
 $bridge = $null
 if ($Feature -eq 'whatsapp-hub') {
     $bridge = Start-FakeBridge $Evidence $root
@@ -78,7 +78,23 @@ if ($Feature -eq 'hub') {
     $start.Environment['WAZIG_HUB_URL'] = $bridge.url
     $start.Environment['WAZIG_HUB_TOKEN'] = (Get-Content (Join-Path $PSScriptRoot 'fake-wa-bridge.py') | Where-Object { $_.StartsWith('KEY = ') }).Split("'")[1]
 }
+if ($Feature -eq 'slack-session') {
+    $bridge = Start-FakeBridge $Evidence $root -Slack
+    $port = ([Uri]$bridge.url).Port.ToString()
+    $start.Environment['WAZIG_VERIFY_SLACK_PORT'] = $port
+    @{ xoxd = 'xoxd-fake-shared-cookie'; workspaces = @{ TFAKE001 = @{ xoxc = 'xoxc-fake-session-token'; team = 'Fake Workspace'; url = 'https://fake-workspace.invalid'; user_id = 'UFAKE001' } } } | ConvertTo-Json -Depth 5 -Compress | Set-Content (Join-Path $messages 'slack-session-import.json')
+}
 try {
+    if ($Feature -eq 'slack-session') {
+        $env:WAZIG_VERIFY_SLACK_PORT = $port
+        try {
+            & zig build test-slack-session '-Dtarget=x86_64-windows-gnu' --release=small 2>&1 | Tee-Object (Join-Path $Evidence 'slack-session-tests.log')
+            Assert-That ($LASTEXITCODE -eq 0) 'Slack session native regression tests failed'
+        } finally {
+            Remove-Item Env:WAZIG_VERIFY_SLACK_PORT
+        }
+        Invoke-RestMethod "$($bridge.url)/fixture/reset" -Method Post | Out-Null
+    }
     $app = [Diagnostics.Process]::Start($start)
 } catch {
     if ($null -ne $bridge) { $bridge.process.Kill(); $bridge.process.WaitForExit() }
@@ -103,6 +119,9 @@ try {
     if ($Feature -in @('whatsapp-hub', 'hub')) {
         $null = Wait-Until { (Read-Control $session status).chat_count -eq 2 } 'hub chat list'
     }
+    if ($Feature -eq 'slack-session') {
+        $null = Wait-Until { $state = Read-Control $session status; $state.chat_count -eq 1 -and $state.slack_connected } 'Slack session chat list and RTM'
+    }
     Invoke-Doctor $session
     if ($Feature -eq 'search') {
         $launch = Get-Content (Join-Path $messages 'launch-log.txt') -Raw
@@ -114,6 +133,9 @@ try {
     $search = Get-Edit $window '1008'
     Save-Screen $session before
     switch ($Feature) {
+        slack-session {
+            Invoke-SlackSessionJourney $session $messages
+        }
         text-comparison {
             $metrics = Join-Path $messages 'text-metrics.json'
             $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'WacliMessageCanvas')
@@ -309,7 +331,7 @@ try {
     Assert-That (-not (Test-Path (Join-Path $messages 'telegram'))) 'Telegram store was created'
     if ($Feature -eq 'archive') {
         Assert-That ((Get-Content $provider -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture provider chat storage changed'
-    } elseif ($Feature -notin @('whatsapp-hub', 'hub')) {
+    } elseif ($Feature -notin @('whatsapp-hub', 'hub', 'slack-session')) {
         Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
     }
     $final | Add-Member -NotePropertyName production_preferences_absent -NotePropertyValue (-not (Test-Path 'HKCU:\Software\Messages'))

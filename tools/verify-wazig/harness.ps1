@@ -164,17 +164,17 @@ function Invoke-Doctor($Session) {
     }
     $status = Read-Control $Session status
     Assert-That ($status.version -eq '0.0.526') 'Wrong control build'
-    Assert-That ($status.sync -eq 'stopped' -and -not $status.slack_connected) 'Provider unexpectedly connected'
+    Assert-That ($status.sync -eq 'stopped' -and $status.slack_connected -eq ($Session.feature -eq 'slack-session')) 'Unexpected provider connection state'
     Assert-That ($status.pending_sends -eq 0 -and $status.pending_archives -eq 0) 'Unexpected pending writes'
     $status | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'doctor.json')
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$Slack) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
-    $script = if ($Unified) { 'fake-hub.py' } else { 'fake-wa-bridge.py' }
+    $script = if ($Slack) { 'fake-slack.py' } elseif ($Unified) { 'fake-hub.py' } else { 'fake-wa-bridge.py' }
     $start.ArgumentList.Add((Join-Path $PSScriptRoot $script))
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
@@ -341,4 +341,33 @@ function Assert-ComposerLayout($Session, [string]$Name, [int]$Lines, $Baseline =
     Add-Content (Join-Path $Session.evidence 'composer-one-box.log') $message
     Write-Host $message
     return $layout
+}
+
+function Invoke-SlackSessionJourney($Session, [string]$Messages) {
+    $state = Read-Control $Session status
+    Assert-That ($state.selected.provider -eq 'slack' -and $state.selected.name -eq 'fake-slack-chat') 'Fake Slack chat lost its network badge identity'
+    Assert-That (-not (Test-Path (Join-Path $Messages 'slack-session-import.json'))) 'Session import was not consumed'
+    $preferences = "HKCU:\Software\MessagesVerification\$($Session.id)\Software\Messages"
+    $key = Get-Item $preferences
+    Assert-That ($key.GetValueKind('SlackInstallation-TFAKE001') -eq [Microsoft.Win32.RegistryValueKind]::Binary) 'Slack session credentials were not DPAPI protected'
+    $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object text -eq 'Fake Slack history').Count -eq 1 } 'Slack history visible'
+    Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'history.messages.json')
+    Save-Screen $Session history
+    Invoke-PaletteCommand $Session 'Compose message'
+    Send-Keys $Session 'Fake Slack outgoing'
+    Send-Keys $Session '{ENTER}'
+    $null = Wait-Until {
+        $remote = Invoke-RestMethod "$($Session.bridge_url)/fixture/state"
+        $remote.sent -eq 1 -and (Read-Control $Session status).pending_sends -eq 0 -and @((Read-Control $Session messages).messages | Where-Object text -eq 'Fake Slack outgoing').Count -eq 1
+    } 'Slack sent message visible and accepted'
+    Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'sent.messages.json')
+    Save-Screen $Session sent
+    Invoke-RestMethod "$($Session.bridge_url)/fixture/live" -Method Post | Out-Null
+    $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object text -eq 'Fake Slack incoming').Count -eq 1 } 'Slack live incoming visible'
+    Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'live.messages.json')
+    Save-Screen $Session after
+    $remote = Invoke-RestMethod "$($Session.bridge_url)/fixture/state"
+    Assert-That ($remote.live -and $remote.acks -eq 0 -and $remote.sent -eq 1) 'RTM used envelope ack or send was duplicated'
+    $remote | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'slack-server-state.json')
+    'slack-session import-dpapi-list-badge-history-send-rtm-cookie PASS' | Set-Content (Join-Path $Session.evidence 'slack-proof.log')
 }

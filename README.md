@@ -48,6 +48,23 @@ zig build --release=small
 
 ## Slack
 
+Existing Slack web sessions can be imported without creating a Slack app. Before
+starting Messages, place `slack-session-import.json` in `%LOCALAPPDATA%\Messages`:
+
+```json
+{"xoxd":"xoxd-fake-shared-cookie","workspaces":{"TFAKE001":{"xoxc":"xoxc-fake-session-token","team":"Fake Workspace","url":"https://fake-workspace.invalid","user_id":"UFAKE001"}}}
+```
+
+The example is deliberately fake. Supply each workspace's session token and the
+shared `d` cookie only in that local file, never in source control or logs.
+Messages protects each workspace with Windows DPAPI and deletes the import file;
+invalid or empty files are also deleted. Chats, history, sends, files, threads,
+reactions and read state use the same Slack interface. Live receive uses RTM
+with the session cookie. Expired sessions show the existing sign-in-required
+state; importing a fresh session on restart replaces them.
+
+### OAuth and Socket Mode
+
 Use Ctrl+K > **Connect Slack workspace** to sign in with Slack in your browser.
 On first use, enter your Slack app's Client ID and its `xapp-` app-level token
 with `connections:write` for Socket Mode. Existing saved app tokens are reused.

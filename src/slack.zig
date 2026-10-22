@@ -122,13 +122,14 @@ pub fn classifyEnvelope(arena: std.mem.Allocator, text: []const u8) classificati
     envelope.event_type = objectString(event, "type") orelse "";
     const subtype = objectString(event, "subtype") orelse "";
     envelope.subtype = subtype;
+    envelope.channel = objectString(event, "channel") orelse "";
     if (std.mem.eql(u8, subtype, "message_changed")) {
         if (event.get("message")) |inner_value| {
             if (inner_value == .object) event = inner_value.object;
         }
     }
-    envelope.channel = objectString(event, "channel") orelse "";
-    envelope.ts = objectString(event, "ts") orelse "";
+    envelope.channel = objectString(event, "channel") orelse envelope.channel;
+    envelope.ts = objectString(event, "deleted_ts") orelse objectString(event, "ts") orelse "";
     envelope.reaction = objectStringField(event, "reaction");
     if (std.mem.eql(u8, envelope.event_type, "reaction_added") or std.mem.eql(u8, envelope.event_type, "reaction_removed")) {
         if (event.get("item")) |item| if (item == .object) {
@@ -517,7 +518,7 @@ fn decodeHtmlEntities(buffer: []u8, text: []const u8) []const u8 {
     return buffer[0..out_len];
 }
 
-pub const WsEndpoint = struct { host: []const u8, path_query: []const u8 };
+pub const WsEndpoint = struct { host: []const u8, path_query: []const u8, secure: bool = true };
 
 pub fn parseWsUrl(arena: std.mem.Allocator, response: []const u8) ?WsEndpoint {
     const root_value = std.json.parseFromSliceLeaky(std.json.Value, arena, response, .{}) catch return null;
@@ -539,7 +540,7 @@ pub fn parseWsUrl(arena: std.mem.Allocator, response: []const u8) ?WsEndpoint {
     const path_query = rest[path_start..];
     _ = &rest;
     if (host.len == 0 or path_query.len < 2) return null;
-    return .{ .host = host, .path_query = path_query };
+    return .{ .host = host, .path_query = path_query, .secure = secure };
 }
 
 pub fn parseRetryAfter(headers: []const u8) ?u64 {

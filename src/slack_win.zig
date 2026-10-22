@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const slack = @import("slack.zig");
+const session_auth = @import("slack_session.zig");
 const slack_send = @import("slack_send.zig");
 const deepgram_key = @import("deepgram_key.zig");
 
@@ -219,16 +220,73 @@ pub const Installation = struct {
     team_name: []const u8,
     user_id: []const u8,
     user_token: []const u8,
+    mode: enum { oauth, session } = .oauth,
+    cookie: []const u8 = "",
     refresh_token: []const u8 = "",
     expires_at: i64 = 0,
 };
+
+fn validInstallation(installation: Installation) bool {
+    return if (installation.mode == .session)
+        session_auth.validToken(installation.user_token) and session_auth.validCookie(installation.cookie)
+    else
+        isUserToken(installation.user_token);
+}
+
+pub const ImportResult = enum { absent, imported, invalid, failed };
+
+pub fn importSessions(allocator: std.mem.Allocator, io: std.Io, directory: []const u8) ImportResult {
+    var dir = std.Io.Dir.cwd().openDir(io, directory, .{}) catch return .absent;
+    defer dir.close(io);
+    const raw = dir.readFileAlloc(io, "slack-session-import.json", allocator, .unlimited) catch |err| return if (err == error.FileNotFound) .absent else failed: {
+        dir.deleteFile(io, "slack-session-import.json") catch {};
+        break :failed .invalid;
+    };
+    defer allocator.free(raw);
+    defer dir.deleteFile(io, "slack-session-import.json") catch {};
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = std.json.parseFromSliceLeaky(std.json.Value, a, raw, .{}) catch return .invalid;
+    if (root != .object) return .invalid;
+    const cookie = slack.objectStringField(root.object, "xoxd");
+    if (!session_auth.validCookie(cookie)) return .invalid;
+    const workspaces = root.object.get("workspaces") orelse return .invalid;
+    if (workspaces != .object or workspaces.object.count() == 0) return .invalid;
+    var items = workspaces.object.iterator();
+    while (items.next()) |entry| {
+        if (!slack.validTeamId(entry.key_ptr.*) or entry.value_ptr.* != .object) return .invalid;
+        if (!session_auth.validToken(slack.objectStringField(entry.value_ptr.object, "xoxc"))) return .invalid;
+    }
+    var index: std.Io.Writer.Allocating = .init(a);
+    if (loadSecret(a, wideLiteral("SlackInstallations"))) |stored| index.writer.print("{s}\n", .{stored.value}) catch return .failed;
+    items = workspaces.object.iterator();
+    while (items.next()) |entry| {
+        const object = entry.value_ptr.object;
+        if (!saveInstallation(.{
+            .team_id = entry.key_ptr.*,
+            .team_name = slack.objectStringField(object, "team"),
+            .user_id = slack.objectStringField(object, "user_id"),
+            .user_token = slack.objectStringField(object, "xoxc"),
+            .mode = .session,
+            .cookie = cookie,
+        })) return .failed;
+        var ids = std.mem.tokenizeScalar(u8, index.written(), '\n');
+        var known = false;
+        while (ids.next()) |id| if (std.mem.eql(u8, id, entry.key_ptr.*)) {
+            known = true;
+        };
+        if (!known) index.writer.print("{s}\n", .{entry.key_ptr.*}) catch return .failed;
+    }
+    return if (saveSecret(wideLiteral("SlackInstallations"), index.written())) .imported else .failed;
+}
 
 pub fn deleteSecret(name: [*:0]const u16) void {
     if (enabled) regDelete(name);
 }
 
 pub fn saveInstallation(installation: Installation) bool {
-    if (!slack.validTeamId(installation.team_id) or !isUserToken(installation.user_token)) return false;
+    if (!slack.validTeamId(installation.team_id) or !validInstallation(installation)) return false;
     const allocator = std.heap.page_allocator;
     const name = std.fmt.allocPrintSentinel(allocator, "SlackInstallation-{s}", .{installation.team_id}, 0) catch return false;
     defer allocator.free(name);
@@ -248,7 +306,7 @@ pub fn loadInstallation(allocator: std.mem.Allocator, team_id: []const u8) ?std.
     const stored = loadSecret(allocator, wide) orelse return null;
     defer allocator.free(stored.value);
     const parsed = std.json.parseFromSlice(Installation, allocator, stored.value, .{ .allocate = .alloc_always }) catch return null;
-    if (!std.mem.eql(u8, parsed.value.team_id, team_id) or !isUserToken(parsed.value.user_token)) {
+    if (!std.mem.eql(u8, parsed.value.team_id, team_id) or !validInstallation(parsed.value)) {
         parsed.deinit();
         return null;
     }
@@ -393,6 +451,8 @@ fn readResponse(allocator: std.mem.Allocator, request: win.HINTERNET, max_bytes:
     return out.toOwnedSlice(allocator);
 }
 
+pub var verification_port: ?u16 = null;
+
 var api_session: ?win.HINTERNET = null;
 var api_connection: ?win.HINTERNET = null;
 var api_host: ?[]u8 = null;
@@ -412,10 +472,10 @@ fn sharedApiHandles(host: []const u8) ?win.HINTERNET {
         api_session = opened;
         break :blk opened;
     };
-    const wide_host = toWide(std.heap.page_allocator, host) catch return null;
+    const wide_host = toWide(std.heap.page_allocator, if (verification_port != null) "127.0.0.1" else host) catch return null;
     defer std.heap.page_allocator.free(wide_host);
     const owned_host = std.heap.page_allocator.dupe(u8, host) catch return null;
-    const connection = win.WinHttpConnect(session, wide_host.ptr, win.INTERNET_DEFAULT_HTTPS_PORT, 0) orelse {
+    const connection = win.WinHttpConnect(session, wide_host.ptr, verification_port orelse win.INTERNET_DEFAULT_HTTPS_PORT, 0) orelse {
         std.heap.page_allocator.free(owned_host);
         return null;
     };
@@ -429,28 +489,39 @@ pub threadlocal var last_status: u32 = 0;
 pub threadlocal var last_error: [64]u8 = [_]u8{0} ** 64;
 
 pub fn callApi(allocator: std.mem.Allocator, host: []const u8, token: []const u8, method: []const u8, path_query: []const u8, body: ?[]const u8) !Response {
+    return callApiAuth(allocator, host, token, "", method, path_query, body);
+}
+
+fn callApiAuth(allocator: std.mem.Allocator, host: []const u8, token: []const u8, cookie: []const u8, method: []const u8, path_query: []const u8, body: ?[]const u8) !Response {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const prepared = if (cookie.len > 0) try session_auth.request(arena.allocator(), path_query, body, token) else null;
+    const request_body = if (prepared) |form| form.body else body;
     last_status = 0;
     last_error = [_]u8{0} ** 64;
     if (!enabled) return error.Unsupported;
-    const wide_path = try toWide(allocator, path_query);
+    const wide_path = try toWide(allocator, if (prepared) |form| form.path else path_query);
     defer allocator.free(wide_path);
-    const wide_method = try toWide(allocator, if (std.mem.eql(u8, method, "GET")) "GET" else "POST");
+    const wide_method = try toWide(allocator, if (prepared == null and std.mem.eql(u8, method, "GET")) "GET" else "POST");
     defer allocator.free(wide_method);
 
     const connection = sharedApiHandles(host) orelse return error.NetworkFailed;
-    const request = win.WinHttpOpenRequest(connection, wide_method.ptr, wide_path.ptr, null, null, null, win.WINHTTP_FLAG_SECURE) orelse return error.NetworkFailed;
+    const request = win.WinHttpOpenRequest(connection, wide_method.ptr, wide_path.ptr, null, null, null, if (verification_port == null) win.WINHTTP_FLAG_SECURE else 0) orelse return error.NetworkFailed;
     defer _ = win.WinHttpCloseHandle(request);
+    if (cookie.len > 0) {
+        var policy: win.DWORD = win.WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+        if (win.WinHttpSetOption(request, win.WINHTTP_OPTION_REDIRECT_POLICY, &policy, @sizeOf(win.DWORD)) == 0) return error.NetworkFailed;
+    }
 
-    var headers = std.ArrayList(u16).empty;
-    defer headers.deinit(allocator);
-    try headers.appendSlice(allocator, std.unicode.utf8ToUtf16LeStringLiteral("Authorization: Bearer "));
-    for (token) |char| try headers.append(allocator, char);
-    try headers.appendSlice(allocator, std.unicode.utf8ToUtf16LeStringLiteral("\r\nContent-Type: application/json; charset=utf-8\r\n"));
-    try headers.append(allocator, 0);
-    if (body) |payload| {
-        if (win.WinHttpSendRequest(request, headers.items.ptr, @intCast(headers.items.len - 1), @constCast(payload.ptr), @intCast(payload.len), @intCast(payload.len), 0) == 0) return error.NetworkFailed;
+    const header_text = if (cookie.len > 0)
+        try std.fmt.allocPrint(arena.allocator(), "{s}Content-Type: application/x-www-form-urlencoded\r\n", .{try session_auth.cookieHeader(arena.allocator(), cookie)})
+    else
+        try std.fmt.allocPrint(arena.allocator(), "Authorization: Bearer {s}\r\nContent-Type: application/json; charset=utf-8\r\n", .{token});
+    const headers = try toWide(arena.allocator(), header_text);
+    if (request_body) |payload| {
+        if (win.WinHttpSendRequest(request, headers.ptr, @intCast(headers.len), @constCast(payload.ptr), @intCast(payload.len), @intCast(payload.len), 0) == 0) return error.NetworkFailed;
     } else {
-        if (win.WinHttpSendRequest(request, headers.items.ptr, @intCast(headers.items.len - 1), null, 0, 0, 0) == 0) return error.NetworkFailed;
+        if (win.WinHttpSendRequest(request, headers.ptr, @intCast(headers.len), null, 0, 0, 0) == 0) return error.NetworkFailed;
     }
     if (win.WinHttpReceiveResponse(request, null) == 0) return error.NetworkFailed;
     var status: win.DWORD = 0;
@@ -531,7 +602,7 @@ pub fn putFile(allocator: std.mem.Allocator, url: []const u8, bytes: []const u8)
     if (status < 200 or status >= 300) return error.UploadRejected;
 }
 
-pub fn downloadTo(allocator: std.mem.Allocator, token: []const u8, url: []const u8, dest_path: []const u8, bridge_host: ?[]const u8) !void {
+pub fn downloadTo(allocator: std.mem.Allocator, token: []const u8, cookie: []const u8, url: []const u8, dest_path: []const u8, bridge_host: ?[]const u8) !void {
     if (!enabled) return error.Unsupported;
     if (!std.mem.startsWith(u8, url, "https://")) return error.UntrustedUrl;
     const host = urlHost(url);
@@ -567,13 +638,20 @@ pub fn downloadTo(allocator: std.mem.Allocator, token: []const u8, url: []const 
     defer _ = win.WinHttpCloseHandle(connection);
     const request = win.WinHttpOpenRequest(connection, wideLiteral("GET"), wide_path.ptr, null, null, null, win.WINHTTP_FLAG_SECURE) orelse return error.NetworkFailed;
     defer _ = win.WinHttpCloseHandle(request);
-    var headers = std.ArrayList(u16).empty;
-    defer headers.deinit(allocator);
-    try headers.appendSlice(allocator, std.unicode.utf8ToUtf16LeStringLiteral("Authorization: Bearer "));
-    for (token) |char| try headers.append(allocator, char);
-    try headers.appendSlice(allocator, std.unicode.utf8ToUtf16LeStringLiteral("\r\n"));
-    try headers.append(allocator, 0);
-    if (win.WinHttpSendRequest(request, headers.items.ptr, @intCast(headers.items.len - 1), null, 0, 0, 0) == 0) return error.NetworkFailed;
+    if (cookie.len > 0) {
+        var policy: win.DWORD = win.WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+        if (win.WinHttpSetOption(request, win.WINHTTP_OPTION_REDIRECT_POLICY, &policy, @sizeOf(win.DWORD)) == 0) return error.NetworkFailed;
+    }
+    const cookie_header = if (cookie.len > 0) try session_auth.cookieHeader(allocator, cookie) else try allocator.dupe(u8, "");
+    defer allocator.free(cookie_header);
+    const header_text = if (cookie.len > 0)
+        try std.fmt.allocPrint(allocator, "Authorization: Bearer {s}\r\n{s}", .{ token, cookie_header })
+    else
+        try std.fmt.allocPrint(allocator, "Authorization: Bearer {s}\r\n", .{token});
+    defer allocator.free(header_text);
+    const headers = try toWide(allocator, header_text);
+    defer allocator.free(headers);
+    if (win.WinHttpSendRequest(request, headers.ptr, @intCast(headers.len), null, 0, 0, 0) == 0) return error.NetworkFailed;
     if (win.WinHttpReceiveResponse(request, null) == 0) return error.NetworkFailed;
     var status: win.DWORD = 0;
     var status_size: win.DWORD = @sizeOf(win.DWORD);
@@ -603,23 +681,31 @@ pub const Socket = struct {
     socket: win.HINTERNET,
 };
 
-pub fn socketConnect(allocator: std.mem.Allocator, endpoint: slack.WsEndpoint) !Socket {
+pub fn socketConnect(allocator: std.mem.Allocator, endpoint: slack.WsEndpoint, cookie: []const u8) !Socket {
     if (!enabled) return error.Unsupported;
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const wide_host = try toWide(arena.allocator(), endpoint.host);
+    const colon = std.mem.lastIndexOfScalar(u8, endpoint.host, ':');
+    const port = if (colon) |i| try std.fmt.parseInt(u16, endpoint.host[i + 1 ..], 10) else @as(u16, 443);
+    if (!endpoint.secure and verification_port == null and !builtin.is_test) return error.UntrustedUrl;
+    const wide_host = try toWide(arena.allocator(), if (colon) |i| endpoint.host[0..i] else endpoint.host);
     const wide_path = try toWide(arena.allocator(), endpoint.path_query);
 
     const session = win.WinHttpOpen(wideLiteral("Wazig Messages/1.0"), win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, null, null, 0) orelse return error.NetworkFailed;
     errdefer _ = win.WinHttpCloseHandle(session);
     _ = win.WinHttpSetTimeouts(session, 10_000, 10_000, 30_000, 15_000);
-    const connection = win.WinHttpConnect(session, wide_host.ptr, win.INTERNET_DEFAULT_HTTPS_PORT, 0) orelse return error.NetworkFailed;
+    const connection = win.WinHttpConnect(session, wide_host.ptr, port, 0) orelse return error.NetworkFailed;
     errdefer _ = win.WinHttpCloseHandle(connection);
-    const request = win.WinHttpOpenRequest(connection, wideLiteral("GET"), wide_path.ptr, null, null, null, win.WINHTTP_FLAG_SECURE) orelse return error.NetworkFailed;
+    const request = win.WinHttpOpenRequest(connection, wideLiteral("GET"), wide_path.ptr, null, null, null, if (endpoint.secure) win.WINHTTP_FLAG_SECURE else 0) orelse return error.NetworkFailed;
     errdefer _ = win.WinHttpCloseHandle(request);
+    if (cookie.len > 0) {
+        var policy: win.DWORD = win.WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+        if (win.WinHttpSetOption(request, win.WINHTTP_OPTION_REDIRECT_POLICY, &policy, @sizeOf(win.DWORD)) == 0) return error.NetworkFailed;
+    }
     var upgrade: win.BOOL = 1;
     if (win.WinHttpSetOption(request, option_upgrade_to_web_socket, &upgrade, @sizeOf(win.BOOL)) == 0) return error.WebSocketUnsupported;
-    if (win.WinHttpSendRequest(request, null, 0, null, 0, 0, 0) == 0) return error.NetworkFailed;
+    const headers = try toWide(arena.allocator(), if (cookie.len > 0) try session_auth.cookieHeader(arena.allocator(), cookie) else "");
+    if (win.WinHttpSendRequest(request, headers.ptr, @intCast(headers.len), null, 0, 0, 0) == 0) return error.NetworkFailed;
     if (win.WinHttpReceiveResponse(request, null) == 0) return error.NetworkFailed;
     var status: win.DWORD = 0;
     var status_size: win.DWORD = @sizeOf(win.DWORD);
@@ -672,6 +758,8 @@ pub const Event = struct {
     team_id_len: u8 = 0,
     event_type: [32]u8 = undefined,
     event_type_len: u8 = 0,
+    subtype: [32]u8 = undefined,
+    subtype_len: u8 = 0,
     reaction: [96]u8 = undefined,
     reaction_len: u8 = 0,
     channel: [slack.max_channel_id + 1]u8 = undefined,
@@ -701,6 +789,9 @@ pub const Event = struct {
     }
     pub fn eventTypeSlice(self: *const Event) []const u8 {
         return self.event_type[0..self.event_type_len];
+    }
+    pub fn subtypeSlice(self: *const Event) []const u8 {
+        return self.subtype[0..self.subtype_len];
     }
     pub fn channelSlice(self: *const Event) []const u8 {
         return self.channel[0..self.channel_len];
@@ -759,6 +850,7 @@ pub fn buildEvent(envelope: slack.Envelope) ?*Event {
     event.* = .{};
     copyInto(&event.team_id, &event.team_id_len, envelope.team_id);
     copyInto(&event.event_type, &event.event_type_len, envelope.event_type);
+    copyInto(&event.subtype, &event.subtype_len, envelope.subtype);
     copyInto(&event.reaction, &event.reaction_len, envelope.reaction);
     copyInto(&event.channel, &event.channel_len, envelope.channel);
     copyInto(&event.ts, &event.ts_len, envelope.ts);
@@ -779,6 +871,9 @@ pub fn destroyEvent(event: *Event) void {
 }
 
 pub const SocketConfig = struct {
+    cookie: []const u8 = "",
+    team_id: []const u8 = "",
+    needs_signin: ?*std.atomic.Value(bool) = null,
     user_token: []const u8,
     app_token: []const u8,
     stop: *std.atomic.Value(bool),
@@ -790,7 +885,20 @@ pub fn socketThreadMain(config: SocketConfig) void {
     var backoff_seconds: u64 = 1;
     while (!config.stop.load(.acquire)) {
         var connected_here = false;
-        runOneSession(config, &connected_here) catch {};
+        runOneSession(config, &connected_here) catch |err| {
+            if (err == error.SignInRequired) {
+                if (config.needs_signin) |state| state.store(true, .release);
+                if (buildEvent(.{ .kind = .events, .team_id = config.team_id, .event_type = "session_rejected", .channel = "auth", .ts = "auth" })) |event| {
+                    _ = config.sink.queue.fetchAdd(1, .acq_rel);
+                    if (win.PostMessageW(@ptrFromInt(@intFromPtr(config.sink.hwnd)), config.sink.message_id, 0, @bitCast(@intFromPtr(event))) == 0) {
+                        _ = config.sink.queue.fetchSub(1, .acq_rel);
+                        destroyEvent(event);
+                    }
+                }
+                _ = config.connected.swap(false, .acq_rel);
+                return;
+            }
+        };
         _ = config.connected.swap(false, .acq_rel);
         if (config.stop.load(.acquire)) return;
         const delay = if (connected_here) 1000 else backoff_seconds * 1000;
@@ -800,15 +908,28 @@ pub fn socketThreadMain(config: SocketConfig) void {
     }
 }
 
+pub fn connectRtm(allocator: std.mem.Allocator, token: []const u8, cookie: []const u8) ![]u8 {
+    var response = try callApiAuth(allocator, "slack.com", token, cookie, "POST", "/api/rtm.connect", null);
+    errdefer response.deinit(allocator);
+    if (sessionRejected(allocator, response.body)) return error.SignInRequired;
+    if (response.status != 200) return error.HttpFailed;
+    return bodyOnly(allocator, response);
+}
+
 fn runOneSession(config: SocketConfig, connected_here: *bool) !void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const response = try callApi(arena, "slack.com", config.app_token, "POST", "/api/apps.connections.open", null);
-    if (response.status != 200) return error.HttpFailed;
-    const endpoint = slack.parseWsUrl(arena, response.body) orelse return error.BadHandshake;
-    const sock = try socketConnect(arena, endpoint);
+    const body = if (config.cookie.len > 0)
+        try connectRtm(arena, config.user_token, config.cookie)
+    else oauth: {
+        const response = try callApi(arena, "slack.com", config.app_token, "POST", "/api/apps.connections.open", null);
+        if (response.status != 200) return error.HttpFailed;
+        break :oauth response.body;
+    };
+    const endpoint = slack.parseWsUrl(arena, body) orelse return error.BadHandshake;
+    const sock = try socketConnect(arena, endpoint, config.cookie);
     defer socketClose(sock);
     connected_here.* = true;
     _ = config.connected.swap(true, .acq_rel);
@@ -816,9 +937,10 @@ fn runOneSession(config: SocketConfig, connected_here: *bool) !void {
     var buffer: [128 * 1024]u8 = undefined;
     while (!config.stop.load(.acquire)) {
         const message = socketReceive(sock, &buffer, config.stop) catch |err| return err;
+        if (config.cookie.len > 0 and sessionRejected(arena, message)) return error.SignInRequired;
         var classify_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer classify_arena.deinit();
-        const envelope = (slack.classifyEnvelope(classify_arena.allocator(), message) catch return error.BadEnvelope) orelse continue;
+        const envelope = ((if (config.cookie.len > 0) session_auth.classifyRtm(classify_arena.allocator(), message, config.team_id) else slack.classifyEnvelope(classify_arena.allocator(), message)) catch return error.BadEnvelope) orelse continue;
         if (envelope.envelope_id.len > 0) {
             const ack = slack.buildAckBody(classify_arena.allocator(), envelope.envelope_id) catch return error.OutOfMemory;
             socketSend(classify_arena.allocator(), sock, ack) catch return error.NetworkFailed;
@@ -853,6 +975,7 @@ pub const JobKind = enum(u8) {
 };
 
 pub const JobContext = struct {
+    cookie: []const u8 = "",
     user_token: []const u8,
     host: []const u8,
     is_bridge: bool,
@@ -883,7 +1006,7 @@ fn workspaceReadState(allocator: std.mem.Allocator, ctx: JobContext, page: []con
             if (id.len == 0) continue;
             const path = try std.fmt.allocPrint(allocator, "/api/conversations.info?channel={s}", .{id});
             defer allocator.free(path);
-            var response = try callWithRetry(allocator, ctx.host, ctx.user_token, path, null);
+            var response = try callWithRetry(allocator, ctx.host, ctx.user_token, ctx.cookie, path, null);
             defer response.deinit(allocator);
             if (response.status != 200 or !httpOk(allocator, response.body)) return error.SlackReadStateFailed;
             const info = try std.json.parseFromSliceLeaky(std.json.Value, parsed.arena.allocator(), response.body, .{ .allocate = .alloc_always });
@@ -911,7 +1034,7 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
                 try path.appendSlice(allocator, "&cursor=");
                 try path.appendSlice(allocator, encoded);
             }
-            const page = try listPage(allocator, try callWithRetry(allocator, ctx.host, ctx.user_token, path.items, null));
+            const page = try listPage(allocator, try callWithRetry(allocator, ctx.host, ctx.user_token, ctx.cookie, path.items, null));
             defer allocator.free(page);
             return workspaceReadState(allocator, ctx, page);
         },
@@ -925,14 +1048,14 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
                 try path.appendSlice(allocator, "&cursor=");
                 try path.appendSlice(allocator, encoded);
             }
-            return listPage(allocator, try callWithRetry(allocator, ctx.host, ctx.user_token, path.items, null));
+            return listPage(allocator, try callWithRetry(allocator, ctx.host, ctx.user_token, ctx.cookie, path.items, null));
         },
         .history => {
             var path = std.ArrayList(u8).empty;
             defer path.deinit(allocator);
             try path.appendSlice(allocator, "/api/conversations.history?limit=80&channel=");
             try path.appendSlice(allocator, if (args.len > 0) args[0] else "");
-            return bodyOnly(allocator, try callWithRetry(allocator, ctx.host, ctx.user_token, path.items, null));
+            return bodyOnly(allocator, try callWithRetry(allocator, ctx.host, ctx.user_token, ctx.cookie, path.items, null));
         },
         .replies => {
             var path = std.ArrayList(u8).empty;
@@ -943,13 +1066,13 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
                 try path.appendSlice(allocator, "&ts=");
                 try path.appendSlice(allocator, args[1]);
             }
-            return bodyOnly(allocator, try callWithRetry(allocator, ctx.host, ctx.user_token, path.items, null));
+            return bodyOnly(allocator, try callWithRetry(allocator, ctx.host, ctx.user_token, ctx.cookie, path.items, null));
         },
         .send_text => {
             if (args.len < 3) return error.BadArguments;
             const body = try slack.buildPostMessageBody(allocator, .{ .channel_id = args[0], .text = args[1], .thread_ts = args[2], .client_msg_id = if (args.len > 3) args[3] else "" });
             defer allocator.free(body);
-            var response = try callWithRetry(allocator, ctx.host, ctx.user_token, "/api/chat.postMessage", body);
+            var response = try callWithRetry(allocator, ctx.host, ctx.user_token, ctx.cookie, "/api/chat.postMessage", body);
             errdefer response.deinit(allocator);
             if (response.status == 200 and !httpOk(allocator, response.body)) return error.SlackRejected;
             if (response.status != 200) return error.HttpFailed;
@@ -966,7 +1089,7 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
             return shareImage(allocator, ctx, args[0], args[1], args[2], args[3]);
         },
         .auth => {
-            var response = try callWithRetry(allocator, ctx.host, ctx.user_token, "/api/auth.test", null);
+            var response = try callWithRetry(allocator, ctx.host, ctx.user_token, ctx.cookie, "/api/auth.test", null);
             errdefer response.deinit(allocator);
             if (response.status != 200) return error.HttpFailed;
             if (!httpOk(allocator, response.body)) return error.SlackRejected;
@@ -976,7 +1099,7 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
             if (args.len < 2) return error.BadArguments;
             const body = try slack.buildMarkBody(allocator, args[0], args[1]);
             defer allocator.free(body);
-            var response = try callWithRetry(allocator, ctx.host, ctx.user_token, "/api/conversations.mark", body);
+            var response = try callWithRetry(allocator, ctx.host, ctx.user_token, ctx.cookie, "/api/conversations.mark", body);
             errdefer response.deinit(allocator);
             if (response.status != 200) return error.HttpFailed;
             if (!httpOk(allocator, response.body)) return error.SlackRejected;
@@ -1004,7 +1127,7 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
                 try dest.append(allocator, '-');
                 try dest.appendSlice(allocator, safe_name);
             }
-            try downloadTo(allocator, ctx.user_token, args[0], dest.items, if (ctx.is_bridge) ctx.host else null);
+            try downloadTo(allocator, ctx.user_token, ctx.cookie, args[0], dest.items, if (ctx.is_bridge) ctx.host else null);
             return allocator.dupe(u8, dest.items);
         },
     }
@@ -1023,13 +1146,21 @@ fn bodyOnly(allocator: std.mem.Allocator, response: Response) []u8 {
     return response.body;
 }
 
-fn callWithRetry(allocator: std.mem.Allocator, host: []const u8, token: []const u8, path: []const u8, body: ?[]const u8) !Response {
-    var response = try callApi(allocator, host, token, if (body == null) "GET" else "POST", path, body);
+pub fn sessionRejected(allocator: std.mem.Allocator, body: []const u8) bool {
+    const root = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return false;
+    defer root.deinit();
+    if (root.value != .object) return false;
+    const code = slack.objectStringField(root.value.object, "error");
+    return std.mem.eql(u8, code, "invalid_auth") or std.mem.eql(u8, code, "not_authed");
+}
+
+fn callWithRetry(allocator: std.mem.Allocator, host: []const u8, token: []const u8, cookie: []const u8, path: []const u8, body: ?[]const u8) !Response {
+    var response = try callApiAuth(allocator, host, token, cookie, if (body == null) "GET" else "POST", path, body);
     if (response.status == 429) {
         const wait_seconds = slack.parseRetryAfter(response.headers) orelse 5;
         response.deinit(allocator);
         win.Sleep(@intCast(@as(u64, @min(wait_seconds, 30)) * 1000));
-        response = try callApi(allocator, host, token, if (body == null) "GET" else "POST", path, body);
+        response = try callApiAuth(allocator, host, token, cookie, if (body == null) "GET" else "POST", path, body);
     }
     var parsed = std.json.parseFromSlice(struct { @"error": []const u8 = "" }, allocator, response.body, .{ .ignore_unknown_fields = true }) catch return response;
     defer parsed.deinit();
@@ -1055,7 +1186,7 @@ fn uploadImage(allocator: std.mem.Allocator, ctx: JobContext, file_path: []const
     defer allocator.free(escaped_name);
     const body = try std.fmt.allocPrint(allocator, "{{\"filename\":\"{s}\",\"length\":{d}}}", .{ escaped_name, bytes.len });
     defer allocator.free(body);
-    var grant_response = try callWithRetry(allocator, ctx.host, ctx.user_token, start_path.items, body);
+    var grant_response = try callWithRetry(allocator, ctx.host, ctx.user_token, ctx.cookie, start_path.items, body);
     defer grant_response.deinit(allocator);
     if (grant_response.status != 200) return error.HttpFailed;
     const grant = slack.parseUploadGrant(allocator, grant_response.body) orelse return error.SlackRejected;
@@ -1203,7 +1334,7 @@ fn shareImage(allocator: std.mem.Allocator, ctx: JobContext, channel: []const u8
     defer allocator.free(encoded);
     const path = try std.fmt.allocPrint(allocator, "/api/files.info?file={s}", .{encoded});
     defer allocator.free(path);
-    var info = try callWithRetry(allocator, ctx.host, ctx.user_token, path, null);
+    var info = try callWithRetry(allocator, ctx.host, ctx.user_token, ctx.cookie, path, null);
     defer info.deinit(allocator);
     if (info.status != 200) return error.HttpFailed;
     switch (slack_send.sharedIn(allocator, info.body, channel)) {
@@ -1214,7 +1345,7 @@ fn shareImage(allocator: std.mem.Allocator, ctx: JobContext, channel: []const u8
     }
     const complete_body = try slack.buildCompleteUploadBody(allocator, file_id, channel, thread_ts, caption);
     defer allocator.free(complete_body);
-    var complete = try callWithRetry(allocator, ctx.host, ctx.user_token, "/api/files.completeUploadExternal", complete_body);
+    var complete = try callWithRetry(allocator, ctx.host, ctx.user_token, ctx.cookie, "/api/files.completeUploadExternal", complete_body);
     errdefer complete.deinit(allocator);
     if (complete.status != 200 or !httpOk(allocator, complete.body)) return error.UploadRejected;
     return bodyOnly(allocator, complete);

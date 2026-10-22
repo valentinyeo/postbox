@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IGSH-464: Import Slack web sessions once from the local data folder, protect each workspace with Windows DPAPI, and reuse Slack chats, history, sends and live RTM without creating a Slack app. Existing OAuth and Socket Mode sign-in remains available.
+
 - IGSH-545: Chat-row, composer-button and window paint buffers are sized to the area being redrawn instead of the whole window, so a 4K row no longer allocates a full-window bitmap. A chat row whose brush cannot be created is left untouched instead of showing a black row.
 - IGSH-533: Reactions appear in small chips below message bubbles with their own row space, so emojis no longer overlap message text at 100% or 150% display scaling.
 - IGSH-461: AMOLED popup and account-dialog inputs show focus borders, and the Telegram input keeps its raised surface while checking credentials. AMOLED remains the default unless a theme was explicitly saved.

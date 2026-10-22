@@ -597,6 +597,10 @@ const SlackInstallation = struct {
     user_id: Utf8Text(32) = .{},
     user_token: []u8 = &.{},
     refresh_token: []u8 = &.{},
+    cookie: []u8 = &.{},
+    socket_thread: ?std.Thread = null,
+    socket_stop: std.atomic.Value(bool) = .init(false),
+    socket_connected: std.atomic.Value(bool) = .init(false),
     expires_at: i64 = 0,
     generation: u64 = 0,
     needs_signin: std.atomic.Value(bool) = .init(false),
@@ -1836,7 +1840,7 @@ fn jobIsWrite(kind: WacliJobKind) bool {
 }
 
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
-    if (verification_fixture and !hubConfigured(a)) return verificationEnqueue(a, job);
+    if (verification_fixture and !hubConfigured(a) and !(slack_win.verification_port != null and jobIsSlack(job.kind))) return verificationEnqueue(a, job);
     if (hubConfigured(a) and !hubJobReady(a, job)) return false;
     if (job.kind == .hub_media or job.kind == .hub_avatar) {
         if (a.hub_media_thread == null) {
@@ -2024,6 +2028,7 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
                 return;
             };
             defer a.allocator.free(context.user_token);
+            defer a.allocator.free(context.cookie);
             defer a.allocator.free(context.host);
             defer a.allocator.free(context.media_dir);
             if (runSlackJob(a, job.account.slice(), context, kind, slack_args[0..slack_count])) |data| {
@@ -3732,7 +3737,13 @@ fn slackContext(a: *App, account: []const u8, legacy_bridge: bool) ?slack_win.Jo
         a.allocator.free(owned_host);
         return null;
     };
-    return .{ .user_token = owned_token, .host = owned_host, .is_bridge = bridge, .media_dir = owned_dir, .io = a.io };
+    const owned_cookie = a.allocator.dupe(u8, if (installation) |install| install.cookie else "") catch {
+        a.allocator.free(owned_token);
+        a.allocator.free(owned_host);
+        a.allocator.free(owned_dir);
+        return null;
+    };
+    return .{ .user_token = owned_token, .cookie = owned_cookie, .host = owned_host, .is_bridge = bridge, .media_dir = owned_dir, .io = a.io };
 }
 
 fn requireSlackSignIn(a: *App, account: []const u8, failed_token: []const u8) void {
@@ -3833,13 +3844,14 @@ fn runSlackJob(a: *App, account: []const u8, initial: slack_win.JobContext, kind
     while (attempt < 2) : (attempt += 1) {
         const context = slackContext(a, account, false) orelse return error.WorkspaceDisconnected;
         defer a.allocator.free(context.user_token);
+        defer a.allocator.free(context.cookie);
         defer a.allocator.free(context.host);
         defer a.allocator.free(context.media_dir);
         const outcome = slack_win.runJob(a.allocator, context, kind, args);
         const auth_error = std.mem.sliceTo(&slack_win.last_error, 0);
-        if (!std.mem.eql(u8, auth_error, "invalid_auth") and !std.mem.eql(u8, auth_error, "token_expired")) return outcome;
+        if (!std.mem.eql(u8, auth_error, "invalid_auth") and !std.mem.eql(u8, auth_error, "token_expired") and !std.mem.eql(u8, auth_error, "not_authed")) return outcome;
         if (outcome) |data| a.allocator.free(data) else |_| {}
-        if (attempt == 1) {
+        if (context.cookie.len > 0 or attempt == 1) {
             requireSlackSignIn(a, account, context.user_token);
             return error.SignInRequired;
         }
@@ -5160,9 +5172,15 @@ fn applySlackEvent(a: *App, event: *slack_win.Event) void {
     defer slack_win.destroyEvent(event);
     const account = event.teamIdSlice();
     const installation = slackInstallation(a, account) orelse return;
+    if (std.mem.eql(u8, event.eventTypeSlice(), "session_rejected")) {
+        setStatus(a, "Slack workspace needs sign-in; use Connect Slack workspace");
+        return;
+    }
     const key = chat_key.Key{ .provider = .slack, .account = account, .id = event.channelSlice() };
     const is_open = a.selected_chat < a.chat_count and chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), key);
-    if (std.mem.startsWith(u8, event.eventTypeSlice(), "reaction_")) {
+    if (std.mem.startsWith(u8, event.eventTypeSlice(), "reaction_") or
+        std.mem.eql(u8, event.subtypeSlice(), "message_changed") or std.mem.eql(u8, event.subtypeSlice(), "message_deleted"))
+    {
         if (is_open) refreshSlackHistory(a);
         return;
     }
@@ -5227,7 +5245,7 @@ fn saveSlackInstallationIndex(a: *App, extra: []const u8, removed: []const u8) b
     return slack_win.saveSecret(lit("SlackInstallations"), list.items);
 }
 
-fn installSlackWorkspace(a: *App, team_id: []const u8, team_name: []const u8, user_id: []const u8, user_token: []const u8, refresh_token: []const u8, expires_at: i64, is_bridge: bool) bool {
+fn installSlackWorkspace(a: *App, team_id: []const u8, team_name: []const u8, user_id: []const u8, user_token: []const u8, refresh_token: []const u8, expires_at: i64, is_bridge: bool, cookie: []const u8) bool {
     if (!slack.validTeamId(team_id)) return false;
     var target = slackInstallation(a, team_id);
     if (target == null) for (&a.slack_installations) |*installation| {
@@ -5248,7 +5266,15 @@ fn installSlackWorkspace(a: *App, team_id: []const u8, team_name: []const u8, us
         a.allocator.free(refresh);
         return false;
     };
+    const owned_cookie = a.allocator.dupe(u8, cookie) catch {
+        a.allocator.free(user);
+        a.allocator.free(refresh);
+        return false;
+    };
+    stopSlackSession(installation);
     a.slack_install_mutex.lockUncancelable(a.io);
+    a.allocator.free(installation.cookie);
+    installation.cookie = owned_cookie;
     a.allocator.free(installation.user_token);
     a.allocator.free(installation.refresh_token);
     if (!installation.active) {
@@ -5291,7 +5317,7 @@ pub fn addSlackInstallation(team_id: []const u8, team_name: []const u8, user_id:
     };
     a.slack_install_mutex.unlock(a.io);
     if (!saved) return false;
-    return installSlackWorkspace(a, team_id, team_name, user_id, user_token, refresh_token, expires_at, false);
+    return installSlackWorkspace(a, team_id, team_name, user_id, user_token, refresh_token, expires_at, false, "");
 }
 
 pub fn removeSlackInstallation(team_id: []const u8) bool {
@@ -5310,6 +5336,9 @@ pub fn removeSlackInstallation(team_id: []const u8) bool {
         }
         slack_win.deleteInstallation(team_id);
     }
+    stopSlackSession(installation);
+    a.allocator.free(installation.cookie);
+    installation.cookie = &.{};
     installation.active = false;
     installation.generation +%= 1;
     a.allocator.free(installation.user_token);
@@ -5351,7 +5380,7 @@ fn loadSlackTokens(a: *App) void {
             const saved = slack_win.loadInstallation(a.allocator, id) orelse continue;
             defer saved.deinit();
             const value = saved.value;
-            _ = installSlackWorkspace(a, value.team_id, value.team_name, value.user_id, value.user_token, value.refresh_token, value.expires_at, false);
+            _ = installSlackWorkspace(a, value.team_id, value.team_name, value.user_id, value.user_token, value.refresh_token, value.expires_at, false, value.cookie);
         }
     }
     a.slack_install_mutex.lockUncancelable(a.io);
@@ -5690,7 +5719,38 @@ fn openSlackSetup(a: *App) void {
     }
 }
 
+fn stopSlackSession(installation: *SlackInstallation) void {
+    installation.socket_stop.store(true, .release);
+    if (installation.socket_thread) |thread| thread.join();
+    installation.socket_thread = null;
+    installation.socket_connected.store(false, .release);
+}
+
+fn slackSocketConnected(a: *App) bool {
+    if (a.slack_connected.load(.acquire)) return true;
+    for (&a.slack_installations) |*installation| {
+        if (installation.active and installation.socket_connected.load(.acquire)) return true;
+    }
+    return false;
+}
+
 fn startSlackSocket(a: *App) void {
+    for (&a.slack_installations) |*installation| {
+        if (!installation.active or installation.cookie.len == 0 or installation.socket_thread != null or installation.needs_signin.load(.acquire)) continue;
+        installation.socket_stop.store(false, .release);
+        const config = slack_win.SocketConfig{
+            .user_token = installation.user_token,
+            .app_token = "",
+            .cookie = installation.cookie,
+            .team_id = installation.team_id.slice(),
+            .needs_signin = &installation.needs_signin,
+            .stop = &installation.socket_stop,
+            .connected = &installation.socket_connected,
+            .sink = .{ .hwnd = if (a.hwnd) |hwnd| hwnd else return, .message_id = wm_slack_event, .queue = &a.slack_event_pending },
+        };
+        installation.socket_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, slack_win.socketThreadMain, .{config}) catch null;
+        if (installation.socket_thread == null) setStatus(a, "Slack connection failed to start");
+    }
     if (!slackConfigured(a) or a.slack_socket_thread != null) return;
     if (a.slack_app_token.len == 0) return;
     a.slack_stop.store(false, .release);
@@ -9996,7 +10056,7 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
 }
 
 fn sendMessage(a: *App) void {
-    if (verification_fixture and !hubConfigured(a)) return setStatus(a, "Verification is offline; sending is disabled");
+    if (verification_fixture and !hubConfigured(a) and !(slack_win.verification_port != null and selectedChatIsSlack(a))) return setStatus(a, "Verification is offline; sending is disabled");
     if (a.compose == null or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
     if (a.outbox_load_failed) {
         setStatus(a, "Outbox could not be loaded; sends paused");
@@ -12216,8 +12276,8 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     if (a.selected_chat < a.chat_count) try controlWriteChat(a, w, &a.chats[a.selected_chat]) else try w.writeAll("null");
     var buffer: [1024]u8 = undefined;
     try w.print(",\"sync\":\"{s}\",\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
-        sync,              a.slack_connected.load(.acquire), pending_sends,   a.pending_archive_count,
-        slackChatCount(a), a.chat_count,                     a.show_archived, a.unread_only,
+        sync,              slackSocketConnected(a), pending_sends,   a.pending_archive_count,
+        slackChatCount(a), a.chat_count,            a.show_archived, a.unread_only,
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\"", .{@tagName(theme.choice)});
@@ -15628,7 +15688,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     const identity = slack.installationIdentity(root) orelse return 0;
                     if (result.account.len == 0) {
                         if (std.mem.eql(u8, result.extra.slice(), "bridge")) {
-                            if (slackInstallation(a, identity.team_id) != null or installSlackWorkspace(a, identity.team_id, identity.team_name, identity.user_id, "", "", 0, true)) bindSlackOutboxAccount(a, identity.team_id);
+                            if (slackInstallation(a, identity.team_id) != null or installSlackWorkspace(a, identity.team_id, identity.team_name, identity.user_id, "", "", 0, true, "")) bindSlackOutboxAccount(a, identity.team_id);
                         } else if (a.slack_tokens) |tokens| {
                             if (addSlackInstallation(identity.team_id, identity.team_name, identity.user_id, tokens.user, "", 0)) {
                                 if (a.slack_bridge == null) bindSlackOutboxAccount(a, identity.team_id);
@@ -15818,7 +15878,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     thread.detach();
                 } else |_| return -1;
                 loadDrafts(a);
-                if (hubConfigured(a)) {
+                if (slack_win.verification_port != null) {
+                    a.wacli_slack_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .slack }) catch return -1;
+                    loadSlackTokens(a);
+                } else if (hubConfigured(a)) {
                     a.wacli_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .wacli }) catch return -1;
                     a.hub_media_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .hub_media }) catch return -1;
                     enqueueCacheTagProbe(a);
@@ -16271,6 +16334,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (!a.read_queue_dead) persistPendingReads(a);
             persistReadState(a);
             a.slack_stop.store(true, .release);
+            for (&a.slack_installations) |*installation| stopSlackSession(installation);
             stopSync(a, "shutdown");
             if (a.sync_job) |job| _ = win.CloseHandle(job);
             a.sync_job = null;
@@ -17348,6 +17412,9 @@ pub fn main(init: std.process.Init) !void {
         _ = win.RegOverridePredefKey(winHandle(win.HKEY, @bitCast(@as(isize, -2147483647))), null);
         _ = win.RegCloseKey(key);
     };
+    if (verification_fixture) {
+        if (init.environ_map.get("WAZIG_VERIFY_SLACK_PORT")) |port| slack_win.verification_port = try std.fmt.parseInt(u16, port, 10);
+    }
     const instance = win.GetModuleHandleW(null) orelse return error.NoModuleHandle;
     installCrashFilter();
     const outbox_store = init.environ_map.get("LOCALAPPDATA") orelse return error.MissingLocalAppData;
@@ -17367,6 +17434,7 @@ pub fn main(init: std.process.Init) !void {
     defer init.gpa.free(wacli_path);
     const avatar_dir = try createAvatarDirectory(init, init.gpa);
     const messages_dir = std.fs.path.dirname(avatar_dir) orelse return error.MissingMessagesDir;
+    const slack_import = slack_win.importSessions(init.gpa, init.io, messages_dir);
     const cache_tag = loadPersistedTag(init.gpa, messages_dir);
     const slack_media_dir = try createSlackMediaDirectory(init, init.gpa);
     defer init.gpa.free(slack_media_dir);
@@ -17420,6 +17488,12 @@ pub fn main(init: std.process.Init) !void {
         if (app.wa_bridge_url.len > 0) init.gpa.free(app.wa_bridge_url);
         if (app.wa_bridge_account.len > 0) init.gpa.free(app.wa_bridge_account);
         if (app.wa_bridge_key.len > 0) init.gpa.free(app.wa_bridge_key);
+    }
+    switch (slack_import) {
+        .absent => {},
+        .imported => appendLaunchLog(app, "Slack session import consumed and protected"),
+        .invalid => appendLaunchLog(app, "Slack session import invalid or empty; discarded"),
+        .failed => appendLaunchLog(app, "Slack session import could not be protected; discarded"),
     }
     app.startup_probe_pending = !verification_fixture or hubConfigured(app);
     if (cache_tag) |tag| {

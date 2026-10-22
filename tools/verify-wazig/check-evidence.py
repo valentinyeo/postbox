@@ -5,6 +5,30 @@ import sys
 
 folder = Path(sys.argv[1])
 session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
+if session['feature'] == 'slack-session':
+    assert session['sha256'] and session['commit']
+    assert not (folder / 'failure.txt').exists()
+    assert 'import-dpapi-list-badge-history-send-rtm-cookie PASS' in (folder / 'slack-proof.log').read_text(encoding='utf-8-sig')
+    assert not (folder / 'final-data/slack-session-import.json').exists()
+    requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
+    for path in ['/api/conversations.list', '/api/conversations.history', '/api/chat.postMessage', '/api/rtm.connect', '/rtm']:
+        assert any(row['path'] == path and row['authorized'] and row['cookie_present'] for row in requests), path
+    remote = json.loads((folder / 'slack-server-state.json').read_text(encoding='utf-8-sig'))
+    assert remote['sent'] == 1 and remote['acks'] == 0 and remote['live']
+    for name, text in [('history', 'Fake Slack history'), ('sent', 'Fake Slack outgoing'), ('live', 'Fake Slack incoming')]:
+        messages = json.loads((folder / f'{name}.messages.json').read_text(encoding='utf-8-sig'))
+        assert any(row['text'] == text for row in messages['messages']), name
+    for stage in ['doctor.json', 'before.state.json', 'after.state.json', 'side-effects.json']:
+        state = json.loads((folder / stage).read_text(encoding='utf-8-sig'))
+        assert state['slack_connected'] and state['selected']['provider'] == 'slack'
+        assert state['chat_count'] == 1 and state['sync'] == 'stopped'
+        assert state['pending_sends'] == 0 and state['pending_archives'] == 0
+    final = json.loads((folder / 'side-effects.json').read_text(encoding='utf-8-sig'))
+    assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
+    assert 'CLEANUP PASSED' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
+    assert 'JOURNEY PASSED: slack-session' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
+    print('EVIDENCE VERIFIED: Slack session import, DPAPI, badge, list, history, send, RTM cookie and cleanup')
+    raise SystemExit(0)
 if session['feature'] in ('whatsapp-hub', 'hub'):
     unified = session['feature'] == 'hub'
     assert session['sha256'] and session['commit']

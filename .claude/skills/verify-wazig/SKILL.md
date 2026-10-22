@@ -16,13 +16,19 @@ gh run watch <id> --interval 60 --exit-status
 gh run download <id> --name verify-wazig-search --dir evidence/<id>
 ```
 
-Replace `search` with a [feature ID](features/README.md). Confirm the run's branch and commit before trusting it. Dispatch requires this workflow on the default branch. Before merge, the retained `pull_request` path triggers run the `search`, `drafts`, `whatsapp-hub` and `hub` journeys, including changes to this skill, the helper or the app source. Watch that PR run instead; do not pretend a dispatch ran on an unregistered workflow.
+Replace `search` with a [feature ID](features/README.md). Confirm the run's branch and commit before trusting it. Dispatch requires this workflow on the default branch. Before merge, the retained `pull_request` path triggers run the `search`, `drafts`, `whatsapp-hub`, `hub` and `slack-session` journeys, including changes to this skill, the helper or the app source. Watch that PR run instead; do not pretend a dispatch ran on an unregistered workflow.
 
 `verify.yml` installs Zig 0.16.0 and builds `Messages.exe`, `wazigctl.exe` and bundled IBM Plex fonts with the same Windows `--release=small` build used by ci.yml's unfurl-verification job. The evidence build version is `0.0.526`; this base desktop build does not include TDLib. It does not download or install wacli, authenticate a provider, or install the app. The `whatsapp-hub` journey additionally verifies the production HTTPS backend against an authenticated loopback fake bridge; it never contacts a real provider. Loopback HTTP is allowed only inside the guarded verification fixture.
 
 The workflow runs `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature search -Bin zig-out/bin -Evidence verification-evidence`. It starts the real `Messages.exe --verify-fixture` with a fresh GUID directory under `RUNNER_TEMP`. Two entirely synthetic local cached chats, `Verification Alpha` and `Verification Beta`, load through the production cache parser. They initially contain no messages except for the menus journey, which seeds one entirely synthetic cached message; archive adds an incoming fixture message. Ready means a `MessagesZig` window titled `Wazig Messages v0.0.526`, an enabled composer, and `DOCTOR PASSED` in the log, not merely a living process.
 
 The flag requires `GITHUB_ACTIONS=true`, isolated `LOCALAPPDATA` and `USERPROFILE`, and a new verification registry key. Process-local HKCU redirection keeps saved settings and secrets separate. A unique `USERNAME` also isolates the control pipe; the outbox mutex already keys on the data directory. Local provider workers, authentication probes, Telegram initialization, sync and updater checks are disabled. The `whatsapp-hub` and `hub` journeys enable the hub worker and SSE reader, using the isolated registry `WaBridgeUrl` and a fake DPAPI `WaBridgeKey`. This is launch-time fixture seeding, not an endpoint that sets the result of the journey. Normal launches are unchanged. The five original recipes use only launch-time fixture seeding. Archive additionally uses an isolated file-backed provider at the enqueue/archive transport boundary; it supplies incoming messages and archive acknowledgements to the production merge path.
+
+The `slack-session` journey instead starts a fake Slack Web API/RTM server,
+runs the native session transport tests, and imports obvious fake credentials
+into the isolated DPAPI store. Only its Slack worker and websocket are enabled;
+no real account or provider process is involved. The feature map records its
+list, badge, history, send, live receive and consumed-import evidence.
 
 ## Doctor
 
@@ -38,7 +44,7 @@ This checks PID plus start time, absolute executable path and SHA-256, exact bui
 
 Harness: **PowerShell UI Automation + SendKeys**. UI Automation resolves native controls by AutomationId; bounded read-only `WM_GETTEXT` reads their text because these subclassed edits do not expose ValuePattern; keyboard input goes through Windows Forms `SendKeys.SendWait` after checking foreground-process ownership. Menus additionally uses owned-control UIA bounds and Win32 `SendInput` for real mouse clicks and text-selection dragging. No `WM_COMMAND`, text-setting window message, internal state setter, control-client mutation or coordinate click replaces the user action. Palette rows and the message canvas are custom drawn; do not invent accessible row names. Filter the palette with its actual label and press Enter. Screenshots are the visual oracle for custom-drawn content.
 
-Select one recipe via `feature=search|navigation|drafts|palette|appearance|menus|whatsapp-hub|archive`. Each recipe starts from its own empty fixture profile. See the feature map for exact shortcuts, entry points, assertions and limitations. The helper logs every keyboard action and waits on resulting readable state rather than accepting a fixed delay as proof. Read-only `wazigctl status` supplements screenshots; it is not the driving harness.
+Select one recipe via `feature=search|navigation|drafts|palette|appearance|menus|whatsapp-hub|hub|slack-session|archive`. Each recipe starts from its own empty fixture profile. See the feature map for exact shortcuts, entry points, assertions and limitations. The helper logs every keyboard action and waits on resulting readable state rather than accepting a fixed delay as proof. Read-only `wazigctl status` supplements screenshots; it is not the driving harness.
 
 ## Evidence
 

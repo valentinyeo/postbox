@@ -258,7 +258,7 @@ test "Slack retains only eight failures and evicts oldest failed before refusing
     try std.testing.expectEqual(@as(usize, 15), a.slack_outbox_count);
 }
 
-const JobContext = struct { host: []const u8 = "slack.com", user_token: []const u8 = "" };
+const JobContext = struct { cookie: []const u8 = "", host: []const u8 = "slack.com", user_token: []const u8 = "" };
 const Response = struct {
     status: u32,
     body: []u8,
@@ -269,7 +269,7 @@ const Response = struct {
 var info_body: []const u8 = "";
 var complete_calls: usize = 0;
 
-fn callWithRetry(allocator: std.mem.Allocator, _: []const u8, _: []const u8, path: []const u8, body: ?[]const u8) !Response {
+fn callWithRetry(allocator: std.mem.Allocator, _: []const u8, _: []const u8, _: []const u8, path: []const u8, body: ?[]const u8) !Response {
     if (std.mem.startsWith(u8, path, "/api/files.info?file=")) {
         try std.testing.expectEqualStrings("/api/files.info?file=F01234567", path);
         try std.testing.expect(body == null);
