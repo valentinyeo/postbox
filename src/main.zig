@@ -14254,12 +14254,11 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     var buffered = screen_item.*;
     buffered.hDC = surface.hdc;
     const item = &buffered;
-    var shapes = smooth.Context.init(item.hDC);
-    defer shapes.deinit();
     const chat = &a.chats[index];
     const selected = (item.itemState & win.ODS_SELECTED) != 0;
     const bulk_selected = a.bulk.count > 0 and a.bulk.containsKey(chat_key.of(chat));
     _ = win.FillRect(item.hDC, &item.rcItem, background);
+    var shapes = smooth.Context.init(item.hDC);
     if (selected or bulk_selected) {
         smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius * 2), px(a, theme.selected_row_radius * 2), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
     }
@@ -14277,18 +14276,32 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     const avatar_left = item.rcItem.left + px(a, 12);
     const avatar_top = item.rcItem.top + px(a, 10);
     const avatar_entry = if (chat.provider == .whatsapp) avatarForChat(a, chat.jid.slice()) else null;
+    if (avatar_entry == null or avatar_entry.?.bitmap == null) {
+        smooth.fillEllipse(&shapes, .{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 }, theme.current.surface_container_highest);
+    }
+    const badge = win.RECT{ .left = avatar_left + px(a, 27), .top = avatar_top + px(a, 28), .right = avatar_left + px(a, 48), .bottom = avatar_top + px(a, 46) };
+    smooth.fillRoundRect(&shapes, badge, px(a, 8), px(a, 8), theme.current.primary_container);
+    const pinned_chat = isChatPinned(a, chat_key.of(chat));
+    if (pinned_chat) {
+        drawPinIcon(a, &shapes, item.rcItem.right - px(a, 78), item.rcItem.top + px(a, 10), row_muted, false);
+    }
+    if (chat.unread or chat.unread_count > 0) {
+        const diameter = px(a, theme.unread_dot_px);
+        const dot_right = item.rcItem.right - px(a, 12);
+        const dot_top = item.rcItem.top + @divTrunc(px(a, 35) + px(a, 56) - diameter, 2);
+        smooth.fillEllipse(&shapes, .{ .left = dot_right - diameter, .top = dot_top, .right = dot_right, .bottom = dot_top + diameter }, theme.current.primary);
+    }
+    shapes.deinit();
     if (avatar_entry != null and avatar_entry.?.bitmap != null) {
         drawAvatarBitmap(item.hDC, avatar_entry.?.bitmap.?, avatar_left, avatar_top, 42);
-    } else {
-        smooth.fillEllipse(&shapes, .{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 }, theme.current.surface_container_highest);
-        if (chat.name.len > 0) {
-            var initial_length: c_int = 1;
-            if (chat.name.buf[0] >= 0xd800 and chat.name.buf[0] <= 0xdbff and chat.name.len > 1) initial_length = 2;
-            _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
-            _ = win.SetTextColor(item.hDC, theme.current.on_surface);
-            var avatar_rect = win.RECT{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 };
-            _ = text_draw.drawText(item.hDC, chat.name.ptr(), initial_length, &avatar_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
-        }
+    }
+    if ((avatar_entry == null or avatar_entry.?.bitmap == null) and chat.name.len > 0) {
+        var initial_length: c_int = 1;
+        if (chat.name.buf[0] >= 0xd800 and chat.name.buf[0] <= 0xdbff and chat.name.len > 1) initial_length = 2;
+        _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
+        _ = win.SetTextColor(item.hDC, theme.current.on_surface);
+        var avatar_rect = win.RECT{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 };
+        _ = text_draw.drawText(item.hDC, chat.name.ptr(), initial_length, &avatar_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     }
 
     const name_text = chat.name.slice();
@@ -14300,10 +14313,6 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         _ = drawMixedLine(item.hDC, a.font_bold.?, a.font_emoji orelse a.font_bold.?, name_text, item.rcItem.left + px(a, 66), name_y);
     }
 
-    _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
-    _ = win.SetTextColor(item.hDC, row_text);
-    const badge = win.RECT{ .left = avatar_left + px(a, 27), .top = avatar_top + px(a, 28), .right = avatar_left + px(a, 48), .bottom = avatar_top + px(a, 46) };
-    smooth.fillRoundRect(&shapes, badge, px(a, 8), px(a, 8), theme.current.primary_container);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, theme.current.on_primary_container);
     var badge_text = badge;
@@ -14314,19 +14323,8 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     }, 1, &badge_text, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
     _ = win.SetTextColor(item.hDC, row_text);
-    const pinned_chat = isChatPinned(a, chat_key.of(chat));
     var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 34) };
-    if (verification_text_comparison) {
-        var clip: win.RECT = undefined;
-        var viewport: win.POINT = undefined;
-        _ = win.GetClipBox(item.hDC, &clip);
-        _ = win.GetViewportOrgEx(item.hDC, &viewport);
-        std.debug.print("ISSUE-462 chat row index={d} name_len={d} kind_len={d} rect={any} clip={any} viewport={any}\n", .{ index, chat.name.len, chat.kind.len, name_rect, clip, viewport });
-    }
     _ = text_draw.drawText(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
-    if (pinned_chat) {
-        drawPinIcon(a, &shapes, item.rcItem.right - px(a, 78), item.rcItem.top + px(a, 10), row_muted, false);
-    }
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, row_muted);
     var time_rect = win.RECT{ .left = item.rcItem.right - px(a, 52), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, 10), .bottom = item.rcItem.top + px(a, 32) };
@@ -14370,13 +14368,6 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         var marker_rect = win.RECT{ .left = item.rcItem.right - px(a, 128), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, 40), .bottom = item.rcItem.top + px(a, 56) };
         _ = text_draw.drawText(item.hDC, text, -1, &marker_rect, win.DT_RIGHT | win.DT_SINGLELINE);
         _ = win.SetTextColor(item.hDC, row_muted);
-    }
-
-    if (chat.unread or chat.unread_count > 0) {
-        const diameter = px(a, theme.unread_dot_px);
-        const dot_right = item.rcItem.right - px(a, 12);
-        const dot_top = @divTrunc(kind_rect.top + kind_rect.bottom - diameter, 2);
-        smooth.fillEllipse(&shapes, .{ .left = dot_right - diameter, .top = dot_top, .right = dot_right, .bottom = dot_top + diameter }, theme.current.primary);
     }
 }
 

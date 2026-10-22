@@ -574,17 +574,32 @@ fn render(dc: win.HDC, text_ptr: [*c]const u16, len: i32, rect: *win.RECT, flags
     bounds.right = @min(bounds.right, clip.right);
     bounds.bottom = @min(bounds.bottom, clip.bottom);
     if (bounds.right <= bounds.left or bounds.bottom <= bounds.top) return height;
+    var viewport: win.POINT = undefined;
+    var window: win.POINT = undefined;
+    if (win.GetViewportOrgEx(dc, &viewport) == 0 or win.GetWindowOrgEx(dc, &window) == 0) return error.OriginFailed;
+    const dx = viewport.x - window.x;
+    const dy = viewport.y - window.y;
+    var binding = bounds;
+    binding.left += dx;
+    binding.right += dx;
+    binding.top += dy;
+    binding.bottom += dy;
+    const saved = win.SaveDC(dc);
+    if (saved == 0) return error.SaveDCFailed;
+    defer _ = win.RestoreDC(dc, saved);
+    _ = win.SetViewportOrgEx(dc, 0, 0, null);
+    _ = win.SetWindowOrgEx(dc, 0, 0, null);
     const width = bounds.right - bounds.left;
     const bitmap_height_needed = bounds.bottom - bounds.top;
     const memory_dc = try bitmapDC(width, bitmap_height_needed);
     mark(.bounds, &stamp);
-    if (win.BitBlt(memory_dc, 0, 0, width, bitmap_height_needed, dc, bounds.left, bounds.top, win.SRCCOPY) == 0) return error.BackdropCopyFailed;
+    if (win.BitBlt(memory_dc, 0, 0, width, bitmap_height_needed, dc, binding.left, binding.top, win.SRCCOPY) == 0) return error.BackdropCopyFailed;
     _ = win.GdiFlush();
     mark(.backdrop_blit, &stamp);
     var renderer = Renderer{ .dc = memory_dc, .color = win.GetTextColor(dc) };
     try check(layout.lpVtbl.*.Draw.?(layout, null, &renderer.interface, @floatFromInt(rect.left - bounds.left), @floatFromInt(rect.top + offset - bounds.top)));
     mark(.draw, &stamp);
-    if (win.BitBlt(dc, bounds.left, bounds.top, width, bitmap_height_needed, memory_dc, 0, 0, win.SRCCOPY) == 0) return error.BitmapCopyFailed;
+    if (win.BitBlt(dc, binding.left, binding.top, width, bitmap_height_needed, memory_dc, 0, 0, win.SRCCOPY) == 0) return error.BitmapCopyFailed;
     mark(.blit_back, &stamp);
     return height;
 }
@@ -1213,6 +1228,16 @@ test "DirectWrite fifty distinct strings frame benchmark" {
 
 test "ISSUE-462 DirectWrite paints every row-sized chat buffer" {
     if (builtin.os.tag != .windows) return error.SkipZigTest;
+    const main = @embedFile("main.zig");
+    const chat_start = std.mem.indexOf(u8, main, "fn drawChat(").?;
+    const chat_end = std.mem.indexOf(u8, main[chat_start..], "fn transcriptLineKind(").?;
+    const chat_draw = main[chat_start..][0..chat_end];
+    const finish_before_text = std.mem.indexOf(u8, chat_draw, "    shapes.deinit();") != null;
+    if (finish_before_text) {
+        const finish = std.mem.indexOf(u8, chat_draw, "    shapes.deinit();").?;
+        try std.testing.expect(std.mem.indexOf(u8, chat_draw[0..finish], "text_draw.draw") == null);
+        try std.testing.expect(std.mem.indexOf(u8, chat_draw[finish..], "&shapes") == null);
+    }
     const screen = win.GetDC(null) orelse return error.CreateDCFailed;
     defer _ = win.ReleaseDC(null, screen);
     const size = 384;
@@ -1253,12 +1278,13 @@ test "ISSUE-462 DirectWrite paints every row-sized chat buffer" {
                 defer shapes.deinit();
                 _ = win.FillRect(surface.hdc, &row, background);
                 @import("smooth_shapes.zig").fillEllipse(&shapes, .{ .left = 12, .top = top + 10, .right = 54, .bottom = top + 52 }, 0x262626);
+                @import("smooth_shapes.zig").fillRoundRect(&shapes, .{ .left = 39, .top = top + 38, .right = 60, .bottom = top + 56 }, 8, 8, 0x333333);
+                if (finish_before_text) shapes.deinit();
                 _ = win.SelectObject(surface.hdc, font);
                 _ = win.SetTextColor(surface.hdc, 0xffffff);
                 _ = win.SetBkMode(surface.hdc, win.TRANSPARENT);
                 var initial = win.RECT{ .left = 12, .top = top + 10, .right = 54, .bottom = top + 52 };
                 _ = drawText(surface.hdc, wide("V"), -1, &initial, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
-                @import("smooth_shapes.zig").fillRoundRect(&shapes, .{ .left = 39, .top = top + 38, .right = 60, .bottom = top + 56 }, 8, 8, 0x333333);
                 var name = win.RECT{ .left = 66, .top = top + 10, .right = 276, .bottom = top + 34 };
                 var preview = win.RECT{ .left = 66, .top = top + 35, .right = 288, .bottom = top + 56 };
                 var clip: win.RECT = undefined;
