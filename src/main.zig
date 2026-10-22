@@ -1859,7 +1859,7 @@ fn jobIsWrite(kind: WacliJobKind) bool {
 }
 
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
-    if (verification_fixture and !hubConfigured(a)) return false;
+    if (verification_fixture and !hubConfigured(a)) return verificationEnqueue(a, job);
     if (hubConfigured(a) and !hubJobReady(a, job)) return false;
     if (job.kind == .hub_media or job.kind == .hub_avatar) {
         if (a.hub_media_thread == null) {
@@ -11748,6 +11748,7 @@ fn startNextArchive(a: *App) void {
         startHubArchive(a);
         return;
     }
+    if (verification_fixture) return;
     if (a.pending_archive_count > 0 and a.archive_batch_total > 1) setStatus(a, "");
     if (a.archive_child != null or a.read_child != null or a.pending_archive_count == 0) return;
     if (mediaBusy(a) or a.send_child != null or sendReadyPending(a) or avatarBusy(a)) return;
@@ -11771,26 +11772,40 @@ fn startNextArchive(a: *App) void {
 }
 
 fn checkArchive(a: *App) void {
+    if (verification_fixture and !hubConfigured(a)) {
+        if (a.pending_archive_count == 0) return;
+        const pending = &a.pending_archives[0];
+        const response = verificationProvider(a, if (pending.should_unarchive) .unarchive else .archive, pending.jid.slice()) orelse return;
+        a.allocator.free(response);
+        var log_buffer: [288]u8 = undefined;
+        appendLaunchLog(a, archive_rules.logLine(&log_buffer, pending.jid.slice(), !pending.should_unarchive, pending.source));
+        completeArchive(a, 0);
+        return;
+    }
     if (a.archive_child) |*child| {
         const handle = child.id orelse return;
         var code: win.DWORD = 0;
         if (win.GetExitCodeProcess(handle, &code) == 0 or code == win.STILL_ACTIVE) return;
         _ = child.wait(a.io) catch {};
         a.archive_child = null;
-        const completed = &a.pending_archives[0];
-        const action: archive_rules.Action = if (completed.should_unarchive) .unarchive else if (isKeptArchived(a, completed.jid.slice())) .keep else .archive;
-        const quiet = completed.source == .kept and code == 0;
-        removeFirstPendingArchive(a);
-        if (a.pending_archive_count > 0) {
-            startNextArchive(a);
-        } else {
-            drainMediaDownloads(a);
-            startSync(a);
-            refreshChats(a);
-            refreshMessages(a);
-            if (!quiet) setStatus(a, if (code == 0) action.status() else "Archive operation failed");
-        }
+        completeArchive(a, code);
     } else startNextArchive(a);
+}
+
+fn completeArchive(a: *App, code: win.DWORD) void {
+    const completed = &a.pending_archives[0];
+    const action: archive_rules.Action = if (completed.should_unarchive) .unarchive else if (isKeptArchived(a, completed.jid.slice())) .keep else .archive;
+    const quiet = completed.source == .kept and code == 0;
+    removeFirstPendingArchive(a);
+    if (a.pending_archive_count > 0) {
+        startNextArchive(a);
+    } else {
+        drainMediaDownloads(a);
+        startSync(a);
+        refreshChats(a);
+        refreshMessages(a);
+        if (!quiet) setStatus(a, if (code == 0) action.status() else "Archive operation failed");
+    }
 }
 
 fn removeChatRow(a: *App, removed: usize) void {
@@ -16081,7 +16096,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             } else if (wparam == timer_refresh) {
                 persistDrafts(a);
                 updateAttachButton(a);
-                if (verification_fixture and !hubConfigured(a)) return 0;
+                if (verification_fixture and !hubConfigured(a)) {
+                    checkArchive(a);
+                    refreshChats(a);
+                    return 0;
+                }
                 updateVoiceButton(a);
                 a.paint_minute_ticks += 1;
                 if (a.paint_minute_ticks >= 60) {
@@ -17197,6 +17216,83 @@ fn saveVerificationTextMetrics(a: *App, hdc: win.HDC, message: *const Message, x
     _ = writeCacheFileAtomic(a, path, data);
 }
 
+fn verificationEnqueue(a: *App, job: WacliJob) bool {
+    if (job.kind != .chats and job.kind != .messages and job.kind != .unread_probe) return false;
+    const data = verificationProvider(a, if (job.kind == .chats) .chats else .messages, job.jid.slice()) orelse return false;
+    const result = a.allocator.create(WacliResult) catch {
+        a.allocator.free(data);
+        return false;
+    };
+    result.* = .{ .kind = job.kind, .provider = job.provider, .account = job.account, .gen = job.gen, .jid = job.jid, .msg_id = job.msg_id, .extra = job.extra, .data = data, .ok = true };
+    a.wacli_mutex.lockUncancelable(a.io);
+    a.wacli_pending[@intFromEnum(job.kind)] += 1;
+    a.wacli_mutex.unlock(a.io);
+    wacliPost(a, result);
+    return true;
+}
+
+fn verificationProvider(a: *App, operation: enum { chats, messages, archive, unarchive }, jid: []const u8) ?[]u8 {
+    if (!verification_fixture) return null;
+    const path = messagesDirPath(a, "verification-provider.json") orelse return null;
+    defer a.allocator.free(path);
+    const raw = readFileWin(a.allocator, path, msg_cache_max_bytes) orelse return null;
+    defer a.allocator.free(raw);
+    var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return null;
+    defer parsed.deinit();
+    const root = switch (parsed.value) {
+        .object => |object| object,
+        else => return null,
+    };
+    const rows = switch (root.get("data") orelse return null) {
+        .array => |array| array.items,
+        else => return null,
+    };
+    var out: std.Io.Writer.Allocating = .init(a.allocator);
+    defer out.deinit();
+    switch (operation) {
+        .chats => {
+            out.writer.writeAll("{\"data\":[") catch return null;
+            var count: usize = 0;
+            for (rows) |row| {
+                const object = switch (row) {
+                    .object => |object| object,
+                    else => continue,
+                };
+                if (getBool(object, "archived") != a.show_archived) continue;
+                if (count > 0) out.writer.writeByte(',') catch return null;
+                std.json.Stringify.value(row, .{}, &out.writer) catch return null;
+                count += 1;
+            }
+            out.writer.writeAll("]}") catch return null;
+        },
+        .messages => {
+            const messages = switch (root.get("messages") orelse return null) {
+                .object => |object| object,
+                else => return null,
+            };
+            const payload = messages.get(jid) orelse return a.allocator.dupe(u8, "{\"data\":{\"messages\":[]}}") catch null;
+            std.json.Stringify.value(payload, .{}, &out.writer) catch return null;
+        },
+        .archive, .unarchive => {
+            var found = false;
+            for (rows) |row| {
+                const object = switch (row) {
+                    .object => |object| object,
+                    else => continue,
+                };
+                if (!std.mem.eql(u8, getString(object, "jid"), jid)) continue;
+                const archived = object.getPtr("archived") orelse return null;
+                archived.* = .{ .bool = operation == .archive };
+                found = true;
+            }
+            if (!found) return null;
+            std.json.Stringify.value(parsed.value, .{}, &out.writer) catch return null;
+            if (!writeCacheFileAtomic(a, path, out.written())) return null;
+        },
+    }
+    return a.allocator.dupe(u8, out.written()) catch null;
+}
+
 fn prepareVerification(init: std.process.Init) !win.HKEY {
     if (!std.mem.eql(u8, init.environ_map.get("GITHUB_ACTIONS") orelse "", "true")) return error.VerificationRequiresActions;
     const root = init.environ_map.get("WAZIG_VERIFY_ROOT") orelse return error.MissingVerificationRoot;
@@ -17314,7 +17410,7 @@ pub fn main(init: std.process.Init) !void {
         if (app.wa_bridge_url.len > 0) init.gpa.free(app.wa_bridge_url);
         if (app.wa_bridge_key.len > 0) init.gpa.free(app.wa_bridge_key);
     }
-    app.startup_probe_pending = true;
+    app.startup_probe_pending = !verification_fixture or hubConfigured(app);
     if (cache_tag) |tag| {
         app.cache_tag.set(&tag);
         appendLaunchLog(app, "startup: saved account tag loaded");

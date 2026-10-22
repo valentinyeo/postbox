@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'whatsapp-hub', 'text-comparison')][string]$Feature = 'search',
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'whatsapp-hub', 'archive', 'text-comparison')][string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence'
 )
@@ -28,6 +28,15 @@ if ($Feature -eq 'menus') {
     New-Item $cache -ItemType Directory -Force | Out-Null
     $payload = @{ data = @{ messages = @(@{ MsgID = 'verify-menu-message'; Text = 'Synthetic menu verification'; SenderName = 'Verification Alpha'; FromMe = $false; Timestamp = '2026-01-01T12:00:00Z' }) } } | ConvertTo-Json -Depth 6 -Compress
     "wazig-msg-cache v2`n$tag`nverify-alpha`n$payload" | Set-Content (Join-Path $cache '82d67c3e0292bfc0.msg') -NoNewline
+}
+if ($Feature -eq 'archive') {
+    $provider = Join-Path $messages 'verification-provider.json'
+    $seed = @{ data = @(
+        @{ jid = 'verify-alpha@s.whatsapp.net'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = ''; archived = $false; unread = $false; unread_count = 0 },
+        @{ jid = 'verify-beta@s.whatsapp.net'; name = 'Verification Beta'; kind = 'direct'; last_message_ts = ''; archived = $false; unread = $false; unread_count = 0 }
+    ); messages = @{} }
+    $seed | ConvertTo-Json -Depth 8 | Set-Content $provider
+    $seed | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $messages "chats-$tag.json")
 }
 $exe = (Resolve-Path (Join-Path $Bin 'Messages.exe')).Path
 foreach ($case in @('not-actions', 'not-isolated')) {
@@ -129,6 +138,56 @@ try {
             Send-Keys $session '{ESC}'
             $null = Wait-Until { (Read-Control $session status).chat_count -eq 2 } 'baseline restored'
         }
+        archive {
+            Assert-That ((Read-Control $session status).selected.name -eq 'Verification Alpha') 'Archive fixture did not start on Alpha'
+            Send-Keys $session '^e'
+            $null = Wait-Until {
+                $state = Read-Control $session status
+                $row = (Get-Content $provider -Raw | ConvertFrom-Json).data | Where-Object name -eq 'Verification Alpha'
+                $row.archived -and $state.pending_archives -eq 0 -and $state.chat_count -eq 1 -and $state.selected.name -eq 'Verification Beta'
+            } 'Alpha archived through Ctrl+E'
+            Invoke-PaletteCommand $session 'Show archived chats'
+            $null = Wait-Until { $state = Read-Control $session status; $state.show_archived -and $state.chat_count -eq 1 -and $state.selected.name -eq 'Verification Alpha' } 'Alpha in Archive'
+            Invoke-PaletteCommand $session 'Archive and keep archived' action
+            $keep = Join-Path $messages 'archive-state.txt'
+            $null = Wait-Until {
+                (Read-Control $session status).pending_archives -eq 0 -and (Get-Content $keep -Raw).Contains("verify-alpha@s.whatsapp.net`t1`t")
+            } 'Keep archived persisted through palette'
+            Copy-Item $keep (Join-Path $Evidence 'kept-archive-state.txt')
+            Save-Screen $session kept
+            Invoke-PaletteCommand $session 'Show inbox chats'
+            $null = Wait-Until { $state = Read-Control $session status; -not $state.show_archived -and $state.chat_count -eq 1 -and $state.selected.name -eq 'Verification Beta' } 'inbox before incoming delivery'
+            $incoming = Get-Content $provider -Raw | ConvertFrom-Json
+            $alpha = $incoming.data | Where-Object name -eq 'Verification Alpha'
+            Assert-That ($alpha.archived -and $alpha.unread_count -eq 0) 'Unexpected pre-delivery provider state'
+            $alpha.archived = $false
+            $alpha.unread = $true
+            $alpha.unread_count = 1
+            $alpha.last_message_ts = '2026-10-10T11:00:00Z'
+            $incoming.messages | Add-Member -NotePropertyName 'verify-alpha@s.whatsapp.net' -NotePropertyValue @{ data = @{ messages = @(
+                @{ MsgID = 'verify-incoming-1'; ChatJID = 'verify-alpha@s.whatsapp.net'; FromMe = $false; SenderName = 'Verification Alpha'; Text = 'Verification incoming message'; Timestamp = $alpha.last_message_ts }
+            ) } }
+            $incoming | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'incoming-provider.json')
+            Copy-Item (Join-Path $Evidence 'incoming-provider.json') "$provider.next"
+            $null = Wait-Until {
+                try { [IO.File]::Move("$provider.next", $provider, $true); return $true } catch [IO.IOException] { return $false }
+            } 'atomic incoming provider delivery'
+            Add-Content (Join-Path $Evidence 'actions.log') 'provider: incoming verify-incoming-1; archived=false; unread_count=1'
+            $null = Wait-Until {
+                $row = (Get-Content $provider -Raw | ConvertFrom-Json).data | Where-Object name -eq 'Verification Alpha'
+                $state = Read-Control $session status
+                $row.archived -and $row.unread_count -eq 1 -and $state.pending_archives -eq 0 -and $state.chat_count -eq 1 -and $state.selected.name -eq 'Verification Beta'
+            } 'production merge re-archives kept Alpha after provider unarchive'
+            Save-Screen $session inbox
+            $chats = Read-Control $session chats
+            Assert-That ($chats.total -eq 1 -and $chats.chats[0].name -eq 'Verification Beta') 'Alpha resurfaced in the main list'
+            Invoke-PaletteCommand $session 'Show archived chats'
+            $null = Wait-Until {
+                $state = Read-Control $session status
+                $state.show_archived -and $state.chat_count -eq 1 -and $state.selected.name -eq 'Verification Alpha' -and $state.selected.archived -and $state.selected.unread -and $state.selected.unread_count -eq 1
+            } 'kept Alpha remains in Archive with updated unread count'
+            Save-Screen $session after
+        }
         navigation {
             Send-Keys $session '^{TAB}'
             $null = Wait-Until { (Read-Control $session status).selected.name -eq 'Verification Beta' } 'next chat'
@@ -209,7 +268,9 @@ try {
     Assert-That ($final.pending_sends -eq 0 -and $final.pending_archives -eq 0 -and $final.sync -eq 'stopped') 'Unexpected transport side effect'
     Assert-That (-not (Test-Path (Join-Path $profile '.wacli'))) 'Provider store was created'
     Assert-That (-not (Test-Path (Join-Path $messages 'telegram'))) 'Telegram store was created'
-    if ($Feature -ne 'whatsapp-hub') {
+    if ($Feature -eq 'archive') {
+        Assert-That ((Get-Content $provider -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture provider chat storage changed'
+    } elseif ($Feature -ne 'whatsapp-hub') {
         Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
     }
     $final | Add-Member -NotePropertyName production_preferences_absent -NotePropertyValue (-not (Test-Path 'HKCU:\Software\Messages'))
