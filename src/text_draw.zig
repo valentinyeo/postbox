@@ -1213,6 +1213,8 @@ test "DirectWrite fifty distinct strings frame benchmark" {
 
 test "ISSUE-462 DirectWrite paints every row-sized chat buffer" {
     if (builtin.os.tag != .windows) return error.SkipZigTest;
+    const screen = win.GetDC(null) orelse return error.CreateDCFailed;
+    defer _ = win.ReleaseDC(null, screen);
     const size = 384;
     const dc = win.CreateCompatibleDC(null) orelse return error.CreateDCFailed;
     defer _ = win.DeleteDC(dc);
@@ -1243,7 +1245,8 @@ test "ISSUE-462 DirectWrite paints every row-sized chat buffer" {
         const row = win.RECT{ .left = 0, .top = top, .right = 330, .bottom = top + 64 };
         for ([_]bool{ false, true }) |buffered| {
             @memset(pixels, 0);
-            var surface = if (buffered) @import("paint_buffer.zig").Buffer.init(dc, client, row) else @import("paint_buffer.zig").Buffer{ .hdc = dc, .target = dc, .rect = row };
+            var surface = if (buffered) @import("paint_buffer.zig").Buffer.init(screen, client, row) else @import("paint_buffer.zig").Buffer{ .hdc = dc, .target = dc, .rect = row };
+            surface.target = dc;
             {
                 defer surface.deinit();
                 var shapes = @import("smooth_shapes.zig").Context.init(surface.hdc);

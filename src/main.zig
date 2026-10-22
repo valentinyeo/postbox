@@ -14301,6 +14301,13 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     _ = win.SetTextColor(item.hDC, row_text);
     const pinned_chat = isChatPinned(a, chat_key.of(chat));
     var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 34) };
+    if (verification_text_comparison) {
+        var clip: win.RECT = undefined;
+        var viewport: win.POINT = undefined;
+        _ = win.GetClipBox(item.hDC, &clip);
+        _ = win.GetViewportOrgEx(item.hDC, &viewport);
+        std.debug.print("ISSUE-462 chat row index={d} name_len={d} kind_len={d} rect={any} clip={any} viewport={any}\n", .{ index, chat.name.len, chat.kind.len, name_rect, clip, viewport });
+    }
     _ = text_draw.drawText(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     if (pinned_chat) {
         drawPinIcon(a, &shapes, item.rcItem.right - px(a, 78), item.rcItem.top + px(a, 10), row_muted, false);
