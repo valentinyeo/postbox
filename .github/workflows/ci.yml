@@ -57,6 +57,9 @@ jobs:
       - name: Preflight
         run: ZIG=zig bash tools/preflight.sh
 
+      - name: Compile ARM64 release
+        run: zig build -Dtarget=aarch64-windows-gnu --release=small -p zig-out-arm64
+
       - name: Agent guard tests
         run: |
           git fetch --quiet --no-tags origin '+refs/pull/*/head:refs/remotes/pr/*'
