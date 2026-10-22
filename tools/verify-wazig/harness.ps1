@@ -217,6 +217,14 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
         Assert-That (@($requests | Where-Object { $_.path.StartsWith($path) -and $_.status -eq 200 }).Count -gt 0) "Missing hub list request: $path"
     }
     Hub-Pass $Session chats
+    if (-not $unified) {
+        $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/send' -and $_.body.client_id -eq '53200000000000000000000000000001' }).Count -eq 1 } 'foreign outbox startup send'
+        $adopted = @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/send' -and $_.body.client_id -eq '53200000000000000000000000000001' })
+        Assert-That ($adopted.Count -eq 1 -and $adopted[0].status -eq 200 -and $adopted[0].accepted -eq $true) 'Adopted send was not delivered exactly once'
+        Assert-That ($adopted[0].body.account -eq 'personal' -and $adopted[0].body.chat -eq $alpha -and $adopted[0].body.reply_to -eq 'BASELINE') 'Adopted send kept foreign identity'
+        Assert-That ([string]::IsNullOrEmpty((Get-Content (Join-Path $Messages 'hub-1111111111111111-outbox.jsonl') -Raw))) 'Adopted line remains in foreign outbox'
+        Hub-Pass $Session foreign-outbox-startup
+    }
     $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object id -eq 'BASELINE').Count -eq 1 } 'hub history visible'
     Send-Keys $Session '^{TAB}'
     $null = Wait-Until {
@@ -250,7 +258,7 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
     Send-Keys $Session 'Fixture outgoing'
     Send-Keys $Session '{ENTER}'
     $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/send' -and $_.duplicate -eq $true -and $_.status -eq 200 }).Count -eq 1 } 'deduplicated hub retry'
-    $sends = @(Read-BridgeRequests $Session | Where-Object path -eq '/v1/send')
+    $sends = @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/send' -and $_.body.client_id -ne '53200000000000000000000000000001' })
     Assert-That ($sends.Count -ge 2 -and @($sends.body.client_id | Select-Object -Unique).Count -eq 1) 'Send retry changed client_id'
     Assert-That (@($sends | Where-Object accepted -eq $true).Count -eq 1) 'Send delivered more than once'
     Assert-That ($sends[0].body.client_id -match '^[a-f0-9]{32}$') 'Send did not use the outbox id'

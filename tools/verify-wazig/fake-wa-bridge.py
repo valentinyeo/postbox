@@ -190,7 +190,9 @@ class Handler(BaseHTTPRequestHandler):
                     state.sends[client_id] = dict(client_id=client_id, msg_id='SENT', ts=state.stamp, status='sent')
                 state.send_attempts[client_id] = state.send_attempts.get(client_id, 0) + 1
                 reply = state.sends[client_id]
-            if not duplicate:
+            if client_id == '53200000000000000000000000000001':
+                self.respond(200, reply, body=body, accepted=not duplicate, duplicate=duplicate)
+            elif not duplicate:
                 self.record(0, body=body, accepted=True, duplicate=False)
                 self.close_connection = True
                 self.connection.shutdown(socket.SHUT_RDWR)

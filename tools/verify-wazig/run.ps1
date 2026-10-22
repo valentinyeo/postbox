@@ -69,6 +69,7 @@ $start.Environment['USERNAME'] = "verify-$id"
 foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN')) { $null = $start.Environment.Remove($name) }
 $bridge = $null
 if ($Feature -eq 'whatsapp-hub') {
+    @{ id = '53200000000000000000000000000001'; provider = 'whatsapp'; account = '1111111111111111'; jid = 'personal:15550000001@s.whatsapp.net'; text = 'Synthetic adopted send'; file = ''; reply_to = 'personal:BASELINE'; state = 'queued'; queued_unix = 1 } | ConvertTo-Json -Compress | Set-Content (Join-Path $messages 'hub-1111111111111111-outbox.jsonl')
     $bridge = Start-FakeBridge $Evidence $root
     $start.Environment['WAZIG_VERIFY_HUB_URL'] = $bridge.url
     $start.Environment['WAZIG_VERIFY_HUB_KEY'] = 'fixture-key-not-a-secret'
@@ -102,6 +103,9 @@ try {
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
     if ($Feature -in @('whatsapp-hub', 'hub')) {
         $null = Wait-Until { (Read-Control $session status).chat_count -eq 2 } 'hub chat list'
+    }
+    if ($Feature -eq 'whatsapp-hub') {
+        $null = Wait-Until { (Read-Control $session status).pending_sends -eq 0 } 'adopted outbox acknowledged'
     }
     Invoke-Doctor $session
     if ($Feature -eq 'search') {
