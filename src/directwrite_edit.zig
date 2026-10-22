@@ -106,7 +106,7 @@ const Host = struct {
             defer _ = win.ReleaseDC(self.hwnd, dc);
             var format = std.mem.zeroes(win.CHARFORMAT2W);
             format.cbSize = @sizeOf(win.CHARFORMAT2W);
-            format.dwMask = win.CFM_FACE | win.CFM_SIZE | win.CFM_WEIGHT | win.CFM_ITALIC | win.CFM_UNDERLINE;
+            format.dwMask = @as(u32, win.CFM_FACE) | @as(u32, win.CFM_SIZE) | @as(u32, win.CFM_WEIGHT) | @as(u32, win.CFM_ITALIC) | @as(u32, win.CFM_UNDERLINE);
             format.dwEffects = (if (logical.lfItalic != 0) @as(u32, win.CFE_ITALIC) else 0) | (if (logical.lfUnderline != 0) @as(u32, win.CFE_UNDERLINE) else 0);
             format.yHeight = win.MulDiv(@intCast(@abs(logical.lfHeight)), 1440, @max(1, win.GetDeviceCaps(dc, win.LOGPIXELSY)));
             format.wWeight = @intCast(logical.lfWeight);
