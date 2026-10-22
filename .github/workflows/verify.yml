@@ -40,6 +40,8 @@ jobs:
         feature: ${{ fromJSON(github.event_name == 'pull_request' && '["search","drafts","whatsapp-hub","text-comparison"]' || format('["{0}"]', inputs.feature || 'search')) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Check skill map and PowerShell syntax
         shell: pwsh
         run: |
@@ -66,8 +68,7 @@ jobs:
       - name: ISSUE-462 row-sized DirectWrite regression
         shell: pwsh
         run: |
-          zig test src/text_draw.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-462
-          if ($LASTEXITCODE -ne 0) { throw 'Chat row text regression' }
+          & tools/verify-wazig/check-chat-rows.ps1
       - name: Build real desktop and control client
         run: zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
       - name: Launch, doctor and drive

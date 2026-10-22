@@ -1249,9 +1249,13 @@ test "ISSUE-462 DirectWrite paints every row-sized chat buffer" {
                 var shapes = @import("smooth_shapes.zig").Context.init(surface.hdc);
                 defer shapes.deinit();
                 _ = win.FillRect(surface.hdc, &row, background);
+                @import("smooth_shapes.zig").fillEllipse(&shapes, .{ .left = 12, .top = top + 10, .right = 54, .bottom = top + 52 }, 0x262626);
                 _ = win.SelectObject(surface.hdc, font);
                 _ = win.SetTextColor(surface.hdc, 0xffffff);
                 _ = win.SetBkMode(surface.hdc, win.TRANSPARENT);
+                var initial = win.RECT{ .left = 12, .top = top + 10, .right = 54, .bottom = top + 52 };
+                _ = drawText(surface.hdc, wide("V"), -1, &initial, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+                @import("smooth_shapes.zig").fillRoundRect(&shapes, .{ .left = 39, .top = top + 38, .right = 60, .bottom = top + 56 }, 8, 8, 0x333333);
                 var name = win.RECT{ .left = 66, .top = top + 10, .right = 276, .bottom = top + 34 };
                 var preview = win.RECT{ .left = 66, .top = top + 35, .right = 288, .bottom = top + 56 };
                 var clip: win.RECT = undefined;
@@ -1265,7 +1269,7 @@ test "ISSUE-462 DirectWrite paints every row-sized chat buffer" {
             var name_ink: usize = 0;
             var preview_ink: usize = 0;
             for (pixels, 0..) |pixel, i| {
-                if (pixel & 0xffffff == 0) continue;
+                if (pixel & 0xffffff == 0 or i % size < 66) continue;
                 const y = i / size;
                 if (y >= top + 10 and y < top + 34) name_ink += 1;
                 if (y >= top + 35 and y < top + 56) preview_ink += 1;
