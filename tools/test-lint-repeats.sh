@@ -69,6 +69,23 @@ fixture="$temp/f1-fixtures"
 mkdir -p "$fixture/src" "$fixture/.github/workflows"
 printf 'name: fixture\n' > "$fixture/.github/workflows/fixture.yml"
 : > "$fixture/src/main.zig"
+for mutation in permission secret trigger; do
+    case "$mutation" in
+        permission) sed '/models: read/d' "$repo/.github/workflows/ai-review.yml" ;;
+        secret) sed 's/github.token/secrets.OPENAI_API_KEY/g' "$repo/.github/workflows/ai-review.yml" ;;
+        trigger) sed 's/^  pull_request:/  pull_request_target:/' "$repo/.github/workflows/ai-review.yml" ;;
+    esac > "$fixture/.github/workflows/ai-review.yml"
+    status=0
+    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+    if (( status != 1 )) || ! grep -Fq '[B6]' "$temp/output"; then
+        cat "$temp/output" >&2
+        printf 'test-lint-repeats: FAIL B6 must reject AI review %s regression, got exit %s\n' "$mutation" "$status" >&2
+        exit 1
+    fi
+done
+cp "$repo/.github/workflows/ai-review.yml" "$fixture/.github/workflows/ai-review.yml"
+"$lint" "$fixture"
+printf 'test-lint-repeats: B6 requires free Models permission and rejects secrets and pull_request_target\n'
 b8_cases=0
 for missing in ci tdlib windows-smoke no-comments unfurl-verification private-markers secret-scan pr-title notify-release "tdlib-cache / cache"; do
     sed "s|\"$missing\"||g" "$repo/.github/workflows/automerge.yml" > "$fixture/.github/workflows/automerge.yml"
