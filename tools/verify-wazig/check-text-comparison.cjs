@@ -29,7 +29,7 @@ assert.equal(chrome.mode, 'installed Chrome, headed, device scale 1');
 assert.ok(chrome.chrome_version);
 assert.deepEqual(chrome.fonts, [{ weight: '500', status: 'loaded' }, { weight: '600', status: 'loaded' }]);
 assert.equal(read('chrome.html').toString('utf8'), html(metrics, contract.fixture));
-for (const file of ['IBMPlexSans-Medium.ttf', 'IBMPlexSans-SemiBold.ttf']) {
+for (const file of ['IBMPlexSans-Medium.ttf', 'IBMPlexSans-SemiBold.ttf', 'IBM-Plex-LICENSE.txt']) {
     assert.equal(hash(read(file)), hash(fs.readFileSync(path.resolve(__dirname, '../../assets', file))));
 }
 assert.deepEqual(png('wazig.png'), { width: native.width, height: native.height });

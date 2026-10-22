@@ -67,7 +67,7 @@ async function capture(evidence, bin) {
     assert.equal(process.platform, 'win32', 'Chrome capture requires the Windows runner');
     const metrics = JSON.parse(fs.readFileSync(path.join(evidence, 'text-metrics.json'), 'utf8'));
     const contract = verifyMetrics(metrics);
-    for (const file of ['IBMPlexSans-Medium.ttf', 'IBMPlexSans-SemiBold.ttf']) {
+    for (const file of ['IBMPlexSans-Medium.ttf', 'IBMPlexSans-SemiBold.ttf', 'IBM-Plex-LICENSE.txt']) {
         fs.copyFileSync(path.join(bin, file), path.join(evidence, file));
     }
     const pagePath = path.resolve(evidence, 'chrome.html');
