@@ -17115,9 +17115,10 @@ fn saveVerificationTextMetrics(a: *App, hdc: win.HDC, message: *const Message, x
     const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch return;
     defer a.allocator.free(text);
     var origin = win.POINT{ .x = x, .y = y };
-    _ = win.ClientToScreen(a.canvas, &origin);
+    const canvas_hwnd = a.canvas orelse return;
+    _ = win.ClientToScreen(canvas_hwnd, &origin);
     var canvas: win.RECT = undefined;
-    _ = win.GetClientRect(a.canvas, &canvas);
+    _ = win.GetClientRect(canvas_hwnd, &canvas);
     const dpi: i32 = @intCast(a.dpi);
     const data = std.json.Stringify.valueAlloc(a.allocator, .{
         .text = text,
