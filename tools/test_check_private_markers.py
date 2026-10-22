@@ -67,10 +67,10 @@ class PrivateMarkers(unittest.TestCase):
 
     def test_only_named_public_skill_files_are_allowed(self):
         private = [".claude/skills/verify-wazig/private.md", ".claude/skills/verify-wazig/features/private.md", ".claude/skills/verify-wazig-other/SKILL.md"]
-        self.assertEqual(private_paths(list(check_private_markers.PUBLIC_SKILL_PATHS) + [".claude/skills/verify-wazig/features/menus.md"] + private), private)
+        self.assertEqual(private_paths(list(check_private_markers.PUBLIC_SKILL_PATHS) + [".claude/skills/verify-wazig/features/menus.md", ".claude/skills/verify-wazig/features/slack-session.md"] + private), private)
 
     def test_public_skill_content_still_rejects_private_markers(self):
-        for path in [".claude/skills/verify-wazig/SKILL.md", ".claude/skills/verify-wazig/features/menus.md"]:
+        for path in [".claude/skills/verify-wazig/SKILL.md", ".claude/skills/verify-wazig/features/menus.md", ".claude/skills/verify-wazig/features/slack-session.md"]:
             with self.subTest(path=path), mock.patch.object(check_private_markers, "git", return_value=path.encode()), mock.patch.object(os.path, "isfile", return_value=True), mock.patch("builtins.open", mock.mock_open(read_data=b"ZZDEVICE")):
                 self.assertEqual(check_private_markers.scan_tree(load_markers("ZZDEVICE")), [(path, 1, 1)])
 

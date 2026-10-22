@@ -16,6 +16,7 @@ PUBLIC_SKILL_PATHS = (
     ".claude/skills/verify-wazig/features/appearance.md",
     ".claude/skills/verify-wazig/features/whatsapp-hub.md",
     ".claude/skills/verify-wazig/features/hub.md",
+    ".claude/skills/verify-wazig/features/slack-session.md",
     ".claude/skills/verify-wazig/features/menus.md",
     ".claude/skills/verify-wazig/features/archive.md",
 )
