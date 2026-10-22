@@ -345,7 +345,11 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     try std.testing.expectEqual(@as(win.LRESULT, @bitCast(@intFromPtr(font))), win.SendMessageW(edit, win.WM_GETFONT, 0, 0));
     var format = std.mem.zeroes(win.CHARFORMAT2W);
     format.cbSize = @sizeOf(win.CHARFORMAT2W);
-    _ = host.send(win.EM_GETCHARFORMAT, win.SCF_DEFAULT, @bitCast(@intFromPtr(&format)));
+    const format_mask = host.send(win.EM_GETCHARFORMAT, win.SCF_DEFAULT, @bitCast(@intFromPtr(&format)));
+    var logical = std.mem.zeroes(win.LOGFONTW);
+    const font_bytes = win.GetObjectW(font, @sizeOf(win.LOGFONTW), &logical);
+    std.debug.print("IGSH-466 native font diagnostics: format size={d}, weight offset={d}, mask={x}/{x}, height={d}, weight={d}, font bytes={d}, logical height={d}, logical weight={d}, face={any}\n", .{ @sizeOf(win.CHARFORMAT2W), @offsetOf(win.CHARFORMAT2W, "wWeight"), format_mask, format.dwMask, format.yHeight, format.wWeight, font_bytes, logical.lfHeight, logical.lfWeight, format.szFaceName });
+    try std.testing.expect(format_mask != 0);
     try std.testing.expectEqual(@as(u16, 500), format.wWeight);
     try std.testing.expectEqual(@as(i32, 255), format.yHeight);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans"), std.mem.sliceTo(&format.szFaceName, 0));
