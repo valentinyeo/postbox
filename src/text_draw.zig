@@ -1234,7 +1234,7 @@ test "ISSUE-462 DirectWrite paints every row-sized chat buffer" {
     const chat_draw = main[chat_start..][0..chat_end];
     const finish_before_text = std.mem.indexOf(u8, chat_draw, "    shapes.deinit();") != null;
     if (finish_before_text) {
-        const finish = std.mem.indexOf(u8, chat_draw, "    shapes.deinit();").?;
+        const finish = std.mem.lastIndexOf(u8, chat_draw, "    shapes.deinit();").?;
         try std.testing.expect(std.mem.indexOf(u8, chat_draw[0..finish], "text_draw.draw") == null);
         try std.testing.expect(std.mem.indexOf(u8, chat_draw[finish..], "&shapes") == null);
     }

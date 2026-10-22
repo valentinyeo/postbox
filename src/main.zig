@@ -14258,12 +14258,6 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     const selected = (item.itemState & win.ODS_SELECTED) != 0;
     const bulk_selected = a.bulk.count > 0 and a.bulk.containsKey(chat_key.of(chat));
     _ = win.FillRect(item.hDC, &item.rcItem, background);
-    var shapes = smooth.Context.init(item.hDC);
-    if (selected or bulk_selected) {
-        smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius * 2), px(a, theme.selected_row_radius * 2), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
-    }
-    const row_text = if (bulk_selected) theme.current.on_primary_container else theme.current.on_surface;
-    const row_muted = if (bulk_selected) row_text else theme.current.on_surface_variant;
     _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
     if (bulk_selected) {
         if (win.CreateSolidBrush(theme.current.primary)) |bar_brush| {
@@ -14273,11 +14267,23 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         }
     }
 
+    var shapes = smooth.Context.init(item.hDC);
+    if (selected or bulk_selected) {
+        smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius * 2), px(a, theme.selected_row_radius * 2), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
+    }
+    const row_text = if (bulk_selected) theme.current.on_primary_container else theme.current.on_surface;
+    const row_muted = if (bulk_selected) row_text else theme.current.on_surface_variant;
+
     const avatar_left = item.rcItem.left + px(a, 12);
     const avatar_top = item.rcItem.top + px(a, 10);
     const avatar_entry = if (chat.provider == .whatsapp) avatarForChat(a, chat.jid.slice()) else null;
     if (avatar_entry == null or avatar_entry.?.bitmap == null) {
         smooth.fillEllipse(&shapes, .{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 }, theme.current.surface_container_highest);
+    }
+    if (avatar_entry != null and avatar_entry.?.bitmap != null) {
+        shapes.deinit();
+        drawAvatarBitmap(item.hDC, avatar_entry.?.bitmap.?, avatar_left, avatar_top, 42);
+        shapes = smooth.Context.init(item.hDC);
     }
     const badge = win.RECT{ .left = avatar_left + px(a, 27), .top = avatar_top + px(a, 28), .right = avatar_left + px(a, 48), .bottom = avatar_top + px(a, 46) };
     smooth.fillRoundRect(&shapes, badge, px(a, 8), px(a, 8), theme.current.primary_container);
@@ -14292,9 +14298,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         smooth.fillEllipse(&shapes, .{ .left = dot_right - diameter, .top = dot_top, .right = dot_right, .bottom = dot_top + diameter }, theme.current.primary);
     }
     shapes.deinit();
-    if (avatar_entry != null and avatar_entry.?.bitmap != null) {
-        drawAvatarBitmap(item.hDC, avatar_entry.?.bitmap.?, avatar_left, avatar_top, 42);
-    }
+    _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
     if ((avatar_entry == null or avatar_entry.?.bitmap == null) and chat.name.len > 0) {
         var initial_length: c_int = 1;
         if (chat.name.buf[0] >= 0xd800 and chat.name.buf[0] <= 0xdbff and chat.name.len > 1) initial_length = 2;

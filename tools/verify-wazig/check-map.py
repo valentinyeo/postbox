@@ -23,7 +23,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, archive]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, archive, text-comparison]' in workflow
 assert 'default: search' in workflow
 assert 'Keep archived\\tCtrl+Shift+E' in (root / 'src/chat_menu.zig').read_text(encoding='utf-8')
 for helper in ['run', 'doctor', 'cleanup', 'harness']:
