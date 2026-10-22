@@ -204,4 +204,4 @@ if grep -Eqi 'codex|openai_api_key' "$check"; then
     printf 'test-ai-review: FAIL paid-key transport remains\n' >&2
     exit 1
 fi
-printf 'test-ai-review: PASS chunking, request bounds, aggregation, partial failures, retries, clean verdict, update, superseded head and free-token transport\n'
+printf 'test-ai-review: PASS chunking, request bounds, aggregation, partial failures, retries, clean verdict, update, superseded head, and free-token transport\n'
