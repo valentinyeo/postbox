@@ -16,7 +16,7 @@ gh run watch <id> --interval 60 --exit-status
 gh run download <id> --name verify-wazig-search --dir evidence/<id>
 ```
 
-Replace `search` with a [feature ID](features/README.md). Confirm the run's branch and commit before trusting it. Dispatch requires this workflow on the default branch. Before merge, the retained `pull_request` paths trigger runs the `search` and `whatsapp-hub` journeys, including changes to this skill, the helper or the app source. Watch that PR run instead; do not pretend a dispatch ran on an unregistered workflow.
+Replace `search` with a [feature ID](features/README.md). Confirm the run's branch and commit before trusting it. Dispatch requires this workflow on the default branch. Before merge, the retained `pull_request` path triggers run the `search`, `drafts` and `whatsapp-hub` journeys, including changes to this skill, the helper or the app source. Watch that PR run instead; do not pretend a dispatch ran on an unregistered workflow.
 
 `verify.yml` installs Zig 0.16.0 and builds `Messages.exe`, `wazigctl.exe` and bundled IBM Plex fonts with the same Windows `--release=small` build used by ci.yml's unfurl-verification job. The evidence build version is `0.0.526`; this base desktop build does not include TDLib. It does not download or install wacli, authenticate a provider, or install the app. The `whatsapp-hub` journey additionally verifies the production HTTPS backend against an authenticated loopback fake bridge; it never contacts a real provider. Loopback HTTP is allowed only inside the guarded verification fixture.
 
@@ -48,7 +48,7 @@ Artifacts are uploaded as `verify-wazig-<feature>` even after failure. `verifica
 - `actions.log`, `run.log`, `doctor.json`, `session.json` with build hash/revision, and `result.txt` or `failure.txt`.
 - `side-effects.json`: no pending sends/archives, local sync stopped; offline fixture storage unchanged, no WhatsApp or Telegram store created. The hub journey intentionally updates its separate hub cache.
 - Hub only: `bridge-requests.jsonl`, `hub-proof.log`, history/live message snapshots and additional screenshots; a simulated lost send response must retry the same outbox ID with one accepted delivery, SSE must resume IDs 1 and 2, and media must return 202 then cached bytes.
-- `final-data/`, `preferences.txt` when settings exist, and `cleanup.txt`; drafts additionally copy `drafts.json` before cleanup.
+- `final-data/`, `preferences.txt` when settings exist, and `cleanup.txt`; drafts additionally copy `drafts.json` before cleanup and save `composer-one-box.log` plus `composer-{amoled,green}-{wide,narrow}-{one,multiline}` screenshots, layout bounds, UI Automation trees and state snapshots.
 
 Download and **look at** before and after screenshots. Require the app title, actual action and resulting visible state, plus the corresponding logged/read-only assertion. A green exit or a final screenshot alone is insufficient. Check search removal/restoration or per-chat draft persistence alongside visible results. Reject blank/obscured screenshots. An absent provider account is deliberate; never call a skipped send, media download, transcription or login verified. Never substitute test-only setters. Only the provider data boundary is fixture-backed; the UI path is production code.
 

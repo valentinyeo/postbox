@@ -18,6 +18,7 @@ on:
       - src/slack_win.zig
       - src/transport.zig
       - build.zig
+      - src/compose_layout.zig
 
 permissions:
   contents: read
@@ -33,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["search","whatsapp-hub"]' || format('["{0}"]', inputs.feature || 'search')) }}
+        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["search","drafts","whatsapp-hub"]' || format('["{0}"]', inputs.feature || 'search')) }}
     steps:
       - uses: actions/checkout@v4
       - name: Check skill map and PowerShell syntax
