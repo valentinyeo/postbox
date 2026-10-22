@@ -18,6 +18,7 @@ test "IGSH-531 opaque chat handles are encoded without parsing source identities
     const allocator = arena.allocator();
     const list = try hub.chats(allocator, true, 500);
     try std.testing.expectEqualStrings("/v1/wazig/chats?archived=true&limit=500", list.path);
+    try std.testing.expectEqualStrings("/v1/wazig/chats?archived=true&limit=800", (try hub.chats(allocator, true, 800)).path);
     const history = try hub.messages(allocator, chat, 80, "cursor+/");
     try std.testing.expectEqualStrings("/v1/wazig/messages?chat=fixture%2Faccount%3Aroom%20%2B%2F&limit=80&before=cursor%2B%2F", history.path);
     const media = try hub.binary(allocator, chat, "media/id");
