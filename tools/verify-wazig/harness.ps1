@@ -345,11 +345,12 @@ function Assert-ComposerLayout($Session, [string]$Name, [int]$Lines, $Baseline =
 
 function Invoke-SlackSessionJourney($Session, [string]$Messages) {
     $state = Read-Control $Session status
-    Assert-That ($state.selected.provider -eq 'slack' -and $state.selected.name -eq 'fake-slack-chat') 'Fake Slack chat lost its network badge identity'
+    Assert-That ($state.selected.provider -eq 'slack' -and $state.selected.name -eq '#fake-slack-chat') 'Fake Slack chat lost its network badge identity'
     Assert-That (-not (Test-Path (Join-Path $Messages 'slack-session-import.json'))) 'Session import was not consumed'
     $preferences = "HKCU:\Software\MessagesVerification\$($Session.id)\Software\Messages"
     $key = Get-Item $preferences
     Assert-That ($key.GetValueKind('SlackInstallation-TFAKE001') -eq [Microsoft.Win32.RegistryValueKind]::Binary) 'Slack session credentials were not DPAPI protected'
+    Send-Keys $Session '^{TAB}'
     $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object text -eq 'Fake Slack history').Count -eq 1 } 'Slack history visible'
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'history.messages.json')
     Save-Screen $Session history
