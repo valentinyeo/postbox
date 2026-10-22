@@ -1,4 +1,5 @@
 const std = @import("std");
+const verification_fixture = false;
 const chat_key = @import("chat_key");
 const archive_rules = @import("archive_rules");
 const voice_sent = @import("voice_sent");
