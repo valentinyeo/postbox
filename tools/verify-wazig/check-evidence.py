@@ -5,21 +5,28 @@ import sys
 
 folder = Path(sys.argv[1])
 session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
-if session['feature'] == 'whatsapp-hub':
+if session['feature'] in ('whatsapp-hub', 'hub'):
+    unified = session['feature'] == 'hub'
     assert session['sha256'] and session['commit']
     assert not (folder / 'failure.txt').exists()
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
     gates = ['chats', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']
     for gate in gates:
-        assert f'whatsapp-hub {gate} PASS' in proof, gate
+        assert f"{session['feature']} {gate} PASS" in proof, gate
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert all(row['authorized'] for row in requests if row['method'] != 'SSE')
     sends = [row for row in requests if row['path'] == '/v1/send']
     assert len(sends) >= 2 and len({row['body']['client_id'] for row in sends}) == 1
     assert sum(row['accepted'] for row in sends) == 1
     assert any(row.get('duplicate') and row['status'] == 200 for row in sends)
-    assert all(row['body']['account'] == 'personal' and row['body']['chat'] == '15550000001@s.whatsapp.net' for row in sends)
-    for path in ['/v1/accounts', '/v1/chats?', '/v1/messages?', '/v1/mark-read', '/v1/archive']:
+    if unified:
+        assert all('account' not in row['body'] and row['body']['chat'] == 'fixture-alpha' for row in sends)
+    else:
+        assert all(row['body']['account'] == 'personal' and row['body']['chat'] == '15550000001@s.whatsapp.net' for row in sends)
+    paths = ['/v1/chats?', '/v1/messages?', '/v1/mark-read', '/v1/archive']
+    if not unified:
+        paths.append('/v1/accounts')
+    for path in paths:
         assert any(row['path'].startswith(path) and row.get('status') == 200 for row in requests), path
     assert any(row['path'] == '/v1/archive' and row['body']['archived'] for row in requests)
     assert any(row['method'] == 'SSE' and row['kind'] == 'msg' for row in requests)
@@ -54,11 +61,16 @@ if session['feature'] == 'whatsapp-hub':
     for keys in ['^{TAB}', '^+{TAB}', 'Compose message', 'Fixture outgoing', 'Archive selected chat', '{ENTER}']:
         assert f'keys: {keys}' in actions
     launch = (folder / 'final-data/launch-log.txt').read_text(encoding='utf-8')
-    assert launch.count('whatsapp backend:') == 1 and 'whatsapp backend: hub' in launch
+    backend = 'message backend:' if unified else 'whatsapp backend:'
+    assert launch.count(backend) == 1 and backend + ' hub' in launch
+    if unified:
+        assert before['selected']['provider'] == 'slack' and final['selected']['provider'] == 'telegram'
+        assert all(row['wire_path'].startswith('/v1/wazig/') or row['wire_path'] == '/fixture/live' for row in requests)
+        assert not any('account=' in row['wire_path'] for row in requests)
     assert 'fixture-key-not-a-secret' not in launch and session['bridge_url'] not in launch
-    assert 'JOURNEY PASSED: whatsapp-hub' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
+    assert 'JOURNEY PASSED: ' + session['feature'] in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('EVIDENCE VERIFIED: whatsapp-hub chats, history, live replay, send dedupe, reads, archive, media cache and isolation')
+    print('EVIDENCE VERIFIED: ' + session['feature'] + ' chats, history, live replay, send dedupe, reads, archive, media cache and isolation')
     raise SystemExit(0)
 if session['feature'] == 'menus':
     assert session['sha256'] and session['commit']
@@ -106,6 +118,9 @@ feature = session['feature']
 assert session['sha256'] and session['commit']
 snapshots = ['doctor', 'before', 'after', 'side-effects']
 if feature == 'search':
+    assert 'hub no-url-direct-fallback PASS' in (folder / 'fallback-proof.log').read_text(encoding='utf-8-sig')
+    launch = (folder / 'final-data/launch-log.txt').read_text(encoding='utf-8-sig')
+    assert 'whatsapp backend: wacli (URL not configured)' in launch and 'message backend: hub' not in launch
     snapshots += ['empty']
 else:
     snapshots += ['action', 'kept', 'inbox']

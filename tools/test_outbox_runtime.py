@@ -33,7 +33,7 @@ def mutate(source, name):
         "no-credentials": ("or !slackConfigured(a) ", ""),
         "wrong-retirement": ("if (!std.mem.eql(u8, slot.entry.idSlice(), id)) continue;", "_ = id;"),
         "wrong-failed-bubble": ("const index = pendingByClientMsgId(a, client_msg_id) orelse return;", "const index = if (!result.ok) oldestPendingSend(a) orelse return else pendingByClientMsgId(a, client_msg_id) orelse return;"),
-        "slack-paste-to-whatsapp": ("staged_file.len > 0 and stagedFileGoesToWacli(a.chats[a.selected_chat].provider)", "staged_file.len > 0"),
+        "slack-paste-to-whatsapp": ("staged_file.len > 0 and (unifiedHub(a) or stagedFileGoesToWacli(a.chats[a.selected_chat].provider))", "staged_file.len > 0"),
         "same-text-reload": ("if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if ((head.from_disk or head.retries == 0 or (head.retries > 0 and head.ambiguous)) and"),
         "restored-resend": ("if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if (head.retries > 0 and head.ambiguous and"),
         "delete-before-retirement": ("if (!persistOutbox(a)) {\n        setStatus(a, \"Could not save send completion; retrying journal\");\n        return false;\n    }", "_ = persistOutbox(a);"),

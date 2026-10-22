@@ -159,7 +159,7 @@ function Invoke-Doctor($Session) {
     $compose = Get-Edit $window '1032'
     Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable'
     $null = Read-Edit $search
-    if ($Session.feature -eq 'whatsapp-hub') {
+    if ($Session.feature -in @('whatsapp-hub', 'hub')) {
         $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'hub baseline'
     }
     $status = Read-Control $Session status
@@ -170,11 +170,12 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
-    $start.ArgumentList.Add((Join-Path $PSScriptRoot 'fake-wa-bridge.py'))
+    $script = if ($Unified) { 'fake-hub.py' } else { 'fake-wa-bridge.py' }
+    $start.ArgumentList.Add((Join-Path $PSScriptRoot $script))
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')
@@ -197,28 +198,34 @@ function Read-BridgeRequests($Session) {
 }
 
 function Hub-Pass($Session, [string]$Gate) {
-    $line = "whatsapp-hub $Gate PASS"
+    $line = "$($Session.feature) $Gate PASS"
     Write-Output $line
     Add-Content (Join-Path $Session.evidence 'hub-proof.log') $line
 }
 
 function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
     $state = Read-Control $Session status
-    Assert-That ($state.chat_count -eq 2 -and $state.selected.name -eq 'Verification Alpha' -and $state.selected.id -eq '15550000001@s.whatsapp.net' -and $state.selected.provider -eq 'whatsapp') 'Hub chats did not reach the sidebar'
+    $unified = $Session.feature -eq 'hub'
+    $rows = (Read-Control $Session chats).chats
+    $alpha = if ($unified) { 'fixture-alpha' } else { ($rows | Where-Object name -eq 'Verification Alpha').id }
+    $beta = if ($unified) { 'fixture-beta' } else { ($rows | Where-Object name -eq 'Verification Beta').id }
+    $provider = if ($unified) { 'slack' } else { 'whatsapp' }
+    Assert-That ($state.chat_count -eq 2 -and $state.selected.name -eq 'Verification Alpha' -and $state.selected.id -eq $alpha -and $state.selected.provider -eq $provider) 'Hub chats did not reach the sidebar'
     $requests = @(Read-BridgeRequests $Session)
-    foreach ($path in @('/v1/accounts', '/v1/chats?')) {
+    $listPaths = if ($unified) { @('/v1/chats?') } else { @('/v1/accounts', '/v1/chats?') }
+    foreach ($path in $listPaths) {
         Assert-That (@($requests | Where-Object { $_.path.StartsWith($path) -and $_.status -eq 200 }).Count -gt 0) "Missing hub list request: $path"
     }
     Hub-Pass $Session chats
     Send-Keys $Session '^{TAB}'
-    $null = Wait-Until { (Read-Control $Session status).selected.id -eq '15550000002@s.whatsapp.net' } 'hub Beta selected'
+    $null = Wait-Until { (Read-Control $Session status).selected.id -eq $beta } 'hub Beta selected'
     Send-Keys $Session '^+{TAB}'
-    $null = Wait-Until { (Read-Control $Session status).selected.id -eq '15550000001@s.whatsapp.net' } 'hub Alpha selected'
+    $null = Wait-Until { (Read-Control $Session status).selected.id -eq $alpha } 'hub Alpha selected'
     $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object id -eq 'BASELINE').Count -eq 1 } 'hub history visible'
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'history.messages.json')
     Save-Screen $Session history
     Hub-Pass $Session history
-    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/mark-read' -and $_.body.chat -eq '15550000001@s.whatsapp.net' -and $_.status -eq 200 }).Count -gt 0 } 'hub mark-read'
+    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/mark-read' -and $_.body.chat -eq $alpha -and $_.status -eq 200 }).Count -gt 0 } 'hub mark-read'
     Hub-Pass $Session mark-read
     $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/events' -and $_.last_event_id -eq '1' }).Count -gt 0 } 'SSE baseline resume'
     $headers = @{ Authorization = 'Bearer fixture-key-not-a-secret' }
@@ -253,19 +260,27 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
     Send-Keys $Session '^k'
     Send-Keys $Session 'Archive selected chat'
     Send-Keys $Session '{ENTER}'
-    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/archive' -and $_.body.archived -eq $true -and $_.body.chat -eq '15550000001@s.whatsapp.net' -and $_.status -eq 200 }).Count -gt 0 } 'hub archive'
+    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/archive' -and $_.body.archived -eq $true -and $_.body.chat -eq $alpha -and $_.status -eq 200 }).Count -gt 0 } 'hub archive'
     $null = Wait-Until { (Read-Control $Session status).chat_count -eq 1 -and (Read-Control $Session status).pending_archives -eq 0 } 'archived chat removed'
     Hub-Pass $Session archive
     Save-Screen $Session after
     $requests = @(Read-BridgeRequests $Session | Where-Object { $_.method -ne 'SSE' })
     Assert-That (@($requests | Where-Object authorized -ne $true).Count -eq 0) 'Unauthenticated hub request'
+    if ($unified) {
+        Assert-That (@($requests | Where-Object { $_.wire_path -ne '/fixture/live' -and -not $_.wire_path.StartsWith('/v1/wazig/') }).Count -eq 0) 'Request bypassed unified hub'
+        Assert-That (@($requests | Where-Object { $_.wire_path.Contains('account=') }).Count -eq 0) 'Source account leaked into hub query'
+        $final = Read-Control $Session status
+        Assert-That ($final.selected.provider -eq 'telegram') 'Hub lost source network identity'
+    }
+    $backend = if ($unified) { 'message backend:' } else { 'whatsapp backend:' }
     $launch = Get-Content (Join-Path $Messages 'launch-log.txt')
-    Assert-That (@($launch | Where-Object { $_ -match 'whatsapp backend:' }).Count -eq 1) 'Backend was logged more than once'
-    Assert-That (@($launch | Where-Object { $_ -match 'whatsapp backend: hub$' }).Count -eq 1) 'Hub was not selected'
+    Assert-That (@($launch | Where-Object { $_ -match $backend }).Count -eq 1) 'Backend was logged more than once'
+    Assert-That (@($launch | Where-Object { $_ -match "$backend hub`$" }).Count -eq 1) 'Hub was not selected'
     Assert-That (-not (($launch -join "`n").Contains('fixture-key-not-a-secret'))) 'Launch log leaked key'
     $preferences = "HKCU:\Software\MessagesVerification\$($Session.id)\Software\Messages"
     $registry = Get-Item $preferences
-    Assert-That ($registry.GetValueKind('WaBridgeKey') -eq [Microsoft.Win32.RegistryValueKind]::Binary) 'Bridge key is not DPAPI storage'
+    $secret = if ($unified) { 'HubToken' } else { 'WaBridgeKey' }
+    Assert-That ($registry.GetValueKind($secret) -eq [Microsoft.Win32.RegistryValueKind]::Binary) 'Bridge key is not DPAPI storage'
     Hub-Pass $Session auth-dpapi-backend
 }
 
