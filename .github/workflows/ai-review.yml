@@ -79,7 +79,9 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           CODEX_HOME: ${{ runner.temp }}/ai-review-codex
-        run: printenv OPENAI_API_KEY | codex login --with-api-key
+        run: |
+          mkdir -p "$CODEX_HOME"
+          printenv OPENAI_API_KEY | codex login --with-api-key
 
       - name: Review and post advisory comment
         if: steps.key.outputs.available == 'true'
