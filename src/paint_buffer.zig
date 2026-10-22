@@ -17,7 +17,7 @@ pub const Buffer = struct {
         var result = Buffer{ .hdc = target, .target = target, .rect = rect };
         if (rect.right <= rect.left or rect.bottom <= rect.top) return result;
         const memory = win.CreateCompatibleDC(target) orelse return result;
-        const bitmap = win.CreateCompatibleBitmap(target, client.right, client.bottom) orelse {
+        const bitmap = win.CreateCompatibleBitmap(target, rect.right - rect.left, rect.bottom - rect.top) orelse {
             _ = win.DeleteDC(memory);
             return result;
         };
@@ -26,7 +26,7 @@ pub const Buffer = struct {
             _ = win.DeleteDC(memory);
             return result;
         };
-        if (win.IntersectClipRect(memory, rect.left, rect.top, rect.right, rect.bottom) == win.ERROR) {
+        if (win.SetViewportOrgEx(memory, -rect.left, -rect.top, null) == 0 or win.IntersectClipRect(memory, rect.left, rect.top, rect.right, rect.bottom) == win.ERROR) {
             _ = win.SelectObject(memory, previous);
             _ = win.DeleteObject(bitmap);
             _ = win.DeleteDC(memory);
