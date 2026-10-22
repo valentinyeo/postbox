@@ -67,6 +67,7 @@ jobs:
           bash tools/test-agent-setup.sh
           bash tools/test-lint-repeats.sh
           bash tools/test-ci-green.sh
+          bash tools/test-ai-review.sh
 
       - name: Outbox lifecycle and regression controls
         run: python3 tools/test_outbox_runtime.py --zig "$(command -v zig)" --negative-controls

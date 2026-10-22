@@ -198,6 +198,10 @@ function fail(line, rule, problem, fix) {
     printf "lint-repeats: %s:%d: [%s] %s. Use %s.\n", file, line, rule, problem, fix
     failed = 1
 }
+function check_models() {
+    if (file == ".github/workflows/ai-review.yml" && !models_read)
+        fail(1, "B6", "AI review lacks free GitHub Models permission", "models: read with GITHUB_TOKEN; no API key or pull_request_target")
+}
 function finish() {
     if (tag_line && !dispatch)
         fail(tag_line, "B1", "bot-created release tag has no explicit release dispatch in its script", "gh workflow run release.yml --ref \"${next_tag}\" -R \"${GITHUB_REPOSITORY}\"")
@@ -211,8 +215,10 @@ function finish() {
     command = ""
 }
 FNR == 1 {
+    check_models()
     finish()
     file = FILENAME
+    models_read = 0
     if (file == ".github/workflows/automerge.yml") automerge_line = 1
 }
 {
@@ -226,8 +232,13 @@ FNR == 1 {
         run_indent = indent
         next
     }
+    if (file == ".github/workflows/ai-review.yml") {
+        if (code ~ /^[[:space:]]*models:[[:space:]]*read[[:space:]]*$/) models_read = 1
+        if (code ~ /secrets[[:space:]]*\./ || code ~ /pull_request_target/)
+            fail(FNR, "B6", "AI review uses a secret or privileged PR trigger", "GITHUB_TOKEN with models: read and pull_request or trusted issue_comment")
+    }
     if (code ~ /openrouter\.ai|OPENROUTER_API_KEY|api\.z\.ai/)
-        fail(FNR, "B6", "workflow calls OpenRouter or Z.ai instead of the approved Codex API", "ai-review.yml runs bash tools/ai-review.sh with the pinned Codex CLI and OPENAI_API_KEY")
+        fail(FNR, "B6", "workflow calls OpenRouter or Z.ai instead of free GitHub Models", "ai-review.yml runs bash tools/ai-review.sh with GITHUB_TOKEN and models: read")
     if (code ~ /^[[:space:]]*runs-on:/ && code ~ /self-hosted/)
         fail(FNR, "B7", "workflow runs on a self-hosted runner, whose public logs show the server\047s name and folders", "runs-on: ubuntu-latest; the AI review runs in ai-review.yml on GitHub")
     if (!running) next
@@ -272,6 +283,7 @@ FNR == 1 {
     command = ""
 }
 END {
+    check_models()
     finish()
     exit failed ? 1 : 0
 }
