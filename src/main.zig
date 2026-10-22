@@ -4932,6 +4932,30 @@ fn persistOutbox(a: *App) bool {
     return true;
 }
 
+fn restoreOutbox(a: *App) void {
+    a.outbox_load_failed = true;
+    if (a.outbox_path.len == 0) return;
+    const folder = std.fs.path.dirname(a.outbox_path) orelse return;
+    const dir = std.Io.Dir.cwd().openDir(a.io, folder, .{ .iterate = true }) catch return;
+    defer dir.close(a.io);
+    var slack_accounts: std.ArrayList([]const u8) = .empty;
+    defer slack_accounts.deinit(a.allocator);
+    const installations = if (!unifiedHub(a)) slack_win.loadSecret(a.allocator, lit("SlackInstallations")) else null;
+    defer if (installations) |stored| a.allocator.free(stored.value);
+    if (installations) |stored| {
+        var ids = std.mem.tokenizeScalar(u8, stored.value, '\n');
+        while (ids.next()) |id| slack_accounts.append(a.allocator, id) catch return;
+    }
+    outbox.adopt(a.allocator, a.io, dir, std.fs.path.basename(a.outbox_path), .{
+        .account = a.cache_tag.slice(),
+        .unified = unifiedHub(a),
+        .slack_accounts = slack_accounts.items,
+    }) catch {
+        appendLaunchLog(a, "startup: outbox adoption failed");
+    };
+    loadOutbox(a);
+}
+
 fn loadOutbox(a: *App) void {
     a.outbox_load_failed = true;
     if (a.outbox_path.len == 0) return;
@@ -17522,7 +17546,7 @@ pub fn main(init: std.process.Init) !void {
     defer app.read_state.deinit(init.gpa);
     app.outbox_path = providerStatePath(app, "outbox.jsonl") orelse &.{};
     defer if (app.outbox_path.len > 0) init.gpa.free(app.outbox_path);
-    loadOutbox(app);
+    restoreOutbox(app);
     if (!unifiedHub(app)) loadFileOutbox(app);
     app.store_watch_path.set(init.gpa, store_watch_path);
     app.sync_heartbeat_path.set(init.gpa, sync_heartbeat_path);
