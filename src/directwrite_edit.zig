@@ -51,6 +51,7 @@ const Host = struct {
     hwnd: win.HWND,
     previous: win.WNDPROC = null,
     composing: bool = false,
+    assigned_font: win.HFONT = null,
     cue: [256:0]u16 = @splat(0),
     cue_focused: bool = false,
 
@@ -59,7 +60,7 @@ const Host = struct {
     }
 
     fn font(self: *Host) win.HFONT {
-        return @ptrFromInt(@as(usize, @bitCast(self.send(win.WM_GETFONT, 0, 0))));
+        return self.assigned_font;
     }
 
     fn textRect(self: *Host) win.RECT {
@@ -86,6 +87,7 @@ const Host = struct {
     }
 
     fn setFont(self: *Host, wparam: usize, lparam: isize) win.LRESULT {
+        self.assigned_font = @ptrFromInt(wparam);
         const mask = self.send(win.EM_SETEVENTMASK, 0, 0);
         defer _ = self.send(win.EM_SETEVENTMASK, 0, mask);
         var ole: ?*Object = null;
@@ -223,6 +225,17 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             return 0;
         },
         win.WM_SETFONT => return host.setFont(wparam, lparam),
+        win.WM_GETFONT => return @bitCast(@intFromPtr(host.assigned_font)),
+        win.WM_SETTEXT => {
+            const mask = host.send(win.EM_SETEVENTMASK, 0, 0);
+            const result = host.send(message, wparam, lparam);
+            _ = host.send(win.EM_SETEVENTMASK, 0, mask);
+            if (result != 0 and mask & win.ENM_CHANGE != 0) {
+                const id: usize = @intCast(win.GetDlgCtrlID(hwnd));
+                _ = win.SendMessageW(win.GetParent(hwnd), win.WM_COMMAND, id | (@as(usize, win.EN_CHANGE) << 16), @bitCast(@intFromPtr(hwnd)));
+            }
+            return result;
+        },
         win.WM_IME_STARTCOMPOSITION => host.composing = true,
         win.WM_IME_ENDCOMPOSITION, win.WM_KILLFOCUS => host.composing = false,
         win.EM_SETCUEBANNER => {
@@ -439,7 +452,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     _ = win.SetFocus(edit);
     var gui = std.mem.zeroes(win.GUITHREADINFO);
     gui.cbSize = @sizeOf(win.GUITHREADINFO);
-    try std.testing.expect(win.GetGUIThreadInfo(0, &gui) != 0);
+    try std.testing.expect(win.GetGUIThreadInfo(win.GetCurrentThreadId(), &gui) != 0);
     try std.testing.expectEqual(edit, gui.hwndCaret);
     _ = win.InvalidateRect(edit, null, win.FALSE);
     _ = win.UpdateWindow(edit);
