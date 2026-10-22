@@ -19,6 +19,65 @@ test "accounts retain linked state and account identity" {
     try std.testing.expectEqualStrings("logged_out", accounts.value[1].state);
 }
 
+test "account selection prefers personal over the first linked account" {
+    const accounts = [_]hub.Account{
+        .{ .account = "business", .state = "linked" },
+        .{ .account = "personal", .state = "linked" },
+    };
+    try std.testing.expectEqualStrings("personal", hub.pickAccount(&accounts, "").?);
+}
+
+test "account selection honors a linked preference over personal" {
+    const accounts = [_]hub.Account{
+        .{ .account = "personal", .state = "linked" },
+        .{ .account = "business", .state = "linked" },
+    };
+    try std.testing.expectEqualStrings("business", hub.pickAccount(&accounts, "business").?);
+}
+
+test "account selection falls back to the first linked account when personal is logged out" {
+    const accounts = [_]hub.Account{
+        .{ .account = "personal", .state = "logged_out" },
+        .{ .account = "business", .state = "linked" },
+        .{ .account = "other", .state = "linked" },
+    };
+    try std.testing.expectEqualStrings("business", hub.pickAccount(&accounts, "").?);
+}
+
+test "account selection falls back to personal when the preference is not linked" {
+    const accounts = [_]hub.Account{
+        .{ .account = "business", .state = "logged_out" },
+        .{ .account = "other", .state = "linked" },
+        .{ .account = "personal", .state = "linked" },
+    };
+    try std.testing.expectEqualStrings("personal", hub.pickAccount(&accounts, "business").?);
+    try std.testing.expectEqualStrings("personal", hub.pickAccount(&accounts, "missing").?);
+}
+
+test "account selection returns null without linked accounts" {
+    const accounts = [_]hub.Account{
+        .{ .account = "personal", .state = "logged_out" },
+        .{ .account = "business", .state = "logged_out" },
+    };
+    try std.testing.expect(hub.pickAccount(&accounts, "business") == null);
+    try std.testing.expect(hub.pickAccount(&.{}, "") == null);
+}
+
+test "account selection accepts only names of one to thirty two bytes" {
+    const too_long = "x" ** 33;
+    const longest = "x" ** 32;
+    const accounts = [_]hub.Account{
+        .{ .account = "", .state = "linked" },
+        .{ .account = too_long, .state = "linked" },
+        .{ .account = "x", .state = "linked" },
+        .{ .account = longest, .state = "linked" },
+    };
+    try std.testing.expectEqualStrings("x", hub.pickAccount(&accounts, "").?);
+    try std.testing.expectEqualStrings("x", hub.pickAccount(&accounts, too_long).?);
+    try std.testing.expectEqualStrings(longest, hub.pickAccount(&accounts, longest).?);
+    try std.testing.expect(hub.pickAccount(accounts[0..2], too_long) == null);
+}
+
 test "request paths encode query values and pagination boundaries" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

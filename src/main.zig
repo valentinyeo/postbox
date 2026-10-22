@@ -619,6 +619,7 @@ const App = struct {
     io: std.Io,
     instance: win.HINSTANCE,
     wa_bridge_url: []const u8 = "",
+    wa_bridge_account: []const u8 = "",
     wa_bridge_key: []const u8 = "",
     unified_hub: bool = false,
     hub_client: ?wa_hub_win.Client = null,
@@ -17417,6 +17418,7 @@ pub fn main(init: std.process.Init) !void {
     app.read_state.allow_opaque = unifiedHub(app);
     defer {
         if (app.wa_bridge_url.len > 0) init.gpa.free(app.wa_bridge_url);
+        if (app.wa_bridge_account.len > 0) init.gpa.free(app.wa_bridge_account);
         if (app.wa_bridge_key.len > 0) init.gpa.free(app.wa_bridge_key);
     }
     app.startup_probe_pending = !verification_fixture or hubConfigured(app);
@@ -19033,10 +19035,14 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
     }
     var hub_accounts = wa_hub.parseAccounts(a.allocator, result.data) catch return;
     defer hub_accounts.deinit();
+    const selected = if (unifiedHub(a)) null else wa_hub.pickAccount(hub_accounts.value, a.wa_bridge_account);
     for (hub_accounts.value) |account| {
         if (!std.mem.eql(u8, account.state, "linked") or account.account.len == 0 or account.account.len > 32) continue;
         if (a.hub_account.len > 0 and !std.mem.eql(u8, a.hub_account.slice(), account.account)) continue;
         if (a.hub_account.len == 0) {
+            if (selected) |account_name| {
+                if (!std.mem.eql(u8, account.account, account_name)) continue;
+            }
             const hash = std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, a.wa_bridge_url), account.account);
             var tag_buffer: [16]u8 = undefined;
             const tag = std.fmt.bufPrint(&tag_buffer, "{x:0>16}", .{hash}) catch return;
@@ -19365,6 +19371,7 @@ fn configureWaHub(a: *App, init: std.process.Init) void {
         }
     }
     a.wa_bridge_url = loadRegistryString(a.allocator, lit("WaBridgeUrl")) orelse "";
+    a.wa_bridge_account = loadRegistryString(a.allocator, lit("WaBridgeAccount")) orelse "";
     a.wa_bridge_key = loadWaBridgeKey(init) orelse "";
     const reason: []const u8 = if (!wa_hub.igsh_532_hub_whatsapp) "disabled" else if (a.wa_bridge_url.len == 0) "URL not configured" else if (a.wa_bridge_key.len == 0) "key not configured" else blk: {
         const endpoint = wa_hub.Endpoint.parse(a.wa_bridge_url, verification_fixture) catch break :blk "invalid URL";
