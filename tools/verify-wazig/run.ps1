@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance')][string]$Feature = 'search',
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'whatsapp-hub')][string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence'
 )
@@ -16,11 +16,13 @@ $profile = Join-Path $root 'profile'
 $messages = Join-Path $local 'Messages'
 New-Item $messages, $profile -ItemType Directory -Force | Out-Null
 $tag = '0000000000000526'
-Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
-@{ data = @(
-    @{ jid = 'verify-alpha'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = '' },
-    @{ jid = 'verify-beta'; name = 'Verification Beta'; kind = 'direct'; last_message_ts = '' }
-) } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $messages "chats-$tag.json")
+if ($Feature -ne 'whatsapp-hub') {
+    Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
+    @{ data = @(
+        @{ jid = 'verify-alpha'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = '' },
+        @{ jid = 'verify-beta'; name = 'Verification Beta'; kind = 'direct'; last_message_ts = '' }
+    ) } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $messages "chats-$tag.json")
+}
 $exe = (Resolve-Path (Join-Path $Bin 'Messages.exe')).Path
 foreach ($case in @('not-actions', 'not-isolated')) {
     $rejected = [Diagnostics.ProcessStartInfo]::new($exe)
@@ -48,24 +50,47 @@ $start.Environment['LOCALAPPDATA'] = $local
 $start.Environment['APPDATA'] = $local
 $start.Environment['USERPROFILE'] = $profile
 $start.Environment['USERNAME'] = "verify-$id"
-foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION')) { $null = $start.Environment.Remove($name) }
-$app = [Diagnostics.Process]::Start($start)
+foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY')) { $null = $start.Environment.Remove($name) }
+$bridge = $null
+if ($Feature -eq 'whatsapp-hub') {
+    $bridge = Start-FakeBridge $Evidence $root
+    $start.Environment['WAZIG_VERIFY_HUB_URL'] = $bridge.url
+    $start.Environment['WAZIG_VERIFY_HUB_KEY'] = 'fixture-key-not-a-secret'
+}
+try {
+    $app = [Diagnostics.Process]::Start($start)
+} catch {
+    if ($null -ne $bridge) { $bridge.process.Kill(); $bridge.process.WaitForExit() }
+    throw
+}
 $session = [ordered]@{
     id = $id; pid = $app.Id; startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
     root = $root; evidence = $Evidence; exe = $exe; ctl = $ctl; username = "verify-$id"
     sha256 = (Get-FileHash $exe).Hash; commit = $env:GITHUB_SHA; feature = $Feature
+}
+if ($null -ne $bridge) {
+    $session['bridge_pid'] = $bridge.process.Id
+    $session['bridge_start_ticks'] = $bridge.process.StartTime.ToUniversalTime().Ticks.ToString()
+    $session['bridge_exe'] = (Get-Process -Id $bridge.process.Id).Path
+    $session['bridge_url'] = $bridge.url
 }
 $session | ConvertTo-Json | Set-Content (Join-Path $Evidence 'session.json')
 $session = Read-Session $Evidence
 try {
     $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window'
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
+    if ($Feature -eq 'whatsapp-hub') {
+        $null = Wait-Until { (Read-Control $session status).chat_count -eq 2 } 'hub chat list'
+    }
     Invoke-Doctor $session
     $window = Get-Window $session
     $compose = Get-Edit $window '1032'
     $search = Get-Edit $window '1008'
     Save-Screen $session before
     switch ($Feature) {
+        whatsapp-hub {
+            Invoke-WhatsAppHubJourney $session $messages
+        }
         search {
             Send-Keys $session '^f'
             Send-Keys $session 'Beta'
@@ -99,6 +124,37 @@ try {
             $null = Wait-Until { (Test-Path $draft) -and (Get-Content $draft -Raw).Contains('Verification draft') } 'persisted draft'
             Copy-Item $draft (Join-Path $Evidence 'drafts.json')
             Save-Screen $session after
+            foreach ($theme in @('AMOLED black', 'Green')) {
+                Send-Keys $session '^k'
+                Send-Keys $session "Theme: $theme"
+                Send-Keys $session '{ENTER}'
+                $themeId = if ($theme -eq 'Green') { 'green' } else { 'amoled' }
+                $null = Wait-Until { (Read-Control $session status).theme -eq $themeId } 'composer theme applied'
+                foreach ($windowSize in @('wide', 'narrow')) {
+                    if ($windowSize -eq 'wide') {
+                        [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
+                    } else {
+                        [VerifyWindow]::ShowWindow($app.MainWindowHandle, 9) | Out-Null
+                        $dpi = [VerifyWindow]::GetDpiForWindow($app.MainWindowHandle)
+                        $width = [int][Math]::Floor((600 * $dpi + 48) / 96)
+                        $height = [int][Math]::Floor((700 * $dpi + 48) / 96)
+                        Assert-That ([VerifyWindow]::SetWindowPos($app.MainWindowHandle, [IntPtr]::Zero, 0, 0, $width, $height, 6)) 'Cannot resize narrow verification window'
+                        $null = Wait-Until { [Math]::Abs((Get-Window $session).Current.BoundingRectangle.Width - $width) -le 1 } 'narrow native window'
+                        $narrowBox = (Read-Control $session status).composer.box
+                        Assert-That (($narrowBox.right - $narrowBox.left) -lt 360 * $dpi / 96) 'Composer did not reach narrow width'
+                    }
+                    Send-Keys $session '^a'
+                    Send-Keys $session 'One'
+                    $null = Wait-Until { (Read-Control $session status).composer.lines -eq 1 } 'one composer line'
+                    $baseline = Assert-ComposerLayout $session "composer-$themeId-$windowSize-one" 1
+                    Send-Keys $session '+{ENTER}'
+                    Send-Keys $session 'Two'
+                    Send-Keys $session '+{ENTER}'
+                    Send-Keys $session 'Three'
+                    $null = Wait-Until { (Read-Control $session status).composer.lines -eq 3 } 'three composer lines'
+                    $null = Assert-ComposerLayout $session "composer-$themeId-$windowSize-multiline" 3 $baseline
+                }
+            }
         }
         palette {
             Send-Keys $session '^k'
@@ -127,7 +183,9 @@ try {
     Assert-That ($final.pending_sends -eq 0 -and $final.pending_archives -eq 0 -and $final.sync -eq 'stopped') 'Unexpected transport side effect'
     Assert-That (-not (Test-Path (Join-Path $profile '.wacli'))) 'Provider store was created'
     Assert-That (-not (Test-Path (Join-Path $messages 'telegram'))) 'Telegram store was created'
-    Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
+    if ($Feature -ne 'whatsapp-hub') {
+        Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
+    }
     $final | Add-Member -NotePropertyName production_preferences_absent -NotePropertyValue (-not (Test-Path 'HKCU:\Software\Messages'))
     $final | Add-Member -NotePropertyName whatsapp_store_absent -NotePropertyValue (-not (Test-Path (Join-Path $profile '.wacli')))
     $final | Add-Member -NotePropertyName telegram_store_absent -NotePropertyValue (-not (Test-Path (Join-Path $messages 'telegram')))

@@ -153,6 +153,10 @@ fn layout(_: *App, _: i32, _: i32) void {}
 fn clearReply(_: *App) void {}
 fn shortcodeHide(_: *App) void {}
 fn focusCompose(_: *App) void {}
+fn updateAttachButton(_: *App) void {}
+fn updateDictateButton(a: *App, state: dictation.State) void {
+    a.last_dictation_state = state;
+}
 fn setStatus(_: *App, _: []const u8) void {}
 fn messagesDirPath(a: *App, name: []const u8) ?[]u8 {
     return a.allocator.dupe(u8, name) catch null;

@@ -14,6 +14,7 @@ PUBLIC_SKILL_PATHS = (
     ".claude/skills/verify-wazig/features/drafts.md",
     ".claude/skills/verify-wazig/features/palette.md",
     ".claude/skills/verify-wazig/features/appearance.md",
+    ".claude/skills/verify-wazig/features/whatsapp-hub.md",
 )
 
 
