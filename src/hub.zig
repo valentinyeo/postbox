@@ -12,7 +12,7 @@ pub fn selected(url: []const u8) bool {
 }
 
 pub fn chats(allocator: std.mem.Allocator, archived: bool, limit: usize) !Request {
-    return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/chats?archived={s}&limit={d}", .{ if (archived) "true" else "false", @min(limit, 500) }) };
+    return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/chats?archived={s}&limit={d}", .{ if (archived) "true" else "false", limit }) };
 }
 
 pub fn messages(allocator: std.mem.Allocator, chat: []const u8, limit: usize, before: []const u8) !Request {
@@ -21,7 +21,7 @@ pub fn messages(allocator: std.mem.Allocator, chat: []const u8, limit: usize, be
     defer allocator.free(c);
     const b = try bridge.encode(allocator, before);
     defer allocator.free(b);
-    return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/messages?chat={s}&limit={d}&before={s}", .{ c, @min(limit, 500), b }) };
+    return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/messages?chat={s}&limit={d}&before={s}", .{ c, limit, b }) };
 }
 
 pub fn send(allocator: std.mem.Allocator, chat: []const u8, text: []const u8, reply_to: []const u8, client_id: []const u8) !Request {
