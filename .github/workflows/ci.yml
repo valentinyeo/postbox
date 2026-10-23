@@ -38,6 +38,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: No new code comments
+        run: python3 tools/check_new_comments.py
+
       - name: Python tooling tests
         run: python3 -m unittest discover -s tools -p 'test_*.py'
 
