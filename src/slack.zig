@@ -256,6 +256,7 @@ pub const HistoryItem = struct {
     reactions: [max_reactions]Reaction = @splat(.{}),
     reaction_count: usize = 0,
     reply_count: i64 = 0,
+    latest_reply: []const u8 = "",
     subtype: []const u8 = "",
     file_id: []const u8 = "",
     file_url: []const u8 = "",
@@ -290,6 +291,7 @@ pub fn readHistoryItem(value: std.json.Value) ?HistoryItem {
     item.user = objectString(object, "user") orelse "";
     item.text = objectString(object, "text") orelse "";
     item.thread_ts = objectString(object, "thread_ts") orelse "";
+    item.latest_reply = objectString(object, "latest_reply") orelse "";
     item.reply_count = switch (object.get("reply_count") orelse std.json.Value{ .integer = 0 }) {
         .integer => |count| count,
         else => 0,
@@ -1480,4 +1482,97 @@ test "authorization fallback routes every distinct workspace but canonical team 
     )).?;
     try std.testing.expectEqual(@as(usize, 1), canonical.team_count);
     try std.testing.expectEqualStrings("T0000000002", canonical.teams[0]);
+}
+
+pub fn isThreadReply(id: []const u8, parent: []const u8) bool {
+    return parent.len > 0 and !std.mem.eql(u8, id, parent);
+}
+
+pub fn inThread(id: []const u8, parent: []const u8, selected: []const u8) bool {
+    return selected.len > 0 and (std.mem.eql(u8, id, selected) or std.mem.eql(u8, parent, selected));
+}
+
+pub fn repliesLine(buffer: []u8, count: usize) []const u8 {
+    if (count == 0) return "";
+    return std.fmt.bufPrint(buffer, "{d} {s}", .{ count, if (count == 1) "reply" else "replies" }) catch "";
+}
+
+pub fn threadsSettingKey(allocator: std.mem.Allocator, account: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "SlackThreads-{s}", .{account});
+}
+
+pub fn threadsSetting(value: ?[]const u8) bool {
+    return !std.mem.eql(u8, value orelse "on", "off");
+}
+
+pub fn threadsSettingValue(enabled: bool) []const u8 {
+    return if (enabled) "on" else "off";
+}
+
+test "thread grouping excludes only replies and includes parent in its own panel" {
+    try std.testing.expect(!isThreadReply("1.1", ""));
+    try std.testing.expect(!isThreadReply("1.1", "1.1"));
+    try std.testing.expect(isThreadReply("2.1", "1.1"));
+    try std.testing.expect(inThread("1.1", "", "1.1"));
+    try std.testing.expect(inThread("2.1", "1.1", "1.1"));
+    try std.testing.expect(!inThread("3.1", "", "1.1"));
+    try std.testing.expect(!inThread("2.1", "4.1", "1.1"));
+    try std.testing.expect(!inThread("", "", ""));
+}
+
+test "thread replies line is empty singular or plural" {
+    var buffer: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", repliesLine(&buffer, 0));
+    try std.testing.expectEqualStrings("1 reply", repliesLine(&buffer, 1));
+    try std.testing.expectEqualStrings("30 replies", repliesLine(&buffer, 30));
+}
+
+test "Slack thread preference round trip defaults on and stays scoped to each account" {
+    try std.testing.expect(threadsSetting(null));
+    for ([_]bool{ true, false }) |enabled| {
+        try std.testing.expectEqual(enabled, threadsSetting(threadsSettingValue(enabled)));
+    }
+    const allocator = std.testing.allocator;
+    const first = try threadsSettingKey(allocator, "fixture-one");
+    defer allocator.free(first);
+    const second = try threadsSettingKey(allocator, "fixture-two");
+    defer allocator.free(second);
+    var saved: std.StringHashMapUnmanaged([]const u8) = .empty;
+    defer saved.deinit(allocator);
+    try saved.put(allocator, first, threadsSettingValue(false));
+    try std.testing.expect(!threadsSetting(saved.get(first)));
+    try std.testing.expect(threadsSetting(saved.get(second)));
+    try saved.put(allocator, second, threadsSettingValue(true));
+    try std.testing.expect(!threadsSetting(saved.get(first)));
+    try std.testing.expect(threadsSetting(saved.get(second)));
+}
+
+test "Slack history retains thread summary and latest reply time" {
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator,
+        \\{"ts":"1740000000.000100","thread_ts":"1740000000.000100","reply_count":30,"latest_reply":"1740000030.000100"}
+    , .{});
+    defer parsed.deinit();
+    const parent = readHistoryItem(parsed.value).?;
+    try std.testing.expectEqual(@as(i64, 30), parent.reply_count);
+    try std.testing.expectEqualStrings("1740000030.000100", parent.latest_reply);
+    try std.testing.expect(!isThreadReply(parent.ts, parent.thread_ts));
+}
+
+test "thirty replies group under one parent without hiding channel messages or another thread" {
+    const parent = "1740000000.000100";
+    var channel: usize = 0;
+    var panel: usize = 0;
+    var ids: [30][32]u8 = undefined;
+    for (&ids, 1..) |*buffer, index| {
+        const id = try std.fmt.bufPrint(buffer, "{d}.000100", .{1740000000 + index});
+        if (!isThreadReply(id, parent)) channel += 1;
+        if (inThread(id, parent, parent)) panel += 1;
+    }
+    for ([_][]const u8{ parent, "1740000031.000100", "1740000032.000100" }) |id| {
+        if (!isThreadReply(id, "")) channel += 1;
+        if (inThread(id, "", parent)) panel += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), channel);
+    try std.testing.expectEqual(@as(usize, 31), panel);
+    try std.testing.expect(!inThread("1740000033.000100", "1740000031.000100", parent));
 }

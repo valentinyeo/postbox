@@ -94,6 +94,18 @@ class SlackThreadsTests(unittest.TestCase):
         self.assertEqual(len({row['MsgID'] for row in rows}), 33)
         ast.parse((ROOT / 'tools/verify-wazig/fake-hub.py').read_text())
 
+    def test_single_chat_baseline_and_native_edit_keyboard_routing(self):
+        runner = (ROOT / 'tools/verify-wazig/run.ps1').read_text()
+        self.assertIn("elseif ($Feature -eq 'slack-threads') { 1 }", runner)
+        source = (ROOT / 'src/main.zig').read_text()
+        keyboard = source.split('fn handleKeyboard(', 1)[1].split('fn jumpToLatestMessage(', 1)[0]
+        self.assertLess(keyboard.index('sendMessageFrom(a, true);'), keyboard.index('if (a.thread_compose != null and focus == a.thread_compose) return false;'))
+        self.assertLess(keyboard.index('if (a.thread_compose != null and focus == a.thread_compose) return false;'), keyboard.index("if (key == win.VK_RETURN or key == 'C')"))
+        self.assertIn('pending.reply_to.set(reply_to);', source)
+        self.assertIn('const reply_to = if (thread) a.thread_parent.slice() else a.reply_to.slice();', source)
+        self.assertIn('if (chat.provider == .slack)', source.split('fn applyMessageData(', 1)[1])
+        self.assertIn('slack.threadsSettingKey(a.allocator, slackThreadsAccount(a))', source)
+
     def test_journey_requires_missing_current_app_state(self):
         journey = (ROOT / 'tools/verify-wazig/slack-threads.ps1').read_text()
         self.assertIn('.slack_threads.parent_reply_line', journey)
