@@ -7,6 +7,9 @@ import sys
 
 folder = Path(sys.argv[1])
 session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
+if session['feature'] == 'slack-threads':
+    runpy.run_path(str(Path(__file__).with_name('check-slack-threads-evidence.py')))['check_threads'](folder)
+    raise SystemExit(0)
 if session['feature'] == 'reactions':
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))

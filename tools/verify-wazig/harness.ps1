@@ -237,13 +237,14 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackThreads, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
     $script = if ($Unified) { 'fake-hub.py' } else { 'fake-wa-bridge.py' }
     $start.ArgumentList.Add((Join-Path $PSScriptRoot $script))
     if ($SlackSort) { $start.ArgumentList.Add('--slack-sort') }
+    if ($SlackThreads) { $start.ArgumentList.Add('--slack-threads') }
     if ($Views) { $start.ArgumentList.Add('--views') }
     if ($WorkspaceIcons) { $start.ArgumentList.Add('--workspace-icons') }
     if ($Signal) { $start.ArgumentList.Add('--signal') }

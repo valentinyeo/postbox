@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == ['appearance', 'archive', 'drafts', 'hub', 'menus', 'navigation', 'notrap', 'palette', 'reactions', 'search', 'signal', 'slack-sort', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons']
+assert features == ['appearance', 'archive', 'drafts', 'hub', 'menus', 'navigation', 'notrap', 'palette', 'reactions', 'search', 'signal', 'slack-sort', 'slack-threads', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons']
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, whatsapp-hub, hub, slack-sort, views, workspace-icons, signal, telegram, notrap, archive, text-comparison]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, whatsapp-hub, hub, slack-sort, slack-threads, views, workspace-icons, signal, telegram, notrap, archive, text-comparison]' in workflow
 options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
 assert options_match, 'missing workflow_dispatch journey options'
 options = [option.strip() for option in options_match[1].split(',')]
@@ -66,7 +66,7 @@ assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
 assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_KEY")) |seed|' in fixture_config
 assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 for proof in ['chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
@@ -205,3 +205,12 @@ assert '.claude/skills/verify-wazig/features/reactions.md' in (root / 'tools/che
 assert "'reaction_laugh'" in reaction_journey and '0x1f602' in reaction_journey
 assert '[VerifyMenus]::Click' in reaction_journey and "'#32768'" in reaction_journey
 print('REACTIONS MAP VERIFIED: real mouse journey, exact hub emoji evidence and PR matrix')
+
+threads = (root / 'tools/verify-wazig/slack-threads.ps1').read_text(encoding='utf-8')
+for artifact in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart', 'restart.json']:
+    assert artifact in threads, artifact
+assert 'slack-threads' in workflow and "matrix.feature == 'slack-threads'" in workflow
+assert 'check-slack-threads-evidence.py' in validator
+assert 'slack_threads.parent_reply_line' in threads and 'WAZIG_VERIFY_RESTART' in threads
+assert '--slack-threads' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+print('SLACK THREADS MAP VERIFIED: synthetic hub, keyboard journey, read-only measurements and restart')
