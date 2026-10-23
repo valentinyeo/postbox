@@ -168,10 +168,15 @@ function Add-PickerImage($Session, [string]$Path) {
     $dialog = Wait-Popup $Session '#32770'
     $window = [Windows.Automation.AutomationElement]::FromHandle($dialog)
     $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Edit)
+    $filenameCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1148')
     $null = Wait-Until {
-        $edits = $window.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
-        foreach ($edit in $edits) {
-            if ($edit.Current.IsEnabled -and -not $edit.Current.IsOffscreen) { $edit.SetFocus(); return $true }
+        $filename = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $filenameCondition)
+        foreach ($container in @($filename, $window)) {
+            if ($null -eq $container) { continue }
+            $edits = $container.FindAll([Windows.Automation.TreeScope]::Subtree, $condition)
+            foreach ($edit in $edits) {
+                if ($edit.Current.IsEnabled -and -not $edit.Current.IsOffscreen -and $edit.Current.IsKeyboardFocusable) { $edit.SetFocus(); return $true }
+            }
         }
     } 'paste-image: file-dialog editable filename'
     Send-Keys $Session '%n'

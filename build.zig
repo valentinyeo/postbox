@@ -633,13 +633,15 @@ pub fn build(b: *std.Build) void {
     _ = composer_button_files.addCopyFile(b.path("src/compose_layout.zig"), "compose_layout.zig");
     const composer_paint_source = sourceSection("fn drawComposerButton(", "fn drawSetupButton(");
     const composer_paint_start = std.mem.indexOf(u8, composer_paint_source, "    var shapes =") orelse @panic("Missing composer painting body");
+    const composer_layout_source = sourceSection("fn layoutRegion(", "    const header_height:");
+    const composer_layout_start = std.mem.indexOf(u8, composer_layout_source, "    const left_width =") orelse @panic("Missing composer layout body");
     const composer_button_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/composer_button_test.zig"),
         sourceSection("fn drawDictationIcon(", "fn drawComposerButton("),
         "fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {\n",
         composer_paint_source[composer_paint_start..],
         "fn layoutComposer(a: *App, width: i32, height: i32) void {\n",
-        sourceSection("    const left_width = std.math.clamp(@divTrunc(width, 3),", "    const header_height:"),
+        composer_layout_source[composer_layout_start..],
         "    const sizes = .{ .edit_height = px(a, 44) };\n",
         sourceSection("            a.compose_geometry =", "            const inner = a.compose_geometry.text;"),
         sourceSection("    const buttons = [_]?win.HWND", "    updateAttachButton(a);"),
