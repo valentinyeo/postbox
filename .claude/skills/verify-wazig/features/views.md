@@ -7,11 +7,12 @@
 - `view-scope`: search, Ctrl+1..9, next/previous chat and sending stay in the account view. Routing identity includes provider, cache account and the full prefixed id; a separate view account controls membership.
 - `view-order`: Ctrl+K → Sort views uses the existing palette list. Ctrl+Up/Down saves a move immediately, Enter switches to that view and Escape closes.
 - `combined-inbox`: all account chats appear newest activity first, retaining existing app badges and hover tooltips with app/account labels.
+- `empty-views`: unlinked Signal and Telegram are ordinary empty lists, with no sign-in screen. Saved empty provider startup falls back to the combined inbox; Esc leaves any empty account view and normal Alt view keys remain available. The [no-trap journey](notrap.md) covers these cases.
 - `view-status`: read-only status exposes current_view (provider, account, label, inbox) and view_order. Control view accepts a number, inbox and legacy provider aliases.
 
 ## How to get to it (user POV)
 
-- Open Messages with hub accounts or configured local providers. Each WhatsApp account and Slack workspace is a separate view; Telegram accounts follow.
+- Open Messages with hub accounts or configured local providers. Each WhatsApp account and Slack workspace is a separate view; Telegram and Signal views follow; linking is done once through the triage CLI on the hub, never through Wazig.
 - Press Alt+1..9 or choose Show <view label> in Ctrl+K. Choose Show combined inbox or press Alt+I for all chats.
 - Choose Sort views, move the selected row with Ctrl+Up/Down, then Enter to switch or Escape to close. ViewOrder persists provider:account entries in the existing settings store. Missing accounts remain saved but are skipped; new accounts append in provider and hub listing order.
 - Hover a chat row for its app and account label. No toolbar or new controls are added.

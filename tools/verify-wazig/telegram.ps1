@@ -11,33 +11,8 @@ function Invoke-TelegramJourney($Session, [string]$Messages) {
     Send-Keys $Session "%$number"
     $null = Wait-Until {
         $state = Read-Control $Session status
-        $state.view -eq 'telegram' -and $state.current_view.account -eq 'telegram' -and $state.current_view.label -eq 'Telegram' -and $state.chat_count -eq 0 -and $state.telegram_link.unlinked -and $state.telegram_link.qr_ready
-    } 'Telegram QR visible'
-    Save-Screen $Session qr
-    $requests = @(Read-BridgeRequests $Session)
-    Assert-That (@($requests | Where-Object { $_.path -eq '/v1/wazig/telegram/link' -and $_.status -eq 200 }).Count -eq 1) 'Missing initial link status'
-    Assert-That (@($requests | Where-Object { $_.path -eq '/v1/wazig/telegram/link.png' -and $_.status -eq 200 }).Count -eq 1) 'Missing QR fetch'
-    Hub-Pass $Session linking-qr
-    $dialog = Wait-Until {
-        $foreground = [Windows.Automation.AutomationElement]::FromHandle([VerifyWindow]::GetForegroundWindow())
-        if ($foreground.Current.ProcessId -eq $Session.pid -and $foreground.Current.ClassName -eq 'TelegramLogin') { return $foreground }
-    } 'hub Telegram password field' 45
-    $fields = $dialog.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit'))
-    Assert-That ($fields.Count -eq 1 -and $fields[0].Current.IsPassword) 'Expected exactly one protected password field'
-    Save-Screen $Session password
-    [System.Windows.Forms.SendKeys]::SendWait('synthetic-invalid')
-    Add-Content (Join-Path $Session.evidence 'actions.log') 'keys: [synthetic password redacted]'
-    Send-Keys $Session '{TAB}{ENTER}'
-    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/telegram/password' -and $_.status -eq 401 }).Count -eq 1 -and $fields[0].Current.IsEnabled } 'invalid password retry'
-    Save-Screen $Session password-invalid
-    $foreground = [Windows.Automation.AutomationElement]::FromHandle([VerifyWindow]::GetForegroundWindow())
-    Assert-That ($foreground.Current.ProcessId -eq $Session.pid -and $foreground.Current.ClassName -eq 'TelegramLogin') 'Password input lost ownership'
-    [System.Windows.Forms.SendKeys]::SendWait('synthetic-accepted')
-    Add-Content (Join-Path $Session.evidence 'actions.log') 'keys: [synthetic password redacted]'
-    Send-Keys $Session '{TAB}{ENTER}'
-    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/telegram/password' -and $_.status -eq 200 }).Count -eq 1 } 'password linked through hub'
-    Hub-Pass $Session linking-password
-    $null = Wait-Until { $state = Read-Control $Session status; $state.chat_count -eq 5 -and -not $state.telegram_link.unlinked } 'Telegram linked and chats loaded' 45
+        $state.view -eq 'telegram' -and $state.current_view.account -eq 'telegram' -and $state.current_view.label -eq 'Telegram' -and $state.chat_count -eq 5
+    } 'Telegram hub chats loaded'
     $rows = (Read-Control $Session chats).chats
     Assert-That (@($rows | Where-Object { $_.provider -ne 'telegram' -or $_.view_account -ne 'telegram' }).Count -eq 0) 'Telegram view includes another account'
     Assert-That (@($rows | Where-Object { $_.id -eq 'telegram:user:9001' -and $_.saved -and $_.name -eq 'Saved Messages' }).Count -eq 1) 'Saved Messages flag missing'

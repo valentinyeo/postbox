@@ -19,18 +19,13 @@ def check_signal(folder):
     assert session['feature'] == 'signal' and session['sha256'] and session['commit']
     assert read('result.json') == dict(feature='signal', status='passed')
     assert not (folder / 'failure.txt').exists()
-    qr = capture('qr')
-    assert qr['chat_count'] == 0 and qr['signal_link'] == dict(unlinked=True, qr_ready=True)
     linked = capture('linked')
     assert read('marks.json')['brand_blue_pixels'] > 20
-    assert linked['chat_count'] == 4 and not linked['signal_link']['unlinked']
+    assert linked['chat_count'] == 4
     assert {(row['provider'], row['view_account']) for row in read('linked.chats.json')['chats']} == {('signal', 'signal')}
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert all(row['authorized'] for row in requests if row['method'] != 'SSE')
     assert all(row['path'].startswith('/v1/wazig/') or row['path'] == '/fixture/live' for row in requests)
-    statuses = [index for index, row in enumerate(requests) if row['path'] == '/v1/wazig/signal/link' and row['status'] == 200]
-    images = [index for index, row in enumerate(requests) if row['path'] == '/v1/wazig/signal/link.png' and row['status'] == 200]
-    assert len(statuses) >= 2 and len(images) == 1 and statuses[0] < images[0] < statuses[1]
     history = read('history.messages.json')
     assert history['chat']['id'] == 'signal:fixture-contact'
     assert any(row['id'] == 'fixture-sender:1000' and row['text'] == 'Synthetic Signal history' for row in history['messages'])
@@ -69,7 +64,7 @@ def check_signal(folder):
     for name in ['history', 'read', 'reacted', 'text', 'file', 'live', 'after']:
         capture(name)
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
-    for gate in ['linking-qr', 'linked-chats', 'history', 'mark-read', 'media', 'react', 'send-text', 'send-file', 'live-events', 'limited', 'captcha', 'archive-unsupported']:
+    for gate in ['linked-chats', 'history', 'mark-read', 'media', 'react', 'send-text', 'send-file', 'live-events', 'limited', 'captcha', 'archive-unsupported']:
         assert f'signal {gate} PASS' in proof, gate
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped' and not final['slack_connected']
@@ -79,4 +74,4 @@ def check_signal(folder):
         assert f'keys: {keys}' in actions, keys
     assert 'JOURNEY PASSED: signal' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('SIGNAL EVIDENCE VERIFIED: linking, account view, history, writes, receipts, media, events and terminal rejections')
+    print('SIGNAL EVIDENCE VERIFIED: prelinked hub, account view, history, writes, receipts, media, events and terminal rejections')

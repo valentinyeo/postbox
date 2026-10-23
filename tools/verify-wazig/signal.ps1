@@ -11,14 +11,8 @@ function Invoke-SignalJourney($Session, [string]$Messages) {
     Send-Keys $Session "%$number"
     $null = Wait-Until {
         $state = Read-Control $Session status
-        $state.view -eq 'signal' -and $state.current_view.account -eq 'signal' -and $state.current_view.label -eq 'Signal' -and $state.chat_count -eq 0 -and $state.signal_link.unlinked -and $state.signal_link.qr_ready
-    } 'Signal QR visible'
-    Save-Screen $Session qr
-    $requests = @(Read-BridgeRequests $Session)
-    Assert-That (@($requests | Where-Object { $_.path -eq '/v1/wazig/signal/link' -and $_.status -eq 200 }).Count -eq 1) 'Missing initial link status'
-    Assert-That (@($requests | Where-Object { $_.path -eq '/v1/wazig/signal/link.png' -and $_.status -eq 200 }).Count -eq 1) 'Missing QR fetch'
-    Hub-Pass $Session linking-qr
-    $null = Wait-Until { $state = Read-Control $Session status; $state.chat_count -eq 4 -and -not $state.signal_link.unlinked } 'Signal linked and chats loaded' 45
+        $state.view -eq 'signal' -and $state.current_view.account -eq 'signal' -and $state.current_view.label -eq 'Signal' -and $state.chat_count -eq 4
+    } 'Signal hub chats loaded'
     $rows = (Read-Control $Session chats).chats
     Assert-That (@($rows | Where-Object { $_.provider -ne 'signal' -or $_.view_account -ne 'signal' }).Count -eq 0) 'Signal view includes another account'
     Save-Screen $Session linked
