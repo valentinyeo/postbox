@@ -134,7 +134,9 @@ def check_integration():
     assert links.count('item.view_identity = .{};') == 2
     assert source.count('chat.account.set(hub.sourceAccount(object, a.cache_tag.slice()));') == 2
     assert source.count('chat.view_account.set(hub.viewAccount(object, a.cache_tag.slice()));') == 2
-    assert source.count('hub.viewAccount(') == 5
+    assert source.count('hub.viewAccount(') == 6
+    assert source.count('.view_account = hub.viewAccount(object, "")') == 1
+    assert source.count('.account = hub.sourceAccount(object, "")') == 1
     routing_function_sha256 = {
         'unifiedHubRequest': '4ac7160663a8389b9e26ad06773e85e7b4690f1d4cb4edd6dffb3f329dec5a5c',
         'restoreOutbox': '97c3d2512d210e72021031071928cc33ccbf4e3038f427ba57a51fce5bcf3f98',
