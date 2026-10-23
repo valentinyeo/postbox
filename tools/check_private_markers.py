@@ -34,6 +34,7 @@ PUBLIC_SKILL_PATHS = (
     ".claude/skills/verify-wazig/features/workspace-icons.md",
     ".claude/skills/verify-wazig/features/menus.md",
     ".claude/skills/verify-wazig/features/archive.md",
+    ".claude/skills/verify-wazig/features/archive-bulk.md",
     ".claude/skills/verify-wazig/features/views.md",
     ".claude/skills/verify-wazig/features/window.md",
     ".claude/skills/verify-wazig/features/repaint.md",

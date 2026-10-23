@@ -8,7 +8,7 @@ on:
         description: User journey to drive
         type: choice
         default: search
-        options: [search, navigation, drafts, palette, appearance, menus, passage-copy, reactions, paste-image, whatsapp-hub, hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window, voice]
+        options: [search, navigation, drafts, palette, appearance, menus, passage-copy, reactions, paste-image, whatsapp-hub, hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, views, workspace-icons, signal, telegram, notrap, repaint, archive, archive-bulk, text-comparison, window, voice]
   pull_request:
     paths:
       - .github/workflows/verify.yml
@@ -56,7 +56,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["paste-image","passage-copy","reactions","menus","search","drafts","whatsapp-hub","hub","hub-archive","palette-archived","slack-sort","slack-archive","slack-threads","link-previews","views","workspace-icons","signal","telegram","notrap","text-comparison","repaint","window","voice"]' || format('["{0}"]', inputs.feature || 'search')) }}
+        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["paste-image","passage-copy","reactions","menus","search","drafts","whatsapp-hub","hub","hub-archive","palette-archived","slack-sort","slack-archive","slack-threads","link-previews","views","workspace-icons","signal","telegram","notrap","text-comparison","repaint","archive-bulk","window","voice"]' || format('["{0}"]', inputs.feature || 'search')) }}
     steps:
       - uses: actions/checkout@v4
         with:

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'passage-copy', 'reactions', 'paste-image', 'whatsapp-hub', 'hub', 'hub-archive', 'palette-archived', 'slack-sort', 'slack-archive', 'slack-threads', 'link-previews', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'repaint', 'archive', 'text-comparison', 'window', 'voice')][string]$Feature = 'search',
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'passage-copy', 'reactions', 'paste-image', 'whatsapp-hub', 'hub', 'hub-archive', 'palette-archived', 'slack-sort', 'slack-archive', 'slack-threads', 'link-previews', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'repaint', 'archive', 'archive-bulk', 'text-comparison', 'window', 'voice')][string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence'
 )
@@ -41,7 +41,7 @@ if ($Feature -eq 'hub-archive') {
     "120363000000000001@g.us`t1`t2026-10-10T10:00:00Z" | Set-Content (Join-Path $messages 'archive-state.txt')
     Copy-Item (Join-Path $messages 'archive-state.txt') (Join-Path $Evidence 'legacy-archive-state.txt')
 }
-if ($Feature -eq 'archive') {
+if ($Feature -in @('archive', 'archive-bulk')) {
     $provider = Join-Path $messages 'verification-provider.json'
     $seed = @{ data = @(
         @{ jid = 'verify-alpha@s.whatsapp.net'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = ''; archived = $false; unread = $false; unread_count = 0 },
@@ -314,6 +314,43 @@ try {
             Send-Keys $session '{ESC}'
             $null = Wait-Until { (Read-Control $session status).chat_count -eq 2 } 'baseline restored'
         }
+        archive-bulk {
+            $compose.SetFocus()
+            Assert-That ($compose.Current.HasKeyboardFocus -and (Read-Edit $compose) -eq '') 'bulk: composer did not start focused and empty'
+            $statusHandle = [IntPtr](Get-Edit $window '1048').Current.NativeWindowHandle
+            Save-Screen $session before
+            Send-Keys $session '^a'
+            $null = Wait-Until {
+                (Read-EditText $statusHandle).Contains('2 chats selected')
+            } 'bulk: Ctrl+A in empty composer selected no chats'
+            Save-Screen $session selected
+            Assert-That $compose.Current.HasKeyboardFocus 'bulk: selection moved focus out of composer'
+            Send-Keys $session '^e'
+            $null = Wait-Until {
+                $state = Read-Control $session status
+                $rows = @((Get-Content $provider -Raw | ConvertFrom-Json).data)
+                $inbox = @((Read-Control $session chats).chats)
+                $state.pending_archives -eq 0 -and $rows.Count -eq 2 -and
+                    @($rows | Where-Object { $_.archived -eq $true }).Count -eq 2 -and
+                    $state.chat_count -eq 0 -and $inbox.Count -eq 0
+            } 'bulk: Ctrl+E did not archive every selected chat'
+            Save-Screen $session after
+            Invoke-PaletteCommand $session 'Show archived chats'
+            $null = Wait-Until { $compose.Current.IsEnabled } 'bulk: archived composer unavailable for text check'
+            $compose.SetFocus()
+            Send-Keys $session 'hello'
+            $null = Wait-Until { (Read-Edit $compose) -ceq 'hello' } 'bulk: composer did not receive text'
+            Send-Keys $session '^a'
+            $null = Wait-Until {
+                $pattern = $compose.GetCurrentPattern([Windows.Automation.TextPattern]::Pattern)
+                $selection = @($pattern.GetSelection())
+                $selection.Count -eq 1 -and $selection[0].GetText(-1) -ceq 'hello' -and
+                    -not (Read-EditText $statusHandle).Contains('chats selected')
+            } 'bulk: Ctrl+A with text did not keep text select-all'
+            Save-Screen $session text-selected
+            Send-Keys $session '{BACKSPACE}'
+            $null = Wait-Until { (Read-Edit $compose) -eq '' } 'bulk: composer did not clear'
+        }
         archive {
             Assert-That ((Read-Control $session status).selected.name -eq 'Verification Alpha') 'Archive fixture did not start on Alpha'
             Send-Keys $session '^e'
@@ -528,7 +565,7 @@ try {
     Assert-That ($final.pending_sends -eq 0 -and $final.pending_archives -eq 0 -and $final.sync -eq 'stopped') 'Unexpected transport side effect'
     Assert-That (-not (Test-Path (Join-Path $profile '.wacli'))) 'Provider store was created'
     Assert-That (-not (Test-Path (Join-Path $messages 'telegram'))) 'Telegram store was created'
-    if ($Feature -eq 'archive') {
+    if ($Feature -in @('archive', 'archive-bulk')) {
         Assert-That ((Get-Content $provider -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture provider chat storage changed'
     } elseif ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'palette-archived', 'slack-sort', 'slack-archive', 'slack-threads', 'link-previews', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'passage-copy', 'reactions', 'repaint', 'paste-image', 'voice')) {
         Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
