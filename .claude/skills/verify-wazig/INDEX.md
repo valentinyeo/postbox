@@ -2,6 +2,7 @@
 
 The complete workflow-input index and bounded recent-change coverage live in [features/README.md](features/README.md). Launch and evidence rules live in [SKILL.md](SKILL.md); [RULE-MAP.md](RULE-MAP.md) links feature-specific acceptance rules.
 
+- [Reactions](features/reactions.md): real right-click laughing-face selection on WhatsApp and Slack, exact hub requests and visible chips.
 - [Telegram](features/telegram.md): hub-only account view, Saved Messages, replies and unified messaging evidence.
 - [Signal](features/signal.md): account view, unified actions, visible terminal send failures and isolated Windows evidence.
 - [No-trap navigation](features/notrap.md): saved empty startup fallback, Esc, and every Alt view shortcut from every view.

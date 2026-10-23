@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IGSH-645: Right-click message reactions send the emoji clicked in the quick reaction row instead of always sending thumbs up.
+
 - IGSH-607: Link Signal and Telegram only through the hub CLI; remove in-app QR/password screens, fall back to the combined inbox on empty startup views, and keep Esc/Alt navigation available.
 
 - IGSH-465: Telegram has its own view through the triage hub, with a paper-plane mark, QR/password linking, Saved Messages, text/file sending, replies, reactions, read receipts and live updates. Hub users no longer see direct Telegram sign-in; rate limits stay visible without automatic resend.

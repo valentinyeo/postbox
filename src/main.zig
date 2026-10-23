@@ -703,6 +703,7 @@ const App = struct {
     emoji_react_id: Utf8Text(191) = .{},
     pending_reactions: [max_pending_reactions]PendingReaction = [_]PendingReaction{.{}} ** max_pending_reactions,
     pending_reaction_count: usize = 0,
+    reaction_row_rect: ?win.RECT = null,
     emoji_recents: [emoji_picker.max_recents]u16 = [_]u16{0} ** emoji_picker.max_recents,
     emoji_recents_count: usize = 0,
     sb_emoji_top: i32 = -1,
@@ -11750,17 +11751,27 @@ fn openReactionMenu(a: *App, x: i32, y: i32) void {
     appendMessageMenuItem(menu, command_reply, lit("Reply                Ctrl+Shift+R"));
     appendMessageMenuItem(menu, 0, null);
     addReactionItems(menu);
+    a.reaction_row_rect = null;
     const choice = win.TrackPopupMenu(menu, win.TPM_RETURNCMD | win.TPM_NONOTIFY, x, y, 0, a.hwnd.?, null);
     if (choice == command_reply) {
         startReply(a);
     } else if (choice == reaction_row) {
-        var rect: win.RECT = undefined;
-        var mouse: win.POINT = undefined;
-        var cell: i32 = 0;
-        if (win.GetMenuItemRect(a.hwnd.?, menu, 2, &rect) != 0 and win.GetCursorPos(&mouse) != 0 and mouse.x >= rect.left and mouse.x < rect.right)
-            cell = @divTrunc(mouse.x - rect.left, reactionCellWidth(a));
-        if (cell >= quick_reactions.len) openReactionPicker(a) else reactToSelected(a, quick_reactions[@intCast(@max(cell, 0))]);
+        const position = win.GetMessagePos();
+        const mouse_x: i32 = @as(i16, @bitCast(@as(u16, @truncate(position))));
+        const mouse_y: i32 = @as(i16, @bitCast(@as(u16, @truncate(position >> 16))));
+        var cell: usize = 0;
+        if (a.reaction_row_rect) |rect| {
+            if (mouse_y >= rect.top and mouse_y < rect.bottom and mouse_x < rect.right)
+                cell = reactionCellAt(mouse_x, rect.left, reactionCellWidth(a), quick_reactions.len + 1);
+        }
+        if (cell == quick_reactions.len) openReactionPicker(a) else reactToSelected(a, quick_reactions[cell]);
     } else reactToSelected(a, @intCast(choice));
+}
+
+fn reactionCellAt(x: i32, left: i32, width: i32, count: usize) usize {
+    if (x < left or width <= 0) return 0;
+    const cell: usize = @intCast(@divTrunc(@as(i64, x) - left, width));
+    return if (cell < count) cell else 0;
 }
 
 fn measureMessageMenuItem(a: *const App, item: *win.MEASUREITEMSTRUCT) void {
@@ -11809,6 +11820,11 @@ fn measureReactionRow(a: *const App, item: *win.MEASUREITEMSTRUCT) void {
 }
 
 fn drawReactionRow(a: *App, item: *win.DRAWITEMSTRUCT) void {
+    if (win.WindowFromDC(item.hDC)) |menu_window| {
+        var rect = item.rcItem;
+        _ = win.MapWindowPoints(menu_window, null, @ptrCast(&rect), 2);
+        a.reaction_row_rect = rect;
+    }
     const selected = item.itemState & win.ODS_SELECTED != 0;
     _ = win.FillRect(item.hDC, &item.rcItem, if (theme.choice == .amoled) (if (selected) a.brush_raised.? else a.brush_panel.?) else win.GetSysColorBrush(if (selected) win.COLOR_BTNFACE else win.COLOR_MENU));
     _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
