@@ -12,6 +12,7 @@ Move a chat out of the inbox, keep it archived across incoming messages, and fin
 
 ## How to get to it (user POV)
 
+- Ctrl+A selects all visible chats when the chat list or the empty main composer has focus. With composer text, or in search, thread composer, emoji or palette edits, Ctrl+A still selects text. Esc clears the chat selection.
 - Ctrl+E archives the open chat, including from the composer; in Archive it unarchives. Bare E works outside editable fields. Ctrl+Shift+E archives and keeps archived.
 - Right-click a chat, or focus the chat list and press Shift+F10, for `Archive` / `Unarchive`, `Keep archived` / `Allow resurfacing`, and pinning. Labels come from `src/chat_menu.zig:items`; keyboard context menus reach `src/main.zig:openChatMenu`.
 - Ctrl+K → `Archive selected chat` / `Unarchive selected chat`, `Archive and keep archived` / `Allow resurfacing`.
