@@ -897,8 +897,9 @@ const App = struct {
     format_workspace: []const u8 = "",
     formatting_requests: format_cache.Requests = .{},
     msg_applied_hash: u64 = 0,
-    paints_canvas: u32 = 0,
-    paints_window: u32 = 0,
+    paints: control_api.Paints = .{},
+    paints_previous: control_api.Paints = .{},
+    chats_prev_proc: usize = 0,
     paint_minute_ticks: u32 = 0,
     transcribe_active_id: Utf8Text(191) = .{},
     transcribe_attempts: [512]u64 = [_]u64{0} ** 512,
@@ -12699,6 +12700,8 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\"", .{@tagName(theme.choice)});
+    try w.writeAll(",\"paints\":");
+    try a.paints.write(w);
     const box = a.compose_pill;
     try w.print(",\"composer\":{{\"box\":{{\"left\":{d},\"top\":{d},\"right\":{d},\"bottom\":{d}}},\"lines\":{d},\"controls\":[", .{ box.left, box.top, box.right, box.bottom, if (a.compose) |edit| win.SendMessageW(edit, win.EM_GETLINECOUNT, 0, 0) else 0 });
     const controls = [_]?win.HWND{ a.attach_btn, a.compose, a.voice_btn, a.dictate, a.emoji_btn, a.send };
@@ -15520,10 +15523,30 @@ fn drawQuoteBlock(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     return block_bottom + px(a, quote_after_gap);
 }
 
+fn countPaint(hwnd: win.HWND, dirty: win.RECT, total: *u64, full: *u64) void {
+    total.* +%= 1;
+    var client: win.RECT = undefined;
+    _ = win.GetClientRect(hwnd, &client);
+    if (client.right > client.left and client.bottom > client.top and
+        dirty.left <= client.left and dirty.top <= client.top and
+        dirty.right >= client.right and dirty.bottom >= client.bottom) full.* +%= 1;
+}
+
+fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
+    const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    if (message == win.WM_PAINT) {
+        var dirty = std.mem.zeroes(win.RECT);
+        _ = win.GetUpdateRect(hwnd, &dirty, win.FALSE);
+        countPaint(hwnd, dirty, &a.paints.list, &a.paints.list_full);
+    }
+    return win.CallWindowProcW(@ptrFromInt(a.chats_prev_proc), hwnd, message, wparam, lparam);
+}
+
 fn drawCanvas(hwnd: win.HWND, a: *App) void {
     var paint: win.PAINTSTRUCT = undefined;
     const screen_dc = win.BeginPaint(hwnd, &paint);
     defer _ = win.EndPaint(hwnd, &paint);
+    countPaint(hwnd, paint.rcPaint, &a.paints.canvas, &a.paints.canvas_full);
     var client: win.RECT = undefined;
     _ = win.GetClientRect(hwnd, &client);
     var surface = paint_buffer.Buffer.init(screen_dc, client, paint.rcPaint);
@@ -15883,7 +15906,6 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
     switch (message) {
         win.WM_PAINT => {
-            a.paints_canvas +%= 1;
             drawCanvas(hwnd, a);
             return 0;
         },
@@ -16537,6 +16559,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.search == null) return -1;
             directwrite_edit.setCentered(a.search.?, true);
             a.chats_hwnd = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 0, 0, 0, 0, hwnd, controlId(id_chats), a.instance, null);
+            if (a.chats_hwnd) |list| a.chats_prev_proc = @bitCast(win.SetWindowLongPtrW(list, win.GWLP_WNDPROC, @intCast(@intFromPtr(&chatsProc))));
             a.canvas = win.CreateWindowExW(0, lit("WacliMessageCanvas"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, hwnd, controlId(id_canvas), a.instance, null);
             a.attach_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("Attach photo or file"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_attach), a.instance, null);
             a.compose = directwrite_edit.create(a.instance, hwnd, controlId(id_compose), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 0, 0);
@@ -16653,10 +16676,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return 0;
         },
         win.WM_PAINT => {
-            a.paints_window +%= 1;
             var paint: win.PAINTSTRUCT = undefined;
             const screen_dc = win.BeginPaint(hwnd, &paint);
             defer _ = win.EndPaint(hwnd, &paint);
+            countPaint(hwnd, paint.rcPaint, &a.paints.window, &a.paints.window_full);
             var client: win.RECT = undefined;
             _ = win.GetClientRect(hwnd, &client);
             var surface = paint_buffer.Buffer.init(screen_dc, client, paint.rcPaint);
@@ -16874,10 +16897,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 a.paint_minute_ticks += 1;
                 if (a.paint_minute_ticks >= 60) {
                     a.paint_minute_ticks = 0;
-                    var paint_log_buffer: [64]u8 = undefined;
-                    appendLaunchLog(a, std.fmt.bufPrint(&paint_log_buffer, "paints: canvas={d} window={d} per min", .{ a.paints_canvas, a.paints_window }) catch "paints");
-                    a.paints_canvas = 0;
-                    a.paints_window = 0;
+                    var paint_log_buffer: [256]u8 = undefined;
+                    const previous = a.paints_previous;
+                    const counts = a.paints;
+                    appendLaunchLog(a, std.fmt.bufPrint(&paint_log_buffer, "paints: window={d} window_full={d} canvas={d} canvas_full={d} list={d} list_full={d} per min", .{ counts.window -% previous.window, counts.window_full -% previous.window_full, counts.canvas -% previous.canvas, counts.canvas_full -% previous.canvas_full, counts.list -% previous.list, counts.list_full -% previous.list_full }) catch "paints");
+                    a.paints_previous = counts;
                 }
                 checkMediaDownload(a);
                 image_viewer.refresh(a, viewer_actions);

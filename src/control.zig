@@ -6,6 +6,26 @@ pub const client_open_flags: u32 = 0x00100000 | 0x00010000;
 
 pub const pipe_prefix = "\\\\.\\pipe\\wazig-control-";
 
+pub const Paints = struct {
+    window: u64 = 0,
+    window_full: u64 = 0,
+    canvas: u64 = 0,
+    canvas_full: u64 = 0,
+    list: u64 = 0,
+    list_full: u64 = 0,
+
+    pub fn write(self: Paints, w: *std.Io.Writer) !void {
+        try w.print("{{\"window\":{d},\"window_full\":{d},\"canvas\":{d},\"canvas_full\":{d},\"list\":{d},\"list_full\":{d}}}", .{ self.window, self.window_full, self.canvas, self.canvas_full, self.list, self.list_full });
+    }
+};
+
+test "paint status contract exposes all cumulative surface counters" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try (Paints{ .window = 9, .window_full = 2, .canvas = 8, .canvas_full = 3, .list = 7, .list_full = 4 }).write(&out.writer);
+    try std.testing.expectEqualStrings("{\"window\":9,\"window_full\":2,\"canvas\":8,\"canvas_full\":3,\"list\":7,\"list_full\":4}", out.written());
+}
+
 pub const Command = enum { theme, status, chats, search, view, select, messages, archive, unarchive, @"archive-many" };
 pub const Messenger = enum { whatsapp, slack, telegram, all, signal };
 
@@ -28,7 +48,7 @@ pub const CommandInfo = struct { cmd: Command, usage: []const u8, summary: []con
 
 pub const commands = [_]CommandInfo{
     .{ .cmd = .theme, .usage = "theme <green|amoled>", .summary = "switch and save the app theme without focusing it" },
-    .{ .cmd = .status, .usage = "status", .summary = "version, theme, current account view and order, selected chat, sync state, pending sends, search text" },
+    .{ .cmd = .status, .usage = "status", .summary = "version, theme, current account view and order, selected chat, sync state, pending sends, search text, cumulative surface paint counters" },
     .{ .cmd = .chats, .usage = "chats [--json] [--messenger all|whatsapp|slack|telegram|signal] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
     .{ .cmd = .search, .usage = "search <text>", .summary = "set the sidebar search text (\"\" clears it)" },
     .{ .cmd = .view, .usage = "view <N|inbox|all|whatsapp|slack|telegram|signal>", .summary = "switch to an account view or the combined inbox" },

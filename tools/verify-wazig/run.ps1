@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'reactions', 'whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'archive', 'text-comparison', 'window')][string]$Feature = 'search',
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'reactions', 'whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'repaint', 'archive', 'text-comparison', 'window')][string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence'
 )
@@ -9,6 +9,7 @@ param(
 . "$PSScriptRoot/notrap.ps1"
 . "$PSScriptRoot/hub-archive.ps1"
 . "$PSScriptRoot/window.ps1"
+. "$PSScriptRoot/repaint.ps1"
 Assert-That ($env:GITHUB_ACTIONS -eq 'true') 'Verification runs only on GitHub Actions'
 New-Item $Evidence -ItemType Directory -Force | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
@@ -22,7 +23,7 @@ $profile = Join-Path $root 'profile'
 $messages = Join-Path $local 'Messages'
 New-Item $messages, $profile -ItemType Directory -Force | Out-Null
 $tag = '0000000000000526'
-if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions')) {
+if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint')) {
     Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
     @{ data = @(
         @{ jid = 'verify-alpha'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = '' },
@@ -84,8 +85,8 @@ if ($Feature -eq 'whatsapp-hub') {
     $start.Environment['WAZIG_VERIFY_HUB_URL'] = $bridge.url
     $start.Environment['WAZIG_VERIFY_HUB_KEY'] = 'fixture-key-not-a-secret'
 }
-if ($Feature -in @('hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions')) {
-    $bridge = Start-FakeBridge $Evidence $root -Unified -SlackSort:($Feature -eq 'slack-sort') -SlackThreads:($Feature -eq 'slack-threads') -Views:($Feature -eq 'views') -WorkspaceIcons:($Feature -eq 'workspace-icons') -Signal:($Feature -eq 'signal') -Telegram:($Feature -eq 'telegram') -Notrap:($Feature -eq 'notrap') -Reactions:($Feature -eq 'reactions') -HubArchive:($Feature -eq 'hub-archive')
+if ($Feature -in @('hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint')) {
+    $bridge = Start-FakeBridge $Evidence $root -Unified -SlackSort:($Feature -eq 'slack-sort') -SlackThreads:($Feature -eq 'slack-threads') -Views:($Feature -eq 'views') -WorkspaceIcons:($Feature -eq 'workspace-icons') -Signal:($Feature -eq 'signal') -Telegram:($Feature -eq 'telegram') -Notrap:($Feature -eq 'notrap') -Reactions:($Feature -eq 'reactions') -HubArchive:($Feature -eq 'hub-archive') -Repaint:($Feature -eq 'repaint')
     $start.Environment['WAZIG_HUB_URL'] = $bridge.url
     $start.Environment['WAZIG_HUB_TOKEN'] = (Get-Content (Join-Path $PSScriptRoot 'fake-wa-bridge.py') | Where-Object { $_.StartsWith('KEY = ') }).Split("'")[1]
 }
@@ -120,7 +121,7 @@ $session = Read-Session $Evidence
 try {
     $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window'
     if ($Feature -ne 'window') { [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null }
-    if ($Feature -in @('whatsapp-hub', 'hub', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions')) {
+    if ($Feature -in @('whatsapp-hub', 'hub', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint')) {
         $null = Wait-Until { (Read-Control $session status).chat_count -eq $(if ($Feature -eq 'signal') { 4 } elseif ($Feature -eq 'telegram') { 5 } elseif ($Feature -in @('views', 'notrap')) { 8 } elseif ($Feature -eq 'workspace-icons') { 5 } elseif ($Feature -eq 'slack-sort') { 4 } elseif ($Feature -eq 'slack-threads') { 1 } else { 2 }) } 'hub chat list'
     }
     if ($Feature -eq 'whatsapp-hub') {
@@ -163,6 +164,9 @@ try {
         }
         hub-archive {
             $app = Invoke-HubArchiveJourney $session $messages $start
+        }
+        repaint {
+            Invoke-RepaintJourney $session
         }
         hub {
             Invoke-WhatsAppHubJourney $session $messages
@@ -499,7 +503,7 @@ try {
     Assert-That (-not (Test-Path (Join-Path $messages 'telegram'))) 'Telegram store was created'
     if ($Feature -eq 'archive') {
         Assert-That ((Get-Content $provider -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture provider chat storage changed'
-    } elseif ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions')) {
+    } elseif ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint')) {
         Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
     }
     $final | Add-Member -NotePropertyName production_preferences_absent -NotePropertyValue (-not (Test-Path 'HKCU:\Software\Messages'))
@@ -509,7 +513,7 @@ try {
     $final | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'side-effects.json')
     "JOURNEY PASSED: $Feature" | Set-Content (Join-Path $Evidence 'result.txt')
 } catch {
-    $_ | Out-String | Set-Content (Join-Path $Evidence 'failure.txt')
+    $_.Exception.Message | Set-Content (Join-Path $Evidence 'failure.txt')
     try { Save-Screen $session failure } catch { $_ | Out-String | Add-Content (Join-Path $Evidence 'failure.txt') }
     throw
 } finally {
