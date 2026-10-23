@@ -8,13 +8,14 @@ assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
 assert features == ['appearance', 'archive', 'drafts', 'hub', 'menus', 'navigation', 'palette', 'search', 'slack-sort', 'views', 'whatsapp-hub']
+index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
     assert re.findall(r'^## (.+)$', entry, re.M) == [
         'Sub-features', 'How to get to it (user POV)', 'Driving it with PowerShell UI Automation', 'Gotchas'
     ], feature
     assert f'feature={feature}' in entry
-    assert f'({feature}.md)' in (skill / 'features/README.md').read_text(encoding="utf-8")
+    assert f'({feature}.md)' in index
 source = (root / 'src/main.zig').read_text(encoding="utf-8")
 for label in ['Search chats', 'Next chat', 'Previous chat', 'Compose message', 'Keyboard shortcuts', 'Theme: Green', 'Make text larger', 'Reset text size', 'Show archived chats', 'Show inbox chats', 'Archive selected chat', 'Unarchive selected chat', 'Archive and keep archived', 'Allow resurfacing']:
     assert f'"{label}"' in source, label
@@ -24,6 +25,31 @@ workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
 assert 'options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, slack-sort, hub, views, archive, text-comparison]' in workflow
+options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
+assert options_match, 'missing workflow_dispatch journey options'
+options = [option.strip() for option in options_match[1].split(',')]
+assert len(options) == len(set(options)), 'duplicate workflow journey'
+indexed = re.findall(r'^\| \[([^\]]+)\]\(([^)]+)\) \|', index, re.M)
+assert len(indexed) == len({name for name, target in indexed}), 'duplicate README journey'
+assert {name for name, target in indexed} == set(options), 'README table must list every workflow journey exactly once'
+assert {Path(target).stem for name, target in indexed} == set(features), 'each feature map must be indexed'
+for name, target in indexed:
+    assert target in {f'{feature}.md' for feature in features} and (skill / 'features' / target).is_file(), (name, target)
+    assert f'feature={name}' in (skill / 'features' / target).read_text(encoding='utf-8'), name
+coverage = index.split('## Recent changes coverage\n', 1)
+assert len(coverage) == 2, 'missing recent changes coverage'
+coverage_ids = set()
+for line in coverage[1].splitlines():
+    if not line.startswith('- '):
+        continue
+    bullet = re.fullmatch(r'- ((?:IGSH|WAZI)-[0-9]+): .+ -> (.+)', line)
+    assert bullet, ('malformed coverage bullet', line)
+    ticket, disposition = bullet.groups()
+    assert ticket not in coverage_ids, ('duplicate coverage ticket', ticket)
+    coverage_ids.add(ticket)
+    journey = re.fullmatch(r'`([^`]+)` \(.+\)', disposition)
+    assert (disposition.startswith('unreachable: ') and len(disposition) > len('unreachable: ')) or (journey and journey[1] in options), (ticket, disposition)
+assert coverage_ids, 'empty recent changes coverage'
 assert 'default: search' in workflow
 assert 'Keep archived\\tCtrl+Shift+E' in (root / 'src/chat_menu.zig').read_text(encoding='utf-8')
 for helper in ['run', 'doctor', 'cleanup', 'harness']:
@@ -52,6 +78,9 @@ for required in ['ReadToEndAsync()', '$child.WaitForExit($TimeoutMilliseconds)',
                  '$shown.messages.Count -eq 0', 'Save-Screen $Session beta-empty']:
     assert required in harness, required
 validator = (root / 'tools/verify-wazig/check-evidence.py').read_text(encoding='utf-8')
+for artifact in ['removed-status.json', 'text-scale.json']:
+    assert artifact in runner and artifact in validator, artifact
+assert 'a.font_scale = 82;' in source and 'command_font_larger => changeFontScale(a, 10)' in source
 for artifact in ['before-beta.requests.json', 'beta-switch.json', 'beta-empty.messages.json']:
     assert artifact in harness and artifact in validator, artifact
 assert "0 <= switch['elapsed_ms'] <= 1000" in validator
@@ -95,4 +124,4 @@ for name in ['hub Slack history refreshes ordering after caching its last messag
 sort_journey = runner.split('        slack-sort {', 1)[1].split('        views {', 1)[0]
 assert "Send-Keys $session '%1'" in sort_journey and 'Drive Alt+1' in sort_map
 assert "for keys in ['%1', '^{TAB}'" in validator
-print('MAP VERIFIED: eleven complete feature entries, source labels, stable controls, bounded chat-switch journey and GitHub triggers')
+print(f'MAP VERIFIED: {len(features)} complete feature entries, workflow/index parity, {len(coverage_ids)} coverage dispositions, source labels, stable controls, bounded chat-switch journey and GitHub triggers')

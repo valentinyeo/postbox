@@ -19,7 +19,7 @@ Move a chat out of the inbox, keep it archived across incoming messages, and fin
 
 ## Driving it with PowerShell UI Automation
 
-Preconditions: doctor passes; Alpha selected, unread count zero, both synthetic chats in the inbox. Only this recipe seeds `verification-provider.json`; the five original journeys keep their original empty fixture caches; whatsapp-hub uses its separate fake bridge.
+Preconditions: doctor passes; Alpha selected, unread count zero, both synthetic chats in the inbox. Only this recipe seeds `verification-provider.json`; search, navigation, drafts, palette and appearance keep empty message caches; menus and text-comparison seed text, while both hub journeys use separate fake services.
 
 - **Run:** dispatch `feature=archive`; GitHub helper: `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature archive`.
 - **Before:** capture `before.png`, UI Automation tree, status and visible-chat snapshots. Send `^e`; wait for Alpha's provider archive acknowledgement, zero pending archives and only Beta in the inbox.
@@ -35,3 +35,4 @@ Preconditions: doctor passes; Alpha selected, unread count zero, both synthetic 
 - Provider reads and archive acknowledgements alone are fixture-backed. All user actions use foreground-checked SendKeys; status/chats are read-only. The hook shares the existing `--verify-fixture` Actions/path/registry isolation guard and cannot enable real provider traffic.
 - Opening a chat explicitly normally marks it read. The recipe changes Archive views without explicitly selecting Alpha after arrival, so the refreshed sidebar can prove its unread badge before a read receipt. It does not verify live WhatsApp delivery, plain-archive resurfacing, bulk archive, restart persistence or the context-menu path.
 - This verification does not alter the font, saved scale, toolbar policy, media behaviour or updater. No real provider account, store or installed executable is touched.
+- Source: `src/chat_menu.zig:9` builds provider-specific actions; `src/main.zig:11622` holds kept chats, `src/main.zig:2371` applies provider updates, and `src/main.zig:17285` defines the restricted fixture jobs.
