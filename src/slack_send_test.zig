@@ -18,6 +18,7 @@ const win = struct {
         return now;
     }
     const TRUE = 1;
+    const FALSE = 0;
     fn InvalidateRect(_: u8, _: ?*anyopaque, _: u8) u8 {
         return 1;
     }
