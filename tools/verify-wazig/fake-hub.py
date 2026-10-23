@@ -233,6 +233,58 @@ class SlackSortHandler(Handler):
             self.respond(400, {'error': 'invalid sort request'}, body=body)
 
 
+THREAD_CHAT = 'slack:fixture-threads:channel'
+THREAD_PARENT = '1740000000.000100'
+
+
+def thread_rows():
+    rows = [dict(MsgID=THREAD_PARENT, Text='Synthetic thread parent', reply_count=30,
+                 latest_reply='1740000030.000100')]
+    rows.extend(dict(MsgID=f'17400000{index:02d}.000100', Text=f'Synthetic thread reply {index}',
+                     thread_ts=THREAD_PARENT) for index in range(1, 31))
+    rows.extend(dict(MsgID=f'17400000{index}.000100', Text='Synthetic channel message') for index in (31, 32))
+    for index, row in enumerate(rows):
+        row.update(ChatJID=THREAD_CHAT, Timestamp=f'2025-02-19T21:20:{index:02d}Z',
+                   FromMe=False, SenderName='Fixture Sender')
+    return list(reversed(rows))
+
+
+class SlackThreadsHandler(SlackSortHandler):
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            self.respond(200, [] if query.get('archived') == ['true'] else [
+                dict(jid=THREAD_CHAT, name='Verification Threads', provider='slack', account='fixture-threads',
+                     kind='group', last_message_ts='2025-02-19T21:20:32Z', unread_count=0, archived=False)])
+        elif url.path == '/v1/wazig/messages' and query.get('chat') == [THREAD_CHAT]:
+            self.respond(200, thread_rows())
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/v1/wazig/mark-read' and body.get('chat') == THREAD_CHAT:
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif (self.path == '/v1/wazig/send' and body.get('chat') == THREAD_CHAT
+              and body.get('reply_to') == THREAD_PARENT and body.get('text') == 'Synthetic thread reply'
+              and body.get('client_id')):
+            self.respond(200, dict(client_id=body['client_id'], msg_id='1740000040.000100',
+                                   ts=self.state.stamp, status='sent'), body=body)
+        else:
+            self.respond(400, {'error': 'invalid thread request'}, body=body)
+
+
 VIEW_ACCOUNTS = [
     ('slack', 'T0ABC123', 'Alpha Workspace'),
     ('whatsapp', 'personal', ''),
@@ -694,6 +746,7 @@ def main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--reactions', action='store_true')
     modes.add_argument('--slack-sort', action='store_true')
+    modes.add_argument('--slack-threads', action='store_true')
     modes.add_argument('--views', action='store_true')
     modes.add_argument('--notrap', action='store_true', help='WhatsApp and Slack chats; Signal and Telegram have no rows')
     modes.add_argument('--workspace-icons', action='store_true')
@@ -701,7 +754,7 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    handler = SlackThreadsHandler if args.slack_threads else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)

@@ -13,6 +13,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [menus](menus.md) | Native menus and custom popups | Measure AMOLED darkness and text contrast, then Green native-menu lightness |
 | [whatsapp-hub](whatsapp-hub.md) | WhatsApp hub transport | Chats, history, live SSE replay, idempotent retry, reads, archive, pending media and DPAPI |
 | [hub](hub.md) | Unified hub transport (IGSH-531) | Source network identity, list/history, SSE replay, send retry, read/archive, media and DPAPI |
+| [slack-threads](slack-threads.md) | Slack threads | Replies line, side panel, threaded send, per-account toggle and restart |
 | [slack-sort](slack-sort.md) | Slack last message order | Newest first, unknown last, incoming and sent promotion with keyboard order |
 | [telegram](telegram.md) | Telegram hub account | Prelinked hub chats, Saved Messages, text/file/reply, reactions, reads, live SSE and terminal rate limits |
 | [signal](signal.md) | Signal hub account | Prelinked hub history, text/file, reactions, reads, live events, terminal 429/403 failures |
@@ -22,7 +23,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [archive](archive.md) | Archive and Keep archived | Ctrl+E, keep via palette, incoming provider event, Archive presence/unread and inbox absence |
 | [text-comparison](appearance.md) | DirectWrite beside Chrome | Exact text/font/metric parity, paired screenshots and 3x paragraph crops |
 
-Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `reactions`, `menus`, `search`, `drafts`, `whatsapp-hub`, `hub`, `slack-sort`, `views`, `workspace-icons`, `signal`, `telegram`, `notrap` and `text-comparison`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
+Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `reactions`, `menus`, `search`, `drafts`, `whatsapp-hub`, `hub`, `slack-sort`, `slack-threads`, `views`, `workspace-icons`, `signal`, `telegram`, `notrap` and `text-comparison`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
 
 The source of truth for commands is `src/main.zig:buildPaletteItems`, for keyboard handling `src/main.zig:handleKeyboard`, and for discoverable help `src/shortcuts.zig`. Every feature file has precisely four H2 sections. Capture the input, resulting UI and durable side effects; preserve proof after cleanup. Only archive adds a synthetic incoming message at the fixture provider boundary; search, navigation, drafts, palette and appearance stay empty. No live send, account login, media, voice playback or transcription claim can be made from these local chats.
 

@@ -39,10 +39,11 @@ def main():
         for name in ("Chat", "TgChat", "StagedImage"):
             sections.append(re.search(rf"^const {name} = struct \{{.*?^}};", production, re.M | re.S).group())
         sections.append(re.search(r"^const max_tg_chats = .*?;", production, re.M).group())
-        sending = extract(production, "sendMessage")
+        sending = extract(production, "sendMessageFrom" if "fn sendMessageFrom(" in production else "sendMessage")
         start = sending.index("    if (selectedChatIsTelegram(a)) {")
         end = sending.index("    if (selectedChatIsSlack(a)) {", start)
-        sections.append("fn sendTelegram(a: *App, text: []const u8, staged_file: []const u8) void {\nstd.mem.doNotOptimizeAway(staged_file);\n" + sending[start:end] + "}\n")
+        context = "const compose = a.compose orelse return;\nconst reply_to = a.reply_to.slice();\nconst thread = false;\n" if "fn sendMessageFrom(" in production else ""
+        sections.append("fn sendTelegram(a: *App, text: []const u8, staged_file: []const u8) void {\nstd.mem.doNotOptimizeAway(staged_file);\n" + context + sending[start:end] + "}\n")
         fixture = (ROOT / "tools/telegram_fake.zig").read_text()
         (directory / "test.zig").write_text(fixture + "\n" + "\n".join(sections))
         command = [os.environ["ZIG"], "test", str(directory / "test.zig"), str(ROOT / "tools/telegram_fake.c"), "-lc", "--test-filter", "fake "]

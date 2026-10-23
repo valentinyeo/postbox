@@ -960,6 +960,12 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
                 try path.appendSlice(allocator, "&ts=");
                 try path.appendSlice(allocator, args[1]);
             }
+            if (args.len > 2 and args[2].len > 0) {
+                const encoded = try slack.percentEncode(allocator, args[2]);
+                defer allocator.free(encoded);
+                try path.appendSlice(allocator, "&cursor=");
+                try path.appendSlice(allocator, encoded);
+            }
             return bodyOnly(allocator, try callWithRetry(allocator, ctx.host, ctx.user_token, path.items, null));
         },
         .send_text => {

@@ -204,3 +204,7 @@ test "IGSH-534 Dictate retains theme hover pressed focus and recording colours a
         try std.testing.expectEqual(if (choice == .amoled) theme.amoled_send else theme.current.primary, painted.face);
     }
 }
+
+fn threadPanelWidth(_: *const App, _: i32, _: i32) i32 {
+    return 0;
+}

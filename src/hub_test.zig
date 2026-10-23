@@ -402,3 +402,23 @@ test "Telegram saved flag survives normalization and is never inferred from an i
     try std.testing.expect(hub.savedMessages(rows[0].object));
     for (rows[1..]) |row| try std.testing.expect(!hub.savedMessages(row.object));
 }
+
+test "Slack thread metadata survives unified normalization and sends retain parent identity" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const raw =
+        \\[{"MsgID":"1740000000.000100","ChatJID":"fixture","reply_count":30,"latest_reply":"1740000030.000100"},
+        \\ {"MsgID":"1740000001.000100","ChatJID":"fixture","thread_ts":"1740000000.000100","quoted_msg_id":"ordinary-quote"}]
+    ;
+    const normalized = try hub.normalize(allocator, raw, .messages, "fixture");
+    const value = try std.json.parseFromSliceLeaky(std.json.Value, allocator, normalized, .{});
+    const rows = value.object.get("data").?.object.get("messages").?.array.items;
+    try std.testing.expectEqual(@as(i64, 30), rows[0].object.get("reply_count").?.integer);
+    try std.testing.expectEqualStrings("1740000030.000100", rows[0].object.get("latest_reply").?.string);
+    try std.testing.expectEqualStrings("1740000000.000100", rows[1].object.get("thread_ts").?.string);
+    try std.testing.expectEqualStrings("ordinary-quote", rows[1].object.get("quoted_msg_id").?.string);
+    const request = try hub.send(allocator, "fixture", "Synthetic thread reply", "1740000000.000100", "fixture-client");
+    const body = try std.json.parseFromSliceLeaky(std.json.Value, allocator, request.body, .{});
+    try std.testing.expectEqualStrings("1740000000.000100", body.object.get("reply_to").?.string);
+}
