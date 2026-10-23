@@ -5,6 +5,7 @@ const messenger_view = @import("messenger_view.zig");
 
 pub const igsh_531_hub_provider = true;
 pub const igsh_604_workspace_icons = true;
+pub const igsh_696_telegram_avatars = true;
 pub const Request = bridge.Request;
 pub const Rows = bridge.Rows;
 pub const Sse = bridge.Sse;
@@ -126,6 +127,10 @@ pub fn workspaceAvatarKey(chat: []const u8) ?[]const u8 {
 fn validTeam(team: []const u8) !void {
     try validId(team);
     if (std.mem.indexOfScalar(u8, team, ':') != null or std.mem.eql(u8, team, ".") or std.mem.eql(u8, team, "..")) return error.InvalidId;
+}
+
+pub fn chatAvatarEnabled(provider: transport.Provider, unified: bool, enabled: bool) bool {
+    return provider == .whatsapp or (enabled and unified and provider == .telegram);
 }
 
 pub const Badge = enum { workspace_icon, whatsapp_mark, signal_mark, telegram_mark, letter_s, letter_w, letter_t };

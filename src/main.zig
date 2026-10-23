@@ -7500,13 +7500,13 @@ fn avatarWanted(entry: *const AvatarEntry) bool {
 }
 
 fn nextAvatarTarget(a: *App) ?AvatarTarget {
-    if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp) {
+    if (a.selected_chat < a.chat_count and hub.chatAvatarEnabled(a.chats[a.selected_chat].provider, unifiedHub(a), hub.igsh_696_telegram_avatars)) {
         if (avatarForChat(a, a.chats[a.selected_chat].jid.slice())) |entry| {
             if (avatarWanted(entry)) return .{ .chat = avatarIndex(a, entry) };
         }
     }
     for (a.chats[0..a.chat_count]) |*chat| {
-        const entry = if (chat.provider == .whatsapp)
+        const entry = if (hub.chatAvatarEnabled(chat.provider, unifiedHub(a), hub.igsh_696_telegram_avatars))
             avatarForChat(a, chat.jid.slice()) orelse continue
         else if (hub.igsh_604_workspace_icons and unifiedHub(a) and chat.provider == .slack) blk: {
             const key = hub.workspaceAvatarKey(chat.jid.slice()) orelse continue;
@@ -15180,7 +15180,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
 
     const avatar_left = item.rcItem.left + px(a, 12);
     const avatar_top = item.rcItem.top + px(a, 10);
-    const avatar_entry = if (chat.provider == .whatsapp) avatarForChat(a, chat.jid.slice()) else null;
+    const avatar_entry = if (hub.chatAvatarEnabled(chat.provider, unifiedHub(a), hub.igsh_696_telegram_avatars)) avatarForChat(a, chat.jid.slice()) else null;
     if (avatar_entry == null or avatar_entry.?.bitmap == null) {
         smooth.fillEllipse(&shapes, .{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 }, theme.current.surface_container_highest);
     }
