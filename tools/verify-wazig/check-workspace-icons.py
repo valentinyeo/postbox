@@ -103,6 +103,7 @@ def check_pixels(folder, capture=False):
         crop_width, crop_height, actual = read_png(crop)
         assert crop_width == right - left and crop_height == bottom - top and actual == rows, name
         white = measure(rows, (255, 255, 255))
+        light = sum(min(pixel) >= 180 for row in rows for pixel in row) / (crop_width * crop_height)
         if name == 'empty':
             fraction = measure(rows, (51, 51, 51))
             assert fraction > 0.55 and white > 0.015, (name, fraction, white)
@@ -110,9 +111,9 @@ def check_pixels(folder, capture=False):
         else:
             fraction = measure(rows, COLOURS[name])
             assert fraction > (0.50 if name == 'whatsapp' else 0.55), (name, fraction)
-            assert white > 0.015, (name, 'missing letter or handset')
+            assert light > 0.03, (name, 'missing letter or handset')
             assert all(measure(rows, colour) < 0.03 for other, colour in COLOURS.items() if other != name), name
-        metrics[name] = dict(rect=[left, top, right, bottom], colour_fraction=fraction, white_fraction=white)
+        metrics[name] = dict(rect=[left, top, right, bottom], colour_fraction=fraction, white_fraction=white, light_fraction=light)
     if capture:
         (folder / 'workspace-icons-pixels.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')
     else:
