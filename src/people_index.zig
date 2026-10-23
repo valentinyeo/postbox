@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Origin = enum { archived, contact };
+pub const Origin = enum { archived, contact, inbox };
 
 pub const Entry = struct {
     jid: []const u8,
@@ -8,7 +8,28 @@ pub const Entry = struct {
     phone: []const u8,
     origin: Origin,
     last_message_ts: []const u8,
+    provider: []const u8 = "",
+    account: []const u8 = "",
+    view_account: []const u8 = "",
 };
+
+pub const HubFields = struct {
+    provider: []const u8,
+    account: []const u8,
+    view_account: []const u8,
+};
+
+pub const HubResolver = *const fn (std.json.ObjectMap) ?HubFields;
+
+pub const Identity = struct {
+    provider: []const u8,
+    account: []const u8,
+    id: []const u8,
+};
+
+fn providerName(entry: Entry) []const u8 {
+    return if (entry.provider.len == 0) "whatsapp" else entry.provider;
+}
 
 const Set = struct {
     arena: ?std.heap.ArenaAllocator = null,
@@ -25,6 +46,7 @@ pub const Index = struct {
     allocator: std.mem.Allocator,
     archived: Set = .{},
     contacts: Set = .{},
+    inbox: Set = .{},
 
     pub fn init(allocator: std.mem.Allocator) Index {
         return .{ .allocator = allocator };
@@ -33,17 +55,26 @@ pub const Index = struct {
     pub fn deinit(self: *Index) void {
         self.archived.deinit();
         self.contacts.deinit();
+        self.inbox.deinit();
     }
 
     pub fn replaceArchived(self: *Index, raw_json: []const u8) !void {
-        try self.replace(raw_json, .archived);
+        try self.replace(raw_json, .archived, null);
+    }
+
+    pub fn replaceArchivedHub(self: *Index, raw_json: []const u8, resolver: HubResolver) !void {
+        try self.replace(raw_json, .archived, resolver);
+    }
+
+    pub fn replaceInboxHub(self: *Index, raw_json: []const u8, resolver: HubResolver) !void {
+        try self.replace(raw_json, .inbox, resolver);
     }
 
     pub fn replaceContacts(self: *Index, raw_json: []const u8) !void {
-        try self.replace(raw_json, .contact);
+        try self.replace(raw_json, .contact, null);
     }
 
-    fn replace(self: *Index, raw_json: []const u8, origin: Origin) !void {
+    fn replace(self: *Index, raw_json: []const u8, origin: Origin, resolver: ?HubResolver) !void {
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         errdefer arena.deinit();
         const allocator = arena.allocator();
@@ -62,10 +93,22 @@ pub const Index = struct {
             const jid = string(object, "jid");
             var name = string(object, "name");
             const phone = string(object, "phone");
+            var fields: HubFields = .{ .provider = "", .account = "", .view_account = "" };
+            if (resolver) |resolve| {
+                fields = resolve(object) orelse continue;
+            }
+            const hub_row = resolver != null;
             switch (origin) {
                 .archived => {
                     const archived = object.get("archived") orelse continue;
-                    if (archived != .bool or !archived.bool or name.len == 0 or std.mem.indexOfScalar(u8, jid, '@') == null) continue;
+                    if (archived != .bool or !archived.bool or name.len == 0 or jid.len == 0) continue;
+                    if (!hub_row and std.mem.indexOfScalar(u8, jid, '@') == null) continue;
+                },
+                .inbox => {
+                    if (!hub_row or name.len == 0 or jid.len == 0) continue;
+                    if (object.get("archived")) |archived| {
+                        if (archived == .bool and archived.bool) continue;
+                    }
                 },
                 .contact => {
                     if (!std.mem.endsWith(u8, jid, "@s.whatsapp.net")) continue;
@@ -76,7 +119,7 @@ pub const Index = struct {
                     }
                 },
             }
-            entries[count] = .{ .jid = jid, .name = name, .phone = phone, .origin = origin, .last_message_ts = if (origin == .archived) string(object, "last_message_ts") else "" };
+            entries[count] = .{ .jid = jid, .name = name, .phone = phone, .origin = origin, .last_message_ts = if (origin == .contact) "" else string(object, "last_message_ts"), .provider = fields.provider, .account = fields.account, .view_account = fields.view_account };
             count += 1;
         }
         std.mem.sort(Entry, entries[0..count], {}, lessThan);
@@ -89,7 +132,11 @@ pub const Index = struct {
             entries[unique] = entry;
             unique += 1;
         }
-        const target = if (origin == .archived) &self.archived else &self.contacts;
+        const target = switch (origin) {
+            .archived => &self.archived,
+            .contact => &self.contacts,
+            .inbox => &self.inbox,
+        };
         target.deinit();
         target.* = .{ .arena = arena, .entries = entries[0..unique], .by_jid = by_jid };
     }
@@ -97,20 +144,22 @@ pub const Index = struct {
     pub fn find(self: *const Index, jid: []const u8) ?Entry {
         if (self.archived.by_jid.get(jid)) |i| return self.archived.entries[i];
         if (self.contacts.by_jid.get(jid)) |i| return self.contacts.entries[i];
+        if (self.inbox.by_jid.get(jid)) |i| return self.inbox.entries[i];
         return null;
     }
 
-    pub fn search(self: *const Index, query: []const u8, exclude: []const []const u8, out: []Entry, max: usize) usize {
+    pub fn search(self: *const Index, query: []const u8, exclude: []const Identity, fallback_account: []const u8, out: []Entry, max: usize) usize {
         if (query.len == 0) return 0;
         const limit = @min(max, out.len);
         var count: usize = 0;
-        for ([_][]const Entry{ self.archived.entries, self.contacts.entries }) |entries| {
+        for ([_][]const Entry{ self.archived.entries, self.contacts.entries, self.inbox.entries }) |entries| {
             for (entries) |entry| {
                 if (count == limit) return count;
-                if (entry.origin == .contact and self.archived.by_jid.contains(entry.jid)) continue;
+                if (entry.origin != .archived and self.archived.by_jid.contains(entry.jid)) continue;
                 var excluded = false;
-                for (exclude) |jid| {
-                    if (std.mem.eql(u8, jid, entry.jid)) {
+                for (exclude) |shown| {
+                    const account = if (entry.account.len == 0) fallback_account else entry.account;
+                    if (std.mem.eql(u8, shown.id, entry.jid) and std.mem.eql(u8, shown.provider, providerName(entry)) and std.mem.eql(u8, shown.account, account)) {
                         excluded = true;
                         break;
                     }
@@ -204,12 +253,12 @@ test "archived beats contacts with newest archived first then contacts by name" 
     try index.replaceContacts(contacts_payload);
     try index.replaceArchived(archived_payload);
     var out: [10]Entry = undefined;
-    const count = index.search("pErSoN", &.{}, &out, out.len);
+    const count = index.search("pErSoN", &.{}, "", &out, out.len);
     try std.testing.expectEqual(@as(usize, 5), count);
     for ([_][]const u8{ "100@g.us", "101@s.whatsapp.net", "104@s.whatsapp.net", "106@s.whatsapp.net", "105@s.whatsapp.net" }, 0..) |jid, i| {
         try std.testing.expectEqualStrings(jid, out[i].jid);
     }
-    try std.testing.expectEqual(@as(usize, 1), index.search("+44 7700 900101", &.{}, &out, out.len));
+    try std.testing.expectEqual(@as(usize, 1), index.search("+44 7700 900101", &.{}, "", &out, out.len));
     try std.testing.expectEqual(Origin.archived, out[0].origin);
     try std.testing.expectEqualStrings("101@s.whatsapp.net", out[0].jid);
 }
@@ -219,10 +268,10 @@ test "phone substring and digits match formatted numbers and jid" {
     defer index.deinit();
     try index.replaceContacts(contacts_payload);
     var out: [10]Entry = undefined;
-    try std.testing.expectEqual(@as(usize, 2), index.search("+44 7700", &.{}, &out, out.len));
-    try std.testing.expectEqual(@as(usize, 1), index.search("447700900104", &.{}, &out, out.len));
+    try std.testing.expectEqual(@as(usize, 2), index.search("+44 7700", &.{}, "", &out, out.len));
+    try std.testing.expectEqual(@as(usize, 1), index.search("447700900104", &.{}, "", &out, out.len));
     try std.testing.expectEqualStrings("104@s.whatsapp.net", out[0].jid);
-    try std.testing.expectEqual(@as(usize, 5), index.search("@S.WHATSAPP.NET", &.{}, &out, out.len));
+    try std.testing.expectEqual(@as(usize, 5), index.search("@S.WHATSAPP.NET", &.{}, "", &out, out.len));
 }
 
 test "exclude skips shown jids and empty query and output limits are respected" {
@@ -230,11 +279,11 @@ test "exclude skips shown jids and empty query and output limits are respected" 
     defer index.deinit();
     try index.replaceArchived(archived_payload);
     var out: [10]Entry = undefined;
-    try std.testing.expectEqual(@as(usize, 1), index.search("Person", &.{"100@g.us"}, &out, out.len));
+    try std.testing.expectEqual(@as(usize, 1), index.search("Person", &.{.{ .provider = "whatsapp", .account = "", .id = "100@g.us" }}, "", &out, out.len));
     try std.testing.expectEqualStrings("101@s.whatsapp.net", out[0].jid);
-    try std.testing.expectEqual(@as(usize, 0), index.search("", &.{}, &out, out.len));
-    try std.testing.expectEqual(@as(usize, 0), index.search("Person", &.{}, &out, 0));
-    try std.testing.expectEqual(@as(usize, 1), index.search("Person", &.{}, out[0..1], 20));
+    try std.testing.expectEqual(@as(usize, 0), index.search("", &.{}, "", &out, out.len));
+    try std.testing.expectEqual(@as(usize, 0), index.search("Person", &.{}, "", &out, 0));
+    try std.testing.expectEqual(@as(usize, 1), index.search("Person", &.{}, "", out[0..1], 20));
 }
 
 test "replacement owns strings and preserves other origin and valid data after errors" {
@@ -265,8 +314,61 @@ test "duplicate jids within each payload appear once" {
         \\{"data":[{"jid":"101@s.whatsapp.net","name":"Person"},{"jid":"101@s.whatsapp.net","name":"Person"}]}
     );
     var out: [10]Entry = undefined;
-    try std.testing.expectEqual(@as(usize, 2), index.search("Person", &.{}, &out, 10));
+    try std.testing.expectEqual(@as(usize, 2), index.search("Person", &.{}, "", &out, 10));
     try std.testing.expectEqualStrings("Person new", out[0].name);
+}
+
+fn testResolver(object: std.json.ObjectMap) ?HubFields {
+    const provider = object.get("provider") orelse return null;
+    if (provider != .string) return null;
+    if (!std.mem.eql(u8, provider.string, "telegram") and !std.mem.eql(u8, provider.string, "slack") and !std.mem.eql(u8, provider.string, "whatsapp")) return null;
+    const account = object.get("account");
+    return .{ .provider = provider.string, .account = if (account != null and account.? == .string) account.?.string else "", .view_account = if (std.mem.eql(u8, provider.string, "telegram")) "telegram" else "" };
+}
+
+const hub_payload =
+    \\{"success":true,"data":[{"jid":"telegram:user:7001001","provider":"telegram","name":"Hub Telegram","archived":true,"last_message_ts":"2026-01-03T00:00:00Z"},{"jid":"slack:T0:C1","provider":"slack","name":"Hub Slack","archived":true,"last_message_ts":"2026-01-02T00:00:00Z"},{"jid":"personal:1@s.whatsapp.net","provider":"whatsapp","name":"Hub Phone","archived":true,"last_message_ts":"2026-01-01T00:00:00Z"},{"jid":"telegram:user:9","provider":"telegram","name":"Hub Open","archived":false},{"jid":"bare","name":"Hub Legacy Bare","archived":true},{"jid":"matrix:1","provider":"matrix","name":"Hub Unknown","archived":true}]}
+;
+
+test "hub archived rows keep ids without at sign and carry provider and view account" {
+    var index = Index.init(std.testing.allocator);
+    defer index.deinit();
+    try index.replaceArchivedHub(hub_payload, testResolver);
+    try std.testing.expectEqual(@as(usize, 3), index.archived.entries.len);
+    const telegram = index.find("telegram:user:7001001").?;
+    try std.testing.expectEqualStrings("telegram", telegram.provider);
+    try std.testing.expectEqualStrings("telegram", telegram.view_account);
+    try std.testing.expectEqual(Origin.archived, telegram.origin);
+    try std.testing.expectEqualStrings("slack", index.find("slack:T0:C1").?.provider);
+    try std.testing.expect(index.find("telegram:user:9") == null);
+    try std.testing.expect(index.find("bare") == null);
+    var out: [10]Entry = undefined;
+    try std.testing.expectEqual(@as(usize, 3), index.search("Hub", &.{}, "personal", &out, out.len));
+    try std.testing.expectEqualStrings("telegram:user:7001001", out[0].jid);
+}
+
+test "legacy rows without a provider still need an at sign" {
+    var index = Index.init(std.testing.allocator);
+    defer index.deinit();
+    try index.replaceArchived(hub_payload);
+    try std.testing.expectEqual(@as(usize, 1), index.archived.entries.len);
+    try std.testing.expect(index.find("telegram:user:7001001") == null);
+    try std.testing.expect(index.find("personal:1@s.whatsapp.net") != null);
+    try index.replaceArchived(archived_payload);
+    try std.testing.expectEqual(@as(usize, 2), index.archived.entries.len);
+    try std.testing.expectEqualStrings("", index.find("100@g.us").?.provider);
+}
+
+test "hub inbox rows are searchable by identity and excluded when shown" {
+    var index = Index.init(std.testing.allocator);
+    defer index.deinit();
+    try index.replaceInboxHub(hub_payload, testResolver);
+    try std.testing.expectEqual(@as(usize, 1), index.inbox.entries.len);
+    var out: [10]Entry = undefined;
+    try std.testing.expectEqual(@as(usize, 1), index.search("Hub Open", &.{}, "personal", &out, out.len));
+    try std.testing.expectEqual(Origin.inbox, out[0].origin);
+    try std.testing.expectEqual(@as(usize, 0), index.search("Hub Open", &.{.{ .provider = "telegram", .account = "personal", .id = "telegram:user:9" }}, "personal", &out, out.len));
+    try std.testing.expectEqual(@as(usize, 1), index.search("Hub Open", &.{.{ .provider = "signal", .account = "personal", .id = "telegram:user:9" }}, "personal", &out, out.len));
 }
 
 test "build 5000 archived and 3000 contacts and search within a second" {
@@ -294,7 +396,7 @@ test "build 5000 archived and 3000 contacts and search within a second" {
     try std.testing.expectEqual(@as(usize, 5000), index.archived.entries.len);
     try std.testing.expectEqual(@as(usize, 3000), index.contacts.entries.len);
     var out: [20]Entry = undefined;
-    try std.testing.expectEqual(@as(usize, 1), index.search("Person 4321", &.{}, &out, 20));
+    try std.testing.expectEqual(@as(usize, 1), index.search("Person 4321", &.{}, "", &out, 20));
     try std.testing.expectEqualStrings("4321@g.us", out[0].jid);
     const elapsed = start.durationTo(std.Io.Clock.cpu_thread.now(std.testing.io)).toNanoseconds();
     try std.testing.expect(elapsed < std.time.ns_per_s);

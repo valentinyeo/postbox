@@ -2341,9 +2341,15 @@ fn refreshContactsIndex(a: *App) void {
     _ = wacliEnqueue(a, job, false);
 }
 
+fn peopleHubFields(object: std.json.ObjectMap) ?people_index.HubFields {
+    const provider = hub.sourceProvider(object) orelse return null;
+    return .{ .provider = @tagName(provider), .account = hub.sourceAccount(object, ""), .view_account = hub.viewAccount(object, "") };
+}
+
 fn refreshPeopleSearch(a: *App) void {
-    if (!messenger_view.includes(activeChatView(a), .whatsapp)) return;
-    if (!a.show_archived) {
+    const whatsapp_view = messenger_view.includes(activeChatView(a), .whatsapp);
+    if (!unifiedHub(a) and !whatsapp_view) return;
+    if (whatsapp_view and !a.show_archived) {
         if (a.search) |search| {
             if (win.GetWindowTextLengthW(search) > 0) {
                 refilterChats(a);
@@ -2356,6 +2362,11 @@ fn refreshPeopleSearch(a: *App) void {
 
 fn peopleChat(a: *App, entry: people_index.Entry) Chat {
     var chat = Chat{ .account = a.cache_tag, .archived = entry.origin == .archived };
+    if (entry.provider.len > 0) {
+        chat.provider = std.meta.stringToEnum(transport.Provider, entry.provider) orelse .whatsapp;
+        if (entry.account.len > 0) chat.account.set(entry.account);
+        chat.view_account.set(entry.view_account);
+    }
     chat.jid.set(entry.jid);
     chat.name.set(a.allocator, entry.name);
     chat.kind.set(a.allocator, if (entry.origin == .contact) "Contact" else if (std.mem.endsWith(u8, entry.jid, "@g.us")) "Group" else "Chat");
@@ -2454,6 +2465,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         }
     }
     rebuildViews(a, data.items);
+    if (unifiedHub(a) and !a.show_archived) a.people.replaceInboxHub(raw, peopleHubFields) catch {};
     if (fresh and unifiedHub(a) and !a.show_archived and a.startup_view_pending) {
         a.startup_view_pending = false;
         if (a.chat_view == .signal or a.chat_view == .telegram) {
@@ -2557,16 +2569,17 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     controlSortChats(a, a.chats[0..a.chat_count], view);
     if (!unifiedHub(a) and messenger_view.includes(view, .whatsapp) and !a.show_archived and !a.unread_only) {
         if (query_utf8) |query| {
-            const exclude = a.allocator.alloc([]const u8, a.chat_count) catch return false;
+            const exclude = a.allocator.alloc(people_index.Identity, a.chat_count) catch return false;
             defer a.allocator.free(exclude);
             var exclude_count: usize = 0;
             for (a.chats[0..a.chat_count]) |*chat| {
                 if (chat.provider != .whatsapp) continue;
-                exclude[exclude_count] = chat.jid.slice();
+                const key = chat_key.of(chat);
+                exclude[exclude_count] = .{ .provider = @tagName(key.provider), .account = key.account, .id = key.id };
                 exclude_count += 1;
             }
             var matches: [max_chats]people_index.Entry = undefined;
-            const count = a.people.search(query, exclude[0..exclude_count], &matches, @min(max_chats, a.chats.len - a.chat_count));
+            const count = a.people.search(query, exclude[0..exclude_count], a.cache_tag.slice(), &matches, @min(max_chats, a.chats.len - a.chat_count));
             for (matches[0..count]) |entry| {
                 if (pendingArchiveHidesChat(a, entry.jid, entry.origin == .archived)) continue;
                 a.chats[a.chat_count] = peopleChat(a, entry);
@@ -2575,7 +2588,8 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         }
     }
     if (a.people_open_jid.len > 0) {
-        if (!messenger_view.includes(view, .whatsapp) or selected_key.provider != .whatsapp or a.show_archived or query_len > 0 or
+        const open_allowed = if (unifiedHub(a)) true else messenger_view.includes(view, .whatsapp) and selected_key.provider == .whatsapp;
+        if (!open_allowed or a.show_archived or query_len > 0 or
             !std.mem.eql(u8, selected_jid[0..selected_len], a.people_open_jid.slice()))
         {
             a.people_open_jid.set("");
@@ -12230,7 +12244,11 @@ fn enqueueResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8) void {
 }
 
 fn applyArchivedScan(a: *App, raw: []const u8) void {
-    a.people.replaceArchived(raw) catch {};
+    if (unifiedHub(a)) {
+        a.people.replaceArchivedHub(raw, peopleHubFields) catch {};
+    } else {
+        a.people.replaceArchived(raw) catch {};
+    }
     refreshPeopleSearch(a);
     const state = a.archive_state orelse return;
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
@@ -13375,6 +13393,43 @@ fn paletteLayout(a: *App) void {
     }
 }
 
+fn appendPalettePeople(a: *App, query_wide: []const u16, scores: *[max_palette_items]i32, scored: bool) void {
+    if (a.palette_links_mode or a.palette_accounts_mode or a.palette_views_mode or query_wide.len == 0) return;
+    const query = std.unicode.utf16LeToUtf8Alloc(a.allocator, query_wide) catch return;
+    defer a.allocator.free(query);
+    var exclude: [max_palette_items]people_index.Identity = undefined;
+    var exclude_count: usize = 0;
+    for (a.palette_matches[0..a.palette_match_count]) |match| {
+        const item = &a.palette_items[match];
+        if (item.chat_jid.len == 0) continue;
+        const key = item.chat_identity.key();
+        exclude[exclude_count] = .{ .provider = @tagName(key.provider), .account = key.account, .id = key.id };
+        exclude_count += 1;
+    }
+    var matches: [20]people_index.Entry = undefined;
+    const count = a.people.search(query, exclude[0..exclude_count], a.cache_tag.slice(), &matches, 20);
+    for (matches[0..count]) |entry| {
+        if (a.palette_item_count == max_palette_items) break;
+        const label = (if (entry.origin == .inbox)
+            std.fmt.allocPrint(a.allocator, "{s}", .{entry.name})
+        else
+            std.fmt.allocPrint(a.allocator, "{s}  ·  {s}", .{ entry.name, if (entry.origin == .archived) "Archived" else "Contact" })) catch continue;
+        defer a.allocator.free(label);
+        const index = a.palette_item_count;
+        appendPalette(a, label, "", 0);
+        const item = &a.palette_items[index];
+        item.chat_jid.set(entry.jid);
+        item.chat_identity.set(.{
+            .provider = std.meta.stringToEnum(transport.Provider, entry.provider) orelse .whatsapp,
+            .account = if (entry.account.len > 0) entry.account else a.cache_tag.slice(),
+            .id = entry.jid,
+        });
+        a.palette_matches[a.palette_match_count] = index;
+        if (scored) scores[a.palette_match_count] = paletteScore(item.label.slice(), query_wide) orelse 0;
+        a.palette_match_count += 1;
+    }
+}
+
 fn paletteFilter(a: *App) void {
     var query_buf: [64]u16 = [_]u16{0} ** 64;
     const query_len: usize = if (a.palette_edit) |edit| @intCast(win.GetWindowTextW(edit, &query_buf, query_buf.len)) else 0;
@@ -13395,6 +13450,7 @@ fn paletteFilter(a: *App) void {
             a.palette_match_count += 1;
         }
     }
+    if (unifiedHub(a)) appendPalettePeople(a, query_buf[0..query_len], &scores, true);
     var i: usize = 1;
     while (i < a.palette_match_count) : (i += 1) {
         var j = i;
@@ -13403,33 +13459,7 @@ fn paletteFilter(a: *App) void {
             std.mem.swap(i32, &scores[j - 1], &scores[j]);
         }
     }
-    if (!a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode and messenger_view.includes(activeChatView(a), .whatsapp) and query_len > 0) {
-        const query = std.unicode.utf16LeToUtf8Alloc(a.allocator, query_buf[0..query_len]) catch null;
-        defer if (query) |text| a.allocator.free(text);
-        if (query) |text| {
-            var exclude: [max_palette_items][]const u8 = undefined;
-            var exclude_count: usize = 0;
-            for (a.palette_matches[0..a.palette_match_count]) |match| {
-                const item = &a.palette_items[match];
-                if (item.chat_jid.len == 0) continue;
-                exclude[exclude_count] = item.chat_jid.slice();
-                exclude_count += 1;
-            }
-            var matches: [20]people_index.Entry = undefined;
-            const count = a.people.search(text, exclude[0..exclude_count], &matches, 20);
-            for (matches[0..count]) |entry| {
-                if (a.palette_item_count == max_palette_items) break;
-                const label = std.fmt.allocPrint(a.allocator, "{s}  ·  {s}", .{ entry.name, if (entry.origin == .archived) "Archived" else "Contact" }) catch continue;
-                defer a.allocator.free(label);
-                const index = a.palette_item_count;
-                appendPalette(a, label, "", 0);
-                a.palette_items[index].chat_jid.set(entry.jid);
-                a.palette_items[index].chat_identity.set(.{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = entry.jid });
-                a.palette_matches[a.palette_match_count] = index;
-                a.palette_match_count += 1;
-            }
-        }
-    }
+    if (!unifiedHub(a) and messenger_view.includes(activeChatView(a), .whatsapp)) appendPalettePeople(a, query_buf[0..query_len], &scores, false);
     if (a.palette_list) |list| {
         _ = win.SendMessageW(list, win.WM_SETREDRAW, 0, 0);
         _ = win.SendMessageW(list, win.LB_RESETCONTENT, 0, 0);
@@ -13482,7 +13512,7 @@ fn paletteActivate(a: *App) void {
                 break;
             }
         }
-        if (chat_index == null and messenger_view.includes(activeChatView(a), .whatsapp) and !a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode) {
+        if (chat_index == null and (unifiedHub(a) or messenger_view.includes(activeChatView(a), .whatsapp)) and !a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode) {
             if (a.people.find(item.chat_jid.slice())) |entry| {
                 const index = @min(a.chat_count, max_chats - 1);
                 a.chats[index] = peopleChat(a, entry);

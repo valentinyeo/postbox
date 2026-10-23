@@ -27,5 +27,5 @@ Run `feature=palette-archived` on GitHub Windows Actions. Matching pull requests
 
 - Palette labels are limited to 63 characters by `Read-ListLabels`; keep fixture names short.
 - Never type into the palette without the foreground check in `Send-Keys`; Escape closes it between queries.
-- The journey-only commit must fail on the app before the fix: expect steps `a-all-telegram`, `a-all-slack`, every non-WhatsApp view and the `c-*` steps to fail.
+- The journey-only commit failed on the app before the fix (hub rows are now indexed with provider, account and view account, searched in every view and scored with the commands): expect steps `a-all-telegram`, `a-all-slack`, every non-WhatsApp view and the `c-*` steps to fail.
 - This is synthetic client-contract proof, not live provider delivery. No `WM_COMMAND`, state setter or control-client mutation is used.
