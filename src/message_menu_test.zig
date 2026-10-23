@@ -6,19 +6,27 @@ const reaction_remove = 3007;
 const command_reply = 2020;
 const command_copy_text = 2021;
 const command_copy_link = 2022;
-const quick_reactions = [_]u16{3000};
+const quick_reactions = [_]u16{ 3000, 3001, 3002, 3003, 3004, 3005, 3006 };
 const App = struct {
     hwnd: ?usize = 1,
     brush_panel: ?usize = 10,
     brush_raised: ?usize = 11,
     brush_muted: ?usize = 12,
     font: ?*anyopaque = @ptrFromInt(16),
+    reaction_row_rect: ?win.RECT = null,
 };
 const MenuItem = struct { flags: u32, command: usize, label: ?[*:0]const u16 };
 var rows: [8]MenuItem = undefined;
 var row_count: usize = 0;
 var menu_info: ?win.MENUINFO = null;
 var destroyed = false;
+var tracking_app: ?*App = null;
+var tracking_rect: ?win.RECT = null;
+var tracking_choice: u32 = 0;
+var mouse_position: u32 = 0;
+var row_was_reset = false;
+var reacted: ?u16 = null;
+var picker_opened = false;
 var fills: [2]usize = undefined;
 var fill_count: usize = 0;
 var text_color: u32 = 0;
@@ -64,13 +72,14 @@ const win = struct {
         return 1;
     }
     fn TrackPopupMenu(_: usize, _: u32, _: i32, _: i32, _: i32, _: usize, _: ?*const RECT) u32 {
-        return 0;
+        if (tracking_app) |app| {
+            row_was_reset = app.reaction_row_rect == null;
+            app.reaction_row_rect = tracking_rect;
+        }
+        return tracking_choice;
     }
-    fn GetMenuItemRect(_: usize, _: usize, _: u32, _: *RECT) i32 {
-        return 0;
-    }
-    fn GetCursorPos(_: *POINT) i32 {
-        return 0;
+    fn GetMessagePos() u32 {
+        return mouse_position;
     }
     fn GetDC(_: usize) ?usize {
         return 1;
@@ -117,8 +126,12 @@ fn reactionCellWidth(_: *const App) i32 {
     return 36;
 }
 fn startReply(_: *App) void {}
-fn openReactionPicker(_: *App) void {}
-fn reactToSelected(_: *App, _: u16) void {}
+fn openReactionPicker(_: *App) void {
+    picker_opened = true;
+}
+fn reactToSelected(_: *App, command: u16) void {
+    reacted = command;
+}
 fn reset(choice: theme.Choice) void {
     theme.set(choice);
     row_count = 0;
@@ -126,6 +139,12 @@ fn reset(choice: theme.Choice) void {
     destroyed = false;
     fill_count = 0;
     drawn_text = null;
+    tracking_app = null;
+    tracking_rect = null;
+    tracking_choice = 0;
+    row_was_reset = false;
+    reacted = null;
+    picker_opened = false;
 }
 
 test "IGSH-505 message menu sets AMOLED background and owner draws every row" {
@@ -186,5 +205,53 @@ test "IGSH-505 Green message menu keeps native text and separators after AMOLED"
             const expected: u32 = if (index == 2) win.MF_OWNERDRAW else if (row.label == null) win.MF_SEPARATOR else win.MF_STRING;
             try std.testing.expectEqual(expected, row.flags);
         }
+    }
+}
+
+test "IGSH-645 reaction cells use screen origin and retain every boundary including plus" {
+    for ([_]i32{ -900, 0, 120 }, [_]i32{ 36, 54, 72 }) |left, width| {
+        for (0..8) |cell| {
+            const start = left + @as(i32, @intCast(cell)) * width;
+            try std.testing.expectEqual(cell, reactionCellAt(start, left, width, 8));
+            try std.testing.expectEqual(cell, reactionCellAt(start + @divTrunc(width, 2), left, width, 8));
+            try std.testing.expectEqual(cell, reactionCellAt(start + width - 1, left, width, 8));
+        }
+        try std.testing.expectEqual(@as(usize, 0), reactionCellAt(left - 1, left, width, 8));
+        try std.testing.expectEqual(@as(usize, 0), reactionCellAt(left + 8 * width, left, width, 8));
+    }
+    try std.testing.expectEqual(@as(usize, 0), reactionCellAt(100, 0, 0, 8));
+    try std.testing.expectEqual(@as(usize, 0), reactionCellAt(100, 0, 36, 0));
+    try std.testing.expectEqual(@as(usize, 0), reactionCellAt(std.math.maxInt(i32), std.math.minInt(i32), 36, 8));
+}
+
+test "IGSH-645 closed menu routes captured cells and plus without querying its destroyed window" {
+    for (0..8) |cell| {
+        reset(.amoled);
+        var app: App = .{ .reaction_row_rect = .{} };
+        tracking_app = &app;
+        tracking_rect = .{ .left = -300, .top = -200, .right = -12, .bottom = -164 };
+        tracking_choice = reaction_row;
+        const x: i16 = @intCast(-300 + @as(i32, @intCast(cell)) * 36 + 18);
+        const y: i16 = -182;
+        mouse_position = @as(u32, @as(u16, @bitCast(x))) | (@as(u32, @as(u16, @bitCast(y))) << 16);
+        openReactionMenu(&app, 100, 100);
+        try std.testing.expect(row_was_reset);
+        try std.testing.expect(destroyed);
+        try std.testing.expectEqual(cell == 7, picker_opened);
+        try std.testing.expectEqual(if (cell == 7) null else @as(?u16, quick_reactions[cell]), reacted);
+    }
+}
+
+test "IGSH-645 keyboard row selection and missing geometry retain thumbs up fallback" {
+    for ([_]?win.RECT{ null, .{ .left = 100, .top = 100, .right = 388, .bottom = 136 } }) |rect| {
+        reset(.amoled);
+        var app: App = .{};
+        tracking_app = &app;
+        tracking_rect = rect;
+        tracking_choice = reaction_row;
+        mouse_position = 0;
+        openReactionMenu(&app, 100, 100);
+        try std.testing.expectEqual(@as(?u16, quick_reactions[0]), reacted);
+        try std.testing.expect(!picker_opened);
     }
 }
