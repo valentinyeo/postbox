@@ -47,6 +47,7 @@ const scrollbar = @import("scrollbar.zig");
 const message_scroll = @import("message_scroll.zig");
 const message_double_click = @import("message_double_click.zig");
 const reaction_chip = @import("reaction_chip.zig");
+const passage = @import("passage.zig");
 const sidebar_nav = @import("sidebar_nav.zig");
 const archive_rules = @import("archive_rules.zig");
 const message_filter = @import("message_filter.zig");
@@ -111,6 +112,7 @@ const timer_update_first_check = 8;
 const timer_telegram = 7;
 const timer_slack_mark = 9;
 const timer_voice = 10;
+const timer_passage_scroll = 11;
 const timer_update_card = 60;
 const command_telegram_login = 2025;
 const command_telegram_logout = 2026;
@@ -892,9 +894,7 @@ const App = struct {
     media_failures: [16]MediaFailure = [_]MediaFailure{.{}} ** 16,
     avatar_session: ?*avatar.Session = null,
     transcribe_session: ?*dictation.FileSession = null,
-    sel_message: ?usize = null,
-    sel_anchor_word: usize = 0,
-    sel_focus_word: usize = 0,
+    text_selection: passage.Selection = .{},
     text_dragging: bool = false,
     drag_moved: bool = false,
     drag_origin: win.POINT = .{ .x = 0, .y = 0 },
@@ -5225,6 +5225,12 @@ fn pendingByClientMsgId(a: *App, client_msg_id: []const u8) ?usize {
 }
 
 fn removeMessageAt(a: *App, index: usize) void {
+    a.text_selection = .{};
+    a.text_dragging = false;
+    if (a.canvas) |canvas| {
+        _ = win.KillTimer(canvas, timer_passage_scroll);
+        if (win.GetCapture() == canvas) _ = win.ReleaseCapture();
+    }
     if (a.selected_message) |selected| {
         if (selected == index) {
             a.selected_message = null;
@@ -6490,6 +6496,12 @@ fn retryPendingDownload(a: *App) void {
 }
 
 fn clearMessages(a: *App) void {
+    a.text_selection = .{};
+    a.text_dragging = false;
+    if (a.canvas) |canvas| {
+        _ = win.KillTimer(canvas, timer_passage_scroll);
+        if (win.GetCapture() == canvas) _ = win.ReleaseCapture();
+    }
     for (a.messages[0..a.message_count]) |*message| {
         if (message.bitmap) |bitmap| {
             _ = win.DeleteObject(bitmap);
@@ -11297,23 +11309,100 @@ fn copyToClipboard(a: *App, text: []const u16) bool {
     return true;
 }
 
+fn selectionPoint(a: *const App, index: usize, word: usize) passage.Endpoint {
+    const span = a.messages[index].word_rects[word];
+    return .{ .message = index, .word = word, .start = span.start, .end = @as(usize, span.start) + span.len };
+}
+
+fn updatePassageFocus(a: *App, x: i32, pointer_y: i32) void {
+    var y = pointer_y;
+    if (a.canvas) |canvas| {
+        var client: win.RECT = undefined;
+        if (win.GetClientRect(canvas, &client) != 0) y = std.math.clamp(y, client.top, @max(client.top, client.bottom - 1));
+    }
+    var nearest: ?passage.Endpoint = null;
+    var vertical_distance: i64 = std.math.maxInt(i64);
+    var horizontal_distance: i64 = std.math.maxInt(i64);
+    for (a.messages[0..a.message_count], 0..) |*item, index| {
+        const bubble = item.bubble_hit;
+        if (item.word_count == 0 or bubble.right <= bubble.left) continue;
+        if (rectHasPoint(bubble, x, y)) {
+            if (hitTestWord(item, x, y)) |word| {
+                a.text_selection.focus = selectionPoint(a, index, word);
+                return;
+            }
+        }
+        const first = item.word_rects[0].rect;
+        const last = item.word_rects[item.word_count - 1].rect;
+        for ([_]usize{ 0, item.word_count - 1 }) |word| {
+            if (item.word_count > 1 and ((y < first.top and word != 0) or (y > last.bottom and word == 0))) continue;
+            const rect = item.word_rects[word].rect;
+            const dx = @max(@as(i64, rect.left) - x, @max(@as(i64, x) - rect.right, 0));
+            const dy = @max(@as(i64, rect.top) - y, @max(@as(i64, y) - rect.bottom, 0));
+            if (dy < vertical_distance or (dy == vertical_distance and dx < horizontal_distance)) {
+                vertical_distance = dy;
+                horizontal_distance = dx;
+                var boundary = selectionPoint(a, index, word);
+                if (word == 0) boundary.start = 0;
+                if (word == item.word_count - 1) boundary.end = item.text.len;
+                nearest = boundary;
+            }
+        }
+    }
+    if (nearest) |point| a.text_selection.focus = point;
+}
+
+fn copyPassage(a: *App) bool {
+    const ends = a.text_selection.bounds() orelse return false;
+    if (ends[0].message == ends[1].message) return false;
+    if (ends[1].message >= a.message_count) return false;
+    const days = a.allocator.alloc([20]u8, ends[1].message - ends[0].message + 1) catch {
+        setStatus(a, "Could not copy");
+        return true;
+    };
+    defer a.allocator.free(days);
+    var messages: std.ArrayList(passage.Message) = .empty;
+    defer messages.deinit(a.allocator);
+    for (a.messages[ends[0].message .. ends[1].message + 1], ends[0].message..) |*message, index| {
+        if (!channelMessageVisible(a, message)) continue;
+        const range = a.text_selection.range(index, message.text.len) orelse continue;
+        var timestamp = message.timestamp.slice();
+        if (timestamp.len == 0) {
+            if (slack.tsSeconds(message.id.slice())) |seconds| timestamp = tj.formatTimestamp(&days[index - ends[0].message], seconds);
+        }
+        messages.append(a.allocator, .{
+            .sender = message.sender.slice(),
+            .from_me = message.from_me,
+            .time = message.time.slice(),
+            .day = timestamp[0..@min(10, timestamp.len)],
+            .text = message.text.slice(),
+            .start = range.start,
+            .end = range.end,
+        }) catch {
+            setStatus(a, "Could not copy");
+            return true;
+        };
+    }
+    const text = passage.build(a.allocator, messages.items) catch {
+        setStatus(a, "Could not copy");
+        return true;
+    };
+    defer a.allocator.free(text);
+    setStatus(a, if (copyToClipboard(a, text)) "Selection copied" else "Could not copy");
+    return true;
+}
+
 fn copySelectedText(a: *App) void {
+    if (copyPassage(a)) return;
     const selected = a.selected_message orelse {
         setStatus(a, "Select a message first (Alt+J/K or click)");
         return;
     };
     if (selected >= a.message_count) return;
     const message = &a.messages[selected];
-    if (a.sel_message != null and a.sel_message.? == selected and a.sel_anchor_word != a.sel_focus_word) {
-        const lo = @min(a.sel_anchor_word, a.sel_focus_word);
-        const hi = @max(a.sel_anchor_word, a.sel_focus_word);
-        if (hi < message.word_count) {
-            const first = message.word_rects[lo];
-            const last = message.word_rects[hi];
-            const slice = message.text.slice()[first.start..][0 .. last.start + last.len - first.start];
-            setStatus(a, if (copyToClipboard(a, slice)) "Selection copied" else "Could not copy");
-            return;
-        }
+    if (a.text_selection.range(selected, message.text.len)) |range| {
+        setStatus(a, if (copyToClipboard(a, message.text.slice()[range.start..range.end])) "Selection copied" else "Could not copy");
+        return;
     }
     if (message.text.len == 0) {
         setStatus(a, "This message has no text");
@@ -11386,7 +11475,7 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
             defer a.allocator.free(utf8);
             const action = reaction_chip.decide(utf8, segment_index, item.my_reaction.slice()) orelse return;
             a.selected_message = index;
-            a.sel_message = null;
+            a.text_selection = .{};
             reactToMessageWithChip(a, a.chats[a.selected_chat].jid.slice(), item.id.slice(), switch (action) {
                 .add => |emoji| emoji,
                 .remove => "",
@@ -11482,16 +11571,7 @@ fn handleCanvasDoubleClick(a: *App, x: i32, y: i32) bool {
 
 fn reactToSelected(a: *App, command: u16) void {
     if (command == command_copy_selection) {
-        const selected = a.selected_message orelse return;
-        if (selected >= a.message_count or a.sel_message == null or a.sel_anchor_word == a.sel_focus_word) return;
-        const message = &a.messages[selected];
-        const lo = @min(a.sel_anchor_word, a.sel_focus_word);
-        const hi = @max(a.sel_anchor_word, a.sel_focus_word);
-        if (hi >= message.word_count) return;
-        const first = message.word_rects[lo];
-        const last = message.word_rects[hi];
-        const slice = message.text.slice()[first.start..][0 .. last.start + last.len - first.start];
-        setStatus(a, if (copyToClipboard(a, slice)) "Selection copied" else "Could not copy");
+        if (a.text_selection.active()) copySelectedText(a);
         return;
     }
     if (command == command_copy_transcript) {
@@ -16298,33 +16378,28 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             drawUnfurlCard(&shapes, hdc, a, message, left + px(a, 12), text_top + text_height + px(a, 4), right - left - px(a, 24));
             text_top += text_height + unfurl_card_height + px(a, 6);
         }
-        if (a.sel_message != null and a.sel_message.? == index and a.sel_anchor_word != a.sel_focus_word) {
-            const lo = @min(a.sel_anchor_word, a.sel_focus_word);
-            const hi = @max(a.sel_anchor_word, a.sel_focus_word);
-            if (hi < message.word_count) {
-                const highlight = win.CreateSolidBrush(theme.current.secondary_container) orelse return;
-                defer _ = win.DeleteObject(highlight);
-                var word_index = lo;
-                while (word_index <= hi) : (word_index += 1) {
-                    const span = &message.word_rects[word_index];
-                    _ = win.FillRect(hdc, &span.rect, highlight);
-                    _ = win.SelectObject(hdc, @ptrCast(a.font.?));
-                    _ = win.SetTextColor(hdc, theme.current.on_secondary_container);
-                    const slice = message.text.slice()[span.start..][0..span.len];
-                    var runs: [max_text_runs]TextRun = undefined;
-                    const count = splitRuns(slice, &runs);
-                    var cursor = span.rect.left;
-                    for (runs[0..count]) |run| {
-                        const part = slice[run.start..][0..run.len];
-                        if (run.emoji) {
-                            _ = win.TextOutW(hdc, cursor, span.rect.top, part.ptr, @intCast(part.len));
-                            var size: win.SIZE = undefined;
-                            _ = win.GetTextExtentPoint32W(hdc, part.ptr, @intCast(part.len), &size);
-                            cursor += size.cx;
-                        } else {
-                            _ = text_draw.drawRun(hdc, cursor, span.rect.top, part.ptr, @intCast(part.len));
-                            cursor += runWidth(hdc, part);
-                        }
+        if (a.text_selection.range(index, message.text.len)) |range| {
+            const highlight = win.CreateSolidBrush(theme.current.secondary_container) orelse return;
+            defer _ = win.DeleteObject(highlight);
+            for (message.word_rects[0..message.word_count]) |*span| {
+                if (span.start < range.start or @as(usize, span.start) + span.len > range.end) continue;
+                _ = win.FillRect(hdc, &span.rect, highlight);
+                _ = win.SelectObject(hdc, @ptrCast(a.font.?));
+                _ = win.SetTextColor(hdc, theme.current.on_secondary_container);
+                const slice = message.text.slice()[span.start..][0..span.len];
+                var runs: [max_text_runs]TextRun = undefined;
+                const count = splitRuns(slice, &runs);
+                var cursor = span.rect.left;
+                for (runs[0..count]) |run| {
+                    const part = slice[run.start..][0..run.len];
+                    if (run.emoji) {
+                        _ = win.TextOutW(hdc, cursor, span.rect.top, part.ptr, @intCast(part.len));
+                        var size: win.SIZE = undefined;
+                        _ = win.GetTextExtentPoint32W(hdc, part.ptr, @intCast(part.len), &size);
+                        cursor += size.cx;
+                    } else {
+                        _ = text_draw.drawRun(hdc, cursor, span.rect.top, part.ptr, @intCast(part.len));
+                        cursor += runWidth(hdc, part);
                     }
                 }
             }
@@ -16372,6 +16447,21 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             return 0;
         },
         win.WM_ERASEBKGND => return 1,
+        win.WM_TIMER => {
+            if (wparam != timer_passage_scroll or !a.text_dragging) return 0;
+            var point: win.POINT = undefined;
+            var client: win.RECT = undefined;
+            if (win.GetCursorPos(&point) == 0 or win.ScreenToClient(hwnd, &point) == 0 or win.GetClientRect(hwnd, &client) == 0) return 0;
+            const step: i32 = if (point.y <= client.top) px(a, 24) else if (point.y >= client.bottom - 1) -px(a, 24) else return 0;
+            const previous = a.scroll_y;
+            a.scroll_y = std.math.clamp(a.scroll_y + step, 0, a.max_scroll);
+            if (a.scroll_y != previous) a.drag_moved = true;
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
+            _ = win.UpdateWindow(hwnd);
+            updatePassageFocus(a, point.x, point.y);
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
+            return 0;
+        },
         win.WM_MOUSEWHEEL => {
             const delta: i16 = @bitCast(hiword(wparam));
             a.scroll_y = std.math.clamp(a.scroll_y + @divTrunc(@as(i32, delta), 2), 0, a.max_scroll);
@@ -16413,13 +16503,15 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                 const bubble = item.bubble_hit;
                 if (x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom) {
                     if (hitTestWord(item, x, y)) |word_index| {
-                        a.sel_message = index;
-                        a.sel_anchor_word = word_index;
-                        a.sel_focus_word = word_index;
+                        const point = selectionPoint(a, index, word_index);
+                        a.text_selection = .{ .anchor = point, .focus = point };
+                        a.selected_message = index;
                         a.text_dragging = true;
                         a.drag_moved = false;
                         a.drag_origin = .{ .x = x, .y = y };
+                        _ = win.SetFocus(hwnd);
                         _ = win.SetCapture(hwnd);
+                        _ = win.SetTimer(hwnd, timer_passage_scroll, 40, null);
                         _ = win.InvalidateRect(hwnd, null, win.FALSE);
                     }
                     break;
@@ -16450,19 +16542,14 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                 const cdy = y - a.click_origin.y;
                 if (cdx * cdx + cdy * cdy > 16) a.click_moved = true;
             }
-            if (!a.text_dragging or a.sel_message == null) return win.DefWindowProcW(hwnd, message, wparam, lparam);
+            if (!a.text_dragging or a.text_selection.anchor == null) return win.DefWindowProcW(hwnd, message, wparam, lparam);
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
             const dx = x - a.drag_origin.x;
             const dy = y - a.drag_origin.y;
             if (dx * dx + dy * dy > 16) a.drag_moved = true;
-            const item = &a.messages[a.sel_message.?];
-            if (hitTestWord(item, x, y)) |word_index| {
-                if (word_index != a.sel_focus_word) {
-                    a.sel_focus_word = word_index;
-                    _ = win.InvalidateRect(hwnd, null, win.FALSE);
-                }
-            }
+            updatePassageFocus(a, x, y);
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return 0;
         },
         win.WM_LBUTTONUP => {
@@ -16478,18 +16565,22 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                 return 0;
             }
             if (a.text_dragging) {
-                _ = win.ReleaseCapture();
+                _ = win.KillTimer(hwnd, timer_passage_scroll);
                 a.text_dragging = false;
+                if (a.drag_moved) updatePassageFocus(a, x, y);
+                _ = win.ReleaseCapture();
                 if (!a.drag_moved) {
-                    a.sel_message = null;
+                    a.text_selection = .{};
                     handleCanvasClick(a, hwnd, x, y);
                 }
+                _ = win.InvalidateRect(hwnd, null, win.FALSE);
                 return 0;
             }
             handleCanvasClick(a, hwnd, x, y);
             return 0;
         },
         win.WM_CAPTURECHANGED => {
+            _ = win.KillTimer(hwnd, timer_passage_scroll);
             a.sb_drag = .none;
             a.text_dragging = false;
             return 0;
@@ -16497,9 +16588,10 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         win.WM_RBUTTONUP => {
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
-            if (a.sel_message != null and a.sel_anchor_word != a.sel_focus_word) {
-                const selected_index = a.sel_message.?;
-                if (selected_index < a.message_count) {
+            if (a.text_selection.active()) {
+                const ends = a.text_selection.bounds().?;
+                var selected_index = ends[0].message;
+                while (selected_index <= ends[1].message and selected_index < a.message_count) : (selected_index += 1) {
                     const item = &a.messages[selected_index];
                     const bubble = item.bubble_hit;
                     if (x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom) {

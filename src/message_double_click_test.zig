@@ -1,4 +1,6 @@
 const std = @import("std");
+const passage = @import("passage");
+const timer_passage_scroll = 11;
 const message_double_click = @import("message_double_click");
 const send_args = @import("send_args");
 const transport = struct {
@@ -7,11 +9,42 @@ const transport = struct {
 const Rect = struct { left: i32 = 0, top: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
 const Point = struct { x: i32 = 0, y: i32 = 0 };
 const win = struct {
+    const HWND = usize;
+    const POINT = Point;
+    const RECT = Rect;
+    const WM_TIMER = 6;
+    var timer: usize = 0;
+    var cursor: Point = .{};
+    fn GetCursorPos(point: *Point) i32 {
+        point.* = cursor;
+        return 1;
+    }
+    fn ScreenToClient(_: usize, _: *Point) i32 {
+        return 1;
+    }
+    fn GetClientRect(_: usize, rect: *Rect) i32 {
+        rect.* = .{ .right = 400, .bottom = 300 };
+        return 1;
+    }
+    fn UpdateWindow(_: usize) i32 {
+        return 1;
+    }
+    fn SetTimer(_: usize, id: usize, _: u32, _: ?*anyopaque) usize {
+        timer = id;
+        return 1;
+    }
+    fn KillTimer(_: usize, _: usize) i32 {
+        timer = 0;
+        return 1;
+    }
     const WM_LBUTTONDOWN = 1;
     const WM_LBUTTONUP = 2;
     const WM_LBUTTONDBLCLK = 3;
     const WM_MOUSEMOVE = 4;
     const WM_CAPTURECHANGED = 5;
+    fn SetFocus(_: usize) usize {
+        return 1;
+    }
     fn SetCapture(_: usize) usize {
         return 1;
     }
@@ -50,6 +83,12 @@ const Message = struct {
     local_path: WideText(519) = .{},
     image: bool = false,
     gif: bool = false,
+    text: WideText(4095) = .{},
+    word_rects: [3]struct { start: u16, len: u16, rect: Rect } = .{
+        .{ .start = 0, .len = 3, .rect = .{ .left = 10, .top = 20, .right = 40, .bottom = 40 } },
+        .{ .start = 4, .len = 3, .rect = .{ .left = 40, .top = 20, .right = 70, .bottom = 40 } },
+        .{ .start = 8, .len = 5, .rect = .{ .left = 70, .top = 20, .right = 100, .bottom = 40 } },
+    },
     word_count: usize = 3,
 };
 const Chat = struct {
@@ -95,9 +134,9 @@ const App = struct {
     click_origin: Point = .{},
     click_moved: bool = false,
     canvas_double_click_handled: bool = false,
-    sel_message: ?usize = null,
-    sel_anchor_word: usize = 0,
-    sel_focus_word: usize = 0,
+    scroll_y: i32 = 0,
+    max_scroll: i32 = 100,
+    text_selection: passage.Selection = .{},
     text_dragging: bool = false,
     drag_moved: bool = false,
     drag_origin: Point = .{},
@@ -150,7 +189,11 @@ fn wacliEnqueue(a: *App, job: WacliJob, _: bool) bool {
     a.job_count += 1;
     return true;
 }
+fn px(_: *const App, value: i32) i32 {
+    return value;
+}
 fn fixture() App {
+    win.timer = 0;
     var a = App{};
     a.chats[0].jid.set("chat@g.us");
     a.chats[0].account.set("test-account");
@@ -332,9 +375,6 @@ fn setCanvasScroll(_: *App, _: i32) void {}
 fn handleCanvasClick(a: *App, _: usize, _: i32, _: i32) void {
     a.clicks += 1;
 }
-fn hitTestWord(_: *Message, x: i32, _: i32) ?usize {
-    return @intCast(@divTrunc(x - 10, 30));
-}
 fn mouse(a: *App, event: u32, x: u16, y: u16) void {
     app_ptr = a;
     defer app_ptr = null;
@@ -366,9 +406,9 @@ test "IGSH-463 drag text selection still selects words without reacting" {
     mouse(&a, win.WM_LBUTTONDOWN, 20, 20);
     mouse(&a, win.WM_MOUSEMOVE, 80, 20);
     mouse(&a, win.WM_LBUTTONUP, 80, 20);
-    try std.testing.expectEqual(@as(?usize, 0), a.sel_message);
-    try std.testing.expectEqual(@as(usize, 0), a.sel_anchor_word);
-    try std.testing.expectEqual(@as(usize, 2), a.sel_focus_word);
+    try std.testing.expectEqual(@as(usize, 0), a.text_selection.anchor.?.message);
+    try std.testing.expectEqual(@as(usize, 0), a.text_selection.anchor.?.word);
+    try std.testing.expectEqual(@as(usize, 2), a.text_selection.focus.word);
     try std.testing.expectEqual(@as(usize, 0), a.job_count);
     try std.testing.expectEqual(@as(usize, 0), a.clicks);
     try std.testing.expect(!a.text_dragging);
@@ -430,4 +470,123 @@ test "IGSH-674 chip overlap never triggers double click thumbs up" {
     a.messages[0].reaction_hit = .{ .left = 20, .top = 96, .right = 60, .bottom = 120 };
     try std.testing.expect(!handleCanvasDoubleClick(&a, 30, 98));
     try std.testing.expectEqual(@as(usize, 0), a.job_count);
+}
+
+test "IGSH-674 chip mouse down takes priority over passage selection" {
+    var a = fixture();
+    a.messages[0].reaction_hit = .{ .left = 20, .top = 20, .right = 60, .bottom = 40 };
+    mouse(&a, win.WM_LBUTTONDOWN, 30, 30);
+    try std.testing.expect(a.text_selection.anchor == null);
+    try std.testing.expect(!a.text_dragging);
+    try std.testing.expectEqual(@as(usize, 0), win.timer);
+    try std.testing.expectEqual(@as(usize, 0), a.job_count);
+    mouse(&a, win.WM_LBUTTONUP, 30, 30);
+    try std.testing.expectEqual(@as(usize, 1), a.clicks);
+}
+
+test "passage mouse drag crosses messages and reverses through the same offsets" {
+    var a = fixture();
+    a.message_count = 2;
+    a.messages[0].text.set(a.allocator, "one two three");
+    a.messages[1].text.set(a.allocator, "one two three");
+    a.messages[1].bubble_hit = .{ .left = 10, .top = 120, .right = 200, .bottom = 210 };
+    for (&a.messages[1].word_rects) |*span| {
+        span.rect.top += 110;
+        span.rect.bottom += 110;
+    }
+    mouse(&a, win.WM_LBUTTONDOWN, 50, 20);
+    mouse(&a, win.WM_MOUSEMOVE, 50, 130);
+    mouse(&a, win.WM_LBUTTONUP, 50, 130);
+    try std.testing.expectEqual(@as(usize, 0), a.text_selection.anchor.?.message);
+    try std.testing.expectEqual(@as(usize, 1), a.text_selection.focus.message);
+    try std.testing.expectEqual(passage.Range{ .start = 4, .end = 13 }, a.text_selection.range(0, 13).?);
+    try std.testing.expectEqual(passage.Range{ .start = 0, .end = 7 }, a.text_selection.range(1, 13).?);
+    mouse(&a, win.WM_LBUTTONDOWN, 50, 130);
+    mouse(&a, win.WM_MOUSEMOVE, 50, 20);
+    mouse(&a, win.WM_LBUTTONUP, 50, 20);
+    try std.testing.expectEqual(passage.Range{ .start = 4, .end = 13 }, a.text_selection.range(0, 13).?);
+    try std.testing.expectEqual(passage.Range{ .start = 0, .end = 7 }, a.text_selection.range(1, 13).?);
+}
+
+test "passage focus snaps between bubbles and outside the canvas" {
+    var a = fixture();
+    a.message_count = 2;
+    a.messages[1].bubble_hit = .{ .left = 10, .top = 120, .right = 200, .bottom = 210 };
+    for (&a.messages[1].word_rects) |*span| {
+        span.rect.top += 110;
+        span.rect.bottom += 110;
+    }
+    updatePassageFocus(&a, 50, 0);
+    try std.testing.expectEqual(@as(usize, 0), a.text_selection.focus.message);
+    try std.testing.expectEqual(@as(usize, 0), a.text_selection.focus.word);
+    updatePassageFocus(&a, 50, 115);
+    try std.testing.expectEqual(@as(usize, 1), a.text_selection.focus.message);
+    try std.testing.expectEqual(@as(usize, 0), a.text_selection.focus.word);
+    updatePassageFocus(&a, 500, 500);
+    try std.testing.expectEqual(@as(usize, 1), a.text_selection.focus.message);
+    try std.testing.expectEqual(@as(usize, 2), a.text_selection.focus.word);
+}
+
+test "passage edge snapping follows message order across opposite bubble alignments" {
+    var a = fixture();
+    a.message_count = 2;
+    a.messages[1].bubble_hit = .{ .left = 900, .top = 120, .right = 1100, .bottom = 210 };
+    for (&a.messages[1].word_rects) |*span| {
+        span.rect.left += 890;
+        span.rect.right += 890;
+        span.rect.top += 110;
+        span.rect.bottom += 110;
+    }
+    updatePassageFocus(&a, -1000, 1000);
+    try std.testing.expectEqual(@as(usize, 1), a.text_selection.focus.message);
+    try std.testing.expectEqual(@as(usize, 2), a.text_selection.focus.word);
+    updatePassageFocus(&a, 2000, -1000);
+    try std.testing.expectEqual(@as(usize, 0), a.text_selection.focus.message);
+    try std.testing.expectEqual(@as(usize, 0), a.text_selection.focus.word);
+}
+
+test "passage outside pointer selects at the canvas edge rather than offscreen text" {
+    var a = fixture();
+    a.messages[0].bubble_hit.bottom = 600;
+    a.messages[0].word_rects[1].rect.top = 280;
+    a.messages[0].word_rects[1].rect.bottom = 300;
+    a.messages[0].word_rects[2].rect.top = 550;
+    a.messages[0].word_rects[2].rect.bottom = 570;
+    updatePassageFocus(&a, 50, 1000);
+    try std.testing.expectEqual(@as(usize, 1), a.text_selection.focus.word);
+    a.messages[0].word_count = 0;
+    updatePassageFocus(&a, 50, -1000);
+    try std.testing.expectEqual(@as(usize, 1), a.text_selection.focus.word);
+}
+
+test "passage edge timer scrolls in both directions clamps and stops on release or lost capture" {
+    var a = fixture();
+    app_ptr = &a;
+    defer app_ptr = null;
+    _ = canvasProc(1, win.WM_LBUTTONDOWN, 0, @intCast((@as(u32, 20) << 16) | 20));
+    try std.testing.expectEqual(@as(usize, timer_passage_scroll), win.timer);
+    a.scroll_y = 50;
+    win.cursor = .{ .x = 50, .y = 100 };
+    _ = canvasProc(1, win.WM_TIMER, timer_passage_scroll, 0);
+    try std.testing.expectEqual(@as(i32, 50), a.scroll_y);
+    win.cursor.y = 301;
+    _ = canvasProc(1, win.WM_TIMER, timer_passage_scroll, 0);
+    try std.testing.expectEqual(@as(i32, 26), a.scroll_y);
+    a.scroll_y = 5;
+    _ = canvasProc(1, win.WM_TIMER, timer_passage_scroll, 0);
+    try std.testing.expectEqual(@as(i32, 0), a.scroll_y);
+    win.cursor.y = -1;
+    a.scroll_y = 95;
+    _ = canvasProc(1, win.WM_TIMER, timer_passage_scroll, 0);
+    try std.testing.expectEqual(@as(i32, 100), a.scroll_y);
+    _ = canvasProc(1, win.WM_LBUTTONUP, 0, @intCast((@as(u32, 20) << 16) | 80));
+    try std.testing.expectEqual(@as(usize, 0), win.timer);
+    try std.testing.expect(!a.text_dragging);
+    _ = canvasProc(1, win.WM_LBUTTONDOWN, 0, @intCast((@as(u32, 20) << 16) | 20));
+    _ = canvasProc(1, win.WM_CAPTURECHANGED, 0, 0);
+    try std.testing.expectEqual(@as(usize, 0), win.timer);
+    try std.testing.expect(!a.text_dragging);
+    const previous = a.scroll_y;
+    _ = canvasProc(1, win.WM_TIMER, timer_passage_scroll, 0);
+    try std.testing.expectEqual(previous, a.scroll_y);
 }

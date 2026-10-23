@@ -319,7 +319,7 @@ pub fn build(b: *std.Build) void {
     b.step("test-edit", "Run native DirectWrite editing tests on Windows").dependOn(&b.addRunArtifact(edit_tests).step);
 
     const test_step = b.step("test", "Run unit tests");
-    for ([_][]const u8{ "src/attachments.zig", "src/hub_test.zig", "src/wa_hub_test.zig", "src/pin_icon_test.zig", "src/message_double_click.zig", "src/reaction_chip.zig", "src/recording_paint.zig", "src/font_config.zig", "src/edit_contract.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/chat_rows.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/update_card_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/slack_oauth.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/environment_keys.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
+    for ([_][]const u8{ "src/attachments.zig", "src/hub_test.zig", "src/wa_hub_test.zig", "src/pin_icon_test.zig", "src/message_double_click.zig", "src/reaction_chip.zig", "src/passage.zig", "src/recording_paint.zig", "src/font_config.zig", "src/edit_contract.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/chat_rows.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/update_card_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/slack_oauth.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/environment_keys.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(test_root),
@@ -371,12 +371,17 @@ pub fn build(b: *std.Build) void {
         "fn hubConfigured(_: *const App) bool { return false; }\nfn enqueueHubReaction(_: *App, _: *PendingReaction) void {}\n",
         sourceSection("fn WideText(", "const Chat = struct"),
         sourceSection("const max_pending_reactions =", "const WacliJobKind = enum"),
+        sourceSection("fn selectionPoint(", "fn copyPassage("),
+        sourceSection("fn hitTestWord(", "fn linkSpanHit("),
         sourceSection("fn handleCanvasDoubleClick(", "fn reactToSelected("),
         sourceSection("fn findPendingReaction(", "fn insertEmoji("),
         "fn foldReactions(a: *App) void {\n",
         sourceSection("    var reaction_index: usize = 0;", "    reapplyPendingReactions(a, chat.jid.slice());"),
         "}\n",
-        "fn canvasProc(hwnd: usize, message: u32, wparam: usize, lparam: isize) isize { const a = app_ptr.?; switch (message) { win.WM_LBUTTONDOWN => { const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))); const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));\n",
+        "fn canvasProc(hwnd: usize, message: u32, wparam: usize, lparam: isize) isize { const a = app_ptr.?; switch (message) {\n",
+        canvas_source[std.mem.indexOf(u8, canvas_source, "        win.WM_TIMER =>").?..std.mem.indexOf(u8, canvas_source, "        win.WM_MOUSEWHEEL =>").?],
+        "win.WM_LBUTTONDOWN => { const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))); const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));\n",
+        sourceSection("            for (a.messages[0..a.message_count]) |*item| {", "            for (a.messages[0..a.message_count], 0..) |*item, index| {"),
         canvas_source[canvas_input_start..canvas_input_end],
         "else => return 0, } }\n",
         "fn loadReaction(a: *App, message: *Message, object: std.json.ObjectMap) void { const reaction_to = getString(object, \"ReactionToID\");\n",
@@ -388,6 +393,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = double_click_harness,
         .target = b.resolveTargetQuery(.{}),
         .imports = &.{
+            .{ .name = "passage", .module = b.createModule(.{ .root_source_file = b.path("src/passage.zig"), .target = b.resolveTargetQuery(.{}) }) },
             .{ .name = "send_args", .module = b.createModule(.{
                 .root_source_file = b.path("src/send_args.zig"),
                 .target = b.resolveTargetQuery(.{}),
