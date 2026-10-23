@@ -189,12 +189,13 @@ if session['feature'] == 'passage-copy':
                     text = text[text.index('MIDDLE'):]
                 if stage == 'partial' and index == last:
                     text = text[:text.index('MIDDLE') + 6]
-                next_day = row['Timestamp'][:10]
+                local = datetime.fromisoformat(row['Timestamp'].replace('Z', '+00:00')).astimezone()
+                next_day = local.strftime('%Y-%m-%d')
                 if day and day != next_day:
                     blocks.append(next_day)
                 day = next_day
                 sender = 'You' if row['FromMe'] else row['SenderName']
-                time = datetime.fromisoformat(row['Timestamp'].replace('Z', '+00:00')).astimezone().strftime('%H:%M')
+                time = local.strftime('%H:%M')
                 blocks.append(f"{sender}, {time}: {text}".replace('\n', '\r\n'))
             assert check['actual'] == check['expected'] == '\r\n'.join(blocks)
             if stage == 'edge':

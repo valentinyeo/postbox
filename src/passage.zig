@@ -45,6 +45,11 @@ pub const Message = struct {
     end: usize,
 };
 
+pub fn dayKey(buffer: []u8, timestamp: []const u8, local_date: ?[3]u16) []const u8 {
+    const date = local_date orelse return timestamp[0..@min(10, timestamp.len)];
+    return std.fmt.bufPrint(buffer, "{d:0>4}-{d:0>2}-{d:0>2}", .{ date[0], date[1], date[2] }) catch timestamp[0..@min(10, timestamp.len)];
+}
+
 pub fn build(allocator: std.mem.Allocator, messages: []const Message) ![]u16 {
     var out: std.ArrayList(u16) = .empty;
     errdefer out.deinit(allocator);
@@ -112,6 +117,38 @@ test "passage date appears only at an internal day change" {
     const actual = try build(std.testing.allocator, &messages);
     defer std.testing.allocator.free(actual);
     try std.testing.expectEqualSlices(u16, wide("A, 23:59: one\r\n2026-10-11\r\nB, 00:01: two\r\nA, 00:02: end"), actual);
+}
+
+test "passage date changes follow local days even when UTC days disagree" {
+    const Case = struct {
+        timestamps: [2][]const u8,
+        local_dates: [2][3]u16,
+        times: [2][]const u16,
+        expected: []const u16,
+    };
+    for ([_]Case{
+        .{
+            .timestamps = .{ "2026-10-10T21:30:00Z", "2026-10-10T22:30:00Z" },
+            .local_dates = .{ .{ 2026, 10, 10 }, .{ 2026, 10, 11 } },
+            .times = .{ wide("23:30"), wide("00:30") },
+            .expected = wide("A, 23:30: one\r\n2026-10-11\r\nB, 00:30: two"),
+        },
+        .{
+            .timestamps = .{ "2026-10-10T23:30:00Z", "2026-10-11T00:30:00Z" },
+            .local_dates = .{ .{ 2026, 10, 11 }, .{ 2026, 10, 11 } },
+            .times = .{ wide("01:30"), wide("02:30") },
+            .expected = wide("A, 01:30: one\r\nB, 02:30: two"),
+        },
+    }) |case| {
+        var days: [2][10]u8 = undefined;
+        const messages = [_]Message{
+            .{ .sender = wide("A"), .time = case.times[0], .day = dayKey(&days[0], case.timestamps[0], case.local_dates[0]), .text = wide("one"), .end = 3 },
+            .{ .sender = wide("B"), .time = case.times[1], .day = dayKey(&days[1], case.timestamps[1], case.local_dates[1]), .text = wide("two"), .end = 3 },
+        };
+        const actual = try build(std.testing.allocator, &messages);
+        defer std.testing.allocator.free(actual);
+        try std.testing.expectEqualSlices(u16, case.expected, actual);
+    }
 }
 
 test "passage skips media-only messages with empty text" {

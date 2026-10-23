@@ -25,10 +25,11 @@ function Get-PassageExpected($Rows, [int]$First, [int]$Last, [bool]$PartialLast)
         } else {
             [DateTimeOffset]::Parse($row.Timestamp, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal).UtcDateTime
         }
-        $nextDay = $timestamp.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        $local = $timestamp.ToLocalTime()
+        $nextDay = $local.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
         if ($day -ne '' -and $day -ne $nextDay) { $blocks += $nextDay }
         $day = $nextDay
-        $time = $timestamp.ToLocalTime().ToString('HH:mm', [Globalization.CultureInfo]::InvariantCulture)
+        $time = $local.ToString('HH:mm', [Globalization.CultureInfo]::InvariantCulture)
         $sender = if ($row.FromMe) { 'You' } else { $row.SenderName }
         $blocks += "$sender, ${time}: $($text.Replace("`n", "`r`n"))"
     }

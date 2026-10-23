@@ -2285,26 +2285,30 @@ fn timestampPart(timestamp: []const u8, start: usize, length: usize) ?u16 {
     return value;
 }
 
+fn localTimestamp(timestamp: []const u8) ?win.SYSTEMTIME {
+    if (timestamp.len < 19) return null;
+    var utc = std.mem.zeroes(win.SYSTEMTIME);
+    utc.wYear = timestampPart(timestamp, 0, 4) orelse 0;
+    utc.wMonth = timestampPart(timestamp, 5, 2) orelse 0;
+    utc.wDay = timestampPart(timestamp, 8, 2) orelse 0;
+    utc.wHour = timestampPart(timestamp, 11, 2) orelse 0;
+    utc.wMinute = timestampPart(timestamp, 14, 2) orelse 0;
+    utc.wSecond = timestampPart(timestamp, 17, 2) orelse 0;
+    var local = std.mem.zeroes(win.SYSTEMTIME);
+    if (utc.wYear > 0 and win.SystemTimeToTzSpecificLocalTime(null, &utc, &local) != 0) return local;
+    return null;
+}
+
 fn formatTime(target: *WideText(15), allocator: std.mem.Allocator, timestamp: []const u8) void {
     if (timestamp.len < 16) {
         target.set(allocator, "");
         return;
     }
-    if (timestamp.len >= 19) {
-        var utc = std.mem.zeroes(win.SYSTEMTIME);
-        utc.wYear = timestampPart(timestamp, 0, 4) orelse 0;
-        utc.wMonth = timestampPart(timestamp, 5, 2) orelse 0;
-        utc.wDay = timestampPart(timestamp, 8, 2) orelse 0;
-        utc.wHour = timestampPart(timestamp, 11, 2) orelse 0;
-        utc.wMinute = timestampPart(timestamp, 14, 2) orelse 0;
-        utc.wSecond = timestampPart(timestamp, 17, 2) orelse 0;
-        var local = std.mem.zeroes(win.SYSTEMTIME);
-        if (utc.wYear > 0 and win.SystemTimeToTzSpecificLocalTime(null, &utc, &local) != 0) {
-            var buffer: [6]u8 = undefined;
-            const rendered = std.fmt.bufPrint(&buffer, "{d:0>2}:{d:0>2}", .{ local.wHour, local.wMinute }) catch timestamp[11..16];
-            target.set(allocator, rendered);
-            return;
-        }
+    if (localTimestamp(timestamp)) |local| {
+        var buffer: [6]u8 = undefined;
+        const rendered = std.fmt.bufPrint(&buffer, "{d:0>2}:{d:0>2}", .{ local.wHour, local.wMinute }) catch timestamp[11..16];
+        target.set(allocator, rendered);
+        return;
     }
     target.set(allocator, timestamp[11..16]);
 }
@@ -11370,11 +11374,12 @@ fn copyPassage(a: *App) bool {
         if (timestamp.len == 0) {
             if (slack.tsSeconds(message.id.slice())) |seconds| timestamp = tj.formatTimestamp(&days[index - ends[0].message], seconds);
         }
+        const local = localTimestamp(timestamp);
         messages.append(a.allocator, .{
             .sender = message.sender.slice(),
             .from_me = message.from_me,
             .time = message.time.slice(),
-            .day = timestamp[0..@min(10, timestamp.len)],
+            .day = passage.dayKey(&days[index - ends[0].message], timestamp, if (local) |value| .{ value.wYear, value.wMonth, value.wDay } else null),
             .text = message.text.slice(),
             .start = range.start,
             .end = range.end,
