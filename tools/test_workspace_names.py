@@ -121,6 +121,46 @@ class WorkspaceNamesSourceTests(unittest.TestCase):
     def test_shared_label_formatter_and_duplicate_precedence_are_wired(self):
         subprocess.run([sys.executable, str(ROOT / 'tools/verify-wazig/check-views-source.py'), 'workspace-names'], cwd=ROOT, check=True)
 
+    def test_inbox_hover_sends_absolute_moves_with_dispatch_time(self):
+        source = (ROOT / 'tools/verify-wazig/menus.cs').read_text()
+        hover = source.split('public static void Hover(', 1)[1].split('public static void Click(', 1)[0]
+        for fragment in [
+            'WindowFromPoint(new Point { X = x, Y = y })', 'if (owner != pid) throw',
+            'GetSystemMetrics(76)', 'GetSystemMetrics(77)', 'GetSystemMetrics(78)', 'GetSystemMetrics(79)',
+            'x = absoluteX, y = absoluteY, flags = 0xE001',
+            'if (SendInput(1, input, Marshal.SizeOf(typeof(Input))) != 1) throw',
+            'System.Threading.Thread.Sleep(100)',
+        ]:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, hover)
+        self.assertNotIn('Mouse(pid, x, y, 1)', hover)
+
+    def test_inbox_tooltip_native_fallback_requires_visible_exact_text(self):
+        source = (ROOT / 'tools/verify-wazig/views.ps1').read_text()
+        hover = source.split('function Read-InboxWorkspaceTooltips(', 1)[1].split('function Assert-AccountView(', 1)[0]
+        for fragment in [
+            '0x01A1', '0x018E', '$Rows[$index].view_account -ne $team',
+            '($index - [int]$top.ToUInt64()) * [int]$height.ToUInt64()',
+            'Hover($Session.pid, $origin.X + 20, $origin.Y + $offset - 5)',
+            'Hover($Session.pid, $origin.X + 24, $origin.Y + $offset)',
+            "'Slack Alpha Workspace'", "'Slack Beta Workspace'",
+            '-not $tip.Current.IsOffscreen -and $tip.Current.Name -ceq $expectedName',
+            "[VerifyMenus]::Find($Session.pid, 'tooltips_class32')",
+            '$nativeTip -ne [IntPtr]::Zero', '[VerifyMenus]::Bounds($nativeTip)',
+            '$bounds.Right -gt $screen.Left -and $bounds.Left -lt $screen.Right',
+            '$bounds.Bottom -gt $screen.Top -and $bounds.Top -lt $screen.Bottom',
+            '$text = Read-EditText $nativeTip', 'if ($text -ceq $expectedName) { return $text }',
+            '"tooltip: $team = $tooltip"', '$labels += $tooltip',
+            'Save-Screen $Session "inbox-tooltip-$team"', "Save-WorkspaceNameCheck $Session 'inbox-tooltip'",
+        ]:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, hover)
+        menus = (ROOT / 'tools/verify-wazig/menus.cs').read_text()
+        find = menus.split('public static IntPtr Find(', 1)[1].split('public static Rect Bounds(', 1)[0]
+        self.assertIn('owner == pid && IsWindowVisible(window) && text.ToString() == name', find)
+        harness = (ROOT / 'tools/verify-wazig/harness.ps1').read_text()
+        self.assertIn('ReadText($Handle, 13,', harness)
+
 
 if __name__ == '__main__':
     unittest.main()

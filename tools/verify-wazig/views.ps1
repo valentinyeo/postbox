@@ -25,6 +25,7 @@ function Read-InboxWorkspaceTooltips($Session, $Rows) {
     $top = [UIntPtr]::Zero
     Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x01A1, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$height) -ne [IntPtr]::Zero) 'Cannot read chat row height'
     Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x018E, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$top) -ne [IntPtr]::Zero) 'Cannot read chat list scroll position'
+    Assert-That ($height.ToUInt64() -gt 10 -and $client.Right -gt 24) 'Chat list is too small for two hover points'
     $labels = @()
     foreach ($team in @('T0ABC123', 'T0DEF456')) {
         $index = 0
@@ -46,7 +47,17 @@ function Read-InboxWorkspaceTooltips($Session, $Rows) {
             foreach ($tip in $tips) {
                 if (-not $tip.Current.IsOffscreen -and $tip.Current.Name -ceq $expectedName) { return $tip.Current.Name }
             }
+            $nativeTip = [VerifyMenus]::Find($Session.pid, 'tooltips_class32')
+            if ($nativeTip -ne [IntPtr]::Zero) {
+                $bounds = [VerifyMenus]::Bounds($nativeTip)
+                $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+                if ($bounds.Right -gt $screen.Left -and $bounds.Left -lt $screen.Right -and $bounds.Bottom -gt $screen.Top -and $bounds.Top -lt $screen.Bottom) {
+                    $text = Read-EditText $nativeTip
+                    if ($text -ceq $expectedName) { return $text }
+                }
+            }
         } "combined inbox tooltip $expectedName"
+        Add-Content (Join-Path $Session.evidence 'actions.log') "tooltip: $team = $tooltip"
         $labels += $tooltip
         Save-Screen $Session "inbox-tooltip-$team"
     }

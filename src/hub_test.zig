@@ -173,7 +173,6 @@ test "real hub prefixed jids without account produce four views without changing
         try std.testing.expect(row.object.get("account") == null);
         const provider = hub.sourceProvider(row.object).?;
         const jid = row.object.get("jid").?.string;
-        const account = hub.viewAccount(row.object, "hub-cache");
         try views.appendUnique(std.testing.allocator, &known, hub.accountView(row.object, "hub-cache", "", "", null).?);
         routing[index].set(.{ .provider = provider, .account = hub.sourceAccount(row.object, "hub-cache"), .id = jid });
         try std.testing.expectEqualStrings("hub-cache", routing[index].key().account);
