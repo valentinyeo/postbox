@@ -34,15 +34,17 @@ function Invoke-ReactionsJourney($Session) {
         $menu = Wait-Popup $Session '#32768'
         $popup = [VerifyMenus]::Bounds($menu)
         $menuElement = [Windows.Automation.AutomationElement]::FromHandle($menu)
-        $items = $menuElement.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
-        $reply = @($items | Where-Object { $_.Current.Name.StartsWith('Reply') })
-        Assert-That ($reply.Count -eq 1) "$name message menu has no unique Reply row"
-        $replyRect = $reply[0].Current.BoundingRectangle
+        $client = [VerifyWindow+Rect]::new()
+        $origin = [VerifyWindow+Point]::new()
+        Assert-That ([VerifyWindow]::GetClientRect($menu, [ref]$client)) "$name menu client bounds unavailable"
+        Assert-That ([VerifyWindow]::ClientToScreen($menu, [ref]$origin)) "$name menu screen origin unavailable"
         $dpi = [VerifyWindow]::GetDpiForWindow([IntPtr](Get-Window $Session).Current.NativeWindowHandle)
         $cell = [int][Math]::Floor((36 * $dpi + 48) / 96)
         $separator = [int][Math]::Floor((8 * $dpi + 48) / 96)
-        $rowLeft = [int]$replyRect.Left
-        $rowTop = [int]$replyRect.Bottom + $separator
+        $textRowsHeight = $client.Bottom - $cell - 3 * $separator
+        Assert-That ($textRowsHeight -gt 0 -and $textRowsHeight % 4 -eq 0) "$name message menu row layout changed"
+        $rowLeft = $origin.X
+        $rowTop = $origin.Y + [int]($textRowsHeight / 4) + $separator
         $x = $popup.Left + ($rowLeft - $popup.Left) + $laughIndex * $cell + [int][Math]::Floor($cell / 2)
         $y = $popup.Top + ($rowTop - $popup.Top) + [int][Math]::Floor($cell / 2)
         Assert-That ($x -gt $popup.Left -and $x -lt $popup.Right -and $y -gt $popup.Top -and $y -lt $popup.Bottom) "$name laughing cell outside menu"
