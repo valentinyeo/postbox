@@ -14,7 +14,7 @@ pub const Account = struct {
     pub fn init(provider: Provider, account: []const u8, name: []const u8) Account {
         var result = Account{};
         result.key.set(.{ .provider = provider, .account = account, .id = "" });
-        const text = std.fmt.bufPrint(&result.label_buf, "{s} {s}", .{ label(providerView(provider)), if (provider == .signal) "" else if (name.len > 0) name else account }) catch {
+        const text = std.fmt.bufPrint(&result.label_buf, "{s} {s}", .{ label(providerView(provider)), if (provider == .signal or (provider == .telegram and std.mem.eql(u8, account, "telegram"))) "" else if (name.len > 0) name else account }) catch {
             const fallback = label(providerView(provider));
             @memcpy(result.label_buf[0..fallback.len], fallback);
             result.label_len = fallback.len;

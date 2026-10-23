@@ -247,7 +247,7 @@ test "IGSH-604 provider badge chooses cached workspace icon fallback and green W
     try std.testing.expectEqual(.workspace_icon, hub.providerBadge(.slack, true, true));
     try std.testing.expectEqual(.letter_s, hub.providerBadge(.slack, false, true));
     try std.testing.expectEqual(.whatsapp_mark, hub.providerBadge(.whatsapp, false, true));
-    try std.testing.expectEqual(.letter_t, hub.providerBadge(.telegram, false, true));
+    try std.testing.expectEqual(.telegram_mark, hub.providerBadge(.telegram, false, true));
     try std.testing.expectEqual(.letter_s, hub.providerBadge(.slack, true, false));
     try std.testing.expectEqual(.letter_w, hub.providerBadge(.whatsapp, true, false));
     try std.testing.expectEqual(.letter_t, hub.providerBadge(.telegram, true, false));
@@ -297,4 +297,58 @@ test "Signal provider mark shares the workspace badge switch and retains letter 
     try std.testing.expectEqual(.signal_mark, hub.providerBadge(.signal, true, true));
     try std.testing.expectEqual(.letter_s, hub.providerBadge(.signal, false, false));
     try std.testing.expectEqual(.letter_s, hub.providerBadge(.signal, true, false));
+}
+
+test "Telegram user group channel ids retain their opaque hub identity and fixed view" {
+    const allocator = std.testing.allocator;
+    const raw = "[{\"provider\":\"telegram\",\"jid\":\"telegram:user:1001\"},{\"provider\":\"telegram\",\"jid\":\"telegram:chat:2001\",\"account\":\"ignored\"},{\"provider\":\"telegram\",\"jid\":\"telegram:channel:3001\"}]";
+    const normalized = try hub.normalize(allocator, raw, .chats, "");
+    defer allocator.free(normalized);
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, normalized, .{});
+    defer parsed.deinit();
+    for (parsed.value.object.get("data").?.array.items, [_][]const u8{ "telegram:user:1001", "telegram:chat:2001", "telegram:channel:3001" }) |row, id| {
+        try std.testing.expectEqualStrings(id, row.object.get("jid").?.string);
+        try std.testing.expectEqual(@import("transport.zig").Provider.telegram, hub.sourceProvider(row.object).?);
+        try std.testing.expectEqualStrings("telegram", hub.viewAccount(row.object, "cache"));
+        try std.testing.expectEqual(@as(?@import("transport.zig").Provider, .telegram), hub.providerForView(row.object, .telegram));
+        try std.testing.expect(hub.providerForView(row.object, .signal) == null);
+        const request = try hub.messages(allocator, id, 80, "1000");
+        defer allocator.free(request.path);
+        try std.testing.expect(std.mem.indexOf(u8, request.path, "%3A") != null);
+        try std.testing.expect(std.mem.endsWith(u8, request.path, "&before=1000"));
+    }
+    const view = @import("messenger_view.zig").Account.init(.telegram, "telegram", "");
+    try std.testing.expectEqualStrings("Telegram", view.labelText());
+    const messages = try hub.normalize(allocator, "[{\"MsgID\":\"1001\",\"ChatJID\":\"telegram:user:1001\",\"FromMe\":false,\"quoted_msg_id\":\"1000\"}]", .messages, "telegram:user:1001");
+    defer allocator.free(messages);
+    const incoming = try hub.readMessageId(allocator, messages);
+    defer allocator.free(incoming);
+    try std.testing.expectEqualStrings("1001", incoming);
+}
+
+test "Telegram provider mark shares the badge switch and retains letter fallback" {
+    try std.testing.expectEqual(.telegram_mark, hub.providerBadge(.telegram, false, true));
+    try std.testing.expectEqual(.telegram_mark, hub.providerBadge(.telegram, true, true));
+    try std.testing.expectEqual(.letter_t, hub.providerBadge(.telegram, false, false));
+    try std.testing.expectEqual(.letter_t, hub.providerBadge(.telegram, true, false));
+}
+
+test "Telegram rate limit text requires matching status and exact hub reason" {
+    const allocator = std.testing.allocator;
+    const limited = "{\"error\":\"telegram rate limited\",\"retry_after\":30}";
+    try std.testing.expectEqualStrings("telegram rate limited", hub.telegramSendFailure(allocator, 429, limited).?);
+    for ([_]u32{ 200, 401, 403, 502 }) |status| try std.testing.expect(hub.telegramSendFailure(allocator, status, limited) == null);
+    for ([_][]const u8{ "invalid", "[]", "{}", "{\"error\":\"signal rate limited\"}" }) |raw| try std.testing.expect(hub.telegramSendFailure(allocator, 429, raw) == null);
+}
+
+test "Telegram saved flag survives normalization and is never inferred from an id" {
+    const allocator = std.testing.allocator;
+    const raw = "[{\"provider\":\"telegram\",\"jid\":\"telegram:user:9001\",\"saved\":true},{\"provider\":\"telegram\",\"jid\":\"telegram:user:1001\",\"saved\":false},{\"provider\":\"telegram\",\"jid\":\"telegram:chat:2001\"},{\"provider\":\"telegram\",\"jid\":\"telegram:channel:3001\",\"saved\":\"true\"},{\"provider\":\"signal\",\"jid\":\"signal:fixture\",\"saved\":true}]";
+    const normalized = try hub.normalize(allocator, raw, .chats, "");
+    defer allocator.free(normalized);
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, normalized, .{});
+    defer parsed.deinit();
+    const rows = parsed.value.object.get("data").?.array.items;
+    try std.testing.expect(hub.savedMessages(rows[0].object));
+    for (rows[1..]) |row| try std.testing.expect(!hub.savedMessages(row.object));
 }

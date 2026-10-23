@@ -211,7 +211,7 @@ function Save-Screen($Session, [string]$Name) {
     $tree | Set-Content (Join-Path $Session.evidence "$Name.uia.txt")
     $state = Read-Control $Session status
     $state | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.state.json")
-    if ($Session.feature -in @('archive', 'slack-sort', 'workspace-icons', 'signal')) {
+    if ($Session.feature -in @('archive', 'slack-sort', 'workspace-icons', 'signal', 'telegram')) {
         $arguments = if ($state.show_archived) { @('--archived') } else { @() }
         Read-Control $Session chats -Arguments $arguments | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.chats.json")
     }
@@ -221,13 +221,13 @@ function Invoke-Doctor($Session) {
     $window = Get-Window $Session
     $search = Get-Edit $window '1008'
     $compose = Get-Edit $window '1032'
-    if ($Session.feature -ne 'signal') { Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable' }
+    if ($Session.feature -notin @('signal', 'telegram')) { Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable' }
     $null = Read-Edit $search
     if ($Session.feature -in @('whatsapp-hub', 'hub')) {
         $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'hub baseline'
     }
     if ($Session.feature -eq 'views') {
-        $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 5 } 'account views baseline'
+        $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 6 } 'account views baseline'
     }
     $status = Read-Control $Session status
     Assert-That ($status.version -eq '0.0.526') 'Wrong control build'
@@ -237,7 +237,7 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
@@ -247,6 +247,7 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [s
     if ($Views) { $start.ArgumentList.Add('--views') }
     if ($WorkspaceIcons) { $start.ArgumentList.Add('--workspace-icons') }
     if ($Signal) { $start.ArgumentList.Add('--signal') }
+    if ($Telegram) { $start.ArgumentList.Add('--telegram') }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')
