@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == ['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'menus', 'navigation', 'notrap', 'palette', 'reactions', 'search', 'signal', 'slack-sort', 'slack-threads', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons']
+assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'menus', 'navigation', 'notrap', 'palette', 'reactions', 'search', 'signal', 'slack-sort', 'slack-threads', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons', 'window'])
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, whatsapp-hub, hub, hub-archive, slack-sort, slack-threads, views, workspace-icons, signal, telegram, notrap, archive, text-comparison]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, whatsapp-hub, hub, hub-archive, slack-sort, slack-threads, views, workspace-icons, signal, telegram, notrap, archive, text-comparison, window]' in workflow
 options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
 assert options_match, 'missing workflow_dispatch journey options'
 options = [option.strip() for option in options_match[1].split(',')]
@@ -237,3 +237,15 @@ for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages 2',
 for fragment in ["min(incoming) < min(writes)", "kept[1] == '1'", "capture(f'{phase}-inbox', False)", "capture(f'{phase}-archived', True)", "read_bytes() == legacy_bytes"]:
     assert fragment in archive_validator, fragment
 print('HUB ARCHIVE MAP VERIFIED: legacy seed, archive request, keep state, same-profile restart, marker, evidence and PR wiring')
+
+window = (skill / 'features/window.md').read_text(encoding='utf-8')
+window_journey = (root / 'tools/verify-wazig/window.ps1').read_text(encoding='utf-8')
+assert 'feature=window' in window and 'Invoke-WindowJourney $session $start $app' in runner
+assert 'window.ps1' in runner and "if ($Feature -ne 'window')" in runner
+assert '"window"' in workflow and "matrix.feature == 'window'" in workflow
+assert "session['feature'] == 'window'" in validator
+for fragment in ['IsZoomed', 'GetWindowPlacement', 'MonitorFromWindow', 'GetMonitorInfo', "'%{F4}'", '--update-relaunch', 'WAZIG_VERIFY_RESTART', 'session.json', 'window.json']:
+    assert fragment in window_journey, fragment
+assert '.claude/skills/verify-wazig/features/window.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert '(features/window.md)' in (skill / 'RULE-MAP.md').read_text(encoding='utf-8')
+print('WINDOW MAP VERIFIED: unforced startup, real keyboard restore/close, same-profile relaunch and zoomed evidence')

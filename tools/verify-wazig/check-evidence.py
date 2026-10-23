@@ -10,6 +10,50 @@ session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
 if session['feature'] == 'slack-threads':
     runpy.run_path(str(Path(__file__).with_name('check-slack-threads-evidence.py')))['check_threads'](folder)
     raise SystemExit(0)
+if session['feature'] == 'window':
+    def read(name):
+        return json.loads((folder / name).read_text(encoding='utf-8-sig'))
+
+    assert session['sha256'] and session['commit']
+    assert read('result.json') == dict(feature='window', status='passed')
+    assert not (folder / 'failure.txt').exists()
+    steps = read('window.json')
+    assert [row['step'] for row in steps] == ['start-1', 'restored', 'start-2', 'start-3']
+    assert [row['zoomed'] for row in steps] == [True, False, True, True], 'Unexpected zoomed sequence'
+    assert [row['update_relaunch'] for row in steps] == [False, False, False, True]
+    assert all(row['root'] == session['root'] and row['id'] == session['id'] for row in steps)
+    assert len({(row['pid'], row['start_ticks']) for row in steps}) == 3
+    assert steps[0]['pid'] == steps[1]['pid'] and steps[0]['start_ticks'] == steps[1]['start_ticks']
+    assert steps[-1]['pid'] == session['pid'] and steps[-1]['start_ticks'] == session['startTicks']
+    assert read('doctor.json')['version'] == '0.0.526'
+    assert len({row['monitor_handle'] for row in steps}) == 1
+    for row in steps:
+        assert row['hwnd'] and row['monitor_handle'] and row['start_ticks']
+        for field in ['monitor_rect', 'work_rect', 'normal_rect']:
+            rect = row[field]
+            assert rect['Right'] > rect['Left'] and rect['Bottom'] > rect['Top'], (row['step'], field)
+        image = (folder / (row['step'] + '.png')).read_bytes()
+        assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
+        assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / (row['step'] + '.uia.txt')).read_text(encoding='utf-8-sig')
+        state = read(row['step'] + '.state.json')
+        assert state['sync'] == 'stopped' and state['pending_sends'] == state['pending_archives'] == 0
+    normal = steps[1]['normal_rect']
+    assert normal == steps[2]['normal_rect'] == steps[3]['normal_rect']
+    initial = steps[0]['normal_rect']
+    assert normal['Right'] - normal['Left'] < initial['Right'] - initial['Left']
+    assert normal['Bottom'] - normal['Top'] < initial['Bottom'] - initial['Top']
+    preferences = (folder / 'preferences.txt').read_text(encoding='utf-8-sig')
+    for name in ['WindowLeft', 'WindowTop', 'WindowRight', 'WindowBottom']:
+        assert name in preferences, name
+    actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
+    assert actions.count('keys: %{F4}') == 2 and 'keys: r' in actions and 'keys: s' in actions
+    final = read('side-effects.json')
+    assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
+    assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
+    assert 'JOURNEY PASSED: window' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
+    assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
+    print('EVIDENCE VERIFIED: zoomed startups, keyboard restore and Alt+F4, same-profile update relaunch and retained monitor')
+    raise SystemExit(0)
 if session['feature'] == 'reactions':
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))

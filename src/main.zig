@@ -1517,6 +1517,39 @@ fn loadTheme() theme.Choice {
     return theme.choiceFromSaved(if (result == win.ERROR_SUCCESS) value else null);
 }
 
+const window_rect_names = [_][*:0]const u16{ lit("WindowLeft"), lit("WindowTop"), lit("WindowRight"), lit("WindowBottom") };
+
+fn validWindowRect(rect: win.RECT) bool {
+    const width = @as(i64, rect.right) - rect.left;
+    const height = @as(i64, rect.bottom) - rect.top;
+    return width > 0 and width <= std.math.maxInt(i32) and height > 0 and height <= std.math.maxInt(i32);
+}
+
+fn loadWindowRect() ?win.RECT {
+    var values: [4]win.DWORD = undefined;
+    for (window_rect_names, &values) |name, *value| {
+        var size: win.DWORD = @sizeOf(win.DWORD);
+        if (win.RegGetValueW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), name, win.RRF_RT_REG_DWORD, null, value, &size) != win.ERROR_SUCCESS) return null;
+    }
+    const rect: win.RECT = .{ .left = @bitCast(values[0]), .top = @bitCast(values[1]), .right = @bitCast(values[2]), .bottom = @bitCast(values[3]) };
+    if (!validWindowRect(rect) or win.MonitorFromRect(&rect, win.MONITOR_DEFAULTTONULL) == null) return null;
+    return rect;
+}
+
+fn saveWindowRect(hwnd: win.HWND) void {
+    var placement: win.WINDOWPLACEMENT = std.mem.zeroes(win.WINDOWPLACEMENT);
+    placement.length = @sizeOf(win.WINDOWPLACEMENT);
+    if (win.GetWindowPlacement(hwnd, &placement) == 0 or !validWindowRect(placement.rcNormalPosition)) return;
+    var key: win.HKEY = null;
+    if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), 0, null, 0, win.KEY_SET_VALUE, null, &key, null) != win.ERROR_SUCCESS) return;
+    defer _ = win.RegCloseKey(key);
+    const rect = placement.rcNormalPosition;
+    const values = [_]win.DWORD{ @bitCast(rect.left), @bitCast(rect.top), @bitCast(rect.right), @bitCast(rect.bottom) };
+    for (window_rect_names, &values) |name, *value| {
+        _ = win.RegSetValueExW(key, name, 0, win.REG_DWORD, @ptrCast(value), @sizeOf(win.DWORD));
+    }
+}
+
 fn loadFontScale() i32 {
     var value: win.DWORD = 82;
     var size: win.DWORD = @sizeOf(win.DWORD);
@@ -16967,6 +17000,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return @bitCast(@intFromPtr(if (theme.choice == .amoled) a.brush_bg.? else a.brush_raised.?));
         },
         win.WM_CLOSE => {
+            saveWindowRect(hwnd);
             saveComposerDraft(a);
             persistDrafts(a);
             _ = win.DestroyWindow(hwnd);
@@ -18480,15 +18514,16 @@ pub fn main(init: std.process.Init) !void {
 
     var pre_window_buffer: [64]u8 = undefined;
     appendLaunchLog(app, std.fmt.bufPrint(&pre_window_buffer, "startup-timing: pre-window work done {d} ms", .{win.GetTickCount64() -% process_start_ms}) catch "startup-timing: pre-window work done");
+    const window_rect = loadWindowRect();
     const hwnd = win.CreateWindowExW(
         0,
         lit("MessagesZig"),
         lit("Wazig Messages v" ++ app_version),
         win.WS_OVERLAPPEDWINDOW | win.WS_CLIPCHILDREN,
-        win.CW_USEDEFAULT,
-        win.CW_USEDEFAULT,
-        1160,
-        760,
+        if (window_rect) |rect| rect.left else win.CW_USEDEFAULT,
+        if (window_rect) |rect| rect.top else win.CW_USEDEFAULT,
+        if (window_rect) |rect| rect.right - rect.left else 1160,
+        if (window_rect) |rect| rect.bottom - rect.top else 760,
         null,
         null,
         instance,
@@ -18496,7 +18531,7 @@ pub fn main(init: std.process.Init) !void {
     ) orelse return error.CreateWindowFailed;
     var dark: win.BOOL = win.TRUE;
     _ = win.DwmSetWindowAttribute(hwnd, 20, &dark, @sizeOf(win.BOOL));
-    _ = win.ShowWindow(hwnd, win.SW_SHOW);
+    _ = win.ShowWindow(hwnd, win.SW_SHOWMAXIMIZED);
     _ = win.UpdateWindow(hwnd);
     focusCompose(app);
     logStartupMilestone(app, .window, "window shown");
@@ -19465,6 +19500,7 @@ fn relaunchIntoUpdate(a: *App) void {
     @memcpy(command_template[1..][0..exe_len], exe_buf[0..exe_len]);
     const suffix = std.mem.span(lit("\" --update-relaunch"));
     @memcpy(command_template[exe_len + 1 ..][0..suffix.len], suffix);
+    if (a.hwnd) |hwnd| saveWindowRect(hwnd);
     saveComposerDraft(a);
     persistDrafts(a);
     var command_line = command_template;
@@ -19481,6 +19517,17 @@ fn relaunchIntoUpdate(a: *App) void {
     } else {
         setStatus(a, "Update installed - restart the app to finish");
     }
+}
+
+test "saved window rect accepts negative monitors and rejects empty or overflowing sizes" {
+    try std.testing.expect(validWindowRect(.{ .left = -1600, .top = -900, .right = -400, .bottom = -100 }));
+    try std.testing.expect(validWindowRect(.{ .left = 100, .top = 80, .right = 1260, .bottom = 840 }));
+    try std.testing.expect(!validWindowRect(.{ .left = 100, .top = 80, .right = 100, .bottom = 840 }));
+    try std.testing.expect(!validWindowRect(.{ .left = 100, .top = 80, .right = 1260, .bottom = 80 }));
+    try std.testing.expect(!validWindowRect(.{ .left = 100, .top = 80, .right = 0, .bottom = 840 }));
+    try std.testing.expect(!validWindowRect(.{ .left = 100, .top = 80, .right = 1260, .bottom = 0 }));
+    try std.testing.expect(!validWindowRect(.{ .left = std.math.minInt(i32), .top = 0, .right = std.math.maxInt(i32), .bottom = 760 }));
+    try std.testing.expect(!validWindowRect(.{ .left = 0, .top = std.math.minInt(i32), .right = 1160, .bottom = std.math.maxInt(i32) }));
 }
 
 test "a read that exhausts its retries backs off and restarts the counter" {

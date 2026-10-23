@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'reactions', 'whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'archive', 'text-comparison')][string]$Feature = 'search',
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'reactions', 'whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'archive', 'text-comparison', 'window')][string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence'
 )
@@ -8,6 +8,7 @@ param(
 . "$PSScriptRoot/telegram.ps1"
 . "$PSScriptRoot/notrap.ps1"
 . "$PSScriptRoot/hub-archive.ps1"
+. "$PSScriptRoot/window.ps1"
 Assert-That ($env:GITHUB_ACTIONS -eq 'true') 'Verification runs only on GitHub Actions'
 New-Item $Evidence -ItemType Directory -Force | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
@@ -118,7 +119,7 @@ $session | ConvertTo-Json | Set-Content (Join-Path $Evidence 'session.json')
 $session = Read-Session $Evidence
 try {
     $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window'
-    [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
+    if ($Feature -ne 'window') { [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null }
     if ($Feature -in @('whatsapp-hub', 'hub', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions')) {
         $null = Wait-Until { (Read-Control $session status).chat_count -eq $(if ($Feature -eq 'signal') { 4 } elseif ($Feature -eq 'telegram') { 5 } elseif ($Feature -in @('views', 'notrap')) { 8 } elseif ($Feature -eq 'workspace-icons') { 5 } elseif ($Feature -eq 'slack-sort') { 4 } elseif ($Feature -eq 'slack-threads') { 1 } else { 2 }) } 'hub chat list'
     }
@@ -139,6 +140,9 @@ try {
     $search = Get-Edit $window '1008'
     Save-Screen $session before
     switch ($Feature) {
+        window {
+            $app = Invoke-WindowJourney $session $start $app
+        }
         text-comparison {
             $metrics = Join-Path $messages 'text-metrics.json'
             $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'WacliMessageCanvas')
