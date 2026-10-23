@@ -20,11 +20,17 @@ function Get-PassageExpected($Rows, [int]$First, [int]$Last, [bool]$PartialLast)
         $text = $row.Text
         if ($index -eq $First) { $text = $text.Substring($text.IndexOf('MIDDLE')) }
         if ($index -eq $Last -and $PartialLast) { $text = $text.Substring(0, $text.IndexOf('MIDDLE') + 6) }
-        $nextDay = $row.Timestamp.Substring(0, 10)
+        $timestamp = if ($row.Timestamp -is [DateTime]) {
+            $row.Timestamp.ToUniversalTime()
+        } else {
+            [DateTimeOffset]::Parse($row.Timestamp, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal).UtcDateTime
+        }
+        $nextDay = $timestamp.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
         if ($day -ne '' -and $day -ne $nextDay) { $blocks += $nextDay }
         $day = $nextDay
+        $time = $timestamp.ToLocalTime().ToString('HH:mm', [Globalization.CultureInfo]::InvariantCulture)
         $sender = if ($row.FromMe) { 'You' } else { $row.SenderName }
-        $blocks += "$sender, $($row.Timestamp.Substring(11, 5)): $($text.Replace("`n", "`r`n"))"
+        $blocks += "$sender, ${time}: $($text.Replace("`n", "`r`n"))"
     }
     return $blocks -join "`r`n"
 }

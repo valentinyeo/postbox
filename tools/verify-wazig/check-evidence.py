@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 import hashlib
 import json
@@ -193,7 +194,8 @@ if session['feature'] == 'passage-copy':
                     blocks.append(next_day)
                 day = next_day
                 sender = 'You' if row['FromMe'] else row['SenderName']
-                blocks.append(f"{sender}, {row['Timestamp'][11:16]}: {text}".replace('\n', '\r\n'))
+                time = datetime.fromisoformat(row['Timestamp'].replace('Z', '+00:00')).astimezone().strftime('%H:%M')
+                blocks.append(f"{sender}, {time}: {text}".replace('\n', '\r\n'))
             assert check['actual'] == check['expected'] == '\r\n'.join(blocks)
             if stage == 'edge':
                 after = passage_messages(check['after'])
