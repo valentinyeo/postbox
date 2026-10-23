@@ -5,8 +5,8 @@ pub fn isWebPBytes(data: []const u8) bool {
 }
 
 pub fn decodeAllowed(width: i32, height: i32, budget_pixels: u64) bool {
-    _ = budget_pixels;
-    return width > 0 and height > 0;
+    if (width <= 0 or height <= 0) return false;
+    return @as(u64, @intCast(width)) * @as(u64, @intCast(height)) <= budget_pixels;
 }
 
 pub const FitBox = struct { width: u32, height: u32 };

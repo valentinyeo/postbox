@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const slack = @import("slack.zig");
 const slack_send = @import("slack_send.zig");
 const deepgram_key = @import("deepgram_key.zig");
+const attachments = @import("attachments.zig");
 
 pub const enabled = builtin.os.tag == .windows;
 
@@ -531,6 +532,19 @@ pub fn putFile(allocator: std.mem.Allocator, url: []const u8, bytes: []const u8)
     if (status < 200 or status >= 300) return error.UploadRejected;
 }
 
+pub fn markDownloaded(allocator: std.mem.Allocator, path: []const u8) void {
+    if (!enabled) return;
+    const wide = toWide(allocator, path) catch return;
+    defer allocator.free(wide);
+    const stream = attachments.zoneStreamName(allocator, wide) catch return;
+    defer allocator.free(stream);
+    const file = win.CreateFileW(stream.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
+    if (file == win.INVALID_HANDLE_VALUE or file == null) return;
+    defer _ = win.CloseHandle(file);
+    var written: win.DWORD = 0;
+    _ = win.WriteFile(file, attachments.zone_stream_body.ptr, @intCast(attachments.zone_stream_body.len), &written, null);
+}
+
 pub fn downloadTo(allocator: std.mem.Allocator, token: []const u8, url: []const u8, dest_path: []const u8, bridge_host: ?[]const u8) !void {
     if (!enabled) return error.Unsupported;
     if (!std.mem.startsWith(u8, url, "https://")) return error.UntrustedUrl;
@@ -582,7 +596,10 @@ pub fn downloadTo(allocator: std.mem.Allocator, token: []const u8, url: []const 
 
     const file = win.CreateFileW(wide_dest.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
     if (file == win.INVALID_HANDLE_VALUE or file == null) return error.WriteFailed;
-    defer _ = win.CloseHandle(file);
+    defer {
+        _ = win.CloseHandle(file);
+        markDownloaded(allocator, dest_path);
+    }
     var total: u64 = 0;
     var buffer: [256 * 1024]u8 = undefined;
     while (true) {

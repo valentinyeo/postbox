@@ -771,9 +771,16 @@ pub fn sanitizeFilename(dest: []u8, name: []const u8) []const u8 {
 }
 
 pub fn validateDownloadIds(file_id: []const u8, channel: []const u8, ts: []const u8) error{BadArguments}!void {
-    _ = file_id;
-    _ = channel;
-    _ = ts;
+    for ([_][]const u8{ file_id, channel }) |id| {
+        if (id.len == 0) return error.BadArguments;
+        for (id) |byte| {
+            if (!std.ascii.isAlphanumeric(byte)) return error.BadArguments;
+        }
+    }
+    if (ts.len == 0) return error.BadArguments;
+    for (ts) |byte| {
+        if (!std.ascii.isDigit(byte) and byte != '.') return error.BadArguments;
+    }
 }
 
 pub fn downloadPath(allocator: std.mem.Allocator, media_dir: []const u8, file_id: []const u8, filename: []const u8, channel: []const u8, ts: []const u8) ![]u8 {

@@ -2,7 +2,7 @@ const std = @import("std");
 const theme = @import("theme.zig");
 const transport = @import("transport.zig");
 
-pub const client_open_flags: u32 = 0;
+pub const client_open_flags: u32 = 0x00100000 | 0x00010000;
 
 pub const pipe_prefix = "\\\\.\\pipe\\wazig-control-";
 

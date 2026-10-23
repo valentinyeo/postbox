@@ -1,15 +1,24 @@
 const std = @import("std");
 
 pub fn externalPreviewAllowed(path: []const u16) bool {
-    _ = path;
-    return true;
+    extensions: for ([_][]const u8{ ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".ico", ".avif", ".heic", ".heif" }) |extension| {
+        if (path.len < extension.len) continue;
+        for (path[path.len - extension.len ..], extension) |character, expected| {
+            if (character > 127 or std.ascii.toLower(@intCast(character)) != expected) continue :extensions;
+        }
+        return true;
+    }
+    return false;
 }
 
-pub const zone_stream_body: []const u8 = "";
+pub const zone_stream_body: []const u8 = "[ZoneTransfer]\r\nZoneId=3\r\n";
 
 pub fn zoneStreamName(allocator: std.mem.Allocator, path: []const u16) ![:0]u16 {
-    _ = path;
-    return allocator.dupeZ(u16, &.{});
+    const suffix = std.unicode.utf8ToUtf16LeStringLiteral(":Zone.Identifier");
+    const stream = try allocator.allocSentinel(u16, path.len + suffix.len, 0);
+    @memcpy(stream[0..path.len], path);
+    @memcpy(stream[path.len..], suffix);
+    return stream;
 }
 
 test "failed image previews only open image file extensions externally" {

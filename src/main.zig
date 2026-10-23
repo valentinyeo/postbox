@@ -6776,6 +6776,8 @@ fn ensureWebPBitmap(a: *App, message: *Message) void {
     if (!webp_detect.isWebPBytes(data)) return;
     var features: webp.WebPBitstreamFeatures = undefined;
     if (webp.WebPGetFeatures(data.ptr, data.len, &features) != webp.VP8_STATUS_OK) return;
+    const max_decode_pixels: u64 = message_bitmap_budget_bytes / 4;
+    if (!webp_detect.decodeAllowed(features.width, features.height, max_decode_pixels)) return;
 
     if (features.has_animation == 0) {
         const fit = webp_detect.fitBox(@intCast(features.width), @intCast(features.height), 420, 250);
@@ -6812,6 +6814,8 @@ fn ensureWebPBitmap(a: *App, message: *Message) void {
     var pixels = webp.WebPDecodeRGBA(data.ptr, data.len, &width, &height);
     if (pixels == null) {
         if (webp_detect.firstAnimationFrame(data)) |frame| {
+            if (webp.WebPGetInfo(frame.ptr, frame.len, &width, &height) == 0 or
+                !webp_detect.decodeAllowed(width, height, max_decode_pixels)) return;
             pixels = webp.WebPDecodeRGBA(frame.ptr, frame.len, &width, &height);
         }
     }
@@ -19528,7 +19532,8 @@ fn hubNormalized(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, ra
                 if (!fileExistsUtf8(alias)) {
                     const source = try std.unicode.utf8ToUtf16LeAllocZ(allocator, path);
                     const target = try std.unicode.utf8ToUtf16LeAllocZ(allocator, alias);
-                    if (win.CreateHardLinkW(target.ptr, source.ptr, null) == 0) _ = win.CopyFileW(source.ptr, target.ptr, win.TRUE);
+                    const copied = win.CreateHardLinkW(target.ptr, source.ptr, null) != 0 or win.CopyFileW(source.ptr, target.ptr, win.TRUE) != 0;
+                    if (copied) slack_win.markDownloaded(allocator, alias);
                 }
                 if (fileExistsUtf8(alias)) local_path = alias;
             }
@@ -19598,6 +19603,7 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
             .ready => {
                 const path = try hubMediaPath(a, allocator, .{ .provider = .whatsapp, .account = job.account.slice(), .id = key.id }, job.msg_id.slice());
                 if (!writeCacheFileAtomic(a, path, response.body)) return error.MediaCacheWriteFailed;
+                slack_win.markDownloaded(allocator, path);
                 return path;
             },
         }
