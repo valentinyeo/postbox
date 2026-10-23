@@ -60,7 +60,7 @@ class Handler(bridge.Handler):
                 with self.state.log.with_name('react-requests.jsonl').open('a', encoding='utf-8') as stream:
                     stream.write(json.dumps(body) + '\n')
                 if status == 200:
-                    self.state.reactions[body['chat']] = dict(body)
+                    self.state.reactions[(body['chat'], body['msg'])] = dict(body)
         super().record(status, wire_path=self.wire_path, **extra)
 
     def respond(self, status, data, content_type='application/json', **extra):
@@ -408,11 +408,21 @@ class ReactionsHandler(Handler):
         rows = [dict(MsgID=message_id, ChatJID=chat, Timestamp=self.state.stamp,
                      Text='Synthetic reaction verification', DisplayText='Synthetic reaction verification',
                      FromMe=False, SenderName='Fixture Sender', SenderJID='fixture-sender')]
+        if chat == BETA:
+            rows.extend([
+                dict(MsgID='CHIP', ChatJID=chat, Timestamp=self.state.stamp,
+                     Text='Chip reaction verification', FromMe=False,
+                     SenderName='Fixture Sender', SenderJID='fixture-sender'),
+                dict(MsgID='CHIP-FRIEND', ChatJID=chat, Timestamp=self.state.stamp,
+                     Text='', FromMe=False, SenderName='Fixture Friend', SenderJID='fixture-friend',
+                     ReactionToID='CHIP', ReactionEmoji='❤️'),
+            ])
         with self.state.lock:
-            reaction = self.state.reactions.get(chat)
-            if reaction:
-                rows.append(dict(MsgID='REACTION', ChatJID=chat, Timestamp=self.state.stamp,
-                                 Text='', FromMe=True, ReactionToID=reaction['msg'], ReactionEmoji=reaction['emoji']))
+            for target in (message_id, 'CHIP') if chat == BETA else (message_id,):
+                reaction = self.state.reactions.get((chat, target))
+                if reaction and reaction['emoji']:
+                    rows.append(dict(MsgID='REACTION-' + target, ChatJID=chat, Timestamp=self.state.stamp,
+                                     Text='', FromMe=True, ReactionToID=target, ReactionEmoji=reaction['emoji']))
         self.respond(200, rows)
 
 
