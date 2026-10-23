@@ -5,6 +5,7 @@
 - Migrate a bare WhatsApp group keep flag into its account-prefixed hub archive state.
 - Re-archive incoming provider-unarchived groups and retain the keep flag across restart.
 - Preserve the legacy file and record migration completion in a hub-scoped marker.
+- Keep a plain Ctrl+E archived direct chat archived when only his own reaction follows the archive, and bring a plain archived chat back for a genuinely newer incoming message.
 
 ## How to get to it (user POV)
 
@@ -20,11 +21,14 @@ Capture `first-inbox.png`, `first-archived.png`, their state/chat/UIA snapshots,
 
 Quit through the palette, then have the same fake hub report archived=false again with a newer incoming timestamp `2026-10-10T13:00:00Z`. Restart the same fixture root and isolated registry using the existing restart opt-in. Require another archive request, the kept group in Archive, and only the other chat in the inbox. Capture the equivalent `restart-*` evidence plus `restart.json`, `restart-incoming.json`, `after.png` and final data through normal cleanup.
 
+Plain archive phase (IGSH-698), after the restart phase: `/fixture/plain-dms` adds two inbox direct chats, each with one incoming message from `2026-10-10`, then the journey selects each with Ctrl+Tab and archives it with Ctrl+E. On the archive write the fake hub lists the chat as archived with a row time five seconds ahead: for `personal:15550000005@s.whatsapp.net` the new newest message is his own reaction (FromMe, ReactionToID set), for `personal:15550000006@s.whatsapp.net` it is a new incoming message. In hub mode the archived scan only runs about every 300 seconds, so the journey waits up to 360 seconds for the probe of the reacted chat (`messages?...limit=3`) and the unarchive write of the newer chat, then requires no `archived=false` write for the reacted chat, it absent from the inbox, and the newer chat back. Capture `plain-dms.json`, `plain-archive-state.txt`, `plain-inbox.*` and `plain.requests.json`.
+
 `check-hub-archive-evidence.py`, dispatched by `check-evidence.py`, requires the two incoming-before-write sequences, keep=1 in both snapshots, owned same-profile restart, scoped marker, screenshots/UIA, unchanged legacy bytes and isolation. Runtime and screenshot inspection are GitHub-only.
 
 ## Gotchas
 
 - The journey-only commit must fail on the old app waiting for the first hub archive request: its fresh hub state has no kept row and there is no migration yet. Do not preseed the hub state or use a control archive write.
 - The completion marker prevents later Allow resurfacing or unarchive choices being undone by the retained legacy file. Unit coverage handles missing-row precedence, non-kept entries and provider/account matching; this journey does not exercise those user choices.
+- The plain phase adds about five minutes because of the 300-tick idle archived scan; it must fail on the old app at the reacted chat coming back (baseline was the stale list row time and the probe compared the scan row time).
 - This is synthetic client-contract proof, not live WhatsApp delivery, production hub availability or Slack archive semantics.
 - Font, media, voice, toolbar and atomic installed executable invariants are unchanged. Builds, Zig tests, real window execution and screenshot inspection must run on GitHub, never on the development host.

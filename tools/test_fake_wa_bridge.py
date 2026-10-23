@@ -109,7 +109,9 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
         server.state = module.bridge.State(Path(self.temp.name) / 'requests.jsonl')
         server.state.archive_incoming = 0
         server.state.archive_group_archived = False
+        server.state.plain_dms = {}
         server.state.archive_stamp = '2026-10-10T11:00:00Z'
+        self.module = module
         self.addCleanup(server.server_close)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -139,6 +141,31 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
         self.request('POST', '/fixture/archive-incoming', {})
         self.assertIn(self.group, self.jids('false'))
         self.assertNotIn(self.group, self.jids('true'))
+
+    def test_plain_direct_chats_gain_a_later_reaction_or_a_later_incoming_message_when_archived(self):
+        reacted, newer = self.module.PLAIN_REACTED, self.module.PLAIN_NEWER
+        self.assertNotIn(reacted, self.jids('false'))
+        self.request('POST', '/fixture/plain-dms', {})
+        self.assertIn(reacted, self.jids('false'))
+        self.assertIn(newer, self.jids('false'))
+        for chat in (reacted, newer):
+            before = self.request('GET', '/v1/wazig/messages?chat=' + chat)
+            self.assertEqual([row['FromMe'] for row in before], [False])
+            self.request('POST', '/v1/wazig/archive', dict(chat=chat, archived=True))
+            self.assertIn(chat, self.jids('true'))
+            self.assertNotIn(chat, self.jids('false'))
+        rows = {row['jid']: row for row in self.request('GET', '/v1/wazig/chats?archived=true')}
+        first = self.request('GET', '/v1/wazig/messages?chat=' + reacted)
+        self.assertEqual(first[0]['ReactionToID'], 'PLAIN-INCOMING')
+        self.assertTrue(first[0]['FromMe'])
+        self.assertEqual(first[1]['Timestamp'], '2026-10-10T11:30:00Z')
+        self.assertEqual(rows[reacted]['last_message_ts'], first[0]['Timestamp'])
+        second = self.request('GET', '/v1/wazig/messages?chat=' + newer)
+        self.assertFalse(second[0]['FromMe'])
+        self.assertNotIn('ReactionToID', second[0])
+        self.assertGreater(second[0]['Timestamp'], '2026-10-23T00:00:00Z')
+        self.request('POST', '/v1/wazig/archive', dict(chat=newer, archived=False))
+        self.assertIn(newer, self.jids('false'))
 
 
 class FakeMixedPagingTests(unittest.TestCase):

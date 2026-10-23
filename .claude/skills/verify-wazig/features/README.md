@@ -110,6 +110,7 @@ These are source changes in the bounded history window, not claims of live verif
 
 - IGSH-668: legacy WhatsApp keep flags survive unified hub adoption -> `hub-archive` (seeds only the legacy flag, requires hub archive requests and durable keep state on initial launch and same-profile restart with newer archived=false delivery)
 
+- IGSH-698: plain archived chat came back after his own reaction -> `hub-archive` (plain Ctrl+E archive of two direct chats, then a hub row moved by his own reaction must stay archived while a newer incoming message brings the other chat back)
 - IGSH-669: maximize every startup on the saved monitor -> `window` (requires native zoomed state without harness maximization, real restore/resize and Alt+F4, same-profile reopen and --update-relaunch; multi-monitor hardware movement remains outside the hosted fixture)
 
 - IGSH-671: Idle and background-message flicker -> `repaint` (60-second full-paint counter and arrival evidence)
