@@ -343,6 +343,39 @@ test "hub view accounts prefer explicit accounts and safely fall back for unpref
     }
 }
 
+test "IGSH-696 Telegram chat avatars require the switch and unified hub without changing other providers" {
+    try std.testing.expect(hub.igsh_696_telegram_avatars);
+    for ([_]bool{ false, true }) |enabled| {
+        for ([_]bool{ false, true }) |unified| {
+            try std.testing.expect(hub.chatAvatarEnabled(.whatsapp, unified, enabled));
+            try std.testing.expectEqual(enabled and unified, hub.chatAvatarEnabled(.telegram, unified, enabled));
+            try std.testing.expect(!hub.chatAvatarEnabled(.slack, unified, enabled));
+            try std.testing.expect(!hub.chatAvatarEnabled(.signal, unified, enabled));
+        }
+    }
+}
+
+test "IGSH-696 Telegram avatar requests preserve and escape opaque user group channel and bot handles" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const handles = [_][]const u8{ "telegram:user:1001", "telegram:chat:2001", "telegram:group:2002", "telegram:channel:3001", "telegram:bot:4001", "telegram:opaque +/" };
+    const paths = [_][]const u8{
+        "/v1/wazig/avatar/telegram%3Auser%3A1001",
+        "/v1/wazig/avatar/telegram%3Achat%3A2001",
+        "/v1/wazig/avatar/telegram%3Agroup%3A2002",
+        "/v1/wazig/avatar/telegram%3Achannel%3A3001",
+        "/v1/wazig/avatar/telegram%3Abot%3A4001",
+        "/v1/wazig/avatar/telegram%3Aopaque%20%2B%2F",
+    };
+    for (handles, paths) |handle, path| {
+        const request = try hub.binary(allocator, handle, null);
+        try std.testing.expectEqualStrings("GET", request.method);
+        try std.testing.expectEqualStrings(path, request.path);
+    }
+    try std.testing.expectError(error.InvalidId, hub.binary(allocator, "telegram:user:bad\nhandle", null));
+}
+
 test "IGSH-604 workspace icon route escapes team IDs and rejects invalid IDs" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

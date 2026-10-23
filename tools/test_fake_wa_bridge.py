@@ -1,11 +1,13 @@
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
+import hashlib
 import importlib.util
 import json
+import runpy
 from pathlib import Path
 import tempfile
 import threading
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 import unittest
 
 
@@ -247,6 +249,119 @@ class FakeMixedPagingTests(unittest.TestCase):
         rows = self.module.mixed_rows()
         self.assertEqual(len(self.page(10, self.cursor(rows[100]))), 10)
         self.assertEqual(self.page(80, self.cursor(rows[249])), [])
+
+
+class TelegramAvatarEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('telegram_avatar_fixture', ROOT / 'tools/verify-wazig/fake-hub.py')
+        self.hub = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.hub)
+        self.check = runpy.run_path(str(ROOT / 'tools/verify-wazig/check-telegram-evidence.py'))
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.folder = Path(temp.name)
+        self.cache = self.folder / 'final-data/avatars'
+        self.cache.mkdir(parents=True)
+        self.requests = []
+        for index, chat in enumerate(self.check['AVATAR_IDS']):
+            route = '/v1/wazig/avatar/' + quote(chat, safe='')
+            row = dict(method='GET', path=route, authorized=True, status=404)
+            path = self.cache / f'{index:016x}.img'
+            if chat in self.check['AVATAR_COLOURS']:
+                image = self.hub.telegram_avatar_png(chat)
+                path.write_bytes(image)
+                row.update(status=200, sha256=hashlib.sha256(image).hexdigest())
+            else:
+                path.with_suffix('.img.none').touch()
+            self.requests.extend([row, dict(method='GET', path=route, authorized=False, status=401)])
+
+    def screenshot(self, dpi=96, missing_photo=False, bad_fallback=False, blank_initial=False):
+        px = lambda value: (value * dpi + 48) // 96
+        layout = dict(dpi=dpi, ids=self.check['AVATAR_IDS'], row_height=px(64), top_index=0,
+                      list_x=10, list_y=10, client_width=px(180), client_height=5 * px(64))
+        (self.folder / 'telegram-avatars-layout.json').write_text(json.dumps(layout))
+        rows = [[(0, 0, 0)] * (px(180) + 20) for _ in range(5 * px(64) + 20)]
+        for index, chat in enumerate(layout['ids']):
+            colour = self.check['AVATAR_COLOURS'].get(chat, (38, 38, 38))
+            if missing_photo and chat in self.check['AVATAR_COLOURS']:
+                colour = (38, 38, 38)
+            if bad_fallback and chat not in self.check['AVATAR_COLOURS']:
+                colour = next(iter(self.check['AVATAR_COLOURS'].values()))
+            left, top = 10 + px(12), 10 + index * px(64) + px(10)
+            for y in range(42):
+                for x in range(42):
+                    if (x - 20.5) ** 2 + (y - 20.5) ** 2 < 21 ** 2:
+                        ink = chat not in self.check['AVATAR_COLOURS'] and not blank_initial and 18 <= x < 22 and 15 <= y < 27
+                        rows[top + y][left + x] = (255, 255, 255) if ink else colour
+        self.check['png']['write_png'](self.folder / 'linked.png', rows)
+
+    def test_fixture_returns_distinct_solid_photos_no_photo_and_unauthorized(self):
+        handler = object.__new__(self.hub.TelegramHandler)
+        replies = []
+        handler.respond = lambda status, data, content_type='application/json', **extra: replies.append((status, data, content_type, extra))
+        for chat in self.check['AVATAR_IDS']:
+            handler.path = '/v1/wazig/avatar/' + quote(chat, safe='')
+            for key in ['', 'wrong-key', self.hub.bridge.KEY]:
+                handler.headers = {'Authorization': 'Bearer ' + key}
+                handler.do_GET()
+                status, data, content_type, extra = replies[-1]
+                if key != self.hub.bridge.KEY:
+                    self.assertEqual(status, 401)
+                elif chat in self.check['AVATAR_COLOURS']:
+                    self.assertEqual((status, content_type), (200, 'image/png'))
+                    self.assertEqual(extra['sha256'], hashlib.sha256(data).hexdigest())
+                    image = self.folder / 'response.png'
+                    image.write_bytes(data)
+                    width, height, rows = self.check['png']['read_png'](image)
+                    self.assertEqual((width, height), (64, 64))
+                    self.assertEqual(self.check['png']['measure'](rows, self.check['AVATAR_COLOURS'][chat], 0), 1)
+                else:
+                    self.assertEqual((status, data), (404, {'error': 'no avatar'}))
+
+    def test_pixel_controls_at_supported_dpis(self):
+        for dpi in [96, 120, 144, 192]:
+            with self.subTest(dpi=dpi):
+                self.screenshot(dpi)
+                self.check['check_avatar_pixels'](self.folder, capture=True)
+                self.check['check_avatar_pixels'](self.folder)
+
+    def test_pixel_checker_rejects_missing_photos_wrong_fallback_and_blank_initials(self):
+        for option in ['missing_photo', 'bad_fallback', 'blank_initial']:
+            with self.subTest(option=option):
+                self.screenshot(**{option: True})
+                with self.assertRaises(AssertionError):
+                    self.check['check_avatar_pixels'](self.folder, capture=True)
+
+    def test_pixel_checker_rejects_a_crop_not_from_the_screenshot(self):
+        self.screenshot()
+        self.check['check_avatar_pixels'](self.folder, capture=True)
+        crop = self.folder / 'avatar-telegram-user-1001.png'
+        self.check['png']['write_png'](crop, [[(0, 0, 0)] * 42 for _ in range(42)])
+        with self.assertRaises(AssertionError):
+            self.check['check_avatar_pixels'](self.folder)
+
+    def test_request_and_disk_cache_positive_control(self):
+        self.check['check_avatar_requests'](self.folder, self.requests)
+
+    def test_cache_checker_rejects_no_fetches_repeats_and_missing_auth_probes(self):
+        for rows in [[], self.requests + [self.requests[0]], self.requests[1:], [row for row in self.requests if row['authorized']]]:
+            with self.subTest(rows=len(rows)):
+                with self.assertRaises(AssertionError):
+                    self.check['check_avatar_requests'](self.folder, rows)
+
+    def test_cache_checker_rejects_missing_or_wrong_bytes_and_missing_negative_cache(self):
+        path = self.cache / '0000000000000000.img'
+        image = path.read_bytes()
+        path.unlink()
+        with self.assertRaises(AssertionError):
+            self.check['check_avatar_requests'](self.folder, self.requests)
+        path.write_bytes(b'wrong bytes')
+        with self.assertRaises(AssertionError):
+            self.check['check_avatar_requests'](self.folder, self.requests)
+        path.write_bytes(image)
+        next(self.cache.glob('*.none')).unlink()
+        with self.assertRaises(AssertionError):
+            self.check['check_avatar_requests'](self.folder, self.requests)
 
 
 if __name__ == '__main__':
