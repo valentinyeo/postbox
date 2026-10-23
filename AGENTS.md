@@ -15,6 +15,6 @@
 ## Product invariants (Valentin, 2026-09-06). Never regress these; check every one before opening a PR.
 - **All media auto-downloads** the moment a chat is opened: voice notes, images, videos, stickers, documents. No "click to load". Media stays cached for the next open; older than 14 days may be evicted.
 - **Voice notes play in-app** with transcription; transcripts are cached and never re-requested.
-- **No toolbar**: every command lives in the Ctrl+K palette. Window title shows `Wazig Messages v<version>`.
+- **No toolbar**: every command lives in the Ctrl+K palette. Window title shows `<view label> - Wazig v<version>` (or `Combined inbox - Wazig v<version>` for the combined inbox; `Wazig v<version>` before a view is known).
 - **Font size** follows the saved scale; never change the default size or the font (IBM Plex Sans).
 - **The installed app must never be left without a runnable `Messages.exe`** (self-update swaps atomically or not at all).

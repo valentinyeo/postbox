@@ -1,3 +1,4 @@
+import re
 import json
 
 
@@ -25,7 +26,7 @@ def check_threads(folder):
     for stage in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart']:
         image = (folder / f'{stage}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
-        assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig')
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         state = read(f'{stage}.state.json')
         assert state['selected']['provider'] == 'slack' and state['selected']['id'] == 'slack:fixture-threads:channel'
         if stage != 'thread-reply':

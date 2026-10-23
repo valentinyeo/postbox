@@ -48,6 +48,21 @@ pub fn label(view: View) []const u8 {
     };
 }
 
+pub fn windowTitle(buffer: []u8, view_label: ?[]const u8, version: []const u8) ![]const u8 {
+    return if (view_label) |text|
+        std.fmt.bufPrint(buffer, "{s} - Wazig v{s}", .{ text, version })
+    else
+        std.fmt.bufPrint(buffer, "Wazig v{s}", .{version});
+}
+
+test "window titles use the view label then Wazig v and build version" {
+    var buffer: [512]u8 = undefined;
+    try std.testing.expectEqualStrings("WhatsApp Personal - Wazig v0.9.179", try windowTitle(&buffer, "WhatsApp Personal", "0.9.179"));
+    try std.testing.expectEqualStrings("Slack Workspace - Wazig v0.0.526", try windowTitle(&buffer, "Slack Workspace", "0.0.526"));
+    try std.testing.expectEqualStrings("Combined inbox - Wazig v0.0.526", try windowTitle(&buffer, "Combined inbox", "0.0.526"));
+    try std.testing.expectEqualStrings("Wazig v0.0.526", try windowTitle(&buffer, null, "0.0.526"));
+}
+
 pub fn forNumber(number: usize, views: []const Account) ?usize {
     return if (number > 0 and number <= views.len) number - 1 else null;
 }
@@ -73,6 +88,8 @@ pub fn mergeOrder(allocator: std.mem.Allocator, saved: []const u8, known: []cons
             if (!chat_key.Key.eql(item.key.key(), key)) continue;
             try appendUnique(allocator, &result, item);
             break;
+        } else {
+            try appendUnique(allocator, &result, Account.init(key.provider, key.account, ""));
         }
     }
     for ([_]Provider{ .whatsapp, .slack, .telegram, .signal }) |provider| {
@@ -139,12 +156,13 @@ test "account view order merges saved missing and new accounts without losing ab
     const saved = "slack:slack-b\nwhatsapp:absent\nwhatsapp:wa-a\n";
     var merged = try mergeOrder(allocator, saved, &known);
     defer merged.deinit(allocator);
-    try std.testing.expectEqual(@as(usize, 4), merged.items.len);
+    try std.testing.expectEqual(@as(usize, 5), merged.items.len);
     try std.testing.expectEqualStrings("slack-b", merged.items[0].key.key().account);
-    try std.testing.expectEqualStrings("wa-a", merged.items[1].key.key().account);
-    try std.testing.expectEqualStrings("wa-b", merged.items[2].key.key().account);
-    try std.testing.expectEqualStrings("slack-a", merged.items[3].key.key().account);
-    std.mem.swap(Account, &merged.items[0], &merged.items[1]);
+    try std.testing.expectEqualStrings("absent", merged.items[1].key.key().account);
+    try std.testing.expectEqualStrings("wa-a", merged.items[2].key.key().account);
+    try std.testing.expectEqualStrings("wa-b", merged.items[3].key.key().account);
+    try std.testing.expectEqualStrings("slack-a", merged.items[4].key.key().account);
+    std.mem.swap(Account, &merged.items[0], &merged.items[2]);
     const stored = try saveOrder(allocator, saved, merged.items);
     defer allocator.free(stored);
     try std.testing.expectEqualStrings("whatsapp:wa-a\nwhatsapp:absent\nslack:slack-b\nwhatsapp:wa-b\nslack:slack-a\n", stored);
@@ -158,6 +176,27 @@ test "account view order merges saved missing and new accounts without losing ab
     defer restored.deinit(allocator);
     try std.testing.expectEqualStrings("absent", restored.items[1].key.key().account);
     try std.testing.expectEqual(@as(usize, returned.len), restored.items.len);
+}
+
+test "empty account keeps its Alt slot after draining and restarting without its chat rows" {
+    const allocator = std.testing.allocator;
+    const saved = "whatsapp:personal\nwhatsapp:business\nslack:workspace\n";
+    const populated = [_]Account{
+        Account.init(.whatsapp, "business", ""),
+        Account.init(.slack, "workspace", "Workspace"),
+    };
+    var drained = try mergeOrder(allocator, saved, &populated);
+    defer drained.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 3), drained.items.len);
+    try std.testing.expectEqualStrings("personal", drained.items[forNumber(1, drained.items).?].key.key().account);
+    try std.testing.expectEqualStrings("business", drained.items[forNumber(2, drained.items).?].key.key().account);
+    try std.testing.expectEqualStrings("workspace", drained.items[forNumber(3, drained.items).?].key.key().account);
+    const stored = try saveOrder(allocator, saved, drained.items);
+    defer allocator.free(stored);
+    try std.testing.expectEqualStrings(saved, stored);
+    var restarted = try mergeOrder(allocator, stored, &.{});
+    defer restarted.deinit(allocator);
+    for (drained.items, restarted.items) |left, right| try std.testing.expect(chat_key.Key.eql(left.key.key(), right.key.key()));
 }
 
 test "Alt+N maps saved account positions including two WhatsApp accounts" {

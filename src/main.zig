@@ -2624,6 +2624,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     switchComposerDraft(a);
     if (a.selected_chat < a.chat_count) selectedViewKey(a).set(chat_key.of(&a.chats[a.selected_chat]));
     updateSearchCue(a, view);
+    updateWindowTitle(a);
     if (a.chats_hwnd) |list| {
         const rows_changed = !chat_rows.equal(Chat, previous_rows, a.chats[0..a.chat_count]);
         const selection_changed = win.SendMessageW(list, win.LB_GETCURSEL, 0, 0) != @as(win.LRESULT, @intCast(a.selected_chat));
@@ -4159,6 +4160,19 @@ fn activeViewLabel(a: *App) []const u8 {
     return messenger_view.label(activeChatView(a));
 }
 
+fn updateWindowTitle(a: *App) void {
+    const hwnd = a.hwnd orelse return;
+    const label = if (activeChatView(a) == .all) "Combined inbox" else activeViewLabel(a);
+    var buffer: [512]u8 = undefined;
+    const text = messenger_view.windowTitle(&buffer, label, app_version) catch return;
+    var wide: [512]u16 = undefined;
+    const len = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], text) catch return;
+    wide[len] = 0;
+    var current: [512]u16 = undefined;
+    const current_len: usize = @intCast(win.GetWindowTextW(hwnd, &current, current.len));
+    if (!std.mem.eql(u16, current[0..current_len], wide[0..len])) _ = win.SetWindowTextW(hwnd, &wide);
+}
+
 fn hubWorkspaceNames(a: *App, rows: []const std.json.Value) ?std.json.Parsed(std.json.Value) {
     const path = providerStatePath(a, "workspace-names.json") orelse return null;
     defer a.allocator.free(path);
@@ -4198,9 +4212,9 @@ fn rebuildViews(a: *App, rows: []const std.json.Value) void {
     if (unifiedHub(a)) {
         var names = hubWorkspaceNames(a, rows);
         defer if (names) |*parsed| parsed.deinit();
-        if (a.show_archived) for (a.views.items) |view| {
+        for (a.views.items) |view| {
             messenger_view.appendUnique(a.allocator, &known, view) catch return;
-        };
+        }
         for (rows) |row| {
             if (row != .object) continue;
             const provider = hub.sourceProvider(row.object) orelse continue;
@@ -4329,6 +4343,7 @@ fn switchAccountView(a: *App, wanted: ?chat_key.Key) void {
     if (a.selected_chat < a.chat_count) selectedViewKey(a).set(chat_key.of(&a.chats[a.selected_chat]));
     a.chat_view = if (wanted) |key| messenger_view.providerView(key.provider) else .all;
     a.view_account.set(if (wanted) |key| key.account else "");
+    updateWindowTitle(a);
     saveChatView(a.chat_view);
     _ = saveRegistryString(a.allocator, lit("AccountView"), a.view_account.slice());
     layout(a, a.compose_client_width, a.compose_client_height);
@@ -18769,7 +18784,7 @@ pub fn main(init: std.process.Init) !void {
     const hwnd = win.CreateWindowExW(
         0,
         lit("MessagesZig"),
-        lit("Wazig Messages v" ++ app_version),
+        lit("Wazig v" ++ app_version),
         win.WS_OVERLAPPEDWINDOW | win.WS_CLIPCHILDREN | win.WS_MAXIMIZE,
         if (window_rect) |rect| rect.left else win.CW_USEDEFAULT,
         if (window_rect) |rect| rect.top else win.CW_USEDEFAULT,
@@ -18780,6 +18795,7 @@ pub fn main(init: std.process.Init) !void {
         instance,
         null,
     ) orelse return error.CreateWindowFailed;
+    updateWindowTitle(app);
     var dark: win.BOOL = win.TRUE;
     _ = win.DwmSetWindowAttribute(hwnd, 20, &dark, @sizeOf(win.BOOL));
     _ = win.ShowWindow(hwnd, win.SW_SHOWMAXIMIZED);

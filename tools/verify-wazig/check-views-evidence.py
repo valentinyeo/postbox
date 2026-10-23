@@ -1,3 +1,4 @@
+import re
 import hashlib
 import json
 from pathlib import Path
@@ -46,7 +47,7 @@ def check_views(folder):
     def capture(name):
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, name
-        assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig'), name
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
         return read(f'{name}.state.json')
 
     check_workspace_names(folder, capture)
@@ -70,6 +71,8 @@ def check_views(folder):
         assert row['version'] == state['version'] == '0.0.526'
         assert row['actual'] == row['expected'] == f"{label} - Wazig v{state['version']}"
         assert f"MessagesZig | {row['actual']}" in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
+    assert capture('title-view-1')['current_view'] == capture('view-1')['current_view']
+    assert capture('title-inbox')['current_view']['inbox']
     drained = capture('drained-alt1')
     assert drained['current_view'] == dict(provider='whatsapp', account='personal', label=expected[0][2], inbox=False)
     assert drained['chat_count'] == drained['pending_archives'] == 0 and not drained['show_archived']

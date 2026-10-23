@@ -1,3 +1,4 @@
+import re
 import hashlib
 import json
 from pathlib import Path
@@ -69,7 +70,7 @@ def check_paste_image(folder):
         for phase in ('staged', 'sent'):
             name = f'paste-{index}-{phase}'
             assert (folder / f'{name}.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
-            assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
+            assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
             assert read(f'{name}.state.json')['selected']['id'] == send['body']['chat']
         assert f'paste-image paste-{index} PASS' in proof
         assert f'clipboard: paste-{index} {size["mode"]} {width}x{height}' in actions

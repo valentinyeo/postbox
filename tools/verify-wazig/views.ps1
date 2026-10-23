@@ -187,6 +187,7 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     $null = Assert-AccountView $Session 1 'personal' 'before-drain'
     foreach ($remaining in @(1, 0)) {
         Send-Keys $Session '^1'
+        Assert-That ((Read-Control $Session messages).chat.view_account -eq 'personal') 'Archive target history belongs to the first account'
         Send-Keys $Session '^e'
         $null = Wait-Until {
             $state = Read-Control $Session status
@@ -209,6 +210,7 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'drained account archived chats'
     foreach ($remaining in @(1, 0)) {
         Send-Keys $Session '^1'
+        Assert-That ((Read-Control $Session messages).chat.view_account -eq 'personal') 'Archive target history belongs to the first account'
         Send-Keys $Session '^e'
         $null = Wait-Until { $state = Read-Control $Session status; $state.pending_archives -eq 0 -and $state.chat_count -eq $remaining } 'restore archived fixture chat'
     }
