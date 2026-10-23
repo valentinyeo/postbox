@@ -247,6 +247,10 @@ if session['feature'] == 'hub-archive':
     runpy.run_path(str(Path(__file__).with_name('check-hub-archive-evidence.py')))['check_hub_archive'](folder)
     raise SystemExit(0)
 
+if session['feature'] == 'palette-archived':
+    runpy.run_path(str(Path(__file__).with_name('check-palette-archived-evidence.py')))['check_palette_archived'](folder)
+    raise SystemExit(0)
+
 if session['feature'] == 'notrap':
     runpy.run_path(str(Path(__file__).with_name('check-notrap-evidence.py')))['check_notrap'](folder)
     raise SystemExit(0)

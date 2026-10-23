@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'menus', 'navigation', 'notrap', 'palette', 'paste-image', 'reactions', 'repaint', 'search', 'signal', 'slack-archive', 'slack-sort', 'slack-threads', 'telegram', 'views', 'voice', 'whatsapp-hub', 'workspace-icons', 'window'])
+assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'menus', 'navigation', 'notrap', 'palette', 'palette-archived', 'paste-image', 'reactions', 'repaint', 'search', 'signal', 'slack-archive', 'slack-sort', 'slack-threads', 'telegram', 'views', 'voice', 'whatsapp-hub', 'workspace-icons', 'window'])
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, paste-image, whatsapp-hub, hub, hub-archive, slack-sort, slack-archive, slack-threads, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window, voice]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, paste-image, whatsapp-hub, hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window, voice]' in workflow
 options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
 assert options_match, 'missing workflow_dispatch journey options'
 options = [option.strip() for option in options_match[1].split(',')]
@@ -66,7 +66,7 @@ assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
 assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_KEY")) |seed|' in fixture_config
 assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-archive', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint', 'paste-image', 'voice')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'palette-archived', 'slack-sort', 'slack-archive', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint', 'paste-image', 'voice')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 keyboard = harness.split('function Send-Keys(', 1)[1].split('function Get-PaletteWindow(', 1)[0]
 for required in ['$app = Get-App $Session', '$null = Wait-Until {', '$foreground -eq [IntPtr]::Zero -or $ownerPid -ne $Session.pid',
@@ -244,6 +244,27 @@ for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages 2',
 for fragment in ["min(incoming) < min(writes)", "kept[1] == '1'", "capture(f'{phase}-inbox', False)", "capture(f'{phase}-archived', True)", "read_bytes() == legacy_bytes"]:
     assert fragment in archive_validator, fragment
 print('HUB ARCHIVE MAP VERIFIED: legacy seed, archive request, keep state, same-profile restart, marker, evidence and PR wiring')
+
+palette_archived_map = (skill / 'features/palette-archived.md').read_text(encoding='utf-8')
+palette_archived_journey = (root / 'tools/verify-wazig/palette-archived.ps1').read_text(encoding='utf-8')
+palette_archived_validator = (root / 'tools/verify-wazig/check-palette-archived-evidence.py').read_text(encoding='utf-8')
+for name in ['INDEX.md', 'RULE-MAP.md']:
+    assert '(features/palette-archived.md)' in (skill / name).read_text(encoding='utf-8')
+assert 'feature=palette-archived' in palette_archived_map
+assert 'Invoke-PaletteArchivedJourney $session' in runner and 'palette-archived.ps1' in runner
+assert "elseif ($Feature -eq 'palette-archived') { 3 }" in runner
+assert '[switch]$PaletteArchived' in harness and "--palette-archived" in harness
+assert '--palette-archived' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+assert '"palette-archived"' in workflow and "matrix.feature == 'palette-archived'" in workflow
+assert "session['feature'] == 'palette-archived'" in validator and 'check-palette-archived-evidence.py' in validator
+assert '.claude/skills/verify-wazig/features/palette-archived.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+for fragment in ["'1064'", "'1072'", 'Read-ListLabels', "'%i'", 'view_order', 'selected.id', '/v1/wazig/archive', '/v1/wazig/messages', 'archived=true', 'Get-ArchivedPaletteLabel']:
+    assert fragment in palette_archived_journey, fragment
+for forbidden in ['WM_COMMAND', 'SendMessage', 'PostMessage', 'Start-Sleep']:
+    assert forbidden not in palette_archived_journey, forbidden
+for fragment in ['ROW_LIMIT', "row['matches'] == 1", "state['selected']['id'] == chat", "path == '/v1/wazig/mark-read'", "journey['failures'] == []"]:
+    assert fragment in palette_archived_validator, fragment
+print('PALETTE ARCHIVED MAP VERIFIED: synthetic hub, every-view palette queries, Enter without unarchive, evidence and PR wiring')
 
 window = (skill / 'features/window.md').read_text(encoding='utf-8')
 window_journey = (root / 'tools/verify-wazig/window.ps1').read_text(encoding='utf-8')
