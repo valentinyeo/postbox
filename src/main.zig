@@ -84,7 +84,7 @@ const outbox = @import("outbox.zig");
 
 const max_chats = 256;
 const max_groups = 1024;
-const max_messages = 100;
+const max_messages = 1000;
 const max_pending_sends = 32;
 const max_pending_archives = max_chats;
 const max_pending_reads = 8;
@@ -516,7 +516,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar, hub_thread };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar, hub_thread, hub_older };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 const WacliLane = enum { wacli, slack, hub_media };
 
@@ -555,6 +555,12 @@ const MsgCacheEntry = struct {
     account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     data: ?[]u8 = null,
+};
+
+const HubOlder = struct {
+    origin: chat_key.Stored = .{},
+    rows: ?[]u8 = null,
+    exhausted: bool = false,
 };
 
 const max_media_children = media_drain.max_children;
@@ -794,7 +800,7 @@ const App = struct {
     accounts_confirm_remove_tg: bool = false,
     groups: [max_groups]Group = [_]Group{.{}} ** max_groups,
     group_count: usize = 0,
-    messages: [max_messages]Message = [_]Message{.{}} ** max_messages,
+    messages: [max_messages]Message = undefined,
     message_count: usize = 0,
     selected_chat: usize = 0,
     selected_message: ?usize = null,
@@ -1012,6 +1018,7 @@ const App = struct {
     msg_read_attempts: u32 = 0,
     msg_read_last_jid: Utf8Text(191) = .{},
     msg_cache: [max_msg_cache]MsgCacheEntry = [_]MsgCacheEntry{.{}} ** max_msg_cache,
+    hub_older: HubOlder = .{},
     msg_cache_len: usize = 0,
     cache_tag: Utf8Text(32) = .{},
     cache_tag_gen: u64 = 0,
@@ -9180,11 +9187,32 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
     }
     clearMessages(a);
     a.selected_message = null;
-    const take = if (chat.provider == .slack and slackThreadsEnabled(a)) list.items.len else @min(list.items.len, max_messages);
+    var united: std.ArrayList(std.json.Value) = .empty;
+    defer united.deinit(a.allocator);
+    var kept_rows: ?std.json.Parsed(std.json.Value) = null;
+    defer if (kept_rows) |*kept| kept.deinit();
+    var rows: []const std.json.Value = list.items;
+    var merged = false;
+    if (unifiedHub(a) and chat.provider == .whatsapp) {
+        if (hubOlderFor(a, chat_key.of(chat)).rows) |kept_text| {
+            if (std.json.parseFromSlice(std.json.Value, a.allocator, kept_text, .{ .allocate = .alloc_always })) |kept| {
+                kept_rows = kept;
+                if (kept.value == .array) {
+                    if (hub.unite(a.allocator, list.items, kept.value.array.items, &united)) |_| {
+                        rows = united.items;
+                        merged = true;
+                    } else |_| {
+                        united.clearRetainingCapacity();
+                    }
+                }
+            } else |_| {}
+        }
+    }
+    const take = if (chat.provider == .slack and slackThreadsEnabled(a)) rows.len else @min(rows.len, max_messages);
     var source_index = take;
     while (source_index > 0) {
         source_index -= 1;
-        const object = switch (list.items[source_index]) {
+        const object = switch (rows[source_index]) {
             .object => |o| o,
             else => continue,
         };
@@ -9259,6 +9287,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         const stored = &a.messages[a.message_count - 1];
         if (isAudio(stored)) loadTranscriptCache(a, stored);
     }
+    if (merged) storeHubOlder(a, chat_key.of(chat), rows);
     var reaction_index: usize = 0;
     while (reaction_index < a.message_count) {
         const reaction_to = a.messages[reaction_index].reaction_to.slice();
@@ -11039,6 +11068,7 @@ fn selectMessage(a: *App, delta: i32) void {
     if (a.message_count == 0) return;
     var next: i32 = if (a.selected_message) |selected| @as(i32, @intCast(selected)) + delta else @intCast(a.message_count - 1);
     while (next >= 0 and next < a.message_count and !channelMessageVisible(a, &a.messages[@intCast(next)])) next += delta;
+    if (next < 0 and delta < 0) requestHubOlder(a);
     if (next < 0 or next >= a.message_count) return;
     a.selected_message = @intCast(next);
     scrollToSelectedMessage(a);
@@ -15567,6 +15597,7 @@ fn setCanvasScroll(a: *App, top: i32) void {
     const max_scroll = @max(0, a.max_scroll);
     a.scroll_y = std.math.clamp(max_scroll - @max(0, top), 0, max_scroll);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    if (a.scroll_y >= max_scroll) requestHubOlder(a);
 }
 
 fn setChatsScroll(a: *App, top: i32) void {
@@ -16421,7 +16452,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 return 0;
             }
             switch (result.kind) {
-                .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar, .hub_thread => applyHubResult(a, result),
+                .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar, .hub_thread, .hub_older => applyHubResult(a, result),
                 .groups => if (result.ok) applyGroups(a, result.data),
                 .contacts_index => if (result.ok) {
                     a.people.replaceContacts(result.data) catch return 0;
@@ -17409,6 +17440,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             };
             a.scroll_y = std.math.clamp(a.scroll_y + step, 0, a.max_scroll);
             _ = win.InvalidateRect(canvas, null, win.FALSE);
+            if (key == win.VK_PRIOR and a.scroll_y >= a.max_scroll) requestHubOlder(a);
         }
         return true;
     }
@@ -18740,6 +18772,7 @@ pub fn main(init: std.process.Init) !void {
                 const wheel_delta: i16 = @bitCast(hiword(@as(usize, @bitCast(message.wParam))));
                 app.scroll_y = std.math.clamp(app.scroll_y + @divTrunc(@as(i32, wheel_delta), 2), 0, app.max_scroll);
                 _ = win.InvalidateRect(app.canvas.?, null, win.TRUE);
+                if (wheel_delta > 0 and app.scroll_y >= app.max_scroll) requestHubOlder(app);
                 continue;
             }
             if (app.chats_hwnd) |list| {
@@ -19982,6 +20015,8 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
     if (unifiedHub(a) and job.kind == .groups) return "{\"success\":true,\"data\":[]}";
     const request: wa_hub.Request = if (unifiedHub(a) and job.kind == .hub_thread)
         try hub.messages(allocator, job.jid.slice(), 80, job.extra.slice())
+    else if (unifiedHub(a) and job.kind == .hub_older)
+        try hub.messages(allocator, job.jid.slice(), hub.older_limit, try hub.beforeCursor(allocator, job.msg_id.slice(), job.extra.slice()))
     else if (unifiedHub(a))
         try unifiedHubRequest(a, allocator, job)
     else switch (job.kind) {
@@ -20052,7 +20087,7 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
     return switch (job.kind) {
         .chats, .archived_scan, .kept_check, .contacts_index => hubNormalized(a, allocator, job, response.body, .chats, ""),
         .groups => hubNormalized(a, allocator, job, response.body, .groups, ""),
-        .messages, .resurface_probe, .unread_probe, .background_media, .hub_thread => hubNormalized(a, allocator, job, response.body, .messages, key.id),
+        .messages, .resurface_probe, .unread_probe, .background_media, .hub_thread, .hub_older => hubNormalized(a, allocator, job, response.body, .messages, key.id),
         else => response.body,
     };
 }
@@ -20165,6 +20200,7 @@ fn startHubAvatar(a: *App, target: AvatarTarget) bool {
 fn applyHubResult(a: *App, result: *const WacliResult) void {
     switch (result.kind) {
         .hub_thread => applyHubThreadPage(a, result),
+        .hub_older => applyHubOlderPage(a, result),
         .hub_send => {
             if (a.pending_send_count == 0 or !std.mem.eql(u8, &a.pending_sends[0].id, result.msg_id.slice())) return;
             if (result.ok) {
@@ -20849,4 +20885,72 @@ fn applyHubThreadPage(a: *App, result: *const WacliResult) void {
     }
     refreshSlackThreadPanel(a);
     if (oldest.len > 0 and (result.extra.len == 0 or std.mem.order(u8, oldest, result.extra.slice()) == .lt)) requestHubThreadPage(a, oldest);
+}
+
+fn hubOlderFor(a: *App, key: chat_key.Key) *HubOlder {
+    const older = &a.hub_older;
+    if (!chat_key.Key.eql(older.origin.key(), key)) {
+        if (older.rows) |rows| a.allocator.free(rows);
+        older.* = .{};
+        older.origin.set(key);
+    }
+    return older;
+}
+
+fn storeHubOlder(a: *App, key: chat_key.Key, rows: []const std.json.Value) void {
+    const text = std.json.Stringify.valueAlloc(a.allocator, rows, .{}) catch return;
+    const older = hubOlderFor(a, key);
+    if (older.rows) |previous| a.allocator.free(previous);
+    older.rows = text;
+}
+
+fn requestHubOlder(a: *App) void {
+    if (!unifiedHub(a) or a.message_count == 0 or a.message_count >= max_messages or a.selected_chat >= a.chat_count or wacliPendingGet(a, .hub_older) > 0) return;
+    const chat = &a.chats[a.selected_chat];
+    const key = chat_key.of(chat);
+    if (chat.provider != .whatsapp or !chat_key.Key.eql(chat_key.displayed(a), key)) return;
+    if (hubOlderFor(a, key).exhausted) return;
+    var oldest: ?*const Message = null;
+    for (a.messages[0..a.message_count]) |*message| {
+        if (message.send_state != .none or message.id.len == 0 or message.timestamp.len == 0) continue;
+        if (oldest == null or std.mem.order(u8, message.timestamp.slice(), oldest.?.timestamp.slice()) == .lt) oldest = message;
+    }
+    const first = oldest orelse return;
+    var job = WacliJob{ .kind = .hub_older, .provider = .whatsapp, .account = chat.account, .jid = chat.jid, .gen = a.messages_gen, .msg_id = first.id };
+    job.extra.set(first.timestamp.slice());
+    _ = wacliEnqueue(a, job, false);
+}
+
+fn applyHubOlderPage(a: *App, result: *const WacliResult) void {
+    if (!unifiedHub(a) or !result.ok or a.selected_chat >= a.chat_count) return;
+    const key = chat_key.of(&a.chats[a.selected_chat]);
+    if (!chat_key.Key.eql(key, chat_key.of(result)) or !chat_key.Key.eql(key, chat_key.displayed(a))) return;
+    var arena = std.heap.ArenaAllocator.init(a.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const older = hubOlderFor(a, key);
+    const page = std.json.parseFromSlice(std.json.Value, allocator, result.data, .{ .allocate = .alloc_always }) catch return;
+    const page_rows = hub.messageRows(page.value) orelse return;
+    var current: []const std.json.Value = &.{};
+    if (older.rows) |kept_text| {
+        const kept = std.json.parseFromSlice(std.json.Value, allocator, kept_text, .{ .allocate = .alloc_always }) catch return;
+        if (kept.value != .array) return;
+        current = kept.value.array.items;
+    } else {
+        const cached = msgCacheGet(a, key) orelse return;
+        const base = std.json.parseFromSlice(std.json.Value, allocator, cached, .{ .allocate = .alloc_always }) catch return;
+        current = hub.messageRows(base.value) orelse return;
+    }
+    var united: std.ArrayList(std.json.Value) = .empty;
+    const added = hub.unite(allocator, current, page_rows, &united) catch return;
+    if (added == 0) {
+        older.exhausted = true;
+        return;
+    }
+    storeHubOlder(a, key, united.items);
+    const stored_text = older.rows orelse return;
+    const raw = std.fmt.allocPrint(a.allocator, "{{\"data\":{{\"messages\":{s}}}}}", .{stored_text}) catch return;
+    defer a.allocator.free(raw);
+    _ = applyMessageData(a, raw, false);
+    a.msg_applied_hash = 0;
 }
