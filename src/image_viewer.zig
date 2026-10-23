@@ -4,6 +4,7 @@ const win = @import("win32.zig").c;
 const text_draw = @import("text_draw.zig");
 const webp_detect = @import("webp.zig");
 const gallery = @import("image_gallery.zig");
+const attachments = @import("attachments.zig");
 
 fn lit(comptime text: []const u8) [*:0]const u16 {
     return std.unicode.utf8ToUtf16LeStringLiteral(text);
@@ -197,7 +198,7 @@ pub fn open(a: anytype, message: anytype, comptime actions: anytype) void {
     a.viewer_chat.set(a.chats[a.selected_chat].jid.slice());
     a.viewer_opened_ms = win.GetTickCount64();
     show(a, current, actions);
-    if (a.viewer_failed and message.local_path.len > 0) {
+    if (a.viewer_failed and message.local_path.len > 0 and attachments.externalPreviewAllowed(message.local_path.slice())) {
         close(a);
         actions.openExternal(a, message);
         return;

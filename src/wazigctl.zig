@@ -78,7 +78,7 @@ fn connect() ?win.HANDLE {
     };
     var attempt: u32 = 0;
     while (attempt < 5) : (attempt += 1) {
-        const handle = win.CreateFileW(name.ptr, win.GENERIC_READ | win.GENERIC_WRITE, 0, null, win.OPEN_EXISTING, 0, null);
+        const handle = win.CreateFileW(name.ptr, win.GENERIC_READ | win.GENERIC_WRITE, 0, null, win.OPEN_EXISTING, control.client_open_flags, null);
         if (handle != win.INVALID_HANDLE_VALUE and handle != null) return handle;
         switch (win.GetLastError()) {
             win.ERROR_PIPE_BUSY => _ = win.WaitNamedPipeW(name.ptr, 2000),
