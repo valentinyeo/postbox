@@ -93,17 +93,31 @@ function Get-Edit($Window, [string]$Id) {
     return $edit
 }
 
+function Read-EditText([IntPtr]$Handle) {
+    $text = [Text.StringBuilder]::new(65537)
+    $length = [UIntPtr]::Zero
+    $ok = [VerifyWindow]::ReadText($Handle, 13, [UIntPtr]65537, $text, 2, 2000, [ref]$length)
+    Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only WM_GETTEXT timed out'
+    return $text.ToString()
+}
+
 function Read-Edit($Edit) {
     $handle = [IntPtr]$Edit.Current.NativeWindowHandle
     Assert-That ($handle -ne [IntPtr]::Zero -and $Edit.Current.ClassName -eq 'RICHEDIT50W') 'Expected a DirectWrite RichEdit host'
-    $text = [Text.StringBuilder]::new(65537)
-    $length = [UIntPtr]::Zero
-    $ok = [VerifyWindow]::ReadText($handle, 13, [UIntPtr]65537, $text, 2, 2000, [ref]$length)
-    Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only WM_GETTEXT timed out'
-    $value = $Edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
-    $value = $value.Replace("`r`n", "`n").Replace("`r", "`n")
-    Assert-That ($value -eq $text.ToString()) 'Screen-reader value differs from edit text'
-    return $text.ToString()
+    $valueMismatch = $false
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $text = Read-EditText $handle
+        $value = $Edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
+        $after = Read-EditText $handle
+        if ($text -ceq $after) {
+            $value = $value.Replace("`r`n", "`n").Replace("`r", "`n")
+            $valueMismatch = $value -ne $text
+            if (-not $valueMismatch) { return $text }
+        }
+        if ($attempt -lt 19) { [System.Threading.Thread]::Sleep(50) }
+    }
+    if ($valueMismatch) { throw 'Screen-reader value differs from edit text' }
+    throw 'Edit text never settled'
 }
 
 function Read-ListCount($List) {

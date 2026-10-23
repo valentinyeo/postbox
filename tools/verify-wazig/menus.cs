@@ -63,7 +63,7 @@ public static class VerifyMenus {
         public int textPixels, pixels;
         public Rect rect;
     }
-    public static Measurement Measure(byte[] image, int width, int height, int stride, Rect rect, int screenX, int screenY, int inset) {
+    public static Measurement Measure(byte[] image, int width, int height, int stride, Rect rect, int screenX, int screenY, int inset, bool clearType = false) {
         int left = rect.Left - screenX + inset, top = rect.Top - screenY + inset;
         int right = rect.Right - screenX - inset, bottom = rect.Bottom - screenY - inset;
         if (stride < width * 4 || image.Length < stride * height || left < 0 || top < 0 || right > width || bottom > height || right - left < 16 || bottom - top < 8) throw new Exception("Screenshot does not contain measurement rectangle");
@@ -84,21 +84,44 @@ public static class VerifyMenus {
             Array.Sort(tile, 0, tileCount); tiles++; if (tileCount > 0 && tile[tileCount / 2] > 0.5) lightTiles++;
         }
         Array.Sort(values); Array.Sort(neutral, 0, neutralCount);
-        if (neutralCount < 24) throw new Exception("No measurable neutral text");
+        double[] textValues = clearType ? values : neutral;
+        int textCount = clearType ? count : neutralCount;
+        if (textCount < 24) throw new Exception("No measurable neutral text");
         double background = values[count / 2];
-        double text = background < 0.5 ? neutral[neutralCount - 24] : neutral[23];
+        double text = background < 0.5 ? textValues[textCount - 24] : textValues[23];
         int textPixels = 0;
-        for (int index = 0; index < neutralCount; index++) if ((Math.Max(background, neutral[index]) + 0.05) / (Math.Min(background, neutral[index]) + 0.05) >= 4.5) textPixels++;
+        for (int index = 0; index < textCount; index++) if ((Math.Max(background, textValues[index]) + 0.05) / (Math.Min(background, textValues[index]) + 0.05) >= 4.5) textPixels++;
         return new Measurement {
             background = background, text = text, contrast = (Math.Max(background, text) + 0.05) / (Math.Min(background, text) + 0.05),
             lightTileFraction = (double)lightTiles / tiles, pixels = count, rect = rect, textPixels = textPixels
         };
+    }
+    public static bool Changed(byte[] before, byte[] after, int width, int height, int stride, Rect rect, int screenX, int screenY) {
+        if (width <= 0 || height <= 0 || stride < (long)width * 4 || before.LongLength < (long)stride * height || after.LongLength < (long)stride * height) throw new Exception("Invalid screenshot pixels");
+        int left = Math.Max(0, rect.Left - screenX), top = Math.Max(0, rect.Top - screenY);
+        int right = Math.Min(width, rect.Right - screenX), bottom = Math.Min(height, rect.Bottom - screenY);
+        if (right <= left || bottom <= top) return false;
+        long changed = 0;
+        for (int y = top; y < bottom; y++) for (int x = left; x < right; x++) {
+            int offset = y * stride + x * 4;
+            if (before[offset] != after[offset] || before[offset + 1] != after[offset + 1] || before[offset + 2] != after[offset + 2] || before[offset + 3] != after[offset + 3]) changed++;
+        }
+        return changed * 50 >= (long)(right - left) * (bottom - top);
     }
     public static void Validate(Measurement measurement, bool light) {
         if (light ? measurement.background < 0.7 : measurement.background > 0.05126945837404324 || measurement.lightTileFraction > 0.02) throw new Exception("Unexpected menu background");
         if (measurement.contrast < 4.5 || measurement.textPixels < 24) throw new Exception("Unreadable popup text");
     }
     public static void TestOracle() {
+        foreach (bool painted in new[] { false, true }) {
+            var before = new byte[240 * 100 * 4];
+            var after = (byte[])before.Clone();
+            if (painted) for (int y = 20; y < 40; y++) for (int x = 20; x < 60; x++) {
+                int offset = (y * 240 + x) * 4;
+                after[offset] = after[offset + 1] = after[offset + 2] = 255;
+            }
+            if (Changed(before, after, 240, 100, 960, new Rect { Right = 240, Bottom = 100 }, 0, 0) != painted) throw new Exception("Popup pixel change control failed");
+        }
         foreach (bool light in new[] { false, true }) foreach (bool text in new[] { false, true }) {
             var image = new byte[240 * 100 * 4];
             for (int y = 0; y < 100; y++) for (int x = 0; x < 240; x++) {
@@ -128,6 +151,23 @@ public static class VerifyMenus {
             bool accepted = true;
             try { Validate(metric, false); } catch { accepted = false; }
             if (accepted == neutralPatch) throw new Exception("Colour foreground/light background control failed");
+        }
+        for (int kind = 0; kind < 3; kind++) {
+            var image = new byte[240 * 100 * 4];
+            for (int y = 0; y < 100; y++) for (int x = 0; x < 240; x++) {
+                bool foreground = kind != 0 && y >= 20 && y < 28 && x >= 20 && x < 60 && x % 8 < 3;
+                bool white = kind == 1 && foreground && x == 24;
+                int offset = (y * 240 + x) * 4;
+                image[offset] = (byte)(foreground ? (white ? 255 : (kind == 1 ? 205 : 70)) : 26);
+                image[offset + 1] = (byte)(foreground ? (white ? 255 : (kind == 1 ? 140 : 50)) : 26);
+                image[offset + 2] = (byte)(white ? 255 : 26); image[offset + 3] = 255;
+            }
+            foreach (bool clearType in new[] { false, true }) {
+                var metric = Measure(image, 240, 100, 960, new Rect { Right = 240, Bottom = 100 }, 0, 0, 8, clearType);
+                bool accepted = true;
+                try { Validate(metric, false); } catch { accepted = false; }
+                if (accepted != (kind == 1 && clearType)) throw new Exception("ClearType edit text control failed");
+            }
         }
     }
     public static Point MessageText(byte[] image, int stride, Rect canvas, int screenX, int screenY) {
