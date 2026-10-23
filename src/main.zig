@@ -17102,7 +17102,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             }
         }
     }
-    if (control and !alt and !shift and (key == win.VK_UP or key == win.VK_DOWN) and a.message_count > 0 and focus != a.thread_compose) {
+    if (control and !alt and !shift and (key == win.VK_UP or key == win.VK_DOWN) and a.message_count > 0 and (a.thread_compose == null or focus != a.thread_compose.?)) {
         walkMessageHighlight(a, key);
         return true;
     }
@@ -17254,16 +17254,16 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             closeSlackThread(a);
             return true;
         }
-        if (focus == a.thread_compose and key == win.VK_RETURN and !shift) {
+        if (a.thread_compose != null and focus == a.thread_compose.? and key == win.VK_RETURN and !shift) {
             sendMessageFrom(a, true);
             return true;
         }
     }
-    if (a.thread_compose != null and focus == a.thread_compose) return false;
+    if (a.thread_compose != null and focus == a.thread_compose.?) return false;
     if (!control and !alt and !shift and key == win.VK_RETURN and a.thread_parent.len == 0 and slackThreadsEnabled(a)) {
         if (a.selected_message) |selected| {
             const empty = if (a.compose) |compose| win.GetWindowTextLengthW(compose) == 0 else true;
-            if (focus != a.search and empty and selected < a.message_count) {
+            if ((a.search == null or focus != a.search.?) and empty and selected < a.message_count) {
                 openSlackThread(a, selected);
                 return true;
             }
