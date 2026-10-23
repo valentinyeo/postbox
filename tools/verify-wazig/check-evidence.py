@@ -210,6 +210,10 @@ if session['feature'] == 'telegram':
 if session['feature'] == 'signal':
     runpy.run_path(str(Path(__file__).with_name('check-signal-evidence.py')))['check_signal'](folder)
     raise SystemExit(0)
+if session['feature'] == 'slack-archive':
+    runpy.run_path(str(Path(__file__).with_name('check-slack-archive-evidence.py')))['check_slack_archive'](folder)
+    raise SystemExit(0)
+
 if session['feature'] == 'slack-sort':
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))
@@ -294,7 +298,7 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
         paths.append('/v1/accounts')
     for path in paths:
         assert any(row['path'].startswith(path) and row.get('status') == 200 for row in requests), path
-    assert any(row['path'] == '/v1/archive' and row['body']['archived'] for row in requests)
+    assert any(row['path'] == '/v1/archive' and row['body']['archived'] and (not unified or row['body']['chat'] == 'fixture-beta') for row in requests)
     assert any(row['method'] == 'SSE' and row['kind'] == 'msg' for row in requests)
     for event_id in ['1', '2']:
         assert any(row['path'] == '/v1/events' and row.get('last_event_id') == event_id for row in requests)
@@ -355,7 +359,7 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
     backend = 'message backend:' if unified else 'whatsapp backend:'
     assert launch.count(backend) == 1 and backend + ' hub' in launch
     if unified:
-        assert before['selected']['provider'] == 'slack' and final['selected']['provider'] == 'whatsapp'
+        assert before['selected']['provider'] == 'slack' and final['selected']['provider'] == 'slack'
         assert 'hub provider-views PASS' in proof
         for keys in ['%1', '%2', '%0']:
             assert f'keys: {keys}' in actions

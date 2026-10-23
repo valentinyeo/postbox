@@ -164,7 +164,7 @@ class HubArchiveHandler(Handler):
         query = parse_qs(url.query)
         if url.path == '/v1/wazig/chats':
             with self.state.lock:
-                archived = self.state.archived
+                archived = self.state.archive_group_archived
                 stamp = self.state.archive_stamp
             rows = [dict(jid=ARCHIVE_GROUP, name='Verification Group', provider='whatsapp', kind='group',
                          last_message_ts=stamp, archived=archived, unread=True, unread_count=1),
@@ -194,12 +194,12 @@ class HubArchiveHandler(Handler):
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
         if self.path == '/fixture/archive-incoming' and body == {}:
             with self.state.lock:
-                self.state.archived = False
+                self.state.archive_group_archived = False
                 self.state.archive_stamp = '2026-10-10T13:00:00Z'
             self.respond(200, {'archived': False, 'last_message_ts': self.state.archive_stamp, 'unread_count': 1})
         elif self.path == '/v1/wazig/archive' and body == {'chat': ARCHIVE_GROUP, 'archived': True}:
             with self.state.lock:
-                self.state.archived = True
+                self.state.archive_group_archived = True
             self.respond(200, {'status': 'ok'}, body=body)
         elif self.path == '/v1/wazig/mark-read' and body.get('chat') in (ARCHIVE_GROUP, ARCHIVE_OTHER):
             self.respond(200, {'status': 'ok'}, body=body)
@@ -898,6 +898,88 @@ class RepaintHandler(Handler):
             self.close_connection = True
 
 
+class SlackArchiveHandler(SlackSortHandler):
+    def stamp(self, incoming):
+        return (datetime.fromisoformat(self.state.stamp) + timedelta(seconds=incoming)).isoformat().replace('+00:00', 'Z')
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        incoming = self.state.archive_incoming
+        if url.path == '/v1/wazig/chats':
+            archived = query.get('archived', ['false'])[0] == 'true'
+            rows = [dict(jid=chat, name=name, provider='slack', kind='group' if chat == ALPHA else 'direct',
+                         last_message_ts=self.stamp(incoming if chat == ALPHA else -1),
+                         unread_count=incoming if chat == ALPHA else 0, unread=chat == ALPHA and incoming > 0,
+                         archived=False)
+                    for chat, name in [(ALPHA, 'Verification Alpha'), (BETA, 'Verification Beta')]]
+            self.respond(200, [] if archived else rows, incoming=incoming, archived=archived, rows=[] if archived else rows)
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            rows = [dict(MsgID='ARCHIVE-BASELINE', ChatJID=chat, Timestamp=self.stamp(0),
+                         Text='Synthetic Slack history', FromMe=False, SenderName='Fixture Sender')]
+            if chat == ALPHA:
+                rows.extend(dict(MsgID=f'ARCHIVE-INCOMING-{number}', ChatJID=chat, Timestamp=self.stamp(number),
+                                 Text=f'Synthetic Slack incoming {number}', FromMe=False, SenderName='Fixture Sender')
+                            for number in range(1, incoming + 1))
+            self.respond(200, list(reversed(rows)))
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+    def event(self, event_id, kind, incoming):
+        data = dict(id=event_id, kind=kind, chat=ALPHA if incoming else '', ts=self.stamp(incoming))
+        self.wfile.write(f'id: {event_id}\ndata: {json.dumps(data)}\n\n'.encode())
+        self.wfile.flush()
+        self.state.record(dict(method='SSE', path='/v1/wazig/events', wire_path=self.wire_path,
+                               incoming=incoming, **data))
+
+    def events(self):
+        self.record(200)
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        last = int(self.headers.get('Last-Event-ID', '0'))
+        if last == 0:
+            self.event(1, 'reset', 0)
+            self.close_connection = True
+            return
+        while True:
+            with self.state.lock:
+                incoming = self.state.archive_incoming
+                if incoming + 1 <= last:
+                    self.state.lock.wait(timeout=2)
+            for number in range(max(1, last), incoming + 1):
+                self.event(number + 1, 'msg', number)
+                last = number + 1
+            self.wfile.write(b': heartbeat\n\n')
+            self.wfile.flush()
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/fixture/live':
+            with self.state.lock:
+                self.state.archive_incoming += 1
+                incoming = self.state.archive_incoming
+                self.state.lock.notify_all()
+            self.respond(200, {'ok': True}, body=body, incoming=incoming, chat=ALPHA)
+        elif self.path == '/v1/wazig/mark-read':
+            self.respond(200, {'status': 'ok'}, body=body)
+        else:
+            self.respond(400, {'error': 'unexpected Slack write'}, body=body)
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Fake hub runs only on GitHub Actions')
@@ -909,6 +991,7 @@ def main():
     modes.add_argument('--repaint', action='store_true')
     modes.add_argument('--reactions', action='store_true')
     modes.add_argument('--slack-sort', action='store_true')
+    modes.add_argument('--slack-archive', action='store_true')
     modes.add_argument('--slack-threads', action='store_true')
     modes.add_argument('--views', action='store_true')
     modes.add_argument('--notrap', action='store_true', help='WhatsApp and Slack chats; Signal and Telegram have no rows')
@@ -917,10 +1000,12 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = HubArchiveHandler if args.hub_archive else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    handler = SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
+    server.state.archive_incoming = 0
+    server.state.archive_group_archived = False
     server.state.view_rows = view_rows()
     server.state.archive_stamp = '2026-10-10T11:00:00Z'
     server.state.repaint_count = 0

@@ -14,8 +14,9 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [whatsapp-hub](whatsapp-hub.md) | WhatsApp hub transport | Chats, history, live SSE replay, idempotent retry, reads, archive, pending media and DPAPI |
 | [hub-archive](hub-archive.md) | Legacy WhatsApp Keep archived | Seed legacy flag, require hub re-archive and keep state, restart with newer incoming message |
 | [hub](hub.md) | Unified hub transport (IGSH-531) | Source network identity, list/history, SSE replay, send retry, read/archive, media and DPAPI |
-| [slack-threads](slack-threads.md) | Slack threads | Replies line, side panel, threaded send, per-account toggle and restart |
 | [slack-sort](slack-sort.md) | Slack last message order | Newest first, unknown last, incoming and sent promotion with keyboard order |
+| [slack-archive](slack-archive.md) | Local Slack archive | Ctrl+E, three incoming messages, inbox absence, Archive presence, restart and unarchive without hub archive writes |
+| [slack-threads](slack-threads.md) | Slack threads | Replies line, side panel, threaded send, per-account toggle and restart |
 | [telegram](telegram.md) | Telegram hub account | Prelinked hub chats, Saved Messages, text/file/reply, reactions, reads, live SSE and terminal rate limits |
 | [signal](signal.md) | Signal hub account | Prelinked hub history, text/file, reactions, reads, live events, terminal 429/403 failures |
 | [notrap](notrap.md) | No empty sign-in traps | Saved Signal startup fallback, Esc and every Alt view key from every view, per-view screenshots |
@@ -26,7 +27,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [text-comparison](appearance.md) | DirectWrite beside Chrome | Exact text/font/metric parity, paired screenshots and 3x paragraph crops |
 | [window](window.md) | Maximized startup and saved normal placement | Unforced launch, keyboard restore/resize, Alt+F4, same-profile reopen and --update-relaunch |
 
-Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `reactions`, `menus`, `search`, `drafts`, `whatsapp-hub`, `hub`, `hub-archive`, `slack-sort`, `slack-threads`, `views`, `workspace-icons`, `signal`, `telegram`, `notrap`, `repaint`, `text-comparison` and `window`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
+Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `reactions`, `menus`, `search`, `drafts`, `whatsapp-hub`, `hub`, `hub-archive`, `slack-sort`, `slack-archive`, `slack-threads`, `views`, `workspace-icons`, `signal`, `telegram`, `notrap`, `repaint`, `text-comparison` and `window`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
 
 The source of truth for commands is `src/main.zig:buildPaletteItems`, for keyboard handling `src/main.zig:handleKeyboard`, and for discoverable help `src/shortcuts.zig`. Every feature file has precisely four H2 sections. Capture the input, resulting UI and durable side effects; preserve proof after cleanup. Only archive adds a synthetic incoming message at the fixture provider boundary; search, navigation, drafts, palette and appearance stay empty. No live send, account login, media, voice playback or transcription claim can be made from these local chats.
 
@@ -39,6 +40,8 @@ The `slack-sort` journey verifies Slack last message ordering and incoming/sent 
 The `workspace-icons` journey verifies rounded Slack workspace icon badges, the missing-icon S fallback and the green WhatsApp handset through screenshot pixel checks, authenticated synthetic endpoints and retained disk caches. It runs on matching PRs.
 
 ## Recent changes coverage
+
+- IGSH-647: local Slack archive -> `slack-archive` (asserts real Ctrl+E, three archived=false incoming hub rows, Archive-only presence, same-profile restart, unarchive and absence of archive endpoint requests; direct Slack remains Zig coverage)
 
 These are source changes in the bounded history window, not claims of live verification. A journey citation names only its actual assertions; unreachable entries identify the missing fixture, hardware, provider or measurement prerequisite. Named CI checks are existing coverage, not checks run during this maintenance pass.
 

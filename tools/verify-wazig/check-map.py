@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'menus', 'navigation', 'notrap', 'palette', 'reactions', 'repaint', 'search', 'signal', 'slack-sort', 'slack-threads', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons', 'window'])
+assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'menus', 'navigation', 'notrap', 'palette', 'reactions', 'repaint', 'search', 'signal', 'slack-archive', 'slack-sort', 'slack-threads', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons', 'window'])
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, whatsapp-hub, hub, hub-archive, slack-sort, slack-threads, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, whatsapp-hub, hub, hub-archive, slack-sort, slack-archive, slack-threads, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window]' in workflow
 options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
 assert options_match, 'missing workflow_dispatch journey options'
 options = [option.strip() for option in options_match[1].split(',')]
@@ -66,8 +66,15 @@ assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
 assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_KEY")) |seed|' in fixture_config
 assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-archive', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
+keyboard = harness.split('function Send-Keys(', 1)[1].split('function Get-PaletteWindow(', 1)[0]
+for required in ['$app = Get-App $Session', '$null = Wait-Until {', '$foreground -eq [IntPtr]::Zero -or $ownerPid -ne $Session.pid',
+                 '$app.Refresh()', '[VerifyWindow]::SetForegroundWindow($app.MainWindowHandle)',
+                 'GetWindowThreadProcessId($foreground, [ref]$ownerPid)',
+                 "Assert-That ($foreground -ne [IntPtr]::Zero -and $ownerPid -eq $Session.pid) 'Refusing keyboard input to another app'"]:
+    assert required in keyboard, required
+assert keyboard.index('Refusing keyboard input to another app') < keyboard.index('[System.Windows.Forms.SendKeys]::SendWait($Keys)')
 for proof in ['chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
 bridge = (root / 'tools/verify-wazig/fake-wa-bridge.py').read_text(encoding='utf-8')
@@ -260,3 +267,26 @@ assert 'Send-Keys' not in repaint
 assert '$clock.Elapsed.TotalSeconds -ge 60' in repaint
 assert 'full repaints in 60 s, limit 3' in repaint
 print('REPAINT MAP VERIFIED: cumulative counters, no-input incoming workload and PR journey')
+
+archive_map = (skill / 'features/slack-archive.md').read_text(encoding='utf-8')
+archive_journey = (root / 'tools/verify-wazig/slack-archive.ps1').read_text(encoding='utf-8')
+archive_validator = (root / 'tools/verify-wazig/check-slack-archive-evidence.py').read_text(encoding='utf-8')
+assert 'feature=slack-archive' in archive_map
+assert 'Invoke-SlackArchiveJourney $session' in runner and '[switch]$SlackArchive' in harness
+assert '--slack-archive' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+assert '"slack-archive"' in workflow and "matrix.feature == 'slack-archive'" in workflow
+assert 'check-slack-archive-evidence.py' in validator
+for name in ['INDEX.md', 'RULE-MAP.md']:
+    assert '(features/slack-archive.md)' in (skill / name).read_text(encoding='utf-8')
+for artifact in ['archived', 'incoming', 'restart', 'unarchived']:
+    assert artifact in archive_journey and artifact in archive_validator, artifact
+assert "foreach ($number in 1..3)" in archive_journey and "Send-Keys $Session '^e'" in archive_journey
+assert 'WAZIG_VERIFY_RESTART' in archive_journey and '$old.Kill()' in archive_journey
+assert '$null = Get-App $Session' in archive_journey
+assert '$app = [Diagnostics.Process]::Start($Start)' in archive_journey and 'return $app' in archive_journey
+assert '$restarted = @(Invoke-SlackArchiveJourney $session $messages $start)' in runner
+assert '$restarted.Count -eq 1 -and $restarted[0] -is [Diagnostics.Process] -and' in runner
+assert '$restarted[0].Id -eq $session.pid' in runner and '$app = $restarted[0]' in runner
+assert '$app.MainWindowHandle -eq [IntPtr](Get-Window $Session).Current.NativeWindowHandle' in archive_journey
+assert '.claude/skills/verify-wazig/features/slack-archive.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+print('SLACK ARCHIVE MAP VERIFIED: unified fixture, three deliveries, restart, unarchive and no archive endpoint requests')
