@@ -146,6 +146,57 @@ if session['feature'] == 'voice':
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
     print('EVIDENCE VERIFIED: five downloaded voice notes with cached transcripts, scroll and expand, partial repaints match full repaints')
     raise SystemExit(0)
+if session['feature'] == 'passage-copy':
+    def read(name):
+        return json.loads((folder / name).read_text(encoding='utf-8-sig'))
+
+    assert session['sha256'] and session['commit']
+    assert read('result.json') == dict(feature='passage-copy', status='passed')
+    checks = read('clipboard.json')
+    fixture = read('passage-fixture.json')
+    assert len(checks) == 4
+    for provider, chat in [('whatsapp', 'fixture-beta'), ('slack', 'fixture-alpha')]:
+        rows = fixture[chat]
+        assert len(rows) >= 7 and len({r['SenderName'] for r in rows}) >= 2
+        assert any(r['FromMe'] for r in rows)
+        for stage, last in [('partial', 4), ('edge', 6)]:
+            check, = [r for r in checks if r['provider'] == provider and r['stage'] == stage]
+            blocks, day = [], ''
+            for index in range(1, last + 1):
+                row = rows[index]
+                text = row['Text']
+                if index == 1:
+                    text = text[text.index('MIDDLE'):]
+                if stage == 'partial' and index == last:
+                    text = text[:text.index('MIDDLE') + 6]
+                next_day = row['Timestamp'][:10]
+                if day and day != next_day:
+                    blocks.append(next_day)
+                day = next_day
+                sender = 'You' if row['FromMe'] else row['SenderName']
+                blocks.append(f"{sender}, {row['Timestamp'][11:16]}: {text}".replace('\n', '\r\n'))
+            assert check['actual'] == check['expected'] == '\r\n'.join(blocks)
+            if stage == 'edge':
+                assert check['before'][6]['bubble'][2] == 0
+                assert check['after'][6]['bubble'][2] > 0
+                assert check['before'][1]['bubble'] != check['after'][1]['bubble']
+        images = []
+        for phase in ['before', 'after', 'edge-after']:
+            image = (folder / f'{provider}-{phase}.png').read_bytes()
+            assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
+            images.append(hashlib.sha256(image).hexdigest())
+            state = read(f'{provider}-{phase}.state.json')
+            assert state['selected']['id'] == chat and state['selected']['provider'] == provider
+        assert len(set(images)) == 3
+    actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
+    assert actions.count('passage message 2 middle to message 5 middle') == 2
+    assert actions.count('held drag beyond canvas 1024 bottom') == 2
+    final = read('side-effects.json')
+    assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
+    assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
+    assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
+    print('EVIDENCE VERIFIED: stamped partial passage and held-edge scrolling on WhatsApp and Slack')
+    raise SystemExit(0)
 if session['feature'] == 'reactions':
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))

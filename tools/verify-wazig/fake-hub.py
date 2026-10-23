@@ -391,6 +391,38 @@ class PaletteArchivedHandler(Handler):
             self.respond(400, {'error': 'unexpected palette fixture write'}, body=body)
 
 
+def passage_rows(chat):
+    return [dict(MsgID=f'PASSAGE-{n}', ChatJID=chat,
+                 Timestamp=f'2026-10-{10 if n <= 3 else 11}T12:{n:02}:00Z',
+                 Text='alpha MIDDLE omega' if n != 6 else '\n'.join(['alpha MIDDLE omega'] * 40),
+                 FromMe=n == 3, SenderName='Fixture Amber' if n % 2 else 'Fixture Cobalt',
+                 SenderJID='fixture-amber' if n % 2 else 'fixture-cobalt') for n in range(1, 8)]
+
+
+class PassageCopyHandler(Handler):
+    def do_GET(self):
+        url = urlsplit(self.path)
+        if url.path == '/v1/wazig/chats':
+            self.wire_path = self.path
+            if self.authorized():
+                rows = [dict(jid=chat, name=name, provider=provider, kind=kind,
+                             last_message_ts='2026-10-11T12:07:00Z', archived=False, unread_count=0)
+                        for chat, name, provider, kind in [(ALPHA, 'Verification Alpha', 'slack', 'group'),
+                                                           (BETA, 'Verification Beta', 'whatsapp', 'direct')]]
+                bridge.Handler.respond(self, 200, [] if parse_qs(url.query).get('archived') == ['true'] else rows)
+        elif url.path == '/fixture/passage':
+            self.wire_path = self.path
+            if self.authorized():
+                self.respond(200, {chat: passage_rows(chat) for chat in (ALPHA, BETA)})
+        elif url.path == '/v1/wazig/messages':
+            self.wire_path = self.path
+            if self.authorized():
+                chat = parse_qs(url.query).get('chat', [''])[0]
+                self.respond(200, passage_rows(chat) if chat in (ALPHA, BETA) else [])
+        else:
+            super().do_GET()
+
+
 class ReactionsHandler(Handler):
     def do_GET(self):
         url = urlsplit(self.path)
@@ -1420,6 +1452,7 @@ def main():
     modes.add_argument('--repaint', action='store_true')
     modes.add_argument('--voice', action='store_true')
     modes.add_argument('--mixed-lid', action='store_true')
+    modes.add_argument('--passage-copy', action='store_true')
     modes.add_argument('--reactions', action='store_true')
     modes.add_argument('--slack-sort', action='store_true')
     modes.add_argument('--slack-archive', action='store_true')
@@ -1431,7 +1464,7 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = LinkPreviewsHandler if args.link_previews else PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else PaletteArchivedHandler if args.palette_archived else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else VoiceHandler if args.voice else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    handler = LinkPreviewsHandler if args.link_previews else PassageCopyHandler if args.passage_copy else PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else PaletteArchivedHandler if args.palette_archived else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else VoiceHandler if args.voice else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
