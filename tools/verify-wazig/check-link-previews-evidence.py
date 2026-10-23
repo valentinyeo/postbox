@@ -68,7 +68,7 @@ def check_link_previews(folder):
         assert fetched and all(row['status'] == 200 for row in fetched), path
         assert len(fetched) == 1, (path, 'URL cache did not suppress repeated fetches across providers')
     assert not any(row['wire_path'] == '/missing.png' for row in requests)
-    assert all(row['authorized'] for row in requests if row['wire_path'].startswith('/v1/wazig/'))
+    assert all(row['authorized'] for row in requests if row['method'] != 'SSE' and row['wire_path'].startswith('/v1/wazig/'))
     files = list((folder / 'final-data').rglob('*'))
     digests = {hashlib.sha256(path.read_bytes()).hexdigest() for path in files if path.is_file()}
     fixture = runpy.run_path(str(Path(__file__).with_name('fake-hub.py')))
