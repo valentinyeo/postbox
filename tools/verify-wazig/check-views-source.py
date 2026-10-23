@@ -245,7 +245,45 @@ def check_fixture():
     old_views = {(row['provider'], row.get('account', 'hub-cache')) for row in rows}
     assert len(old_views) == 2 and len(accounts) == 4
 
+def tooltip_registration(source):
+    require(source, ['const tooltip_info_size = @offsetOf(win.TOOLINFOW, "lParam") + @sizeOf(win.LPARAM);'])
+    infos = re.findall(r'win\.TOOLINFOW\{(.*?)\n    };', source, re.S)
+    assert len(infos) == 4, 'audit every tooltip registration and update structure'
+    for info in infos:
+        require(info, ['.cbSize = tooltip_info_size,'])
+    add = section(source, 'fn addTooltip(', 'fn updateChatTooltip(')
+    require(add, ['.uFlags = win.TTF_IDISHWND | win.TTF_SUBCLASS,',
+                  '.hwnd = win.GetParent(target),', '.uId = @intFromPtr(target),',
+                  'if (win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @as(win.LPARAM, @bitCast(@intFromPtr(&info)))) == 0)',
+                  'appendLaunchLog(a, "tooltip: TTM_ADDTOOLW failed for window")'])
+    create = section(source, 'fn createTooltips(', 'fn attachUnavailableReason(')
+    require(create, ['addTooltip(a, tt, a.chats_hwnd,',
+                     'if (win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @bitCast(@intFromPtr(&attach_info))) == 0)',
+                     'appendLaunchLog(a, "tooltip: TTM_ADDTOOLW failed for attachment rectangle")'])
+
+
+def check_tooltip_registration():
+    source = read('src/main.zig')
+    tooltip_registration(source)
+    old = subprocess.check_output(['git', 'show', '70dbb32:src/main.zig'], cwd=root, text=True)
+    try:
+        tooltip_registration(old)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError('V3 tooltip size negative control unexpectedly accepted')
+    for match in re.finditer(r'\.cbSize = tooltip_info_size,', source):
+        try:
+            tooltip_registration(source[:match.start()] + '.cbSize = @sizeOf(win.TOOLINFOW),' + source[match.end():])
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError('V3 tooltip size mutation unexpectedly accepted')
+    print('TOOLTIP REGISTRATION VERIFIED: V2 size for registration and updates, failures logged; old V3 source rejected')
+
+
 def check_workspace_names():
+    check_tooltip_registration()
     hub = read('src/hub.zig')
     main = read('src/main.zig')
     require(hub, ['pub fn workspaceName(', 'string(row, "team_name")', 'pub fn accountView(',

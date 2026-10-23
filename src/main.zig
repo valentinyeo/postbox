@@ -1334,16 +1334,20 @@ fn setFont(hwnd: ?win.HWND, font: ?win.HFONT) void {
     }
 }
 
-fn addTooltip(tt: win.HWND, tool: ?win.HWND, text: [*:0]const u16) void {
+const tooltip_info_size = @offsetOf(win.TOOLINFOW, "lParam") + @sizeOf(win.LPARAM);
+
+fn addTooltip(a: *App, tt: win.HWND, tool: ?win.HWND, text: [*:0]const u16) void {
     const target = tool orelse return;
     var info = win.TOOLINFOW{
-        .cbSize = @sizeOf(win.TOOLINFOW),
+        .cbSize = tooltip_info_size,
         .uFlags = win.TTF_IDISHWND | win.TTF_SUBCLASS,
         .hwnd = win.GetParent(target),
         .uId = @intFromPtr(target),
         .lpszText = @constCast(text),
     };
-    _ = win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @as(win.LPARAM, @bitCast(@intFromPtr(&info))));
+    if (win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @as(win.LPARAM, @bitCast(@intFromPtr(&info)))) == 0) {
+        appendLaunchLog(a, "tooltip: TTM_ADDTOOLW failed for window");
+    }
 }
 
 fn updateChatTooltip(a: *App, coords: win.LPARAM) void {
@@ -1365,7 +1369,7 @@ fn updateChatTooltip(a: *App, coords: win.LPARAM) void {
     if (std.mem.eql(u16, wide.slice(), a.chat_tooltip.slice())) return;
     a.chat_tooltip = wide;
     var info = win.TOOLINFOW{
-        .cbSize = @sizeOf(win.TOOLINFOW),
+        .cbSize = tooltip_info_size,
         .uFlags = win.TTF_IDISHWND | win.TTF_SUBCLASS,
         .hwnd = win.GetParent(list),
         .uId = @intFromPtr(list),
@@ -1404,23 +1408,25 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
     a.tooltips = tt;
     updateTooltipTheme(a);
     _ = win.SendMessageW(tt, 0x400 + 24, 0, 260);
-    addTooltip(tt, a.search, lit("Search chats  Ctrl+F or /"));
-    addTooltip(tt, a.chats_hwnd, lit("Chats  ↑/↓ move · Ctrl+Tab next chat"));
-    addTooltip(tt, a.canvas, lit("Messages  Alt+J/K select · Ctrl+P play voice · Ctrl+T transcript · Ctrl+R react"));
-    addTooltip(tt, a.compose, lit("Message box  Enter sends · Shift+Enter new line"));
-    addTooltip(tt, a.dictate, lit("Dictate  Ctrl+D"));
-    addTooltip(tt, a.send, lit("Send message  Enter"));
-    addTooltip(tt, a.emoji_btn, lit("Emoji menu"));
-    addTooltip(tt, a.voice_btn, lit("Record a voice note  Enter sends · Esc cancels"));
-    addTooltip(tt, a.attach_btn, lit("Attach photo or file"));
+    addTooltip(a, tt, a.search, lit("Search chats  Ctrl+F or /"));
+    addTooltip(a, tt, a.chats_hwnd, lit("Chats  ↑/↓ move · Ctrl+Tab next chat"));
+    addTooltip(a, tt, a.canvas, lit("Messages  Alt+J/K select · Ctrl+P play voice · Ctrl+T transcript · Ctrl+R react"));
+    addTooltip(a, tt, a.compose, lit("Message box  Enter sends · Shift+Enter new line"));
+    addTooltip(a, tt, a.dictate, lit("Dictate  Ctrl+D"));
+    addTooltip(a, tt, a.send, lit("Send message  Enter"));
+    addTooltip(a, tt, a.emoji_btn, lit("Emoji menu"));
+    addTooltip(a, tt, a.voice_btn, lit("Record a voice note  Enter sends · Esc cancels"));
+    addTooltip(a, tt, a.attach_btn, lit("Attach photo or file"));
     var attach_info = win.TOOLINFOW{
-        .cbSize = @sizeOf(win.TOOLINFOW),
+        .cbSize = tooltip_info_size,
         .uFlags = win.TTF_SUBCLASS,
         .hwnd = hwnd,
         .uId = id_attach,
         .lpszText = @constCast(a.attach_tooltip.ptr()),
     };
-    _ = win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @bitCast(@intFromPtr(&attach_info)));
+    if (win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @bitCast(@intFromPtr(&attach_info))) == 0) {
+        appendLaunchLog(a, "tooltip: TTM_ADDTOOLW failed for attachment rectangle");
+    }
     updateAttachButton(a);
 }
 
@@ -1446,7 +1452,7 @@ fn updateAttachButton(a: *App) void {
     a.attach_tooltip.len = std.unicode.utf8ToUtf16Le(&a.attach_tooltip.buf, reason orelse "Attach photo or file") catch 0;
     a.attach_tooltip.buf[a.attach_tooltip.len] = 0;
     var info = win.TOOLINFOW{
-        .cbSize = @sizeOf(win.TOOLINFOW),
+        .cbSize = tooltip_info_size,
         .hwnd = owner,
         .uId = id_attach,
         .rect = if (reason != null) @bitCast(a.compose_geometry.attach) else std.mem.zeroes(win.RECT),
