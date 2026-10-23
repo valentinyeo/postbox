@@ -66,22 +66,36 @@ function Invoke-SignalJourney($Session, [string]$Messages) {
     $image = [Drawing.Bitmap]::new(32, 32)
     try { $image.Save($file, [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
     @{ sha256 = (Get-FileHash $file).Hash.ToLowerInvariant(); size = (Get-Item $file).Length } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'file.json')
+    New-Item (Join-Path $Session.root 'profile\Desktop') -ItemType Directory -Force | Out-Null
     Invoke-PaletteCommand $Session 'Attach photo or file'
     $picker = Wait-Until {
         $foreground = [Windows.Automation.AutomationElement]::FromHandle([VerifyWindow]::GetForegroundWindow())
-        if ($foreground.Current.ProcessId -eq $Session.pid -and $foreground.Current.ClassName -eq '#32770') { return $foreground }
+        if ($foreground.Current.ProcessId -eq $Session.pid -and $foreground.Current.ClassName -eq '#32770') { return [IntPtr]$foreground.Current.NativeWindowHandle }
     } 'owned attachment picker'
-    $filenameCondition = [Windows.Automation.AndCondition]::new(
-        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Edit),
-        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, 'File name:')
-    )
-    $filename = Wait-Until { $picker.FindFirst([Windows.Automation.TreeScope]::Descendants, $filenameCondition) } 'attachment filename edit'
-    $value = $filename.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
-    $value.SetValue($file)
-    Assert-That ($value.Current.Value -ceq $file) 'Attachment filename was not set'
-    $open = Get-Edit $picker '1'
-    $open.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Add-Content (Join-Path $Session.evidence 'actions.log') 'uia: attachment filename set and Open invoked'
+    $controls = Wait-Until {
+        $combo = [VerifyWindow]::GetDlgItem($picker, 1148)
+        if ($combo -eq [IntPtr]::Zero) { return $false }
+        $filename = [VerifyWindow]::FindWindowEx($combo, [IntPtr]::Zero, 'Edit', $null)
+        if ($filename -eq [IntPtr]::Zero) {
+            $inner = [VerifyWindow]::FindWindowEx($combo, [IntPtr]::Zero, 'ComboBox', $null)
+            if ($inner -ne [IntPtr]::Zero) { $filename = [VerifyWindow]::FindWindowEx($inner, [IntPtr]::Zero, 'Edit', $null) }
+        }
+        $open = [VerifyWindow]::GetDlgItem($picker, 1)
+        foreach ($handle in @($picker, $combo, $filename, $open)) {
+            if ($handle -eq [IntPtr]::Zero -or -not [VerifyWindow]::IsWindowEnabled($handle)) { return $false }
+            $ownerPid = [uint32]0
+            $null = [VerifyWindow]::GetWindowThreadProcessId($handle, [ref]$ownerPid)
+            Assert-That ($ownerPid -eq $Session.pid) 'Attachment control belongs to another process'
+        }
+        return @{ filename = $filename; open = $open }
+    } 'enabled attachment filename edit and Open button'
+    $result = [UIntPtr]::Zero
+    $ok = [VerifyWindow]::WriteText($controls.filename, 0x000C, [UIntPtr]::Zero, $file, 2, 2000, [ref]$result)
+    Assert-That ($ok -ne [IntPtr]::Zero -and $result -ne [UIntPtr]::Zero) 'Attachment WM_SETTEXT failed'
+    Assert-That ((Read-EditText $controls.filename) -ceq $file) 'Attachment filename was not set'
+    $ok = [VerifyWindow]::ReadCount($controls.open, 0x00F5, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$result)
+    Assert-That ($ok -ne [IntPtr]::Zero) 'Attachment BM_CLICK timed out'
+    Add-Content (Join-Path $Session.evidence 'actions.log') 'win32: attachment filename set and verified; Open clicked'
     $null = Wait-Until { [VerifyWindow]::GetForegroundWindow() -eq (Get-App $Session).MainWindowHandle } 'attachment picker closed'
     Invoke-PaletteCommand $Session 'Compose message'
     Send-Keys $Session 'Synthetic Signal file'
