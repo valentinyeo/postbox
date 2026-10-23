@@ -213,13 +213,14 @@ test "hub view accounts prefer explicit accounts and safely fall back for unpref
         \\  {"provider":"slack","jid":"slack:T0ABC123"},
         \\  {"provider":"slack","jid":"slack::channel"},
         \\  {"provider":"slack","jid":"slack:T0ABC123:"},
-        \\  {"provider":"telegram","jid":"telegram:opaque"}
+        \\  {"provider":"telegram","jid":"telegram:opaque"},
+        \\  {"provider":"telegram","jid":"opaque"}
         \\]
     ;
     var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, rows, .{});
     defer parsed.deinit();
     for (parsed.value.array.items, 0..) |row, index| {
-        try std.testing.expectEqualStrings(if (index == 0) "explicit" else "hub-cache", hub.viewAccount(row.object, "hub-cache"));
+        try std.testing.expectEqualStrings(if (index == 0) "explicit" else if (index == 8) "telegram" else "hub-cache", hub.viewAccount(row.object, "hub-cache"));
     }
 }
 
