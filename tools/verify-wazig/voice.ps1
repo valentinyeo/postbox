@@ -102,9 +102,9 @@ function Invoke-VoiceWheel($Session, [int]$Notches) {
 
 function Open-VoiceChatAgain($Session) {
     Send-Keys $Session '^{TAB}'
-    $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'fixture-beta' } 'voice: other chat selected'
+    $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'fixture-beta' -and (Read-Control $Session messages).chat.id -eq 'fixture-beta' } 'voice: other chat shown'
     Send-Keys $Session '^+{TAB}'
-    $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'fixture-alpha' } 'voice: voice chat selected again'
+    $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'fixture-alpha' -and (Read-Control $Session messages).chat.id -eq 'fixture-alpha' } 'voice: voice chat shown again'
 }
 
 function Invoke-VoiceJourney($Session, [string]$Messages) {
