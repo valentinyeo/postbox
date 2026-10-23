@@ -134,7 +134,8 @@ def check_integration():
     assert links.count('item.view_identity = .{};') == 2
     assert source.count('chat.account.set(hub.sourceAccount(object, a.cache_tag.slice()));') == 2
     assert source.count('chat.view_account.set(hub.viewAccount(object, a.cache_tag.slice()));') == 2
-    assert source.count('hub.viewAccount(') == 4
+    assert source.count('hub.viewAccount(') == 5
+    require(source, ['if (chatInView(a, .{ .provider = provider, .account = hub.viewAccount(row.object, a.cache_tag.slice()), .id = "" }))'])
     routing_function_sha256 = {
         'unifiedHubRequest': '4ac7160663a8389b9e26ad06773e85e7b4690f1d4cb4edd6dffb3f329dec5a5c',
         'restoreOutbox': '97c3d2512d210e72021031071928cc33ccbf4e3038f427ba57a51fce5bcf3f98',
@@ -203,8 +204,12 @@ def check_journey():
                        "== order + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]", "+ ['telegram:telegram', 'signal:signal']"])
     require(read('tools/verify-wazig/check-evidence.py'), ["session['feature'] == 'views'", 'check-views-evidence.py'])
     workflow = read('.github/workflows/verify.yml')
-    require(workflow, ['hub, slack-sort, views, workspace-icons, signal, telegram, archive', '"hub","slack-sort","views","workspace-icons","signal","telegram","text-comparison"', "matrix.feature == 'views'",
-                       'src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig'])
+    options = re.search(r'options: \[(.+)\]', workflow).group(1).split(', ')
+    matrix = json.loads(re.search(r"&& '(\[[^']+\])'", workflow).group(1))
+    for feature in ['hub', 'slack-sort', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'menus', 'text-comparison']:
+        assert feature in options and feature in matrix, feature
+    assert 'archive' in options
+    require(workflow, ["matrix.feature == 'views'", 'src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig'])
     for path in (root / 'tools/verify-wazig').glob('*.py'):
         ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
     require(read('.claude/skills/verify-wazig/features/views.md'), [
