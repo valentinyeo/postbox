@@ -20,7 +20,7 @@ try {
     [IO.File]::WriteAllText($path, $historical + "`n" + $current.Substring($start))
     $output = & zig test src/text_draw.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-462 2>&1
     $exit = $LASTEXITCODE
-    $output | ForEach-Object { Write-Host $_ }
+    $output | ForEach-Object { Write-Host "negative control, old renderer must fail: $_" }
     if ($exit -eq 0 -or ($output -join "`n") -notmatch 'buffered=true name_ink=0 preview_ink=0') { throw 'Historical renderer did not reproduce the missing row text' }
     Write-Host 'ISSUE-462 OLD RENDERER REJECTED: buffered row text has zero ink'
 } finally {
