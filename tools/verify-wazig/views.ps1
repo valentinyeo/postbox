@@ -15,6 +15,7 @@ function Save-WorkspaceNameCheck($Session, [string]$Id, [string[]]$Labels, [stri
 
 function Read-InboxWorkspaceTooltips($Session, $Rows) {
     Add-Type -Path "$PSScriptRoot/menus.cs"
+    Add-Type -Path "$PSScriptRoot/inbox-tooltip.cs"
     $list = Get-Edit (Get-Window $Session) '1016'
     $handle = [IntPtr]$list.Current.NativeWindowHandle
     $origin = [VerifyWindow+Point]::new()
@@ -34,29 +35,48 @@ function Read-InboxWorkspaceTooltips($Session, $Rows) {
         $offset = ($index - [int]$top.ToUInt64()) * [int]$height.ToUInt64() + [int]($height.ToUInt64() / 2)
         Assert-That ($offset -gt 0 -and $offset -lt $client.Bottom) 'Workspace row not visible for hover'
         $null = Get-App $Session
+        $hoverForeground = [VerifyInboxTooltip]::DescribeWindow([VerifyWindow]::GetForegroundWindow())
+        Add-Content (Join-Path $Session.evidence 'actions.log') "hover-foreground: $team $hoverForeground"
         [VerifyMenus]::Hover($Session.pid, $origin.X + 20, $origin.Y + $offset - 5)
         [VerifyMenus]::Hover($Session.pid, $origin.X + 24, $origin.Y + $offset)
         Add-Content (Join-Path $Session.evidence 'actions.log') "hover: $team"
         $expectedName = if ($team -eq 'T0ABC123') { 'Slack Alpha Workspace' } else { 'Slack Beta Workspace' }
-        $tooltip = Wait-Until {
-            $condition = [Windows.Automation.AndCondition]::new(
-                [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$Session.pid),
-                [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'tooltips_class32')
-            )
-            $tips = [Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
-            foreach ($tip in $tips) {
-                if (-not $tip.Current.IsOffscreen -and $tip.Current.Name -ceq $expectedName) { return $tip.Current.Name }
-            }
-            $nativeTip = [VerifyMenus]::Find($Session.pid, 'tooltips_class32')
-            if ($nativeTip -ne [IntPtr]::Zero) {
-                $bounds = [VerifyMenus]::Bounds($nativeTip)
-                $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
-                if ($bounds.Right -gt $screen.Left -and $bounds.Left -lt $screen.Right -and $bounds.Bottom -gt $screen.Top -and $bounds.Top -lt $screen.Bottom) {
-                    $text = Read-EditText $nativeTip
-                    if ($text -ceq $expectedName) { return $text }
+        try {
+            $tooltip = Wait-Until {
+                $condition = [Windows.Automation.AndCondition]::new(
+                    [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$Session.pid),
+                    [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'tooltips_class32')
+                )
+                $tips = [Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+                foreach ($tip in $tips) {
+                    if (-not $tip.Current.IsOffscreen -and $tip.Current.Name -ceq $expectedName) { return $tip.Current.Name }
                 }
+                $nativeTip = [VerifyMenus]::Find($Session.pid, 'tooltips_class32')
+                if ($nativeTip -ne [IntPtr]::Zero) {
+                    $bounds = [VerifyMenus]::Bounds($nativeTip)
+                    $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+                    if ($bounds.Right -gt $screen.Left -and $bounds.Left -lt $screen.Right -and $bounds.Bottom -gt $screen.Top -and $bounds.Top -lt $screen.Bottom) {
+                        $text = Read-EditText $nativeTip
+                        if ($text -ceq $expectedName) { return $text }
+                    }
+                }
+            } "combined inbox tooltip $expectedName"
+        } catch {
+            $tooltipFailure = $_
+            $failure = Join-Path $Session.evidence 'inbox-tooltip-failure.txt'
+            "team=$team expected=$expectedName row_index=$index error=$tooltipFailure`nhover_foreground=$hoverForeground" | Set-Content $failure
+            try {
+                [VerifyInboxTooltip]::Capture($handle, $origin.X + 24, $origin.Y + $offset) | Add-Content $failure
+            } catch {
+                Add-Content $failure "Native diagnostics failed: $_"
             }
-        } "combined inbox tooltip $expectedName"
+            try {
+                Save-Screen $Session 'inbox-tooltip-failure'
+            } catch {
+                Add-Content $failure "Failure screenshot failed: $_"
+            }
+            throw $tooltipFailure
+        }
         Add-Content (Join-Path $Session.evidence 'actions.log') "tooltip: $team = $tooltip"
         $labels += $tooltip
         Save-Screen $Session "inbox-tooltip-$team"

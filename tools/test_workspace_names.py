@@ -135,6 +135,56 @@ class WorkspaceNamesSourceTests(unittest.TestCase):
                 self.assertIn(fragment, hover)
         self.assertNotIn('Mouse(pid, x, y, 1)', hover)
 
+    def test_inbox_tooltip_timeout_records_native_state_and_rethrows(self):
+        source = (ROOT / 'tools/verify-wazig/views.ps1').read_text()
+        hover = source.split('function Read-InboxWorkspaceTooltips(', 1)[1].split('function Assert-AccountView(', 1)[0]
+        self.assertIn('DescribeWindow([VerifyWindow]::GetForegroundWindow())', hover)
+        self.assertLess(hover.index('"hover-foreground:'), hover.index('[VerifyMenus]::Hover'))
+        failure = hover.split('} catch {', 1)[1]
+        for fragment in [
+            "'inbox-tooltip-failure.txt'", 'row_index=$index', 'error=$tooltipFailure', '$tooltipFailure = $_',
+            '[VerifyInboxTooltip]::Capture($handle, $origin.X + 24, $origin.Y + $offset)',
+            "Save-Screen $Session 'inbox-tooltip-failure'", 'Native diagnostics failed:',
+            'Failure screenshot failed:', '\n            throw $tooltipFailure\n',
+        ]:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, failure)
+        self.assertLess(failure.index('::Capture('), failure.index('\n            throw $tooltipFailure\n'))
+        self.assertLess(failure.index('Save-Screen'), failure.index('\n            throw $tooltipFailure\n'))
+
+    def test_inbox_tooltip_diagnostics_read_remote_tools_including_hidden_foreign_windows(self):
+        source = (ROOT / 'tools/verify-wazig/inbox-tooltip.cs').read_text()
+        required = [
+            'GetCursorPos(out cursor)', '"list: " + DescribeWindow(list)', 'GetWindowRect(window, out rect)',
+            '"WindowFromPoint: " + DescribeWindow(WindowFromPoint(hover))',
+            '"foreground: " + DescribeWindow(GetForegroundWindow())', 'ScreenToClient(list, ref hover)',
+            'SendMessageTimeout(list, 0x01A9', 'LB_ITEMFROMPOINT ok=', 'outside={3}',
+            'owner_pid={2} visible={3}', 'GetWindowThreadProcessId(window, out pid)',
+            'GetClassName(window, name, name.Capacity)', 'GetWindowText(window, text, text.Capacity)',
+            'EnumWindows((window, data) =>', 'ClassName(window) != "tooltips_class32"',
+            '"tooltip: " + DescribeWindow(window)', 'TooltipText(output, window)',
+            'OpenProcess(0x1038, false, pid)', 'VirtualAllocEx(process,', 'WriteProcessMemory(process,',
+            'ReadProcessMemory(process,', 'Environment.Is64BitOperatingSystem && !wow64 ? 72 : 48',
+            'size == 72 ? 48 : 36', '0x043B', '0x043A', 'Message(window, 0x0438, 32768, memory',
+            'TTM_GETTEXT={3}', '0x23, 500, out result)', 'safeToFree = false;',
+            'memory != IntPtr.Zero && safeToFree', 'CloseHandle(process)',
+        ]
+        def validate(text):
+            for fragment in required:
+                self.assertIn(fragment, text)
+            enumeration = text.split('bool enumerated = EnumWindows(', 1)[1]
+            self.assertNotIn('IsWindowVisible', enumeration)
+            self.assertNotIn('pid ==', enumeration)
+        validate(source)
+        for fragment in required:
+            with self.subTest(missing=fragment):
+                with self.assertRaises(AssertionError):
+                    validate(source.replace(fragment, 'removed'))
+        for filter_text in ['if (!IsWindowVisible(window)) return true;', 'if (pid == 1) return true;']:
+            with self.subTest(filter=filter_text):
+                with self.assertRaises(AssertionError):
+                    validate(source.replace('count++;', filter_text + 'count++;', 1))
+
     def test_inbox_tooltip_native_fallback_requires_visible_exact_text(self):
         source = (ROOT / 'tools/verify-wazig/views.ps1').read_text()
         hover = source.split('function Read-InboxWorkspaceTooltips(', 1)[1].split('function Assert-AccountView(', 1)[0]
