@@ -1,7 +1,10 @@
 function Save-WorkspaceNameCheck($Session, [string]$Id, [string[]]$Labels, [string[]]$Screenshots, [string]$Prefix = '') {
     $names = @('Alpha Workspace', 'Beta Workspace')
     foreach ($name in $names) {
-        Assert-That ($Labels -ccontains "$Prefix$name") "$Id missing workspace name: $name"
+        Assert-That ($Labels -ccontains "${Prefix}Slack $name") "$Id missing workspace name: $name"
+    }
+    foreach ($team in @('T0ABC123', 'T0DEF456')) {
+        Assert-That ($Labels -cnotcontains "${Prefix}Slack $team") "$Id contains team-id label: $team"
     }
     $path = Join-Path $Session.evidence 'workspace-names.json'
     $checks = if (Test-Path $path) { Get-Content $path -Raw | ConvertFrom-Json -AsHashtable } else { @{} }
@@ -33,7 +36,7 @@ function Read-InboxWorkspaceTooltips($Session, $Rows) {
         [VerifyMenus]::Hover($Session.pid, $origin.X + 20, $origin.Y + $offset - 5)
         [VerifyMenus]::Hover($Session.pid, $origin.X + 24, $origin.Y + $offset)
         Add-Content (Join-Path $Session.evidence 'actions.log') "hover: $team"
-        $expectedName = if ($team -eq 'T0ABC123') { 'Alpha Workspace' } else { 'Beta Workspace' }
+        $expectedName = if ($team -eq 'T0ABC123') { 'Slack Alpha Workspace' } else { 'Slack Beta Workspace' }
         $tooltip = Wait-Until {
             $condition = [Windows.Automation.AndCondition]::new(
                 [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$Session.pid),
@@ -96,7 +99,7 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     $list = Get-Edit $palette '1072'
     $null = Wait-Until {
         $labels = @(Read-ListLabels $list)
-        $labels -ccontains 'Show Alpha Workspace' -and $labels -ccontains 'Show Beta Workspace'
+        $labels -ccontains 'Show Slack Alpha Workspace' -and $labels -ccontains 'Show Slack Beta Workspace'
     } 'Show workspace commands'
     $labels = @(Read-ListLabels $list)
     Save-Screen $Session workspace-palette

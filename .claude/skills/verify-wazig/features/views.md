@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-- `account-views`: each account or workspace has one view, labelled WhatsApp <account>, or <hub workspace name> for Slack (locally saved workspace name for direct sign-ins; Slack <team id> when unknown).
+- `account-views`: each account or workspace has one view, labelled WhatsApp <account>, or Slack <workspace name> for Slack (hub name or locally saved workspace name for direct sign-ins; Slack <team id> when unknown).
 - `view-keys`: Alt+1..9 selects the saved account position; Alt+I opens the combined inbox.
 - `view-scope`: search, Ctrl+1..9, next/previous chat and sending stay in the account view. Routing identity includes provider, cache account and the full prefixed id; a separate view account controls membership.
 - `view-order`: Ctrl+K → Sort views uses the existing palette list. Ctrl+Up/Down saves a move immediately, Enter switches to that view and Escape closes.
@@ -24,7 +24,7 @@
 - Drive Alt+I and assert the complete catalog and descending activity timestamps in inbox.chats.json and inbox.png.
 - Drive Ctrl+K, Sort views, Ctrl+Down, Enter. Retain sort-command.png, sort-before.png, sort-moved.png, sort-selected.png, view-order.txt and immediate read-only state. Open again and Escape, capturing sort-closed.png.
 - Quit through the palette and restart the same executable with the same fixture root, registry id and preferences. Retain restart.json, restart-1.png through restart-4.png and corresponding state/chat snapshots proving swapped Alt+1/Alt+2 and unchanged Slack positions.
-- Require both Alpha Workspace and Beta Workspace under exact result check ids `view-label`, `sort-views`, `palette` and `inbox-tooltip`. Read current_view/view_order, the actual Sort views and Ctrl+K Show list rows, and each visible owned native tooltip after real mouse hover in the combined inbox. Retain workspace-names.json, result.json checks, hub-proof.log, workspace-palette.png, sort-before.png, view-3.png/view-4.png and inbox-tooltip-T0ABC123.png/inbox-tooltip-T0DEF456.png. The final-data hub workspace-names cache and restart labels must retain both names.
+- Require full labels Slack Alpha Workspace and Slack Beta Workspace (Show Slack Alpha Workspace and Show Slack Beta Workspace in the palette), while retaining exact names Alpha Workspace and Beta Workspace in evidence, under exact result check ids `view-label`, `sort-views`, `palette` and `inbox-tooltip`. Reject Slack T0ABC123 and Slack T0DEF456 labels for these named workspaces. Read current_view/view_order, the actual Sort views and Ctrl+K Show list rows, and each visible owned native tooltip after real mouse hover in the combined inbox. Retain workspace-names.json, result.json checks, hub-proof.log, workspace-palette.png, sort-before.png, view-3.png/view-4.png and inbox-tooltip-T0ABC123.png/inbox-tooltip-T0DEF456.png. The final-data hub workspace-names cache and restart labels must retain both names.
 - check-evidence.py validates the surviving screenshots, keyboard log, account partitions, scoped send, combined ordering and restart evidence. Inspect the images too; source checks are not runtime proof.
 
 ## Gotchas

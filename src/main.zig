@@ -4068,24 +4068,26 @@ fn rebuildViews(a: *App, rows: []const std.json.Value) void {
             const account = hub.viewAccount(row.object, a.cache_tag.slice());
             const key = chat_key.Key{ .provider = provider, .account = account, .id = "" };
             const cached_name = if (names) |parsed| getString(parsed.value.object, account) else "";
-            var view = hub.accountView(row.object, a.cache_tag.slice(), cached_name) orelse continue;
-            if (provider == .slack) {
-                if (slackInstallation(a, account)) |installation| {
-                    if (installation.team_name.len > 0) view = messenger_view.Account.init(provider, account, installation.team_name.slice());
-                } else if (slack_win.loadInstallation(a.allocator, account)) |saved| {
-                    defer saved.deinit();
-                    if (saved.value.team_name.len > 0) view = messenger_view.Account.init(provider, account, saved.value.team_name);
+            var present: ?usize = null;
+            for (known.items, 0..) |existing, index| {
+                if (chat_key.Key.eql(existing.key.key(), key)) {
+                    present = index;
+                    break;
                 }
             }
-            var present = false;
-            for (known.items) |*existing| {
-                if (!chat_key.Key.eql(existing.key.key(), key)) continue;
-                view.selected = existing.selected;
-                existing.* = view;
-                present = true;
-                break;
+            var saved: ?std.json.Parsed(slack_win.Installation) = null;
+            defer if (saved) |*parsed| parsed.deinit();
+            const direct_name = if (provider == .slack) name: {
+                if (slackInstallation(a, account)) |installation| break :name installation.team_name.slice();
+                saved = slack_win.loadInstallation(a.allocator, account);
+                break :name if (saved) |parsed| parsed.value.team_name else "";
+            } else "";
+            const view = hub.accountView(row.object, a.cache_tag.slice(), cached_name, direct_name, if (present) |index| known.items[index] else null) orelse continue;
+            if (present) |index| {
+                known.items[index] = view;
+            } else {
+                messenger_view.appendUnique(a.allocator, &known, view) catch return;
             }
-            if (!present) messenger_view.appendUnique(a.allocator, &known, view) catch return;
         }
     } else {
         if (a.cache_tag.len > 0) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.whatsapp, a.cache_tag.slice(), a.hub_account.slice())) catch return;

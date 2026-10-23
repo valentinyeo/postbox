@@ -36,7 +36,7 @@ def view_identity(source):
 def model(source):
     require(source, [
         'pub const Account = struct', 'key: chat_key.Stored', 'pub fn mergeOrder(',
-        'for ([_]Provider{ .whatsapp, .slack, .telegram })', 'try appendUnique(allocator, &result, item)',
+        'for ([_]Provider{ .whatsapp, .slack, .telegram, .signal })', 'try appendUnique(allocator, &result, item)',
         'pub fn forNumber(number: usize, views: []const Account)', 'number - 1',
         'pub fn accountMatches(', 'key.account', 'pub fn saveOrder(',
         'if (present)', 'views[next].key.key()', 'views[next..]',
@@ -56,7 +56,7 @@ def check_model():
     model(source)
     hub = read('src/hub.zig')
     view_identity(hub)
-    old = subprocess.check_output(['git', 'show', 'origin/main:src/hub.zig'], cwd=root, text=True)
+    old = subprocess.check_output(['git', 'show', 'f436ed2^:src/hub.zig'], cwd=root, text=True)
     try:
         view_identity(old)
     except AssertionError:
@@ -107,7 +107,7 @@ def check_integration():
         'hub.viewAccount(row.object, a.cache_tag.slice())',
         'view_account: Utf8Text(32) = .{}', 'fn chatViewKey(chat: *const Chat) chat_key.Key',
         'if (chat.view_account.len > 0) key.account = chat.view_account.slice()',
-        'slack_win.loadInstallation(a.allocator, account)', 'saved.value.team_name',
+        'slack_win.loadInstallation(a.allocator, account)', 'parsed.value.team_name',
         'messenger_view.providerView(chat.provider), chatViewKey(chat).account, view.key.key()',
         'installation.team_id.slice(), installation.team_name.slice()', 'telegramReady(a)',
         'appendPalette(a, "Sort views", "", command_sort_views)', 'command_sort_views => openSortViews(a)',
@@ -127,7 +127,7 @@ def check_integration():
     assert links.count('item.view_identity = .{};') == 2
     assert source.count('chat.account.set(hub.sourceAccount(object, a.cache_tag.slice()));') == 2
     assert source.count('chat.view_account.set(hub.viewAccount(object, a.cache_tag.slice()));') == 2
-    assert source.count('hub.viewAccount(') == 3
+    assert source.count('hub.viewAccount(') == 4
     old = subprocess.check_output(['git', 'show', 'origin/main:src/main.zig'], cwd=root, text=True)
     for name in ['unifiedHubRequest', 'restoreOutbox', 'loadOutbox', 'bindOutboxAccount', 'startHubSend',
                  'markChatRead', 'startNextMarkRead', 'loadPendingReads', 'persistPendingReads',
@@ -154,7 +154,7 @@ def check_integration():
 
 def check_journey():
     runner = read('tools/verify-wazig/run.ps1')
-    require(runner, ["'hub', 'views', 'archive'", '-Views:($Feature -eq \'views\')',
+    require(runner, ["'hub', 'slack-sort', 'views', 'workspace-icons', 'signal', 'telegram'", '-Views:($Feature -eq \'views\')',
                      '. "$PSScriptRoot/views.ps1"', 'Invoke-ViewsJourney $session $messages $start'])
     journey = read('tools/verify-wazig/views.ps1')
     require(journey, ['Assert-AccountView', "@('personal', 'business', 'T0ABC123', 'T0DEF456')", 'Where-Object view_account -ne $Account',
@@ -162,6 +162,7 @@ def check_journey():
                       "Send-Keys $Session '^f'", "Send-Keys $Session '%i'", "Send-Keys $Session '^{DOWN}'",
                       "'Sort views'", "'ViewOrder not saved at move time'", "'Quit Messages'",
                       "WAZIG_VERIFY_RESTART", "'restart.json'", 'restart-4', 'other.messages.json', 'inbox.chats.json'])
+    require(journey, ['view_order.Count -eq 6', "(Read-ListCount $list) -eq 6"])
     assert set(re.findall(r'Read-Control \$Session (\w+)', journey)) == {'status', 'chats', 'messages'}
     fixture = ast.parse(read('tools/verify-wazig/fake-hub.py'))
     assignment = next(node for node in fixture.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'VIEW_ACCOUNTS' for target in node.targets))
@@ -170,14 +171,16 @@ def check_journey():
     assert [provider for provider, _, _ in accounts].count('slack') == 2
     assert len({account for _, account, _ in accounts}) == 4
     require(read('tools/verify-wazig/fake-hub.py'), ['Verification Shared', 'range(2)', 'source_account=view_account(row)',
-                                                  'class ViewsHandler(Handler)', 'bridge.Handler.respond(self', "parser.add_argument('--views'"])
+                                                  'class ViewsHandler(Handler)', 'bridge.Handler.respond(self', "modes.add_argument('--views'"])
     evidence = read('tools/verify-wazig/check-views-evidence.py')
     require(evidence, ['assert partition == all_keys', 'assert identities(inbox) == all_keys', 'reverse=True',
                        'source_account', "other['messages']", "restart['new_pid'] == session['pid']", "['root', 'id', 'sha256']",
                        "capture(f'restart-{number}')", "'view-order.txt'", "assert len(set(images)) == 4"])
+    require(evidence, ["== expected + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]",
+                       "== order + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]", "+ ['telegram:telegram', 'signal:signal']"])
     require(read('tools/verify-wazig/check-evidence.py'), ["session['feature'] == 'views'", 'check-views-evidence.py'])
     workflow = read('.github/workflows/verify.yml')
-    require(workflow, ['hub, views, archive', '"hub","views","text-comparison"', "matrix.feature == 'views'",
+    require(workflow, ['hub, slack-sort, views, workspace-icons, signal, telegram, archive', '"hub","slack-sort","views","workspace-icons","signal","telegram","text-comparison"', "matrix.feature == 'views'",
                        'src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig'])
     for path in (root / 'tools/verify-wazig').glob('*.py'):
         ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
@@ -246,13 +249,13 @@ def check_workspace_names():
     hub = read('src/hub.zig')
     main = read('src/main.zig')
     require(hub, ['pub fn workspaceName(', 'string(row, "team_name")', 'pub fn accountView(',
-                  'if (supplied.len > 0) supplied else cached_name', 'view.label_len = text.len'])
+                  'if (supplied.len > 0) supplied else cached_name', 'messenger_view.Account.init(provider, account, name)'])
     old = subprocess.check_output(['git', 'show', 'origin/main:src/hub.zig'], cwd=root, text=True)
     assert 'string(row, "team_name")' not in old, 'old-code name-parser negative control missing'
     require(main, ['hubWorkspaceNames(a, rows)', 'providerStatePath(a, "workspace-names.json")',
                    'readFileWin(a.allocator, path, msg_cache_max_bytes)', 'writeCacheFileAtomic(a, path, raw)',
-                   'if (name.len == 0) continue;', 'hub.accountView(row.object, a.cache_tag.slice(), cached_name)',
-                   'installation.team_name.slice()', 'saved.value.team_name'])
+                   'if (name.len == 0) continue;', 'hub.accountView(row.object, a.cache_tag.slice(), cached_name, direct_name, if (present) |index| known.items[index] else null)',
+                   'installation.team_name.slice()', 'parsed.value.team_name'])
     for start, end in [('fn activeViewLabel(', 'fn hubWorkspaceNames('),
                        ('fn updateChatTooltip(', 'fn updateTooltipTheme('),
                        ('fn buildSortViewsItems(', 'fn openSortViews(')]:
@@ -281,9 +284,34 @@ def check_workspace_names():
         else:
             assert 'team_name' not in row
         assert 'account' not in row and 'account_name' not in row
-    require(read('src/hub_test.zig'), ['"Alpha Workspace", known.items[2].labelText()',
+    require(read('src/hub_test.zig'), ['"Slack Alpha Workspace", known.items[2].labelText()',
                                       '"Slack T0DEF456", known.items[3].labelText()',
-                                      '"Beta Workspace", cached.labelText()', '"Slack Direct Workspace", direct.labelText()'])
+                                      '"Slack Beta Workspace", cached.labelText()', '"Slack Direct Workspace", direct.labelText()'])
+    decision = section(hub, 'pub fn accountView(', 'pub fn providerForView(')
+    def require_precedence(source):
+        require(source, ['if (direct_name.len > 0) direct_name else if (supplied.len > 0)',
+                         'if (provider == .slack and name.len == 0) if (existing) |view| return view;',
+                         'if (existing) |previous| view.selected = previous.selected;',
+                         'messenger_view.Account.init(provider, account, name)'])
+        assert 'view.label_buf' not in source
+    require_precedence(decision)
+    for fragment in ['if (direct_name.len > 0) direct_name else ',
+                     'if (provider == .slack and name.len == 0) if (existing) |view| return view;',
+                     'if (existing) |previous| view.selected = previous.selected;',
+                     'messenger_view.Account.init(provider, account, name)']:
+        try:
+            require_precedence(decision.replace(fragment, '', 1))
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f'workspace precedence mutation accepted: {fragment}')
+    require(read('src/hub_test.zig'), [
+        'test "hub duplicate rows retain named views and direct sign-in names win"',
+        'hub.accountView(row.object, "hub-cache", "", "", view)',
+        '"Slack Alpha Workspace", view.labelText()', '"Slack Beta Workspace", view.labelText()',
+        '"slack:T0ABC123:C1", view.selected.key().id',
+        'hub.accountView(row.object, "hub-cache", "Cached Workspace", "Direct Workspace", direct)',
+        '"Slack Direct Workspace", direct.?.labelText()'])
     print('WORKSPACE NAMES VERIFIED: fixture names, parsing, cache, shared labels and four journey checks; old parser rejected')
 
 checks = {'model': check_model, 'integration': check_integration, 'journey': check_journey, 'fixture': check_fixture, 'workspace-names': check_workspace_names}

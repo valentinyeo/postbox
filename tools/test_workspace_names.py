@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -25,7 +27,7 @@ class WorkspaceNamesEvidenceTests(unittest.TestCase):
         }
         self.checks = {}
         for check_id, images in screenshots.items():
-            prefix = 'Show ' if check_id == 'palette' else ''
+            prefix = 'Show Slack ' if check_id == 'palette' else 'Slack '
             self.checks[check_id] = dict(status='passed', names=names, labels=[prefix + name for name in names], screenshots=images)
             for image in images:
                 (self.folder / image).write_bytes(b'fixture screenshot')
@@ -65,6 +67,31 @@ class WorkspaceNamesEvidenceTests(unittest.TestCase):
         self.write_checks()
         self.validate()
 
+    def test_each_surface_rejects_bare_workspace_labels(self):
+        for check_id, check in self.checks.items():
+            for index, name in enumerate(check['names']):
+                with self.subTest(check_id=check_id, name=name):
+                    old = check['labels'][index]
+                    check['labels'][index] = ('Show ' if check_id == 'palette' else '') + name
+                    self.write_checks()
+                    with self.assertRaises(AssertionError):
+                        self.validate()
+                    check['labels'][index] = old
+        self.write_checks()
+        self.validate()
+
+    def test_each_surface_rejects_extra_team_id_labels(self):
+        for check_id, check in self.checks.items():
+            for team in ['T0ABC123', 'T0DEF456']:
+                with self.subTest(check_id=check_id, team=team):
+                    check['labels'].append(('Show ' if check_id == 'palette' else '') + 'Slack ' + team)
+                    self.write_checks()
+                    with self.assertRaises(AssertionError):
+                        self.validate()
+                    check['labels'].pop()
+        self.write_checks()
+        self.validate()
+
     def test_missing_check_screenshot_proof_or_cache_is_rejected(self):
         originals = json.loads(json.dumps(self.checks))
         for check_id in originals:
@@ -88,6 +115,11 @@ class WorkspaceNamesEvidenceTests(unittest.TestCase):
         self.write('result.json', dict(feature='views', status='passed'))
         with self.assertRaises(AssertionError):
             self.validate()
+
+
+class WorkspaceNamesSourceTests(unittest.TestCase):
+    def test_shared_label_formatter_and_duplicate_precedence_are_wired(self):
+        subprocess.run([sys.executable, str(ROOT / 'tools/verify-wazig/check-views-source.py'), 'workspace-names'], cwd=ROOT, check=True)
 
 
 if __name__ == '__main__':

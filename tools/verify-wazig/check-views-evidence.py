@@ -15,8 +15,9 @@ def check_workspace_names(folder, capture):
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
     for check_id, check in checks.items():
         assert check['status'] == 'passed' and check['names'] == names, check_id
-        prefix = 'Show ' if check_id == 'palette' else ''
+        prefix = 'Show Slack ' if check_id == 'palette' else 'Slack '
         assert all(prefix + name in check['labels'] for name in names), check_id
+        assert not any(prefix + team in check['labels'] for team in ['T0ABC123', 'T0DEF456']), check_id
         assert f'views {check_id} PASS' in proof
         assert check['screenshots'], check_id
         for screenshot in check['screenshots']:
@@ -55,7 +56,7 @@ def check_views(folder):
     assert not (folder / 'failure.txt').exists()
     baseline = capture('before')
     expected = [('whatsapp', 'personal', 'WhatsApp personal'), ('whatsapp', 'business', 'WhatsApp business'),
-                ('slack', 'T0ABC123', 'Alpha Workspace'), ('slack', 'T0DEF456', 'Beta Workspace')]
+                ('slack', 'T0ABC123', 'Slack Alpha Workspace'), ('slack', 'T0DEF456', 'Slack Beta Workspace')]
     assert [(view['provider'], view['account'], view['label']) for view in baseline['view_order']] == expected + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]
     assert baseline['current_view']['inbox'] and baseline['chat_count'] == 8
     catalog = read('views-catalog.json')['chats']

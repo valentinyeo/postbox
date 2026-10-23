@@ -160,15 +160,14 @@ pub fn workspaceName(row: std.json.ObjectMap) []const u8 {
     return if (sourceProvider(row) == .slack) string(row, "team_name") else "";
 }
 
-pub fn accountView(row: std.json.ObjectMap, fallback: []const u8, cached_name: []const u8) ?messenger_view.Account {
+pub fn accountView(row: std.json.ObjectMap, fallback: []const u8, cached_name: []const u8, direct_name: []const u8, existing: ?messenger_view.Account) ?messenger_view.Account {
     const provider = sourceProvider(row) orelse return null;
-    var view = messenger_view.Account.init(provider, viewAccount(row, fallback), "");
+    const account = viewAccount(row, fallback);
     const supplied = workspaceName(row);
-    const name = if (supplied.len > 0) supplied else cached_name;
-    if (provider == .slack and name.len > 0) {
-        const text = std.fmt.bufPrint(&view.label_buf, "{s}", .{name}) catch return view;
-        view.label_len = text.len;
-    }
+    const name = if (provider != .slack) "" else if (direct_name.len > 0) direct_name else if (supplied.len > 0) supplied else cached_name;
+    if (provider == .slack and name.len == 0) if (existing) |view| return view;
+    var view = messenger_view.Account.init(provider, account, name);
+    if (existing) |previous| view.selected = previous.selected;
     return view;
 }
 
