@@ -39,7 +39,7 @@ def check_link_previews(folder):
     screenshots = {provider + '.png': read_png(folder / (provider + '.png')) for provider in ['slack', 'whatsapp', 'telegram', 'signal']}
     pixels = read('image-pixels.json')
     assert len(pixels) == 8
-    assert {row['screenshot'] for row in pixels} == {name + '.png' for name in ['slack', 'whatsapp', 'telegram', 'signal']}
+    assert {(row['screenshot'], row['colour']) for row in pixels} == {(name + '.png', colour) for name in ['slack', 'whatsapp', 'telegram', 'signal'] for colour in ['amber', 'cobalt']}
     for row in pixels:
         assert row['colour'] in ['amber', 'cobalt'] and row['samples'] > 0 and row['hits'] / row['samples'] > 0.1
         width, height, image = screenshots[row['screenshot']]

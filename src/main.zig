@@ -8561,7 +8561,6 @@ fn unfurlCardVisible(a: *App, message: *Message) bool {
             message.local_path = entry.image_path;
             message.media_type.set("image");
             if (std.ascii.endsWithIgnoreCase(message.unfurl_canonical.slice()[0 .. std.mem.indexOfAny(u8, message.unfurl_canonical.slice(), "?#") orelse message.unfurl_canonical.len], ".gif")) message.mime_type.set("image/gif");
-            ensureBitmap(a, message);
         }
         return false;
     }
@@ -8986,6 +8985,7 @@ fn unfurlThreadMain(ctx: *UnfurlContext) void {
         },
         .none => {},
     };
+    if (provider == .page and result.title_len == 0) result.title_len = copyInto(&result.title, result.author[0..result.author_len]);
     result.ok = if (provider == .page or provider == .image) result.thumb != null else result.title_len > 0 or result.play_len > 0 or result.thumb != null;
     _ = unfurl_fetch_count.fetchSub(1, .monotonic);
     if (win.PostMessageW(ctx.hwnd, wm_unfurl_done, 0, @bitCast(@intFromPtr(result))) == 0) {
@@ -15648,6 +15648,7 @@ fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: b
 }
 
 fn measureMessageCached(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool) i32 {
+    _ = unfurlCardVisible(a, message);
     if (message.measure_tag == measureTag(a, message, width, show_sender)) return message.measure_height;
     return measureMessageStore(hdc, a, message, width, show_sender);
 }

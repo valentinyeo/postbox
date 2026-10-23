@@ -21,7 +21,7 @@ function Measure-LinkImage($Session, [string]$Name, $Rect, [string]$Colour) {
         }
     } finally { $image.Dispose() }
     Assert-That ($samples -gt 0 -and $hits / $samples -gt 0.1) "$Name missing rendered $Colour image pixels"
-    return @{ screenshot = "$Name.png"; rect = $Rect; canvas = @([int]$bounds.Left - $screen.Left, [int]$bounds.Top - $screen.Top); colour = $Colour; hits = $hits; samples = $samples }
+    return @{ screenshot = "$Name.png"; rect = $Rect; canvas = @(([int]$bounds.Left - $screen.Left), ([int]$bounds.Top - $screen.Top)); colour = $Colour; hits = $hits; samples = $samples }
 }
 
 function Open-LinkChat($Session, [string]$Provider) {
