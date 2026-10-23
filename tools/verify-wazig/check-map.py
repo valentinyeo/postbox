@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'menus', 'navigation', 'notrap', 'palette', 'reactions', 'repaint', 'search', 'signal', 'slack-archive', 'slack-sort', 'slack-threads', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons', 'window'])
+assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'menus', 'navigation', 'notrap', 'palette', 'paste-image', 'reactions', 'repaint', 'search', 'signal', 'slack-archive', 'slack-sort', 'slack-threads', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons', 'window'])
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, whatsapp-hub, hub, hub-archive, slack-sort, slack-archive, slack-threads, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, paste-image, whatsapp-hub, hub, hub-archive, slack-sort, slack-archive, slack-threads, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window]' in workflow
 options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
 assert options_match, 'missing workflow_dispatch journey options'
 options = [option.strip() for option in options_match[1].split(',')]
@@ -66,7 +66,7 @@ assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
 assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_KEY")) |seed|' in fixture_config
 assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-archive', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-archive', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint', 'paste-image')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 keyboard = harness.split('function Send-Keys(', 1)[1].split('function Get-PaletteWindow(', 1)[0]
 for required in ['$app = Get-App $Session', '$null = Wait-Until {', '$foreground -eq [IntPtr]::Zero -or $ownerPid -ne $Session.pid',
@@ -290,3 +290,21 @@ assert '$restarted[0].Id -eq $session.pid' in runner and '$app = $restarted[0]' 
 assert '$app.MainWindowHandle -eq [IntPtr](Get-Window $Session).Current.NativeWindowHandle' in archive_journey
 assert '.claude/skills/verify-wazig/features/slack-archive.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
 print('SLACK ARCHIVE MAP VERIFIED: unified fixture, three deliveries, restart, unarchive and no archive endpoint requests')
+paste_journey = (root / 'tools/verify-wazig/paste-image.ps1').read_text(encoding='utf-8')
+paste_validator = (root / 'tools/verify-wazig/check-paste-image-evidence.py').read_text(encoding='utf-8')
+for name in ['INDEX.md', 'RULE-MAP.md']:
+    assert '(features/paste-image.md)' in (skill / name).read_text(encoding='utf-8')
+assert 'Invoke-PasteImageJourney $session' in runner and 'paste-image.ps1' in runner
+assert "'paste-image'" in runner and '[switch]$PasteImage' in harness
+assert '--paste-image' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+assert '"paste-image"' in workflow and "matrix.feature == 'paste-image'" in workflow
+assert 'src/paste_image.zig' in workflow
+assert 'check-paste-image-evidence.py' in validator
+assert '.claude/skills/verify-wazig/features/paste-image.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+for artifact in ['sizes.json', 'decoded', 'paste-uploads/', 'bridge-requests.jsonl']:
+    assert artifact in paste_journey + harness + (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+    assert artifact in paste_validator
+for required in ['1920, 1032', '3840, 2160', 'DataFormats.GetFormat(17)', 'SetData("PNG", false, png)',
+                 "Send-Keys $Session '^v'", "Send-Keys $Session '{ENTER}'", 'VerifyPasteImage]::Decode']:
+    assert required in paste_journey, required
+print('PASTE IMAGE MAP VERIFIED: native clipboard, decoded uploads, four providers, dispatch, PR matrix and evidence')

@@ -1026,6 +1026,86 @@ class SlackArchiveHandler(SlackSortHandler):
             self.respond(400, {'error': 'unexpected Slack write'}, body=body)
 
 
+class PasteImageHandler(TelegramHandler):
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            self.respond(200, [] if query.get('archived') == ['true'] else [
+                dict(jid='paste:' + provider, provider=provider, name='Verification Paste ' + provider,
+                     kind='direct', last_message_ts=self.state.stamp, unread_count=0, archived=False)
+                for provider in ('whatsapp', 'slack', 'signal', 'telegram')])
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            with self.state.lock:
+                rows = [self.message(chat, reply['msg_id'], '', FromMe=True, MediaType='image',
+                                     MimeType='image/png', Filename=reply['filename'])
+                        for reply in self.state.sends.values() if reply['chat'] == chat]
+            self.respond(200, list(reversed(rows)))
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path.startswith('/v1/wazig/media/'):
+            chat, message = map(unquote, url.path.removeprefix('/v1/wazig/media/').split('/', 1))
+            with self.state.lock:
+                reply = next((row for row in self.state.sends.values()
+                              if row['chat'] == chat and row['msg_id'] == message), None)
+            if reply:
+                self.respond(200, (self.state.log.parent / reply['upload']).read_bytes(), 'image/png')
+            else:
+                self.respond(404, {'error': 'unknown image'})
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        payload = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        multipart = self.headers.get('Content-Type', '').startswith('multipart/form-data')
+        body, image = {}, b''
+        if multipart:
+            envelope = bridge.BytesParser(policy=bridge.policy.default).parsebytes(
+                f'Content-Type: {self.headers["Content-Type"]}\r\nMIME-Version: 1.0\r\n\r\n'.encode() + payload)
+            for part in envelope.iter_parts():
+                name = part.get_param('name', header='content-disposition')
+                if part.get_filename() is None:
+                    body[name] = part.get_content()
+                else:
+                    body[name] = part.get_filename()
+                    image = part.get_payload(decode=True)
+        else:
+            body = json.loads(payload or '{}')
+        if body.get('chat') not in {'paste:' + provider for provider in ('whatsapp', 'slack', 'signal', 'telegram')}:
+            self.respond(400, {'error': 'invalid paste chat'}, body=body)
+        elif self.path == '/v1/wazig/mark-read':
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif (self.path == '/v1/wazig/send' and multipart and image.startswith(b'\x89PNG\r\n\x1a\n')
+              and {'chat', 'text', 'file', 'client_id'}.issubset(body) and body['client_id'].isalnum()):
+            with self.state.lock:
+                duplicate = body['client_id'] in self.state.sends
+                if not duplicate:
+                    upload = 'paste-uploads/' + body['client_id'] + '.png'
+                    target = self.state.log.parent / upload
+                    target.parent.mkdir(exist_ok=True)
+                    target.write_bytes(image)
+                    self.state.sends[body['client_id']] = dict(client_id=body['client_id'],
+                        msg_id=f'paste-{len(self.state.sends) + 1}', ts=self.state.stamp, status='sent',
+                        chat=body['chat'], filename=body['file'], upload=upload)
+                    self.state.telegram_events.append(('msg', body['chat']))
+                    self.state.lock.notify_all()
+                reply = dict(self.state.sends[body['client_id']])
+            self.respond(200, reply, body=body, multipart=True, accepted=not duplicate,
+                         file_size=len(image), file_sha256=hashlib.sha256(image).hexdigest(),
+                         upload=reply['upload'], message_id=reply['msg_id'])
+        else:
+            self.respond(400, {'error': 'paste-image requires an image upload'}, body=body)
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Fake hub runs only on GitHub Actions')
@@ -1033,6 +1113,7 @@ def main():
     parser.add_argument('--port-file', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
     modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--paste-image', action='store_true')
     modes.add_argument('--hub-archive', action='store_true')
     modes.add_argument('--repaint', action='store_true')
     modes.add_argument('--mixed-lid', action='store_true')
@@ -1047,7 +1128,7 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    handler = PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)

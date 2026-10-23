@@ -4,6 +4,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 
 | ID / workflow input | User-facing feature | Automated recipe |
 | --- | --- | --- |
+| [paste-image](paste-image.md) | Clipboard screenshot images | Ctrl+V, Enter, full-screen RGBA and 4K on every provider, decoded upload dimensions/alpha |
 | [search](search.md) | Chat search | Ctrl+F, match, clear, no-match, restore |
 | [navigation](navigation.md) | Keyboard chat navigation | Next chat, previous chat |
 | [drafts](drafts.md) | Composer and per-chat drafts | Type, switch away/back, check disk |
@@ -27,7 +28,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [text-comparison](appearance.md) | DirectWrite beside Chrome | Exact text/font/metric parity, paired screenshots and 3x paragraph crops |
 | [window](window.md) | Maximized startup and saved normal placement | Unforced launch, keyboard restore/resize, Alt+F4, same-profile reopen and --update-relaunch |
 
-Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `reactions`, `menus`, `search`, `drafts`, `whatsapp-hub`, `hub`, `hub-archive`, `slack-sort`, `slack-archive`, `slack-threads`, `views`, `workspace-icons`, `signal`, `telegram`, `notrap`, `repaint`, `text-comparison` and `window`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
+Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `paste-image`, `reactions`, `menus`, `search`, `drafts`, `whatsapp-hub`, `hub`, `hub-archive`, `slack-sort`, `slack-archive`, `slack-threads`, `views`, `workspace-icons`, `signal`, `telegram`, `notrap`, `repaint`, `text-comparison` and `window`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
 
 The source of truth for commands is `src/main.zig:buildPaletteItems`, for keyboard handling `src/main.zig:handleKeyboard`, and for discoverable help `src/shortcuts.zig`. Every feature file has precisely four H2 sections. Capture the input, resulting UI and durable side effects; preserve proof after cleanup. Only archive adds a synthetic incoming message at the fixture provider boundary; search, navigation, drafts, palette and appearance stay empty. No live send, account login, media, voice playback or transcription claim can be made from these local chats.
 
@@ -112,3 +113,4 @@ These are source changes in the bounded history window, not claims of live verif
 
 - IGSH-671: Idle and background-message flicker -> `repaint` (60-second full-paint counter and arrival evidence)
 - IGSH-683: WhatsApp phone chat page mixing @lid rows -> `hub` (asserts all four texts of a page that mixes phone and same-account @lid ChatJIDs reach the pane and the launch log has no WrongChat; other mismatches stay unit-test coverage in src/hub_test.zig)
+- IGSH-679: clipboard screenshot paste and Enter send -> `paste-image` (full-screen and 4K RGBA, V5/PNG and bitmap formats, decoded upload dimensions, alpha and orientation on four synthetic provider chats)
