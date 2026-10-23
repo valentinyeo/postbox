@@ -12948,8 +12948,8 @@ fn paletteFilter(a: *App) void {
     if (a.palette_list) |list| {
         _ = win.SendMessageW(list, win.WM_SETREDRAW, 0, 0);
         _ = win.SendMessageW(list, win.LB_RESETCONTENT, 0, 0);
-        for (0..a.palette_match_count) |_| {
-            _ = win.SendMessageW(list, win.LB_ADDSTRING, 0, 1);
+        for (a.palette_matches[0..a.palette_match_count]) |match| {
+            _ = win.SendMessageW(list, win.LB_ADDSTRING, 0, @bitCast(@intFromPtr(a.palette_items[match].label.ptr())));
         }
         if (a.palette_match_count > 0) _ = win.SendMessageW(list, win.LB_SETCURSEL, 0, 0);
         _ = win.SendMessageW(list, win.WM_SETREDRAW, 1, 0);
@@ -13387,7 +13387,7 @@ fn showPaletteWindow(a: *App) void {
         _ = win.DestroyWindow(palette);
         return;
     }
-    a.palette_list = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 1, palette_edit_zone, palette_width - 2 - scrollbar_width, palette_max_rows * palette_row_height + 12, palette, controlId(id_palette_list), a.instance, null);
+    a.palette_list = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_HASSTRINGS | win.LBS_NOINTEGRALHEIGHT, 1, palette_edit_zone, palette_width - 2 - scrollbar_width, palette_max_rows * palette_row_height + 12, palette, controlId(id_palette_list), a.instance, null);
     setFont(a.palette_edit, a.font);
     setFont(a.palette_list, a.font);
     setPaletteCue(a);

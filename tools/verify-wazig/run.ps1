@@ -343,14 +343,28 @@ try {
             $edit = Get-Edit $palette '1064'
             $list = Get-Edit $palette '1072'
             $null = Wait-Until { (Read-Edit $edit) -eq 'Keyboard shortcuts' -and (Read-ListCount $list) -eq 1 } 'positive palette row control'
-            $positiveCount = Read-ListCount $list
+            $positiveRows = @(Read-ListLabels $list)
+            Assert-That ($positiveRows.Count -eq 1 -and $positiveRows[0] -eq 'Keyboard shortcuts') 'Positive palette row label is not readable'
+            $positiveCount = $positiveRows.Count
             Send-Keys $session '^a'
             Send-Keys $session 'Status'
-            $null = Wait-Until { (Read-Edit $edit) -eq 'Status' } 'removed Status query'
-            $statusCount = Read-ListCount $list
+            $settled = @{ signature = $null; since = [DateTime]::UtcNow; rows = @() }
+            $null = Wait-Until {
+                if ((Read-Edit $edit) -ne 'Status') { return $false }
+                $settled.rows = @(Read-ListLabels $list)
+                $signature = ConvertTo-Json -InputObject $settled.rows -Compress
+                if ($signature -cne $settled.signature) {
+                    $settled.signature = $signature
+                    $settled.since = [DateTime]::UtcNow
+                    return $false
+                }
+                return ([DateTime]::UtcNow - $settled.since).TotalMilliseconds -ge 200
+            } 'removed Status query and settled palette rows'
+            $rows = $settled.rows
+            $statusCount = @($rows | Where-Object { $_.Trim() -ieq 'Status' }).Count
             $removedCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1120')
             $sidebarCount = $window.FindAll([Windows.Automation.TreeScope]::Descendants, $removedCondition).Count
-            @{ query = Read-Edit $edit; matches = $statusCount; positive_query = 'Keyboard shortcuts'; positive_matches = $positiveCount; sidebar_status_controls = $sidebarCount } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'removed-status.json')
+            @{ query = Read-Edit $edit; status_rows = $statusCount; rows = $rows; positive_query = 'Keyboard shortcuts'; positive_matches = $positiveCount; sidebar_status_controls = $sidebarCount } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'removed-status.json')
             Save-Screen $session removed-status
             Assert-That ($statusCount -eq 0 -and $sidebarCount -eq 0) 'Removed WhatsApp Status entry is still reachable'
             Send-Keys $session '^a'
