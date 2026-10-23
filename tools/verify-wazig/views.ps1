@@ -84,6 +84,19 @@ function Read-InboxWorkspaceTooltips($Session, $Rows) {
     Save-WorkspaceNameCheck $Session 'inbox-tooltip' $labels @('inbox-tooltip-T0ABC123.png', 'inbox-tooltip-T0DEF456.png')
 }
 
+function Save-ViewTitle($Session, [string]$Capture) {
+    $state = Read-Control $Session status
+    $label = if ($state.current_view.inbox) { 'Combined inbox' } else { $state.current_view.label }
+    $expected = "$label - Wazig v$($state.version)"
+    $actual = (Get-Window $Session).Current.Name
+    $path = Join-Path $Session.evidence 'title.json'
+    $titles = if (Test-Path $path) { Get-Content $path -Raw | ConvertFrom-Json -AsHashtable } else { @{} }
+    $titles[$Capture] = @{ actual = $actual; expected = $expected; version = $state.version; current_view = $state.current_view }
+    $titles | ConvertTo-Json -Depth 12 | Set-Content $path
+    Assert-That ($actual -ceq $expected) "Wrong inbox title: $actual; expected $expected"
+    Save-Screen $Session $Capture
+}
+
 function Assert-AccountView($Session, [int]$Number, [string]$Account, [string]$Capture) {
     Send-Keys $Session "%$Number"
     $null = Wait-Until {
@@ -95,7 +108,7 @@ function Assert-AccountView($Session, [int]$Number, [string]$Account, [string]$C
     Assert-That ($rows.total -eq 2 -and @($rows.chats | Where-Object view_account -ne $Account).Count -eq 0) 'Account view leaked another account'
     Assert-That ($state.current_view.label -eq $state.view_order[$Number - 1].label) 'View label does not match saved position'
     $rows | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Capture.chats.json")
-    Save-Screen $Session $Capture
+    Save-ViewTitle $Session $Capture
     return $rows.chats
 }
 
@@ -109,6 +122,7 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     for ($index = 0; $index -lt $expected.Count; $index++) {
         Assert-That ($baseline.view_order[$index].account -eq $expected[$index]) 'Default account order differs'
         $rows = @(Assert-AccountView $Session ($index + 1) $expected[$index] "view-$($index + 1)")
+        if ($index -eq 0) { Save-ViewTitle $Session 'title-view-1' }
         Send-Keys $Session '^1'
         $null = Wait-Until { (Read-Control $Session status).selected.id -eq $rows[0].id } 'first chat in account'
         Send-Keys $Session '^{TAB}'
@@ -168,7 +182,40 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     }
     $inbox | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'inbox.chats.json')
     Save-Screen $Session inbox
+    Save-ViewTitle $Session 'title-inbox'
     Read-InboxWorkspaceTooltips $Session $inbox.chats
+    $null = Assert-AccountView $Session 1 'personal' 'before-drain'
+    foreach ($remaining in @(1, 0)) {
+        Send-Keys $Session '^1'
+        Assert-That ((Read-Control $Session messages).chat.view_account -eq 'personal') 'Archive target history belongs to the first account'
+        Send-Keys $Session '^e'
+        $null = Wait-Until {
+            $state = Read-Control $Session status
+            $state.pending_archives -eq 0 -and $state.chat_count -eq $remaining -and @((Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/archive' -and $_.body.archived })).Count -eq (2 - $remaining)
+        } 'account archive write completed'
+    }
+    Invoke-PaletteCommand $Session 'Refresh'
+    Send-Keys $Session '%1'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $state.current_view.account -eq 'personal' -and -not $state.current_view.inbox -and $state.chat_count -eq 0 -and $state.pending_archives -eq 0
+    } 'drained account retains Alt+1 with an empty list'
+    $drained = Read-Control $Session status
+    Assert-That (($drained.view_order | ConvertTo-Json -Depth 12 -Compress) -ceq ($baseline.view_order | ConvertTo-Json -Depth 12 -Compress)) 'Draining changed account positions'
+    Assert-That ((Read-Control $Session chats).total -eq 0) 'Drained account still has visible chats'
+    Save-ViewTitle $Session 'drained-alt1'
+    $null = Assert-AccountView $Session 2 'business' 'drained-alt2'
+    Send-Keys $Session '%1'
+    Invoke-PaletteCommand $Session 'Show archived chats'
+    $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'drained account archived chats'
+    foreach ($remaining in @(1, 0)) {
+        Send-Keys $Session '^1'
+        Assert-That ((Read-Control $Session messages).chat.view_account -eq 'personal') 'Archive target history belongs to the first account'
+        Send-Keys $Session '^e'
+        $null = Wait-Until { $state = Read-Control $Session status; $state.pending_archives -eq 0 -and $state.chat_count -eq $remaining } 'restore archived fixture chat'
+    }
+    Invoke-PaletteCommand $Session 'Show inbox chats'
+    $null = Assert-AccountView $Session 1 'personal' 'restored-account'
     Invoke-PaletteCommand $Session 'Sort views' sort-command
     Save-Screen $Session sort-before
     $list = Get-Edit (Get-PaletteWindow $Session) '1072'

@@ -569,7 +569,7 @@ class ViewsHandler(Handler):
         if url.path == '/v1/wazig/chats':
             with self.state.lock:
                 rows = json.loads(json.dumps(self.state.view_rows))
-            self.respond(200, [] if query.get('archived') == ['true'] else rows)
+            self.respond(200, [row for row in rows if row['archived'] == (query.get('archived') == ['true'])])
         elif url.path == '/v1/wazig/messages':
             chat = query.get('chat', [''])[0]
             row = next((row for row in self.state.view_rows if row['jid'] == chat), None)
@@ -612,6 +612,10 @@ class ViewsHandler(Handler):
                     row['last_message_ts'] = self.state.stamp
                 reply = dict(self.state.sends[body['client_id']])
             self.respond(200, reply, body=body, accepted=not duplicate, duplicate=duplicate, **scope)
+        elif self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and isinstance(body['archived'], bool) and row['provider'] == 'whatsapp':
+            with self.state.lock:
+                row['archived'] = body['archived']
+            self.respond(200, {'status': 'ok'}, body=body, **scope)
         elif self.path == '/v1/wazig/mark-read' and set(body) == {'chat', 'message_id'}:
             self.respond(200, {'status': 'ok'}, body=body, **scope)
         else:

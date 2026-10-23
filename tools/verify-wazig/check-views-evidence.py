@@ -1,3 +1,4 @@
+import re
 import hashlib
 import json
 from pathlib import Path
@@ -46,7 +47,7 @@ def check_views(folder):
     def capture(name):
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, name
-        assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig'), name
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
         return read(f'{name}.state.json')
 
     check_workspace_names(folder, capture)
@@ -59,6 +60,26 @@ def check_views(folder):
                 ('slack', 'T0ABC123', 'Slack Alpha Workspace'), ('slack', 'T0DEF456', 'Slack Beta Workspace')]
     assert [(view['provider'], view['account'], view['label']) for view in baseline['view_order']] == expected + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]
     assert baseline['current_view']['inbox'] and baseline['chat_count'] == 8
+    titles = read('title.json')
+    required_titles = {'title-view-1', 'view-3', 'title-inbox', 'drained-alt1', 'drained-alt2'}
+    assert required_titles <= titles.keys()
+    for name, row in titles.items():
+        state = capture(name)
+        view = state['current_view']
+        label = 'Combined inbox' if view['inbox'] else view['label']
+        assert row['current_view'] == view
+        assert row['version'] == state['version'] == '0.0.526'
+        assert row['actual'] == row['expected'] == f"{label} - Wazig v{state['version']}"
+        assert f"MessagesZig | {row['actual']}" in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
+    assert capture('title-view-1')['current_view'] == capture('view-1')['current_view']
+    assert capture('title-inbox')['current_view']['inbox']
+    drained = capture('drained-alt1')
+    assert drained['current_view'] == dict(provider='whatsapp', account='personal', label=expected[0][2], inbox=False)
+    assert drained['chat_count'] == drained['pending_archives'] == 0 and not drained['show_archived']
+    assert drained['view_order'] == baseline['view_order']
+    second = capture('drained-alt2')
+    assert second['current_view'] == dict(provider='whatsapp', account='business', label=expected[1][2], inbox=False)
+    assert second['chat_count'] == 2 and second['view_order'] == baseline['view_order']
     catalog = read('views-catalog.json')['chats']
     assert len(catalog) == 8
     all_keys = identities(catalog)
@@ -89,6 +110,13 @@ def check_views(folder):
     assert sum(row['name'] == 'Verification Shared' and row['provider'] == 'whatsapp' for row in catalog) == 2
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert all(row['authorized'] for row in requests if row['method'] != 'SSE')
+    archives = [row for row in requests if row['path'] == '/v1/wazig/archive']
+    assert len(archives) == 4
+    assert [row['body']['archived'] for row in archives] == [True, True, False, False]
+    archived_chats = {row['body']['chat'] for row in archives[:2]}
+    assert len(archived_chats) == 2 and archived_chats == {row['id'] for row in catalog if row['view_account'] == 'personal'}
+    assert {row['body']['chat'] for row in archives[2:]} == archived_chats
+    assert all(row['source_provider'] == 'whatsapp' and row['source_account'] == 'personal' and row['status'] == 200 for row in archives)
     sends = [row for row in requests if row['path'] == '/v1/wazig/send']
     assert sends and sum(row['accepted'] for row in sends) == 1
     assert len({row['body']['client_id'] for row in sends}) == 1

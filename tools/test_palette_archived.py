@@ -68,7 +68,7 @@ class PaletteArchivedTests(unittest.TestCase):
 
     def screen(self, name, selected=None):
         (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'fixture' * 2000)
-        (self.folder / f'{name}.uia.txt').write_text('MessagesZig | Wazig Messages v0.0.526')
+        (self.folder / f'{name}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526')
         self.write(f'{name}.state.json', dict(selected=selected or {}))
 
     def write(self, name, value):

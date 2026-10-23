@@ -46,7 +46,7 @@ if session['feature'] == 'window':
             assert rect['Right'] > rect['Left'] and rect['Bottom'] > rect['Top'], (row['step'], field)
         image = (folder / (row['step'] + '.png')).read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
-        assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / (row['step'] + '.uia.txt')).read_text(encoding='utf-8-sig')
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / (row['step'] + '.uia.txt')).read_text(encoding='utf-8-sig').splitlines()[0])
         state = read(row['step'] + '.state.json')
         assert state['sync'] == 'stopped' and state['pending_sends'] == state['pending_archives'] == 0
     normal = steps[1]['normal_rect']
@@ -98,7 +98,7 @@ if session['feature'] == 'repaint':
         image = (folder / f'{phase}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
         tree = (folder / f'{phase}.uia.txt').read_text(encoding='utf-8-sig')
-        assert 'MessagesZig | Wazig Messages v0.0.526' in tree
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', tree.splitlines()[0])
         assert read(f'{phase}.state.json')['selected']['id'] == 'fixture-alpha'
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
@@ -180,7 +180,7 @@ if session['feature'] == 'reactions':
             image = (folder / f'{name}.png').read_bytes()
             assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
             images.append(hashlib.sha256(image).hexdigest())
-            assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
+            assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
             selected = read(f'{name}.state.json')['selected']
             assert selected['id'] == chat and selected['provider'] == provider
         assert images[0] != images[1]
@@ -219,7 +219,7 @@ if session['feature'] == 'workspace-icons':
     assert all(row['provider'] == ('signal' if row['id'] == 'signal:fixture-contact' else 'whatsapp' if row['id'] == 'whatsapp:fixture:contact-delta' else 'slack') for row in rows['chats'])
     state = read('workspace-icons-list.state.json')
     assert state['view'] == 'all' and state['theme'] == 'amoled'
-    assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / 'workspace-icons-list.uia.txt').read_text(encoding='utf-8-sig')
+    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / 'workspace-icons-list.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert all(row['wire_path'].startswith('/v1/wazig/') for row in requests)
     for team, status in [('fixture-amber', 200), ('fixture-cobalt', 200), ('fixture-empty', 404)]:
@@ -291,7 +291,7 @@ if session['feature'] == 'slack-sort':
         assert f'slack-sort {stage}-last-message-order PASS' in proof
         image = (folder / f'{stage}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
-        assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig')
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         assert read(f'{stage}.state.json')['view'] == 'slack'
     initial_times = {row['id']: row['last_message_time'] for row in read('before.chats.json')['chats']}
     assert initial_times['fixture-alpha'] < read('after.chats.json')['chats'][0]['last_message_time']
@@ -316,6 +316,8 @@ if session['feature'] == 'slack-sort':
     print('EVIDENCE VERIFIED: Slack last message ordering, unknown last, incoming and sent promotion with keyboard order and isolation')
     raise SystemExit(0)
 if session['feature'] == 'views':
+    for required in ['title.json', 'title-view-1.png', 'title-inbox.png', 'drained-alt1.png']:
+        assert (folder / required).is_file(), required
     runpy.run_path(str(Path(__file__).with_name('check-views-evidence.py')))['check_views'](folder)
     raise SystemExit(0)
 if session['feature'] in ('whatsapp-hub', 'hub'):
@@ -393,7 +395,7 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
     for name in ['before', 'beta-empty', 'beta', 'history', 'live', 'sent', 'after']:
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
-        assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         if name != 'beta-empty':
             images.append(hashlib.sha256(image).hexdigest())
     assert len(set(images)) >= 4
@@ -472,7 +474,7 @@ if session['feature'] in ('palette', 'appearance'):
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
         images.append(hashlib.sha256(image).hexdigest())
-        assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         state = json.loads((folder / f'{name}.state.json').read_text(encoding='utf-8-sig'))
         assert state['version'] == '0.0.526' and state['chat_count'] == 2
         assert state['pending_sends'] == state['pending_archives'] == 0 and state['sync'] == 'stopped'
@@ -516,7 +518,7 @@ if session['feature'] == 'menus':
             data = path.read_bytes()
             assert data.startswith(b'\x89PNG\r\n\x1a\n') and len(data) > 10000
             images.append(hashlib.sha256(data).hexdigest())
-            assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}-{phase}.uia.txt').read_text(encoding='utf-8-sig')
+            assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}-{phase}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         assert images[0] != images[1], name
     state = json.loads((folder / 'side-effects.json').read_text(encoding='utf-8-sig'))
     assert state['theme'] == 'green' and state['chat_count'] == 2
@@ -609,7 +611,7 @@ stages = ['before', 'after', 'empty'] if feature == 'search' else ['before', 'ac
 for name in stages:
     image = (folder / f'{name}.png').read_bytes()
     assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
-    assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
+    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
     images.append(hashlib.sha256(image).hexdigest())
 assert len(set(images)) == len(stages)
 if feature == 'search':

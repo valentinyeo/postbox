@@ -31,7 +31,7 @@ class SlackThreadsTests(unittest.TestCase):
             if stage != 'thread-reply':
                 self.write(f'{stage}.json', dict(state, **({'restarted': True} if stage == 'threads-restart' else {})))
             (self.folder / f'{stage}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'fixture' * 2000)
-            (self.folder / f'{stage}.uia.txt').write_text('MessagesZig | Wazig Messages v0.0.526')
+            (self.folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526')
         self.requests = [dict(method='POST', authorized=True, wire_path='/v1/wazig/send', status=200,
                              body=dict(chat='slack:fixture-threads:channel', text='Synthetic thread reply', reply_to=PARENT))]
         self.save_requests()

@@ -90,7 +90,7 @@ function Get-Window($Session) {
     Assert-That ($null -ne $window) 'App window is not up'
     Assert-That ($window.Current.ProcessId -eq $Session.pid) 'UI Automation found another process'
     Assert-That ($window.Current.ClassName -eq 'MessagesZig') 'Wrong window class'
-    Assert-That ($window.Current.Name -eq 'Wazig Messages v0.0.526') 'Wrong build title'
+    Assert-That ($window.Current.Name -cmatch '^(?:.+ - )?Wazig v0\.0\.526$') 'Wrong build title'
     return $window
 }
 
@@ -244,6 +244,8 @@ function Invoke-Doctor($Session) {
     }
     $status = Read-Control $Session status
     Assert-That ($status.version -eq '0.0.526') 'Wrong control build'
+    $label = if ($status.current_view.inbox) { 'Combined inbox' } else { $status.current_view.label }
+    Assert-That ((Get-Window $Session).Current.Name -ceq "$label - Wazig v$($status.version)") 'Window title does not match the active inbox'
     Assert-That ($status.sync -eq 'stopped' -and -not $status.slack_connected) 'Provider unexpectedly connected'
     Assert-That ($status.pending_sends -eq 0 -and $status.pending_archives -eq 0) 'Unexpected pending writes'
     $status | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'doctor.json')

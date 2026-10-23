@@ -52,7 +52,7 @@ def model(source):
         'test "Alt+N maps saved account positions including two WhatsApp accounts"',
         'test "combined inbox sorts activity across accounts without prioritizing old pins"',
         'test "two WhatsApp account views isolate a shared contact in projection search selection and sending"',
-        'try std.testing.expectEqualStrings("wa-b", merged.items[2].key.key().account)',
+        'try std.testing.expectEqualStrings("wa-b", merged.items[3].key.key().account)',
         'try std.testing.expect(!rows[0].pinned)', 'chat_key.indexOf(Row, &output, key)',
         'try std.testing.expectEqual(@as(usize, 2), count)',
     ])

@@ -1,4 +1,4 @@
-# Wazig Messages verification map
+# Wazig verification map
 
 Start with [the skill](../SKILL.md). The eight offline desktop journeys use the real native window, not the existing headless smoke modes. Each run creates a separate profile and synthetic cached chats `Verification Alpha` and `Verification Beta`, without provider login. Menus seeds one synthetic cached message to reach both message menus; text-comparison loads its synthetic paragraph from `src/verify_text.json`. The baseline is the AMOLED theme, saved-scale default of 82%, All networks, Alpha selected and an empty composer. Never change the product's default font or scale to suit the harness.
 
@@ -22,7 +22,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [telegram](telegram.md) | Telegram hub account | Prelinked hub chats, Saved Messages, text/file/reply, reactions, reads, live SSE and terminal rate limits |
 | [signal](signal.md) | Signal hub account | Prelinked hub history, text/file, reactions, reads, live events, terminal 429/403 failures |
 | [notrap](notrap.md) | No empty sign-in traps | Saved Signal startup fallback, Esc and every Alt view key from every view, per-view screenshots |
-| [views](views.md) | Account views and combined inbox | Alt+1..4 isolation, account send, Alt+I order, Sort views, restart |
+| [views](views.md) | Account views and combined inbox | Alt+1..4 isolation, inbox titles, drained fixed slots, account send, Alt+I order, Sort views, restart |
 | [workspace-icons](workspace-icons.md) | Slack workspace icon, WhatsApp and Signal mark badges | Two synthetic team icon colours, missing-icon S, green handset, blue Signal mark and persistent avatar cache |
 | [repaint](repaint.md) | Change-driven redraw | 60 seconds without input, baseline refreshes, non-selected incoming messages and full-paint deltas |
 | [voice](voice.md) | Voice message bubbles | Five downloaded voice notes with cached transcripts, wheel scroll, Show more, playback-style partial repaints matching full repaints |
