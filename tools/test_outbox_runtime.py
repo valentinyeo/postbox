@@ -87,6 +87,7 @@ def main():
         (directory / "chat_key.zig").write_text((ROOT / "src/chat_key.zig").read_text())
         (directory / "transport.zig").write_text((ROOT / "src/transport.zig").read_text())
         (directory / "voice_sent.zig").write_text((ROOT / "src/voice_sent.zig").read_text())
+        (directory / "staged_images.zig").write_text((ROOT / "src/staged_images.zig").read_text())
         format_source = (ROOT / "src/outbox.zig").read_text()
         for mutant in mutants:
             effective_format = format_source

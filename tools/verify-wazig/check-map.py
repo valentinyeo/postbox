@@ -335,7 +335,30 @@ for artifact in ['sizes.json', 'decoded', 'paste-uploads/', 'bridge-requests.jso
 for required in ['1920, 1032', '3840, 2160', 'DataFormats.GetFormat(17)', 'SetData("PNG", false, png)',
                  "Send-Keys $Session '^v'", "Send-Keys $Session '{ENTER}'", 'VerifyPasteImage]::Decode']:
     assert required in paste_journey, required
-print('PASTE IMAGE MAP VERIFIED: native clipboard, decoded uploads, four providers, dispatch, PR matrix and evidence')
+for artifact in ['multi-before', 'multi-staged', 'multi-sent.json', 'remove.json', 'remove-staged', 'remove-one', 'remove-sent']:
+    assert artifact in paste_journey and artifact in paste_validator and artifact in (skill / 'features/paste-image.md').read_text(encoding='utf-8'), artifact
+for required in ["Click-Control $Session '1136'", 'Get-PickerDialog $Session $dialog', 'AutomationElement]::FromHandle', 'Read-ImagePreviews', '[VerifyMenus]::Click', 'two-image-caption']:
+    assert required in paste_journey, required
+for required in ["foreach ($folder in @('Desktop', 'Documents', 'Pictures'))", 'New-Item (Join-Path $profile $folder)',
+                 "$profile = Join-Path $root 'profile'", '$root = Join-Path $env:RUNNER_TEMP "wazig-verify-$id"']:
+    assert required in runner, required
+assert runner.index('New-Item (Join-Path $profile $folder)') < runner.index('$app = [Diagnostics.Process]::Start($start)')
+for required in ['owner == pid && IsWindowVisible(window)', 'name.ToString() == "#32770"',
+                 'unexpected #32770 dialog: $text', "AutomationIdProperty, '1148'", 'ControlType]::ComboBox', 'ComboBoxEx32',
+                 "$labels -ccontains 'File name:'", '$filename.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)',
+                 '$edit.SetFocus()', 'AutomationElement]::FocusedElement, $edit', "@('^a', $Path, '{ENTER}')",
+                 "'paste-image: file dialog closed'", 'picker-dialog-$($handle.ToInt64()).uia.txt', 'throw $failure']:
+    assert required in paste_journey, required
+for required in ['public static extern bool IsWindow(IntPtr window)', 'public static extern bool IsWindowVisible(IntPtr window)',
+                 '$Expected -ne [IntPtr]::Zero -and $handle -eq $Expected',
+                 'if (-not [VerifyPasteImage]::IsWindow($handle) -or -not [VerifyPasteImage]::IsWindowVisible($handle)) { continue }']:
+    assert required in paste_journey, required
+picker = paste_journey.split('function Add-PickerImage(', 1)[1].split('function Read-ImagePreviews(', 1)[0]
+assert "Send-Keys $Session '%n'" not in picker and '.SetValue(' not in picker
+assert 'foreach ($container in @($filename, $window))' not in picker
+assert picker.index('$edit.SetFocus()') < picker.index('AutomationElement]::FocusedElement, $edit') < picker.index('Send-Keys $Session $keys')
+assert paste_journey.count('Add-PickerImage $Session $fixture') == 2
+print('PASTE IMAGE MAP VERIFIED: native clipboard, decoded uploads, four providers, isolated folders, focused file-name picker, popup diagnostics and remove-first evidence')
 
 for item in ['link-previews.ps1', 'check-link-previews-evidence.py']:
     assert (root / 'tools/verify-wazig' / item).is_file()

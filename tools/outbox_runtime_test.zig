@@ -1,4 +1,5 @@
 const std = @import("std");
+const staged_images = @import("staged_images.zig");
 var verification_fixture = false;
 fn verificationEnqueue(_: *App, _: WacliJob) bool {
     return false;
@@ -139,7 +140,7 @@ const App = struct {
     chats: [1]struct { account: Utf8Text(32) = .{}, jid: Utf8Text(191) = .{}, provider: transport.Provider = .whatsapp } = @splat(.{}),
     reply_to: Utf8Text(191) = .{},
     reply_sender: Utf8Text(191) = .{},
-    staged_image: struct { provider: transport.Provider = .whatsapp, account: Utf8Text(32) = .{}, path: Utf8Text(519) = .{}, jid: Utf8Text(191) = .{} } = .{},
+    staged_images: staged_images.List(struct { provider: transport.Provider = .whatsapp, account: Utf8Text(32) = .{}, path: Utf8Text(519) = .{}, jid: Utf8Text(191) = .{} }) = .{},
     slack_attach: WideText(519) = .{},
     slack_attach_jid: Utf8Text(191) = .{},
     slack_attach_account: Utf8Text(32) = .{},
@@ -329,10 +330,13 @@ fn saveComposerDraft(_: *App) void {}
 fn focusCompose(_: *App) void {}
 fn layout(_: *App, _: i32, _: i32) void {}
 fn releaseStagedImage(a: *App) void {
-    a.staged_image = .{};
+    a.staged_images.clear();
 }
 fn discardStagedImage(a: *App) void {
     releaseStagedImage(a);
+}
+fn removeStagedImage(a: *App, index: usize, _: bool) void {
+    _ = a.staged_images.remove(index);
 }
 fn forgetFailedSend(_: *App, _: chat_key.Key, _: []const u8) void {}
 fn nowUnixSeconds() i64 {
@@ -433,20 +437,21 @@ test "failed journal admission preserves composer reply and staged image" {
     sendMessage(&app);
     try std.testing.expectEqual(@as(usize, 0), app.pending_send_count);
     try std.testing.expect(compose_len > 0 and app.reply_to.len > 0);
-    app.staged_image.path.set("synthetic.png");
-    app.staged_image.jid = app.chats[0].jid;
-    app.staged_image.provider = app.chats[0].provider;
-    app.staged_image.account = app.chats[0].account;
+    app.staged_images.count = 1;
+    app.staged_images.items[0].path.set("synthetic.png");
+    app.staged_images.items[0].jid = app.chats[0].jid;
+    app.staged_images.items[0].provider = app.chats[0].provider;
+    app.staged_images.items[0].account = app.chats[0].account;
     sendMessage(&app);
     try std.testing.expectEqual(@as(usize, 0), app.pending_send_count);
-    try std.testing.expect(app.staged_image.path.len > 0 and app.reply_to.len > 0);
+    try std.testing.expect(app.staged_images.items[0].path.len > 0 and app.reply_to.len > 0);
     app.chats[0].provider = .slack;
     app.chats[0].account.set("");
-    app.staged_image.provider = .slack;
-    app.staged_image.account.set("");
+    app.staged_images.items[0].provider = .slack;
+    app.staged_images.items[0].account.set("");
     sendMessage(&app);
     try std.testing.expectEqual(@as(usize, 0), app.slack_outbox_count);
-    try std.testing.expect(app.staged_image.path.len > 0 and compose_len > 0);
+    try std.testing.expect(app.staged_images.items[0].path.len > 0 and compose_len > 0);
 }
 
 test "completed file stays alive until journal retirement succeeds" {
@@ -667,13 +672,14 @@ test "Slack pasted image reaches Slack journal and preserves borrowed path" {
     var app = fixture();
     app.chats[0].provider = .slack;
     app.chats[0].account.set("");
-    app.staged_image.provider = .slack;
-    app.staged_image.account.set("");
+    app.staged_images.items[0].provider = .slack;
+    app.staged_images.items[0].account.set("");
     app.chats[0].jid.set("synthetic-chat");
-    app.staged_image.jid = app.chats[0].jid;
-    app.staged_image.provider = app.chats[0].provider;
-    app.staged_image.account = app.chats[0].account;
-    app.staged_image.path.set("synthetic.png");
+    app.staged_images.items[0].jid = app.chats[0].jid;
+    app.staged_images.items[0].provider = app.chats[0].provider;
+    app.staged_images.items[0].account = app.chats[0].account;
+    app.staged_images.count = 1;
+    app.staged_images.items[0].path.set("synthetic.png");
     sendMessage(&app);
     try std.testing.expectEqual(@as(usize, 0), app.pending_send_count);
     try std.testing.expectEqual(@as(usize, 1), app.slack_outbox_count);
@@ -687,8 +693,8 @@ test "multibyte composer text is refused rather than journaled as invalid UTF8" 
     var app = fixture();
     app.chats[0].provider = .slack;
     app.chats[0].account.set("");
-    app.staged_image.provider = .slack;
-    app.staged_image.account.set("");
+    app.staged_images.items[0].provider = .slack;
+    app.staged_images.items[0].account.set("");
     compose_len = 3000;
     @memset(compose_text[0..compose_len], 0x00fc);
     sendMessage(&app);
@@ -701,8 +707,8 @@ test "Slack text is not truncated to the old 512-byte job capacity" {
     var app = fixture();
     app.chats[0].provider = .slack;
     app.chats[0].account.set("");
-    app.staged_image.provider = .slack;
-    app.staged_image.account.set("");
+    app.staged_images.items[0].provider = .slack;
+    app.staged_images.items[0].account.set("");
     app.chats[0].jid.set("synthetic-chat");
     const text = [_]u8{'a'} ** 1024;
     setCompose(&text);
@@ -912,6 +918,122 @@ test "Slack jobs never fall back to UI-thread networking when the worker is unav
     app.wacli_slack_thread = null;
     try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .slack_auth, .provider = .slack }, false));
     try std.testing.expectEqual(@as(usize, 0), app.wacli_queue_len);
+}
+
+test "staged hub images keep order first caption and independent durable ids on every provider" {
+    for ([_]transport.Provider{ .whatsapp, .slack, .signal, .telegram }) |provider| {
+        reset();
+        var app = fixture();
+        app.unified_hub = true;
+        app.chats[0].provider = provider;
+        app.chats[0].account.set("synthetic-account");
+        app.chats[0].jid.set("synthetic-chat");
+        for ([_][]const u8{ "first.png", "second.png", "third.png" }) |path| {
+            var image = app.staged_images.items[0];
+            image.provider = provider;
+            image.account = app.chats[0].account;
+            image.jid = app.chats[0].jid;
+            image.path.set(path);
+            try std.testing.expect(app.staged_images.add(image));
+        }
+        setCompose("caption");
+        sendMessage(&app);
+        try std.testing.expectEqual(@as(usize, 3), app.pending_send_count);
+        try std.testing.expectEqual(@as(usize, 0), app.staged_images.count);
+        try std.testing.expectEqual(@as(usize, 0), compose_len);
+        for (app.pending_sends[0..3], [_][]const u8{ "first.png", "second.png", "third.png" }, 0..) |pending, path, index| {
+            try std.testing.expectEqual(provider, pending.provider);
+            try std.testing.expectEqualStrings("synthetic-account", pending.account.slice());
+            try std.testing.expectEqualStrings(path, pending.file.slice());
+            try std.testing.expectEqualStrings(if (index == 0) "caption" else "", pending.text.slice());
+            try std.testing.expectEqual(index + 1, pending.seq);
+            for (app.pending_sends[0..index]) |earlier| try std.testing.expect(!std.mem.eql(u8, &earlier.id, &pending.id));
+        }
+        var restored = fixture();
+        restored.unified_hub = true;
+        loadOutbox(&restored);
+        try std.testing.expectEqual(@as(usize, 3), restored.pending_send_count);
+        for (app.pending_sends[0..3], restored.pending_sends[0..3]) |before, after| {
+            try std.testing.expectEqualSlices(u8, &before.id, &after.id);
+            try std.testing.expectEqualStrings(before.file.slice(), after.file.slice());
+            try std.testing.expectEqualStrings(before.text.slice(), after.text.slice());
+        }
+    }
+}
+
+test "staged batch journal failure retains all images and caption" {
+    reset();
+    var app = fixture();
+    app.chats[0].jid.set("synthetic-chat");
+    for ([_][]const u8{ "first.png", "second.png" }) |path| {
+        var image = app.staged_images.items[0];
+        image.jid = app.chats[0].jid;
+        image.account = app.chats[0].account;
+        image.path.set(path);
+        try std.testing.expect(app.staged_images.add(image));
+    }
+    setCompose("caption");
+    fault = .rename;
+    sendMessage(&app);
+    try std.testing.expectEqual(@as(usize, 0), app.pending_send_count);
+    try std.testing.expectEqual(@as(usize, 2), app.staged_images.count);
+    try std.testing.expectEqual(@as(usize, 7), compose_len);
+    try std.testing.expectEqual(@as(usize, 0), spawned);
+    try std.testing.expectEqualStrings("second.png", app.staged_images.items[1].path.slice());
+}
+
+test "staged batch queue saturation never admits a partial message" {
+    reset();
+    var app = fixture();
+    app.chats[0].jid.set("synthetic-chat");
+    for ([_][]const u8{ "first.png", "second.png" }) |path| {
+        var image = app.staged_images.items[0];
+        image.jid = app.chats[0].jid;
+        image.account = app.chats[0].account;
+        image.path.set(path);
+        try std.testing.expect(app.staged_images.add(image));
+    }
+    app.pending_send_count = max_pending_sends - 1;
+    setCompose("caption");
+    sendMessage(&app);
+    try std.testing.expectEqual(max_pending_sends - 1, app.pending_send_count);
+    try std.testing.expectEqual(@as(usize, 2), app.staged_images.count);
+    try std.testing.expectEqual(@as(usize, 7), compose_len);
+    try std.testing.expectEqual(@as(usize, 0), spawned);
+}
+
+test "staged direct Slack sends each image through its own journal entry" {
+    reset();
+    var app = fixture();
+    app.chats[0].provider = .slack;
+    app.chats[0].account.set("");
+    app.chats[0].jid.set("synthetic-chat");
+    for ([_][]const u8{ "first.png", "second.png" }) |path| {
+        var image = app.staged_images.items[0];
+        image.provider = .slack;
+        image.account = app.chats[0].account;
+        image.jid = app.chats[0].jid;
+        image.path.set(path);
+        try std.testing.expect(app.staged_images.add(image));
+    }
+    setCompose("caption");
+    sendMessage(&app);
+    try std.testing.expectEqual(@as(usize, 0), app.pending_send_count);
+    try std.testing.expectEqual(@as(usize, 2), app.slack_outbox_count);
+    try std.testing.expectEqual(@as(usize, 0), app.staged_images.count);
+    try std.testing.expectEqualStrings("first.png", app.slack_outbox[0].entry.file.slice());
+    try std.testing.expectEqualStrings("second.png", app.slack_outbox[1].entry.file.slice());
+    try std.testing.expectEqualStrings("caption", app.slack_outbox[0].entry.text.slice());
+    try std.testing.expectEqualStrings("", app.slack_outbox[1].entry.text.slice());
+    try std.testing.expect(!std.mem.eql(u8, &app.slack_outbox[0].entry.id, &app.slack_outbox[1].entry.id));
+    var restored = fixture();
+    loadOutbox(&restored);
+    try std.testing.expectEqual(@as(usize, 2), restored.slack_outbox_count);
+    for (app.slack_outbox[0..2], restored.slack_outbox[0..2]) |before, after| {
+        try std.testing.expectEqualSlices(u8, &before.entry.id, &after.entry.id);
+        try std.testing.expectEqualStrings(before.entry.file.slice(), after.entry.file.slice());
+        try std.testing.expectEqualStrings(before.entry.text.slice(), after.entry.text.slice());
+    }
 }
 
 test "verification fixture refuses provider queues and sends without losing a draft" {
