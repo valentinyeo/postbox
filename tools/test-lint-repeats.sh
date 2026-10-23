@@ -87,9 +87,18 @@ done
 cp "$repo/.github/workflows/ai-review.yml" "$fixture/.github/workflows/ai-review.yml"
 "$lint" "$fixture"
 printf 'test-lint-repeats: B6 requires free Models permission and rejects secrets and pull_request_target\n'
+mkdir -p "$fixture/tools"
+admit_src="$repo/tools/automerge-admit.sh"
+yml_src="$repo/.github/workflows/automerge.yml"
+reset_automerge() {
+    cp "$yml_src" "$fixture/.github/workflows/automerge.yml"
+    cp "$admit_src" "$fixture/tools/automerge-admit.sh"
+}
+reset_automerge
 b8_cases=0
 for missing in ci tdlib windows-smoke no-comments unfurl-verification private-markers secret-scan pr-title notify-release "tdlib-cache / cache"; do
-    sed "s|\"$missing\"||g" "$repo/.github/workflows/automerge.yml" > "$fixture/.github/workflows/automerge.yml"
+    reset_automerge
+    sed "s|\"$missing\"||g" "$admit_src" > "$fixture/tools/automerge-admit.sh"
     status=0
     "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
     if (( status != 1 )) || ! grep -Fq '[B8]' "$temp/output"; then
@@ -100,7 +109,12 @@ for missing in ci tdlib windows-smoke no-comments unfurl-verification private-ma
     b8_cases=$((b8_cases + 1))
 done
 for guard in 'required=' 'as \$names' 'COMPLETED' 'match-head-commit' 'could not evaluate head checks' 'length) == 0' '!= "code-review"'; do
-    sed "/$guard/d" "$repo/.github/workflows/automerge.yml" > "$fixture/.github/workflows/automerge.yml"
+    reset_automerge
+    if [ "$guard" = 'match-head-commit' ]; then
+        sed "/$guard/d" "$yml_src" > "$fixture/.github/workflows/automerge.yml"
+    else
+        sed "/$guard/d" "$admit_src" > "$fixture/tools/automerge-admit.sh"
+    fi
     status=0
     "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
     if (( status != 1 )) || ! grep -Fq '[B8]' "$temp/output"; then
@@ -110,19 +124,20 @@ for guard in 'required=' 'as \$names' 'COMPLETED' 'match-head-commit' 'could not
     fi
     b8_cases=$((b8_cases + 1))
 done
-cp "$repo/.github/workflows/automerge.yml" "$fixture/.github/workflows/automerge.yml"
+reset_automerge
 "$lint" "$fixture"
 printf 'test-lint-repeats: IGSH-504 B8 rejects %s incomplete check policies and permits the fixed workflow\n' "$b8_cases"
 b9_cases=0
 for mutation in fields owner_env owner_arg same_repo owner_author; do
+    reset_automerge
     case "$mutation" in
-        fields) sed 's/,isCrossRepository,author//' "$repo/.github/workflows/automerge.yml" ;;
-        owner_env) sed '/REPO_OWNER:/d' "$repo/.github/workflows/automerge.yml" ;;
-        owner_arg) sed 's/ --arg owner "\$REPO_OWNER"//' "$repo/.github/workflows/automerge.yml" ;;
-        same_repo) sed 's/\.isCrossRepository != false or //' "$repo/.github/workflows/automerge.yml" ;;
-        owner_author) sed 's/ or \.author\.login != \$owner//' "$repo/.github/workflows/automerge.yml" ;;
-    esac > "$fixture/.github/workflows/automerge.yml"
-    if cmp -s "$repo/.github/workflows/automerge.yml" "$fixture/.github/workflows/automerge.yml"; then
+        fields) sed 's/,isCrossRepository,author//' "$yml_src" > "$fixture/.github/workflows/automerge.yml" ;;
+        owner_env) sed '/REPO_OWNER:/d' "$yml_src" > "$fixture/.github/workflows/automerge.yml" ;;
+        owner_arg) sed 's/ --arg owner "\$REPO_OWNER"//' "$admit_src" > "$fixture/tools/automerge-admit.sh" ;;
+        same_repo) sed 's/\.isCrossRepository != false or //' "$admit_src" > "$fixture/tools/automerge-admit.sh" ;;
+        owner_author) sed 's/ or \.author\.login != \$owner//' "$admit_src" > "$fixture/tools/automerge-admit.sh" ;;
+    esac
+    if cmp -s "$yml_src" "$fixture/.github/workflows/automerge.yml" && cmp -s "$admit_src" "$fixture/tools/automerge-admit.sh"; then
         printf 'test-lint-repeats: FAIL IGSH-635 %s mutation changed nothing\n' "$mutation" >&2
         exit 1
     fi
@@ -135,7 +150,7 @@ for mutation in fields owner_env owner_arg same_repo owner_author; do
     fi
     b9_cases=$((b9_cases + 1))
 done
-cp "$repo/.github/workflows/automerge.yml" "$fixture/.github/workflows/automerge.yml"
+reset_automerge
 "$lint" "$fixture"
 printf 'test-lint-repeats: IGSH-635 B9 rejects %s incomplete admission policies and permits the fixed workflow\n' "$b9_cases"
 mkdir -p "$fixture/src/nested"

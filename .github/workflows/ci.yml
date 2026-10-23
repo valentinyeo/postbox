@@ -70,6 +70,7 @@ jobs:
           bash tools/test-agent-setup.sh
           bash tools/test-lint-repeats.sh
           bash tools/test-ci-green.sh
+          bash tools/test-automerge-admit.sh
           bash tools/test-ai-review.sh
 
       - name: Outbox lifecycle and regression controls

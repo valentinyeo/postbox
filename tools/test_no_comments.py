@@ -100,7 +100,7 @@ elif args[:2] == ['pr', 'view']:
 elif args[:2] == ['pr', 'merge']:
     pass
 elif args[0] == 'api':
-    print('src/main.zig' if '/files?' in args[1] else sha)
+    print('src/main.zig' if '/files?' in args[1] else '0' if '/compare/' in args[1] else sha)
 elif args[:2] == ['workflow', 'run']:
     if mode == 'dispatch-failure' and args[2] == 'no-comments.yml': sys.exit(1)
     (root / args[2]).touch()
@@ -114,8 +114,8 @@ else:
             (root / 'sleep').write_text('#!/bin/sh\nexit 0\n')
             (root / 'sleep').chmod(0o755)
             env = dict(os.environ, PATH=directory + os.pathsep + os.environ['PATH'],
-                       FAKE_DIR=directory, FAKE_MODE=mode, REPO='fixture/repository', REPO_OWNER='fixture')
-            result = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True)
+                       FAKE_DIR=directory, FAKE_MODE=mode, REPO='fixture/repository', REPO_OWNER='fixture', RUNNER_TEMP=directory)
+            result = subprocess.run(['bash', '-c', script], env=env, cwd=ROOT, capture_output=True, text=True)
             calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
             return result, calls
 

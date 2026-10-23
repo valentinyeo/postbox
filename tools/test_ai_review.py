@@ -374,7 +374,7 @@ class Workflow(unittest.TestCase):
         self.assertIn("GH_TOKEN: ${{ github.token }}", review)
         self.assertIn('run: bash tools/ai-review.sh "$PR_NUMBER"', review)
         self.assertEqual(text.count("if: steps.pr.outputs.number != ''"), 2)
-        automerge = (TOOLS.parent / ".github/workflows/automerge.yml").read_text()
+        automerge = (TOOLS.parent / ".github/workflows/automerge.yml").read_text() + (TOOLS / "automerge-admit.sh").read_text()
         self.assertIn('select((.name // .context) != "code-review")', automerge)
         required = re.search(r"required='([^']+)'", automerge).group(1)
         self.assertNotIn("code-review", json.loads(required))
