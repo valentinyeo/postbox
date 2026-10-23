@@ -16493,13 +16493,14 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             text_top += text_height + unfurl_card_height + px(a, 6);
         }
         if (a.text_selection.range(index, message.text.len)) |range| {
-            const highlight = win.CreateSolidBrush(theme.current.secondary_container) orelse return;
+            const colors = theme.selectionColors(theme.current.*, message.from_me);
+            const highlight = win.CreateSolidBrush(colors.fill) orelse return;
             defer _ = win.DeleteObject(highlight);
             for (message.word_rects[0..message.word_count]) |*span| {
                 if (span.start < range.start or @as(usize, span.start) + span.len > range.end) continue;
                 _ = win.FillRect(hdc, &span.rect, highlight);
                 _ = win.SelectObject(hdc, @ptrCast(a.font.?));
-                _ = win.SetTextColor(hdc, theme.current.on_secondary_container);
+                _ = win.SetTextColor(hdc, colors.text);
                 const slice = message.text.slice()[span.start..][0..span.len];
                 var runs: [max_text_runs]TextRun = undefined;
                 const count = splitRuns(slice, &runs);
