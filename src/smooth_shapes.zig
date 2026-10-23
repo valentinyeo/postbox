@@ -71,30 +71,39 @@ fn argb(color: win.COLORREF) u32 {
 
 pub const Context = struct {
     hdc: win.HDC,
-    graphics: Handle = null,
+    antialias: bool = false,
 
     pub fn init(hdc: win.HDC) Context {
         _ = win.InitOnceExecuteOnce(&once, loadOnce, null, null);
-        var result = Context{ .hdc = hdc };
-        if (api) |f| {
-            if (f.GdipCreateFromHDC(hdc, &result.graphics) == 0 and result.graphics != null) {
-                var clip: win.RECT = undefined;
-                const kind = win.GetClipBox(hdc, &clip);
-                if (kind != win.ERROR and
-                    f.GdipSetClipRect(result.graphics, @floatFromInt(clip.left), @floatFromInt(clip.top), @floatFromInt(@max(0, clip.right - clip.left)), @floatFromInt(@max(0, clip.bottom - clip.top)), 0) == 0 and
-                    f.GdipSetSmoothingMode(result.graphics, 4) == 0 and f.GdipSetPixelOffsetMode(result.graphics, 4) == 0) return result;
-                _ = f.GdipDeleteGraphics(result.graphics);
-            }
-        }
-        result.graphics = null;
+        var result = Context{ .hdc = hdc, .antialias = true };
+        const graphics = open(&result);
+        result.antialias = graphics != null;
+        close(graphics);
         return result;
     }
 
     pub fn deinit(self: *Context) void {
-        if (self.graphics) |graphics| _ = api.?.GdipDeleteGraphics(graphics);
-        self.graphics = null;
+        self.antialias = false;
     }
 };
+
+fn open(ctx: *const Context) Handle {
+    if (!ctx.antialias) return null;
+    const f = api orelse return null;
+    var graphics: Handle = null;
+    if (f.GdipCreateFromHDC(ctx.hdc, &graphics) != 0 or graphics == null) return null;
+    var clip: win.RECT = undefined;
+    const kind = win.GetClipBox(ctx.hdc, &clip);
+    if (kind != win.ERROR and
+        f.GdipSetClipRect(graphics, @floatFromInt(clip.left), @floatFromInt(clip.top), @floatFromInt(@max(0, clip.right - clip.left)), @floatFromInt(@max(0, clip.bottom - clip.top)), 0) == 0 and
+        f.GdipSetSmoothingMode(graphics, 4) == 0 and f.GdipSetPixelOffsetMode(graphics, 4) == 0) return graphics;
+    _ = f.GdipDeleteGraphics(graphics);
+    return null;
+}
+
+fn close(graphics: Handle) void {
+    if (graphics != null) _ = api.?.GdipDeleteGraphics(graphics);
+}
 
 fn roundPath(rect: win.RECT, corner_width: i32, corner_height: i32) Handle {
     const f = api.?;
@@ -119,7 +128,9 @@ fn roundPath(rect: win.RECT, corner_width: i32, corner_height: i32) Handle {
 
 fn draw(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i32, color: win.COLORREF, stroke: ?i32, ellipse: bool) void {
     if (rect.right <= rect.left or rect.bottom <= rect.top) return;
-    if (ctx.graphics) |graphics| {
+    const opened = open(ctx);
+    defer close(opened);
+    if (opened) |graphics| {
         const f = api.?;
         var shape = rect;
         if (stroke != null) {
@@ -146,13 +157,15 @@ fn draw(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i
             }
         }
     }
-    fillCoverage(ctx, .{ .rect = @bitCast(rect), .corner_width = corner_width, .corner_height = corner_height, .ellipse = ellipse, .stroke = stroke }, color);
+    fillCoverage(ctx, opened, .{ .rect = @bitCast(rect), .corner_width = corner_width, .corner_height = corner_height, .ellipse = ellipse, .stroke = stroke }, color);
 }
 
 pub fn strokePolyline(ctx: *const Context, points: []const [2]f32, color: win.COLORREF, width: f32) void {
     if (points.len < 2) return;
     const stroke = @max(1, width);
-    if (ctx.graphics) |graphics| {
+    const opened = open(ctx);
+    defer close(opened);
+    if (opened) |graphics| {
         const f = api.?;
         var path: Handle = null;
         if (f.GdipCreatePath(0, &path) == 0 and path != null) {
@@ -185,10 +198,10 @@ pub fn strokePolyline(ctx: *const Context, points: []const [2]f32, color: win.CO
         .bottom = @intFromFloat(@ceil(high[1] + padding)),
     };
     var dc = ctx.hdc;
-    if (ctx.graphics) |graphics| {
+    if (opened) |graphics| {
         if (api.?.GdipGetDC(graphics, &dc) != 0 or dc == null) return;
     }
-    defer if (ctx.graphics) |graphics| {
+    defer if (opened) |graphics| {
         _ = api.?.GdipReleaseDC(graphics, dc);
     };
     blendCoverage(dc, box, coverage.Polyline{ .points = points, .width = stroke }, color);
@@ -222,13 +235,13 @@ fn blendCoverage(dc: win.HDC, box: geometry.Rect, shape: anytype, color: win.COL
     _ = win.AlphaBlend(dc, box.left, box.top, width, height, memory, 0, 0, width, height, .{ .BlendOp = win.AC_SRC_OVER, .BlendFlags = 0, .SourceConstantAlpha = 255, .AlphaFormat = win.AC_SRC_ALPHA });
 }
 
-fn fillCoverage(ctx: *const Context, shape: coverage.Shape, color: win.COLORREF) void {
+fn fillCoverage(ctx: *const Context, opened: Handle, shape: coverage.Shape, color: win.COLORREF) void {
     if (shape.rect.right <= shape.rect.left or shape.rect.bottom <= shape.rect.top) return;
     var dc = ctx.hdc;
-    if (ctx.graphics) |graphics| {
+    if (opened) |graphics| {
         if (api.?.GdipGetDC(graphics, &dc) != 0 or dc == null) return;
     }
-    defer if (ctx.graphics) |graphics| {
+    defer if (opened) |graphics| {
         _ = api.?.GdipReleaseDC(graphics, dc);
     };
     if (shape.stroke == null and !shape.ellipse) {
@@ -262,8 +275,9 @@ fn fillCoverage(ctx: *const Context, shape: coverage.Shape, color: win.COLORREF)
 }
 
 fn fillHybrid(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i32, color: win.COLORREF, parts: geometry.Partition) bool {
-    const f = api.?;
-    const graphics = ctx.graphics.?;
+    const f = api orelse return false;
+    const graphics = open(ctx) orelse return false;
+    defer close(graphics);
     const brush = win.CreateSolidBrush(color) orelse return false;
     defer _ = win.DeleteObject(brush);
     var aa_brush: Handle = null;
@@ -313,7 +327,7 @@ fn fillHybrid(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_hei
 }
 
 pub fn fillRoundRect(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i32, color: win.COLORREF) void {
-    if (ctx.graphics != null) {
+    if (ctx.antialias) {
         if (geometry.partition(@bitCast(rect), corner_width, corner_height)) |parts| {
             if (fillHybrid(ctx, rect, corner_width, corner_height, color, parts)) return;
         }
@@ -334,7 +348,9 @@ pub fn strokeEllipse(ctx: *const Context, rect: win.RECT, color: win.COLORREF, w
 }
 
 pub fn strokeArc(ctx: *const Context, rect: win.RECT, start: f32, sweep: f32, color: win.COLORREF, width: i32) void {
-    if (ctx.graphics) |graphics| {
+    const opened = open(ctx);
+    defer close(opened);
+    if (opened) |graphics| {
         const f = api.?;
         var pen: Handle = null;
         if (f.GdipCreatePen1(argb(color), @floatFromInt(@max(1, width)), 2, &pen) == 0 and pen != null) {
@@ -342,7 +358,7 @@ pub fn strokeArc(ctx: *const Context, rect: win.RECT, start: f32, sweep: f32, co
             if (f.GdipDrawArc(graphics, pen, @floatFromInt(rect.left), @floatFromInt(rect.top), @floatFromInt(rect.right - rect.left - 1), @floatFromInt(rect.bottom - rect.top - 1), start, sweep) == 0) return;
         }
     }
-    fillCoverage(ctx, .{ .rect = @bitCast(rect), .ellipse = true, .stroke = width, .arc = .{ .start = start, .sweep = sweep } }, color);
+    fillCoverage(ctx, opened, .{ .rect = @bitCast(rect), .ellipse = true, .stroke = width, .arc = .{ .start = start, .sweep = sweep } }, color);
 }
 
 test "rounded shapes and forced fallback preserve solid colours and bounds with partial edge coverage at both scales" {
@@ -363,7 +379,7 @@ test "rounded shapes and forced fallback preserve solid colours and bounds with 
     const pixels: []u32 = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. size * size];
     var ctx = Context.init(dc);
     defer ctx.deinit();
-    try std.testing.expect(ctx.graphics != null);
+    try std.testing.expect(ctx.antialias);
     const color = 0x00332211;
     const expected = argb(color) & 0xffffff;
     for ([_]i32{ 2, 3 }) |scale| {
@@ -450,7 +466,7 @@ test "hybrid fills match full paths at edges and exactly inside with odd corners
                         if (clipped) _ = win.IntersectClipRect(dc, 25, 22, 210, 180);
                         var ctx = Context.init(dc);
                         defer ctx.deinit();
-                        try std.testing.expect(ctx.graphics != null);
+                        try std.testing.expect(ctx.antialias);
                         for (colors, 0..) |color, i| {
                             const offset: i32 = @intCast(i * 13);
                             const rect = win.RECT{ .left = 8 + offset, .top = 11 + offset, .right = 8 + offset + @divTrunc(dimensions[0] * scale, 2), .bottom = 11 + offset + @divTrunc(dimensions[1] * scale, 2) };
@@ -561,7 +577,7 @@ test "forced GDI fallback preserves solid pixels edge bands coverage area and ev
                         @memset(pixels, 0xff000000);
                         var ctx = if (fallback) Context{ .hdc = dc } else Context.init(dc);
                         defer ctx.deinit();
-                        if (!fallback) try std.testing.expect(ctx.graphics != null);
+                        if (!fallback) try std.testing.expect(ctx.antialias);
                         if (kind == .arc) strokeArc(&ctx, rect, 183.814075, -187.628150, 0x00ffffff, stroke.?) else if (kind == .ellipse) {
                             if (stroke) |width| strokeEllipse(&ctx, rect, 0x00ffffff, width) else fillEllipse(&ctx, rect, 0x00ffffff);
                         } else if (stroke) |width| strokeRoundRect(&ctx, rect, diameter * scale, diameter * scale, 0x00ffffff, width) else fillRoundRect(&ctx, rect, diameter * scale, diameter * scale, 0x00ffffff);
@@ -665,7 +681,7 @@ const Ink = struct {
 fn paintIssue545Row(dc: win.HDC, row: win.RECT, antialias: bool) !void {
     var smooth_context = Context.init(dc);
     defer smooth_context.deinit();
-    if (antialias) try std.testing.expect(smooth_context.graphics != null);
+    if (antialias) try std.testing.expect(smooth_context.antialias);
     const fallback = Context{ .hdc = dc };
     const ctx = if (antialias) &smooth_context else &fallback;
     const background = win.CreateSolidBrush(0x00141210) orelse return error.BrushFailed;
@@ -676,6 +692,14 @@ fn paintIssue545Row(dc: win.HDC, row: win.RECT, antialias: bool) !void {
     strokeArc(ctx, .{ .left = row.left + 70, .top = row.top + 8, .right = row.left + 110, .bottom = row.top + 48 }, 180, 180, 0x0060c0ff, 3);
     strokePolyline(ctx, &.{ .{ @floatFromInt(row.left + 130), @floatFromInt(row.top + 12) }, .{ @floatFromInt(row.left + 160), @floatFromInt(row.top + 40) } }, 0x00f0f0f0, 2);
     fillRoundRect(ctx, .{ .left = row.left - 20, .top = row.top - 10, .right = row.left + 30, .bottom = row.top + 20 }, 16, 16, 0x000000ff);
+    const ink = win.CreateSolidBrush(0x0040c0e0) orelse return error.BrushFailed;
+    defer _ = win.DeleteObject(ink);
+    var after_shapes = win.RECT{ .left = row.left + 20, .top = row.top + 16, .right = row.left + 44, .bottom = row.top + 30 };
+    _ = win.FillRect(dc, &after_shapes, ink);
+    var glyph = [3]win.POINT{ .{ .x = row.left + 60, .y = row.top + 20 }, .{ .x = row.left + 60, .y = row.top + 36 }, .{ .x = row.left + 73, .y = row.top + 28 } };
+    const previous_brush = win.SelectObject(dc, ink);
+    defer _ = win.SelectObject(dc, previous_brush);
+    _ = win.Polygon(dc, &glyph, 3);
     _ = win.GdiFlush();
 }
 
