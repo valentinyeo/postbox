@@ -4,7 +4,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 
 | ID / workflow input | User-facing feature | Automated recipe |
 | --- | --- | --- |
-| [paste-image](paste-image.md) | Clipboard screenshot images | Ctrl+V, Enter, full-screen RGBA and 4K on every provider, decoded upload dimensions/alpha |
+| [paste-image](paste-image.md) | Clipboard images and multiple attachments | Ctrl+V, Enter, full-screen RGBA and 4K on every provider; WhatsApp/Slack + picker, two previews, ordered captioned sends and remove-first |
 | [search](search.md) | Chat search | Ctrl+F, match, clear, no-match, restore |
 | [navigation](navigation.md) | Keyboard chat navigation | Next chat, previous chat |
 | [drafts](drafts.md) | Composer and per-chat drafts | Type, switch away/back, check disk |
@@ -121,6 +121,7 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-683: WhatsApp phone chat page mixing @lid rows -> `hub` (asserts all four texts of a page that mixes phone and same-account @lid ChatJIDs reach the pane and the launch log has no WrongChat; other mismatches stay unit-test coverage in src/hub_test.zig)
 - IGSH-681: WhatsApp chats load older hub messages on scroll-up -> `hub` (real PageUp keystrokes page a 250-row synthetic chat through cursor requests `before=<id>:<timestamp>`; asserts all 250 rows once each, oldest first, an empty last page and no request after it; the legacy `whatsapp-hub` bridge is not paged)
 - IGSH-679: clipboard screenshot paste and Enter send -> `paste-image` (full-screen and 4K RGBA, V5/PNG and bitmap formats, decoded upload dimensions, alpha and orientation on four synthetic provider chats)
+- IGSH-688: attach two or more images -> `paste-image` (WhatsApp and Slack Ctrl+V plus real + picker, two screenshot-measured previews, ordered per-image sends with first-only caption and distinct client IDs, remove-first keeps the second image)
 - IGSH-700: Ctrl+K finds archived chats on every account -> `palette-archived` (archived WhatsApp, Telegram and Slack names from the combined inbox and every account view, inbox names from every view, Enter opens the chat without a hub archive write)
 
 - IGSH-667: drag across full chat passages -> `passage-copy` (exact stamped partial clipboard and held-edge scrolling on WhatsApp and Slack)

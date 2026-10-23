@@ -1,3 +1,5 @@
+. "$PSScriptRoot/menus.ps1"
+
 $pasteReferences = @((Get-ChildItem (Join-Path $PSHOME 'ref') -Filter '*.dll').FullName) + @(
     [Drawing.Bitmap].Assembly.Location,
     [Drawing.Color].Assembly.Location,
@@ -80,6 +82,27 @@ public static class VerifyPasteImage {
             }
         }
     }
+    public static void Fixture(string path) {
+        using (Bitmap image = new Bitmap(80, 60)) {
+            using (Graphics graphics = Graphics.FromImage(image)) { graphics.Clear(Color.FromArgb(32, 180, 220)); }
+            image.Save(path, ImageFormat.Png);
+        }
+    }
+    public static int[] Preview(string path, int left, int top, int right, int bottom, bool second) {
+        using (Bitmap image = new Bitmap(path)) {
+            int minX = right, minY = bottom, maxX = -1, maxY = -1, count = 0;
+            for (int y = Math.Max(0, top); y < Math.Min(bottom, image.Height); y++) {
+                for (int x = Math.Max(0, left); x < Math.Min(right, image.Width); x++) {
+                    Color c = image.GetPixel(x, y);
+                    bool match = second ? c.R == 32 && c.G == 180 && c.B == 220 :
+                        (c.R == 224 || c.R == 64) && c.G == 96 && (c.B == 48 || c.B == 192);
+                    if (match) { minX = Math.Min(minX, x); minY = Math.Min(minY, y); maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y); count++; }
+                }
+            }
+            if (count < 100 || maxX - minX < 16 || maxY - minY < 16) throw new Exception("paste-image: missing visible preview");
+            return new int[] { minX, minY, maxX + 1, maxY + 1, count };
+        }
+    }
     public static int[] Decode(string path) {
         using (Bitmap image = new Bitmap(path)) {
             Color first = image.GetPixel(0, 0);
@@ -135,6 +158,97 @@ function Invoke-PasteImageJourney($Session) {
         Hub-Pass $Session $name
     }
     Assert-That (@(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/send' }).Count -eq $cases.Count) 'paste-image: duplicate or failed send attempts'
+    Invoke-MultiImageJourney $Session $index
     [Windows.Forms.Clipboard]::Clear()
     Save-Screen $Session after
+}
+
+function Add-PickerImage($Session, [string]$Path) {
+    Click-Control $Session '1136'
+    $dialog = Wait-Popup $Session '#32770'
+    $window = [Windows.Automation.AutomationElement]::FromHandle($dialog)
+    $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Edit)
+    $null = Wait-Until {
+        $edits = $window.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+        foreach ($edit in $edits) {
+            if ($edit.Current.IsEnabled -and -not $edit.Current.IsOffscreen) { $edit.SetFocus(); return $true }
+        }
+    } 'paste-image: file-dialog editable filename'
+    Send-Keys $Session '%n'
+    Send-Keys $Session '^a'
+    Send-Keys $Session $Path
+    Send-Keys $Session '{ENTER}'
+    $null = Wait-Until { (Find-Popup $Session '#32770') -eq [IntPtr]::Zero } 'paste-image: file dialog closed'
+    Add-Content (Join-Path $Session.evidence 'actions.log') 'picker: UIA filename, keyboard path and Enter'
+}
+
+function Read-ImagePreviews($Session, [string]$Name) {
+    Save-Screen $Session $Name
+    $canvas = (Get-Edit (Get-Window $Session) '1024').Current.BoundingRectangle
+    $compose = (Get-Edit (Get-Window $Session) '1032').Current.BoundingRectangle
+    $screen = [Windows.Forms.SystemInformation]::VirtualScreen
+    $path = Join-Path $Session.evidence "$Name.png"
+    $first = [VerifyPasteImage]::Preview($path, [int]($canvas.Left - $screen.Left), [int]($canvas.Bottom - $screen.Top), [int]($canvas.Right - $screen.Left), [int]($compose.Top - $screen.Top), $false)
+    $second = [VerifyPasteImage]::Preview($path, [int]($canvas.Left - $screen.Left), [int]($canvas.Bottom - $screen.Top), [int]($canvas.Right - $screen.Left), [int]($compose.Top - $screen.Top), $true)
+    Assert-That ($first[2] -lt $second[0]) 'paste-image: two separate previews in attachment order'
+    return @{ first = $first; second = $second }
+}
+
+function Invoke-MultiImageJourney($Session, [int]$Count) {
+    $fixture = Join-Path (Join-Path $Session.root 'profile') 'second-image.png'
+    [VerifyPasteImage]::Fixture($fixture)
+    $multi = @()
+    $removed = @()
+    foreach ($provider in @('whatsapp', 'slack')) {
+        New-Item (Join-Path $Session.evidence $provider) -ItemType Directory -Force | Out-Null
+        Invoke-PaletteCommand $Session "Verification Paste $provider"
+        $null = Wait-Until { (Read-Control $Session status).selected.id -eq "paste:$provider" } "paste-image: multi $provider selected"
+        Invoke-PaletteCommand $Session 'Compose message'
+        Save-Screen $Session "$provider/multi-before"
+        $null = [VerifyPasteImage]::Put(80, 60, 'bitmap')
+        Send-Keys $Session '^v'
+        Add-PickerImage $Session $fixture
+        $previews = Read-ImagePreviews $Session "$provider/multi-staged"
+        Send-Keys $Session 'two-image-caption'
+        Send-Keys $Session '{ENTER}'
+        $null = Wait-Until {
+            @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/send' }).Count -eq ($Count + 2) -and (Read-Control $Session status).pending_sends -eq 0
+        } "paste-image: $provider two ordered image sends"
+        $sends = @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/send' } | Select-Object -Skip $Count)
+        Assert-That ($sends.Count -eq 2 -and $sends[0].body.text -ceq 'two-image-caption' -and $sends[1].body.text -ceq '') 'paste-image: caption belongs to first image only'
+        foreach ($send in $sends) { Assert-That ($send.accepted -and $send.multipart -and $send.body.chat -eq "paste:$provider") 'paste-image: multi image routed once' }
+        $first = [VerifyPasteImage]::Decode((Join-Path $Session.evidence $sends[0].upload))
+        $second = [VerifyPasteImage]::Decode((Join-Path $Session.evidence $sends[1].upload))
+        Assert-That (($first -join ',') -eq '80,60,224,96,48,255,64,96,192,255') 'paste-image: pasted image first'
+        Assert-That (($second -join ',') -eq '80,60,32,180,220,255,32,180,220,255') 'paste-image: picker image second'
+        $multi += @{ provider = $provider; sends = $sends; previews = $previews; decoded = @($first, $second) }
+        ConvertTo-Json -InputObject $multi -Depth 16 | Set-Content (Join-Path $Session.evidence 'multi-sent.json')
+        $Count += 2
+        Save-Screen $Session "$provider/multi-sent"
+        Invoke-PaletteCommand $Session 'Compose message'
+        $null = [VerifyPasteImage]::Put(80, 60, 'bitmap')
+        Send-Keys $Session '^v'
+        Add-PickerImage $Session $fixture
+        $previews = Read-ImagePreviews $Session "$provider/remove-staged"
+        $screen = [Windows.Forms.SystemInformation]::VirtualScreen
+        $x = $screen.Left + $previews.first[2] - 6
+        $y = $screen.Top + $previews.first[1] + 6
+        [VerifyMenus]::Click($Session.pid, $x, $y, $false)
+        Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: remove first preview $provider x=$x y=$y"
+        Save-Screen $Session "$provider/remove-one"
+        Send-Keys $Session '{ENTER}'
+        $null = Wait-Until {
+            @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/send' }).Count -eq ($Count + 1) -and (Read-Control $Session status).pending_sends -eq 0
+        } "paste-image: $provider only second image after removal"
+        $sends = @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/send' } | Select-Object -Skip $Count)
+        Assert-That ($sends.Count -eq 1 -and $sends[0].accepted -and $sends[0].body.chat -eq "paste:$provider" -and $sends[0].body.text -ceq '') 'paste-image: remove sends exactly one image'
+        Assert-That ($sends[0].file_sha256 -eq $multi[-1].sends[1].file_sha256) 'paste-image: removal kept second image bytes'
+        $removed += @{ provider = $provider; sends = $sends; click = @($x, $y); previews = $previews }
+        ConvertTo-Json -InputObject $removed -Depth 16 | Set-Content (Join-Path $Session.evidence 'remove.json')
+        $Count++
+        Save-Screen $Session "$provider/remove-sent"
+        Hub-Pass $Session "$provider-multi-remove"
+    }
+    $sends = @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/send' })
+    Assert-That ($sends.Count -eq $Count -and @($sends.body.client_id | Select-Object -Unique).Count -eq $Count) 'paste-image: distinct per-image client ids, no extra sends'
 }

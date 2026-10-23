@@ -335,7 +335,11 @@ for artifact in ['sizes.json', 'decoded', 'paste-uploads/', 'bridge-requests.jso
 for required in ['1920, 1032', '3840, 2160', 'DataFormats.GetFormat(17)', 'SetData("PNG", false, png)',
                  "Send-Keys $Session '^v'", "Send-Keys $Session '{ENTER}'", 'VerifyPasteImage]::Decode']:
     assert required in paste_journey, required
-print('PASTE IMAGE MAP VERIFIED: native clipboard, decoded uploads, four providers, dispatch, PR matrix and evidence')
+for artifact in ['multi-before', 'multi-staged', 'multi-sent.json', 'remove.json', 'remove-staged', 'remove-one', 'remove-sent']:
+    assert artifact in paste_journey and artifact in paste_validator and artifact in (skill / 'features/paste-image.md').read_text(encoding='utf-8'), artifact
+for required in ["Click-Control $Session '1136'", "Wait-Popup $Session '#32770'", 'AutomationElement]::FromHandle', 'Read-ImagePreviews', '[VerifyMenus]::Click', 'two-image-caption']:
+    assert required in paste_journey, required
+print('PASTE IMAGE MAP VERIFIED: native clipboard, decoded uploads, four providers, multi-image picker and remove-first evidence')
 
 for item in ['link-previews.ps1', 'check-link-previews-evidence.py']:
     assert (root / 'tools/verify-wazig' / item).is_file()

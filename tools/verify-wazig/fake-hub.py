@@ -1321,7 +1321,7 @@ class PasteImageHandler(TelegramHandler):
         elif url.path == '/v1/wazig/messages':
             chat = query.get('chat', [''])[0]
             with self.state.lock:
-                rows = [self.message(chat, reply['msg_id'], '', FromMe=True, MediaType='image',
+                rows = [self.message(chat, reply['msg_id'], reply['text'], FromMe=True, MediaType='image',
                                      MimeType='image/png', Filename=reply['filename'])
                         for reply in self.state.sends.values() if reply['chat'] == chat]
             self.respond(200, list(reversed(rows)))
@@ -1375,7 +1375,7 @@ class PasteImageHandler(TelegramHandler):
                     target.write_bytes(image)
                     self.state.sends[body['client_id']] = dict(client_id=body['client_id'],
                         msg_id=f'paste-{len(self.state.sends) + 1}', ts=self.state.stamp, status='sent',
-                        chat=body['chat'], filename=body['file'], upload=upload)
+                        chat=body['chat'], text=body['text'], filename=body['file'], upload=upload)
                     self.state.telegram_events.append(('msg', body['chat']))
                     self.state.lock.notify_all()
                 reply = dict(self.state.sends[body['client_id']])

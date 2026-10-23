@@ -23,10 +23,13 @@ def check_paste_image(folder):
     assert all(row['authorized'] for row in requests if row['method'] != 'SSE')
     assert all(row['wire_path'].startswith('/v1/wazig/') for row in requests)
     sends = [row for row in requests if row['path'] == '/v1/wazig/send']
-    assert len(sends) == len(sizes) and len({row['body']['client_id'] for row in sends}) == len(sizes)
+    assert len(sends) == len(sizes) + 6
+    assert len({row['body']['client_id'] for row in sends}) == len(sends)
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
-    assert actions.count('keys: ^v\n') == len(sizes)
+    assert actions.count('keys: ^v\n') == len(sizes) + 4
+    assert actions.count('SendInput: control=1136 ') == 4
+    assert actions.count('picker: UIA filename, keyboard path and Enter') == 4
     for index, (size, send) in enumerate(zip(sizes, sends), 1):
         assert size['case'] == index
         assert send['accepted'] and send['status'] == 200 and send['multipart']
@@ -74,6 +77,33 @@ def check_paste_image(folder):
             assert read(f'{name}.state.json')['selected']['id'] == send['body']['chat']
         assert f'paste-image paste-{index} PASS' in proof
         assert f'clipboard: paste-{index} {size["mode"]} {width}x{height}' in actions
+    multi, removed = read('multi-sent.json'), read('remove.json')
+    assert [row['provider'] for row in multi] == [row['provider'] for row in removed] == ['whatsapp', 'slack']
+    for index, (row, removal) in enumerate(zip(multi, removed)):
+        provider = row['provider']
+        pair = sends[len(sizes) + index * 3:len(sizes) + index * 3 + 2]
+        last = sends[len(sizes) + index * 3 + 2]
+        assert row['sends'] == pair and removal['sends'] == [last]
+        assert [send['body']['text'] for send in pair] == ['two-image-caption', '']
+        assert last['body']['text'] == ''
+        assert row['decoded'] == [[80, 60, 224, 96, 48, 255, 64, 96, 192, 255], [80, 60, 32, 180, 220, 255, 32, 180, 220, 255]]
+        assert pair[0]['file_sha256'] != pair[1]['file_sha256'] == last['file_sha256']
+        for send in [*pair, last]:
+            assert send['accepted'] and send['status'] == 200 and send['multipart']
+            assert send['body']['chat'] == 'paste:' + provider
+            raw = (folder / send['upload']).read_bytes()
+            assert raw.startswith(b'\x89PNG\r\n\x1a\n') and len(raw) == send['file_size']
+            assert hashlib.sha256(raw).hexdigest() == send['file_sha256']
+        for preview in (row['previews'], removal['previews']):
+            assert preview['first'][2] < preview['second'][0]
+            assert preview['first'][4] >= 100 and preview['second'][4] >= 100
+        assert len(removal['click']) == 2 and f'SendInput: remove first preview {provider} ' in actions
+        for phase in ('multi-before', 'multi-staged', 'multi-sent', 'remove-staged', 'remove-one', 'remove-sent'):
+            name = f'{provider}/{phase}'
+            assert (folder / f'{name}.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+            assert read(f'{name}.state.json')['selected']['id'] == 'paste:' + provider
+            assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
+        assert f'paste-image {provider}-multi-remove PASS' in proof
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
     assert all(final[key] for key in ('production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'))
