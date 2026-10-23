@@ -1,11 +1,22 @@
 . "$PSScriptRoot/menus.ps1"
 Add-Type -Path "$PSScriptRoot/passage-copy.cs"
 
+function Get-PassageMessages($Rows) {
+    $messages = @{}
+    foreach ($row in $Rows) {
+        Assert-That (-not $messages.ContainsKey($row.id)) "Duplicate passage message id: $($row.id)"
+        $messages[$row.id] = $row
+    }
+    return $messages
+}
+
 function Get-PassageExpected($Rows, [int]$First, [int]$Last, [bool]$PartialLast) {
     $blocks = @()
     $day = ''
     foreach ($index in $First..$Last) {
-        $row = $Rows[$index]
+        $matches = @($Rows | Where-Object { $_.MsgID -ceq "PASSAGE-$index" })
+        Assert-That ($matches.Count -eq 1) "Expected one fixture row for PASSAGE-$index"
+        $row = $matches[0]
         $text = $row.Text
         if ($index -eq $First) { $text = $text.Substring($text.IndexOf('MIDDLE')) }
         if ($index -eq $Last -and $PartialLast) { $text = $text.Substring(0, $text.IndexOf('MIDDLE') + 6) }
@@ -59,13 +70,18 @@ function Invoke-PassageCopyJourney($Session) {
             $name = $target.provider
             Send-Keys $Session '^f'
             Send-Keys $Session $target.search
-            $null = Wait-Until { $shown = Read-Control $Session messages; $shown.chat.id -eq $target.chat -and $shown.chat.provider -eq $name -and $shown.messages.Count -eq 7 -and $shown.messages[6].bubble[2] -gt $shown.messages[6].bubble[0] } "$name passage history painted"
+            $null = Wait-Until {
+                $shown = Read-Control $Session messages
+                $messages = Get-PassageMessages $shown.messages
+                $shown.chat.id -eq $target.chat -and $shown.chat.provider -eq $name -and $shown.messages.Count -eq 7 -and $messages.ContainsKey('PASSAGE-7') -and $messages['PASSAGE-7'].bubble[2] -gt $messages['PASSAGE-7'].bubble[0]
+            } "$name passage history painted"
             Click-Control $Session '1024'
             $canvas = Get-PassageCanvas $Session
             $visible = $false
             for ($step = 0; $step -le 80; $step++) {
                 $rows = (Read-Control $Session messages).messages
-                $visible = @($rows[1..4] | Where-Object { -not (Test-PassageVisible $_ $canvas) }).Count -eq 0
+                $messages = Get-PassageMessages $rows
+                $visible = @(2..5 | Where-Object { -not (Test-PassageVisible $messages["PASSAGE-$_"] $canvas) }).Count -eq 0
                 if ($visible -or $step -eq 80) { break }
                 $x = [int]($canvas.left + $canvas.width / 2)
                 $y = [int]($canvas.top + $canvas.height / 2)
@@ -74,50 +90,54 @@ function Invoke-PassageCopyJourney($Session) {
                 Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: $name wheel up over canvas 1024 step=$($step + 1) x=$x y=$y"
                 [System.Threading.Thread]::Sleep(150)
             }
-            Assert-That $visible "$name messages 2 through 5 must fit fully inside canvas 1024 after at most 80 wheel steps; canvas=$($canvas.width)x$($canvas.height) message2=$($rows[1].bubble -join ',') message5=$($rows[4].bubble -join ',')"
+            Assert-That $visible "$name messages 2 through 5 must fit fully inside canvas 1024 after at most 80 wheel steps; canvas=$($canvas.width)x$($canvas.height) message2=$($messages['PASSAGE-2'].bubble -join ',') message5=$($messages['PASSAGE-5'].bubble -join ',')"
             Save-Screen $Session "$name-before"
             $before = (Read-Control $Session messages).messages
-            Assert-That ($before[4].bubble[3] - $before[1].bubble[1] -le $canvas.height) "$name messages 2 through 5 must fit together in the canvas"
-            Assert-That ($before[6].bubble[2] -eq 0) "$name final fixture message must start below the fold"
-            $start = Get-PassagePoint $Session $before[1] "$name-before"
-            $end = Get-PassagePoint $Session $before[4] "$name-before"
+            $messages = Get-PassageMessages $before
+            Assert-That ($messages['PASSAGE-5'].bubble[3] - $messages['PASSAGE-2'].bubble[1] -le $canvas.height) "$name messages 2 through 5 must fit together in the canvas"
+            Assert-That ($messages['PASSAGE-7'].bubble[2] -eq 0) "$name final fixture message must start below the fold"
+            $start = Get-PassagePoint $Session $messages['PASSAGE-2'] "$name-before"
+            $end = Get-PassagePoint $Session $messages['PASSAGE-5'] "$name-before"
             [VerifyMenus]::Hover($Session.pid, $start[0], $start[1])
             [VerifyPassage]::Button($Session.pid, $true)
             try { [VerifyMenus]::Hover($Session.pid, $end[0], $end[1]) } finally { [VerifyPassage]::Button($Session.pid, $false) }
             Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: $name passage message 2 middle to message 5 middle"
             Send-Keys $Session '^c'
             $actual = [Windows.Forms.Clipboard]::GetText()
-            $expected = Get-PassageExpected $fixture.($target.chat) 1 4 $true
+            $expected = Get-PassageExpected $fixture.($target.chat) 2 5 $true
             $checks += @{ provider = $name; stage = 'partial'; actual = $actual; expected = $expected; start = $start; end = $end; canvas = $canvas; before = $before }
             ConvertTo-Json -InputObject $checks -Depth 12 | Set-Content (Join-Path $Session.evidence 'clipboard.json')
             Save-Screen $Session "$name-after"
             Assert-That ($actual -ceq $expected) "$name passage clipboard mismatch: expected stamped partial messages 2 through 5"
             $canvas = Get-PassageCanvas $Session
             $edgeBefore = (Read-Control $Session messages).messages
-            Assert-That (Test-PassageVisible $edgeBefore[1] $canvas) "$name edge drag must start in visible message 2 before message 6"
-            Assert-That ($edgeBefore[6].bubble[2] -eq 0) "$name message 7 must be below the fold at edge-drag start"
-            Assert-That ($edgeBefore[5].bubble[2] -gt $edgeBefore[5].bubble[0]) "$name tall message 6 must be measurable before edge scrolling"
-            $held = @{ messages = @(); scroll_before = $edgeBefore[5].bubble[1]; scroll_after = $edgeBefore[5].bubble[1] }
+            $edgeMessages = Get-PassageMessages $edgeBefore
+            Assert-That (Test-PassageVisible $edgeMessages['PASSAGE-2'] $canvas) "$name edge drag must start in visible message 2 before message 6"
+            Assert-That ($edgeMessages['PASSAGE-7'].bubble[2] -eq 0) "$name message 7 must be below the fold at edge-drag start"
+            Assert-That ($edgeMessages['PASSAGE-6'].bubble[2] -gt $edgeMessages['PASSAGE-6'].bubble[0]) "$name tall message 6 must be measurable before edge scrolling"
+            $held = @{ messages = @(); scroll_before = $edgeMessages['PASSAGE-6'].bubble[1]; scroll_after = $edgeMessages['PASSAGE-6'].bubble[1] }
             [VerifyMenus]::Hover($Session.pid, $start[0], $start[1])
             [VerifyPassage]::Button($Session.pid, $true)
             try {
                 [VerifyMenus]::Hover($Session.pid, $start[0], ($canvas.top + $canvas.height + [Math]::Max(2, [int](2 * $canvas.dpi / 96))))
                 $null = Wait-Until {
                     $held.messages = (Read-Control $Session messages).messages
-                    $held.scroll_after = $held.messages[5].bubble[1]
-                    (Test-PassageVisible $held.messages[6] $canvas) -and $held.messages[5].bubble[2] -gt $held.messages[5].bubble[0] -and $held.scroll_after -lt $held.scroll_before
+                    $heldMessages = Get-PassageMessages $held.messages
+                    $held.scroll_after = $heldMessages['PASSAGE-6'].bubble[1]
+                    (Test-PassageVisible $heldMessages['PASSAGE-7'] $canvas) -and $heldMessages['PASSAGE-6'].bubble[2] -gt $heldMessages['PASSAGE-6'].bubble[0] -and $held.scroll_after -lt $held.scroll_before
                 } "$name held edge drag must scroll canvas 1024 and fully reveal message 7"
                 Assert-That ($held.scroll_after -lt $held.scroll_before) "$name read-only message 6 position must change during the held edge drag"
             } finally { [VerifyPassage]::Button($Session.pid, $false) }
             Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: $name held drag beyond canvas 1024 bottom"
             Send-Keys $Session '^c'
             $actual = [Windows.Forms.Clipboard]::GetText()
-            $expected = Get-PassageExpected $fixture.($target.chat) 1 6 $false
+            $expected = Get-PassageExpected $fixture.($target.chat) 2 7 $false
             $after = (Read-Control $Session messages).messages
             $checks += @{ provider = $name; stage = 'edge'; actual = $actual; expected = $expected; before = $edgeBefore; after = $after; held = $held; canvas = $canvas }
             ConvertTo-Json -InputObject $checks -Depth 12 | Set-Content (Join-Path $Session.evidence 'clipboard.json')
             Save-Screen $Session "$name-edge-after"
-            Assert-That ($after[5].bubble[2] -gt $after[5].bubble[0] -and $after[5].bubble[1] -lt $edgeBefore[5].bubble[1]) "$name held edge drag did not scroll"
+            $afterMessages = Get-PassageMessages $after
+            Assert-That ($afterMessages['PASSAGE-6'].bubble[2] -gt $afterMessages['PASSAGE-6'].bubble[0] -and $afterMessages['PASSAGE-6'].bubble[1] -lt $edgeMessages['PASSAGE-6'].bubble[1]) "$name held edge drag did not scroll"
             Assert-That ($actual -ceq $expected) "$name edge selection did not extend through final message"
             Hub-Pass $Session "$name-passage"
             Send-Keys $Session '^f'

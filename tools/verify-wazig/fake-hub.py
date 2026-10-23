@@ -418,7 +418,7 @@ class PassageCopyHandler(Handler):
             self.wire_path = self.path
             if self.authorized():
                 chat = parse_qs(url.query).get('chat', [''])[0]
-                self.respond(200, passage_rows(chat) if chat in (ALPHA, BETA) else [])
+                self.respond(200, list(reversed(passage_rows(chat))) if chat in (ALPHA, BETA) else [])
         else:
             super().do_GET()
 

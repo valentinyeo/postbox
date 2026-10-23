@@ -355,4 +355,12 @@ for value in ['[VerifyPassage]::Button', '[VerifyMenus]::Hover', "Send-Keys $Ses
     assert value in passage, value
 assert '--passage-copy' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
 assert '.claude/skills/verify-wazig/features/passage-copy.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
-print('PASSAGE COPY MAP VERIFIED: real cross-message drag, exact clipboard, held-edge scrolling and both providers')
+assert not re.search(r'\$(?:\w+\.)?(?:messages|rows|before|edgeBefore|after)\[\d', passage, re.I), 'passage targets must use PASSAGE ids, not array positions'
+for value in ["$messages['PASSAGE-2']", "$messages['PASSAGE-5']", "$edgeMessages['PASSAGE-6']", "$heldMessages['PASSAGE-7']", '$_.MsgID -ceq "PASSAGE-$index"', '[VerifyPassage]::Wheel($Session.pid, 120)']:
+    assert value in passage, value
+passage_validator = validator.split("if session['feature'] == 'passage-copy':", 1)[1].split("if session['feature'] == 'reactions':", 1)[0]
+assert not re.search(r"\['(?:before|after|messages)'\]\[\d", passage_validator), 'passage evidence must resolve control messages by id'
+for value in ["passage_messages(check['before'])", "passage_messages(check['after'])", "passage_messages(held['messages'])", "fixture_messages[f'PASSAGE-{index}']", 'timestamps == sorted(timestamps)']:
+    assert value in passage_validator, value
+assert 'self.respond(200, list(reversed(passage_rows(chat)))' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8'), 'passage message endpoint must be newest-first; clipboard fixture stays chronological'
+print('PASSAGE COPY MAP VERIFIED: id-based targets and evidence, chronological clipboard, newest-first wire rows, real drag and held-edge scrolling on both providers')
