@@ -202,9 +202,9 @@ class SlackSortHandler(Handler):
 
 
 VIEW_ACCOUNTS = [
-    ('slack', 'T0ABC123', ''),
+    ('slack', 'T0ABC123', 'Alpha Workspace'),
     ('whatsapp', 'personal', ''),
-    ('slack', 'T0DEF456', ''),
+    ('slack', 'T0DEF456', 'Beta Workspace'),
     ('whatsapp', 'business', ''),
 ]
 
@@ -223,6 +223,8 @@ def view_rows():
             rows.append(dict(jid=jid, provider=provider, name='Verification Shared' if contact == 0 else 'Verification Other',
                              kind='direct', last_message_ts=stamp.isoformat().replace('+00:00', 'Z'),
                              unread_count=0, archived=False))
+            if provider == 'slack':
+                rows[-1]['team_name'] = name
     return rows
 
 

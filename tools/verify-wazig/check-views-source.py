@@ -242,6 +242,50 @@ def check_fixture():
     old_views = {(row['provider'], row.get('account', 'hub-cache')) for row in rows}
     assert len(old_views) == 2 and len(accounts) == 4
 
-checks = {'model': check_model, 'integration': check_integration, 'journey': check_journey, 'fixture': check_fixture}
+def check_workspace_names():
+    hub = read('src/hub.zig')
+    main = read('src/main.zig')
+    require(hub, ['pub fn workspaceName(', 'string(row, "team_name")', 'pub fn accountView(',
+                  'if (supplied.len > 0) supplied else cached_name', 'view.label_len = text.len'])
+    old = subprocess.check_output(['git', 'show', 'origin/main:src/hub.zig'], cwd=root, text=True)
+    assert 'string(row, "team_name")' not in old, 'old-code name-parser negative control missing'
+    require(main, ['hubWorkspaceNames(a, rows)', 'providerStatePath(a, "workspace-names.json")',
+                   'readFileWin(a.allocator, path, msg_cache_max_bytes)', 'writeCacheFileAtomic(a, path, raw)',
+                   'if (name.len == 0) continue;', 'hub.accountView(row.object, a.cache_tag.slice(), cached_name)',
+                   'installation.team_name.slice()', 'saved.value.team_name'])
+    for start, end in [('fn activeViewLabel(', 'fn hubWorkspaceNames('),
+                       ('fn updateChatTooltip(', 'fn updateTooltipTheme('),
+                       ('fn buildSortViewsItems(', 'fn openSortViews(')]:
+        require(section(main, start, end), ['view.labelText()'])
+    require(section(main, 'fn buildPaletteItems(', 'fn paletteScore('), ['view.labelText()'])
+    require(section(main, 'fn loadChatsCache(', 'fn msgCacheDirName('), ['applyChats(a, data, false)'])
+    require(section(main, 'fn applyChats(', 'fn '), ['rebuildViews(a, data.items)'])
+    journey = read('tools/verify-wazig/views.ps1')
+    validator = read('tools/verify-wazig/check-views-evidence.py')
+    for check_id in ['view-label', 'sort-views', 'palette', 'inbox-tooltip']:
+        require(journey, [f"Save-WorkspaceNameCheck $Session '{check_id}'"])
+        require(validator, [f"'{check_id}'"])
+    require(journey, ['Read-ListLabels $list', 'VerifyMenus]::Hover', 'tooltips_class32', '$tip.Current.Name',
+                      'Save-Screen $Session workspace-palette', 'Save-Screen $Session "inbox-tooltip-$team"'])
+    require(read('tools/verify-wazig/run.ps1'), ['$result.checks', "'workspace-names.json'"])
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location('workspace_names_fixture', root / 'tools/verify-wazig/fake-hub.py')
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    rows = fixture.view_rows()
+    assert len(rows) == 8
+    expected = {'T0ABC123': 'Alpha Workspace', 'T0DEF456': 'Beta Workspace'}
+    for row in rows:
+        if row['provider'] == 'slack':
+            assert row['team_name'] == expected[fixture.view_account(row)]
+        else:
+            assert 'team_name' not in row
+        assert 'account' not in row and 'account_name' not in row
+    require(read('src/hub_test.zig'), ['"Alpha Workspace", known.items[2].labelText()',
+                                      '"Slack T0DEF456", known.items[3].labelText()',
+                                      '"Beta Workspace", cached.labelText()', '"Slack Direct Workspace", direct.labelText()'])
+    print('WORKSPACE NAMES VERIFIED: fixture names, parsing, cache, shared labels and four journey checks; old parser rejected')
+
+checks = {'model': check_model, 'integration': check_integration, 'journey': check_journey, 'fixture': check_fixture, 'workspace-names': check_workspace_names}
 checks[sys.argv[1]]()
 print(f'views {sys.argv[1]} static PASS')

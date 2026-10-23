@@ -160,7 +160,7 @@ test "real hub prefixed jids without account produce four views without changing
         \\[
         \\  {"provider":"whatsapp","jid":"personal:0000000000@s.whatsapp.net"},
         \\  {"provider":"whatsapp","jid":"business:0000000000@s.whatsapp.net"},
-        \\  {"provider":"slack","jid":"slack:T0ABC123:C0000000000"},
+        \\  {"provider":"slack","jid":"slack:T0ABC123:C0000000000","team_name":"Alpha Workspace"},
         \\  {"provider":"slack","jid":"slack:T0DEF456:C0000000000"}
         \\]
     ;
@@ -174,7 +174,7 @@ test "real hub prefixed jids without account produce four views without changing
         const provider = hub.sourceProvider(row.object).?;
         const jid = row.object.get("jid").?.string;
         const account = hub.viewAccount(row.object, "hub-cache");
-        try views.appendUnique(std.testing.allocator, &known, views.Account.init(provider, account, ""));
+        try views.appendUnique(std.testing.allocator, &known, hub.accountView(row.object, "hub-cache", "").?);
         routing[index].set(.{ .provider = provider, .account = hub.sourceAccount(row.object, "hub-cache"), .id = jid });
         try std.testing.expectEqualStrings("hub-cache", routing[index].key().account);
         try std.testing.expectEqualStrings(jid, routing[index].key().id);
@@ -182,7 +182,7 @@ test "real hub prefixed jids without account produce four views without changing
     try std.testing.expectEqual(@as(usize, 4), known.items.len);
     try std.testing.expectEqualStrings("WhatsApp personal", known.items[0].labelText());
     try std.testing.expectEqualStrings("WhatsApp business", known.items[1].labelText());
-    try std.testing.expectEqualStrings("Slack T0ABC123", known.items[2].labelText());
+    try std.testing.expectEqualStrings("Alpha Workspace", known.items[2].labelText());
     try std.testing.expectEqualStrings("Slack T0DEF456", known.items[3].labelText());
     try std.testing.expect(!chat_key.Key.eql(routing[0].key(), routing[1].key()));
     for (known.items, 0..) |view, index| {
@@ -200,6 +200,30 @@ test "real hub prefixed jids without account produce four views without changing
     defer body.deinit();
     try std.testing.expectEqualStrings(routing[0].key().id, body.value.object.get("chat").?.string);
     try std.testing.expect(body.value.object.get("account") == null);
+}
+
+test "hub workspace labels use supplied names then cached names then team ids" {
+    const raw =
+        \\[ {"provider":"slack","jid":"slack:T0ABC123:C1","team_name":"Alpha Workspace"},
+        \\  {"provider":"slack","jid":"slack:T0DEF456:C1"},
+        \\  {"provider":"slack","jid":"slack:T0DEF456:C2","team_name":""},
+        \\  {"provider":"whatsapp","jid":"personal:0000000000@s.whatsapp.net","team_name":"Not Slack"} ]
+    ;
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, raw, .{});
+    defer parsed.deinit();
+    const rows = parsed.value.array.items;
+    const supplied = hub.accountView(rows[0].object, "hub-cache", "Old Workspace").?;
+    try std.testing.expectEqualStrings("Alpha Workspace", supplied.labelText());
+    for (rows[1..3]) |row| {
+        const fallback = hub.accountView(row.object, "hub-cache", "").?;
+        try std.testing.expectEqualStrings("Slack T0DEF456", fallback.labelText());
+        const cached = hub.accountView(row.object, "hub-cache", "Beta Workspace").?;
+        try std.testing.expectEqualStrings("Beta Workspace", cached.labelText());
+    }
+    const whatsapp = hub.accountView(rows[3].object, "hub-cache", "Not Slack").?;
+    try std.testing.expectEqualStrings("WhatsApp personal", whatsapp.labelText());
+    const direct = @import("messenger_view.zig").Account.init(.slack, "T0ABC123", "Direct Workspace");
+    try std.testing.expectEqualStrings("Slack Direct Workspace", direct.labelText());
 }
 
 test "hub view accounts prefer explicit accounts and safely fall back for unprefixed handles" {

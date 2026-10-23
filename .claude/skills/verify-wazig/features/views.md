@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-- `account-views`: each account or workspace has one view, labelled WhatsApp <account>, or Slack <locally saved workspace name> (Slack <team id> when unknown).
+- `account-views`: each account or workspace has one view, labelled WhatsApp <account>, or <hub workspace name> for Slack (locally saved workspace name for direct sign-ins; Slack <team id> when unknown).
 - `view-keys`: Alt+1..9 selects the saved account position; Alt+I opens the combined inbox.
 - `view-scope`: search, Ctrl+1..9, next/previous chat and sending stay in the account view. Routing identity includes provider, cache account and the full prefixed id; a separate view account controls membership.
 - `view-order`: Ctrl+K → Sort views uses the existing palette list. Ctrl+Up/Down saves a move immediately, Enter switches to that view and Escape closes.
@@ -13,17 +13,18 @@
 
 - Open Messages with hub accounts or configured local providers. Each WhatsApp account and Slack workspace is a separate view; Telegram accounts follow.
 - Press Alt+1..9 or choose Show <view label> in Ctrl+K. Choose Show combined inbox or press Alt+I for all chats.
-- Choose Sort views, move the selected row with Ctrl+Up/Down, then Enter to switch or Escape to close. ViewOrder persists provider:account entries in the existing settings store. Missing accounts remain saved but are skipped; new accounts append in provider and hub listing order.
+- Choose Sort views, move the selected row with Ctrl+Up/Down, then Enter to switch or Escape to close. ViewOrder persists provider:account entries in the existing settings store. Hub workspace names persist alongside the hub state and label cached startup rows without waiting on the hub. Missing accounts remain saved but are skipped; new accounts append in provider and hub listing order.
 - Hover a chat row for its app and account label. No toolbar or new controls are added.
 
 ## Driving it with PowerShell UI Automation
 
-- Run feature=views on GitHub Actions only. run.ps1 starts fake-hub.py --views with two WhatsApp accounts (personal and business) and two Slack teams (T0ABC123 and T0DEF456), two chats each, plus empty Telegram and Signal views after those four accounts. Rows omit account and account_name, matching the real hub. WhatsApp JIDs are <account>:<contact>@s.whatsapp.net with the same synthetic contact in both accounts; Slack JIDs are slack:<team>:<channel>.
+- Run feature=views on GitHub Actions only. run.ps1 starts fake-hub.py --views with two WhatsApp accounts (personal and business) and two Slack teams (T0ABC123 and T0DEF456), two chats each, plus empty Telegram and Signal views after those four accounts. Rows omit account and account_name, matching the real hub; Slack rows carry team_name Alpha Workspace and Beta Workspace. WhatsApp JIDs are <account>:<contact>@s.whatsapp.net with the same synthetic contact in both accounts; Slack JIDs are slack:<team>:<channel>.
 - Drive Alt+1..Alt+4. Assert account-only sidebar identities through current_view.account and each chat's view_account in read-only status and chats; capture view-1.png through view-4.png. Exercise Ctrl+1, next/previous and Shared search in each account, retaining search-1.png through search-4.png.
 - Send Verification account send in the first account. Require one accepted fake-hub send with source_account personal and the selected opaque handle. Retain sent.messages.json and sent.png. Open the matching contact in business; require its own history without that message, with other.messages.json and isolated.png.
 - Drive Alt+I and assert the complete catalog and descending activity timestamps in inbox.chats.json and inbox.png.
 - Drive Ctrl+K, Sort views, Ctrl+Down, Enter. Retain sort-command.png, sort-before.png, sort-moved.png, sort-selected.png, view-order.txt and immediate read-only state. Open again and Escape, capturing sort-closed.png.
 - Quit through the palette and restart the same executable with the same fixture root, registry id and preferences. Retain restart.json, restart-1.png through restart-4.png and corresponding state/chat snapshots proving swapped Alt+1/Alt+2 and unchanged Slack positions.
+- Require both Alpha Workspace and Beta Workspace under exact result check ids `view-label`, `sort-views`, `palette` and `inbox-tooltip`. Read current_view/view_order, the actual Sort views and Ctrl+K Show list rows, and each visible owned native tooltip after real mouse hover in the combined inbox. Retain workspace-names.json, result.json checks, hub-proof.log, workspace-palette.png, sort-before.png, view-3.png/view-4.png and inbox-tooltip-T0ABC123.png/inbox-tooltip-T0DEF456.png. The final-data hub workspace-names cache and restart labels must retain both names.
 - check-evidence.py validates the surviving screenshots, keyboard log, account partitions, scoped send, combined ordering and restart evidence. Inspect the images too; source checks are not runtime proof.
 
 ## Gotchas

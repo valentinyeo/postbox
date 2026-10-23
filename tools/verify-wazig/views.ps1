@@ -1,3 +1,55 @@
+function Save-WorkspaceNameCheck($Session, [string]$Id, [string[]]$Labels, [string[]]$Screenshots, [string]$Prefix = '') {
+    $names = @('Alpha Workspace', 'Beta Workspace')
+    foreach ($name in $names) {
+        Assert-That ($Labels -ccontains "$Prefix$name") "$Id missing workspace name: $name"
+    }
+    $path = Join-Path $Session.evidence 'workspace-names.json'
+    $checks = if (Test-Path $path) { Get-Content $path -Raw | ConvertFrom-Json -AsHashtable } else { @{} }
+    $checks[$Id] = @{ status = 'passed'; names = $names; labels = $Labels; screenshots = $Screenshots }
+    $checks | ConvertTo-Json -Depth 12 | Set-Content $path
+    Hub-Pass $Session $Id
+}
+
+function Read-InboxWorkspaceTooltips($Session, $Rows) {
+    Add-Type -Path "$PSScriptRoot/menus.cs"
+    $list = Get-Edit (Get-Window $Session) '1016'
+    $handle = [IntPtr]$list.Current.NativeWindowHandle
+    $origin = [VerifyWindow+Point]::new()
+    $client = [VerifyWindow+Rect]::new()
+    Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$origin)) 'Cannot read chat list origin'
+    Assert-That ([VerifyWindow]::GetClientRect($handle, [ref]$client)) 'Cannot read chat list bounds'
+    $height = [UIntPtr]::Zero
+    $top = [UIntPtr]::Zero
+    Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x01A1, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$height) -ne [IntPtr]::Zero) 'Cannot read chat row height'
+    Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x018E, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$top) -ne [IntPtr]::Zero) 'Cannot read chat list scroll position'
+    $labels = @()
+    foreach ($team in @('T0ABC123', 'T0DEF456')) {
+        $index = 0
+        while ($index -lt $Rows.Count -and $Rows[$index].view_account -ne $team) { $index++ }
+        Assert-That ($index -lt $Rows.Count) 'Slack workspace missing from inbox'
+        $offset = ($index - [int]$top.ToUInt64()) * [int]$height.ToUInt64() + [int]($height.ToUInt64() / 2)
+        Assert-That ($offset -gt 0 -and $offset -lt $client.Bottom) 'Workspace row not visible for hover'
+        $null = Get-App $Session
+        [VerifyMenus]::Hover($Session.pid, $origin.X + 20, $origin.Y + $offset - 5)
+        [VerifyMenus]::Hover($Session.pid, $origin.X + 24, $origin.Y + $offset)
+        Add-Content (Join-Path $Session.evidence 'actions.log') "hover: $team"
+        $expectedName = if ($team -eq 'T0ABC123') { 'Alpha Workspace' } else { 'Beta Workspace' }
+        $tooltip = Wait-Until {
+            $condition = [Windows.Automation.AndCondition]::new(
+                [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$Session.pid),
+                [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'tooltips_class32')
+            )
+            $tips = [Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+            foreach ($tip in $tips) {
+                if (-not $tip.Current.IsOffscreen -and $tip.Current.Name -ceq $expectedName) { return $tip.Current.Name }
+            }
+        } "combined inbox tooltip $expectedName"
+        $labels += $tooltip
+        Save-Screen $Session "inbox-tooltip-$team"
+    }
+    Save-WorkspaceNameCheck $Session 'inbox-tooltip' $labels @('inbox-tooltip-T0ABC123.png', 'inbox-tooltip-T0DEF456.png')
+}
+
 function Assert-AccountView($Session, [int]$Number, [string]$Account, [string]$Capture) {
     Send-Keys $Session "%$Number"
     $null = Wait-Until {
@@ -36,6 +88,20 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
         Send-Keys $Session '{ESC}'
         $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'account search cleared'
     }
+    $labels = @((Read-Control $Session status).view_order | Where-Object provider -eq 'slack' | ForEach-Object label)
+    Save-WorkspaceNameCheck $Session 'view-label' $labels @('view-3.png', 'view-4.png')
+    Send-Keys $Session '^k'
+    $palette = Get-PaletteWindow $Session
+    Send-Keys $Session 'Show'
+    $list = Get-Edit $palette '1072'
+    $null = Wait-Until {
+        $labels = @(Read-ListLabels $list)
+        $labels -ccontains 'Show Alpha Workspace' -and $labels -ccontains 'Show Beta Workspace'
+    } 'Show workspace commands'
+    $labels = @(Read-ListLabels $list)
+    Save-Screen $Session workspace-palette
+    Save-WorkspaceNameCheck $Session 'palette' $labels @('workspace-palette.png') 'Show '
+    Send-Keys $Session '{ESC}'
     $null = Assert-AccountView $Session 1 'personal' 'send-account'
     Send-Keys $Session '^2'
     $target = (Read-Control $Session status).selected
@@ -68,8 +134,12 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     }
     $inbox | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'inbox.chats.json')
     Save-Screen $Session inbox
+    Read-InboxWorkspaceTooltips $Session $inbox.chats
     Invoke-PaletteCommand $Session 'Sort views' sort-command
     Save-Screen $Session sort-before
+    $list = Get-Edit (Get-PaletteWindow $Session) '1072'
+    $null = Wait-Until { (Read-ListCount $list) -eq 6 } 'four populated account rows, Telegram and Signal in Sort views'
+    Save-WorkspaceNameCheck $Session 'sort-views' @(Read-ListLabels $list) @('sort-before.png')
     Send-Keys $Session '^{DOWN}'
     $null = Wait-Until { (Read-Control $Session status).view_order[0].account -eq 'business' } 'view move saved immediately'
     $preferences = "HKCU:\Software\MessagesVerification\$($Session.id)\Software\Messages"

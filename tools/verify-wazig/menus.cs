@@ -40,6 +40,9 @@ public static class VerifyMenus {
         var input = new Input[] { new Input { type = 0, mouse = new MouseInput { x = 0, y = 0, data = 0, flags = flags, time = 0, extra = UIntPtr.Zero } } };
         if (SendInput(1, input, Marshal.SizeOf(typeof(Input))) != 1) throw new Exception("SendInput failed");
     }
+    public static void Hover(int pid, int x, int y) {
+        Mouse(pid, x, y, 1);
+    }
     public static void Click(int pid, int x, int y, bool right) {
         Mouse(pid, x, y, right ? 8u : 2u);
         Mouse(pid, x, y, right ? 16u : 4u);

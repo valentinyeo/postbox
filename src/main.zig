@@ -969,6 +969,7 @@ const App = struct {
     view_account: Utf8Text(32) = .{},
     views: std.ArrayList(messenger_view.Account) = .empty,
     view_order: []const u8 = "",
+    hub_workspace_names: ?[]u8 = null,
     palette_views_mode: bool = false,
     chat_tooltip: WideText(255) = .{},
     view_selected: [@typeInfo(messenger_view.View).@"enum".fields.len]chat_key.Stored = @splat(.{}),
@@ -4019,10 +4020,45 @@ fn activeViewLabel(a: *App) []const u8 {
     return messenger_view.label(activeChatView(a));
 }
 
+fn hubWorkspaceNames(a: *App, rows: []const std.json.Value) ?std.json.Parsed(std.json.Value) {
+    const path = providerStatePath(a, "workspace-names.json") orelse return null;
+    defer a.allocator.free(path);
+    if (a.hub_workspace_names == null) a.hub_workspace_names = readFileWin(a.allocator, path, msg_cache_max_bytes);
+    var names = std.json.parseFromSlice(std.json.Value, a.allocator, a.hub_workspace_names orelse "{}", .{ .allocate = .alloc_always }) catch
+        std.json.parseFromSlice(std.json.Value, a.allocator, "{}", .{}) catch return null;
+    if (names.value != .object) {
+        names.deinit();
+        names = std.json.parseFromSlice(std.json.Value, a.allocator, "{}", .{}) catch return null;
+    }
+    const allocator = names.arena.allocator();
+    var changed = false;
+    for (rows) |row| {
+        if (row != .object) continue;
+        const name = hub.workspaceName(row.object);
+        if (name.len == 0) continue;
+        const account = hub.viewAccount(row.object, a.cache_tag.slice());
+        if (std.mem.eql(u8, getString(names.value.object, account), name)) continue;
+        const key = allocator.dupe(u8, account) catch continue;
+        const value = allocator.dupe(u8, name) catch continue;
+        names.value.object.put(allocator, key, .{ .string = value }) catch continue;
+        changed = true;
+    }
+    if (changed) {
+        if (std.json.Stringify.valueAlloc(a.allocator, names.value, .{})) |raw| {
+            if (a.hub_workspace_names) |old| a.allocator.free(old);
+            a.hub_workspace_names = raw;
+            _ = writeCacheFileAtomic(a, path, raw);
+        } else |_| {}
+    }
+    return names;
+}
+
 fn rebuildViews(a: *App, rows: []const std.json.Value) void {
     var known: std.ArrayList(messenger_view.Account) = .empty;
     defer known.deinit(a.allocator);
     if (unifiedHub(a)) {
+        var names = hubWorkspaceNames(a, rows);
+        defer if (names) |*parsed| parsed.deinit();
         if (a.show_archived) for (a.views.items) |view| {
             messenger_view.appendUnique(a.allocator, &known, view) catch return;
         };
@@ -4031,21 +4067,25 @@ fn rebuildViews(a: *App, rows: []const std.json.Value) void {
             const provider = hub.sourceProvider(row.object) orelse continue;
             const account = hub.viewAccount(row.object, a.cache_tag.slice());
             const key = chat_key.Key{ .provider = provider, .account = account, .id = "" };
-            var present = false;
-            for (known.items) |view| {
-                if (chat_key.Key.eql(view.key.key(), key)) present = true;
-            }
-            if (present) continue;
-            var view = messenger_view.Account.init(provider, account, "");
+            const cached_name = if (names) |parsed| getString(parsed.value.object, account) else "";
+            var view = hub.accountView(row.object, a.cache_tag.slice(), cached_name) orelse continue;
             if (provider == .slack) {
                 if (slackInstallation(a, account)) |installation| {
-                    view = messenger_view.Account.init(provider, account, installation.team_name.slice());
+                    if (installation.team_name.len > 0) view = messenger_view.Account.init(provider, account, installation.team_name.slice());
                 } else if (slack_win.loadInstallation(a.allocator, account)) |saved| {
                     defer saved.deinit();
-                    view = messenger_view.Account.init(provider, account, saved.value.team_name);
+                    if (saved.value.team_name.len > 0) view = messenger_view.Account.init(provider, account, saved.value.team_name);
                 }
             }
-            messenger_view.appendUnique(a.allocator, &known, view) catch return;
+            var present = false;
+            for (known.items) |*existing| {
+                if (!chat_key.Key.eql(existing.key.key(), key)) continue;
+                view.selected = existing.selected;
+                existing.* = view;
+                present = true;
+                break;
+            }
+            if (!present) messenger_view.appendUnique(a.allocator, &known, view) catch return;
         }
     } else {
         if (a.cache_tag.len > 0) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.whatsapp, a.cache_tag.slice(), a.hub_account.slice())) catch return;
@@ -17965,6 +18005,7 @@ pub fn main(init: std.process.Init) !void {
     }
     defer {
         app.views.deinit(init.gpa);
+        if (app.hub_workspace_names) |names| init.gpa.free(names);
         if (app.view_order.len > 0) init.gpa.free(app.view_order);
     }
     app.startup_probe_pending = !verification_fixture or hubConfigured(app);
