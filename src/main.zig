@@ -709,7 +709,7 @@ const App = struct {
     palette_match_count: usize = 0,
     palette_selected: usize = 0,
     palette_ever_active: bool = false,
-    palette_archive_jid: Utf8Text(191) = .{},
+    palette_archive_key: chat_key.Stored = .{},
     palette_archive_bulk_count: usize = 0,
     palette_archive_show_archived: bool = false,
     palette_archive_was_archived: bool = false,
@@ -2518,7 +2518,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         const jid = getString(object, "jid");
         chat.jid.set(jid);
         if (!chatInView(a, chatViewKey(&chat))) continue;
-        if (fresh and !a.show_archived) _ = holdKeptArchived(a, jid, getBool(object, "archived"), getString(object, "last_message_ts"));
+        if (fresh and !a.show_archived and chat.provider != .slack) _ = holdKeptArchived(a, jid, getBool(object, "archived"), getString(object, "last_message_ts"));
         if (pendingArchiveHidesChat(a, jid, a.show_archived)) continue;
         const raw_name = if (chat.saved) "Saved Messages" else getString(object, "name");
         const display_name = groupName(a, jid) orelse raw_name;
@@ -2538,13 +2538,14 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         queueUnreadProbe(a, &chat);
         if (a.unread_only and !chat.unread) continue;
         chat.pinned = getBool(object, "pinned");
-        chat.archived = getBool(object, "archived");
+        chat.archived = if (chat.provider == .slack) if (a.archive_state) |state| state.localArchived(chat_key.of(&chat)) else false else getBool(object, "archived");
+        if (unifiedHub(a) and chat.archived != a.show_archived) continue;
         a.chats[a.chat_count] = chat;
         a.chat_count += 1;
     }
-    if (!a.show_archived and !unifiedHub(a)) {
+    if (!unifiedHub(a)) {
         if (messenger_view.includes(view, .slack)) appendSlackChats(a, query_utf8);
-        if (messenger_view.includes(view, .telegram)) appendTelegramChats(a, query_utf8);
+        if (!a.show_archived and messenger_view.includes(view, .telegram)) appendTelegramChats(a, query_utf8);
     }
     controlSortChats(a, a.chats[0..a.chat_count], view);
     if (!unifiedHub(a) and messenger_view.includes(view, .whatsapp) and !a.show_archived and !a.unread_only) {
@@ -4327,6 +4328,8 @@ fn appendSlackChats(a: *App, query_utf8: ?[]const u8) void {
         for (installation.chats[0..installation.chat_count]) |*cached| {
             const name = std.unicode.utf16LeToUtf8Alloc(a.allocator, cached.name.slice()) catch continue;
             defer a.allocator.free(name);
+            cached.archived = if (a.archive_state) |state| state.localArchived(chat_key.of(cached)) else false;
+            if (cached.archived != a.show_archived) continue;
             if (!chatInView(a, chat_key.of(cached))) continue;
             if (!messenger_view.matches(activeChatView(a), .slack, a.unread_only, cached.unread, query_utf8 orelse "", name, cached.jid.slice())) continue;
             messenger_view.merge(Chat, a.chats, &a.chat_count, &.{cached.*});
@@ -4369,6 +4372,7 @@ fn applySlackWorkspace(a: *App, account: []const u8, raw: []const u8) bool {
         defer a.allocator.free(shown);
         const seconds = channel.seconds;
         if (slackChatById(a, account, id)) |existing| {
+            existing.archived = if (a.archive_state) |state| state.localArchived(chat_key.of(existing)) else false;
             existing.name.set(a.allocator, shown);
             _ = raiseSlackTimestamp(existing, seconds);
             if (channel.unread_count) |unread| {
@@ -4380,6 +4384,7 @@ fn applySlackWorkspace(a: *App, account: []const u8, raw: []const u8) bool {
             }
             continue;
         }
+        chat.archived = if (a.archive_state) |state| state.localArchived(chat_key.of(&chat)) else false;
         chat.name.set(a.allocator, shown);
         chat.kind.set(a.allocator, if (is_im) "Slack DM" else "Slack channel");
         _ = raiseSlackTimestamp(&chat, seconds);
@@ -9073,12 +9078,20 @@ fn refreshMessages(a: *App) void {
 }
 
 fn reconcileOpenChat(a: *App) void {
-    if (!a.user_viewed or a.chat_selection_pending) return;
-    if (a.selected_chat >= a.chat_count) return;
+    if (a.chat_selection_pending) return;
+    if (a.selected_chat >= a.chat_count) {
+        if (a.displayed_jid.len > 0) refreshMessages(a);
+        return;
+    }
     const chat = &a.chats[a.selected_chat];
+    if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat))) {
+        refreshMessages(a);
+        return;
+    }
+    if (!a.user_viewed) return;
     if (!unifiedHub(a) and chat.provider != .whatsapp) return;
     if (wacliPendingGet(a, .messages) > 0) return;
-    if (chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat)) and !chat_reconcile.openChatStale(chat.jid.slice(), chat.timestamp.slice(), a.displayed_jid.slice(), a.displayed_timestamp.slice())) return;
+    if (!chat_reconcile.openChatStale(chat.jid.slice(), chat.timestamp.slice(), a.displayed_jid.slice(), a.displayed_timestamp.slice())) return;
     refreshMessages(a);
 }
 
@@ -9614,7 +9627,7 @@ fn removeFirstPendingSend(a: *App, delivered: bool) void {
     if (a.pending_send_count == 0) return;
     if (!completePendingSend(a, delivered)) return;
     const head = &a.pending_sends[0];
-    if (delivered) unarchiveSentChat(a, head.jid.slice());
+    if (delivered and head.provider != .slack) unarchiveSentChat(a, head.jid.slice());
     if (delivered and head.file.len > 0 and head.jid.len <= 191 and head.file.len <= 520) {
         var entry = voice_sent.Entry{ .queued_unix = head.queued_unix, .seconds = head.voice_seconds, .seq = head.seq, .voice = head.ptt };
         @memcpy(entry.jid[0..head.jid.len], head.jid.slice());
@@ -12071,6 +12084,7 @@ fn isKeptArchived(a: *const App, jid: []const u8) bool {
 }
 
 fn archiveMarker(a: *const App, chat: *const Chat) ?[*:0]const u16 {
+    if (chat.provider == .slack) return if (chat.archived) lit("Kept archived") else null;
     if (chat.provider != .whatsapp) return null;
     if (std.mem.eql(u16, chat.kind.slice(), std.mem.span(lit("Contact")))) return lit("Contact");
     if (!chat.archived and !a.show_archived) return null;
@@ -12114,7 +12128,7 @@ fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) vo
 fn holdKeptArchived(a: *App, jid: []const u8, provider_archived: bool, ts: []const u8) bool {
     const state = a.archive_state orelse return false;
     if (!state.holdKept(jid, provider_archived, ts)) return false;
-    if (archiveChat(a, jid, .keep, .kept) == null) return true;
+    if (archiveChat(a, .{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = jid }, .keep, .kept) == null) return true;
     state.releaseHold(jid);
     return false;
 }
@@ -12193,6 +12207,7 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
         while (index > 0) {
             index -= 1;
             const entry = &state.entries[index];
+            if (entry.slack) continue;
             var present = false;
             for (rows) |item| {
                 const object = switch (item) {
@@ -12397,11 +12412,23 @@ fn chatProvider(a: *App, jid: []const u8) transport.Provider {
     return .whatsapp;
 }
 
-fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action, source: archive_rules.Source) ?[]const u8 {
+fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source: archive_rules.Source) ?[]const u8 {
+    const jid = key.id;
     const unarchive = action == .unarchive;
-    if (!unifiedHub(a)) switch (chatProvider(a, jid)) {
+    if (key.provider == .slack) {
+        const state = a.archive_state orelse return "Archive is not available";
+        if (!state.setLocalArchived(key, !unarchive)) return "Keep archived list is full";
+        saveArchiveState(a);
+        if (visibleChatIndex(a, key)) |index| {
+            if (unarchive or !a.show_archived) removeChatRow(a, index);
+        }
+        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+        return null;
+    }
+    if (!unifiedHub(a)) switch (key.provider) {
         .telegram => return "Archiving is not available for Telegram chats yet",
-        .slack => return "Archiving is not available for Slack channels yet",
+        .slack => unreachable,
         .signal => return "Archiving is not available for Signal chats yet",
         .whatsapp => {},
     };
@@ -12415,7 +12442,7 @@ fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action, source: a
         if (unarchive) {
             state.remove(jid);
         } else {
-            const stamp = if (visibleChatIndex(a, .{ .provider = chatProvider(a, jid), .account = a.cache_tag.slice(), .id = jid })) |index| a.chats[index].timestamp.slice() else "";
+            const stamp = if (visibleChatIndex(a, key)) |index| a.chats[index].timestamp.slice() else "";
             if (!state.archive(jid, stamp, action == .keep) and action == .keep) return "Keep archived list is full";
         }
         saveArchiveState(a);
@@ -12430,16 +12457,22 @@ fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action, source: a
         a.archive_batch_total = if (a.pending_archive_count == 0) 1 else a.archive_batch_total + 1;
         a.pending_archive_count += 1;
     }
-    if (visibleChatIndex(a, .{ .provider = chatProvider(a, jid), .account = a.cache_tag.slice(), .id = jid })) |index| {
+    if (visibleChatIndex(a, key)) |index| {
         if (unarchive or !(a.show_archived or a.chats[index].archived)) removeChatRow(a, index);
     }
     startNextArchive(a);
     return null;
 }
 
+fn archiveChatKey(a: *App, jid: []const u8) chat_key.Key {
+    if (a.selected_chat < a.chat_count and std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), jid)) return chat_key.of(&a.chats[a.selected_chat]);
+    for (a.chats[0..a.chat_count]) |*chat| if (std.mem.eql(u8, chat.jid.slice(), jid)) return chat_key.of(chat);
+    return .{ .provider = chatProvider(a, jid), .account = a.cache_tag.slice(), .id = jid };
+}
+
 fn paneFollowSelection(a: *App, open_jid: []const u8) void {
     const now: ?[]const u8 = if (a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else null;
-    if (!archive_rules.paneNeedsSwitch(open_jid, now)) return;
+    if (!archive_rules.paneNeedsSwitch(open_jid, now) and a.selected_chat < a.chat_count and chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]))) return;
     clearReply(a);
     discardStagedImage(a);
     a.user_viewed = true;
@@ -12465,7 +12498,7 @@ fn unarchiveSentChat(a: *App, jid: []const u8) void {
 
 fn archivePaletteSelection(a: *App, keep: bool) void {
     const jid = if (a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else "";
-    if (!std.mem.eql(u8, jid, a.palette_archive_jid.slice()) or
+    if (a.selected_chat >= a.chat_count or !chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), a.palette_archive_key.key()) or
         a.bulk.count != a.palette_archive_bulk_count or a.show_archived != a.palette_archive_show_archived or
         (a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived != a.palette_archive_was_archived) or
         (keep and isKeptArchived(a, jid) != a.palette_archive_kept))
@@ -12482,9 +12515,11 @@ fn archiveSelectedChat(a: *App, keep: bool, source: archive_rules.Source) void {
     var open_jid = Utf8Text(191){};
     open_jid.set(chat.jid.slice());
     const action: archive_rules.Action = if (keep) .keep else if (a.show_archived or chat.archived) .unarchive else .archive;
-    if (archiveChat(a, open_jid.slice(), action, source)) |problem| return setStatus(a, problem);
+    var key = chat_key.Stored{};
+    key.set(chat_key.of(chat));
+    if (archiveChat(a, key.key(), action, source)) |problem| return setStatus(a, problem);
     paneFollowSelection(a, open_jid.slice());
-    setStatus(a, action.status());
+    setStatus(a, if (key.provider == .slack and action != .unarchive) archive_rules.Action.keep.status() else action.status());
 }
 
 fn selectAllChats(a: *App) void {
@@ -12507,20 +12542,22 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void 
     if (a.selected_chat < a.chat_count) open_jid.set(a.chats[a.selected_chat].jid.slice());
     const action: archive_rules.Action = if (keep) .keep else if (a.show_archived) .unarchive else .archive;
     var problem: ?[]const u8 = null;
+    var slack_only = true;
     var index: usize = 0;
     while (index < a.bulk.count) : (index += 1) {
         const key = a.bulk.atKey(chat_key.Key, index);
-        if ((!unifiedHub(a) and key.provider != .whatsapp) or !std.mem.eql(u8, key.account, a.cache_tag.slice())) {
+        slack_only = slack_only and key.provider == .slack;
+        if (key.provider != .slack and ((!unifiedHub(a) and key.provider != .whatsapp) or !std.mem.eql(u8, key.account, a.cache_tag.slice()))) {
             problem = "Archiving is only available for the active WhatsApp account";
             continue;
         }
-        if (archiveChat(a, key.id, action, source)) |why| problem = why;
+        if (archiveChat(a, key, action, source)) |why| problem = why;
     }
     a.bulk.clear();
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
     paneFollowSelection(a, open_jid.slice());
     if (problem) |why| return setStatus(a, why);
-    setStatus(a, action.status());
+    setStatus(a, if (slack_only and action != .unarchive) archive_rules.Action.keep.status() else action.status());
 }
 
 fn toggleKeepArchived(a: *App, source: archive_rules.Source) void {
@@ -12528,6 +12565,7 @@ fn toggleKeepArchived(a: *App, source: archive_rules.Source) void {
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return setStatus(a, "Select a chat first");
     const state = a.archive_state orelse return setStatus(a, "Keep archived is not available");
     const chat = &a.chats[a.selected_chat];
+    if (chat.provider == .slack) return archiveSelectedChat(a, true, source);
     if (!unifiedHub(a) and chat.provider != .whatsapp) return setStatus(a, "Keep archived works for WhatsApp chats only");
     var jid = Utf8Text(191){};
     jid.set(chat.jid.slice());
@@ -12696,7 +12734,7 @@ fn controlDispatch(a: *App, call: *ControlCall) !void {
         .messages => try controlMessages(a, call),
         .archive, .unarchive => {
             if (request.id.len == 0) return control_api.writeError(w, "needs a chat id");
-            if (archiveChat(a, request.id, if (request.cmd == .unarchive) .unarchive else .archive, .control)) |problem| return control_api.writeError(w, problem);
+            if (archiveChat(a, archiveChatKey(a, request.id), if (request.cmd == .unarchive) .unarchive else .archive, .control)) |problem| return control_api.writeError(w, problem);
             try w.writeAll("{\"ok\":true,\"result\":{\"id\":");
             try control_api.writeString(w, request.id);
             try w.print(",\"queued\":\"{s}\"}}}}\n", .{@tagName(request.cmd)});
@@ -12813,10 +12851,12 @@ fn controlChats(a: *App, call: *ControlCall) !void {
         filtered = filtered or a.unread_only;
     } else {
         const wanted = if (request.all) "" else query;
-        if (!unifiedHub(a) and messenger_view.includes(view, .slack) and !request.archived) {
+        if (!unifiedHub(a) and messenger_view.includes(view, .slack)) {
             for (&a.slack_installations) |*installation| {
                 if (!installation.active) continue;
                 for (installation.chats[0..installation.chat_count]) |*chat| {
+                    chat.archived = if (a.archive_state) |state| state.localArchived(chat_key.of(chat)) else false;
+                    if (chat.archived != request.archived) continue;
                     if ((request.messenger != null or chatInView(a, chat_key.of(chat))) and controlMatches(a, chat, wanted)) try list.append(a.allocator, chat.*);
                 }
             }
@@ -12888,7 +12928,8 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, acc
         fillSlackTimestamp(a, &chat);
         chat.unread = getBool(object, "unread");
         chat.unread_count = getInt(object, "unread_count");
-        chat.archived = getBool(object, "archived");
+        chat.archived = if (chat.provider == .slack) if (a.archive_state) |state| state.localArchived(chat_key.of(&chat)) else false else getBool(object, "archived");
+        if (unifiedHub(a) and chat.archived != show_archived) continue;
         try list.append(a.allocator, chat);
     }
 }
@@ -13063,7 +13104,7 @@ fn controlArchiveMany(a: *App, w: *std.Io.Writer, ids: []const []const u8) !void
     defer a.allocator.free(problems);
     var failed: usize = 0;
     for (ids, problems) |id, *problem| {
-        problem.* = archiveChat(a, id, .archive, .control);
+        problem.* = archiveChat(a, archiveChatKey(a, id), .archive, .control);
         if (problem.* != null) failed += 1;
     }
     if (failed == 0) try w.writeAll("{\"ok\":true,\"result\":{\"results\":[") else try w.print("{{\"ok\":false,\"error\":\"{d} of {d} chats could not be archived\",\"result\":{{\"results\":[", .{ failed, ids.len });
@@ -13125,11 +13166,11 @@ fn appendMicrophones(a: *App) void {
 }
 
 fn buildPaletteItems(a: *App) void {
-    a.palette_archive_jid.set(if (a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else "");
+    a.palette_archive_key.set(if (a.selected_chat < a.chat_count) chat_key.of(&a.chats[a.selected_chat]) else .{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = "" });
     a.palette_archive_bulk_count = a.bulk.count;
     a.palette_archive_show_archived = a.show_archived;
     a.palette_archive_was_archived = a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived;
-    a.palette_archive_kept = isKeptArchived(a, a.palette_archive_jid.slice());
+    a.palette_archive_kept = isKeptArchived(a, a.palette_archive_key.key().id);
     a.palette_item_count = 0;
     appendPalette(a, "Search chats", "Ctrl+F", command_search);
     appendPalette(a, "Compose message", "C", command_compose);
@@ -13161,7 +13202,7 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, if (a.selected_chat < a.chat_count and isChatPinned(a, chat_key.of(&a.chats[a.selected_chat]))) "Unpin selected chat" else "Pin chat to top", "", command_pin);
     appendPalette(a, if (a.show_archived) "Show inbox chats" else "Show archived chats", "", command_archived);
     appendPalette(a, if (a.show_archived) "Unarchive selected chat" else "Archive selected chat", "Ctrl+E", command_archive);
-    if (a.selected_chat < a.chat_count and (unifiedHub(a) or a.chats[a.selected_chat].provider == .whatsapp)) {
+    if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider != .slack and (unifiedHub(a) or a.chats[a.selected_chat].provider == .whatsapp)) {
         const allow_resurfacing = a.bulk.count == 0 and isKeptArchived(a, a.chats[a.selected_chat].jid.slice());
         appendPalette(a, if (allow_resurfacing) "Allow resurfacing" else "Archive and keep archived", if (allow_resurfacing) "" else "Ctrl+Shift+E", command_keep_archived);
     }
@@ -14128,6 +14169,7 @@ fn runCommand(a: *App, command: u16) void {
         command_archived => {
             _ = clearBulkSelection(a);
             a.show_archived = !a.show_archived;
+            if (!unifiedHub(a) and messenger_view.includes(activeChatView(a), .slack)) _ = applyChats(a, "{\"data\":[]}", false);
             refreshChats(a);
             refreshMessages(a);
         },
@@ -19961,6 +20003,11 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
         if (!std.mem.eql(u8, reply.value.client_id, client_id) or !std.mem.eql(u8, reply.value.status, "sent")) return error.SendNotConfirmed;
         return "";
     }
+    if (unifiedHub(a) and job.kind == .chats and hubHasArg(job, "--archived")) {
+        const inbox = try client.call(allocator, try hub.chats(allocator, false, 500));
+        if (inbox.status != 200) return error.HubHttpFailed;
+        return hub.archivedChats(allocator, response.body, inbox.body);
+    }
     return switch (job.kind) {
         .chats, .archived_scan, .kept_check, .contacts_index => hubNormalized(a, allocator, job, response.body, .chats, ""),
         .groups => hubNormalized(a, allocator, job, response.body, .groups, ""),
@@ -20183,7 +20230,11 @@ fn readHubChats(a: *App, archived: bool) ?[]u8 {
     var response = client.call(allocator, request) catch return null;
     defer response.deinit(allocator);
     if (response.status != 200) return null;
-    const normalized = if (unifiedHub(a)) hub.normalize(allocator, response.body, .chats, "") catch return null else wa_hub.normalize(allocator, response.body, account.slice(), .chats) catch return null;
+    const normalized = if (unifiedHub(a) and archived) blk: {
+        const inbox = client.call(allocator, hub.chats(allocator, false, 250) catch return null) catch return null;
+        if (inbox.status != 200) return null;
+        break :blk hub.archivedChats(allocator, response.body, inbox.body) catch return null;
+    } else if (unifiedHub(a)) hub.normalize(allocator, response.body, .chats, "") catch return null else wa_hub.normalize(allocator, response.body, account.slice(), .chats) catch return null;
     return a.allocator.dupe(u8, normalized) catch null;
 }
 

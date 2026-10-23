@@ -16,7 +16,7 @@ fn Utf8Text(comptime capacity: usize) type {
         }
     };
 }
-const Provider = enum { whatsapp, slack, telegram };
+const Provider = enum { whatsapp, slack, telegram, signal };
 const Chat = struct {
     account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
@@ -273,6 +273,64 @@ test "reconciliation respects provider, selection and user-view guards" {
     a.chats[0].provider = .slack;
     reconcileOpenChat(&a);
     try std.testing.expectEqual(@as(u32, 0), a.queued);
+}
+
+test "restored Archive selection opens every provider despite an obsolete pending read and unviewed row" {
+    inline for (.{ Provider.whatsapp, Provider.slack, Provider.telegram, Provider.signal }) |provider| {
+        var a = fixture();
+        a.unified_hub = true;
+        a.user_viewed = false;
+        a.chats[0].provider = provider;
+        a.chats[0].account.set("hub-cache");
+        a.chats[0].jid.set("fixture-alpha");
+        a.displayed_provider = provider;
+        a.displayed_account = a.chats[0].account;
+        a.displayed_jid.set("fixture-beta");
+        a.message_count = 1;
+        a.messages_read_key.set(chat_key.displayed(&a));
+        a.pending = 1;
+        a.cache_data = "{\"data\":{\"messages\":[{}, {}, {}]}}";
+
+        reconcileOpenChat(&a);
+
+        try std.testing.expect(chat_key.Key.eql(chat_key.displayed(&a), chat_key.of(&a.chats[0])));
+        try std.testing.expectEqual(@as(usize, 3), a.message_count);
+        try std.testing.expectEqual(@as(u32, 1), a.painted);
+        try std.testing.expectEqual(@as(u32, 1), a.queued);
+        try std.testing.expect(!a.user_viewed);
+        reconcileOpenChat(&a);
+        try std.testing.expectEqual(@as(u32, 1), a.queued);
+    }
+}
+
+test "unviewed selection reconciles provider and account changes even for the same chat id" {
+    inline for (.{ true, false }) |change_provider| {
+        var a = fixture();
+        a.unified_hub = true;
+        a.user_viewed = false;
+        a.chats[0].account.set("account-a");
+        a.displayed_account = a.chats[0].account;
+        if (change_provider) a.chats[0].provider = .slack else a.chats[0].account.set("account-b");
+        reconcileOpenChat(&a);
+        try std.testing.expect(chat_key.Key.eql(chat_key.displayed(&a), chat_key.of(&a.chats[0])));
+        try std.testing.expectEqual(@as(u32, 1), a.queued);
+        try std.testing.expect(!a.user_viewed);
+    }
+}
+
+test "sidebar reconciliation defers pending selection then clears an empty view" {
+    var a = fixture();
+    a.user_viewed = false;
+    a.chat_selection_pending = true;
+    a.chat_count = 0;
+    a.message_count = 1;
+    reconcileOpenChat(&a);
+    try std.testing.expect(a.displayed_jid.len > 0);
+    try std.testing.expectEqual(@as(usize, 1), a.message_count);
+    a.chat_selection_pending = false;
+    reconcileOpenChat(&a);
+    try std.testing.expectEqual(@as(usize, 0), a.displayed_jid.len);
+    try std.testing.expectEqual(@as(usize, 0), a.message_count);
 }
 
 test "uncached contact opens an empty conversation before the fresh read" {

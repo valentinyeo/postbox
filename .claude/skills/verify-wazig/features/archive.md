@@ -4,7 +4,7 @@ Move a chat out of the inbox, keep it archived across incoming messages, and fin
 
 ## Sub-features
 
-- `archive-chat`: archive or unarchive the selected WhatsApp chat; the message pane immediately follows the remaining selection.
+- `archive-chat`: archive or unarchive the selected WhatsApp or Slack chat; the message pane immediately follows the remaining selection.
 - `archive-keep`: persist Keep archived; Allow resurfacing removes that preference.
 - `archive-view`: toggle between inbox and Archive.
 - `archive-incoming`: plain archives can resurface on new incoming messages; kept chats are re-archived when the provider itself unarchives them.
@@ -29,6 +29,8 @@ Preconditions: doctor passes; Alpha selected, unread count zero, both synthetic 
 - **After:** Ctrl+K → `Show archived chats`; require exactly Alpha, archived and unread, with count 1 and the new timestamp. Capture `after.png`, status, visible-chat snapshot and UI Automation tree. Cleanup preserves `final-data/verification-provider.json` and `archive-state.txt`. `check-evidence.py` checks this transition chain; inspect all three required screenshots, especially the unread badge and Kept archived marker.
 
 ## Gotchas
+
+- Slack archives are local to Wazig, keyed by provider, account and chat ID. Channels, groups and DMs stay in Archive across incoming messages, hub sync and restarts until explicitly unarchived. No Slack API archive or hub archive request is sent. The existing Ctrl+E, bare E, context menu, palette archive action and Archive view are shared with WhatsApp; Slack has no Allow resurfacing preference. See [Slack archive](slack-archive.md) for its dedicated journey. WhatsApp keep/resurfacing and Telegram/Signal behavior are unchanged.
 
 - WAZI-106 introduced immediate pane switching, resurfacing, keeping and bulk archive; WAZI-115 made the context-menu path discoverable and race-safe; WAZI-144 restored plain-archive resurfacing; WAZI-153 restored Ctrl+E from the composer. IGSH-515 (`d6acd95`, PR 281) repairs provider-side unarchiving via `holdKeptArchived`, not just `archive_rules.shouldResurface`.
 - The incoming provider input must say `archived=false`. Leaving it true would pass without exercising IGSH-515. A negative control is to replace the inbox `holdKeptArchived` call in `applyChats` with a no-op; this journey must then fail waiting for provider re-archive.

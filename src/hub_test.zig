@@ -422,3 +422,20 @@ test "Slack thread metadata survives unified normalization and sends retain pare
     const body = try std.json.parseFromSliceLeaky(std.json.Value, allocator, request.body, .{});
     try std.testing.expectEqualStrings("1740000000.000100", body.object.get("reply_to").?.string);
 }
+
+test "local Slack Archive uses active hub rows without changing provider archive rows" {
+    const archived = "[{\"provider\":\"whatsapp\",\"jid\":\"fixture-wa\",\"archived\":true},{\"provider\":\"signal\",\"jid\":\"fixture-signal\",\"archived\":true}]";
+    const inbox = "[{\"provider\":\"slack\",\"account\":\"fixture-team\",\"jid\":\"fixture-channel\",\"archived\":false,\"unread_count\":3},{\"provider\":\"whatsapp\",\"jid\":\"fixture-inbox\",\"archived\":false}]";
+    const raw = try hub.archivedChats(std.testing.allocator, archived, inbox);
+    defer std.testing.allocator.free(raw);
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, raw, .{});
+    defer parsed.deinit();
+    const rows = parsed.value.object.get("data").?.array.items;
+    try std.testing.expectEqual(@as(usize, 3), rows.len);
+    try std.testing.expectEqualStrings("fixture-wa", rows[0].object.get("jid").?.string);
+    try std.testing.expect(rows[0].object.get("archived").?.bool);
+    try std.testing.expectEqualStrings("fixture-signal", rows[1].object.get("jid").?.string);
+    try std.testing.expectEqualStrings("fixture-channel", rows[2].object.get("jid").?.string);
+    try std.testing.expect(!rows[2].object.get("archived").?.bool);
+    try std.testing.expectEqual(@as(i64, 3), rows[2].object.get("unread_count").?.integer);
+}

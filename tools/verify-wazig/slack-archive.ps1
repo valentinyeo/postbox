@@ -31,7 +31,9 @@ function Invoke-SlackArchiveJourney($Session, [string]$Messages, $Start) {
         $null = Assert-SlackArchiveView $Session $false 0 "incoming-$number-hidden"
     }
     $null = Assert-SlackArchiveView $Session $true 3 incoming
-    $null = Copy-Item (Join-Path $Messages 'archive-state.txt') (Join-Path $Session.evidence 'slack-archive-state.txt')
+    $archiveState = @(Get-ChildItem $Messages -Filter 'hub-*-archive-state.txt')
+    $null = Assert-That ($archiveState.Count -eq 1) 'Isolated hub archive state missing'
+    $null = Copy-Item $archiveState[0].FullName (Join-Path $Session.evidence 'slack-archive-state.txt')
     $old = Get-App $Session
     $oldPid = $Session.pid
     $oldTicks = $Session.startTicks

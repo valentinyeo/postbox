@@ -50,6 +50,9 @@ pub const Action = enum {
 };
 
 pub const Entry = struct {
+    slack: bool = false,
+    account: [32]u8 = undefined,
+    account_len: u8 = 0,
     jid: [max_jid]u8 = undefined,
     jid_len: u8 = 0,
     ts: [max_ts]u8 = undefined,
@@ -73,9 +76,48 @@ pub const State = struct {
 
     pub fn find(self: *const State, jid: []const u8) ?usize {
         for (self.entries[0..self.count], 0..) |*entry, index| {
-            if (std.mem.eql(u8, entry.jidSlice(), jid)) return index;
+            if (!entry.slack and std.mem.eql(u8, entry.jidSlice(), jid)) return index;
         }
         return null;
+    }
+
+    pub fn localArchived(self: *const State, key: anytype) bool {
+        return self.findLocal(key) != null;
+    }
+
+    fn findLocal(self: *const State, key: anytype) ?usize {
+        if (key.provider != .slack) return null;
+        const Key = @TypeOf(key);
+        for (self.entries[0..self.count], 0..) |*entry, index| {
+            if (entry.slack and Key.eql(key, .{ .provider = .slack, .account = entry.account[0..entry.account_len], .id = entry.jidSlice() })) return index;
+        }
+        return null;
+    }
+
+    pub fn setLocalArchived(self: *State, key: anytype, archived: bool) bool {
+        if (key.provider != .slack or key.account.len > 32 or key.id.len == 0 or key.id.len > max_jid) return false;
+        if (self.findLocal(key)) |index| {
+            if (!archived) self.removeAt(index);
+            return true;
+        }
+        if (!archived) return true;
+        if (self.count >= max_entries) {
+            for (self.entries[0..self.count], 0..) |*entry, index| {
+                if (!entry.keep) {
+                    self.removeAt(index);
+                    break;
+                }
+            }
+            if (self.count >= max_entries) return false;
+        }
+        const entry = &self.entries[self.count];
+        entry.* = .{ .slack = true, .keep = true };
+        @memcpy(entry.account[0..key.account.len], key.account);
+        entry.account_len = @intCast(key.account.len);
+        @memcpy(entry.jid[0..key.id.len], key.id);
+        entry.jid_len = @intCast(key.id.len);
+        self.count += 1;
+        return true;
     }
 
     pub fn isKept(self: *const State, jid: []const u8) bool {
@@ -166,7 +208,10 @@ pub const State = struct {
     pub fn format(self: *const State, out: []u8) []const u8 {
         var len: usize = 0;
         for (self.entries[0..self.count]) |*entry| {
-            const line = std.fmt.bufPrint(out[len..], "{s}\t{d}\t{s}\n", .{ entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break;
+            const line = if (entry.slack)
+                std.fmt.bufPrint(out[len..], "slack\t{s}\t{s}\n", .{ entry.account[0..entry.account_len], entry.jidSlice() }) catch break
+            else
+                std.fmt.bufPrint(out[len..], "{s}\t{d}\t{s}\n", .{ entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break;
             len += line.len;
         }
         return out[0..len];
@@ -178,6 +223,19 @@ pub const State = struct {
         while (lines.next()) |line| {
             var fields = std.mem.splitScalar(u8, line, '\t');
             const jid = fields.next() orelse continue;
+            if (std.mem.eql(u8, jid, "slack")) {
+                const account = fields.next() orelse continue;
+                const id = fields.next() orelse continue;
+                if (account.len > 32 or id.len == 0 or id.len > max_jid or self.count >= max_entries) continue;
+                const entry = &self.entries[self.count];
+                entry.* = .{ .slack = true, .keep = true };
+                @memcpy(entry.account[0..account.len], account);
+                entry.account_len = @intCast(account.len);
+                @memcpy(entry.jid[0..id.len], id);
+                entry.jid_len = @intCast(id.len);
+                self.count += 1;
+                continue;
+            }
             const keep = fields.next() orelse continue;
             const ts = fields.next() orelse "";
             const entry = self.slot(jid) orelse continue;
