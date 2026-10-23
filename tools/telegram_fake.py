@@ -32,6 +32,8 @@ def main():
         production = source("main.zig")
         names = ("WideText", "Utf8Text", "tgChatIdString", "selectedChatIsTelegram", "tgSelectedChatId", "tgSelectedChatIsGroup", "upsertTgChat", "appendTelegramChats", "refreshTelegramMessages", "tgDisplayText", "telegramAutoDownload", "discardStagedImage", "releaseStagedImage")
         sections = [extract(production, name) for name in names]
+        if "fn chatInView(" in production:
+            sections.append(extract(production, "chatInView"))
         if "fn stageTelegramFile(" in production:
             sections.append(extract(production, "stageTelegramFile"))
         for name in ("Chat", "TgChat", "StagedImage"):
