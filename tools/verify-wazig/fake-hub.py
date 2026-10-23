@@ -381,22 +381,9 @@ class SignalHandler(Handler):
             return
         url = urlsplit(self.path)
         query = parse_qs(url.query)
-        if url.path == '/v1/wazig/signal/link':
-            with self.state.lock:
-                self.state.signal_linked = self.state.signal_qr_fetched
-                linked = self.state.signal_linked
-            self.respond(200, dict(status='linked') if linked else dict(status='unlinked', uri='sgnl://linkdevice?fixture'))
-        elif url.path == '/v1/wazig/signal/link.png':
-            with self.state.lock:
-                linked = self.state.signal_linked
-                self.state.signal_qr_fetched = True
-            if linked:
-                self.respond(404, {'error': 'already linked'})
-            else:
-                self.respond(200, Path(__file__).with_name('signal-link.png').read_bytes(), 'image/png')
-        elif url.path == '/v1/wazig/chats':
+        if url.path == '/v1/wazig/chats':
             rows = []
-            if self.state.signal_linked and query.get('archived', ['false'])[0] == 'false':
+            if query.get('archived', ['false'])[0] == 'false':
                 rows = [dict(provider='signal', jid=chat, name=name, kind=kind,
                              last_message_ts=self.state.stamp, unread_count=0 if chat in self.state.signal_read else 1,
                              unread=chat not in self.state.signal_read, archived=False)
@@ -503,8 +490,6 @@ TELEGRAM_SAVED = 'telegram:user:9001'
 
 class TelegramHandler(Handler):
     def end_headers(self):
-        if self.path.startswith('/v1/wazig/telegram/'):
-            self.send_header('Cache-Control', 'no-store')
         if hasattr(self, 'telegram_retry_after'):
             self.send_header('Retry-After', str(self.telegram_retry_after))
         super().end_headers()
@@ -561,22 +546,9 @@ class TelegramHandler(Handler):
             return
         url = urlsplit(self.path)
         query = parse_qs(url.query)
-        if url.path == '/v1/wazig/telegram/link':
-            with self.state.lock:
-                linked = self.state.telegram_linked
-                password = self.state.telegram_qr_fetched and not linked
-            self.respond(200, dict(status='linked') if linked else dict(status='password') if password else dict(status='unlinked', uri='tg://login?token=fixture'))
-        elif url.path == '/v1/wazig/telegram/link.png':
-            with self.state.lock:
-                unavailable = self.state.telegram_linked or self.state.telegram_qr_fetched
-                self.state.telegram_qr_fetched = True
-            if unavailable:
-                self.respond(404, {'error': 'already linked'})
-            else:
-                self.respond(200, Path(__file__).with_name('telegram-link.png').read_bytes(), 'image/png')
-        elif url.path == '/v1/wazig/chats':
+        if url.path == '/v1/wazig/chats':
             rows = []
-            if self.state.telegram_linked and query.get('archived', ['false'])[0] == 'false':
+            if query.get('archived', ['false'])[0] == 'false':
                 rows = [dict(provider='telegram', jid=chat, name=name, kind=kind,
                              last_message_ts=self.state.stamp, unread_count=0 if chat in self.state.telegram_read else 1,
                              unread=chat not in self.state.telegram_read, archived=False, saved=chat == TELEGRAM_SAVED)
@@ -644,13 +616,6 @@ class TelegramHandler(Handler):
             self.publish('message')
             self.respond(200, {'ok': True}, body=body)
             return
-        if self.path == '/v1/wazig/telegram/password':
-            if set(body) != {'password'} or not isinstance(body['password'], str) or not body['password'] or body['password'] == 'synthetic-invalid':
-                self.respond(401, {'error': 'telegram password invalid'}, password_supplied=True)
-            else:
-                self.state.telegram_linked = True
-                self.respond(200, {'status': 'linked'}, password_supplied=True)
-            return
         chat = body.get('chat', '')
         if not chat.startswith('telegram:'):
             self.respond(400, {'error': 'invalid Telegram chat'}, body=body)
@@ -695,23 +660,20 @@ def main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--slack-sort', action='store_true')
     modes.add_argument('--views', action='store_true')
+    modes.add_argument('--notrap', action='store_true', help='WhatsApp and Slack chats; Signal and Telegram have no rows')
     modes.add_argument('--workspace-icons', action='store_true')
     modes.add_argument('--signal', action='store_true')
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else Handler
+    handler = TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
     server.state.view_rows = view_rows()
-    server.state.signal_linked = False
-    server.state.signal_qr_fetched = False
     server.state.signal_reaction = None
     server.state.signal_events = []
     server.state.signal_read = set()
-    server.state.telegram_linked = False
-    server.state.telegram_qr_fetched = False
     server.state.telegram_reaction = None
     server.state.telegram_events = []
     server.state.telegram_read = set()

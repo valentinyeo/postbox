@@ -1,4 +1,5 @@
 name: verify-wazig
+run-name: verify-wazig ${{ inputs.feature || 'pr' }} ${{ github.head_ref || github.ref_name }}
 
 on:
   workflow_dispatch:
@@ -7,7 +8,7 @@ on:
         description: User journey to drive
         type: choice
         default: search
-        options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, hub, slack-sort, views, workspace-icons, signal, telegram, archive, text-comparison]
+        options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, hub, slack-sort, views, workspace-icons, signal, telegram, notrap, archive, text-comparison]
   pull_request:
     paths:
       - .github/workflows/verify.yml
@@ -50,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["search","drafts","whatsapp-hub","hub","slack-sort","views","workspace-icons","signal","telegram","text-comparison"]' || format('["{0}"]', inputs.feature || 'search')) }}
+        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["search","drafts","whatsapp-hub","hub","slack-sort","views","workspace-icons","signal","telegram","notrap","text-comparison"]' || format('["{0}"]', inputs.feature || 'search')) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -90,7 +91,7 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence
       - name: Validate surviving journey evidence
-        if: matrix.feature == 'search' || matrix.feature == 'whatsapp-hub' || matrix.feature == 'hub' || matrix.feature == 'slack-sort' || matrix.feature == 'views' || matrix.feature == 'workspace-icons' || matrix.feature == 'signal' || matrix.feature == 'telegram' || matrix.feature == 'palette' || matrix.feature == 'appearance'
+        if: matrix.feature == 'search' || matrix.feature == 'whatsapp-hub' || matrix.feature == 'hub' || matrix.feature == 'slack-sort' || matrix.feature == 'views' || matrix.feature == 'workspace-icons' || matrix.feature == 'signal' || matrix.feature == 'telegram' || matrix.feature == 'notrap' || matrix.feature == 'palette' || matrix.feature == 'appearance'
         shell: pwsh
         run: |
           python tools/verify-wazig/check-evidence.py verification-evidence

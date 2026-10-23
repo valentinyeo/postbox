@@ -10,6 +10,7 @@ PUBLIC_SKILL_PATHS = (
     ".claude/skills/verify-wazig/SKILL.md",
     ".claude/skills/verify-wazig/INDEX.md",
     ".claude/skills/verify-wazig/RULE-MAP.md",
+    ".claude/skills/verify-wazig/features/notrap.md",
     ".claude/skills/verify-wazig/features/signal.md",
     ".claude/skills/verify-wazig/features/telegram.md",
     ".claude/skills/verify-wazig/features/README.md",

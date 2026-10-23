@@ -498,7 +498,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar, signal_link, telegram_link, telegram_password };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 const WacliLane = enum { wacli, slack, hub_media };
 
@@ -632,13 +632,6 @@ const App = struct {
     unified_hub: bool = false,
     hub_client: ?wa_hub_win.Client = null,
     hub_account: Utf8Text(32) = .{},
-    signal_link_due_ms: u64 = 0,
-    signal_link_unlinked: bool = false,
-    signal_qr: Message = .{},
-    telegram_link_due_ms: u64 = 0,
-    telegram_link_unlinked: bool = false,
-    telegram_link_password: bool = false,
-    telegram_qr: Message = .{},
     hub_stop: std.atomic.Value(bool) = .init(false),
     hub_cancel: slack_win.HttpCancel = .{},
     hub_thread: ?std.Thread = null,
@@ -966,6 +959,7 @@ const App = struct {
     slack_count_log_ms: u64 = 0,
     slack_count_log_hash: u64 = 0,
     chat_view: messenger_view.View = .all,
+    startup_view_pending: bool = true,
     view_account: Utf8Text(32) = .{},
     views: std.ArrayList(messenger_view.Account) = .empty,
     view_order: []const u8 = "",
@@ -1889,7 +1883,7 @@ fn wacliPendingSub(a: *App, kind: WacliJobKind) void {
 fn jobIsWrite(kind: WacliJobKind) bool {
     return switch (kind) {
         .reaction, .slack_send, .slack_attach, .slack_share => true,
-        .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar, .telegram_password => true,
+        .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar => true,
         else => false,
     };
 }
@@ -2375,6 +2369,27 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         }
     }
     rebuildViews(a, data.items);
+    if (fresh and unifiedHub(a) and !a.show_archived and a.startup_view_pending) {
+        a.startup_view_pending = false;
+        if (a.chat_view == .signal or a.chat_view == .telegram) {
+            var populated = false;
+            for (data.items) |row| {
+                if (row != .object) continue;
+                const provider = hub.sourceProvider(row.object) orelse continue;
+                if (chatInView(a, .{ .provider = provider, .account = hub.viewAccount(row.object, a.cache_tag.slice()), .id = "" })) {
+                    populated = true;
+                    break;
+                }
+            }
+            if (!populated) {
+                a.chat_view = .all;
+                a.view_account.set("");
+                saveChatView(.all);
+                _ = saveRegistryString(a.allocator, lit("AccountView"), "");
+                a.chat_view_switched = true;
+            }
+        }
+    }
     const view = activeChatView(a);
     var needed = data.items.len + a.tg_chat_count + max_chats;
     for (&a.slack_installations) |*installation| if (installation.active) {
@@ -2973,7 +2988,7 @@ fn tgLoginRetryInput(a: *App) void {
 }
 
 fn openTelegramLogin(a: *App, mode: TgLoginMode) void {
-    if (hubConfigured(a) and (mode != .password or !a.telegram_link_password)) return;
+    if (hubConfigured(a)) return;
     a.tg_login = mode;
     setStatus(a, switch (mode) {
         .phone => "Telegram: type your phone number in the box and press Next",
@@ -3010,9 +3025,6 @@ fn openTelegramLogin(a: *App, mode: TgLoginMode) void {
         return;
     };
     a.tg_login_window = window;
-    if (hubConfigured(a)) if (win.GetDlgItem(window, id_tg_prompt)) |prompt| {
-        _ = win.SetWindowTextW(prompt, tgPromptText(.password));
-    };
     if (theme.choice == .amoled) {
         var dark: win.BOOL = win.TRUE;
         _ = win.DwmSetWindowAttribute(window, 20, &dark, @sizeOf(win.BOOL));
@@ -3149,17 +3161,7 @@ fn tgLoginSubmit(a: *App) void {
     if (length == 0) return;
     const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide_buffer[0..length]) catch return;
     defer a.allocator.free(text);
-    if (hubConfigured(a)) {
-        if (!unifiedHub(a) or a.tg_login != .password or !a.telegram_link_password) return;
-        if (wacliPendingGet(a, .telegram_password) > 0) return;
-        var job = WacliJob{ .kind = .telegram_password, .account = a.cache_tag };
-        wacliJobArgs(&job, &.{text});
-        if (wacliEnqueue(a, job, true)) {
-            _ = win.SetWindowTextW(edit, lit(""));
-            tgLoginSetChecking(a);
-        }
-        return;
-    }
+    if (hubConfigured(a)) return;
     const trimmed = std.mem.trim(u8, text, " ");
     switch (a.tg_login) {
         .phone, .code, .password => {
@@ -4143,6 +4145,7 @@ fn switchChatView(a: *App, view: messenger_view.View) void {
 }
 
 fn switchAccountView(a: *App, wanted: ?chat_key.Key) void {
+    a.startup_view_pending = false;
     _ = clearBulkSelection(a);
     if (a.selected_chat < a.chat_count) selectedViewKey(a).set(chat_key.of(&a.chats[a.selected_chat]));
     a.chat_view = if (wanted) |key| messenger_view.providerView(key.provider) else .all;
@@ -4156,8 +4159,6 @@ fn switchAccountView(a: *App, wanted: ?chat_key.Key) void {
     refreshVisibleChats(a);
     if (messenger_view.includes(a.chat_view, .whatsapp)) refreshChats(a);
     refreshMessages(a);
-    pollSignalLink(a);
-    pollTelegramLink(a);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
     var buffer: [300]u8 = undefined;
     setStatus(a, std.fmt.bufPrint(&buffer, "Showing {s}", .{activeViewLabel(a)}) catch "");
@@ -12489,8 +12490,6 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         try controlWriteView(w, view.key.key(), view.labelText());
     }
     try w.writeByte(']');
-    try w.print(",\"signal_link\":{{\"unlinked\":{},\"qr_ready\":{}}}", .{ a.signal_link_unlinked, a.signal_qr.bitmap != null });
-    try w.print(",\"telegram_link\":{{\"unlinked\":{},\"password\":{},\"qr_ready\":{}}}", .{ a.telegram_link_unlinked, a.telegram_link_password, a.telegram_qr.bitmap != null });
     var buffer: [1024]u8 = undefined;
     try w.print(",\"sync\":\"{s}\",\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
         sync,              a.slack_connected.load(.acquire), pending_sends,   a.pending_archive_count,
@@ -15313,25 +15312,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     defer shapes.deinit();
     _ = win.FillRect(hdc, &client, a.brush_bg.?);
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
-    const telegram_link = activeChatView(a) == .telegram and a.telegram_link_unlinked;
-    if (a.chat_count == 0 and (telegram_link or (activeChatView(a) == .signal and a.signal_link_unlinked))) {
-        const qr = if (telegram_link) &a.telegram_qr else &a.signal_qr;
-        if (qr.bitmap) |bitmap| {
-            const left = @divTrunc(client.right - qr.bitmap_width, 2);
-            const top = @max(px(a, 24), @divTrunc(client.bottom - qr.bitmap_height - px(a, 60), 2));
-            if (win.CreateCompatibleDC(hdc)) |memory| {
-                const previous = win.SelectObject(memory, bitmap);
-                _ = win.BitBlt(hdc, left, top, qr.bitmap_width, qr.bitmap_height, memory, 0, 0, win.SRCCOPY);
-                _ = win.SelectObject(memory, previous);
-                _ = win.DeleteDC(memory);
-            }
-            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-            _ = win.SetTextColor(hdc, theme.current.on_surface);
-            var text_rect = win.RECT{ .left = px(a, 8), .top = top + qr.bitmap_height + px(a, 16), .right = client.right - px(a, 8), .bottom = client.bottom };
-            _ = text_draw.drawText(hdc, if (telegram_link) lit("Scan in Telegram: Settings > Devices > Link Desktop Device") else lit("Scan in Signal > Settings > Linked devices > Link new device"), -1, &text_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_NOPREFIX);
-        }
-        return;
-    }
     const available_width = client.right - client.left;
     const bubble_width = std.math.clamp(@divTrunc(available_width * 7, 10), px(a, 280), px(a, 620));
     const chat_jid = if (a.displayed_jid.len > 0)
@@ -16014,7 +15994,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 return 0;
             }
             switch (result.kind) {
-                .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar, .signal_link, .telegram_link, .telegram_password => applyHubResult(a, result),
+                .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar => applyHubResult(a, result),
                 .groups => if (result.ok) applyGroups(a, result.data),
                 .contacts_index => if (result.ok) {
                     a.people.replaceContacts(result.data) catch return 0;
@@ -16631,8 +16611,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 tickVoice(a);
             } else if (wparam == timer_refresh) {
                 persistDrafts(a);
-                pollSignalLink(a);
-                pollTelegramLink(a);
                 updateAttachButton(a);
                 if (verification_fixture and !hubConfigured(a)) {
                     checkArchive(a);
@@ -16825,8 +16803,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 session.destroy();
                 a.openrouter_session = null;
             }
-            if (a.signal_qr.bitmap) |bitmap| _ = win.DeleteObject(bitmap);
-            if (a.telegram_qr.bitmap) |bitmap| _ = win.DeleteObject(bitmap);
             for (a.avatars[0..a.avatar_count]) |*entry| {
                 if (entry.bitmap) |bitmap| _ = win.DeleteObject(bitmap);
             }
@@ -17128,6 +17104,11 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
                 return true;
             }
         }
+    }
+    if (key == win.VK_ESCAPE and !control and !alt and a.chat_count == 0) {
+        if (!clearSearch(a) and activeChatView(a) != .all) switchChatView(a, .all);
+        focusCompose(a);
+        return true;
     }
     if (control and (key == win.VK_OEM_MINUS or key == win.VK_SUBTRACT)) {
         runCommand(a, command_font_smaller);
@@ -19521,39 +19502,6 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
     const key = chat_key.Key{ .provider = .whatsapp, .account = job.hub_account.slice(), .id = job.jid.slice() };
     if (unifiedHub(a) and job.kind == .cache_tag) return "[{\"account\":\"hub\",\"state\":\"linked\"}]";
     if (unifiedHub(a) and job.kind == .groups) return "{\"success\":true,\"data\":[]}";
-    if (unifiedHub(a) and job.kind == .telegram_password) {
-        const body = try std.json.Stringify.valueAlloc(allocator, .{ .password = job.args[0].slice() }, .{});
-        const response = try client.call(allocator, .{ .method = "POST", .path = "/v1/wazig/telegram/password", .body = body });
-        result.http_status = response.status;
-        if (response.status == 401) {
-            result.extra.set("telegram password invalid");
-            return error.TelegramPasswordInvalid;
-        }
-        if (response.status != 200) return error.HubHttpFailed;
-        var parsed = try std.json.parseFromSlice(std.json.Value, allocator, response.body, .{});
-        defer parsed.deinit();
-        if (parsed.value != .object or !std.mem.eql(u8, getString(parsed.value.object, "status"), "linked")) return error.BadResponse;
-        return "linked";
-    }
-    if (unifiedHub(a) and (job.kind == .signal_link or job.kind == .telegram_link)) {
-        const telegram = job.kind == .telegram_link;
-        const status = try client.call(allocator, .{ .path = if (telegram) "/v1/wazig/telegram/link" else "/v1/wazig/signal/link" });
-        if (status.status != 200) return error.HubHttpFailed;
-        var parsed = try std.json.parseFromSlice(std.json.Value, allocator, status.body, .{});
-        defer parsed.deinit();
-        if (parsed.value != .object) return error.BadResponse;
-        const state = getString(parsed.value.object, "status");
-        if (std.mem.eql(u8, state, "linked")) return "linked";
-        if (telegram and std.mem.eql(u8, state, "password")) return "password";
-        if (!std.mem.eql(u8, state, "unlinked")) return error.BadResponse;
-        const qr = try client.call(allocator, .{ .path = if (telegram) "/v1/wazig/telegram/link.png" else "/v1/wazig/signal/link.png" });
-        if (qr.status == 404) return "linked";
-        if (qr.status != 200 or qr.body.len > 1024 * 1024) return error.BadResponse;
-        const path = messagesDirPath(a, if (telegram) "telegram-link.png" else "signal-link.png") orelse return error.MissingMessagesDir;
-        defer a.allocator.free(path);
-        if (!writeCacheFileAtomic(a, path, qr.body)) return error.MediaCacheWriteFailed;
-        return "unlinked";
-    }
     const request: wa_hub.Request = if (unifiedHub(a)) try unifiedHubRequest(a, allocator, job) else switch (job.kind) {
         .cache_tag => wa_hub.accounts(),
         .chats, .archived_scan, .kept_check, .contacts_index => try wa_hub.chats(allocator, key.account, hubHasArg(job, "--archived"), 500),
@@ -19728,55 +19676,6 @@ fn startHubAvatar(a: *App, target: AvatarTarget) bool {
 
 fn applyHubResult(a: *App, result: *const WacliResult) void {
     switch (result.kind) {
-        .telegram_password => {
-            if (!result.ok) {
-                tgLoginRetryInput(a);
-                tgLoginShowError(a, if (result.http_status == 401) "telegram password invalid" else "Telegram hub password request failed");
-                return;
-            }
-            a.telegram_link_password = false;
-            a.telegram_link_unlinked = false;
-            closeTgLogin(a);
-            refreshChats(a);
-        },
-        .telegram_link => {
-            if (!result.ok) return;
-            a.telegram_link_unlinked = std.mem.eql(u8, result.data, "unlinked");
-            a.telegram_link_password = std.mem.eql(u8, result.data, "password");
-            if (a.telegram_qr.bitmap) |bitmap| _ = win.DeleteObject(bitmap);
-            a.message_bitmap_lru.remove(@intFromPtr(&a.telegram_qr));
-            a.telegram_qr = .{};
-            if (a.telegram_link_unlinked) {
-                const path = messagesDirPath(a, "telegram-link.png") orelse return;
-                defer a.allocator.free(path);
-                a.telegram_qr.local_path.set(a.allocator, path);
-                a.telegram_qr.media_type.set("image");
-                ensureBitmap(a, &a.telegram_qr);
-            } else if (a.telegram_link_password) {
-                if (a.tg_login_window == null) openTelegramLogin(a, .password);
-            } else {
-                closeTgLogin(a);
-                refreshChats(a);
-            }
-            if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
-        },
-        .signal_link => {
-            if (!result.ok) return;
-            a.signal_link_unlinked = std.mem.eql(u8, result.data, "unlinked");
-            if (a.signal_qr.bitmap) |bitmap| _ = win.DeleteObject(bitmap);
-            a.message_bitmap_lru.remove(@intFromPtr(&a.signal_qr));
-            a.signal_qr = .{};
-            if (a.signal_link_unlinked) {
-                const path = messagesDirPath(a, "signal-link.png") orelse return;
-                defer a.allocator.free(path);
-                a.signal_qr.local_path.set(a.allocator, path);
-                a.signal_qr.media_type.set("image");
-                ensureBitmap(a, &a.signal_qr);
-            } else {
-                refreshChats(a);
-            }
-            if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
-        },
         .hub_send => {
             if (a.pending_send_count == 0 or !std.mem.eql(u8, &a.pending_sends[0].id, result.msg_id.slice())) return;
             if (result.ok) {
@@ -20221,20 +20120,4 @@ test "hub stream open reset survives event coalescing without a reset frame" {
     postHubEvent(a, true);
     try std.testing.expect(a.hub_reset_pending.load(.acquire));
     try std.testing.expect(!a.hub_event_pending.load(.acquire));
-}
-
-fn pollSignalLink(a: *App) void {
-    if (!unifiedHub(a) or activeChatView(a) != .signal or a.show_archived) return;
-    if (a.chat_count > 0) return;
-    const now = win.GetTickCount64();
-    if (now < a.signal_link_due_ms or wacliPendingGet(a, .signal_link) > 0) return;
-    if (wacliEnqueue(a, .{ .kind = .signal_link, .account = a.cache_tag }, false)) a.signal_link_due_ms = now + 30_000;
-}
-
-fn pollTelegramLink(a: *App) void {
-    if (!unifiedHub(a) or activeChatView(a) != .telegram or a.show_archived) return;
-    if (a.chat_count > 0) return;
-    const now = win.GetTickCount64();
-    if (now < a.telegram_link_due_ms or wacliPendingGet(a, .telegram_link) > 0 or wacliPendingGet(a, .telegram_password) > 0) return;
-    if (wacliEnqueue(a, .{ .kind = .telegram_link, .account = a.cache_tag }, false)) a.telegram_link_due_ms = now + 30_000;
 }

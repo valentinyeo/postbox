@@ -19,23 +19,13 @@ def check_telegram(folder):
     assert session['feature'] == 'telegram' and session['sha256'] and session['commit']
     assert read('result.json') == dict(feature='telegram', status='passed')
     assert not (folder / 'failure.txt').exists()
-    qr = capture('qr')
-    assert qr['chat_count'] == 0 and qr['telegram_link'] == dict(unlinked=True, password=False, qr_ready=True)
     linked = capture('linked')
     assert read('marks.json')['brand_blue_pixels'] > 20
-    assert linked['chat_count'] == 5 and not linked['telegram_link']['unlinked']
+    assert linked['chat_count'] == 5
     assert {(row['provider'], row['view_account']) for row in read('linked.chats.json')['chats']} == {('telegram', 'telegram')}
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert all(row['authorized'] for row in requests if row['method'] != 'SSE')
     assert all(row['path'].startswith('/v1/wazig/') or row['path'] == '/fixture/live' for row in requests)
-    statuses = [index for index, row in enumerate(requests) if row['path'] == '/v1/wazig/telegram/link' and row['status'] == 200]
-    images = [index for index, row in enumerate(requests) if row['path'] == '/v1/wazig/telegram/link.png' and row['status'] == 200]
-    assert len(statuses) >= 2 and len(images) == 1 and statuses[0] < images[0] < statuses[1]
-    assert capture('password')['telegram_link']['password']
-    assert capture('password-invalid')['telegram_link']['password']
-    passwords = [row for row in requests if row['path'] == '/v1/wazig/telegram/password']
-    assert [row['status'] for row in passwords] == [401, 200]
-    assert all(row['password_supplied'] and 'body' not in row for row in passwords)
     palette = read('palette.json')
     assert 'Show Telegram' in palette
     assert not any(label in palette for label in ['Connect Telegram account', 'Log out of Telegram', 'Remove Telegram account...'])
@@ -80,10 +70,10 @@ def check_telegram(folder):
         assert capture(name)['pending_sends'] == 0
     archives = [row for row in requests if row['path'] == '/v1/wazig/archive']
     assert len(archives) == 1 and archives[0]['status'] == 502 and archives[0]['body']['chat'] == 'telegram:user:1001'
-    for name in ['history', 'read', 'reacted', 'reply', 'text', 'file', 'live', 'after', 'password', 'password-invalid']:
+    for name in ['history', 'read', 'reacted', 'reply', 'text', 'file', 'live', 'after']:
         capture(name)
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
-    for gate in ['linking-qr', 'linking-password', 'linked-chats', 'history', 'mark-read', 'media', 'react', 'reply', 'send-text', 'send-file', 'live-events', 'limited', 'archive-unsupported']:
+    for gate in ['linked-chats', 'history', 'mark-read', 'media', 'react', 'reply', 'send-text', 'send-file', 'live-events', 'limited', 'archive-unsupported']:
         assert f'telegram {gate} PASS' in proof, gate
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped' and not final['slack_connected']
@@ -93,4 +83,4 @@ def check_telegram(folder):
         assert f'keys: {keys}' in actions, keys
     assert 'JOURNEY PASSED: telegram' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('TELEGRAM EVIDENCE VERIFIED: linking, account view, history, writes, receipts, media, events and terminal rejections')
+    print('TELEGRAM EVIDENCE VERIFIED: prelinked hub, account view, history, writes, receipts, media, events and terminal rejections')
