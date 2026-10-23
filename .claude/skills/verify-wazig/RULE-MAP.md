@@ -15,6 +15,7 @@
 | Empty saved Signal/Telegram views never trap startup; Esc and every Alt view shortcut remain usable | notrap.ps1 and check-notrap-evidence.py startup seed, every-view screenshots, Escape state and full shortcut matrix | [No-trap](features/notrap.md) |
 | New journeys appear in dispatch, PR matrix, evidence validation and maps | tools/verify-wazig/check-map.py checks Signal wiring and index links | [Index](features/README.md) |
 | Slack icons and WhatsApp/Signal marks share the provider badge mechanism | src/hub_test.zig, workspace-icons journey screenshot crops and check-workspace-icons.py | [Workspace icons](features/workspace-icons.md) |
+| Legacy WhatsApp keep flags migrate once per hub without resurfacing on incoming messages or restart | hub-archive.ps1, synthetic hub archive ledger and check-hub-archive-evidence.py | [Hub archive](features/hub-archive.md) |
 | Existing account order remains stable when empty Telegram and Signal are registered | views journey and check-views-evidence.py | [Views](features/views.md) |
 
 IGSH-589: update the maps with the implementation and describe only actual assertions. GitHub execution and screenshot inspection remain required before claiming runtime success. The Signal fixture does not prove production authentication or delivery.
