@@ -289,6 +289,70 @@ class HubArchiveHandler(Handler):
         else:
             self.respond(400, {'error': 'unexpected archive fixture write'}, body=body)
 
+PALETTE_INBOX = [
+    ('personal:15550000021@s.whatsapp.net', 'Inbox WhatsApp Epsilon', 'whatsapp', 'direct', '2026-10-10T12:00:00Z'),
+    ('personal:15550000022@s.whatsapp.net', 'Inbox WhatsApp Zeta', 'whatsapp', 'direct', '2026-10-10T11:00:00Z'),
+    ('slack:T0PALETTE:C0000000001', 'Inbox Slack Delta', 'slack', 'direct', '2026-10-10T10:00:00Z'),
+]
+PALETTE_ARCHIVED = [
+    ('personal:15550000031@s.whatsapp.net', 'Archived Person Alpha', 'whatsapp', 'direct', '2026-09-10T12:00:00Z'),
+    ('telegram:user:7001001', 'Archived Telegram Beta', 'telegram', 'direct', '2026-09-09T12:00:00Z'),
+    ('slack:T0PALETTE:C0000000002', 'Archived Slack Gamma', 'slack', 'group', '2026-09-08T12:00:00Z'),
+]
+
+
+def palette_rows(archived):
+    rows = []
+    for jid, name, provider, kind, stamp in PALETTE_ARCHIVED if archived else PALETTE_INBOX:
+        row = dict(jid=jid, name=name, provider=provider, kind=kind, archived=archived, last_message_ts=stamp,
+                   unread=False, unread_count=0, pinned=False, muted_until='')
+        if provider == 'slack':
+            row['team_name'] = 'Palette Workspace'
+        rows.append(row)
+    return rows
+
+
+class PaletteArchivedHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            self.respond(200, palette_rows(query.get('archived', ['false'])[0] == 'true'))
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            known = {row[0]: row for row in PALETTE_INBOX + PALETTE_ARCHIVED}
+            if chat not in known:
+                self.respond(404, {'error': 'unknown palette chat'})
+                return
+            self.respond(200, [dict(MsgID='PALETTE-HISTORY', ChatJID=chat, Timestamp=known[chat][4],
+                                    Text='Synthetic palette history', FromMe=False,
+                                    SenderName='Fixture Sender', SenderJID='fixture-sender')])
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path.startswith('/v1/wazig/avatar/'):
+            self.respond(404, {'error': 'unavailable'})
+        else:
+            self.respond(404, {'error': 'unknown palette fixture path'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path in ('/v1/wazig/archive', '/v1/wazig/mark-read'):
+            self.respond(200, {'status': 'ok'}, body=body)
+        else:
+            self.respond(400, {'error': 'unexpected palette fixture write'}, body=body)
+
+
 class ReactionsHandler(Handler):
     def do_GET(self):
         url = urlsplit(self.path)
@@ -1231,6 +1295,7 @@ def main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--paste-image', action='store_true')
     modes.add_argument('--hub-archive', action='store_true')
+    modes.add_argument('--palette-archived', action='store_true')
     modes.add_argument('--repaint', action='store_true')
     modes.add_argument('--voice', action='store_true')
     modes.add_argument('--mixed-lid', action='store_true')
@@ -1245,7 +1310,7 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else VoiceHandler if args.voice else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    handler = PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else PaletteArchivedHandler if args.palette_archived else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else VoiceHandler if args.voice else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)

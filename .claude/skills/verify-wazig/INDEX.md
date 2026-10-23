@@ -11,6 +11,7 @@ The complete workflow-input index and bounded recent-change coverage live in [fe
 - [Slack archive](features/slack-archive.md): local archive, incoming messages, restart and unarchive without workspace archive calls.
 - [Workspace icons](features/workspace-icons.md): Slack workspace images, WhatsApp and Signal marks, fallback and persistent cache evidence.
 - [Hub archive migration](features/hub-archive.md): legacy WhatsApp keep flags, hub re-archive, durable state and same-profile restart.
+- [Palette archived](features/palette-archived.md): Ctrl+K finds archived and other-view chats on every account; Enter opens without unarchiving.
 - [Unified hub](features/hub.md): existing transport and backend isolation.
 
 IGSH-607 adds signal to workflow dispatch, the pull-request matrix and surviving-evidence validation. A registered journey is coverage intent, not proof of a successful run. Runtime evidence must come from the exact commit's GitHub Windows run.
