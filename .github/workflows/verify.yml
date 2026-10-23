@@ -96,6 +96,12 @@ jobs:
         run: |
           python tools/verify-wazig/check-evidence.py verification-evidence
           if ($LASTEXITCODE -ne 0) { throw 'Invalid journey evidence' }
+      - name: Validate search pill ink centering
+        if: matrix.feature == 'search'
+        shell: pwsh
+        run: |
+          python tools/verify-wazig/check-search-center.py verification-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Search text is not centered' }
       - name: ISSUE-462 validate text comparison artifact
         if: matrix.feature == 'text-comparison'
         shell: pwsh
