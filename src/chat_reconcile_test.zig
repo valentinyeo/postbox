@@ -71,6 +71,8 @@ const App = struct {
     displayed_jid: Utf8Text(191) = .{},
     displayed_timestamp: Utf8Text(47) = .{},
     messages_gen: u64 = 0,
+    messages_read_key: chat_key.Stored = .{},
+    messages_refresh_again: bool = false,
     chats_gen: u64 = 1,
     chats_read_attempts: u32 = 0,
     chats_read_retry_ticks: u32 = 0,
@@ -120,10 +122,11 @@ fn wacliPendingGet(a: *App, _: WacliJobKind) u32 {
     return a.pending;
 }
 fn wacliJobArgs(_: *WacliJob, _: []const []const u8) void {}
-fn wacliEnqueue(a: *App, job: WacliJob, _: bool) void {
+fn wacliEnqueue(a: *App, job: WacliJob, _: bool) bool {
     a.pending += 1;
     a.queued += 1;
     a.last_job = job;
+    return true;
 }
 fn msgCacheStore(a: *App, _: chat_key.Key, _: []const u8) void {
     a.cached += 1;
@@ -411,4 +414,168 @@ test "IGSH-575 dropped account and selected generation replies each log once" {
     try std.testing.expectEqual(@as(usize, 2), a.log_count);
     try std.testing.expect(std.mem.indexOf(u8, a.last_log.slice(), "generation changed") != null);
     try std.testing.expectEqual(@as(usize, 0), a.message_count);
+}
+
+test "IGSH-575 hub events during uncached history do not supersede its reply" {
+    var a = fixture();
+    a.unified_hub = true;
+    a.cache_tag.set("aaaaaaaaaaaaaaaa");
+    a.chats[0].account = a.cache_tag;
+    a.chats[0].jid.set("uncached@g.us");
+    refreshMessages(&a);
+    var first = resultFor(a.last_job);
+    first.data = "{\"data\":{\"messages\":[{\"MsgID\":\"FIRST\"}]}}";
+    const gen = a.messages_gen;
+    const painted = a.painted;
+
+    for (0..3) |_| hubRefreshMessages(&a, a.chats[0].jid.slice());
+    const chats = WacliResult{ .kind = .chats, .gen = a.chats_gen, .data = "2026-09-06T13:34:39" };
+    deliverChats(&a, &chats);
+    try std.testing.expectEqual(gen, a.messages_gen);
+    try std.testing.expectEqual(@as(u32, 1), a.queued);
+    try std.testing.expectEqual(painted, a.painted);
+    try std.testing.expectEqual(@as(usize, 0), a.message_count);
+
+    deliver(&a, &first);
+    try std.testing.expectEqual(@as(usize, 1), a.message_count);
+    try std.testing.expectEqual(@as(u32, 1), a.cached);
+    try std.testing.expectEqual(painted + 1, a.painted);
+    try std.testing.expectEqual(@as(usize, 1), a.log_count);
+    try std.testing.expect(std.mem.indexOf(u8, a.last_log.slice(), "dropped reply") == null);
+    try std.testing.expectEqual(@as(u32, 2), a.queued);
+    try std.testing.expectEqual(gen + 1, a.messages_gen);
+    try std.testing.expectEqual(@as(u32, 1), a.pending);
+
+    var followup = resultFor(a.last_job);
+    followup.data = "{\"data\":{\"messages\":[{\"MsgID\":\"NEWER\"}]}}";
+    deliver(&a, &followup);
+    try std.testing.expectEqual(@as(u32, 2), a.cached);
+    try std.testing.expectEqual(@as(u32, 2), a.queued);
+    try std.testing.expectEqual(@as(u32, 0), a.pending);
+}
+
+test "IGSH-575 returning to a chat keeps the newer click ahead of older reads" {
+    var a = fixture();
+    a.unified_hub = true;
+    a.chats[1].jid.set("b@g.us");
+    a.chat_count = 2;
+    refreshMessages(&a);
+    var first = resultFor(a.last_job);
+    a.selected_chat = 1;
+    refreshMessages(&a);
+    var other = resultFor(a.last_job);
+    a.selected_chat = 0;
+    refreshMessages(&a);
+    var newest = resultFor(a.last_job);
+    newest.data = "{\"data\":{\"messages\":[{}]}}";
+    const gen = a.messages_gen;
+    const painted = a.painted;
+    hubRefreshMessages(&a, a.chats[0].jid.slice());
+    deliver(&a, &other);
+    try std.testing.expectEqualStrings("messages-read: dropped reply, identity changed", a.last_log.slice());
+    deliver(&a, &first);
+    try std.testing.expectEqualStrings("messages-read: dropped reply, generation changed", a.last_log.slice());
+    try std.testing.expectEqual(painted, a.painted);
+    try std.testing.expectEqual(@as(u32, 0), a.cached);
+    try std.testing.expectEqual(gen, a.messages_gen);
+    try std.testing.expect(a.messages_refresh_again);
+    try std.testing.expect(chat_key.Key.eql(a.messages_read_key.key(), chat_key.of(&a.chats[0])));
+    deliver(&a, &newest);
+    try std.testing.expectEqual(@as(usize, 1), a.message_count);
+    try std.testing.expectEqual(@as(u32, 1), a.cached);
+    try std.testing.expectEqual(gen + 1, a.messages_gen);
+    var followup = resultFor(a.last_job);
+    deliver(&a, &followup);
+}
+
+test "IGSH-575 coalescing distinguishes provider and account for the same jid" {
+    inline for (.{ Provider.slack, Provider.telegram, Provider.whatsapp }) |provider| {
+        var a = fixture();
+        a.unified_hub = true;
+        refreshMessages(&a);
+        var first = resultFor(a.last_job);
+        a.chats[0].provider = provider;
+        if (provider == .whatsapp) a.chats[0].account.set("other-account");
+        refreshMessages(&a);
+        var newest = resultFor(a.last_job);
+        try std.testing.expectEqual(@as(u32, 2), a.queued);
+        const painted = a.painted;
+        deliver(&a, &first);
+        try std.testing.expectEqualStrings("messages-read: dropped reply, identity changed", a.last_log.slice());
+        try std.testing.expectEqual(painted, a.painted);
+        a.cache_tag = a.chats[0].account;
+        deliver(&a, &newest);
+        try std.testing.expectEqual(@as(u32, 1), a.cached);
+    }
+}
+
+test "IGSH-575 cleared selection drops its reply and can reopen while it is pending" {
+    var a = fixture();
+    refreshMessages(&a);
+    var old = resultFor(a.last_job);
+    a.chat_count = 0;
+    refreshMessages(&a);
+    deliver(&a, &old);
+    try std.testing.expectEqualStrings("messages-read: dropped reply, selection changed", a.last_log.slice());
+    a.chat_count = 1;
+    refreshMessages(&a);
+    old = resultFor(a.last_job);
+    a.chat_count = 0;
+    refreshMessages(&a);
+    a.chat_count = 1;
+    refreshMessages(&a);
+    var newest = resultFor(a.last_job);
+    const gen = a.messages_gen;
+    deliver(&a, &old);
+    try std.testing.expectEqualStrings("messages-read: dropped reply, generation changed", a.last_log.slice());
+    try std.testing.expectEqual(gen, a.messages_gen);
+    deliver(&a, &newest);
+    try std.testing.expectEqual(@as(u32, 1), a.cached);
+}
+
+test "IGSH-575 coalesced refresh preserves failure and malformed retry scheduling" {
+    for ([_]bool{ false, true }) |ok| {
+        var a = fixture();
+        refreshMessages(&a);
+        var result = resultFor(a.last_job);
+        result.ok = ok;
+        result.data = "{\"data\":{}}";
+        refreshMessages(&a);
+        deliver(&a, &result);
+        try std.testing.expectEqual(@as(u32, 1), a.queued);
+        try std.testing.expectEqual(@as(u32, 2), a.msg_read_retry_ticks);
+        try std.testing.expectEqual(@as(u32, 0), a.cached);
+        tick(&a);
+        tick(&a);
+        try std.testing.expectEqual(@as(u32, 2), a.queued);
+        result = resultFor(a.last_job);
+        deliver(&a, &result);
+    }
+}
+
+test "IGSH-575 late older reads cannot replace the newest click or block its next refresh" {
+    var a = fixture();
+    refreshMessages(&a);
+    var first = resultFor(a.last_job);
+    a.chats[1].jid.set("b@g.us");
+    a.chat_count = 2;
+    a.selected_chat = 1;
+    refreshMessages(&a);
+    var other = resultFor(a.last_job);
+    a.selected_chat = 0;
+    refreshMessages(&a);
+    var newest = resultFor(a.last_job);
+    newest.data = "{\"data\":{\"messages\":[{}]}}";
+    deliver(&a, &newest);
+    const painted = a.painted;
+    refreshMessages(&a);
+    var followup = resultFor(a.last_job);
+    try std.testing.expectEqual(newest.gen + 1, followup.gen);
+    deliver(&a, &first);
+    deliver(&a, &other);
+    try std.testing.expectEqual(painted, a.painted);
+    try std.testing.expectEqual(@as(usize, 1), a.message_count);
+    try std.testing.expectEqual(@as(u32, 1), a.cached);
+    try std.testing.expect(chat_key.Key.eql(a.messages_read_key.key(), chat_key.of(&a.chats[0])));
+    deliver(&a, &followup);
 }
