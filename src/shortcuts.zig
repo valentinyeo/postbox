@@ -1,5 +1,9 @@
 const std = @import("std");
 
+pub fn ctrlASelectsChats(list_focused: bool, compose_focused: bool, compose_empty: bool) bool {
+    return list_focused or (compose_focused and compose_empty);
+}
+
 pub const Shortcut = struct {
     key: []const u8,
     desc: []const u8,
@@ -23,7 +27,7 @@ pub const groups = [_]Group{
         .{ .key = "U", .desc = "Toggle unread chats" },
         .{ .key = "Ctrl+E or E", .desc = "Archive or unarchive the selected chat" },
         .{ .key = "Ctrl+Shift+E", .desc = "Archive and keep archived, including all selected chats" },
-        .{ .key = "Ctrl+A in the chat list", .desc = "Select all chats; Ctrl+E archives, Ctrl+Shift+E keeps archived, Esc cancels" },
+        .{ .key = "Ctrl+A in the chat list or empty message box", .desc = "Select all chats; Ctrl+E archives, Ctrl+Shift+E keeps archived, Esc cancels" },
         .{ .key = "R", .desc = "Refresh" },
         .{ .key = "Q", .desc = "Quit Messages" },
     } },
@@ -44,7 +48,7 @@ pub const groups = [_]Group{
     .{ .name = "Composer", .items = &[_]Shortcut{
         .{ .key = "Enter", .desc = "Send the message, or focus the composer if it isn't focused" },
         .{ .key = "Shift+Enter", .desc = "Insert a new line" },
-        .{ .key = "Ctrl+A", .desc = "Select all text in the message box" },
+        .{ .key = "Ctrl+A", .desc = "Select all text, or all visible chats if the message box is empty" },
         .{ .key = "C", .desc = "Focus the composer" },
         .{ .key = "Ctrl+V", .desc = "Paste a copied image to send" },
         .{ .key = "Esc", .desc = "Cancel the reply or discard a pasted image" },
@@ -111,4 +115,32 @@ test "keep archived has a discoverable direct shortcut" {
         }
     }
     return error.MissingKeepArchivedShortcut;
+}
+
+test "Ctrl+A in the chat list selects chats" {
+    try std.testing.expect(ctrlASelectsChats(true, false, false));
+}
+
+test "Ctrl+A in the empty main composer selects chats" {
+    try std.testing.expect(ctrlASelectsChats(false, true, true));
+}
+
+test "Ctrl+A in the main composer with text selects text" {
+    try std.testing.expect(!ctrlASelectsChats(false, true, false));
+}
+
+test "Ctrl+A in search selects text even with an empty main composer" {
+    try std.testing.expect(!ctrlASelectsChats(false, false, true));
+}
+
+test "Ctrl+A in the thread composer selects text even with an empty main composer" {
+    try std.testing.expect(!ctrlASelectsChats(false, false, true));
+}
+
+test "Ctrl+A in the emoji edit selects text even with an empty main composer" {
+    try std.testing.expect(!ctrlASelectsChats(false, false, true));
+}
+
+test "Ctrl+A in the palette edit selects text even with an empty main composer" {
+    try std.testing.expect(!ctrlASelectsChats(false, false, true));
 }

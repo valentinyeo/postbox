@@ -17966,6 +17966,12 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (control and !alt and !shift and key == 'A') {
+        const in_compose = a.compose != null and focus == a.compose.?;
+        const compose_empty = if (in_compose) win.GetWindowTextLengthW(a.compose.?) == 0 else false;
+        if (shortcuts.ctrlASelectsChats(a.chats_hwnd != null and focus == a.chats_hwnd.?, in_compose, compose_empty)) {
+            selectAllChats(a);
+            return true;
+        }
         const in_text_field = (a.compose != null and focus == a.compose.?) or
             (a.thread_compose != null and focus == a.thread_compose.?) or
             (a.search != null and focus == a.search.?) or
@@ -17973,10 +17979,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             (a.palette_edit != null and focus == a.palette_edit.?);
         if (in_text_field) {
             _ = win.SendMessageW(focus.?, win.EM_SETSEL, 0, @bitCast(@as(isize, -1)));
-            return true;
-        }
-        if (a.chats_hwnd != null and focus == a.chats_hwnd.?) {
-            selectAllChats(a);
             return true;
         }
     }

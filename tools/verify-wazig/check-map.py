@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'link-previews', 'menus', 'navigation', 'notrap', 'palette', 'palette-archived', 'paste-image', 'passage-copy', 'reactions', 'repaint', 'search', 'signal', 'slack-archive', 'slack-sort', 'slack-threads', 'telegram', 'views', 'voice', 'whatsapp-hub', 'workspace-icons', 'window'])
+assert features == sorted(['appearance', 'archive', 'archive-bulk', 'drafts', 'hub', 'hub-archive', 'link-previews', 'menus', 'navigation', 'notrap', 'palette', 'palette-archived', 'paste-image', 'passage-copy', 'reactions', 'repaint', 'search', 'signal', 'slack-archive', 'slack-sort', 'slack-threads', 'telegram', 'views', 'voice', 'whatsapp-hub', 'workspace-icons', 'window'])
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, passage-copy, reactions, paste-image, whatsapp-hub, hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window, voice]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, passage-copy, reactions, paste-image, whatsapp-hub, hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, views, workspace-icons, signal, telegram, notrap, repaint, archive, archive-bulk, text-comparison, window, voice]' in workflow
 options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
 assert options_match, 'missing workflow_dispatch journey options'
 options = [option.strip() for option in options_match[1].split(',')]
