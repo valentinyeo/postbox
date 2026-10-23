@@ -43,6 +43,17 @@ pub fn create(instance: win.HINSTANCE, parent: win.HWND, id: win.HMENU, style: u
     return hwnd;
 }
 
+pub fn setCentered(hwnd: win.HWND, centered: bool) void {
+    const host = fromWindow(hwnd) orelse return;
+    host.centered = centered;
+    if (centered) {
+        host.centerRect();
+    } else {
+        _ = host.send(win.EM_SETRECTNP, 0, 0);
+    }
+    _ = win.InvalidateRect(hwnd, null, win.FALSE);
+}
+
 pub fn isComposing(hwnd: ?win.HWND) bool {
     const host = fromWindow(hwnd orelse return false) orelse return false;
     return host.composing;
@@ -66,6 +77,8 @@ const Host = struct {
     hwnd: win.HWND,
     previous: win.WNDPROC = null,
     composing: bool = false,
+    centered: bool = false,
+    base_margins: u32 = 0,
     assigned_font: win.HFONT = null,
     cue: [256:0]u16 = @splat(0),
     cue_focused: bool = false,
@@ -101,6 +114,64 @@ const Host = struct {
         return @max(1, metrics.tmHeight);
     }
 
+    fn centerRect(self: *Host) void {
+        if (!self.centered or self.font() == null) return;
+        const dc = win.GetDC(self.hwnd);
+        if (dc == null) return;
+        defer _ = win.ReleaseDC(self.hwnd, dc);
+        const old_font = win.SelectObject(dc, self.font());
+        defer _ = win.SelectObject(dc, old_font);
+        var metrics: win.TEXTMETRICW = undefined;
+        if (win.GetTextMetricsW(dc, &metrics) == 0) return;
+        var client: win.RECT = undefined;
+        if (win.GetClientRect(self.hwnd, &client) == 0) return;
+        const height = @max(1, metrics.tmHeight);
+        var top = @divTrunc(client.bottom - height, 2);
+        const sample: []const u16 = if (self.cue[0] != 0) std.mem.sliceTo(&self.cue, 0) else std.unicode.utf8ToUtf16LeStringLiteral("Search");
+        var transform = std.mem.zeroes(win.MAT2);
+        transform.eM11.value = 1;
+        transform.eM22.value = 1;
+        var ink_top: i32 = height;
+        var ink_bottom: i32 = 0;
+        for (sample) |unit| {
+            var glyph: win.GLYPHMETRICS = undefined;
+            if (win.GetGlyphOutlineW(dc, unit, win.GGO_METRICS, &glyph, 0, null, &transform) == 0xffffffff or glyph.gmBlackBoxY == 0) continue;
+            const glyph_top = metrics.tmAscent - glyph.gmptGlyphOrigin.y;
+            ink_top = @min(ink_top, glyph_top);
+            ink_bottom = @max(ink_bottom, glyph_top + @as(i32, @intCast(glyph.gmBlackBoxY)));
+        }
+        if (ink_bottom > ink_top) top += @divTrunc(height - ink_top - ink_bottom, 2);
+        const margins = self.base_margins;
+        var rect = win.RECT{
+            .left = client.left + @as(i32, @intCast(margins & 0xffff)),
+            .top = top,
+            .right = client.right - @as(i32, @intCast(margins >> 16)),
+            .bottom = top + height,
+        };
+        const length_request = win.GETTEXTLENGTHEX{ .flags = win.GTL_PRECISE | win.GTL_NUMCHARS, .codepage = 1200 };
+        const length: usize = @intCast(self.send(win.EM_GETTEXTLENGTHEX, @intFromPtr(&length_request), 0));
+        var fits = length == 0;
+        if (length > 0) {
+            const text = std.heap.page_allocator.alloc(u16, length + 1) catch return;
+            defer std.heap.page_allocator.free(text);
+            const request = win.GETTEXTEX{ .cb = @intCast(text.len * 2), .flags = win.GT_DEFAULT, .codepage = 1200, .lpDefaultChar = null, .lpUsedDefChar = null };
+            const count = self.send(win.EM_GETTEXTEX, @intFromPtr(&request), @bitCast(@intFromPtr(text.ptr)));
+            var extent = win.SIZE{ .cx = 0, .cy = 0 };
+            if (count > 0 and win.GetTextExtentPoint32W(dc, text.ptr, @intCast(count), &extent) != 0 and extent.cx < rect.right - rect.left) {
+                const inset = @divTrunc(rect.right - rect.left - extent.cx - 1, 2);
+                rect.left += inset;
+                rect.right -= inset;
+                fits = true;
+            }
+        }
+        if (fits) {
+            var scroll = win.POINT{ .x = 0, .y = 0 };
+            _ = self.send(win.EM_SETSCROLLPOS, 0, @bitCast(@intFromPtr(&scroll)));
+        }
+        _ = self.send(win.EM_SETRECTNP, 0, @bitCast(@intFromPtr(&rect)));
+        _ = win.InvalidateRect(self.hwnd, null, win.FALSE);
+    }
+
     fn setFont(self: *Host, wparam: usize, lparam: isize) win.LRESULT {
         self.assigned_font = @ptrFromInt(wparam);
         const mask = self.send(win.EM_SETEVENTMASK, 0, 0);
@@ -131,6 +202,7 @@ const Host = struct {
             _ = self.send(win.EM_SETCHARFORMAT, win.SCF_ALL, @bitCast(@intFromPtr(&format)));
         }
         _ = self.send(win.EM_SETMODIFY, @intCast(modified), 0);
+        self.centerRect();
         return result;
     }
 
@@ -154,7 +226,13 @@ const Host = struct {
             if (self.cue[0] != 0 and (self.cue_focused or win.GetFocus() != self.hwnd)) {
                 _ = win.SetTextColor(dc, theme.current.on_surface_variant);
                 var cue_rect = rect;
-                _ = text_draw.drawText(dc, &self.cue, -1, &cue_rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_END_ELLIPSIS);
+                if (self.centered) {
+                    var measured = rect;
+                    const cue_height = text_draw.drawText(dc, &self.cue, -1, &measured, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_CALCRECT);
+                    cue_rect.bottom = cue_rect.top + @max(self.lineHeight(dc), cue_height);
+                }
+                const alignment: u32 = if (self.centered) @intCast(win.DT_CENTER | win.DT_VCENTER) else 0;
+                _ = text_draw.drawText(dc, &self.cue, -1, &cue_rect, @as(u32, @intCast(win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_END_ELLIPSIS)) | alignment);
             }
             return;
         }
@@ -256,9 +334,23 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         },
         win.WM_SETFONT => return host.setFont(wparam, lparam),
         win.WM_GETFONT => return @bitCast(@intFromPtr(host.assigned_font)),
+        win.EM_SETMARGINS => {
+            const margins: u32 = @truncate(@as(usize, @bitCast(lparam)));
+            if (wparam & win.EC_LEFTMARGIN != 0) host.base_margins = (host.base_margins & 0xffff0000) | (margins & 0xffff);
+            if (wparam & win.EC_RIGHTMARGIN != 0) host.base_margins = (host.base_margins & 0xffff) | (margins & 0xffff0000);
+            const result = host.send(message, wparam, lparam);
+            host.centerRect();
+            return result;
+        },
+        win.WM_SIZE, win.WM_CHAR, win.WM_KEYDOWN, win.WM_CUT, win.WM_PASTE, win.WM_CLEAR, win.WM_UNDO, win.EM_UNDO, win.EM_REDO, win.EM_REPLACESEL, win.WM_IME_COMPOSITION, win.EM_SETTEXTEX => {
+            const result = host.send(message, wparam, lparam);
+            host.centerRect();
+            return result;
+        },
         win.WM_SETTEXT => {
             const mask = host.send(win.EM_SETEVENTMASK, 0, 0);
             const result = host.send(message, wparam, lparam);
+            host.centerRect();
             _ = host.send(win.EM_SETEVENTMASK, 0, mask);
             if (result != 0 and mask & win.ENM_CHANGE != 0) {
                 const id: usize = @intCast(win.GetDlgCtrlID(hwnd));
@@ -274,6 +366,7 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             @memcpy(host.cue[0..count], input[0..count]);
             host.cue[count] = 0;
             host.cue_focused = wparam != 0;
+            host.centerRect();
             _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return 1;
         },
@@ -574,6 +667,119 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
         _ = win.SendMessageW(edit, win.WM_SETFONT, @intFromPtr(font), 0);
     }
     std.debug.print("IGSH-466 font pixel equality, fallback negative control and 96/144 DPI ink/content-height passed\n", .{});
+
+    try std.testing.expect(!host.centered);
+    const search = create(instance, parent, null, win.WS_CHILD | win.WS_VISIBLE | win.ES_AUTOHSCROLL, 0, 0, 200, 34) orelse return error.CreateEditFailed;
+    defer _ = win.DestroyWindow(search);
+    const search_host = fromWindow(search).?;
+    try std.testing.expect(!search_host.centered);
+    setCentered(search, true);
+    for ([_]i32{ 96, 144 }) |dpi| {
+        const search_font = win.CreateFontW(-@divTrunc(14 * dpi + 48, 96), 0, 0, 0, @import("font_config.zig").body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans")) orelse return error.CreateFontFailed;
+        defer _ = win.DeleteObject(search_font);
+        const search_height = @divTrunc(34 * dpi + 48, 96);
+        _ = win.MoveWindow(search, 0, 0, 200, search_height, win.FALSE);
+        _ = win.SendMessageW(search, win.WM_SETFONT, @intFromPtr(search_font), 0);
+        _ = win.SendMessageW(search, win.EM_SETMARGINS, win.EC_LEFTMARGIN | win.EC_RIGHTMARGIN, 2 | (2 << 16));
+        for ([_][*:0]const u16{
+            std.unicode.utf8ToUtf16LeStringLiteral("Search All  Ctrl+F"),
+            std.unicode.utf8ToUtf16LeStringLiteral("Search App"),
+            std.unicode.utf8ToUtf16LeStringLiteral("Beta"),
+        }, 0..) |search_sample, index| {
+            _ = win.SetWindowTextW(search, std.unicode.utf8ToUtf16LeStringLiteral(""));
+            const search_cue = if (index == 2) std.unicode.utf8ToUtf16LeStringLiteral("Search All  Ctrl+F") else search_sample;
+            _ = win.SendMessageW(search, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(search_cue)));
+            const centered_top = search_host.textRect().top;
+            var first_width: i32 = 0;
+            for ([_]u16{ 'a', 'y', 'A', 'g', 'y' }, 0..) |unit, typed_index| {
+                if (typed_index == 2) _ = win.SendMessageW(search, win.EM_SETSEL, 0, -1);
+                _ = win.SendMessageW(search, win.WM_CHAR, unit, 0);
+                var typed_rect: win.RECT = undefined;
+                _ = win.SendMessageW(search, win.EM_GETRECT, 0, @bitCast(@intFromPtr(&typed_rect)));
+                if (typed_index == 0) first_width = typed_rect.right - typed_rect.left;
+                if (typed_index == 4) try std.testing.expect(typed_rect.right - typed_rect.left > first_width);
+                const typed_ink = try expectSearchAlignment(search, dc, pixels, search_height);
+                try std.testing.expectEqual(centered_top, typed_rect.top);
+                try std.testing.expect(typed_ink.right > typed_ink.left);
+                try std.testing.expect(@abs(typed_ink.left + typed_ink.right - 200) <= 4);
+            }
+            const typed_length: usize = @intCast(win.GetWindowTextW(search, &buffer, buffer.len));
+            try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Agy"), buffer[0..typed_length]);
+            const completed_ink = try expectSearchAlignment(search, dc, pixels, search_height);
+            try std.testing.expect(completed_ink.right > completed_ink.left);
+            try std.testing.expect(@abs(completed_ink.left + completed_ink.right - 200) <= 4);
+            _ = win.SetWindowTextW(search, std.unicode.utf8ToUtf16LeStringLiteral(""));
+            const empty_rect = search_host.textRect();
+            var search_client: win.RECT = undefined;
+            _ = win.GetClientRect(search, &search_client);
+            const base_width = search_client.right - search_client.left - @as(i32, @intCast(search_host.base_margins & 0xffff)) - @as(i32, @intCast(search_host.base_margins >> 16));
+            try std.testing.expectEqual(base_width, empty_rect.right - empty_rect.left);
+            if (index == 2) _ = win.SetWindowTextW(search, search_sample);
+            _ = win.SendMessageW(search, win.EM_SETSEL, 1, 1);
+            var selection_before: win.CHARRANGE = undefined;
+            _ = win.SendMessageW(search, win.EM_EXGETSEL, 0, @bitCast(@intFromPtr(&selection_before)));
+            const search_ink = try expectSearchAlignment(search, dc, pixels, search_height);
+            var selection_after: win.CHARRANGE = undefined;
+            _ = win.SendMessageW(search, win.EM_EXGETSEL, 0, @bitCast(@intFromPtr(&selection_after)));
+            try std.testing.expectEqualDeep(selection_before, selection_after);
+            const left = search_ink.left;
+            const right = search_ink.right;
+            const top = search_ink.top;
+            const bottom = search_ink.bottom;
+            try std.testing.expect(right > left and bottom > top);
+            try std.testing.expect(@abs(left + right - 200) <= 4);
+            try std.testing.expect(@abs(top + bottom - search_height) <= 2);
+        }
+        _ = win.SetWindowTextW(search, std.unicode.utf8ToUtf16LeStringLiteral("Beta"));
+        try std.testing.expectEqual(@as(win.LRESULT, 0), win.SendMessageW(search, win.EM_CANUNDO, 0, 0));
+        _ = win.SendMessageW(search, win.EM_SETSEL, 0, -1);
+        _ = win.SendMessageW(search, win.EM_REPLACESEL, 1, @bitCast(@intFromPtr(std.unicode.utf8ToUtf16LeStringLiteral(""))));
+        _ = try expectSearchAlignment(search, dc, pixels, search_height);
+        _ = win.SetWindowTextW(search, std.unicode.utf8ToUtf16LeStringLiteral("A long search query that must keep the full width for horizontal scrolling"));
+        const overflow_rect = search_host.textRect();
+        std.debug.print("IGSH-646 overflow dpi={d} rect=[{d},{d},{d},{d}]\n", .{ dpi, overflow_rect.left, overflow_rect.top, overflow_rect.right, overflow_rect.bottom });
+        try std.testing.expectEqual(@as(i32, 2), overflow_rect.left);
+        try std.testing.expectEqual(@as(i32, 198), overflow_rect.right);
+        _ = win.SendMessageW(search, win.EM_SETSEL, @intCast(win.GetWindowTextLengthW(search)), -1);
+        _ = win.SendMessageW(search, win.EM_SCROLLCARET, 0, 0);
+        _ = win.SendMessageW(search, win.EM_SETSEL, 0, -1);
+        _ = win.SendMessageW(search, win.WM_CHAR, 'B', 0);
+        const shortened_ink = try expectSearchAlignment(search, dc, pixels, search_height);
+        try std.testing.expect(shortened_ink.right > shortened_ink.left);
+        try std.testing.expect(@abs(shortened_ink.left + shortened_ink.right - 200) <= 4);
+        _ = win.SendMessageW(search, win.WM_SETFONT, @intFromPtr(font), 0);
+    }
+    setCentered(search, false);
+    try std.testing.expect(!search_host.centered);
+    try std.testing.expect(!host.centered);
+    std.debug.print("IGSH-646 search-only centered rectangle and cue/typed ink at 96/144 DPI passed\n", .{});
+}
+
+fn expectSearchAlignment(search: win.HWND, dc: win.HDC, pixels: []const u32, search_height: i32) !win.RECT {
+    _ = win.SendMessageW(search, win.WM_PRINTCLIENT, @intFromPtr(dc), win.PRF_CLIENT);
+    _ = win.GdiFlush();
+    const bg = rgbPixel(theme.current.surface_container_high);
+    var left: i32 = 200;
+    var right: i32 = 0;
+    var top: i32 = search_height;
+    var bottom: i32 = 0;
+    for (pixels[0..@intCast(200 * search_height)], 0..) |pixel, i| {
+        var contrast: u32 = 0;
+        for ([_]u5{ 0, 8, 16 }) |shift| {
+            const channel_value: i32 = @intCast((pixel >> shift) & 255);
+            const fill: i32 = @intCast((bg >> shift) & 255);
+            contrast = @max(contrast, @abs(channel_value - fill));
+        }
+        if (contrast < 48) continue;
+        const x: i32 = @intCast(i % 200);
+        const y: i32 = @intCast(i / 200);
+        left = @min(left, x);
+        right = @max(right, x + 1);
+        top = @min(top, y);
+        bottom = @max(bottom, y + 1);
+    }
+    try std.testing.expect(right > left and bottom > top and @abs(left + right - 200) <= 4);
+    return .{ .left = left, .top = top, .right = right, .bottom = bottom };
 }
 
 fn rgbPixel(colour: win.COLORREF) u32 {
