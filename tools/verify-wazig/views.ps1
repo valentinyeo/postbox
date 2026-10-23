@@ -6,7 +6,7 @@ function Assert-AccountView($Session, [int]$Number, [string]$Account, [string]$C
     } "account view $Account"
     $state = Read-Control $Session status
     $rows = Read-Control $Session chats
-    Assert-That ($rows.total -eq 2 -and @($rows.chats | Where-Object account -ne $Account).Count -eq 0) 'Account view leaked another account'
+    Assert-That ($rows.total -eq 2 -and @($rows.chats | Where-Object view_account -ne $Account).Count -eq 0) 'Account view leaked another account'
     Assert-That ($state.current_view.label -eq $state.view_order[$Number - 1].label) 'View label does not match saved position'
     $rows | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Capture.chats.json")
     Save-Screen $Session $Capture
@@ -14,7 +14,7 @@ function Assert-AccountView($Session, [int]$Number, [string]$Account, [string]$C
 }
 
 function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
-    $expected = @('wa-a', 'wa-b', 'slack-a', 'slack-b')
+    $expected = @('personal', 'business', 'T0ABC123', 'T0DEF456')
     $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 4 } 'four account views'
     $baseline = Read-Control $Session status
     Assert-That ($baseline.current_view.inbox -and $baseline.chat_count -eq 8) 'Combined inbox baseline missing'
@@ -31,12 +31,12 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
         $null = Wait-Until { (Read-Control $Session status).selected.id -eq $rows[0].id } 'previous chat within account'
         Send-Keys $Session '^f'
         Send-Keys $Session 'Shared'
-        $null = Wait-Until { $state = Read-Control $Session status; $state.chat_count -eq 1 -and $state.selected.account -eq $expected[$index] -and $state.selected.name -eq 'Verification Shared' } 'account-scoped search'
+        $null = Wait-Until { $state = Read-Control $Session status; $state.chat_count -eq 1 -and $state.selected.view_account -eq $expected[$index] -and $state.selected.name -eq 'Verification Shared' } 'account-scoped search'
         Save-Screen $Session "search-$($index + 1)"
         Send-Keys $Session '{ESC}'
         $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'account search cleared'
     }
-    $null = Assert-AccountView $Session 1 'wa-a' 'send-account'
+    $null = Assert-AccountView $Session 1 'personal' 'send-account'
     Send-Keys $Session '^2'
     $target = (Read-Control $Session status).selected
     Invoke-PaletteCommand $Session 'Compose message'
@@ -48,15 +48,15 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
         $state.pending_sends -eq 0 -and $sends.Count -eq 1
     } 'one account-scoped send accepted'
     $sends = @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/send' })
-    Assert-That (@($sends | Where-Object { $_.source_account -ne 'wa-a' -or $_.body.chat -ne $target.id }).Count -eq 0) 'Send reached another account'
+    Assert-That (@($sends | Where-Object { $_.source_account -ne 'personal' -or $_.body.chat -ne $target.id }).Count -eq 0) 'Send reached another account'
     $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object text -eq 'Verification account send').Count -eq 1 } 'sent message visible in source account'
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'sent.messages.json')
     Save-Screen $Session sent
-    $null = Assert-AccountView $Session 2 'wa-b' 'other-account'
+    $null = Assert-AccountView $Session 2 'business' 'other-account'
     Send-Keys $Session '^2'
     $null = Wait-Until {
         $shown = Read-Control $Session messages
-        $shown.chat.account -eq 'wa-b' -and $shown.messages.Count -gt 0 -and @($shown.messages | Where-Object text -eq 'Verification account send').Count -eq 0
+        $shown.chat.view_account -eq 'business' -and $shown.messages.Count -gt 0 -and @($shown.messages | Where-Object text -eq 'Verification account send').Count -eq 0
     } 'shared contact in other account has no sent message'
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'other.messages.json')
     Save-Screen $Session isolated
@@ -71,14 +71,14 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     Invoke-PaletteCommand $Session 'Sort views' sort-command
     Save-Screen $Session sort-before
     Send-Keys $Session '^{DOWN}'
-    $null = Wait-Until { (Read-Control $Session status).view_order[0].account -eq 'wa-b' } 'view move saved immediately'
+    $null = Wait-Until { (Read-Control $Session status).view_order[0].account -eq 'business' } 'view move saved immediately'
     $preferences = "HKCU:\Software\MessagesVerification\$($Session.id)\Software\Messages"
     $savedOrder = (Get-ItemProperty $preferences).ViewOrder
-    Assert-That ($savedOrder.StartsWith("whatsapp:wa-b`nwhatsapp:wa-a`n")) 'ViewOrder not saved at move time'
+    Assert-That ($savedOrder.StartsWith("whatsapp:business`nwhatsapp:personal`n")) 'ViewOrder not saved at move time'
     Set-Content (Join-Path $Session.evidence 'view-order.txt') $savedOrder -NoNewline
     Save-Screen $Session sort-moved
     Send-Keys $Session '{ENTER}'
-    $null = Wait-Until { (Read-Control $Session status).current_view.account -eq 'wa-a' } 'Enter switches to moved selection'
+    $null = Wait-Until { (Read-Control $Session status).current_view.account -eq 'personal' } 'Enter switches to moved selection'
     Save-Screen $Session sort-selected
     Invoke-PaletteCommand $Session 'Sort views'
     Send-Keys $Session '{ESC}'
@@ -98,10 +98,10 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
     $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'saved account view restored'
     Invoke-Doctor $Session | Out-Null
-    $null = Assert-AccountView $Session 1 'wa-b' 'restart-1'
-    $null = Assert-AccountView $Session 2 'wa-a' 'restart-2'
-    $null = Assert-AccountView $Session 3 'slack-a' 'restart-3'
-    $null = Assert-AccountView $Session 4 'slack-b' 'restart-4'
+    $null = Assert-AccountView $Session 1 'business' 'restart-1'
+    $null = Assert-AccountView $Session 2 'personal' 'restart-2'
+    $null = Assert-AccountView $Session 3 'T0ABC123' 'restart-3'
+    $null = Assert-AccountView $Session 4 'T0DEF456' 'restart-4'
     Save-Screen $Session after
     return $app
 }

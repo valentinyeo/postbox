@@ -152,3 +152,73 @@ test "hub source accounts retain per-account view labels independently of cache 
     try std.testing.expect(views.accountMatches(.whatsapp, "wa-b", key));
     try std.testing.expect(!views.accountMatches(.whatsapp, "wa-a", key));
 }
+
+test "real hub prefixed jids without account produce four views without changing routing identity" {
+    const views = @import("messenger_view.zig");
+    const chat_key = @import("chat_key.zig");
+    const raw =
+        \\[
+        \\  {"provider":"whatsapp","jid":"personal:0000000000@s.whatsapp.net"},
+        \\  {"provider":"whatsapp","jid":"business:0000000000@s.whatsapp.net"},
+        \\  {"provider":"slack","jid":"slack:T0ABC123:C0000000000"},
+        \\  {"provider":"slack","jid":"slack:T0DEF456:C0000000000"}
+        \\]
+    ;
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, raw, .{});
+    defer parsed.deinit();
+    var known: std.ArrayList(views.Account) = .empty;
+    defer known.deinit(std.testing.allocator);
+    var routing: [4]chat_key.Stored = @splat(.{});
+    for (parsed.value.array.items, 0..) |row, index| {
+        try std.testing.expect(row.object.get("account") == null);
+        const provider = hub.sourceProvider(row.object).?;
+        const jid = row.object.get("jid").?.string;
+        const account = hub.viewAccount(row.object, "hub-cache");
+        try views.appendUnique(std.testing.allocator, &known, views.Account.init(provider, account, ""));
+        routing[index].set(.{ .provider = provider, .account = hub.sourceAccount(row.object, "hub-cache"), .id = jid });
+        try std.testing.expectEqualStrings("hub-cache", routing[index].key().account);
+        try std.testing.expectEqualStrings(jid, routing[index].key().id);
+    }
+    try std.testing.expectEqual(@as(usize, 4), known.items.len);
+    try std.testing.expectEqualStrings("WhatsApp personal", known.items[0].labelText());
+    try std.testing.expectEqualStrings("WhatsApp business", known.items[1].labelText());
+    try std.testing.expectEqualStrings("Slack T0ABC123", known.items[2].labelText());
+    try std.testing.expectEqualStrings("Slack T0DEF456", known.items[3].labelText());
+    try std.testing.expect(!chat_key.Key.eql(routing[0].key(), routing[1].key()));
+    for (known.items, 0..) |view, index| {
+        var count: usize = 0;
+        for (parsed.value.array.items) |row| {
+            const key = chat_key.Key{ .provider = hub.sourceProvider(row.object).?, .account = hub.viewAccount(row.object, "hub-cache"), .id = row.object.get("jid").?.string };
+            if (views.accountMatches(views.providerView(view.key.provider), view.key.key().account, key)) count += 1;
+        }
+        try std.testing.expectEqual(@as(usize, 1), count);
+        try std.testing.expect(views.accountMatches(views.providerView(view.key.provider), view.key.key().account, .{ .provider = routing[index].provider, .account = view.key.key().account, .id = routing[index].key().id }));
+    }
+    const request = try hub.send(std.testing.allocator, routing[0].key().id, "Synthetic message", "", client_id);
+    defer std.testing.allocator.free(request.body);
+    var body = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, request.body, .{});
+    defer body.deinit();
+    try std.testing.expectEqualStrings(routing[0].key().id, body.value.object.get("chat").?.string);
+    try std.testing.expect(body.value.object.get("account") == null);
+}
+
+test "hub view accounts prefer explicit accounts and safely fall back for unprefixed handles" {
+    const rows =
+        \\[
+        \\  {"provider":"whatsapp","account":"explicit","jid":"personal:0000000000@s.whatsapp.net"},
+        \\  {"provider":"slack","account":"hub-cache","jid":"slack:T0ABC123:C0000000000"},
+        \\  {"provider":"whatsapp","jid":"0000000000@s.whatsapp.net"},
+        \\  {"provider":"whatsapp","jid":"personal:opaque"},
+        \\  {"provider":"whatsapp","jid":":contact@example.invalid"},
+        \\  {"provider":"slack","jid":"slack:T0ABC123"},
+        \\  {"provider":"slack","jid":"slack::channel"},
+        \\  {"provider":"slack","jid":"slack:T0ABC123:"},
+        \\  {"provider":"telegram","jid":"telegram:opaque"}
+        \\]
+    ;
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, rows, .{});
+    defer parsed.deinit();
+    for (parsed.value.array.items, 0..) |row, index| {
+        try std.testing.expectEqualStrings(if (index == 0) "explicit" else "hub-cache", hub.viewAccount(row.object, "hub-cache"));
+    }
+}

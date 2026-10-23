@@ -158,11 +158,16 @@ class SlackSortHandler(Handler):
 
 
 VIEW_ACCOUNTS = [
-    ('slack', 'slack-a', 'Workspace A'),
-    ('whatsapp', 'wa-a', 'Account A'),
-    ('slack', 'slack-b', 'Workspace B'),
-    ('whatsapp', 'wa-b', 'Account B'),
+    ('slack', 'T0ABC123', ''),
+    ('whatsapp', 'personal', ''),
+    ('slack', 'T0DEF456', ''),
+    ('whatsapp', 'business', ''),
 ]
+
+
+def view_account(row):
+    parts = row['jid'].split(':')
+    return parts[1] if row['provider'] == 'slack' else parts[0]
 
 
 def view_rows():
@@ -170,8 +175,8 @@ def view_rows():
     for index, (provider, account, name) in enumerate(VIEW_ACCOUNTS):
         for contact in range(2):
             stamp = datetime(2026, 1, 1, 0, index * 2 + contact, tzinfo=timezone.utc)
-            rows.append(dict(jid=f'views-{account}-{contact}', provider=provider, account=account,
-                             account_name=name, name='Verification Shared' if contact == 0 else 'Verification Other',
+            jid = f'slack:{account}:C{contact:010d}' if provider == 'slack' else f'{account}:{contact:010d}@s.whatsapp.net'
+            rows.append(dict(jid=jid, provider=provider, name='Verification Shared' if contact == 0 else 'Verification Other',
                              kind='direct', last_message_ts=stamp.isoformat().replace('+00:00', 'Z'),
                              unread_count=0, archived=False))
     return rows
@@ -199,7 +204,7 @@ class ViewsHandler(Handler):
                 return
             with self.state.lock:
                 rows = [dict(MsgID=f'baseline-{chat}', ChatJID=chat, Timestamp=row['last_message_ts'],
-                             Text=f'History {row["account"]}', FromMe=False, SenderName='Verification Shared')]
+                             Text=f'History {view_account(row)}', FromMe=False, SenderName='Verification Shared')]
                 rows.extend(dict(MsgID=reply['msg_id'], ChatJID=chat, Timestamp=reply['ts'],
                                  Text=reply['text'], FromMe=True, SenderName='Verification Sender')
                             for reply in self.state.sends.values() if reply['chat'] == chat)
@@ -220,7 +225,7 @@ class ViewsHandler(Handler):
         if row is None:
             self.respond(400, {'error': 'unknown fixture chat'}, body=body)
             return
-        scope = dict(source_provider=row['provider'], source_account=row['account'])
+        scope = dict(source_provider=row['provider'], source_account=view_account(row))
         if self.path == '/v1/wazig/send':
             if set(body) != {'chat', 'text', 'reply_to', 'client_id'} or not body['client_id']:
                 self.respond(400, {'error': 'invalid send'}, body=body)
@@ -233,7 +238,7 @@ class ViewsHandler(Handler):
                     row['last_message_ts'] = self.state.stamp
                 reply = dict(self.state.sends[body['client_id']])
             self.respond(200, reply, body=body, accepted=not duplicate, duplicate=duplicate, **scope)
-        elif self.path == '/v1/wazig/mark-read':
+        elif self.path == '/v1/wazig/mark-read' and set(body) == {'chat', 'message_id'}:
             self.respond(200, {'status': 'ok'}, body=body, **scope)
         else:
             self.respond(400, {'error': 'unexpected fixture write'}, body=body, **scope)

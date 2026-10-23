@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IGSH-602: Derive separate account views from real hub prefixed chat IDs when account metadata is absent, preserving send and cache identities. WhatsApp labels show the account; Slack labels use a locally saved workspace name or team ID.
+
 - IGSH-602: Separate account and workspace views with saved Alt+1..9 ordering, a Ctrl+K Sort views list, and an Alt+I combined inbox. Search, navigation and sending keep account identities separate; read-only control status reports the current view and order.
 
 - IGSH-545: Chat-row, composer-button and window paint buffers are sized to the area being redrawn instead of the whole window, so a 4K row no longer allocates a full-window bitmap. A chat row whose brush cannot be created is left untouched instead of showing a black row.
