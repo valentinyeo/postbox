@@ -14,9 +14,9 @@ function Read-ScreenshotPixels([string]$Path) {
     } finally { $image.Dispose() }
 }
 
-function Measure-Screenshot([string]$Path, $Rect, [int]$ScreenX, [int]$ScreenY, [int]$Inset) {
+function Measure-Screenshot([string]$Path, $Rect, [int]$ScreenX, [int]$ScreenY, [int]$Inset, [bool]$ClearType = $false) {
     $image = Read-ScreenshotPixels $Path
-    [VerifyMenus]::Measure($image.bytes, $image.width, $image.height, $image.stride, $Rect, $ScreenX, $ScreenY, $Inset)
+    [VerifyMenus]::Measure($image.bytes, $image.width, $image.height, $image.stride, $Rect, $ScreenX, $ScreenY, $Inset, $ClearType)
 }
 
 function Find-Popup($Session, [string]$Class) {
@@ -52,12 +52,16 @@ function Assert-PopupPixels($Session, [string]$Name, [IntPtr]$Handle, [bool]$Lig
 }
 
 function Capture-Popup($Session, [string]$Name, [string]$Class, [bool]$Light = $false) {
+    $before = Read-ScreenshotPixels (Join-Path $Session.evidence "$Name-before.png")
     $handle = Wait-Popup $Session $Class
     $null = Wait-Until {
         Save-Screen $Session "$Name-after"
         $screen = [Windows.Forms.SystemInformation]::VirtualScreen
-        $metric = Measure-Screenshot (Join-Path $Session.evidence "$Name-after.png") ([VerifyMenus]::Bounds($handle)) $screen.Left $screen.Top 8
-        $metric.textPixels -ge 24
+        $rect = [VerifyMenus]::Bounds($handle)
+        $after = Read-ScreenshotPixels (Join-Path $Session.evidence "$Name-after.png")
+        Assert-That ($before.width -eq $after.width -and $before.height -eq $after.height -and $before.stride -eq $after.stride) 'Popup screenshots must have matching dimensions'
+        $metric = [VerifyMenus]::Measure($after.bytes, $after.width, $after.height, $after.stride, $rect, $screen.Left, $screen.Top, 8)
+        $metric.textPixels -ge 24 -and [VerifyMenus]::Changed($before.bytes, $after.bytes, $after.width, $after.height, $after.stride, $rect, $screen.Left, $screen.Top)
     } "$Name painted text"
     Assert-PopupPixels $Session "$Name-after" $handle $Light
     return $handle
@@ -154,7 +158,7 @@ function Invoke-Menus($Session) {
         Assert-That ($edits.Count -eq $expectedEdits) "$($entry.name) edit inventory changed"
         foreach ($edit in $edits) {
             $rect = [VerifyMenus]::Bounds([IntPtr]$edit.Current.NativeWindowHandle)
-            $metric = Measure-Screenshot (Join-Path $Session.evidence "amoled-$($entry.name)-after.png") $rect $screen.Left $screen.Top 4
+            $metric = Measure-Screenshot (Join-Path $Session.evidence "amoled-$($entry.name)-after.png") $rect $screen.Left $screen.Top 4 $true
             $script:menuMeasurements += [ordered]@{ screenshot = "amoled-$($entry.name)-after.png"; expected = 'dark-edit'; automationId = $edit.Current.AutomationId; measurement = $metric }
             $script:menuMeasurements | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'menu-luminances.json')
             if ($entry.name -eq 'emoji') { [VerifyMenus]::Validate($metric, $false) }
