@@ -350,6 +350,7 @@ const App = struct {
     selected_chat: usize = 0,
     unread_only: bool = false,
     view: messenger_view.View = .all,
+    view_account: Utf8Text(32) = .{},
     messages: [max_messages]Message = @splat(.{}),
     message_count: usize = 0,
     selected_message: ?usize = null,

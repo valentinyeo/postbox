@@ -45,7 +45,7 @@ def mutate(source, name):
         "lost-refresh": ("if (!jobIsWrite(job.kind)) a.wacli_refresh_again = true;", ""),
         "no-account-migration": ("if (pending.provider == .whatsapp and (pending.account.len == 0 or", "if (false and (pending.account.len == 0 or"),
         "overwrite-known-account": ("pending.provider == .whatsapp and (pending.account.len == 0 or", "pending.provider == .whatsapp and (true or"),
-        "send-wrong-account": ("or !std.mem.eql(u8, head.account.slice(), a.cache_tag.slice())", ""),
+        "send-wrong-account": ("or (!unifiedHub(a) and !std.mem.eql(u8, head.account.slice(), a.cache_tag.slice()))", ""),
         "jid-only-dedup": ("if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), key) or !chat_key.Key.eql(chat_key.displayed(a), key)) return false;", "if (!std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), key.id)) return false;"),
         "partial-load": ("if (win.ReadFile(handle, buffer[total..].ptr, @intCast(buffer.len - total), &got, null) == 0) return;", "if (win.ReadFile(handle, buffer[total..].ptr, @intCast(buffer.len - total), &got, null) == 0) break;"),
     }

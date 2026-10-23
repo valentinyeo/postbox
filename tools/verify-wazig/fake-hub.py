@@ -1,5 +1,5 @@
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import importlib.util
 import io
 import json
@@ -157,6 +157,88 @@ class SlackSortHandler(Handler):
             self.respond(400, {'error': 'invalid sort request'}, body=body)
 
 
+VIEW_ACCOUNTS = [
+    ('slack', 'slack-a', 'Workspace A'),
+    ('whatsapp', 'wa-a', 'Account A'),
+    ('slack', 'slack-b', 'Workspace B'),
+    ('whatsapp', 'wa-b', 'Account B'),
+]
+
+
+def view_rows():
+    rows = []
+    for index, (provider, account, name) in enumerate(VIEW_ACCOUNTS):
+        for contact in range(2):
+            stamp = datetime(2026, 1, 1, 0, index * 2 + contact, tzinfo=timezone.utc)
+            rows.append(dict(jid=f'views-{account}-{contact}', provider=provider, account=account,
+                             account_name=name, name='Verification Shared' if contact == 0 else 'Verification Other',
+                             kind='direct', last_message_ts=stamp.isoformat().replace('+00:00', 'Z'),
+                             unread_count=0, archived=False))
+    return rows
+
+
+class ViewsHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            with self.state.lock:
+                rows = json.loads(json.dumps(self.state.view_rows))
+            self.respond(200, [] if query.get('archived') == ['true'] else rows)
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            row = next((row for row in self.state.view_rows if row['jid'] == chat), None)
+            if row is None:
+                self.respond(404, {'error': 'unknown fixture chat'})
+                return
+            with self.state.lock:
+                rows = [dict(MsgID=f'baseline-{chat}', ChatJID=chat, Timestamp=row['last_message_ts'],
+                             Text=f'History {row["account"]}', FromMe=False, SenderName='Verification Shared')]
+                rows.extend(dict(MsgID=reply['msg_id'], ChatJID=chat, Timestamp=reply['ts'],
+                                 Text=reply['text'], FromMe=True, SenderName='Verification Sender')
+                            for reply in self.state.sends.values() if reply['chat'] == chat)
+            self.respond(200, rows)
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path.startswith('/v1/wazig/avatar/'):
+            self.respond(404, {'error': 'unavailable'})
+        else:
+            self.respond(404, {'error': 'unknown fixture route'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        row = next((row for row in self.state.view_rows if row['jid'] == body.get('chat')), None)
+        if row is None:
+            self.respond(400, {'error': 'unknown fixture chat'}, body=body)
+            return
+        scope = dict(source_provider=row['provider'], source_account=row['account'])
+        if self.path == '/v1/wazig/send':
+            if set(body) != {'chat', 'text', 'reply_to', 'client_id'} or not body['client_id']:
+                self.respond(400, {'error': 'invalid send'}, body=body)
+                return
+            with self.state.lock:
+                duplicate = body['client_id'] in self.state.sends
+                if not duplicate:
+                    self.state.sends[body['client_id']] = dict(client_id=body['client_id'], msg_id='views-sent',
+                        ts=self.state.stamp, status='sent', chat=body['chat'], text=body['text'])
+                    row['last_message_ts'] = self.state.stamp
+                reply = dict(self.state.sends[body['client_id']])
+            self.respond(200, reply, body=body, accepted=not duplicate, duplicate=duplicate, **scope)
+        elif self.path == '/v1/wazig/mark-read':
+            self.respond(200, {'status': 'ok'}, body=body, **scope)
+        else:
+            self.respond(400, {'error': 'unexpected fixture write'}, body=body, **scope)
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Fake hub runs only on GitHub Actions')
@@ -164,11 +246,13 @@ def main():
     parser.add_argument('--port-file', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
     parser.add_argument('--slack-sort', action='store_true')
+    parser.add_argument('--views', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    server = ThreadingHTTPServer((loopback, 0), SlackSortHandler if args.slack_sort else Handler)
+    server = ThreadingHTTPServer((loopback, 0), ViewsHandler if args.views else SlackSortHandler if args.slack_sort else Handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
+    server.state.view_rows = view_rows()
     if args.slack_sort:
         stamp = datetime.fromisoformat(server.state.stamp)
         server.state.sort_times = {

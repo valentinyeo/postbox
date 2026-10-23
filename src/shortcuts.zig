@@ -54,7 +54,7 @@ pub const groups = [_]Group{
         .{ .key = "Ctrl+K > Connect Slack workspace", .desc = "Sign in with Slack in the browser" },
         .{ .key = "Ctrl+K > Slack sign-in settings", .desc = "Change the Slack Client ID and Socket Mode token" },
         .{ .key = "Ctrl+K > Disconnect Slack workspace", .desc = "Remove a workspace and its saved credentials" },
-        .{ .key = "Alt+0 / Alt+1..3", .desc = "All networks / configured WhatsApp, Slack, Telegram" },
+        .{ .key = "Alt+I / Alt+1..9", .desc = "Combined inbox / accounts in saved view order" },
     } },
     .{ .name = "Open and view", .items = &[_]Shortcut{
         .{ .key = "Ctrl+O", .desc = "Open links and media in the selected message" },

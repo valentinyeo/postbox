@@ -142,3 +142,13 @@ test "IGSH-592 hub Telegram rows remain exclusive to Telegram and all views" {
     try std.testing.expectEqual(@as(?Provider, null), hub.providerForView(parsed.value.object, .slack));
     try std.testing.expectEqual(@as(?Provider, null), hub.providerForView(parsed.value.object, .whatsapp));
 }
+
+test "hub source accounts retain per-account view labels independently of cache namespace" {
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"provider\":\"whatsapp\",\"account\":\"wa-b\",\"account_name\":\"Account B\"}", .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("wa-b", hub.sourceAccount(parsed.value.object, "hub-cache"));
+    const views = @import("messenger_view.zig");
+    const key = @import("chat_key.zig").Key{ .provider = .whatsapp, .account = hub.sourceAccount(parsed.value.object, "hub-cache"), .id = "shared-contact" };
+    try std.testing.expect(views.accountMatches(.whatsapp, "wa-b", key));
+    try std.testing.expect(!views.accountMatches(.whatsapp, "wa-a", key));
+}

@@ -19,6 +19,7 @@ PUBLIC_SKILL_PATHS = (
     ".claude/skills/verify-wazig/features/slack-sort.md",
     ".claude/skills/verify-wazig/features/menus.md",
     ".claude/skills/verify-wazig/features/archive.md",
+    ".claude/skills/verify-wazig/features/views.md",
 )
 
 

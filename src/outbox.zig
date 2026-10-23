@@ -220,7 +220,7 @@ fn adoptIdentity(entry: *Entry, target: AdoptionTarget, source_unified: bool) bo
                 field.set(prefixed);
             }
         }
-        entry.account.set(target.account);
+        if (!source_unified or !target.unified) entry.account.set(target.account);
     } else if (target.unified) {
         if (!source_unified) {
             if (entry.provider != .slack or entry.account.len == 0) return false;
@@ -228,7 +228,7 @@ fn adoptIdentity(entry: *Entry, target: AdoptionTarget, source_unified: bool) bo
             const prefixed = std.fmt.bufPrint(&buffer, "slack:{s}:{s}", .{ entry.account.slice(), entry.jid.slice() }) catch return false;
             entry.jid.set(prefixed);
         }
-        entry.account.set(target.account);
+        if (!source_unified) entry.account.set(target.account);
     } else {
         if (entry.provider != .slack) return false;
         if (source_unified) {
@@ -738,4 +738,17 @@ test "adopt routes configured Slack accounts and retains unavailable providers" 
     const remaining = try tmp.dir.readFileAlloc(io, foreign_name, allocator, .unlimited);
     defer allocator.free(remaining);
     try std.testing.expectEqualStrings(retained, remaining);
+}
+
+test "unified outbox adoption preserves the source account for shared-contact sends" {
+    var first = Entry{ .state = .queued };
+    first.account.set("wa-a");
+    first.jid.set("shared-contact");
+    var second = first;
+    second.account.set("wa-b");
+    const target = AdoptionTarget{ .account = "hub-cache", .unified = true };
+    try std.testing.expect(adoptIdentity(&first, target, true));
+    try std.testing.expect(adoptIdentity(&second, target, true));
+    try std.testing.expectEqualStrings("wa-a", first.account.slice());
+    try std.testing.expectEqualStrings("wa-b", second.account.slice());
 }

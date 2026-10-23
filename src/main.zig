@@ -209,6 +209,7 @@ const command_show_all = 2065;
 const command_show_whatsapp = 2057;
 const command_show_slack = 2058;
 const command_show_telegram = 2059;
+const command_sort_views = 2067;
 const command_shortcuts_help = 2060;
 const command_keep_archived = 2061;
 const command_theme_green = 2063;
@@ -415,6 +416,8 @@ const PaletteItem = struct {
     command: u16 = 0,
     url: WideText(519) = .{},
     chat_jid: Utf8Text(191) = .{},
+    chat_identity: chat_key.Stored = .{},
+    view_identity: chat_key.Stored = .{},
     message_id: Utf8Text(191) = .{},
 };
 
@@ -951,6 +954,11 @@ const App = struct {
     slack_count_log_ms: u64 = 0,
     slack_count_log_hash: u64 = 0,
     chat_view: messenger_view.View = .all,
+    view_account: Utf8Text(32) = .{},
+    views: std.ArrayList(messenger_view.Account) = .empty,
+    view_order: []const u8 = "",
+    palette_views_mode: bool = false,
+    chat_tooltip: WideText(255) = .{},
     view_selected: [4]chat_key.Stored = @splat(.{}),
     chat_view_switched: bool = false,
     slack_attach: WideText(519) = .{},
@@ -1325,6 +1333,34 @@ fn addTooltip(tt: win.HWND, tool: ?win.HWND, text: [*:0]const u16) void {
     _ = win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @as(win.LPARAM, @bitCast(@intFromPtr(&info))));
 }
 
+fn updateChatTooltip(a: *App, coords: win.LPARAM) void {
+    const list = a.chats_hwnd orelse return;
+    const tt = a.tooltips orelse return;
+    const hit: usize = @bitCast(win.SendMessageW(list, win.LB_ITEMFROMPOINT, 0, coords));
+    var text: []const u8 = "Chats";
+    if (hiword(hit) == 0 and loword(hit) < a.chat_count) {
+        const chat = &a.chats[loword(hit)];
+        for (a.views.items) |*view| {
+            if (messenger_view.accountMatches(messenger_view.providerView(chat.provider), chat.account.slice(), view.key.key())) {
+                text = view.labelText();
+                break;
+            }
+        }
+    }
+    var wide = WideText(255){};
+    wide.set(a.allocator, text);
+    if (std.mem.eql(u16, wide.slice(), a.chat_tooltip.slice())) return;
+    a.chat_tooltip = wide;
+    var info = win.TOOLINFOW{
+        .cbSize = @sizeOf(win.TOOLINFOW),
+        .uFlags = win.TTF_IDISHWND | win.TTF_SUBCLASS,
+        .hwnd = win.GetParent(list),
+        .uId = @intFromPtr(list),
+        .lpszText = @constCast(a.chat_tooltip.ptr()),
+    };
+    _ = win.SendMessageW(tt, win.TTM_UPDATETIPTEXTW, 0, @bitCast(@intFromPtr(&info)));
+}
+
 fn updateTooltipTheme(a: *App) void {
     const tt = a.tooltips orelse return;
     const module = win.LoadLibraryW(lit("uxtheme.dll")) orelse return;
@@ -1421,6 +1457,15 @@ fn loadRegistryString(allocator: std.mem.Allocator, name: [*:0]const u16) ?[]con
     if (win.RegGetValueW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), name, win.RRF_RT_REG_SZ, null, wide.ptr, &size) != win.ERROR_SUCCESS) return null;
     const char_count = @min(wide.len, size / 2);
     return std.unicode.utf16LeToUtf8Alloc(allocator, std.mem.trimEnd(u16, wide[0..char_count], &.{0})) catch null;
+}
+
+fn saveRegistryString(allocator: std.mem.Allocator, name: [*:0]const u16, text: []const u8) bool {
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(allocator, text) catch return false;
+    defer allocator.free(wide);
+    var key: win.HKEY = null;
+    if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), 0, null, 0, win.KEY_SET_VALUE, null, &key, null) != win.ERROR_SUCCESS) return false;
+    defer _ = win.RegCloseKey(key);
+    return win.RegSetValueExW(key, name, 0, win.REG_SZ, @ptrCast(wide.ptr), @intCast((wide.len + 1) * 2)) == win.ERROR_SUCCESS;
 }
 
 fn loadTheme() theme.Choice {
@@ -2128,10 +2173,10 @@ fn msgCacheStore(a: *App, key: chat_key.Key, data: []const u8) void {
     entry.account.set(key.account);
     entry.jid.set(key.id);
     entry.data = copy;
-    if (a.startup_probe_pending or (!unifiedHub(a) and key.provider != .whatsapp) or !std.mem.eql(u8, key.account, a.cache_tag.slice())) return;
+    if (a.startup_probe_pending or (!unifiedHub(a) and (key.provider != .whatsapp or !std.mem.eql(u8, key.account, a.cache_tag.slice())))) return;
     if (msgCacheDiskPath(a, key.id)) |path| {
         defer a.allocator.free(path);
-        const envelope = chat_cache.envelope(a.allocator, key.account, key.id, data) catch return;
+        const envelope = chat_cache.envelope(a.allocator, if (unifiedHub(a)) a.cache_tag.slice() else key.account, key.id, data) catch return;
         defer a.allocator.free(envelope);
         _ = writeCacheFileAtomic(a, path, envelope);
     }
@@ -2220,7 +2265,7 @@ fn refreshPeopleSearch(a: *App) void {
             }
         }
     }
-    if (a.palette != null and !a.palette_links_mode and !a.palette_accounts_mode) paletteFilter(a);
+    if (a.palette != null and !a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode) paletteFilter(a);
 }
 
 fn peopleChat(a: *App, entry: people_index.Entry) Chat {
@@ -2317,13 +2362,14 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
             _ = savePins(a);
         }
     }
+    rebuildViews(a, data.items);
     const view = activeChatView(a);
     var needed = data.items.len + a.tg_chat_count + max_chats;
     for (&a.slack_installations) |*installation| if (installation.active) {
         needed += installation.chat_count;
     };
     if (a.chats.len < needed) a.chats = a.allocator.realloc(a.chats, needed) catch return false;
-    var selected_key = a.view_selected[@intFromEnum(view)];
+    var selected_key = selectedViewKey(a).*;
     if (!a.chat_view_switched and a.selected_chat < a.chat_count) selected_key.set(chat_key.of(&a.chats[a.selected_chat]));
     var anchor_key = chat_key.Stored{};
     var selected_jid: [192]u8 = [_]u8{0} ** 192;
@@ -2359,8 +2405,10 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         };
         var chat = Chat{ .account = a.cache_tag };
         if (unifiedHub(a)) {
-            chat.provider = hub.providerForView(object, view) orelse continue;
+            chat.provider = hub.sourceProvider(object) orelse continue;
+            chat.account.set(hub.sourceAccount(object, a.cache_tag.slice()));
         }
+        if (!chatInView(a, .{ .provider = chat.provider, .account = chat.account.slice(), .id = "" })) continue;
         const jid = getString(object, "jid");
         if (fresh and !a.show_archived) _ = holdKeptArchived(a, jid, getBool(object, "archived"), getString(object, "last_message_ts"));
         if (pendingArchiveHidesChat(a, jid, a.show_archived)) continue;
@@ -2391,7 +2439,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         if (messenger_view.includes(view, .slack)) appendSlackChats(a, query_utf8);
         if (messenger_view.includes(view, .telegram)) appendTelegramChats(a, query_utf8);
     }
-    controlSortChats(a, a.chats[0..a.chat_count]);
+    controlSortChats(a, a.chats[0..a.chat_count], view);
     if (!unifiedHub(a) and messenger_view.includes(view, .whatsapp) and !a.show_archived and !a.unread_only) {
         if (query_utf8) |query| {
             const exclude = a.allocator.alloc([]const u8, a.chat_count) catch return false;
@@ -2445,7 +2493,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         cancelSlackMark(a);
     }
     switchComposerDraft(a);
-    if (a.selected_chat < a.chat_count) a.view_selected[@intFromEnum(view)].set(chat_key.of(&a.chats[a.selected_chat]));
+    if (a.selected_chat < a.chat_count) selectedViewKey(a).set(chat_key.of(&a.chats[a.selected_chat]));
     updateSearchCue(a, view);
     if (a.chats_hwnd) |list| {
         _ = win.SendMessageW(list, win.WM_SETREDRAW, 0, 0);
@@ -2587,6 +2635,7 @@ fn appendTelegramChats(a: *App, query_utf8: ?[]const u8) void {
         chat.unread_count = cached.unread_count;
         chat.provider = .telegram;
         chat.account = a.tg_account;
+        if (!chatInView(a, chat_key.of(&chat))) continue;
         if (!messenger_view.matches(activeChatView(a), .telegram, a.unread_only, chat.unread, query_utf8 orelse "", name_bytes, chat.jid.slice())) continue;
         messenger_view.merge(Chat, a.chats, &a.chat_count, &.{chat});
     }
@@ -2956,7 +3005,7 @@ fn openTelegramLogin(a: *App, mode: TgLoginMode) void {
 
 fn setPaletteCue(a: *App) void {
     const edit = a.palette_edit orelse return;
-    const cue: [*:0]const u16 = if (a.palette_accounts_mode) lit("Accounts") else lit("Type a command");
+    const cue: [*:0]const u16 = if (a.palette_views_mode) lit("Ctrl+Up/Down reorders. Enter switches.") else if (a.palette_accounts_mode) lit("Accounts") else lit("Type a command");
     _ = win.SendMessageW(edit, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(cue)));
 }
 
@@ -3913,14 +3962,95 @@ fn telegramReady(a: *App) bool {
 }
 
 fn activeChatView(a: *App) messenger_view.View {
-    return messenger_view.effective(a.chat_view, unifiedHub(a) or slackConfigured(a), unifiedHub(a) or telegramReady(a));
+    return a.chat_view;
+}
+
+fn selectedViewKey(a: *App) *chat_key.Stored {
+    for (a.views.items) |*view| {
+        if (messenger_view.accountMatches(a.chat_view, a.view_account.slice(), view.key.key()) and a.view_account.len > 0) return &view.selected;
+    }
+    return &a.view_selected[@intFromEnum(a.chat_view)];
+}
+
+fn chatInView(a: *App, key: chat_key.Key) bool {
+    return messenger_view.accountMatches(activeChatView(a), a.view_account.slice(), key);
+}
+
+fn activeViewLabel(a: *App) []const u8 {
+    for (a.views.items) |*view| {
+        if (a.view_account.len > 0 and chatInView(a, view.key.key())) return view.labelText();
+    }
+    return messenger_view.label(activeChatView(a));
+}
+
+fn rebuildViews(a: *App, rows: []const std.json.Value) void {
+    var known: std.ArrayList(messenger_view.Account) = .empty;
+    defer known.deinit(a.allocator);
+    if (unifiedHub(a)) {
+        if (a.show_archived) for (a.views.items) |view| {
+            messenger_view.appendUnique(a.allocator, &known, view) catch return;
+        };
+        for (rows) |row| {
+            if (row != .object) continue;
+            const provider = hub.sourceProvider(row.object) orelse continue;
+            const account = hub.sourceAccount(row.object, a.cache_tag.slice());
+            messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(provider, account, getString(row.object, "account_name"))) catch return;
+        }
+    } else {
+        if (a.cache_tag.len > 0) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.whatsapp, a.cache_tag.slice(), a.hub_account.slice())) catch return;
+        for (&a.slack_installations) |*installation| {
+            if (installation.active) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.slack, installation.team_id.slice(), installation.team_name.slice())) catch return;
+        }
+        if (telegramReady(a)) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.telegram, a.tg_account.slice(), a.tg_account.slice())) catch return;
+    }
+    const ordered = messenger_view.mergeOrder(a.allocator, a.view_order, known.items) catch return;
+    for (ordered.items) |*view| {
+        for (a.views.items) |old| {
+            if (chat_key.Key.eql(view.key.key(), old.key.key())) view.selected = old.selected;
+        }
+    }
+    a.views.deinit(a.allocator);
+    a.views = ordered;
+    _ = saveViewOrder(a);
+    if (a.view_account.len == 0 and a.chat_view != .all) {
+        for (a.views.items) |view| {
+            if (messenger_view.includes(a.chat_view, view.key.provider)) {
+                a.view_account.set(view.key.key().account);
+                break;
+            }
+        } else a.chat_view = .all;
+    }
+    if (a.view_account.len > 0) {
+        for (a.views.items) |view| {
+            if (chatInView(a, view.key.key())) break;
+        } else {
+            a.chat_view = .all;
+            a.view_account.set("");
+        }
+    }
+}
+
+fn saveViewOrder(a: *App) bool {
+    const text = messenger_view.saveOrder(a.allocator, a.view_order, a.views.items) catch return false;
+    if (std.mem.eql(u8, text, a.view_order)) {
+        a.allocator.free(text);
+        return true;
+    }
+    if (!saveRegistryString(a.allocator, lit("ViewOrder"), text)) {
+        a.allocator.free(text);
+        return false;
+    }
+    if (a.view_order.len > 0) a.allocator.free(a.view_order);
+    a.view_order = text;
+    return true;
 }
 
 fn updateSearchCue(a: *App, view: messenger_view.View) void {
     const search = a.search orelse return;
-    var buffer: [64]u8 = undefined;
-    const text = std.fmt.bufPrint(&buffer, "Search {s}  Ctrl+F", .{messenger_view.label(view)}) catch return;
-    var wide: [64]u16 = undefined;
+    var buffer: [300]u8 = undefined;
+    _ = view;
+    const text = std.fmt.bufPrint(&buffer, "Search {s}  Ctrl+F", .{activeViewLabel(a)}) catch return;
+    var wide: [300]u16 = undefined;
     const len = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], text) catch return;
     wide[len] = 0;
     _ = win.SendMessageW(search, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(&wide)));
@@ -3950,27 +4080,29 @@ fn refilterChats(a: *App) void {
 }
 
 fn switchChatView(a: *App, view: messenger_view.View) void {
+    if (view == .all) return switchAccountView(a, null);
+    for (a.views.items) |*account| {
+        if (messenger_view.includes(view, account.key.provider)) return switchAccountView(a, account.key.key());
+    }
+    setStatus(a, "Account is not available");
+}
+
+fn switchAccountView(a: *App, wanted: ?chat_key.Key) void {
     _ = clearBulkSelection(a);
-    const current = activeChatView(a);
-    if (messenger_view.effective(view, unifiedHub(a) or slackConfigured(a), unifiedHub(a) or telegramReady(a)) != view) {
-        setStatus(a, if (view == .slack) "Slack is not set up" else "Telegram is not signed in");
-        return;
-    }
-    if (a.selected_chat < a.chat_count and messenger_view.includes(current, a.chats[a.selected_chat].provider)) {
-        a.view_selected[@intFromEnum(current)].set(chat_key.of(&a.chats[a.selected_chat]));
-    }
-    a.chat_view = view;
+    if (a.selected_chat < a.chat_count) selectedViewKey(a).set(chat_key.of(&a.chats[a.selected_chat]));
+    a.chat_view = if (wanted) |key| messenger_view.providerView(key.provider) else .all;
+    a.view_account.set(if (wanted) |key| key.account else "");
+    saveChatView(a.chat_view);
+    _ = saveRegistryString(a.allocator, lit("AccountView"), a.view_account.slice());
     layout(a, a.compose_client_width, a.compose_client_height);
-    saveChatView(view);
-    if (view == current) return;
     a.chat_view_switched = true;
     clearReply(a);
     discardStagedImage(a);
     refreshVisibleChats(a);
-    if (messenger_view.includes(view, .whatsapp)) refreshChats(a);
+    if (messenger_view.includes(a.chat_view, .whatsapp)) refreshChats(a);
     refreshMessages(a);
-    var buffer: [48]u8 = undefined;
-    setStatus(a, std.fmt.bufPrint(&buffer, "Showing {s}", .{messenger_view.label(view)}) catch "");
+    var buffer: [300]u8 = undefined;
+    setStatus(a, std.fmt.bufPrint(&buffer, "Showing {s}", .{activeViewLabel(a)}) catch "");
 }
 
 fn appendSlackChats(a: *App, query_utf8: ?[]const u8) void {
@@ -3979,6 +4111,7 @@ fn appendSlackChats(a: *App, query_utf8: ?[]const u8) void {
         for (installation.chats[0..installation.chat_count]) |*cached| {
             const name = std.unicode.utf16LeToUtf8Alloc(a.allocator, cached.name.slice()) catch continue;
             defer a.allocator.free(name);
+            if (!chatInView(a, chat_key.of(cached))) continue;
             if (!messenger_view.matches(activeChatView(a), .slack, a.unread_only, cached.unread, query_utf8 orelse "", name, cached.jid.slice())) continue;
             messenger_view.merge(Chat, a.chats, &a.chat_count, &.{cached.*});
         }
@@ -4990,7 +5123,7 @@ fn loadOutbox(a: *App) void {
     }
     var scanner = outbox.Scanner.init(a.allocator, buffer[0..total]);
     while (scanner.next()) |entry| {
-        if (entry.provider == .whatsapp or (unifiedHub(a) and std.mem.eql(u8, entry.account.slice(), a.cache_tag.slice()))) {
+        if (entry.provider == .whatsapp or unifiedHub(a)) {
             if (a.pending_send_count >= a.pending_sends.len) return;
             const pending = &a.pending_sends[a.pending_send_count];
             pending.* = .{};
@@ -9484,7 +9617,7 @@ fn startNextSend(a: *App) void {
     if (win.GetTickCount64() < a.pending_sends[0].not_before_ms) return;
     bindOutboxAccount(a);
     const head = &a.pending_sends[0];
-    if (a.slack_outbox_dirty or head.account.len == 0 or !std.mem.eql(u8, head.account.slice(), a.cache_tag.slice())) return;
+    if (a.slack_outbox_dirty or head.account.len == 0 or (!unifiedHub(a) and !std.mem.eql(u8, head.account.slice(), a.cache_tag.slice()))) return;
     if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and
         sentMessageExists(a, chat_key.of(head), head.text.slice(), head.queued_unix))
     {
@@ -12208,7 +12341,7 @@ fn controlDispatch(a: *App, call: *ControlCall) !void {
         .status => try controlStatus(a, w),
         .chats => try controlChats(a, call),
         .search => try controlSearch(a, call),
-        .view => try controlView(a, w, request.messenger),
+        .view => try controlView(a, w, request),
         .select => try controlSelect(a, call),
         .messages => try controlMessages(a, call),
         .archive, .unarchive => {
@@ -12261,6 +12394,14 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     const pending_sends = a.pending_send_count + wacliPendingGet(a, .slack_send) + wacliPendingGet(a, .slack_attach) + wacliPendingGet(a, .slack_share);
     try w.print("{{\"ok\":true,\"result\":{{\"version\":\"{s}\",\"view\":\"{s}\",\"selected\":", .{ app_version, @tagName(activeChatView(a)) });
     if (a.selected_chat < a.chat_count) try controlWriteChat(a, w, &a.chats[a.selected_chat]) else try w.writeAll("null");
+    try w.writeAll(",\"current_view\":");
+    try controlWriteView(w, currentViewKey(a), activeViewLabel(a));
+    try w.writeAll(",\"view_order\":[");
+    for (a.views.items, 0..) |*view, index| {
+        if (index > 0) try w.writeByte(',');
+        try controlWriteView(w, view.key.key(), view.labelText());
+    }
+    try w.writeByte(']');
     var buffer: [1024]u8 = undefined;
     try w.print(",\"sync\":\"{s}\",\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
         sync,              a.slack_connected.load(.acquire), pending_sends,   a.pending_archive_count,
@@ -12310,7 +12451,7 @@ fn controlChats(a: *App, call: *ControlCall) !void {
     var query_buffer: [1024]u8 = undefined;
     const query = controlSearchText(a, &query_buffer);
     var filtered = query.len > 0 and !request.all;
-    if (view == active and request.archived == a.show_archived and !request.all) {
+    if (request.messenger == null and view == active and request.archived == a.show_archived and !request.all) {
         try list.appendSlice(a.allocator, a.chats[0..a.chat_count]);
         filtered = filtered or a.unread_only;
     } else {
@@ -12319,7 +12460,7 @@ fn controlChats(a: *App, call: *ControlCall) !void {
             for (&a.slack_installations) |*installation| {
                 if (!installation.active) continue;
                 for (installation.chats[0..installation.chat_count]) |*chat| {
-                    if (controlMatches(a, chat, wanted)) try list.append(a.allocator, chat.*);
+                    if ((request.messenger != null or chatInView(a, chat_key.of(chat))) and controlMatches(a, chat, wanted)) try list.append(a.allocator, chat.*);
                 }
             }
         }
@@ -12330,7 +12471,7 @@ fn controlChats(a: *App, call: *ControlCall) !void {
                 chat.jid.set(tgChatIdString(&id_buffer, cached.id));
                 chat.kind.set(a.allocator, cached.kind.slice());
                 chat.timestamp.set(cached.timestamp.slice());
-                if (controlMatches(a, &chat, wanted)) try list.append(a.allocator, chat);
+                if ((request.messenger != null or chatInView(a, chat_key.of(&chat))) and controlMatches(a, &chat, wanted)) try list.append(a.allocator, chat);
             }
         }
         if (unifiedHub(a) or messenger_view.includes(view, .whatsapp)) {
@@ -12338,12 +12479,12 @@ fn controlChats(a: *App, call: *ControlCall) !void {
                 call.need_whatsapp = true;
                 return;
             }
-            controlWhatsAppChats(a, call.whatsapp_raw, view, request.archived, wanted, &list) catch |err| switch (err) {
+            controlWhatsAppChats(a, call.whatsapp_raw, view, if (request.messenger == null) a.view_account.slice() else "", request.archived, wanted, &list) catch |err| switch (err) {
                 error.OutOfMemory => return err,
                 else => return control_api.writeError(w, "could not parse the WhatsApp chat list"),
             };
         }
-        controlSortChats(a, list.items);
+        controlSortChats(a, list.items, view);
     }
     const shown = @min(list.items.len, request.limit orelse std.math.maxInt(u32));
     try w.print("{{\"ok\":true,\"result\":{{\"messenger\":\"{s}\",\"archived\":{},\"filtered\":{},\"total\":{d},\"chats\":[", .{ @tagName(view), request.archived, filtered, list.items.len });
@@ -12354,7 +12495,7 @@ fn controlChats(a: *App, call: *ControlCall) !void {
     try w.writeAll("]}}\n");
 }
 
-fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, show_archived: bool, query: []const u8, list: *std.ArrayList(Chat)) !void {
+fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, account: []const u8, show_archived: bool, query: []const u8, list: *std.ArrayList(Chat)) !void {
     var parsed = try std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{});
     defer parsed.deinit();
     const root = switch (parsed.value) {
@@ -12376,7 +12517,11 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, sho
         if (isUnresolvableChatEntry(display_name, jid, getString(object, "kind"))) continue;
         if (query.len > 0 and !containsIgnoreCase(display_name, query) and !containsIgnoreCase(jid, query)) continue;
         var chat = Chat{ .account = a.cache_tag };
-        if (unifiedHub(a)) chat.provider = hub.providerForView(object, view) orelse continue;
+        if (unifiedHub(a)) {
+            chat.provider = hub.sourceProvider(object) orelse continue;
+            chat.account.set(hub.sourceAccount(object, a.cache_tag.slice()));
+        }
+        if (!messenger_view.accountMatches(view, account, .{ .provider = chat.provider, .account = chat.account.slice(), .id = jid })) continue;
         chat.jid.set(jid);
         chat.name.set(a.allocator, display_name);
         chat.kind.set(a.allocator, if (std.mem.endsWith(u8, jid, "@g.us")) "Group" else getString(object, "kind"));
@@ -12389,7 +12534,7 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, sho
     }
 }
 
-fn controlSortChats(a: *const App, chats: []Chat) void {
+fn controlSortChats(a: *const App, chats: []Chat, view: messenger_view.View) void {
     var i: usize = 1;
     while (i < chats.len) : (i += 1) {
         var j = i;
@@ -12397,7 +12542,8 @@ fn controlSortChats(a: *const App, chats: []Chat) void {
             const by_time = std.mem.order(u8, chats[j - 1].timestamp.slice(), chats[j].timestamp.slice());
             const by_name = std.mem.order(u16, chats[j - 1].name.slice(), chats[j].name.slice());
             const jid_order = chat_key.order(chat_key.of(&chats[j - 1]), chat_key.of(&chats[j]));
-            if (!chat_order.shouldMoveUp(isChatPinned(a, chat_key.of(&chats[j - 1])), isChatPinned(a, chat_key.of(&chats[j])), by_time, by_name, jid_order)) break;
+            const move = if (view == .all) messenger_view.inboxMoveUp(by_time, jid_order) else chat_order.shouldMoveUp(isChatPinned(a, chat_key.of(&chats[j - 1])), isChatPinned(a, chat_key.of(&chats[j])), by_time, by_name, jid_order);
+            if (!move) break;
             std.mem.swap(Chat, &chats[j - 1], &chats[j]);
         }
     }
@@ -12428,12 +12574,37 @@ fn controlSearch(a: *App, call: *ControlCall) !void {
     try w.print(",\"chat_count\":{d}}}}}\n", .{a.chat_count});
 }
 
-fn controlView(a: *App, w: *std.Io.Writer, messenger: ?control_api.Messenger) !void {
-    const view = controlProvider(messenger orelse return control_api.writeError(w, "view needs all, whatsapp, slack or telegram"));
-    if (messenger_view.effective(view, unifiedHub(a) or slackConfigured(a), unifiedHub(a) or telegramReady(a)) != view)
-        return control_api.writeError(w, if (view == .slack) "Slack is not set up" else "Telegram is not signed in");
-    switchChatView(a, view);
-    try w.print("{{\"ok\":true,\"result\":{{\"view\":\"{s}\"}}}}\n", .{@tagName(view)});
+fn controlWriteView(w: *std.Io.Writer, key: ?chat_key.Key, label: []const u8) !void {
+    try w.writeAll("{\"provider\":");
+    if (key) |value| try control_api.writeString(w, @tagName(value.provider)) else try w.writeAll("null");
+    try w.writeAll(",\"account\":");
+    if (key) |value| try control_api.writeString(w, value.account) else try w.writeAll("null");
+    try w.writeAll(",\"label\":");
+    try control_api.writeString(w, label);
+    try w.print(",\"inbox\":{}}}", .{key == null});
+}
+
+fn controlView(a: *App, w: *std.Io.Writer, request: *const control_api.Request) !void {
+    if (request.view_number) |number| {
+        const index = messenger_view.forNumber(number, a.views.items) orelse return control_api.writeError(w, "view number is not available");
+        switchAccountView(a, a.views.items[index].key.key());
+    } else {
+        const view = controlProvider(request.messenger orelse return control_api.writeError(w, "view needs a number, inbox or provider"));
+        if (view != .all) {
+            for (a.views.items) |account| {
+                if (messenger_view.includes(view, account.key.provider)) break;
+            } else return control_api.writeError(w, "account is not available");
+        }
+        switchChatView(a, view);
+    }
+    try w.print("{{\"ok\":true,\"result\":{{\"view\":\"{s}\",\"current_view\":", .{@tagName(activeChatView(a))});
+    try controlWriteView(w, currentViewKey(a), activeViewLabel(a));
+    try w.writeAll("}}\n");
+}
+
+fn currentViewKey(a: *App) ?chat_key.Key {
+    for (a.views.items) |*view| if (a.view_account.len > 0 and chatInView(a, view.key.key())) return view.key.key();
+    return null;
 }
 
 fn controlSelectIndex(a: *App, index: usize) void {
@@ -12444,7 +12615,7 @@ fn controlSelectIndex(a: *App, index: usize) void {
     a.selected_chat = index;
     switchComposerDraft(a);
     a.user_viewed = true;
-    a.view_selected[@intFromEnum(activeChatView(a))].set(chat_key.of(&a.chats[index]));
+    selectedViewKey(a).set(chat_key.of(&a.chats[index]));
     if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, index, 0);
     refreshMessages(a);
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
@@ -12557,6 +12728,8 @@ fn appendPalette(a: *App, label: []const u8, shortcut: []const u8, command: u16)
     item.command = command;
     item.url = .{};
     item.chat_jid = .{};
+    item.chat_identity = .{};
+    item.view_identity = .{};
     item.message_id = .{};
 }
 
@@ -12574,6 +12747,8 @@ fn appendPaletteChat(a: *App, index: usize) void {
     item.url = .{};
     item.message_id = .{};
     item.chat_jid.set(chat.jid.slice());
+    item.chat_identity.set(chat_key.of(chat));
+    item.view_identity = .{};
 }
 
 fn appendMicrophones(a: *App) void {
@@ -12612,12 +12787,14 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Theme: AMOLED black", "", command_theme_amoled);
     appendPalette(a, "Theme: Green", "", command_theme_green);
     appendPalette(a, "Toggle unread chats", "U", command_unread);
-    appendPalette(a, "Show All networks", "Alt+0", command_show_all);
-    inline for (.{ .{ messenger_view.View.whatsapp, "Show WhatsApp", command_show_whatsapp }, .{ messenger_view.View.slack, "Show Slack", command_show_slack }, .{ messenger_view.View.telegram, "Show Telegram", command_show_telegram } }) |entry| {
-        if (messenger_view.numberFor(entry[0], unifiedHub(a) or slackConfigured(a), unifiedHub(a) or telegramReady(a))) |number| {
-            var shortcut: [8]u8 = undefined;
-            appendPalette(a, entry[1], std.fmt.bufPrint(&shortcut, "Alt+{d}", .{number}) catch "", entry[2]);
-        }
+    appendPalette(a, "Show combined inbox", "Alt+I", command_show_all);
+    appendPalette(a, "Sort views", "", command_sort_views);
+    for (a.views.items, 0..) |*view, index| {
+        var shortcut: [16]u8 = undefined;
+        var label_buffer: [300]u8 = undefined;
+        const before = a.palette_item_count;
+        appendPalette(a, std.fmt.bufPrint(&label_buffer, "Show {s}", .{view.labelText()}) catch continue, if (index < 9) std.fmt.bufPrint(&shortcut, "Alt+{d}", .{index + 1}) catch "" else "", 0);
+        if (a.palette_item_count > before) a.palette_items[before].view_identity = view.key;
     }
     appendPalette(a, if (a.selected_chat < a.chat_count and isChatPinned(a, chat_key.of(&a.chats[a.selected_chat]))) "Unpin selected chat" else "Pin chat to top", "", command_pin);
     appendPalette(a, if (a.show_archived) "Show inbox chats" else "Show archived chats", "", command_archived);
@@ -12716,7 +12893,7 @@ fn paletteLayout(a: *App) void {
 fn paletteFilter(a: *App) void {
     var query_buf: [64]u16 = [_]u16{0} ** 64;
     const query_len: usize = if (a.palette_edit) |edit| @intCast(win.GetWindowTextW(edit, &query_buf, query_buf.len)) else 0;
-    if (!a.palette_links_mode and !a.palette_accounts_mode) a.palette_item_count = a.palette_base_item_count;
+    if (!a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode) a.palette_item_count = a.palette_base_item_count;
     a.palette_match_count = 0;
     a.palette_selected = 0;
     var scores: [max_palette_items]i32 = [_]i32{0} ** max_palette_items;
@@ -12741,7 +12918,7 @@ fn paletteFilter(a: *App) void {
             std.mem.swap(i32, &scores[j - 1], &scores[j]);
         }
     }
-    if (!a.palette_links_mode and !a.palette_accounts_mode and messenger_view.includes(activeChatView(a), .whatsapp) and query_len > 0) {
+    if (!a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode and messenger_view.includes(activeChatView(a), .whatsapp) and query_len > 0) {
         const query = std.unicode.utf16LeToUtf8Alloc(a.allocator, query_buf[0..query_len]) catch null;
         defer if (query) |text| a.allocator.free(text);
         if (query) |text| {
@@ -12762,6 +12939,7 @@ fn paletteFilter(a: *App) void {
                 const index = a.palette_item_count;
                 appendPalette(a, label, "", 0);
                 a.palette_items[index].chat_jid.set(entry.jid);
+                a.palette_items[index].chat_identity.set(.{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = entry.jid });
                 a.palette_matches[a.palette_match_count] = index;
                 a.palette_match_count += 1;
             }
@@ -12793,6 +12971,7 @@ fn paletteMove(a: *App, delta: i32) void {
 }
 
 fn closePalette(a: *App) void {
+    a.palette_views_mode = false;
     a.accounts_confirm_remove = false;
     a.accounts_confirm_remove_tg = false;
     if (a.palette) |palette| {
@@ -12804,15 +12983,21 @@ fn closePalette(a: *App) void {
 fn paletteActivate(a: *App) void {
     if (a.palette_selected >= a.palette_match_count) return;
     const item = &a.palette_items[a.palette_matches[a.palette_selected]];
+    if (item.view_identity.account_len > 0) {
+        const wanted = item.view_identity;
+        closePalette(a);
+        switchAccountView(a, wanted.key());
+        return;
+    }
     if (item.chat_jid.len > 0) {
         var chat_index: ?usize = null;
         for (a.chats[0..a.chat_count], 0..) |*chat, index| {
-            if (std.mem.eql(u8, chat.jid.slice(), item.chat_jid.slice())) {
+            if (chat_key.Key.eql(chat_key.of(chat), item.chat_identity.key())) {
                 chat_index = index;
                 break;
             }
         }
-        if (chat_index == null and messenger_view.includes(activeChatView(a), .whatsapp) and !a.palette_links_mode and !a.palette_accounts_mode) {
+        if (chat_index == null and messenger_view.includes(activeChatView(a), .whatsapp) and !a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode) {
             if (a.people.find(item.chat_jid.slice())) |entry| {
                 const index = @min(a.chat_count, max_chats - 1);
                 a.chats[index] = peopleChat(a, entry);
@@ -12900,6 +13085,7 @@ fn openPalette(a: *App) void {
     }
     a.palette_links_mode = false;
     a.palette_accounts_mode = false;
+    a.palette_views_mode = false;
     buildPaletteItems(a);
     showPaletteWindow(a);
 }
@@ -12911,6 +13097,7 @@ fn openLinkPalette(a: *App) void {
     }
     a.palette_links_mode = true;
     a.palette_accounts_mode = false;
+    a.palette_views_mode = false;
     buildLinkPaletteItems(a);
     if (a.palette_item_count == 0) {
         a.palette_links_mode = false;
@@ -12940,6 +13127,8 @@ fn buildLinkPaletteItems(a: *App) void {
             item.shortcut.set(a.allocator, "");
             item.command = 0;
             item.chat_jid = .{};
+            item.chat_identity = .{};
+            item.view_identity = .{};
             item.message_id = .{};
             a.palette_item_count += 1;
         }
@@ -12958,6 +13147,8 @@ fn buildLinkPaletteItems(a: *App) void {
             item.command = 0;
             item.url = .{};
             item.chat_jid = .{};
+            item.chat_identity = .{};
+            item.view_identity = .{};
             item.message_id.set(message.id.slice());
             a.palette_item_count += 1;
         }
@@ -12972,6 +13163,50 @@ fn whatsappStorePresent(a: *App) bool {
     return win.GetFileAttributesW(db_wide.ptr) != win.INVALID_FILE_ATTRIBUTES;
 }
 
+fn buildSortViewsItems(a: *App) void {
+    a.palette_item_count = 0;
+    for (a.views.items, 0..) |*view, index| {
+        var shortcut: [16]u8 = undefined;
+        const before = a.palette_item_count;
+        appendPalette(a, view.labelText(), if (index < 9) std.fmt.bufPrint(&shortcut, "Alt+{d}", .{index + 1}) catch "" else "", 0);
+        if (a.palette_item_count > before) a.palette_items[before].view_identity = view.key;
+    }
+}
+
+fn openSortViews(a: *App) void {
+    a.palette_links_mode = false;
+    a.palette_accounts_mode = false;
+    a.palette_views_mode = true;
+    buildSortViewsItems(a);
+    showPaletteWindow(a);
+}
+
+fn moveView(a: *App, down: bool) void {
+    if (a.palette_selected >= a.palette_match_count) return;
+    const wanted = a.palette_items[a.palette_matches[a.palette_selected]].view_identity;
+    for (a.views.items, 0..) |*view, index| {
+        if (!chat_key.Key.eql(wanted.key(), view.key.key())) continue;
+        if ((down and index + 1 == a.views.items.len) or (!down and index == 0)) return;
+        const target = if (down) index + 1 else index - 1;
+        std.mem.swap(messenger_view.Account, &a.views.items[index], &a.views.items[target]);
+        if (!saveViewOrder(a)) {
+            std.mem.swap(messenger_view.Account, &a.views.items[index], &a.views.items[target]);
+            setStatus(a, "Could not save view order");
+            return;
+        }
+        buildSortViewsItems(a);
+        paletteFilter(a);
+        for (a.palette_matches[0..a.palette_match_count], 0..) |match, selected| {
+            if (chat_key.Key.eql(wanted.key(), a.palette_items[match].view_identity.key())) {
+                a.palette_selected = selected;
+                if (a.palette_list) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, selected, 0);
+                break;
+            }
+        }
+        return;
+    }
+}
+
 fn openAccountsPalette(a: *App) void {
     if (a.palette != null) {
         closePalette(a);
@@ -12979,6 +13214,7 @@ fn openAccountsPalette(a: *App) void {
     }
     a.palette_links_mode = false;
     a.palette_accounts_mode = true;
+    a.palette_views_mode = false;
     buildAccountsItems(a);
     showPaletteWindow(a);
 }
@@ -13067,7 +13303,7 @@ fn removeWhatsAppAccount(a: *App) void {
     a.chats_raw = null;
     a.cache_tag.set("");
     a.cache_tag_gen += 1;
-    if (a.selected_chat < a.chat_count) a.view_selected[@intFromEnum(activeChatView(a))].set(chat_key.of(&a.chats[a.selected_chat]));
+    if (a.selected_chat < a.chat_count) selectedViewKey(a).set(chat_key.of(&a.chats[a.selected_chat]));
     a.chat_view_switched = true;
     a.chat_count = 0;
     a.selected_chat = 0;
@@ -13297,6 +13533,7 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
         },
         win.WM_DESTROY => {
             a.palette = null;
+            a.palette_views_mode = false;
             a.palette_edit = null;
             a.palette_list = null;
             a.tg_login = .none;
@@ -13517,6 +13754,7 @@ fn runCommand(a: *App, command: u16) void {
             }
             if (!resendFailedMessage(a, selected)) setStatus(a, "Only a failed WhatsApp message can be resent");
         },
+        command_sort_views => openSortViews(a),
         command_show_all => switchChatView(a, .all),
         command_show_whatsapp => switchChatView(a, .whatsapp),
         command_show_slack => switchChatView(a, .slack),
@@ -15554,7 +15792,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 }
             }
             if (jobIsSlack(result.kind) and !result.ok) logSlackFailure(a, result.kind, result.extra.slice(), result.http_status);
-            if (result.kind != .cache_tag and result.provider == .whatsapp and !std.mem.eql(u8, result.account.slice(), a.cache_tag.slice())) {
+            if (result.kind != .cache_tag and result.provider == .whatsapp and !std.mem.eql(u8, result.account.slice(), a.cache_tag.slice()) and !unifiedHub(a)) {
                 var buffer: [128]u8 = undefined;
                 appendLaunchLog(a, std.fmt.bufPrint(&buffer, "wacli-result: dropped {s}, account mismatch", .{@tagName(result.kind)}) catch "wacli-result: dropped, account mismatch");
                 return 0;
@@ -16462,6 +16700,10 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     const shift = win.GetKeyState(win.VK_SHIFT) < 0;
     const alt = win.GetKeyState(win.VK_MENU) < 0;
     if (directwrite_edit.isComposing(focus)) return false;
+    if (a.palette != null and a.palette_views_mode and control and !alt and !shift and (key == win.VK_UP or key == win.VK_DOWN)) {
+        moveView(a, key == win.VK_DOWN);
+        return true;
+    }
     if (alt and key == win.VK_MENU) return true;
     if (a.tg_login_window != null) return false;
     if (a.image_viewer_window != null) return false;
@@ -16486,8 +16728,12 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         walkMessageHighlight(a, key);
         return true;
     }
+    if (alt and !control and !shift and key == 'I') {
+        switchChatView(a, .all);
+        return true;
+    }
     if (alt and !control and !shift and key >= '0' and key <= '9') {
-        if (messenger_view.forNumber(key - '0', unifiedHub(a) or slackConfigured(a), unifiedHub(a) or telegramReady(a))) |view| switchChatView(a, view);
+        if (key == '0') switchChatView(a, .all) else if (messenger_view.forNumber(key - '0', a.views.items)) |index| switchAccountView(a, a.views.items[index].key.key());
         return true;
     }
     if (control and !alt and key >= '1' and key <= '9') {
@@ -17392,7 +17638,7 @@ fn prepareVerification(init: std.process.Init) !win.HKEY {
     var disposition: win.DWORD = 0;
     if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), wide.ptr, 0, null, 0, win.KEY_ALL_ACCESS, null, &key, &disposition) != win.ERROR_SUCCESS) return error.VerificationRegistryFailed;
     errdefer _ = win.RegCloseKey(key);
-    if (disposition != win.REG_CREATED_NEW_KEY) return error.VerificationRegistryAlreadyExists;
+    if (disposition != win.REG_CREATED_NEW_KEY and !std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_RESTART") orelse "", id)) return error.VerificationRegistryAlreadyExists;
     if (win.RegOverridePredefKey(winHandle(win.HKEY, @bitCast(@as(isize, -2147483647))), key) != win.ERROR_SUCCESS) return error.VerificationRegistryOverrideFailed;
     return key;
 }
@@ -17491,6 +17737,15 @@ pub fn main(init: std.process.Init) !void {
         if (app.wa_bridge_url.len > 0) init.gpa.free(app.wa_bridge_url);
         if (app.wa_bridge_account.len > 0) init.gpa.free(app.wa_bridge_account);
         if (app.wa_bridge_key.len > 0) init.gpa.free(app.wa_bridge_key);
+    }
+    app.view_order = loadRegistryString(init.gpa, lit("ViewOrder")) orelse "";
+    if (loadRegistryString(init.gpa, lit("AccountView"))) |saved| {
+        app.view_account.set(saved);
+        init.gpa.free(saved);
+    }
+    defer {
+        app.views.deinit(init.gpa);
+        if (app.view_order.len > 0) init.gpa.free(app.view_order);
     }
     app.startup_probe_pending = !verification_fixture or hubConfigured(app);
     if (cache_tag) |tag| {
@@ -17841,6 +18096,7 @@ pub fn main(init: std.process.Init) !void {
         if (app.tg_login_window) |login_wnd| {
             if (win.IsDialogMessageW(login_wnd, &message) != 0) continue;
         }
+        if (message.message == win.WM_MOUSEMOVE and app.chats_hwnd != null and message.hwnd == app.chats_hwnd.?) updateChatTooltip(app, message.lParam);
         if (handleKeyboard(app, &message)) continue;
         const clicked_chat_list = message.message == win.WM_LBUTTONDOWN and
             app.chats_hwnd != null and message.hwnd == app.chats_hwnd.?;
@@ -18984,7 +19240,8 @@ fn hubConfigured(a: *const App) bool {
 }
 
 fn hubMediaPath(a: *App, allocator: std.mem.Allocator, key: chat_key.Key, id: []const u8) ![]u8 {
-    const name = try wa_hub.cacheName(allocator, key, id);
+    const cache_key = if (unifiedHub(a)) chat_key.Key{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = key.id } else key;
+    const name = try wa_hub.cacheName(allocator, cache_key, id);
     return std.fs.path.join(allocator, &.{ std.fs.path.dirname(a.avatar_dir) orelse return error.MissingMessagesDir, "hub-media", name });
 }
 
@@ -19140,11 +19397,7 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
 
 fn startHubSend(a: *App, pending: *const PendingSend) void {
     if (wacliPendingGet(a, .hub_send) > 0) return;
-    if (pending.file.len == 0 and pending.reply_to.len == 0) {
-        _ = hubTransport(a).sendText(pending.jid.slice(), pending.text.slice(), &pending.id);
-        return;
-    }
-    var job = WacliJob{ .kind = .hub_send, .account = pending.account, .jid = pending.jid };
+    var job = WacliJob{ .kind = .hub_send, .provider = pending.provider, .account = pending.account, .jid = pending.jid };
     job.msg_id.set(&pending.id);
     wacliJobArgs(&job, &.{ pending.text.slice(), pending.file.slice(), pending.reply_to.slice(), if (pending.ptt) "true" else "false" });
     _ = wacliEnqueue(a, job, true);
@@ -19484,7 +19737,7 @@ fn hubRefreshChats(context: *anyopaque) void {
 fn hubRefreshMessages(context: *anyopaque, jid: []const u8) void {
     const a: *App = @ptrCast(@alignCast(context));
     if (a.selected_chat < a.chat_count and (unifiedHub(a) or a.chats[a.selected_chat].provider == .whatsapp) and
-        std.mem.eql(u8, a.chats[a.selected_chat].account.slice(), a.cache_tag.slice()) and std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), jid)) refreshMessages(a);
+        (unifiedHub(a) or std.mem.eql(u8, a.chats[a.selected_chat].account.slice(), a.cache_tag.slice())) and std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), jid)) refreshMessages(a);
 }
 
 fn hubSendText(context: *anyopaque, jid: []const u8, text: []const u8, client_id: []const u8) bool {

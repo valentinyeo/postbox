@@ -401,7 +401,6 @@ test "IGSH-575 unified hub repairs a saved bridge tag and shows fresh history" {
 
 test "IGSH-575 dropped account and selected generation replies each log once" {
     var a = fixture();
-    a.unified_hub = true;
     a.cache_tag.set("aaaaaaaaaaaaaaaa");
     a.chats[0].account.set("bbbbbbbbbbbbbbbb");
     refreshMessages(&a);
@@ -593,4 +592,25 @@ test "hub Slack history refreshes ordering after caching its last message fallba
     deliver(&a, &result);
     try std.testing.expectEqual(@as(u32, 1), a.cached);
     try std.testing.expectEqual(@as(u32, 1), a.refreshed_chats);
+}
+
+test "account view history accepts source accounts without confusing the hub cache namespace" {
+    var a = fixture();
+    a.unified_hub = true;
+    a.cache_tag.set("hub-cache");
+    a.chats[0].account.set("wa-a");
+    a.chats[0].jid.set("shared-contact");
+    refreshMessages(&a);
+    var result = resultFor(a.last_job);
+    result.data = "{\"data\":{\"messages\":[{\"MsgID\":\"fixture-message\"}]}}";
+    deliver(&a, &result);
+    try std.testing.expectEqual(@as(usize, 1), a.message_count);
+    try std.testing.expectEqualStrings("wa-a", a.displayed_account.slice());
+    refreshMessages(&a);
+    result = resultFor(a.last_job);
+    a.chats[0].account.set("wa-b");
+    const painted = a.painted;
+    deliver(&a, &result);
+    try std.testing.expectEqual(painted, a.painted);
+    try std.testing.expect(std.mem.indexOf(u8, a.last_log.slice(), "identity changed") != null);
 }

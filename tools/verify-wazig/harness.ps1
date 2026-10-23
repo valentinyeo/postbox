@@ -169,6 +169,9 @@ function Invoke-Doctor($Session) {
     if ($Session.feature -in @('whatsapp-hub', 'hub')) {
         $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'hub baseline'
     }
+    if ($Session.feature -eq 'views') {
+        $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 4 } 'account views baseline'
+    }
     $status = Read-Control $Session status
     Assert-That ($status.version -eq '0.0.526') 'Wrong control build'
     Assert-That ($status.sync -eq 'stopped' -and -not $status.slack_connected) 'Provider unexpectedly connected'
@@ -177,13 +180,14 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$Views) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
     $script = if ($Unified) { 'fake-hub.py' } else { 'fake-wa-bridge.py' }
     $start.ArgumentList.Add((Join-Path $PSScriptRoot $script))
     if ($SlackSort) { $start.ArgumentList.Add('--slack-sort') }
+    if ($Views) { $start.ArgumentList.Add('--views') }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')
