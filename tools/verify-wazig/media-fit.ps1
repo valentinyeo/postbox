@@ -45,9 +45,20 @@ function Invoke-MediaFitJourney($Session) {
         if ($size -eq 'narrow') {
             $null = Send-Keys $Session '% '
             $null = Send-Keys $Session 'r'
-            $null = Send-Keys $Session '% '
-            $null = Send-Keys $Session 's'
-            $null = Send-Keys $Session '{RIGHT}{LEFT 40}{ENTER}'
+            $canvas = [IntPtr](Get-Edit (Get-Window $Session) '1024').Current.NativeWindowHandle
+            $bounds = [VerifyVoice]::Bounds($Session.pid, $canvas)
+            $canvasWidth = $bounds.Right - $bounds.Left
+            while ($canvasWidth -gt 340) {
+                $previousWidth = $canvasWidth
+                $null = Send-Keys $Session '% '
+                $null = Send-Keys $Session 's'
+                $null = Send-Keys $Session '{RIGHT}{LEFT 4}{ENTER}'
+                $canvas = [IntPtr](Get-Edit (Get-Window $Session) '1024').Current.NativeWindowHandle
+                $bounds = [VerifyVoice]::Bounds($Session.pid, $canvas)
+                $canvasWidth = $bounds.Right - $bounds.Left
+                $null = Assert-That ($canvasWidth -lt $previousWidth) "media-fit: keyboard resize made no progress from $previousWidth px (now $canvasWidth px); cannot reach the 300-340 px canvas band"
+            }
+            $null = Assert-That ($canvasWidth -ge 300 -and $canvasWidth -le 340) "media-fit: keyboard resize missed the 300-340 px canvas band (now $canvasWidth px)"
         }
         $null = Set-MediaFitText $Session 'M M M M M M M M'
         $own = Get-MediaFitTarget $Session 'fit-own'
