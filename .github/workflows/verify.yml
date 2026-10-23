@@ -19,6 +19,7 @@ on:
       - src/text_draw.zig
       - src/main.zig
       - src/archive_rules.zig
+      - src/chat_rows.zig
       - src/chat_order.zig
       - src/slack.zig
       - src/hub*.zig

@@ -98,6 +98,7 @@ const App = struct {
     msg_applied_hash: u64 = 0,
 };
 fn markChatRead(_: *App) void {}
+fn drainMediaDownloads(_: *App) void {}
 fn fixture() App {
     var a = App{};
     a.chats[0].jid.set("a@g.us");
@@ -613,4 +614,29 @@ test "account view history accepts source accounts without confusing the hub cac
     deliver(&a, &result);
     try std.testing.expectEqual(painted, a.painted);
     try std.testing.expect(std.mem.indexOf(u8, a.last_log.slice(), "identity changed") != null);
+}
+
+test "unchanged cached history does not repaint while still scheduling the fresh read" {
+    var a = fixture();
+    a.cache_data = "{\"data\":{\"messages\":[{\"MsgID\":\"CACHED\"}]}}";
+    refreshMessages(&a);
+    const painted = a.painted;
+    a.pending = 0;
+    refreshMessages(&a);
+    try std.testing.expectEqual(painted, a.painted);
+    try std.testing.expectEqual(@as(u32, 2), a.queued);
+}
+
+test "unchanged empty history does not repaint and accepts the latest chat timestamp" {
+    var a = fixture();
+    refreshMessages(&a);
+    var result = resultFor(a.last_job);
+    deliver(&a, &result);
+    const painted = a.painted;
+    a.chats[0].timestamp.set("2026-09-06T14:00:00");
+    refreshMessages(&a);
+    result = resultFor(a.last_job);
+    deliver(&a, &result);
+    try std.testing.expectEqual(painted, a.painted);
+    try std.testing.expectEqualStrings(a.chats[0].timestamp.slice(), a.displayed_timestamp.slice());
 }
