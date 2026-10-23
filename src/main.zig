@@ -385,6 +385,8 @@ const UnfurlEntry = struct {
     id: Utf8Text(unfurl.max_id_len) = .{},
     title: WideText(159) = .{},
     author: WideText(63) = .{},
+    description: WideText(159) = .{},
+    image_path: WideText(519) = .{},
     play_url: WideText(1023) = .{},
     thumb: ?win.HBITMAP = null,
     status: enum { loading, ready, failed } = .loading,
@@ -476,6 +478,8 @@ const Message = struct {
     transcript: WideText(2047) = .{},
     transcript_state: enum { none, loading, ready, failed } = .none,
     transcript_error: WideText(95) = .{},
+    label_links: [8]slack.MrkdwnLink = [_]slack.MrkdwnLink{.{}} ** 8,
+    label_link_count: usize = 0,
     links: [8]LinkSpan = [_]LinkSpan{.{}} ** 8,
     link_count: usize = 0,
     unfurl_provider: unfurl.Provider = .none,
@@ -3711,9 +3715,9 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         .{ .url = "https://www.facebook.com/watch?v=1234567890", .provider = .facebook, .id = "1234567890" },
         .{ .url = "https://www.facebook.com/nike/videos/9876543210/", .provider = .facebook, .id = "9876543210" },
         .{ .url = "https://fb.watch/AbCdEf123/", .provider = .facebook, .id = "AbCdEf123" },
-        .{ .url = "https://example.com/watch?v=dQw4w9WgXcQ", .provider = .none },
-        .{ .url = "https://youtube.com.evil.com/watch?v=dQw4w9WgXcQ", .provider = .none },
-        .{ .url = "https://www.facebook.com/photo/?fbid=123", .provider = .none },
+        .{ .url = "https://example.com/watch?v=dQw4w9WgXcQ", .provider = .page },
+        .{ .url = "https://youtube.com.evil.com/watch?v=dQw4w9WgXcQ", .provider = .page },
+        .{ .url = "https://www.facebook.com/photo/?fbid=123", .provider = .page },
     };
     for (cases) |case| {
         const info = unfurl.classify(case.url);
@@ -4606,15 +4610,14 @@ fn buildSlackMessage(a: *App, account: []const u8, item: slack.HistoryItem) Mess
     }
     var raw_buffer: [900]u8 = undefined;
     const raw_text = slack.historyItemBody(item, &raw_buffer);
-    var body_buffer: [slack.max_text + 1]u8 = undefined;
-    const text = slack.convertMrkdwn(&body_buffer, raw_text, lookup);
+    const text = raw_text;
     const is_thread_reply = slack.isThreadReply(item.ts, item.thread_ts) and !slackThreadsEnabled(a);
     if (is_thread_reply and text.len > 0 and text.len + 4 <= slack.max_text) {
         var threaded: [slack.max_text + 4]u8 = undefined;
         const rendered = std.fmt.bufPrint(&threaded, "\u{21a9} {s}", .{text}) catch text;
-        message.text.set(a.allocator, rendered);
+        setSlackMessageText(a, &message, rendered, lookup);
     } else {
-        message.text.set(a.allocator, text);
+        setSlackMessageText(a, &message, text, lookup);
     }
     formatSlackTime(&message.time, a.allocator, item.ts);
     if (slackThreadsEnabled(a)) rememberSlackThreadRow(a, &message);
@@ -4624,6 +4627,11 @@ fn buildSlackMessage(a: *App, account: []const u8, item: slack.HistoryItem) Mess
         message.filename.set(a.allocator, item.file_name);
     }
     return message;
+}
+
+fn setSlackMessageText(a: *App, message: *Message, raw: []const u8, lookup: ?slack.UserLookup) void {
+    var buffer: [slack.max_text + 1]u8 = undefined;
+    message.text.set(a.allocator, slack.convertMrkdwnLinks(&buffer, raw, lookup, &message.label_links, &message.label_link_count));
 }
 
 fn formatSlackTime(target: *WideText(15), allocator: std.mem.Allocator, ts: []const u8) void {
@@ -8524,14 +8532,42 @@ fn imageViewerProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam
 }
 
 fn detectUnfurl(message: *Message) void {
-    if (message.unfurl_provider != .none or message.link_count == 0) return;
-    var buffer: [1024]u8 = undefined;
-    const url_length = std.unicode.utf16LeToUtf8(&buffer, message.links[0].url.slice()) catch return;
-    const info = unfurl.classify(buffer[0..url_length]);
-    if (info.provider == .none) return;
+    if (message.unfurl_provider != .none) return;
+    var buffer: [slack.max_text * 3]u8 = undefined;
+    var url: []const u8 = "";
+    if (message.label_link_count > 0) {
+        const link = &message.label_links[0];
+        url = link.url[0..link.url_len];
+    } else {
+        const length = std.unicode.utf16LeToUtf8(&buffer, message.text.slice()) catch return;
+        var words = std.mem.tokenizeAny(u8, buffer[0..length], " \t\r\n<>");
+        while (words.next()) |word| {
+            if (unfurl.classify(word).provider != .none) {
+                url = word;
+                break;
+            }
+        }
+    }
+    const info = unfurl.classify(url);
+    if (info.provider == .none or (info.provider == .image and message.media_type.len > 0)) return;
     message.unfurl_provider = info.provider;
     message.unfurl_id.set(info.idSlice());
     message.unfurl_canonical.set(info.canonicalSlice());
+}
+
+fn unfurlCardVisible(a: *App, message: *Message) bool {
+    detectUnfurl(message);
+    if (message.unfurl_provider == .none) return false;
+    const entry = unfurlEntryFor(a, message) orelse return false;
+    if (message.unfurl_provider == .image) {
+        if (entry.status == .ready and entry.image_path.len > 0 and message.local_path.len == 0) {
+            message.local_path = entry.image_path;
+            message.media_type.set("image");
+            if (std.ascii.endsWithIgnoreCase(message.unfurl_canonical.slice()[0 .. std.mem.indexOfAny(u8, message.unfurl_canonical.slice(), "?#") orelse message.unfurl_canonical.len], ".gif")) message.mime_type.set("image/gif");
+        }
+        return false;
+    }
+    return message.unfurl_provider != .page or (entry.status == .ready and entry.thumb != null);
 }
 
 fn unfurlEntryFor(a: *App, message: *Message) ?*UnfurlEntry {
@@ -8570,6 +8606,7 @@ fn unfurlProviderLabel(provider: unfurl.Provider) []const u8 {
         .youtube => "YouTube",
         .instagram => "Instagram",
         .facebook => "Facebook",
+        .page, .image => "Link",
         .none => "Video",
     };
 }
@@ -8579,7 +8616,7 @@ fn unfurlPlaceholderColor(provider: unfurl.Provider) u32 {
         .youtube => rgb(197, 40, 40),
         .instagram => rgb(225, 48, 108),
         .facebook => rgb(24, 119, 242),
-        .none => theme.current.surface_container_highest,
+        .none, .page, .image => theme.current.surface_container_highest,
     };
 }
 
@@ -8639,19 +8676,20 @@ fn drawUnfurlCard(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
 
     const thumb_right = x + unfurl_thumb_width;
     drawUnfurlThumbnail(hdc, entry.thumb, .{ .left = x, .top = top, .right = thumb_right, .bottom = bottom }, unfurlPlaceholderColor(message.unfurl_provider));
-    const play_brush = win.CreateSolidBrush(theme.current.on_surface) orelse return;
-    defer _ = win.DeleteObject(play_brush);
-    const old_play = win.SelectObject(hdc, play_brush);
-    const center_x = x + @divTrunc(unfurl_thumb_width, 2);
-    const center_y = top + @divTrunc(unfurl_card_height, 2);
-    var points = [3]win.POINT{
-        .{ .x = center_x - 9, .y = center_y - 13 },
-        .{ .x = center_x - 9, .y = center_y + 13 },
-        .{ .x = center_x + 15, .y = center_y },
-    };
-    _ = win.Polygon(hdc, &points, 3);
-    _ = win.SelectObject(hdc, old_play);
-
+    if (message.unfurl_provider != .page) {
+        const play_brush = win.CreateSolidBrush(theme.current.on_surface) orelse return;
+        defer _ = win.DeleteObject(play_brush);
+        const old_play = win.SelectObject(hdc, play_brush);
+        const center_x = x + @divTrunc(unfurl_thumb_width, 2);
+        const center_y = top + @divTrunc(unfurl_card_height, 2);
+        var points = [3]win.POINT{
+            .{ .x = center_x - 9, .y = center_y - 13 },
+            .{ .x = center_x - 9, .y = center_y + 13 },
+            .{ .x = center_x + 15, .y = center_y },
+        };
+        _ = win.Polygon(hdc, &points, 3);
+        _ = win.SelectObject(hdc, old_play);
+    }
     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(hdc, theme.current.on_surface);
     var title: []const u16 = std.unicode.utf8ToUtf16LeStringLiteral("Loading…")[0..];
@@ -8660,14 +8698,20 @@ fn drawUnfurlCard(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     } else if (entry.status == .failed) {
         title = std.unicode.utf8ToUtf16LeStringLiteral("Open in browser")[0..];
     }
-    var title_rect = win.RECT{ .left = thumb_right + 10, .top = top + 10, .right = x + card_width - 10, .bottom = top + unfurl_card_height - 34 };
+    var title_rect = win.RECT{ .left = thumb_right + 10, .top = top + 10, .right = x + card_width - 10, .bottom = top + unfurl_card_height - (if (entry.description.len > 0) @as(i32, 54) else 34) };
     _ = text_draw.drawText(hdc, title.ptr, @intCast(title.len), &title_rect, win.DT_WORDBREAK | win.DT_END_ELLIPSIS);
     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
     var label_buffer: [96]u8 = undefined;
     var author_utf8: [128]u8 = undefined;
     const author_length = std.unicode.utf16LeToUtf8(&author_utf8, entry.author.slice()) catch 0;
     const author = author_utf8[0..author_length];
-    const label = if (author.len > 0)
+    if (entry.description.len > 0) {
+        var description_rect = win.RECT{ .left = thumb_right + 10, .top = bottom - 50, .right = x + card_width - 10, .bottom = bottom - 30 };
+        _ = text_draw.drawText(hdc, entry.description.ptr(), @intCast(entry.description.len), &description_rect, win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    }
+    const label = if (message.unfurl_provider == .page)
+        author
+    else if (author.len > 0)
         std.fmt.bufPrint(&label_buffer, "{s} · {s}", .{ unfurlProviderLabel(message.unfurl_provider), author }) catch "Video"
     else
         std.fmt.bufPrint(&label_buffer, "{s}", .{unfurlProviderLabel(message.unfurl_provider)}) catch "Video";
@@ -8700,6 +8744,7 @@ const UnfurlContext = struct {
     provider: u8,
     id: []u8,
     canonical: []u8,
+    cache_path: ?[]u8,
 };
 
 const UnfurlResult = struct {
@@ -8711,6 +8756,9 @@ const UnfurlResult = struct {
     title_len: usize = 0,
     author: [64]u8 = undefined,
     author_len: usize = 0,
+    description: [160]u8 = undefined,
+    description_len: usize = 0,
+    from_cache: bool = false,
     play_url: [1024]u8 = undefined,
     play_len: usize = 0,
     thumb: ?[]u8 = null,
@@ -8738,24 +8786,84 @@ fn startUnfurlFetch(a: *App, entry: *UnfurlEntry, url_utf8: []const u8) void {
         entry.status = .failed;
         return;
     };
-    ctx.* = .{ .hwnd = a.hwnd.?, .provider = @intFromEnum(entry.provider), .id = id, .canonical = url };
+    const cache_path = unfurlCachePath(a, page, entry.provider, entry.id.slice());
+    ctx.* = .{ .hwnd = a.hwnd.?, .provider = @intFromEnum(entry.provider), .id = id, .canonical = url, .cache_path = cache_path };
+    _ = unfurl_fetch_count.fetchAdd(1, .monotonic);
     const thread = std.Thread.spawn(.{ .stack_size = 512 * 1024 }, unfurlThreadMain, .{ctx}) catch {
+        _ = unfurl_fetch_count.fetchSub(1, .monotonic);
         page.free(url);
         page.free(id);
+        if (cache_path) |path| page.free(path);
         page.destroy(ctx);
         entry.status = .failed;
         return;
     };
     thread.detach();
     entry.fetch_started = true;
-    _ = unfurl_fetch_count.fetchAdd(1, .monotonic);
+}
+
+fn unfurlCachePath(a: *App, allocator: std.mem.Allocator, provider: unfurl.Provider, id: []const u8) ?[]u8 {
+    const dir = messagesDirPath(a, "link-previews") orelse return null;
+    defer a.allocator.free(dir);
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(allocator, dir) catch return null;
+    defer allocator.free(wide);
+    _ = win.CreateDirectoryW(wide.ptr, null);
+    return std.fmt.allocPrint(allocator, "{s}/{s}-{s}.json", .{ dir, @tagName(provider), id }) catch null;
+}
+
+fn loadUnfurlCache(allocator: std.mem.Allocator, ctx: *const UnfurlContext, result: *UnfurlResult) bool {
+    const path = ctx.cache_path orelse return false;
+    const data = readFileWin(allocator, path, 16384) orelse return false;
+    defer allocator.free(data);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, data, .{}) catch return false;
+    defer parsed.deinit();
+    if (parsed.value != .object) return false;
+    const object = parsed.value.object;
+    if (getBool(object, "image")) {
+        const image_path = std.fmt.allocPrint(allocator, "{s}.image", .{path}) catch return false;
+        defer allocator.free(image_path);
+        result.thumb = readFileWin(allocator, image_path, 2 * 1024 * 1024) orelse return false;
+    }
+    result.title_len = copyInto(&result.title, getString(object, "title"));
+    result.author_len = copyInto(&result.author, getString(object, "author"));
+    result.description_len = copyInto(&result.description, getString(object, "description"));
+    result.play_len = copyInto(&result.play_url, getString(object, "play_url"));
+    result.from_cache = true;
+    return true;
+}
+
+fn saveUnfurlCache(a: *App, entry: *UnfurlEntry, result: *const UnfurlResult) void {
+    const path = unfurlCachePath(a, a.allocator, entry.provider, entry.id.slice()) orelse return;
+    defer a.allocator.free(path);
+    const image_path = std.fmt.allocPrint(a.allocator, "{s}.image", .{path}) catch return;
+    defer a.allocator.free(image_path);
+    if (result.thumb) |bytes| {
+        if (result.from_cache or writeCacheFileAtomic(a, image_path, bytes)) entry.image_path.set(a.allocator, image_path);
+    }
+    if (result.from_cache) return;
+    const data = std.json.Stringify.valueAlloc(a.allocator, .{
+        .title = result.title[0..result.title_len],
+        .author = result.author[0..result.author_len],
+        .description = result.description[0..result.description_len],
+        .play_url = result.play_url[0..result.play_len],
+        .image = result.thumb != null and entry.image_path.len > 0,
+    }, .{}) catch return;
+    defer a.allocator.free(data);
+    _ = writeCacheFileAtomic(a, path, data);
+}
+
+fn verificationUnfurlUrl(url: []const u8) bool {
+    if (!verification_fixture) return false;
+    const a = app_ptr orelse return false;
+    const origin = std.mem.trimEnd(u8, a.wa_bridge_url, "/");
+    return origin.len > 0 and std.mem.startsWith(u8, url, origin) and url.len > origin.len and url[origin.len] == '/';
 }
 
 fn httpGetChecked(allocator: std.mem.Allocator, url: []const u8, comptime kind: unfurl.FetchKind, max_bytes: usize) ![]u8 {
-    switch (kind) {
+    if (!verificationUnfurlUrl(url)) switch (kind) {
         .page => if (!unfurl.isPageFetchAllowed(url)) return error.UpdateBadUrl,
         .image => if (!unfurl.isImageFetchAllowed(url)) return error.UpdateBadUrl,
-    }
+    };
     const wide = try utf8ToWide(allocator, url);
     defer allocator.free(wide);
     var components: win.URL_COMPONENTSW = std.mem.zeroes(win.URL_COMPONENTSW);
@@ -8770,7 +8878,8 @@ fn httpGetChecked(allocator: std.mem.Allocator, url: []const u8, comptime kind: 
     components.lpszExtraInfo = &extra_buf;
     components.dwExtraInfoLength = extra_buf.len;
     if (win.WinHttpCrackUrl(wide.ptr, @intCast(wide.len), 0, &components) == 0) return error.UpdateBadUrl;
-    if (components.nScheme != win.INTERNET_SCHEME_HTTPS) return error.UpdateBadUrl;
+    if (components.nScheme != win.INTERNET_SCHEME_HTTPS and components.nScheme != win.INTERNET_SCHEME_HTTP) return error.UpdateBadUrl;
+    if (components.dwHostNameLength == 0 or components.dwHostNameLength >= host_buf.len) return error.UpdateBadUrl;
     if (components.dwUrlPathLength + components.dwExtraInfoLength >= path_buf.len) return error.UpdateBadUrl;
     host_buf[components.dwHostNameLength] = 0;
     std.mem.copyForwards(u16, path_buf[components.dwUrlPathLength..], extra_buf[0..components.dwExtraInfoLength]);
@@ -8782,11 +8891,15 @@ fn httpGetChecked(allocator: std.mem.Allocator, url: []const u8, comptime kind: 
         path_buf[0..path_total :0].ptr,
         lit("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\nAccept: */*\r\n"),
         max_bytes,
+        components.nPort,
+        components.nScheme == win.INTERNET_SCHEME_HTTPS,
+        false,
     );
 }
 
 fn copyInto(dest: []u8, source: []const u8) usize {
-    const length = @min(dest.len, source.len);
+    var length = @min(dest.len, source.len);
+    while (length > 0 and !std.unicode.utf8ValidateSlice(source[0..length])) length -= 1;
     @memcpy(dest[0..length], source[0..length]);
     return length;
 }
@@ -8796,6 +8909,7 @@ fn unfurlThreadMain(ctx: *UnfurlContext) void {
     defer {
         page.free(ctx.canonical);
         page.free(ctx.id);
+        if (ctx.cache_path) |path| page.free(path);
         page.destroy(ctx);
     }
     const allocator = page;
@@ -8808,7 +8922,8 @@ fn unfurlThreadMain(ctx: *UnfurlContext) void {
     const provider: unfurl.Provider = @enumFromInt(ctx.provider);
     var small_buffer: [unfurl.max_canonical_len]u8 = undefined;
 
-    switch (provider) {
+    const cached = loadUnfurlCache(allocator, ctx, result);
+    if (!cached) switch (provider) {
         .youtube => {
             const info = unfurl.classify(ctx.canonical);
             if (info.provider == .youtube) {
@@ -8841,11 +8956,20 @@ fn unfurlThreadMain(ctx: *UnfurlContext) void {
                 }
             }
         },
-        .instagram, .facebook => {
+        .image => {
+            result.thumb = httpGetChecked(allocator, ctx.canonical, .image, 2 * 1024 * 1024) catch null;
+        },
+        .page, .instagram, .facebook => {
             if (httpGetChecked(allocator, ctx.canonical, .page, 256 * 1024)) |page_body| {
                 defer allocator.free(page_body);
-                if (unfurl.scrapeOgMeta(page_body, "og:video")) |stream| {
-                    if (unfurl.isStreamUrlAllowed(stream)) result.play_len = copyInto(&result.play_url, stream);
+                var meta_buffer: [2048]u8 = undefined;
+                if (unfurl.scrapeOgMeta(page_body, "og:title")) |title| result.title_len = copyInto(&result.title, slack.decodeHtmlEntities(&meta_buffer, title));
+                if (unfurl.scrapeOgMeta(page_body, "og:description")) |description| result.description_len = copyInto(&result.description, slack.decodeHtmlEntities(&meta_buffer, description));
+                if (provider == .page) result.author_len = copyInto(&result.author, unfurl.siteHost(ctx.canonical));
+                if (provider != .page) {
+                    if (unfurl.scrapeOgMeta(page_body, "og:video")) |stream| {
+                        if (unfurl.isStreamUrlAllowed(stream)) result.play_len = copyInto(&result.play_url, stream);
+                    }
                 }
                 const image_key: []const u8 = if (unfurl.scrapeOgMeta(page_body, "og:image:secure_url")) |image|
                     image
@@ -8853,16 +8977,19 @@ fn unfurlThreadMain(ctx: *UnfurlContext) void {
                     image
                 else
                     "";
-                if (image_key.len > 0 and unfurl.isImageFetchAllowed(image_key)) {
-                    if (httpGetChecked(allocator, image_key, .image, 2 * 1024 * 1024)) |bytes| {
+                var image_buffer: [2048]u8 = undefined;
+                const image_url = unfurl.resolveImageUrl(ctx.canonical, slack.decodeHtmlEntities(&meta_buffer, image_key), &image_buffer) orelse "";
+                if (image_url.len > 0) {
+                    if (httpGetChecked(allocator, image_url, .image, 2 * 1024 * 1024)) |bytes| {
                         result.thumb = bytes;
                     } else |_| {}
                 }
             } else |_| {}
         },
         .none => {},
-    }
-    result.ok = result.title_len > 0 or result.play_len > 0 or result.thumb != null;
+    };
+    if (provider == .page and result.title_len == 0) result.title_len = copyInto(&result.title, result.author[0..result.author_len]);
+    result.ok = if (provider == .page or provider == .image) result.thumb != null else result.title_len > 0 or result.play_len > 0 or result.thumb != null;
     _ = unfurl_fetch_count.fetchSub(1, .monotonic);
     if (win.PostMessageW(ctx.hwnd, wm_unfurl_done, 0, @bitCast(@intFromPtr(result))) == 0) {
         if (result.thumb) |bytes| page.free(bytes);
@@ -8923,10 +9050,15 @@ fn applyUnfurlResult(a: *App, result: *UnfurlResult) void {
         entry.status = if (result.ok) .ready else .failed;
         if (result.title_len > 0) entry.title.set(a.allocator, result.title[0..result.title_len]);
         if (result.author_len > 0) entry.author.set(a.allocator, result.author[0..result.author_len]);
+        if (result.description_len > 0) entry.description.set(a.allocator, result.description[0..result.description_len]);
         if (result.play_len > 0 and unfurl.isStreamUrlAllowed(result.play_url[0..result.play_len])) {
             entry.play_url.set(a.allocator, result.play_url[0..result.play_len]);
         }
         if (result.thumb) |bytes| entry.thumb = decodeUnfurlThumb(a, bytes);
+        saveUnfurlCache(a, entry, result);
+        for (a.messages[0..a.message_count]) |*message| {
+            if (message.unfurl_provider == provider and std.mem.eql(u8, message.unfurl_id.slice(), entry.id.slice())) message.measure_tag = 0;
+        }
         if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
         return;
     }
@@ -9284,13 +9416,20 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         } else if (!(chat.provider == .slack and slackThreadsEnabled(a) and slack.isThreadReply(id, message.thread_ts.slice())) and getString(object, "quoted_msg_id").len > 0) {
             if (splitQuote(text, getString(object, "Text"))) |parts| {
                 const quoted_sender_jid = getString(object, "quoted_sender_jid");
-                message.quote.set(a.allocator, parts.quote);
+                var quote_buffer: [slack.max_text + 1]u8 = undefined;
+                const lookup = if (slackInstallation(a, chat.account.slice())) |installation| slackUserLookup(installation) else null;
+                message.quote.set(a.allocator, if (unifiedHub(a) and std.mem.startsWith(u8, chat.jid.slice(), "slack:")) slack.convertMrkdwn(&quote_buffer, parts.quote, lookup) else parts.quote);
                 message.quote_sender_jid.set(quoted_sender_jid);
                 message.quote_sender = resolveQuoteSender(a, chat.jid.slice(), quoted_sender_jid);
                 text = parts.body;
             }
         }
-        message.text.set(a.allocator, if (media_drain.isPlaceholder(media_type, text)) "" else text);
+        if (unifiedHub(a) and std.mem.startsWith(u8, chat.jid.slice(), "slack:")) {
+            const lookup = if (slackInstallation(a, chat.account.slice())) |installation| slackUserLookup(installation) else null;
+            setSlackMessageText(a, &message, if (media_drain.isPlaceholder(media_type, text)) "" else text, lookup);
+        } else {
+            message.text.set(a.allocator, if (media_drain.isPlaceholder(media_type, text)) "" else text);
+        }
         message.from_me = getBool(object, "FromMe");
         message.media_type.set(media_type);
         message.mime_type.set(getString(object, "MimeType"));
@@ -13234,6 +13373,29 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try control_api.writeString(w, message.timestamp.slice());
         try w.writeAll(",\"text\":");
         try control_api.writeStringUtf16(w, message.text.slice());
+        try w.writeAll(",\"quote\":");
+        try control_api.writeStringUtf16(w, message.quote.slice());
+        try w.writeAll(",\"links\":[");
+        for (message.links[0..message.link_count], 0..) |*link, link_index| {
+            if (link_index > 0) try w.writeByte(',');
+            try control_api.writeStringUtf16(w, link.url.slice());
+        }
+        try w.writeAll("],\"preview\":{\"kind\":");
+        try control_api.writeString(w, @tagName(message.unfurl_provider));
+        var preview: ?*const UnfurlEntry = null;
+        for (a.unfurl_entries[0..a.unfurl_entry_count]) |*entry| {
+            if (entry.provider == message.unfurl_provider and std.mem.eql(u8, entry.id.slice(), message.unfurl_id.slice())) {
+                preview = entry;
+                break;
+            }
+        }
+        try w.writeAll(",\"title\":");
+        try control_api.writeStringUtf16(w, if (preview) |entry| entry.title.slice() else &.{});
+        try w.writeAll(",\"site\":");
+        try control_api.writeStringUtf16(w, if (preview) |entry| entry.author.slice() else &.{});
+        try w.writeAll(",\"description\":");
+        try control_api.writeStringUtf16(w, if (preview) |entry| entry.description.slice() else &.{});
+        try w.print(",\"ready\":{},\"image\":{}}}", .{ if (preview) |entry| entry.status == .ready else false, if (preview) |entry| entry.thumb != null else false });
         try w.writeAll(",\"reaction\":");
         try control_api.writeStringUtf16(w, message.reaction.slice());
         try w.writeAll(",\"my_reaction\":");
@@ -13245,6 +13407,7 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             .{ .name = "bubble", .rect = message.bubble_hit },
             .{ .name = "reaction_chip", .rect = message.reaction_hit },
             .{ .name = "media", .rect = message.media_hit },
+            .{ .name = "card", .rect = message.unfurl_card_hit },
             .{ .name = "toggle", .rect = message.toggle_hit },
         }) |entry| try w.print(",\"{s}\":[{d},{d},{d},{d}]", .{ entry.name, entry.rect.left, entry.rect.top, entry.rect.right, entry.rect.bottom });
         try w.print(",\"from_me\":{},\"revoked\":{},\"send_state\":\"{s}\"}}", .{ message.from_me, message.revoked, @tagName(message.send_state) });
@@ -15123,7 +15286,20 @@ fn wrapMixedSink(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int, max_
                 line_top += line_height;
                 cursor_x = left;
             }
-            const is_link = wordIsUrl(word);
+            var wide_url: [519]u16 = undefined;
+            var link_word = word;
+            if (sink) |target| {
+                if (text.ptr == target.text.ptr()) {
+                    for (target.label_links[0..target.label_link_count]) |*link| {
+                        if (word_start >= link.start and word_start < link.end) {
+                            const length = std.unicode.utf8ToUtf16Le(&wide_url, link.url[0..link.url_len]) catch 0;
+                            if (length > 0) link_word = wide_url[0..length];
+                            break;
+                        }
+                    }
+                }
+            }
+            const is_link = wordIsUrl(link_word);
             var emitted: usize = 0;
             while (true) {
                 const remaining = word[emitted..];
@@ -15143,7 +15319,7 @@ fn wrapMixedSink(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int, max_
                             var extended = false;
                             if (target.link_count > 0) {
                                 const last = &target.links[target.link_count - 1];
-                                if (std.mem.eql(u16, last.url.slice(), word)) {
+                                if (std.mem.eql(u16, last.url.slice(), link_word)) {
                                     if (last.chunk_count < last.chunk_rects.len) {
                                         last.chunk_rects[last.chunk_count] = chunk_rect;
                                         last.chunk_count += 1;
@@ -15155,7 +15331,7 @@ fn wrapMixedSink(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int, max_
                                 const span = &target.links[target.link_count];
                                 span.rect = chunk_rect;
                                 span.chunk_count = 0;
-                                if (std.unicode.utf16LeToUtf8Alloc(a.allocator, word)) |utf8_word| {
+                                if (std.unicode.utf16LeToUtf8Alloc(a.allocator, link_word)) |utf8_word| {
                                     defer a.allocator.free(utf8_word);
                                     span.url.set(a.allocator, utf8_word);
                                     target.link_count += 1;
@@ -15513,6 +15689,7 @@ fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: b
 }
 
 fn measureMessageCached(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool) i32 {
+    _ = unfurlCardVisible(a, message);
     if (message.measure_tag == measureTag(a, message, width, show_sender)) return message.measure_height;
     return measureMessageStore(hdc, a, message, width, show_sender);
 }
@@ -15541,8 +15718,7 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, sh
     if (!skip_body_line) {
         height += wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), if (message.text.len > 0) @intCast(message.text.len) else 1, width - px(a, 24), false, 0, 0, message);
     }
-    if (message.unfurl_provider == .none and message.link_count > 0) detectUnfurl(@constCast(message));
-    if (message.unfurl_provider != .none) height += unfurl_card_height + px(a, 6);
+    if (unfurlCardVisible(a, @constCast(message))) height += unfurl_card_height + px(a, 6);
     if (message.bitmap_height > 0) {
         height += message.bitmap_height + px(a, 8);
     } else if (message.media_type.len > 0) height += px(a, 54);
@@ -16118,7 +16294,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         if (verification_fixture and verification_text_comparison and std.mem.eql(u8, message.id.slice(), "ISSUE-462-PARAGRAPH")) {
             saveVerificationTextMetrics(a, hdc, message, left + px(a, 12), text_top, right - left - px(a, 24), text_height);
         }
-        if (message.unfurl_provider != .none) {
+        if (unfurlCardVisible(a, message)) {
             drawUnfurlCard(&shapes, hdc, a, message, left + px(a, 12), text_top + text_height + px(a, 4), right - left - px(a, 24));
             text_top += text_height + unfurl_card_height + px(a, 6);
         }
@@ -19221,7 +19397,7 @@ fn checkForUpdate(allocator: std.mem.Allocator) !?UpdateAvailable {
     const current = currentVersion() orelse return error.UpdateBadVersion;
     const api_headers = try utf8ToWide(allocator, "User-Agent: Messages updater\r\nAccept: application/vnd.github+json\r\n");
     defer allocator.free(api_headers);
-    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/wazig/releases/latest"), api_headers.ptr, 4 * 1024 * 1024);
+    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/wazig/releases/latest"), api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
     defer allocator.free(json);
     var parsed: std.json.Parsed(std.json.Value) = undefined;
     const maybe_asset = try update.pickAsset(allocator, json, &parsed);
@@ -19288,15 +19464,15 @@ fn wideToUtf8(allocator: std.mem.Allocator, wide: []const u16) ![]u8 {
     return std.unicode.utf16LeToUtf8Alloc(allocator, wide);
 }
 
-fn httpGet(allocator: std.mem.Allocator, host: [*:0]const u16, path: [*:0]const u16, headers: [*:0]const u16, max_bytes: usize) ![]u8 {
+fn httpGet(allocator: std.mem.Allocator, host: [*:0]const u16, path: [*:0]const u16, headers: [*:0]const u16, max_bytes: usize, port: u16, secure: bool, redirects: bool) ![]u8 {
     const session = win.WinHttpOpen(lit("Messages updater"), win.WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, null, null, 0) orelse return error.UpdateNetwork;
     defer _ = win.WinHttpCloseHandle(session);
     _ = win.WinHttpSetTimeouts(session, 15000, 15000, 60000, 60000);
-    const connection = win.WinHttpConnect(session, host, win.INTERNET_DEFAULT_HTTPS_PORT, 0) orelse return error.UpdateNetwork;
+    const connection = win.WinHttpConnect(session, host, port, 0) orelse return error.UpdateNetwork;
     defer _ = win.WinHttpCloseHandle(connection);
-    const request = win.WinHttpOpenRequest(connection, lit("GET"), path, null, null, null, win.WINHTTP_FLAG_SECURE) orelse return error.UpdateNetwork;
+    const request = win.WinHttpOpenRequest(connection, lit("GET"), path, null, null, null, if (secure) win.WINHTTP_FLAG_SECURE else 0) orelse return error.UpdateNetwork;
     defer _ = win.WinHttpCloseHandle(request);
-    var policy = win.WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
+    var policy: win.DWORD = if (redirects) win.WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP else win.WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
     _ = win.WinHttpSetOption(request, win.WINHTTP_OPTION_REDIRECT_POLICY, &policy, @sizeOf(@TypeOf(policy)));
     _ = win.WinHttpAddRequestHeaders(request, headers, std.math.maxInt(win.DWORD), win.WINHTTP_ADDREQ_FLAG_ADD);
     if (win.WinHttpSendRequest(request, null, 0, null, 0, 0, 0) == 0) return error.UpdateNetwork;
@@ -19355,6 +19531,9 @@ fn httpGetUrl(allocator: std.mem.Allocator, url_wide: []const u16, headers: [*:0
         path_buf[0..path_total :0].ptr,
         headers,
         max_bytes,
+        win.INTERNET_DEFAULT_HTTPS_PORT,
+        true,
+        true,
     );
 }
 
@@ -19554,7 +19733,7 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
 
     const api_headers = try utf8ToWide(allocator, "User-Agent: Messages updater\r\nAccept: application/vnd.github+json\r\n");
     defer allocator.free(api_headers);
-    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/wazig/releases/latest"), api_headers.ptr, 4 * 1024 * 1024);
+    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/wazig/releases/latest"), api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
     defer allocator.free(json);
 
     var parsed: std.json.Parsed(std.json.Value) = undefined;
@@ -20988,7 +21167,8 @@ fn applyHubThreadPage(a: *App, result: *const WacliResult) void {
         if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice())) {
             if (splitQuote(text, getString(object, "Text"))) |parts| text = parts.body;
         }
-        message.text.set(a.allocator, text);
+        const lookup = if (slackInstallation(a, result.account.slice())) |installation| slackUserLookup(installation) else null;
+        setSlackMessageText(a, &message, text, lookup);
         message.timestamp.set(stamp);
         formatTime(&message.time, a.allocator, stamp);
         rememberSlackThreadRow(a, &message);

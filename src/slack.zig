@@ -396,17 +396,38 @@ pub const UserLookup = struct {
     }
 };
 
+pub const MrkdwnLink = struct {
+    start: usize = 0,
+    end: usize = 0,
+    url: [519]u8 = undefined,
+    url_len: usize = 0,
+};
+
 pub fn convertMrkdwn(buffer: []u8, text: []const u8, users: ?UserLookup) []const u8 {
+    var count: usize = 0;
+    return convertMrkdwnLinks(buffer, text, users, &.{}, &count);
+}
+
+pub fn convertMrkdwnLinks(buffer: []u8, text: []const u8, users: ?UserLookup, links: []MrkdwnLink, count: *usize) []const u8 {
     var stage1: [max_text + 1]u8 = undefined;
     var stage1_len: usize = 0;
     var index: usize = 0;
+    count.* = 0;
     while (index < text.len) {
         if (text[index] == '<') {
             if (std.mem.indexOfScalarPos(u8, text, index, '>')) |close| {
                 const token = text[index + 1 .. close];
                 var token_buffer: [max_text + 1]u8 = undefined;
                 const rendered = renderMrkdwnToken(&token_buffer, token, users);
+                const begin = stage1_len;
                 stage1_len = appendClamped(&stage1, stage1_len, rendered);
+                if (count.* < links.len and (std.mem.startsWith(u8, token, "https://") or std.mem.startsWith(u8, token, "http://"))) {
+                    const url = token[0 .. std.mem.indexOfScalar(u8, token, '|') orelse token.len];
+                    const link = &links[count.*];
+                    link.* = .{ .start = begin, .end = stage1_len };
+                    link.url_len = decodeHtmlEntities(&link.url, url).len;
+                    count.* += 1;
+                }
                 index = close + 1;
                 continue;
             }
@@ -414,6 +435,11 @@ pub fn convertMrkdwn(buffer: []u8, text: []const u8, users: ?UserLookup) []const
         const rune_len = @min(utf8RuneLen(text[index]), text.len - index);
         stage1_len = appendClamped(&stage1, stage1_len, text[index..][0..rune_len]);
         index += rune_len;
+    }
+    var prefix: [max_text + 1]u8 = undefined;
+    for (links[0..count.*]) |*link| {
+        link.start = std.unicode.calcUtf16LeLen(decodeHtmlEntities(&prefix, stage1[0..link.start])) catch 0;
+        link.end = std.unicode.calcUtf16LeLen(decodeHtmlEntities(&prefix, stage1[0..link.end])) catch 0;
     }
     return decodeHtmlEntities(buffer, stage1[0..stage1_len]);
 }
@@ -452,7 +478,7 @@ fn renderMrkdwnToken(dest: []u8, token: []const u8, users: ?UserLookup) []const 
         else => {
             const pipe = std.mem.indexOfScalar(u8, token, '|');
             const url = if (pipe) |p| token[0..p] else token;
-            return copyClamped(dest, url);
+            return copyClamped(dest, if (pipe) |p| (if (token[p + 1 ..].len > 0) token[p + 1 ..] else url) else url);
         },
     }
 }
@@ -488,7 +514,7 @@ fn appendClamped(dest: []u8, dest_len: usize, text: []const u8) usize {
     return dest_len + n;
 }
 
-fn decodeHtmlEntities(buffer: []u8, text: []const u8) []const u8 {
+pub fn decodeHtmlEntities(buffer: []u8, text: []const u8) []const u8 {
     var out_len: usize = 0;
     var index: usize = 0;
     while (index < text.len) {
@@ -1072,14 +1098,14 @@ fn testUserLookup(context: *anyopaque, user_id: []const u8) ?[]const u8 {
     return null;
 }
 
-test "convertMrkdwn shows the url instead of the label, since links are detected from visible url text" {
+test "convertMrkdwn shows link labels" {
     var buffer: [256]u8 = undefined;
     try std.testing.expectEqualStrings(
-        "https://www.tempdrop.com/",
+        "tempdrop.com",
         convertMrkdwn(&buffer, "<https://www.tempdrop.com/|tempdrop.com>", null),
     );
     try std.testing.expectEqualStrings(
-        "New device: https://www.tempdrop.com/",
+        "New device: tempdrop.com",
         convertMrkdwn(&buffer, "New device: <https://www.tempdrop.com/|tempdrop.com>", null),
     );
 }
@@ -1575,4 +1601,16 @@ test "thirty replies group under one parent without hiding channel messages or a
     try std.testing.expectEqual(@as(usize, 3), channel);
     try std.testing.expectEqual(@as(usize, 31), panel);
     try std.testing.expect(!inThread("1740000033.000100", "1740000031.000100", parent));
+}
+
+test "mrkdwn labels retain decoded targets and UTF16 ranges" {
+    var buffer: [256]u8 = undefined;
+    var links: [8]MrkdwnLink = undefined;
+    var count: usize = 0;
+    const text = convertMrkdwnLinks(&buffer, "\u{1f600} &amp; <https://example.com/page?a=1&amp;b=2|Clean &amp; label>", null, &links, &count);
+    try std.testing.expectEqualStrings("\u{1f600} & Clean & label", text);
+    try std.testing.expectEqual(@as(usize, 1), count);
+    try std.testing.expectEqual(@as(usize, 5), links[0].start);
+    try std.testing.expectEqual(@as(usize, 18), links[0].end);
+    try std.testing.expectEqualStrings("https://example.com/page?a=1&b=2", links[0].url[0..links[0].url_len]);
 }
