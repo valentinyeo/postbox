@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IGSH-669: Always open Messages maximized on its last saved monitor, including update relaunches, while retaining the normal window size for Restore.
+
 - IGSH-645: Right-click message reactions send the emoji clicked in the quick reaction row instead of always sending thumbs up.
 
 - IGSH-607: Link Signal and Telegram only through the hub CLI; remove in-app QR/password screens, fall back to the combined inbox on empty startup views, and keep Esc/Alt navigation available.
