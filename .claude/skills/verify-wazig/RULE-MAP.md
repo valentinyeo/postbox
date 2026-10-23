@@ -21,3 +21,5 @@
 | Every start maximizes on the saved monitor, including update relaunch | window journey reads native IsZoomed without forced harness maximization, including CreateProcessW launches with SW_SHOWNORMAL startup info and the updater's empty startup info, and requires the startup zoomed launch-log line; restores/resizes and closes through real keyboard input before same-profile restarts | [Window](features/window.md) |
 
 IGSH-589: update the maps with the implementation and describe only actual assertions. GitHub execution and screenshot inspection remain required before claiming runtime success. The Signal fixture does not prove production authentication or delivery.
+
+| Clipboard screenshots preserve dimensions and alpha through paste and Enter on every provider | paste-image.ps1 and check-paste-image-evidence.py native clipboard, decoded upload and exact send assertions | [Clipboard images](features/paste-image.md) |

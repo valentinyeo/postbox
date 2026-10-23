@@ -250,7 +250,7 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackArchive, [switch]$SlackThreads, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions, [switch]$HubArchive, [switch]$Repaint, [switch]$MixedLid) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackArchive, [switch]$SlackThreads, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions, [switch]$HubArchive, [switch]$Repaint, [switch]$MixedLid, [switch]$PasteImage) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
@@ -265,6 +265,7 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [s
     if ($Telegram) { $start.ArgumentList.Add('--telegram') }
     if ($Notrap) { $start.ArgumentList.Add('--notrap') }
     if ($Reactions) { $start.ArgumentList.Add('--reactions') }
+    if ($PasteImage) { $start.ArgumentList.Add('--paste-image') }
     if ($HubArchive) { $start.ArgumentList.Add('--hub-archive') }
     if ($Repaint) { $start.ArgumentList.Add('--repaint') }
     if ($MixedLid) { $start.ArgumentList.Add('--mixed-lid') }

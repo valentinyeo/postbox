@@ -10131,10 +10131,14 @@ fn writePngFile(a: *App, path_wide: [*:0]const u16, width: u32, height: u32, pix
     defer _ = frame.*.lpVtbl.*.Release.?(frame);
     if (frame.*.lpVtbl.*.Initialize.?(frame, null) < 0) return false;
     if (frame.*.lpVtbl.*.SetSize.?(frame, width, height) < 0) return false;
-    var format = win.GUID_WICPixelFormat32bppBGR;
+    var format = win.GUID_WICPixelFormat32bppBGRA;
     if (frame.*.lpVtbl.*.SetPixelFormat.?(frame, &format) < 0 or
-        !std.mem.eql(u8, std.mem.asBytes(&format), std.mem.asBytes(&win.GUID_WICPixelFormat32bppBGR))) return false;
-    if (frame.*.lpVtbl.*.WritePixels.?(frame, height, @intCast(width * 4), @intCast(pixels.len), @constCast(pixels.ptr)) < 0) return false;
+        !std.mem.eql(u8, std.mem.asBytes(&format), std.mem.asBytes(&win.GUID_WICPixelFormat32bppBGRA))) return false;
+    const stride = std.math.cast(u32, @as(usize, width) * 4) orelse return false;
+    var row: usize = 0;
+    while (row < height) : (row += 1) {
+        if (frame.*.lpVtbl.*.WritePixels.?(frame, 1, stride, stride, @constCast(pixels[row * stride ..].ptr)) < 0) return false;
+    }
     if (frame.*.lpVtbl.*.Commit.?(frame) < 0) return false;
     return encoder.*.lpVtbl.*.Commit.?(encoder) >= 0;
 }
@@ -10166,13 +10170,16 @@ fn stageNewPath(a: *App, buffer: []u8, extension: []const u8) ?usize {
 
 fn stageImageFromClipboard(a: *App) bool {
     if (a.compose == null or a.wic_factory == null or a.chat_count == 0 or a.selected_chat >= a.chat_count) return false;
-    if (win.IsClipboardFormatAvailable(win.CF_DIB) == 0 and win.IsClipboardFormatAvailable(win.CF_BITMAP) == 0 and win.IsClipboardFormatAvailable(win.CF_HDROP) == 0) return false;
+    const png_format = win.RegisterClipboardFormatW(lit("PNG"));
+    if (win.IsClipboardFormatAvailable(png_format) == 0 and win.IsClipboardFormatAvailable(win.CF_DIBV5) == 0 and win.IsClipboardFormatAvailable(win.CF_DIB) == 0 and win.IsClipboardFormatAvailable(win.CF_BITMAP) == 0 and win.IsClipboardFormatAvailable(win.CF_HDROP) == 0) return false;
     if (win.IsClipboardFormatAvailable(win.CF_UNICODETEXT) != 0 or win.IsClipboardFormatAvailable(win.CF_TEXT) != 0) return false;
     if (win.OpenClipboard(a.hwnd orelse null) == 0) return false;
     var path_buffer: [520]u8 = undefined;
     var path_len: usize = 0;
     var pixels: ?paste_image.Bitmap = null;
     var source_name: ?[]u8 = null;
+    var png_data: ?[]u8 = null;
+    defer if (png_data) |data| a.allocator.free(data);
 
     {
         defer _ = win.CloseClipboard();
@@ -10181,6 +10188,24 @@ fn stageImageFromClipboard(a: *App) bool {
             if (!shell_lazy.ensureShell32()) return true;
             const chars = shell_lazy.dragQueryFileW.?(@ptrCast(@alignCast(hdrop)), 0, &name_buffer, name_buffer.len);
             source_name = std.unicode.utf16LeToUtf8Alloc(a.allocator, name_buffer[0..chars]) catch {
+                setStatus(a, "Clipboard holds no image to paste");
+                return true;
+            };
+        } else if (win.GetClipboardData(png_format)) |handle| {
+            const size = win.GlobalSize(handle);
+            const locked = if (size > 0) win.GlobalLock(handle) else null;
+            if (locked == null) {
+                setStatus(a, "Clipboard holds no image to paste");
+                return true;
+            }
+            defer _ = win.GlobalUnlock(handle);
+            const bytes: [*]const u8 = @ptrCast(locked.?);
+            png_data = a.allocator.dupe(u8, bytes[0..size]) catch {
+                setStatus(a, "Could not stage the pasted image");
+                return true;
+            };
+        } else if (win.GetClipboardData(win.CF_DIBV5)) |handle| {
+            pixels = clipboardDibPixels(a, handle) orelse {
                 setStatus(a, "Clipboard holds no image to paste");
                 return true;
             };
@@ -10204,7 +10229,9 @@ fn stageImageFromClipboard(a: *App) bool {
             info.bmiHeader.biPlanes = 1;
             info.bmiHeader.biBitCount = 32;
             info.bmiHeader.biCompression = win.BI_RGB;
-            const buffer = a.allocator.alloc(u8, w * h * 4) catch {
+            const pixel_count = std.math.mul(usize, w, h) catch return true;
+            const byte_count = std.math.mul(usize, pixel_count, 4) catch return true;
+            const buffer = a.allocator.alloc(u8, byte_count) catch {
                 setStatus(a, "Could not stage the pasted image");
                 return true;
             };
@@ -10254,6 +10281,18 @@ fn stageImageFromClipboard(a: *App) bool {
         std.Io.Dir.cwd().writeFile(a.io, .{ .sub_path = path_buffer[0..path_len], .data = data }) catch {
             deleteFileUtf8(path_buffer[0..path_len]);
             path_len = 0;
+            setStatus(a, "Could not stage the pasted image");
+            return true;
+        };
+    }
+
+    if (png_data) |data| {
+        path_len = stageNewPath(a, &path_buffer, "png") orelse {
+            setStatus(a, "Could not stage the pasted image");
+            return true;
+        };
+        std.Io.Dir.cwd().writeFile(a.io, .{ .sub_path = path_buffer[0..path_len], .data = data }) catch {
+            deleteFileUtf8(path_buffer[0..path_len]);
             setStatus(a, "Could not stage the pasted image");
             return true;
         };
