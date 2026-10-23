@@ -2,7 +2,7 @@ const std = @import("std");
 const message_double_click = @import("message_double_click");
 const send_args = @import("send_args");
 const transport = struct {
-    const Provider = enum { whatsapp, slack, telegram };
+    const Provider = enum { whatsapp, slack, telegram, signal };
 };
 const Rect = struct { left: i32 = 0, top: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
 const Point = struct { x: i32 = 0, y: i32 = 0 };
@@ -105,6 +105,9 @@ const App = struct {
     sync_running: bool = true,
     sync_pauses: usize = 0,
 };
+fn unifiedHub(_: *const App) bool {
+    return false;
+}
 fn setStatus(_: *App, _: []const u8) void {}
 fn saveEmojiRecents(_: *App) void {}
 fn startSync(a: *App) void {

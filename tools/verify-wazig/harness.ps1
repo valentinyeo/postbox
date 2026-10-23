@@ -27,8 +27,8 @@ function Assert-That($Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-function Wait-Until([scriptblock]$Check, [string]$Description) {
-    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+function Wait-Until([scriptblock]$Check, [string]$Description, [int]$Seconds = 20) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     do {
         $value = & $Check
         if ($value) { return $value }
@@ -205,7 +205,7 @@ function Save-Screen($Session, [string]$Name) {
     $tree | Set-Content (Join-Path $Session.evidence "$Name.uia.txt")
     $state = Read-Control $Session status
     $state | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.state.json")
-    if ($Session.feature -in @('archive', 'slack-sort', 'workspace-icons')) {
+    if ($Session.feature -in @('archive', 'slack-sort', 'workspace-icons', 'signal')) {
         $arguments = if ($state.show_archived) { @('--archived') } else { @() }
         Read-Control $Session chats -Arguments $arguments | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.chats.json")
     }
@@ -215,13 +215,13 @@ function Invoke-Doctor($Session) {
     $window = Get-Window $Session
     $search = Get-Edit $window '1008'
     $compose = Get-Edit $window '1032'
-    Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable'
+    if ($Session.feature -ne 'signal') { Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable' }
     $null = Read-Edit $search
     if ($Session.feature -in @('whatsapp-hub', 'hub')) {
         $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'hub baseline'
     }
     if ($Session.feature -eq 'views') {
-        $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 4 } 'account views baseline'
+        $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 5 } 'account views baseline'
     }
     $status = Read-Control $Session status
     Assert-That ($status.version -eq '0.0.526') 'Wrong control build'
@@ -231,7 +231,7 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$Views, [switch]$WorkspaceIcons) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
@@ -240,6 +240,7 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [s
     if ($SlackSort) { $start.ArgumentList.Add('--slack-sort') }
     if ($Views) { $start.ArgumentList.Add('--views') }
     if ($WorkspaceIcons) { $start.ArgumentList.Add('--workspace-icons') }
+    if ($Signal) { $start.ArgumentList.Add('--signal') }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')

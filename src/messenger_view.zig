@@ -1,7 +1,7 @@
 const std = @import("std");
 const Provider = @import("transport.zig").Provider;
 
-pub const View = enum { whatsapp, slack, telegram, all };
+pub const View = enum { whatsapp, slack, telegram, all, signal };
 
 const chat_key = @import("chat_key.zig");
 
@@ -14,13 +14,13 @@ pub const Account = struct {
     pub fn init(provider: Provider, account: []const u8, name: []const u8) Account {
         var result = Account{};
         result.key.set(.{ .provider = provider, .account = account, .id = "" });
-        const text = std.fmt.bufPrint(&result.label_buf, "{s} {s}", .{ label(providerView(provider)), if (name.len > 0) name else account }) catch {
+        const text = std.fmt.bufPrint(&result.label_buf, "{s} {s}", .{ label(providerView(provider)), if (provider == .signal) "" else if (name.len > 0) name else account }) catch {
             const fallback = label(providerView(provider));
             @memcpy(result.label_buf[0..fallback.len], fallback);
             result.label_len = fallback.len;
             return result;
         };
-        result.label_len = text.len;
+        result.label_len = std.mem.trimEnd(u8, text, " ").len;
         return result;
     }
 
@@ -34,6 +34,7 @@ pub fn providerView(provider: Provider) View {
         .whatsapp => .whatsapp,
         .slack => .slack,
         .telegram => .telegram,
+        .signal => .signal,
     };
 }
 
@@ -43,6 +44,7 @@ pub fn label(view: View) []const u8 {
         .whatsapp => "WhatsApp",
         .slack => "Slack",
         .telegram => "Telegram",
+        .signal => "Signal",
     };
 }
 
@@ -73,7 +75,7 @@ pub fn mergeOrder(allocator: std.mem.Allocator, saved: []const u8, known: []cons
             break;
         }
     }
-    for ([_]Provider{ .whatsapp, .slack, .telegram }) |provider| {
+    for ([_]Provider{ .whatsapp, .slack, .telegram, .signal }) |provider| {
         for (known) |item| {
             if (item.key.provider == provider) try appendUnique(allocator, &result, item);
         }
@@ -264,7 +266,7 @@ test "All projection rebuild preserves WhatsApp and isolates colliding Slack wor
 }
 
 test "All search and unread filter apply across every provider" {
-    for ([_]Provider{ .whatsapp, .slack, .telegram }) |provider| {
+    for ([_]Provider{ .whatsapp, .slack, .telegram, .signal }) |provider| {
         try std.testing.expect(matches(.all, provider, true, true, "EXAMPLE", "Example chat", "id"));
         try std.testing.expect(!matches(.all, provider, true, false, "", "Example chat", "id"));
         try std.testing.expect(!matches(.all, provider, false, true, "missing", "Example chat", "id"));

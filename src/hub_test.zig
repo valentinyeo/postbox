@@ -60,7 +60,7 @@ test "IGSH-531 aggregate rows retain network labels reject collisions and remove
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    for ([_][]const u8{ "whatsapp", "slack", "telegram" }) |provider| {
+    for ([_][]const u8{ "whatsapp", "slack", "telegram", "signal" }) |provider| {
         const raw = try std.fmt.allocPrint(allocator, "[{{\"jid\":\"opaque\",\"provider\":\"{s}\",\"name\":\"Fixture\"}}]", .{provider});
         const normalized = try hub.normalize(allocator, raw, .chats, "");
         const value = try std.json.parseFromSliceLeaky(std.json.Value, allocator, normalized, .{});
@@ -251,4 +251,43 @@ test "IGSH-604 provider badge chooses cached workspace icon fallback and green W
     try std.testing.expectEqual(.letter_s, hub.providerBadge(.slack, true, false));
     try std.testing.expectEqual(.letter_w, hub.providerBadge(.whatsapp, true, false));
     try std.testing.expectEqual(.letter_t, hub.providerBadge(.telegram, true, false));
+}
+
+test "Signal rows have a fixed account and an exclusive provider view" {
+    const allocator = std.testing.allocator;
+    const raw = "[{\"provider\":\"signal\",\"jid\":\"signal:fixture-contact\",\"kind\":\"direct\"},{\"provider\":\"signal\",\"jid\":\"signal:group:fixture-group\",\"account\":\"ignored\",\"kind\":\"group\"}]";
+    const normalized = try hub.normalize(allocator, raw, .chats, "");
+    defer allocator.free(normalized);
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, normalized, .{});
+    defer parsed.deinit();
+    for (parsed.value.object.get("data").?.array.items) |row| {
+        try std.testing.expectEqual(@import("transport.zig").Provider.signal, hub.sourceProvider(row.object).?);
+        try std.testing.expectEqualStrings("signal", hub.viewAccount(row.object, "cache"));
+        try std.testing.expectEqual(@as(?@import("transport.zig").Provider, .signal), hub.providerForView(row.object, .signal));
+        try std.testing.expectEqual(@as(?@import("transport.zig").Provider, null), hub.providerForView(row.object, .slack));
+    }
+}
+
+test "Signal send rejection preserves rate limit and captcha reasons only for matching status" {
+    const allocator = std.testing.allocator;
+    const limited = "{\"error\":\"signal rate limited\",\"retry_after\":30}";
+    const captcha = "{\"error\":\"signal captcha required\"}";
+    try std.testing.expectEqualStrings("signal rate limited", hub.signalSendFailure(allocator, 429, limited).?);
+    try std.testing.expectEqualStrings("signal captcha required", hub.signalSendFailure(allocator, 403, captcha).?);
+    try std.testing.expect(hub.signalSendFailure(allocator, 200, limited) == null);
+    try std.testing.expect(hub.signalSendFailure(allocator, 403, limited) == null);
+    try std.testing.expect(hub.signalSendFailure(allocator, 429, captcha) == null);
+    try std.testing.expect(hub.signalSendFailure(allocator, 429, "invalid") == null);
+    try std.testing.expect(hub.signalSendFailure(allocator, 429, "[]") == null);
+}
+
+test "Signal read receipts retain incoming author and timestamp rather than an empty id" {
+    const allocator = std.testing.allocator;
+    const raw = "[{\"MsgID\":\"fixture-self:3000\",\"ChatJID\":\"signal:fixture-contact\",\"FromMe\":true},{\"MsgID\":\"fixture-reaction:2001\",\"ChatJID\":\"signal:fixture-contact\",\"FromMe\":false,\"ReactionToID\":\"fixture-sender:2000\"},{\"MsgID\":\"fixture-sender:2000\",\"ChatJID\":\"signal:fixture-contact\",\"FromMe\":false}]";
+    const normalized = try hub.normalize(allocator, raw, .messages, "signal:fixture-contact");
+    defer allocator.free(normalized);
+    const id = try hub.readMessageId(allocator, normalized);
+    defer allocator.free(id);
+    try std.testing.expectEqualStrings("fixture-sender:2000", id);
+    try std.testing.expectError(error.NoIncomingMessage, hub.readMessageId(allocator, "{\"data\":{\"messages\":[]}}"));
 }

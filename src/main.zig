@@ -320,6 +320,7 @@ const PendingSend = struct {
     file: Utf8Text(519) = .{},
     ptt: bool = false,
     voice_seconds: u32 = 0,
+    failure_reason: Utf8Text(95) = .{},
     seq: u64 = 0,
     retries: u8 = 0,
     not_before_ms: u64 = 0,
@@ -342,6 +343,7 @@ const FailedSend = struct {
     file: Utf8Text(519) = .{},
     ptt: bool = false,
     voice_seconds: u32 = 0,
+    failure_reason: Utf8Text(95) = .{},
 };
 
 const max_slack_outbox = 16;
@@ -495,7 +497,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar, signal_link };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 const WacliLane = enum { wacli, slack, hub_media };
 
@@ -629,6 +631,9 @@ const App = struct {
     unified_hub: bool = false,
     hub_client: ?wa_hub_win.Client = null,
     hub_account: Utf8Text(32) = .{},
+    signal_link_due_ms: u64 = 0,
+    signal_link_unlinked: bool = false,
+    signal_qr: Message = .{},
     hub_stop: std.atomic.Value(bool) = .init(false),
     hub_cancel: slack_win.HttpCancel = .{},
     hub_thread: ?std.Thread = null,
@@ -961,7 +966,7 @@ const App = struct {
     view_order: []const u8 = "",
     palette_views_mode: bool = false,
     chat_tooltip: WideText(255) = .{},
-    view_selected: [4]chat_key.Stored = @splat(.{}),
+    view_selected: [@typeInfo(messenger_view.View).@"enum".fields.len]chat_key.Stored = @splat(.{}),
     chat_view_switched: bool = false,
     slack_attach: WideText(519) = .{},
     slack_attach_jid: Utf8Text(191) = .{},
@@ -1589,7 +1594,7 @@ fn loadChatView() messenger_view.View {
     var value: win.DWORD = 0;
     var size: win.DWORD = @sizeOf(win.DWORD);
     const result = win.RegGetValueW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), lit("InboxView"), win.RRF_RT_REG_DWORD, null, &value, &size);
-    if (result != win.ERROR_SUCCESS or value > 3) return .all;
+    if (result != win.ERROR_SUCCESS or value >= @typeInfo(messenger_view.View).@"enum".fields.len) return .all;
     return @enumFromInt(value);
 }
 
@@ -3916,7 +3921,7 @@ fn selectedChatIsSlack(a: *App) bool {
 fn stagedFileGoesToWacli(provider: transport.Provider) bool {
     return switch (provider) {
         .whatsapp => true,
-        .slack, .telegram => false,
+        .slack, .telegram, .signal => false,
     };
 }
 
@@ -4027,6 +4032,7 @@ fn rebuildViews(a: *App, rows: []const std.json.Value) void {
         }
         if (telegramReady(a)) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.telegram, a.tg_account.slice(), a.tg_account.slice())) catch return;
     }
+    if (unifiedHub(a)) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.signal, "signal", "")) catch return;
     const ordered = messenger_view.mergeOrder(a.allocator, a.view_order, known.items) catch return;
     for (ordered.items) |*view| {
         for (a.views.items) |old| {
@@ -4125,6 +4131,8 @@ fn switchAccountView(a: *App, wanted: ?chat_key.Key) void {
     refreshVisibleChats(a);
     if (messenger_view.includes(a.chat_view, .whatsapp)) refreshChats(a);
     refreshMessages(a);
+    pollSignalLink(a);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
     var buffer: [300]u8 = undefined;
     setStatus(a, std.fmt.bufPrint(&buffer, "Showing {s}", .{activeViewLabel(a)}) catch "");
 }
@@ -4669,7 +4677,13 @@ fn markPendingSendFailed(a: *App, pending: *const PendingSend) void {
         message.send_state = .failed;
         var base_buffer: [48]u8 = undefined;
         const old = sendBaseText(&base_buffer, pending.text.slice(), pending.file.len > 0, pending.ptt, pending.voice_seconds);
-        if (old.len + " (not sent)".len < 4095) {
+        if (pending.failure_reason.len > 0) {
+            var buffer: [4095]u8 = undefined;
+            var length = @min(old.len, 3900);
+            while (!std.unicode.utf8ValidateSlice(old[0..length])) length -= 1;
+            const marked = std.fmt.bufPrint(&buffer, "{s} (not sent: {s})", .{ old[0..length], pending.failure_reason.slice() }) catch return;
+            message.text.set(a.allocator, marked);
+        } else if (old.len + " (not sent)".len < 4095) {
             const marked = std.fmt.allocPrint(a.allocator, "{s} (not sent)", .{old}) catch return;
             defer a.allocator.free(marked);
             message.text.set(a.allocator, marked);
@@ -4703,7 +4717,13 @@ fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
     message.sender.set(a.allocator, "You");
     var base_buffer: [48]u8 = undefined;
     const base = sendBaseText(&base_buffer, failed.text.slice(), failed.is_file, failed.ptt, failed.voice_seconds);
-    if (base.len == 0) {
+    if (failed.failure_reason.len > 0) {
+        var buffer: [4095]u8 = undefined;
+        var length = @min(base.len, 3900);
+        while (!std.unicode.utf8ValidateSlice(base[0..length])) length -= 1;
+        const marked = std.fmt.bufPrint(&buffer, "{s} (not sent: {s})", .{ base[0..length], failed.failure_reason.slice() }) catch return;
+        message.text.set(a.allocator, marked);
+    } else if (base.len == 0) {
         message.text.set(a.allocator, "(not sent)");
     } else if (base.len + " (not sent)".len < 4095) {
         const marked = std.fmt.allocPrint(a.allocator, "{s} (not sent)", .{base}) catch return;
@@ -4744,6 +4764,7 @@ fn rememberFailedSend(a: *App, pending: *const PendingSend) void {
     a.failed_sends[a.failed_send_count].file.set(pending.file.slice());
     a.failed_sends[a.failed_send_count].ptt = pending.ptt;
     a.failed_sends[a.failed_send_count].voice_seconds = pending.voice_seconds;
+    a.failed_sends[a.failed_send_count].failure_reason = pending.failure_reason;
     a.failed_send_count += 1;
 }
 
@@ -4841,13 +4862,14 @@ fn resendFailedMessage(a: *App, index: usize) bool {
     const bubble_text = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch return true;
     defer a.allocator.free(bubble_text);
     const suffix = " (not sent)";
-    const original = if (std.mem.endsWith(u8, bubble_text, suffix)) bubble_text[0 .. bubble_text.len - suffix.len] else bubble_text;
+    const reason_start = std.mem.lastIndexOf(u8, bubble_text, " (not sent: ");
+    const original = if (reason_start) |start| bubble_text[0..start] else if (std.mem.endsWith(u8, bubble_text, suffix)) bubble_text[0 .. bubble_text.len - suffix.len] else bubble_text;
     const jid = a.chats[a.selected_chat].jid.slice();
     var entry: ?*const FailedSend = null;
     for (a.failed_sends[0..a.failed_send_count]) |*candidate| {
         var base_buffer: [48]u8 = undefined;
         const base = sendBaseText(&base_buffer, candidate.text.slice(), candidate.is_file, candidate.ptt, candidate.voice_seconds);
-        if (chat_key.Key.eql(chat_key.of(candidate), chat_key.of(&a.chats[a.selected_chat])) and std.mem.eql(u8, base, original)) {
+        if (chat_key.Key.eql(chat_key.of(candidate), chat_key.of(&a.chats[a.selected_chat])) and (std.mem.eql(u8, base, original) or (candidate.failure_reason.len > 0 and original.len >= 3897 and std.mem.startsWith(u8, base, original)))) {
             entry = candidate;
             break;
         }
@@ -9968,7 +9990,7 @@ fn stageImageFromClipboard(a: *App) bool {
             if (file_extension.len == ext.len + 1 and std.ascii.eqlIgnoreCase(file_extension[1..], ext)) extension = ext;
         }
         if (selectedChatIsTelegram(a)) {
-            _ = stageTelegramFile(a, name_len);
+            _ = stageFile(a, name_len);
             return true;
         }
         if (extension.len == 0) {
@@ -10043,7 +10065,7 @@ fn stageImageFromClipboard(a: *App) bool {
     return true;
 }
 
-fn stageTelegramFile(a: *App, path: []const u8) bool {
+fn stageFile(a: *App, path: []const u8) bool {
     if (path.len > 519) {
         setStatus(a, "The file path is too long");
         return false;
@@ -10051,7 +10073,7 @@ fn stageTelegramFile(a: *App, path: []const u8) bool {
     discardStagedImage(a);
     a.staged_image.path.set(path);
     a.staged_image.owned = false;
-    a.staged_image.provider = .telegram;
+    a.staged_image.provider = a.chats[a.selected_chat].provider;
     a.staged_image.account = a.chats[a.selected_chat].account;
     a.staged_image.jid = a.chats[a.selected_chat].jid;
     layout(a, a.compose_client_width, a.compose_client_height);
@@ -10998,7 +11020,7 @@ fn reactToMessage(a: *App, jid: []const u8, msg_id: []const u8, emoji: []const u
         return;
     }
     const chat = &a.chats[a.selected_chat];
-    if (chat.provider != .whatsapp) {
+    if (chat.provider != .whatsapp and !unifiedHub(a)) {
         setStatus(a, "Reactions work in WhatsApp chats only for now");
         return;
     }
@@ -11013,7 +11035,7 @@ fn reactToMessage(a: *App, jid: []const u8, msg_id: []const u8, emoji: []const u
         }
         const fresh = &a.pending_reactions[a.pending_reaction_count];
         a.pending_reaction_count += 1;
-        fresh.* = .{ .account = chat.account, .previous = message.reaction, .previous_my_reaction = message.my_reaction };
+        fresh.* = .{ .provider = chat.provider, .account = chat.account, .previous = message.reaction, .previous_my_reaction = message.my_reaction };
         fresh.jid.set(jid);
         fresh.msg_id.set(msg_id);
         if (std.mem.endsWith(u8, jid, "@g.us")) fresh.sender.set(message.sender_jid.slice());
@@ -11279,7 +11301,7 @@ fn openReactionPicker(a: *App) void {
     if (a.emoji_wnd) |picker| _ = win.DestroyWindow(picker);
     if (a.selected_chat >= a.chat_count or a.message_count == 0) return;
     const chat = &a.chats[a.selected_chat];
-    if (chat.provider != .whatsapp) {
+    if (chat.provider != .whatsapp and !unifiedHub(a)) {
         setStatus(a, "Reactions work in WhatsApp chats only for now");
         return;
     }
@@ -12087,6 +12109,7 @@ fn archiveChat(a: *App, jid: []const u8, action: archive_rules.Action, source: a
     if (!unifiedHub(a)) switch (chatProvider(a, jid)) {
         .telegram => return "Archiving is not available for Telegram chats yet",
         .slack => return "Archiving is not available for Slack channels yet",
+        .signal => return "Archiving is not available for Signal chats yet",
         .whatsapp => {},
     };
     if (jid.len == 0 or jid.len > archive_rules.max_jid or (!unifiedHub(a) and std.mem.indexOfScalar(u8, jid, '@') == null)) return "Unknown chat id";
@@ -12395,6 +12418,7 @@ fn controlProvider(messenger: control_api.Messenger) messenger_view.View {
         .whatsapp => .whatsapp,
         .slack => .slack,
         .telegram => .telegram,
+        .signal => .signal,
     };
 }
 
@@ -12438,6 +12462,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         try controlWriteView(w, view.key.key(), view.labelText());
     }
     try w.writeByte(']');
+    try w.print(",\"signal_link\":{{\"unlinked\":{},\"qr_ready\":{}}}", .{ a.signal_link_unlinked, a.signal_qr.bitmap != null });
     var buffer: [1024]u8 = undefined;
     try w.print(",\"sync\":\"{s}\",\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
         sync,              a.slack_connected.load(.acquire), pending_sends,   a.pending_archive_count,
@@ -12726,6 +12751,8 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try control_api.writeString(w, message.timestamp.slice());
         try w.writeAll(",\"text\":");
         try control_api.writeStringUtf16(w, message.text.slice());
+        try w.writeAll(",\"reaction\":");
+        try control_api.writeStringUtf16(w, message.reaction.slice());
         try w.writeAll(",\"media_type\":");
         try control_api.writeString(w, message.media_type.slice());
         try w.print(",\"from_me\":{},\"revoked\":{},\"send_state\":\"{s}\"}}", .{ message.from_me, message.revoked, @tagName(message.send_state) });
@@ -13922,11 +13949,23 @@ fn runCommand(a: *App, command: u16) void {
                 setStatus(a, reason);
                 return;
             }
-            if (selectedChatIsTelegram(a)) {
+            if (selectedChatIsTelegram(a) or unifiedHub(a)) {
                 if (pickImageFile(a)) |path| {
                     const utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, path.slice()) catch return;
                     defer a.allocator.free(utf8);
-                    _ = stageTelegramFile(a, utf8);
+                    if (unifiedHub(a)) {
+                        var buffer: [520]u8 = undefined;
+                        const extension = std.fs.path.extension(utf8);
+                        const length = stageNewPath(a, &buffer, if (extension.len > 1) extension[1..] else "bin") orelse return;
+                        var copy_path = WideText(519){};
+                        copy_path.set(a.allocator, buffer[0..length]);
+                        if (win.CopyFileW(path.ptr(), copy_path.ptr(), win.FALSE) == 0) {
+                            deleteFileUtf8(buffer[0..length]);
+                            setStatus(a, "Could not stage the attachment");
+                            return;
+                        }
+                        if (stageFile(a, buffer[0..length])) a.staged_image.owned = true else deleteFileUtf8(buffer[0..length]);
+                    } else _ = stageFile(a, utf8);
                 }
                 return;
             }
@@ -14701,6 +14740,10 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     }
     if (provider_badge == .whatsapp_mark) {
         drawWhatsAppBadge(&shapes, badge);
+    } else if (provider_badge == .signal_mark) {
+        const diameter = badge.bottom - badge.top;
+        const left = badge.left + @divTrunc(badge.right - badge.left - diameter, 2);
+        smooth.fillEllipse(&shapes, .{ .left = left, .top = badge.top, .right = left + diameter, .bottom = badge.bottom }, rgb(58, 118, 240));
     } else if (provider_badge != .workspace_icon) {
         smooth.fillRoundRect(&shapes, badge, px(a, 8), px(a, 8), theme.current.primary_container);
     }
@@ -14737,7 +14780,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, theme.current.on_primary_container);
     var badge_text = badge;
-    if (provider_badge != .workspace_icon and provider_badge != .whatsapp_mark) {
+    if (provider_badge != .workspace_icon and provider_badge != .whatsapp_mark and provider_badge != .signal_mark) {
         _ = text_draw.drawText(item.hDC, switch (provider_badge) {
             .letter_w => lit("W"),
             .letter_s => lit("S"),
@@ -15232,6 +15275,23 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     defer shapes.deinit();
     _ = win.FillRect(hdc, &client, a.brush_bg.?);
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
+    if (activeChatView(a) == .signal and a.chat_count == 0 and a.signal_link_unlinked) {
+        if (a.signal_qr.bitmap) |bitmap| {
+            const left = @divTrunc(client.right - a.signal_qr.bitmap_width, 2);
+            const top = @max(px(a, 24), @divTrunc(client.bottom - a.signal_qr.bitmap_height - px(a, 60), 2));
+            if (win.CreateCompatibleDC(hdc)) |memory| {
+                const previous = win.SelectObject(memory, bitmap);
+                _ = win.BitBlt(hdc, left, top, a.signal_qr.bitmap_width, a.signal_qr.bitmap_height, memory, 0, 0, win.SRCCOPY);
+                _ = win.SelectObject(memory, previous);
+                _ = win.DeleteDC(memory);
+            }
+            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+            _ = win.SetTextColor(hdc, theme.current.on_surface);
+            var text_rect = win.RECT{ .left = px(a, 8), .top = top + a.signal_qr.bitmap_height + px(a, 16), .right = client.right - px(a, 8), .bottom = client.bottom };
+            _ = text_draw.drawText(hdc, lit("Scan in Signal > Settings > Linked devices > Link new device"), -1, &text_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_NOPREFIX);
+        }
+        return;
+    }
     const available_width = client.right - client.left;
     const bubble_width = std.math.clamp(@divTrunc(available_width * 7, 10), px(a, 280), px(a, 620));
     const chat_jid = if (a.displayed_jid.len > 0)
@@ -15914,7 +15974,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 return 0;
             }
             switch (result.kind) {
-                .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar => applyHubResult(a, result),
+                .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar, .signal_link => applyHubResult(a, result),
                 .groups => if (result.ok) applyGroups(a, result.data),
                 .contacts_index => if (result.ok) {
                     a.people.replaceContacts(result.data) catch return 0;
@@ -16531,6 +16591,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 tickVoice(a);
             } else if (wparam == timer_refresh) {
                 persistDrafts(a);
+                pollSignalLink(a);
                 updateAttachButton(a);
                 if (verification_fixture and !hubConfigured(a)) {
                     checkArchive(a);
@@ -16723,6 +16784,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 session.destroy();
                 a.openrouter_session = null;
             }
+            if (a.signal_qr.bitmap) |bitmap| _ = win.DeleteObject(bitmap);
             for (a.avatars[0..a.avatar_count]) |*entry| {
                 if (entry.bitmap) |bitmap| _ = win.DeleteObject(bitmap);
             }
@@ -19404,7 +19466,7 @@ fn runHubJob(a: *App, job: WacliJob, result: *WacliResult) void {
     var arena = std.heap.ArenaAllocator.init(a.allocator);
     defer arena.deinit();
     const data = executeHubJob(a, arena.allocator(), &job, result) catch |err| {
-        result.extra.set(@errorName(err));
+        if (result.extra.len == 0) result.extra.set(@errorName(err));
         return;
     };
     result.data = a.allocator.dupe(u8, data) catch return;
@@ -19417,6 +19479,23 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
     const key = chat_key.Key{ .provider = .whatsapp, .account = job.hub_account.slice(), .id = job.jid.slice() };
     if (unifiedHub(a) and job.kind == .cache_tag) return "[{\"account\":\"hub\",\"state\":\"linked\"}]";
     if (unifiedHub(a) and job.kind == .groups) return "{\"success\":true,\"data\":[]}";
+    if (unifiedHub(a) and job.kind == .signal_link) {
+        const status = try client.call(allocator, .{ .path = "/v1/wazig/signal/link" });
+        if (status.status != 200) return error.HubHttpFailed;
+        var parsed = try std.json.parseFromSlice(std.json.Value, allocator, status.body, .{});
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.BadResponse;
+        const state = getString(parsed.value.object, "status");
+        if (std.mem.eql(u8, state, "linked")) return "linked";
+        if (!std.mem.eql(u8, state, "unlinked")) return error.BadResponse;
+        const qr = try client.call(allocator, .{ .path = "/v1/wazig/signal/link.png" });
+        if (qr.status == 404) return "linked";
+        if (qr.status != 200 or qr.body.len > 1024 * 1024) return error.BadResponse;
+        const path = messagesDirPath(a, "signal-link.png") orelse return error.MissingMessagesDir;
+        defer a.allocator.free(path);
+        if (!writeCacheFileAtomic(a, path, qr.body)) return error.MediaCacheWriteFailed;
+        return "unlinked";
+    }
     const request: wa_hub.Request = if (unifiedHub(a)) try unifiedHubRequest(a, allocator, job) else switch (job.kind) {
         .cache_tag => wa_hub.accounts(),
         .chats, .archived_scan, .kept_check, .contacts_index => try wa_hub.chats(allocator, key.account, hubHasArg(job, "--archived"), 500),
@@ -19450,6 +19529,12 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
                 if (!writeCacheFileAtomic(a, path, response.body)) return error.MediaCacheWriteFailed;
                 return path;
             },
+        }
+    }
+    if (unifiedHub(a) and job.kind == .hub_send and std.mem.startsWith(u8, job.jid.slice(), "signal:")) {
+        if (hub.signalSendFailure(allocator, response.status, response.body)) |reason| {
+            result.extra.set(reason);
+            return error.SignalSendRejected;
         }
     }
     if (response.status < 200 or response.status >= 300) return error.HubHttpFailed;
@@ -19521,7 +19606,19 @@ fn startHubSend(a: *App, pending: *const PendingSend) void {
 
 fn startHubMarkRead(a: *App) void {
     if (a.hub_account.len == 0 or a.pending_read_count == 0 or wacliPendingGet(a, .hub_read) > 0 or a.read_backoff_until[0] > win.GetTickCount64()) return;
-    hubTransport(a).markRead(a.pending_reads[0].slice(), "");
+    const jid = a.pending_reads[0].slice();
+    if (unifiedHub(a) and std.mem.startsWith(u8, jid, "signal:")) {
+        const key = chat_key.Key{ .provider = .signal, .account = a.cache_tag.slice(), .id = jid };
+        const disk = if (msgCacheGet(a, key) == null) loadMsgCacheDisk(a, jid) else null;
+        defer if (disk) |data| a.allocator.free(data);
+        const raw = msgCacheGet(a, key) orelse disk orelse return;
+        const message_id = hub.readMessageId(a.allocator, raw) catch |err| {
+            if (err == error.NoIncomingMessage) removeFirstPendingRead(a);
+            return;
+        };
+        defer a.allocator.free(message_id);
+        hubTransport(a).markRead(jid, message_id);
+    } else hubTransport(a).markRead(jid, "");
 }
 
 fn startHubArchive(a: *App) void {
@@ -19567,6 +19664,23 @@ fn startHubAvatar(a: *App, target: AvatarTarget) bool {
 
 fn applyHubResult(a: *App, result: *const WacliResult) void {
     switch (result.kind) {
+        .signal_link => {
+            if (!result.ok) return;
+            a.signal_link_unlinked = std.mem.eql(u8, result.data, "unlinked");
+            if (a.signal_qr.bitmap) |bitmap| _ = win.DeleteObject(bitmap);
+            a.message_bitmap_lru.remove(@intFromPtr(&a.signal_qr));
+            a.signal_qr = .{};
+            if (a.signal_link_unlinked) {
+                const path = messagesDirPath(a, "signal-link.png") orelse return;
+                defer a.allocator.free(path);
+                a.signal_qr.local_path.set(a.allocator, path);
+                a.signal_qr.media_type.set("image");
+                ensureBitmap(a, &a.signal_qr);
+            } else {
+                refreshChats(a);
+            }
+            if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+        },
         .hub_send => {
             if (a.pending_send_count == 0 or !std.mem.eql(u8, &a.pending_sends[0].id, result.msg_id.slice())) return;
             if (result.ok) {
@@ -19574,6 +19688,16 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 refreshChats(a);
                 refreshMessages(a);
                 setStatus(a, "Sent");
+            } else if (a.pending_sends[0].provider == .signal and (result.http_status == 429 or result.http_status == 403)) {
+                const reason = if (result.extra.len > 0 and !std.mem.eql(u8, result.extra.slice(), "HubHttpFailed")) result.extra.slice() else "Signal send rejected";
+                a.pending_sends[0].failure_reason.set(reason);
+                const failed = a.pending_sends[0];
+                markPendingSendFailed(a, &failed);
+                rememberFailedSend(a, &failed);
+                removeFirstPendingSend(a, false);
+                restoreFailedSendText(a, &failed);
+                setStatus(a, reason);
+                if (a.pending_send_count > 0) startNextSend(a);
             } else if (result.http_status == 409) {
                 failHeadPendingSend(a, 409, true, "delivery unknown", false);
                 _ = persistOutbox(a);
@@ -19603,8 +19727,14 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 refreshChats(a);
                 setStatus(a, "Archive operation completed");
             } else {
-                a.pending_archives[0].retry_at_ms = win.GetTickCount64() + 3_000;
-                setStatus(a, "Archive operation failed; retrying");
+                if (result.http_status == 502 and std.mem.startsWith(u8, result.jid.slice(), "signal:")) {
+                    removeFirstPendingArchive(a);
+                    refreshChats(a);
+                    setStatus(a, "Archiving is not available for Signal chats yet");
+                } else {
+                    a.pending_archives[0].retry_at_ms = win.GetTickCount64() + 3_000;
+                    setStatus(a, "Archive operation failed; retrying");
+                }
             }
         },
         .hub_media => {
@@ -19995,4 +20125,12 @@ test "hub stream open reset survives event coalescing without a reset frame" {
     postHubEvent(a, true);
     try std.testing.expect(a.hub_reset_pending.load(.acquire));
     try std.testing.expect(!a.hub_event_pending.load(.acquire));
+}
+
+fn pollSignalLink(a: *App) void {
+    if (!unifiedHub(a) or activeChatView(a) != .signal or a.show_archived) return;
+    if (a.chat_count > 0) return;
+    const now = win.GetTickCount64();
+    if (now < a.signal_link_due_ms or wacliPendingGet(a, .signal_link) > 0) return;
+    if (wacliEnqueue(a, .{ .kind = .signal_link, .account = a.cache_tag }, false)) a.signal_link_due_ms = now + 30_000;
 }

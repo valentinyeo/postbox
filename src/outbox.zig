@@ -10,7 +10,7 @@ pub const max_file_id_len = 63;
 pub const max_line_len = 32 * 1024;
 pub const max_entries = 64;
 
-pub const Provider = enum { whatsapp, slack, telegram };
+pub const Provider = enum { whatsapp, slack, telegram, signal };
 pub const SendState = enum { queued, uploaded, failed };
 
 pub fn Str(comptime capacity: usize) type {

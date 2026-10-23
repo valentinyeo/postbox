@@ -8,6 +8,9 @@ PRIVATE_PATHS = ("CLAUDE.local.md", "HANDOFF.md", "board.yml", ".claude/skills/"
 
 PUBLIC_SKILL_PATHS = (
     ".claude/skills/verify-wazig/SKILL.md",
+    ".claude/skills/verify-wazig/INDEX.md",
+    ".claude/skills/verify-wazig/RULE-MAP.md",
+    ".claude/skills/verify-wazig/features/signal.md",
     ".claude/skills/verify-wazig/features/README.md",
     ".claude/skills/verify-wazig/features/search.md",
     ".claude/skills/verify-wazig/features/navigation.md",

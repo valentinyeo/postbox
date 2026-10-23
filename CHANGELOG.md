@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IGSH-607: Signal has its own account view through the hub, a blue row mark, QR linking, messaging, attachments, reactions, read receipts and live updates. Rate-limit and captcha rejections stay visible in failed messages without automatic retries.
+
 - IGSH-602: Derive separate account views from real hub prefixed chat IDs when account metadata is absent, preserving send and cache identities. WhatsApp labels show the account; Slack labels use a locally saved workspace name or team ID.
 
 - IGSH-602: Separate account and workspace views with saved Alt+1..9 ordering, a Ctrl+K Sort views list, and an Alt+I combined inbox. Search, navigation and sending keep account identities separate; read-only control status reports the current view and order.
