@@ -55,6 +55,31 @@ pub fn scaleCircle(source: []const u8, source_size: usize, target: []u8, target_
     applyMask(target, target_size);
 }
 
+pub fn scaleSquareArea(source: []const u8, source_size: usize, target: []u8, target_size: usize) void {
+    if (source_size == 0 or target_size == 0) return;
+    const area: u64 = @as(u64, source_size) * source_size;
+    for (0..target_size) |y| {
+        const top = y * source_size;
+        const bottom = (y + 1) * source_size;
+        const end_y = std.math.divCeil(usize, bottom, target_size) catch unreachable;
+        for (0..target_size) |x| {
+            const left = x * source_size;
+            const right = (x + 1) * source_size;
+            const end_x = std.math.divCeil(usize, right, target_size) catch unreachable;
+            var sums = [_]u64{0} ** 4;
+            for (top / target_size..end_y) |sy| {
+                const overlap_y = @min(bottom, (sy + 1) * target_size) - @max(top, sy * target_size);
+                for (left / target_size..end_x) |sx| {
+                    const overlap_x = @min(right, (sx + 1) * target_size) - @max(left, sx * target_size);
+                    const weight = @as(u64, overlap_x) * overlap_y;
+                    for (0..4) |channel| sums[channel] += @as(u64, source[(sy * source_size + sx) * 4 + channel]) * weight;
+                }
+            }
+            for (0..4) |channel| target[(y * target_size + x) * 4 + channel] = @intCast((sums[channel] + area / 2) / area);
+        }
+    }
+}
+
 pub fn fillCircle(pixels: []u8, size: usize, r: u8, g: u8, b: u8) void {
     var y: usize = 0;
     while (y < size) : (y += 1) {
@@ -141,4 +166,46 @@ test "resized avatars use destination pixel coverage and retain premultiplied co
             }
         }
     }
+}
+
+test "IGSH-604 workspace area downscale preserves a six pixel white bar" {
+    var source: [42 * 42 * 4]u8 = undefined;
+    for (0..42) |y| {
+        for (0..42) |x| {
+            const colour: [4]u8 = if (x >= 18 and x < 24) .{ 255, 255, 255, 255 } else .{ 32, 160, 240, 255 };
+            @memcpy(source[(y * 42 + x) * 4 ..][0..4], &colour);
+        }
+    }
+    var target: [18 * 18 * 4]u8 = undefined;
+    scaleSquareArea(&source, 42, &target, 18);
+    var white: usize = 0;
+    for (0..18 * 18) |i| {
+        if (target[i * 4] >= 243 and target[i * 4 + 1] >= 243 and target[i * 4 + 2] >= 243) white += 1;
+        try std.testing.expectEqual(@as(u8, 255), target[i * 4 + 3]);
+    }
+    try std.testing.expect(white >= 18);
+    try std.testing.expectEqualSlices(u8, &.{ 32, 160, 240, 255 }, target[0..4]);
+}
+
+test "IGSH-604 workspace area downscale averages a one pixel checkerboard" {
+    var source: [42 * 42 * 4]u8 = undefined;
+    for (0..42) |y| {
+        for (0..42) |x| {
+            const value: u8 = if ((x + y) % 2 == 0) 0 else 255;
+            @memcpy(source[(y * 42 + x) * 4 ..][0..4], &[_]u8{ value, value, value, 255 });
+        }
+    }
+    var target: [18 * 18 * 4]u8 = undefined;
+    scaleSquareArea(&source, 42, &target, 18);
+    for (0..18 * 18) |i| {
+        for (0..3) |channel| try std.testing.expect(target[i * 4 + channel] >= 125 and target[i * 4 + channel] <= 130);
+        try std.testing.expectEqual(@as(u8, 255), target[i * 4 + 3]);
+    }
+}
+
+test "IGSH-604 workspace area downscale averages premultiplied BGRA" {
+    const source = [_]u8{ 0, 0, 128, 128, 0, 0, 0, 0 } ** 2;
+    var target: [4]u8 = undefined;
+    scaleSquareArea(&source, 2, &target, 1);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 64, 64 }, &target);
 }

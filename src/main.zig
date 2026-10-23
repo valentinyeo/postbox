@@ -14200,39 +14200,38 @@ fn drawAvatarBitmap(hdc: win.HDC, bitmap: win.HBITMAP, left: i32, top: i32, size
 }
 
 fn drawWorkspaceBadge(hdc: win.HDC, bitmap: win.HBITMAP, rect: win.RECT, radius_px: i32) bool {
-    const width = rect.right - rect.left;
-    const height = rect.bottom - rect.top;
-    if (width <= 0 or height <= 0) return false;
+    const side = rect.bottom - rect.top;
+    if (rect.right <= rect.left or side <= 0) return false;
     var source: win.BITMAP = undefined;
     if (win.GetObjectW(bitmap, @sizeOf(win.BITMAP), &source) == 0 or source.bmBits == null) return false;
     var info = std.mem.zeroes(win.BITMAPINFO);
     info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = width;
-    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biWidth = side;
+    info.bmiHeader.biHeight = -side;
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
     var bits: ?*anyopaque = null;
     const rounded = win.CreateDIBSection(null, &info, win.DIB_RGB_COLORS, &bits, null, 0) orelse return false;
     defer _ = win.DeleteObject(rounded);
     if (bits == null) return false;
-    const pixels: [*]u8 = @ptrCast(bits.?);
-    const original: [*]const u8 = @ptrCast(source.bmBits.?);
+    const size: usize = @intCast(side);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. size * size * 4];
+    const original = @as([*]const u8, @ptrCast(source.bmBits.?))[0 .. 42 * 42 * 4];
+    avatar_mask.scaleSquareArea(original, 42, pixels, size);
     const radius: f32 = @floatFromInt(radius_px);
-    for (0..@as(usize, @intCast(height))) |y| {
-        for (0..@as(usize, @intCast(width))) |x| {
-            const dx = @max(radius - (@as(f32, @floatFromInt(x)) + 0.5), @as(f32, @floatFromInt(x)) + 0.5 - (@as(f32, @floatFromInt(width)) - radius));
-            const dy = @max(radius - (@as(f32, @floatFromInt(y)) + 0.5), @as(f32, @floatFromInt(y)) + 0.5 - (@as(f32, @floatFromInt(height)) - radius));
+    for (0..size) |y| {
+        for (0..size) |x| {
+            const dx = @max(radius - (@as(f32, @floatFromInt(x)) + 0.5), @as(f32, @floatFromInt(x)) + 0.5 - (@as(f32, @floatFromInt(side)) - radius));
+            const dy = @max(radius - (@as(f32, @floatFromInt(y)) + 0.5), @as(f32, @floatFromInt(y)) + 0.5 - (@as(f32, @floatFromInt(side)) - radius));
             const alpha: u16 = avatar_mask.distanceAlpha(@sqrt(@max(dx, 0) * @max(dx, 0) + @max(dy, 0) * @max(dy, 0)) - radius);
-            const sx = @min(x * 42 / @as(usize, @intCast(width)), 41);
-            const sy = @min(y * 42 / @as(usize, @intCast(height)), 41);
-            for (0..4) |channel| pixels[(y * @as(usize, @intCast(width)) + x) * 4 + channel] = @intCast(@as(u16, original[(sy * 42 + sx) * 4 + channel]) * alpha / 255);
+            for (0..4) |channel| pixels[(y * size + x) * 4 + channel] = @intCast(@as(u16, pixels[(y * size + x) * 4 + channel]) * alpha / 255);
         }
     }
     const memory = win.CreateCompatibleDC(hdc) orelse return false;
     defer _ = win.DeleteDC(memory);
     const previous = win.SelectObject(memory, rounded);
     defer _ = win.SelectObject(memory, previous);
-    return win.AlphaBlend(hdc, rect.left, rect.top, width, height, memory, 0, 0, width, height, .{ .BlendOp = win.AC_SRC_OVER, .BlendFlags = 0, .SourceConstantAlpha = 255, .AlphaFormat = win.AC_SRC_ALPHA }) != 0;
+    return win.AlphaBlend(hdc, rect.right - side, rect.bottom - side, side, side, memory, 0, 0, side, side, .{ .BlendOp = win.AC_SRC_OVER, .BlendFlags = 0, .SourceConstantAlpha = 255, .AlphaFormat = win.AC_SRC_ALPHA }) != 0;
 }
 
 fn drawWhatsAppBadge(shapes: *const smooth.Context, badge: win.RECT) void {
