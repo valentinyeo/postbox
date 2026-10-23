@@ -34,6 +34,7 @@ const win = struct {
     const ODS_DISABLED = 4;
     const ODS_FOCUS = 16;
     const TRUE = 1;
+    const FALSE = 0;
     var bounds: [5]RECT = undefined;
     fn MoveWindow(hwnd: usize, x: i32, y: i32, width: i32, height: i32, _: i32) i32 {
         bounds[hwnd] = .{ .left = x, .top = y, .right = x + width, .bottom = y + height };

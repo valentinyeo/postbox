@@ -418,6 +418,7 @@ const win = struct {
         return 1;
     }
     const TRUE = 1;
+    const FALSE = 0;
     fn InvalidateRect(_: usize, _: ?*anyopaque, _: i32) i32 {
         return 1;
     }

@@ -187,6 +187,7 @@ const win = struct {
     const MOVEFILE_WRITE_THROUGH = 2;
     const ERROR_FILE_NOT_FOUND = 2;
     const TRUE = 1;
+    const FALSE = 0;
     fn CreateFileW(_: [*:0]const u16, access: u32, _: u32, _: ?usize, _: u32, _: u32, _: ?usize) ?usize {
         if (fault == .open) return INVALID_HANDLE_VALUE;
         if (access == GENERIC_READ) {
