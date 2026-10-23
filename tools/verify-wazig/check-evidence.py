@@ -110,6 +110,10 @@ if session['feature'] == 'workspace-icons':
     assert 'JOURNEY PASSED: workspace-icons' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     print('EVIDENCE VERIFIED: workspace icon badge pixels, authenticated team cache, fallback, WhatsApp green, Signal blue and isolation')
     raise SystemExit(0)
+if session['feature'] == 'hub-archive':
+    runpy.run_path(str(Path(__file__).with_name('check-hub-archive-evidence.py')))['check_hub_archive'](folder)
+    raise SystemExit(0)
+
 if session['feature'] == 'notrap':
     runpy.run_path(str(Path(__file__).with_name('check-notrap-evidence.py')))['check_notrap'](folder)
     raise SystemExit(0)

@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == ['appearance', 'archive', 'drafts', 'hub', 'menus', 'navigation', 'notrap', 'palette', 'reactions', 'search', 'signal', 'slack-sort', 'slack-threads', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons']
+assert features == ['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'menus', 'navigation', 'notrap', 'palette', 'reactions', 'search', 'signal', 'slack-sort', 'slack-threads', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons']
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, whatsapp-hub, hub, slack-sort, slack-threads, views, workspace-icons, signal, telegram, notrap, archive, text-comparison]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, whatsapp-hub, hub, hub-archive, slack-sort, slack-threads, views, workspace-icons, signal, telegram, notrap, archive, text-comparison]' in workflow
 options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
 assert options_match, 'missing workflow_dispatch journey options'
 options = [option.strip() for option in options_match[1].split(',')]
@@ -66,7 +66,7 @@ assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
 assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_KEY")) |seed|' in fixture_config
 assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 for proof in ['chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
@@ -214,3 +214,26 @@ assert 'check-slack-threads-evidence.py' in validator
 assert 'slack_threads.parent_reply_line' in threads and 'WAZIG_VERIFY_RESTART' in threads
 assert '--slack-threads' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
 print('SLACK THREADS MAP VERIFIED: synthetic hub, keyboard journey, read-only measurements and restart')
+
+archive_journey = (root / 'tools/verify-wazig/hub-archive.ps1').read_text(encoding='utf-8')
+archive_validator = (root / 'tools/verify-wazig/check-hub-archive-evidence.py').read_text(encoding='utf-8')
+for name in ['INDEX.md', 'RULE-MAP.md']:
+    assert '(features/hub-archive.md)' in (skill / name).read_text(encoding='utf-8')
+assert 'feature=hub-archive' in (skill / 'features/hub-archive.md').read_text(encoding='utf-8')
+assert 'Invoke-HubArchiveJourney $session $messages $start' in runner
+assert 'Wait-HubArchive $session $messages 1' in runner
+assert '120363000000000001@g.us`t1`t2026-10-10T10:00:00Z' in runner
+assert runner.index("Copy-Item (Join-Path $messages 'archive-state.txt')") < runner.index('$app = [Diagnostics.Process]::Start($start)')
+assert '[switch]$HubArchive' in harness and "--hub-archive" in harness
+assert '--hub-archive' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+assert '"hub-archive"' in workflow and "matrix.feature == 'hub-archive'" in workflow
+assert 'src/archive_rules.zig' in workflow
+assert 'check-hub-archive-evidence.py' in validator
+assert '.claude/skills/verify-wazig/features/hub-archive.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+for artifact in ['legacy-archive-state.txt', 'restart-incoming.json', 'restart.json', 'archive-legacy-done.txt', 'archive-state.txt', '.requests.json']:
+    assert artifact in runner + archive_journey and artifact in archive_validator, artifact
+for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages 2', 'Show archived chats', 'Show inbox chats', 'Quit Messages', 'Get-FileHash']:
+    assert fragment in archive_journey, fragment
+for fragment in ["min(incoming) < min(writes)", "kept[1] == '1'", "capture(f'{phase}-inbox', False)", "capture(f'{phase}-archived', True)", "read_bytes() == legacy_bytes"]:
+    assert fragment in archive_validator, fragment
+print('HUB ARCHIVE MAP VERIFIED: legacy seed, archive request, keep state, same-profile restart, marker, evidence and PR wiring')

@@ -147,6 +147,65 @@ class Handler(bridge.Handler):
         super().do_POST()
 
 
+
+ARCHIVE_GROUP = 'personal:120363000000000001@g.us'
+ARCHIVE_OTHER = 'personal:15550000003@s.whatsapp.net'
+
+
+class HubArchiveHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            with self.state.lock:
+                archived = self.state.archived
+                stamp = self.state.archive_stamp
+            rows = [dict(jid=ARCHIVE_GROUP, name='Verification Group', provider='whatsapp', kind='group',
+                         last_message_ts=stamp, archived=archived, unread=True, unread_count=1),
+                    dict(jid=ARCHIVE_OTHER, name='Verification Inbox', provider='whatsapp', kind='direct',
+                         last_message_ts='2026-10-10T12:00:00Z', archived=False, unread=False, unread_count=0)]
+            self.respond(200, [row for row in rows if row['archived'] == (query.get('archived') == ['true'])],
+                         group_archived=archived, group_last_message_ts=stamp, group_unread_count=1)
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            rows = [] if chat != ARCHIVE_GROUP else [dict(MsgID='ARCHIVE-INCOMING', ChatJID=chat,
+                    Timestamp=self.state.archive_stamp, Text='Synthetic incoming group message', FromMe=False,
+                    SenderName='Fixture Sender', SenderJID='15550000004@s.whatsapp.net')]
+            self.respond(200, rows)
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path.startswith('/v1/wazig/avatar/'):
+            self.respond(404, {'error': 'unavailable'})
+        else:
+            self.respond(404, {'error': 'unknown archive fixture path'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/fixture/archive-incoming' and body == {}:
+            with self.state.lock:
+                self.state.archived = False
+                self.state.archive_stamp = '2026-10-10T13:00:00Z'
+            self.respond(200, {'archived': False, 'last_message_ts': self.state.archive_stamp, 'unread_count': 1})
+        elif self.path == '/v1/wazig/archive' and body == {'chat': ARCHIVE_GROUP, 'archived': True}:
+            with self.state.lock:
+                self.state.archived = True
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/mark-read' and body.get('chat') in (ARCHIVE_GROUP, ARCHIVE_OTHER):
+            self.respond(200, {'status': 'ok'}, body=body)
+        else:
+            self.respond(400, {'error': 'unexpected archive fixture write'}, body=body)
+
 class ReactionsHandler(Handler):
     def do_GET(self):
         url = urlsplit(self.path)
@@ -744,6 +803,7 @@ def main():
     parser.add_argument('--port-file', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
     modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--hub-archive', action='store_true')
     modes.add_argument('--reactions', action='store_true')
     modes.add_argument('--slack-sort', action='store_true')
     modes.add_argument('--slack-threads', action='store_true')
@@ -754,11 +814,12 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = SlackThreadsHandler if args.slack_threads else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    handler = HubArchiveHandler if args.hub_archive else SlackThreadsHandler if args.slack_threads else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
     server.state.view_rows = view_rows()
+    server.state.archive_stamp = '2026-10-10T11:00:00Z'
     server.state.reactions = {}
     server.state.signal_reaction = None
     server.state.signal_events = []

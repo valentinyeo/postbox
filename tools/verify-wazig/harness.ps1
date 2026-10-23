@@ -211,7 +211,7 @@ function Save-Screen($Session, [string]$Name) {
     $tree | Set-Content (Join-Path $Session.evidence "$Name.uia.txt")
     $state = Read-Control $Session status
     $state | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.state.json")
-    if ($Session.feature -in @('archive', 'slack-sort', 'workspace-icons', 'signal', 'telegram', 'notrap')) {
+    if ($Session.feature -in @('archive', 'hub-archive', 'slack-sort', 'workspace-icons', 'signal', 'telegram', 'notrap')) {
         $arguments = if ($state.show_archived) { @('--archived') } else { @() }
         Read-Control $Session chats -Arguments $arguments | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.chats.json")
     }
@@ -237,7 +237,7 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackThreads, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackThreads, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions, [switch]$HubArchive) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
@@ -251,6 +251,7 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [s
     if ($Telegram) { $start.ArgumentList.Add('--telegram') }
     if ($Notrap) { $start.ArgumentList.Add('--notrap') }
     if ($Reactions) { $start.ArgumentList.Add('--reactions') }
+    if ($HubArchive) { $start.ArgumentList.Add('--hub-archive') }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')
