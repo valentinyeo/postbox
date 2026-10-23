@@ -125,7 +125,6 @@ function Read-ListLabels($List) {
         $ok = [VerifyWindow]::ReadCount($handle, 0x018A, [UIntPtr]$index, [IntPtr]::Zero, 2, 2000, [ref]$length)
         Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only LB_GETTEXTLEN timed out'
         Assert-That ($length.ToUInt64() -le 63) 'Read-only LB_GETTEXTLEN failed or label exceeds limit'
-        # LB_GETTEXT has no capacity argument; PaletteItem labels cannot exceed 63 UTF-16 units.
         $text = [Text.StringBuilder]::new(64)
         $copied = [UIntPtr]::Zero
         $ok = [VerifyWindow]::ReadText($handle, 0x0189, [UIntPtr]$index, $text, 2, 2000, [ref]$copied)
