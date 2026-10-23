@@ -174,7 +174,7 @@ if session['feature'] in ('palette', 'appearance'):
     if feature == 'palette':
         removed = json.loads((folder / 'removed-status.json').read_text(encoding='utf-8-sig'))
         assert removed['positive_query'] == 'Keyboard shortcuts' and removed['positive_matches'] == 1
-        assert removed['query'] == 'Status' and removed['matches'] == 0
+        assert removed['query'] == 'Status' and removed['status_rows'] == 0
         assert removed['sidebar_status_controls'] == 0
         stages = ['before', 'removed-status', 'action', 'after']
         keys = ['^k', 'Keyboard shortcuts', '^a', 'Status', '{ENTER}', '{ESC}']
