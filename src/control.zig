@@ -14,6 +14,7 @@ pub const Request = struct {
     ids: []const []const u8 = &.{},
     text: []const u8 = "",
     messenger: ?Messenger = null,
+    view_number: ?usize = null,
     provider: ?transport.Provider = null,
     account: []const u8 = "",
     archived: bool = false,
@@ -25,10 +26,10 @@ pub const CommandInfo = struct { cmd: Command, usage: []const u8, summary: []con
 
 pub const commands = [_]CommandInfo{
     .{ .cmd = .theme, .usage = "theme <green|amoled>", .summary = "switch and save the app theme without focusing it" },
-    .{ .cmd = .status, .usage = "status", .summary = "version, theme, active messenger, selected chat, sync state, pending sends, search text" },
+    .{ .cmd = .status, .usage = "status", .summary = "version, theme, current account view and order, selected chat, sync state, pending sends, search text" },
     .{ .cmd = .chats, .usage = "chats [--json] [--messenger all|whatsapp|slack|telegram] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
     .{ .cmd = .search, .usage = "search <text>", .summary = "set the sidebar search text (\"\" clears it)" },
-    .{ .cmd = .view, .usage = "view <all|whatsapp|slack|telegram>", .summary = "switch the sidebar messenger, like Alt+0/Alt+1/Alt+2/Alt+3" },
+    .{ .cmd = .view, .usage = "view <N|inbox|all|whatsapp|slack|telegram>", .summary = "switch to an account view or the combined inbox" },
     .{ .cmd = .select, .usage = "select <id> [--provider whatsapp|slack|telegram --account ID]", .summary = "open that chat in the app" },
     .{ .cmd = .messages, .usage = "messages [<id>] [--limit N]", .summary = "recent loaded messages of the selected (or given) chat" },
     .{ .cmd = .archive, .usage = "archive <id>", .summary = "archive a chat (the app's own archive action)" },
@@ -116,8 +117,16 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
             request.text = try std.mem.join(allocator, " ", items);
         },
         .view => {
-            if (items.len != 1) return usage(message, "view needs all, whatsapp, slack or telegram");
-            request.messenger = std.meta.stringToEnum(Messenger, items[0]) orelse return usage(message, "view needs all, whatsapp, slack or telegram");
+            if (items.len != 1) return usage(message, "view needs a number, inbox or provider");
+            if (std.mem.eql(u8, items[0], "inbox")) {
+                request.messenger = .all;
+            } else if (std.meta.stringToEnum(Messenger, items[0])) |messenger| {
+                request.messenger = messenger;
+            } else {
+                const number = std.fmt.parseInt(usize, items[0], 10) catch return usage(message, "view needs a number, inbox or provider");
+                if (number == 0) return usage(message, "view numbers start at 1");
+                request.view_number = number;
+            }
         },
         .select, .archive, .unarchive => {
             if (items.len != 1 or items[0].len == 0) return usage(message, "needs exactly one chat id");
@@ -419,4 +428,16 @@ test "IGSH-538 app diagnostics and messenger controls remain available" {
         try std.testing.expectEqual(Command.view, request.cmd);
         try std.testing.expectEqualStrings(messenger, @tagName(request.messenger.?));
     }
+}
+
+test "view accepts an account position and combined inbox while retaining provider aliases" {
+    const allocator = std.testing.allocator;
+    var message: []const u8 = "";
+    const numbered = try parseArgs(allocator, &.{ "view", "4" }, &message);
+    try std.testing.expectEqual(@as(?usize, 4), numbered.view_number);
+    const inbox = try parseArgs(allocator, &.{ "view", "inbox" }, &message);
+    try std.testing.expectEqual(@as(?Messenger, .all), inbox.messenger);
+    const legacy = try parseArgs(allocator, &.{ "view", "slack" }, &message);
+    try std.testing.expectEqual(@as(?Messenger, .slack), legacy.messenger);
+    try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "view", "0" }, &message));
 }

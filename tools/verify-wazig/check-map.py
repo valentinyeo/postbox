@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == ['appearance', 'archive', 'drafts', 'hub', 'menus', 'navigation', 'palette', 'search', 'slack-sort', 'whatsapp-hub']
+assert features == ['appearance', 'archive', 'drafts', 'hub', 'menus', 'navigation', 'palette', 'search', 'slack-sort', 'views', 'whatsapp-hub']
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
     assert re.findall(r'^## (.+)$', entry, re.M) == [
@@ -23,7 +23,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, hub, slack-sort, archive, text-comparison]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, slack-sort, hub, views, archive, text-comparison]' in workflow
 assert 'default: search' in workflow
 assert 'Keep archived\\tCtrl+Shift+E' in (root / 'src/chat_menu.zig').read_text(encoding='utf-8')
 for helper in ['run', 'doctor', 'cleanup', 'harness']:
@@ -40,7 +40,7 @@ assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
 assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_KEY")) |seed|' in fixture_config
 assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+assert "if ($Feature -notin @('whatsapp-hub', 'slack-sort', 'hub', 'views')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 for proof in ['chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
@@ -71,4 +71,28 @@ assert '"slack-sort"' in workflow and "matrix.feature == 'slack-sort'" in workfl
 assert "status = 'failed'" in runner and "status = 'passed'" in runner and "read('result.json')" in validator
 print('SLACK SORT MAP VERIFIED: dispatch, recipe, synthetic hub and passed/failed evidence')
 assert '.claude/skills/verify-wazig/features/slack-sort.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
-print('MAP VERIFIED: ten complete feature entries, source labels, stable controls, bounded chat-switch journey and GitHub triggers')
+
+views = (root / 'tools/verify-wazig/views.ps1').read_text(encoding='utf-8')
+for required in ['Sort views', 'Show combined inbox', 'Alt+I']:
+    assert f'"{required}"' in source, required
+for required in ['views', 'src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig']:
+    assert required in workflow, required
+assert '"views"' in workflow.split('matrix:', 1)[1]
+for required in ['Assert-AccountView', 'Verification account send', "Send-Keys $Session '%i'", "Send-Keys $Session '^{DOWN}'", 'WAZIG_VERIFY_RESTART', 'restart.json']:
+    assert required in views, required
+assert 'VIEW_ACCOUNTS' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+changelog = (root / 'CHANGELOG.md').read_text(encoding='utf-8')
+assert 'IGSH-602:' in changelog and 'Alt+I combined inbox' in changelog
+for required in ['controlSortChats(a, a.chats[0..a.chat_count], view);',
+                 'controlSortChats(a, list.items, view);',
+                 'messenger_view.inboxMoveUp(by_time, jid_order)',
+                 'by_time, by_name, jid_order)', 'fillSlackTimestamp(a, &chat);']:
+    assert required in source, required
+reconcile = (root / 'src/chat_reconcile_test.zig').read_text(encoding='utf-8')
+for name in ['hub Slack history refreshes ordering after caching its last message fallback',
+             'account view history accepts source accounts without confusing the hub cache namespace']:
+    assert f'test "{name}"' in reconcile, name
+sort_journey = runner.split('        slack-sort {', 1)[1].split('        views {', 1)[0]
+assert "Send-Keys $session '%1'" in sort_journey and 'Drive Alt+1' in sort_map
+assert "for keys in ['%1', '^{TAB}'" in validator
+print('MAP VERIFIED: eleven complete feature entries, source labels, stable controls, bounded chat-switch journey and GitHub triggers')

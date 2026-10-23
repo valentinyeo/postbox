@@ -1,6 +1,7 @@
 from pathlib import Path
 import hashlib
 import json
+import runpy
 import subprocess
 import sys
 
@@ -49,11 +50,14 @@ if session['feature'] == 'slack-sort':
     assert final['sync'] == 'stopped' and not final['slack_connected']
     assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for keys in ['%2', '^{TAB}', '^+{TAB}', 'Compose message', 'Synthetic Slack outgoing', '{ENTER}']:
+    for keys in ['%1', '^{TAB}', '^+{TAB}', 'Compose message', 'Synthetic Slack outgoing', '{ENTER}']:
         assert f'keys: {keys}' in actions
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
     assert 'JOURNEY PASSED: slack-sort' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     print('EVIDENCE VERIFIED: Slack last message ordering, unknown last, incoming and sent promotion with keyboard order and isolation')
+    raise SystemExit(0)
+if session['feature'] == 'views':
+    runpy.run_path(str(Path(__file__).with_name('check-views-evidence.py')))['check_views'](folder)
     raise SystemExit(0)
 if session['feature'] in ('whatsapp-hub', 'hub'):
     unified = session['feature'] == 'hub'

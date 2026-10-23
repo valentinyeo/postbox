@@ -10,6 +10,7 @@ Start with [the skill](../SKILL.md). The seven offline desktop features use the 
 | [palette](palette.md) | Command palette and shortcut discovery | Filter a command, activate the help overlay |
 | [menus](menus.md) | Native menus and custom popups | Measure AMOLED darkness and text contrast, then Green native-menu lightness |
 | [slack-sort](slack-sort.md) | Slack last message order | Newest first, unknown last, incoming and sent promotion with keyboard order |
+| [views](views.md) | Account views and combined inbox | Alt+1..4 isolation, account send, Alt+I order, Sort views, restart |
 | [hub](hub.md) | Unified hub transport (IGSH-531) | Source network identity, list/history, SSE replay, send retry, read/archive, media and DPAPI |
 | [whatsapp-hub](whatsapp-hub.md) | WhatsApp hub transport | Chats, history, live SSE replay, idempotent retry, reads, archive, pending media and DPAPI |
 | [appearance](appearance.md) | Theme and saved text size | Choose Green through the palette, check persistence |

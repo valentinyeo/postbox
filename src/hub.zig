@@ -100,6 +100,11 @@ pub fn sourceProvider(row: std.json.ObjectMap) ?transport.Provider {
     return std.meta.stringToEnum(transport.Provider, string(row, "provider"));
 }
 
+pub fn sourceAccount(row: std.json.ObjectMap, fallback: []const u8) []const u8 {
+    const account = string(row, "account");
+    return if (account.len > 0) account else fallback;
+}
+
 pub fn providerForView(row: std.json.ObjectMap, view: messenger_view.View) ?transport.Provider {
     const provider = sourceProvider(row) orelse return null;
     return if (messenger_view.includes(view, provider)) provider else null;

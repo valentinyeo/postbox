@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'whatsapp-hub', 'hub', 'slack-sort', 'archive', 'text-comparison')][string]$Feature = 'search',
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'whatsapp-hub', 'slack-sort', 'hub', 'views', 'archive', 'text-comparison')][string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence'
 )
@@ -17,7 +17,7 @@ $profile = Join-Path $root 'profile'
 $messages = Join-Path $local 'Messages'
 New-Item $messages, $profile -ItemType Directory -Force | Out-Null
 $tag = '0000000000000526'
-if ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort')) {
+if ($Feature -notin @('whatsapp-hub', 'slack-sort', 'hub', 'views')) {
     Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
     @{ data = @(
         @{ jid = 'verify-alpha'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = '' },
@@ -67,7 +67,7 @@ $start.Environment['LOCALAPPDATA'] = $local
 $start.Environment['APPDATA'] = $local
 $start.Environment['USERPROFILE'] = $profile
 $start.Environment['USERNAME'] = "verify-$id"
-foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN')) { $null = $start.Environment.Remove($name) }
+foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN', 'WAZIG_VERIFY_RESTART')) { $null = $start.Environment.Remove($name) }
 $bridge = $null
 if ($Feature -eq 'whatsapp-hub') {
     @{ id = '53200000000000000000000000000001'; provider = 'whatsapp'; account = '1111111111111111'; jid = 'personal:15550000001@s.whatsapp.net'; text = 'Synthetic adopted send'; file = ''; reply_to = 'personal:BASELINE'; state = 'queued'; queued_unix = 1 } | ConvertTo-Json -Compress | Set-Content (Join-Path $messages 'hub-1111111111111111-outbox.jsonl')
@@ -75,8 +75,8 @@ if ($Feature -eq 'whatsapp-hub') {
     $start.Environment['WAZIG_VERIFY_HUB_URL'] = $bridge.url
     $start.Environment['WAZIG_VERIFY_HUB_KEY'] = 'fixture-key-not-a-secret'
 }
-if ($Feature -in @('hub', 'slack-sort')) {
-    $bridge = Start-FakeBridge $Evidence $root -Unified -SlackSort:($Feature -eq 'slack-sort')
+if ($Feature -in @('slack-sort', 'hub', 'views')) {
+    $bridge = Start-FakeBridge $Evidence $root -Unified -SlackSort:($Feature -eq 'slack-sort') -Views:($Feature -eq 'views')
     $start.Environment['WAZIG_HUB_URL'] = $bridge.url
     $start.Environment['WAZIG_HUB_TOKEN'] = (Get-Content (Join-Path $PSScriptRoot 'fake-wa-bridge.py') | Where-Object { $_.StartsWith('KEY = ') }).Split("'")[1]
 }
@@ -102,8 +102,8 @@ $session = Read-Session $Evidence
 try {
     $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window'
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
-    if ($Feature -in @('whatsapp-hub', 'hub', 'slack-sort')) {
-        $null = Wait-Until { (Read-Control $session status).chat_count -eq $(if ($Feature -eq 'slack-sort') { 4 } else { 2 }) } 'hub chat list'
+    if ($Feature -in @('whatsapp-hub', 'slack-sort', 'hub', 'views')) {
+        $null = Wait-Until { (Read-Control $session status).chat_count -eq $(if ($Feature -eq 'views') { 8 } elseif ($Feature -eq 'slack-sort') { 4 } else { 2 }) } 'hub chat list'
     }
     if ($Feature -eq 'whatsapp-hub') {
         $null = Wait-Until { (Read-Control $session status).pending_sends -eq 0 } 'adopted outbox acknowledged'
@@ -141,7 +141,7 @@ try {
             Invoke-WhatsAppHubJourney $session $messages
         }
         slack-sort {
-            Send-Keys $session '%2'
+            Send-Keys $session '%1'
             $null = Wait-Until { (Read-Control $session status).view -eq 'slack' } 'Slack sidebar'
             $orders = [ordered]@{
                 before = @('fixture-beta', 'fixture-gamma', 'fixture-alpha', 'fixture-unknown')
@@ -190,6 +190,10 @@ try {
                 }
                 Hub-Pass $session "$stage-last-message-order"
             }
+        }
+        views {
+            . "$PSScriptRoot/views.ps1"
+            $app = Invoke-ViewsJourney $session $messages $start
         }
         search {
             Send-Keys $session '^f'
@@ -365,7 +369,7 @@ try {
     Assert-That (-not (Test-Path (Join-Path $messages 'telegram'))) 'Telegram store was created'
     if ($Feature -eq 'archive') {
         Assert-That ((Get-Content $provider -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture provider chat storage changed'
-    } elseif ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort')) {
+    } elseif ($Feature -notin @('whatsapp-hub', 'slack-sort', 'hub', 'views')) {
         Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
     }
     $final | Add-Member -NotePropertyName production_preferences_absent -NotePropertyValue (-not (Test-Path 'HKCU:\Software\Messages'))
