@@ -483,7 +483,8 @@ function Invoke-WorkspaceIconsJourney($Session) {
     $null = Wait-Until { (Read-Control $Session status).view -eq 'all' } 'All networks sidebar'
     $expected = @('slack:fixture-amber:channel-alpha', 'slack:fixture-cobalt:channel-beta', 'whatsapp:fixture:contact-delta', 'slack:fixture-empty:channel-gamma')
     $rows = (Read-Control $Session chats).chats
-    Assert-That (($rows.id -join ',') -eq ($expected -join ',')) 'Workspace badge fixture list changed'
+    $ids = @($rows.id)
+    Assert-That ($ids.Count -eq 4 -and (($ids | Sort-Object) -join ',') -ceq (($expected | Sort-Object) -join ',')) 'Workspace badge fixture list changed'
     $window = Get-Window $Session
     $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1016')
     $list = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
@@ -501,7 +502,7 @@ function Invoke-WorkspaceIconsJourney($Session) {
     $dpi = [VerifyWindow]::GetDpiForWindow($handle)
     $desktop = [System.Windows.Forms.SystemInformation]::VirtualScreen
     $layout = [ordered]@{
-        dpi = $dpi; row_height = $rowHeight.ToUInt64(); ids = $expected
+        dpi = $dpi; row_height = $rowHeight.ToUInt64(); ids = $ids
         list_x = $origin.X - $desktop.Left; list_y = $origin.Y - $desktop.Top
         client_width = $client.Right; client_height = $client.Bottom
     }

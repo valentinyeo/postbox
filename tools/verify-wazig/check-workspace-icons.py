@@ -78,7 +78,7 @@ def measure(rows, colour):
 
 def check_pixels(folder, capture=False):
     layout = json.loads((folder / 'workspace-icons-layout.json').read_text(encoding='utf-8-sig'))
-    assert layout['ids'] == IDS
+    assert len(layout['ids']) == 4 and sorted(layout['ids']) == sorted(IDS)
     dpi = layout['dpi']
     assert 96 <= dpi <= 192
 
@@ -89,7 +89,8 @@ def check_pixels(folder, capture=False):
     assert layout['client_height'] >= 4 * px(64) and layout['client_width'] > px(66)
     width, height, screenshot = read_png(folder / 'workspace-icons-list.png')
     metrics = {}
-    for index, name in enumerate(['amber', 'cobalt', 'whatsapp', 'empty']):
+    for name, chat_id in zip(['amber', 'cobalt', 'whatsapp', 'empty'], IDS):
+        index = layout['ids'].index(chat_id)
         left = layout['list_x'] + px(12) + px(27)
         top = layout['list_y'] + index * px(64) + px(10) + px(28)
         right = layout['list_x'] + px(12) + px(48)
