@@ -141,7 +141,7 @@ def check_integration():
         'loadOutbox': '040428fa42997f7006f87154b7713db94102b863d4536fa853496fc8c4103f0b',
         'bindOutboxAccount': 'c18bfcb6097cec448f946232c1cc8a5a1d92055cfc533e855132e64ea2412b6b',
         'startHubSend': '6e4246a0416884bd87273a0e16e9a3ea09f5624ee705592b24dcd2c260074f61',
-        'markChatRead': 'e02ffb29b9808d1db4b7d83d48ca4de422ff0ba07b925c24fb57008b34d89c8b',
+        'markChatRead': '5676c98f78dfe3942babf4b8c1f510f3cacd32a975ffb85403bf1ba58d9b3545',
         'startNextMarkRead': '159224436c04c9369adec4daee7cd3379ceee2554330e8db74b7816423651de1',
         'loadPendingReads': 'f24e69e81447328bbb7a6349acade9df6a256cd8374df178570f39bcaef30799',
         'persistPendingReads': '695d922f67253237c5b26207d3f37f19d7274a5a99a33e7e91c612e4f230351e',
@@ -203,7 +203,7 @@ def check_journey():
                        "== order + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]", "+ ['telegram:telegram', 'signal:signal']"])
     require(read('tools/verify-wazig/check-evidence.py'), ["session['feature'] == 'views'", 'check-views-evidence.py'])
     workflow = read('.github/workflows/verify.yml')
-    require(workflow, ['hub, hub-archive, slack-sort, slack-threads, views, workspace-icons, signal, telegram, notrap, archive', '"hub","hub-archive","slack-sort","slack-threads","views","workspace-icons","signal","telegram","notrap","text-comparison"', "matrix.feature == 'views'",
+    require(workflow, ['hub, hub-archive, slack-sort, slack-threads, views, workspace-icons, signal, telegram, notrap, repaint, archive', '"hub","hub-archive","slack-sort","slack-threads","views","workspace-icons","signal","telegram","notrap","text-comparison","repaint"', "matrix.feature == 'views'",
                        'src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig'])
     for path in (root / 'tools/verify-wazig').glob('*.py'):
         ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
