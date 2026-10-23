@@ -46,7 +46,7 @@ class LinkPreviewsTests(unittest.TestCase):
                                               site='127.0.0.1', description='Synthetic description')))
             self.write(provider + '.messages.json', dict(chat=dict(provider=provider), messages=rows))
             self.write(provider + '.state.json', dict(selected=dict(provider=provider)))
-            (self.folder / (provider + '.uia.txt')).write_text('MessagesZig | Wazig Messages v0.0.526')
+            (self.folder / (provider + '.uia.txt')).write_text('MessagesZig | Wazig v0.0.526')
             PNG(self.folder / (provider + '.png'), image)
             for colour, rect in [('amber', [20, 20, 100, 100]), ('cobalt', [120, 20, 240, 100])]:
                 samples = len(range(rect[0] + 8, rect[2] - 8, 3)) * len(range(rect[1] + 8, rect[3] - 8, 3))
