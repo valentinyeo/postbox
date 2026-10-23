@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'menus', 'navigation', 'notrap', 'palette', 'reactions', 'search', 'signal', 'slack-sort', 'slack-threads', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons', 'window'])
+assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'menus', 'navigation', 'notrap', 'palette', 'reactions', 'repaint', 'search', 'signal', 'slack-sort', 'slack-threads', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons', 'window'])
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, whatsapp-hub, hub, hub-archive, slack-sort, slack-threads, views, workspace-icons, signal, telegram, notrap, archive, text-comparison, window]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, whatsapp-hub, hub, hub-archive, slack-sort, slack-threads, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window]' in workflow
 options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
 assert options_match, 'missing workflow_dispatch journey options'
 options = [option.strip() for option in options_match[1].split(',')]
@@ -66,7 +66,7 @@ assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
 assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_KEY")) |seed|' in fixture_config
 assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 for proof in ['chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
@@ -249,3 +249,14 @@ for fragment in ['IsZoomed', 'GetWindowPlacement', 'MonitorFromWindow', 'GetMoni
 assert '.claude/skills/verify-wazig/features/window.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
 assert '(features/window.md)' in (skill / 'RULE-MAP.md').read_text(encoding='utf-8')
 print('WINDOW MAP VERIFIED: unforced startup, real keyboard restore/close, same-profile relaunch and zoomed evidence')
+
+repaint = (root / 'tools/verify-wazig/repaint.ps1').read_text(encoding='utf-8')
+assert 'Invoke-RepaintJourney $session' in runner and '[switch]$Repaint' in harness
+assert '--repaint' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+assert '"repaint"' in workflow and "matrix.feature == 'repaint'" in workflow
+for artifact in ['paints.json', 'before.chats.json', 'after.chats.json']:
+    assert artifact in repaint and artifact in validator, artifact
+assert 'Send-Keys' not in repaint
+assert '$clock.Elapsed.TotalSeconds -ge 60' in repaint
+assert 'full repaints in 60 s, limit 3' in repaint
+print('REPAINT MAP VERIFIED: cumulative counters, no-input incoming workload and PR journey')

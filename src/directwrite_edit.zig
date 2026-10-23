@@ -363,6 +363,7 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         win.EM_SETCUEBANNER => {
             const input: [*:0]const u16 = @ptrFromInt(@as(usize, @bitCast(lparam)));
             const count = @min(std.mem.len(input), host.cue.len - 1);
+            if (host.cue_focused == (wparam != 0) and std.mem.eql(u16, std.mem.sliceTo(&host.cue, 0), input[0..count])) return 1;
             @memcpy(host.cue[0..count], input[0..count]);
             host.cue[count] = 0;
             host.cue_focused = wparam != 0;

@@ -52,6 +52,7 @@ const message_filter = @import("message_filter.zig");
 const voice_sent = @import("voice_sent.zig");
 const send_args = @import("send_args.zig");
 const chat_key = @import("chat_key.zig");
+const chat_rows = @import("chat_rows.zig");
 const chat_cache = @import("chat_cache.zig");
 const people_index = @import("people_index.zig");
 const unfurl = @import("unfurl.zig");
@@ -897,8 +898,9 @@ const App = struct {
     format_workspace: []const u8 = "",
     formatting_requests: format_cache.Requests = .{},
     msg_applied_hash: u64 = 0,
-    paints_canvas: u32 = 0,
-    paints_window: u32 = 0,
+    paints: control_api.Paints = .{},
+    paints_previous: control_api.Paints = .{},
+    chats_prev_proc: usize = 0,
     paint_minute_ticks: u32 = 0,
     transcribe_active_id: Utf8Text(191) = .{},
     transcribe_attempts: [512]u64 = [_]u64{0} ** 512,
@@ -1854,8 +1856,8 @@ fn recreateFonts(a: *App) void {
     if (old_bold) |font| _ = win.DeleteObject(font);
     if (old_underline) |font| _ = win.DeleteObject(font);
     if (old_emoji) |font| _ = win.DeleteObject(font);
-    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn changeFontScale(a: *App, delta: i32) void {
@@ -2404,6 +2406,10 @@ fn isUnresolvableChatEntry(name: []const u8, jid: []const u8, kind: []const u8) 
 }
 
 fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
+    const previous_rows = a.allocator.dupe(Chat, a.chats[0..a.chat_count]) catch return false;
+    defer a.allocator.free(previous_rows);
+    const previous_marker = if (a.selected_chat < a.chat_count) archiveMarker(a, &a.chats[a.selected_chat]) else null;
+    const view_switched = a.chat_view_switched;
     var query_wide: [256]u16 = [_]u16{0} ** 256;
     const query_len = if (a.search) |search| @as(usize, @intCast(win.GetWindowTextW(search, &query_wide, query_wide.len))) else 0;
     const query_utf8 = if (query_len > 0) std.unicode.utf16LeToUtf8Alloc(a.allocator, query_wide[0..query_len]) catch null else null;
@@ -2597,12 +2603,19 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     if (a.selected_chat < a.chat_count) selectedViewKey(a).set(chat_key.of(&a.chats[a.selected_chat]));
     updateSearchCue(a, view);
     if (a.chats_hwnd) |list| {
-        _ = win.SendMessageW(list, win.WM_SETREDRAW, 0, 0);
-        _ = win.SendMessageW(list, win.LB_RESETCONTENT, 0, 0);
-        for (a.chats[0..a.chat_count]) |*chat| {
-            _ = win.SendMessageW(list, win.LB_ADDSTRING, 0, @bitCast(@intFromPtr(chat.name.ptr())));
-        }
-        if (a.chat_count > 0) {
+        const rows_changed = !chat_rows.equal(Chat, previous_rows, a.chats[0..a.chat_count]);
+        const selection_changed = win.SendMessageW(list, win.LB_GETCURSEL, 0, 0) != @as(win.LRESULT, @intCast(a.selected_chat));
+        if (rows_changed or selection_changed or view_switched) {
+            const count_changed = previous_rows.len != a.chat_count;
+            if (count_changed) _ = win.SendMessageW(list, win.WM_SETREDRAW, 0, 0);
+            var count = previous_rows.len;
+            while (count > a.chat_count) {
+                count -= 1;
+                _ = win.SendMessageW(list, win.LB_DELETESTRING, count, 0);
+            }
+            while (count < a.chat_count) : (count += 1) {
+                _ = win.SendMessageW(list, win.LB_ADDSTRING, 0, 0);
+            }
             var restore_top = top_index;
             for (a.chats[0..a.chat_count], 0..) |*chat, index| {
                 if (anchor_len > 0 and chat_key.Key.eql(anchor_key.key(), chat_key.of(chat))) {
@@ -2610,14 +2623,37 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
                     break;
                 }
             }
-            if (restore_top >= 0) {
+            if (a.chat_count > 0 and top_index < 0) _ = win.SendMessageW(list, win.LB_SETTOPINDEX, 0, 0);
+            if (a.chat_count > 0 and (selection_changed or view_switched)) _ = win.SendMessageW(list, win.LB_SETCURSEL, a.selected_chat, 0);
+            if (a.chat_count > 0 and restore_top >= 0) {
                 const clamped = @min(restore_top, @as(i32, @intCast(a.chat_count)) - 1);
-                _ = win.SendMessageW(list, win.LB_SETCURSEL, a.selected_chat, 0);
-                _ = win.SendMessageW(list, win.LB_SETTOPINDEX, @intCast(clamped), 0);
-            } else _ = win.SendMessageW(list, win.LB_SETCURSEL, a.selected_chat, 0);
+                if (win.SendMessageW(list, win.LB_GETTOPINDEX, 0, 0) != clamped) _ = win.SendMessageW(list, win.LB_SETTOPINDEX, @intCast(clamped), 0);
+            }
+            if (count_changed) _ = win.SendMessageW(list, win.WM_SETREDRAW, 1, 0);
+            if (win.SendMessageW(list, win.LB_GETTOPINDEX, 0, 0) != top_index and top_index >= 0) {
+                _ = win.InvalidateRect(list, null, win.FALSE);
+            } else {
+                for (a.chats[0..@min(previous_rows.len, a.chat_count)], previous_rows[0..@min(previous_rows.len, a.chat_count)], 0..) |*chat, *before, index| {
+                    if (!chat_rows.rowEqual(Chat, before, chat)) invalidateChatRow(a, index);
+                }
+                if (count_changed) {
+                    var tail: win.RECT = undefined;
+                    _ = win.GetClientRect(list, &tail);
+                    const top = win.SendMessageW(list, win.LB_GETTOPINDEX, 0, 0);
+                    tail.top = @max(0, (@as(i32, @intCast(@min(previous_rows.len, a.chat_count))) - @as(i32, @intCast(top))) * px(a, 64));
+                    if (tail.top < tail.bottom) _ = win.InvalidateRect(list, &tail, win.FALSE);
+                }
+            }
         }
-        _ = win.SendMessageW(list, win.WM_SETREDRAW, 1, 0);
-        _ = win.InvalidateRect(list, null, win.TRUE);
+    }
+    const marker = if (a.selected_chat < a.chat_count) archiveMarker(a, &a.chats[a.selected_chat]) else null;
+    if (marker != previous_marker) {
+        if (a.canvas) |canvas| {
+            var client: win.RECT = undefined;
+            _ = win.GetClientRect(canvas, &client);
+            const badge = win.RECT{ .left = client.right - px(a, 150), .top = client.top + px(a, 8), .right = client.right - px(a, 24), .bottom = client.top + px(a, 32) };
+            _ = win.InvalidateRect(canvas, &badge, win.FALSE);
+        }
     }
     var status_buffer: [64]u8 = undefined;
     if (a.chat_count != a.last_chat_count) {
@@ -2634,6 +2670,13 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         } else |_| {}
     }
     return true;
+}
+
+fn invalidateChatRow(a: *App, index: usize) void {
+    if (a.chats_hwnd) |list| {
+        var row: win.RECT = undefined;
+        if (win.SendMessageW(list, win.LB_GETITEMRECT, index, @bitCast(@intFromPtr(&row))) != win.LB_ERR) _ = win.InvalidateRect(list, &row, win.FALSE);
+    }
 }
 
 fn persistReadState(a: *App) void {
@@ -2663,14 +2706,15 @@ fn applyUnreadProbe(a: *App, result: *const WacliResult) void {
     if (!result.ok or !std.mem.eql(u8, result.msg_id.slice(), a.cache_tag.slice())) return;
     const timestamp = media_age.unixSeconds(result.extra.slice()) orelse return;
     if (!a.read_state.acceptProbe(a.allocator, a.cache_tag.slice(), result.jid.slice(), timestamp, result.data)) return;
-    for (a.chats[0..a.chat_count]) |*chat| {
+    for (a.chats[0..a.chat_count], 0..) |*chat, index| {
         if (!unifiedHub(a) and chat.provider != .whatsapp) continue;
+        const was_unread = chat.unread or chat.unread_count > 0;
         chat.unread = a.read_state.isUnread(a.cache_tag.slice(), chat.jid.slice());
         chat.unread_count = if (chat.unread) @max(1, chat.unread_count) else 0;
+        if (was_unread != (chat.unread or chat.unread_count > 0)) invalidateChatRow(a, index);
         queueUnreadProbe(a, chat);
     }
     if (a.unread_only) refreshChats(a);
-    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
 }
 
 fn tgChatIdString(buffer: *[24]u8, chat_id: i64) []const u8 {
@@ -2931,7 +2975,7 @@ fn refreshTelegramMessages(a: *App) void {
     a.displayed_account = a.chats[a.selected_chat].account;
     a.displayed_provider = a.chats[a.selected_chat].provider;
     a.displayed_timestamp.set(a.chats[a.selected_chat].timestamp.slice());
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     telegramAutoDownload(a);
     markChatRead(a);
 }
@@ -3396,7 +3440,7 @@ fn removeTelegramAccount(a: *App) void {
     }
     refreshVisibleChats(a);
     if (!messagesAreCurrent(a)) refreshMessages(a);
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     setStatus(a, if (removed) "Telegram removed from this PC" else "Telegram signed out, but its files could not be deleted");
 }
 
@@ -4272,7 +4316,7 @@ fn switchAccountView(a: *App, wanted: ?chat_key.Key) void {
     refreshVisibleChats(a);
     if (messenger_view.includes(a.chat_view, .whatsapp)) refreshChats(a);
     refreshMessages(a);
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     var buffer: [300]u8 = undefined;
     setStatus(a, std.fmt.bufPrint(&buffer, "Showing {s}", .{activeViewLabel(a)}) catch "");
 }
@@ -4679,8 +4723,8 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
             resolveSlackSend(a, &result);
         }
     }
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
-    if (a.chats_hwnd) |chats_list| _ = win.InvalidateRect(chats_list, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    if (a.chats_hwnd) |chats_list| _ = win.InvalidateRect(chats_list, null, win.FALSE);
     markChatRead(a);
     refreshVisibleChats(a);
 }
@@ -4712,7 +4756,7 @@ fn applySlackReplies(a: *App, raw: []const u8, parent: []const u8) void {
     }
     const cursor = slack.nextCursor(root);
     if (slackThreadsEnabled(a) and cursor.len > 0) requestSlackThread(a, parent, cursor);
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     if (a.user_viewed) requestSlackMark(a, chat.jid.slice());
 }
 
@@ -4744,7 +4788,7 @@ fn appendSlackPending(a: *App, text: []const u8, client_msg_id: []const u8, thre
     a.messages[a.message_count] = message;
     a.message_count += 1;
     a.scroll_y = 0;
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn oldestPendingSend(a: *App) ?usize {
@@ -4813,7 +4857,7 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
     message.send_state = .pending;
     a.messages[a.message_count] = message;
     a.message_count += 1;
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn markPendingSendFailed(a: *App, pending: *const PendingSend) void {
@@ -4838,7 +4882,7 @@ fn markPendingSendFailed(a: *App, pending: *const PendingSend) void {
         } else {
             message.text.set(a.allocator, old);
         }
-        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
         return;
     }
 }
@@ -4852,7 +4896,7 @@ fn markPendingSendRetrying(a: *App, pending: *const PendingSend) void {
             !std.mem.eql(u8, message.id.slice(), id)) continue;
         var retry_buffer: [4095]u8 = undefined;
         message.text.set(a.allocator, retryingBubbleText(&retry_buffer, pending.text.slice(), pending.retries));
-        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
         return;
     }
 }
@@ -4890,7 +4934,7 @@ fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
     message.send_state = .failed;
     a.messages[a.message_count] = message;
     a.message_count += 1;
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn rememberFailedSend(a: *App, pending: *const PendingSend) void {
@@ -4971,7 +5015,7 @@ fn restoreFailedSendText(a: *App, failed: *const PendingSend) void {
         focusCompose(a);
     }
     persistDrafts(a);
-    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
 }
 
 fn resendFailedMessage(a: *App, index: usize) bool {
@@ -4998,7 +5042,7 @@ fn resendFailedMessage(a: *App, index: usize) bool {
             message.text.set(a.allocator, entry.text.slice());
             enqueueSlackOutbox(a, slot);
             setStatus(a, "Resending...");
-            if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+            if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
             return true;
         }
         setStatus(a, "Can't resend this message - type it again");
@@ -5063,7 +5107,7 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         forgetFailedSendEntry(a, failed);
         persistFileOutbox(a);
         setStatus(a, "Resending...");
-        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
         startNextSend(a);
         return true;
     }
@@ -5114,7 +5158,7 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         }
     }
     setStatus(a, "Resending...");
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     startNextSend(a);
     return true;
 }
@@ -5191,7 +5235,7 @@ fn resolveSlackSend(a: *App, result: *WacliResult) void {
             defer a.allocator.free(marked);
             message.text.set(a.allocator, marked);
         }
-        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
         return;
     }
     const ts = slack.parseSentTs(a.allocator, result.data) orelse {
@@ -5212,7 +5256,7 @@ fn resolveSlackSend(a: *App, result: *WacliResult) void {
     a.slack_log_mutex.lockUncancelable(a.io);
     _ = a.slack_log.markAccount(result.account.slice(), result.jid.slice(), ts);
     a.slack_log_mutex.unlock(a.io);
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn mintSendId(a: *App, id: *[outbox.id_len]u8) void {
@@ -5574,7 +5618,7 @@ fn applySlackEvent(a: *App, event: *slack_win.Event) void {
         insertSlackMessageSorted(a, buildSlackMessage(a, account, item));
         if (viewed) requestSlackMark(a, channel);
         if (item.file_url.len > 0) requestSlackDownload(a, account, channel, item);
-        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     }
     refreshVisibleChats(a);
 }
@@ -6078,6 +6122,7 @@ fn startSlackSocket(a: *App) void {
 fn markChatRead(a: *App) void {
     if (!a.user_viewed or a.selected_chat >= a.chat_count) return;
     const chat = &a.chats[a.selected_chat];
+    const was_unread = chat.unread or chat.unread_count > 0;
     if (!unifiedHub(a) and chat.provider == .telegram) {
         if (a.message_count > 0) {
             const last = a.messages[a.message_count - 1];
@@ -6100,7 +6145,7 @@ fn markChatRead(a: *App) void {
             cached.unread = false;
             cached.unread_count = 0;
         }
-        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+        if (was_unread != (chat.unread or chat.unread_count > 0)) invalidateChatRow(a, a.selected_chat);
         requestSlackMark(a, chat.jid.slice());
         return;
     }
@@ -6114,7 +6159,7 @@ fn markChatRead(a: *App) void {
         persistReadState(a);
         chat.unread = a.read_state.isUnread(a.cache_tag.slice(), chat.jid.slice());
         chat.unread_count = if (chat.unread) @max(1, chat.unread_count) else 0;
-        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+        if (was_unread != (chat.unread or chat.unread_count > 0)) invalidateChatRow(a, a.selected_chat);
     }
     if (!needs_receipt or a.read_queue_dead) return;
     var already_queued = false;
@@ -6472,7 +6517,7 @@ fn stopAudio(a: *App) void {
     a.audio_position_ms = 0;
     a.audio_duration_ms = 0;
     if (a.audio_player) |player| player.stop();
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn startAudioPlayback(a: *App, message: *Message) void {
@@ -6598,7 +6643,7 @@ fn updateAudioPlayback(a: *App) void {
             a.audio_position_ms = 0;
             a.audio_duration_ms = 0;
             setStatus(a, "Windows cannot play this audio format");
-            if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+            if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
         }
         return;
     }
@@ -6633,8 +6678,14 @@ fn updateAudioPlayback(a: *App) void {
         a.audio_position_ms = position;
         changed = true;
     }
-    if (changed or mapped == .playing) {
-        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    if (changed) {
+        if (a.canvas) |canvas| {
+            for (a.messages[0..a.message_count]) |*message| {
+                if (!isAudio(message)) continue;
+                const dirty = message.bubble_hit;
+                if (dirty.right > dirty.left and dirty.bottom > dirty.top) _ = win.InvalidateRect(canvas, &dirty, win.FALSE);
+            }
+        }
     }
 }
 
@@ -9100,6 +9151,16 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         .array => |items| items,
         else => return false,
     };
+    if (!chat_changed and a.pending_send_count == 0 and a.failed_send_count == 0 and
+        std.hash.Wyhash.hash(0, raw) == a.msg_applied_hash)
+    {
+        if (fresh_read) {
+            a.displayed_timestamp = chat.timestamp;
+            markChatRead(a);
+        }
+        drainMediaDownloads(a);
+        return true;
+    }
     var selected_id = Utf8Text(191){};
     if (a.selected_message) |selected| {
         if (selected < a.message_count) selected_id.set(a.messages[selected].id.slice());
@@ -9228,7 +9289,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         appendWhatsAppFailed(a, failed);
     }
     a.msg_applied_hash = std.hash.Wyhash.hash(0, raw);
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     if (fresh_read) markChatRead(a);
     drainMediaDownloads(a);
     if (a.message_count > 0) logStartupMilestone(a, .messages, if (fresh_read) "first messages shown (fresh)" else "first messages shown (cache)");
@@ -9409,7 +9470,7 @@ fn markWhatsAppLoggedOut(a: *App) void {
     a.sync_logged_out = true;
     stopSync(a, "logged out");
     setStatus(a, logged_out_status);
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn checkPairing(a: *App) void {
@@ -9508,7 +9569,7 @@ fn applySyncAuthProbe(a: *App, ok: bool, data: []const u8) void {
         return;
     }
     setStatus(a, "Live sync keeps stopping - press Ctrl+K and pick Restart live sync");
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn setStatus(a: *App, text: []const u8) void {
@@ -9520,6 +9581,9 @@ fn setStatus(a: *App, text: []const u8) void {
     if (a.status) |status| {
         var wide_text = WideText(255){};
         wide_text.set(a.allocator, progress orelse text);
+        var previous: [256]u16 = undefined;
+        const length: usize = @intCast(win.GetWindowTextW(status, &previous, previous.len));
+        if (std.mem.eql(u16, previous[0..length], wide_text.slice())) return;
         _ = win.SetWindowTextW(status, wide_text.ptr());
     }
 }
@@ -9975,7 +10039,7 @@ fn discardStagedImage(a: *App) void {
     releaseStagedImage(a);
     if (owned and path.len > 0) deleteFileUtf8(path.slice());
     layout(a, a.compose_client_width, a.compose_client_height);
-    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
+    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
 }
 
 fn releaseStagedImage(a: *App) void {
@@ -10225,7 +10289,7 @@ fn stageImageFromClipboard(a: *App) bool {
         a.staged_image.preview_height = bitmap.bmHeight;
     }
     layout(a, a.compose_client_width, a.compose_client_height);
-    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
+    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
     setStatus(a, "Image ready... Enter sends, Esc discards");
     focusCompose(a);
     return true;
@@ -10392,7 +10456,7 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
     a.scroll_y = 0;
     appendWhatsAppPending(a, pending, false);
     persistFileOutbox(a);
-    if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.TRUE);
+    if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.FALSE);
     startNextSend(a);
     return true;
 }
@@ -10466,7 +10530,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
         _ = win.SetWindowTextW(compose, lit(""));
         if (!thread) saveComposerDraft(a);
         layout(a, a.compose_client_width, a.compose_client_height);
-        if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.TRUE);
+        if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.FALSE);
         startNextSend(a);
         return;
     }
@@ -10690,7 +10754,7 @@ fn pasteComposerText(a: *App) void {
             setStatus(a, "Could not paste: draft limit reached");
             return;
         };
-        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
     }
     persistDrafts(a);
 }
@@ -10769,7 +10833,7 @@ fn switchComposerDraft(a: *App) void {
     setComposerDraft(a, restored);
     if (a.compose) |compose| _ = win.EnableWindow(compose, if (next != null) win.TRUE else win.FALSE);
     persistDrafts(a);
-    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
 }
 
 fn ensureDictation(a: *App) ?*dictation.Session {
@@ -10842,7 +10906,7 @@ fn updateDictation(a: *App) void {
                 };
             }
             persistDrafts(a);
-            if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+            if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
             setStatus(a, if (same_chat) "Dictation inserted" else "Dictation saved to its chat draft");
         }
         updateDictateButton(a, .idle);
@@ -10927,7 +10991,7 @@ fn selectMessage(a: *App, delta: i32) void {
     a.selected_message = @intCast(next);
     scrollToSelectedMessage(a);
     if (a.canvas) |canvas| {
-        _ = win.InvalidateRect(canvas, null, win.TRUE);
+        _ = win.InvalidateRect(canvas, null, win.FALSE);
     }
 }
 
@@ -10937,7 +11001,7 @@ fn walkMessageHighlight(a: *App, key: u32) void {
             if (selected + 1 >= a.message_count) {
                 a.selected_message = null;
                 a.scroll_y = 0;
-                if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+                if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
             } else selectMessage(a, 1);
         }
     } else selectMessage(a, -1);
@@ -11053,7 +11117,7 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
         if (item.send_state == .failed and x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom and
             resendFailedMessage(a, index))
         {
-            _ = win.InvalidateRect(hwnd, null, win.TRUE);
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return;
         }
         if (x >= media.left and x <= media.right and y >= media.top and y <= media.bottom) {
@@ -11076,7 +11140,7 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
             if (x >= toggle.left and x <= toggle.right and y >= toggle.top and y <= toggle.bottom) {
                 item.transcript_expanded = !item.transcript_expanded;
                 a.selected_message = index;
-                _ = win.InvalidateRect(hwnd, null, win.TRUE);
+                _ = win.InvalidateRect(hwnd, null, win.FALSE);
                 return;
             }
         }
@@ -11084,7 +11148,7 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
         if (x >= card.left and x <= card.right and y >= card.top and y <= card.bottom) {
             a.selected_message = index;
             openUnfurlCard(a, item);
-            _ = win.InvalidateRect(hwnd, null, win.TRUE);
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return;
         }
         if (x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom) {
@@ -11092,12 +11156,12 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
                 if (linkSpanHit(span, x, y)) {
                     openUrlWide(a, span.url.ptr());
                     a.selected_message = index;
-                    _ = win.InvalidateRect(hwnd, null, win.TRUE);
+                    _ = win.InvalidateRect(hwnd, null, win.FALSE);
                     return;
                 }
             }
             a.selected_message = index;
-            _ = win.InvalidateRect(hwnd, null, win.TRUE);
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return;
         }
     }
@@ -11313,7 +11377,7 @@ fn insertEmoji(a: *App, emoji: []const u8) void {
             return;
         };
         persistDrafts(a);
-        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.TRUE);
+        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
         return;
     }
     const compose = a.compose orelse return;
@@ -12381,7 +12445,7 @@ fn paneFollowSelection(a: *App, open_jid: []const u8) void {
     a.user_viewed = true;
     refreshMessages(a);
     if (a.chat_count > 0) focusCompose(a);
-    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
+    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
 }
 
 fn archiveShortcutAllowed(a: *const App, focus: ?win.HWND, lparam: win.LPARAM, allow_compose: bool) bool {
@@ -12699,6 +12763,8 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\"", .{@tagName(theme.choice)});
+    try w.writeAll(",\"paints\":");
+    try a.paints.write(w);
     const box = a.compose_pill;
     try w.print(",\"composer\":{{\"box\":{{\"left\":{d},\"top\":{d},\"right\":{d},\"bottom\":{d}}},\"lines\":{d},\"controls\":[", .{ box.left, box.top, box.right, box.bottom, if (a.compose) |edit| win.SendMessageW(edit, win.EM_GETLINECOUNT, 0, 0) else 0 });
     const controls = [_]?win.HWND{ a.attach_btn, a.compose, a.voice_btn, a.dictate, a.emoji_btn, a.send };
@@ -12911,7 +12977,7 @@ fn controlSelectIndex(a: *App, index: usize) void {
     selectedViewKey(a).set(chat_key.of(&a.chats[index]));
     if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, index, 0);
     refreshMessages(a);
-    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
+    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
 }
 
 fn controlSelect(a: *App, call: *ControlCall) !void {
@@ -13329,7 +13395,7 @@ fn paletteActivate(a: *App) void {
         a.user_viewed = true;
         refreshMessages(a);
         focusCompose(a);
-        if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
+        if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
         return;
     }
     if (item.url.len > 0) {
@@ -13612,7 +13678,7 @@ fn removeWhatsAppAccount(a: *App) void {
     a.max_scroll = 0;
     a.message_count = 0;
     a.last_refresh_unix = 0;
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     refreshVisibleChats(a);
     refreshMessages(a);
     setStatus(a, "WhatsApp signed out - its data was kept as a backup folder; pair again with Add account");
@@ -15419,7 +15485,7 @@ fn canvasScrollInfo(a: *App) ScrollInfo {
 fn setCanvasScroll(a: *App, top: i32) void {
     const max_scroll = @max(0, a.max_scroll);
     a.scroll_y = std.math.clamp(max_scroll - @max(0, top), 0, max_scroll);
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn setChatsScroll(a: *App, top: i32) void {
@@ -15520,10 +15586,39 @@ fn drawQuoteBlock(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     return block_bottom + px(a, quote_after_gap);
 }
 
+fn countPaint(hwnd: win.HWND, dirty: win.RECT, total: *u64, full: *u64) void {
+    total.* +%= 1;
+    var client: win.RECT = undefined;
+    _ = win.GetClientRect(hwnd, &client);
+    if (client.right > client.left and client.bottom > client.top and
+        dirty.left <= client.left and dirty.top <= client.top and
+        dirty.right >= client.right and dirty.bottom >= client.bottom) full.* +%= 1;
+}
+
+fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
+    const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    if (message == win.WM_ERASEBKGND) return 1;
+    if (message == win.WM_PAINT) {
+        var paint: win.PAINTSTRUCT = undefined;
+        const screen_dc = win.BeginPaint(hwnd, &paint);
+        defer _ = win.EndPaint(hwnd, &paint);
+        countPaint(hwnd, paint.rcPaint, &a.paints.list, &a.paints.list_full);
+        var client: win.RECT = undefined;
+        _ = win.GetClientRect(hwnd, &client);
+        var surface = paint_buffer.Buffer.init(screen_dc, client, paint.rcPaint);
+        defer surface.deinit();
+        _ = win.FillRect(surface.hdc, &paint.rcPaint, if (theme.choice == .amoled) a.brush_bg.? else a.brush_raised.?);
+        _ = win.CallWindowProcW(@ptrFromInt(a.chats_prev_proc), hwnd, win.WM_PRINTCLIENT, @intFromPtr(surface.hdc), win.PRF_CLIENT);
+        return 0;
+    }
+    return win.CallWindowProcW(@ptrFromInt(a.chats_prev_proc), hwnd, message, wparam, lparam);
+}
+
 fn drawCanvas(hwnd: win.HWND, a: *App) void {
     var paint: win.PAINTSTRUCT = undefined;
     const screen_dc = win.BeginPaint(hwnd, &paint);
     defer _ = win.EndPaint(hwnd, &paint);
+    countPaint(hwnd, paint.rcPaint, &a.paints.canvas, &a.paints.canvas_full);
     var client: win.RECT = undefined;
     _ = win.GetClientRect(hwnd, &client);
     var surface = paint_buffer.Buffer.init(screen_dc, client, paint.rcPaint);
@@ -15883,7 +15978,6 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
     switch (message) {
         win.WM_PAINT => {
-            a.paints_canvas +%= 1;
             drawCanvas(hwnd, a);
             return 0;
         },
@@ -15891,7 +15985,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         win.WM_MOUSEWHEEL => {
             const delta: i16 = @bitCast(hiword(wparam));
             a.scroll_y = std.math.clamp(a.scroll_y + @divTrunc(@as(i32, delta), 2), 0, a.max_scroll);
-            _ = win.InvalidateRect(hwnd, null, win.TRUE);
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return 0;
         },
         win.WM_LBUTTONDOWN => {
@@ -16033,7 +16127,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                 const bubble = item.bubble_hit;
                 if (x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom) {
                     a.selected_message = index;
-                    _ = win.InvalidateRect(hwnd, null, win.TRUE);
+                    _ = win.InvalidateRect(hwnd, null, win.FALSE);
                     var point = win.POINT{ .x = x, .y = y };
                     _ = win.ClientToScreen(hwnd, &point);
                     openReactionMenu(a, point.x, point.y);
@@ -16057,7 +16151,7 @@ fn selectChatRow(a: *App, row: usize) void {
     beginTranscriptionOpen(a);
     refreshMessages(a);
     focusCompose(a);
-    _ = win.InvalidateRect(a.hwnd.?, null, win.TRUE);
+    _ = win.InvalidateRect(a.hwnd.?, null, win.FALSE);
 }
 
 fn openChatMenu(a: *App, lparam: win.LPARAM) void {
@@ -16309,6 +16403,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                             chat_key.Key.eql(chat_key.displayed(a), chat_key.of(result)) and
                             std.hash.Wyhash.hash(0, result.data) == a.msg_applied_hash)
                         {
+                            a.displayed_timestamp = a.chats[a.selected_chat].timestamp;
                             markChatRead(a);
                             a.msg_read_attempts = 0;
                             a.msg_read_retry_ticks = 0;
@@ -16431,7 +16526,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         for (a.messages[0..a.message_count]) |*stored| {
                             if (std.mem.eql(u8, stored.id.slice(), ts)) {
                                 stored.local_path.set(a.allocator, result.data);
-                                if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+                                if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
                                 break;
                             }
                         }
@@ -16537,6 +16632,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.search == null) return -1;
             directwrite_edit.setCentered(a.search.?, true);
             a.chats_hwnd = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 0, 0, 0, 0, hwnd, controlId(id_chats), a.instance, null);
+            if (a.chats_hwnd) |list| a.chats_prev_proc = @bitCast(win.SetWindowLongPtrW(list, win.GWLP_WNDPROC, @intCast(@intFromPtr(&chatsProc))));
             a.canvas = win.CreateWindowExW(0, lit("WacliMessageCanvas"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, hwnd, controlId(id_canvas), a.instance, null);
             a.attach_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("Attach photo or file"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_attach), a.instance, null);
             a.compose = directwrite_edit.create(a.instance, hwnd, controlId(id_compose), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 0, 0);
@@ -16649,14 +16745,14 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             var rc_dpi: win.RECT = undefined;
             _ = win.GetClientRect(hwnd, &rc_dpi);
             layout(a, rc_dpi.right, rc_dpi.bottom);
-            _ = win.InvalidateRect(hwnd, null, win.TRUE);
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return 0;
         },
         win.WM_PAINT => {
-            a.paints_window +%= 1;
             var paint: win.PAINTSTRUCT = undefined;
             const screen_dc = win.BeginPaint(hwnd, &paint);
             defer _ = win.EndPaint(hwnd, &paint);
+            countPaint(hwnd, paint.rcPaint, &a.paints.window, &a.paints.window_full);
             var client: win.RECT = undefined;
             _ = win.GetClientRect(hwnd, &client);
             var surface = paint_buffer.Buffer.init(screen_dc, client, paint.rcPaint);
@@ -16874,10 +16970,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 a.paint_minute_ticks += 1;
                 if (a.paint_minute_ticks >= 60) {
                     a.paint_minute_ticks = 0;
-                    var paint_log_buffer: [64]u8 = undefined;
-                    appendLaunchLog(a, std.fmt.bufPrint(&paint_log_buffer, "paints: canvas={d} window={d} per min", .{ a.paints_canvas, a.paints_window }) catch "paints");
-                    a.paints_canvas = 0;
-                    a.paints_window = 0;
+                    var paint_log_buffer: [256]u8 = undefined;
+                    const previous = a.paints_previous;
+                    const counts = a.paints;
+                    appendLaunchLog(a, std.fmt.bufPrint(&paint_log_buffer, "paints: window={d} window_full={d} canvas={d} canvas_full={d} list={d} list_full={d} per min", .{ counts.window -% previous.window, counts.window_full -% previous.window_full, counts.canvas -% previous.canvas, counts.canvas_full -% previous.canvas_full, counts.list -% previous.list, counts.list_full -% previous.list_full }) catch "paints");
+                    a.paints_previous = counts;
                 }
                 checkMediaDownload(a);
                 image_viewer.refresh(a, viewer_actions);
@@ -17113,7 +17210,7 @@ fn toggleSelectedTranscript(a: *App) void {
             if (transcript_item.transcript.len > 0) {
                 transcript_item.transcript_expanded = !transcript_item.transcript_expanded;
                 scrollToSelectedMessage(a);
-                if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+                if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
                 return;
             }
         }
@@ -17230,7 +17327,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
                 else => -a.scroll_y,
             };
             a.scroll_y = std.math.clamp(a.scroll_y + step, 0, a.max_scroll);
-            _ = win.InvalidateRect(canvas, null, win.TRUE);
+            _ = win.InvalidateRect(canvas, null, win.FALSE);
         }
         return true;
     }
@@ -17506,7 +17603,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
                 if (a.staged_image.path.len > 0) {
                     discardStagedImage(a);
                     layout(a, a.compose_client_width, a.compose_client_height);
-                    if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.TRUE);
+                    if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.FALSE);
                     setStatus(a, "Pasted image discarded");
                     return true;
                 }
@@ -17566,7 +17663,7 @@ fn jumpToLatestMessage(a: *App) void {
     if (a.message_count == 0) return;
     a.selected_message = a.message_count - 1;
     a.scroll_y = 0;
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn hashStorePath(init: std.process.Init, allocator: std.mem.Allocator, filename: []const u8) []u8 {
@@ -18573,7 +18670,7 @@ pub fn main(init: std.process.Init) !void {
                         const info = listboxScrollInfo(list);
                         const max_top = @max(0, info.total - info.page);
                         setListboxTop(list, std.math.clamp(info.top - step.rows, 0, max_top));
-                        _ = win.InvalidateRect(list, null, win.TRUE);
+                        _ = win.InvalidateRect(list, null, win.FALSE);
                     }
                     continue;
                 }

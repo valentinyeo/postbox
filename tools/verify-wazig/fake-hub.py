@@ -796,6 +796,108 @@ class TelegramHandler(Handler):
             self.respond(400, {'error': 'invalid Telegram write'}, body=body)
 
 
+class RepaintHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        state = self.state
+        if url.path == '/v1/wazig/chats':
+            with state.lock:
+                count = state.repaint_count
+                stamp = state.repaint_stamp
+            rows = [] if parse_qs(url.query).get('archived') == ['true'] else [
+                dict(jid=ALPHA, name='Verification Alpha', provider='slack', kind='direct',
+                     last_message_ts=state.stamp, unread_count=0, archived=False),
+                dict(jid=BETA, name='Verification Beta', provider='whatsapp', kind='direct',
+                     last_message_ts=stamp, unread_count=count, archived=False)]
+            self.respond(200, rows, incoming=count)
+        elif url.path == '/v1/wazig/messages':
+            chat = parse_qs(url.query).get('chat', [''])[0]
+            with state.lock:
+                count = state.repaint_count if chat == BETA else 0
+            rows = [dict(MsgID='BASELINE', ChatJID=chat, Timestamp=state.stamp,
+                         Text='Synthetic baseline', FromMe=False, SenderName='Fixture Sender')]
+            rows.extend(dict(MsgID=f'INCOMING-{n}', ChatJID=chat, Timestamp=(datetime.fromisoformat(state.stamp) + timedelta(seconds=n * 10)).isoformat().replace('+00:00', 'Z'),
+                             Text=f'Synthetic incoming {n}', FromMe=False, SenderName='Fixture Sender')
+                        for n in range(1, count + 1))
+            self.respond(200, list(reversed(rows)))
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path == '/fixture/repaint':
+            with state.lock:
+                self.respond(200, dict(incoming=state.repaint_count, ticks=state.repaint_ticks))
+        elif url.path.startswith('/v1/wazig/avatar/'):
+            self.respond(404, {'error': 'unavailable'})
+        else:
+            self.respond(404, {'error': 'unknown repaint fixture route'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/fixture/repaint/start':
+            with self.state.lock:
+                if self.state.repaint_started:
+                    self.respond(409, {'error': 'already started'})
+                    return
+                self.state.repaint_started = True
+            bridge.threading.Thread(target=self.produce_updates, daemon=True).start()
+            self.respond(200, {'ok': True})
+        elif self.path == '/v1/wazig/mark-read':
+            self.respond(200, {'status': 'ok'}, body=body)
+        else:
+            self.respond(400, {'error': 'unexpected repaint write'}, body=body)
+
+    def produce_updates(self):
+        state = self.state
+        started = bridge.time.monotonic()
+        for tick in range(1, 31):
+            with state.lock:
+                state.lock.wait_for(lambda: bridge.time.monotonic() >= started + tick * 2,
+                                    timeout=max(0, started + tick * 2 - bridge.time.monotonic()))
+                state.repaint_ticks = tick
+                if tick % 5 == 0:
+                    state.repaint_count += 1
+                    state.repaint_stamp = (datetime.fromisoformat(state.stamp) + timedelta(seconds=tick * 2)).isoformat().replace('+00:00', 'Z')
+                    state.repaint_events.append(('msg', BETA))
+                state.repaint_events.append(('reset', ''))
+                state.lock.notify_all()
+
+    def events(self):
+        self.record(200)
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        last = int(self.headers.get('Last-Event-ID', '0'))
+        try:
+            if last == 0:
+                self.event(1, 'reset', '')
+                self.close_connection = True
+                return
+            while True:
+                with self.state.lock:
+                    pending = [(i + 1, event) for i, event in enumerate(self.state.repaint_events) if i + 1 > last]
+                    if not pending:
+                        self.state.lock.wait(timeout=2)
+                if pending:
+                    for event_id, (kind, chat) in pending:
+                        self.event(event_id, kind, chat)
+                    self.close_connection = True
+                    return
+                self.wfile.write(b': heartbeat\n\n')
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Fake hub runs only on GitHub Actions')
@@ -804,6 +906,7 @@ def main():
     parser.add_argument('--log', type=Path, required=True)
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--hub-archive', action='store_true')
+    modes.add_argument('--repaint', action='store_true')
     modes.add_argument('--reactions', action='store_true')
     modes.add_argument('--slack-sort', action='store_true')
     modes.add_argument('--slack-threads', action='store_true')
@@ -814,12 +917,17 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = HubArchiveHandler if args.hub_archive else SlackThreadsHandler if args.slack_threads else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    handler = HubArchiveHandler if args.hub_archive else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
     server.state.view_rows = view_rows()
     server.state.archive_stamp = '2026-10-10T11:00:00Z'
+    server.state.repaint_count = 0
+    server.state.repaint_ticks = 0
+    server.state.repaint_started = False
+    server.state.repaint_stamp = (datetime.fromisoformat(server.state.stamp) - timedelta(seconds=1)).isoformat().replace('+00:00', 'Z')
+    server.state.repaint_events = [('reset', '')]
     server.state.reactions = {}
     server.state.signal_reaction = None
     server.state.signal_events = []

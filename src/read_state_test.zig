@@ -86,10 +86,25 @@ const App = struct {
 };
 const win = struct {
     const TRUE = 1;
+    const FALSE = 0;
+    const LB_GETITEMRECT = 0x198;
+    const LB_ERR = -1;
+    const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
+    var row_paints: usize = 0;
+    var last_row: usize = 0;
+    fn SendMessageW(_: usize, message: u32, index: usize, data: isize) isize {
+        std.debug.assert(message == LB_GETITEMRECT);
+        last_row = index;
+        const row: *RECT = @ptrFromInt(@as(usize, @bitCast(data)));
+        row.* = .{ .left = 0, .top = @intCast(index * 64), .right = 380, .bottom = @intCast((index + 1) * 64) };
+        return 0;
+    }
     fn GetTickCount64() u64 {
         return 100_000;
     }
-    fn InvalidateRect(_: usize, _: ?*const anyopaque, _: i32) i32 {
+    fn InvalidateRect(_: usize, rect: ?*const RECT, erase: i32) i32 {
+        std.debug.assert(rect != null and erase == FALSE);
+        row_paints += 1;
         return 1;
     }
 };
@@ -150,6 +165,7 @@ fn wacliEnqueue(a: *App, job: WacliJob, _: bool) void {
     a.queued += 1;
 }
 fn fixture() App {
+    win.row_paints = 0;
     child_process.sync_stopped = false;
     child_process.correct_args = false;
     var a: App = .{};
@@ -230,4 +246,19 @@ test "mark-read uses wacli 0.18.1 arguments only after pausing sync" {
     try std.testing.expect(child_process.sync_stopped);
     try std.testing.expect(child_process.correct_args);
     try std.testing.expect(a.read_child != null);
+}
+
+test "marking an already read chat leaves the list alone while a changed dot dirties only its row" {
+    var a = fixture();
+    defer a.read_state.deinit(a.allocator);
+    a.chats_hwnd = 1;
+    markChatRead(&a);
+    try std.testing.expectEqual(@as(usize, 0), win.row_paints);
+    a.chats[0].unread = true;
+    a.chats[0].unread_count = 1;
+    markChatRead(&a);
+    try std.testing.expectEqual(@as(usize, 1), win.row_paints);
+    try std.testing.expectEqual(@as(usize, 0), win.last_row);
+    markChatRead(&a);
+    try std.testing.expectEqual(@as(usize, 1), win.row_paints);
 }
