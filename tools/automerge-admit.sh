@@ -47,4 +47,9 @@ if [ -z "${reason}" ]; then
 fi
 if [ -n "$blocked" ]; then reason="required checks not green: ${blocked}"; fi
 if [ -n "$reason" ]; then echo "skip ($reason)"; exit 0; fi
+if ! [[ "$behind_by" =~ ^[0-9]+$ ]]; then echo "skip (could not compare with main)"; exit 0; fi
+if (( 10#$behind_by > 0 )); then
+    echo "skip (behind main by $((10#$behind_by)); checks ran on an older main, rebase and push)"
+    exit 0
+fi
 echo "merge"
