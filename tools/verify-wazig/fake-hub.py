@@ -1,5 +1,6 @@
 import argparse
 from datetime import datetime, timedelta, timezone
+import hashlib
 import importlib.util
 import io
 import json
@@ -8,7 +9,8 @@ from pathlib import Path
 import socket
 import struct
 from http.server import ThreadingHTTPServer
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
+import zlib
 
 
 spec = importlib.util.spec_from_file_location('bridge_fixture', Path(__file__).with_name('fake-wa-bridge.py'))
@@ -16,6 +18,34 @@ bridge = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bridge)
 ALPHA = 'fixture-alpha'
 BETA = 'fixture-beta'
+
+
+WORKSPACE_CHATS = [
+    ('slack:fixture-amber:channel-alpha', 'Verification Amber', 'slack'),
+    ('slack:fixture-cobalt:channel-beta', 'Verification Cobalt', 'slack'),
+    ('slack:fixture-empty:channel-gamma', 'Verification Empty', 'slack'),
+    ('whatsapp:fixture:contact-delta', 'Verification Delta', 'whatsapp'),
+]
+WORKSPACE_COLOURS = {'fixture-amber': (240, 160, 32), 'fixture-cobalt': (48, 112, 240)}
+
+
+def workspace_png(team):
+    colour = WORKSPACE_COLOURS[team]
+    letter = ['01110', '11011', '11011', '11111', '11011', '11011', '11011'] if team == 'fixture-amber' else [
+        '01111', '11000', '11000', '11000', '11000', '11000', '01111']
+    rows = []
+    for y in range(64):
+        row = bytearray(b'\x00')
+        for x in range(64):
+            gx, gy = (x - 22) // 4, (y - 18) // 4
+            ink = 0 <= gx < 5 and 0 <= gy < 7 and letter[gy][gx] == '1'
+            row.extend((255, 255, 255) if ink else colour)
+        rows.append(row)
+
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 64, 64, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(b''.join(rows))) + chunk(b'IEND', b'')
 
 
 class Handler(bridge.Handler):
@@ -38,6 +68,11 @@ class Handler(bridge.Handler):
     def do_GET(self):
         self.wire_path = self.path
         url = urlsplit(self.path)
+        if url.path.startswith('/v1/wazig/workspace-icon/'):
+            if not self.authorized():
+                return
+            self.workspace_icon(url.path)
+            return
         if not url.path.startswith('/v1/wazig/'):
             self.respond(400, {'error': 'expected unified API'})
             return
@@ -57,6 +92,14 @@ class Handler(bridge.Handler):
         route = route.replace(ALPHA, bridge.ALPHA).replace(BETA, bridge.BETA)
         self.path = route + ('?' + urlencode(query, doseq=True) if query else '')
         super().do_GET()
+
+    def workspace_icon(self, path):
+        team = unquote(path.removeprefix('/v1/wazig/workspace-icon/'))
+        if team in WORKSPACE_COLOURS:
+            image = workspace_png(team)
+            self.respond(200, image, 'image/png', sha256=hashlib.sha256(image).hexdigest())
+        else:
+            self.respond(404, {'error': 'workspace icon unavailable'})
 
     def event(self, event_id, kind, chat):
         handle = chat.removeprefix(bridge.ACCOUNT + ':').replace(bridge.ALPHA, ALPHA).replace(bridge.BETA, BETA)
@@ -244,17 +287,57 @@ class ViewsHandler(Handler):
             self.respond(400, {'error': 'unexpected fixture write'}, body=body, **scope)
 
 
+class WorkspaceIconsHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            rows = [dict(jid=chat, name=name, provider=provider, kind='direct',
+                         last_message_ts=self.state.stamp, unread_count=0, archived=False)
+                    for chat, name, provider in WORKSPACE_CHATS]
+            self.respond(200, rows if query.get('archived', ['false'])[0] == 'false' else [])
+        elif url.path in ('/v1/wazig/messages', '/v1/wazig/groups'):
+            self.respond(200, [])
+        elif url.path.startswith('/v1/wazig/workspace-icon/'):
+            self.workspace_icon(url.path)
+        elif url.path.startswith('/v1/wazig/avatar/'):
+            self.respond(404, {'error': 'unavailable'})
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        else:
+            self.respond(404, {'error': 'unknown workspace fixture path'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/v1/wazig/mark-read' and body.get('chat') in [row[0] for row in WORKSPACE_CHATS]:
+            self.respond(200, {'status': 'ok'}, body=body)
+        else:
+            self.respond(400, {'error': 'unexpected workspace fixture write'}, body=body)
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Fake hub runs only on GitHub Actions')
     parser = argparse.ArgumentParser()
     parser.add_argument('--port-file', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
-    parser.add_argument('--slack-sort', action='store_true')
-    parser.add_argument('--views', action='store_true')
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--slack-sort', action='store_true')
+    modes.add_argument('--views', action='store_true')
+    modes.add_argument('--workspace-icons', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    server = ThreadingHTTPServer((loopback, 0), ViewsHandler if args.views else SlackSortHandler if args.slack_sort else Handler)
+    handler = ViewsHandler if args.views else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else Handler
+    server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
     server.state.view_rows = view_rows()

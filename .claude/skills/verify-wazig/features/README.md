@@ -8,16 +8,17 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [navigation](navigation.md) | Keyboard chat navigation | Next chat, previous chat |
 | [drafts](drafts.md) | Composer and per-chat drafts | Type, switch away/back, check disk |
 | [palette](palette.md) | Command palette and shortcut discovery | Positive shortcut row, no Status result/sidebar entry, activate help |
+| [appearance](appearance.md) | Theme and saved text size | Choose Green, save larger text, reset scale to 82% |
 | [menus](menus.md) | Native menus and custom popups | Measure AMOLED darkness and text contrast, then Green native-menu lightness |
+| [whatsapp-hub](whatsapp-hub.md) | WhatsApp hub transport | Chats, history, live SSE replay, idempotent retry, reads, archive, pending media and DPAPI |
+| [hub](hub.md) | Unified hub transport (IGSH-531) | Source network identity, list/history, SSE replay, send retry, read/archive, media and DPAPI |
 | [slack-sort](slack-sort.md) | Slack last message order | Newest first, unknown last, incoming and sent promotion with keyboard order |
 | [views](views.md) | Account views and combined inbox | Alt+1..4 isolation, account send, Alt+I order, Sort views, restart |
-| [hub](hub.md) | Unified hub transport (IGSH-531) | Source network identity, list/history, SSE replay, send retry, read/archive, media and DPAPI |
-| [whatsapp-hub](whatsapp-hub.md) | WhatsApp hub transport | Chats, history, live SSE replay, idempotent retry, reads, archive, pending media and DPAPI |
-| [appearance](appearance.md) | Theme and saved text size | Choose Green, save larger text, reset scale to 82% |
-| [text-comparison](appearance.md) | DirectWrite beside Chrome | Exact text/font/metric parity, paired screenshots and 3x paragraph crops |
+| [workspace-icons](workspace-icons.md) | Slack workspace icon and WhatsApp mark badges | Two synthetic team icon colours, missing-icon S, green handset and persistent avatar cache |
 | [archive](archive.md) | Archive and Keep archived | Ctrl+E, keep via palette, incoming provider event, Archive presence/unread and inbox absence |
+| [text-comparison](appearance.md) | DirectWrite beside Chrome | Exact text/font/metric parity, paired screenshots and 3x paragraph crops |
 
-Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `search`, `drafts`, `whatsapp-hub`, `hub`, `slack-sort`, `views` and `text-comparison`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
+Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `search`, `drafts`, `whatsapp-hub`, `hub`, `slack-sort`, `views`, `workspace-icons` and `text-comparison`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
 
 The source of truth for commands is `src/main.zig:buildPaletteItems`, for keyboard handling `src/main.zig:handleKeyboard`, and for discoverable help `src/shortcuts.zig`. Every feature file has precisely four H2 sections. Capture the input, resulting UI and durable side effects; preserve proof after cleanup. Only archive adds a synthetic incoming message at the fixture provider boundary; search, navigation, drafts, palette and appearance stay empty. No live send, account login, media, voice playback or transcription claim can be made from these local chats.
 
@@ -26,6 +27,8 @@ The hub journey uses a loopback fake bridge with synthetic rows instead of the o
 The `hub` journey uses the unified `/v1/wazig` contract and synthetic Slack/WhatsApp rows; `whatsapp-hub` continues to prove the separate legacy bridge. Both run automatically on matching PRs. Unit switch/fallback checks are part of the normal Zig test roots.
 
 The `slack-sort` journey verifies Slack last message ordering and incoming/sent promotion through the unified fake hub, and runs on matching PRs.
+
+The `workspace-icons` journey verifies rounded Slack workspace icon badges, the missing-icon S fallback and the green WhatsApp handset through screenshot pixel checks, authenticated synthetic endpoints and retained disk caches. It runs on matching PRs.
 
 ## Recent changes coverage
 
@@ -57,6 +60,7 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-546: keep-archived verification fixture -> unreachable: no user-facing change (fixture provider reads/archive acknowledgements and retained archive transition evidence)
 - IGSH-575: uncached chat switching clears previous messages -> `hub` (asserts Beta identity with zero messages within one second, then delayed Beta-only history and restored Alpha; does not simulate an unbounded event storm)
 - IGSH-592: unified provider views filter by row identity -> `hub` (asserts nonempty pure Slack/WhatsApp views, exact All partition and Alt-key sidebar parity; Telegram rows remain unit-test coverage)
+- IGSH-604: Slack workspace icons and green WhatsApp badges -> `workspace-icons` (asserts screenshot badge colours and letter/handset pixels, authenticated per-team fetches, missing-icon fallback and retained avatar cache bytes; restart reuse and scaling remain source/unit review)
 - IGSH-605: newest-first Slack chat sorting -> `slack-sort` (asserts exact before/incoming/sent orders, descending known times with unknown last, cyclic keyboard order, retained Gamma selection on incoming reorder, authenticated SSE delivery and acknowledged Gamma send; equal-time/name ties and cached timestamp fallback remain CI coverage)
 - WAZI-100: durable send queues and full-queue retention -> unreachable: process restart with pending offline sends and a saturated worker queue are not fixture journeys; covered by tools/test_outbox_runtime.py and src/outbox.zig
 - WAZI-101: pasted files route by provider -> unreachable: staged file plus configured direct Slack/Telegram provider; covered by tools/test_outbox_runtime.py and lint-repeats rule D1

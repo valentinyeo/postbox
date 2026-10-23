@@ -222,3 +222,33 @@ test "hub view accounts prefer explicit accounts and safely fall back for unpref
         try std.testing.expectEqualStrings(if (index == 0) "explicit" else "hub-cache", hub.viewAccount(row.object, "hub-cache"));
     }
 }
+
+test "IGSH-604 workspace icon route escapes team IDs and rejects invalid IDs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    try std.testing.expect(hub.igsh_604_workspace_icons);
+    const request = try hub.workspaceIcon(allocator, "fixture +/team?");
+    try std.testing.expectEqualStrings("GET", request.method);
+    try std.testing.expectEqualStrings("/v1/wazig/workspace-icon/fixture%20%2B%2Fteam%3F", request.path);
+    for ([_][]const u8{ "", "bad\nteam", "bad\x7fteam", "bad\xffteam", "bad:team", ".", "..", &([_]u8{'a'} ** 192) }) |invalid| {
+        try std.testing.expectError(error.InvalidId, hub.workspaceIcon(allocator, invalid));
+    }
+    const key = hub.workspaceAvatarKey("slack:fixture-team:fixture-channel").?;
+    try std.testing.expectEqualStrings("slack:fixture-team:", key);
+    try std.testing.expectEqualStrings(key, hub.workspaceAvatarKey("slack:fixture-team:other-channel").?);
+    try std.testing.expect(!std.mem.eql(u8, key, hub.workspaceAvatarKey("slack:other-team:fixture-channel").?));
+    for ([_][]const u8{ "slack::channel", "slack:team:", "slack:team", "other:team:channel", "slack:bad\nteam:channel" }) |invalid| {
+        try std.testing.expect(hub.workspaceAvatarKey(invalid) == null);
+    }
+}
+
+test "IGSH-604 provider badge chooses cached workspace icon fallback and green WhatsApp mark" {
+    try std.testing.expectEqual(.workspace_icon, hub.providerBadge(.slack, true, true));
+    try std.testing.expectEqual(.letter_s, hub.providerBadge(.slack, false, true));
+    try std.testing.expectEqual(.whatsapp_mark, hub.providerBadge(.whatsapp, false, true));
+    try std.testing.expectEqual(.letter_t, hub.providerBadge(.telegram, false, true));
+    try std.testing.expectEqual(.letter_s, hub.providerBadge(.slack, true, false));
+    try std.testing.expectEqual(.letter_w, hub.providerBadge(.whatsapp, true, false));
+    try std.testing.expectEqual(.letter_t, hub.providerBadge(.telegram, true, false));
+}

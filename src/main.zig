@@ -407,6 +407,7 @@ const AvatarEntry = struct {
     bitmap: ?win.HBITMAP = null,
     status: enum { unknown, loading, ready, unavailable } = .unknown,
     refresh: bool = false,
+    workspace_icon: bool = false,
 };
 
 const AvatarTarget = union(enum) { chat: usize, participant: usize };
@@ -7250,8 +7251,14 @@ fn nextAvatarTarget(a: *App) ?AvatarTarget {
         }
     }
     for (a.chats[0..a.chat_count]) |*chat| {
-        if (chat.provider != .whatsapp) continue;
-        const entry = avatarForChat(a, chat.jid.slice()) orelse continue;
+        const entry = if (chat.provider == .whatsapp)
+            avatarForChat(a, chat.jid.slice()) orelse continue
+        else if (hub.igsh_604_workspace_icons and unifiedHub(a) and chat.provider == .slack) blk: {
+            const key = hub.workspaceAvatarKey(chat.jid.slice()) orelse continue;
+            const workspace_entry = avatarForChat(a, key) orelse continue;
+            workspace_entry.workspace_icon = true;
+            break :blk workspace_entry;
+        } else continue;
         if (avatarWanted(entry)) return .{ .chat = avatarIndex(a, entry) };
     }
     for (a.avatars[0..a.avatar_count], 0..) |*entry, index| {
@@ -7271,7 +7278,7 @@ fn requestNextAvatar(a: *App) void {
     if (a.sync_logged_out or a.pairing_process != null) return;
     if (avatarBusy(a) or avatarBatchBlocked(a)) return;
     const now = win.GetTickCount64();
-    if (!sync_gate.avatarBatchMayStart(a.last_sync_stop_ms, a.avatar_batch_end_ms, a.avatar_retry_after_ms, now)) return;
+    if (!(hub.igsh_604_workspace_icons and unifiedHub(a)) and !sync_gate.avatarBatchMayStart(a.last_sync_stop_ms, a.avatar_batch_end_ms, a.avatar_retry_after_ms, now)) return;
     const target = nextAvatarTarget(a) orelse return;
     stopSync(a, "avatars");
     a.avatar_batch_active = true;
@@ -7308,6 +7315,10 @@ fn startAvatarFetch(a: *App, target: AvatarTarget) bool {
 }
 
 fn applyAvatarResult(a: *App, entry: *AvatarEntry, state: avatar.State) void {
+    if (entry.workspace_icon) {
+        if (entry.bitmap) |old| _ = win.DeleteObject(old);
+        entry.bitmap = null;
+    }
     var buffer: [540]u16 = undefined;
     switch (state) {
         .ready => if (loadAvatarBitmap(a, entry.path.ptr())) |bitmap| {
@@ -14188,6 +14199,62 @@ fn drawAvatarBitmap(hdc: win.HDC, bitmap: win.HBITMAP, left: i32, top: i32, size
     _ = win.AlphaBlend(hdc, left, top, size, size, memory, 0, 0, size, size, blend);
 }
 
+fn drawWorkspaceBadge(hdc: win.HDC, bitmap: win.HBITMAP, rect: win.RECT, radius_px: i32) bool {
+    const width = rect.right - rect.left;
+    const height = rect.bottom - rect.top;
+    if (width <= 0 or height <= 0) return false;
+    var source: win.BITMAP = undefined;
+    if (win.GetObjectW(bitmap, @sizeOf(win.BITMAP), &source) == 0 or source.bmBits == null) return false;
+    var info = std.mem.zeroes(win.BITMAPINFO);
+    info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    var bits: ?*anyopaque = null;
+    const rounded = win.CreateDIBSection(null, &info, win.DIB_RGB_COLORS, &bits, null, 0) orelse return false;
+    defer _ = win.DeleteObject(rounded);
+    if (bits == null) return false;
+    const pixels: [*]u8 = @ptrCast(bits.?);
+    const original: [*]const u8 = @ptrCast(source.bmBits.?);
+    const radius: f32 = @floatFromInt(radius_px);
+    for (0..@as(usize, @intCast(height))) |y| {
+        for (0..@as(usize, @intCast(width))) |x| {
+            const dx = @max(radius - (@as(f32, @floatFromInt(x)) + 0.5), @as(f32, @floatFromInt(x)) + 0.5 - (@as(f32, @floatFromInt(width)) - radius));
+            const dy = @max(radius - (@as(f32, @floatFromInt(y)) + 0.5), @as(f32, @floatFromInt(y)) + 0.5 - (@as(f32, @floatFromInt(height)) - radius));
+            const alpha: u16 = avatar_mask.distanceAlpha(@sqrt(@max(dx, 0) * @max(dx, 0) + @max(dy, 0) * @max(dy, 0)) - radius);
+            const sx = @min(x * 42 / @as(usize, @intCast(width)), 41);
+            const sy = @min(y * 42 / @as(usize, @intCast(height)), 41);
+            for (0..4) |channel| pixels[(y * @as(usize, @intCast(width)) + x) * 4 + channel] = @intCast(@as(u16, original[(sy * 42 + sx) * 4 + channel]) * alpha / 255);
+        }
+    }
+    const memory = win.CreateCompatibleDC(hdc) orelse return false;
+    defer _ = win.DeleteDC(memory);
+    const previous = win.SelectObject(memory, rounded);
+    defer _ = win.SelectObject(memory, previous);
+    return win.AlphaBlend(hdc, rect.left, rect.top, width, height, memory, 0, 0, width, height, .{ .BlendOp = win.AC_SRC_OVER, .BlendFlags = 0, .SourceConstantAlpha = 255, .AlphaFormat = win.AC_SRC_ALPHA }) != 0;
+}
+
+fn drawWhatsAppBadge(shapes: *const smooth.Context, badge: win.RECT) void {
+    const diameter = badge.bottom - badge.top;
+    const left = badge.left + @divTrunc(badge.right - badge.left - diameter, 2);
+    const circle = win.RECT{ .left = left, .top = badge.top, .right = left + diameter, .bottom = badge.bottom };
+    smooth.fillEllipse(shapes, circle, 0x0066d325);
+    const x: f32 = @floatFromInt(left);
+    const y: f32 = @floatFromInt(badge.top);
+    const size: f32 = @floatFromInt(diameter);
+    smooth.strokePolyline(shapes, &.{
+        .{ x + size * 0.34, y + size * 0.29 },
+        .{ x + size * 0.29, y + size * 0.39 },
+        .{ x + size * 0.35, y + size * 0.53 },
+        .{ x + size * 0.48, y + size * 0.66 },
+        .{ x + size * 0.61, y + size * 0.71 },
+        .{ x + size * 0.71, y + size * 0.65 },
+    }, 0x00ffffff, size * 0.12);
+    smooth.strokePolyline(shapes, &.{ .{ x + size * 0.34, y + size * 0.29 }, .{ x + size * 0.41, y + size * 0.39 } }, 0x00ffffff, size * 0.15);
+    smooth.strokePolyline(shapes, &.{ .{ x + size * 0.61, y + size * 0.59 }, .{ x + size * 0.71, y + size * 0.65 } }, 0x00ffffff, size * 0.15);
+}
+
 fn isEmojiCodepoint(cp: u21) bool {
     return (cp >= 0x1F000 and cp <= 0x1FAFF) or
         (cp >= 0xE0020 and cp <= 0xE007F) or
@@ -14616,7 +14683,28 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         shapes = smooth.Context.init(item.hDC);
     }
     const badge = win.RECT{ .left = avatar_left + px(a, 27), .top = avatar_top + px(a, 28), .right = avatar_left + px(a, 48), .bottom = avatar_top + px(a, 46) };
-    smooth.fillRoundRect(&shapes, badge, px(a, 8), px(a, 8), theme.current.primary_container);
+    var workspace_bitmap: ?win.HBITMAP = null;
+    if (hub.igsh_604_workspace_icons and unifiedHub(a) and chat.provider == .slack) {
+        if (hub.workspaceAvatarKey(chat.jid.slice())) |key| {
+            for (a.avatars[0..a.avatar_count]) |*entry| {
+                if (entry.workspace_icon and std.mem.eql(u8, entry.jid.slice(), key)) {
+                    workspace_bitmap = entry.bitmap;
+                    break;
+                }
+            }
+        }
+    }
+    var provider_badge = hub.providerBadge(chat.provider, workspace_bitmap != null, hub.igsh_604_workspace_icons);
+    if (provider_badge == .workspace_icon) {
+        shapes.deinit();
+        if (!drawWorkspaceBadge(item.hDC, workspace_bitmap.?, badge, px(a, 4))) provider_badge = .letter_s;
+        shapes = smooth.Context.init(item.hDC);
+    }
+    if (provider_badge == .whatsapp_mark) {
+        drawWhatsAppBadge(&shapes, badge);
+    } else if (provider_badge != .workspace_icon) {
+        smooth.fillRoundRect(&shapes, badge, px(a, 8), px(a, 8), theme.current.primary_container);
+    }
     const pinned_chat = isChatPinned(a, chat_key.of(chat));
     if (pinned_chat) {
         drawPinIcon(a, &shapes, item.rcItem.right - px(a, 78), item.rcItem.top + px(a, 10), row_muted, false);
@@ -14650,11 +14738,14 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, theme.current.on_primary_container);
     var badge_text = badge;
-    _ = text_draw.drawText(item.hDC, switch (chat.provider) {
-        .whatsapp => lit("W"),
-        .slack => lit("S"),
-        .telegram => lit("T"),
-    }, 1, &badge_text, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+    if (provider_badge != .workspace_icon and provider_badge != .whatsapp_mark) {
+        _ = text_draw.drawText(item.hDC, switch (provider_badge) {
+            .letter_w => lit("W"),
+            .letter_s => lit("S"),
+            .letter_t => lit("T"),
+            else => unreachable,
+        }, 1, &badge_text, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+    }
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
     _ = win.SetTextColor(item.hDC, row_text);
     var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 34) };
@@ -19467,6 +19558,7 @@ fn startHubAvatar(a: *App, target: AvatarTarget) bool {
     defer a.allocator.free(destination);
     var job = WacliJob{ .kind = .hub_avatar, .account = a.cache_tag, .jid = entry.jid };
     wacliJobArgs(&job, &.{destination});
+    if (entry.workspace_icon) job.extra.set("workspace-icon");
     if (!wacliEnqueue(a, job, false)) return false;
     a.avatar_active_index = target;
     if (entry.status == .unknown) entry.status = .loading;
@@ -19693,7 +19785,7 @@ fn unifiedHubRequest(a: *App, allocator: std.mem.Allocator, job: *const WacliJob
         .hub_read => hub.markRead(allocator, jid, job.msg_id.slice()),
         .hub_archive => hub.archive(allocator, jid, std.mem.eql(u8, job.extra.slice(), "true")),
         .hub_media => hub.binary(allocator, jid, job.msg_id.slice()),
-        .hub_avatar => hub.binary(allocator, jid, null),
+        .hub_avatar => if (std.mem.eql(u8, job.extra.slice(), "workspace-icon")) hub.workspaceIcon(allocator, jid[6 .. jid.len - 1]) else hub.binary(allocator, jid, null),
         .hub_send => blk: {
             if (job.args[1].len == 0) break :blk hub.send(allocator, jid, job.args[0].slice(), job.args[2].slice(), job.msg_id.slice());
             const bytes = readFileWin(allocator, job.args[1].slice(), wa_hub.max_file_bytes) orelse return error.FileReadFailed;

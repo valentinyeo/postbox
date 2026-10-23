@@ -18,6 +18,8 @@ public static class VerifyWindow {
     public static extern IntPtr ReadText(IntPtr window, uint message, UIntPtr capacity, StringBuilder text, uint flags, uint timeout, out UIntPtr length);
     [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode)]
     public static extern IntPtr ReadCount(IntPtr window, uint message, UIntPtr wparam, IntPtr lparam, uint flags, uint timeout, out UIntPtr count);
+    [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW")]
+    public static extern IntPtr ReadListMetric(IntPtr window, uint message, UIntPtr index, IntPtr unused, uint flags, uint timeout, out UIntPtr value);
 }
 '@
 
@@ -203,7 +205,7 @@ function Save-Screen($Session, [string]$Name) {
     $tree | Set-Content (Join-Path $Session.evidence "$Name.uia.txt")
     $state = Read-Control $Session status
     $state | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.state.json")
-    if ($Session.feature -in @('archive', 'slack-sort')) {
+    if ($Session.feature -in @('archive', 'slack-sort', 'workspace-icons')) {
         $arguments = if ($state.show_archived) { @('--archived') } else { @() }
         Read-Control $Session chats -Arguments $arguments | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.chats.json")
     }
@@ -229,7 +231,7 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$Views) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$Views, [switch]$WorkspaceIcons) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
@@ -237,6 +239,7 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [s
     $start.ArgumentList.Add((Join-Path $PSScriptRoot $script))
     if ($SlackSort) { $start.ArgumentList.Add('--slack-sort') }
     if ($Views) { $start.ArgumentList.Add('--views') }
+    if ($WorkspaceIcons) { $start.ArgumentList.Add('--workspace-icons') }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')
@@ -473,4 +476,53 @@ function Assert-ComposerLayout($Session, [string]$Name, [int]$Lines, $Baseline =
     Add-Content (Join-Path $Session.evidence 'composer-one-box.log') $message
     Write-Host $message
     return $layout
+}
+
+function Invoke-WorkspaceIconsJourney($Session) {
+    Send-Keys $Session '%0'
+    $null = Wait-Until { (Read-Control $Session status).view -eq 'all' } 'All networks sidebar'
+    $expected = @('slack:fixture-amber:channel-alpha', 'slack:fixture-cobalt:channel-beta', 'whatsapp:fixture:contact-delta', 'slack:fixture-empty:channel-gamma')
+    $rows = (Read-Control $Session chats).chats
+    Assert-That (($rows.id -join ',') -eq ($expected -join ',')) 'Workspace badge fixture list changed'
+    $window = Get-Window $Session
+    $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1016')
+    $list = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+    Assert-That ($null -ne $list) 'Chat list not exposed to UI Automation'
+    $handle = [IntPtr]$list.Current.NativeWindowHandle
+    $client = [VerifyWindow+Rect]::new()
+    $origin = [VerifyWindow+Point]::new()
+    Assert-That ([VerifyWindow]::GetClientRect($handle, [ref]$client)) 'Cannot read list client bounds'
+    Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$origin)) 'Cannot read list screen origin'
+    $rowHeight = [UIntPtr]::Zero
+    $topIndex = [UIntPtr]::Zero
+    Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x01A1, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$rowHeight) -ne [IntPtr]::Zero) 'Cannot read row height'
+    Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x018E, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$topIndex) -ne [IntPtr]::Zero) 'Cannot read list scroll position'
+    Assert-That ($topIndex.ToUInt64() -eq 0) 'Badge fixture is scrolled'
+    $dpi = [VerifyWindow]::GetDpiForWindow($handle)
+    $desktop = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $layout = [ordered]@{
+        dpi = $dpi; row_height = $rowHeight.ToUInt64(); ids = $expected
+        list_x = $origin.X - $desktop.Left; list_y = $origin.Y - $desktop.Top
+        client_width = $client.Right; client_height = $client.Bottom
+    }
+    $layout | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Session.evidence 'workspace-icons-layout.json')
+    foreach ($team in @('fixture-amber', 'fixture-cobalt', 'fixture-empty')) {
+        $reply = Invoke-WebRequest -Uri "$($Session.bridge_url)/v1/wazig/workspace-icon/$team" -SkipHttpErrorCheck
+        Assert-That ($reply.StatusCode -eq 401) 'Workspace icon route allowed unauthenticated access'
+    }
+    $null = Wait-Until {
+        $requests = Read-BridgeRequests $Session
+        foreach ($team in @('fixture-amber', 'fixture-cobalt', 'fixture-empty')) {
+            $fetched = @($requests | Where-Object { $_.authorized -and $_.wire_path -eq "/v1/wazig/workspace-icon/$team" })
+            $status = if ($team -eq 'fixture-empty') { 404 } else { 200 }
+            if ($fetched.Count -ne 1 -or $fetched[0].status -ne $status) { return $false }
+        }
+        return $true
+    } 'workspace icons fetched once per team'
+    $null = Wait-Until {
+        Save-Screen $Session workspace-icons-list
+        & python "$PSScriptRoot/check-workspace-icons.py" $Session.evidence --capture | Out-Host
+        $LASTEXITCODE -eq 0
+    } 'visible workspace icons and green WhatsApp badge'
+    Hub-Pass $Session workspace-icons-pixels
 }

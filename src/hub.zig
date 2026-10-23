@@ -4,6 +4,7 @@ const transport = @import("transport.zig");
 const messenger_view = @import("messenger_view.zig");
 
 pub const igsh_531_hub_provider = true;
+pub const igsh_604_workspace_icons = true;
 pub const Request = bridge.Request;
 pub const Rows = bridge.Rows;
 pub const Sse = bridge.Sse;
@@ -64,6 +65,37 @@ pub fn binary(allocator: std.mem.Allocator, chat: []const u8, message_id: ?[]con
         return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/media/{s}/{s}", .{ c, m }) };
     }
     return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/avatar/{s}", .{c}) };
+}
+
+pub fn workspaceIcon(allocator: std.mem.Allocator, team: []const u8) !Request {
+    try validTeam(team);
+    const encoded = try bridge.encode(allocator, team);
+    defer allocator.free(encoded);
+    return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/workspace-icon/{s}", .{encoded}) };
+}
+
+pub fn workspaceAvatarKey(chat: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, chat, "slack:")) return null;
+    const end = std.mem.indexOfScalarPos(u8, chat, 6, ':') orelse return null;
+    if (end + 1 >= chat.len) return null;
+    const team = chat[6..end];
+    validTeam(team) catch return null;
+    return chat[0 .. end + 1];
+}
+
+fn validTeam(team: []const u8) !void {
+    try validId(team);
+    if (std.mem.indexOfScalar(u8, team, ':') != null or std.mem.eql(u8, team, ".") or std.mem.eql(u8, team, "..")) return error.InvalidId;
+}
+
+pub const Badge = enum { workspace_icon, whatsapp_mark, letter_s, letter_w, letter_t };
+
+pub fn providerBadge(provider: transport.Provider, cached_icon: bool, enabled: bool) Badge {
+    return switch (provider) {
+        .slack => if (enabled and cached_icon) .workspace_icon else .letter_s,
+        .whatsapp => if (enabled) .whatsapp_mark else .letter_w,
+        .telegram => .letter_t,
+    };
 }
 
 pub fn events(last_event_id: []const u8) Request {
