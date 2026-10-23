@@ -7,7 +7,7 @@
 - Ship: `tools/ship.sh <TICKET> "<what changed>"` runs light checks locally, pushes, opens the PR and waits for `automerge.yml` to merge it and `auto-release.yml`/`release.yml` to publish a release for app changes.
 
 ## Build and test
-- Pushes and PR commands run `tools/preflight-light.sh` locally: fast static checks and an explicit allowlist of Python/Node tooling tests, with no Zig or Wine invocation. The private-marker scan runs when `PRIVATE_MARKERS` is available; CI always enforces it.
+- Pushes and PR commands run `tools/preflight-light.sh` locally: fast static checks and Python/Node tooling tests with J2-enforced parity against CI Python discovery and reasoned heavy exclusions, with no Zig or Wine invocation. The private-marker scan runs when `PRIVATE_MARKERS` is available; CI always enforces it.
 - GitHub CI runs the unchanged full `tools/preflight.sh` with Zig 0.16.0: format, tests, Windows builds and harnesses. Never run the full preflight on the shared build server.
 - `node tools/strip-comments.mjs --check`: CI rejects code comments; put the why in the commit or PR.
 - build.zig harnesses slice `src/main.zig` by text markers; editing near them breaks `unfurl-verification`.
@@ -15,7 +15,7 @@
 ## Rules and what enforces them (WAZI-123)
 | Rule | Enforced by |
 |---|---|
-| Pushes run only light checks locally; GitHub CI runs the full preflight. Never run full preflight on the shared build server (IGSH-518) | `.claude/hooks/preflight-guard.sh` and `tools/ship.sh` run `tools/preflight-light.sh`; `tools/test-preflight-guard.sh` rule J1 rejects full preflight and direct Zig calls in either entrypoint; CI runs `tools/preflight.sh` |
+| Pushes run only light checks locally; GitHub CI runs the full preflight. Never run full preflight on the shared build server (IGSH-518) | `.claude/hooks/preflight-guard.sh` and `tools/ship.sh` run `tools/preflight-light.sh`; `tools/test-preflight-guard.sh` rule J1 rejects full preflight and direct Zig calls in either entrypoint; rule J2 (IGSH-711) requires every CI-discovered Python test in the light list or a reasoned heavy-exclusion list; CI runs `tools/preflight.sh` |
 | The wacli worker keeps the job it dequeues; a full archive queue keeps the unarchive request | `tools/lint-repeats.sh` rules A1, A2 |
 | Release workflows dispatch release.yml for bot tags, wait for GUI exes, end expected-exit-3 checks with `exit 0`, never use `gh api --slurp`; automerge never requires the AI `code-review` check; workflows never call OpenRouter or Z.ai, the advisory AI `code-review` job runs in `ai-review.yml` on same-repo, non-draft PR events or trusted `/ai-review` comments, checks out the base SHA's tools and rules, uses GitHub Models through `GITHUB_TOKEN` with `models: read`, per-file chunks for the free per-request limit, `AI_REVIEW_MODEL` overrides `openai/gpt-4.1`, no API key, and posts directly | `tools/lint-repeats.sh` rules B1 to B7 |
 | Automerge waits for every non-AI check on the PR head, including unfurl-verification and the TDLib cache; missing, pending, skipped or failed checks block merging (IGSH-504) | `tools/lint-repeats.sh` rule B8 and `tools/test_no_comments.py` |
