@@ -277,6 +277,7 @@ fn Utf8Text(comptime capacity: usize) type {
 
 const Chat = struct {
     account: Utf8Text(32) = .{},
+    view_account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
     name: WideText(159) = .{},
     kind: WideText(31) = .{},
@@ -1341,7 +1342,7 @@ fn updateChatTooltip(a: *App, coords: win.LPARAM) void {
     if (hiword(hit) == 0 and loword(hit) < a.chat_count) {
         const chat = &a.chats[loword(hit)];
         for (a.views.items) |*view| {
-            if (messenger_view.accountMatches(messenger_view.providerView(chat.provider), chat.account.slice(), view.key.key())) {
+            if (messenger_view.accountMatches(messenger_view.providerView(chat.provider), chatViewKey(chat).account, view.key.key())) {
                 text = view.labelText();
                 break;
             }
@@ -2407,9 +2408,11 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         if (unifiedHub(a)) {
             chat.provider = hub.sourceProvider(object) orelse continue;
             chat.account.set(hub.sourceAccount(object, a.cache_tag.slice()));
+            chat.view_account.set(hub.viewAccount(object, a.cache_tag.slice()));
         }
-        if (!chatInView(a, .{ .provider = chat.provider, .account = chat.account.slice(), .id = "" })) continue;
         const jid = getString(object, "jid");
+        chat.jid.set(jid);
+        if (!chatInView(a, chatViewKey(&chat))) continue;
         if (fresh and !a.show_archived) _ = holdKeptArchived(a, jid, getBool(object, "archived"), getString(object, "last_message_ts"));
         if (pendingArchiveHidesChat(a, jid, a.show_archived)) continue;
         const raw_name = getString(object, "name");
@@ -2418,7 +2421,6 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         if (query_utf8) |query| {
             if (!containsIgnoreCase(display_name, query) and !containsIgnoreCase(jid, query)) continue;
         }
-        chat.jid.set(jid);
         chat.name.set(a.allocator, display_name);
         chat.kind.set(a.allocator, if (std.mem.endsWith(u8, jid, "@g.us")) "Group" else getString(object, "kind"));
         chat.timestamp.set(getString(object, "last_message_ts"));
@@ -3972,6 +3974,12 @@ fn selectedViewKey(a: *App) *chat_key.Stored {
     return &a.view_selected[@intFromEnum(a.chat_view)];
 }
 
+fn chatViewKey(chat: *const Chat) chat_key.Key {
+    var key = chat_key.of(chat);
+    if (chat.view_account.len > 0) key.account = chat.view_account.slice();
+    return key;
+}
+
 fn chatInView(a: *App, key: chat_key.Key) bool {
     return messenger_view.accountMatches(activeChatView(a), a.view_account.slice(), key);
 }
@@ -3993,8 +4001,23 @@ fn rebuildViews(a: *App, rows: []const std.json.Value) void {
         for (rows) |row| {
             if (row != .object) continue;
             const provider = hub.sourceProvider(row.object) orelse continue;
-            const account = hub.sourceAccount(row.object, a.cache_tag.slice());
-            messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(provider, account, getString(row.object, "account_name"))) catch return;
+            const account = hub.viewAccount(row.object, a.cache_tag.slice());
+            const key = chat_key.Key{ .provider = provider, .account = account, .id = "" };
+            var present = false;
+            for (known.items) |view| {
+                if (chat_key.Key.eql(view.key.key(), key)) present = true;
+            }
+            if (present) continue;
+            var view = messenger_view.Account.init(provider, account, "");
+            if (provider == .slack) {
+                if (slackInstallation(a, account)) |installation| {
+                    view = messenger_view.Account.init(provider, account, installation.team_name.slice());
+                } else if (slack_win.loadInstallation(a.allocator, account)) |saved| {
+                    defer saved.deinit();
+                    view = messenger_view.Account.init(provider, account, saved.value.team_name);
+                }
+            }
+            messenger_view.appendUnique(a.allocator, &known, view) catch return;
         }
     } else {
         if (a.cache_tag.len > 0) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.whatsapp, a.cache_tag.slice(), a.hub_account.slice())) catch return;
@@ -12369,6 +12392,8 @@ fn controlWriteChat(a: *const App, w: *std.Io.Writer, chat: *const Chat) !void {
     try control_api.writeString(w, chat.jid.slice());
     try w.print(",\"provider\":\"{s}\",\"account\":", .{@tagName(chat.provider)});
     try control_api.writeString(w, chat.account.slice());
+    try w.writeAll(",\"view_account\":");
+    try control_api.writeString(w, chatViewKey(chat).account);
     try w.writeAll(",\"name\":");
     try control_api.writeStringUtf16(w, chat.name.slice());
     try w.writeAll(",\"kind\":");
@@ -12520,9 +12545,10 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, acc
         if (unifiedHub(a)) {
             chat.provider = hub.sourceProvider(object) orelse continue;
             chat.account.set(hub.sourceAccount(object, a.cache_tag.slice()));
+            chat.view_account.set(hub.viewAccount(object, a.cache_tag.slice()));
         }
-        if (!messenger_view.accountMatches(view, account, .{ .provider = chat.provider, .account = chat.account.slice(), .id = jid })) continue;
         chat.jid.set(jid);
+        if (!messenger_view.accountMatches(view, account, chatViewKey(&chat))) continue;
         chat.name.set(a.allocator, display_name);
         chat.kind.set(a.allocator, if (std.mem.endsWith(u8, jid, "@g.us")) "Group" else getString(object, "kind"));
         chat.timestamp.set(getString(object, "last_message_ts"));

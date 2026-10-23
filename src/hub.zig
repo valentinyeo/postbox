@@ -105,6 +105,22 @@ pub fn sourceAccount(row: std.json.ObjectMap, fallback: []const u8) []const u8 {
     return if (account.len > 0) account else fallback;
 }
 
+pub fn viewAccount(row: std.json.ObjectMap, fallback: []const u8) []const u8 {
+    const account = string(row, "account");
+    if (account.len > 0) return account;
+    const jid = string(row, "jid");
+    const provider = sourceProvider(row) orelse return fallback;
+    if (provider == .whatsapp) {
+        const colon = std.mem.indexOfScalar(u8, jid, ':') orelse return fallback;
+        if (colon > 0 and std.mem.indexOfScalar(u8, jid[colon + 1 ..], '@') != null) return jid[0..colon];
+    } else if (provider == .slack and std.mem.startsWith(u8, jid, "slack:")) {
+        const rest = jid["slack:".len..];
+        const colon = std.mem.indexOfScalar(u8, rest, ':') orelse return fallback;
+        if (colon > 0 and colon + 1 < rest.len) return rest[0..colon];
+    }
+    return fallback;
+}
+
 pub fn providerForView(row: std.json.ObjectMap, view: messenger_view.View) ?transport.Provider {
     const provider = sourceProvider(row) orelse return null;
     return if (messenger_view.includes(view, provider)) provider else null;

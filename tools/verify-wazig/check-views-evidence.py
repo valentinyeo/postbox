@@ -22,13 +22,22 @@ def check_views(folder):
     assert session['feature'] == 'views' and session['sha256'] and session['commit']
     assert not (folder / 'failure.txt').exists()
     baseline = capture('before')
-    expected = [('whatsapp', 'wa-a', 'WhatsApp Account A'), ('whatsapp', 'wa-b', 'WhatsApp Account B'),
-                ('slack', 'slack-a', 'Slack Workspace A'), ('slack', 'slack-b', 'Slack Workspace B')]
+    expected = [('whatsapp', 'personal', 'WhatsApp personal'), ('whatsapp', 'business', 'WhatsApp business'),
+                ('slack', 'T0ABC123', 'Slack T0ABC123'), ('slack', 'T0DEF456', 'Slack T0DEF456')]
     assert [(view['provider'], view['account'], view['label']) for view in baseline['view_order']] == expected
     assert baseline['current_view']['inbox'] and baseline['chat_count'] == 8
     catalog = read('views-catalog.json')['chats']
     assert len(catalog) == 8
     all_keys = identities(catalog)
+    routing_accounts = {row['account'] for row in catalog}
+    assert len(routing_accounts) == 1, 'view derivation changed the hub cache identity'
+    for row in catalog:
+        if row['provider'] == 'whatsapp':
+            prefix, contact = row['id'].split(':', 1)
+            assert '@' in contact and prefix == row['view_account']
+        else:
+            prefix, team, channel = row['id'].split(':')
+            assert prefix == 'slack' and team == row['view_account'] and channel.startswith('C')
     partition = set()
     for number, (provider, account, label) in enumerate(expected, 1):
         state = capture(f'view-{number}')
@@ -36,13 +45,13 @@ def check_views(folder):
         assert (view['provider'], view['account'], view['label'], view['inbox']) == (provider, account, label, False)
         rows = read(f'view-{number}.chats.json')['chats']
         assert state['chat_count'] == len(rows) == 2
-        assert all((row['provider'], row['account']) == (provider, account) for row in rows)
+        assert all((row['provider'], row['view_account']) == (provider, account) for row in rows)
         keys = identities(rows)
         assert keys.isdisjoint(partition)
         partition |= keys
         filtered = capture(f'search-{number}')
         assert filtered['search'] == 'Shared' and filtered['chat_count'] == 1
-        assert filtered['selected']['account'] == account and filtered['selected']['name'] == 'Verification Shared'
+        assert filtered['selected']['view_account'] == account and filtered['selected']['name'] == 'Verification Shared'
     assert partition == all_keys
     assert sum(row['name'] == 'Verification Shared' and row['provider'] == 'whatsapp' for row in catalog) == 2
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
@@ -52,14 +61,17 @@ def check_views(folder):
     assert len({row['body']['client_id'] for row in sends}) == 1
     sent = read('sent.messages.json')
     other = read('other.messages.json')
-    assert sent['chat']['account'] == 'wa-a' and other['chat']['account'] == 'wa-b'
+    assert sent['chat']['view_account'] == 'personal' and other['chat']['view_account'] == 'business'
     assert sent['chat']['name'] == other['chat']['name'] == 'Verification Shared'
-    assert all(row['source_provider'] == 'whatsapp' and row['source_account'] == 'wa-a' and row['body']['chat'] == sent['chat']['id'] for row in sends)
+    assert sent['chat']['account'] == other['chat']['account'] == next(iter(routing_accounts))
+    assert sent['chat']['id'].startswith('personal:') and other['chat']['id'].startswith('business:')
+    assert sent['chat']['id'].split(':', 1)[1] == other['chat']['id'].split(':', 1)[1]
+    assert all(row['source_provider'] == 'whatsapp' and row['source_account'] == 'personal' and row['body']['chat'] == sent['chat']['id'] for row in sends)
     assert all(set(row['body']) == {'chat', 'text', 'reply_to', 'client_id'} for row in sends)
     assert sum(row['text'] == 'Verification account send' for row in sent['messages']) == 1
     assert other['messages'] and all(row['text'] != 'Verification account send' for row in other['messages'])
-    for name, account in [('sent', 'wa-a'), ('isolated', 'wa-b')]:
-        assert capture(name)['selected']['account'] == account
+    for name, account in [('sent', 'personal'), ('isolated', 'business')]:
+        assert capture(name)['selected']['view_account'] == account
     inbox = read('inbox.chats.json')['chats']
     assert identities(inbox) == all_keys
     assert [row['last_message_time'] for row in inbox] == sorted((row['last_message_time'] for row in inbox), reverse=True)
@@ -72,8 +84,8 @@ def check_views(folder):
     assert [(view['provider'], view['account'], view['label']) for view in moved['view_order']] == order
     saved = (folder / 'view-order.txt').read_text(encoding='utf-8-sig').splitlines()
     assert saved == [f'{provider}:{account}' for provider, account, _ in order]
-    assert capture('sort-selected')['current_view']['account'] == 'wa-a'
-    assert capture('sort-closed')['current_view']['account'] == 'wa-a'
+    assert capture('sort-selected')['current_view']['account'] == 'personal'
+    assert capture('sort-closed')['current_view']['account'] == 'personal'
     restart = read('restart.json')
     assert (restart['old_pid'], restart['old_start']) != (restart['new_pid'], restart['new_start'])
     assert restart['new_pid'] == session['pid'] and restart['new_start'] == session['startTicks']
@@ -83,7 +95,7 @@ def check_views(folder):
         assert state['current_view'] == dict(provider=provider, account=account, label=label, inbox=False)
         assert [(view['provider'], view['account'], view['label']) for view in state['view_order']] == order
         rows = read(f'restart-{number}.chats.json')['chats']
-        assert len(rows) == 2 and all(row['account'] == account for row in rows)
+        assert len(rows) == 2 and all(row['view_account'] == account for row in rows)
     capture('after')
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
     for keys in ['%1', '%2', '%3', '%4', '%i', '^1', '^2', '^{TAB}', '^+{TAB}', '^f', 'Shared', 'Sort views', '^{DOWN}', '{ENTER}', '{ESC}', 'Quit Messages', 'Verification account send']:
