@@ -102,7 +102,7 @@ def check_paste_image(folder):
             name = f'{provider}/{phase}'
             assert (folder / f'{name}.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
             assert read(f'{name}.state.json')['selected']['id'] == 'paste:' + provider
-            assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
+            assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         assert f'paste-image {provider}-multi-remove PASS' in proof
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
