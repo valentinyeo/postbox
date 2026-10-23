@@ -1,6 +1,7 @@
 const std = @import("std");
 const chat_key = @import("chat_key");
 const chat_reconcile = @import("chat_reconcile");
+const wa_hub = @import("wa_hub.zig");
 
 fn Utf8Text(comptime capacity: usize) type {
     return struct {
@@ -22,7 +23,7 @@ const Chat = struct {
     timestamp: Utf8Text(47) = .{},
     provider: Provider = .whatsapp,
 };
-const WacliJobKind = enum { messages, chats };
+const WacliJobKind = enum { messages, chats, cache_tag };
 const WacliJob = struct {
     provider: Provider = .whatsapp,
     account: Utf8Text(32) = .{},
@@ -48,6 +49,17 @@ const WacliResult = struct {
 };
 const App = struct {
     cache_tag: Utf8Text(32) = .{},
+    unified_hub: bool = false,
+    hub_account: Utf8Text(32) = .{},
+    wa_bridge_url: []const u8 = "fixture-origin",
+    wa_bridge_account: []const u8 = "",
+    startup_probe_pending: bool = false,
+    sync_logged_out: bool = false,
+    wacli_mutex: std.Io.Mutex = .init,
+    io: std.Io = std.testing.io,
+    persisted_tag: Utf8Text(32) = .{},
+    log_count: usize = 0,
+    last_log: Utf8Text(191) = .{},
     allocator: std.mem.Allocator = std.testing.allocator,
     chats: [2]Chat = .{ .{}, .{} },
     chat_count: usize = 1,
@@ -122,7 +134,18 @@ fn applyChats(a: *App, raw: []const u8, _: bool) bool {
 }
 fn saveChatsCache(_: *App, _: []const u8) void {}
 fn setStatus(_: *App, _: []const u8) void {}
-fn appendLaunchLog(_: *App, _: []const u8) void {}
+fn appendLaunchLog(a: *App, line: []const u8) void {
+    a.log_count += 1;
+    a.last_log.set(line);
+}
+fn persistTag(a: *App, tag: []const u8) void {
+    a.persisted_tag.set(tag);
+}
+fn bindOutboxAccount(_: *App) void {}
+fn loadChatsCache(_: *App) void {}
+fn refreshGroups(_: *App) void {}
+fn refreshChats(_: *App) void {}
+fn refreshContactsIndex(_: *App) void {}
 
 test "fresh sidebar row triggers one generation-guarded read" {
     var a = fixture();
@@ -334,4 +357,58 @@ test "IGSH-575 switching to cached history displays it before the reply" {
     try std.testing.expectEqual(@as(u32, 0), a.cached);
     try std.testing.expectEqual(@as(u32, 1), a.pending);
     try std.testing.expect(chat_key.Key.eql(chat_key.of(&a.chats[0]), chat_key.displayed(&a)));
+}
+
+test "IGSH-575 unified hub repairs a saved bridge tag and shows fresh history" {
+    for ([_]bool{ true, false }) |account_ready| {
+        var a = fixture();
+        a.unified_hub = true;
+        a.cache_tag.set("aaaaaaaaaaaaaaaa");
+        if (account_ready) a.hub_account.set("hub");
+        var tag_buffer: [16]u8 = undefined;
+        const tag = try std.fmt.bufPrint(&tag_buffer, "{x:0>16}", .{std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, a.wa_bridge_url), "hub")});
+        a.chats[0].account.set(tag);
+        a.chats[0].jid.set("fixture-room@g.us");
+        a.message_count = 1;
+        a.displayed_account = a.cache_tag;
+        a.displayed_jid.set("personal:fixture-previous@g.us");
+        const accounts = WacliResult{ .kind = .cache_tag, .data = "[{\"account\":\"hub\",\"state\":\"linked\"}]" };
+        applyHubAccounts(&a, &accounts);
+        try std.testing.expectEqual(@as(usize, 0), a.message_count);
+        try std.testing.expect(chat_key.Key.eql(chat_key.of(&a.chats[0]), chat_key.displayed(&a)));
+        var result = resultFor(a.last_job);
+        result.data = "{\"success\":true,\"data\":{\"messages\":[{\"MsgID\":\"FRESH\",\"ChatJID\":\"personal:fixture-room@g.us\",\"Text\":\"Fixture message\",\"FromMe\":false,\"Timestamp\":\"2026-01-01T00:00:00Z\"}]}}";
+        deliver(&a, &result);
+        try std.testing.expectEqual(@as(usize, 1), a.message_count);
+        try std.testing.expectEqual(@as(u32, 2), a.painted);
+        try std.testing.expectEqual(@as(u32, 1), a.cached);
+        try std.testing.expect(chat_key.Key.eql(chat_key.of(&a.chats[0]), chat_key.displayed(&a)));
+        try std.testing.expectEqualStrings(a.chats[0].timestamp.slice(), a.displayed_timestamp.slice());
+        try std.testing.expectEqualStrings(tag, a.cache_tag.slice());
+        try std.testing.expectEqualStrings(tag, a.persisted_tag.slice());
+        const queued = a.queued;
+        hubRefreshMessages(&a, a.chats[0].jid.slice());
+        try std.testing.expectEqual(queued + 1, a.queued);
+    }
+}
+
+test "IGSH-575 dropped account and selected generation replies each log once" {
+    var a = fixture();
+    a.unified_hub = true;
+    a.cache_tag.set("aaaaaaaaaaaaaaaa");
+    a.chats[0].account.set("bbbbbbbbbbbbbbbb");
+    refreshMessages(&a);
+    var result = resultFor(a.last_job);
+    deliver(&a, &result);
+    try std.testing.expectEqual(@as(usize, 1), a.log_count);
+    try std.testing.expect(std.mem.indexOf(u8, a.last_log.slice(), "account mismatch") != null);
+    try std.testing.expectEqual(@as(usize, 0), a.message_count);
+    a.cache_tag = a.chats[0].account;
+    refreshMessages(&a);
+    result = resultFor(a.last_job);
+    a.messages_gen += 1;
+    deliver(&a, &result);
+    try std.testing.expectEqual(@as(usize, 2), a.log_count);
+    try std.testing.expect(std.mem.indexOf(u8, a.last_log.slice(), "generation changed") != null);
+    try std.testing.expectEqual(@as(usize, 0), a.message_count);
 }
