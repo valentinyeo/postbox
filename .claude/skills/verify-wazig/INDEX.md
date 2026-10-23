@@ -8,6 +8,7 @@ The complete workflow-input index and bounded recent-change coverage live in [fe
 - [No-trap navigation](features/notrap.md): saved empty startup fallback, Esc, and every Alt view shortcut from every view.
 - [Account views](features/views.md): saved Alt-key ordering, account isolation, combined inbox and same-profile restart.
 - [Slack ordering](features/slack-sort.md): last-message ordering and incoming/sent promotion.
+- [Slack archive](features/slack-archive.md): local archive, incoming messages, restart and unarchive without workspace archive calls.
 - [Workspace icons](features/workspace-icons.md): Slack workspace images, WhatsApp and Signal marks, fallback and persistent cache evidence.
 - [Hub archive migration](features/hub-archive.md): legacy WhatsApp keep flags, hub re-archive, durable state and same-profile restart.
 - [Unified hub](features/hub.md): existing transport and backend isolation.

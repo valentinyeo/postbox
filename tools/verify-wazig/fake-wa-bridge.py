@@ -33,7 +33,7 @@ class State:
         self.log = log
         self.lock = threading.Condition()
         self.live = False
-        self.archived = False
+        self.archived = {ALPHA: False, BETA: False}
         self.read = False
         self.media_polls = {}
         self.sends = {}
@@ -96,13 +96,13 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path == '/v1/chats':
             archived = query.get('archived', ['false'])[0] == 'true'
             rows = []
-            if archived == state.archived:
+            if archived == state.archived[ALPHA]:
                 rows.append(dict(jid=f'{ACCOUNT}:{ALPHA}', name='Verification Alpha', kind='direct',
                                  last_message_ts=state.stamp, unread_count=0 if state.read else 2,
-                                 archived=state.archived))
-            if not archived:
+                                 archived=state.archived[ALPHA]))
+            if archived == state.archived[BETA]:
                 rows.append(dict(jid=f'{ACCOUNT}:{BETA}', name='Verification Beta', kind='direct',
-                                 last_message_ts='2026-01-01T00:00:00Z', unread_count=0, archived=False))
+                                 last_message_ts='2026-01-01T00:00:00Z', unread_count=0, archived=state.archived[BETA]))
             self.respond(200, rows)
         elif url.path == '/v1/messages':
             chat = query.get('chat', [''])[0].removeprefix(f'{ACCOUNT}:')
@@ -217,7 +217,7 @@ class Handler(BaseHTTPRequestHandler):
             state.read = True
             self.respond(200, {'status': 'ok'}, body=body)
         elif self.path == '/v1/archive':
-            state.archived = body['archived']
+            state.archived[body['chat']] = body['archived']
             self.respond(200, {'status': 'ok'}, body=body)
         else:
             self.respond(404, {'error': 'unknown path'}, body=body)

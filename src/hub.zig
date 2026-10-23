@@ -129,6 +129,26 @@ pub fn normalize(allocator: std.mem.Allocator, raw: []const u8, kind: Rows, chat
         std.json.Stringify.valueAlloc(allocator, .{ .success = true, .data = parsed.value }, .{});
 }
 
+pub fn archivedChats(allocator: std.mem.Allocator, archived_raw: []const u8, inbox_raw: []const u8) ![]u8 {
+    const archived = try normalize(allocator, archived_raw, .chats, "");
+    defer allocator.free(archived);
+    const inbox = try normalize(allocator, inbox_raw, .chats, "");
+    defer allocator.free(inbox);
+    var archived_rows = try std.json.parseFromSlice(std.json.Value, allocator, archived, .{});
+    defer archived_rows.deinit();
+    var inbox_rows = try std.json.parseFromSlice(std.json.Value, allocator, inbox, .{});
+    defer inbox_rows.deinit();
+    var rows: std.ArrayList(std.json.Value) = .empty;
+    defer rows.deinit(allocator);
+    for (archived_rows.value.object.get("data").?.array.items) |row| {
+        if (sourceProvider(row.object) != .slack) try rows.append(allocator, row);
+    }
+    for (inbox_rows.value.object.get("data").?.array.items) |row| {
+        if (sourceProvider(row.object) == .slack) try rows.append(allocator, row);
+    }
+    return std.json.Stringify.valueAlloc(allocator, .{ .success = true, .data = rows.items }, .{});
+}
+
 pub fn sourceProvider(row: std.json.ObjectMap) ?transport.Provider {
     return std.meta.stringToEnum(transport.Provider, string(row, "provider"));
 }

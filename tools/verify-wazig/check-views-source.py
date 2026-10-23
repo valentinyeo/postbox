@@ -147,7 +147,7 @@ def check_integration():
         'persistPendingReads': '695d922f67253237c5b26207d3f37f19d7274a5a99a33e7e91c612e4f230351e',
         'msgCacheGet': '35de7a11c5298f2b4f7954cda6b73e8b4bb9d54a82e4053b32cc8f4745ac593e',
         'loadMsgCacheDisk': 'd86c62bd4d9c3a242afcd9aeaa3b757af3e09c54fe288a2e73e19dbf31654a19',
-        'archiveChat': '24d0ee2a4534ff68c1284d1de2c91344dd34840653d51fca24cba3fc3eed91ce',
+        'archiveChat': '42608623fc98629f48aabeb12998d8c18687be20f97e54ae3c890c594fbd6bee',
         'startNextArchive': 'c346ccb3d69e3fb5a16f6216f91f8e2390aac40164187b77be632a329df1f67d',
     }
     for name, expected in routing_function_sha256.items():
@@ -177,7 +177,7 @@ def check_integration():
 
 def check_journey():
     runner = read('tools/verify-wazig/run.ps1')
-    require(runner, ["'hub', 'hub-archive', 'slack-sort', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram'", '-Views:($Feature -eq \'views\')',
+    require(runner, ["'hub', 'hub-archive', 'slack-sort', 'slack-archive', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram'", '-Views:($Feature -eq \'views\')',
                      '. "$PSScriptRoot/views.ps1"', 'Invoke-ViewsJourney $session $messages $start'])
     journey = read('tools/verify-wazig/views.ps1')
     require(journey, ['Assert-AccountView', "@('personal', 'business', 'T0ABC123', 'T0DEF456')", 'Where-Object view_account -ne $Account',
@@ -203,7 +203,7 @@ def check_journey():
                        "== order + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]", "+ ['telegram:telegram', 'signal:signal']"])
     require(read('tools/verify-wazig/check-evidence.py'), ["session['feature'] == 'views'", 'check-views-evidence.py'])
     workflow = read('.github/workflows/verify.yml')
-    require(workflow, ['hub, hub-archive, slack-sort, slack-threads, views, workspace-icons, signal, telegram, notrap, repaint, archive', '"hub","hub-archive","slack-sort","slack-threads","views","workspace-icons","signal","telegram","notrap","text-comparison","repaint"', "matrix.feature == 'views'",
+    require(workflow, ['hub, hub-archive, slack-sort, slack-archive, slack-threads, views, workspace-icons, signal, telegram, notrap, repaint, archive', '"hub","hub-archive","slack-sort","slack-archive","slack-threads","views","workspace-icons","signal","telegram","notrap","text-comparison","repaint"', "matrix.feature == 'views'",
                        'src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig'])
     for path in (root / 'tools/verify-wazig').glob('*.py'):
         ast.parse(path.read_text(encoding='utf-8'), filename=str(path))

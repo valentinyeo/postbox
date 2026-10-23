@@ -159,12 +159,25 @@ function Read-ListLabels($List) {
 
 function Send-Keys($Session, [string]$Keys) {
     $app = Get-App $Session
-    $foreground = [Windows.Automation.AutomationElement]::FromHandle([VerifyWindow]::GetForegroundWindow())
-    if ($foreground.Current.ProcessId -ne $Session.pid) {
-        [VerifyWindow]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
-        $foreground = [Windows.Automation.AutomationElement]::FromHandle([VerifyWindow]::GetForegroundWindow())
+    $null = Wait-Until {
+        $foreground = [VerifyWindow]::GetForegroundWindow()
+        $ownerPid = [uint32]0
+        if ($foreground -ne [IntPtr]::Zero) {
+            [VerifyWindow]::GetWindowThreadProcessId($foreground, [ref]$ownerPid) | Out-Null
+        }
+        if ($foreground -eq [IntPtr]::Zero -or $ownerPid -ne $Session.pid) {
+            $app.Refresh()
+            [VerifyWindow]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
+            return $false
+        }
+        return $true
+    } 'app foreground window before keyboard input'
+    $foreground = [VerifyWindow]::GetForegroundWindow()
+    $ownerPid = [uint32]0
+    if ($foreground -ne [IntPtr]::Zero) {
+        [VerifyWindow]::GetWindowThreadProcessId($foreground, [ref]$ownerPid) | Out-Null
     }
-    Assert-That ($foreground.Current.ProcessId -eq $Session.pid) 'Refusing keyboard input to another app'
+    Assert-That ($foreground -ne [IntPtr]::Zero -and $ownerPid -eq $Session.pid) 'Refusing keyboard input to another app'
     [System.Windows.Forms.SendKeys]::SendWait($Keys)
     Add-Content (Join-Path $Session.evidence 'actions.log') "keys: $Keys"
 }
@@ -211,7 +224,7 @@ function Save-Screen($Session, [string]$Name) {
     $tree | Set-Content (Join-Path $Session.evidence "$Name.uia.txt")
     $state = Read-Control $Session status
     $state | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.state.json")
-    if ($Session.feature -in @('archive', 'hub-archive', 'slack-sort', 'workspace-icons', 'signal', 'telegram', 'notrap')) {
+    if ($Session.feature -in @('archive', 'hub-archive', 'slack-sort', 'slack-archive', 'slack-threads', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions')) {
         $arguments = if ($state.show_archived) { @('--archived') } else { @() }
         Read-Control $Session chats -Arguments $arguments | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.chats.json")
     }
@@ -237,13 +250,14 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackThreads, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions, [switch]$HubArchive, [switch]$Repaint) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackArchive, [switch]$SlackThreads, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions, [switch]$HubArchive, [switch]$Repaint) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
     $script = if ($Unified) { 'fake-hub.py' } else { 'fake-wa-bridge.py' }
     $start.ArgumentList.Add((Join-Path $PSScriptRoot $script))
     if ($SlackSort) { $start.ArgumentList.Add('--slack-sort') }
+    if ($SlackArchive) { $start.ArgumentList.Add('--slack-archive') }
     if ($SlackThreads) { $start.ArgumentList.Add('--slack-threads') }
     if ($Views) { $start.ArgumentList.Add('--views') }
     if ($WorkspaceIcons) { $start.ArgumentList.Add('--workspace-icons') }
@@ -405,10 +419,15 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
     Assert-That ($cached.Count -gt 0) 'Downloaded media bytes differ from bridge response'
     Hub-Pass $Session media-202-ready-cache
     Save-Screen $Session sent
+    if ($unified) {
+        Send-Keys $Session '^{TAB}'
+        $null = Wait-Until { (Read-Control $Session status).selected.id -eq $beta } 'WhatsApp archive target'
+    }
+    $archiveTarget = if ($unified) { $beta } else { $alpha }
     Send-Keys $Session '^k'
     Send-Keys $Session 'Archive selected chat'
     Send-Keys $Session '{ENTER}'
-    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/archive' -and $_.body.archived -eq $true -and $_.body.chat -eq $alpha -and $_.status -eq 200 }).Count -gt 0 } 'hub archive'
+    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/archive' -and $_.body.archived -eq $true -and $_.body.chat -eq $archiveTarget -and $_.status -eq 200 }).Count -gt 0 } 'hub archive'
     $null = Wait-Until { (Read-Control $Session status).chat_count -eq 1 -and (Read-Control $Session status).pending_archives -eq 0 } 'archived chat removed'
     Hub-Pass $Session archive
     Save-Screen $Session after
@@ -418,7 +437,7 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
         Assert-That (@($requests | Where-Object { $_.wire_path -ne '/fixture/live' -and -not $_.wire_path.StartsWith('/v1/wazig/') }).Count -eq 0) 'Request bypassed unified hub'
         Assert-That (@($requests | Where-Object { $_.wire_path.Contains('account=') }).Count -eq 0) 'Source account leaked into hub query'
         $final = Read-Control $Session status
-        Assert-That ($final.selected.provider -eq 'whatsapp') 'Hub lost source network identity'
+        Assert-That ($final.selected.provider -eq 'slack') 'Hub lost source network identity'
     }
     $backend = if ($unified) { 'message backend:' } else { 'whatsapp backend:' }
     $launch = Get-Content (Join-Path $Messages 'launch-log.txt')
