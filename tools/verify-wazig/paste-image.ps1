@@ -14,6 +14,21 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 public static class VerifyPasteImage {
+    delegate bool EnumWindow(IntPtr window, IntPtr data);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, System.Text.StringBuilder name, int capacity);
+    public static IntPtr[] Dialogs(int pid) {
+        var dialogs = new System.Collections.Generic.List<IntPtr>();
+        EnumWindows((window, data) => {
+            uint owner; GetWindowThreadProcessId(window, out owner);
+            var name = new System.Text.StringBuilder(256); GetClassName(window, name, name.Capacity);
+            if (owner == pid && IsWindowVisible(window) && name.ToString() == "#32770") dialogs.Add(window);
+            return true;
+        }, IntPtr.Zero);
+        return dialogs.ToArray();
+    }
     public static string[] Put(int width, int height, string mode) {
         byte[] pixels = new byte[width * height * 4];
         for (int y = 0; y < height; y++) {
@@ -163,27 +178,76 @@ function Invoke-PasteImageJourney($Session) {
     Save-Screen $Session after
 }
 
+function Get-PickerDialog($Session, [IntPtr]$Expected = [IntPtr]::Zero) {
+    $open = $null
+    foreach ($handle in [VerifyPasteImage]::Dialogs($Session.pid)) {
+        $window = [Windows.Automation.AutomationElement]::FromHandle($handle)
+        $filename = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1148'))
+        if ($window.Current.Name -cne 'Open' -or $null -eq $filename -or ($filename.Current.ControlType -ne [Windows.Automation.ControlType]::ComboBox -and $filename.Current.ClassName -ne 'ComboBoxEx32') -or ($Expected -ne [IntPtr]::Zero -and $handle -ne $Expected) -or $null -ne $open) {
+            $elements = $window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
+            $text = (@($window.Current.Name) + @($elements | ForEach-Object { $_.Current.Name } | Where-Object { $_ })) -join ' | '
+            throw "paste-image: unexpected #32770 dialog: $text"
+        }
+        $open = $window
+    }
+    return $open
+}
+
 function Add-PickerImage($Session, [string]$Path) {
     Click-Control $Session '1136'
-    $dialog = Wait-Popup $Session '#32770'
-    $window = [Windows.Automation.AutomationElement]::FromHandle($dialog)
-    $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Edit)
-    $filenameCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1148')
-    $null = Wait-Until {
-        $filename = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $filenameCondition)
-        foreach ($container in @($filename, $window)) {
-            if ($null -eq $container) { continue }
-            $edits = $container.FindAll([Windows.Automation.TreeScope]::Subtree, $condition)
-            foreach ($edit in $edits) {
-                if ($edit.Current.IsEnabled -and -not $edit.Current.IsOffscreen -and $edit.Current.IsKeyboardFocusable) { $edit.SetFocus(); return $true }
+    try {
+        $window = Wait-Until { Get-PickerDialog $Session } 'paste-image: Open file dialog'
+        $dialog = [IntPtr]$window.Current.NativeWindowHandle
+        $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Edit)
+        $filenameCondition = [Windows.Automation.AndCondition]::new(
+            [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1148'),
+            [Windows.Automation.OrCondition]::new(
+                [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::ComboBox),
+                [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'ComboBoxEx32')
+            )
+        )
+        $edit = Wait-Until {
+            $null = Get-PickerDialog $Session $dialog
+            $filename = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $filenameCondition)
+            if ($null -eq $filename) { return $false }
+            $edits = $filename.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+            foreach ($candidate in $edits) {
+                if ($candidate.Current.IsEnabled -and -not $candidate.Current.IsOffscreen -and $candidate.Current.IsKeyboardFocusable) {
+                    $labels = @($filename.Current.Name, $candidate.Current.Name)
+                    foreach ($control in @($filename, $candidate)) {
+                        if ($null -ne $control.Current.LabeledBy) { $labels += $control.Current.LabeledBy.Current.Name }
+                    }
+                    if (@($labels | Where-Object { $_ }).Count -gt 0) {
+                        Assert-That ($labels -ccontains 'File name:') 'paste-image: control 1148 is not labelled File name:'
+                    }
+                    return $candidate
+                }
+            }
+        } 'paste-image: file-dialog editable filename'
+        $edit.SetFocus()
+        foreach ($keys in @('^a', $Path, '{ENTER}')) {
+            $null = Get-PickerDialog $Session $dialog
+            Assert-That ([Windows.Automation.Automation]::Compare([Windows.Automation.AutomationElement]::FocusedElement, $edit)) 'paste-image: File name edit does not have keyboard focus'
+            Send-Keys $Session $keys
+        }
+        $null = Wait-Until { $null -eq (Get-PickerDialog $Session $dialog) } 'paste-image: file dialog closed'
+    } catch {
+        $failure = $_
+        foreach ($handle in [VerifyPasteImage]::Dialogs($Session.pid)) {
+            try {
+                $popup = [Windows.Automation.AutomationElement]::FromHandle($handle)
+                $elements = $popup.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
+                $tree = @("$($popup.Current.ClassName) | $($popup.Current.Name)")
+                foreach ($element in $elements) {
+                    $tree += "$($element.Current.AutomationId) | $($element.Current.ClassName) | $($element.Current.ControlType.ProgrammaticName) | $($element.Current.Name) | focused=$($element.Current.HasKeyboardFocus)"
+                }
+                $tree | Set-Content (Join-Path $Session.evidence "picker-dialog-$($handle.ToInt64()).uia.txt")
+            } catch {
+                $_ | Out-String | Add-Content (Join-Path $Session.evidence 'picker-diagnostics.txt')
             }
         }
-    } 'paste-image: file-dialog editable filename'
-    Send-Keys $Session '%n'
-    Send-Keys $Session '^a'
-    Send-Keys $Session $Path
-    Send-Keys $Session '{ENTER}'
-    $null = Wait-Until { (Find-Popup $Session '#32770') -eq [IntPtr]::Zero } 'paste-image: file dialog closed'
+        throw $failure
+    }
     Add-Content (Join-Path $Session.evidence 'actions.log') 'picker: UIA filename, keyboard path and Enter'
 }
 

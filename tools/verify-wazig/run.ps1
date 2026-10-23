@@ -23,6 +23,9 @@ $local = Join-Path $root 'local'
 $profile = Join-Path $root 'profile'
 $messages = Join-Path $local 'Messages'
 New-Item $messages, $profile -ItemType Directory -Force | Out-Null
+foreach ($folder in @('Desktop', 'Documents', 'Pictures')) {
+    New-Item (Join-Path $profile $folder) -ItemType Directory -Force | Out-Null
+}
 $tag = '0000000000000526'
 if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'palette-archived', 'slack-sort', 'slack-archive', 'slack-threads', 'link-previews', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'passage-copy', 'reactions', 'repaint', 'paste-image', 'voice')) {
     Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
