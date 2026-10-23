@@ -770,6 +770,58 @@ pub fn sanitizeFilename(dest: []u8, name: []const u8) []const u8 {
     return dest[0..out_len];
 }
 
+pub fn validateDownloadIds(file_id: []const u8, channel: []const u8, ts: []const u8) error{BadArguments}!void {
+    _ = file_id;
+    _ = channel;
+    _ = ts;
+}
+
+pub fn downloadPath(allocator: std.mem.Allocator, media_dir: []const u8, file_id: []const u8, filename: []const u8, channel: []const u8, ts: []const u8) ![]u8 {
+    try validateDownloadIds(file_id, channel, ts);
+    var name_buffer: [128]u8 = undefined;
+    const safe_name = sanitizeFilename(&name_buffer, filename);
+    var dest = std.ArrayList(u8).empty;
+    errdefer dest.deinit(allocator);
+    try dest.appendSlice(allocator, media_dir);
+    try dest.append(allocator, '\\');
+    try dest.appendSlice(allocator, channel);
+    try dest.append(allocator, '-');
+    try dest.appendSlice(allocator, ts);
+    try dest.append(allocator, '-');
+    try dest.appendSlice(allocator, file_id);
+    const dot = std.mem.lastIndexOfScalar(u8, safe_name, '.');
+    const suffix = if (dot) |dot_index| safe_name[dot_index..] else "";
+    if (suffix.len > 0) {
+        try dest.appendSlice(allocator, suffix);
+    } else if (safe_name.len > 0) {
+        try dest.append(allocator, '-');
+        try dest.appendSlice(allocator, safe_name);
+    }
+    return dest.toOwnedSlice(allocator);
+}
+
+test "download media ids preserve ordinary paths and reject invalid components" {
+    const allocator = std.testing.allocator;
+    const path = try downloadPath(allocator, "media", "F123", "photo.png", "C123", "1700000000.000001");
+    defer allocator.free(path);
+    try std.testing.expectEqualStrings("media\\C123-1700000000.000001-F123.png", path);
+    const plain_path = try downloadPath(allocator, "media", "F123", "notes", "C123", "1700000000.000001");
+    defer allocator.free(plain_path);
+    try std.testing.expectEqualStrings("media\\C123-1700000000.000001-F123-notes", plain_path);
+    const empty_name_path = try downloadPath(allocator, "media", "F123", "", "C123", "1700000000.000001");
+    defer allocator.free(empty_name_path);
+    try std.testing.expectEqualStrings("media\\C123-1700000000.000001-F123", empty_name_path);
+    for ([_][]const u8{ "..\\", "/", ":", "\x00", "" }) |invalid| {
+        try std.testing.expectError(error.BadArguments, validateDownloadIds(invalid, "C123", "1700000000.000001"));
+        try std.testing.expectError(error.BadArguments, validateDownloadIds("F123", invalid, "1700000000.000001"));
+        try std.testing.expectError(error.BadArguments, validateDownloadIds("F123", "C123", invalid));
+    }
+    try std.testing.expectError(error.BadArguments, validateDownloadIds("F-123", "C123", "1700000000.000001"));
+    try std.testing.expectError(error.BadArguments, validateDownloadIds("F123", "C_123", "1700000000.000001"));
+    try std.testing.expectError(error.BadArguments, validateDownloadIds("F123", "C123", "1700000000.a"));
+    try validateDownloadIds("Fa123", "Cb123", "1700000000.000001");
+}
+
 pub const Log = struct {
     pub const entry_max_channel = 40;
     pub const entry_max_ts = 40;

@@ -4,6 +4,11 @@ pub fn isWebPBytes(data: []const u8) bool {
     return data.len >= 12 and std.mem.eql(u8, data[0..4], "RIFF") and std.mem.eql(u8, data[8..12], "WEBP");
 }
 
+pub fn decodeAllowed(width: i32, height: i32, budget_pixels: u64) bool {
+    _ = budget_pixels;
+    return width > 0 and height > 0;
+}
+
 pub const FitBox = struct { width: u32, height: u32 };
 
 pub fn fitBox(source_width: u32, source_height: u32, max_width: u32, max_height: u32) FitBox {
@@ -90,4 +95,18 @@ test "fitBox fits within the box preserving aspect" {
     try std.testing.expectEqual(FitBox{ .width = 40, .height = 25 }, fitBox(40, 25, 420, 250));
     try std.testing.expectEqual(FitBox{ .width = 1, .height = 1 }, fitBox(0, 0, 420, 250));
     try std.testing.expectEqual(FitBox{ .width = 1, .height = 250 }, fitBox(1, 10000, 420, 250));
+}
+
+test "preview size bounds decoded area for small inputs" {
+    const budget_pixels = 24 * 1024 * 1024 / 4;
+    try std.testing.expect(decodeAllowed(512, 512, budget_pixels));
+    try std.testing.expect(decodeAllowed(3072, 2048, budget_pixels));
+    try std.testing.expect(!decodeAllowed(16383, 16383, budget_pixels));
+    try std.testing.expect(!decodeAllowed(3072, 2049, budget_pixels));
+    try std.testing.expect(!decodeAllowed(std.math.maxInt(i32), std.math.maxInt(i32), budget_pixels));
+    try std.testing.expect(!decodeAllowed(0, 512, budget_pixels));
+    try std.testing.expect(!decodeAllowed(512, 0, budget_pixels));
+    try std.testing.expect(!decodeAllowed(-1, 512, budget_pixels));
+    try std.testing.expect(!decodeAllowed(512, -1, budget_pixels));
+    try std.testing.expect(!decodeAllowed(1, 1, 0));
 }

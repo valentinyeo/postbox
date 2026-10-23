@@ -984,28 +984,11 @@ pub fn runJob(allocator: std.mem.Allocator, ctx: JobContext, kind: JobKind, args
         },
         .download => {
             if (args.len < 5) return error.BadArguments;
+            const dest = try slack.downloadPath(allocator, ctx.media_dir, args[1], args[2], args[3], args[4]);
+            defer allocator.free(dest);
             try ensureMediaDir(ctx.media_dir);
-            var name_buffer: [128]u8 = undefined;
-            const safe_name = slack.sanitizeFilename(&name_buffer, args[2]);
-            var dest = std.ArrayList(u8).empty;
-            defer dest.deinit(allocator);
-            try dest.appendSlice(allocator, ctx.media_dir);
-            try dest.append(allocator, '\\');
-            try dest.appendSlice(allocator, args[3]);
-            try dest.append(allocator, '-');
-            try dest.appendSlice(allocator, args[4]);
-            try dest.append(allocator, '-');
-            try dest.appendSlice(allocator, args[1]);
-            const dot = std.mem.lastIndexOfScalar(u8, safe_name, '.');
-            const suffix = if (dot) |dot_index| safe_name[dot_index..] else "";
-            if (suffix.len > 0) {
-                try dest.appendSlice(allocator, suffix);
-            } else if (safe_name.len > 0) {
-                try dest.append(allocator, '-');
-                try dest.appendSlice(allocator, safe_name);
-            }
-            try downloadTo(allocator, ctx.user_token, args[0], dest.items, if (ctx.is_bridge) ctx.host else null);
-            return allocator.dupe(u8, dest.items);
+            try downloadTo(allocator, ctx.user_token, args[0], dest, if (ctx.is_bridge) ctx.host else null);
+            return allocator.dupe(u8, dest);
         },
     }
 }

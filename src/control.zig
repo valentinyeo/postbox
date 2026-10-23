@@ -2,6 +2,8 @@ const std = @import("std");
 const theme = @import("theme.zig");
 const transport = @import("transport.zig");
 
+pub const client_open_flags: u32 = 0;
+
 pub const pipe_prefix = "\\\\.\\pipe\\wazig-control-";
 
 pub const Command = enum { theme, status, chats, search, view, select, messages, archive, unarchive, @"archive-many" };
@@ -440,4 +442,8 @@ test "view accepts an account position and combined inbox while retaining provid
     const legacy = try parseArgs(allocator, &.{ "view", "slack" }, &message);
     try std.testing.expectEqual(@as(?Messenger, .slack), legacy.messenger);
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "view", "0" }, &message));
+}
+
+test "pipe open flags select identification only" {
+    try std.testing.expectEqual(@as(u32, 0x00110000), client_open_flags & 0x00130000);
 }
