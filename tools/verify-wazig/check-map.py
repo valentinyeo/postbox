@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == ['appearance', 'archive', 'drafts', 'hub', 'menus', 'navigation', 'palette', 'search', 'signal', 'slack-sort', 'views', 'whatsapp-hub', 'workspace-icons']
+assert features == ['appearance', 'archive', 'drafts', 'hub', 'menus', 'navigation', 'palette', 'search', 'signal', 'slack-sort', 'telegram', 'views', 'whatsapp-hub', 'workspace-icons']
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, hub, slack-sort, views, workspace-icons, signal, archive, text-comparison]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, hub, slack-sort, views, workspace-icons, signal, telegram, archive, text-comparison]' in workflow
 options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
 assert options_match, 'missing workflow_dispatch journey options'
 options = [option.strip() for option in options_match[1].split(',')]
@@ -66,7 +66,7 @@ assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
 assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_KEY")) |seed|' in fixture_config
 assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort', 'views', 'workspace-icons', 'signal')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort', 'views', 'workspace-icons', 'signal', 'telegram')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 for proof in ['chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
@@ -156,3 +156,20 @@ assert 'signal:fixture-contact' in icons_validator and 'signal:fixture-contact' 
 assert 'drawProviderMark(&shapes, badge, provider_badge)' in source
 assert 'provider_badge == .whatsapp_mark or provider_badge == .signal_mark' in source
 print('SIGNAL MARK MAP VERIFIED: shared provider renderer and workspace-icons screenshot evidence')
+
+telegram = (skill / 'features/telegram.md').read_text(encoding='utf-8')
+telegram_journey = (root / 'tools/verify-wazig/telegram.ps1').read_text(encoding='utf-8')
+telegram_validator = (root / 'tools/verify-wazig/check-telegram-evidence.py').read_text(encoding='utf-8')
+for gate in ['linking-qr', 'linking-password', 'linked-chats', 'history', 'mark-read', 'media', 'react', 'reply', 'send-text', 'send-file', 'live-events', 'limited', 'archive-unsupported']:
+    assert gate in telegram_journey and gate in telegram_validator, gate
+for name in ['INDEX.md', 'RULE-MAP.md']:
+    assert '(features/telegram.md)' in (skill / name).read_text(encoding='utf-8')
+assert 'feature=telegram' in telegram and 'Invoke-TelegramJourney' in runner
+assert 'telegram.ps1' in runner and '[switch]$Telegram' in harness
+assert '--telegram' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+assert '"telegram"' in workflow and "matrix.feature == 'telegram'" in workflow
+assert 'check-telegram-evidence.py' in validator
+assert '.claude/skills/verify-wazig/features/telegram.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert (root / 'tools/verify-wazig/telegram-link.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+assert 'Scan in Telegram: Settings > Devices > Link Desktop Device' in source
+print('TELEGRAM MAP VERIFIED: hub linking, messaging journey, CI wiring and indexed evidence')

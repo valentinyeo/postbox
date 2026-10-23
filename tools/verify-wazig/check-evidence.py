@@ -54,6 +54,10 @@ if session['feature'] == 'workspace-icons':
     assert 'JOURNEY PASSED: workspace-icons' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     print('EVIDENCE VERIFIED: workspace icon badge pixels, authenticated team cache, fallback, WhatsApp green, Signal blue and isolation')
     raise SystemExit(0)
+if session['feature'] == 'telegram':
+    runpy.run_path(str(Path(__file__).with_name('check-telegram-evidence.py')))['check_telegram'](folder)
+    raise SystemExit(0)
+
 if session['feature'] == 'signal':
     runpy.run_path(str(Path(__file__).with_name('check-signal-evidence.py')))['check_signal'](folder)
     raise SystemExit(0)

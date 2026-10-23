@@ -496,6 +496,196 @@ class SignalHandler(Handler):
             self.respond(400, {'error': 'invalid Signal write'}, body=body)
 
 
+TELEGRAM_CHAT = 'telegram:user:1001'
+TELEGRAM_LIMITED = 'telegram:user:1002'
+TELEGRAM_SAVED = 'telegram:user:9001'
+
+
+class TelegramHandler(Handler):
+    def end_headers(self):
+        if self.path.startswith('/v1/wazig/telegram/'):
+            self.send_header('Cache-Control', 'no-store')
+        if hasattr(self, 'telegram_retry_after'):
+            self.send_header('Retry-After', str(self.telegram_retry_after))
+        super().end_headers()
+
+    def respond(self, status, data, content_type='application/json', **extra):
+        if status == 429:
+            self.telegram_retry_after = data['retry_after']
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def event(self, event_id, kind, chat):
+        data = dict(id=event_id, chat=chat, ts=self.state.stamp, kind=kind)
+        self.wfile.write(f'id: {event_id}\ndata: {json.dumps(data)}\n\n'.encode())
+        self.wfile.flush()
+        self.state.record(dict(method='SSE', path='/v1/wazig/events', wire_path=self.wire_path, **data))
+
+    def events(self):
+        self.record(200)
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        last = int(self.headers.get('Last-Event-ID', '0'))
+        if last == 0:
+            self.event(1, 'reset', '')
+            self.close_connection = True
+            return
+        while True:
+            with self.state.lock:
+                pending = [(index + 2, event) for index, event in enumerate(self.state.telegram_events) if index + 2 > last]
+                if not pending:
+                    self.state.lock.wait(timeout=2)
+            if pending:
+                for event_id, (kind, chat) in pending:
+                    self.event(event_id, kind, chat)
+                self.close_connection = True
+                return
+            self.wfile.write(b': heartbeat\n\n')
+            self.wfile.flush()
+
+    def publish(self, kind, chat=TELEGRAM_CHAT):
+        with self.state.lock:
+            self.state.telegram_events.append((kind, chat))
+            self.state.lock.notify_all()
+
+    def message(self, chat, message_id, text, **extra):
+        return dict(MsgID=message_id, ChatJID=chat, Text=text, DisplayText=text,
+                    Timestamp=self.state.stamp, SenderJID='telegram:user:1001', SenderName='Fixture Sender',
+                    FromMe=extra.pop('FromMe', False), **extra)
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/telegram/link':
+            with self.state.lock:
+                linked = self.state.telegram_linked
+                password = self.state.telegram_qr_fetched and not linked
+            self.respond(200, dict(status='linked') if linked else dict(status='password') if password else dict(status='unlinked', uri='tg://login?token=fixture'))
+        elif url.path == '/v1/wazig/telegram/link.png':
+            with self.state.lock:
+                unavailable = self.state.telegram_linked or self.state.telegram_qr_fetched
+                self.state.telegram_qr_fetched = True
+            if unavailable:
+                self.respond(404, {'error': 'already linked'})
+            else:
+                self.respond(200, Path(__file__).with_name('telegram-link.png').read_bytes(), 'image/png')
+        elif url.path == '/v1/wazig/chats':
+            rows = []
+            if self.state.telegram_linked and query.get('archived', ['false'])[0] == 'false':
+                rows = [dict(provider='telegram', jid=chat, name=name, kind=kind,
+                             last_message_ts=self.state.stamp, unread_count=0 if chat in self.state.telegram_read else 1,
+                             unread=chat not in self.state.telegram_read, archived=False, saved=chat == TELEGRAM_SAVED)
+                        for chat, name, kind in [(TELEGRAM_CHAT, 'Verification Telegram', 'direct'),
+                                                 (TELEGRAM_LIMITED, 'Verification Limited', 'direct'),
+                                                 (TELEGRAM_SAVED, 'Saved Messages', 'direct'),
+                                                 ('telegram:chat:2001', 'Verification Group', 'group'),
+                                                 ('telegram:channel:3001', 'Verification Channel', 'group')]]
+            self.respond(200, rows)
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            rows = [self.message(chat, '1000', 'Synthetic Telegram history')]
+            if chat == TELEGRAM_CHAT:
+                rows.append(self.message(chat, '1001', 'Synthetic Telegram attachment',
+                                         MediaType='image', MimeType='image/png', Filename='fixture.png'))
+                if self.state.live:
+                    rows.append(self.message(chat, '1002', 'Synthetic Telegram live'))
+                with self.state.lock:
+                    rows.extend(dict(self.message(chat, reply['msg_id'], reply['text']), FromMe=True,
+                                     quoted_msg_id=reply['reply_to'],
+                                     **({'MediaType': 'image', 'Filename': 'fixture.png', 'MimeType': 'image/png'} if reply['file'] else {}))
+                                for reply in self.state.sends.values() if reply['chat'] == chat)
+                    if self.state.telegram_reaction:
+                        rows.append(self.message(chat, '1003', '',
+                                                 ReactionToID=self.state.telegram_reaction['msg'],
+                                                 ReactionEmoji=self.state.telegram_reaction['emoji']))
+            before = query.get('before', [''])[0]
+            if before:
+                message_id = before.split(':', 1)[0]
+                rows = [row for row in rows if int(row['MsgID']) < int(message_id)] if message_id.isdecimal() else [row for row in rows if row['Timestamp'] < before]
+            self.respond(200, list(reversed(rows)))
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path.startswith('/v1/wazig/media/'):
+            self.respond(200, self.state.image, 'image/png')
+        elif url.path.startswith('/v1/wazig/avatar/'):
+            self.respond(502, {'error': 'Telegram avatar unsupported'})
+        else:
+            self.respond(404, {'error': 'unknown telegram route'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        payload = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        multipart = self.headers.get('Content-Type', '').startswith('multipart/form-data')
+        file_bytes = b''
+        if multipart:
+            envelope = bridge.BytesParser(policy=bridge.policy.default).parsebytes(
+                f'Content-Type: {self.headers["Content-Type"]}\r\nMIME-Version: 1.0\r\n\r\n'.encode() + payload)
+            body = {}
+            for part in envelope.iter_parts():
+                name = part.get_param('name', header='content-disposition')
+                if part.get_filename() is None:
+                    body[name] = part.get_content()
+                else:
+                    body[name] = part.get_filename()
+                    file_bytes = part.get_payload(decode=True)
+        else:
+            body = json.loads(payload or '{}')
+        if self.path == '/fixture/live':
+            with self.state.lock:
+                self.state.live = True
+                self.state.lock.notify_all()
+            self.publish('message')
+            self.respond(200, {'ok': True}, body=body)
+            return
+        if self.path == '/v1/wazig/telegram/password':
+            if set(body) != {'password'} or not isinstance(body['password'], str) or not body['password'] or body['password'] == 'synthetic-invalid':
+                self.respond(401, {'error': 'telegram password invalid'}, password_supplied=True)
+            else:
+                self.state.telegram_linked = True
+                self.respond(200, {'status': 'linked'}, password_supplied=True)
+            return
+        chat = body.get('chat', '')
+        if not chat.startswith('telegram:'):
+            self.respond(400, {'error': 'invalid Telegram chat'}, body=body)
+        elif self.path == '/v1/wazig/send':
+            if chat == TELEGRAM_LIMITED:
+                self.respond(429, {'error': 'telegram rate limited', 'retry_after': 30}, body=body)
+                return
+            expected = {'chat', 'text', 'reply_to', 'client_id'} if not multipart else {'chat', 'text', 'file', 'client_id'}
+            if not expected.issubset(body) or not body['client_id'] or (multipart and not file_bytes):
+                self.respond(400, {'error': 'invalid Telegram send'}, body=body)
+                return
+            with self.state.lock:
+                duplicate = body['client_id'] in self.state.sends
+                if not duplicate:
+                    self.state.sends[body['client_id']] = dict(client_id=body['client_id'],
+                        msg_id=str(2000 + len(self.state.sends)), ts=self.state.stamp,
+                        status='sent', chat=chat, text=body['text'], file=multipart, reply_to=body.get('reply_to', ''))
+                reply = self.state.sends[body['client_id']]
+            self.respond(200, reply, body=body, multipart=multipart, file_size=len(file_bytes),
+                         file_sha256=bridge.hashlib.sha256(file_bytes).hexdigest(), accepted=not duplicate)
+        elif self.path == '/v1/wazig/react' and set(body) == {'chat', 'msg', 'emoji', 'client_id'}:
+            self.state.telegram_reaction = body
+            self.publish('reaction', chat)
+            self.respond(200, dict(client_id=body['client_id'], msg_id='1003',
+                                   ts=self.state.stamp, status='sent'), body=body)
+        elif self.path == '/v1/wazig/mark-read' and set(body) == {'chat', 'message_id'}:
+            self.state.telegram_read.add(chat)
+            self.publish('read', chat)
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/archive':
+            self.respond(502, {'error': 'Telegram archive unsupported'}, body=body)
+        else:
+            self.respond(400, {'error': 'invalid Telegram write'}, body=body)
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Fake hub runs only on GitHub Actions')
@@ -507,9 +697,10 @@ def main():
     modes.add_argument('--views', action='store_true')
     modes.add_argument('--workspace-icons', action='store_true')
     modes.add_argument('--signal', action='store_true')
+    modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = SignalHandler if args.signal else ViewsHandler if args.views else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else Handler
+    handler = TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
@@ -519,6 +710,11 @@ def main():
     server.state.signal_reaction = None
     server.state.signal_events = []
     server.state.signal_read = set()
+    server.state.telegram_linked = False
+    server.state.telegram_qr_fetched = False
+    server.state.telegram_reaction = None
+    server.state.telegram_events = []
+    server.state.telegram_read = set()
     if args.slack_sort:
         stamp = datetime.fromisoformat(server.state.stamp)
         server.state.sort_times = {

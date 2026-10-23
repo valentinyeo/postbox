@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IGSH-465: Telegram has its own view through the triage hub, with a paper-plane mark, QR/password linking, Saved Messages, text/file sending, replies, reactions, read receipts and live updates. Hub users no longer see direct Telegram sign-in; rate limits stay visible without automatic resend.
+
 - IGSH-607: Signal has its own account view through the hub, a blue row mark, QR linking, messaging, attachments, reactions, read receipts and live updates. Rate-limit and captcha rejections stay visible in failed messages without automatic retries.
 
 - IGSH-602: Derive separate account views from real hub prefixed chat IDs when account metadata is absent, preserving send and cache identities. WhatsApp labels show the account; Slack labels use a locally saved workspace name or team ID.

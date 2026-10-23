@@ -88,13 +88,13 @@ fn validTeam(team: []const u8) !void {
     if (std.mem.indexOfScalar(u8, team, ':') != null or std.mem.eql(u8, team, ".") or std.mem.eql(u8, team, "..")) return error.InvalidId;
 }
 
-pub const Badge = enum { workspace_icon, whatsapp_mark, signal_mark, letter_s, letter_w, letter_t };
+pub const Badge = enum { workspace_icon, whatsapp_mark, signal_mark, telegram_mark, letter_s, letter_w, letter_t };
 
 pub fn providerBadge(provider: transport.Provider, cached_icon: bool, enabled: bool) Badge {
     return switch (provider) {
         .slack => if (enabled and cached_icon) .workspace_icon else .letter_s,
         .whatsapp => if (enabled) .whatsapp_mark else .letter_w,
-        .telegram => .letter_t,
+        .telegram => if (enabled) .telegram_mark else .letter_t,
         .signal => if (enabled) .signal_mark else .letter_s,
     };
 }
@@ -140,6 +140,7 @@ pub fn sourceAccount(row: std.json.ObjectMap, fallback: []const u8) []const u8 {
 
 pub fn viewAccount(row: std.json.ObjectMap, fallback: []const u8) []const u8 {
     if (sourceProvider(row) == .signal and std.mem.startsWith(u8, string(row, "jid"), "signal:")) return "signal";
+    if (sourceProvider(row) == .telegram and std.mem.startsWith(u8, string(row, "jid"), "telegram:")) return "telegram";
     const account = string(row, "account");
     if (account.len > 0) return account;
     const jid = string(row, "jid");
@@ -203,4 +204,19 @@ pub fn readMessageId(allocator: std.mem.Allocator, raw: []const u8) ![]u8 {
         return allocator.dupe(u8, id);
     }
     return error.NoIncomingMessage;
+}
+
+pub fn telegramSendFailure(allocator: std.mem.Allocator, status: u32, raw: []const u8) ?[]const u8 {
+    if (status != 429) return null;
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, raw, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    if (std.mem.eql(u8, string(parsed.value.object, "error"), "telegram rate limited")) return "telegram rate limited";
+    return null;
+}
+
+pub fn savedMessages(row: std.json.ObjectMap) bool {
+    if (sourceProvider(row) != .telegram) return false;
+    const saved = row.get("saved") orelse return false;
+    return saved == .bool and saved.bool;
 }
