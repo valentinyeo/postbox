@@ -10,6 +10,7 @@ public static class VerifyPassage {
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] public static extern uint GetDoubleClickTime();
     static void Mouse(int pid, uint flags, uint data) {
         uint owner; GetWindowThreadProcessId(GetForegroundWindow(), out owner);
         if (owner != pid) throw new Exception("Refusing input to another process");

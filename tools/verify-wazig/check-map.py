@@ -353,6 +353,11 @@ for value in ['clipboard.json', 'passage-fixture.json', 'held drag beyond canvas
     assert value in passage and value in validator, value
 for value in ['[VerifyPassage]::Button', '[VerifyMenus]::Hover', "Send-Keys $Session '^c'", '$actual -ceq $expected']:
     assert value in passage, value
+for value in ['$doubleClickDelay = [int][VerifyPassage]::GetDoubleClickTime() + 100',
+              '[System.Threading.Thread]::Sleep($doubleClickDelay)', "'react-requests.jsonl'",
+              'Assert-That (-not (Test-Path $reactionLog) -or (Get-Item $reactionLog).Length -eq 0)']:
+    assert value in passage, value
+assert '[DllImport("user32.dll")] public static extern uint GetDoubleClickTime();' in (root / 'tools/verify-wazig/passage-copy.cs').read_text(encoding='utf-8')
 assert '--passage-copy' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
 assert '.claude/skills/verify-wazig/features/passage-copy.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
 assert not re.search(r'\$(?:\w+\.)?(?:messages|rows|before|edgeBefore|after)\[\d', passage, re.I), 'passage targets must use PASSAGE ids, not array positions'

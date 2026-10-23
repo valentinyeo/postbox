@@ -69,6 +69,7 @@ function Invoke-PassageCopyJourney($Session) {
         $fixture = Invoke-RestMethod -Uri "$($Session.bridge_url)/fixture/passage" -Headers @{ Authorization = 'Bearer fixture-key-not-a-secret' }
         $fixture | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'passage-fixture.json')
         $checks = @()
+        $reactionLog = Join-Path $Session.evidence 'react-requests.jsonl'
         Send-Keys $Session '%0'
         foreach ($target in @(
             @{ provider = 'whatsapp'; chat = 'fixture-beta'; search = 'Verification Beta' },
@@ -123,11 +124,15 @@ function Invoke-PassageCopyJourney($Session) {
             Assert-That ($edgeMessages['PASSAGE-7'].bubble[2] -eq 0) "$name message 7 must be below the fold at edge-drag start"
             Assert-That ($edgeMessages['PASSAGE-6'].bubble[2] -gt $edgeMessages['PASSAGE-6'].bubble[0]) "$name tall message 6 must be measurable before edge scrolling"
             $held = @{ messages = @(); scroll_before = $edgeMessages['PASSAGE-6'].bubble[1]; scroll_after = $edgeMessages['PASSAGE-6'].bubble[1] }
+            $doubleClickDelay = [int][VerifyPassage]::GetDoubleClickTime() + 100
+            [System.Threading.Thread]::Sleep($doubleClickDelay)
+            Add-Content (Join-Path $Session.evidence 'actions.log') "Wait: $name edge drag double-click interval plus margin ${doubleClickDelay}ms"
             [VerifyMenus]::Hover($Session.pid, $start[0], $start[1])
             [VerifyPassage]::Button($Session.pid, $true)
             try {
                 [VerifyMenus]::Hover($Session.pid, $start[0], ($canvas.top + $canvas.height + [Math]::Max(2, [int](2 * $canvas.dpi / 96))))
                 $null = Wait-Until {
+                    Assert-That (-not (Test-Path $reactionLog) -or (Get-Item $reactionLog).Length -eq 0) "$name passage-copy must not send reaction requests"
                     $held.messages = (Read-Control $Session messages).messages
                     $heldMessages = Get-PassageMessages $held.messages
                     $held.scroll_after = $heldMessages['PASSAGE-6'].bubble[1]
@@ -146,6 +151,7 @@ function Invoke-PassageCopyJourney($Session) {
             $afterMessages = Get-PassageMessages $after
             Assert-That ($afterMessages['PASSAGE-6'].bubble[2] -gt $afterMessages['PASSAGE-6'].bubble[0] -and $afterMessages['PASSAGE-6'].bubble[1] -lt $edgeMessages['PASSAGE-6'].bubble[1]) "$name held edge drag did not scroll"
             Assert-That ($actual -ceq $expected) "$name edge selection did not extend through final message"
+            Assert-That (-not (Test-Path $reactionLog) -or (Get-Item $reactionLog).Length -eq 0) "$name passage-copy must not send reaction requests"
             Hub-Pass $Session "$name-passage"
             Send-Keys $Session '^f'
             Send-Keys $Session '^a{BACKSPACE}{ESC}'
