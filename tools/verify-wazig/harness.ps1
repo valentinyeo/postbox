@@ -250,7 +250,7 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackArchive, [switch]$SlackThreads, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions, [switch]$HubArchive, [switch]$Repaint, [switch]$MixedLid, [switch]$PasteImage) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackArchive, [switch]$SlackThreads, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions, [switch]$HubArchive, [switch]$Repaint, [switch]$MixedLid, [switch]$PasteImage, [switch]$Voice) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
@@ -268,6 +268,7 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [s
     if ($PasteImage) { $start.ArgumentList.Add('--paste-image') }
     if ($HubArchive) { $start.ArgumentList.Add('--hub-archive') }
     if ($Repaint) { $start.ArgumentList.Add('--repaint') }
+    if ($Voice) { $start.ArgumentList.Add('--voice') }
     if ($MixedLid) { $start.ArgumentList.Add('--mixed-lid') }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
