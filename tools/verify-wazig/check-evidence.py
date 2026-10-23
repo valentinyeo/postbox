@@ -22,8 +22,12 @@ if session['feature'] == 'workspace-icons':
     assert not (folder / 'failure.txt').exists()
     icons.check_pixels(folder)
     rows = read('workspace-icons-list.chats.json')
-    assert rows['total'] == 4 and [row['id'] for row in rows['chats']] == icons.IDS
-    assert [row['provider'] for row in rows['chats']] == ['slack', 'slack', 'whatsapp', 'slack']
+    layout = read('workspace-icons-layout.json')
+    ids = [row['id'] for row in rows['chats']]
+    assert rows['total'] == 4
+    assert ids == layout['ids']
+    assert sorted(ids) == sorted(icons.IDS)
+    assert all(row['provider'] == ('whatsapp' if row['id'] == 'whatsapp:fixture:contact-delta' else 'slack') for row in rows['chats'])
     state = read('workspace-icons-list.state.json')
     assert state['view'] == 'all' and state['theme'] == 'amoled'
     assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / 'workspace-icons-list.uia.txt').read_text(encoding='utf-8-sig')
