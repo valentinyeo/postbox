@@ -19,6 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools
+          persist-credentials: false
+
       - name: Merge green low-risk PRs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -27,39 +32,15 @@ jobs:
         run: |
           set -uo pipefail
           merged_any=0
-          required='["ci","tdlib","windows-smoke","no-comments","unfurl-verification","private-markers","secret-scan","pr-title","notify-release","tdlib-cache / cache"]'
           for pr in $(gh pr list -R "$REPO" --state open --json number -q '.[].number'); do
             info=$(gh pr view "$pr" -R "$REPO" --json isDraft,labels,additions,deletions,files,mergeable,statusCheckRollup,headRefOid,isCrossRepository,author) || { echo "#$pr: could not read PR head checks"; continue; }
             head_oid=$(echo "$info" | jq -er '.headRefOid | select(test("^[0-9a-f]{40}$"))') || { echo "#$pr: invalid PR head"; continue; }
-            blocked=$(echo "$info" | jq -r --argjson req "$required" '
-              ([.statusCheckRollup[] | select((.name // .context) != "code-review")] as $roll
-               | ($req + [$roll[] | .name // .context] | unique) as $names
-               | [ $names[] as $r
-                   | [$roll[] | select((.name // .context) == $r)] as $checks
-                   | if ($checks | length) == 0
-                       or any($checks[]; if .__typename == "StatusContext" then .state != "SUCCESS"
-                              else .status != "COMPLETED" or .conclusion != "SUCCESS" end)
-                     then $r else empty end ] )
-              | join(",")') || blocked="could not evaluate head checks"
-            gating='[".github/workflows/automerge.yml", ".github/workflows/ci.yml", ".github/workflows/no-comments.yml", ".github/workflows/release.yml", ".github/workflows/auto-release.yml"]'
+            behind_by=$(gh api "repos/$REPO/compare/main...$head_oid" --jq .behind_by 2>/dev/null) || behind_by=""
             files_json=$(gh api "repos/$REPO/pulls/$pr/files?per_page=100" --paginate --jq '.[].filename' 2>/dev/null | jq -R . | jq -cs .) || files_json=""
-            reason=$(echo "$info" | jq -r --arg owner "$REPO_OWNER" '
-              if .isCrossRepository != false or .author.login != $owner then "not a same-repo PR by the owner"
-              elif .isDraft then "draft"
-              elif ([.labels[].name] | index("hold")) then "hold label"
-              elif .mergeable != "MERGEABLE" then "not mergeable (\(.mergeable))"
-              else "" end') || reason="could not evaluate PR state"
-            if [ "${reason}" = "null" ]; then reason="could not evaluate PR state"; fi
-            if [ -z "${reason}" ]; then
-              gated=$(echo "${files_json}" | jq -r --argjson gate "$gating" '[.[] | select(. == $gate[])] | length' 2>/dev/null) || gated=""
-              if [ -z "${files_json}" ] || ! [ -n "${gated}" ] || ! [ "${gated}" -ge 0 ] 2>/dev/null; then
-                reason="could not list PR files"
-              elif [ "${gated}" -ge 1 ]; then
-                reason="edits a release-gating workflow, needs manual review"
-              fi
-            fi
-            if [ -n "$blocked" ]; then reason="required checks not green: ${blocked}"; fi
-            if [ -n "$reason" ]; then echo "#$pr: skip ($reason)"; continue; fi
+            printf '%s' "$info" > "$RUNNER_TEMP/pr-info.json"
+            printf '%s' "$files_json" > "$RUNNER_TEMP/pr-files.json"
+            verdict=$(bash tools/automerge-admit.sh "$RUNNER_TEMP/pr-info.json" "$RUNNER_TEMP/pr-files.json" "$behind_by" "$REPO_OWNER") || verdict="skip (admission script failed)"
+            if [ "$verdict" != "merge" ]; then echo "#$pr: $verdict"; continue; fi
             if gh pr merge "$pr" -R "$REPO" --squash --delete-branch --match-head-commit "$head_oid"; then
               echo "#$pr: merged"
               merged_any=1

@@ -193,6 +193,14 @@ if (( ${#workflows[@]} == 0 )); then
     printf 'lint-repeats: no .github/workflows/*.yml files found\n' >&2
     exit 1
 fi
+admit=tools/automerge-admit.sh
+if [[ -f $admit && -f .github/workflows/automerge.yml ]]; then
+    ordered=("$admit" .github/workflows/automerge.yml)
+    for workflow in "${workflows[@]}"; do
+        [[ $workflow == .github/workflows/automerge.yml ]] || ordered+=("$workflow")
+    done
+    workflows=("${ordered[@]}")
+fi
 if ! awk '
 function fail(line, rule, problem, fix) {
     printf "lint-repeats: %s:%d: [%s] %s. Use %s.\n", file, line, rule, problem, fix
@@ -219,10 +227,18 @@ function finish() {
 }
 FNR == 1 {
     check_models()
-    finish()
+    if (file != "tools/automerge-admit.sh") finish()
     file = FILENAME
     models_read = 0
-    if (file == ".github/workflows/automerge.yml") automerge_line = 1
+    if (file == ".github/workflows/automerge.yml") {
+        automerge_line = 1
+        running = 0
+    }
+    if (file == "tools/automerge-admit.sh") {
+        automerge_line = 1
+        running = 1
+        run_indent = -1
+    }
 }
 {
     code = $0
@@ -262,7 +278,7 @@ FNR == 1 {
     }
     if (status_call && code ~ /\$LASTEXITCODE[[:space:]]+-ne[[:space:]]+3([^0-9]|$)/) expected_three = FNR
     if (expected_three && code ~ /^[[:space:]]*exit[[:space:]]+0([[:space:];]|$)/) success_exit = 1
-    if (file == ".github/workflows/automerge.yml") {
+    if (file == ".github/workflows/automerge.yml" || file == "tools/automerge-admit.sh") {
         if (code ~ /gh pr view/ && code ~ /--json[[:space:]]+[^[:space:]]*isCrossRepository/ && code ~ /--json[[:space:]]+[^[:space:]]*author/) admission_fields = 1
         if (code ~ /reason=.*jq/ && code ~ /--arg owner "\$REPO_OWNER"/) owner_arg = 1
         if (code ~ /if \.isCrossRepository != false or \.author\.login != \$owner then "not a same-repo PR by the owner"/) admission_guard = 1
@@ -280,7 +296,7 @@ FNR == 1 {
         if (code ~ /gh pr merge/ && code ~ /--match-head-commit "\$head_oid"/) head_pinned = 1
         if (code ~ /\|\| blocked="could not evaluate head checks"/) checks_fail_closed = 1
     }
-    if (file == ".github/workflows/automerge.yml" && code ~ /required=/ && code ~ /code-review/)
+    if ((file == ".github/workflows/automerge.yml" || file == "tools/automerge-admit.sh") && code ~ /required=/ && code ~ /code-review/)
         fail(FNR, "B5", "automerge requires the AI code-review check, so an AI reviewer blocks merges", "all non-AI head checks; an AI reviewer may comment but never gates a merge")
     if (command == "") command_line = FNR
     command = command " " code
