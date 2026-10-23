@@ -46,6 +46,7 @@ const Message = struct {
     reaction_pending: bool = false,
     bubble_hit: Rect = .{ .left = 10, .top = 10, .right = 200, .bottom = 100 },
     media_hit: Rect = .{},
+    reaction_hit: Rect = .{},
     local_path: WideText(519) = .{},
     image: bool = false,
     gif: bool = false,
@@ -396,4 +397,37 @@ test "IGSH-463 double-click targets another bubble instead of the previously sel
     try std.testing.expectEqual(@as(?usize, 1), a.selected_message);
     try std.testing.expectEqualStrings("", a.messages[0].my_reaction.slice());
     try std.testing.expectEqualStrings("👍", a.messages[1].my_reaction.slice());
+}
+
+test "IGSH-674 chip reactions preserve other reactions through pending refresh and removal" {
+    var a = fixture();
+    a.messages[0].reaction.set(a.allocator, "😂 2  ❤️ 1");
+    reactToMessageWithChip(&a, a.chats[0].jid.slice(), a.messages[0].id.slice(), "❤️", true);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("😂 2  ❤️ 1"), a.messages[0].reaction.slice());
+    try std.testing.expectEqualStrings("❤️", a.messages[0].my_reaction.slice());
+    reapplyPendingReactions(&a, a.chats[0].jid.slice());
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("😂 2  ❤️ 1"), a.messages[0].reaction.slice());
+    reactToMessageWithChip(&a, a.chats[0].jid.slice(), a.messages[0].id.slice(), "", true);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("😂 2  ❤️ 1"), a.messages[0].reaction.slice());
+    try std.testing.expectEqualStrings("", a.messages[0].my_reaction.slice());
+    try std.testing.expectEqualStrings("", a.jobs[1].extra.slice());
+}
+
+test "IGSH-674 chip reaction failure rolls back both reaction fields" {
+    var a = fixture();
+    a.messages[0].reaction.set(a.allocator, "❤️");
+    reactToMessageWithChip(&a, a.chats[0].jid.slice(), a.messages[0].id.slice(), "❤️", true);
+    a.pending_reactions[0].retries = 3;
+    var result = WacliResult{ .msg_id = a.jobs[0].msg_id, .extra = a.jobs[0].extra, .ok = false };
+    applyReaction(&a, &result);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("❤️"), a.messages[0].reaction.slice());
+    try std.testing.expectEqualStrings("", a.messages[0].my_reaction.slice());
+    try std.testing.expectEqual(@as(usize, 0), a.pending_reaction_count);
+}
+
+test "IGSH-674 chip overlap never triggers double click thumbs up" {
+    var a = fixture();
+    a.messages[0].reaction_hit = .{ .left = 20, .top = 96, .right = 60, .bottom = 120 };
+    try std.testing.expect(!handleCanvasDoubleClick(&a, 30, 98));
+    try std.testing.expectEqual(@as(usize, 0), a.job_count);
 }

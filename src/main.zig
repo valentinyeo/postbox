@@ -46,6 +46,7 @@ const paste_image = @import("paste_image.zig");
 const scrollbar = @import("scrollbar.zig");
 const message_scroll = @import("message_scroll.zig");
 const message_double_click = @import("message_double_click.zig");
+const reaction_chip = @import("reaction_chip.zig");
 const sidebar_nav = @import("sidebar_nav.zig");
 const archive_rules = @import("archive_rules.zig");
 const message_filter = @import("message_filter.zig");
@@ -488,6 +489,7 @@ const Message = struct {
     toggle_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     media_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     bubble_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+    reaction_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     measure_tag: u64 = 0,
     measure_height: i32 = 0,
 };
@@ -512,6 +514,7 @@ const PendingReaction = struct {
     client_id: Utf8Text(128) = .{},
     previous: WideText(1023) = .{},
     previous_my_reaction: Utf8Text(63) = .{},
+    preserve_chip: bool = false,
     retries: u8 = 0,
     retry_at_ms: u64 = 0,
 };
@@ -11208,6 +11211,34 @@ fn linkSpanHit(span: *const LinkSpan, x: i32, y: i32) bool {
 
 fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
     for (a.messages[0..a.message_count], 0..) |*item, index| {
+        const chip = item.reaction_hit;
+        if (chip.right > chip.left and rectHasPoint(chip, x, y)) {
+            if (a.selected_chat >= a.chat_count) return;
+            const font = a.font orelse return;
+            const hdc = win.GetDC(hwnd) orelse return;
+            defer _ = win.ReleaseDC(hwnd, hdc);
+            const previous_font = win.SelectObject(hdc, @ptrCast(font));
+            defer _ = win.SelectObject(hdc, previous_font);
+            const text = item.reaction.slice();
+            var segments = std.mem.splitSequence(u16, text, &.{ ' ', ' ' });
+            var segment_index: usize = 0;
+            while (segments.next()) |segment| {
+                const end = (@intFromPtr(segment.ptr) - @intFromPtr(text.ptr)) / @sizeOf(u16) + segment.len;
+                const boundary = mixedSliceWidth(hdc, font, a.font_emoji orelse font, textLineHeight(hdc, font), fontAscent(hdc, font), text[0..end]);
+                if (x - chip.left - px(a, 6) < boundary or end == text.len) break;
+                segment_index += 1;
+            }
+            const utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, text) catch return;
+            defer a.allocator.free(utf8);
+            const action = reaction_chip.decide(utf8, segment_index, item.my_reaction.slice()) orelse return;
+            a.selected_message = index;
+            a.sel_message = null;
+            reactToMessageWithChip(a, a.chats[a.selected_chat].jid.slice(), item.id.slice(), switch (action) {
+                .add => |emoji| emoji,
+                .remove => "",
+            }, true);
+            return;
+        }
         const media = item.media_hit;
         const bubble = item.bubble_hit;
         if (item.send_state == .failed and x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom and
@@ -11265,6 +11296,8 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
 
 fn handleCanvasDoubleClick(a: *App, x: i32, y: i32) bool {
     for (a.messages[0..a.message_count], 0..) |*item, index| {
+        const chip = item.reaction_hit;
+        if (chip.right > chip.left and x >= chip.left and x <= chip.right and y >= chip.top and y <= chip.bottom) return false;
         const media = item.media_hit;
         if (x >= media.left and x <= media.right and y >= media.top and y <= media.bottom) {
             if (!isImage(item) and (!isGif(item) or isVideoGif(item))) return false;
@@ -11354,6 +11387,10 @@ fn findLoadedMessage(a: *App, msg_id: []const u8) ?*Message {
 }
 
 fn reactToMessage(a: *App, jid: []const u8, msg_id: []const u8, emoji: []const u8) void {
+    reactToMessageWithChip(a, jid, msg_id, emoji, false);
+}
+
+fn reactToMessageWithChip(a: *App, jid: []const u8, msg_id: []const u8, emoji: []const u8, preserve_chip: bool) void {
     if (a.selected_chat >= a.chat_count or !std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), jid)) {
         setStatus(a, "The chat changed; reaction not sent");
         return;
@@ -11384,7 +11421,8 @@ fn reactToMessage(a: *App, jid: []const u8, msg_id: []const u8, emoji: []const u
     entry.client_id.set("");
     entry.retries = 0;
     entry.retry_at_ms = 0;
-    message.reaction.set(a.allocator, emoji);
+    entry.preserve_chip = preserve_chip;
+    if (!preserve_chip) message.reaction.set(a.allocator, emoji);
     message.my_reaction.set(emoji);
     message.reaction_pending = true;
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
@@ -11460,7 +11498,7 @@ fn reapplyPendingReactions(a: *App, jid: []const u8) void {
     for (a.pending_reactions[0..a.pending_reaction_count]) |*entry| {
         if (!std.mem.eql(u8, entry.jid.slice(), jid)) continue;
         const message = findLoadedMessage(a, entry.msg_id.slice()) orelse continue;
-        message.reaction.set(a.allocator, entry.emoji.slice());
+        if (!entry.preserve_chip) message.reaction.set(a.allocator, entry.emoji.slice());
         message.my_reaction.set(entry.emoji.slice());
         message.reaction_pending = true;
     }
@@ -13183,11 +13221,14 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try control_api.writeStringUtf16(w, message.text.slice());
         try w.writeAll(",\"reaction\":");
         try control_api.writeStringUtf16(w, message.reaction.slice());
+        try w.writeAll(",\"my_reaction\":");
+        try control_api.writeString(w, message.my_reaction.slice());
         try w.writeAll(",\"media_type\":");
         try control_api.writeString(w, message.media_type.slice());
         try w.print(",\"local\":{},\"transcript_chars\":{d},\"expanded\":{}", .{ message.local_path.len > 0, message.transcript.len, message.transcript_expanded });
         for ([_]struct { name: []const u8, rect: win.RECT }{
             .{ .name = "bubble", .rect = message.bubble_hit },
+            .{ .name = "reaction_chip", .rect = message.reaction_hit },
             .{ .name = "media", .rect = message.media_hit },
             .{ .name = "toggle", .rect = message.toggle_hit },
         }) |entry| try w.print(",\"{s}\":[{d},{d},{d},{d}]", .{ entry.name, entry.rect.left, entry.rect.top, entry.rect.right, entry.rect.bottom });
@@ -15821,6 +15862,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         defer clearPaintingMessageId();
         message.media_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.bubble_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+        message.reaction_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.unfurl_card_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.replies_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.link_count = 0;
@@ -16098,11 +16140,15 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         }
         if (message.reaction.len > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font.?));
-            _ = win.SetTextColor(hdc, if (message.reaction_pending) theme.current.on_surface_variant else if (message.from_me) theme.current.on_primary_container else theme.current.on_surface);
+            var my_reaction: [63]u16 = undefined;
+            const my_len = std.unicode.utf8ToUtf16Le(&my_reaction, message.my_reaction.slice()) catch 0;
+            const included = message.from_me or (my_len > 0 and std.mem.indexOf(u16, message.reaction.slice(), my_reaction[0..my_len]) != null);
+            _ = win.SetTextColor(hdc, if (message.reaction_pending) theme.current.on_surface_variant else if (included) theme.current.on_primary_container else theme.current.on_surface);
             const chip_left = if (message.from_me) right - px(a, 12) - reaction_size.cx else left + px(a, 12);
             const chip_top = message.bubble_hit.bottom - px(a, 4);
             const chip = win.RECT{ .left = chip_left, .top = chip_top, .right = chip_left + reaction_size.cx, .bottom = chip_top + reaction_size.cy };
-            smooth.fillRoundRect(&shapes, chip, px(a, 12), px(a, 12), if (message.from_me) theme.current.primary_container else theme.current.surface_container_high);
+            message.reaction_hit = chip;
+            smooth.fillRoundRect(&shapes, chip, px(a, 12), px(a, 12), if (included) theme.current.primary_container else theme.current.surface_container_high);
             smooth.strokeRoundRect(&shapes, chip, px(a, 12), px(a, 12), theme.current.outline_variant, px(a, 1));
             _ = wrapMixedSink(hdc, a, message.reaction.ptr(), @intCast(message.reaction.len), reaction_size.cx - px(a, 12), true, chip.left + px(a, 6), chip.top + px(a, 4), null);
         }
@@ -16153,6 +16199,13 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                         beginStripDrag(a, hwnd, strip, info, y, .canvas, setCanvasScroll);
                         return 0;
                     }
+                }
+            }
+            for (a.messages[0..a.message_count]) |*item| {
+                const chip = item.reaction_hit;
+                if (chip.right > chip.left and rectHasPoint(chip, x, y)) {
+                    a.canvas_double_click_handled = false;
+                    return 0;
                 }
             }
             for (a.messages[0..a.message_count], 0..) |*item, index| {
