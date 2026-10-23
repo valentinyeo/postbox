@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'link-previews', 'menus', 'navigation', 'notrap', 'palette', 'palette-archived', 'paste-image', 'reactions', 'repaint', 'search', 'signal', 'slack-archive', 'slack-sort', 'slack-threads', 'telegram', 'views', 'voice', 'whatsapp-hub', 'workspace-icons', 'window'])
+assert features == sorted(['appearance', 'archive', 'drafts', 'hub', 'hub-archive', 'link-previews', 'menus', 'navigation', 'notrap', 'palette', 'palette-archived', 'paste-image', 'passage-copy', 'reactions', 'repaint', 'search', 'signal', 'slack-archive', 'slack-sort', 'slack-threads', 'telegram', 'views', 'voice', 'whatsapp-hub', 'workspace-icons', 'window'])
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, reactions, paste-image, whatsapp-hub, hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window, voice]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, passage-copy, reactions, paste-image, whatsapp-hub, hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window, voice]' in workflow
 options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
 assert options_match, 'missing workflow_dispatch journey options'
 options = [option.strip() for option in options_match[1].split(',')]
@@ -66,7 +66,7 @@ assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
 assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_KEY")) |seed|' in fixture_config
 assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'palette-archived', 'slack-sort', 'slack-archive', 'slack-threads', 'link-previews', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint', 'paste-image', 'voice')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'palette-archived', 'slack-sort', 'slack-archive', 'slack-threads', 'link-previews', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'passage-copy', 'reactions', 'repaint', 'paste-image', 'voice')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 keyboard = harness.split('function Send-Keys(', 1)[1].split('function Get-PaletteWindow(', 1)[0]
 for required in ['$app = Get-App $Session', '$null = Wait-Until {', '$foreground -eq [IntPtr]::Zero -or $ownerPid -ne $Session.pid',
@@ -343,3 +343,29 @@ assert '"link-previews"' in workflow and "matrix.feature == 'link-previews'" in 
 assert '--link-previews' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
 assert 'check-link-previews-evidence.py' in validator
 print('LINK PREVIEWS MAP VERIFIED: dispatch, PR matrix, hub mode and surviving evidence')
+
+passage = (root / 'tools/verify-wazig/passage-copy.ps1').read_text(encoding='utf-8')
+for value in ['Invoke-PassageCopyJourney $session', "'passage-copy'", '-PassageCopy:']:
+    assert value in runner, value
+for value in ['"passage-copy"', "matrix.feature == 'passage-copy'"]:
+    assert value in workflow, value
+for value in ['clipboard.json', 'passage-fixture.json', 'held drag beyond canvas 1024 bottom']:
+    assert value in passage and value in validator, value
+for value in ['[VerifyPassage]::Button', '[VerifyMenus]::Hover', "Send-Keys $Session '^c'", '$actual -ceq $expected']:
+    assert value in passage, value
+for value in ['$doubleClickDelay = [int][VerifyPassage]::GetDoubleClickTime() + 100',
+              '[System.Threading.Thread]::Sleep($doubleClickDelay)', "'react-requests.jsonl'",
+              'Assert-That (-not (Test-Path $reactionLog) -or (Get-Item $reactionLog).Length -eq 0)']:
+    assert value in passage, value
+assert '[DllImport("user32.dll")] public static extern uint GetDoubleClickTime();' in (root / 'tools/verify-wazig/passage-copy.cs').read_text(encoding='utf-8')
+assert '--passage-copy' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+assert '.claude/skills/verify-wazig/features/passage-copy.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert not re.search(r'\$(?:\w+\.)?(?:messages|rows|before|edgeBefore|after)\[\d', passage, re.I), 'passage targets must use PASSAGE ids, not array positions'
+for value in ["$messages['PASSAGE-2']", "$messages['PASSAGE-5']", "$edgeMessages['PASSAGE-6']", "$heldMessages['PASSAGE-7']", '$_.MsgID -ceq "PASSAGE-$index"', '[VerifyPassage]::Wheel($Session.pid, 120)']:
+    assert value in passage, value
+passage_validator = validator.split("if session['feature'] == 'passage-copy':", 1)[1].split("if session['feature'] == 'reactions':", 1)[0]
+assert not re.search(r"\['(?:before|after|messages)'\]\[\d", passage_validator), 'passage evidence must resolve control messages by id'
+for value in ["passage_messages(check['before'])", "passage_messages(check['after'])", "passage_messages(held['messages'])", "fixture_messages[f'PASSAGE-{index}']", 'timestamps == sorted(timestamps)']:
+    assert value in passage_validator, value
+assert 'self.respond(200, list(reversed(passage_rows(chat)))' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8'), 'passage message endpoint must be newest-first; clipboard fixture stays chronological'
+print('PASSAGE COPY MAP VERIFIED: id-based targets and evidence, chronological clipboard, newest-first wire rows, real drag and held-edge scrolling on both providers')

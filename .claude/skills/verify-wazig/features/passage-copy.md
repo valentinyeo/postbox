@@ -1,0 +1,27 @@
+# Chat passage copy
+
+## Sub-features
+
+Cross-message word selection, partial endpoints, sender/time stamps, You for outgoing messages, intervening date lines and held-edge auto-scroll on WhatsApp and Slack.
+
+## How to get to it (user POV)
+
+Drag from text in one message into another. Hold at the top or bottom of the message canvas to extend through offscreen messages. Ctrl+C or the existing right-click Copy selection copies plain text. Single-message selection remains unstamped.
+
+## Driving it with PowerShell UI Automation
+
+Run `feature=passage-copy` on GitHub-hosted Windows. The unified fake hub seeds seven synthetic messages per provider, alternating senders and one outgoing message, with a day change between messages three and four. Message six has forty lines so message seven starts below the fold when viewing the first five.
+
+The message endpoint returns newest-first, matching the provider contract; the app reverses these rows into chronological storage and emits that storage order through the control API. The separate passage fixture stays chronological. Resolve all control snapshots, drag endpoints, visibility checks and held-scroll evidence by `PASSAGE-<n>` id, never by array position. Build expected clipboard text by increasing fixture message id, with timestamps verified to be chronological.
+
+Use Ctrl+F to open each chat, then real SendInput wheel-up (positive delta) over canvas 1024, re-reading read-only message bounds after each notch until messages two through five are all fully visible. Stop after at most 80 notches with a diagnostic assertion if the short targets do not fit. Use the canvas client size and ClientToScreen origin in a per-monitor-DPI-aware thread, read-only bubble rectangles and screenshot body pixels to locate the middle word of messages two and five. Real SendInput mouse down, move and up followed by Send-Keys Ctrl+C must yield the exact fixture-derived stamped passage, including both partial endpoints and the intervening date line. Current single-message-only selection must fail that clipboard assertion.
+
+Repeat from fully visible message two with message seven still below the fold, and hold the pointer beyond the canvas bottom until message seven is fully visible. Before releasing, require message six's read-only client-relative top to decrease: this tall bubble remains measurable across the scroll, unlike short messages that disappear offscreen. Require exact clipboard text through message seven. Retain passage-fixture.json, clipboard.json (including canvas geometry and before/during-hold bounds), provider before/after/edge-after screenshots and state/UIA companions, actions.log, result.json, side-effects.json and cleanup.txt. check-evidence.py independently reconstructs the clipboard expectations and validates target visibility and during-hold scroll evidence. Inspect screenshots after downloading the artifact.
+
+## Gotchas
+
+PowerShell 7 can deserialize fixture ISO timestamps as DateTime instead of strings. Normalize either representation to UTC with invariant parsing/formatting, retain the UTC fixture day as `yyyy-MM-dd`, and convert only the time to runner-local `HH:mm`. The app fills Message.time with SystemTimeToTzSpecificLocalTime but passes the raw timestamp's first ten characters to the passage builder as the day. GitHub-hosted Windows runners normally use UTC; do not hard-code that assumption in the journey or evidence validator. Multi-message copy is `Sender, HH:mm: selected text` (or `You`), with CRLF separators and a bare `yyyy-MM-dd` line only at an internal day change, never before the first message. Partial first/last messages retain their stamps.
+
+Keep fixture-match results wrapped in `@(...)` before counting/indexing, message maps keyed by string ids, and clipboard evidence serialized with `ConvertTo-Json -InputObject $checks` so a single check stays an array. JSON integer coordinates may be Int64; use numeric comparisons and the native helpers' typed integer parameters, not integer-type identity assertions.
+
+The first commit deliberately contains no app fix and must fail the partial passage assertion on GitHub. No local app or suite runs are permitted. Pixel targeting requires a fully visible single-line endpoint; fixture setup failures do not count as the expected red result. This proves the synthetic hub providers, not live provider delivery. Top-edge, reverse selection, right-click copying and single-message behavior also require unit/source review; this journey exercises bottom-edge scrolling and Ctrl+C.

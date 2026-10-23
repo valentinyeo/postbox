@@ -10,6 +10,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [drafts](drafts.md) | Composer and per-chat drafts | Type, switch away/back, check disk |
 | [palette](palette.md) | Command palette and shortcut discovery | Positive shortcut row, no Status result/sidebar entry, activate help |
 | [appearance](appearance.md) | Theme and saved text size | Choose Green, save larger text, reset scale to 82% |
+| [passage-copy](passage-copy.md) | Cross-message text selection | Real drags on WhatsApp and Slack, partial stamped clipboard, day change and held-edge scrolling |
 | [reactions](reactions.md) | Right-click message reactions | Real mouse laughing-face selection on WhatsApp and Slack; exact hub request and visible chip |
 | [menus](menus.md) | Native menus and custom popups | Measure AMOLED darkness and text contrast, then Green native-menu lightness |
 | [whatsapp-hub](whatsapp-hub.md) | WhatsApp hub transport | Chats, history, live SSE replay, idempotent retry, reads, archive, pending media and DPAPI |
@@ -31,7 +32,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [text-comparison](appearance.md) | DirectWrite beside Chrome | Exact text/font/metric parity, paired screenshots and 3x paragraph crops |
 | [window](window.md) | Maximized startup and saved normal placement | Unforced launch, keyboard restore/resize, Alt+F4, same-profile reopen and --update-relaunch |
 
-Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `paste-image`, `reactions`, `menus`, `search`, `drafts`, `whatsapp-hub`, `hub`, `hub-archive`, `palette-archived`, `slack-sort`, `slack-archive`, `slack-threads`, `views`, `workspace-icons`, `signal`, `telegram`, `notrap`, `repaint`, `text-comparison`, `window` and `voice`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
+Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `paste-image`, `passage-copy`, `reactions`, `menus`, `search`, `drafts`, `whatsapp-hub`, `hub`, `hub-archive`, `palette-archived`, `slack-sort`, `slack-archive`, `slack-threads`, `views`, `workspace-icons`, `signal`, `telegram`, `notrap`, `repaint`, `text-comparison`, `window` and `voice`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
 
 The source of truth for commands is `src/main.zig:buildPaletteItems`, for keyboard handling `src/main.zig:handleKeyboard`, and for discoverable help `src/shortcuts.zig`. Every feature file has precisely four H2 sections. Capture the input, resulting UI and durable side effects; preserve proof after cleanup. Only archive adds a synthetic incoming message at the fixture provider boundary; search, navigation, drafts, palette and appearance stay empty. No live send, account login, media, voice playback or transcription claim can be made from these local chats.
 
@@ -121,3 +122,5 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-681: WhatsApp chats load older hub messages on scroll-up -> `hub` (real PageUp keystrokes page a 250-row synthetic chat through cursor requests `before=<id>:<timestamp>`; asserts all 250 rows once each, oldest first, an empty last page and no request after it; the legacy `whatsapp-hub` bridge is not paged)
 - IGSH-679: clipboard screenshot paste and Enter send -> `paste-image` (full-screen and 4K RGBA, V5/PNG and bitmap formats, decoded upload dimensions, alpha and orientation on four synthetic provider chats)
 - IGSH-700: Ctrl+K finds archived chats on every account -> `palette-archived` (archived WhatsApp, Telegram and Slack names from the combined inbox and every account view, inbox names from every view, Enter opens the chat without a hub archive write)
+
+- IGSH-667: drag across full chat passages -> `passage-copy` (exact stamped partial clipboard and held-edge scrolling on WhatsApp and Slack)
