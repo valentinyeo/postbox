@@ -237,7 +237,7 @@ function Invoke-Doctor($Session) {
     Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable'
     $null = Read-Edit $search
     if ($Session.feature -in @('whatsapp-hub', 'hub')) {
-        $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'hub baseline'
+        $null = Wait-Until { (Read-Control $Session status).chat_count -eq $(if ($Session.feature -eq 'hub') { 3 } else { 2 }) } 'hub baseline'
     }
     if ($Session.feature -eq 'views') {
         $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 6 } 'account views baseline'
@@ -250,7 +250,7 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackArchive, [switch]$SlackThreads, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions, [switch]$HubArchive, [switch]$Repaint) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackArchive, [switch]$SlackThreads, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$Reactions, [switch]$HubArchive, [switch]$Repaint, [switch]$MixedLid) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
@@ -267,6 +267,7 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [s
     if ($Reactions) { $start.ArgumentList.Add('--reactions') }
     if ($HubArchive) { $start.ArgumentList.Add('--hub-archive') }
     if ($Repaint) { $start.ArgumentList.Add('--repaint') }
+    if ($MixedLid) { $start.ArgumentList.Add('--mixed-lid') }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')
@@ -301,7 +302,7 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
     $alpha = if ($unified) { 'fixture-alpha' } else { ($rows | Where-Object name -eq 'Verification Alpha').id }
     $beta = if ($unified) { 'fixture-beta' } else { ($rows | Where-Object name -eq 'Verification Beta').id }
     $provider = if ($unified) { 'slack' } else { 'whatsapp' }
-    Assert-That ($state.chat_count -eq 2 -and $state.selected.name -eq 'Verification Alpha' -and $state.selected.id -eq $alpha -and $state.selected.provider -eq $provider) 'Hub chats did not reach the sidebar'
+    Assert-That ($state.chat_count -eq $(if ($unified) { 3 } else { 2 }) -and $state.selected.name -eq 'Verification Alpha' -and $state.selected.id -eq $alpha -and $state.selected.provider -eq $provider) 'Hub chats did not reach the sidebar'
     $requests = @(Read-BridgeRequests $Session)
     $listPaths = if ($unified) { @('/v1/chats?') } else { @('/v1/accounts', '/v1/chats?') }
     foreach ($path in $listPaths) {
@@ -383,6 +384,33 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
             $shown.chat.id -eq $alpha -and @($shown.messages | Where-Object id -eq 'BASELINE').Count -eq 1 -and @($shown.messages | Where-Object id -eq 'BASELINE_BETA').Count -eq 0
         } 'Alpha history restored after provider views'
         Hub-Pass $Session provider-views
+        $mixedRow = @((Read-Control $Session chats -Arguments @('--json', '--messenger', 'whatsapp')).chats | Where-Object name -eq 'Verification Mixed')
+        Assert-That ($mixedRow.Count -eq 1 -and $mixedRow[0].id -eq '15550000005@s.whatsapp.net') 'Mixed WhatsApp chat missing from the list'
+        $alphaRow = @($rows | Where-Object id -eq $alpha)[0]
+        $null = Read-Control $Session select -Arguments @($mixedRow[0].id, '--provider', $mixedRow[0].provider, '--account', $mixedRow[0].account)
+        $expectedTexts = @('Mixed phone first', 'Mixed lid first', 'Mixed phone second', 'Mixed lid second')
+        $null = Wait-Until {
+            $shown = Read-Control $Session messages
+            (Read-Control $Session status).selected.id -eq $mixedRow[0].id -and $shown.chat.id -eq $mixedRow[0].id -and @($expectedTexts | Where-Object { $_ -in @($shown.messages.text) }).Count -eq $expectedTexts.Count
+        } 'mixed phone and lid page shown'
+        $shown = Read-Control $Session messages
+        $shown | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'mixed-lid.messages.json')
+        Save-Screen $Session mixed-lid
+        Assert-That (@($shown.messages | Where-Object { $_.text -in $expectedTexts }).Count -eq $expectedTexts.Count) 'Mixed page lost messages'
+        $mixedReads = @(Read-BridgeRequests $Session | Where-Object { $_.wire_path.StartsWith('/v1/wazig/messages?') -and $_.wire_path.Contains('15550000005') -and $_.status -eq 200 })
+        Assert-That ($mixedReads.Count -gt 0) 'Mixed chat page was never served'
+        Assert-That (-not ((Get-Content (Join-Path $Messages 'launch-log.txt') -Raw).Contains('WrongChat'))) 'Launch log reports WrongChat for the mixed page'
+        Send-Keys $Session '^k'
+        Send-Keys $Session 'Archive selected chat'
+        Send-Keys $Session '{ENTER}'
+        $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/archive' -and $_.body.archived -eq $true -and $_.body.chat -eq $mixedRow[0].id -and $_.status -eq 200 }).Count -gt 0 } 'mixed chat archive'
+        $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 -and (Read-Control $Session status).pending_archives -eq 0 } 'mixed chat removed'
+        Hub-Pass $Session mixed-lid-page
+        $null = Read-Control $Session select -Arguments @($alphaRow.id, '--provider', $alphaRow.provider, '--account', $alphaRow.account)
+        $null = Wait-Until {
+            $shown = Read-Control $Session messages
+            (Read-Control $Session status).selected.id -eq $alpha -and $shown.chat.id -eq $alpha -and @($shown.messages | Where-Object id -eq 'BASELINE').Count -eq 1
+        } 'Alpha reselected after mixed page'
     }
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'history.messages.json')
     Save-Screen $Session history
@@ -443,6 +471,7 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
     $launch = Get-Content (Join-Path $Messages 'launch-log.txt')
     Assert-That (@($launch | Where-Object { $_ -match $backend }).Count -eq 1) 'Backend was logged more than once'
     Assert-That (@($launch | Where-Object { $_ -match "$backend hub`$" }).Count -eq 1) 'Hub was not selected'
+    Assert-That (-not (($launch -join "`n").Contains('WrongChat'))) 'Launch log reports WrongChat'
     Assert-That (-not (($launch -join "`n").Contains('fixture-key-not-a-secret'))) 'Launch log leaked key'
     $preferences = "HKCU:\Software\MessagesVerification\$($Session.id)\Software\Messages"
     $registry = Get-Item $preferences

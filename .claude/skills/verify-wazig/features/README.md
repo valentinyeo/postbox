@@ -111,3 +111,4 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-669: maximize every startup on the saved monitor -> `window` (requires native zoomed state without harness maximization, real restore/resize and Alt+F4, same-profile reopen and --update-relaunch; multi-monitor hardware movement remains outside the hosted fixture)
 
 - IGSH-671: Idle and background-message flicker -> `repaint` (60-second full-paint counter and arrival evidence)
+- IGSH-683: WhatsApp phone chat page mixing @lid rows -> `hub` (asserts all four texts of a page that mixes phone and same-account @lid ChatJIDs reach the pane and the launch log has no WrongChat; other mismatches stay unit-test coverage in src/hub_test.zig)

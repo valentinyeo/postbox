@@ -355,7 +355,7 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
     assert len(set(images)) >= 4
     before = json.loads((folder / 'before.state.json').read_text(encoding='utf-8-sig'))
     final = json.loads((folder / 'side-effects.json').read_text(encoding='utf-8-sig'))
-    assert before['chat_count'] == 2 and final['chat_count'] == 1
+    assert before['chat_count'] == (3 if unified else 2) and final['chat_count'] == 1
     assert final['pending_sends'] == 0 and final['pending_archives'] == 0
     assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
     guards = (folder / 'launch-guards.log').read_text(encoding='utf-8-sig')
@@ -368,7 +368,11 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
     assert launch.count(backend) == 1 and backend + ' hub' in launch
     if unified:
         assert before['selected']['provider'] == 'slack' and final['selected']['provider'] == 'slack'
-        assert 'hub provider-views PASS' in proof
+        assert 'hub provider-views PASS' in proof and 'hub mixed-lid-page PASS' in proof
+        mixed = json.loads((folder / 'mixed-lid.messages.json').read_text(encoding='utf-8-sig'))
+        assert sorted(row['text'] for row in mixed['messages']) == sorted(['Mixed phone first', 'Mixed lid first', 'Mixed phone second', 'Mixed lid second'])
+        assert mixed['chat']['id'] == '15550000005@s.whatsapp.net' and 'WrongChat' not in launch
+        assert any(row['path'] == '/v1/archive' and row['body']['chat'] == mixed['chat']['id'] and row['body']['archived'] and row['status'] == 200 for row in requests)
         for keys in ['%1', '%2', '%0']:
             assert f'keys: {keys}' in actions
         subprocess.run([sys.executable, str(Path(__file__).with_name('check-hub-views.py')), str(folder)], check=True)

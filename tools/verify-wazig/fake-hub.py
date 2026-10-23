@@ -152,6 +152,52 @@ ARCHIVE_GROUP = 'personal:120363000000000001@g.us'
 ARCHIVE_OTHER = 'personal:15550000003@s.whatsapp.net'
 
 
+MIXED = '15550000005@s.whatsapp.net'
+MIXED_LID = '99990000000001@lid'
+MIXED_TEXTS = ['Mixed phone first', 'Mixed lid first', 'Mixed phone second', 'Mixed lid second']
+
+
+def mixed_rows():
+    stamp = datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
+    return [dict(MsgID=f'MIXED-{index + 1}', ChatJID=MIXED if index % 2 == 0 else MIXED_LID, Timestamp=stamp,
+                 Text=text, DisplayText=text, FromMe=False, SenderName='Fixture Sender',
+                 SenderJID='15550000005@s.whatsapp.net') for index, text in enumerate(MIXED_TEXTS)]
+
+
+class MixedLidHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        if content_type == 'application/json' and isinstance(data, list) and self.wire_path.startswith('/v1/wazig/chats'):
+            archived = getattr(self.state, 'mixed_archived', False)
+            if ('archived=true' in self.wire_path) == archived:
+                data = data + [dict(jid=MIXED, name='Verification Mixed', provider='whatsapp', kind='direct',
+                                    last_message_ts='2025-12-01T00:00:00Z', unread_count=0, archived=archived)]
+        super().respond(status, data, content_type, **extra)
+
+    def do_GET(self):
+        url = urlsplit(self.path)
+        if url.path == '/v1/wazig/messages' and parse_qs(url.query).get('chat') == [MIXED]:
+            self.wire_path = self.path
+            if self.authorized():
+                self.respond(200, mixed_rows())
+            return
+        super().do_GET()
+
+    def do_POST(self):
+        if self.path in ('/v1/wazig/mark-read', '/v1/wazig/archive'):
+            data = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+            self.rfile = io.BytesIO(data)
+            body = json.loads(data or '{}')
+            if body.get('chat') == MIXED:
+                self.wire_path = self.path
+                if self.authorized():
+                    if self.path == '/v1/wazig/archive':
+                        self.state.mixed_archived = bool(body.get('archived'))
+                    self.path = self.path.replace('/v1/wazig/', '/v1/', 1)
+                    self.respond(200, {'status': 'ok'}, body=body)
+                return
+        super().do_POST()
+
+
 class HubArchiveHandler(Handler):
     def respond(self, status, data, content_type='application/json', **extra):
         bridge.Handler.respond(self, status, data, content_type, **extra)
@@ -989,6 +1035,7 @@ def main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--hub-archive', action='store_true')
     modes.add_argument('--repaint', action='store_true')
+    modes.add_argument('--mixed-lid', action='store_true')
     modes.add_argument('--reactions', action='store_true')
     modes.add_argument('--slack-sort', action='store_true')
     modes.add_argument('--slack-archive', action='store_true')
@@ -1000,7 +1047,7 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    handler = SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)

@@ -118,7 +118,11 @@ pub fn normalize(allocator: std.mem.Allocator, raw: []const u8, kind: Rows, chat
         if (kind == .chats) {
             _ = sourceProvider(item.object) orelse return error.BadProvider;
         } else if (kind == .messages) {
-            if (!std.mem.eql(u8, string(item.object, "ChatJID"), chat)) return error.WrongChat;
+            const row_chat = string(item.object, "ChatJID");
+            if (!std.mem.eql(u8, row_chat, chat)) {
+                if (!lidAlias(row_chat, chat)) return error.WrongChat;
+                try item.object.put(allocator, "ChatJID", .{ .string = chat });
+            }
             _ = item.object.swapRemove("LocalPath");
             _ = item.object.swapRemove("local_path");
         }
@@ -147,6 +151,16 @@ pub fn archivedChats(allocator: std.mem.Allocator, archived_raw: []const u8, inb
         if (sourceProvider(row.object) == .slack) try rows.append(allocator, row);
     }
     return std.json.Stringify.valueAlloc(allocator, .{ .success = true, .data = rows.items }, .{});
+}
+
+fn accountPrefix(id: []const u8) []const u8 {
+    const colon = std.mem.indexOfScalar(u8, id, ':') orelse return "";
+    return id[0..colon];
+}
+
+fn lidAlias(row_chat: []const u8, chat: []const u8) bool {
+    if (!std.mem.endsWith(u8, row_chat, "@lid") or !std.mem.endsWith(u8, chat, "@s.whatsapp.net")) return false;
+    return std.mem.eql(u8, accountPrefix(row_chat), accountPrefix(chat));
 }
 
 pub fn sourceProvider(row: std.json.ObjectMap) ?transport.Provider {
