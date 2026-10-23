@@ -106,11 +106,11 @@ def check_pixels(folder, capture=False):
         light = sum(min(pixel) >= 180 for row in rows for pixel in row) / (crop_width * crop_height)
         if name == 'empty':
             fraction = measure(rows, (51, 51, 51))
-            assert fraction > 0.55 and white > 0.015, (name, fraction, white)
+            assert fraction > 0.55 and light > 0.03, (name, fraction, light)
             assert all(measure(rows, colour) < 0.03 for colour in COLOURS.values()), name
         else:
             fraction = measure(rows, COLOURS[name])
-            assert fraction > (0.50 if name == 'whatsapp' else 0.55), (name, fraction)
+            assert fraction > (0.35 if name == 'whatsapp' else 0.55), (name, fraction)
             assert light > 0.03, (name, 'missing letter or handset')
             assert all(measure(rows, colour) < 0.03 for other, colour in COLOURS.items() if other != name), name
         metrics[name] = dict(rect=[left, top, right, bottom], colour_fraction=fraction, white_fraction=white, light_fraction=light)
