@@ -77,6 +77,28 @@ test "IGSH-531 aggregate rows retain network labels reject collisions and remove
     try std.testing.expect(std.mem.indexOf(u8, file.body, "name=\"ptt\"\r\n\r\ntrue\r\n") != null);
 }
 
+test "IGSH-683 same-account lid rows join the phone chat and other mismatches stay rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const phone = "personal:15550000002@s.whatsapp.net";
+    const mixed = "[{\"MsgID\":\"a\",\"ChatJID\":\"personal:15550000002@s.whatsapp.net\",\"Text\":\"phone\"},{\"MsgID\":\"b\",\"ChatJID\":\"personal:99990000000001@lid\",\"Text\":\"lid\"}]";
+    const normalized = try hub.normalize(allocator, mixed, .messages, phone);
+    const value = try std.json.parseFromSliceLeaky(std.json.Value, allocator, normalized, .{});
+    const rows = value.object.get("data").?.object.get("messages").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), rows.len);
+    for (rows) |row| try std.testing.expectEqualStrings(phone, row.object.get("ChatJID").?.string);
+    try std.testing.expectEqualStrings("lid", rows[1].object.get("Text").?.string);
+    const bare = try hub.normalize(allocator, "[{\"MsgID\":\"a\",\"ChatJID\":\"99990000000001@lid\"}]", .messages, "15550000002@s.whatsapp.net");
+    try std.testing.expect(std.mem.indexOf(u8, bare, "\"ChatJID\":\"15550000002@s.whatsapp.net\"") != null);
+    try std.testing.expectError(error.WrongChat, hub.normalize(allocator, "[{\"MsgID\":\"b\",\"ChatJID\":\"business:99990000000001@lid\"}]", .messages, phone));
+    try std.testing.expectError(error.WrongChat, hub.normalize(allocator, "[{\"MsgID\":\"b\",\"ChatJID\":\"99990000000001@lid\"}]", .messages, phone));
+    try std.testing.expectError(error.WrongChat, hub.normalize(allocator, "[{\"MsgID\":\"b\",\"ChatJID\":\"business:99990000000001@lid\"}]", .messages, phone));
+    try std.testing.expectError(error.WrongChat, hub.normalize(allocator, "[{\"MsgID\":\"b\",\"ChatJID\":\"personal:15550000003@s.whatsapp.net\"}]", .messages, phone));
+    try std.testing.expectError(error.WrongChat, hub.normalize(allocator, "[{\"MsgID\":\"b\",\"ChatJID\":\"personal:99990000000001@lid\"}]", .messages, "personal:120363000000000001@g.us"));
+    try std.testing.expectError(error.WrongChat, hub.normalize(allocator, "[{\"MsgID\":\"b\",\"ChatJID\":\"personal:99990000000002@lid\"}]", .messages, "personal:99990000000001@lid"));
+}
+
 test "IGSH-531 live updates use bounded validated SSE and resume ids" {
     var sse = hub.Sse{};
     const frame = "id: 7\ndata: {\"id\":7,\"kind\":\"msg\",\"chat\":\"opaque\"}\n\n";
