@@ -209,6 +209,9 @@ function finish() {
         fail(expected_three, "B3", "expected wazigctl exit 3 remains the PowerShell step exit status", "exit 0 after checking $LASTEXITCODE -ne 3")
     if (automerge_line && (!all_required || !all_checks || !completed_checks || !head_pinned || !checks_fail_closed || !missing_checks || !ai_optional))
         fail(automerge_line, "B8", "automerge can merge before every non-AI PR head check succeeds", "all required checks including unfurl-verification, every discovered non-AI check, COMPLETED and SUCCESS, fail-closed evaluation, and --match-head-commit")
+    if (automerge_line && (!admission_fields || !owner_env || !owner_arg || !admission_guard))
+        fail(automerge_line, "B9", "automerge admits PRs without checking their repository and author", "read isCrossRepository and author, pass github.repository_owner through env to jq, and skip when .isCrossRepository != false or .author.login != $owner")
+    admission_fields = owner_env = owner_arg = admission_guard = 0
     automerge_line = all_required = all_checks = completed_checks = head_pinned = checks_fail_closed = missing_checks = ai_optional = 0
     tag_line = dispatch = gui_exe = gui_call = expected_three = success_exit = status_call = 0
     running = 0
@@ -241,6 +244,7 @@ FNR == 1 {
         fail(FNR, "B6", "workflow calls OpenRouter or Z.ai instead of free GitHub Models", "ai-review.yml runs bash tools/ai-review.sh with GITHUB_TOKEN and models: read")
     if (code ~ /^[[:space:]]*runs-on:/ && code ~ /self-hosted/)
         fail(FNR, "B7", "workflow runs on a self-hosted runner, whose public logs show the server\047s name and folders", "runs-on: ubuntu-latest; the AI review runs in ai-review.yml on GitHub")
+    if (file == ".github/workflows/automerge.yml" && code ~ /^[[:space:]]*REPO_OWNER:[[:space:]]*\$\{\{[[:space:]]*github\.repository_owner[[:space:]]*\}\}/) owner_env = 1
     if (!running) next
     if (file == ".github/workflows/auto-release.yml") {
         if (code ~ /git[[:space:]]+push.*next_tag/ || code ~ /ref=refs\/tags\/\$\{next_tag\}/) tag_line = FNR
@@ -259,6 +263,9 @@ FNR == 1 {
     if (status_call && code ~ /\$LASTEXITCODE[[:space:]]+-ne[[:space:]]+3([^0-9]|$)/) expected_three = FNR
     if (expected_three && code ~ /^[[:space:]]*exit[[:space:]]+0([[:space:];]|$)/) success_exit = 1
     if (file == ".github/workflows/automerge.yml") {
+        if (code ~ /gh pr view/ && code ~ /--json[[:space:]]+[^[:space:]]*isCrossRepository/ && code ~ /--json[[:space:]]+[^[:space:]]*author/) admission_fields = 1
+        if (code ~ /reason=.*jq/ && code ~ /--arg owner "\$REPO_OWNER"/) owner_arg = 1
+        if (code ~ /if \.isCrossRepository != false or \.author\.login != \$owner then "not a same-repo PR by the owner"/) admission_guard = 1
         if (code ~ /required=/) {
             automerge_line = FNR
             all_required = 1

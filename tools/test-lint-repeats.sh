@@ -21,6 +21,7 @@ cases=(
     '7ea1b5b B6 HEAD'
     'a701837 B7 HEAD'
     '4064743 B8 HEAD'
+    'fc4e1a0 B9 HEAD'
     'dc9bdce C1 HEAD'
     '0e7c320d44f1 C1 HEAD'
     '914331e C2 HEAD'
@@ -112,6 +113,31 @@ done
 cp "$repo/.github/workflows/automerge.yml" "$fixture/.github/workflows/automerge.yml"
 "$lint" "$fixture"
 printf 'test-lint-repeats: IGSH-504 B8 rejects %s incomplete check policies and permits the fixed workflow\n' "$b8_cases"
+b9_cases=0
+for mutation in fields owner_env owner_arg same_repo owner_author; do
+    case "$mutation" in
+        fields) sed 's/,isCrossRepository,author//' "$repo/.github/workflows/automerge.yml" ;;
+        owner_env) sed '/REPO_OWNER:/d' "$repo/.github/workflows/automerge.yml" ;;
+        owner_arg) sed 's/ --arg owner "\$REPO_OWNER"//' "$repo/.github/workflows/automerge.yml" ;;
+        same_repo) sed 's/\.isCrossRepository != false or //' "$repo/.github/workflows/automerge.yml" ;;
+        owner_author) sed 's/ or \.author\.login != \$owner//' "$repo/.github/workflows/automerge.yml" ;;
+    esac > "$fixture/.github/workflows/automerge.yml"
+    if cmp -s "$repo/.github/workflows/automerge.yml" "$fixture/.github/workflows/automerge.yml"; then
+        printf 'test-lint-repeats: FAIL IGSH-635 %s mutation changed nothing\n' "$mutation" >&2
+        exit 1
+    fi
+    status=0
+    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+    if (( status != 1 )) || ! grep -Fq '[B9]' "$temp/output"; then
+        cat "$temp/output" >&2
+        printf 'test-lint-repeats: FAIL IGSH-635 B9 must reject missing %s, got exit %s\n' "$mutation" "$status" >&2
+        exit 1
+    fi
+    b9_cases=$((b9_cases + 1))
+done
+cp "$repo/.github/workflows/automerge.yml" "$fixture/.github/workflows/automerge.yml"
+"$lint" "$fixture"
+printf 'test-lint-repeats: IGSH-635 B9 rejects %s incomplete admission policies and permits the fixed workflow\n' "$b9_cases"
 mkdir -p "$fixture/src/nested"
 c2_cases=0
 for variable in DEEPGRAM_API_KEY WA_BRIDGE_KEY; do
