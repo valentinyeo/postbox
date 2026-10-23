@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import os
 import re
 import subprocess
@@ -7,38 +9,13 @@ SKIP_DIRS = ("vendor/",)
 PRIVATE_PATHS = ("CLAUDE.local.md", "HANDOFF.md", "board.yml", ".claude/skills/", ".claude/hooks/agent-scope-guard.sh", ".claude/handoffs/")
 
 PUBLIC_SKILL_PATHS = (
-    ".claude/skills/verify-wazig/features/passage-copy.md",
-    ".claude/skills/verify-wazig/features/paste-image.md",
-    ".claude/skills/verify-wazig/features/link-previews.md",
-    ".claude/skills/verify-wazig/features/hub-archive.md",
-    ".claude/skills/verify-wazig/features/palette-archived.md",
-    ".claude/skills/verify-wazig/features/reactions.md",
     ".claude/skills/verify-wazig/SKILL.md",
     ".claude/skills/verify-wazig/INDEX.md",
     ".claude/skills/verify-wazig/RULE-MAP.md",
-    ".claude/skills/verify-wazig/features/notrap.md",
-    ".claude/skills/verify-wazig/features/signal.md",
-    ".claude/skills/verify-wazig/features/telegram.md",
     ".claude/skills/verify-wazig/features/README.md",
-    ".claude/skills/verify-wazig/features/search.md",
-    ".claude/skills/verify-wazig/features/navigation.md",
-    ".claude/skills/verify-wazig/features/drafts.md",
-    ".claude/skills/verify-wazig/features/palette.md",
-    ".claude/skills/verify-wazig/features/appearance.md",
-    ".claude/skills/verify-wazig/features/whatsapp-hub.md",
-    ".claude/skills/verify-wazig/features/hub.md",
-    ".claude/skills/verify-wazig/features/slack-sort.md",
-    ".claude/skills/verify-wazig/features/slack-archive.md",
-
-    ".claude/skills/verify-wazig/features/slack-threads.md",
-    ".claude/skills/verify-wazig/features/workspace-icons.md",
-    ".claude/skills/verify-wazig/features/menus.md",
-    ".claude/skills/verify-wazig/features/archive.md",
-    ".claude/skills/verify-wazig/features/archive-bulk.md",
-    ".claude/skills/verify-wazig/features/views.md",
-    ".claude/skills/verify-wazig/features/window.md",
-    ".claude/skills/verify-wazig/features/repaint.md",
-    ".claude/skills/verify-wazig/features/voice.md",
+) + tuple(
+    f".claude/skills/verify-wazig/features/{journey['name']}.md"
+    for journey in json.loads((Path(__file__).resolve().parent / 'verify-wazig/journeys.json').read_text(encoding='utf-8'))['journeys']
 )
 
 

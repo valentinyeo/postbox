@@ -1,0 +1,444 @@
+{
+  "journeys": [
+    {
+      "name": "search",
+      "pr": true,
+      "hub": null,
+      "evidence": true,
+      "chats": null,
+      "script": "journey-search.ps1",
+      "validator": {
+        "file": "evidence-search.py"
+      },
+      "hub_handler": null,
+      "maximize": true
+    },
+    {
+      "name": "navigation",
+      "pr": false,
+      "hub": null,
+      "evidence": false,
+      "chats": null,
+      "script": "journey-navigation.ps1",
+      "validator": null,
+      "hub_handler": null,
+      "maximize": true
+    },
+    {
+      "name": "drafts",
+      "pr": true,
+      "hub": null,
+      "evidence": false,
+      "chats": null,
+      "script": "journey-drafts.ps1",
+      "validator": null,
+      "hub_handler": null,
+      "maximize": true
+    },
+    {
+      "name": "palette",
+      "pr": false,
+      "hub": null,
+      "evidence": true,
+      "chats": null,
+      "script": "journey-palette.ps1",
+      "validator": {
+        "file": "evidence-palette.py"
+      },
+      "hub_handler": null,
+      "maximize": true
+    },
+    {
+      "name": "appearance",
+      "pr": false,
+      "hub": null,
+      "evidence": true,
+      "chats": null,
+      "script": "journey-appearance.ps1",
+      "validator": {
+        "file": "evidence-palette.py"
+      },
+      "hub_handler": null,
+      "maximize": true
+    },
+    {
+      "name": "menus",
+      "pr": true,
+      "hub": null,
+      "evidence": false,
+      "chats": null,
+      "script": "journey-menus.ps1",
+      "validator": {
+        "file": "evidence-menus.py"
+      },
+      "hub_handler": null,
+      "prepare": "prepare-menus.ps1",
+      "maximize": true
+    },
+    {
+      "name": "passage-copy",
+      "pr": true,
+      "hub": "passage-copy",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-passage-copy.ps1",
+      "validator": {
+        "file": "evidence-passage-copy.py"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "PassageCopyHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "reactions",
+      "pr": true,
+      "hub": "reactions",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-reactions.ps1",
+      "validator": {
+        "file": "evidence-reactions.py"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "ReactionsHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "paste-image",
+      "pr": true,
+      "hub": "paste-image",
+      "evidence": true,
+      "chats": 4,
+      "script": "journey-paste-image.ps1",
+      "validator": {
+        "file": "check-paste-image-evidence.py",
+        "function": "check_paste_image"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "PasteImageHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "whatsapp-hub",
+      "pr": true,
+      "hub": "legacy",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-whatsapp-hub.ps1",
+      "validator": {
+        "file": "evidence-whatsapp-hub.py"
+      },
+      "hub_handler": {
+        "file": "fake-wa-bridge.py",
+        "class": "Handler"
+      },
+      "ready": "ready-whatsapp-hub.ps1",
+      "prepare": "prepare-whatsapp-hub.ps1",
+      "maximize": true
+    },
+    {
+      "name": "hub",
+      "pr": true,
+      "hub": "mixed-lid",
+      "evidence": true,
+      "chats": 3,
+      "script": "journey-hub.ps1",
+      "validator": {
+        "file": "evidence-whatsapp-hub.py"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "MixedLidHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "hub-archive",
+      "pr": true,
+      "hub": "hub-archive",
+      "evidence": true,
+      "chats": null,
+      "script": "journey-hub-archive.ps1",
+      "validator": {
+        "file": "check-hub-archive-evidence.py",
+        "function": "check_hub_archive"
+      },
+      "library": "hub-archive.ps1",
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "HubArchiveHandler"
+      },
+      "ready": "ready-hub-archive.ps1",
+      "prepare": "prepare-hub-archive.ps1",
+      "maximize": true
+    },
+    {
+      "name": "palette-archived",
+      "pr": true,
+      "hub": "palette-archived",
+      "evidence": true,
+      "chats": 3,
+      "script": "journey-palette-archived.ps1",
+      "validator": {
+        "file": "check-palette-archived-evidence.py",
+        "function": "check_palette_archived"
+      },
+      "library": "palette-archived.ps1",
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "PaletteArchivedHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "slack-sort",
+      "pr": true,
+      "hub": "slack-sort",
+      "evidence": true,
+      "chats": 4,
+      "script": "journey-slack-sort.ps1",
+      "validator": {
+        "file": "evidence-slack-sort.py"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "SlackSortHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "slack-archive",
+      "pr": true,
+      "hub": "slack-archive",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-slack-archive.ps1",
+      "validator": {
+        "file": "check-slack-archive-evidence.py",
+        "function": "check_slack_archive"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "SlackArchiveHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "slack-threads",
+      "pr": true,
+      "hub": "slack-threads",
+      "evidence": true,
+      "chats": 1,
+      "script": "journey-slack-threads.ps1",
+      "validator": {
+        "file": "check-slack-threads-evidence.py",
+        "function": "check_threads"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "SlackThreadsHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "link-previews",
+      "pr": true,
+      "hub": "link-previews",
+      "evidence": true,
+      "chats": 4,
+      "script": "journey-link-previews.ps1",
+      "validator": {
+        "file": "check-link-previews-evidence.py",
+        "function": "check_link_previews"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "LinkPreviewsHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "views",
+      "pr": true,
+      "hub": "views",
+      "evidence": true,
+      "chats": 8,
+      "script": "journey-views.ps1",
+      "validator": {
+        "file": "evidence-views.py"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "ViewsHandler"
+      },
+      "maximize": true,
+      "result_checks": "workspace-names.json"
+    },
+    {
+      "name": "workspace-icons",
+      "pr": true,
+      "hub": "workspace-icons",
+      "evidence": true,
+      "chats": 5,
+      "script": "journey-workspace-icons.ps1",
+      "validator": {
+        "file": "evidence-workspace-icons.py"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "WorkspaceIconsHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "signal",
+      "pr": true,
+      "hub": "signal",
+      "evidence": true,
+      "chats": 4,
+      "script": "journey-signal.ps1",
+      "validator": {
+        "file": "check-signal-evidence.py",
+        "function": "check_signal"
+      },
+      "library": "signal.ps1",
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "SignalHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "telegram",
+      "pr": true,
+      "hub": "telegram",
+      "evidence": true,
+      "chats": 5,
+      "script": "journey-telegram.ps1",
+      "validator": {
+        "file": "check-telegram-evidence.py",
+        "function": "check_telegram"
+      },
+      "library": "telegram.ps1",
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "TelegramHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "notrap",
+      "pr": true,
+      "hub": "notrap",
+      "evidence": true,
+      "chats": 8,
+      "script": "journey-notrap.ps1",
+      "validator": {
+        "file": "check-notrap-evidence.py",
+        "function": "check_notrap"
+      },
+      "library": "notrap.ps1",
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "ViewsHandler"
+      },
+      "prepare": "prepare-notrap.ps1",
+      "maximize": true
+    },
+    {
+      "name": "repaint",
+      "pr": true,
+      "hub": "repaint",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-repaint.ps1",
+      "validator": {
+        "file": "evidence-repaint.py"
+      },
+      "library": "repaint.ps1",
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "RepaintHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "archive",
+      "pr": false,
+      "hub": null,
+      "evidence": false,
+      "chats": null,
+      "script": "journey-archive.ps1",
+      "validator": {
+        "file": "evidence-search.py"
+      },
+      "hub_handler": null,
+      "prepare": "prepare-archive.ps1",
+      "maximize": true,
+      "provider": true
+    },
+    {
+      "name": "archive-bulk",
+      "pr": true,
+      "hub": null,
+      "evidence": false,
+      "chats": null,
+      "script": "journey-archive-bulk.ps1",
+      "validator": null,
+      "hub_handler": null,
+      "prepare": "prepare-archive.ps1",
+      "maximize": true,
+      "provider": true
+    },
+    {
+      "name": "text-comparison",
+      "pr": true,
+      "hub": null,
+      "evidence": false,
+      "chats": null,
+      "script": "journey-text-comparison.ps1",
+      "validator": null,
+      "hub_handler": null,
+      "maximize": true,
+      "arguments": [
+        "--verify-text-comparison"
+      ]
+    },
+    {
+      "name": "window",
+      "pr": true,
+      "hub": null,
+      "evidence": true,
+      "chats": null,
+      "script": "journey-window.ps1",
+      "validator": {
+        "file": "evidence-window.py"
+      },
+      "library": "window.ps1",
+      "hub_handler": null,
+      "maximize": false
+    },
+    {
+      "name": "voice",
+      "pr": true,
+      "hub": "voice",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-voice.ps1",
+      "validator": {
+        "file": "evidence-voice.py"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "VoiceHandler"
+      },
+      "maximize": true
+    }
+  ]
+}

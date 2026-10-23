@@ -157,7 +157,11 @@ class PaletteArchivedTests(unittest.TestCase):
     def test_journey_wiring_and_selectors(self):
         journey = (ROOT / 'tools/verify-wazig/palette-archived.ps1').read_text(encoding='utf-8')
         runner = (ROOT / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-        self.assertIn("elseif ($Feature -eq 'palette-archived') { 3 }", runner)
+        registry = json.loads((ROOT / 'tools/verify-wazig/journeys.json').read_text())
+        entry = next(row for row in registry['journeys'] if row['name'] == 'palette-archived')
+        self.assertEqual(entry['chats'], 3)
+        self.assertIn('$journey.chats', runner)
+        runner += (ROOT / 'tools/verify-wazig' / entry['script']).read_text()
         self.assertIn('Invoke-PaletteArchivedJourney $session', runner)
         for required in ["'1064'", "'1072'", 'Read-ListLabels', 'Get-PaletteWindow', "'%i'", 'view_order', 'selected.id', '/v1/wazig/archive', '/v1/wazig/messages']:
             self.assertIn(required, journey)

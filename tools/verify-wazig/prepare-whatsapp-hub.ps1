@@ -1,0 +1,1 @@
+@{ id = '53200000000000000000000000000001'; provider = 'whatsapp'; account = '1111111111111111'; jid = 'personal:15550000001@s.whatsapp.net'; text = 'Synthetic adopted send'; file = ''; reply_to = 'personal:BASELINE'; state = 'queued'; queued_unix = 1 } | ConvertTo-Json -Compress | Set-Content (Join-Path $messages 'hub-1111111111111111-outbox.jsonl')
