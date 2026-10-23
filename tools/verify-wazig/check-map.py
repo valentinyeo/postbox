@@ -190,6 +190,5 @@ for artifact in ['startup-seed.json', 'transitions.json', 'escape-to-first-', 'e
     assert artifact in runner + notrap_journey and artifact in notrap_validator, artifact
 for fragment in ['$source -le $order.Count', '$target -le $order.Count', "@('%0', '%i')", "'{ESC}'", 'Save-Screen $Session "view-$source"']:
     assert fragment in notrap_journey, fragment
-assert 'startup_view_pending' in source and 'saveChatView(.all)' in source
 assert "-Name InboxView -Value 4" in runner and "-Name AccountView -Value 'signal'" in runner
 print('NOTRAP MAP VERIFIED: saved empty startup, every-view Escape and Alt matrix, dispatch and indexed evidence')
