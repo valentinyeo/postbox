@@ -3,6 +3,33 @@ function Save-TelegramMessages($Session, [string]$Name) {
     Save-Screen $Session $Name
 }
 
+function Save-TelegramAvatars($Session) {
+    $window = Get-Window $Session
+    $list = Get-Edit $window '1016'
+    $handle = [IntPtr]$list.Current.NativeWindowHandle
+    $client = [VerifyWindow+Rect]::new()
+    $origin = [VerifyWindow+Point]::new()
+    Assert-That ([VerifyWindow]::GetClientRect($handle, [ref]$client)) 'Cannot read Telegram list bounds'
+    Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$origin)) 'Cannot read Telegram list origin'
+    $rowHeight = [UIntPtr]::Zero
+    $topIndex = [UIntPtr]::Zero
+    Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x01A1, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$rowHeight) -ne [IntPtr]::Zero) 'Cannot read Telegram row height'
+    Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x018E, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$topIndex) -ne [IntPtr]::Zero) 'Cannot read Telegram scroll position'
+    Assert-That ($topIndex.ToUInt64() -eq 0) 'Telegram avatar list is scrolled'
+    $desktop = [Windows.Forms.SystemInformation]::VirtualScreen
+    @{
+        dpi = [VerifyWindow]::GetDpiForWindow($handle); row_height = $rowHeight.ToUInt64(); top_index = $topIndex.ToUInt64()
+        ids = @((Read-Control $Session chats).chats.id)
+        list_x = $origin.X - $desktop.Left; list_y = $origin.Y - $desktop.Top
+        client_width = $client.Right; client_height = $client.Bottom
+    } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Session.evidence 'telegram-avatars-layout.json')
+    $null = Wait-Until {
+        Save-Screen $Session linked
+        & python "$PSScriptRoot/check-telegram-evidence.py" $Session.evidence --capture | Out-Host
+        $LASTEXITCODE -eq 0
+    } 'Telegram contact and group photos and no-photo letter circles'
+}
+
 function Invoke-TelegramJourney($Session, [string]$Messages) {
     $null = Wait-Until { @((Read-Control $Session status).view_order | Where-Object provider -eq 'telegram').Count -eq 1 } 'Telegram view registered'
     $order = (Read-Control $Session status).view_order
@@ -24,7 +51,24 @@ function Invoke-TelegramJourney($Session, [string]$Messages) {
     Assert-That (@($labels | Where-Object { $_ -match 'Connect Telegram account|Log out of Telegram|Remove Telegram account' }).Count -eq 0) 'Direct Telegram login exposed with hub'
     $labels | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'palette.json')
     Send-Keys $Session '{ESC}'
-    Save-Screen $Session linked
+    $avatarIds = @('telegram:user:1001', 'telegram:user:1002', 'telegram:user:9001', 'telegram:chat:2001', 'telegram:channel:3001')
+    foreach ($id in $avatarIds) {
+        $encoded = [Uri]::EscapeDataString($id)
+        $reply = Invoke-WebRequest -Uri "$($Session.bridge_url)/v1/wazig/avatar/$encoded" -SkipHttpErrorCheck
+        Assert-That ($reply.StatusCode -eq 401) 'Telegram avatar route allowed unauthenticated access'
+    }
+    $null = Wait-Until {
+        $requests = Read-BridgeRequests $Session
+        foreach ($id in $avatarIds) {
+            $route = '/v1/wazig/avatar/' + [Uri]::EscapeDataString($id)
+            $fetched = @($requests | Where-Object { $_.authorized -and $_.path -ceq $route })
+            $expected = if ($id -in @('telegram:user:1001', 'telegram:chat:2001')) { 200 } else { 404 }
+            if ($fetched.Count -ne 1 -or $fetched[0].status -ne $expected) { return $false }
+        }
+        return $true
+    } 'Telegram avatars fetched once per chat'
+    Save-TelegramAvatars $Session
+    Hub-Pass $Session avatars
     $sidebar = (Get-Edit (Get-Window $Session) '1016').Current.BoundingRectangle
     $screen = [Windows.Forms.SystemInformation]::VirtualScreen
     $image = [Drawing.Bitmap]::new((Join-Path $Session.evidence 'linked.png'))

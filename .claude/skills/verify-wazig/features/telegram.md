@@ -4,7 +4,7 @@
 
 - `account-view`: one Telegram view participates in saved Alt-key order and the combined inbox. User, basic-group and channel handles remain opaque. The existing badge path paints a blue paper-plane mark; the saved flag identifies Saved Messages.
 - `hub-only-linking`: link once through the triage CLI on the hub. Wazig only lists existing hub chats; unlinked Telegram is an ordinary empty list with no QR or password input.
-- `actions`: history, text, files, replies, reactions, read receipts, automatic media downloads and live SSE use the unified routes. Telegram rate limited stays in failed message text without automatic resend. Archive and avatar are unsupported.
+- `actions`: history, text, files, replies, reactions, read receipts, automatic media downloads and live SSE use the unified routes. Telegram rate limited stays in failed message text without automatic resend. Archive is unsupported. Contact, group and bot avatars use the existing authenticated hub avatar worker and chat-list photo rendering; absent photos keep the letter circle. The default-on `hub.igsh_696_telegram_avatars` switch applies only with the unified hub configured.
 - `hub-only-login`: when a hub is configured, no direct Telegram connect/logout/remove palette entries, TDLib initialization or phone, code or app-key screens are reachable.
 
 ## How to get to it (user POV)
@@ -18,6 +18,8 @@
 - Run feature=telegram on GitHub Actions only. run.ps1 starts fake-hub.py --telegram in the isolated profile; telegram.ps1 drives the native window with owned keyboard input and read-only control snapshots.
 - The fake hub starts linked; use the assigned Alt key to open its existing Telegram chats without any authentication interaction.
 - Require five Telegram rows spanning user, basic-group and channel handles, with exactly one saved row. Capture linked.png, measure blue badge pixels and retain the palette's positive Show Telegram row and absence of direct account commands.
+- The avatar route returns generated solid pink and green PNG photos for the user and basic-group rows, and 404 for the other three rows. Probe every avatar route without a key and require 401. Require exactly one authenticated fetch per chat across the journey, including the 404 negative cache.
+- Capture linked.png after photos load. Native read-only row metrics, scroll position and client-to-screen coordinates locate every 42-pixel avatar circle at the actual DPI; retain telegram-avatars-layout.json, avatar-telegram-*.png and telegram-avatars-pixels.json. The validator requires each photo colour over 55% of its crop, dark letter circles with visible light initials for the other rows and no unrelated photo colours; crops must match the full screenshot exactly. Match successful response hashes to Windows-safe, sixteen-hex-digit .img files under final-data/avatars and require three .img.none markers, with no .fail markers.
 - Open Verification Telegram; capture history and read state, require a decimal message ID in mark-read, cleared unread state and automatic cached media.
 - React to the selected incoming message, reply with reply_to=1001, send text and use the native attachment picker to send generated PNG bytes. Capture reacted, reply, text and file messages; compare file hash and size to the multipart ledger.
 - Trigger the fake live SSE message and capture live.png plus history. Send once to the rate-limited chat; require the visible reason, empty queue and exactly one 429 request. Archive must settle one unsupported 502 without retrying.
@@ -29,4 +31,5 @@
 - Windows builds, Zig tests, PowerShell parsing/execution and desktop evidence belong to GitHub Actions. Static source checks on the development host are not runtime verification.
 - Empty Telegram and Signal views are registered before provider rows exist. Default provider order puts Telegram before Signal; existing saved order still takes precedence.
 - Routing and cache accounts remain in the existing hub namespace. The view account is fixed to telegram, independent of user/group/channel identifiers. src/hub_test.zig covers opaque IDs, view isolation, badge fallback, exact rate-limit text/status and saved-flag parsing.
+- This checkout has no chat-header avatar for any provider; this journey preserves that layout rather than introducing a new header. Restart reuse follows the existing avatar cache classifier; the journey measures cold fetch and disk persistence, not a second launch.
 - Startup time, release size, working set, hub CLI linking, voice playback and cached transcription need CI or live-provider evidence; unchanged mechanisms are not re-certified here.

@@ -816,6 +816,17 @@ class SignalHandler(Handler):
 TELEGRAM_CHAT = 'telegram:user:1001'
 TELEGRAM_LIMITED = 'telegram:user:1002'
 TELEGRAM_SAVED = 'telegram:user:9001'
+TELEGRAM_AVATAR_COLOURS = {TELEGRAM_CHAT: (232, 64, 128), 'telegram:chat:2001': (112, 208, 64)}
+
+
+def telegram_avatar_png(chat):
+    colour = bytes(TELEGRAM_AVATAR_COLOURS[chat])
+    pixels = (b'\x00' + colour * 64) * 64
+
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 64, 64, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b'')
 
 
 class TelegramHandler(Handler):
@@ -915,7 +926,12 @@ class TelegramHandler(Handler):
         elif url.path.startswith('/v1/wazig/media/'):
             self.respond(200, self.state.image, 'image/png')
         elif url.path.startswith('/v1/wazig/avatar/'):
-            self.respond(502, {'error': 'Telegram avatar unsupported'})
+            chat = unquote(url.path.removeprefix('/v1/wazig/avatar/'))
+            if chat in TELEGRAM_AVATAR_COLOURS:
+                image = telegram_avatar_png(chat)
+                self.respond(200, image, 'image/png', sha256=hashlib.sha256(image).hexdigest())
+            else:
+                self.respond(404, {'error': 'no avatar'})
         else:
             self.respond(404, {'error': 'unknown telegram route'})
 
