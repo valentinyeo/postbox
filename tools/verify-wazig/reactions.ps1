@@ -25,10 +25,13 @@ function Invoke-ReactionsJourney($Session) {
         Click-Control $Session '1032'
         Save-Screen $Session "$name-message"
         $canvas = Get-Edit (Get-Window $Session) '1024'
-        $canvasRect = [VerifyMenus]::Bounds([IntPtr]$canvas.Current.NativeWindowHandle)
-        $screen = [Windows.Forms.SystemInformation]::VirtualScreen
-        $image = Read-ScreenshotPixels (Join-Path $Session.evidence "$name-message.png")
-        $point = [VerifyMenus]::MessageText($image.bytes, $image.stride, $canvasRect, $screen.Left, $screen.Top)
+        $incoming = Wait-Until {
+            (Read-Control $Session messages).messages | Where-Object { $_.id -eq $target.message -and $_.bubble[2] -gt $_.bubble[0] -and $_.bubble[3] -gt $_.bubble[1] }
+        } "$name incoming bubble painted"
+        $point = [VerifyWindow+Point]::new()
+        $point.X = [int](($incoming.bubble[0] + $incoming.bubble[2]) / 2)
+        $point.Y = [int](($incoming.bubble[1] + $incoming.bubble[3]) / 2)
+        Assert-That ([VerifyWindow]::ClientToScreen([IntPtr]$canvas.Current.NativeWindowHandle, [ref]$point)) "$name canvas screen origin unavailable"
         [VerifyMenus]::Click($Session.pid, $point.X, $point.Y, $true)
         Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: right-click $name message=$($target.message) x=$($point.X) y=$($point.Y)"
         $menu = Wait-Popup $Session '#32768'
@@ -78,5 +81,52 @@ function Invoke-ReactionsJourney($Session) {
         Send-Keys $Session '{ESC}'
     }
     Assert-That ($failures.Count -eq 0) ($failures -join '; ')
+    Send-Keys $Session '^f'
+    Send-Keys $Session 'Verification Beta'
+    $heart = [char]::ConvertFromUtf32(0x2764) + [string][char]0xfe0f
+    $null = Wait-Until {
+        $shown = Read-Control $Session messages
+        $shown.chat.id -eq 'fixture-beta' -and $shown.chat.provider -eq 'whatsapp' -and
+            @($shown.messages | Where-Object { $_.id -eq 'CHIP' -and $_.reaction.Contains($heart) }).Count -eq 1
+    } 'CHIP friend heart visible'
+    Click-Control $Session '1032'
+    foreach ($phase in @('added', 'removed')) {
+        $chip = Wait-Until {
+            (Read-Control $Session messages).messages | Where-Object { $_.id -eq 'CHIP' -and $_.bubble[2] -gt $_.bubble[0] -and $_.bubble[3] -gt $_.bubble[1] }
+        } 'CHIP bubble painted'
+        $canvas = Get-Edit (Get-Window $Session) '1024'
+        $handle = [IntPtr]$canvas.Current.NativeWindowHandle
+        $dpi = [VerifyWindow]::GetDpiForWindow($handle)
+        $point = [VerifyWindow+Point]::new()
+        $rect = @($chip.reaction_chip)
+        if ($rect.Count -eq 4 -and $rect[2] -gt $rect[0] -and $rect[3] -gt $rect[1]) {
+            $point.X = [int](($rect[0] + $rect[2]) / 2)
+            $point.Y = [int](($rect[1] + $rect[3]) / 2)
+        } else {
+            $point.X = [int]$chip.bubble[0] + [int][Math]::Floor((24 * $dpi + 48) / 96)
+            $point.Y = [int]$chip.bubble[3] + [int][Math]::Floor((8 * $dpi + 48) / 96)
+        }
+        Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$point)) 'CHIP canvas screen origin unavailable'
+        [VerifyMenus]::Click($Session.pid, $point.X, $point.Y, $false)
+        Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: left-click CHIP $phase x=$($point.X) y=$($point.Y)"
+        $expected = if ($phase -eq 'added') { $heart } else { '' }
+        try {
+            $null = Wait-Until {
+                if (-not (Test-Path $path)) { return $false }
+                Get-Content $path | Where-Object { $_.EndsWith('}') } | ForEach-Object { $_ | ConvertFrom-Json } |
+                    Where-Object { $_.chat -eq 'fixture-beta' -and $_.msg -eq 'CHIP' -and $_.emoji -ceq $expected } | Select-Object -Last 1
+            } "CHIP $phase hub reaction request"
+        } catch {
+            $operation = if ($phase -eq 'added') { 'add' } else { 'remove' }
+            throw "CHIP REACTION MISSING: $operation did not reach the hub"
+        }
+        $shown = Wait-Until {
+            $messages = Read-Control $Session messages
+            if (@($messages.messages | Where-Object { $_.id -eq 'CHIP' -and $_.reaction.Contains($heart) -and $_.my_reaction -ceq $expected }).Count -eq 1) { return $messages }
+        } "CHIP $phase own reaction and friend heart"
+        $shown | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "chip-$phase.messages.json")
+        Save-Screen $Session "chip-$phase"
+        Hub-Pass $Session "chip-$phase"
+    }
     Save-Screen $Session after
 }
