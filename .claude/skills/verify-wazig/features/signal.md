@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-- `account-view`: a single Signal account, labelled Signal, participates in saved account order and the combined inbox. Its rows carry a blue circle in brand blue.
+- `account-view`: a single Signal account, labelled Signal, participates in saved account order and the combined inbox. Its rows carry a #3A76F0 mark with a white speech bubble and dashed outline through the shared provider badge path.
 - `linking-qr`: an empty Signal view loads hub link status and draws the link PNG using the existing WIC media decoder and bitmap path. It polls every 30 seconds until linked, then reloads chats.
 - `actions`: opaque Signal handles use existing unified history, text, multipart attachments, reactions, author/timestamp read receipts, media and live events. Archive reports unsupported.
 - `terminal-errors`: rate-limit and captcha rejections remain in failed message text with their reason. They leave the send queue without automatic retry; manual resend remains available.

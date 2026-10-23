@@ -14273,14 +14273,25 @@ fn drawWorkspaceBadge(hdc: win.HDC, bitmap: win.HBITMAP, rect: win.RECT, radius_
     return win.AlphaBlend(hdc, rect.right - side, rect.bottom - side, side, side, memory, 0, 0, side, side, .{ .BlendOp = win.AC_SRC_OVER, .BlendFlags = 0, .SourceConstantAlpha = 255, .AlphaFormat = win.AC_SRC_ALPHA }) != 0;
 }
 
-fn drawWhatsAppBadge(shapes: *const smooth.Context, badge: win.RECT) void {
+fn drawProviderMark(shapes: *const smooth.Context, badge: win.RECT, mark: hub.Badge) void {
     const diameter = badge.bottom - badge.top;
     const left = badge.left + @divTrunc(badge.right - badge.left - diameter, 2);
     const circle = win.RECT{ .left = left, .top = badge.top, .right = left + diameter, .bottom = badge.bottom };
-    smooth.fillEllipse(shapes, circle, 0x0066d325);
+    smooth.fillEllipse(shapes, circle, if (mark == .signal_mark) rgb(58, 118, 240) else 0x0066d325);
     const x: f32 = @floatFromInt(left);
     const y: f32 = @floatFromInt(badge.top);
     const size: f32 = @floatFromInt(diameter);
+    if (mark == .signal_mark) {
+        const inset = @divTrunc(diameter, 8);
+        const outline = win.RECT{ .left = circle.left + inset, .top = circle.top + inset, .right = circle.right - inset, .bottom = circle.bottom - inset };
+        for (0..8) |segment| {
+            smooth.strokeArc(shapes, outline, @as(f32, @floatFromInt(segment)) * 45, 24, 0x00ffffff, @max(1, @divTrunc(diameter, 16)));
+        }
+        const inner = @divTrunc(diameter * 5, 18);
+        smooth.fillEllipse(shapes, .{ .left = circle.left + inner, .top = circle.top + inner, .right = circle.right - inner, .bottom = circle.bottom - inner }, 0x00ffffff);
+        smooth.strokePolyline(shapes, &.{ .{ x + size * 0.36, y + size * 0.61 }, .{ x + size * 0.30, y + size * 0.72 }, .{ x + size * 0.47, y + size * 0.65 } }, 0x00ffffff, size * 0.08);
+        return;
+    }
     smooth.strokePolyline(shapes, &.{
         .{ x + size * 0.34, y + size * 0.29 },
         .{ x + size * 0.29, y + size * 0.39 },
@@ -14738,12 +14749,8 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         if (!drawWorkspaceBadge(item.hDC, workspace_bitmap.?, badge, px(a, 4))) provider_badge = .letter_s;
         shapes = smooth.Context.init(item.hDC);
     }
-    if (provider_badge == .whatsapp_mark) {
-        drawWhatsAppBadge(&shapes, badge);
-    } else if (provider_badge == .signal_mark) {
-        const diameter = badge.bottom - badge.top;
-        const left = badge.left + @divTrunc(badge.right - badge.left - diameter, 2);
-        smooth.fillEllipse(&shapes, .{ .left = left, .top = badge.top, .right = left + diameter, .bottom = badge.bottom }, rgb(58, 118, 240));
+    if (provider_badge == .whatsapp_mark or provider_badge == .signal_mark) {
+        drawProviderMark(&shapes, badge, provider_badge);
     } else if (provider_badge != .workspace_icon) {
         smooth.fillRoundRect(&shapes, badge, px(a, 8), px(a, 8), theme.current.primary_container);
     }

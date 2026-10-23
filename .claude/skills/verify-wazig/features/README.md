@@ -15,7 +15,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [slack-sort](slack-sort.md) | Slack last message order | Newest first, unknown last, incoming and sent promotion with keyboard order |
 | [signal](signal.md) | Signal hub account | QR link, history, text/file, reactions, reads, live events, terminal 429/403 failures |
 | [views](views.md) | Account views and combined inbox | Alt+1..4 isolation, account send, Alt+I order, Sort views, restart |
-| [workspace-icons](workspace-icons.md) | Slack workspace icon and WhatsApp mark badges | Two synthetic team icon colours, missing-icon S, green handset and persistent avatar cache |
+| [workspace-icons](workspace-icons.md) | Slack workspace icon, WhatsApp and Signal mark badges | Two synthetic team icon colours, missing-icon S, green handset, blue Signal mark and persistent avatar cache |
 | [archive](archive.md) | Archive and Keep archived | Ctrl+E, keep via palette, incoming provider event, Archive presence/unread and inbox absence |
 | [text-comparison](appearance.md) | DirectWrite beside Chrome | Exact text/font/metric parity, paired screenshots and 3x paragraph crops |
 

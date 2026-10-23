@@ -25,6 +25,7 @@ WORKSPACE_CHATS = [
     ('slack:fixture-cobalt:channel-beta', 'Verification Cobalt', 'slack'),
     ('slack:fixture-empty:channel-gamma', 'Verification Empty', 'slack'),
     ('whatsapp:fixture:contact-delta', 'Verification Delta', 'whatsapp'),
+    ('signal:fixture-contact', 'Verification Signal', 'signal'),
 ]
 WORKSPACE_COLOURS = {'fixture-amber': (240, 160, 32), 'fixture-cobalt': (48, 112, 240)}
 

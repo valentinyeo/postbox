@@ -482,10 +482,10 @@ function Assert-ComposerLayout($Session, [string]$Name, [int]$Lines, $Baseline =
 function Invoke-WorkspaceIconsJourney($Session) {
     Send-Keys $Session '%0'
     $null = Wait-Until { (Read-Control $Session status).view -eq 'all' } 'All networks sidebar'
-    $expected = @('slack:fixture-amber:channel-alpha', 'slack:fixture-cobalt:channel-beta', 'whatsapp:fixture:contact-delta', 'slack:fixture-empty:channel-gamma')
+    $expected = @('slack:fixture-amber:channel-alpha', 'slack:fixture-cobalt:channel-beta', 'whatsapp:fixture:contact-delta', 'slack:fixture-empty:channel-gamma', 'signal:fixture-contact')
     $rows = (Read-Control $Session chats).chats
     $ids = @($rows.id)
-    Assert-That ($ids.Count -eq 4 -and (($ids | Sort-Object) -join ',') -ceq (($expected | Sort-Object) -join ',')) 'Workspace badge fixture list changed'
+    Assert-That ($ids.Count -eq 5 -and (($ids | Sort-Object) -join ',') -ceq (($expected | Sort-Object) -join ',')) 'Workspace badge fixture list changed'
     $window = Get-Window $Session
     $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1016')
     $list = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
@@ -525,6 +525,6 @@ function Invoke-WorkspaceIconsJourney($Session) {
         Save-Screen $Session workspace-icons-list
         & python "$PSScriptRoot/check-workspace-icons.py" $Session.evidence --capture | Out-Host
         $LASTEXITCODE -eq 0
-    } 'visible workspace icons and green WhatsApp badge'
+    } 'visible workspace icons, green WhatsApp and blue Signal marks'
     Hub-Pass $Session workspace-icons-pixels
 }

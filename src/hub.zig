@@ -95,7 +95,7 @@ pub fn providerBadge(provider: transport.Provider, cached_icon: bool, enabled: b
         .slack => if (enabled and cached_icon) .workspace_icon else .letter_s,
         .whatsapp => if (enabled) .whatsapp_mark else .letter_w,
         .telegram => .letter_t,
-        .signal => .signal_mark,
+        .signal => if (enabled) .signal_mark else .letter_s,
     };
 }
 

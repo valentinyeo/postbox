@@ -149,3 +149,10 @@ assert '.claude/skills/verify-wazig/features/workspace-icons.md' in (root / 'too
 for artifact in ['workspace-icons-list', 'badge-icon-', 'workspace-icons-pixels.json']:
     assert artifact in (root / 'tools/verify-wazig/check-workspace-icons.py').read_text(encoding='utf-8')
 print('WORKSPACE ICON MAP VERIFIED: dispatch, synthetic team icons, screenshot pixels and surviving cache evidence')
+
+icons_validator = (root / 'tools/verify-wazig/check-workspace-icons.py').read_text(encoding='utf-8')
+assert "'signal': (58, 118, 240)" in icons_validator
+assert 'signal:fixture-contact' in icons_validator and 'signal:fixture-contact' in harness
+assert 'drawProviderMark(&shapes, badge, provider_badge)' in source
+assert 'provider_badge == .whatsapp_mark or provider_badge == .signal_mark' in source
+print('SIGNAL MARK MAP VERIFIED: shared provider renderer and workspace-icons screenshot evidence')

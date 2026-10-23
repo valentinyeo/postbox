@@ -104,7 +104,7 @@ try {
     $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window'
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
     if ($Feature -in @('whatsapp-hub', 'hub', 'slack-sort', 'views', 'workspace-icons', 'signal')) {
-        $null = Wait-Until { (Read-Control $session status).chat_count -eq $(if ($Feature -eq 'signal') { 0 } elseif ($Feature -eq 'views') { 8 } elseif ($Feature -in @('slack-sort', 'workspace-icons')) { 4 } else { 2 }) } 'hub chat list'
+        $null = Wait-Until { (Read-Control $session status).chat_count -eq $(if ($Feature -eq 'signal') { 0 } elseif ($Feature -eq 'views') { 8 } elseif ($Feature -eq 'workspace-icons') { 5 } elseif ($Feature -eq 'slack-sort') { 4 } else { 2 }) } 'hub chat list'
     }
     if ($Feature -eq 'whatsapp-hub') {
         $null = Wait-Until { (Read-Control $session status).pending_sends -eq 0 } 'adopted outbox acknowledged'

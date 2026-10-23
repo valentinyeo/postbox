@@ -291,3 +291,10 @@ test "Signal read receipts retain incoming author and timestamp rather than an e
     try std.testing.expectEqualStrings("fixture-sender:2000", id);
     try std.testing.expectError(error.NoIncomingMessage, hub.readMessageId(allocator, "{\"data\":{\"messages\":[]}}"));
 }
+
+test "Signal provider mark shares the workspace badge switch and retains letter fallback" {
+    try std.testing.expectEqual(.signal_mark, hub.providerBadge(.signal, false, true));
+    try std.testing.expectEqual(.signal_mark, hub.providerBadge(.signal, true, true));
+    try std.testing.expectEqual(.letter_s, hub.providerBadge(.signal, false, false));
+    try std.testing.expectEqual(.letter_s, hub.providerBadge(.signal, true, false));
+}

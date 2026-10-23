@@ -81,4 +81,4 @@ The `slack-sort` journey proves Slack last message ordering, unknown times last 
 
 The `views` journey uses four synthetic source accounts, per-account keyboard navigation and search, a scoped send, combined ordering and a same-profile restart after sorting. Its explicitly opted-in restart reuses only the isolated Actions registry subtree; ordinary fixture launches still require a new subtree.
 
-The `workspace-icons` journey verifies workspace icon colours, missing-icon S and the green WhatsApp handset from the full chat-list screenshot and per-badge crops, then validates authenticated per-team fetches and persistent avatar cache bytes. See [workspace-icons](features/workspace-icons.md).
+The `workspace-icons` journey verifies workspace icon colours, missing-icon S, the green WhatsApp handset and the blue Signal speech bubble from the full chat-list screenshot and per-badge crops, then validates authenticated per-team fetches and persistent avatar cache bytes. See [workspace-icons](features/workspace-icons.md).
