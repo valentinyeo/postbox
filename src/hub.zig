@@ -26,6 +26,46 @@ pub fn messages(allocator: std.mem.Allocator, chat: []const u8, limit: usize, be
     return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/messages?chat={s}&limit={d}&before={s}", .{ c, limit, b }) };
 }
 
+pub const older_limit: usize = 80;
+
+pub fn beforeCursor(allocator: std.mem.Allocator, msg_id: []const u8, timestamp: []const u8) ![]u8 {
+    try validId(msg_id);
+    try validId(timestamp);
+    return std.fmt.allocPrint(allocator, "{s}:{s}", .{ msg_id, timestamp });
+}
+
+pub fn messageRows(root: std.json.Value) ?[]const std.json.Value {
+    if (root != .object) return null;
+    const data = root.object.get("data") orelse return null;
+    if (data != .object) return null;
+    const rows = data.object.get("messages") orelse return null;
+    return if (rows == .array) rows.array.items else null;
+}
+
+pub fn unite(allocator: std.mem.Allocator, first: []const std.json.Value, second: []const std.json.Value, out: *std.ArrayList(std.json.Value)) !usize {
+    try out.appendSlice(allocator, first);
+    var added: usize = 0;
+    for (second) |row| {
+        const id = rowId(row);
+        if (id.len == 0) continue;
+        var known = false;
+        for (out.items) |existing| {
+            if (std.mem.eql(u8, rowId(existing), id)) {
+                known = true;
+                break;
+            }
+        }
+        if (known) continue;
+        try out.append(allocator, row);
+        added += 1;
+    }
+    return added;
+}
+
+fn rowId(row: std.json.Value) []const u8 {
+    return if (row == .object) string(row.object, "MsgID") else "";
+}
+
 pub fn send(allocator: std.mem.Allocator, chat: []const u8, text: []const u8, reply_to: []const u8, client_id: []const u8) !Request {
     try validWrite(chat, client_id);
     return .{ .method = "POST", .path = "/v1/wazig/send", .body = try std.json.Stringify.valueAlloc(allocator, .{ .chat = chat, .text = text, .reply_to = reply_to, .client_id = client_id }, .{}) };

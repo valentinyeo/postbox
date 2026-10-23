@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import struct
 from http.server import ThreadingHTTPServer
@@ -155,13 +156,43 @@ ARCHIVE_OTHER = 'personal:15550000003@s.whatsapp.net'
 MIXED = '15550000005@s.whatsapp.net'
 MIXED_LID = '99990000000001@lid'
 MIXED_TEXTS = ['Mixed phone first', 'Mixed lid first', 'Mixed phone second', 'Mixed lid second']
+MIXED_TOTAL = 250
+MIXED_BASE = datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
+MIXED_TIED_INDEX = 79
+CURSOR_STAMP = re.compile(r'\d{4}-\d{2}-\d{2}T\S*$')
+
+
+def mixed_stamp(index):
+    shared = index - 1 if index == MIXED_TIED_INDEX else index
+    return (MIXED_BASE - timedelta(seconds=shared)).isoformat().replace('+00:00', 'Z')
 
 
 def mixed_rows():
-    stamp = datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
-    return [dict(MsgID=f'MIXED-{index + 1}', ChatJID=MIXED if index % 2 == 0 else MIXED_LID, Timestamp=stamp,
-                 Text=text, DisplayText=text, FromMe=False, SenderName='Fixture Sender',
-                 SenderJID='15550000005@s.whatsapp.net') for index, text in enumerate(MIXED_TEXTS)]
+    rows = []
+    for index in range(MIXED_TOTAL):
+        text = MIXED_TEXTS[index] if index < len(MIXED_TEXTS) else f'Mixed history {index + 1}'
+        rows.append(dict(MsgID=f'MIXED-{index + 1}', ChatJID=MIXED if index % 2 == 0 else MIXED_LID,
+                         Timestamp=mixed_stamp(index), Text=text, DisplayText=text, FromMe=False,
+                         SenderName='Fixture Sender', SenderJID='15550000005@s.whatsapp.net'))
+    return rows
+
+
+def split_before(before):
+    match = CURSOR_STAMP.search(before)
+    if match is None:
+        raise ValueError(f'before is neither id:timestamp nor a timestamp: {before}')
+    msg_id = before[:match.start()].rstrip(':').removeprefix(bridge.ACCOUNT + ':')
+    return msg_id, datetime.fromisoformat(match.group(0))
+
+
+def mixed_page(query):
+    limit = int(query.get('limit', ['80'])[0])
+    before = query.get('before', [''])[0]
+    rows = mixed_rows()
+    if before:
+        msg_id, cutoff = split_before(before)
+        rows = [row for row in rows if datetime.fromisoformat(row['Timestamp']) <= cutoff and row['MsgID'] != msg_id]
+    return rows[:limit]
 
 
 class MixedLidHandler(Handler):
@@ -175,10 +206,16 @@ class MixedLidHandler(Handler):
 
     def do_GET(self):
         url = urlsplit(self.path)
-        if url.path == '/v1/wazig/messages' and parse_qs(url.query).get('chat') == [MIXED]:
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/messages' and query.get('chat') == [MIXED]:
             self.wire_path = self.path
             if self.authorized():
-                self.respond(200, mixed_rows())
+                try:
+                    page = mixed_page(query)
+                except ValueError as error:
+                    self.respond(400, {'error': str(error)})
+                    return
+                self.respond(200, page, mixed_before=query.get('before', [''])[0], mixed_count=len(page))
             return
         super().do_GET()
 

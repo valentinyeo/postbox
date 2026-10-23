@@ -401,6 +401,25 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
         $mixedReads = @(Read-BridgeRequests $Session | Where-Object { $_.wire_path.StartsWith('/v1/wazig/messages?') -and $_.wire_path.Contains('15550000005') -and $_.status -eq 200 })
         Assert-That ($mixedReads.Count -gt 0) 'Mixed chat page was never served'
         Assert-That (-not ((Get-Content (Join-Path $Messages 'launch-log.txt') -Raw).Contains('WrongChat'))) 'Launch log reports WrongChat for the mixed page'
+        Assert-That ($shown.messages.Count -eq 80) 'Mixed chat did not open with its newest 80 messages'
+        $null = Wait-Until {
+            Send-Keys $Session '{PGUP}'
+            @(Read-BridgeRequests $Session | Where-Object { [string]$_.mixed_before -ne '' -and $_.mixed_count -eq 0 -and $_.status -eq 200 }).Count -gt 0
+        } 'Mixed chat scrolled up to its first message' -Seconds 120
+        $paged = Read-Control $Session messages
+        $paged | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'mixed-paged.messages.json')
+        Save-Screen $Session mixed-paged
+        $pagedIds = @($paged.messages | ForEach-Object { $_.id })
+        Assert-That ($paged.chat.id -eq $mixedRow[0].id -and $pagedIds.Count -eq 250) "Scrolled chat holds $($pagedIds.Count) of 250 messages"
+        Assert-That (@($pagedIds | Select-Object -Unique).Count -eq 250) 'Scrolled chat shows a message twice'
+        for ($position = 0; $position -lt 250; $position++) {
+            Assert-That ($pagedIds[$position] -eq "MIXED-$(250 - $position)") "Scrolled chat is out of order at position $position"
+        }
+        $olderPages = @(Read-BridgeRequests $Session | Where-Object { [string]$_.mixed_before -ne '' -and $_.status -eq 200 })
+        $olderPages | ConvertTo-Json -Depth 12 -AsArray | Set-Content (Join-Path $Session.evidence 'mixed-older.requests.json')
+        Assert-That ($olderPages.Count -ge 4 -and @($olderPages | Where-Object mixed_count -eq 0).Count -eq 1 -and $olderPages[-1].mixed_count -eq 0) 'Older pages did not end with exactly one empty page'
+        Send-Keys $Session '{PGUP}{PGUP}{PGUP}'
+        Hub-Pass $Session mixed-older-pages
         Send-Keys $Session '^k'
         Send-Keys $Session 'Archive selected chat'
         Send-Keys $Session '{ENTER}'
@@ -465,6 +484,7 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
     if ($unified) {
         Assert-That (@($requests | Where-Object { $_.wire_path -ne '/fixture/live' -and -not $_.wire_path.StartsWith('/v1/wazig/') }).Count -eq 0) 'Request bypassed unified hub'
         Assert-That (@($requests | Where-Object { $_.wire_path.Contains('account=') }).Count -eq 0) 'Source account leaked into hub query'
+        Assert-That (@($requests | Where-Object { [string]$_.mixed_before -ne '' -and $_.status -eq 200 }).Count -eq $olderPages.Count) 'Older pages were requested again after an empty page'
         $final = Read-Control $Session status
         Assert-That ($final.selected.provider -eq 'slack') 'Hub lost source network identity'
     }

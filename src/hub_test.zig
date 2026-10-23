@@ -27,6 +27,54 @@ test "IGSH-531 opaque chat handles are encoded without parsing source identities
     try std.testing.expectError(error.InvalidId, hub.binary(allocator, "bad\nhandle", "id"));
 }
 
+test "IGSH-681 older page cursor joins the oldest id and its RFC3339 timestamp" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const cursor = try hub.beforeCursor(allocator, "personal:ABC", "2026-10-01T11:58:41Z");
+    try std.testing.expectEqualStrings("personal:ABC:2026-10-01T11:58:41Z", cursor);
+    const request = try hub.messages(allocator, chat, hub.older_limit, cursor);
+    try std.testing.expectEqualStrings("/v1/wazig/messages?chat=fixture%2Faccount%3Aroom%20%2B%2F&limit=80&before=personal%3AABC%3A2026-10-01T11%3A58%3A41Z", request.path);
+    try std.testing.expectError(error.InvalidId, hub.beforeCursor(allocator, "", "2026-10-01T11:58:41Z"));
+    try std.testing.expectError(error.InvalidId, hub.beforeCursor(allocator, "ABC", ""));
+    try std.testing.expectError(error.InvalidId, hub.beforeCursor(allocator, "AB\nC", "2026-10-01T11:58:41Z"));
+}
+
+test "IGSH-681 older rows merge behind the loaded rows without repeating a MsgID" {
+    const allocator = std.testing.allocator;
+    var loaded = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[{\"MsgID\":\"C\"},{\"MsgID\":\"B\"}]}}", .{ .allocate = .alloc_always });
+    defer loaded.deinit();
+    var page = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[{\"MsgID\":\"B\"},{\"MsgID\":\"A\"},{\"MsgID\":\"A\"},{\"Text\":\"no id\"}]}}", .{ .allocate = .alloc_always });
+    defer page.deinit();
+    var rows: std.ArrayList(std.json.Value) = .empty;
+    defer rows.deinit(allocator);
+    const added = try hub.unite(allocator, hub.messageRows(loaded.value).?, hub.messageRows(page.value).?, &rows);
+    try std.testing.expectEqual(@as(usize, 1), added);
+    try std.testing.expectEqual(@as(usize, 3), rows.items.len);
+    for (rows.items, [_][]const u8{ "C", "B", "A" }) |row, id| {
+        try std.testing.expectEqualStrings(id, row.object.get("MsgID").?.string);
+    }
+}
+
+test "IGSH-681 an empty page or a page of known rows adds nothing" {
+    const allocator = std.testing.allocator;
+    var loaded = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[{\"MsgID\":\"B\"}]}}", .{ .allocate = .alloc_always });
+    defer loaded.deinit();
+    var empty = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[]}}", .{ .allocate = .alloc_always });
+    defer empty.deinit();
+    var repeat = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[{\"MsgID\":\"B\"}]}}", .{ .allocate = .alloc_always });
+    defer repeat.deinit();
+    var without_rows = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{}}", .{ .allocate = .alloc_always });
+    defer without_rows.deinit();
+    var rows: std.ArrayList(std.json.Value) = .empty;
+    defer rows.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 0), try hub.unite(allocator, hub.messageRows(loaded.value).?, hub.messageRows(empty.value).?, &rows));
+    rows.clearRetainingCapacity();
+    try std.testing.expectEqual(@as(usize, 0), try hub.unite(allocator, hub.messageRows(loaded.value).?, hub.messageRows(repeat.value).?, &rows));
+    try std.testing.expectEqual(@as(usize, 1), rows.items.len);
+    try std.testing.expect(hub.messageRows(without_rows.value) == null);
+}
+
 test "IGSH-531 writes carry escaped text persisted id read watermark and archive state" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -1,6 +1,7 @@
 from pathlib import Path
 import hashlib
 import json
+import re
 import runpy
 import subprocess
 import sys
@@ -371,10 +372,25 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
     assert launch.count(backend) == 1 and backend + ' hub' in launch
     if unified:
         assert before['selected']['provider'] == 'slack' and final['selected']['provider'] == 'slack'
-        assert 'hub provider-views PASS' in proof and 'hub mixed-lid-page PASS' in proof
+        assert 'hub provider-views PASS' in proof and 'hub mixed-lid-page PASS' in proof and 'hub mixed-older-pages PASS' in proof
         mixed = json.loads((folder / 'mixed-lid.messages.json').read_text(encoding='utf-8-sig'))
-        assert sorted(row['text'] for row in mixed['messages']) == sorted(['Mixed phone first', 'Mixed lid first', 'Mixed phone second', 'Mixed lid second'])
+        assert len(mixed['messages']) == 80
+        assert set(['Mixed phone first', 'Mixed lid first', 'Mixed phone second', 'Mixed lid second']) <= set(row['text'] for row in mixed['messages'])
         assert mixed['chat']['id'] == '15550000005@s.whatsapp.net' and 'WrongChat' not in launch
+        paged = json.loads((folder / 'mixed-paged.messages.json').read_text(encoding='utf-8-sig'))
+        paged_ids = [row['id'] for row in paged['messages']]
+        assert paged['chat']['id'] == mixed['chat']['id']
+        assert paged_ids == [f'MIXED-{250 - position}' for position in range(250)]
+        assert len({row['time'] for row in paged['messages']}) == 249
+        mixed_reads = [row for row in requests if row.get('wire_path', '').startswith('/v1/wazig/messages?') and 'mixed_count' in row and row['status'] == 200]
+        assert mixed_reads[0]['mixed_before'] == '' and mixed_reads[0]['mixed_count'] == 80
+        older = [row for row in mixed_reads if row['mixed_before']]
+        assert len(older) >= 4 and older[-1]['mixed_count'] == 0 and all(row['mixed_count'] > 0 for row in older[:-1])
+        assert all(re.fullmatch(r'MIXED-\d+:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', row['mixed_before']) for row in older)
+        assert len({row['mixed_before'] for row in older}) == len(older)
+        assert all('limit=80' in row['wire_path'] for row in mixed_reads)
+        assert (folder / 'mixed-paged.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+        assert 'keys: {PGUP}' in actions
         assert any(row['path'] == '/v1/archive' and row['body']['chat'] == mixed['chat']['id'] and row['body']['archived'] and row['status'] == 200 for row in requests)
         for keys in ['%1', '%2', '%0']:
             assert f'keys: {keys}' in actions

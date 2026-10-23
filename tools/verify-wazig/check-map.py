@@ -75,7 +75,7 @@ for required in ['$app = Get-App $Session', '$null = Wait-Until {', '$foreground
                  "Assert-That ($foreground -ne [IntPtr]::Zero -and $ownerPid -eq $Session.pid) 'Refusing keyboard input to another app'"]:
     assert required in keyboard, required
 assert keyboard.index('Refusing keyboard input to another app') < keyboard.index('[System.Windows.Forms.SendKeys]::SendWait($Keys)')
-for proof in ['mixed-lid-page', 'chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
+for proof in ['mixed-lid-page', 'mixed-older-pages', 'chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
 bridge = (root / 'tools/verify-wazig/fake-wa-bridge.py').read_text(encoding='utf-8')
 assert "last_message_ts='2026-01-01T00:00:00Z'" in bridge
