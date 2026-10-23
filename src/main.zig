@@ -10867,7 +10867,7 @@ fn scrollToSelectedMessage(a: *App) void {
     ensureBitmap(a, &a.messages[selected]);
     var total_height: i32 = px(a, 18);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
-        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, showSenderName(a, index)) + messageGap(a, index);
+        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, showSenderName(a, index)) + threadSummaryHeight(a, message) + messageGap(a, index);
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     var y = client.bottom - px(a, 14) + a.scroll_y;
@@ -10875,7 +10875,7 @@ fn scrollToSelectedMessage(a: *App) void {
     while (index > 0) {
         index -= 1;
         if (!channelMessageVisible(a, &a.messages[index])) continue;
-        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, showSenderName(a, index));
+        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, showSenderName(a, index)) + threadSummaryHeight(a, &a.messages[index]);
         y -= height + messageGap(a, index);
         if (index != selected) continue;
         const delta = message_scroll.scrollDelta(y, height, client.top, client.bottom, px(a, 8));
@@ -15174,7 +15174,7 @@ fn measureMessageCached(hdc: win.HDC, a: *App, message: *Message, width: i32, sh
 }
 
 fn measureMessageStore(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool) i32 {
-    const height = measureMessage(hdc, a, message, width, show_sender);
+    const height = measureMessage(hdc, a, message, width, show_sender) + threadSummaryHeight(a, message);
     message.measure_tag = measureTag(a, message, width, show_sender);
     message.measure_height = height;
     return height;
@@ -15209,7 +15209,7 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, sh
         height += transcriptRender(hdc, a, message, shown, width - px(a, 24), false, 0, 0) + px(a, 22);
     }
     const min_height: i32 = header_height + timeBandHeight(hdc, a) + px(a, 5);
-    return @max(height, min_height) + @max(0, reactionChipSize(hdc, a, message, width).cy - px(a, 4)) + threadSummaryHeight(a, message);
+    return @max(height, min_height) + @max(0, reactionChipSize(hdc, a, message, width).cy - px(a, 4));
 }
 
 const SenderColor = struct { r: u8, g: u8, b: u8 };
@@ -15513,14 +15513,15 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         y -= estimated_height + messageGap(a, index);
         if (y > client.bottom or y + estimated_height < client.top) continue;
         ensureBitmap(a, message);
-        const height = measureMessageStore(hdc, a, message, bubble_width, show_sender);
+        var height = measureMessageStore(hdc, a, message, bubble_width, show_sender);
         y -= height - estimated_height;
         if (y > client.bottom or y + height < client.top) continue;
         const left: i32 = if (message.from_me) client.right - bubble_width - px(a, 24) else if (in_group) px(a, 62) else px(a, 24);
         const right = left + bubble_width;
         const reaction_size = reactionChipSize(hdc, a, message, bubble_width);
         const replies_height = threadSummaryHeight(a, message);
-        const bubble_height = height - @max(0, reaction_size.cy - px(a, 4)) - replies_height;
+        height -= replies_height;
+        const bubble_height = height - @max(0, reaction_size.cy - px(a, 4));
         message.bubble_hit = .{ .left = left, .top = y, .right = right, .bottom = y + bubble_height };
         if (replies_height > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
@@ -15528,7 +15529,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             var line_buffer: [64]u8 = undefined;
             var line = WideText(63){};
             line.set(a.allocator, slack.repliesLine(&line_buffer, threadReplyCount(a, message)));
-            message.replies_hit = .{ .left = left + px(a, 12), .top = y + bubble_height, .right = right - px(a, 12), .bottom = y + height };
+            message.replies_hit = .{ .left = left + px(a, 12), .top = y + bubble_height, .right = right - px(a, 12), .bottom = y + height + replies_height };
             var line_rect = message.replies_hit;
             line_rect.bottom = line_rect.top + @divTrunc(replies_height, 2);
             _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &line_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
@@ -16907,7 +16908,13 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             _ = win.SetTextColor(hdc, theme.current.on_surface);
             _ = win.SetBkColor(hdc, fieldColor());
             const control_value: usize = @bitCast(lparam);
-            for ([_]?win.HWND{ a.compose, a.search, a.thread_list, a.thread_compose }) |control| {
+            for ([_]?win.HWND{ a.thread_list, a.thread_compose }) |control| {
+                if (control != null and control_value == @intFromPtr(control.?)) {
+                    _ = win.SetBkColor(hdc, theme.current.surface_container_high);
+                    return @bitCast(@intFromPtr(a.brush_raised.?));
+                }
+            }
+            for ([_]?win.HWND{ a.compose, a.search }) |control| {
                 if (control != null and control_value == @intFromPtr(control.?)) {
                     _ = win.SetBkColor(hdc, theme.current.surface_container_high);
                     return @bitCast(@intFromPtr(a.brush_raised.?));
@@ -19708,7 +19715,11 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
     const key = chat_key.Key{ .provider = .whatsapp, .account = job.hub_account.slice(), .id = job.jid.slice() };
     if (unifiedHub(a) and job.kind == .cache_tag) return "[{\"account\":\"hub\",\"state\":\"linked\"}]";
     if (unifiedHub(a) and job.kind == .groups) return "{\"success\":true,\"data\":[]}";
-    const request: wa_hub.Request = if (unifiedHub(a)) try unifiedHubRequest(a, allocator, job) else switch (job.kind) {
+    const request: wa_hub.Request = if (unifiedHub(a) and job.kind == .hub_thread)
+        try hub.messages(allocator, job.jid.slice(), 80, job.extra.slice())
+    else if (unifiedHub(a))
+        try unifiedHubRequest(a, allocator, job)
+    else switch (job.kind) {
         .cache_tag => wa_hub.accounts(),
         .chats, .archived_scan, .kept_check, .contacts_index => try wa_hub.chats(allocator, key.account, hubHasArg(job, "--archived"), 500),
         .messages, .resurface_probe, .background_media => try wa_hub.messages(allocator, key, std.fmt.parseInt(usize, hubArg(job, "--limit", "80"), 10) catch 80, ""),
@@ -20110,7 +20121,6 @@ fn configureHub(a: *App, init: std.process.Init) void {
 fn unifiedHubRequest(a: *App, allocator: std.mem.Allocator, job: *const WacliJob) !hub.Request {
     const jid = job.jid.slice();
     return switch (job.kind) {
-        .hub_thread => hub.messages(allocator, jid, 80, job.extra.slice()),
         .chats, .archived_scan, .kept_check, .contacts_index => hub.chats(allocator, hubHasArg(job, "--archived"), 500),
         .messages, .resurface_probe, .background_media => hub.messages(allocator, jid, std.fmt.parseInt(usize, hubArg(job, "--limit", "80"), 10) catch 80, ""),
         .unread_probe => hub.messages(allocator, jid, 20, ""),

@@ -99,8 +99,8 @@ class SlackThreadsTests(unittest.TestCase):
         self.assertIn("elseif ($Feature -eq 'slack-threads') { 1 }", runner)
         source = (ROOT / 'src/main.zig').read_text()
         keyboard = source.split('fn handleKeyboard(', 1)[1].split('fn jumpToLatestMessage(', 1)[0]
-        self.assertLess(keyboard.index('sendMessageFrom(a, true);'), keyboard.index('if (a.thread_compose != null and focus == a.thread_compose) return false;'))
-        self.assertLess(keyboard.index('if (a.thread_compose != null and focus == a.thread_compose) return false;'), keyboard.index("if (key == win.VK_RETURN or key == 'C')"))
+        self.assertLess(keyboard.index('sendMessageFrom(a, true);'), keyboard.index('if (a.thread_compose != null and focus == a.thread_compose.?) return false;'))
+        self.assertLess(keyboard.index('if (a.thread_compose != null and focus == a.thread_compose.?) return false;'), keyboard.index("if (key == win.VK_RETURN or key == 'C')"))
         self.assertIn('pending.reply_to.set(reply_to);', source)
         self.assertIn('const reply_to = if (thread) a.thread_parent.slice() else a.reply_to.slice();', source)
         self.assertIn('if (chat.provider == .slack)', source.split('fn applyMessageData(', 1)[1])
