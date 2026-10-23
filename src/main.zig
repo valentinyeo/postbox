@@ -958,6 +958,8 @@ const App = struct {
     slack_attach_account: Utf8Text(32) = .{},
     slack_media_dir: []u8 = &.{},
     messages_gen: u64 = 0,
+    messages_read_key: chat_key.Stored = .{},
+    messages_refresh_again: bool = false,
     chats_gen: u64 = 0,
     chats_pending_flags: u8 = 0,
     msg_read_retry_ticks: u32 = 0,
@@ -8610,6 +8612,8 @@ fn advanceGifs(a: *App) void {
 fn refreshMessages(a: *App) void {
     cancelSlackMark(a);
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) {
+        a.messages_read_key = .{};
+        a.messages_refresh_again = false;
         clearMessages(a);
         a.displayed_jid.set("");
         a.displayed_account.set("");
@@ -8626,8 +8630,17 @@ fn refreshMessages(a: *App) void {
         a.msg_read_attempts = 0;
         a.msg_read_retry_ticks = 0;
     }
-    if (!unifiedHub(a) and chat.provider == .telegram) return refreshTelegramMessages(a);
-    if (!unifiedHub(a) and chat.provider == .slack) return refreshSlackHistory(a);
+    if (!unifiedHub(a) and chat.provider != .whatsapp) {
+        a.messages_read_key = .{};
+        a.messages_refresh_again = false;
+        if (chat.provider == .telegram) return refreshTelegramMessages(a);
+        return refreshSlackHistory(a);
+    }
+    if (chat_key.Key.eql(a.messages_read_key.key(), chat_key.of(chat)) and wacliPendingGet(a, .messages) > 0) {
+        a.messages_refresh_again = true;
+        return;
+    }
+    a.messages_refresh_again = false;
     const chat_changed = !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat));
     if (chat_changed) {
         stopAudio(a);
@@ -8642,6 +8655,7 @@ fn refreshMessages(a: *App) void {
         _ = applyMessageData(a, "{\"data\":{\"messages\":[]}}", false);
     }
     a.messages_gen += 1;
+    a.messages_read_key.set(chat_key.of(chat));
     var job = WacliJob{ .account = a.cache_tag, .kind = .messages, .gen = a.messages_gen };
     job.provider = chat.provider;
     job.account = chat.account;
@@ -8649,7 +8663,7 @@ fn refreshMessages(a: *App) void {
     wacliJobArgs(&job, &.{
         a.wacli_path, "--json", "--read-only", "messages", "list", "--chat", chat.jid.slice(), "--limit", "80",
     });
-    _ = wacliEnqueue(a, job, true);
+    if (!wacliEnqueue(a, job, true)) a.messages_read_key = .{};
 }
 
 fn reconcileOpenChat(a: *App) void {
@@ -15568,6 +15582,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 },
                 .messages => {
                     var kind: []const u8 = "unknown";
+                    var refresh_again = result.gen == a.messages_gen and a.messages_refresh_again;
+                    if (result.gen == a.messages_gen) {
+                        a.messages_read_key = .{};
+                        a.messages_refresh_again = false;
+                    }
                     for (a.chats[0..a.chat_count]) |*chat| {
                         if (chat_key.Key.eql(chat_key.of(chat), chat_key.of(result))) {
                             kind = @tagName(chat.provider);
@@ -15605,10 +15624,20 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                             const fail_line = std.fmt.bufPrint(&fail_buffer, "messages-read: empty payload, chat={s}", .{kind}) catch "messages-read: empty payload";
                             appendLaunchLog(a, fail_line);
                             scheduleMessageReadRetry(a);
+                            refresh_again = false;
                         }
                     } else {
-                        appendLaunchLog(a, "messages-read: dropped reply, selection, identity or generation changed");
+                        const reason: []const u8 = if (a.selected_chat >= a.chat_count)
+                            "selection changed"
+                        else if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)))
+                            "identity changed"
+                        else
+                            "generation changed";
+                        var drop_buffer: [96]u8 = undefined;
+                        appendLaunchLog(a, std.fmt.bufPrint(&drop_buffer, "messages-read: dropped reply, {s}", .{reason}) catch "messages-read: dropped reply");
                     }
+                    if (refresh_again and result.ok and result.gen == a.messages_gen and a.selected_chat < a.chat_count and
+                        chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result))) refreshMessages(a);
                 },
                 .background_media => applyBackgroundMedia(a, result),
                 .reaction => applyReaction(a, result),
