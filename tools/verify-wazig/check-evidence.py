@@ -1,6 +1,7 @@
 from pathlib import Path
 import hashlib
 import json
+import subprocess
 import sys
 
 folder = Path(sys.argv[1])
@@ -98,7 +99,11 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
     backend = 'message backend:' if unified else 'whatsapp backend:'
     assert launch.count(backend) == 1 and backend + ' hub' in launch
     if unified:
-        assert before['selected']['provider'] == 'slack' and final['selected']['provider'] == 'telegram'
+        assert before['selected']['provider'] == 'slack' and final['selected']['provider'] == 'whatsapp'
+        assert 'hub provider-views PASS' in proof
+        for keys in ['%1', '%2', '%0']:
+            assert f'keys: {keys}' in actions
+        subprocess.run([sys.executable, str(Path(__file__).with_name('check-hub-views.py')), str(folder)], check=True)
         assert all(row['wire_path'].startswith('/v1/wazig/') or row['wire_path'] == '/fixture/live' for row in requests)
         assert not any('account=' in row['wire_path'] for row in requests)
     assert 'fixture-key-not-a-secret' not in launch and session['bridge_url'] not in launch
