@@ -248,7 +248,7 @@ fn WideText(comptime capacity: usize) type {
             self.buf[self.len] = 0;
         }
 
-        fn slice(self: *const @This()) []const u16 {
+        pub fn slice(self: *const @This()) []const u16 {
             return self.buf[0..self.len];
         }
 
