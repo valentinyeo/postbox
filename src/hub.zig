@@ -1,6 +1,7 @@
 const std = @import("std");
 const bridge = @import("wa_hub.zig");
 const transport = @import("transport.zig");
+const messenger_view = @import("messenger_view.zig");
 
 pub const igsh_531_hub_provider = true;
 pub const Request = bridge.Request;
@@ -97,6 +98,11 @@ pub fn normalize(allocator: std.mem.Allocator, raw: []const u8, kind: Rows, chat
 
 pub fn sourceProvider(row: std.json.ObjectMap) ?transport.Provider {
     return std.meta.stringToEnum(transport.Provider, string(row, "provider"));
+}
+
+pub fn providerForView(row: std.json.ObjectMap, view: messenger_view.View) ?transport.Provider {
+    const provider = sourceProvider(row) orelse return null;
+    return if (messenger_view.includes(view, provider)) provider else null;
 }
 
 fn string(row: std.json.ObjectMap, name: []const u8) []const u8 {

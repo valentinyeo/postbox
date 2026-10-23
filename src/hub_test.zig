@@ -98,3 +98,47 @@ test "IGSH-531 live updates use bounded validated SSE and resume ids" {
     try std.testing.expectEqual(.ready, try bridge.mediaState(200));
     try std.testing.expectError(error.HttpFailed, bridge.mediaState(401));
 }
+
+test "IGSH-592 hub provider views partition parsed rows without trusting opaque handles" {
+    const View = @import("messenger_view.zig").View;
+    const Provider = @import("transport.zig").Provider;
+    const raw =
+        \\[
+        \\  {"jid":"opaque-first","provider":"slack"},
+        \\  {"jid":"opaque-second","provider":"whatsapp"},
+        \\  {"jid":"unknown","provider":"other"},
+        \\  {"jid":"missing"},
+        \\  {"jid":"invalid","provider":42}
+        \\]
+    ;
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, raw, .{});
+    defer parsed.deinit();
+    const rows = parsed.value.array.items;
+    var counts = [_]usize{0} ** 3;
+    for ([_]View{ .slack, .whatsapp, .all }, 0..) |view, index| {
+        for (rows) |row| {
+            if (hub.providerForView(row.object, view)) |provider| {
+                try std.testing.expect(view == .all or std.mem.eql(u8, @tagName(view), @tagName(provider)));
+                counts[index] += 1;
+            }
+        }
+    }
+    try std.testing.expectEqual(@as(?Provider, .slack), hub.providerForView(rows[0].object, .slack));
+    try std.testing.expectEqual(@as(?Provider, null), hub.providerForView(rows[0].object, .whatsapp));
+    try std.testing.expectEqual(@as(?Provider, .whatsapp), hub.providerForView(rows[1].object, .whatsapp));
+    try std.testing.expectEqual(@as(?Provider, null), hub.providerForView(rows[1].object, .slack));
+    try std.testing.expectEqual(@as(usize, 1), counts[0]);
+    try std.testing.expectEqual(@as(usize, 1), counts[1]);
+    try std.testing.expectEqual(@as(usize, 2), counts[2]);
+    try std.testing.expectEqual(counts[2], counts[0] + counts[1]);
+}
+
+test "IGSH-592 hub Telegram rows remain exclusive to Telegram and all views" {
+    const Provider = @import("transport.zig").Provider;
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"provider\":\"telegram\"}", .{});
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(?Provider, .telegram), hub.providerForView(parsed.value.object, .telegram));
+    try std.testing.expectEqual(@as(?Provider, .telegram), hub.providerForView(parsed.value.object, .all));
+    try std.testing.expectEqual(@as(?Provider, null), hub.providerForView(parsed.value.object, .slack));
+    try std.testing.expectEqual(@as(?Provider, null), hub.providerForView(parsed.value.object, .whatsapp));
+}

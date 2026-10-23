@@ -29,7 +29,7 @@ class Handler(bridge.Handler):
             data = json.loads(json.dumps(data).replace(bridge.ACCOUNT + ':', '').replace(bridge.ALPHA, ALPHA).replace(bridge.BETA, BETA))
             for row in data:
                 if 'jid' in row:
-                    row['provider'] = 'slack' if row['jid'] == ALPHA else 'telegram'
+                    row['provider'] = 'slack' if row['jid'] == ALPHA else 'whatsapp'
                     if row['jid'] == BETA:
                         stamp = datetime.fromisoformat(row['last_message_ts']) - timedelta(seconds=1)
                         row['last_message_ts'] = stamp.isoformat().replace('+00:00', 'Z')

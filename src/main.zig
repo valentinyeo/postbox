@@ -2357,8 +2357,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         };
         var chat = Chat{ .account = a.cache_tag };
         if (unifiedHub(a)) {
-            chat.provider = hub.sourceProvider(object) orelse continue;
-            if (!messenger_view.includes(view, chat.provider)) continue;
+            chat.provider = hub.providerForView(object, view) orelse continue;
         }
         const jid = getString(object, "jid");
         if (fresh and !a.show_archived) _ = holdKeptArchived(a, jid, getBool(object, "archived"), getString(object, "last_message_ts"));
@@ -12292,7 +12291,7 @@ fn controlChats(a: *App, call: *ControlCall) !void {
         filtered = filtered or a.unread_only;
     } else {
         const wanted = if (request.all) "" else query;
-        if (messenger_view.includes(view, .slack) and !request.archived) {
+        if (!unifiedHub(a) and messenger_view.includes(view, .slack) and !request.archived) {
             for (&a.slack_installations) |*installation| {
                 if (!installation.active) continue;
                 for (installation.chats[0..installation.chat_count]) |*chat| {
@@ -12300,7 +12299,7 @@ fn controlChats(a: *App, call: *ControlCall) !void {
                 }
             }
         }
-        if (messenger_view.includes(view, .telegram) and !request.archived and telegramReady(a) and a.tg_account.len > 0) {
+        if (!unifiedHub(a) and messenger_view.includes(view, .telegram) and !request.archived and telegramReady(a) and a.tg_account.len > 0) {
             for (a.tg_chats[0..a.tg_chat_count]) |*cached| {
                 var chat = Chat{ .name = cached.name, .unread = cached.unread_count > 0, .unread_count = cached.unread_count, .provider = .telegram, .account = a.tg_account };
                 var id_buffer: [24]u8 = undefined;
@@ -12310,12 +12309,12 @@ fn controlChats(a: *App, call: *ControlCall) !void {
                 if (controlMatches(a, &chat, wanted)) try list.append(a.allocator, chat);
             }
         }
-        if (messenger_view.includes(view, .whatsapp)) {
+        if (unifiedHub(a) or messenger_view.includes(view, .whatsapp)) {
             if (call.whatsapp_raw.len == 0) {
                 call.need_whatsapp = true;
                 return;
             }
-            controlWhatsAppChats(a, call.whatsapp_raw, request.archived, wanted, &list) catch |err| switch (err) {
+            controlWhatsAppChats(a, call.whatsapp_raw, view, request.archived, wanted, &list) catch |err| switch (err) {
                 error.OutOfMemory => return err,
                 else => return control_api.writeError(w, "could not parse the WhatsApp chat list"),
             };
@@ -12331,7 +12330,7 @@ fn controlChats(a: *App, call: *ControlCall) !void {
     try w.writeAll("]}}\n");
 }
 
-fn controlWhatsAppChats(a: *App, raw: []const u8, show_archived: bool, query: []const u8, list: *std.ArrayList(Chat)) !void {
+fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, show_archived: bool, query: []const u8, list: *std.ArrayList(Chat)) !void {
     var parsed = try std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{});
     defer parsed.deinit();
     const root = switch (parsed.value) {
@@ -12353,7 +12352,7 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, show_archived: bool, query: []
         if (isUnresolvableChatEntry(display_name, jid, getString(object, "kind"))) continue;
         if (query.len > 0 and !containsIgnoreCase(display_name, query) and !containsIgnoreCase(jid, query)) continue;
         var chat = Chat{ .account = a.cache_tag };
-        if (unifiedHub(a)) chat.provider = hub.sourceProvider(object) orelse continue;
+        if (unifiedHub(a)) chat.provider = hub.providerForView(object, view) orelse continue;
         chat.jid.set(jid);
         chat.name.set(a.allocator, display_name);
         chat.kind.set(a.allocator, if (std.mem.endsWith(u8, jid, "@g.us")) "Group" else getString(object, "kind"));

@@ -224,6 +224,17 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
         Assert-That (@($requests | Where-Object { $_.path.StartsWith($path) -and $_.status -eq 200 }).Count -gt 0) "Missing hub list request: $path"
     }
     Hub-Pass $Session chats
+    if ($unified) {
+        foreach ($mode in @('views', 'unfiltered-views')) {
+            $views = @{}
+            foreach ($view in @('slack', 'whatsapp', 'all')) {
+                $arguments = @('--json', '--messenger', $view)
+                if ($mode -eq 'unfiltered-views') { $arguments += '--all' }
+                $views[$view] = Read-Control $Session chats -Arguments $arguments
+            }
+            $views | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "provider-$mode.json")
+        }
+    }
     if (-not $unified) {
         $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/send' -and $_.body.client_id -eq '53200000000000000000000000000001' }).Count -eq 1 } 'foreign outbox startup send'
         $adopted = @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/send' -and $_.body.client_id -eq '53200000000000000000000000000001' })
@@ -267,6 +278,28 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
         (Read-Control $Session status).selected.id -eq $alpha -and $shown.chat.id -eq $alpha -and @($shown.messages | Where-Object id -eq 'BASELINE').Count -eq 1 -and @($shown.messages | Where-Object id -eq 'BASELINE_BETA').Count -eq 0
     } 'hub Alpha selected with only Alpha history'
     Hub-Pass $Session chat-switch
+    if ($unified) {
+        $sidebar = @{}
+        foreach ($view in @('whatsapp', 'slack', 'all')) {
+            $keys = switch ($view) { 'whatsapp' { '%1' } 'slack' { '%2' } 'all' { '%0' } }
+            Send-Keys $Session $keys
+            $null = Wait-Until { (Read-Control $Session status).view -eq $view } "sidebar $view view"
+            $sidebar[$view] = @{
+                state = Read-Control $Session status
+                chats = Read-Control $Session chats -Arguments @('--json')
+            }
+            Save-Screen $Session "provider-$view"
+        }
+        $sidebar | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'provider-sidebar.json')
+        & python (Join-Path $PSScriptRoot 'check-hub-views.py') $Session.evidence
+        Assert-That ($LASTEXITCODE -eq 0) 'Hub provider views failed'
+        Assert-That ((Read-Control $Session status).selected.id -eq $alpha) 'All view did not restore Alpha'
+        $null = Wait-Until {
+            $shown = Read-Control $Session messages
+            $shown.chat.id -eq $alpha -and @($shown.messages | Where-Object id -eq 'BASELINE').Count -eq 1 -and @($shown.messages | Where-Object id -eq 'BASELINE_BETA').Count -eq 0
+        } 'Alpha history restored after provider views'
+        Hub-Pass $Session provider-views
+    }
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'history.messages.json')
     Save-Screen $Session history
     Hub-Pass $Session history
@@ -315,7 +348,7 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
         Assert-That (@($requests | Where-Object { $_.wire_path -ne '/fixture/live' -and -not $_.wire_path.StartsWith('/v1/wazig/') }).Count -eq 0) 'Request bypassed unified hub'
         Assert-That (@($requests | Where-Object { $_.wire_path.Contains('account=') }).Count -eq 0) 'Source account leaked into hub query'
         $final = Read-Control $Session status
-        Assert-That ($final.selected.provider -eq 'telegram') 'Hub lost source network identity'
+        Assert-That ($final.selected.provider -eq 'whatsapp') 'Hub lost source network identity'
     }
     $backend = if ($unified) { 'message backend:' } else { 'whatsapp backend:' }
     $launch = Get-Content (Join-Path $Messages 'launch-log.txt')

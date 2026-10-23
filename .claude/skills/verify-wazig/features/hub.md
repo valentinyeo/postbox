@@ -4,8 +4,9 @@ The IGSH-531 backend runs through the existing transport interface with no new U
 
 ## Sub-features
 
-- `hub-list-history`: synthetic Slack and Telegram chats load through authenticated `/v1/wazig` requests, not local connector credentials.
-- `chat-switch`: opening timestamped, uncached Telegram Beta clears Slack Alpha before delayed history arrives.
+- `hub-list-history`: synthetic Slack and WhatsApp chats load through authenticated `/v1/wazig` requests, not local connector credentials.
+- `provider-views`: explicit `wazigctl chats --json --messenger slack|whatsapp|all`, with and without `--all`, return nonempty provider-pure lists; Slack plus WhatsApp exactly partitions All. Alt+1/Alt+2/Alt+0 sidebar lists match those identities.
+- `chat-switch`: opening timestamped, uncached WhatsApp Beta clears Slack Alpha before delayed history arrives.
 - `hub-live`: fragmented SSE framing, reconnect replay and live history invalidation use the existing cancellable WinHTTP reader.
 - `hub-send`: a lost response retries the persisted client_id; exactly one send is accepted.
 - `hub-read-archive`: opening a remote chat marks it read and keyboard archiving removes it from the inbox.
@@ -22,9 +23,10 @@ The IGSH-531 backend runs through the existing transport interface with no new U
 
 - Run `feature=hub`, or `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature hub`, on GitHub Actions only. The existing verification workflow includes this journey on matching pull requests.
 - The helper starts `tools/verify-wazig/fake-hub.py`, reusing the synthetic bridge state machine under a distinct `/v1/wazig` contract. The real Zig app, transport vtable, workers and WinHTTP/SSE reader execute; Python is fixture infrastructure, not a bundled app runtime.
-- Require Slack Alpha and Telegram Beta without local provider credentials. Beta has a last-message timestamp but no cached history in the fresh profile; retain before-beta.requests.json proving no earlier Beta request. The shared bridge delays its first Beta history response by three seconds and records the measured delay.
+- Require Slack Alpha and WhatsApp Beta without local provider credentials. Beta has a last-message timestamp but no cached history in the fresh profile; retain before-beta.requests.json proving no earlier Beta request. The shared bridge delays its first Beta history response by three seconds and records the measured delay.
 - After Alpha's BASELINE appears, select Beta with Ctrl+Tab. Within one second of keyboard input returning, require selected Beta and matching provider/account/id with zero displayed messages, using bounded read-only control clients. Preserve beta-switch.json, beta-empty.messages.json, beta-empty.png and state/UIA snapshots. Then require only BASELINE_BETA / Fixture Beta history and retain beta.messages.json and beta.png. Switch back with Ctrl+Shift+Tab, require Alpha's baseline without Beta messages, then trigger the synthetic upstream event and require LIVE after SSE replay.
-- Send Fixture outgoing through the composer; require stable client_id retries and one acceptance. Require read state, pending-to-ready media with matching cache SHA-256, and keyboard archive with one remaining Telegram row.
+- Before opening Beta, retain `provider-views.json` and `provider-unfiltered-views.json` from explicit messenger queries while All is active. After the chat-switch proof, drive Alt+1, Alt+2 and Alt+0, retaining `provider-sidebar.json` and `provider-whatsapp.png`, `provider-slack.png`, `provider-all.png`. `check-hub-views.py` rejects empty/truncated views, wrong-provider rows, duplicates, incomplete partitions and CLI/sidebar identity mismatches. `hub provider-views PASS` is required in the surviving proof log.
+- Send Fixture outgoing through the composer; require stable client_id retries and one acceptance. Require read state, pending-to-ready media with matching cache SHA-256, and keyboard archive with one remaining WhatsApp row.
 - Require every original wire path to use `/v1/wazig` except the fixture-only event trigger, no source-account query, DPAPI HubToken storage, redacted launch logging and surviving evidence after cleanup.
 - `src/hub_test.zig` joins the normal unit-test roots for switch/fallback, escaped opaque handles, all source networks, reads, archive/unarchive, multipart, malformed responses, duplicate handles and SSE resume validation. The existing search journey runs without either hub configuration; no runtime checks run on the development host.
 
