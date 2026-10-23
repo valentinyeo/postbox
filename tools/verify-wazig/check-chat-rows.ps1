@@ -3,6 +3,8 @@ $path = Join-Path $PSScriptRoot '../../src/text_draw.zig'
 $current = [IO.File]::ReadAllText($path)
 $mainPath = Join-Path $PSScriptRoot '../../src/main.zig'
 $currentMain = [IO.File]::ReadAllText($mainPath)
+$shapesPath = Join-Path $PSScriptRoot '../../src/smooth_shapes.zig'
+$currentShapes = [IO.File]::ReadAllText($shapesPath)
 $marker = 'test "ISSUE-462 DirectWrite paints every row-sized chat buffer"'
 $start = $current.IndexOf($marker)
 if ($start -lt 0) { throw 'ISSUE-462 pixel regression missing' }
@@ -10,8 +12,11 @@ $historical = (& git show '44c90f3:src/text_draw.zig') -join "`n"
 if ($LASTEXITCODE -ne 0) { throw 'Historical renderer unavailable' }
 $historicalMain = (& git show '44c90f3:src/main.zig') -join "`n"
 if ($LASTEXITCODE -ne 0) { throw 'Historical chat painter unavailable' }
+$historicalShapes = (& git show '44c90f3:src/smooth_shapes.zig') -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'Historical smooth shapes unavailable' }
 try {
     [IO.File]::WriteAllText($mainPath, $historicalMain)
+    [IO.File]::WriteAllText($shapesPath, $historicalShapes)
     [IO.File]::WriteAllText($path, $historical + "`n" + $current.Substring($start))
     $output = & zig test src/text_draw.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-462 2>&1
     $exit = $LASTEXITCODE
@@ -21,6 +26,7 @@ try {
 } finally {
     [IO.File]::WriteAllText($path, $current)
     [IO.File]::WriteAllText($mainPath, $currentMain)
+    [IO.File]::WriteAllText($shapesPath, $currentShapes)
 }
 & zig test src/text_draw.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-462
 if ($LASTEXITCODE -ne 0) { throw 'Chat row text regression' }

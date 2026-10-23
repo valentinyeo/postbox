@@ -981,6 +981,85 @@ class RepaintHandler(Handler):
             self.close_connection = True
 
 
+VOICE_NOTES = 5
+VOICE_BYTES = b'OggS' + bytes(range(256)) * 8
+
+
+class VoiceHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def stamp(self, offset):
+        return (datetime.fromisoformat(self.state.stamp) + timedelta(seconds=offset)).isoformat().replace('+00:00', 'Z')
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            rows = [] if query.get('archived') == ['true'] else [
+                dict(jid=ALPHA, name='Verification Voice', provider='whatsapp', kind='direct',
+                     last_message_ts=self.stamp(VOICE_NOTES * 60), unread_count=0, archived=False),
+                dict(jid=BETA, name='Verification Beta', provider='whatsapp', kind='direct',
+                     last_message_ts=self.stamp(0), unread_count=0, archived=False)]
+            self.respond(200, rows)
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            if chat == ALPHA:
+                rows = [dict(MsgID=f'VOICE-{n}', ChatJID=chat, Timestamp=self.stamp(n * 60), Text='', FromMe=False,
+                             SenderJID='fixture-voice-sender', SenderName='Fixture Voice', MediaType='audio',
+                             MimeType='audio/ogg', Filename=f'voice-{n}.ogg')
+                        for n in range(1, VOICE_NOTES + 1)]
+            else:
+                rows = [dict(MsgID='VOICE-BETA', ChatJID=chat, Timestamp=self.stamp(0), Text='Synthetic text',
+                             FromMe=False, SenderName='Fixture Sender')]
+            self.respond(200, list(reversed(rows)))
+        elif url.path.startswith('/v1/wazig/media/'):
+            chat, message = map(unquote, url.path.removeprefix('/v1/wazig/media/').split('/', 1))
+            if chat == ALPHA and message.startswith('VOICE-'):
+                self.respond(200, VOICE_BYTES, 'audio/ogg', sha256=hashlib.sha256(VOICE_BYTES).hexdigest())
+            else:
+                self.respond(404, {'error': 'unknown voice note'})
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/v1/wazig/mark-read':
+            self.respond(200, {'status': 'ok'}, body=body)
+        else:
+            self.respond(400, {'error': 'unexpected voice write'}, body=body)
+
+    def events(self):
+        self.record(200)
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        last = int(self.headers.get('Last-Event-ID', '0'))
+        try:
+            if last == 0:
+                self.event(1, 'reset', '')
+                self.close_connection = True
+                return
+            while True:
+                bridge.time.sleep(2)
+                self.wfile.write(b': heartbeat\n\n')
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
+
+
 class SlackArchiveHandler(SlackSortHandler):
     def stamp(self, incoming):
         return (datetime.fromisoformat(self.state.stamp) + timedelta(seconds=incoming)).isoformat().replace('+00:00', 'Z')
@@ -1153,6 +1232,7 @@ def main():
     modes.add_argument('--paste-image', action='store_true')
     modes.add_argument('--hub-archive', action='store_true')
     modes.add_argument('--repaint', action='store_true')
+    modes.add_argument('--voice', action='store_true')
     modes.add_argument('--mixed-lid', action='store_true')
     modes.add_argument('--reactions', action='store_true')
     modes.add_argument('--slack-sort', action='store_true')
@@ -1165,7 +1245,7 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    handler = PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else VoiceHandler if args.voice else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)

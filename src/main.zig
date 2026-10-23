@@ -13162,6 +13162,12 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try control_api.writeStringUtf16(w, message.reaction.slice());
         try w.writeAll(",\"media_type\":");
         try control_api.writeString(w, message.media_type.slice());
+        try w.print(",\"local\":{},\"transcript_chars\":{d},\"expanded\":{}", .{ message.local_path.len > 0, message.transcript.len, message.transcript_expanded });
+        for ([_]struct { name: []const u8, rect: win.RECT }{
+            .{ .name = "bubble", .rect = message.bubble_hit },
+            .{ .name = "media", .rect = message.media_hit },
+            .{ .name = "toggle", .rect = message.toggle_hit },
+        }) |entry| try w.print(",\"{s}\":[{d},{d},{d},{d}]", .{ entry.name, entry.rect.left, entry.rect.top, entry.rect.right, entry.rect.bottom });
         try w.print(",\"from_me\":{},\"revoked\":{},\"send_state\":\"{s}\"}}", .{ message.from_me, message.revoked, @tagName(message.send_state) });
     }
     try w.writeAll("]}}\n");

@@ -34,6 +34,7 @@ PUBLIC_SKILL_PATHS = (
     ".claude/skills/verify-wazig/features/views.md",
     ".claude/skills/verify-wazig/features/window.md",
     ".claude/skills/verify-wazig/features/repaint.md",
+    ".claude/skills/verify-wazig/features/voice.md",
 )
 
 
