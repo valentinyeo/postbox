@@ -45,7 +45,7 @@ function Get-App($Session) {
     return $app
 }
 
-function Read-Control($Session, [string]$Command, [string[]]$Arguments = @()) {
+function Read-Control($Session, [string]$Command, [string[]]$Arguments = @(), [int]$TimeoutMilliseconds = 15000) {
     $start = [Diagnostics.ProcessStartInfo]::new($Session.ctl)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
@@ -54,13 +54,20 @@ function Read-Control($Session, [string]$Command, [string[]]$Arguments = @()) {
     foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
     $start.Environment['USERNAME'] = $Session.username
     $child = [Diagnostics.Process]::Start($start)
-    $text = $child.StandardOutput.ReadToEnd()
-    $errors = $child.StandardError.ReadToEnd()
-    Assert-That ($child.WaitForExit(15000)) 'Read-only control client timed out'
-    Assert-That ($child.ExitCode -eq 0) "Read-only control failed: $errors"
-    $response = $text | ConvertFrom-Json
-    Assert-That $response.ok 'Control response is not OK'
-    return $response.result
+    try {
+        $output = $child.StandardOutput.ReadToEndAsync()
+        $errorOutput = $child.StandardError.ReadToEndAsync()
+        Assert-That ($child.WaitForExit($TimeoutMilliseconds)) "Read-only control client timed out after $TimeoutMilliseconds ms: $Command"
+        $text = $output.GetAwaiter().GetResult()
+        $errors = $errorOutput.GetAwaiter().GetResult()
+        Assert-That ($child.ExitCode -eq 0) "Read-only control failed: $errors"
+        $response = $text | ConvertFrom-Json
+        Assert-That $response.ok 'Control response is not OK'
+        return $response.result
+    } finally {
+        if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
+        $child.Dispose()
+    }
 }
 
 function Get-Window($Session) {
@@ -226,11 +233,32 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
         Hub-Pass $Session foreign-outbox-startup
     }
     $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object id -eq 'BASELINE').Count -eq 1 } 'hub history visible'
+    Assert-That (@($rows | Where-Object { $_.id -eq $beta -and $_.last_message_time }).Count -eq 1) 'Beta must have a last message timestamp'
+    $requests = @(Read-BridgeRequests $Session)
+    Assert-That (@($requests | Where-Object { $null -ne $_.history_request }).Count -eq 0) 'Beta history was requested before the first switch'
+    $requests | ConvertTo-Json -Depth 12 -AsArray | Set-Content (Join-Path $Session.evidence 'before-beta.requests.json')
     Send-Keys $Session '^{TAB}'
+    $switchTimer = [Diagnostics.Stopwatch]::StartNew()
+    $selected = (Read-Control $Session status -TimeoutMilliseconds 1000).selected
+    Assert-That ($selected.id -eq $beta -and $selected.name -eq 'Verification Beta') 'Keyboard did not select Beta'
+    $remaining = 1000 - [int][Math]::Ceiling($switchTimer.Elapsed.TotalMilliseconds)
+    Assert-That ($remaining -gt 0) 'Beta selection exceeded one second'
+    $shown = Read-Control $Session messages -TimeoutMilliseconds $remaining
+    $elapsed = $switchTimer.Elapsed.TotalMilliseconds
+    @{ elapsed_ms = $elapsed; selected = $selected } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'beta-switch.json')
+    $shown | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'beta-empty.messages.json')
+    Assert-That ($elapsed -le 1000) 'Beta messages response exceeded one second'
+    foreach ($field in @('id', 'provider', 'account')) {
+        Assert-That ($shown.chat.$field -eq $selected.$field) "Shown Beta $field differs from selection"
+    }
+    Assert-That ($shown.messages.Count -eq 0) 'Uncached Beta pane retained messages before history arrived'
+    Save-Screen $Session beta-empty
     $null = Wait-Until {
         $shown = Read-Control $Session messages
         (Read-Control $Session status).selected.id -eq $beta -and $shown.chat.id -eq $beta -and $shown.messages.Count -eq 1 -and $shown.messages[0].id -eq 'BASELINE_BETA' -and $shown.messages[0].text -eq 'Fixture Beta history'
     } 'hub Beta selected with only Beta history'
+    $requests = @(Read-BridgeRequests $Session)
+    Assert-That (@($requests | Where-Object { $_.history_request -eq 1 -and $_.status -eq 200 -and $_.history_delay_ms -ge 3000 }).Count -eq 1) 'First Beta history response was not delayed three seconds'
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'beta.messages.json')
     Save-Screen $Session beta
     Send-Keys $Session '^+{TAB}'

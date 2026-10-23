@@ -47,6 +47,20 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
     assert ready and any(row['status'] == 202 and row['path'] == ready[0]['path'] for row in media)
     cached = list((folder / 'final-data/hub-media').glob('*.bin'))
     assert any(hashlib.sha256(path.read_bytes()).hexdigest() == ready[0]['sha256'] for path in cached)
+    before_beta = json.loads((folder / 'before-beta.requests.json').read_text(encoding='utf-8-sig'))
+    assert not any('history_request' in row for row in before_beta)
+    delayed = [row for row in requests if row.get('history_request') == 1 and row['status'] == 200]
+    assert len(delayed) == 1 and delayed[0]['history_delay_ms'] >= 3000
+    assert any(row.get('history_request') == 1 and row.get('history_phase') == 'requested' for row in requests)
+    switch = json.loads((folder / 'beta-switch.json').read_text(encoding='utf-8-sig'))
+    empty = json.loads((folder / 'beta-empty.messages.json').read_text(encoding='utf-8-sig'))
+    empty_state = json.loads((folder / 'beta-empty.state.json').read_text(encoding='utf-8-sig'))
+    assert 0 <= switch['elapsed_ms'] <= 1000
+    assert switch['selected']['name'] == empty_state['selected']['name'] == 'Verification Beta'
+    assert switch['selected']['last_message_time'] and empty['chat']['last_message_time']
+    assert empty['messages'] == []
+    for selected in [switch['selected'], empty_state['selected']]:
+        assert all(empty['chat'][field] == selected[field] for field in ['id', 'provider', 'account'])
     history = json.loads((folder / 'history.messages.json').read_text(encoding='utf-8-sig'))
     beta = json.loads((folder / 'beta.messages.json').read_text(encoding='utf-8-sig'))
     beta_state = json.loads((folder / 'beta.state.json').read_text(encoding='utf-8-sig'))
@@ -63,11 +77,12 @@ if session['feature'] in ('whatsapp-hub', 'hub'):
     assert not any(row['id'] == 'LIVE' for row in history['messages'])
     assert any(row['id'] == 'LIVE' for row in live['messages'])
     images = []
-    for name in ['before', 'beta', 'history', 'live', 'sent', 'after']:
+    for name in ['before', 'beta-empty', 'beta', 'history', 'live', 'sent', 'after']:
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
         assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
-        images.append(hashlib.sha256(image).hexdigest())
+        if name != 'beta-empty':
+            images.append(hashlib.sha256(image).hexdigest())
     assert len(set(images)) >= 4
     before = json.loads((folder / 'before.state.json').read_text(encoding='utf-8-sig'))
     final = json.loads((folder / 'side-effects.json').read_text(encoding='utf-8-sig'))

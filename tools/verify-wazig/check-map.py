@@ -44,4 +44,21 @@ assert "if ($Feature -notin @('whatsapp-hub', 'hub')) {\n    Set-Content (Join-P
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 for proof in ['chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
-print('MAP VERIFIED: nine complete feature entries, source labels, stable controls, hub journey and GitHub triggers')
+bridge = (root / 'tools/verify-wazig/fake-wa-bridge.py').read_text(encoding='utf-8')
+assert "last_message_ts='2026-01-01T00:00:00Z'" in bridge
+assert 'if request == 1:\n                    time.sleep(3)' in bridge
+for required in ['ReadToEndAsync()', '$child.WaitForExit($TimeoutMilliseconds)', '$remaining = 1000 -',
+                 'Read-Control $Session messages -TimeoutMilliseconds $remaining', '$elapsed -le 1000',
+                 '$shown.messages.Count -eq 0', 'Save-Screen $Session beta-empty']:
+    assert required in harness, required
+validator = (root / 'tools/verify-wazig/check-evidence.py').read_text(encoding='utf-8')
+for artifact in ['before-beta.requests.json', 'beta-switch.json', 'beta-empty.messages.json']:
+    assert artifact in harness and artifact in validator, artifact
+assert "0 <= switch['elapsed_ms'] <= 1000" in validator
+assert "empty['messages'] == []" in validator
+assert "delayed[0]['history_delay_ms'] >= 3000" in validator
+for feature in ['whatsapp-hub', 'hub']:
+    entry = (skill / 'features' / f'{feature}.md').read_text(encoding='utf-8')
+    for required in ['beta-empty.png', 'beta-switch.json', 'one second', 'three seconds']:
+        assert required in entry, (feature, required)
+print('MAP VERIFIED: nine complete feature entries, source labels, stable controls, bounded chat-switch journey and GitHub triggers')
