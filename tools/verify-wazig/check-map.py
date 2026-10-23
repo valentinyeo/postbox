@@ -468,3 +468,25 @@ for required in ["Send-Keys $session '^a'", "Send-Keys $session '^e'", '2 chats 
 assert "'archive-bulk'" in harness.split('function Save-Screen(', 1)[1].split('function Invoke-Doctor(', 1)[0]
 assert 'check-chat-rows.ps1' in workflow
 print(f'JOURNEY REGISTRY VERIFIED: {len(journeys)} journeys, maps, scripts, hub switches, evidence and plan matrix')
+
+media_fit = (root / 'tools/verify-wazig/media-fit.ps1').read_text(encoding='utf-8')
+assert 'feature=media-fit' in (skill / 'features/media-fit.md').read_text(encoding='utf-8')
+assert 'Invoke-MediaFitJourney $session' in (registry_path.parent / entries['media-fit']['script']).read_text(encoding='utf-8')
+assert entries['media-fit']['hub'] == 'media-fit'
+assert entries['media-fit']['hub_handler']['class'] == 'MediaFitHandler'
+assert entries['media-fit']['chats'] == 1
+assert entries['media-fit']['pr'] and entries['media-fit']['evidence']
+assert entries['media-fit']['library'] == 'media-fit.ps1'
+assert entries['media-fit']['validator'] == {'file': 'check-media-fit-evidence.py', 'function': 'check_media_fit'}
+assert hub_parser.parse_args(['--media-fit', '--port-file', 'port', '--log', 'log']).mode == 'media-fit'
+assert '.claude/skills/verify-wazig/features/media-fit.md' in marker_namespace['PUBLIC_SKILL_PATHS']
+assert '(features/media-fit.md)' in (skill / 'RULE-MAP.md').read_text(encoding='utf-8')
+for artifact in ['media-fit-checks.json', 'media-fit.requests.json', 'media-fit-fixture.json']:
+    assert artifact in media_fit and artifact in (root / 'tools/verify-wazig/check-media-fit-evidence.py').read_text(encoding='utf-8')
+for required in ['canvas = @($ox, $oy, $canvasWidth, $canvasHeight)',
+                 '$null = [VerifyVoice]::FullRepaint', '$null = [VerifyVoice]::Wheel',
+                 '$rows.Count -eq 1', '$row = $rows[0]', '$row.bubble[3] -le $height',
+                 '$narrow.bubble[2] - $narrow.bubble[0] - $padding -lt $wide.media[2] - $wide.media[0]']:
+    assert required in media_fit, required
+assert '$row.bubble[3] - $row.bubble[1] -gt' not in media_fit
+print('MEDIA FIT MAP VERIFIED: hub downloads, wide/narrow geometry and screenshot pixels, timestamp clearance and PR wiring')
