@@ -811,7 +811,7 @@ class RepaintHandler(Handler):
                 count = state.repaint_count
                 stamp = state.repaint_stamp
             rows = [] if parse_qs(url.query).get('archived') == ['true'] else [
-                dict(jid=ALPHA, name='Verification Alpha', provider='whatsapp', kind='direct',
+                dict(jid=ALPHA, name='Verification Alpha', provider='slack', kind='direct',
                      last_message_ts=state.stamp, unread_count=0, archived=False),
                 dict(jid=BETA, name='Verification Beta', provider='whatsapp', kind='direct',
                      last_message_ts=stamp, unread_count=count, archived=False)]
@@ -878,19 +878,24 @@ class RepaintHandler(Handler):
         self.end_headers()
         last = int(self.headers.get('Last-Event-ID', '0'))
         try:
+            if last == 0:
+                self.event(1, 'reset', '')
+                self.close_connection = True
+                return
             while True:
                 with self.state.lock:
                     pending = [(i + 1, event) for i, event in enumerate(self.state.repaint_events) if i + 1 > last]
                     if not pending:
                         self.state.lock.wait(timeout=2)
-                for event_id, (kind, chat) in pending:
-                    self.event(event_id, kind, chat)
-                    last = event_id
-                if not pending:
-                    self.wfile.write(b': heartbeat\n\n')
-                    self.wfile.flush()
+                if pending:
+                    for event_id, (kind, chat) in pending:
+                        self.event(event_id, kind, chat)
+                    self.close_connection = True
+                    return
+                self.wfile.write(b': heartbeat\n\n')
+                self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-            pass
+            self.close_connection = True
 
 
 def main():
