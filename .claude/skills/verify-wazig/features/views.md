@@ -3,7 +3,8 @@
 ## Sub-features
 
 - `account-views`: each account or workspace has one view, labelled WhatsApp <account>, or Slack <workspace name> for Slack (hub name or locally saved workspace name for direct sign-ins; Slack <team id> when unknown).
-- `view-keys`: Alt+1..9 selects the saved account position; Alt+I opens the combined inbox.
+- `view-keys`: Alt+1..9 selects the saved account position, even when that account has zero visible chats; Alt+I opens the combined inbox.
+- `view-title`: the native window title is <view label> - Wazig v<version>, using the exact Show palette label; the combined view uses Combined inbox - Wazig v<version>.
 - `view-scope`: search, Ctrl+1..9, next/previous chat and sending stay in the account view. Routing identity includes provider, cache account and the full prefixed id; a separate view account controls membership.
 - `view-order`: Ctrl+K → Sort views uses the existing palette list. Ctrl+Up/Down saves a move immediately, Enter switches to that view and Escape closes.
 - `combined-inbox`: all account chats appear newest activity first, retaining existing app badges and hover tooltips with app/account labels.
@@ -14,7 +15,7 @@
 
 - Open Messages with hub accounts or configured local providers. Each WhatsApp account and Slack workspace is a separate view; Telegram and Signal views follow; linking is done once through the triage CLI on the hub, never through Wazig.
 - Press Alt+1..9 or choose Show <view label> in Ctrl+K. Choose Show combined inbox or press Alt+I for all chats.
-- Choose Sort views, move the selected row with Ctrl+Up/Down, then Enter to switch or Escape to close. ViewOrder persists provider:account entries in the existing settings store. Hub workspace names persist alongside the hub state and label cached startup rows without waiting on the hub. Missing accounts remain saved but are skipped; new accounts append in provider and hub listing order.
+- Choose Sort views, move the selected row with Ctrl+Up/Down, then Enter to switch or Escape to close. ViewOrder persists provider:account entries in the existing settings store. Hub workspace names persist alongside the hub state and label cached startup rows without waiting on the hub. Saved account slots remain available as empty lists when their chats disappear; new accounts append in provider and hub listing order.
 - Hover a chat row for its app and account label. No toolbar or new controls are added.
 
 ## Driving it with PowerShell UI Automation
@@ -23,6 +24,8 @@
 - Drive Alt+1..Alt+4. Assert account-only sidebar identities through current_view.account and each chat's view_account in read-only status and chats; capture view-1.png through view-4.png. Exercise Ctrl+1, next/previous and Shared search in each account, retaining search-1.png through search-4.png.
 - Send Verification account send in the first account. Require one accepted fake-hub send with source_account personal and the selected opaque handle. Retain sent.messages.json and sent.png. Open the matching contact in business; require its own history without that message, with other.messages.json and isolated.png.
 - Drive Alt+I and assert the complete catalog and descending activity timestamps in inbox.chats.json and inbox.png.
+- Require exact native titles after Alt+1 and Alt+3 and Combined inbox after Alt+I, with the read-only build version. Retain title-view-1.png, title-inbox.png and title.json alongside UI Automation and state snapshots.
+- Drain personal through Ctrl+1 and Ctrl+E twice; the fake hub records real archive writes and filters archived rows. Refresh, press Alt+1 and require current_view personal with zero chats and the unchanged view_order. Retain drained-alt1.png; Alt+2 must still select business with two chats, retaining drained-alt2.png. Restore both chats through Show archived chats and Ctrl+E before sorting and restarting.
 - Drive Ctrl+K, Sort views, Ctrl+Down, Enter. Retain sort-command.png, sort-before.png, sort-moved.png, sort-selected.png, view-order.txt and immediate read-only state. Open again and Escape, capturing sort-closed.png.
 - Quit through the palette and restart the same executable with the same fixture root, registry id and preferences. Retain restart.json, restart-1.png through restart-4.png and corresponding state/chat snapshots proving swapped Alt+1/Alt+2 and unchanged Slack positions.
 - Require full labels Slack Alpha Workspace and Slack Beta Workspace (Show Slack Alpha Workspace and Show Slack Beta Workspace in the palette), while retaining exact names Alpha Workspace and Beta Workspace in evidence, under exact result check ids `view-label`, `sort-views`, `palette` and `inbox-tooltip`. Reject Slack T0ABC123 and Slack T0DEF456 labels for these named workspaces. Read current_view/view_order, the actual Sort views and Ctrl+K Show list rows, and each visible owned native tooltip after real mouse hover in the combined inbox. Retain workspace-names.json, result.json checks, hub-proof.log, workspace-palette.png, sort-before.png, view-3.png/view-4.png and inbox-tooltip-T0ABC123.png/inbox-tooltip-T0DEF456.png. The final-data hub workspace-names cache and restart labels must retain both names.

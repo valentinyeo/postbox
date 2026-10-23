@@ -316,6 +316,8 @@ if session['feature'] == 'slack-sort':
     print('EVIDENCE VERIFIED: Slack last message ordering, unknown last, incoming and sent promotion with keyboard order and isolation')
     raise SystemExit(0)
 if session['feature'] == 'views':
+    for required in ['title.json', 'title-view-1.png', 'title-inbox.png', 'drained-alt1.png']:
+        assert (folder / required).is_file(), required
     runpy.run_path(str(Path(__file__).with_name('check-views-evidence.py')))['check_views'](folder)
     raise SystemExit(0)
 if session['feature'] in ('whatsapp-hub', 'hub'):
