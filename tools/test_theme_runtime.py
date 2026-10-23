@@ -61,7 +61,9 @@ def verify_wiring(main, edit):
     assert "text_draw.drawText(dc, &self.cue" in paint
     assert "win.HideCaret(hwnd)" in edit and "win.ShowCaret(hwnd)" in edit
     assert "(id == id_compose or id == id_search) and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)" in main
-    assert "win.InvalidateRect(hwnd, if (id == id_compose) &a.compose_pill else &a.search_pill, win.FALSE)" in main
+    assert "win.InflateRect(&dirty, 1, 1)" in main
+    assert "compose_layout.composerBorderRect(@bitCast(rect))" in field
+    assert "win.InvalidateRect(hwnd, if (id == id_compose) &dirty else &a.search_pill, win.FALSE)" in main
     assert "win.SetBkColor(hdc, fieldColor())" in main
     assert "if (theme.choice == .amoled) a.brush_bg.? else a.brush_raised.?" in main
     assert "if (!recreateThemeBrushes(a)) return -1;" in main
@@ -214,7 +216,7 @@ class ThemeRuntimeTests(unittest.TestCase):
             "for ([_]?win.HWND{ a.compose, a.search }) |control|",
             "win.SetBkColor(hdc, theme.current.surface_container_high)",
             "a.search = directwrite_edit.create(",
-            "win.InvalidateRect(hwnd, if (id == id_compose) &a.compose_pill else &a.search_pill, win.FALSE)",
+            "win.InvalidateRect(hwnd, if (id == id_compose) &dirty else &a.search_pill, win.FALSE)",
             "win.SetBkColor(hdc, fieldColor())",
             "if (!recreateThemeBrushes(a)) return -1;",
         ):

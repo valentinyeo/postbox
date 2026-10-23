@@ -33,6 +33,10 @@ pub const Rect = extern struct {
     bottom: i32 = 0,
 };
 
+pub fn composerBorderRect(box: Rect) Rect {
+    return .{ .left = box.left, .top = box.top, .right = box.right + 1, .bottom = box.bottom + 1 };
+}
+
 pub const Layout = struct {
     box: Rect = .{},
     attach: Rect = .{},
@@ -155,6 +159,23 @@ test "one box contains disjoint text and bottom anchored icons at narrow and wid
                     try testing.expectEqual(slots.box.bottom - 1, slots.text.bottom);
                 }
             }
+        }
+    }
+}
+
+test "composer border centreline has equal inset on all four sides at 100 125 150 percent" {
+    const testing = @import("std").testing;
+    for ([_]i32{ 96, 120, 144 }) |dpi| {
+        for ([_]i32{ 44, 81, 240 }) |height| {
+            const box = Rect{ .left = scale(404, dpi), .top = scale(600, dpi), .right = scale(900, dpi), .bottom = scale(600 + height, dpi) };
+            const border = composerBorderRect(box);
+            const centreline = Rect{ .left = border.left, .top = border.top, .right = border.right - 1, .bottom = border.bottom - 1 };
+            const insets = [_]i32{ centreline.left - box.left, centreline.top - box.top, box.right - centreline.right, box.bottom - centreline.bottom };
+            for (insets) |inset| try testing.expectEqual(@as(i32, 0), inset);
+            const text = arrange(.{ .left = box.left - scale(14, dpi), .right = box.right + scale(14, dpi), .bottom = box.bottom + scale(11, dpi) }, box.bottom - box.top, dpi, false).text;
+            try testing.expectEqual(box.top + 1, text.top);
+            try testing.expectEqual(box.bottom - 1, text.bottom);
+            try testing.expectEqual(text.top - centreline.top, centreline.bottom - text.bottom);
         }
     }
 }
