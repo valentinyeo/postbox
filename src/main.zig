@@ -18616,7 +18616,7 @@ pub fn main(init: std.process.Init) !void {
         0,
         lit("MessagesZig"),
         lit("Wazig Messages v" ++ app_version),
-        win.WS_OVERLAPPEDWINDOW | win.WS_CLIPCHILDREN,
+        win.WS_OVERLAPPEDWINDOW | win.WS_CLIPCHILDREN | win.WS_MAXIMIZE,
         if (window_rect) |rect| rect.left else win.CW_USEDEFAULT,
         if (window_rect) |rect| rect.top else win.CW_USEDEFAULT,
         if (window_rect) |rect| rect.right - rect.left else 1160,
@@ -18629,6 +18629,8 @@ pub fn main(init: std.process.Init) !void {
     var dark: win.BOOL = win.TRUE;
     _ = win.DwmSetWindowAttribute(hwnd, 20, &dark, @sizeOf(win.BOOL));
     _ = win.ShowWindow(hwnd, win.SW_SHOWMAXIMIZED);
+    if (win.IsZoomed(hwnd) == 0) _ = win.ShowWindow(hwnd, win.SW_MAXIMIZE);
+    appendLaunchLog(app, if (win.IsZoomed(hwnd) != 0) "startup: window zoomed=true" else "startup: window zoomed=false");
     _ = win.UpdateWindow(hwnd);
     focusCompose(app);
     logStartupMilestone(app, .window, "window shown");
