@@ -18,6 +18,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [hub](hub.md) | Unified hub transport (IGSH-531) | Source network identity, list/history, SSE replay, send retry, read/archive, media and DPAPI |
 | [slack-sort](slack-sort.md) | Slack last message order | Newest first, unknown last, incoming and sent promotion with keyboard order |
 | [slack-archive](slack-archive.md) | Local Slack archive | Ctrl+E, three incoming messages, inbox absence, Archive presence, restart and unarchive without hub archive writes |
+| [link-previews](link-previews.md) | Slack labels, linked images and page previews | Real hub messages on four providers, inline image and OG card pixels, image viewer and cache reuse |
 | [slack-threads](slack-threads.md) | Slack threads | Replies line, side panel, threaded send, per-account toggle and restart |
 | [telegram](telegram.md) | Telegram hub account | Prelinked hub chats, Saved Messages, text/file/reply, reactions, reads, live SSE and terminal rate limits |
 | [signal](signal.md) | Signal hub account | Prelinked hub history, text/file, reactions, reads, live events, terminal 429/403 failures |

@@ -1344,6 +1344,55 @@ class PasteImageHandler(TelegramHandler):
             self.respond(400, {'error': 'paste-image requires an image upload'}, body=body)
 
 
+LINK_CHATS = [('slack:fixture-links:channel', 'slack'), ('whatsapp:fixture-links', 'whatsapp'),
+              ('telegram:user:7004', 'telegram'), ('signal:fixture-links', 'signal')]
+
+
+class LinkPreviewsHandler(VoiceHandler):
+    def do_GET(self):
+        self.wire_path = self.path
+        url = urlsplit(self.path)
+        origin = f'http://127.0.0.1:{self.server.server_port}'
+        if url.path in ('/pic.png', '/card.png'):
+            team = 'fixture-amber' if url.path == '/pic.png' else 'fixture-cobalt'
+            self.respond(200, workspace_png(team), 'image/png')
+            return
+        if url.path in ('/page', '/plain', '/query'):
+            meta = ('<meta property="og:title" content="Synthetic preview">'
+                    '<meta property="og:description" content="Synthetic description">'
+                    f'<meta property="og:image" content="{origin}/missing.png">'
+                    f'<meta property="og:image:secure_url" content="{origin}/card.png">') if url.path == '/page' else ''
+            self.respond(200, f'<html><head>{meta}</head><body>Synthetic page</body></html>'.encode(), 'text/html')
+            return
+        if not self.authorized():
+            return
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            self.respond(200, [] if query.get('archived') == ['true'] else [
+                dict(jid=chat, name='Verification Links ' + provider, provider=provider, kind='direct',
+                     last_message_ts=self.state.stamp, unread_count=0, archived=False)
+                for chat, provider in LINK_CHATS])
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            provider = next((provider for jid, provider in LINK_CHATS if jid == chat), '')
+            paths = [('IMAGE', '/pic.png', origin.removeprefix('http://') + '/pic.png'),
+                     ('PAGE', '/page', 'Synthetic page label'),
+                     ('QUERY', '/query?a=1&b=2', ''), ('PLAIN', '/plain', 'Clean page label')]
+            rows = []
+            for index, (message, path, label) in enumerate(paths):
+                link = origin + path
+                text = ('<' + link.replace('&', '&amp;') + ('|' + label if label else '') + '>') if provider == 'slack' else link
+                rows.append(dict(MsgID='LINK-' + message, ChatJID=chat, Timestamp=self.stamp(index),
+                                 Text=text, DisplayText=text, FromMe=False, SenderName='Fixture Sender'))
+            self.respond(200, list(reversed(rows)))
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Fake hub runs only on GitHub Actions')
@@ -1351,6 +1400,7 @@ def main():
     parser.add_argument('--port-file', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
     modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--link-previews', action='store_true')
     modes.add_argument('--paste-image', action='store_true')
     modes.add_argument('--hub-archive', action='store_true')
     modes.add_argument('--palette-archived', action='store_true')
@@ -1368,7 +1418,7 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else PaletteArchivedHandler if args.palette_archived else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else VoiceHandler if args.voice else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    handler = LinkPreviewsHandler if args.link_previews else PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else PaletteArchivedHandler if args.palette_archived else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else VoiceHandler if args.voice else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
