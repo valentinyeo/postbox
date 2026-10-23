@@ -809,6 +809,7 @@ const App = struct {
     unarchive_retry_source: archive_rules.Source = .resurface,
     archive_state: ?*archive_rules.State = null,
     archive_state_path: []u8 = &.{},
+    archive_legacy_done: bool = false,
     bulk: archive_rules.Selection(max_chats) = .{},
     archived_scan_dirty: bool = true,
     archived_scan_ticks: u32 = 0,
@@ -2389,6 +2390,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         .array => |items| items,
         else => return false,
     };
+    if (fresh) migrateLegacyArchiveState(a, data.items);
     if (fresh) observeBackgroundMediaChats(a, data.items);
     if (!a.pins_loaded) {
         if (loadPins(a)) {
@@ -11910,6 +11912,41 @@ fn drawReactionRow(a: *App, item: *win.DRAWITEMSTRUCT) void {
             _ = text_draw.drawText(item.hDC, wide.ptr(), -1, &box, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
     }
+}
+
+fn migrateLegacyArchiveState(a: *App, chats: []const std.json.Value) void {
+    if (!unifiedHub(a) or a.archive_legacy_done) return;
+    const state = a.archive_state orelse return;
+    if (a.archive_state_path.len == 0) return;
+    const marker = providerStatePath(a, "archive-legacy-done.txt") orelse return;
+    defer a.allocator.free(marker);
+    if (fileExistsUtf8(marker)) {
+        a.archive_legacy_done = true;
+        return;
+    }
+    const path = messagesDirPath(a, "archive-state.txt") orelse return;
+    defer a.allocator.free(path);
+    if (fileExistsUtf8(path)) {
+        const data = readFileWin(a.allocator, path, archive_rules.max_entries * 260) orelse return;
+        defer a.allocator.free(data);
+        const legacy = a.allocator.create(archive_rules.State) catch return;
+        defer a.allocator.destroy(legacy);
+        legacy.* = .{};
+        legacy.parse(data);
+        for (chats) |row| {
+            if (row != .object) continue;
+            const key = chat_key.Key{
+                .provider = hub.sourceProvider(row.object) orelse continue,
+                .account = hub.sourceAccount(row.object, a.cache_tag.slice()),
+                .id = getString(row.object, "jid"),
+            };
+            _ = archive_rules.migrateLegacyKeep(state, legacy, key, getString(row.object, "last_message_ts"));
+        }
+        const buffer = a.allocator.alloc(u8, archive_rules.max_entries * 260) catch return;
+        defer a.allocator.free(buffer);
+        if (!writeCacheFileAtomic(a, a.archive_state_path, state.format(buffer))) return;
+    }
+    a.archive_legacy_done = writeCacheFileAtomic(a, marker, "done\n");
 }
 
 fn loadArchiveState(a: *App) void {

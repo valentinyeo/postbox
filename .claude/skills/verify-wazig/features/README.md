@@ -100,3 +100,5 @@ These are source changes in the bounded history window, not claims of live verif
 - WAZI-161: DirectWrite IBM Plex Medium body text -> `text-comparison` (requires active DirectWrite, exact bundled Medium/SemiBold font hashes and body/heading metric parity with Chrome)
 
 - IGSH-645: right-click reaction chooses the clicked emoji -> `reactions` (real SendInput selection of laughing face on WhatsApp and Slack, exact hub payload and visible chip)
+
+- IGSH-668: legacy WhatsApp keep flags survive unified hub adoption -> `hub-archive` (seeds only the legacy flag, requires hub archive requests and durable keep state on initial launch and same-profile restart with newer archived=false delivery)

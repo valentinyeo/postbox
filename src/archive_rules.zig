@@ -5,6 +5,17 @@ pub const scan_limit = std.fmt.comptimePrint("{d}", .{max_entries});
 pub const max_jid = 191;
 pub const max_ts = 47;
 
+pub fn migrateLegacyKeep(state: *State, legacy: *const State, key: anytype, ts: []const u8) bool {
+    if (key.provider != .whatsapp or state.find(key.id) != null) return false;
+    const colon = std.mem.indexOfScalar(u8, key.id, ':') orelse return false;
+    if (colon == 0) return false;
+    for (legacy.entries[0..legacy.count]) |*entry| {
+        if (!entry.keep or std.mem.indexOfScalar(u8, entry.jidSlice(), ':') != null) continue;
+        if (std.mem.eql(u8, entry.jidSlice(), key.id[colon + 1 ..])) return state.archive(key.id, ts, true);
+    }
+    return false;
+}
+
 pub fn pendingHidesChat(show_archived: bool, should_unarchive: bool) bool {
     return show_archived == should_unarchive;
 }
@@ -250,6 +261,56 @@ pub fn Selection(comptime capacity: usize) type {
 pub fn paneNeedsSwitch(open_jid: []const u8, selected_jid: ?[]const u8) bool {
     const now = selected_jid orelse return true;
     return !std.mem.eql(u8, open_jid, now);
+}
+
+test "legacy keep migration matches only bare WhatsApp ids and uses the hub message baseline" {
+    const Key = struct { provider: enum { whatsapp, slack, signal, telegram }, account: []const u8, id: []const u8 };
+    var legacy = State{};
+    legacy.parse("120363000000000001@g.us\t1\t2026-10-10T10:00:00Z\nplain@g.us\t0\told\npersonal:prefixed@g.us\t1\told\n");
+    var state = State{};
+    const key = Key{ .provider = .whatsapp, .account = "hub-cache", .id = "personal:120363000000000001@g.us" };
+    try std.testing.expect(migrateLegacyKeep(&state, &legacy, key, "2026-10-10T11:00:00Z"));
+    try std.testing.expect(state.isKept(key.id));
+    try std.testing.expectEqualStrings("2026-10-10T11:00:00Z", state.baseline(key.id).?);
+    for ([_]Key{
+        .{ .provider = .whatsapp, .account = "hub-cache", .id = "personal:plain@g.us" },
+        .{ .provider = .whatsapp, .account = "hub-cache", .id = "personal:prefixed@g.us" },
+        .{ .provider = .whatsapp, .account = "hub-cache", .id = "personal:unknown@g.us" },
+        .{ .provider = .whatsapp, .account = "hub-cache", .id = "120363000000000001@g.us" },
+        .{ .provider = .whatsapp, .account = "hub-cache", .id = ":120363000000000001@g.us" },
+        .{ .provider = .slack, .account = "hub-cache", .id = "other:120363000000000001@g.us" },
+        .{ .provider = .signal, .account = "hub-cache", .id = "other:120363000000000001@g.us" },
+        .{ .provider = .telegram, .account = "hub-cache", .id = "other:120363000000000001@g.us" },
+    }) |other| try std.testing.expect(!migrateLegacyKeep(&state, &legacy, other, "new"));
+    try std.testing.expectEqual(@as(usize, 1), state.count);
+    try std.testing.expectEqual(@as(usize, 3), legacy.count);
+    try std.testing.expectEqualStrings("2026-10-10T10:00:00Z", legacy.baseline("120363000000000001@g.us").?);
+}
+
+test "legacy migration preserves existing hub choices and scopes matches to each account handle" {
+    const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
+    var legacy = State{};
+    try std.testing.expect(legacy.archive("120363000000000001@g.us", "old", true));
+    var state = State{};
+    const first = Key{ .provider = .whatsapp, .account = "hub-cache", .id = "personal:120363000000000001@g.us" };
+    const second = Key{ .provider = .whatsapp, .account = "hub-cache", .id = "business:120363000000000001@g.us" };
+    try std.testing.expect(state.archive(first.id, "hub-choice", false));
+    try std.testing.expect(!migrateLegacyKeep(&state, &legacy, first, "new"));
+    try std.testing.expect(!state.isKept(first.id));
+    try std.testing.expectEqualStrings("hub-choice", state.baseline(first.id).?);
+    try std.testing.expect(migrateLegacyKeep(&state, &legacy, second, "new"));
+    try std.testing.expect(state.isKept(second.id));
+    try std.testing.expect(!migrateLegacyKeep(&state, &legacy, second, "newer"));
+    try std.testing.expectEqualStrings("new", state.baseline(second.id).?);
+    var buffer: [512]u8 = undefined;
+    var loaded = State{};
+    loaded.parse(state.format(&buffer));
+    try std.testing.expect(!migrateLegacyKeep(&loaded, &legacy, first, "newer"));
+    try std.testing.expect(!loaded.isKept(first.id));
+    try std.testing.expect(loaded.holdKept(second.id, false, "newer"));
+    loaded.setKeep(second.id, false);
+    try std.testing.expect(!migrateLegacyKeep(&loaded, &legacy, second, "newest"));
+    try std.testing.expect(!loaded.holdKept(second.id, false, "newest"));
 }
 
 test "a newer incoming message resurfaces an archived chat" {
