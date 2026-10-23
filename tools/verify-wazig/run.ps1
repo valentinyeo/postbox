@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'whatsapp-hub', 'hub', 'archive', 'text-comparison')][string]$Feature = 'search',
+    [ValidateSet('search', 'navigation', 'drafts', 'palette', 'appearance', 'menus', 'whatsapp-hub', 'hub', 'slack-sort', 'archive', 'text-comparison')][string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence'
 )
@@ -7,6 +7,7 @@ param(
 Assert-That ($env:GITHUB_ACTIONS -eq 'true') 'Verification runs only on GitHub Actions'
 New-Item $Evidence -ItemType Directory -Force | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
+@{ feature = $Feature; status = 'failed' } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')
 Start-Transcript (Join-Path $Evidence 'run.log') | Out-Null
 Assert-That (-not (Test-Path 'HKCU:\Software\Messages')) 'Hosted runner already has production app preferences'
 $id = [Guid]::NewGuid().ToString()
@@ -16,7 +17,7 @@ $profile = Join-Path $root 'profile'
 $messages = Join-Path $local 'Messages'
 New-Item $messages, $profile -ItemType Directory -Force | Out-Null
 $tag = '0000000000000526'
-if ($Feature -notin @('whatsapp-hub', 'hub')) {
+if ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort')) {
     Set-Content (Join-Path $messages 'account-tag.txt') $tag -NoNewline
     @{ data = @(
         @{ jid = 'verify-alpha'; name = 'Verification Alpha'; kind = 'direct'; last_message_ts = '' },
@@ -74,8 +75,8 @@ if ($Feature -eq 'whatsapp-hub') {
     $start.Environment['WAZIG_VERIFY_HUB_URL'] = $bridge.url
     $start.Environment['WAZIG_VERIFY_HUB_KEY'] = 'fixture-key-not-a-secret'
 }
-if ($Feature -eq 'hub') {
-    $bridge = Start-FakeBridge $Evidence $root -Unified
+if ($Feature -in @('hub', 'slack-sort')) {
+    $bridge = Start-FakeBridge $Evidence $root -Unified -SlackSort:($Feature -eq 'slack-sort')
     $start.Environment['WAZIG_HUB_URL'] = $bridge.url
     $start.Environment['WAZIG_HUB_TOKEN'] = (Get-Content (Join-Path $PSScriptRoot 'fake-wa-bridge.py') | Where-Object { $_.StartsWith('KEY = ') }).Split("'")[1]
 }
@@ -101,8 +102,8 @@ $session = Read-Session $Evidence
 try {
     $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window'
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
-    if ($Feature -in @('whatsapp-hub', 'hub')) {
-        $null = Wait-Until { (Read-Control $session status).chat_count -eq 2 } 'hub chat list'
+    if ($Feature -in @('whatsapp-hub', 'hub', 'slack-sort')) {
+        $null = Wait-Until { (Read-Control $session status).chat_count -eq $(if ($Feature -eq 'slack-sort') { 4 } else { 2 }) } 'hub chat list'
     }
     if ($Feature -eq 'whatsapp-hub') {
         $null = Wait-Until { (Read-Control $session status).pending_sends -eq 0 } 'adopted outbox acknowledged'
@@ -138,6 +139,57 @@ try {
         }
         hub {
             Invoke-WhatsAppHubJourney $session $messages
+        }
+        slack-sort {
+            Send-Keys $session '%2'
+            $null = Wait-Until { (Read-Control $session status).view -eq 'slack' } 'Slack sidebar'
+            $orders = [ordered]@{
+                before = @('fixture-beta', 'fixture-gamma', 'fixture-alpha', 'fixture-unknown')
+                after = @('fixture-alpha', 'fixture-beta', 'fixture-gamma', 'fixture-unknown')
+                sent = @('fixture-gamma', 'fixture-alpha', 'fixture-beta', 'fixture-unknown')
+            }
+            foreach ($stage in $orders.Keys) {
+                if ($stage -eq 'after') {
+                    Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/live" -Headers @{ Authorization = 'Bearer fixture-key-not-a-secret' } -Body '{}' -ContentType 'application/json' | Out-Null
+                    Add-Content (Join-Path $Evidence 'actions.log') 'provider: new Slack last message to fixture-alpha'
+                } elseif ($stage -eq 'sent') {
+                    Send-Keys $session '^{TAB}'
+                    $null = Wait-Until { (Read-Control $session status).selected.id -eq 'fixture-gamma' } 'select Slack send target'
+                    Invoke-PaletteCommand $session 'Compose message'
+                    Send-Keys $session 'Synthetic Slack outgoing'
+                    Send-Keys $session '{ENTER}'
+                    $null = Wait-Until { (Read-Control $session status).pending_sends -eq 0 } 'Slack send acknowledged'
+                }
+                $expected = $orders[$stage]
+                $null = Wait-Until {
+                    $rows = (Read-Control $session chats).chats
+                    ($rows.id -join ',') -eq ($expected -join ',')
+                } "Slack $stage last message order"
+                $rows = (Read-Control $session chats).chats
+                Assert-That ($rows.Count -eq 4 -and @($rows | Where-Object provider -ne 'slack').Count -eq 0) 'Slack list identity changed'
+                Assert-That ($rows[3].last_message_time -eq '') 'Unknown Slack time did not stay last'
+                Save-Screen $session $stage
+                $walk = @()
+                $first = (Read-Control $session status).selected.id
+                foreach ($step in 1..4) {
+                    $selected = (Read-Control $session status).selected
+                    $walk += $selected.id
+                    if ($step -lt 4) { Send-Keys $session '^{TAB}' }
+                }
+                $offset = [Array]::IndexOf($expected, $first)
+                Assert-That ($offset -ge 0) 'Selected chat is outside the Slack list'
+                $visible = @(0..3 | ForEach-Object { $expected[($offset + $_) % 4] })
+                Assert-That (($walk -join ',') -eq ($visible -join ',')) 'Keyboard navigation disagrees with visible Slack list order'
+                $walk | ConvertTo-Json | Set-Content (Join-Path $Evidence "$stage.navigation.json")
+                if ($stage -eq 'before') {
+                    Send-Keys $session '^+{TAB}'
+                    Send-Keys $session '^+{TAB}'
+                    $null = Wait-Until { (Read-Control $session status).selected.id -eq 'fixture-gamma' } 'retain selection during incoming reorder'
+                } elseif ($stage -eq 'after') {
+                    Assert-That ($first -eq 'fixture-gamma') 'Incoming message changed selected Slack chat'
+                }
+                Hub-Pass $session "$stage-last-message-order"
+            }
         }
         search {
             Send-Keys $session '^f'
@@ -313,7 +365,7 @@ try {
     Assert-That (-not (Test-Path (Join-Path $messages 'telegram'))) 'Telegram store was created'
     if ($Feature -eq 'archive') {
         Assert-That ((Get-Content $provider -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture provider chat storage changed'
-    } elseif ($Feature -notin @('whatsapp-hub', 'hub')) {
+    } elseif ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort')) {
         Assert-That ((Get-Content (Join-Path $messages "chats-$tag.json") -Raw | ConvertFrom-Json).data.Count -eq 2) 'Fixture chat storage changed'
     }
     $final | Add-Member -NotePropertyName production_preferences_absent -NotePropertyValue (-not (Test-Path 'HKCU:\Software\Messages'))
@@ -331,3 +383,4 @@ try {
     $app.StandardError.ReadToEnd() | Set-Content (Join-Path $Evidence 'app.stderr.log')
     Stop-Transcript | Out-Null
 }
+@{ feature = $Feature; status = 'passed' } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')

@@ -193,11 +193,6 @@ pub fn conversationSeconds(object: std.json.ObjectMap) i64 {
         .object => |latest_object| if (tsSeconds(objectStringField(latest_object, "ts"))) |seconds| return seconds,
         else => {},
     };
-    if (numberField(object, "updated")) |updated| {
-        const seconds = if (updated > 100_000_000_000) @divTrunc(updated, 1000) else updated;
-        if (seconds > 0) return seconds;
-    }
-    if (numberField(object, "created")) |created| if (created > 0) return created;
     return 0;
 }
 
@@ -1217,12 +1212,12 @@ test "bridgeFilePath percent-encodes the original url" {
     try std.testing.expectEqualStrings("/file?url=https%3A%2F%2Ffiles.slack.com%2Fx%3Fy%3D1", path);
 }
 
-test "conversationSeconds prefers latest.ts, then updated ms, then created" {
+test "conversationSeconds uses only last message time, never channel metadata" {
     const cases = [_]struct { json: []const u8, want: i64 }{
         .{ .json = "{\"latest\":{\"ts\":\"1740000500.000100\"},\"updated\":1740000000123,\"created\":1600000000}", .want = 1740000500 },
-        .{ .json = "{\"updated\":1740000000123,\"created\":1600000000}", .want = 1740000000 },
-        .{ .json = "{\"latest\":null,\"created\":1600000000}", .want = 1600000000 },
-        .{ .json = "{\"updated\":1740000000}", .want = 1740000000 },
+        .{ .json = "{\"updated\":1740000000123,\"created\":1600000000}", .want = 0 },
+        .{ .json = "{\"latest\":null,\"created\":1600000000}", .want = 0 },
+        .{ .json = "{\"updated\":1740000000}", .want = 0 },
         .{ .json = "{\"id\":\"D1\"}", .want = 0 },
     };
     for (cases) |case| {
@@ -1265,7 +1260,7 @@ test "workspace page yields every channel with an id, DMs by user, and the next 
     try std.testing.expectEqual(@as(usize, 3), count);
     try std.testing.expectEqualStrings("C0001", ids[0]);
     try std.testing.expectEqualStrings("D0003", ids[2]);
-    try std.testing.expectEqual(@as(i64, 1750000000), workspaceChannel(root.get("channels").?.array.items[0].object).?.seconds);
+    try std.testing.expectEqual(@as(i64, 0), workspaceChannel(root.get("channels").?.array.items[0].object).?.seconds);
     try std.testing.expectEqualStrings("dGVhbTpDMDYxRkE1UEI=", nextCursor(root));
 }
 

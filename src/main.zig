@@ -2374,6 +2374,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         chat.name.set(a.allocator, display_name);
         chat.kind.set(a.allocator, if (std.mem.endsWith(u8, jid, "@g.us")) "Group" else getString(object, "kind"));
         chat.timestamp.set(getString(object, "last_message_ts"));
+        fillSlackTimestamp(a, &chat);
         chat.provider_unread = getBool(object, "unread") or getInt(object, "unread_count") > 0;
         const timestamp = media_age.unixSeconds(chat.timestamp.slice()) orelse 0;
         a.read_state.observeChat(a.allocator, a.cache_tag.slice(), jid, timestamp, chat.provider_unread, fresh and !a.startup_probe_pending);
@@ -2390,24 +2391,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         if (messenger_view.includes(view, .slack)) appendSlackChats(a, query_utf8);
         if (messenger_view.includes(view, .telegram)) appendTelegramChats(a, query_utf8);
     }
-    var i: usize = 1;
-    while (i < a.chat_count) : (i += 1) {
-        var j = i;
-        while (j > 0) : (j -= 1) {
-            const by_time = std.mem.order(u8, a.chats[j - 1].timestamp.slice(), a.chats[j].timestamp.slice());
-            const jid_order = chat_key.order(chat_key.of(&a.chats[j - 1]), chat_key.of(&a.chats[j]));
-            const should_move = chat_order.shouldMoveUp(
-                isChatPinned(a, chat_key.of(&a.chats[j - 1])),
-                isChatPinned(a, chat_key.of(&a.chats[j])),
-                by_time,
-                jid_order,
-            );
-            if (!should_move) break;
-            const temporary = a.chats[j - 1];
-            a.chats[j - 1] = a.chats[j];
-            a.chats[j] = temporary;
-        }
-    }
+    controlSortChats(a, a.chats[0..a.chat_count]);
     if (!unifiedHub(a) and messenger_view.includes(view, .whatsapp) and !a.show_archived and !a.unread_only) {
         if (query_utf8) |query| {
             const exclude = a.allocator.alloc([]const u8, a.chat_count) catch return false;
@@ -3904,6 +3888,26 @@ fn noteSlackActivity(a: *App, account: []const u8, channel: []const u8, seconds:
     }
 }
 
+fn fillSlackTimestamp(a: *App, chat: *Chat) void {
+    if (chat.provider != .slack or chat.timestamp.len > 0) return;
+    const key = chat_key.of(chat);
+    const disk = if (unifiedHub(a) and msgCacheGet(a, key) == null) loadMsgCacheDisk(a, key.id) else null;
+    defer if (disk) |data| a.allocator.free(data);
+    const raw = msgCacheGet(a, key) orelse disk orelse return;
+    var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
+    defer parsed.deinit();
+    if (parsed.value != .object) return;
+    const data = parsed.value.object.get("data") orelse return;
+    if (data != .object) return;
+    const messages = data.object.get("messages") orelse return;
+    if (messages != .array) return;
+    for (messages.array.items) |item| {
+        if (item != .object) continue;
+        const timestamp = getString(item.object, "Timestamp");
+        if (std.mem.order(u8, timestamp, chat.timestamp.slice()) == .gt) chat.timestamp.set(timestamp);
+    }
+}
+
 fn telegramReady(a: *App) bool {
     return a.telegram != null and a.tg_auth == .ready;
 }
@@ -4369,6 +4373,7 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
     if (a.chats_hwnd) |chats_list| _ = win.InvalidateRect(chats_list, null, win.TRUE);
     markChatRead(a);
+    refreshVisibleChats(a);
 }
 
 fn applySlackReplies(a: *App, raw: []const u8) void {
@@ -5099,7 +5104,12 @@ fn handleSlackSendResult(a: *App, result: *WacliResult) void {
         if (!result.ok and std.mem.eql(u8, result.extra.slice(), "WorkspaceDisconnected")) return;
         const entry = &slot.entry;
         if (result.ok and result.kind != .slack_attach) {
+            if (slack.parseSentTs(a.allocator, result.data)) |ts| {
+                defer a.allocator.free(ts);
+                noteSlackActivity(a, result.account.slice(), result.jid.slice(), slack.tsSeconds(ts) orelse 0);
+            }
             if (result.kind == .slack_send) resolveSlackSend(a, result);
+            refreshVisibleChats(a);
             retireSlackOutbox(a, result.msg_id.slice());
             var status_buffer: [64]u8 = undefined;
             const label: []const u8 = if (result.kind == .slack_send) "Sent" else "Image sent";
@@ -12371,6 +12381,7 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, sho
         chat.name.set(a.allocator, display_name);
         chat.kind.set(a.allocator, if (std.mem.endsWith(u8, jid, "@g.us")) "Group" else getString(object, "kind"));
         chat.timestamp.set(getString(object, "last_message_ts"));
+        fillSlackTimestamp(a, &chat);
         chat.unread = getBool(object, "unread");
         chat.unread_count = getInt(object, "unread_count");
         chat.archived = getBool(object, "archived");
@@ -12384,8 +12395,9 @@ fn controlSortChats(a: *const App, chats: []Chat) void {
         var j = i;
         while (j > 0) : (j -= 1) {
             const by_time = std.mem.order(u8, chats[j - 1].timestamp.slice(), chats[j].timestamp.slice());
+            const by_name = std.mem.order(u16, chats[j - 1].name.slice(), chats[j].name.slice());
             const jid_order = chat_key.order(chat_key.of(&chats[j - 1]), chat_key.of(&chats[j]));
-            if (!chat_order.shouldMoveUp(isChatPinned(a, chat_key.of(&chats[j - 1])), isChatPinned(a, chat_key.of(&chats[j])), by_time, jid_order)) break;
+            if (!chat_order.shouldMoveUp(isChatPinned(a, chat_key.of(&chats[j - 1])), isChatPinned(a, chat_key.of(&chats[j])), by_time, by_name, jid_order)) break;
             std.mem.swap(Chat, &chats[j - 1], &chats[j]);
         }
     }
@@ -15616,6 +15628,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                             a.msg_read_retry_ticks = 0;
                         } else if (applyMessageData(a, result.data, true)) {
                             msgCacheStore(a, chat_key.of(result), result.data);
+                            if (unifiedHub(a) and a.chats[a.selected_chat].provider == .slack) refreshVisibleChats(a);
                             a.msg_read_attempts = 0;
                             a.msg_read_retry_ticks = 0;
                         } else {

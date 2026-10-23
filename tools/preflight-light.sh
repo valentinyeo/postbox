@@ -6,6 +6,7 @@ run bash tools/lint-repeats.sh .
 run node tools/strip-comments.mjs --check
 run node tools/check-fonts.mjs
 run python3 tools/check_cache_keys.py
+run python3 tools/verify-wazig/check-map.py
 if [ -n "${PRIVATE_MARKERS:-}" ]; then
     run python3 tools/check_private_markers.py
 else
@@ -14,6 +15,6 @@ fi
 run node --test tools/check-fonts.test.mjs tools/strip-comments.test.js
 (
     cd tools
-    run python3 -m unittest test_check_cache_keys test_check_private_markers test_pin_icon test_tdlib_release
+    run python3 -m unittest test_check_cache_keys test_check_private_markers test_pin_icon test_tdlib_release test_slack_sort
 )
 echo 'preflight-light: all checks passed'

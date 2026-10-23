@@ -154,7 +154,7 @@ function Save-Screen($Session, [string]$Name) {
     $tree | Set-Content (Join-Path $Session.evidence "$Name.uia.txt")
     $state = Read-Control $Session status
     $state | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.state.json")
-    if ($Session.feature -eq 'archive') {
+    if ($Session.feature -in @('archive', 'slack-sort')) {
         $arguments = if ($state.show_archived) { @('--archived') } else { @() }
         Read-Control $Session chats -Arguments $arguments | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.chats.json")
     }
@@ -177,12 +177,13 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
     $script = if ($Unified) { 'fake-hub.py' } else { 'fake-wa-bridge.py' }
     $start.ArgumentList.Add((Join-Path $PSScriptRoot $script))
+    if ($SlackSort) { $start.ArgumentList.Add('--slack-sort') }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')
