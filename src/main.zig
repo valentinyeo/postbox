@@ -963,6 +963,7 @@ const App = struct {
     view_account: Utf8Text(32) = .{},
     views: std.ArrayList(messenger_view.Account) = .empty,
     view_order: []const u8 = "",
+    hub_workspace_names: ?[]u8 = null,
     palette_views_mode: bool = false,
     chat_tooltip: WideText(255) = .{},
     view_selected: [@typeInfo(messenger_view.View).@"enum".fields.len]chat_key.Stored = @splat(.{}),
@@ -1327,16 +1328,20 @@ fn setFont(hwnd: ?win.HWND, font: ?win.HFONT) void {
     }
 }
 
-fn addTooltip(tt: win.HWND, tool: ?win.HWND, text: [*:0]const u16) void {
+const tooltip_info_size = @offsetOf(win.TOOLINFOW, "lParam") + @sizeOf(win.LPARAM);
+
+fn addTooltip(a: *App, tt: win.HWND, tool: ?win.HWND, text: [*:0]const u16) void {
     const target = tool orelse return;
     var info = win.TOOLINFOW{
-        .cbSize = @sizeOf(win.TOOLINFOW),
+        .cbSize = tooltip_info_size,
         .uFlags = win.TTF_IDISHWND | win.TTF_SUBCLASS,
         .hwnd = win.GetParent(target),
         .uId = @intFromPtr(target),
         .lpszText = @constCast(text),
     };
-    _ = win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @as(win.LPARAM, @bitCast(@intFromPtr(&info))));
+    if (win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @as(win.LPARAM, @bitCast(@intFromPtr(&info)))) == 0) {
+        appendLaunchLog(a, "tooltip: TTM_ADDTOOLW failed for window");
+    }
 }
 
 fn updateChatTooltip(a: *App, coords: win.LPARAM) void {
@@ -1358,7 +1363,7 @@ fn updateChatTooltip(a: *App, coords: win.LPARAM) void {
     if (std.mem.eql(u16, wide.slice(), a.chat_tooltip.slice())) return;
     a.chat_tooltip = wide;
     var info = win.TOOLINFOW{
-        .cbSize = @sizeOf(win.TOOLINFOW),
+        .cbSize = tooltip_info_size,
         .uFlags = win.TTF_IDISHWND | win.TTF_SUBCLASS,
         .hwnd = win.GetParent(list),
         .uId = @intFromPtr(list),
@@ -1397,23 +1402,25 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
     a.tooltips = tt;
     updateTooltipTheme(a);
     _ = win.SendMessageW(tt, 0x400 + 24, 0, 260);
-    addTooltip(tt, a.search, lit("Search chats  Ctrl+F or /"));
-    addTooltip(tt, a.chats_hwnd, lit("Chats  ↑/↓ move · Ctrl+Tab next chat"));
-    addTooltip(tt, a.canvas, lit("Messages  Alt+J/K select · Ctrl+P play voice · Ctrl+T transcript · Ctrl+R react"));
-    addTooltip(tt, a.compose, lit("Message box  Enter sends · Shift+Enter new line"));
-    addTooltip(tt, a.dictate, lit("Dictate  Ctrl+D"));
-    addTooltip(tt, a.send, lit("Send message  Enter"));
-    addTooltip(tt, a.emoji_btn, lit("Emoji menu"));
-    addTooltip(tt, a.voice_btn, lit("Record a voice note  Enter sends · Esc cancels"));
-    addTooltip(tt, a.attach_btn, lit("Attach photo or file"));
+    addTooltip(a, tt, a.search, lit("Search chats  Ctrl+F or /"));
+    addTooltip(a, tt, a.chats_hwnd, lit("Chats  ↑/↓ move · Ctrl+Tab next chat"));
+    addTooltip(a, tt, a.canvas, lit("Messages  Alt+J/K select · Ctrl+P play voice · Ctrl+T transcript · Ctrl+R react"));
+    addTooltip(a, tt, a.compose, lit("Message box  Enter sends · Shift+Enter new line"));
+    addTooltip(a, tt, a.dictate, lit("Dictate  Ctrl+D"));
+    addTooltip(a, tt, a.send, lit("Send message  Enter"));
+    addTooltip(a, tt, a.emoji_btn, lit("Emoji menu"));
+    addTooltip(a, tt, a.voice_btn, lit("Record a voice note  Enter sends · Esc cancels"));
+    addTooltip(a, tt, a.attach_btn, lit("Attach photo or file"));
     var attach_info = win.TOOLINFOW{
-        .cbSize = @sizeOf(win.TOOLINFOW),
+        .cbSize = tooltip_info_size,
         .uFlags = win.TTF_SUBCLASS,
         .hwnd = hwnd,
         .uId = id_attach,
         .lpszText = @constCast(a.attach_tooltip.ptr()),
     };
-    _ = win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @bitCast(@intFromPtr(&attach_info)));
+    if (win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @bitCast(@intFromPtr(&attach_info))) == 0) {
+        appendLaunchLog(a, "tooltip: TTM_ADDTOOLW failed for attachment rectangle");
+    }
     updateAttachButton(a);
 }
 
@@ -1439,7 +1446,7 @@ fn updateAttachButton(a: *App) void {
     a.attach_tooltip.len = std.unicode.utf8ToUtf16Le(&a.attach_tooltip.buf, reason orelse "Attach photo or file") catch 0;
     a.attach_tooltip.buf[a.attach_tooltip.len] = 0;
     var info = win.TOOLINFOW{
-        .cbSize = @sizeOf(win.TOOLINFOW),
+        .cbSize = tooltip_info_size,
         .hwnd = owner,
         .uId = id_attach,
         .rect = if (reason != null) @bitCast(a.compose_geometry.attach) else std.mem.zeroes(win.RECT),
@@ -4021,10 +4028,45 @@ fn activeViewLabel(a: *App) []const u8 {
     return messenger_view.label(activeChatView(a));
 }
 
+fn hubWorkspaceNames(a: *App, rows: []const std.json.Value) ?std.json.Parsed(std.json.Value) {
+    const path = providerStatePath(a, "workspace-names.json") orelse return null;
+    defer a.allocator.free(path);
+    if (a.hub_workspace_names == null) a.hub_workspace_names = readFileWin(a.allocator, path, msg_cache_max_bytes);
+    var names = std.json.parseFromSlice(std.json.Value, a.allocator, a.hub_workspace_names orelse "{}", .{ .allocate = .alloc_always }) catch
+        std.json.parseFromSlice(std.json.Value, a.allocator, "{}", .{}) catch return null;
+    if (names.value != .object) {
+        names.deinit();
+        names = std.json.parseFromSlice(std.json.Value, a.allocator, "{}", .{}) catch return null;
+    }
+    const allocator = names.arena.allocator();
+    var changed = false;
+    for (rows) |row| {
+        if (row != .object) continue;
+        const name = hub.workspaceName(row.object);
+        if (name.len == 0) continue;
+        const account = hub.viewAccount(row.object, a.cache_tag.slice());
+        if (std.mem.eql(u8, getString(names.value.object, account), name)) continue;
+        const key = allocator.dupe(u8, account) catch continue;
+        const value = allocator.dupe(u8, name) catch continue;
+        names.value.object.put(allocator, key, .{ .string = value }) catch continue;
+        changed = true;
+    }
+    if (changed) {
+        if (std.json.Stringify.valueAlloc(a.allocator, names.value, .{})) |raw| {
+            if (a.hub_workspace_names) |old| a.allocator.free(old);
+            a.hub_workspace_names = raw;
+            _ = writeCacheFileAtomic(a, path, raw);
+        } else |_| {}
+    }
+    return names;
+}
+
 fn rebuildViews(a: *App, rows: []const std.json.Value) void {
     var known: std.ArrayList(messenger_view.Account) = .empty;
     defer known.deinit(a.allocator);
     if (unifiedHub(a)) {
+        var names = hubWorkspaceNames(a, rows);
+        defer if (names) |*parsed| parsed.deinit();
         if (a.show_archived) for (a.views.items) |view| {
             messenger_view.appendUnique(a.allocator, &known, view) catch return;
         };
@@ -4033,21 +4075,27 @@ fn rebuildViews(a: *App, rows: []const std.json.Value) void {
             const provider = hub.sourceProvider(row.object) orelse continue;
             const account = hub.viewAccount(row.object, a.cache_tag.slice());
             const key = chat_key.Key{ .provider = provider, .account = account, .id = "" };
-            var present = false;
-            for (known.items) |view| {
-                if (chat_key.Key.eql(view.key.key(), key)) present = true;
-            }
-            if (present) continue;
-            var view = messenger_view.Account.init(provider, account, "");
-            if (provider == .slack) {
-                if (slackInstallation(a, account)) |installation| {
-                    view = messenger_view.Account.init(provider, account, installation.team_name.slice());
-                } else if (slack_win.loadInstallation(a.allocator, account)) |saved| {
-                    defer saved.deinit();
-                    view = messenger_view.Account.init(provider, account, saved.value.team_name);
+            const cached_name = if (names) |parsed| getString(parsed.value.object, account) else "";
+            var present: ?usize = null;
+            for (known.items, 0..) |existing, index| {
+                if (chat_key.Key.eql(existing.key.key(), key)) {
+                    present = index;
+                    break;
                 }
             }
-            messenger_view.appendUnique(a.allocator, &known, view) catch return;
+            var saved: ?std.json.Parsed(slack_win.Installation) = null;
+            defer if (saved) |*parsed| parsed.deinit();
+            const direct_name = if (provider == .slack) name: {
+                if (slackInstallation(a, account)) |installation| break :name installation.team_name.slice();
+                saved = slack_win.loadInstallation(a.allocator, account);
+                break :name if (saved) |parsed| parsed.value.team_name else "";
+            } else "";
+            const view = hub.accountView(row.object, a.cache_tag.slice(), cached_name, direct_name, if (present) |index| known.items[index] else null) orelse continue;
+            if (present) |index| {
+                known.items[index] = view;
+            } else {
+                messenger_view.appendUnique(a.allocator, &known, view) catch return;
+            }
         }
     } else {
         if (a.cache_tag.len > 0) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.whatsapp, a.cache_tag.slice(), a.hub_account.slice())) catch return;
@@ -17946,6 +17994,7 @@ pub fn main(init: std.process.Init) !void {
     }
     defer {
         app.views.deinit(init.gpa);
+        if (app.hub_workspace_names) |names| init.gpa.free(names);
         if (app.view_order.len > 0) init.gpa.free(app.view_order);
     }
     app.startup_probe_pending = !verification_fixture or hubConfigured(app);

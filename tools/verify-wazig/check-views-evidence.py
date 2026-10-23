@@ -3,6 +3,37 @@ import json
 from pathlib import Path
 
 
+def check_workspace_names(folder, capture):
+    def read(name):
+        return json.loads((folder / name).read_text(encoding='utf-8-sig'))
+
+    names = ['Alpha Workspace', 'Beta Workspace']
+    checks = read('workspace-names.json')
+    assert set(checks) == {'view-label', 'sort-views', 'palette', 'inbox-tooltip'}
+    result = read('result.json')
+    assert result == dict(feature='views', status='passed', checks=checks)
+    proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
+    for check_id, check in checks.items():
+        assert check['status'] == 'passed' and check['names'] == names, check_id
+        prefix = 'Show Slack ' if check_id == 'palette' else 'Slack '
+        assert all(prefix + name in check['labels'] for name in names), check_id
+        assert not any(prefix + team in check['labels'] for team in ['T0ABC123', 'T0DEF456']), check_id
+        assert f'views {check_id} PASS' in proof
+        assert check['screenshots'], check_id
+        for screenshot in check['screenshots']:
+            assert Path(screenshot).name == screenshot and screenshot.endswith('.png')
+            capture(screenshot[:-4])
+    assert checks['view-label']['screenshots'] == ['view-3.png', 'view-4.png']
+    assert checks['sort-views']['screenshots'] == ['sort-before.png']
+    assert checks['palette']['screenshots'] == ['workspace-palette.png']
+    assert checks['inbox-tooltip']['screenshots'] == ['inbox-tooltip-T0ABC123.png', 'inbox-tooltip-T0DEF456.png']
+    for team in ['T0ABC123', 'T0DEF456']:
+        assert f'hover: {team}' in (folder / 'actions.log').read_text(encoding='utf-8-sig')
+        assert capture(f'inbox-tooltip-{team}')['current_view']['inbox']
+    cached = list((folder / 'final-data').glob('hub-*-workspace-names.json'))
+    assert len(cached) == 1 and read(str(cached[0].relative_to(folder))) == dict(T0ABC123=names[0], T0DEF456=names[1])
+
+
 def check_views(folder):
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))
@@ -18,12 +49,14 @@ def check_views(folder):
         assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig'), name
         return read(f'{name}.state.json')
 
+    check_workspace_names(folder, capture)
+
     session = read('session.json')
     assert session['feature'] == 'views' and session['sha256'] and session['commit']
     assert not (folder / 'failure.txt').exists()
     baseline = capture('before')
     expected = [('whatsapp', 'personal', 'WhatsApp personal'), ('whatsapp', 'business', 'WhatsApp business'),
-                ('slack', 'T0ABC123', 'Slack T0ABC123'), ('slack', 'T0DEF456', 'Slack T0DEF456')]
+                ('slack', 'T0ABC123', 'Slack Alpha Workspace'), ('slack', 'T0DEF456', 'Slack Beta Workspace')]
     assert [(view['provider'], view['account'], view['label']) for view in baseline['view_order']] == expected + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]
     assert baseline['current_view']['inbox'] and baseline['chat_count'] == 8
     catalog = read('views-catalog.json')['chats']
@@ -98,7 +131,7 @@ def check_views(folder):
         assert len(rows) == 2 and all(row['view_account'] == account for row in rows)
     capture('after')
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for keys in ['%1', '%2', '%3', '%4', '%i', '^1', '^2', '^{TAB}', '^+{TAB}', '^f', 'Shared', 'Sort views', '^{DOWN}', '{ENTER}', '{ESC}', 'Quit Messages', 'Verification account send']:
+    for keys in ['%1', '%2', '%3', '%4', '%i', '^k', 'Show', '^1', '^2', '^{TAB}', '^+{TAB}', '^f', 'Shared', 'Sort views', '^{DOWN}', '{ENTER}', '{ESC}', 'Quit Messages', 'Verification account send']:
         assert f'keys: {keys}' in actions, keys
     guards = (folder / 'launch-guards.log').read_text(encoding='utf-8-sig')
     assert 'REJECTED: not-actions' in guards and 'REJECTED: not-isolated' in guards

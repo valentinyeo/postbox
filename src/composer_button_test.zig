@@ -162,7 +162,7 @@ test "IGSH-534 composer icons have equal gaps and give freed width to the typing
 
 test "IGSH-534 Dictate keeps its accessible name and shortcut tooltip throughout dictation" {
     try std.testing.expect(std.mem.indexOf(u8, source, "a.dictate = win.CreateWindowExW(0, lit(\"BUTTON\"), lit(\"Dictate\")") != null);
-    try std.testing.expect(std.mem.indexOf(u8, source, "addTooltip(tt, a.dictate, lit(\"Dictate  Ctrl+D\"))") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "addTooltip(a, tt, a.dictate, lit(\"Dictate  Ctrl+D\"))") != null);
     const dictation_source = section("fn toggleDictation(", "fn selectChat(");
     try std.testing.expect(std.mem.indexOf(u8, dictation_source, "SetWindowTextW(a.dictate") == null);
     try std.testing.expect(std.mem.indexOf(u8, dictation_source, "updateDictateButton(a, state)") != null);

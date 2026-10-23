@@ -461,4 +461,8 @@ try {
     $app.StandardError.ReadToEnd() | Set-Content (Join-Path $Evidence 'app.stderr.log')
     Stop-Transcript | Out-Null
 }
-@{ feature = $Feature; status = 'passed' } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')
+$result = @{ feature = $Feature; status = 'passed' }
+if ($Feature -eq 'views') {
+    $result.checks = Get-Content (Join-Path $Evidence 'workspace-names.json') -Raw | ConvertFrom-Json -AsHashtable
+}
+$result | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'result.json')
