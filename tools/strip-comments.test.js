@@ -69,6 +69,40 @@ test('C/C++ headers: raw literals, escaped characters and token separators', asy
   await fixture('c', `/* remove */\nconst/* remove */char *s = "https://x/#"; // remove\nchar c = '\\'';\nauto raw = R"tag(// # /* literal */)tag";\n#define VALUE 1 /* remove */\n`, `const char *s = "https://x/#";\nchar c = '\\'';\nauto raw = R"tag(// # /* literal */)tag";\n#define VALUE 1\n`);
 });
 
+test('C#: normal, verbatim, raw and character literals preserve comment markers', async () => {
+  const kept = [
+    String.raw`var normal = "escaped \" // /* literal */";`,
+    String.raw`var verbatim = @"// literal\";`,
+    String.raw`var doubled = @"a ""// literal"" \";`,
+    String.raw`var raw = """// literal /* data */ "quoted" \""";`,
+    'var multiline = """"',
+    '// literal """ /* data */',
+    '"""";',
+    String.raw`char slash = '/'; char quote = '\''; char backslash = '\\';`,
+  ];
+  await fixture('csharp', '// remove\n' + kept.map(line => line.endsWith(';') ? line + ' // remove' : line).join('\n') + '\n/* remove */\n', kept.join('\n') + '\n');
+  await fixture('csharp', 'var/* remove */value = 1; // remove\\\nvar next = 2;\n', 'var value = 1;\nvar next = 2;\n');
+});
+
+test('C#: interpolated literals preserve text and lex nested expressions and format strings', async () => {
+  const kept = [
+    'var normal = $"// {{literal}} {Get("// data", new[] { 1, 2 })} /* literal */";',
+    String.raw`var verbatim = $@"// {Get(@"// data\")} ""quoted"" \";`,
+    String.raw`var alternate = @$"// {{literal}} {Get("/* data */")} \";`,
+    'var nested = $"{Get($"// {Get("// data")}")}";',
+    'var raw = $"""// {Get("/* data */")} "quoted"""";',
+    'var braces = $$"""// {literal} {{{Get("// data")}}} /* literal */""";',
+    'var deep = $$$""""// {{literal}} {{{Get($"{new { Value = @"// data" }.Value}")}}} """ data"""";',
+    'var format = $"{value: // literal /* data */}";',
+    'var conditional = $"{(ok ? @"// data" : "/* data */")}";',
+    String.raw`var character = $"{Get('}', '\\', '\'')}";`,
+    'var alias = $"{global::System.String.Empty}";',
+  ];
+  await fixture('csharp', kept.map(line => line + ' // remove').join('\n') + '\n', kept.join('\n') + '\n');
+  await fixture('csharp', 'var s = $"{Get(/* remove */ "// data")}";\n', 'var s = $"{Get( "// data")}";\n');
+  await fixture('csharp', 'var s = $$"""{{Get( // remove\n"// data")}}""";\n', 'var s = $$"""{{Get(\n"// data")}}""";\n');
+});
+
 test('CSS: only block comments, not string contents or URL fragments', async () => {
   await fixture('css', `/* remove */\na { content: "/* literal */ // #"; background: url(https://x/#id); } /* remove */\n`, `a { content: "/* literal */ // #"; background: url(https://x/#id); }\n`);
 });
@@ -177,7 +211,7 @@ test('protected directories/data and generated sources are excluded', async () =
   for (const file of ['vendor/x.js', 'third_party/x.kt', 'node_modules/x.js', 'skillsrepo/x.py', 'docs/x.html', 'docs-site/x.ts', 'openwiki/x.sh', 'CLAUDE.md', 'AGENTS.md', 'README', 'data.json', 'gradle/wrapper/gradle-wrapper.properties', 'tools/fixtures/x.html']) assert.equal(languageFor(file), null, file);
   assert.equal(languageFor('src/generated.js', '// automatically generated'), null);
   assert.equal(languageFor('assets/page.html'), 'html');
-  for (const [extension, language] of [['yml', 'yaml'], ['yaml', 'yaml'], ['toml', 'toml'], ['sql', 'sql'], ['bat', 'batch'], ['cmd', 'batch']]) assert.equal(languageFor(`config.${extension}`), language);
+  for (const [extension, language] of [['cs', 'csharp'], ['yml', 'yaml'], ['yaml', 'yaml'], ['toml', 'toml'], ['sql', 'sql'], ['bat', 'batch'], ['cmd', 'batch']]) assert.equal(languageFor(`config.${extension}`), language);
 });
 
 test('CLI --verify rejects token changes and protected modifications', () => {
@@ -228,6 +262,7 @@ test('CLI --check fails on a new code comment and names where it is', () => {
 });
 
 for (const [extension, clean, planted] of [
+  ['cs', String.raw`var path = @"// literal\";` + '\n', '// planted comment\n/* planted block */\n'],
   ['yml', 'value: "https://example.test/#fragment"\n', '# planted comment\n'],
   ['yaml', 'run: |\n  echo "# literal"\n', '  # planted comment\n'],
   ['toml', 'value = "https://example.test/#fragment"\n', '# planted comment\n'],

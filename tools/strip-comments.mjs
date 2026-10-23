@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const extensions = { '.zig': 'zig', '.js': 'javascript', '.ts': 'typescript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascript', '.tsx': 'typescript', '.py': 'python', '.kt': 'kotlin', '.kts': 'kotlin', '.java': 'java', '.ps1': 'powershell', '.psm1': 'powershell', '.sh': 'shell', '.bash': 'shell', '.c': 'c', '.h': 'c', '.cpp': 'c', '.hpp': 'c', '.rc': 'c', '.css': 'css', '.html': 'html', '.yml': 'yaml', '.yaml': 'yaml', '.toml': 'toml', '.sql': 'sql', '.bat': 'batch', '.cmd': 'batch', '.wxs': 'html', '.xml': 'html', '.svg': 'html', '.zon': 'zig', '.jsonc': 'javascript' };
+const extensions = { '.zig': 'zig', '.js': 'javascript', '.ts': 'typescript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascript', '.tsx': 'typescript', '.py': 'python', '.kt': 'kotlin', '.kts': 'kotlin', '.java': 'java', '.ps1': 'powershell', '.psm1': 'powershell', '.sh': 'shell', '.bash': 'shell', '.c': 'c', '.h': 'c', '.cpp': 'c', '.cs': 'csharp', '.hpp': 'c', '.rc': 'c', '.css': 'css', '.html': 'html', '.yml': 'yaml', '.yaml': 'yaml', '.toml': 'toml', '.sql': 'sql', '.bat': 'batch', '.cmd': 'batch', '.wxs': 'html', '.xml': 'html', '.svg': 'html', '.zon': 'zig', '.jsonc': 'javascript' };
 const excluded = new Set(['third_party', 'third-party', 'vendor', 'vendored', 'node_modules', 'skillsrepo', 'openwiki', 'docs', 'docs-site', '.git', '.zig-cache', 'zig-out', 'build', 'generated']);
 const operators = ['>>>=', '===', '!==', '**=', '&&=', '||=', '??=', '>>>', '<<=', '>>=', '...', '=>', '==', '!=', '<=', '>=', '++', '--', '&&', '||', '??', '?.', '**', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<', '>>', '::', '->', '..', '##'];
 const white = c => c !== undefined && /\s/.test(c);
@@ -152,6 +152,74 @@ function lex(source, language) {
     }
     throw new Error(`Unterminated interpolation at ${start}`);
   }
+  function csharpString(start) {
+    const prefix = /^(?:\$+@?|@\$?)?"/.exec(source.slice(start));
+    if (!prefix) return null;
+    const quoteStart = start + prefix[0].length - 1;
+    const verbatim = prefix[0].includes('@');
+    const quotes = /^"+/.exec(source.slice(quoteStart))[0].length;
+    const raw = !verbatim && quotes >= 3;
+    const delimiter = '"'.repeat(raw ? quotes : 1);
+    const dollars = (prefix[0].match(/\$/g) || []).length;
+    let end = quoteStart + delimiter.length, segment = start;
+    while (end < source.length) {
+      if (!raw && !verbatim && source[end] === '\\') { end += 2; continue; }
+      if (source.startsWith(delimiter, end)) {
+        if (verbatim && source.startsWith('""', end)) { end += 2; continue; }
+        end += raw ? /^"+/.exec(source.slice(end))[0].length : 1;
+        token(segment, end, 'string');
+        return end;
+      }
+      if (dollars && source[end] === '{') {
+        const count = /^\{+/.exec(source.slice(end))[0].length;
+        if (!raw && count >= 2) { end += 2; continue; }
+        const braces = raw ? dollars : 1;
+        if (count >= braces) {
+          end += raw ? count : 1;
+          token(segment, end, 'string');
+          end = csharpInterpolation(end, braces);
+          segment = end;
+          continue;
+        }
+        end += count; continue;
+      }
+      end++;
+    }
+    throw new Error(`Unterminated C# string at ${start}`);
+  }
+  function csharpInterpolation(start, braces) {
+    let end = start, depth = 0, format = false;
+    while (end < source.length) {
+      const c = source[end];
+      if (!depth && source.startsWith('}'.repeat(braces), end)) {
+        token(end, end + braces);
+        return end + braces;
+      }
+      if (format) {
+        const begin = end;
+        while (end < source.length && !source.startsWith('}'.repeat(braces), end)) end++;
+        token(begin, end, 'string'); continue;
+      }
+      if (white(c)) { end++; continue; }
+      if (source.startsWith('//', end) || source.startsWith('/*', end)) {
+        const stop = source.startsWith('//', end) ? lineEnd(end) : blockEnd(end, '/*', '*/');
+        comments.push({ start: end, end: stop, reason: null });
+        end = stop; continue;
+      }
+      const literal = csharpString(end);
+      if (literal !== null) { end = literal; continue; }
+      if (c === "'") {
+        const stop = quoted(source, end, "'");
+        token(end, stop, 'string'); end = stop; continue;
+      }
+      if ('([{'.includes(c)) depth++;
+      if (')]}'.includes(c)) depth--;
+      if (!depth && source.startsWith('::', end)) { token(end, end + 2); end += 2; continue; }
+      if (!depth && c === ':') format = true;
+      token(end, end + 1); end++;
+    }
+    throw new Error(`Unterminated C# interpolation at ${start}`);
+  }
   function regexEnd(start) {
     let end = start + 1, inClass = false;
     while (end < source.length) {
@@ -213,6 +281,10 @@ function lex(source, language) {
       comment(i, end); continue;
     }
     if (language !== 'powershell' && language !== 'toml' && source.startsWith('/*', i)) { comment(i, blockEnd(i, '/*', '*/', language === 'kotlin')); continue; }
+    if (language === 'csharp') {
+      const end = csharpString(i);
+      if (end !== null) { i = end; continue; }
+    }
     if (language === 'c' && source.startsWith('R"', i)) {
       const opening = source.indexOf('(', i + 2);
       if (opening < 0) throw new Error('Invalid C++ raw string');

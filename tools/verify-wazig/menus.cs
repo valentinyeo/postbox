@@ -76,8 +76,8 @@ public static class VerifyMenus {
                 int b = image[offset], g = image[offset + 1], r = image[offset + 2];
                 double value = 0.2126 * Linear(r) + 0.7152 * Linear(g) + 0.0722 * Linear(b);
                 values[used++] = value;
-                // Colour emoji are foreground, not evidence of a light menu background.
-                if (Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b)) <= 12) {
+                bool isNeutralBackgroundSample = Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b)) <= 12;
+                if (isNeutralBackgroundSample) {
                     neutral[neutralCount++] = value; tile[tileCount++] = value;
                 }
             }
