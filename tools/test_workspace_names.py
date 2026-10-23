@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -120,6 +122,25 @@ class WorkspaceNamesEvidenceTests(unittest.TestCase):
 class WorkspaceNamesSourceTests(unittest.TestCase):
     def test_shared_label_formatter_and_duplicate_precedence_are_wired(self):
         subprocess.run([sys.executable, str(ROOT / 'tools/verify-wazig/check-views-source.py'), 'workspace-names'], cwd=ROOT, check=True)
+
+    def test_all_source_check_modes_work_without_git_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ['src', 'tools/verify-wazig']:
+                shutil.copytree(ROOT / name, root / name)
+            for name in ['build.zig', 'CHANGELOG.md', '.github/workflows/verify.yml',
+                         '.claude/skills/verify-wazig/features/views.md']:
+                target = root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / name, target)
+            self.assertFalse((root / '.git').exists())
+            for mode in ['model', 'integration', 'journey', 'fixture', 'workspace-names']:
+                with self.subTest(mode=mode):
+                    result = subprocess.run(
+                        [sys.executable, str(root / 'tools/verify-wazig/check-views-source.py'), mode],
+                        cwd=root, env=dict(os.environ, PATH=''), capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn(f'views {mode} static PASS', result.stdout)
 
     def test_inbox_hover_sends_absolute_moves_with_dispatch_time(self):
         source = (ROOT / 'tools/verify-wazig/menus.cs').read_text()

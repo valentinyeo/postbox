@@ -1,15 +1,22 @@
 import ast
 import importlib.util
+import hashlib
 import io
 import json
 import threading
 from pathlib import Path
 import re
-import subprocess
 import sys
 from types import SimpleNamespace
 
 root = Path(__file__).resolve().parents[2]
+
+OLD_SOURCE_ACCOUNT = '''pub fn sourceAccount(row: std.json.ObjectMap, fallback: []const u8) []const u8 {
+    const account = string(row, "account");
+    return if (account.len > 0) account else fallback;
+}
+
+'''
 
 
 def read(path):
@@ -56,7 +63,7 @@ def check_model():
     model(source)
     hub = read('src/hub.zig')
     view_identity(hub)
-    old = subprocess.check_output(['git', 'show', 'f436ed2^:src/hub.zig'], cwd=root, text=True)
+    old = OLD_SOURCE_ACCOUNT
     try:
         view_identity(old)
     except AssertionError:
@@ -128,17 +135,33 @@ def check_integration():
     assert source.count('chat.account.set(hub.sourceAccount(object, a.cache_tag.slice()));') == 2
     assert source.count('chat.view_account.set(hub.viewAccount(object, a.cache_tag.slice()));') == 2
     assert source.count('hub.viewAccount(') == 4
-    old = subprocess.check_output(['git', 'show', 'origin/main:src/main.zig'], cwd=root, text=True)
-    for name in ['unifiedHubRequest', 'restoreOutbox', 'loadOutbox', 'bindOutboxAccount', 'startHubSend',
-                 'markChatRead', 'startNextMarkRead', 'loadPendingReads', 'persistPendingReads',
-                 'msgCacheGet', 'loadMsgCacheDisk', 'archiveChat', 'startNextArchive']:
-        pattern = rf'^fn {name}\([^\n]*\n.*?^}}'
-        current = re.search(pattern, source, re.M | re.S)
-        previous = re.search(pattern, old, re.M | re.S)
-        assert current and previous, f'missing identity audit function: {name}'
-        assert current.group() == previous.group(), f'routing identity path changed: {name}'
-    for path in ['src/outbox.zig', 'src/chat_cache.zig', 'src/read_state.zig', 'src/pending_reads.zig']:
-        assert read(path) == subprocess.check_output(['git', 'show', f'origin/main:{path}'], cwd=root, text=True), path
+    routing_function_sha256 = {
+        'unifiedHubRequest': '4ac7160663a8389b9e26ad06773e85e7b4690f1d4cb4edd6dffb3f329dec5a5c',
+        'restoreOutbox': '97c3d2512d210e72021031071928cc33ccbf4e3038f427ba57a51fce5bcf3f98',
+        'loadOutbox': '040428fa42997f7006f87154b7713db94102b863d4536fa853496fc8c4103f0b',
+        'bindOutboxAccount': 'c18bfcb6097cec448f946232c1cc8a5a1d92055cfc533e855132e64ea2412b6b',
+        'startHubSend': '6e4246a0416884bd87273a0e16e9a3ea09f5624ee705592b24dcd2c260074f61',
+        'markChatRead': 'e02ffb29b9808d1db4b7d83d48ca4de422ff0ba07b925c24fb57008b34d89c8b',
+        'startNextMarkRead': '159224436c04c9369adec4daee7cd3379ceee2554330e8db74b7816423651de1',
+        'loadPendingReads': 'f24e69e81447328bbb7a6349acade9df6a256cd8374df178570f39bcaef30799',
+        'persistPendingReads': '695d922f67253237c5b26207d3f37f19d7274a5a99a33e7e91c612e4f230351e',
+        'msgCacheGet': '35de7a11c5298f2b4f7954cda6b73e8b4bb9d54a82e4053b32cc8f4745ac593e',
+        'loadMsgCacheDisk': 'd86c62bd4d9c3a242afcd9aeaa3b757af3e09c54fe288a2e73e19dbf31654a19',
+        'archiveChat': '24d0ee2a4534ff68c1284d1de2c91344dd34840653d51fca24cba3fc3eed91ce',
+        'startNextArchive': 'c346ccb3d69e3fb5a16f6216f91f8e2390aac40164187b77be632a329df1f67d',
+    }
+    for name, expected in routing_function_sha256.items():
+        current = re.search(rf'^fn {name}\([^\n]*\n.*?^}}', source, re.M | re.S)
+        assert current, f'missing identity audit function: {name}'
+        assert hashlib.sha256(current.group().encode()).hexdigest() == expected, f'routing identity path changed: {name}'
+    routing_file_sha256 = {
+        'src/outbox.zig': '4e39faf317e342d24ff3ff38b997df2e1b7b3ffdf89b968af8d7c2df94908f6f',
+        'src/chat_cache.zig': 'fe97020e73578d02e52daf25961b65a2151c38b67bbfaa0942e459df05732013',
+        'src/read_state.zig': 'c40146cd2dc3ab78a3ad91e5b868a2edf1ae0da2e277eceb5328663af1f13f07',
+        'src/pending_reads.zig': 'bac1f5848428e4e9fdc00033eb94386fcce945aa759aef0d8576b2a00df98f4f',
+    }
+    for path, expected in routing_file_sha256.items():
+        assert hashlib.sha256(read(path).encode()).hexdigest() == expected, f'routing identity file changed: {path}'
     control = read('src/control.zig')
     require(control, ['view_number: ?usize', 'std.mem.eql(u8, items[0], "inbox")', 'std.fmt.parseInt(usize, items[0], 10)',
                       'test "view accepts an account position and combined inbox while retaining provider aliases"'])
@@ -240,8 +263,7 @@ def check_fixture():
     handler.do_GET()
     assert len(responses[-1][1]) == 2
     assert all(row['ChatJID'] == wa[0]['jid'] for row in responses[-1][1])
-    old = subprocess.check_output(['git', 'show', 'origin/main:src/hub.zig'], cwd=root, text=True)
-    require(section(old, 'pub fn sourceAccount(', 'pub fn providerForView('), ['account.len > 0', 'else fallback'])
+    require(OLD_SOURCE_ACCOUNT, ['account.len > 0', 'else fallback'])
     old_views = {(row['provider'], row.get('account', 'hub-cache')) for row in rows}
     assert len(old_views) == 2 and len(accounts) == 4
 
@@ -265,13 +287,28 @@ def tooltip_registration(source):
 def check_tooltip_registration():
     source = read('src/main.zig')
     tooltip_registration(source)
-    old = subprocess.check_output(['git', 'show', '70dbb32:src/main.zig'], cwd=root, text=True)
-    try:
-        tooltip_registration(old)
-    except AssertionError:
-        pass
-    else:
-        raise AssertionError('V3 tooltip size negative control unexpectedly accepted')
+    old_add = """fn addTooltip(tt: win.HWND, tool: ?win.HWND, text: [*:0]const u16) void {
+    const target = tool orelse return;
+    var info = win.TOOLINFOW{
+        .cbSize = tooltip_info_size,
+        .uFlags = win.TTF_IDISHWND | win.TTF_SUBCLASS,
+        .hwnd = win.GetParent(target),
+        .uId = @intFromPtr(target),
+        .lpszText = @constCast(text),
+    };
+    _ = win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @as(win.LPARAM, @bitCast(@intFromPtr(&info))));
+}"""
+    old_attach = '_ = win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @bitCast(@intFromPtr(&attach_info)));'
+    add = re.search(r'^fn addTooltip\([^\n]*\n.*?^}', source, re.M | re.S).group()
+    attach = 'if (win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @bitCast(@intFromPtr(&attach_info))) == 0) {\n        appendLaunchLog(a, "tooltip: TTM_ADDTOOLW failed for attachment rectangle");\n    }'
+    for current, old in [(add, old_add), (attach, old_attach)]:
+        assert current in source
+        try:
+            tooltip_registration(source.replace(current, old, 1))
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError('unchecked tooltip registration negative control unexpectedly accepted')
     for match in re.finditer(r'\.cbSize = tooltip_info_size,', source):
         try:
             tooltip_registration(source[:match.start()] + '.cbSize = @sizeOf(win.TOOLINFOW),' + source[match.end():])
@@ -286,10 +323,20 @@ def check_workspace_names():
     check_tooltip_registration()
     hub = read('src/hub.zig')
     main = read('src/main.zig')
-    require(hub, ['pub fn workspaceName(', 'string(row, "team_name")', 'pub fn accountView(',
-                  'if (supplied.len > 0) supplied else cached_name', 'messenger_view.Account.init(provider, account, name)'])
-    old = subprocess.check_output(['git', 'show', 'origin/main:src/hub.zig'], cwd=root, text=True)
-    assert 'string(row, "team_name")' not in old, 'old-code name-parser negative control missing'
+    name_fragments = ['pub fn workspaceName(', 'string(row, "team_name")', 'pub fn accountView(',
+                      'if (supplied.len > 0) supplied else cached_name', 'messenger_view.Account.init(provider, account, name)']
+    require(hub, name_fragments)
+    old = OLD_SOURCE_ACCOUNT + """pub fn accountView(row: std.json.ObjectMap, fallback: []const u8) ?messenger_view.Account {
+    const provider = sourceProvider(row) orelse return null;
+    return messenger_view.Account.init(provider, sourceAccount(row, fallback), string(row, "account_name"));
+}
+"""
+    try:
+        require(old, name_fragments)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError('old-code name-parser negative control unexpectedly accepted')
     require(main, ['hubWorkspaceNames(a, rows)', 'providerStatePath(a, "workspace-names.json")',
                    'readFileWin(a.allocator, path, msg_cache_max_bytes)', 'writeCacheFileAtomic(a, path, raw)',
                    'if (name.len == 0) continue;', 'hub.accountView(row.object, a.cache_tag.slice(), cached_name, direct_name, if (present) |index| known.items[index] else null)',
