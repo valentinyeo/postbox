@@ -30,6 +30,7 @@ def check_link_previews(folder):
         assert not plain['preview']['image'] and plain['card'] == [0, 0, 0, 0]
         if provider == 'slack':
             assert plain['text'] == 'Clean page label' and page['text'] == 'Synthetic page label'
+            assert query['quote'] == 'Quoted & label'
         image_bytes = (folder / f'{provider}.png').read_bytes()
         assert image_bytes.startswith(b'\x89PNG\r\n\x1a\n') and len(image_bytes) > 10000
         assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{provider}.uia.txt').read_text(encoding='utf-8-sig')

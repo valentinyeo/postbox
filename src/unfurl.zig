@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Provider = enum { none, youtube, instagram, facebook };
+pub const Provider = enum { none, youtube, instagram, facebook, page, image };
 
 pub const FetchKind = enum { page, image };
 
@@ -69,9 +69,9 @@ fn trimTrailingPunctuation(url: []const u8) []const u8 {
 }
 
 fn splitHostPath(rest: []const u8) ?struct { host: []const u8, path: []const u8 } {
-    if (std.mem.indexOfScalar(u8, rest, '@') != null) return null;
     const host_end = std.mem.indexOfAny(u8, rest, "/?#") orelse rest.len;
     var host = rest[0..host_end];
+    if (std.mem.indexOfScalar(u8, host, '@') != null) return null;
     const path_and_more = if (host_end < rest.len) rest[host_end..] else "";
     if (std.mem.indexOfScalar(u8, host, ':')) |at| host = host[0..at];
     host = std.mem.trimEnd(u8, host, ".");
@@ -209,6 +209,7 @@ pub fn classify(url: []const u8) Info {
     var info = Info{};
     var cleaned = std.mem.trim(u8, url, " \t\r\n");
     cleaned = trimTrailingPunctuation(cleaned);
+    const original = cleaned;
     if (std.ascii.startsWithIgnoreCase(cleaned, "https://")) {
         cleaned = cleaned[8..];
     } else if (std.ascii.startsWithIgnoreCase(cleaned, "http://")) {
@@ -223,7 +224,12 @@ pub fn classify(url: []const u8) Info {
         .youtube => _ = classifyYoutube(parts.host, parts.path, &info),
         .instagram => _ = classifyInstagram(pathOf(parts.path), &info),
         .facebook => _ = classifyFacebook(parts.host, parts.path, &info),
-        .none => {},
+        else => {},
+    }
+    if (info.provider == .none) {
+        var id_buffer: [max_id_len]u8 = undefined;
+        const id = std.fmt.bufPrint(&id_buffer, "{x}", .{std.hash.Wyhash.hash(0, original)}) catch return info;
+        _ = store(&info, if (isImageUrl(original)) .image else .page, id, original);
     }
     return info;
 }
@@ -265,24 +271,58 @@ fn suffixMatches(host: []const u8, suffix: []const u8) bool {
     return host.len > suffix.len and std.ascii.endsWithIgnoreCase(host, suffix);
 }
 
+pub fn siteHost(url: []const u8) []const u8 {
+    const offset: usize = if (std.ascii.startsWithIgnoreCase(url, "https://")) 8 else if (std.ascii.startsWithIgnoreCase(url, "http://")) 7 else return "";
+    const parts = splitHostPath(url[offset..]) orelse return "";
+    return parts.host;
+}
+
+pub fn isImageUrl(url: []const u8) bool {
+    const offset: usize = if (std.ascii.startsWithIgnoreCase(url, "https://")) 8 else if (std.ascii.startsWithIgnoreCase(url, "http://")) 7 else return false;
+    const parts = splitHostPath(url[offset..]) orelse return false;
+    const path = pathOf(parts.path);
+    for ([_][]const u8{ ".png", ".jpg", ".jpeg", ".gif", ".webp" }) |extension| {
+        if (std.ascii.endsWithIgnoreCase(path, extension)) return true;
+    }
+    return false;
+}
+
+pub fn resolveImageUrl(page_url: []const u8, image: []const u8, buffer: []u8) ?[]const u8 {
+    if (image.len == 0) return null;
+    if (std.ascii.startsWithIgnoreCase(image, "https://") or std.ascii.startsWithIgnoreCase(image, "http://")) return image;
+    const scheme_end = std.mem.indexOf(u8, page_url, "://") orelse return null;
+    if (std.mem.startsWith(u8, image, "//")) return std.fmt.bufPrint(buffer, "{s}:{s}", .{ page_url[0..scheme_end], image }) catch null;
+    if (std.mem.indexOfScalar(u8, image, ':') != null) return null;
+    const authority_start = scheme_end + 3;
+    const authority_end = std.mem.indexOfScalarPos(u8, page_url, authority_start, '/') orelse page_url.len;
+    const origin_end = std.mem.indexOfAny(u8, page_url[authority_start..authority_end], "?#") orelse authority_end - authority_start;
+    const origin = page_url[0 .. authority_start + origin_end];
+    if (image[0] == '/') return std.fmt.bufPrint(buffer, "{s}{s}", .{ origin, image }) catch null;
+    const clean_end = std.mem.indexOfAny(u8, page_url, "?#") orelse page_url.len;
+    const slash = std.mem.lastIndexOfScalar(u8, page_url[0..clean_end], '/') orelse return null;
+    const base = if (slash >= authority_start) page_url[0 .. slash + 1] else "";
+    return if (base.len > 0) std.fmt.bufPrint(buffer, "{s}{s}", .{ base, image }) catch null else std.fmt.bufPrint(buffer, "{s}/{s}", .{ origin, image }) catch null;
+}
+
 pub fn isPageFetchAllowed(url: []const u8) bool {
-    const cleaned = trimTrailingPunctuation(url);
-    if (!std.ascii.startsWithIgnoreCase(cleaned, "https://")) return false;
-    const rest = cleaned[8..];
-    const host_end = std.mem.indexOfAny(u8, rest, "/?#") orelse rest.len;
-    const host = rest[0..host_end];
-    return providerForHost(host) != .none;
+    if (std.mem.indexOfAny(u8, url, " \t\r\n\\") != null) return false;
+    const host = siteHost(url);
+    if (host.len == 0 or std.mem.indexOfScalar(u8, host, '.') == null) return false;
+    if (std.ascii.eqlIgnoreCase(host, "localhost") or std.ascii.endsWithIgnoreCase(host, ".localhost") or std.ascii.endsWithIgnoreCase(host, ".local")) return false;
+    if (std.ascii.isDigit(host[0])) {
+        var octets = std.mem.splitScalar(u8, host, '.');
+        var bytes: [4]u8 = undefined;
+        for (&bytes) |*byte| byte.* = std.fmt.parseInt(u8, octets.next() orelse return false, 10) catch return false;
+        if (octets.next() != null) return false;
+        if (bytes[0] == 0 or bytes[0] == 10 or bytes[0] == 127 or bytes[0] >= 224 or
+            (bytes[0] == 169 and bytes[1] == 254) or (bytes[0] == 172 and bytes[1] >= 16 and bytes[1] <= 31) or
+            (bytes[0] == 192 and bytes[1] == 168) or (bytes[0] == 100 and bytes[1] >= 64 and bytes[1] <= 127)) return false;
+    }
+    return true;
 }
 
 pub fn isImageFetchAllowed(url: []const u8) bool {
-    const cleaned = trimTrailingPunctuation(url);
-    if (!std.ascii.startsWithIgnoreCase(cleaned, "https://")) return false;
-    const rest = cleaned[8..];
-    const host_end = std.mem.indexOfAny(u8, rest, "/?#") orelse rest.len;
-    const host = rest[0..host_end];
-    const exact = [_][]const u8{ "img.youtube.com", "i.ytimg.com" };
-    for (exact) |allowed| if (std.ascii.eqlIgnoreCase(host, allowed)) return true;
-    return suffixMatches(host, ".cdninstagram.com") or suffixMatches(host, ".fbcdn.net");
+    return isPageFetchAllowed(url);
 }
 
 pub fn isStreamUrlAllowed(url: []const u8) bool {
@@ -394,23 +434,23 @@ test "classify instagram and facebook" {
     try std.testing.expectEqual(Provider.facebook, fbwatch.provider);
 }
 
-test "classify rejects non-video pages and hostile hosts" {
-    try std.testing.expectEqual(Provider.none, classify("https://www.instagram.com/").provider);
-    try std.testing.expectEqual(Provider.none, classify("https://www.facebook.com/photo/?fbid=123").provider);
-    try std.testing.expectEqual(Provider.none, classify("https://youtube.com.evil.com/watch?v=dQw4w9WgXcQ").provider);
-    try std.testing.expectEqual(Provider.none, classify("https://notyoutube.com/watch?v=dQw4w9WgXcQ").provider);
+test "non-video pages are generic without impersonating video providers" {
+    try std.testing.expectEqual(Provider.page, classify("https://www.instagram.com/").provider);
+    try std.testing.expectEqual(Provider.page, classify("https://www.facebook.com/photo/?fbid=123").provider);
+    try std.testing.expectEqual(Provider.page, classify("https://youtube.com.evil.com/watch?v=dQw4w9WgXcQ").provider);
+    try std.testing.expectEqual(Provider.page, classify("https://notyoutube.com/watch?v=dQw4w9WgXcQ").provider);
     try std.testing.expectEqual(Provider.none, classify("https://user:pass@youtube.com/watch?v=dQw4w9WgXcQ").provider); // trufflehog:ignore
-    try std.testing.expectEqual(Provider.none, classify("https://www.youtube.com/channel/UC1234567890").provider);
-    try std.testing.expectEqual(Provider.none, classify("https://youtu.be/ab").provider);
-    try std.testing.expectEqual(Provider.none, classify("https://www.youtube.com/watch?v=../../etc").provider);
-    try std.testing.expectEqual(Provider.none, classify("https://example.com/watch?v=dQw4w9WgXcQ").provider);
+    try std.testing.expectEqual(Provider.page, classify("https://www.youtube.com/channel/UC1234567890").provider);
+    try std.testing.expectEqual(Provider.page, classify("https://youtu.be/ab").provider);
+    try std.testing.expectEqual(Provider.page, classify("https://www.youtube.com/watch?v=../../etc").provider);
+    try std.testing.expectEqual(Provider.page, classify("https://example.com/watch?v=dQw4w9WgXcQ").provider);
     try std.testing.expectEqual(Provider.none, classify("").provider);
 }
 
 test "bare host URLs never panic" {
-    try std.testing.expectEqual(Provider.none, classify("https://youtu.be").provider);
-    try std.testing.expectEqual(Provider.none, classify("https://fb.watch").provider);
-    try std.testing.expectEqual(Provider.none, classify("https://www.instagram.com").provider);
+    try std.testing.expectEqual(Provider.page, classify("https://youtu.be").provider);
+    try std.testing.expectEqual(Provider.page, classify("https://fb.watch").provider);
+    try std.testing.expectEqual(Provider.page, classify("https://www.instagram.com").provider);
 }
 
 test "scrapeOgMeta survives truncated html" {
@@ -444,12 +484,12 @@ test "endpoints and fetch allowlists" {
     try std.testing.expect(oembedEndpoint(&reel, &buffer) == null);
 
     try std.testing.expect(isPageFetchAllowed("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
-    try std.testing.expect(!isPageFetchAllowed("https://img.youtube.com/vi/x/hqdefault.jpg"));
-    try std.testing.expect(!isPageFetchAllowed("http://www.youtube.com/watch?v=dQw4w9WgXcQ"));
+    try std.testing.expect(isPageFetchAllowed("https://img.youtube.com/vi/x/hqdefault.jpg"));
+    try std.testing.expect(isPageFetchAllowed("http://www.youtube.com/watch?v=dQw4w9WgXcQ"));
     try std.testing.expect(isImageFetchAllowed("https://img.youtube.com/vi/x/hqdefault.jpg"));
     try std.testing.expect(isImageFetchAllowed("https://scontent-arn2-1.cdninstagram.com/v/x.jpg"));
     try std.testing.expect(isImageFetchAllowed("https://scontent.xx.fbcdn.net/v/x.jpg"));
-    try std.testing.expect(!isImageFetchAllowed("https://evil.com/.cdninstagram.com/x.jpg"));
+    try std.testing.expect(isImageFetchAllowed("https://evil.com/.cdninstagram.com/x.jpg"));
     try std.testing.expect(isStreamUrlAllowed("https://rr3---sn-x.googlevideo.com/videoplayback?x=1"));
     try std.testing.expect(isStreamUrlAllowed("https://scontent-arn2-1.cdninstagram.com/v.mp4"));
     try std.testing.expect(!isStreamUrlAllowed("http://rr3---sn-x.googlevideo.com/videoplayback"));
@@ -471,4 +511,22 @@ test "og scraping and stream extraction" {
     try std.testing.expectEqualStrings("https://www.googlevideo.com/videoplayback?expire=1&id=dQw4w9WgXcQ", stream);
     try std.testing.expect(extractYoutubeStream("no stream here", &stream_buffer) == null);
     try std.testing.expect(extractYoutubeStream("\"https://www.googlevideo.com.evil.com/videoplayback?id=1\"", &stream_buffer) == null);
+}
+
+test "generic pages and direct images retain full URL identity" {
+    const page = classify("https://example.com/all-ads?a=1&b=2");
+    try std.testing.expectEqual(Provider.page, page.provider);
+    try std.testing.expectEqualStrings("https://example.com/all-ads?a=1&b=2", page.canonicalSlice());
+    try std.testing.expect(!std.mem.eql(u8, page.idSlice(), classify("https://example.com/all-ads?a=2").idSlice()));
+    for ([_][]const u8{ "https://screencast2.com/ivu2o.png", "https://example.com/x.JPG?download=1", "http://example.com/x.jpeg#view", "https://example.com/x.gif", "https://example.com/x.webp" }) |url| {
+        try std.testing.expect(isImageUrl(url));
+        try std.testing.expectEqual(Provider.image, classify(url).provider);
+        try std.testing.expect(isImageFetchAllowed(url));
+    }
+    try std.testing.expect(!isImageUrl("https://example.com/page?file=pic.png"));
+    try std.testing.expect(!isImageUrl("https://example.com/pic.png/more"));
+    try std.testing.expect(!isImageUrl("file:///pic.png"));
+    for ([_][]const u8{ "http://127.0.0.1/pic.png", "https://10.1.2.3/page", "https://localhost/page", "https://app.local/page", "https://user@example.com/page", "file:///page" }) |url| {
+        try std.testing.expect(!isPageFetchAllowed(url));
+    }
 }

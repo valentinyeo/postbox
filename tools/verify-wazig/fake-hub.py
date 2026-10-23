@@ -1384,6 +1384,9 @@ class LinkPreviewsHandler(VoiceHandler):
                 text = ('<' + link.replace('&', '&amp;') + ('|' + label if label else '') + '>') if provider == 'slack' else link
                 rows.append(dict(MsgID='LINK-' + message, ChatJID=chat, Timestamp=self.stamp(index),
                                  Text=text, DisplayText=text, FromMe=False, SenderName='Fixture Sender'))
+                if provider == 'slack' and message == 'QUERY':
+                    rows[-1].update(DisplayText=f'> <{origin}/plain|Quoted &amp; label>\n{text}',
+                                    quoted_msg_id='LINK-PLAIN', quoted_sender_jid='fixture-sender')
             self.respond(200, list(reversed(rows)))
         elif url.path == '/v1/wazig/events':
             self.events()
