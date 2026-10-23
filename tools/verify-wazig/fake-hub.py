@@ -151,6 +151,9 @@ class Handler(bridge.Handler):
 
 ARCHIVE_GROUP = 'personal:120363000000000001@g.us'
 ARCHIVE_OTHER = 'personal:15550000003@s.whatsapp.net'
+PLAIN_REACTED = 'personal:15550000005@s.whatsapp.net'
+PLAIN_NEWER = 'personal:15550000006@s.whatsapp.net'
+PLAIN_STAMPS = {PLAIN_REACTED: '2026-10-10T11:30:00Z', PLAIN_NEWER: '2026-10-10T11:00:00Z'}
 
 
 MIXED = '15550000005@s.whatsapp.net'
@@ -235,6 +238,10 @@ class MixedLidHandler(Handler):
         super().do_POST()
 
 
+def plain_stamp(seconds):
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
 class HubArchiveHandler(Handler):
     def respond(self, status, data, content_type='application/json', **extra):
         bridge.Handler.respond(self, status, data, content_type, **extra)
@@ -253,6 +260,11 @@ class HubArchiveHandler(Handler):
                          last_message_ts=stamp, archived=archived, unread=True, unread_count=1),
                     dict(jid=ARCHIVE_OTHER, name='Verification Inbox', provider='whatsapp', kind='direct',
                          last_message_ts='2026-10-10T12:00:00Z', archived=False, unread=False, unread_count=0)]
+            with self.state.lock:
+                for jid, plain in self.state.plain_dms.items():
+                    rows.append(dict(jid=jid, name='Fixture Contact' if jid == PLAIN_REACTED else 'Fixture Contact Two',
+                                     provider='whatsapp', kind='direct', last_message_ts=plain['after'] or PLAIN_STAMPS[jid],
+                                     archived=plain['archived'], unread=False, unread_count=0))
             self.respond(200, [row for row in rows if row['archived'] == (query.get('archived') == ['true'])],
                          group_archived=archived, group_last_message_ts=stamp, group_unread_count=1)
         elif url.path == '/v1/wazig/messages':
@@ -260,6 +272,20 @@ class HubArchiveHandler(Handler):
             rows = [] if chat != ARCHIVE_GROUP else [dict(MsgID='ARCHIVE-INCOMING', ChatJID=chat,
                     Timestamp=self.state.archive_stamp, Text='Synthetic incoming group message', FromMe=False,
                     SenderName='Fixture Sender', SenderJID='15550000004@s.whatsapp.net')]
+            with self.state.lock:
+                plain = self.state.plain_dms.get(chat)
+                if plain:
+                    rows = [dict(MsgID='PLAIN-INCOMING', ChatJID=chat, Timestamp=PLAIN_STAMPS[chat],
+                                 Text='Synthetic incoming direct message', FromMe=False,
+                                 SenderName='Fixture Contact', SenderJID=chat)]
+                    if plain['after'] and chat == PLAIN_REACTED:
+                        rows.insert(0, dict(MsgID='PLAIN-REACTION', ChatJID=chat, Timestamp=plain['after'], Text='',
+                                            FromMe=True, ReactionToID='PLAIN-INCOMING', SenderName='Fixture Owner',
+                                            SenderJID='15550000007@s.whatsapp.net'))
+                    elif plain['after']:
+                        rows.insert(0, dict(MsgID='PLAIN-NEWER', ChatJID=chat, Timestamp=plain['after'],
+                                            Text='Synthetic newer direct message', FromMe=False,
+                                            SenderName='Fixture Contact Two', SenderJID=chat))
             self.respond(200, rows)
         elif url.path == '/v1/wazig/groups':
             self.respond(200, [])
@@ -280,11 +306,23 @@ class HubArchiveHandler(Handler):
                 self.state.archive_group_archived = False
                 self.state.archive_stamp = '2026-10-10T13:00:00Z'
             self.respond(200, {'archived': False, 'last_message_ts': self.state.archive_stamp, 'unread_count': 1})
+        elif self.path == '/fixture/plain-dms' and body == {}:
+            with self.state.lock:
+                for jid in PLAIN_STAMPS:
+                    self.state.plain_dms[jid] = dict(archived=False, after='')
+            self.respond(200, {'chats': sorted(PLAIN_STAMPS), 'last_message_ts': PLAIN_STAMPS})
         elif self.path == '/v1/wazig/archive' and body == {'chat': ARCHIVE_GROUP, 'archived': True}:
             with self.state.lock:
                 self.state.archive_group_archived = True
             self.respond(200, {'status': 'ok'}, body=body)
-        elif self.path == '/v1/wazig/mark-read' and body.get('chat') in (ARCHIVE_GROUP, ARCHIVE_OTHER):
+        elif self.path == '/v1/wazig/archive' and body.get('chat') in PLAIN_STAMPS and isinstance(body.get('archived'), bool) and body['chat'] in self.state.plain_dms:
+            with self.state.lock:
+                plain = self.state.plain_dms[body['chat']]
+                plain['archived'] = body['archived']
+                if body['archived']:
+                    plain['after'] = plain_stamp(5)
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/mark-read' and body.get('chat') in (ARCHIVE_GROUP, ARCHIVE_OTHER, PLAIN_REACTED, PLAIN_NEWER):
             self.respond(200, {'status': 'ok'}, body=body)
         else:
             self.respond(400, {'error': 'unexpected archive fixture write'}, body=body)
@@ -1251,6 +1289,7 @@ def main():
     server.state = bridge.State(args.log)
     server.state.archive_incoming = 0
     server.state.archive_group_archived = False
+    server.state.plain_dms = {}
     server.state.view_rows = view_rows()
     server.state.archive_stamp = '2026-10-10T11:00:00Z'
     server.state.repaint_count = 0

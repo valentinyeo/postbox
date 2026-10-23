@@ -105,6 +105,9 @@ fn fixture(state: *archive_rules.State) App {
     for (a.chats[0..2]) |*chat| chat.timestamp.set("2026-10-10T10:00:00Z");
     return a;
 }
+fn nowUnixSeconds() i64 {
+    return 1791628200;
+}
 fn setStatus(a: *App, status: []const u8) void {
     var buffer: [64]u8 = undefined;
     const progress = if (a.pending_archive_count > 0)
@@ -321,6 +324,23 @@ test "plain bulk archive resurfaces on incoming but not outgoing messages" {
         try std.testing.expect(archive_rules.shouldResurface(false, state.isKept(jid), "2026-10-10T11:00:00Z", state.baseline(jid).?));
         try std.testing.expect(!archive_rules.shouldResurface(true, state.isKept(jid), "2026-10-10T11:00:00Z", state.baseline(jid).?));
     }
+}
+
+test "a plain archive baselines at the archive moment when the list row is stale" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    archiveSelected(&a, false);
+    try std.testing.expectEqualStrings("2026-10-10T10:30:00Z", state.baseline("a@g.us").?);
+    try std.testing.expect(!archive_rules.shouldResurface(false, false, "2026-10-10T10:00:00Z", state.baseline("a@g.us").?));
+    try std.testing.expect(archive_rules.shouldResurface(false, false, "2026-10-10T10:30:01Z", state.baseline("a@g.us").?));
+}
+
+test "a plain archive keeps a list row time that is later than the archive moment" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    a.chats[0].timestamp.set("2026-10-10T12:00:00Z");
+    archiveSelected(&a, false);
+    try std.testing.expectEqualStrings("2026-10-10T12:00:00Z", state.baseline("a@g.us").?);
 }
 
 test "unarchive clears keep while unavailable and full queues do not claim success" {
