@@ -12344,6 +12344,7 @@ fn applyResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8, raw: []cons
         else => return,
     };
     var newest_from_me: ?bool = null;
+    var newest_ts: []const u8 = "";
     for (list) |item| {
         const object = switch (item) {
             .object => |o| o,
@@ -12351,12 +12352,14 @@ fn applyResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8, raw: []cons
         };
         if (getString(object, "ReactionToID").len > 0 or getString(object, "MsgID").len == 0) continue;
         newest_from_me = getBool(object, "FromMe");
+        newest_ts = getString(object, "Timestamp");
         break;
     }
     const from_me = newest_from_me orelse return;
     const base = state.baseline(jid) orelse "";
-    if (archive_rules.shouldResurface(from_me, state.isKept(jid), row_ts, base)) {
-        appendLaunchLog(a, "archive-scan: new message in an archived chat, unarchiving");
+    if (archive_rules.shouldResurface(from_me, state.isKept(jid), newest_ts, base)) {
+        var log_buffer: [archive_rules.max_jid + 96]u8 = undefined;
+        appendLaunchLog(a, std.fmt.bufPrint(&log_buffer, "archive-scan: new message in an archived chat, unarchiving {s}", .{jid}) catch "archive-scan: new message in an archived chat, unarchiving");
         queueUnarchiveChat(a, jid, .resurface);
         return;
     }
@@ -12511,7 +12514,9 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
         if (unarchive) {
             state.remove(jid);
         } else {
-            const stamp = if (visibleChatIndex(a, key)) |index| a.chats[index].timestamp.slice() else "";
+            const row_stamp = if (visibleChatIndex(a, key)) |index| a.chats[index].timestamp.slice() else "";
+            var stamp_buffer: [archive_rules.stamp_len]u8 = undefined;
+            const stamp = archive_rules.archiveBaseline(&stamp_buffer, row_stamp, nowUnixSeconds());
             if (!state.archive(jid, stamp, action == .keep) and action == .keep) return "Keep archived list is full";
         }
         saveArchiveState(a);

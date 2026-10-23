@@ -252,6 +252,24 @@ pub fn needsProbe(kept: bool, last_ts: []const u8, baseline_ts: []const u8) bool
     return std.mem.order(u8, last_ts, baseline_ts) == .gt;
 }
 
+pub const stamp_len = 20;
+
+pub fn archiveBaseline(out: *[stamp_len]u8, row_ts: []const u8, now_seconds: i64) []const u8 {
+    const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(@max(0, now_seconds)) };
+    const year_day = epoch.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_seconds = epoch.getDaySeconds();
+    const now = std.fmt.bufPrint(out, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index + 1,
+        day_seconds.getHoursIntoDay(),
+        day_seconds.getMinutesIntoHour(),
+        day_seconds.getSecondsIntoMinute(),
+    }) catch return row_ts;
+    return if (std.mem.order(u8, row_ts, now) == .gt) row_ts else now;
+}
+
 pub fn shouldResurface(newest_from_me: bool, kept: bool, newest_ts: []const u8, baseline_ts: []const u8) bool {
     if (newest_from_me or kept) return false;
     if (newest_ts.len == 0 or baseline_ts.len == 0) return false;
@@ -373,6 +391,23 @@ test "legacy migration preserves existing hub choices and scopes matches to each
 
 test "a newer incoming message resurfaces an archived chat" {
     try std.testing.expect(shouldResurface(false, false, "2026-10-10T10:30:00Z", "2026-10-10T10:24:33Z"));
+}
+
+test "the baseline is the later of the list row time and the archive moment" {
+    var buffer: [stamp_len]u8 = undefined;
+    const moment: i64 = 1792775400;
+    try std.testing.expectEqualStrings("2026-10-23T17:10:00Z", archiveBaseline(&buffer, "2026-10-23T16:43:39Z", moment));
+    try std.testing.expectEqualStrings("2026-10-23T17:10:00Z", archiveBaseline(&buffer, "", moment));
+    try std.testing.expectEqualStrings("2026-10-23T18:00:00Z", archiveBaseline(&buffer, "2026-10-23T18:00:00Z", moment));
+}
+
+test "a reaction that moved the row after the archive does not bring a chat back" {
+    var buffer: [stamp_len]u8 = undefined;
+    const base = archiveBaseline(&buffer, "2026-10-23T16:43:39Z", 1792775400);
+    try std.testing.expect(needsProbe(false, "2026-10-23T17:20:00Z", base));
+    try std.testing.expect(!shouldResurface(false, false, "2026-10-23T16:43:39Z", base));
+    try std.testing.expect(!shouldResurface(false, false, "2026-10-23T17:10:00Z", base));
+    try std.testing.expect(shouldResurface(false, false, "2026-10-23T17:10:01Z", base));
 }
 
 test "my own newest message, a kept chat or an old stamp never resurface" {
