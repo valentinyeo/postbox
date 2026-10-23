@@ -23,12 +23,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
           set -uo pipefail
           merged_any=0
           required='["ci","tdlib","windows-smoke","no-comments","unfurl-verification","private-markers","secret-scan","pr-title","notify-release","tdlib-cache / cache"]'
           for pr in $(gh pr list -R "$REPO" --state open --json number -q '.[].number'); do
-            info=$(gh pr view "$pr" -R "$REPO" --json isDraft,labels,additions,deletions,files,mergeable,statusCheckRollup,headRefOid) || { echo "#$pr: could not read PR head checks"; continue; }
+            info=$(gh pr view "$pr" -R "$REPO" --json isDraft,labels,additions,deletions,files,mergeable,statusCheckRollup,headRefOid,isCrossRepository,author) || { echo "#$pr: could not read PR head checks"; continue; }
             head_oid=$(echo "$info" | jq -er '.headRefOid | select(test("^[0-9a-f]{40}$"))') || { echo "#$pr: invalid PR head"; continue; }
             blocked=$(echo "$info" | jq -r --argjson req "$required" '
               ([.statusCheckRollup[] | select((.name // .context) != "code-review")] as $roll
@@ -42,8 +43,9 @@ jobs:
               | join(",")') || blocked="could not evaluate head checks"
             gating='[".github/workflows/automerge.yml", ".github/workflows/ci.yml", ".github/workflows/no-comments.yml", ".github/workflows/release.yml", ".github/workflows/auto-release.yml"]'
             files_json=$(gh api "repos/$REPO/pulls/$pr/files?per_page=100" --paginate --jq '.[].filename' 2>/dev/null | jq -R . | jq -cs .) || files_json=""
-            reason=$(echo "$info" | jq -r '
-              if .isDraft then "draft"
+            reason=$(echo "$info" | jq -r --arg owner "$REPO_OWNER" '
+              if .isCrossRepository != false or .author.login != $owner then "not a same-repo PR by the owner"
+              elif .isDraft then "draft"
               elif ([.labels[].name] | index("hold")) then "hold label"
               elif .mergeable != "MERGEABLE" then "not mergeable (\(.mergeable))"
               else "" end') || reason="could not evaluate PR state"

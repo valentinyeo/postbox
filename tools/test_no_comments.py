@@ -95,7 +95,8 @@ elif args[:2] == ['pr', 'view']:
             elif action == 'status': rollup.append(dict(__typename='StatusContext', context='external', state=name))
             else: rollup.append(dict(name=name, status='COMPLETED', conclusion=action))
         print(json.dumps(dict(isDraft=False, labels=[], mergeable='MERGEABLE', headRefOid=sha,
-            statusCheckRollup=rollup)))
+            statusCheckRollup=rollup, isCrossRepository=(mode == 'cross-repository'),
+            author=dict(login='contributor' if mode == 'non-owner' else 'fixture'))))
 elif args[:2] == ['pr', 'merge']:
     pass
 elif args[0] == 'api':
@@ -113,7 +114,7 @@ else:
             (root / 'sleep').write_text('#!/bin/sh\nexit 0\n')
             (root / 'sleep').chmod(0o755)
             env = dict(os.environ, PATH=directory + os.pathsep + os.environ['PATH'],
-                       FAKE_DIR=directory, FAKE_MODE=mode, REPO='fixture/repository')
+                       FAKE_DIR=directory, FAKE_MODE=mode, REPO='fixture/repository', REPO_OWNER='fixture')
             result = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True)
             calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
             return result, calls
@@ -123,6 +124,18 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         dispatched = [args[2] for args in calls if args[:2] == ['workflow', 'run']]
         self.assertEqual(dispatched, ['ci.yml', 'no-comments.yml'])
+
+    def test_IGSH_635_cross_repository_pr_is_skipped(self):
+        result, calls = self.run_workflow('cross-repository')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('#1: skip (not a same-repo PR by the owner)', result.stdout)
+        self.assertFalse(any(args[:2] == ['pr', 'merge'] for args in calls))
+
+    def test_IGSH_635_non_owner_pr_is_skipped(self):
+        result, calls = self.run_workflow('non-owner')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('#1: skip (not a same-repo PR by the owner)', result.stdout)
+        self.assertFalse(any(args[:2] == ['pr', 'merge'] for args in calls))
 
     def test_self_heal_dispatches_both_checks(self):
         result, calls = self.run_workflow('self-heal')
