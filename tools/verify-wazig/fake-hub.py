@@ -192,6 +192,7 @@ class MixedLidHandler(Handler):
                 if self.authorized():
                     if self.path == '/v1/wazig/archive':
                         self.state.mixed_archived = bool(body.get('archived'))
+                    self.path = self.path.replace('/v1/wazig/', '/v1/', 1)
                     self.respond(200, {'status': 'ok'}, body=body)
                 return
         super().do_POST()
