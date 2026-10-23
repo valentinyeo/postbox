@@ -38,8 +38,8 @@ pub fn messageRows(root: std.json.Value) ?[]const std.json.Value {
     if (root != .object) return null;
     const data = root.object.get("data") orelse return null;
     if (data != .object) return null;
-    const messages = data.object.get("messages") orelse return null;
-    return if (messages == .array) messages.array.items else null;
+    const rows = data.object.get("messages") orelse return null;
+    return if (rows == .array) rows.array.items else null;
 }
 
 pub fn unite(allocator: std.mem.Allocator, first: []const std.json.Value, second: []const std.json.Value, out: *std.ArrayList(std.json.Value)) !usize {
