@@ -309,15 +309,24 @@ pub fn isPageFetchAllowed(url: []const u8) bool {
     const host = siteHost(url);
     if (host.len == 0 or std.mem.indexOfScalar(u8, host, '.') == null) return false;
     if (std.ascii.eqlIgnoreCase(host, "localhost") or std.ascii.endsWithIgnoreCase(host, ".localhost") or std.ascii.endsWithIgnoreCase(host, ".local")) return false;
-    if (std.ascii.isDigit(host[0])) {
+    var numeric = true;
+    for (host) |byte| {
+        if (!std.ascii.isDigit(byte) and byte != '.') numeric = false;
+    }
+    if (numeric) {
         var octets = std.mem.splitScalar(u8, host, '.');
         var bytes: [4]u8 = undefined;
-        for (&bytes) |*byte| byte.* = std.fmt.parseInt(u8, octets.next() orelse return false, 10) catch return false;
+        for (&bytes) |*byte| {
+            const octet = octets.next() orelse return false;
+            if (octet.len > 1 and octet[0] == '0') return false;
+            byte.* = std.fmt.parseInt(u8, octet, 10) catch return false;
+        }
         if (octets.next() != null) return false;
         if (bytes[0] == 0 or bytes[0] == 10 or bytes[0] == 127 or bytes[0] >= 224 or
             (bytes[0] == 169 and bytes[1] == 254) or (bytes[0] == 172 and bytes[1] >= 16 and bytes[1] <= 31) or
             (bytes[0] == 192 and bytes[1] == 168) or (bytes[0] == 100 and bytes[1] >= 64 and bytes[1] <= 127)) return false;
     }
+    if (std.ascii.startsWithIgnoreCase(host, "0x")) return false;
     return true;
 }
 
@@ -338,20 +347,37 @@ pub fn isStreamUrlAllowed(url: []const u8) bool {
 
 pub fn scrapeOgMeta(page: []const u8, key: []const u8) ?[]const u8 {
     var search_from: usize = 0;
-    while (std.mem.indexOfPos(u8, page, search_from, "<meta")) |tag_start| {
-        const tag_end = std.mem.indexOfPos(u8, page, tag_start, ">") orelse page.len;
-        search_from = tag_start + 5;
-        const tag = page[tag_start..tag_end];
-        const has_key = std.mem.indexOf(u8, tag, key) orelse continue;
-        const before_ok = has_key == 0 or tag[has_key - 1] == '"' or tag[has_key - 1] == '\'';
-        const after = has_key + key.len;
-        const after_ok = after >= tag.len or tag[after] == '"' or tag[after] == '\'';
-        if (!before_ok or !after_ok) continue;
-        const content_at = std.mem.indexOf(u8, tag, "content=\"") orelse continue;
-        const rest = tag[content_at + "content=\"".len ..];
-        const end = std.mem.indexOfScalar(u8, rest, '"') orelse continue;
-        if (end == 0) continue;
-        return rest[0..end];
+    while (search_from < page.len) {
+        const tag_start = std.mem.indexOfScalarPos(u8, page, search_from, '<') orelse return null;
+        const tag_end = std.mem.indexOfScalarPos(u8, page, tag_start, '>') orelse return null;
+        search_from = tag_end + 1;
+        const tag = page[tag_start + 1 .. tag_end];
+        if (tag.len < 5 or !std.ascii.eqlIgnoreCase(tag[0..4], "meta") or !std.ascii.isWhitespace(tag[4])) continue;
+        var index: usize = 4;
+        var property: []const u8 = "";
+        var content: []const u8 = "";
+        while (index < tag.len) {
+            while (index < tag.len and std.ascii.isWhitespace(tag[index])) : (index += 1) {}
+            const name_start = index;
+            while (index < tag.len and tag[index] != '=' and !std.ascii.isWhitespace(tag[index])) : (index += 1) {}
+            const name = tag[name_start..index];
+            while (index < tag.len and std.ascii.isWhitespace(tag[index])) : (index += 1) {}
+            if (index >= tag.len or tag[index] != '=') break;
+            index += 1;
+            while (index < tag.len and std.ascii.isWhitespace(tag[index])) : (index += 1) {}
+            if (index >= tag.len) break;
+            const quote = tag[index];
+            const quoted = quote == '"' or quote == '\'';
+            if (quoted) index += 1;
+            const value_start = index;
+            while (index < tag.len and (if (quoted) tag[index] != quote else !std.ascii.isWhitespace(tag[index]))) : (index += 1) {}
+            if (quoted and index == tag.len) break;
+            const value = tag[value_start..index];
+            if (std.ascii.eqlIgnoreCase(name, "property") or std.ascii.eqlIgnoreCase(name, "name")) property = value;
+            if (std.ascii.eqlIgnoreCase(name, "content")) content = value;
+            if (quoted) index += 1;
+        }
+        if (std.ascii.eqlIgnoreCase(property, key) and content.len > 0) return content;
     }
     return null;
 }
@@ -526,7 +552,21 @@ test "generic pages and direct images retain full URL identity" {
     try std.testing.expect(!isImageUrl("https://example.com/page?file=pic.png"));
     try std.testing.expect(!isImageUrl("https://example.com/pic.png/more"));
     try std.testing.expect(!isImageUrl("file:///pic.png"));
+    try std.testing.expect(isPageFetchAllowed("https://1.example.com/page"));
     for ([_][]const u8{ "http://127.0.0.1/pic.png", "https://10.1.2.3/page", "https://localhost/page", "https://app.local/page", "https://user@example.com/page", "file:///page" }) |url| {
         try std.testing.expect(!isPageFetchAllowed(url));
     }
+}
+
+test "Open Graph attributes allow single quotes, whitespace, case and relative images" {
+    const page = "<META CONTENT = 'Synthetic title' PROPERTY = 'og:title'><meta name='og:image:secure_url' content='/cover.png'>";
+    try std.testing.expectEqualStrings("Synthetic title", scrapeOgMeta(page, "og:title").?);
+    try std.testing.expectEqualStrings("/cover.png", scrapeOgMeta(page, "og:image:secure_url").?);
+    try std.testing.expect(scrapeOgMeta("<meta property='og:image' content='truncated", "og:image") == null);
+    try std.testing.expect(scrapeOgMeta("<meta property='og:image:secure_url' content='secure'>", "og:image") == null);
+    var buffer: [512]u8 = undefined;
+    try std.testing.expectEqualStrings("https://example.com/cover.png", resolveImageUrl("https://example.com/post/entry", "/cover.png", &buffer).?);
+    try std.testing.expectEqualStrings("https://example.com/post/cover.png", resolveImageUrl("https://example.com/post/entry?a=1", "cover.png", &buffer).?);
+    try std.testing.expectEqualStrings("https://cdn.example.com/cover.png", resolveImageUrl("https://example.com/post", "//cdn.example.com/cover.png", &buffer).?);
+    try std.testing.expect(resolveImageUrl("https://example.com/post", "javascript:bad", &buffer) == null);
 }

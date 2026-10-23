@@ -35,11 +35,28 @@ def check_link_previews(folder):
         assert image_bytes.startswith(b'\x89PNG\r\n\x1a\n') and len(image_bytes) > 10000
         assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / f'{provider}.uia.txt').read_text(encoding='utf-8-sig')
         assert read(f'{provider}.state.json')['selected']['provider'] == provider
+    read_png = runpy.run_path(str(Path(__file__).with_name('check-workspace-icons.py')))['read_png']
+    screenshots = {provider + '.png': read_png(folder / (provider + '.png')) for provider in ['slack', 'whatsapp', 'telegram', 'signal']}
     pixels = read('image-pixels.json')
     assert len(pixels) == 8
     assert {row['screenshot'] for row in pixels} == {name + '.png' for name in ['slack', 'whatsapp', 'telegram', 'signal']}
     for row in pixels:
         assert row['colour'] in ['amber', 'cobalt'] and row['samples'] > 0 and row['hits'] / row['samples'] > 0.1
+        width, height, image = screenshots[row['screenshot']]
+        rows = {message['id']: message for message in read(row['screenshot'].replace('.png', '.messages.json'))['messages']}
+        target = rows['LINK-IMAGE']['media'] if row['colour'] == 'amber' else rows['LINK-PAGE']['card']
+        assert row['rect'] == target
+        left, top, right, bottom = target
+        cx, cy = row['canvas']
+        assert 0 <= left + cx < right + cx <= width and 0 <= top + cy < bottom + cy <= height
+        hits = samples = 0
+        for y in range(top + 8, bottom - 8, 3):
+            for x in range(left + 8, right - 8, 3):
+                red, green, blue = image[y + cy][x + cx]
+                match = red > 210 and 130 < green < 190 and blue < 65 if row['colour'] == 'amber' else blue > 210 and red < 75 and 85 < green < 145
+                hits += bool(match)
+                samples += 1
+        assert hits == row['hits'] and samples == row['samples'] and hits / samples > 0.1
     viewer = read('viewer.json')
     assert viewer['handle'] and viewer['class'] == 'MessagesImageViewer' and viewer['pid'] == session['pid']
     assert (folder / 'viewer.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')

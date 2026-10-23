@@ -8896,7 +8896,8 @@ fn httpGetChecked(allocator: std.mem.Allocator, url: []const u8, comptime kind: 
 }
 
 fn copyInto(dest: []u8, source: []const u8) usize {
-    const length = @min(dest.len, source.len);
+    var length = @min(dest.len, source.len);
+    while (length > 0 and !std.unicode.utf8ValidateSlice(source[0..length])) length -= 1;
     @memcpy(dest[0..length], source[0..length]);
     return length;
 }
