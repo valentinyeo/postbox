@@ -67,13 +67,21 @@ function Invoke-SignalJourney($Session, [string]$Messages) {
     try { $image.Save($file, [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
     @{ sha256 = (Get-FileHash $file).Hash.ToLowerInvariant(); size = (Get-Item $file).Length } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'file.json')
     Invoke-PaletteCommand $Session 'Attach photo or file'
-    $null = Wait-Until {
+    $picker = Wait-Until {
         $foreground = [Windows.Automation.AutomationElement]::FromHandle([VerifyWindow]::GetForegroundWindow())
-        $foreground.Current.ProcessId -eq $Session.pid -and $foreground.Current.ClassName -eq '#32770'
+        if ($foreground.Current.ProcessId -eq $Session.pid -and $foreground.Current.ClassName -eq '#32770') { return $foreground }
     } 'owned attachment picker'
-    Send-Keys $Session '%n'
-    Send-Keys $Session $file
-    Send-Keys $Session '{ENTER}'
+    $filenameCondition = [Windows.Automation.AndCondition]::new(
+        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Edit),
+        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, 'File name:')
+    )
+    $filename = Wait-Until { $picker.FindFirst([Windows.Automation.TreeScope]::Descendants, $filenameCondition) } 'attachment filename edit'
+    $value = $filename.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
+    $value.SetValue($file)
+    Assert-That ($value.Current.Value -ceq $file) 'Attachment filename was not set'
+    $open = Get-Edit $picker '1'
+    $open.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Add-Content (Join-Path $Session.evidence 'actions.log') 'uia: attachment filename set and Open invoked'
     $null = Wait-Until { [VerifyWindow]::GetForegroundWindow() -eq (Get-App $Session).MainWindowHandle } 'attachment picker closed'
     Invoke-PaletteCommand $Session 'Compose message'
     Send-Keys $Session 'Synthetic Signal file'

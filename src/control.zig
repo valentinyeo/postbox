@@ -268,7 +268,7 @@ test "usage errors name the problem instead of guessing" {
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{"send"}, &message));
     try std.testing.expectEqualStrings("unknown command", message);
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "chats", "--limit", "0" }, &message));
-    try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "chats", "--messenger", "signal" }, &message));
+    try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "chats", "--messenger", "unknown" }, &message));
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{"select"}, &message));
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "view", "slack", "extra" }, &message));
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{"archive-many"}, &message));

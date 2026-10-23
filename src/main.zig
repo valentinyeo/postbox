@@ -14282,11 +14282,6 @@ fn drawProviderMark(shapes: *const smooth.Context, badge: win.RECT, mark: hub.Ba
     const y: f32 = @floatFromInt(badge.top);
     const size: f32 = @floatFromInt(diameter);
     if (mark == .signal_mark) {
-        const inset = @divTrunc(diameter, 8);
-        const outline = win.RECT{ .left = circle.left + inset, .top = circle.top + inset, .right = circle.right - inset, .bottom = circle.bottom - inset };
-        for (0..8) |segment| {
-            smooth.strokeArc(shapes, outline, @as(f32, @floatFromInt(segment)) * 45, 24, 0x00ffffff, @max(1, @divTrunc(diameter, 16)));
-        }
         const inner = @divTrunc(diameter * 5, 18);
         smooth.fillEllipse(shapes, .{ .left = circle.left + inner, .top = circle.top + inner, .right = circle.right - inner, .bottom = circle.bottom - inner }, 0x00ffffff);
         smooth.strokePolyline(shapes, &.{ .{ x + size * 0.36, y + size * 0.61 }, .{ x + size * 0.30, y + size * 0.72 }, .{ x + size * 0.47, y + size * 0.65 } }, 0x00ffffff, size * 0.08);
