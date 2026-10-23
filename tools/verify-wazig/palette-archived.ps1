@@ -35,7 +35,7 @@ function Close-PaletteWindow($Session) {
 
 function Read-PaletteLabelsOnce($List) {
     try {
-        return , @(Read-ListLabels $List | ForEach-Object { [string]$_ })
+        return @{ labels = [string[]]@(Read-ListLabels $List | ForEach-Object { [string]$_ }) }
     } catch {
         return $null
     }
@@ -53,7 +53,7 @@ function Invoke-PaletteQuery($Session, [string]$Query, [string]$Expected, [int]$
     do {
         $read = Read-PaletteLabelsOnce $list
         if ($null -ne $read) {
-            $labels = [string[]]$read[0]
+            $labels = [string[]]@($read.labels)
             if ($labels -ccontains $Expected) { break }
         }
         [System.Threading.Thread]::Sleep(250)
@@ -146,7 +146,7 @@ function Test-PaletteEnter($Session, [string]$Step, [string]$ViewLabel, [string]
     do {
         $read = Read-PaletteLabelsOnce $list
         if ($null -ne $read) {
-            $labels = [string[]]$read[0]
+            $labels = [string[]]@($read.labels)
             if ($labels -ccontains $expected) { break }
         }
         [System.Threading.Thread]::Sleep(250)
