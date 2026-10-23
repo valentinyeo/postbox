@@ -31,4 +31,5 @@ Preconditions: a successful doctor, Alpha and Beta in the baseline sidebar, no d
 - Filtering is debounced by a 240 ms timer; wait for resulting state.
 - Slash in an editable field inserts text instead of focusing search.
 - Palette fuzzy search is a different feature; a palette result is not proof of sidebar filtering.
-- The screenshot, not just a status count, must show the query and remaining chat. Fixtures do not cover the live contacts/archived lookup.
+- The screenshot, not just a status count, must show the query and remaining chat. The archive provider fixture does not supply `.archived_scan` or `.contacts_index` jobs, so neither this recipe nor archive proves cross-inbox archived/contact lookup. That requires a populated provider people index.
+- Source: `src/main.zig:3915` builds the view-specific cue, `src/main.zig:2410` merges indexed people into inbox search, and `src/main.zig:16157` debounces for 240 ms. `src/main.zig:16521` handles Ctrl+F.

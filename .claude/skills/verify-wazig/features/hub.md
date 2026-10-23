@@ -32,7 +32,9 @@ The IGSH-531 backend runs through the existing transport interface with no new U
 
 ## Gotchas
 
-- The proposed unified HTTP API does not yet exist in the inspected triage backend. This fixture proves the client contract only; backend implementation is separate follow-up work.
+- The fake service proves only the client contract; this source-side map does not establish deployment or availability of a production unified endpoint.
 - A configured URL with missing/invalid credentials remains hub-selected and fails closed. Network failures never switch to direct sends.
+- The fixture contains Slack Alpha and WhatsApp Beta, not a Telegram row; Telegram provider filtering is covered by `src/hub_test.zig`, not this live recipe.
 - Opaque chat handles must be globally unique across all source accounts and fit the existing 191-byte chat identity. Network identity remains presentation metadata, while the hub resolves source accounts.
 - This journey proves list/history/live/send/read/archive/media against a fake service, not production delivery, upstream Slack archive semantics, TLS deployment, voice playback, or transcription.
+- Source: `src/hub.zig:11` selects the configured backend, `src/hub.zig:15` defines unified paths, and `src/main.zig:19362` loads URL/token and DPAPI state. `tools/verify-wazig/fake-hub.py:34` assigns the two fixture networks.

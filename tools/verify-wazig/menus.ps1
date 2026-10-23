@@ -145,7 +145,13 @@ function Invoke-Menus($Session) {
         }
         $popup = Capture-Popup $Session "amoled-$($entry.name)" $entry.class
         $window = [Windows.Automation.AutomationElement]::FromHandle($popup)
-        $edits = $window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit'))
+        $editCondition = [Windows.Automation.OrCondition]::new(
+            [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit'),
+            [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'RICHEDIT50W')
+        )
+        $edits = $window.FindAll([Windows.Automation.TreeScope]::Descendants, $editCondition)
+        $expectedEdits = if ($entry.name -eq 'shortcuts') { 0 } elseif ($entry.name -eq 'slack-setup') { 2 } else { 1 }
+        Assert-That ($edits.Count -eq $expectedEdits) "$($entry.name) edit inventory changed"
         foreach ($edit in $edits) {
             $rect = [VerifyMenus]::Bounds([IntPtr]$edit.Current.NativeWindowHandle)
             $metric = Measure-Screenshot (Join-Path $Session.evidence "amoled-$($entry.name)-after.png") $rect $screen.Left $screen.Top 4

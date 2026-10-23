@@ -338,12 +338,33 @@ try {
         }
         palette {
             Send-Keys $session '^k'
+            $palette = Get-PaletteWindow $session
             Send-Keys $session 'Keyboard shortcuts'
+            $edit = Get-Edit $palette '1064'
+            $list = Get-Edit $palette '1072'
+            $null = Wait-Until { (Read-Edit $edit) -eq 'Keyboard shortcuts' -and (Read-ListCount $list) -eq 1 } 'positive palette row control'
+            $positiveCount = Read-ListCount $list
+            Send-Keys $session '^a'
+            Send-Keys $session 'Status'
+            $null = Wait-Until { (Read-Edit $edit) -eq 'Status' } 'removed Status query'
+            $statusCount = Read-ListCount $list
+            $removedCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1120')
+            $sidebarCount = $window.FindAll([Windows.Automation.TreeScope]::Descendants, $removedCondition).Count
+            @{ query = Read-Edit $edit; matches = $statusCount; positive_query = 'Keyboard shortcuts'; positive_matches = $positiveCount; sidebar_status_controls = $sidebarCount } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'removed-status.json')
+            Save-Screen $session removed-status
+            Assert-That ($statusCount -eq 0 -and $sidebarCount -eq 0) 'Removed WhatsApp Status entry is still reachable'
+            Send-Keys $session '^a'
+            Send-Keys $session 'Keyboard shortcuts'
+            $null = Wait-Until { (Read-Edit $edit) -eq 'Keyboard shortcuts' -and (Read-ListCount $list) -eq 1 } 'shortcut command restored'
             Save-Screen $session action
             Send-Keys $session '{ENTER}'
+            $owner = Get-Window $session
             $null = Wait-Until {
-                $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MessagesShortcutHelp')
-                [Windows.Automation.AutomationElement]::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, $condition)
+                $condition = [Windows.Automation.AndCondition]::new(
+                    [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MessagesShortcutHelp'),
+                    [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$session.pid)
+                )
+                $owner.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
             } 'keyboard shortcut overlay'
             Save-Screen $session after
             Send-Keys $session '{ESC}'
@@ -353,13 +374,28 @@ try {
             Invoke-Menus $session
         }
         appearance {
-            Send-Keys $session '^k'
-            Send-Keys $session 'Theme: Green'
-            Save-Screen $session action
-            Send-Keys $session '{ENTER}'
+            Invoke-PaletteCommand $session 'Theme: Green' action
             $null = Wait-Until { (Read-Control $session status).theme -eq 'green' } 'green theme'
             $preferences = "HKCU:\Software\MessagesVerification\$id\Software\Messages"
             Assert-That ((Get-ItemProperty $preferences).Theme -eq 0) 'Theme preference was not saved'
+            Assert-That ($null -eq (Get-ItemProperty $preferences).FontScale) 'Fresh fixture already has a saved scale'
+            Send-Keys $session 'Scale probe'
+            $textPattern = $compose.GetCurrentPattern([Windows.Automation.TextPattern]::Pattern)
+            $baselinePoints = [double]$textPattern.DocumentRange.GetAttributeValue([Windows.Automation.TextPattern]::FontSizeAttribute)
+            Assert-That ($baselinePoints -gt 0) 'Composer font size is not readable through UI Automation'
+            Invoke-PaletteCommand $session 'Make text larger'
+            $null = Wait-Until { (Get-ItemProperty $preferences).FontScale -eq 92 } 'larger text scale persisted'
+            $larger = (Get-ItemProperty $preferences).FontScale
+            $largerPoints = [double]$textPattern.DocumentRange.GetAttributeValue([Windows.Automation.TextPattern]::FontSizeAttribute)
+            Assert-That ($largerPoints -gt $baselinePoints) 'Larger text did not increase the UI Automation font size'
+            Save-Screen $session text-larger
+            Send-Keys $session '^0'
+            $null = Wait-Until { (Get-ItemProperty $preferences).FontScale -eq 82 } 'default text scale restored'
+            $resetPoints = [double]$textPattern.DocumentRange.GetAttributeValue([Windows.Automation.TextPattern]::FontSizeAttribute)
+            Assert-That ($resetPoints -eq $baselinePoints) 'Reset did not restore the UI Automation font size'
+            @{ initial_saved = $false; larger = $larger; reset = (Get-ItemProperty $preferences).FontScale; baseline_points = $baselinePoints; larger_points = $largerPoints; reset_points = $resetPoints } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'text-scale.json')
+            Send-Keys $session '^a{BACKSPACE}'
+            $null = Wait-Until { (Read-Edit $compose) -eq '' } 'scale probe cleared'
             Save-Screen $session after
         }
     }

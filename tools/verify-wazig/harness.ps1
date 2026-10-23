@@ -16,6 +16,8 @@ public static class VerifyWindow {
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode)]
     public static extern IntPtr ReadText(IntPtr window, uint message, UIntPtr capacity, StringBuilder text, uint flags, uint timeout, out UIntPtr length);
+    [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode)]
+    public static extern IntPtr ReadCount(IntPtr window, uint message, UIntPtr wparam, IntPtr lparam, uint flags, uint timeout, out UIntPtr count);
 }
 '@
 
@@ -104,6 +106,16 @@ function Read-Edit($Edit) {
     return $text.ToString()
 }
 
+function Read-ListCount($List) {
+    $handle = [IntPtr]$List.Current.NativeWindowHandle
+    Assert-That ($handle -ne [IntPtr]::Zero -and $List.Current.ClassName -eq 'LISTBOX') 'Expected a native listbox'
+    $count = [UIntPtr]::Zero
+    $ok = [VerifyWindow]::ReadCount($handle, 0x018B, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$count)
+    Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only LB_GETCOUNT timed out'
+    Assert-That ($count.ToUInt64() -le [int]::MaxValue) 'Read-only LB_GETCOUNT failed'
+    return [int]$count.ToUInt64()
+}
+
 function Send-Keys($Session, [string]$Keys) {
     $app = Get-App $Session
     $foreground = [Windows.Automation.AutomationElement]::FromHandle([VerifyWindow]::GetForegroundWindow())
@@ -116,14 +128,18 @@ function Send-Keys($Session, [string]$Keys) {
     Add-Content (Join-Path $Session.evidence 'actions.log') "keys: $Keys"
 }
 
-function Invoke-PaletteCommand($Session, [string]$Command, [string]$Capture = '') {
-    Send-Keys $Session '^k'
+function Get-PaletteWindow($Session) {
     $owner = Get-Window $Session
-    $palette = Wait-Until {
+    return Wait-Until {
         $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MessagesPalette')
         $windows = $owner.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
         foreach ($window in $windows) { if ($window.Current.ProcessId -eq $Session.pid) { return $window } }
     } 'owned command palette'
+}
+
+function Invoke-PaletteCommand($Session, [string]$Command, [string]$Capture = '') {
+    Send-Keys $Session '^k'
+    $palette = Get-PaletteWindow $Session
     $edit = Get-Edit $palette '1064'
     Send-Keys $Session $Command
     $null = Wait-Until { (Read-Edit $edit) -eq $Command } 'palette query'
