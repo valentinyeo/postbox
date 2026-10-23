@@ -86,7 +86,7 @@ if ($Feature -eq 'whatsapp-hub') {
     $start.Environment['WAZIG_VERIFY_HUB_KEY'] = 'fixture-key-not-a-secret'
 }
 if ($Feature -in @('hub', 'hub-archive', 'slack-sort', 'slack-archive', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint')) {
-    $bridge = Start-FakeBridge $Evidence $root -Unified -SlackSort:($Feature -eq 'slack-sort') -SlackArchive:($Feature -eq 'slack-archive') -SlackThreads:($Feature -eq 'slack-threads') -Views:($Feature -eq 'views') -WorkspaceIcons:($Feature -eq 'workspace-icons') -Signal:($Feature -eq 'signal') -Telegram:($Feature -eq 'telegram') -Notrap:($Feature -eq 'notrap') -Reactions:($Feature -eq 'reactions') -HubArchive:($Feature -eq 'hub-archive') -Repaint:($Feature -eq 'repaint')
+    $bridge = Start-FakeBridge $Evidence $root -Unified -SlackSort:($Feature -eq 'slack-sort') -SlackArchive:($Feature -eq 'slack-archive') -SlackThreads:($Feature -eq 'slack-threads') -Views:($Feature -eq 'views') -WorkspaceIcons:($Feature -eq 'workspace-icons') -Signal:($Feature -eq 'signal') -Telegram:($Feature -eq 'telegram') -Notrap:($Feature -eq 'notrap') -Reactions:($Feature -eq 'reactions') -HubArchive:($Feature -eq 'hub-archive') -MixedLid:($Feature -eq 'hub') -Repaint:($Feature -eq 'repaint')
     $start.Environment['WAZIG_HUB_URL'] = $bridge.url
     $start.Environment['WAZIG_HUB_TOKEN'] = (Get-Content (Join-Path $PSScriptRoot 'fake-wa-bridge.py') | Where-Object { $_.StartsWith('KEY = ') }).Split("'")[1]
 }
@@ -122,7 +122,7 @@ try {
     $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window'
     if ($Feature -ne 'window') { [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null }
     if ($Feature -in @('whatsapp-hub', 'hub', 'slack-sort', 'slack-archive', 'slack-threads', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'reactions', 'repaint')) {
-        $null = Wait-Until { (Read-Control $session status).chat_count -eq $(if ($Feature -eq 'signal') { 4 } elseif ($Feature -eq 'telegram') { 5 } elseif ($Feature -in @('views', 'notrap')) { 8 } elseif ($Feature -eq 'workspace-icons') { 5 } elseif ($Feature -eq 'slack-sort') { 4 } elseif ($Feature -eq 'slack-threads') { 1 } else { 2 }) } 'hub chat list'
+        $null = Wait-Until { (Read-Control $session status).chat_count -eq $(if ($Feature -eq 'signal') { 4 } elseif ($Feature -eq 'telegram') { 5 } elseif ($Feature -in @('views', 'notrap')) { 8 } elseif ($Feature -eq 'workspace-icons') { 5 } elseif ($Feature -eq 'slack-sort') { 4 } elseif ($Feature -eq 'slack-threads') { 1 } elseif ($Feature -eq 'hub') { 3 } else { 2 }) } 'hub chat list'
     }
     if ($Feature -eq 'whatsapp-hub') {
         $null = Wait-Until { (Read-Control $session status).pending_sends -eq 0 } 'adopted outbox acknowledged'
