@@ -264,6 +264,23 @@
       "maximize": true
     },
     {
+      "name": "slack-emoji",
+      "pr": true,
+      "hub": "slack-emoji",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-slack-emoji.ps1",
+      "validator": {
+        "file": "check-slack-emoji-evidence.py",
+        "function": "check_slack_emoji"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "SlackEmojiHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "views",
       "pr": true,
       "hub": "views",

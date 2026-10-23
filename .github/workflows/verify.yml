@@ -20,6 +20,10 @@ on:
       - src/archive_rules.zig
       - src/chat_rows.zig
       - src/chat_order.zig
+      - src/slack_emoji.*
+      - tools/generate-slack-emoji.py
+      - tools/check_slack_emoji.py
+      - tools/test_slack_emoji.py
       - src/slack.zig
       - src/hub*.zig
       - src/wa_hub*.zig

@@ -542,3 +542,23 @@ test "local Slack Archive uses active hub rows without changing provider archive
     try std.testing.expect(!rows[2].object.get("archived").?.bool);
     try std.testing.expectEqual(@as(i64, 3), rows[2].object.get("unread_count").?.integer);
 }
+
+test "IGSH-670 account scoped emoji routes and Giphy attachment media" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    try std.testing.expectEqualStrings("/v1/wazig/slack/emoji?account=fixture-team", (try hub.slackEmoji(allocator, "fixture-team", null)).path);
+    try std.testing.expectEqualStrings("/v1/wazig/slack/emoji/media?account=fixture-team&name=custom%2Bname", (try hub.slackEmoji(allocator, "fixture-team", "custom+name")).path);
+    try std.testing.expectError(error.InvalidId, hub.slackEmoji(allocator, "..", null));
+    const raw =
+        \\[{"MsgID":"gif","ChatJID":"slack:fixture-team:channel","Text":"Synthetic Giphy","attachments":[{"service_name":"Giphy","image_url":"https://example.invalid/animation.gif","image_mimetype":"image/gif"}],"reactions":[{"name":"tea","count":1},{"name":"custom_fixture","count":2}],"SlackEmojiPaths":{"custom_fixture":"untrusted-local-path"}}]
+    ;
+    const normalized = try hub.normalize(allocator, raw, .messages, "slack:fixture-team:channel");
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, normalized, .{});
+    defer parsed.deinit();
+    const row = hub.messageRows(parsed.value).?[0].object;
+    try std.testing.expectEqualStrings("image", row.get("MediaType").?.string);
+    try std.testing.expectEqualStrings("image/gif", row.get("MimeType").?.string);
+    try std.testing.expectEqualStrings("🍵 1  :custom_fixture: 2", row.get("ReactionEmoji").?.string);
+    try std.testing.expect(!row.contains("SlackEmojiPaths"));
+}
