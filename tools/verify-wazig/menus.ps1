@@ -51,9 +51,16 @@ function Assert-PopupPixels($Session, [string]$Name, [IntPtr]$Handle, [bool]$Lig
     [VerifyMenus]::Validate($measurement, $Light)
 }
 
-function Capture-Popup($Session, [string]$Name, [string]$Class, [bool]$Light = $false) {
+function Capture-Popup($Session, [string]$Name, [string]$Class, [bool]$Light = $false, [string]$Query = $null) {
     $before = Read-ScreenshotPixels (Join-Path $Session.evidence "$Name-before.png")
     $handle = Wait-Popup $Session $Class
+    if ($Query) {
+        $popupWindow = [Windows.Automation.AutomationElement]::FromHandle($handle)
+        $search = Get-Edit $popupWindow '1088'
+        $grid = [VerifyMenus]::Bounds([IntPtr](Get-Edit $popupWindow '1096').Current.NativeWindowHandle)
+        $null = Wait-Until { (Read-Edit $search) -ceq $Query } "$Name search reads $Query"
+    }
+    $script:previousPopupFrame = $null
     $null = Wait-Until {
         Save-Screen $Session "$Name-after"
         $screen = [Windows.Forms.SystemInformation]::VirtualScreen
@@ -61,7 +68,10 @@ function Capture-Popup($Session, [string]$Name, [string]$Class, [bool]$Light = $
         $after = Read-ScreenshotPixels (Join-Path $Session.evidence "$Name-after.png")
         Assert-That ($before.width -eq $after.width -and $before.height -eq $after.height -and $before.stride -eq $after.stride) 'Popup screenshots must have matching dimensions'
         $metric = [VerifyMenus]::Measure($after.bytes, $after.width, $after.height, $after.stride, $rect, $screen.Left, $screen.Top, 8)
-        $metric.textPixels -ge 24 -and [VerifyMenus]::Changed($before.bytes, $after.bytes, $after.width, $after.height, $after.stride, $rect, $screen.Left, $screen.Top)
+        $previous = $script:previousPopupFrame
+        $script:previousPopupFrame = $after
+        $settled = -not $Query -or ($null -ne $previous -and -not [VerifyMenus]::Changed($previous.bytes, $after.bytes, $after.width, $after.height, $after.stride, $grid, $screen.Left, $screen.Top))
+        $metric.textPixels -ge 24 -and $settled -and [VerifyMenus]::Changed($before.bytes, $after.bytes, $after.width, $after.height, $after.stride, $rect, $screen.Left, $screen.Top)
     } "$Name painted text"
     Assert-PopupPixels $Session "$Name-after" $handle $Light
     return $handle
@@ -147,7 +157,7 @@ function Invoke-Menus($Session) {
             $null = Wait-Popup $Session $entry.class
             Send-Keys $Session 'heart'
         }
-        $popup = Capture-Popup $Session "amoled-$($entry.name)" $entry.class
+        $popup = Capture-Popup $Session "amoled-$($entry.name)" $entry.class $false $(if ($entry.name -eq 'emoji') { 'heart' } else { $null })
         $window = [Windows.Automation.AutomationElement]::FromHandle($popup)
         $editCondition = [Windows.Automation.OrCondition]::new(
             [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit'),
