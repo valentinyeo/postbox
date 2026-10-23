@@ -50,7 +50,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["search","drafts","whatsapp-hub","slack-sort","hub","views","text-comparison"]' || format('["{0}"]', inputs.feature || 'search')) }}
+        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["search","drafts","whatsapp-hub","slack-sort","hub","views","text-comparison","palette"]' || format('["{0}"]', inputs.feature || 'search')) }}
     steps:
       - uses: actions/checkout@v4
         with:

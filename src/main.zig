@@ -12771,6 +12771,7 @@ fn buildPaletteItems(a: *App) void {
     a.palette_archive_kept = isKeptArchived(a, a.palette_archive_jid.slice());
     a.palette_item_count = 0;
     appendPalette(a, "Search chats", "Ctrl+F", command_search);
+    appendPalette(a, "Status", "", command_shortcuts_help);
     appendPalette(a, "Compose message", "C", command_compose);
     appendPalette(a, "Keyboard shortcuts", "F1", command_shortcuts_help);
     appendPalette(a, "Dictate", "Ctrl+D", command_dictate);
