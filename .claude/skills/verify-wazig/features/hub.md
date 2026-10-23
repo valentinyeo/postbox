@@ -11,6 +11,7 @@ The IGSH-531 backend runs through the existing transport interface with no new U
 - `hub-send`: a lost response retries the persisted client_id; exactly one send is accepted.
 - `hub-read-archive`: opening a remote chat marks it read and keyboard archiving removes it from the inbox.
 - `hub-media`: automatic fetch polls 202 then caches the exact 200 binary response.
+- `workspace-icons`: Slack provider badges use authenticated `/v1/wazig/workspace-icon/<team>` image bytes through the existing avatar worker and disk cache, with S on loading/missing/error; WhatsApp uses a green handset and Telegram retains T. The dedicated [workspace-icons](workspace-icons.md) journey proves badge pixels.
 - `hub-config`: the ticket switch defaults on when WAZIG_HUB_URL is set; its token uses saved user environment/process environment and existing DPAPI HubToken storage. Missing URL retains direct connectors. Configured-but-invalid hubs never silently send directly.
 
 ## How to get to it (user POV)
