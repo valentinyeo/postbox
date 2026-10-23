@@ -108,6 +108,46 @@ pub fn binary(allocator: std.mem.Allocator, chat: []const u8, message_id: ?[]con
     return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/avatar/{s}", .{c}) };
 }
 
+pub fn slackEmoji(allocator: std.mem.Allocator, account: []const u8, name: ?[]const u8) !Request {
+    try validTeam(account);
+    const encoded = try bridge.encode(allocator, account);
+    defer allocator.free(encoded);
+    if (name) |value| {
+        try validId(value);
+        const emoji = try bridge.encode(allocator, value);
+        defer allocator.free(emoji);
+        return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/slack/emoji/media?account={s}&name={s}", .{ encoded, emoji }) };
+    }
+    return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/slack/emoji?account={s}", .{encoded}) };
+}
+
+pub fn slackAttachment(row: *std.json.ObjectMap, allocator: std.mem.Allocator) !void {
+    if (row.get("reactions")) |_| {
+        if (string(row.*, "ReactionEmoji").len == 0) {
+            const slack = @import("slack.zig");
+            var reactions: [slack.max_reactions]slack.Reaction = undefined;
+            const count = slack.readReactions(row.*, &reactions);
+            var buffer: [4096]u8 = undefined;
+            const rendered = slack.formatReactions(&buffer, reactions[0..count]);
+            try row.put(allocator, "ReactionEmoji", .{ .string = try allocator.dupe(u8, rendered) });
+        }
+    }
+    if (string(row.*, "MediaType").len > 0) return;
+    const attachments = row.get("attachments") orelse return;
+    if (attachments != .array) return;
+    for (attachments.array.items) |value| {
+        if (value != .object) continue;
+        const url = string(value.object, "image_url");
+        if (url.len == 0) continue;
+        const mime = string(value.object, "image_mimetype");
+        try row.put(allocator, "MediaType", .{ .string = "image" });
+        const gif = std.mem.indexOf(u8, url, ".gif") != null or std.ascii.eqlIgnoreCase(string(value.object, "service_name"), "Giphy");
+        try row.put(allocator, "MimeType", .{ .string = if (mime.len > 0) mime else if (gif) "image/gif" else "image/png" });
+        try row.put(allocator, "Filename", .{ .string = if (gif) "attachment.gif" else "attachment.png" });
+        break;
+    }
+}
+
 pub fn workspaceIcon(allocator: std.mem.Allocator, team: []const u8) !Request {
     try validTeam(team);
     const encoded = try bridge.encode(allocator, team);
@@ -168,6 +208,8 @@ pub fn normalize(allocator: std.mem.Allocator, raw: []const u8, kind: Rows, chat
                 if (!lidAlias(row_chat, chat)) return error.WrongChat;
                 try item.object.put(allocator, "ChatJID", .{ .string = chat });
             }
+            if (std.mem.startsWith(u8, chat, "slack:")) try slackAttachment(&item.object, allocator);
+            _ = item.object.swapRemove("SlackEmojiPaths");
             _ = item.object.swapRemove("LocalPath");
             _ = item.object.swapRemove("local_path");
         }

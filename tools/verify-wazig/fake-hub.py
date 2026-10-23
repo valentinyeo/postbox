@@ -1438,6 +1438,78 @@ class LinkPreviewsHandler(VoiceHandler):
             self.respond(404, {'error': 'unavailable'})
 
 
+SLACK_EMOJI_CHAT = 'slack:fixture-emoji:channel'
+
+
+def emoji_gif():
+    width, height = 96, 48
+    result = bytearray(b'GIF89a' + struct.pack('<HH', width, height) + b'\x81\x00\x00')
+    result.extend(bytes((240, 160, 32, 48, 112, 240, 0, 0, 0, 255, 255, 255)))
+    result.extend(b'!\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00')
+    for colour in (0, 1):
+        codes = [value for _ in range(width * height) for value in (4, colour)] + [5]
+        packed = bytearray()
+        bits = count = 0
+        for code in codes:
+            bits |= code << count
+            count += 3
+            while count >= 8:
+                packed.append(bits & 255)
+                bits >>= 8
+                count -= 8
+        if count:
+            packed.append(bits)
+        result.extend(b'!\xf9\x04\x04\x0a\x00\x00\x00,')
+        result.extend(struct.pack('<HHHH', 0, 0, width, height) + b'\x00\x02')
+        for start in range(0, len(packed), 255):
+            block = packed[start:start + 255]
+            result.extend(bytes((len(block),)) + block)
+        result.extend(b'\x00')
+    return bytes(result + b';')
+
+
+class SlackEmojiHandler(VoiceHandler):
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        origin = f'http://127.0.0.1:{self.server.server_port}'
+        if url.path == '/v1/wazig/chats':
+            self.respond(200, [] if query.get('archived') == ['true'] else [
+                dict(jid=SLACK_EMOJI_CHAT, name='Verification Emoji', provider='slack', kind='channel',
+                     account='fixture-emoji', last_message_ts=self.state.stamp, unread_count=0, archived=False),
+                dict(jid='slack:fixture-emoji:other', name='Verification Other', provider='slack', kind='channel',
+                     account='fixture-emoji', last_message_ts=self.stamp(-1), unread_count=0, archived=False)])
+        elif url.path == '/v1/wazig/messages' and query.get('chat') == ['slack:fixture-emoji:other']:
+            self.respond(200, [dict(MsgID='PLAIN', ChatJID='slack:fixture-emoji:other', Text='Synthetic plain text',
+                                    Timestamp=self.state.stamp, FromMe=False, SenderName='Fixture Sender')])
+        elif url.path == '/v1/wazig/messages' and query.get('chat') == [SLACK_EMOJI_CHAT]:
+            rows = [
+                dict(MsgID='EMOJI-STANDARD', Text=':broken_heart: :timer_clock::billed_cap: :crossed_fingers: :thumbsup::skin-tone-2: :unknown_fixture:',
+                     reactions=[dict(name='crycat', count=2), dict(name='smiling_face_with_tear', count=1), dict(name='tea', count=1)]),
+                dict(MsgID='EMOJI-CUSTOM', Text='Custom :cat_alone: alias :fixture_cat: :fixture_standard: :cycle_a:'),
+                dict(MsgID='GIPHY', Text='Synthetic Giphy', attachments=[dict(service_name='Giphy',
+                     image_url=origin + '/fixture/animation.gif', image_mimetype='image/gif')])]
+            for index, row in enumerate(rows):
+                row.update(ChatJID=SLACK_EMOJI_CHAT, Timestamp=self.stamp(index), FromMe=False, SenderName='Fixture Sender')
+            self.respond(200, list(reversed(rows)))
+        elif url.path == '/v1/wazig/slack/emoji' and query == {'account': ['fixture-emoji']}:
+            self.respond(200, dict(emoji=dict(cat_alone='https://example.invalid/custom.png', crycat='alias:cat_alone',
+                                              fixture_cat='alias:crycat', fixture_standard='alias:tea', cycle_a='alias:cycle_b', cycle_b='alias:cycle_a')))
+        elif url.path == '/v1/wazig/slack/emoji/media' and query.get('account') == ['fixture-emoji'] and query.get('name') == ['cat_alone']:
+            self.respond(200, workspace_png('fixture-amber'), 'image/png')
+        elif url.path.startswith('/v1/wazig/media/') and list(map(unquote, url.path.removeprefix('/v1/wazig/media/').split('/', 1))) == [SLACK_EMOJI_CHAT, 'GIPHY']:
+            self.respond(200, emoji_gif(), 'image/gif')
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Fake hub runs only on GitHub Actions')
@@ -1445,6 +1517,7 @@ def main():
     parser.add_argument('--port-file', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
     modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--slack-emoji', action='store_true')
     modes.add_argument('--link-previews', action='store_true')
     modes.add_argument('--paste-image', action='store_true')
     modes.add_argument('--hub-archive', action='store_true')
@@ -1464,7 +1537,7 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = LinkPreviewsHandler if args.link_previews else PassageCopyHandler if args.passage_copy else PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else PaletteArchivedHandler if args.palette_archived else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else VoiceHandler if args.voice else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    handler = SlackEmojiHandler if args.slack_emoji else LinkPreviewsHandler if args.link_previews else PassageCopyHandler if args.passage_copy else PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else PaletteArchivedHandler if args.palette_archived else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else VoiceHandler if args.voice else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)

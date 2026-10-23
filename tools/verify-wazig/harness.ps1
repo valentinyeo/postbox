@@ -252,7 +252,7 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackArchive, [switch]$SlackThreads, [switch]$LinkPreviews, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$PassageCopy, [switch]$Reactions, [switch]$HubArchive, [switch]$PaletteArchived, [switch]$Repaint, [switch]$MixedLid, [switch]$PasteImage, [switch]$Voice) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackArchive, [switch]$SlackThreads, [switch]$LinkPreviews, [switch]$SlackEmoji, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$PassageCopy, [switch]$Reactions, [switch]$HubArchive, [switch]$PaletteArchived, [switch]$Repaint, [switch]$MixedLid, [switch]$PasteImage, [switch]$Voice) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
@@ -261,6 +261,7 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [s
     if ($SlackSort) { $start.ArgumentList.Add('--slack-sort') }
     if ($SlackArchive) { $start.ArgumentList.Add('--slack-archive') }
     if ($SlackThreads) { $start.ArgumentList.Add('--slack-threads') }
+    if ($SlackEmoji) { $start.ArgumentList.Add('--slack-emoji') }
     if ($LinkPreviews) { $start.ArgumentList.Add('--link-previews') }
     if ($Views) { $start.ArgumentList.Add('--views') }
     if ($WorkspaceIcons) { $start.ArgumentList.Add('--workspace-icons') }

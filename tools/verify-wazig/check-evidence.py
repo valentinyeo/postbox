@@ -12,6 +12,9 @@ session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
 if session['feature'] == 'paste-image':
     runpy.run_path(str(Path(__file__).with_name('check-paste-image-evidence.py')))['check_paste_image'](folder)
     raise SystemExit(0)
+if session['feature'] == 'slack-emoji':
+    runpy.run_path(str(Path(__file__).with_name('check-slack-emoji-evidence.py')))['check_slack_emoji'](folder)
+    raise SystemExit(0)
 if session['feature'] == 'link-previews':
     runpy.run_path(str(Path(__file__).with_name('check-link-previews-evidence.py')))['check_link_previews'](folder)
     raise SystemExit(0)

@@ -8,7 +8,7 @@ on:
         description: User journey to drive
         type: choice
         default: search
-        options: [search, navigation, drafts, palette, appearance, menus, passage-copy, reactions, paste-image, whatsapp-hub, hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window, voice]
+        options: [search, navigation, drafts, palette, appearance, menus, passage-copy, reactions, paste-image, whatsapp-hub, hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, slack-emoji, views, workspace-icons, signal, telegram, notrap, repaint, archive, text-comparison, window, voice]
   pull_request:
     paths:
       - .github/workflows/verify.yml
@@ -21,6 +21,10 @@ on:
       - src/archive_rules.zig
       - src/chat_rows.zig
       - src/chat_order.zig
+      - src/slack_emoji.*
+      - tools/generate-slack-emoji.py
+      - tools/check_slack_emoji.py
+      - tools/test_slack_emoji.py
       - src/slack.zig
       - src/hub*.zig
       - src/wa_hub*.zig
@@ -56,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["paste-image","passage-copy","reactions","menus","search","drafts","whatsapp-hub","hub","hub-archive","palette-archived","slack-sort","slack-archive","slack-threads","link-previews","views","workspace-icons","signal","telegram","notrap","text-comparison","repaint","window","voice"]' || format('["{0}"]', inputs.feature || 'search')) }}
+        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["paste-image","passage-copy","reactions","menus","search","drafts","whatsapp-hub","hub","hub-archive","palette-archived","slack-sort","slack-archive","slack-threads","link-previews","slack-emoji","views","workspace-icons","signal","telegram","notrap","text-comparison","repaint","window","voice"]' || format('["{0}"]', inputs.feature || 'search')) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,7 +100,7 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence
       - name: Validate surviving journey evidence
-        if: matrix.feature == 'paste-image' || matrix.feature == 'repaint' || matrix.feature == 'voice' || matrix.feature == 'passage-copy' || matrix.feature == 'reactions' || matrix.feature == 'search' || matrix.feature == 'whatsapp-hub' || matrix.feature == 'hub' || matrix.feature == 'hub-archive' || matrix.feature == 'palette-archived' || matrix.feature == 'slack-sort' || matrix.feature == 'slack-archive' || matrix.feature == 'slack-threads' || matrix.feature == 'link-previews' || matrix.feature == 'views' || matrix.feature == 'workspace-icons' || matrix.feature == 'signal' || matrix.feature == 'telegram' || matrix.feature == 'notrap' || matrix.feature == 'palette' || matrix.feature == 'appearance' || matrix.feature == 'window'
+        if: matrix.feature == 'paste-image' || matrix.feature == 'repaint' || matrix.feature == 'voice' || matrix.feature == 'passage-copy' || matrix.feature == 'reactions' || matrix.feature == 'search' || matrix.feature == 'whatsapp-hub' || matrix.feature == 'hub' || matrix.feature == 'hub-archive' || matrix.feature == 'palette-archived' || matrix.feature == 'slack-sort' || matrix.feature == 'slack-archive' || matrix.feature == 'slack-threads' || matrix.feature == 'link-previews' || matrix.feature == 'slack-emoji' || matrix.feature == 'views' || matrix.feature == 'workspace-icons' || matrix.feature == 'signal' || matrix.feature == 'telegram' || matrix.feature == 'notrap' || matrix.feature == 'palette' || matrix.feature == 'appearance' || matrix.feature == 'window'
         shell: pwsh
         run: |
           python tools/verify-wazig/check-evidence.py verification-evidence

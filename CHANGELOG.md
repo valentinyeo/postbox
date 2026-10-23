@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IGSH-670: Render the complete generated standard Slack emoji set and skin-tone aliases, show workspace emoji images in messages and reactions through the hub, and display Giphy attachments as inline animated GIFs. Custom emoji and Giphy require the corresponding hub endpoints and attachment metadata.
+
 - IGSH-669: Messages opens maximized even when a shortcut or the updater starts it with a normal-window request, and the launch log records whether the window started maximized.
 
 - IGSH-669: Always open Messages maximized on its last saved monitor, including update relaunches, while retaining the normal window size for Restore.

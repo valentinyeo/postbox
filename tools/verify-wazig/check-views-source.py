@@ -179,7 +179,7 @@ def check_integration():
 
 def check_journey():
     runner = read('tools/verify-wazig/run.ps1')
-    require(runner, ["'hub', 'hub-archive', 'palette-archived', 'slack-sort', 'slack-archive', 'slack-threads', 'link-previews', 'views', 'workspace-icons', 'signal', 'telegram'", '-Views:($Feature -eq \'views\')',
+    require(runner, ["'hub', 'hub-archive', 'palette-archived', 'slack-sort', 'slack-archive', 'slack-threads', 'link-previews', 'slack-emoji', 'views', 'workspace-icons', 'signal', 'telegram'", '-Views:($Feature -eq \'views\')',
                      '. "$PSScriptRoot/views.ps1"', 'Invoke-ViewsJourney $session $messages $start'])
     journey = read('tools/verify-wazig/views.ps1')
     require(journey, ['Assert-AccountView', "@('personal', 'business', 'T0ABC123', 'T0DEF456')", 'Where-Object view_account -ne $Account',
@@ -205,7 +205,7 @@ def check_journey():
                        "== order + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]", "+ ['telegram:telegram', 'signal:signal']"])
     require(read('tools/verify-wazig/check-evidence.py'), ["session['feature'] == 'views'", 'check-views-evidence.py'])
     workflow = read('.github/workflows/verify.yml')
-    require(workflow, ['hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, views, workspace-icons, signal, telegram, notrap, repaint, archive', '"hub","hub-archive","palette-archived","slack-sort","slack-archive","slack-threads","link-previews","views","workspace-icons","signal","telegram","notrap","text-comparison","repaint"', "matrix.feature == 'views'",
+    require(workflow, ['hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, slack-emoji, views, workspace-icons, signal, telegram, notrap, repaint, archive', '"hub","hub-archive","palette-archived","slack-sort","slack-archive","slack-threads","link-previews","slack-emoji","views","workspace-icons","signal","telegram","notrap","text-comparison","repaint"', "matrix.feature == 'views'",
                        'src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig'])
     for path in (root / 'tools/verify-wazig').glob('*.py'):
         ast.parse(path.read_text(encoding='utf-8'), filename=str(path))

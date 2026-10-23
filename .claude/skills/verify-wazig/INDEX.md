@@ -19,3 +19,5 @@ IGSH-607 adds signal to workflow dispatch, the pull-request matrix and surviving
 - [Clipboard images](features/paste-image.md): native V5/PNG paste, Enter send, decoded full-screen/4K uploads and per-provider evidence.
 
 - [Link previews](features/link-previews.md): Slack labels, inline linked images and cached Open Graph page cards on every provider.
+
+- [Slack emoji](features/slack-emoji.md): complete standard shortcode data, custom message/reaction pixels and animated Giphy frame proof.

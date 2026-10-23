@@ -10,6 +10,7 @@ PUBLIC_SKILL_PATHS = (
     ".claude/skills/verify-wazig/features/passage-copy.md",
     ".claude/skills/verify-wazig/features/paste-image.md",
     ".claude/skills/verify-wazig/features/link-previews.md",
+    ".claude/skills/verify-wazig/features/slack-emoji.md",
     ".claude/skills/verify-wazig/features/hub-archive.md",
     ".claude/skills/verify-wazig/features/palette-archived.md",
     ".claude/skills/verify-wazig/features/reactions.md",
