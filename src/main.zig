@@ -1,4 +1,5 @@
 const std = @import("std");
+const staged_images = @import("staged_images.zig");
 const theme = @import("theme.zig");
 const menu_theme = @import("menu_theme.zig");
 const smooth = @import("smooth_shapes.zig");
@@ -883,7 +884,7 @@ const App = struct {
     failed_send_count: usize = 0,
     sent_voice: [voice_sent.max_entries]voice_sent.Entry = [_]voice_sent.Entry{.{}} ** voice_sent.max_entries,
     sent_voice_count: usize = 0,
-    staged_image: StagedImage = .{},
+    staged_images: staged_images.List(StagedImage) = .{},
     media_attempts: [512]u64 = [_]u64{0} ** 512,
     media_attempt_count: usize = 0,
     media_unavailable: [512]u64 = [_]u64{0} ** 512,
@@ -1470,7 +1471,8 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
 }
 
 fn attachUnavailableReason(a: *App) ?[]const u8 {
-    if (unifiedHub(a) and a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider != .whatsapp) return null;
+    if (a.selected_chat >= a.chat_count) return "Select a chat first";
+    if (unifiedHub(a) or a.chats[a.selected_chat].provider == .whatsapp) return null;
     if (selectedChatIsSlack(a)) {
         if (slackAccountIsBridge(a, a.chats[a.selected_chat].account.slice())) return "File upload not available over the Slack bridge";
         return null;
@@ -10263,17 +10265,19 @@ fn deleteFileUtf8(path_utf8: []const u8) void {
 }
 
 fn discardStagedImage(a: *App) void {
-    const path = a.staged_image.path;
-    const owned = a.staged_image.owned;
-    releaseStagedImage(a);
-    if (owned and path.len > 0) deleteFileUtf8(path.slice());
+    while (a.staged_images.count > 0) removeStagedImage(a, 0, true);
     layout(a, a.compose_client_width, a.compose_client_height);
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
 }
 
+fn removeStagedImage(a: *App, index: usize, discard: bool) void {
+    const image = a.staged_images.remove(index) orelse return;
+    if (image.preview) |bitmap| _ = win.DeleteObject(bitmap);
+    if (discard and image.owned and image.path.len > 0) deleteFileUtf8(image.path.slice());
+}
+
 fn releaseStagedImage(a: *App) void {
-    if (a.staged_image.preview) |bitmap| _ = win.DeleteObject(bitmap);
-    a.staged_image = .{};
+    while (a.staged_images.count > 0) removeStagedImage(a, 0, false);
 }
 
 fn pasteDirectory(a: *App) ?[]u8 {
@@ -10402,6 +10406,16 @@ fn stageImageFromClipboard(a: *App) bool {
         if (win.GetClipboardData(win.CF_HDROP)) |hdrop| {
             var name_buffer: [520]u16 = undefined;
             if (!shell_lazy.ensureShell32()) return true;
+            const count = shell_lazy.dragQueryFileW.?(@ptrCast(@alignCast(hdrop)), 0xffffffff, null, 0);
+            if (count > 1) {
+                for (0..count) |index| {
+                    const chars = shell_lazy.dragQueryFileW.?(@ptrCast(@alignCast(hdrop)), @intCast(index), &name_buffer, name_buffer.len);
+                    if (chars == 0 or chars >= name_buffer.len) continue;
+                    name_buffer[chars] = 0;
+                    if (!stageAttachmentFile(a, @ptrCast(&name_buffer))) break;
+                }
+                return true;
+            }
             const chars = shell_lazy.dragQueryFileW.?(@ptrCast(@alignCast(hdrop)), 0, &name_buffer, name_buffer.len);
             source_name = std.unicode.utf16LeToUtf8Alloc(a.allocator, name_buffer[0..chars]) catch {
                 setStatus(a, "Clipboard holds no image to paste");
@@ -10545,16 +10559,22 @@ fn stageImageFromClipboard(a: *App) bool {
         setStatus(a, "Could not preview the pasted image");
         return true;
     };
-    discardStagedImage(a);
-    a.staged_image.path.set(path_buffer[0..path_len]);
-    a.staged_image.provider = a.chats[a.selected_chat].provider;
-    a.staged_image.account = a.chats[a.selected_chat].account;
-    a.staged_image.jid.set(a.chats[a.selected_chat].jid.slice());
-    a.staged_image.preview = preview;
+    var image = StagedImage{};
+    image.path.set(path_buffer[0..path_len]);
+    image.provider = a.chats[a.selected_chat].provider;
+    image.account = a.chats[a.selected_chat].account;
+    image.jid = a.chats[a.selected_chat].jid;
+    image.preview = preview;
     var bitmap: win.BITMAP = undefined;
     if (win.GetObjectW(preview, @sizeOf(win.BITMAP), &bitmap) != 0) {
-        a.staged_image.preview_width = bitmap.bmWidth;
-        a.staged_image.preview_height = bitmap.bmHeight;
+        image.preview_width = bitmap.bmWidth;
+        image.preview_height = bitmap.bmHeight;
+    }
+    if (!a.staged_images.add(image)) {
+        _ = win.DeleteObject(preview);
+        deleteFileUtf8(image.path.slice());
+        setStatus(a, "Could not stage the pasted image");
+        return true;
     }
     layout(a, a.compose_client_width, a.compose_client_height);
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
@@ -10568,16 +10588,72 @@ fn stageFile(a: *App, path: []const u8) bool {
         setStatus(a, "The file path is too long");
         return false;
     }
-    discardStagedImage(a);
-    a.staged_image.path.set(path);
-    a.staged_image.owned = false;
-    a.staged_image.provider = a.chats[a.selected_chat].provider;
-    a.staged_image.account = a.chats[a.selected_chat].account;
-    a.staged_image.jid = a.chats[a.selected_chat].jid;
+    if (a.selected_chat >= a.chat_count) return false;
+    var image = StagedImage{ .owned = false };
+    image.path.set(path);
+    image.provider = a.chats[a.selected_chat].provider;
+    image.account = a.chats[a.selected_chat].account;
+    image.jid = a.chats[a.selected_chat].jid;
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch return false;
+    defer a.allocator.free(wide);
+    image.preview = makePreviewBitmap(a, wide.ptr);
+    if (image.preview) |preview| {
+        var bitmap: win.BITMAP = undefined;
+        if (win.GetObjectW(preview, @sizeOf(win.BITMAP), &bitmap) != 0) {
+            image.preview_width = bitmap.bmWidth;
+            image.preview_height = bitmap.bmHeight;
+        }
+    }
+    if (!a.staged_images.add(image)) {
+        if (image.preview) |preview| _ = win.DeleteObject(preview);
+        setStatus(a, "Could not stage the attachment");
+        return false;
+    }
     layout(a, a.compose_client_width, a.compose_client_height);
     setStatus(a, "File attached - Enter sends, Esc discards");
     focusCompose(a);
     return true;
+}
+
+fn stageAttachmentFile(a: *App, path: [*:0]const u16) bool {
+    const utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, std.mem.span(path)) catch return false;
+    defer a.allocator.free(utf8);
+    if (selectedChatIsTelegram(a) and !unifiedHub(a)) return stageFile(a, utf8);
+    var buffer: [520]u8 = undefined;
+    const extension = std.fs.path.extension(utf8);
+    const length = stageNewPath(a, &buffer, if (extension.len > 1) extension[1..] else "bin") orelse return false;
+    var copy_path = WideText(519){};
+    copy_path.set(a.allocator, buffer[0..length]);
+    if (win.CopyFileW(path, copy_path.ptr(), win.FALSE) == 0) {
+        deleteFileUtf8(buffer[0..length]);
+        setStatus(a, "Could not stage the attachment");
+        return false;
+    }
+    if (!stageFile(a, buffer[0..length])) {
+        deleteFileUtf8(buffer[0..length]);
+        return false;
+    }
+    a.staged_images.items[a.staged_images.count - 1].owned = true;
+    return true;
+}
+
+fn stageDroppedFiles(a: *App, drop: win.HDROP) void {
+    if (!shell_lazy.ensureShell32()) return;
+    const module = win.GetModuleHandleW(lit("shell32.dll")) orelse return;
+    const finish: *const @TypeOf(win.DragFinish) = @ptrCast(@alignCast(win.GetProcAddress(module, "DragFinish") orelse return));
+    defer finish(drop);
+    if (attachUnavailableReason(a)) |reason| {
+        setStatus(a, reason);
+        return;
+    }
+    const count = shell_lazy.dragQueryFileW.?(drop, 0xffffffff, null, 0);
+    for (0..count) |index| {
+        var path: [520]u16 = undefined;
+        const length = shell_lazy.dragQueryFileW.?(drop, @intCast(index), &path, path.len);
+        if (length == 0 or length >= path.len) continue;
+        path[length] = 0;
+        if (!stageAttachmentFile(a, @ptrCast(&path))) break;
+    }
 }
 
 fn voiceChatAllowed(a: *const App) bool {
@@ -10749,12 +10825,12 @@ fn sendMessageFrom(a: *App, thread: bool) void {
     }
     var wide_buffer: [drafts.max_text + 1]u16 = undefined;
     const length: usize = @intCast(win.GetWindowTextW(compose, &wide_buffer, wide_buffer.len));
-    if (length == 0 and a.staged_image.path.len == 0) return;
+    if (length == 0 and a.staged_images.count == 0) return;
     var staged_file: []const u8 = "";
     var attach_path_buffer: [1600]u8 = undefined;
-    if (!thread and a.staged_image.path.len > 0) {
-        if (chat_key.Key.eql(chat_key.of(&a.staged_image), chat_key.of(&a.chats[a.selected_chat]))) {
-            staged_file = a.staged_image.path.slice();
+    if (!thread and a.staged_images.count > 0) {
+        if (chat_key.Key.eql(chat_key.of(&a.staged_images.items[0]), chat_key.of(&a.chats[a.selected_chat]))) {
+            staged_file = a.staged_images.items[0].path.slice();
         } else discardStagedImage(a);
     }
     if (length == 0 and staged_file.len == 0) return;
@@ -10765,35 +10841,43 @@ fn sendMessageFrom(a: *App, thread: bool) void {
         return;
     }
     if (staged_file.len > 0 and (unifiedHub(a) or stagedFileGoesToWacli(a.chats[a.selected_chat].provider))) {
-        const path_copy = a.allocator.dupe(u8, staged_file) catch return;
-        defer a.allocator.free(path_copy);
-        const caption_copy = a.allocator.dupe(u8, text) catch return;
-        defer a.allocator.free(caption_copy);
-        const pending = &a.pending_sends[a.pending_send_count];
-        pending.provider = a.chats[a.selected_chat].provider;
-        pending.account = a.chats[a.selected_chat].account;
-        pending.jid.set(a.chats[a.selected_chat].jid.slice());
-        pending.text.set(caption_copy);
-        pending.file.set(path_copy);
-        pending.reply_to.set(reply_to);
-        pending.reply_sender.set(a.reply_sender.slice());
-        a.send_seq += 1;
-        pending.seq = a.send_seq;
-        pending.queued_unix = nowUnixSeconds();
-        mintSendId(a, &pending.id);
-        a.pending_send_count += 1;
-        if (!persistOutbox(a)) {
-            a.pending_send_count -= 1;
+        const plan = a.staged_images.sendPlan(text, .single_file);
+        const start = a.pending_send_count;
+        if (plan.count > max_pending_sends - start) {
+            setStatus(a, "Send queue is full");
+            return;
+        }
+        for (plan.items[0..plan.count]) |send| {
+            const image = &a.staged_images.items[send.first];
+            const pending = &a.pending_sends[a.pending_send_count];
             pending.* = .{};
+            pending.provider = image.provider;
+            pending.account = image.account;
+            pending.jid = image.jid;
+            pending.text.set(send.text);
+            pending.file = image.path;
+            pending.reply_to.set(reply_to);
+            pending.reply_sender.set(a.reply_sender.slice());
+            a.send_seq += 1;
+            pending.seq = a.send_seq;
+            pending.queued_unix = nowUnixSeconds();
+            mintSendId(a, &pending.id);
+            a.pending_send_count += 1;
+        }
+        if (!persistOutbox(a)) {
+            for (a.pending_sends[start..a.pending_send_count]) |*pending| pending.* = .{};
+            a.pending_send_count = start;
             setStatus(a, "Could not save outbox; message not queued");
             return;
         }
         releaseStagedImage(a);
         if (!thread) clearReply(a);
-        forgetFailedSend(a, chat_key.of(pending), pending.text.slice());
         a.user_viewed = true;
         a.scroll_y = 0;
-        appendWhatsAppPending(a, pending, false);
+        for (a.pending_sends[start..a.pending_send_count]) |*pending| {
+            forgetFailedSend(a, chat_key.of(pending), pending.text.slice());
+            appendWhatsAppPending(a, pending, false);
+        }
         persistFileOutbox(a);
         _ = win.SetWindowTextW(compose, lit(""));
         if (!thread) saveComposerDraft(a);
@@ -10807,19 +10891,28 @@ fn sendMessageFrom(a: *App, thread: bool) void {
         const chat_id = tgSelectedChatId(a) orelse return;
         const client = a.telegram orelse return;
         const telegram_reply_to = std.fmt.parseInt(i64, reply_to, 10) catch 0;
-        const sent = if (staged_file.len > 0)
-            client.sendFile(chat_id, staged_file, text, telegram_reply_to)
-        else
-            client.sendTextReply(chat_id, text, telegram_reply_to);
-        if (sent) {
-            releaseStagedImage(a);
-            if (!thread) clearReply(a);
-            _ = win.SetWindowTextW(compose, lit(""));
-            if (!thread) saveComposerDraft(a);
-            layout(a, a.compose_client_width, a.compose_client_height);
-            focusCompose(a);
-            setStatus(a, "Sending...");
-        } else setStatus(a, "Telegram refused the message");
+        if (!thread and a.staged_images.count > 0) {
+            const plan = a.staged_images.sendPlan(text, .single_file);
+            for (plan.items[0..plan.count]) |send| {
+                if (!client.sendFile(chat_id, a.staged_images.items[0].path.slice(), send.text, telegram_reply_to)) {
+                    layout(a, a.compose_client_width, a.compose_client_height);
+                    setStatus(a, "Telegram refused the message");
+                    return;
+                }
+                removeStagedImage(a, 0, false);
+                _ = win.SetWindowTextW(compose, lit(""));
+                if (!thread) saveComposerDraft(a);
+            }
+        } else if (!client.sendTextReply(chat_id, text, telegram_reply_to)) {
+            setStatus(a, "Telegram refused the message");
+            return;
+        }
+        if (!thread) clearReply(a);
+        _ = win.SetWindowTextW(compose, lit(""));
+        if (!thread) saveComposerDraft(a);
+        layout(a, a.compose_client_width, a.compose_client_height);
+        focusCompose(a);
+        setStatus(a, "Sending...");
         return;
     }
     if (selectedChatIsSlack(a)) {
@@ -10849,24 +10942,38 @@ fn sendMessageFrom(a: *App, thread: bool) void {
             return;
         }
         if (attach.len > 0) {
-            const slot = &a.slack_outbox[a.slack_outbox_count];
-            slot.* = .{};
-            mintSendId(a, &slot.entry.id);
-            slot.entry.provider = .slack;
-            slot.entry.account.set(chat.account.slice());
-            slot.entry.jid.set(chat.jid.slice());
-            slot.entry.text.set(text);
-            slot.entry.file.set(attach);
-            slot.entry.reply_to.set(reply_to);
-            slot.entry.queued_unix = nowUnixSeconds();
-            a.slack_outbox_count += 1;
-            if (!persistOutbox(a)) {
-                a.slack_outbox_count -= 1;
+            var plan = a.staged_images.sendPlan(text, .single_file);
+            if (staged_file.len == 0) {
+                plan.items[0] = .{ .first = 0, .count = 1, .text = text };
+                plan.count = 1;
+            }
+            while (plan.count > max_slack_outbox - a.slack_outbox_count) {
+                if (!evictOldestFailedSlackOutbox(a)) {
+                    setStatus(a, "Send queue is full");
+                    return;
+                }
+            }
+            const start = a.slack_outbox_count;
+            for (plan.items[0..plan.count]) |send| {
+                const slot = &a.slack_outbox[a.slack_outbox_count];
                 slot.* = .{};
+                mintSendId(a, &slot.entry.id);
+                slot.entry.provider = .slack;
+                slot.entry.account.set(chat.account.slice());
+                slot.entry.jid.set(chat.jid.slice());
+                slot.entry.text.set(send.text);
+                slot.entry.file.set(if (staged_file.len > 0) a.staged_images.items[send.first].path.slice() else attach);
+                slot.entry.reply_to.set(reply_to);
+                slot.entry.queued_unix = nowUnixSeconds();
+                a.slack_outbox_count += 1;
+            }
+            if (!persistOutbox(a)) {
+                for (a.slack_outbox[start..a.slack_outbox_count]) |*slot| slot.* = .{};
+                a.slack_outbox_count = start;
                 setStatus(a, "Could not save outbox; message not queued");
                 return;
             }
-            enqueueSlackOutbox(a, slot);
+            for (a.slack_outbox[start..a.slack_outbox_count]) |*slot| enqueueSlackOutbox(a, slot);
         } else {
             var uuid_bytes: [16]u8 = undefined;
             a.io.random(&uuid_bytes);
@@ -13169,7 +13276,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         slackChatCount(a), a.chat_count,                     a.show_archived, a.unread_only,
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
-    try w.print(",\"theme\":\"{s}\"", .{@tagName(theme.choice)});
+    try w.print(",\"theme\":\"{s}\",\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.staged_images.count });
     try w.writeAll(",\"paints\":");
     try a.paints.write(w);
     const box = a.compose_pill;
@@ -14707,32 +14814,7 @@ fn runCommand(a: *App, command: u16) void {
                 setStatus(a, reason);
                 return;
             }
-            if (selectedChatIsTelegram(a) or unifiedHub(a)) {
-                if (pickImageFile(a)) |path| {
-                    const utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, path.slice()) catch return;
-                    defer a.allocator.free(utf8);
-                    if (unifiedHub(a)) {
-                        var buffer: [520]u8 = undefined;
-                        const extension = std.fs.path.extension(utf8);
-                        const length = stageNewPath(a, &buffer, if (extension.len > 1) extension[1..] else "bin") orelse return;
-                        var copy_path = WideText(519){};
-                        copy_path.set(a.allocator, buffer[0..length]);
-                        if (win.CopyFileW(path.ptr(), copy_path.ptr(), win.FALSE) == 0) {
-                            deleteFileUtf8(buffer[0..length]);
-                            setStatus(a, "Could not stage the attachment");
-                            return;
-                        }
-                        if (stageFile(a, buffer[0..length])) a.staged_image.owned = true else deleteFileUtf8(buffer[0..length]);
-                    } else _ = stageFile(a, utf8);
-                }
-                return;
-            }
-            if (pickImageFile(a)) |path| {
-                a.slack_attach = path;
-                a.slack_attach_account = a.chats[a.selected_chat].account;
-                a.slack_attach_jid.set(a.chats[a.selected_chat].jid.slice());
-                setStatus(a, "Image attached - press Send");
-            }
+            if (pickImageFile(a)) |path| _ = stageAttachmentFile(a, path.ptr());
         },
         command_open_video_external => {
             const selected = a.selected_message orelse {
@@ -14820,9 +14902,36 @@ fn composerContentHeight(a: *App) i32 {
     return directwrite_edit.contentHeight(compose, compose_layout.edit_min_height);
 }
 
+fn stagedPreviewColumns(a: *const App, width: i32) usize {
+    const left_width = std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 390));
+    const available = width - left_width - threadPanelWidth(a, width, left_width) - px(a, 26);
+    return @intCast(@max(1, @divTrunc(available, px(a, 56))));
+}
+
+fn stagedComposerSizes(a: *App, width: i32, height: i32) compose_layout.Composer {
+    const columns = stagedPreviewColumns(a, width);
+    const extra = @as(i32, @intCast((a.staged_images.count -| 1) / columns)) * px(a, compose_layout.preview_band);
+    var sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height - extra, a.staged_images.count > 0, @intCast(a.dpi));
+    sizes.strip_height += extra;
+    return sizes;
+}
+
+fn stagedPreviewRect(a: *const App, index: usize) win.RECT {
+    const columns = stagedPreviewColumns(a, a.compose_client_width);
+    const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 390));
+    const left = left_width + px(a, 13) + @as(i32, @intCast(index % columns)) * px(a, 56);
+    const top = a.compose_strip_top + px(a, 10) + @as(i32, @intCast(index / columns)) * px(a, compose_layout.preview_band);
+    return .{ .left = left, .top = top, .right = left + px(a, 44) + 2, .bottom = top + px(a, 44) + 2 };
+}
+
+fn stagedRemoveRect(a: *const App, index: usize) win.RECT {
+    const preview = stagedPreviewRect(a, index);
+    return .{ .left = preview.right - px(a, 14), .top = preview.top, .right = preview.right, .bottom = preview.top + px(a, 14) };
+}
+
 fn layoutComposer(a: *App) void {
     const height = a.compose_client_height;
-    const sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
+    const sizes = stagedComposerSizes(a, a.compose_client_width, height);
     if (a.compose_strip_top == height - sizes.strip_height and a.compose_pill.top == height - px(a, 11) - sizes.edit_height) return;
     const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 390));
     var dirty = win.RECT{ .left = left_width + 1, .top = @min(a.compose_strip_top, height - sizes.strip_height), .right = a.compose_client_width, .bottom = height };
@@ -14840,10 +14949,10 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
     const header_height: i32 = 0;
     const search_height: i32 = px(a, 48);
     const status_height: i32 = px(a, 26);
-    var sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
+    var sizes = stagedComposerSizes(a, width, height);
     if (a.compose) |hwnd| {
         for (0..2) |pass| {
-            if (pass > 0) sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height, a.staged_image.path.len > 0, @intCast(a.dpi));
+            if (pass > 0) sizes = stagedComposerSizes(a, width, height);
             a.compose_geometry = compose_layout.arrange(.{ .left = left_width + 1, .top = 0, .right = width - threadPanelWidth(a, width, left_width), .bottom = height }, sizes.edit_height, @intCast(a.dpi), a.voice_active);
             a.compose_pill = @bitCast(a.compose_geometry.box);
             const inner = a.compose_geometry.text;
@@ -17098,6 +17207,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             controlOnUi(a, @ptrFromInt(@as(usize, @bitCast(lparam))));
             return 0;
         },
+        win.WM_DROPFILES => {
+            stageDroppedFiles(a, @ptrFromInt(wparam));
+            return 0;
+        },
         win.WM_POWERBROADCAST => {
             if (wparam == win.PBT_APMRESUMEAUTOMATIC) startUpdateCheck(hwnd, false);
             return 1;
@@ -17267,22 +17380,32 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 var grip = win.RECT{ .left = cx - px(a, 22), .top = a.compose_strip_top + px(a, 4), .right = cx + px(a, 22), .bottom = a.compose_strip_top + px(a, 6) };
                 _ = win.FillRect(hdc, &grip, if (theme.choice == .amoled) a.brush_muted.? else a.brush_panel.?);
             }
-            if (a.staged_image.preview) |preview| {
-                var preview_rect = win.RECT{
-                    .left = left_width + px(a, 13),
-                    .top = a.compose_strip_top + px(a, 10),
-                    .right = left_width + px(a, 14) + a.staged_image.preview_width,
-                    .bottom = a.compose_strip_top + px(a, 11) + a.staged_image.preview_height,
-                };
+            for (a.staged_images.items[0..a.staged_images.count], 0..) |image, index| {
+                var preview_rect = stagedPreviewRect(a, index);
                 _ = win.FillRect(hdc, &preview_rect, a.brush_bg.?);
-                const memory_dc = win.CreateCompatibleDC(hdc);
-                if (memory_dc != null) {
-                    const previous = win.SelectObject(memory_dc, @ptrCast(preview));
-                    _ = win.BitBlt(hdc, preview_rect.left + 1, preview_rect.top + 1, a.staged_image.preview_width, a.staged_image.preview_height, memory_dc, 0, 0, win.SRCCOPY);
-                    _ = win.SelectObject(memory_dc, previous);
-                    _ = win.DeleteDC(memory_dc);
+                if (image.preview) |preview| {
+                    const memory_dc = win.CreateCompatibleDC(hdc);
+                    if (memory_dc != null) {
+                        const previous = win.SelectObject(memory_dc, @ptrCast(preview));
+                        _ = win.StretchBlt(hdc, preview_rect.left + 1, preview_rect.top + 1, px(a, image.preview_width), px(a, image.preview_height), memory_dc, 0, 0, image.preview_width, image.preview_height, win.SRCCOPY);
+                        _ = win.SelectObject(memory_dc, previous);
+                        _ = win.DeleteDC(memory_dc);
+                    }
+                } else {
+                    var filename = WideText(519){};
+                    filename.set(a.allocator, std.fs.path.basename(image.path.slice()));
+                    _ = win.SelectObject(hdc, a.font_small.?);
+                    _ = win.SetBkMode(hdc, win.TRANSPARENT);
+                    _ = win.SetTextColor(hdc, theme.current.on_surface);
+                    _ = text_draw.drawText(hdc, filename.ptr(), -1, &preview_rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
                 }
                 _ = win.FrameRect(hdc, &preview_rect, a.brush_muted.?);
+                var close_rect = stagedRemoveRect(a, index);
+                _ = win.FillRect(hdc, &close_rect, a.brush_bg.?);
+                _ = win.SelectObject(hdc, a.font_small.?);
+                _ = win.SetBkMode(hdc, win.TRANSPARENT);
+                _ = win.SetTextColor(hdc, theme.current.on_surface);
+                _ = text_draw.drawText(hdc, lit("×"), -1, &close_rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
             }
             if (a.chats_hwnd) |list| drawScrollbar(&shapes, stripRightOf(list, hwnd), listboxScrollInfo(list), theme.current.outline);
             if (a.compose) |edit| drawScrollbar(&shapes, stripRightOf(edit, hwnd), composeScrollInfo(a, edit), theme.current.outline);
@@ -17316,6 +17439,15 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 },
                 .body => return 0,
                 .none => {},
+            }
+            for (0..a.staged_images.count) |index| {
+                const close_rect = stagedRemoveRect(a, index);
+                if (win.PtInRect(&close_rect, .{ .x = x, .y = y }) != 0) {
+                    removeStagedImage(a, index, true);
+                    layout(a, a.compose_client_width, a.compose_client_height);
+                    focusCompose(a);
+                    return 0;
+                }
             }
             if (a.compose != null and y >= a.compose_strip_top and y < a.compose_strip_top + px(a, 11)) {
                 a.compose_dragging = true;
@@ -17954,7 +18086,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             if (selected < a.message_count and isImage(&a.messages[selected])) {
                 const compose_empty = if (a.compose) |compose| win.GetWindowTextLengthW(compose) == 0 else true;
                 const in_search = if (a.search) |search| focus == search else false;
-                if (compose_empty and a.staged_image.path.len == 0 and !in_search) {
+                if (compose_empty and a.staged_images.count == 0 and !in_search) {
                     openImageInViewerOrQueue(a, selected, &a.messages[selected]);
                     return true;
                 }
@@ -18095,7 +18227,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
                     setStatus(a, "Reply cancelled");
                     return true;
                 }
-                if (a.staged_image.path.len > 0) {
+                if (a.staged_images.count > 0) {
                     discardStagedImage(a);
                     layout(a, a.compose_client_width, a.compose_client_height);
                     if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.FALSE);
@@ -19108,7 +19240,7 @@ pub fn main(init: std.process.Init) !void {
     appendLaunchLog(app, std.fmt.bufPrint(&pre_window_buffer, "startup-timing: pre-window work done {d} ms", .{win.GetTickCount64() -% process_start_ms}) catch "startup-timing: pre-window work done");
     const window_rect = loadWindowRect();
     const hwnd = win.CreateWindowExW(
-        0,
+        win.WS_EX_ACCEPTFILES,
         lit("MessagesZig"),
         lit("Wazig v" ++ app_version),
         win.WS_OVERLAPPEDWINDOW | win.WS_CLIPCHILDREN | win.WS_MAXIMIZE,

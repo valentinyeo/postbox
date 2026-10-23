@@ -1,4 +1,5 @@
 const std = @import("std");
+const staged_images = @import("staged_images.zig");
 const tg = @import("telegram.zig");
 const tj = @import("telegram_json.zig");
 const transport = @import("transport.zig");
@@ -193,8 +194,8 @@ test "fake send_file" {
     for ([_][]const u8{ "fixture/photo.png", "fixture/report.pdf" }, [_][]const u8{ "inputMessagePhoto", "inputMessageDocument" }, [_][]const u8{ "photo", "document" }) |path, kind, field| {
         if (comptime @hasDecl(@This(), "stageFile")) {
             try std.testing.expect(@field(@This(), "stageFile")(app, path));
-            try std.testing.expect(!app.staged_image.owned);
-            try std.testing.expectEqualStrings(path, app.staged_image.path.slice());
+            try std.testing.expect(!app.staged_images.items[0].owned);
+            try std.testing.expectEqualStrings(path, app.staged_images.items[0].path.slice());
         }
         sendTelegram(app, "caption", path);
         var sent = try request("sendMessage");
@@ -207,11 +208,23 @@ test "fake send_file" {
         try std.testing.expectEqualStrings("caption", content.get("caption").?.object.get("text").?.string);
     }
     if (comptime @hasDecl(@This(), "stageFile")) {
+        try std.testing.expect(stageFile(app, "fixture/first.png"));
+        try std.testing.expect(stageFile(app, "fixture/second.png"));
+        sendTelegram(app, "caption", "fixture/first.png");
+        for ([_][]const u8{ "fixture/first.png", "fixture/second.png" }, 0..) |path, index| {
+            var sent = try request("sendMessage");
+            defer sent.deinit();
+            const content = sent.value.object.get("input_message_content").?.object;
+            try std.testing.expectEqualStrings(path, content.get("photo").?.object.get("path").?.string);
+            try std.testing.expectEqualStrings(if (index == 0) "caption" else "", content.get("caption").?.object.get("text").?.string);
+        }
+        try std.testing.expectEqual(@as(usize, 0), app.staged_images.count);
         const before = deleted_files;
         try std.testing.expect(@field(@This(), "stageFile")(app, "fixture/original.pdf"));
         discardStagedImage(app);
         try std.testing.expectEqual(before, deleted_files);
-        app.staged_image.path.set("fixture/owned.png");
+        app.staged_images.count = 1;
+        app.staged_images.items[0].path.set("fixture/owned.png");
         discardStagedImage(app);
         try std.testing.expectEqual(before + 1, deleted_files);
     }
@@ -361,7 +374,7 @@ const App = struct {
     scroll_y: i32 = 0,
     canvas: ?usize = null,
     compose: ?usize = 1,
-    staged_image: StagedImage = .{},
+    staged_images: staged_images.List(StagedImage) = .{},
     hwnd: ?usize = null,
     reply_to: Utf8Text(191) = .{},
     compose_client_width: i32 = 0,
@@ -412,8 +425,15 @@ var deleted_files: usize = 0;
 fn deleteFileUtf8(_: []const u8) void {
     deleted_files += 1;
 }
+fn makePreviewBitmap(_: *App, _: [*:0]const u16) ?win.HBITMAP {
+    return null;
+}
 const win = struct {
     const HBITMAP = usize;
+    const BITMAP = struct { bmWidth: i32 = 0, bmHeight: i32 = 0 };
+    fn GetObjectW(_: usize, _: usize, _: *BITMAP) i32 {
+        return 0;
+    }
     fn DeleteObject(_: usize) i32 {
         return 1;
     }

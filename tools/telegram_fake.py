@@ -29,9 +29,13 @@ def main():
         directory = Path(temporary)
         for name in ("telegram.zig", "telegram_json.zig", "transport.zig", "chat_key.zig", "messenger_view.zig", "archive_rules.zig"):
             (directory / name).write_text(source(name))
+        if not args.baseline:
+            (directory / "staged_images.zig").write_text(source("staged_images.zig"))
         production = source("main.zig")
         names = ("WideText", "Utf8Text", "tgChatIdString", "selectedChatIsTelegram", "tgSelectedChatId", "tgSelectedChatIsGroup", "upsertTgChat", "appendTelegramChats", "refreshTelegramMessages", "tgDisplayText", "telegramAutoDownload", "discardStagedImage", "releaseStagedImage")
         sections = [extract(production, name) for name in names]
+        if not args.baseline:
+            sections.append(extract(production, "removeStagedImage"))
         if "fn chatInView(" in production:
             sections.append(extract(production, "chatInView"))
         if "fn stageFile(" in production:
@@ -44,7 +48,8 @@ def main():
         end = sending.index("    if (selectedChatIsSlack(a)) {", start)
         context = "const compose = a.compose orelse return;\nconst reply_to = a.reply_to.slice();\nconst thread = false;\n" if "fn sendMessageFrom(" in production else ""
         sections.append("fn sendTelegram(a: *App, text: []const u8, staged_file: []const u8) void {\nstd.mem.doNotOptimizeAway(staged_file);\n" + context + sending[start:end] + "}\n")
-        fixture = (ROOT / "tools/telegram_fake.zig").read_text()
+        fixture = (subprocess.check_output(["git", "show", "origin/main:tools/telegram_fake.zig"], cwd=ROOT).decode()
+                   if args.baseline else (ROOT / "tools/telegram_fake.zig").read_text())
         (directory / "test.zig").write_text(fixture + "\n" + "\n".join(sections))
         command = [os.environ["ZIG"], "test", str(directory / "test.zig"), str(ROOT / "tools/telegram_fake.c"), "-lc", "--test-filter", "fake "]
         result = subprocess.run(command, cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

@@ -103,7 +103,7 @@ const App = struct {
     content_height: i32 = 44,
     compose_strip_top: i32 = 734,
     compose_pill: struct { top: i32 } = .{ .top = 745 },
-    staged_image: struct { path: struct { len: usize = 0 } = .{} } = .{},
+    staged_images: struct { count: usize = 0 } = .{},
     layouts: usize = 0,
     saves: usize = 0,
     shortcodes: usize = 0,
@@ -117,6 +117,10 @@ fn px(a: *const App, value: i32) i32 {
     return @divTrunc(value * @as(i32, @intCast(a.dpi)) + 48, 96);
 }
 
+fn threadPanelWidth(_: *const App, _: i32, _: i32) i32 {
+    return 0;
+}
+
 fn layout(a: *App, width: i32, height: i32) void {
     layoutRegion(a, width, height, null);
 }
@@ -127,7 +131,7 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
     }
     std.debug.assert(width == a.compose_client_width and height == a.compose_client_height);
     a.layouts += 1;
-    const sizes = compose_layout.computeScaled(a.compose_dragged, a.content_height, height, a.staged_image.path.len > 0, @intCast(a.dpi));
+    const sizes = stagedComposerSizes(a, width, height);
     a.compose_strip_top = height - sizes.strip_height;
     a.compose_pill.top = height - px(a, 11) - sizes.edit_height;
 }
@@ -173,9 +177,27 @@ test "IGSH-510 composer still grows shrinks and respects dragged height and prev
     a.compose_dragged = 320;
     composeChanged(&a);
     try std.testing.expectEqual(@as(i32, 458), a.compose_strip_top);
-    a.staged_image.path.len = 1;
+    a.staged_images.count = 1;
     composeChanged(&a);
     try std.testing.expectEqual(@as(i32, 404), a.compose_strip_top);
+}
+
+test "staged previews wrap without overlapping the composer and share remove hit targets" {
+    for ([_]u32{ 96, 144, 192 }) |dpi| {
+        var a = App{ .dpi = dpi, .compose_client_width = @intCast(@divTrunc(900 * dpi, 96)), .compose_client_height = @intCast(@divTrunc(800 * dpi, 96)) };
+        a.staged_images.count = 16;
+        layout(&a, a.compose_client_width, a.compose_client_height);
+        const columns = stagedPreviewColumns(&a, a.compose_client_width);
+        try std.testing.expect(columns > 1 and columns < a.staged_images.count);
+        for (0..a.staged_images.count) |index| {
+            const preview = stagedPreviewRect(&a, index);
+            const close = stagedRemoveRect(&a, index);
+            try std.testing.expect(preview.left > 0 and preview.right < a.compose_client_width);
+            try std.testing.expect(preview.bottom < a.compose_pill.top);
+            try std.testing.expect(close.left >= preview.left and close.top == preview.top and close.right == preview.right and close.bottom <= preview.bottom);
+            if (index >= columns) try std.testing.expect(preview.top > stagedPreviewRect(&a, index - columns).bottom);
+        }
+    }
 }
 
 test "IGSH-510 dirty painting clips and presents only changed pixels once on both themes" {
