@@ -50,6 +50,8 @@ const App = struct {
     status: Utf8Text(127) = .{},
     failed_bubbles: usize = 0,
     sent_bubbles: usize = 0,
+    activity_seconds: i64 = 0,
+    refreshed_chats: usize = 0,
     allocator: std.mem.Allocator = std.testing.allocator,
     selected_chat: usize = 0,
     chats: [1]struct { provider: enum { slack } = .slack, account: Utf8Text(32) = .{}, jid: Utf8Text(191) = .{} } = .{.{}},
@@ -75,6 +77,14 @@ fn setStatus(a: *App, status: []const u8) void {
 
 fn resolveSlackSend(a: *App, result: *WacliResult) void {
     if (result.ok) a.sent_bubbles += 1 else a.failed_bubbles += 1;
+}
+
+fn noteSlackActivity(a: *App, _: []const u8, _: []const u8, seconds: i64) void {
+    a.activity_seconds = seconds;
+}
+
+fn refreshVisibleChats(a: *App) void {
+    a.refreshed_chats += 1;
 }
 
 fn persistOutbox(a: *App) bool {
@@ -388,4 +398,16 @@ test "outbox keeps colliding channel ids isolated and one disconnected workspace
     handleSlackSendResult(&a, &result);
     try std.testing.expectEqual(@as(u8, 0), first.entry.attempts);
     try std.testing.expectEqual(outbox.SendState.queued, first.entry.state);
+}
+
+test "successful Slack send records last message time and refreshes chat ordering without an echo" {
+    var a = App{};
+    const slot = addEntry(&a, false);
+    var result = resultFor(slot, .slack_send);
+    result.ok = true;
+    result.data = @constCast("{\"ok\":true,\"ts\":\"1740000500.000100\"}");
+    handleSlackSendResult(&a, &result);
+    try std.testing.expectEqual(@as(i64, 1740000500), a.activity_seconds);
+    try std.testing.expectEqual(@as(usize, 1), a.refreshed_chats);
+    try std.testing.expectEqual(@as(usize, 0), a.slack_outbox_count);
 }

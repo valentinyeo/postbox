@@ -86,6 +86,7 @@ const App = struct {
     last_job: WacliJob = .{},
     painted: u32 = 0,
     cached: u32 = 0,
+    refreshed_chats: u32 = 0,
     cache_data: ?[]const u8 = null,
     message_count: usize = 0,
     messages: [1]struct { transcript_state: enum { none, loading, ready, failed } = .none } = .{.{}},
@@ -148,6 +149,9 @@ fn bindOutboxAccount(_: *App) void {}
 fn loadChatsCache(_: *App) void {}
 fn refreshGroups(_: *App) void {}
 fn refreshChats(_: *App) void {}
+fn refreshVisibleChats(a: *App) void {
+    a.refreshed_chats += 1;
+}
 fn refreshContactsIndex(_: *App) void {}
 
 test "fresh sidebar row triggers one generation-guarded read" {
@@ -578,4 +582,15 @@ test "IGSH-575 late older reads cannot replace the newest click or block its nex
     try std.testing.expectEqual(@as(u32, 1), a.cached);
     try std.testing.expect(chat_key.Key.eql(a.messages_read_key.key(), chat_key.of(&a.chats[0])));
     deliver(&a, &followup);
+}
+
+test "hub Slack history refreshes ordering after caching its last message fallback" {
+    var a = fixture();
+    a.unified_hub = true;
+    a.chats[0].provider = .slack;
+    refreshMessages(&a);
+    var result = resultFor(a.last_job);
+    deliver(&a, &result);
+    try std.testing.expectEqual(@as(u32, 1), a.cached);
+    try std.testing.expectEqual(@as(u32, 1), a.refreshed_chats);
 }

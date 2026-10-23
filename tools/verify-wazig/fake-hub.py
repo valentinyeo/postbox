@@ -96,17 +96,88 @@ class Handler(bridge.Handler):
         super().do_POST()
 
 
+class SlackSortHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            rows = [dict(jid=chat, name=name, provider='slack', kind='direct',
+                         last_message_ts=self.state.sort_times[chat], unread_count=0, archived=False)
+                    for chat, name in [('fixture-alpha', 'Verification Alpha'),
+                                       ('fixture-unknown', 'Verification Aardvark'),
+                                       ('fixture-gamma', 'Verification Gamma'),
+                                       ('fixture-beta', 'Verification Beta')]]
+            self.respond(200, rows if query.get('archived', ['false'])[0] == 'false' else [])
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            stamp = self.state.sort_initial.get(chat, '')
+            rows = [] if not stamp else [dict(MsgID='SORT-' + chat, ChatJID=chat, Timestamp=stamp,
+                                              Text='Synthetic last message', FromMe=chat == 'fixture-gamma',
+                                              SenderName='Fixture Sender')]
+            if chat == ALPHA and self.state.live:
+                rows.insert(0, dict(MsgID='SORT-LIVE', ChatJID=chat, Timestamp=self.state.sort_times[chat],
+                                    Text='Synthetic Slack incoming', FromMe=False, SenderName='Fixture Sender'))
+            if chat == 'fixture-gamma' and self.state.sort_times[chat] != stamp:
+                rows.insert(0, dict(MsgID='SORT-SENT', ChatJID=chat, Timestamp=self.state.sort_times[chat],
+                                    Text='Synthetic Slack outgoing', FromMe=True, SenderName='Fixture Sender'))
+            self.respond(200, rows)
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path.startswith('/v1/wazig/avatar/'):
+            self.respond(404, {'error': 'unavailable'})
+        else:
+            self.respond(404, {'error': 'unknown sort path'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/fixture/live':
+            with self.state.lock:
+                self.state.sort_times[ALPHA] = self.state.stamp
+                self.state.live = True
+                self.state.lock.notify_all()
+            self.respond(200, {'ok': True})
+        elif self.path == '/v1/wazig/mark-read':
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/send' and body.get('chat') == 'fixture-gamma':
+            stamp = (datetime.fromisoformat(self.state.stamp) + timedelta(seconds=1)).isoformat().replace('+00:00', 'Z')
+            self.state.sort_times['fixture-gamma'] = stamp
+            self.respond(200, dict(client_id=body['client_id'], msg_id='SORT-SENT', ts=stamp, status='sent'), body=body)
+        else:
+            self.respond(400, {'error': 'invalid sort request'}, body=body)
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Fake hub runs only on GitHub Actions')
     parser = argparse.ArgumentParser()
     parser.add_argument('--port-file', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
+    parser.add_argument('--slack-sort', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    server = ThreadingHTTPServer((loopback, 0), Handler)
+    server = ThreadingHTTPServer((loopback, 0), SlackSortHandler if args.slack_sort else Handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
+    if args.slack_sort:
+        stamp = datetime.fromisoformat(server.state.stamp)
+        server.state.sort_times = {
+            ALPHA: (stamp - timedelta(hours=3)).isoformat().replace('+00:00', 'Z'),
+            BETA: (stamp - timedelta(hours=1)).isoformat().replace('+00:00', 'Z'),
+            'fixture-gamma': (stamp - timedelta(hours=2)).isoformat().replace('+00:00', 'Z'),
+            'fixture-unknown': '',
+        }
+        server.state.sort_initial = dict(server.state.sort_times)
     args.port_file.write_text(str(server.server_port), encoding='utf-8')
     server.serve_forever()
 
