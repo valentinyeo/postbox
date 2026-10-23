@@ -5,6 +5,7 @@
 - Every start opens the main MessagesZig window maximized with the taskbar available, not borderless fullscreen.
 - Normal placement survives a user close and same-profile restart; the window returns maximized on the same monitor.
 - The updater's exact --update-relaunch argument follows the same startup rule.
+- A launcher that passes STARTF_USESHOWWINDOW with SW_SHOWNORMAL, like a Start-menu shortcut, and the updater's own CreateProcessW call with an empty STARTUPINFO also open maximized, and each start logs `startup: window zoomed=true`.
 
 ## How to get to it (user POV)
 
@@ -19,7 +20,9 @@
 - After foreground ownership checks, use SendKeys Alt+Space, R to restore, then Alt+Space, S and arrow keys to shrink both dimensions. Require zoomed=false and a smaller normal rect; save restored.png.
 - Send Alt+F4, require process exit, and relaunch the same ProcessStartInfo with WAZIG_VERIFY_RESTART set to the fixture ID. Immediately replace the session manifest PID and start ticks before waiting for the new window and running doctor. Require zoomed=true, the saved monitor and normal rect; save start-2.png.
 - Close again with Alt+F4, wait for exit, append --update-relaunch and repeat the same-profile launch, manifest update and doctor. Require zoomed=true, the saved monitor and normal rect; save start-3.png.
-- Retain window.json even on assertion failure: ordered start-1, restored, start-2 and start-3 observations contain zoomed values, HWND, PID/start ticks, monitor handle/rect/work area, normal rect, isolated root/ID and update-relaunch flag. check-evidence.py validates these observations, images, user-input log and side-effect/cleanup evidence.
+- After start-3 and Alt+F4, launch from PowerShell through kernel32 CreateProcessW with an environment block built from the harness ProcessStartInfo plus the restart fixture ID. start-4 passes STARTUPINFOW dwFlags=STARTF_USESHOWWINDOW and wShowWindow=SW_SHOWNORMAL; start-5 passes STARTUPINFOW zeroed except cb with the command line `"<exe>" --verify-fixture --update-relaunch`, mirroring relaunchIntoUpdate (the fixture flag keeps the registry isolated). Replace the manifest PID and start ticks, run doctor, require zoomed=true, the saved monitor and normal rect; save start-4.png and start-5.png. Close start-4 with Alt+F4; start-5 is closed by cleanup.
+- After every start require a new `startup: window zoomed=true` line in the isolated profile's Messages/launch-log.txt (written by appendLaunchLog in src/main.zig) and record launch_zoomed_before and launch_zoomed_after counts.
+- Retain window.json even on assertion failure: ordered start-1, restored, start-2, start-3, start-4 and start-5 observations contain zoomed values, HWND, PID/start ticks, monitor handle/rect/work area, normal rect, isolated root/ID and update-relaunch flag, start_method and the launch-log counts. check-evidence.py validates these observations, images, user-input log and side-effect/cleanup evidence.
 
 ## Gotchas
 

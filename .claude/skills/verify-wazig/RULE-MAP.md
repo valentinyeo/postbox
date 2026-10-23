@@ -18,6 +18,6 @@
 | Slack icons and WhatsApp/Signal marks share the provider badge mechanism | src/hub_test.zig, workspace-icons journey screenshot crops and check-workspace-icons.py | [Workspace icons](features/workspace-icons.md) |
 | Legacy WhatsApp keep flags migrate once per hub without resurfacing on incoming messages or restart | hub-archive.ps1, synthetic hub archive ledger and check-hub-archive-evidence.py | [Hub archive](features/hub-archive.md) |
 | Existing account order remains stable when empty Telegram and Signal are registered | views journey and check-views-evidence.py | [Views](features/views.md) |
-| Every start maximizes on the saved monitor, including update relaunch | window journey reads native IsZoomed without forced harness maximization; restores/resizes and closes through real keyboard input before same-profile restarts | [Window](features/window.md) |
+| Every start maximizes on the saved monitor, including update relaunch | window journey reads native IsZoomed without forced harness maximization, including CreateProcessW launches with SW_SHOWNORMAL startup info and the updater's empty startup info, and requires the startup zoomed launch-log line; restores/resizes and closes through real keyboard input before same-profile restarts | [Window](features/window.md) |
 
 IGSH-589: update the maps with the implementation and describe only actual assertions. GitHub execution and screenshot inspection remain required before claiming runtime success. The Signal fixture does not prove production authentication or delivery.

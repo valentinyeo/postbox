@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IGSH-669: Messages opens maximized even when a shortcut or the updater starts it with a normal-window request, and the launch log records whether the window started maximized.
+
 - IGSH-669: Always open Messages maximized on its last saved monitor, including update relaunches, while retaining the normal window size for Restore.
 
 - IGSH-645: Right-click message reactions send the emoji clicked in the quick reaction row instead of always sending thumbs up.
