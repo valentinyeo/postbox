@@ -73,6 +73,7 @@ fn WideText(comptime capacity: usize) type {
     };
 }
 const Message = struct {
+    thread_ts: Utf8Text(191) = .{},
     media_type: Utf8Text(31) = .{},
     local_path: WideText(519) = .{},
     from_me: bool = true,
@@ -128,6 +129,9 @@ const App = struct {
     wacli_refresh_again: bool = false,
     wacli_pending: [@typeInfo(WacliJobKind).@"enum".fields.len]u32 = @splat(0),
     compose: ?usize = 1,
+    thread_compose: ?usize = null,
+    thread_parent: Utf8Text(191) = .{},
+    thread_origin: chat_key.Stored = .{},
     canvas: ?usize = null,
     hwnd: ?usize = null,
     chat_count: usize = 1,
@@ -248,6 +252,9 @@ const win = struct {
         @memcpy(dest[0..len], compose_text[0..len]);
         return @intCast(len);
     }
+    fn SetFocus(_: usize) ?usize {
+        return null;
+    }
     fn SetWindowTextW(_: usize, _: [*:0]const u16) u32 {
         compose_len = 0;
         return 1;
@@ -334,7 +341,7 @@ fn mintSendId(_: *App, id: *[outbox.id_len]u8) void {
     std.testing.io.random(id);
     id.* = outbox.hexId(id[0..16].*);
 }
-fn appendSlackPending(_: *App, _: []const u8, _: []const u8) void {}
+fn appendSlackPending(_: *App, _: []const u8, _: []const u8, _: []const u8) void {}
 fn wacliPumpSync(_: *App) void {}
 fn deleteFileUtf8(_: []const u8) void {
     deleted += 1;
