@@ -16,7 +16,8 @@ using System.Windows.Forms;
 public static class VerifyPasteImage {
     delegate bool EnumWindow(IntPtr window, IntPtr data);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
-    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr window);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, System.Text.StringBuilder name, int capacity);
     public static IntPtr[] Dialogs(int pid) {
@@ -181,14 +182,25 @@ function Invoke-PasteImageJourney($Session) {
 function Get-PickerDialog($Session, [IntPtr]$Expected = [IntPtr]::Zero) {
     $open = $null
     foreach ($handle in [VerifyPasteImage]::Dialogs($Session.pid)) {
-        $window = [Windows.Automation.AutomationElement]::FromHandle($handle)
-        $filename = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1148'))
-        if ($window.Current.Name -cne 'Open' -or $null -eq $filename -or ($filename.Current.ControlType -ne [Windows.Automation.ControlType]::ComboBox -and $filename.Current.ClassName -ne 'ComboBoxEx32') -or ($Expected -ne [IntPtr]::Zero -and $handle -ne $Expected) -or $null -ne $open) {
-            $elements = $window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
-            $text = (@($window.Current.Name) + @($elements | ForEach-Object { $_.Current.Name } | Where-Object { $_ })) -join ' | '
-            throw "paste-image: unexpected #32770 dialog: $text"
+        if (-not [VerifyPasteImage]::IsWindow($handle) -or -not [VerifyPasteImage]::IsWindowVisible($handle)) { continue }
+        try {
+            $window = [Windows.Automation.AutomationElement]::FromHandle($handle)
+            if ($Expected -ne [IntPtr]::Zero -and $handle -eq $Expected) {
+                $open = $window
+                continue
+            }
+            $filename = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1148'))
+            if ($window.Current.Name -cne 'Open' -or $null -eq $filename -or ($filename.Current.ControlType -ne [Windows.Automation.ControlType]::ComboBox -and $filename.Current.ClassName -ne 'ComboBoxEx32') -or ($Expected -ne [IntPtr]::Zero -and $handle -ne $Expected) -or $null -ne $open) {
+                $elements = $window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
+                $text = (@($window.Current.Name) + @($elements | ForEach-Object { $_.Current.Name } | Where-Object { $_ })) -join ' | '
+                if (-not [VerifyPasteImage]::IsWindow($handle) -or -not [VerifyPasteImage]::IsWindowVisible($handle)) { continue }
+                throw "paste-image: unexpected #32770 dialog: $text"
+            }
+            $open = $window
+        } catch {
+            if (-not [VerifyPasteImage]::IsWindow($handle) -or -not [VerifyPasteImage]::IsWindowVisible($handle)) { continue }
+            throw
         }
-        $open = $window
     }
     return $open
 }
