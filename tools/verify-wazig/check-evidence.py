@@ -159,8 +159,17 @@ if session['feature'] == 'passage-copy':
         rows = fixture[chat]
         assert len(rows) >= 7 and len({r['SenderName'] for r in rows}) >= 2
         assert any(r['FromMe'] for r in rows)
+        assert all(row['Text'] == 'alpha MIDDLE omega' for row in rows[1:5])
+        assert rows[5]['Text'].split('\n') == ['alpha MIDDLE omega'] * 40
         for stage, last in [('partial', 4), ('edge', 6)]:
             check, = [r for r in checks if r['provider'] == provider and r['stage'] == stage]
+            canvas = check['canvas']
+            assert canvas['width'] > 0 and canvas['height'] > 0 and canvas['dpi'] > 0
+            if stage == 'partial':
+                for row in check['before'][1:5]:
+                    left, top, right, bottom = row['bubble']
+                    assert 0 <= left < right <= canvas['width'] and 0 <= top < bottom <= canvas['height']
+                assert check['before'][4]['bubble'][3] - check['before'][1]['bubble'][1] <= canvas['height']
             blocks, day = [], ''
             for index in range(1, last + 1):
                 row = rows[index]
@@ -180,6 +189,17 @@ if session['feature'] == 'passage-copy':
                 assert check['before'][6]['bubble'][2] == 0
                 assert check['after'][6]['bubble'][2] > 0
                 assert check['before'][1]['bubble'] != check['after'][1]['bubble']
+                left, top, right, bottom = check['before'][1]['bubble']
+                assert 0 <= left < right <= canvas['width'] and 0 <= top < bottom <= canvas['height']
+                held = check['held']
+                assert check['before'][5]['bubble'][2] > check['before'][5]['bubble'][0]
+                assert held['messages'][5]['bubble'][2] > held['messages'][5]['bubble'][0]
+                assert held['scroll_before'] == check['before'][5]['bubble'][1]
+                assert held['scroll_after'] == held['messages'][5]['bubble'][1] < held['scroll_before']
+                assert check['after'][5]['bubble'][2] > check['after'][5]['bubble'][0]
+                assert check['after'][5]['bubble'][1] < held['scroll_before']
+                left, top, right, bottom = held['messages'][6]['bubble']
+                assert 0 <= left < right <= canvas['width'] and 0 <= top < bottom <= canvas['height']
         images = []
         for phase in ['before', 'after', 'edge-after']:
             image = (folder / f'{provider}-{phase}.png').read_bytes()
