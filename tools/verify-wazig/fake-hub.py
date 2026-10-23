@@ -53,6 +53,13 @@ class Handler(bridge.Handler):
     def record(self, status, **extra):
         if 'body' in extra and hasattr(self, 'wire_body'):
             extra['body'] = self.wire_body
+        if self.wire_path == '/v1/wazig/react' and 'body' in extra:
+            body = extra['body']
+            with self.state.lock:
+                with self.state.log.with_name('react-requests.jsonl').open('a', encoding='utf-8') as stream:
+                    stream.write(json.dumps(body) + '\n')
+                if status == 200:
+                    self.state.reactions[body['chat']] = dict(body)
         super().record(status, wire_path=self.wire_path, **extra)
 
     def respond(self, status, data, content_type='application/json', **extra):
@@ -138,6 +145,31 @@ class Handler(bridge.Handler):
         self.headers.replace_header('Content-Length', str(len(encoded)))
         self.path = self.path.replace('/v1/wazig/', '/v1/', 1)
         super().do_POST()
+
+
+class ReactionsHandler(Handler):
+    def do_GET(self):
+        url = urlsplit(self.path)
+        if url.path != '/v1/wazig/messages':
+            super().do_GET()
+            return
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        chat = parse_qs(url.query).get('chat', [''])[0]
+        if chat not in (ALPHA, BETA):
+            self.respond(400, {'error': 'unknown reaction chat'})
+            return
+        message_id = 'BASELINE' if chat == ALPHA else 'BASELINE_BETA'
+        rows = [dict(MsgID=message_id, ChatJID=chat, Timestamp=self.state.stamp,
+                     Text='Synthetic reaction verification', DisplayText='Synthetic reaction verification',
+                     FromMe=False, SenderName='Fixture Sender', SenderJID='fixture-sender')]
+        with self.state.lock:
+            reaction = self.state.reactions.get(chat)
+            if reaction:
+                rows.append(dict(MsgID='REACTION', ChatJID=chat, Timestamp=self.state.stamp,
+                                 Text='', FromMe=True, ReactionToID=reaction['msg'], ReactionEmoji=reaction['emoji']))
+        self.respond(200, rows)
 
 
 class SlackSortHandler(Handler):
@@ -660,6 +692,7 @@ def main():
     parser.add_argument('--port-file', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
     modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--reactions', action='store_true')
     modes.add_argument('--slack-sort', action='store_true')
     modes.add_argument('--views', action='store_true')
     modes.add_argument('--notrap', action='store_true', help='WhatsApp and Slack chats; Signal and Telegram have no rows')
@@ -668,11 +701,12 @@ def main():
     modes.add_argument('--telegram', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else Handler
+    handler = TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
     server.state.view_rows = view_rows()
+    server.state.reactions = {}
     server.state.signal_reaction = None
     server.state.signal_events = []
     server.state.signal_read = set()

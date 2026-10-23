@@ -9,6 +9,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [drafts](drafts.md) | Composer and per-chat drafts | Type, switch away/back, check disk |
 | [palette](palette.md) | Command palette and shortcut discovery | Positive shortcut row, no Status result/sidebar entry, activate help |
 | [appearance](appearance.md) | Theme and saved text size | Choose Green, save larger text, reset scale to 82% |
+| [reactions](reactions.md) | Right-click message reactions | Real mouse laughing-face selection on WhatsApp and Slack; exact hub request and visible chip |
 | [menus](menus.md) | Native menus and custom popups | Measure AMOLED darkness and text contrast, then Green native-menu lightness |
 | [whatsapp-hub](whatsapp-hub.md) | WhatsApp hub transport | Chats, history, live SSE replay, idempotent retry, reads, archive, pending media and DPAPI |
 | [hub](hub.md) | Unified hub transport (IGSH-531) | Source network identity, list/history, SSE replay, send retry, read/archive, media and DPAPI |
@@ -21,7 +22,7 @@ Start with [the skill](../SKILL.md). The eight offline desktop journeys use the 
 | [archive](archive.md) | Archive and Keep archived | Ctrl+E, keep via palette, incoming provider event, Archive presence/unread and inbox absence |
 | [text-comparison](appearance.md) | DirectWrite beside Chrome | Exact text/font/metric parity, paired screenshots and 3x paragraph crops |
 
-Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `search`, `drafts`, `whatsapp-hub`, `hub`, `slack-sort`, `views`, `workspace-icons`, `signal`, `telegram`, `notrap` and `text-comparison`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
+Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `reactions`, `menus`, `search`, `drafts`, `whatsapp-hub`, `hub`, `slack-sort`, `views`, `workspace-icons`, `signal`, `telegram`, `notrap` and `text-comparison`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
 
 The source of truth for commands is `src/main.zig:buildPaletteItems`, for keyboard handling `src/main.zig:handleKeyboard`, and for discoverable help `src/shortcuts.zig`. Every feature file has precisely four H2 sections. Capture the input, resulting UI and durable side effects; preserve proof after cleanup. Only archive adds a synthetic incoming message at the fixture provider boundary; search, navigation, drafts, palette and appearance stay empty. No live send, account login, media, voice playback or transcription claim can be made from these local chats.
 
@@ -95,3 +96,5 @@ These are source changes in the bounded history window, not claims of live verif
 - WAZI-159: antialiased curves/avatars and GDI fallback -> unreachable: edge-alpha and forced-renderer-fallback measurements are absent from the fixture journeys; covered by src/smooth_geometry.zig and lint-repeats rule F1 for raw rounded calls
 - WAZI-160: selectable AMOLED theme -> `menus` (requires default AMOLED, measures dark popups, then switches to Green and verifies saved preference and light native chat menu)
 - WAZI-161: DirectWrite IBM Plex Medium body text -> `text-comparison` (requires active DirectWrite, exact bundled Medium/SemiBold font hashes and body/heading metric parity with Chrome)
+
+- IGSH-645: right-click reaction chooses the clicked emoji -> `reactions` (real SendInput selection of laughing face on WhatsApp and Slack, exact hub payload and visible chip)

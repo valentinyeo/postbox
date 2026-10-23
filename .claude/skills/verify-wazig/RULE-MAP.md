@@ -2,6 +2,7 @@
 
 | Rule | Executable coverage | Feature map |
 | --- | --- | --- |
+| Right-click reactions send the clicked laughing face on WhatsApp and Slack | reactions.ps1 real SendInput, hub body ledger and check-evidence.py | [Reactions](features/reactions.md) |
 | Telegram has one saved view, opaque user/group/channel handles, a paper-plane badge and Saved Messages | src/hub_test.zig, Telegram journey row/state and blue-pixel assertions | [Telegram](features/telegram.md) |
 | Telegram lists prelinked hub chats without in-app authentication | telegram journey populated rows, positive palette row and direct-command absence | [Telegram](features/telegram.md) |
 | Telegram text, files, replies, reactions, reads, media and live events stay on the hub | telegram.ps1 and check-telegram-evidence.py wire/history assertions | [Telegram](features/telegram.md) |

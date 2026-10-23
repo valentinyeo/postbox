@@ -7,6 +7,7 @@ SKIP_DIRS = ("vendor/",)
 PRIVATE_PATHS = ("CLAUDE.local.md", "HANDOFF.md", "board.yml", ".claude/skills/", ".claude/hooks/agent-scope-guard.sh", ".claude/handoffs/")
 
 PUBLIC_SKILL_PATHS = (
+    ".claude/skills/verify-wazig/features/reactions.md",
     ".claude/skills/verify-wazig/SKILL.md",
     ".claude/skills/verify-wazig/INDEX.md",
     ".claude/skills/verify-wazig/RULE-MAP.md",
