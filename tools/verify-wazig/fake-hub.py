@@ -25,6 +25,7 @@ WORKSPACE_CHATS = [
     ('slack:fixture-cobalt:channel-beta', 'Verification Cobalt', 'slack'),
     ('slack:fixture-empty:channel-gamma', 'Verification Empty', 'slack'),
     ('whatsapp:fixture:contact-delta', 'Verification Delta', 'whatsapp'),
+    ('signal:fixture-contact', 'Verification Signal', 'signal'),
 ]
 WORKSPACE_COLOURS = {'fixture-amber': (240, 160, 32), 'fixture-cobalt': (48, 112, 240)}
 
@@ -324,6 +325,177 @@ class WorkspaceIconsHandler(Handler):
             self.respond(400, {'error': 'unexpected workspace fixture write'}, body=body)
 
 
+SIGNAL_CHAT = 'signal:fixture-contact'
+SIGNAL_LIMITED = 'signal:fixture-limited'
+SIGNAL_CAPTCHA = 'signal:fixture-captcha'
+
+
+class SignalHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def event(self, event_id, kind, chat):
+        data = dict(id=event_id, chat=SIGNAL_CHAT if chat else '', ts=self.state.stamp, kind=kind)
+        self.wfile.write(f'id: {event_id}\ndata: {json.dumps(data)}\n\n'.encode())
+        self.wfile.flush()
+        self.state.record(dict(method='SSE', path='/v1/wazig/events', wire_path=self.wire_path, **data))
+
+    def events(self):
+        self.record(200)
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        last = int(self.headers.get('Last-Event-ID', '0'))
+        if last == 0:
+            self.event(1, 'reset', '')
+            self.close_connection = True
+            return
+        while True:
+            with self.state.lock:
+                pending = [(index + 2, event) for index, event in enumerate(self.state.signal_events) if index + 2 > last]
+                if not pending:
+                    self.state.lock.wait(timeout=2)
+            if pending:
+                for event_id, (kind, chat) in pending:
+                    self.event(event_id, kind, chat)
+                self.close_connection = True
+                return
+            self.wfile.write(b': heartbeat\n\n')
+            self.wfile.flush()
+
+    def publish(self, kind, chat=SIGNAL_CHAT):
+        with self.state.lock:
+            self.state.signal_events.append((kind, chat))
+            self.state.lock.notify_all()
+
+    def message(self, chat, message_id, text, **extra):
+        return dict(MsgID=message_id, ChatJID=chat, Text=text, DisplayText=text,
+                    Timestamp=self.state.stamp, SenderJID='fixture-sender', SenderName='Fixture Sender',
+                    FromMe=extra.pop('FromMe', False), **extra)
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/signal/link':
+            with self.state.lock:
+                self.state.signal_linked = self.state.signal_qr_fetched
+                linked = self.state.signal_linked
+            self.respond(200, dict(status='linked') if linked else dict(status='unlinked', uri='sgnl://linkdevice?fixture'))
+        elif url.path == '/v1/wazig/signal/link.png':
+            with self.state.lock:
+                linked = self.state.signal_linked
+                self.state.signal_qr_fetched = True
+            if linked:
+                self.respond(404, {'error': 'already linked'})
+            else:
+                self.respond(200, Path(__file__).with_name('signal-link.png').read_bytes(), 'image/png')
+        elif url.path == '/v1/wazig/chats':
+            rows = []
+            if self.state.signal_linked and query.get('archived', ['false'])[0] == 'false':
+                rows = [dict(provider='signal', jid=chat, name=name, kind=kind,
+                             last_message_ts=self.state.stamp, unread_count=0 if chat in self.state.signal_read else 1,
+                             unread=chat not in self.state.signal_read, archived=False)
+                        for chat, name, kind in [(SIGNAL_CHAT, 'Verification Signal', 'direct'),
+                                                 (SIGNAL_LIMITED, 'Verification Limited', 'direct'),
+                                                 (SIGNAL_CAPTCHA, 'Verification Captcha', 'direct'),
+                                                 ('signal:group:fixture-group', 'Verification Group', 'group')]]
+            self.respond(200, rows)
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            rows = [self.message(chat, 'fixture-sender:1000', 'Synthetic Signal history')]
+            if chat == SIGNAL_CHAT:
+                rows.append(self.message(chat, 'fixture-sender:1001', 'Synthetic Signal attachment',
+                                         MediaType='image', MimeType='image/png', Filename='fixture.png'))
+                if self.state.live:
+                    rows.append(self.message(chat, 'fixture-sender:1002', 'Synthetic Signal live'))
+                with self.state.lock:
+                    rows.extend(dict(self.message(chat, reply['msg_id'], reply['text']), FromMe=True,
+                                     **({'MediaType': 'image', 'Filename': 'fixture.png', 'MimeType': 'image/png'} if reply['file'] else {}))
+                                for reply in self.state.sends.values() if reply['chat'] == chat)
+                    if self.state.signal_reaction:
+                        rows.append(self.message(chat, 'fixture-reaction:1003', '',
+                                                 ReactionToID=self.state.signal_reaction['msg'],
+                                                 ReactionEmoji=self.state.signal_reaction['emoji']))
+            self.respond(200, list(reversed(rows)))
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path.startswith('/v1/wazig/media/'):
+            self.respond(200, self.state.image, 'image/png')
+        elif url.path.startswith('/v1/wazig/avatar/'):
+            self.respond(404, {'error': 'unavailable'})
+        else:
+            self.respond(404, {'error': 'unknown signal route'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        payload = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        multipart = self.headers.get('Content-Type', '').startswith('multipart/form-data')
+        file_bytes = b''
+        if multipart:
+            envelope = bridge.BytesParser(policy=bridge.policy.default).parsebytes(
+                f'Content-Type: {self.headers["Content-Type"]}\r\nMIME-Version: 1.0\r\n\r\n'.encode() + payload)
+            body = {}
+            for part in envelope.iter_parts():
+                name = part.get_param('name', header='content-disposition')
+                if part.get_filename() is None:
+                    body[name] = part.get_content()
+                else:
+                    body[name] = part.get_filename()
+                    file_bytes = part.get_payload(decode=True)
+        else:
+            body = json.loads(payload or '{}')
+        if self.path == '/fixture/live':
+            with self.state.lock:
+                self.state.live = True
+                self.state.lock.notify_all()
+            self.publish('msg')
+            self.respond(200, {'ok': True}, body=body)
+            return
+        chat = body.get('chat', '')
+        if not chat.startswith('signal:'):
+            self.respond(400, {'error': 'invalid Signal chat'}, body=body)
+        elif self.path == '/v1/wazig/send':
+            if chat == SIGNAL_LIMITED:
+                self.respond(429, {'error': 'signal rate limited', 'retry_after': 30}, body=body)
+                return
+            if chat == SIGNAL_CAPTCHA:
+                self.respond(403, {'error': 'signal captcha required'}, body=body)
+                return
+            expected = {'chat', 'text', 'reply_to', 'client_id'} if not multipart else {'chat', 'text', 'file', 'client_id'}
+            if not expected.issubset(body) or not body['client_id'] or (multipart and not file_bytes):
+                self.respond(400, {'error': 'invalid Signal send'}, body=body)
+                return
+            with self.state.lock:
+                duplicate = body['client_id'] in self.state.sends
+                if not duplicate:
+                    self.state.sends[body['client_id']] = dict(client_id=body['client_id'],
+                        msg_id=f'fixture-self:{2000 + len(self.state.sends)}', ts=self.state.stamp,
+                        status='sent', chat=chat, text=body['text'], file=multipart)
+                reply = self.state.sends[body['client_id']]
+            self.respond(200, reply, body=body, multipart=multipart, file_size=len(file_bytes),
+                         file_sha256=bridge.hashlib.sha256(file_bytes).hexdigest(), accepted=not duplicate)
+        elif self.path == '/v1/wazig/react' and set(body) == {'chat', 'msg', 'emoji', 'client_id'}:
+            self.state.signal_reaction = body
+            self.publish('reaction', chat)
+            self.respond(200, dict(client_id=body['client_id'], msg_id='fixture-reaction:1003',
+                                   ts=self.state.stamp, status='sent'), body=body)
+        elif self.path == '/v1/wazig/mark-read' and set(body) == {'chat', 'message_id'}:
+            self.state.signal_read.add(chat)
+            self.publish('read', chat)
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/archive':
+            self.respond(502, {'error': 'Signal archive unsupported'}, body=body)
+        else:
+            self.respond(400, {'error': 'invalid Signal write'}, body=body)
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Fake hub runs only on GitHub Actions')
@@ -334,13 +506,19 @@ def main():
     modes.add_argument('--slack-sort', action='store_true')
     modes.add_argument('--views', action='store_true')
     modes.add_argument('--workspace-icons', action='store_true')
+    modes.add_argument('--signal', action='store_true')
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = ViewsHandler if args.views else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else Handler
+    handler = SignalHandler if args.signal else ViewsHandler if args.views else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else Handler
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
     server.state.view_rows = view_rows()
+    server.state.signal_linked = False
+    server.state.signal_qr_fetched = False
+    server.state.signal_reaction = None
+    server.state.signal_events = []
+    server.state.signal_read = set()
     if args.slack_sort:
         stamp = datetime.fromisoformat(server.state.stamp)
         server.state.sort_times = {

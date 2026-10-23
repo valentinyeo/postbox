@@ -88,13 +88,14 @@ fn validTeam(team: []const u8) !void {
     if (std.mem.indexOfScalar(u8, team, ':') != null or std.mem.eql(u8, team, ".") or std.mem.eql(u8, team, "..")) return error.InvalidId;
 }
 
-pub const Badge = enum { workspace_icon, whatsapp_mark, letter_s, letter_w, letter_t };
+pub const Badge = enum { workspace_icon, whatsapp_mark, signal_mark, letter_s, letter_w, letter_t };
 
 pub fn providerBadge(provider: transport.Provider, cached_icon: bool, enabled: bool) Badge {
     return switch (provider) {
         .slack => if (enabled and cached_icon) .workspace_icon else .letter_s,
         .whatsapp => if (enabled) .whatsapp_mark else .letter_w,
         .telegram => .letter_t,
+        .signal => if (enabled) .signal_mark else .letter_s,
     };
 }
 
@@ -138,6 +139,7 @@ pub fn sourceAccount(row: std.json.ObjectMap, fallback: []const u8) []const u8 {
 }
 
 pub fn viewAccount(row: std.json.ObjectMap, fallback: []const u8) []const u8 {
+    if (sourceProvider(row) == .signal and std.mem.startsWith(u8, string(row, "jid"), "signal:")) return "signal";
     const account = string(row, "account");
     if (account.len > 0) return account;
     const jid = string(row, "jid");
@@ -171,4 +173,34 @@ fn validId(id: []const u8) !void {
 fn validWrite(chat: []const u8, client_id: []const u8) !void {
     try validId(chat);
     if (client_id.len == 0 or client_id.len > 128) return error.InvalidSend;
+}
+
+pub fn signalSendFailure(allocator: std.mem.Allocator, status: u32, raw: []const u8) ?[]const u8 {
+    if (status != 429 and status != 403) return null;
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, raw, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const reason = string(parsed.value.object, "error");
+    if (status == 429 and std.mem.eql(u8, reason, "signal rate limited")) return "signal rate limited";
+    if (status == 403 and std.mem.eql(u8, reason, "signal captcha required")) return "signal captcha required";
+    return null;
+}
+
+pub fn readMessageId(allocator: std.mem.Allocator, raw: []const u8) ![]u8 {
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, raw, .{});
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.BadResponse;
+    const data = parsed.value.object.get("data") orelse return error.BadResponse;
+    if (data != .object) return error.BadResponse;
+    const rows = data.object.get("messages") orelse return error.BadResponse;
+    if (rows != .array) return error.BadResponse;
+    for (rows.array.items) |row| {
+        if (row != .object or string(row.object, "ReactionToID").len > 0) continue;
+        const from_me = row.object.get("FromMe") orelse continue;
+        if (from_me != .bool or from_me.bool) continue;
+        const id = string(row.object, "MsgID");
+        try validId(id);
+        return allocator.dupe(u8, id);
+    }
+    return error.NoIncomingMessage;
 }

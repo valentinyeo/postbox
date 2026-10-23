@@ -18,7 +18,7 @@
 
 ## Driving it with PowerShell UI Automation
 
-- Run feature=views on GitHub Actions only. run.ps1 starts fake-hub.py --views with two WhatsApp accounts (personal and business) and two Slack teams (T0ABC123 and T0DEF456), two chats each. Rows omit account and account_name, matching the real hub. WhatsApp JIDs are <account>:<contact>@s.whatsapp.net with the same synthetic contact in both accounts; Slack JIDs are slack:<team>:<channel>.
+- Run feature=views on GitHub Actions only. run.ps1 starts fake-hub.py --views with two WhatsApp accounts (personal and business) and two Slack teams (T0ABC123 and T0DEF456), two chats each, plus an empty Signal view after those four accounts. Rows omit account and account_name, matching the real hub. WhatsApp JIDs are <account>:<contact>@s.whatsapp.net with the same synthetic contact in both accounts; Slack JIDs are slack:<team>:<channel>.
 - Drive Alt+1..Alt+4. Assert account-only sidebar identities through current_view.account and each chat's view_account in read-only status and chats; capture view-1.png through view-4.png. Exercise Ctrl+1, next/previous and Shared search in each account, retaining search-1.png through search-4.png.
 - Send Verification account send in the first account. Require one accepted fake-hub send with source_account personal and the selected opaque handle. Retain sent.messages.json and sent.png. Open the matching contact in business; require its own history without that message, with other.messages.json and isolated.png.
 - Drive Alt+I and assert the complete catalog and descending activity timestamps in inbox.chats.json and inbox.png.

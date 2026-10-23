@@ -24,10 +24,10 @@ if session['feature'] == 'workspace-icons':
     rows = read('workspace-icons-list.chats.json')
     layout = read('workspace-icons-layout.json')
     ids = [row['id'] for row in rows['chats']]
-    assert rows['total'] == 4
+    assert rows['total'] == 5
     assert ids == layout['ids']
     assert sorted(ids) == sorted(icons.IDS)
-    assert all(row['provider'] == ('whatsapp' if row['id'] == 'whatsapp:fixture:contact-delta' else 'slack') for row in rows['chats'])
+    assert all(row['provider'] == ('signal' if row['id'] == 'signal:fixture-contact' else 'whatsapp' if row['id'] == 'whatsapp:fixture:contact-delta' else 'slack') for row in rows['chats'])
     state = read('workspace-icons-list.state.json')
     assert state['view'] == 'all' and state['theme'] == 'amoled'
     assert 'MessagesZig | Wazig Messages v0.0.526' in (folder / 'workspace-icons-list.uia.txt').read_text(encoding='utf-8-sig')
@@ -45,14 +45,17 @@ if session['feature'] == 'workspace-icons':
     assert not any(row['wire_path'] in ('/v1/wazig/send', '/v1/wazig/archive') for row in requests)
     assert len(list((folder / 'final-data/avatars').glob('*.none'))) >= 2
     final = read('side-effects.json')
-    assert final['chat_count'] == 4 and final['pending_sends'] == final['pending_archives'] == 0
+    assert final['chat_count'] == 5 and final['pending_sends'] == final['pending_archives'] == 0
     assert final['sync'] == 'stopped' and not final['slack_connected']
     assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
     assert 'workspace-icons workspace-icons-pixels PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
     assert 'keys: %0' in (folder / 'actions.log').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
     assert 'JOURNEY PASSED: workspace-icons' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
-    print('EVIDENCE VERIFIED: workspace icon badge pixels, authenticated team cache, fallback, WhatsApp green and isolation')
+    print('EVIDENCE VERIFIED: workspace icon badge pixels, authenticated team cache, fallback, WhatsApp green, Signal blue and isolation')
+    raise SystemExit(0)
+if session['feature'] == 'signal':
+    runpy.run_path(str(Path(__file__).with_name('check-signal-evidence.py')))['check_signal'](folder)
     raise SystemExit(0)
 if session['feature'] == 'slack-sort':
     def read(name):

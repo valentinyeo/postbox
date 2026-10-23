@@ -5,7 +5,7 @@ const transport = @import("transport.zig");
 pub const pipe_prefix = "\\\\.\\pipe\\wazig-control-";
 
 pub const Command = enum { theme, status, chats, search, view, select, messages, archive, unarchive, @"archive-many" };
-pub const Messenger = enum { whatsapp, slack, telegram, all };
+pub const Messenger = enum { whatsapp, slack, telegram, all, signal };
 
 pub const Request = struct {
     cmd: Command,
@@ -27,10 +27,10 @@ pub const CommandInfo = struct { cmd: Command, usage: []const u8, summary: []con
 pub const commands = [_]CommandInfo{
     .{ .cmd = .theme, .usage = "theme <green|amoled>", .summary = "switch and save the app theme without focusing it" },
     .{ .cmd = .status, .usage = "status", .summary = "version, theme, current account view and order, selected chat, sync state, pending sends, search text" },
-    .{ .cmd = .chats, .usage = "chats [--json] [--messenger all|whatsapp|slack|telegram] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
+    .{ .cmd = .chats, .usage = "chats [--json] [--messenger all|whatsapp|slack|telegram|signal] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
     .{ .cmd = .search, .usage = "search <text>", .summary = "set the sidebar search text (\"\" clears it)" },
-    .{ .cmd = .view, .usage = "view <N|inbox|all|whatsapp|slack|telegram>", .summary = "switch to an account view or the combined inbox" },
-    .{ .cmd = .select, .usage = "select <id> [--provider whatsapp|slack|telegram --account ID]", .summary = "open that chat in the app" },
+    .{ .cmd = .view, .usage = "view <N|inbox|all|whatsapp|slack|telegram|signal>", .summary = "switch to an account view or the combined inbox" },
+    .{ .cmd = .select, .usage = "select <id> [--provider whatsapp|slack|telegram|signal --account ID]", .summary = "open that chat in the app" },
     .{ .cmd = .messages, .usage = "messages [<id>] [--limit N]", .summary = "recent loaded messages of the selected (or given) chat" },
     .{ .cmd = .archive, .usage = "archive <id>", .summary = "archive a chat (the app's own archive action)" },
     .{ .cmd = .unarchive, .usage = "unarchive <id>", .summary = "unarchive a chat" },
@@ -88,8 +88,8 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
             }
             if (cmd == .chats and std.mem.eql(u8, arg, "--messenger")) {
                 index += 1;
-                if (index >= args.len) return usage(message, "--messenger needs whatsapp, slack or telegram");
-                request.messenger = std.meta.stringToEnum(Messenger, args[index]) orelse return usage(message, "--messenger needs whatsapp, slack or telegram");
+                if (index >= args.len) return usage(message, "--messenger needs whatsapp, slack, telegram or signal");
+                request.messenger = std.meta.stringToEnum(Messenger, args[index]) orelse return usage(message, "--messenger needs whatsapp, slack, telegram or signal");
                 continue;
             }
             if (cmd == .chats and std.mem.eql(u8, arg, "--archived")) {
@@ -268,7 +268,7 @@ test "usage errors name the problem instead of guessing" {
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{"send"}, &message));
     try std.testing.expectEqualStrings("unknown command", message);
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "chats", "--limit", "0" }, &message));
-    try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "chats", "--messenger", "signal" }, &message));
+    try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "chats", "--messenger", "unknown" }, &message));
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{"select"}, &message));
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "view", "slack", "extra" }, &message));
     try std.testing.expectError(error.Usage, parseArgs(allocator, &.{"archive-many"}, &message));
@@ -423,7 +423,7 @@ test "IGSH-538 removed stories commands reject CLI and pipe requests" {
 
 test "IGSH-538 app diagnostics and messenger controls remain available" {
     try std.testing.expectEqual(Command.status, (try parseForTest(&.{"status"})).cmd);
-    for ([_][]const u8{ "all", "whatsapp", "slack", "telegram" }) |messenger| {
+    for ([_][]const u8{ "all", "whatsapp", "slack", "telegram", "signal" }) |messenger| {
         const request = try parseForTest(&.{ "view", messenger });
         try std.testing.expectEqual(Command.view, request.cmd);
         try std.testing.expectEqualStrings(messenger, @tagName(request.messenger.?));

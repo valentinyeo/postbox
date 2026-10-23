@@ -8,7 +8,7 @@ pub const ChatSummary = struct {
     timestamp: []const u8,
 };
 
-pub const Provider = enum { whatsapp, telegram, slack };
+pub const Provider = enum { whatsapp, telegram, slack, signal };
 
 pub const Transport = struct {
     context: *anyopaque,

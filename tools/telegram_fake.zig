@@ -191,8 +191,8 @@ test "fake send_file" {
     const app = try fixture(client);
     defer freeFixture(app);
     for ([_][]const u8{ "fixture/photo.png", "fixture/report.pdf" }, [_][]const u8{ "inputMessagePhoto", "inputMessageDocument" }, [_][]const u8{ "photo", "document" }) |path, kind, field| {
-        if (comptime @hasDecl(@This(), "stageTelegramFile")) {
-            try std.testing.expect(@field(@This(), "stageTelegramFile")(app, path));
+        if (comptime @hasDecl(@This(), "stageFile")) {
+            try std.testing.expect(@field(@This(), "stageFile")(app, path));
             try std.testing.expect(!app.staged_image.owned);
             try std.testing.expectEqualStrings(path, app.staged_image.path.slice());
         }
@@ -206,9 +206,9 @@ test "fake send_file" {
         try std.testing.expectEqualStrings(path, file.get("path").?.string);
         try std.testing.expectEqualStrings("caption", content.get("caption").?.object.get("text").?.string);
     }
-    if (comptime @hasDecl(@This(), "stageTelegramFile")) {
+    if (comptime @hasDecl(@This(), "stageFile")) {
         const before = deleted_files;
-        try std.testing.expect(@field(@This(), "stageTelegramFile")(app, "fixture/original.pdf"));
+        try std.testing.expect(@field(@This(), "stageFile")(app, "fixture/original.pdf"));
         discardStagedImage(app);
         try std.testing.expectEqual(before, deleted_files);
         app.staged_image.path.set("fixture/owned.png");

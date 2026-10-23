@@ -7,7 +7,7 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == ['appearance', 'archive', 'drafts', 'hub', 'menus', 'navigation', 'palette', 'search', 'slack-sort', 'views', 'whatsapp-hub', 'workspace-icons']
+assert features == ['appearance', 'archive', 'drafts', 'hub', 'menus', 'navigation', 'palette', 'search', 'signal', 'slack-sort', 'views', 'whatsapp-hub', 'workspace-icons']
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, hub, slack-sort, views, workspace-icons, archive, text-comparison]' in workflow
+assert 'options: [search, navigation, drafts, palette, appearance, menus, whatsapp-hub, hub, slack-sort, views, workspace-icons, signal, archive, text-comparison]' in workflow
 options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
 assert options_match, 'missing workflow_dispatch journey options'
 options = [option.strip() for option in options_match[1].split(',')]
@@ -66,7 +66,7 @@ assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
 assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_KEY")) |seed|' in fixture_config
 assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort', 'views', 'workspace-icons')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'slack-sort', 'views', 'workspace-icons', 'signal')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
 for proof in ['chats', 'chat-switch', 'history', 'mark-read', 'live-sse-replay', 'send-client-id-dedupe', 'media-202-ready-cache', 'archive', 'auth-dpapi-backend']:
     assert f'Hub-Pass $Session {proof}' in harness, proof
@@ -124,6 +124,19 @@ for name in ['hub Slack history refreshes ordering after caching its last messag
 sort_journey = runner.split('        slack-sort {', 1)[1].split('        views {', 1)[0]
 assert "Send-Keys $session '%1'" in sort_journey and 'Drive Alt+1' in sort_map
 assert "for keys in ['%1', '^{TAB}'" in validator
+signal = (skill / 'features/signal.md').read_text(encoding='utf-8')
+signal_journey = (root / 'tools/verify-wazig/signal.ps1').read_text(encoding='utf-8')
+signal_validator = (root / 'tools/verify-wazig/check-signal-evidence.py').read_text(encoding='utf-8')
+for gate in ['linking-qr', 'linked-chats', 'history', 'mark-read', 'media', 'react', 'send-text', 'send-file', 'live-events', 'limited', 'captcha', 'archive-unsupported']:
+    assert gate in signal_journey and gate in signal_validator, gate
+for name in ['INDEX.md', 'RULE-MAP.md']:
+    assert '(features/signal.md)' in (skill / name).read_text(encoding='utf-8')
+assert 'feature=signal' in signal and 'Invoke-SignalJourney' in runner
+assert 'signal.ps1' in runner and '[switch]$Signal' in harness
+assert '--signal' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+assert '"signal"' in workflow and "matrix.feature == 'signal'" in workflow
+assert 'check-signal-evidence.py' in validator
+assert '.claude/skills/verify-wazig/features/signal.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
 print(f'MAP VERIFIED: {len(features)} complete feature entries, workflow/index parity, {len(coverage_ids)} coverage dispositions, source labels, stable controls, bounded chat-switch journey and GitHub triggers')
 
 icons_map = (skill / 'features/workspace-icons.md').read_text(encoding='utf-8')
@@ -136,3 +149,10 @@ assert '.claude/skills/verify-wazig/features/workspace-icons.md' in (root / 'too
 for artifact in ['workspace-icons-list', 'badge-icon-', 'workspace-icons-pixels.json']:
     assert artifact in (root / 'tools/verify-wazig/check-workspace-icons.py').read_text(encoding='utf-8')
 print('WORKSPACE ICON MAP VERIFIED: dispatch, synthetic team icons, screenshot pixels and surviving cache evidence')
+
+icons_validator = (root / 'tools/verify-wazig/check-workspace-icons.py').read_text(encoding='utf-8')
+assert "'signal': (58, 118, 240)" in icons_validator
+assert 'signal:fixture-contact' in icons_validator and 'signal:fixture-contact' in harness
+assert 'drawProviderMark(&shapes, badge, provider_badge)' in source
+assert 'provider_badge == .whatsapp_mark or provider_badge == .signal_mark' in source
+print('SIGNAL MARK MAP VERIFIED: shared provider renderer and workspace-icons screenshot evidence')

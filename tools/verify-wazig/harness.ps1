@@ -7,6 +7,10 @@ using System.Text;
 public static class VerifyWindow {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr dialog, int id);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
+    [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr window);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
@@ -14,6 +18,8 @@ public static class VerifyWindow {
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window, ref Point point);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode)]
+    public static extern IntPtr WriteText(IntPtr window, uint message, UIntPtr wparam, string text, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode)]
     public static extern IntPtr ReadText(IntPtr window, uint message, UIntPtr capacity, StringBuilder text, uint flags, uint timeout, out UIntPtr length);
     [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode)]
@@ -27,8 +33,8 @@ function Assert-That($Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-function Wait-Until([scriptblock]$Check, [string]$Description) {
-    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+function Wait-Until([scriptblock]$Check, [string]$Description, [int]$Seconds = 20) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     do {
         $value = & $Check
         if ($value) { return $value }
@@ -205,7 +211,7 @@ function Save-Screen($Session, [string]$Name) {
     $tree | Set-Content (Join-Path $Session.evidence "$Name.uia.txt")
     $state = Read-Control $Session status
     $state | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.state.json")
-    if ($Session.feature -in @('archive', 'slack-sort', 'workspace-icons')) {
+    if ($Session.feature -in @('archive', 'slack-sort', 'workspace-icons', 'signal')) {
         $arguments = if ($state.show_archived) { @('--archived') } else { @() }
         Read-Control $Session chats -Arguments $arguments | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.chats.json")
     }
@@ -215,13 +221,13 @@ function Invoke-Doctor($Session) {
     $window = Get-Window $Session
     $search = Get-Edit $window '1008'
     $compose = Get-Edit $window '1032'
-    Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable'
+    if ($Session.feature -ne 'signal') { Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable' }
     $null = Read-Edit $search
     if ($Session.feature -in @('whatsapp-hub', 'hub')) {
         $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'hub baseline'
     }
     if ($Session.feature -eq 'views') {
-        $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 4 } 'account views baseline'
+        $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 5 } 'account views baseline'
     }
     $status = Read-Control $Session status
     Assert-That ($status.version -eq '0.0.526') 'Wrong control build'
@@ -231,7 +237,7 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$Views, [switch]$WorkspaceIcons) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal) {
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
@@ -240,6 +246,7 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [s
     if ($SlackSort) { $start.ArgumentList.Add('--slack-sort') }
     if ($Views) { $start.ArgumentList.Add('--views') }
     if ($WorkspaceIcons) { $start.ArgumentList.Add('--workspace-icons') }
+    if ($Signal) { $start.ArgumentList.Add('--signal') }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')
@@ -481,10 +488,10 @@ function Assert-ComposerLayout($Session, [string]$Name, [int]$Lines, $Baseline =
 function Invoke-WorkspaceIconsJourney($Session) {
     Send-Keys $Session '%0'
     $null = Wait-Until { (Read-Control $Session status).view -eq 'all' } 'All networks sidebar'
-    $expected = @('slack:fixture-amber:channel-alpha', 'slack:fixture-cobalt:channel-beta', 'whatsapp:fixture:contact-delta', 'slack:fixture-empty:channel-gamma')
+    $expected = @('slack:fixture-amber:channel-alpha', 'slack:fixture-cobalt:channel-beta', 'whatsapp:fixture:contact-delta', 'slack:fixture-empty:channel-gamma', 'signal:fixture-contact')
     $rows = (Read-Control $Session chats).chats
     $ids = @($rows.id)
-    Assert-That ($ids.Count -eq 4 -and (($ids | Sort-Object) -join ',') -ceq (($expected | Sort-Object) -join ',')) 'Workspace badge fixture list changed'
+    Assert-That ($ids.Count -eq 5 -and (($ids | Sort-Object) -join ',') -ceq (($expected | Sort-Object) -join ',')) 'Workspace badge fixture list changed'
     $window = Get-Window $Session
     $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1016')
     $list = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
@@ -524,6 +531,6 @@ function Invoke-WorkspaceIconsJourney($Session) {
         Save-Screen $Session workspace-icons-list
         & python "$PSScriptRoot/check-workspace-icons.py" $Session.evidence --capture | Out-Host
         $LASTEXITCODE -eq 0
-    } 'visible workspace icons and green WhatsApp badge'
+    } 'visible workspace icons, green WhatsApp and blue Signal marks'
     Hub-Pass $Session workspace-icons-pixels
 }

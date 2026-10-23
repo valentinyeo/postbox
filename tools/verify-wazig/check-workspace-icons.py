@@ -6,8 +6,8 @@ import zlib
 
 
 IDS = ['slack:fixture-amber:channel-alpha', 'slack:fixture-cobalt:channel-beta',
-       'whatsapp:fixture:contact-delta', 'slack:fixture-empty:channel-gamma']
-COLOURS = {'amber': (240, 160, 32), 'cobalt': (48, 112, 240), 'whatsapp': (37, 211, 102)}
+       'whatsapp:fixture:contact-delta', 'slack:fixture-empty:channel-gamma', 'signal:fixture-contact']
+COLOURS = {'amber': (240, 160, 32), 'cobalt': (48, 112, 240), 'whatsapp': (37, 211, 102), 'signal': (58, 118, 240)}
 
 
 def read_png(path):
@@ -71,14 +71,14 @@ def write_png(path, rows):
     path.write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b''))
 
 
-def measure(rows, colour):
+def measure(rows, colour, tolerance=12):
     pixels = [pixel for row in rows for pixel in row]
-    return sum(max(abs(a - b) for a, b in zip(pixel, colour)) <= 12 for pixel in pixels) / len(pixels)
+    return sum(max(abs(a - b) for a, b in zip(pixel, colour)) <= tolerance for pixel in pixels) / len(pixels)
 
 
 def check_pixels(folder, capture=False):
     layout = json.loads((folder / 'workspace-icons-layout.json').read_text(encoding='utf-8-sig'))
-    assert len(layout['ids']) == 4 and sorted(layout['ids']) == sorted(IDS)
+    assert len(layout['ids']) == 5 and sorted(layout['ids']) == sorted(IDS)
     dpi = layout['dpi']
     assert 96 <= dpi <= 192
 
@@ -86,10 +86,10 @@ def check_pixels(folder, capture=False):
         return (value * dpi + 48) // 96
 
     assert layout['row_height'] == px(64)
-    assert layout['client_height'] >= 4 * px(64) and layout['client_width'] > px(66)
+    assert layout['client_height'] >= 5 * px(64) and layout['client_width'] > px(66)
     width, height, screenshot = read_png(folder / 'workspace-icons-list.png')
     metrics = {}
-    for name, chat_id in zip(['amber', 'cobalt', 'whatsapp', 'empty'], IDS):
+    for name, chat_id in zip(['amber', 'cobalt', 'whatsapp', 'empty', 'signal'], IDS):
         index = layout['ids'].index(chat_id)
         left = layout['list_x'] + px(12) + px(27)
         top = layout['list_y'] + index * px(64) + px(10) + px(28)
@@ -109,10 +109,10 @@ def check_pixels(folder, capture=False):
             assert fraction > 0.55 and light > 0.03, (name, fraction, light)
             assert all(measure(rows, colour) < 0.03 for colour in COLOURS.values()), name
         else:
-            fraction = measure(rows, COLOURS[name])
-            assert fraction > (0.35 if name == 'whatsapp' else 0.55), (name, fraction)
-            assert light > 0.03, (name, 'missing letter or handset')
-            assert all(measure(rows, colour) < 0.03 for other, colour in COLOURS.items() if other != name), name
+            fraction = measure(rows, COLOURS[name], 4 if name == 'signal' else 12)
+            assert fraction > (0.35 if name in ('whatsapp', 'signal') else 0.55), (name, fraction)
+            assert light > 0.03, (name, 'missing letter, handset or Signal bubble')
+            assert all(measure(rows, colour, 4 if {name, other} == {'signal', 'cobalt'} else 12) < 0.03 for other, colour in COLOURS.items() if other != name), name
         metrics[name] = dict(rect=[left, top, right, bottom], colour_fraction=fraction, white_fraction=white, light_fraction=light)
     if capture:
         (folder / 'workspace-icons-pixels.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')
@@ -127,4 +127,4 @@ if __name__ == '__main__':
     parser.add_argument('--capture', action='store_true')
     args = parser.parse_args()
     check_pixels(args.folder, args.capture)
-    print('WORKSPACE ICON PIXELS VERIFIED: distinct team colours, letter fallback and green WhatsApp handset')
+    print('WORKSPACE ICON PIXELS VERIFIED: distinct team colours, letter fallback and green WhatsApp handset and blue Signal bubble')

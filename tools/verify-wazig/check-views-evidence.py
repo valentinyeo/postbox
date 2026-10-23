@@ -24,7 +24,7 @@ def check_views(folder):
     baseline = capture('before')
     expected = [('whatsapp', 'personal', 'WhatsApp personal'), ('whatsapp', 'business', 'WhatsApp business'),
                 ('slack', 'T0ABC123', 'Slack T0ABC123'), ('slack', 'T0DEF456', 'Slack T0DEF456')]
-    assert [(view['provider'], view['account'], view['label']) for view in baseline['view_order']] == expected
+    assert [(view['provider'], view['account'], view['label']) for view in baseline['view_order']] == expected + [('signal', 'signal', 'Signal')]
     assert baseline['current_view']['inbox'] and baseline['chat_count'] == 8
     catalog = read('views-catalog.json')['chats']
     assert len(catalog) == 8
@@ -81,9 +81,9 @@ def check_views(folder):
     moved = capture('sort-moved')
     order = expected.copy()
     order[0], order[1] = order[1], order[0]
-    assert [(view['provider'], view['account'], view['label']) for view in moved['view_order']] == order
+    assert [(view['provider'], view['account'], view['label']) for view in moved['view_order']] == order + [('signal', 'signal', 'Signal')]
     saved = (folder / 'view-order.txt').read_text(encoding='utf-8-sig').splitlines()
-    assert saved == [f'{provider}:{account}' for provider, account, _ in order]
+    assert saved == [f'{provider}:{account}' for provider, account, _ in order] + ['signal:signal']
     assert capture('sort-selected')['current_view']['account'] == 'personal'
     assert capture('sort-closed')['current_view']['account'] == 'personal'
     restart = read('restart.json')
@@ -93,7 +93,7 @@ def check_views(folder):
     for number, (provider, account, label) in enumerate(order, 1):
         state = capture(f'restart-{number}')
         assert state['current_view'] == dict(provider=provider, account=account, label=label, inbox=False)
-        assert [(view['provider'], view['account'], view['label']) for view in state['view_order']] == order
+        assert [(view['provider'], view['account'], view['label']) for view in state['view_order']] == order + [('signal', 'signal', 'Signal')]
         rows = read(f'restart-{number}.chats.json')['chats']
         assert len(rows) == 2 and all(row['view_account'] == account for row in rows)
     capture('after')

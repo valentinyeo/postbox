@@ -15,7 +15,7 @@ function Assert-AccountView($Session, [int]$Number, [string]$Account, [string]$C
 
 function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     $expected = @('personal', 'business', 'T0ABC123', 'T0DEF456')
-    $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 4 } 'four account views'
+    $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 5 } 'four populated account views and Signal'
     $baseline = Read-Control $Session status
     Assert-That ($baseline.current_view.inbox -and $baseline.chat_count -eq 8) 'Combined inbox baseline missing'
     $catalog = Read-Control $Session chats

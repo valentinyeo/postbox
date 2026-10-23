@@ -34,8 +34,8 @@ def main():
         sections = [extract(production, name) for name in names]
         if "fn chatInView(" in production:
             sections.append(extract(production, "chatInView"))
-        if "fn stageTelegramFile(" in production:
-            sections.append(extract(production, "stageTelegramFile"))
+        if "fn stageFile(" in production:
+            sections.append(extract(production, "stageFile"))
         for name in ("Chat", "TgChat", "StagedImage"):
             sections.append(re.search(rf"^const {name} = struct \{{.*?^}};", production, re.M | re.S).group())
         sections.append(re.search(r"^const max_tg_chats = .*?;", production, re.M).group())

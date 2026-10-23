@@ -217,7 +217,7 @@ fn addOpus(b: *std.Build, module: *std.Build.Module, with_decoder: bool) void {
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
-    const version = b.option([]const u8, "version", "App version embedded for self-update (e.g. 0.9.7)") orelse "0.9.7";
+    const version = b.option([]const u8, "version", "App version embedded for self-update (e.g. 0.9.7)") orelse "0.9.8";
 
     const build_info = b.addOptions();
     build_info.addOption([]const u8, "version", version);
