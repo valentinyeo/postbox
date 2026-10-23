@@ -56,6 +56,16 @@ pub fn dibToBitmap(allocator: std.mem.Allocator, dib: []const u8) ?Bitmap {
     const stride = std.math.mul(usize, aligned_bits / 32, 4) catch return null;
     const source_bytes = std.math.mul(usize, stride, h) catch return null;
     const output_bytes = std.math.mul(usize, std.math.mul(usize, w, h) catch return null, 4) catch return null;
+    if (compression == 3 and header_size > 40) {
+        const header_end: usize = header_size;
+        const table_end = header_end + 12;
+        const with_table = std.math.add(usize, pixel_offset, 12) catch return null;
+        if (table_end <= dib.len and with_table <= dib.len and source_bytes <= dib.len - with_table and
+            std.mem.eql(u8, dib[header_end..table_end], dib[40..52]))
+        {
+            pixel_offset = with_table;
+        }
+    }
     if (pixel_offset > dib.len or source_bytes > dib.len - pixel_offset) return null;
     const source = dib[pixel_offset..];
 
@@ -272,4 +282,54 @@ test "IGSH-679 rejects invalid bitfields and impossible buffer layouts" {
     std.mem.writeInt(i32, dib[4..8], 1, .little);
     std.mem.writeInt(i32, dib[8..12], 1, .little);
     try std.testing.expect(dibToBitmap(allocator, dib[0..51]) == null);
+}
+
+fn v5BitfieldsDib(buffer: []u8, with_table: bool) []const u8 {
+    @memset(buffer, 0);
+    std.mem.writeInt(u32, buffer[0..4], 124, .little);
+    std.mem.writeInt(i32, buffer[4..8], 4, .little);
+    std.mem.writeInt(i32, buffer[8..12], 2, .little);
+    std.mem.writeInt(u16, buffer[12..14], 1, .little);
+    std.mem.writeInt(u16, buffer[14..16], 32, .little);
+    std.mem.writeInt(u32, buffer[16..20], 3, .little);
+    std.mem.writeInt(u32, buffer[40..44], 0x00ff0000, .little);
+    std.mem.writeInt(u32, buffer[44..48], 0x0000ff00, .little);
+    std.mem.writeInt(u32, buffer[48..52], 0x000000ff, .little);
+    std.mem.writeInt(u32, buffer[52..56], 0xff000000, .little);
+    var offset: usize = 124;
+    if (with_table) {
+        @memcpy(buffer[124..136], buffer[40..52]);
+        offset = 136;
+    }
+    var index: usize = 0;
+    while (index < 8) : (index += 1) {
+        const base: u8 = if (index < 4) 100 else 10;
+        const pixel = buffer[offset + index * 4 ..][0..4];
+        pixel[0] = base + @as(u8, @intCast(index));
+        pixel[1] = base + 20 + @as(u8, @intCast(index));
+        pixel[2] = base + 40 + @as(u8, @intCast(index));
+        pixel[3] = 255;
+    }
+    return buffer[0 .. offset + 32];
+}
+
+test "IGSH-679 skips the mask table Windows adds after a synthesized V5 header" {
+    var buffer: [124 + 12 + 32]u8 = undefined;
+    const dib = v5BitfieldsDib(&buffer, true);
+    const bitmap = dibToBitmap(std.testing.allocator, dib) orelse return error.TestUnexpectedResult;
+    defer std.testing.allocator.free(bitmap.pixels);
+    try std.testing.expectEqual(@as(u32, 4), bitmap.width);
+    try std.testing.expectEqual(@as(u32, 2), bitmap.height);
+    try std.testing.expectEqualSlices(u8, &.{ 14, 34, 54, 255 }, bitmap.pixels[0..4]);
+    try std.testing.expectEqualSlices(u8, &.{ 17, 37, 57, 255 }, bitmap.pixels[12..16]);
+    try std.testing.expectEqualSlices(u8, &.{ 100, 120, 140, 255 }, bitmap.pixels[16..20]);
+}
+
+test "IGSH-679 V5 bitfields without a mask table still decode in place" {
+    var buffer: [124 + 12 + 32]u8 = undefined;
+    const dib = v5BitfieldsDib(&buffer, false);
+    const bitmap = dibToBitmap(std.testing.allocator, dib) orelse return error.TestUnexpectedResult;
+    defer std.testing.allocator.free(bitmap.pixels);
+    try std.testing.expectEqualSlices(u8, &.{ 14, 34, 54, 255 }, bitmap.pixels[0..4]);
+    try std.testing.expectEqualSlices(u8, &.{ 100, 120, 140, 255 }, bitmap.pixels[16..20]);
 }
