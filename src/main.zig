@@ -16465,6 +16465,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (!recreateThemeBrushes(a)) return -1;
             a.search = directwrite_edit.create(a.instance, hwnd, controlId(id_search), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 0, 0, 0, 0);
             if (a.search == null) return -1;
+            directwrite_edit.setCentered(a.search.?, true);
             a.chats_hwnd = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 0, 0, 0, 0, hwnd, controlId(id_chats), a.instance, null);
             a.canvas = win.CreateWindowExW(0, lit("WacliMessageCanvas"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, hwnd, controlId(id_canvas), a.instance, null);
             a.attach_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("Attach photo or file"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_attach), a.instance, null);
