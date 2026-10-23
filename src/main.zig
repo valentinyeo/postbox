@@ -6776,8 +6776,6 @@ fn ensureWebPBitmap(a: *App, message: *Message) void {
     if (!webp_detect.isWebPBytes(data)) return;
     var features: webp.WebPBitstreamFeatures = undefined;
     if (webp.WebPGetFeatures(data.ptr, data.len, &features) != webp.VP8_STATUS_OK) return;
-    const max_decode_pixels: u64 = message_bitmap_budget_bytes / 4;
-    if (!webp_detect.decodeAllowed(features.width, features.height, max_decode_pixels)) return;
 
     if (features.has_animation == 0) {
         const fit = webp_detect.fitBox(@intCast(features.width), @intCast(features.height), 420, 250);
@@ -6809,6 +6807,8 @@ fn ensureWebPBitmap(a: *App, message: *Message) void {
         } else webp.WebPFreeDecBuffer(&config.output);
     }
 
+    const max_decode_pixels: u64 = message_bitmap_budget_bytes / 4;
+    if (!webp_detect.decodeAllowed(features.width, features.height, max_decode_pixels)) return;
     var width: c_int = 0;
     var height: c_int = 0;
     var pixels = webp.WebPDecodeRGBA(data.ptr, data.len, &width, &height);
