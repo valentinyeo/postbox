@@ -150,6 +150,122 @@ test releaseBody {
     try std.testing.expectEqualStrings("", releaseBody(empty.value));
 }
 
+pub const Release = struct {
+    tag: []const u8,
+    body: []const u8,
+};
+
+pub fn releaseFromValue(root: std.json.Value) ?Release {
+    if (root != .object) return null;
+    if (flagTrue(root.object.get("draft")) or flagTrue(root.object.get("prerelease"))) return null;
+    const tag = root.object.get("tag_name") orelse return null;
+    if (tag != .string or parseVersion(tag.string) == null) return null;
+    return .{ .tag = tag.string, .body = releaseBody(root) };
+}
+
+pub const fallback_note = "Small fixes and speed improvements";
+
+pub fn isCardLine(text: []const u8) bool {
+    const length = std.unicode.utf8CountCodepoints(text) catch return false;
+    if (length == 0 or length > 80) return false;
+    if (std.mem.indexOf(u8, text, "://") != null or std.mem.indexOf(u8, text, "www.") != null) return false;
+    for (text, 0..) |c, i| {
+        if (c == '#' and i + 1 < text.len and std.ascii.isDigit(text[i + 1])) return false;
+        if (c == '.' and i > 0 and i + 1 < text.len and std.ascii.isAlphanumeric(text[i - 1]) and std.ascii.isAlphabetic(text[i + 1])) return false;
+        if (c == '-' and i > 0 and i + 1 < text.len and std.ascii.isDigit(text[i + 1])) {
+            var start = i;
+            while (start > 0 and std.ascii.isAlphanumeric(text[start - 1])) start -= 1;
+            if (start < i and std.ascii.isAlphabetic(text[start])) return false;
+        }
+    }
+    return true;
+}
+
+pub fn appendBodyLines(allocator: std.mem.Allocator, body: []const u8, lines: *std.ArrayList([]const u8)) !void {
+    var iter = std.mem.splitScalar(u8, body, '\n');
+    while (iter.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (!std.mem.startsWith(u8, line, "- ")) continue;
+        const text = std.mem.trim(u8, line[2..], " \t");
+        if (isCardLine(text)) try lines.append(allocator, text);
+    }
+}
+
+pub fn notesForReleases(allocator: std.mem.Allocator, releases: []const Release, current: Version, latest: Version) ![]u8 {
+    const ordered = try allocator.dupe(Release, releases);
+    defer allocator.free(ordered);
+    std.mem.sort(Release, ordered, {}, struct {
+        fn lessThan(_: void, a: Release, b: Release) bool {
+            const av = parseVersion(a.tag) orelse return false;
+            const bv = parseVersion(b.tag) orelse return true;
+            return isNewerVersion(av, bv);
+        }
+    }.lessThan);
+    var lines: std.ArrayList([]const u8) = .empty;
+    defer lines.deinit(allocator);
+    for (ordered) |release| {
+        const version = parseVersion(release.tag) orelse continue;
+        if (!isNewerVersion(version, current) or isNewerVersion(version, latest)) continue;
+        try appendBodyLines(allocator, release.body, &lines);
+    }
+    if (lines.items.len == 0) try lines.append(allocator, fallback_note);
+    var result: std.ArrayList(u8) = .empty;
+    errdefer result.deinit(allocator);
+    for (lines.items[0..@min(5, lines.items.len)], 0..) |line, i| {
+        if (i > 0) try result.append(allocator, '\n');
+        try result.appendSlice(allocator, "- ");
+        try result.appendSlice(allocator, line);
+    }
+    if (lines.items.len > 5) {
+        const more = try std.fmt.allocPrint(allocator, "\n+{d} more", .{lines.items.len - 5});
+        defer allocator.free(more);
+        try result.appendSlice(allocator, more);
+    }
+    return result.toOwnedSlice(allocator);
+}
+
+test "update notes combine skipped versions newest first and cap five changes" {
+    const releases = [_]Release{
+        .{ .tag = "v1.0.1", .body = "- Older change\n- Another change\n- Sixth change\n- Seventh change" },
+        .{ .tag = "v1.0.0", .body = "- Already installed" },
+        .{ .tag = "v1.0.2", .body = "- Newest change\n- Second change\n- Third change" },
+        .{ .tag = "v1.0.3", .body = "- Not offered yet" },
+    };
+    const notes = try notesForReleases(std.testing.allocator, &releases, parseVersion("1.0.0").?, parseVersion("1.0.2").?);
+    defer std.testing.allocator.free(notes);
+    try std.testing.expectEqualStrings("- Newest change\n- Second change\n- Third change\n- Older change\n- Another change\n+2 more", notes);
+}
+
+test "update notes ignore developer bullets and handle empty bodies" {
+    var lines: std.ArrayList([]const u8) = .empty;
+    defer lines.deinit(std.testing.allocator);
+    try appendBodyLines(std.testing.allocator, "Heading\n- IGSH-715: inbox slots (#346)\n- Fix main.zig\n- See https://example.com\n- Alt+1 stays WhatsApp after you empty it\r\n", &lines);
+    try std.testing.expectEqual(@as(usize, 1), lines.items.len);
+    try std.testing.expectEqualStrings("Alt+1 stays WhatsApp after you empty it", lines.items[0]);
+    const releases = [_]Release{.{ .tag = "v1.0.1", .body = "" }};
+    const notes = try notesForReleases(std.testing.allocator, &releases, parseVersion("1.0.0").?, parseVersion("1.0.1").?);
+    defer std.testing.allocator.free(notes);
+    try std.testing.expectEqualStrings("- Small fixes and speed improvements", notes);
+}
+
+test "update notes with exactly five changes have no overflow line" {
+    const releases = [_]Release{.{ .tag = "v1.0.1", .body = "- One\n- Two\n- Three\n- Four\n- Five" }};
+    const notes = try notesForReleases(std.testing.allocator, &releases, parseVersion("1.0.0").?, parseVersion("1.0.1").?);
+    defer std.testing.allocator.free(notes);
+    try std.testing.expectEqualStrings(releases[0].body, notes);
+}
+
+test "release history excludes drafts prereleases and malformed versions" {
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator,
+        \\[null, {}, {"tag_name":"bad"}, {"tag_name":"v1.0.1","draft":true}, {"tag_name":"v1.0.1","prerelease":true}, {"tag_name":"v1.0.1","body":"- Chat search is faster"}]
+    , .{});
+    defer parsed.deinit();
+    for (parsed.value.array.items[0..5]) |value| try std.testing.expect(releaseFromValue(value) == null);
+    const release = releaseFromValue(parsed.value.array.items[5]).?;
+    try std.testing.expectEqualStrings("v1.0.1", release.tag);
+    try std.testing.expectEqualStrings("- Chat search is faster", release.body);
+}
+
 fn flagTrue(value: ?std.json.Value) bool {
     const v = value orelse return false;
     return v == .bool and v.bool;
