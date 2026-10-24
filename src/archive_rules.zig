@@ -82,14 +82,14 @@ pub const State = struct {
     }
 
     pub fn localArchived(self: *const State, key: anytype) bool {
-        return if (key.provider == .whatsapp) self.isKept(key.id) else if (self.findLocal(key)) |index| self.entries[index].keep else false;
+        return if (key.provider == .whatsapp) self.find(key.id) != null else if (self.findLocal(key)) |index| self.entries[index].keep else false;
     }
 
     pub fn isArchived(self: *const State, key: anytype, provider_archived: bool) bool {
-        if (key.provider == .whatsapp) {
-            if (self.find(key.id)) |index| return self.entries[index].keep;
-        } else if (self.findLocal(key)) |index| return self.entries[index].keep;
-        return provider_archived;
+        if (key.provider != .whatsapp) {
+            if (self.findLocal(key)) |index| return self.entries[index].keep;
+        }
+        return self.localArchived(key) or provider_archived;
     }
 
     pub fn setLocalUnarchived(self: *State, key: anytype) bool {
