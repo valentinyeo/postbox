@@ -60,19 +60,32 @@ def check_signal(folder):
         assert shown['chat']['id'] == f'signal:fixture-{name}'
         assert sum(row['send_state'] == 'failed' and reason in row['text'] for row in shown['messages']) == 1
         assert capture(name)['pending_sends'] == 0
-    archives = [row for row in requests if row['path'] == '/v1/wazig/archive']
-    assert len(archives) == 1 and archives[0]['status'] == 502 and archives[0]['body']['chat'] == 'signal:fixture-contact'
+    archives = [row for row in requests if row['method'] == 'POST' and row['path'] == '/v1/wazig/archive' and row['body']['chat'] == 'signal:fixture-contact']
+    assert not archives, 'Signal archive must stay local'
+    for name, archived, count in [('archived-inbox', False, 3), ('archived', True, 1), ('unarchived-archive', True, 0), ('after', False, 4)]:
+        state = capture(name)
+        assert state['show_archived'] == archived and state['pending_archives'] == 0 and state['chat_count'] == count, name
+        chats = read(f'{name}.chats.json')
+        assert chats['total'] == len(chats['chats']) == count, name
+        target = [row for row in chats['chats'] if row['id'] == 'signal:fixture-contact']
+        if name in ('archived', 'after'):
+            assert len(target) == 1 and target[0]['provider'] == 'signal' and target[0]['archived'] == archived, name
+        else:
+            assert not target, name
+        if name == 'archived':
+            assert state['selected']['id'] == 'signal:fixture-contact'
     for name in ['history', 'read', 'reacted', 'text', 'file', 'live', 'after']:
         capture(name)
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
-    for gate in ['linked-chats', 'history', 'mark-read', 'media', 'react', 'send-text', 'send-file', 'live-events', 'limited', 'captcha', 'archive-unsupported']:
+    for gate in ['linked-chats', 'history', 'mark-read', 'media', 'react', 'send-text', 'send-file', 'live-events', 'limited', 'captcha', 'local-archive-unarchive']:
         assert f'signal {gate} PASS' in proof, gate
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped' and not final['slack_connected']
     assert all(final[key] for key in ['production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'])
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for keys in ['%2', '%k', 'Compose message', 'Attach photo or file', 'Synthetic Signal outgoing', 'Synthetic Signal file', 'Synthetic rejected send', 'Like', '{ENTER}']:
+    for keys in ['%2', '%k', 'Compose message', 'Attach photo or file', 'Synthetic Signal outgoing', 'Synthetic Signal file', 'Synthetic rejected send', 'Like', '^e', 'Show archived chats', 'Show inbox chats', '{ENTER}']:
         assert f'keys: {keys}' in actions, keys
+    assert actions.count('keys: ^e\n') == 2
     assert 'JOURNEY PASSED: signal' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('SIGNAL EVIDENCE VERIFIED: prelinked hub, account view, history, writes, receipts, media, events and terminal rejections')
+    print('SIGNAL EVIDENCE VERIFIED: prelinked hub, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections')

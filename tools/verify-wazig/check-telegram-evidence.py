@@ -146,22 +146,35 @@ def check_telegram(folder):
         assert shown['chat']['id'] == 'telegram:user:1002'
         assert sum(row['send_state'] == 'failed' and reason in row['text'] for row in shown['messages']) == 1
         assert capture(name)['pending_sends'] == 0
-    archives = [row for row in requests if row['path'] == '/v1/wazig/archive']
-    assert len(archives) == 1 and archives[0]['status'] == 502 and archives[0]['body']['chat'] == 'telegram:user:1001'
+    archives = [row for row in requests if row['method'] == 'POST' and row['path'] == '/v1/wazig/archive' and row['body']['chat'] == 'telegram:user:1001']
+    assert not archives, 'Telegram archive must stay local'
+    for name, archived, count in [('archived-inbox', False, 4), ('archived', True, 1), ('unarchived-archive', True, 0), ('after', False, 5)]:
+        state = capture(name)
+        assert state['show_archived'] == archived and state['pending_archives'] == 0 and state['chat_count'] == count, name
+        chats = read(f'{name}.chats.json')
+        assert chats['total'] == len(chats['chats']) == count, name
+        target = [row for row in chats['chats'] if row['id'] == 'telegram:user:1001']
+        if name in ('archived', 'after'):
+            assert len(target) == 1 and target[0]['provider'] == 'telegram' and target[0]['archived'] == archived, name
+        else:
+            assert not target, name
+        if name == 'archived':
+            assert state['selected']['id'] == 'telegram:user:1001'
     for name in ['history', 'read', 'reacted', 'reply', 'text', 'file', 'live', 'after']:
         capture(name)
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
-    for gate in ['linked-chats', 'avatars', 'history', 'mark-read', 'media', 'react', 'reply', 'send-text', 'send-file', 'live-events', 'limited', 'archive-unsupported']:
+    for gate in ['linked-chats', 'avatars', 'history', 'mark-read', 'media', 'react', 'reply', 'send-text', 'send-file', 'live-events', 'limited', 'local-archive-unarchive']:
         assert f'telegram {gate} PASS' in proof, gate
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped' and not final['slack_connected']
     assert all(final[key] for key in ['production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'])
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for keys in ['%1', 'Reply to selected message', 'Synthetic Telegram reply', '%k', 'Compose message', 'Attach photo or file', 'Synthetic Telegram outgoing', 'Synthetic Telegram file', 'Synthetic rejected send', 'Like', '{ENTER}']:
+    for keys in ['%1', 'Reply to selected message', 'Synthetic Telegram reply', '%k', 'Compose message', 'Attach photo or file', 'Synthetic Telegram outgoing', 'Synthetic Telegram file', 'Synthetic rejected send', 'Like', '^e', 'Show archived chats', 'Show inbox chats', '{ENTER}']:
         assert f'keys: {keys}' in actions, keys
+    assert actions.count('keys: ^e\n') == 2
     assert 'JOURNEY PASSED: telegram' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events and terminal rejections')
+    print('TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections')
 
 
 if __name__ == '__main__':

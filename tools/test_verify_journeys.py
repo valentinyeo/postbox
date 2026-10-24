@@ -350,16 +350,16 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
                 dict(wire_path='/v1/wazig/chats?archived=false&limit=250', status=200,
                      rows=[dict(jid=chat, last_message_ts='2026-10-10T13:00:00Z', archived=False) for chat in (self.newer, self.telegram)]),
                 self.write(reacted), self.write(self.newer), self.write(self.other),
-                self.write(self.telegram), self.write(self.telegram, False), self.write(self.telegram),
                 dict(wire_path='/fixture/plain-incoming', status=200),
                 dict(wire_path='/v1/wazig/chats?archived=false&limit=250', status=200,
                      rows=[dict(jid=chat, last_message_ts='2026-10-10T14:00:00Z', archived=False) for chat in (self.newer, self.telegram)]),
                 self.write(self.newer, status=409), dict(wire_path='/fixture/rearchive-enable', status=200),
-                self.write(self.newer), self.write(self.telegram), self.write(self.other, False),
+                self.write(self.newer), self.write(self.other, False),
             ],
         }
         for name, archived, chats in [
             ('telegram-only', False, [self.telegram]), ('telegram-empty', False, []),
+            ('telegram-unarchived', False, [self.telegram]),
             ('telegram-bulk-empty', False, []), ('telegram-restart-empty', False, []),
             ('telegram-restart-archived', True, self.all_chats), ('plain-incoming-inbox', False, []),
             ('plain-incoming-archived', True, self.all_chats), ('plain-rearchived-inbox', False, []),
@@ -372,7 +372,8 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
             (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(10000))
             (self.folder / f'{name}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526')
         (self.folder / 'telegram-archive-state.txt').write_text(''.join(
-            f"{chat}\t{1 if chat == group else 0}\t2026-10-10T14:00:00Z\n" for chat in self.all_chats))
+            (f"telegram\ttelegram\t{chat}\n" if chat == self.telegram else
+             f"{chat}\t{1 if chat == group else 0}\t2026-10-10T14:00:00Z\n") for chat in self.all_chats))
         (self.folder / 'actions.log').write_text('keys: %i\nkeys: ^a\nkeys: ^e\n')
         (self.folder / 'hub-proof.log').write_text('hub-archive telegram-single-bulk-restart-incoming PASS')
 
@@ -382,20 +383,33 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
     def check(self):
         self.checker['check_telegram'](self.folder, self.data.__getitem__)
 
+    def test_hub_unsupported_providers_use_local_archive_route(self):
+        source = (ROOT / 'src/main.zig').read_text()
+        archive = source.split('fn archiveChat(', 1)[1].split('fn archiveChatKey(', 1)[0]
+        local_route = archive.split('state.setLocalArchived(key, !unarchive)', 1)[0]
+        self.assertIn('unifiedHub(a)', local_route)
+        self.assertIn('key.provider == .telegram', local_route)
+        self.assertIn('key.provider == .signal', local_route)
+
     def test_complete_telegram_and_network_unarchive_proof_passes(self):
         self.check()
 
     def test_origin_plain_not_held_or_telegram_bulk_rejected_evidence_fails(self):
         original = copy.deepcopy(self.data['telegram.requests.json'])
-        for index in (6, 11, 12):
+        for index in (2, 8):
             with self.subTest(missing_archive=index):
                 self.data['telegram.requests.json'] = copy.deepcopy(original)
                 self.data['telegram.requests.json'].pop(index)
                 with self.assertRaises(AssertionError):
                     self.check()
 
-    def test_duplicate_rearchive_or_wrong_chat_id_fails(self):
-        self.data['telegram.requests.json'].append(self.write(self.telegram))
+    def test_any_telegram_hub_write_or_duplicate_whatsapp_rearchive_fails(self):
+        for status in (200, 502):
+            self.data['telegram.requests.json'].append(self.write(self.telegram, status=status))
+            with self.assertRaisesRegex(AssertionError, 'must stay local'):
+                self.check()
+            self.data['telegram.requests.json'].pop()
+        self.data['telegram.requests.json'].append(self.write(self.newer))
         with self.assertRaises(AssertionError):
             self.check()
         self.data['telegram.requests.json'].pop()
@@ -409,7 +423,7 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
             for field, value in [('archived', True), ('last_message_ts', '2026-10-10T13:00:00Z')]:
                 with self.subTest(index=index, field=field):
                     self.data['telegram.requests.json'] = copy.deepcopy(original)
-                    self.data['telegram.requests.json'][8]['rows'][index][field] = value
+                    self.data['telegram.requests.json'][5]['rows'][index][field] = value
                     with self.assertRaises(AssertionError):
                         self.check()
 
@@ -432,11 +446,181 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
                 self.check()
             rows.append(row)
 
+    def test_missing_explicit_unarchive_proof_fails(self):
+        self.data['telegram-unarchived.chats.json']['chats'].clear()
+        with self.assertRaises(AssertionError):
+            self.check()
+
     def test_lost_plain_state_fails(self):
         path = self.folder / 'telegram-archive-state.txt'
-        path.write_text(''.join(line for line in path.read_text().splitlines(keepends=True) if not line.startswith(self.telegram + '\t')))
+        path.write_text(''.join(line for line in path.read_text().splitlines(keepends=True) if not line.startswith('telegram\ttelegram\t' + self.telegram)))
         with self.assertRaises(ValueError):
             self.check()
+
+
+class HubLocalArchiveJourneyTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.folder = Path(self.temp.name)
+
+    def fixture(self, provider):
+        title = provider.title()
+        chat = 'telegram:user:1001' if provider == 'telegram' else 'signal:fixture-contact'
+        limited = 'telegram:user:1002' if provider == 'telegram' else 'signal:fixture-limited'
+        count = 5 if provider == 'telegram' else 4
+        message = '1001' if provider == 'telegram' else 'fixture-sender:1001'
+        other_ids = [limited, 'telegram:user:9001', 'telegram:chat:2001', 'telegram:channel:3001'] if provider == 'telegram' else [limited, 'signal:fixture-captcha', 'signal:fixture-group']
+        rows = [dict(id=identity, provider=provider, view_account=provider, archived=False, saved=identity == 'telegram:user:9001', unread=False) for identity in [chat, *other_ids]]
+        gates = ['linked-chats', 'history', 'mark-read', 'media', 'react', 'send-text', 'send-file', 'live-events', 'limited', 'local-archive-unarchive']
+        if provider == 'telegram':
+            gates += ['avatars', 'reply']
+        else:
+            gates += ['captcha']
+        data = {
+            'session.json': dict(feature=provider, sha256='fixture', commit='fixture'),
+            'result.json': dict(feature=provider, status='passed'),
+            'marks.json': dict(brand_blue_pixels=21),
+            'palette.json': ['Show Telegram'],
+            'telegram-avatars-layout.json': dict(ids=[row['id'] for row in rows]),
+            'file.json': dict(sha256='fixture-file', size=10),
+            'side-effects.json': dict(pending_sends=0, pending_archives=0, sync='stopped', slack_connected=False,
+                                      production_preferences_absent=True, whatsapp_store_absent=True, telegram_store_absent=True),
+        }
+        names = ['linked', 'history', 'read', 'reacted', 'text', 'file', 'live', 'limited', 'after', 'archived-inbox', 'archived', 'unarchived-archive']
+        names += ['reply'] if provider == 'telegram' else ['captcha']
+        for name in names:
+            selected_rows = copy.deepcopy(rows)
+            if name == 'archived-inbox':
+                selected_rows = selected_rows[1:]
+            elif name == 'archived':
+                selected_rows = [dict(rows[0], archived=True)]
+            elif name == 'unarchived-archive':
+                selected_rows = []
+            data[f'{name}.state.json'] = dict(view=provider, current_view=dict(provider=provider, account=provider, label=title, inbox=False),
+                                            chat_count=len(selected_rows), show_archived=name in ('archived', 'unarchived-archive'),
+                                            pending_archives=0, pending_sends=0, theme='amoled', selected=dict(id=chat))
+            data[f'{name}.chats.json'] = dict(total=len(selected_rows), chats=selected_rows)
+            (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(10000))
+            (self.folder / f'{name}.uia.txt').write_text(f'MessagesZig | {title} - Wazig v0.0.526')
+        data['history.messages.json'] = dict(chat=dict(id=chat), messages=[dict(id=message.replace('1001', '1000'), text=f'Synthetic {title} history')])
+        data['reacted.messages.json'] = dict(messages=[dict(id=message, reaction='\U0001f44d')])
+        data['live.messages.json'] = dict(messages=[dict(id=message.replace('1001', '1002'), text=f'Synthetic {title} live')])
+        requests = [dict(method='POST', path='/v1/wazig/mark-read', body=dict(chat=chat, message_id=message), status=200),
+                    dict(method='GET', path='/v1/wazig/media/fixture', status=200),
+                    dict(method='POST', path='/v1/wazig/react', body=dict(chat=chat, msg=message, emoji='\U0001f44d', client_id='fixture'), status=200),
+                    dict(method='SSE', path='/v1/wazig/events', kind='message' if provider == 'telegram' else 'msg', chat=chat)]
+        for name in ['text', 'file'] + (['reply'] if provider == 'telegram' else []):
+            text = f'Synthetic {title} ' + ('outgoing' if name == 'text' else name)
+            body = dict(chat=chat, text=text, reply_to=message if name == 'reply' else '', client_id='fixture')
+            if name == 'file':
+                body['file'] = 'fixture.png'
+            requests.append(dict(method='POST', path='/v1/wazig/send', body=body, status=200, accepted=True,
+                                 multipart=name == 'file', file_sha256='fixture-file', file_size=10))
+            data[f'{name}.messages.json'] = dict(messages=[dict(text=text, from_me=True, media_type='image' if name == 'file' else '')])
+        failures = [('limited', limited, 429, f'{provider} rate limited')]
+        if provider == 'signal':
+            failures.append(('captcha', 'signal:fixture-captcha', 403, 'signal captcha required'))
+        for name, identity, code, reason in failures:
+            requests.append(dict(method='POST', path='/v1/wazig/send', body=dict(chat=identity), status=code))
+            data[f'{name}.messages.json'] = dict(chat=dict(id=identity), messages=[dict(send_state='failed', text=reason)])
+        for row in requests:
+            row['authorized'] = True
+        self.requests = requests
+        self.data = data
+        self.chat = chat
+        self.provider = provider
+        self.checker = runpy.run_path(str(ROOT / f'tools/verify-wazig/check-{provider}-evidence.py'))
+        keys = ['%1' if provider == 'telegram' else '%2', '%k', 'Compose message', 'Attach photo or file',
+                f'Synthetic {title} outgoing', f'Synthetic {title} file', 'Synthetic rejected send', 'Like', '{ENTER}',
+                '^e', 'Show archived chats', '^e', 'Show inbox chats']
+        if provider == 'telegram':
+            keys += ['Reply to selected message', 'Synthetic Telegram reply']
+        (self.folder / 'actions.log').write_text(''.join(f'keys: {key}\n' for key in keys))
+        (self.folder / 'hub-proof.log').write_text('\n'.join(f'{provider} {gate} PASS' for gate in gates))
+        (self.folder / 'result.txt').write_text(f'JOURNEY PASSED: {provider}')
+        (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED:')
+
+    def check(self):
+        for name, value in self.data.items():
+            (self.folder / name).write_text(json.dumps(value))
+        (self.folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in self.requests))
+        check = self.checker[f'check_{self.provider}']
+        with patch.dict(check.__globals__, check_avatar_pixels=lambda folder: None, check_avatar_requests=lambda folder, requests: None):
+            check(self.folder)
+
+    def test_both_local_archive_journeys_pass(self):
+        for provider in ('telegram', 'signal'):
+            with self.subTest(provider=provider):
+                self.fixture(provider)
+                self.check()
+
+    def test_any_archive_post_for_target_fails(self):
+        for provider in ('telegram', 'signal'):
+            for status in (200, 502):
+                with self.subTest(provider=provider, status=status):
+                    self.fixture(provider)
+                    self.requests.append(dict(method='POST', path='/v1/wazig/archive', body=dict(chat=self.chat), status=status, authorized=True))
+                    with self.assertRaisesRegex(AssertionError, 'must stay local'):
+                        self.check()
+
+    def test_missing_or_wrong_archive_transition_fails(self):
+        for provider in ('telegram', 'signal'):
+            for name in ('archived-inbox', 'archived', 'unarchived-archive', 'after'):
+                for defect in ('wrong-row', 'pending', 'wrong-view', 'wrong-count'):
+                    with self.subTest(provider=provider, name=name, defect=defect):
+                        self.fixture(provider)
+                        state = self.data[f'{name}.state.json']
+                        rows = self.data[f'{name}.chats.json']['chats']
+                        if defect == 'wrong-row':
+                            if name in ('archived', 'after'):
+                                next(row for row in rows if row['id'] == self.chat)['id'] = 'wrong-chat'
+                            elif rows:
+                                rows[0]['id'] = self.chat
+                            else:
+                                rows.append(dict(id=self.chat, provider=provider, archived=False))
+                        elif defect == 'pending':
+                            state['pending_archives'] = 1
+                        elif defect == 'wrong-view':
+                            state['show_archived'] = not state['show_archived']
+                        else:
+                            state['chat_count'] += 1
+                        with self.assertRaises(AssertionError):
+                            self.check()
+
+    def test_wrong_target_provider_or_archive_flag_fails(self):
+        for provider in ('telegram', 'signal'):
+            for name in ('archived', 'after'):
+                for field, value in [('provider', 'whatsapp'), ('archived', name != 'archived')]:
+                    with self.subTest(provider=provider, name=name, field=field):
+                        self.fixture(provider)
+                        next(row for row in self.data[f'{name}.chats.json']['chats'] if row['id'] == self.chat)[field] = value
+                        with self.assertRaises(AssertionError):
+                            self.check()
+
+    def test_missing_archive_capture_proof_or_shortcut_fails(self):
+        for provider in ('telegram', 'signal'):
+            for filename in ('archived.png', 'archived-inbox.state.json', 'unarchived-archive.chats.json', 'hub-proof.log', 'actions.log'):
+                with self.subTest(provider=provider, filename=filename):
+                    self.fixture(provider)
+                    if filename in self.data:
+                        self.data.pop(filename)
+                        (self.folder / filename).unlink(missing_ok=True)
+                    else:
+                        (self.folder / filename).write_text('')
+                    with self.assertRaises((AssertionError, FileNotFoundError)):
+                        self.check()
+
+    def test_journeys_pin_ctrl_e_and_local_archive_transitions(self):
+        for provider in ('telegram', 'signal'):
+            source = (ROOT / f'tools/verify-wazig/{provider}.ps1').read_text()
+            self.assertEqual(source.count("Send-Keys $Session '^e'"), 2)
+            for fragment in ["'Show archived chats'", "'Show inbox chats'", 'Save-Screen $Session archived-inbox',
+                             'Save-Screen $Session archived', 'Save-Screen $Session unarchived-archive',
+                             "Hub-Pass $Session local-archive-unarchive", "$_.method -eq 'POST'"]:
+                self.assertIn(fragment, source)
+            self.assertNotIn('archive-unsupported', source)
+            self.assertNotIn('unsupported archive settled', source)
 
 
 if __name__ == '__main__':

@@ -4,7 +4,7 @@
 
 - `account-view`: a single Signal account, labelled Signal, participates in saved account order and the combined inbox. Its rows carry a #3A76F0 mark with a white speech bubble and dashed outline through the shared provider badge path.
 - `hub-only-linking`: link once through the triage CLI on the hub. Wazig only lists chats already present there; an unlinked provider is an ordinary empty list, never a login screen.
-- `actions`: opaque Signal handles use existing unified history, text, multipart attachments, reactions, author/timestamp read receipts, media and live events. Archive reports unsupported.
+- `actions`: opaque Signal handles use existing unified history, text, multipart attachments, reactions, author/timestamp read receipts, media and live events. Ctrl+E archives and unarchives locally in Wazig, without a hub archive POST.
 - `terminal-errors`: rate-limit and captcha rejections remain in failed message text with their reason. They leave the send queue without automatic retry; manual resend remains available.
 
 ## How to get to it (user POV)
@@ -21,7 +21,7 @@
 - Open Verification Signal through the palette. Assert exact history identity and content, author/timestamp mark-read payload and cleared unread state, automatic attachment download and durable cache.
 - Select an incoming message and choose Like; require a recorded reaction and visible reaction through wazigctl. Send Synthetic Signal outgoing; require one accepted JSON send and visible acknowledged history.
 - Choose Attach photo or file, enter a generated PNG in the owned native picker, then send a caption. Require one multipart write with exact bytes, size, filename, chat and client ID, plus the visible file message.
-- Trigger the synthetic live event, require production SSE and a visible message. Open the rate-limited and captcha chats, send once each, require the exact failed reason and an empty pending queue. The final request ledger must contain only one attempt per rejected chat. Attempt archive and require one 502 and no pending archive retry.
+- Trigger the synthetic live event, require production SSE and a visible message. Open the rate-limited and captcha chats, send once each, require the exact failed reason and an empty pending queue. The final request ledger must contain only one attempt per rejected chat. Press Ctrl+E on Verification Signal: require its row to leave the inbox, pending_archives=0 and archived-inbox evidence. Choose Show archived chats, require exactly that archived Signal row and capture archived. Press Ctrl+E again, capture the empty unarchived-archive list, choose Show inbox chats and require the unarchived row back in after. The final request ledger must contain no POST /v1/wazig/archive for that chat; retain local-archive-unarchive proof and both Ctrl+E actions.
 - check-evidence.py delegates to check-signal-evidence.py to validate retained screenshots, Signal account state, histories, request payloads, file hash, live event, both terminal failures, proof gates and cleanup isolation. Inspect the images before claiming visible appearance.
 
 ## Gotchas

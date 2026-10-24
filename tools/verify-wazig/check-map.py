@@ -199,7 +199,7 @@ assert "for keys in ['%1', '^{TAB}'" in validator
 signal = (skill / 'features/signal.md').read_text(encoding='utf-8')
 signal_journey = (root / 'tools/verify-wazig/signal.ps1').read_text(encoding='utf-8')
 signal_validator = (root / 'tools/verify-wazig/check-signal-evidence.py').read_text(encoding='utf-8')
-for gate in ['linked-chats', 'history', 'mark-read', 'media', 'react', 'send-text', 'send-file', 'live-events', 'limited', 'captcha', 'archive-unsupported']:
+for gate in ['linked-chats', 'history', 'mark-read', 'media', 'react', 'send-text', 'send-file', 'live-events', 'limited', 'captcha', 'local-archive-unarchive']:
     assert gate in signal_journey and gate in signal_validator, gate
 for name in ['RULE-MAP.md']:
     assert '(features/signal.md)' in (skill / name).read_text(encoding='utf-8')
@@ -232,7 +232,7 @@ print('SIGNAL MARK MAP VERIFIED: shared provider renderer and workspace-icons sc
 telegram = (skill / 'features/telegram.md').read_text(encoding='utf-8')
 telegram_journey = (root / 'tools/verify-wazig/telegram.ps1').read_text(encoding='utf-8')
 telegram_validator = (root / 'tools/verify-wazig/check-telegram-evidence.py').read_text(encoding='utf-8')
-for gate in ['linked-chats', 'history', 'mark-read', 'media', 'react', 'reply', 'send-text', 'send-file', 'live-events', 'limited', 'archive-unsupported']:
+for gate in ['linked-chats', 'history', 'mark-read', 'media', 'react', 'reply', 'send-text', 'send-file', 'live-events', 'limited', 'local-archive-unarchive']:
     assert gate in telegram_journey and gate in telegram_validator, gate
 for name in ['RULE-MAP.md']:
     assert '(features/telegram.md)' in (skill / name).read_text(encoding='utf-8')

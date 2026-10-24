@@ -9926,7 +9926,7 @@ fn removeFirstPendingSend(a: *App, delivered: bool) void {
     if (a.pending_send_count == 0) return;
     if (!completePendingSend(a, delivered)) return;
     const head = &a.pending_sends[0];
-    if (delivered and head.provider != .slack) unarchiveSentChat(a, head.jid.slice());
+    if (delivered and head.provider != .slack and !(unifiedHub(a) and (head.provider == .telegram or head.provider == .signal))) unarchiveSentChat(a, head.jid.slice());
     if (delivered and head.file.len > 0 and head.jid.len <= 191 and head.file.len <= 520) {
         var entry = voice_sent.Entry{ .queued_unix = head.queued_unix, .seconds = head.voice_seconds, .seq = head.seq, .voice = head.ptt };
         @memcpy(entry.jid[0..head.jid.len], head.jid.slice());
@@ -12708,7 +12708,7 @@ fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) vo
 }
 
 fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []const u8) bool {
-    if (key.provider == .slack) return false;
+    if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal))) return false;
     const jid = key.id;
     const state = a.archive_state orelse return false;
     if (!state.holdKept(jid, provider_archived, ts)) return false;
@@ -12780,7 +12780,7 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
         while (index > 0) {
             index -= 1;
             const entry = &state.entries[index];
-            if (entry.slack) continue;
+            if (entry.provider != .whatsapp) continue;
             var present = false;
             for (rows) |item| {
                 const object = switch (item) {
@@ -12827,6 +12827,7 @@ fn applyKeptCheck(a: *App, raw: []const u8) void {
             .account = if (unifiedHub(a)) hub.sourceAccount(object, a.cache_tag.slice()) else a.cache_tag.slice(),
             .id = getString(object, "jid"),
         };
+        if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal))) continue;
         _ = holdKeptArchived(a, key, getBool(object, "archived"), getString(object, "last_message_ts"));
     }
 }
@@ -12951,7 +12952,7 @@ fn chatProvider(a: *App, jid: []const u8) transport.Provider {
 fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source: archive_rules.Source) ?[]const u8 {
     const jid = key.id;
     const unarchive = action == .unarchive;
-    if (key.provider == .slack) {
+    if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal))) {
         const state = a.archive_state orelse return "Archive is not available";
         if (!state.setLocalArchived(key, !unarchive)) return "Keep archived list is full";
         saveArchiveState(a);
@@ -20995,13 +20996,9 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 setStatus(a, "Archive operation completed");
             } else {
                 if (result.http_status == 502 and (std.mem.startsWith(u8, result.jid.slice(), "signal:") or std.mem.startsWith(u8, result.jid.slice(), "telegram:"))) {
-                    if (a.archive_state) |state| {
-                        state.remove(result.jid.slice());
-                        saveArchiveState(a);
-                    }
                     removeFirstPendingArchive(a);
                     refreshChats(a);
-                    setStatus(a, if (std.mem.startsWith(u8, result.jid.slice(), "telegram:")) "Archiving is not available for Telegram chats yet" else "Archiving is not available for Signal chats yet");
+                    setStatus(a, "Chat archive is managed locally in Wazig");
                 } else {
                     a.pending_archives[0].retry_at_ms = win.GetTickCount64() + 3_000;
                     setStatus(a, "Archive operation failed; retrying");

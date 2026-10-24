@@ -339,6 +339,8 @@ class HubArchiveHandler(Handler):
             with self.state.lock:
                 self.state.archive_group_archived = True
             self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/archive' and body.get('chat') == ARCHIVE_TELEGRAM:
+            self.respond(502, {'error': 'Telegram action unsupported'}, body=body)
         elif self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and body.get('chat') in ARCHIVE_STAMPS and isinstance(body.get('archived'), bool) and body['chat'] in self.state.plain_dms:
             with self.state.lock:
                 plain = self.state.plain_dms[body['chat']]

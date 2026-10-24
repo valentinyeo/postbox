@@ -50,7 +50,7 @@ pub const Action = enum {
 };
 
 pub const Entry = struct {
-    slack: bool = false,
+    provider: enum { whatsapp, slack, telegram, signal } = .whatsapp,
     account: [32]u8 = undefined,
     account_len: u8 = 0,
     jid: [max_jid]u8 = undefined,
@@ -76,26 +76,28 @@ pub const State = struct {
 
     pub fn find(self: *const State, jid: []const u8) ?usize {
         for (self.entries[0..self.count], 0..) |*entry, index| {
-            if (!entry.slack and std.mem.eql(u8, entry.jidSlice(), jid)) return index;
+            if (entry.provider == .whatsapp and std.mem.eql(u8, entry.jidSlice(), jid)) return index;
         }
         return null;
     }
 
     pub fn localArchived(self: *const State, key: anytype) bool {
-        return if (key.provider == .slack) self.findLocal(key) != null else self.find(key.id) != null;
+        return if (key.provider == .whatsapp) self.find(key.id) != null else self.findLocal(key) != null;
     }
 
     fn findLocal(self: *const State, key: anytype) ?usize {
-        if (key.provider != .slack) return null;
-        const Key = @TypeOf(key);
+        if (key.provider == .whatsapp) return null;
         for (self.entries[0..self.count], 0..) |*entry, index| {
-            if (entry.slack and Key.eql(key, .{ .provider = .slack, .account = entry.account[0..entry.account_len], .id = entry.jidSlice() })) return index;
+            if (std.mem.eql(u8, @tagName(entry.provider), @tagName(key.provider)) and
+                std.mem.eql(u8, entry.jidSlice(), key.id) and
+                (std.mem.eql(u8, entry.account[0..entry.account_len], key.account) or
+                    (entry.provider != .slack and entry.account_len == 0))) return index;
         }
         return null;
     }
 
     pub fn setLocalArchived(self: *State, key: anytype, archived: bool) bool {
-        if (key.provider != .slack or key.account.len > 32 or key.id.len == 0 or key.id.len > max_jid) return false;
+        if (key.provider == .whatsapp or key.account.len > 32 or key.id.len == 0 or key.id.len > max_jid) return false;
         if (self.findLocal(key)) |index| {
             if (!archived) self.removeAt(index);
             return true;
@@ -111,7 +113,7 @@ pub const State = struct {
             if (self.count >= max_entries) return false;
         }
         const entry = &self.entries[self.count];
-        entry.* = .{ .slack = true, .keep = true };
+        entry.* = .{ .provider = std.meta.stringToEnum(@FieldType(Entry, "provider"), @tagName(key.provider)).?, .keep = true };
         @memcpy(entry.account[0..key.account.len], key.account);
         entry.account_len = @intCast(key.account.len);
         @memcpy(entry.jid[0..key.id.len], key.id);
@@ -207,8 +209,8 @@ pub const State = struct {
     pub fn format(self: *const State, out: []u8) []const u8 {
         var len: usize = 0;
         for (self.entries[0..self.count]) |*entry| {
-            const line = if (entry.slack)
-                std.fmt.bufPrint(out[len..], "slack\t{s}\t{s}\n", .{ entry.account[0..entry.account_len], entry.jidSlice() }) catch break
+            const line = if (entry.provider != .whatsapp)
+                std.fmt.bufPrint(out[len..], "{s}\t{s}\t{s}\n", .{ @tagName(entry.provider), entry.account[0..entry.account_len], entry.jidSlice() }) catch break
             else
                 std.fmt.bufPrint(out[len..], "{s}\t{d}\t{s}\n", .{ entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break;
             len += line.len;
@@ -222,12 +224,12 @@ pub const State = struct {
         while (lines.next()) |line| {
             var fields = std.mem.splitScalar(u8, line, '\t');
             const jid = fields.next() orelse continue;
-            if (std.mem.eql(u8, jid, "slack")) {
+            if (std.mem.eql(u8, jid, "slack") or std.mem.eql(u8, jid, "telegram") or std.mem.eql(u8, jid, "signal")) {
                 const account = fields.next() orelse continue;
                 const id = fields.next() orelse continue;
                 if (account.len > 32 or id.len == 0 or id.len > max_jid or self.count >= max_entries) continue;
                 const entry = &self.entries[self.count];
-                entry.* = .{ .slack = true, .keep = true };
+                entry.* = .{ .provider = std.meta.stringToEnum(@FieldType(Entry, "provider"), jid).?, .keep = true };
                 @memcpy(entry.account[0..account.len], account);
                 entry.account_len = @intCast(account.len);
                 @memcpy(entry.jid[0..id.len], id);
@@ -242,6 +244,10 @@ pub const State = struct {
             const n = @min(ts.len, max_ts);
             @memcpy(entry.ts[0..n], ts[0..n]);
             entry.ts_len = @intCast(n);
+            if (std.mem.startsWith(u8, jid, "telegram:") or std.mem.startsWith(u8, jid, "signal:")) {
+                entry.provider = if (std.mem.startsWith(u8, jid, "telegram:")) .telegram else .signal;
+                entry.keep = true;
+            }
         }
     }
 };
@@ -517,4 +523,55 @@ test "batch progress includes the current operation through the last item" {
 
 test "archive status is Archived" {
     try std.testing.expectEqualStrings("Archived", Action.archive.status());
+}
+
+test "local Slack Telegram and Signal archives round trip with provider and account identity" {
+    const Key = struct { provider: enum { whatsapp, slack, telegram, signal }, account: []const u8, id: []const u8 };
+    for ([_]Key{
+        .{ .provider = .slack, .account = "team", .id = "shared" },
+        .{ .provider = .telegram, .account = "telegram", .id = "telegram:user:7001" },
+        .{ .provider = .signal, .account = "signal", .id = "signal:fixture" },
+    }) |key| {
+        var state = State{};
+        try std.testing.expect(state.setLocalArchived(key, true));
+        try std.testing.expect(state.localArchived(key));
+        try std.testing.expect(!state.localArchived(Key{ .provider = key.provider, .account = "other", .id = key.id }));
+        try std.testing.expect(!state.localArchived(Key{ .provider = .whatsapp, .account = key.account, .id = key.id }));
+        var buffer: [512]u8 = undefined;
+        var loaded = State{};
+        loaded.parse(state.format(&buffer));
+        try std.testing.expect(loaded.localArchived(key));
+        try std.testing.expectEqual(@as(usize, 1), loaded.count);
+        try std.testing.expect(!loaded.holdKept(key.id, false, "new message"));
+        try std.testing.expect(loaded.localArchived(key));
+        try std.testing.expect(loaded.setLocalArchived(key, false));
+        try std.testing.expect(!loaded.localArchived(key));
+        state.parse(loaded.format(&buffer));
+        try std.testing.expect(!state.localArchived(key));
+    }
+}
+
+test "old plain Telegram and Signal archives become local regardless of keep or timestamp" {
+    const Key = struct { provider: enum { whatsapp, slack, telegram, signal }, account: []const u8, id: []const u8 };
+    for ([_]Key{
+        .{ .provider = .telegram, .account = "telegram", .id = "telegram:user:7001" },
+        .{ .provider = .signal, .account = "signal", .id = "signal:fixture" },
+    }) |key| {
+        for ([_]bool{ false, true }) |keep| {
+            var text: [512]u8 = undefined;
+            var state = State{};
+            state.parse(try std.fmt.bufPrint(&text, "{s}\t{d}\told\n", .{ key.id, @intFromBool(keep) }));
+            try std.testing.expect(state.localArchived(key));
+            try std.testing.expect(state.find(key.id) == null);
+            try std.testing.expect(!state.holdKept(key.id, false, "newer"));
+            var buffer: [512]u8 = undefined;
+            var loaded = State{};
+            loaded.parse(state.format(&buffer));
+            try std.testing.expect(loaded.localArchived(key));
+            try std.testing.expect(loaded.setLocalArchived(key, false));
+            try std.testing.expect(!loaded.localArchived(key));
+            state.parse(loaded.format(&buffer));
+            try std.testing.expect(!state.localArchived(key));
+        }
+    }
 }
