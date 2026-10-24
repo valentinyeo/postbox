@@ -356,8 +356,8 @@ pub fn mergeChatData(allocator: std.mem.Allocator, normal: []const u8, archived:
                 const fields = [_][]const u8{ "jid", "provider", "account" };
                 var equal = true;
                 for (fields) |field| {
-                    const left = existing.object.get(field) orelse .{ .string = "" };
-                    const right = row.object.get(field) orelse .{ .string = "" };
+                    const left = existing.object.get(field) orelse std.json.Value{ .string = "" };
+                    const right = row.object.get(field) orelse std.json.Value{ .string = "" };
                     if (left != .string or right != .string or !std.mem.eql(u8, left.string, right.string)) equal = false;
                 }
                 if (equal) {
