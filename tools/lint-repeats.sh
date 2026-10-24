@@ -206,9 +206,9 @@ function fail(line, rule, problem, fix) {
     printf "lint-repeats: %s:%d: [%s] %s. Use %s.\n", file, line, rule, problem, fix
     failed = 1
 }
-function check_models() {
-    if (file == ".github/workflows/ai-review.yml" && !models_read)
-        fail(1, "B6", "AI review lacks free GitHub Models permission", "models: read with GITHUB_TOKEN; no API key or pull_request_target")
+function check_ai_review() {
+    if (file == ".github/workflows/ai-review.yml" && !review_secret)
+        fail(1, "B6", "AI review passes no review key to the reviewer", "AI_REVIEW_API_KEY: ${{ secrets.GROQ_API_KEY }} on the review step; no pull_request_target")
 }
 function finish() {
     if (tag_line && !dispatch)
@@ -226,10 +226,10 @@ function finish() {
     command = ""
 }
 FNR == 1 {
-    check_models()
+    check_ai_review()
     if (file != "tools/automerge-admit.sh") finish()
     file = FILENAME
-    models_read = 0
+    review_secret = 0
     if (file == ".github/workflows/automerge.yml") {
         automerge_line = 1
         running = 0
@@ -252,12 +252,12 @@ FNR == 1 {
         next
     }
     if (file == ".github/workflows/ai-review.yml") {
-        if (code ~ /^[[:space:]]*models:[[:space:]]*read[[:space:]]*$/) models_read = 1
-        if (code ~ /secrets[[:space:]]*\./ || code ~ /pull_request_target/)
-            fail(FNR, "B6", "AI review uses a secret or privileged PR trigger", "GITHUB_TOKEN with models: read and pull_request or trusted issue_comment")
+        if (code ~ /secrets[[:space:]]*\.[[:space:]]*GROQ_API_KEY/) review_secret = 1
+        if (code ~ /pull_request_target/)
+            fail(FNR, "B6", "AI review runs on pull_request_target, which hands the review key to fork pull requests", "pull_request with the same-repository head check and the key only in that job")
     }
-    if (code ~ /openrouter\.ai|OPENROUTER_API_KEY|api\.z\.ai/)
-        fail(FNR, "B6", "workflow calls OpenRouter or Z.ai instead of free GitHub Models", "ai-review.yml runs bash tools/ai-review.sh with GITHUB_TOKEN and models: read")
+    if (code ~ /openrouter\.ai|OPENROUTER_API_KEY|api\.z\.ai|OPENAI_API_KEY/)
+        fail(FNR, "B6", "workflow calls a paid model provider", "the free Groq key from the GROQ_API_KEY secret through tools/ai-review.sh")
     if (code ~ /^[[:space:]]*runs-on:/ && code ~ /self-hosted/)
         fail(FNR, "B7", "workflow runs on a self-hosted runner, whose public logs show the server\047s name and folders", "runs-on: ubuntu-latest; the AI review runs in ai-review.yml on GitHub")
     if (file == ".github/workflows/automerge.yml" && code ~ /^[[:space:]]*REPO_OWNER:[[:space:]]*\$\{\{[[:space:]]*github\.repository_owner[[:space:]]*\}\}/) owner_env = 1

@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  models: read
   pull-requests: write
   issues: write
 
@@ -48,16 +47,30 @@ jobs:
           head=$(jq -er '.head.sha | select(test("^[0-9a-f]{40}$"))' <<< "$info")
           printf 'number=%s\nbase=%s\nhead=%s\n' "$PR_NUMBER" "$base" "$head" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - name: Check review key availability
+        id: key
         if: steps.pr.outputs.number != ''
+        env:
+          AI_REVIEW_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$AI_REVIEW_API_KEY" ]]; then
+            echo '::notice::AI review skipped: the review key is not configured; a maintainer must set it.'
+            exit 0
+          fi
+          echo 'available=true' >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.available == 'true'
         with:
           ref: ${{ steps.pr.outputs.base }}
           persist-credentials: false
 
       - name: Review and post advisory comment
-        if: steps.pr.outputs.number != ''
+        if: steps.key.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          AI_REVIEW_API_KEY: ${{ secrets.GROQ_API_KEY }}
           AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
           AI_REVIEW_HEAD_SHA: ${{ steps.pr.outputs.head }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}

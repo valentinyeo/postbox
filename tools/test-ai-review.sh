@@ -84,8 +84,12 @@ elif [[ $FAKE_MODE == retry && $n == 1 ]]; then
 fi
 retry_after=0
 [[ $status != 429 ]] || retry_after=120
-printf 'HTTP/2 %s\r\nRetry-After: %s\r\n\r\n' "$status" "$retry_after" > "$headers"
-if [[ $status != 200 ]]; then
+content_type=application/json
+[[ $FAKE_MODE != not-json ]] || content_type=text/plain
+printf 'HTTP/2 %s\r\nRetry-After: %s\r\nContent-Type: %s\r\n\r\n' "$status" "$retry_after" "$content_type" > "$headers"
+if [[ $FAKE_MODE == not-json ]]; then
+    printf 'OK\r\n' > "$output"
+elif [[ $status != 200 ]]; then
     printf '{"error":"fixture model limit","echo":"fixture-token"}' > "$output"
 elif [[ $FAKE_MODE == invalid ]]; then
     printf '{"choices":[{"message":{"content":"No verdict"}}]}' > "$output"
@@ -121,7 +125,7 @@ run_review() {
     rm -f "$temp/calls" "$temp/posted.md" "$temp/posts" "$temp/delays" "$temp"/request.*.json
     status=0
     (cd "$temp/repo" && PATH="$temp/bin:$PATH" FAKE_DIR="$temp" FAKE_MODE="$mode" \
-        GH_TOKEN=fixture-token GITHUB_REPOSITORY=fixture/review AI_REVIEW_HEAD_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+        GH_TOKEN=fixture-token AI_REVIEW_API_KEY=fixture-token GITHUB_REPOSITORY=fixture/review AI_REVIEW_HEAD_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
         AI_REVIEW_MODEL="${TEST_MODEL:-}" AI_REVIEW_API_URL=https://fixture.invalid/inference \
         FAKE_EXISTING="${TEST_EXISTING:-0}" FAKE_SUPERSEDED="${TEST_SUPERSEDED:-0}" \
         bash "$check" 516) > "$temp/out" 2> "$temp/err" || status=$?
@@ -146,7 +150,8 @@ large = []
 for path in requests:
     assert path.stat().st_size <= 20000, path.stat().st_size
     request = json.loads(path.read_text())
-    assert request["model"] == "openai/gpt-4.1"
+    assert request["model"] == "openai/gpt-oss-120b"
+    assert request["max_tokens"] == 4000
     system, user = request["messages"]
     assert system["role"] == "system" and user["role"] == "user"
     assert "Trusted agent rule." in system["content"] and "Trusted claude rule." in system["content"]
@@ -160,7 +165,7 @@ assert len(large) > 1
 original = (root / "diff.txt").read_text().split("diff --git a/large.zig b/large.zig\n", 1)[1].split("diff --git a/failed.zig", 1)[0]
 assert "".join(large) == original
 body = (root / "posted.md").read_text()
-assert body.startswith("<!-- wazig-ai-review -->\n### AI review (GitHub Models openai/gpt-4.1, advisory)\n")
+assert body.startswith("<!-- wazig-ai-review -->\n### AI review (Groq openai/gpt-oss-120b, advisory)\n")
 assert "Commit " + "a" * 40 in body and "Verdict: CONCERNS" in body
 findings = re.findall(r"^- \*\*.*$", body, re.M)
 assert len(findings) == 10, len(findings)
@@ -187,12 +192,14 @@ run_review all-fail 1
 [[ $(cat "$temp/calls") -gt 3 ]]
 run_review invalid 1
 [[ ! -f $temp/posted.md ]]
+run_review not-json 1
+[[ ! -f $temp/posted.md ]]
 run_review retry 0
 grep -q 'HTTP 429.*fixture model limit' "$temp/err"
 grep -qx '60' "$temp/delays"
 cmp "$temp/request.1.json" "$temp/request.2.json"
 TEST_MODEL=fixture/model TEST_EXISTING=1 run_review clean 0
-grep -q '^### AI review (GitHub Models fixture/model, advisory)$' "$temp/posted.md"
+grep -q '^### AI review (Groq fixture/model, advisory)$' "$temp/posted.md"
 grep -qx 'Verdict: APPROVE' "$temp/posted.md"
 grep -qx 'No findings.' "$temp/posted.md"
 grep -qx 'PATCH repos/fixture/review/issues/comments/42' "$temp/posts"
@@ -204,4 +211,4 @@ if grep -Eqi 'codex|openai_api_key' "$check"; then
     printf 'test-ai-review: FAIL paid-key transport remains\n' >&2
     exit 1
 fi
-printf 'test-ai-review: PASS chunking, request bounds, aggregation, partial failures, retries, clean verdict, update, superseded head and free-token transport\n'
+printf 'test-ai-review: PASS chunking, request bounds, aggregation, partial failures, retries, non-JSON 200, clean verdict, update, superseded head and free-key transport\n'

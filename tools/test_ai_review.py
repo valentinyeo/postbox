@@ -33,14 +33,15 @@ elif name == "curl":
     assert args[:2] == ["--silent", "--show-error"], args
     assert args[args.index("--request") + 1] == "POST", args
     assert args[args.index("--write-out") + 1] == "%{http_code}", args
-    assert "https://models.github.ai/inference/chat/completions" in args, args
+    assert "https://api.groq.com/openai/v1/chat/completions" in args, args
     headers = [args[index + 1] for index, arg in enumerate(args) if arg == "--header"]
-    assert headers == ["Authorization: Bearer " + os.environ["GH_TOKEN"],
+    assert headers == ["Authorization: Bearer " + os.environ["AI_REVIEW_API_KEY"],
                        "Content-Type: application/json"], headers
     body = args[args.index("--data-binary") + 1]
     assert body.startswith("@"), body
     request = json.loads(Path(body[1:]).read_text())
-    assert set(request) == {"model", "messages"}, request
+    assert set(request) == {"model", "max_tokens", "messages"}, request
+    assert request["max_tokens"] == 4000, request
     assert [message["role"] for message in request["messages"]] == ["system", "user"], request
     assert all(isinstance(message["content"], str) for message in request["messages"]), request
     counter = root / "attempts"
@@ -56,7 +57,8 @@ elif name == "curl":
     if not result.get("omit_output"):
         Path(args[args.index("--output") + 1]).write_text(response)
     status = result.get("status", "200")
-    Path(args[args.index("--dump-header") + 1]).write_text(f"HTTP/2 {status}\\r\\n\\r\\n")
+    content_type = result.get("content_type", "application/json")
+    Path(args[args.index("--dump-header") + 1]).write_text(f"HTTP/2 {status}\\r\\nContent-Type: {content_type}\\r\\n\\r\\n")
     print(status, end="")
     sys.exit(result.get("exit", 0))
 elif args[:2] == ["pr", "diff"]:
@@ -115,7 +117,7 @@ class Review(unittest.TestCase):
         self.env = dict(os.environ, FIXTURE_ROOT=str(self.root),
                         PATH=str(self.root / "bin") + os.pathsep + os.environ["PATH"],
                         GITHUB_REPOSITORY="example/project", AI_REVIEW_MODEL="",
-                        AI_REVIEW_HEAD_SHA=SHA, GH_TOKEN="fixture-token",
+                        AI_REVIEW_HEAD_SHA=SHA, GH_TOKEN="fixture-token", AI_REVIEW_API_KEY="fixture-token",
                         GITHUB_TOKEN="fixture-token", AI_REVIEW_API_URL="",
                         GITHUB_OUTPUT=str(self.root / "outputs"), PR_NUMBER="12", EVENT_HEAD=SHA)
         self.env.pop("OPENAI_API_KEY", None)
@@ -157,10 +159,10 @@ class Review(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, f"wazig-ai-review posted PR 12 commit {SHA}\n")
         self.assertEqual(result.stderr, "")
-        self.assertEqual(self.posted(), f"{MARKER}\n### AI review (GitHub Models openai/gpt-4.1, advisory)\n\nCommit {SHA}\n\nVerdict: APPROVE\n\nNo findings.\n")
+        self.assertEqual(self.posted(), f"{MARKER}\n### AI review (Groq openai/gpt-oss-120b, advisory)\n\nCommit {SHA}\n\nVerdict: APPROVE\n\nNo findings.\n")
         self.assertEqual(len(self.requests()), 1)
         request = self.requests()[0]
-        self.assertEqual(request["model"], "openai/gpt-4.1")
+        self.assertEqual(request["model"], "openai/gpt-oss-120b")
         trusted, untrusted = [message["content"] for message in request["messages"]]
         self.assertIn("Trusted base agent rules", trusted)
         self.assertIn("Trusted base project rules", trusted)
@@ -179,7 +181,7 @@ class Review(unittest.TestCase):
         self.env["AI_REVIEW_MODEL"] = "custom-model"
         self.config["results"] = [{"text": "Preamble\nVerdict: CONCERNS\n- **major** `file:1` bug\n"}]
         self.assertEqual(self.run_script().returncode, 0)
-        self.assertIn("GitHub Models custom-model, advisory", self.posted())
+        self.assertIn("Groq custom-model, advisory", self.posted())
         self.assertNotIn("Preamble", self.posted())
         self.assertIn("Verdict: CONCERNS", self.posted())
         self.assertIn("- **major** `file:1` bug", self.posted())
@@ -189,6 +191,7 @@ class Review(unittest.TestCase):
         for first in ({"text": "No verdict"}, {"text": "Verdict: APPROVE", "exit": 7},
                       {"text": "Verdict: APPROVE", "status": "500"},
                       {"body": "not JSON"}, {"body": "{}"},
+                      {"body": "OK", "content_type": "text/plain"},
                       {"body": '{"choices":[{"message":{"content":42}}]}'}):
             with self.subTest(first=first):
                 self.config["results"] = [first, {"text": "Verdict: APPROVE\nNo findings."}]
@@ -331,6 +334,21 @@ class Review(unittest.TestCase):
         self.assertIn("Verdict: APPROVE", self.posted())
         self.assertNotIn(self.env["GH_TOKEN"], result.stdout + result.stderr)
 
+    def test_workflow_skips_review_without_key(self):
+        self.env["AI_REVIEW_API_KEY"] = ""
+        (self.root / "outputs").unlink(missing_ok=True)
+        result = self.run_script(script=workflow_run("Check review key availability"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("::notice::", result.stdout)
+        self.assertFalse((self.root / "outputs").exists())
+        self.assertEqual(self.calls("curl"), [])
+
+    def test_workflow_marks_review_available_with_key(self):
+        (self.root / "outputs").unlink(missing_ok=True)
+        result = self.run_script(script=workflow_run("Check review key availability"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root / "outputs").read_text(), "available=true\n")
+
     def test_workflow_token_is_not_printed_on_success_or_failure(self):
         token = self.env["GH_TOKEN"]
         for response, expected in (({"text": "Verdict: APPROVE\nNo findings."}, 0),
@@ -362,18 +380,20 @@ class Workflow(unittest.TestCase):
             self.assertIn(guard, text)
         self.assertIn("group: ai-review-${{ github.event.pull_request.number || github.event.issue.number }}", text)
         self.assertIn("cancel-in-progress: true", text)
-        self.assertIn("permissions:\n  contents: read\n  models: read\n  pull-requests: write\n  issues: write", text)
+        self.assertIn("permissions:\n  contents: read\n  pull-requests: write\n  issues: write", text)
         self.assertIn("ref: ${{ steps.pr.outputs.base }}", text)
         self.assertIn("persist-credentials: false", text)
         self.assertNotIn("codex", text.lower())
         self.assertNotIn("OPENAI_API_KEY", text)
-        self.assertNotIn("steps.key.outputs", text)
+        self.assertNotIn("models: read", text)
         review = text.split("      - name: Review and post advisory comment\n", 1)[1]
+        self.assertIn("if: steps.key.outputs.available == 'true'", review)
+        self.assertIn("AI_REVIEW_API_KEY: ${{ secrets.GROQ_API_KEY }}", review)
         self.assertIn("AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}", review)
         self.assertIn("AI_REVIEW_HEAD_SHA: ${{ steps.pr.outputs.head }}", review)
         self.assertIn("GH_TOKEN: ${{ github.token }}", review)
         self.assertIn('run: bash tools/ai-review.sh "$PR_NUMBER"', review)
-        self.assertEqual(text.count("if: steps.pr.outputs.number != ''"), 2)
+        self.assertEqual(text.count("if: steps.pr.outputs.number != ''"), 1)
         automerge = (TOOLS.parent / ".github/workflows/automerge.yml").read_text() + (TOOLS / "automerge-admit.sh").read_text()
         self.assertIn('select((.name // .context) != "code-review")', automerge)
         required = re.search(r"required='([^']+)'", automerge).group(1)
