@@ -82,7 +82,7 @@ pub const State = struct {
     }
 
     pub fn localArchived(self: *const State, key: anytype) bool {
-        return if (key.provider == .whatsapp) self.find(key.id) != null else if (self.findLocal(key)) |index| self.entries[index].keep else false;
+        return if (key.provider == .whatsapp) self.isKept(key.id) else if (self.findLocal(key)) |index| self.entries[index].keep else false;
     }
 
     pub fn isArchived(self: *const State, key: anytype, provider_archived: bool) bool {
@@ -536,6 +536,38 @@ test "batch progress includes the current operation through the last item" {
 
 test "archive status is Archived" {
     try std.testing.expectEqualStrings("Archived", Action.archive.status());
+}
+
+test "WhatsApp archive entries honor zero and one keep flags after restart" {
+    const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
+    var state = State{};
+    state.parse("plain@g.us\t0\tbaseline\nkept@g.us\t1\tbaseline\n");
+    var buffer: [512]u8 = undefined;
+    var loaded = State{};
+    loaded.parse(state.format(&buffer));
+    for ([_]*const State{ &state, &loaded }) |current| {
+        try std.testing.expectEqual(@as(usize, 2), current.count);
+        for ([_]bool{ false, true }) |keep| {
+            const key = Key{ .provider = .whatsapp, .account = "fixture-account", .id = if (keep) "kept@g.us" else "plain@g.us" };
+            try std.testing.expectEqualStrings("baseline", current.baseline(key.id).?);
+            try std.testing.expectEqual(keep, current.localArchived(key));
+        }
+    }
+}
+
+test "WhatsApp archive status keeps the provider flag and adds keep" {
+    const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
+    var state = State{};
+    state.parse("plain@g.us\t0\tbaseline\nkept@g.us\t1\tbaseline\n");
+    for ([_]bool{ false, true }) |provider_archived| {
+        for ([_]bool{ false, true }) |keep| {
+            const key = Key{ .provider = .whatsapp, .account = "fixture-account", .id = if (keep) "kept@g.us" else "plain@g.us" };
+            try std.testing.expectEqual(keep or provider_archived, state.isArchived(key, provider_archived));
+        }
+        const missing = Key{ .provider = .whatsapp, .account = "fixture-account", .id = "missing@g.us" };
+        try std.testing.expect(!state.localArchived(missing));
+        try std.testing.expectEqual(provider_archived, state.isArchived(missing, provider_archived));
+    }
 }
 
 test "local Slack Telegram and Signal archives round trip with provider and account identity" {
