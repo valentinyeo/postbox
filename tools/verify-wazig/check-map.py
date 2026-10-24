@@ -431,6 +431,20 @@ assert 'link-previews' in {row['hub'] for row in journeys}
 assert entries['link-previews']['validator']['file'] == 'check-link-previews-evidence.py'
 print('LINK PREVIEWS MAP VERIFIED: dispatch, PR matrix, hub mode and surviving evidence')
 
+composer_border = (root / 'tools/verify-wazig/composer-border.ps1').read_text(encoding='utf-8')
+assert entries['composer-border']['library'] == 'composer-border.ps1'
+assert entries['composer-border']['script'] == 'journey-composer-border.ps1'
+assert entries['composer-border']['pr'] and 'Invoke-ComposerBorderJourney $session $start $app' in runner
+for fragment in ['@(100, 125, 150)', "Get-Edit $window '1032'", 'BoundingRectangle', 'Measure-ComposerBorder', 'Assert-ComposerBorder', 'composer-border.json', 'Test-ComposerBorderOracle', "-Name FontScale -Value $scale", 'GetDpiForWindow']:
+    assert fragment in composer_border, fragment
+for side in ['top', 'bottom', 'left', 'right']:
+    assert f'{side} = Measure-ComposerBorder' in composer_border, side
+assert '$Measurement.top -eq $Measurement.bottom' in composer_border
+assert '$Measurement.left -eq $Measurement.right' in composer_border
+assert '$Measurement.top -eq $Measurement.left' in composer_border
+assert '.claude/skills/verify-wazig/features/composer-border.md' in marker_namespace['PUBLIC_SKILL_PATHS']
+print('COMPOSER BORDER MAP VERIFIED: four screenshot edges, exact saved text scales, negative oracle and PR wiring')
+
 passage = (root / 'tools/verify-wazig/passage-copy.ps1').read_text(encoding='utf-8')
 assert 'Invoke-PassageCopyJourney $session' in runner
 assert entries['passage-copy']['hub'] == 'passage-copy'

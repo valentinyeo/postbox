@@ -1148,6 +1148,13 @@ fn paintRoundedButton(a: *App, shapes: *const smooth.Context, hdc: win.HDC, rect
 }
 
 fn paintInputField(a: *App, shapes: *const smooth.Context, hdc: win.HDC, control: win.HWND, rect: win.RECT) void {
+    if (a.compose != null and control == a.compose.?) {
+        const radius = @min(@min(rect.right - rect.left, rect.bottom - rect.top), px(a, theme.radius_field * 2));
+        smooth.fillRoundRect(shapes, rect, radius, radius, theme.current.surface_container_high);
+        const border: win.RECT = @bitCast(compose_layout.composerBorderRect(@bitCast(rect)));
+        smooth.strokeRoundRect(shapes, border, radius, radius, if (win.GetFocus() == control) theme.current.primary else theme.current.outline, 1);
+        return;
+    }
     paintRoundedButton(a, shapes, hdc, rect, theme.current.surface_container_high, theme.current.on_surface, a.font.?, if (win.GetFocus() == control) theme.current.primary else theme.current.outline, &.{});
 }
 
@@ -17617,7 +17624,9 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             } else if (id == id_emoji and notification == win.BN_CLICKED) {
                 openEmojiMenu(a);
             } else if ((id == id_compose or id == id_search) and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {
-                _ = win.InvalidateRect(hwnd, if (id == id_compose) &a.compose_pill else &a.search_pill, win.FALSE);
+                var dirty = a.compose_pill;
+                _ = win.InflateRect(&dirty, 1, 1);
+                _ = win.InvalidateRect(hwnd, if (id == id_compose) &dirty else &a.search_pill, win.FALSE);
             } else if (id == id_compose and notification == win.EN_CHANGE) {
                 saveComposerDraft(a);
                 layoutComposer(a);
