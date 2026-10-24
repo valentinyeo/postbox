@@ -6,10 +6,6 @@ pub const Provider = enum(u8) { whatsapp = 0, slack = 1 };
 pub const max_channel_id = 31;
 pub const max_user_id = 31;
 
-pub fn resurfacesChat(from_me: bool, visible: bool, archived: bool) bool {
-    return !from_me and (!visible or archived);
-}
-
 pub fn compareTs(a: []const u8, b: []const u8) std.math.Order {
     const left = splitTs(a);
     const right = splitTs(b);
@@ -961,14 +957,6 @@ test "compareTs orders numerically, then by fraction" {
     try std.testing.expectEqual(std.math.Order.gt, compareTs("1740000000.5", "1740000000.05"));
     try std.testing.expectEqual(std.math.Order.eq, compareTs("1740000000.000123", "1740000000.000123"));
     try std.testing.expectEqual(std.math.Order.gt, compareTs("999", "20"));
-}
-
-test "resurfacesChat pulls archived chats back except for my own messages" {
-    try std.testing.expect(resurfacesChat(false, false, false));
-    try std.testing.expect(resurfacesChat(false, true, true));
-    try std.testing.expect(!resurfacesChat(false, true, false));
-    try std.testing.expect(!resurfacesChat(true, false, false));
-    try std.testing.expect(!resurfacesChat(true, true, true));
 }
 
 test "classifyEnvelope reads ack, hello and message events" {

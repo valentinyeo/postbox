@@ -26,8 +26,7 @@ pub const groups = [_]Group{
         .{ .key = "Esc", .desc = "Clear the search and show all chats" },
         .{ .key = "U", .desc = "Toggle unread chats" },
         .{ .key = "Ctrl+E or E", .desc = "Archive or unarchive the selected chat" },
-        .{ .key = "Ctrl+Shift+E", .desc = "Archive and keep archived, including all selected chats" },
-        .{ .key = "Ctrl+A in the chat list or empty message box", .desc = "Select all chats; Ctrl+E archives, Ctrl+Shift+E keeps archived, Esc cancels" },
+        .{ .key = "Ctrl+A in the chat list or empty message box", .desc = "Select all chats; Ctrl+E archives, Esc cancels" },
         .{ .key = "R", .desc = "Refresh" },
         .{ .key = "Q", .desc = "Quit Messages" },
     } },
@@ -105,16 +104,6 @@ test "no empty key or description" {
             try std.testing.expect(item.desc.len > 0);
         }
     }
-}
-
-test "keep archived has a discoverable direct shortcut" {
-    for (groups[0].items) |item| {
-        if (std.mem.eql(u8, item.key, "Ctrl+Shift+E")) {
-            try std.testing.expectEqualStrings("Archive and keep archived, including all selected chats", item.desc);
-            return;
-        }
-    }
-    return error.MissingKeepArchivedShortcut;
 }
 
 test "Ctrl+A in the chat list selects chats" {
