@@ -3,6 +3,12 @@ set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 check="$script_dir/ai-review.sh"
+for pinned in 'api.groq.com/openai/v1/chat/completions' 'openai/gpt-oss-120b'; do
+    if ! grep -qF "$pinned" "$check"; then
+        printf 'test-ai-review: FAIL the free provider default is gone: %s\n' "$pinned" >&2
+        exit 1
+    fi
+done
 temp=$(mktemp -d)
 trap 'rm -rf -- "$temp"' EXIT
 mkdir -p "$temp/bin" "$temp/repo"
@@ -211,4 +217,4 @@ if grep -Eqi 'codex|openai_api_key' "$check"; then
     printf 'test-ai-review: FAIL paid-key transport remains\n' >&2
     exit 1
 fi
-printf 'test-ai-review: PASS chunking, request bounds, aggregation, partial failures, retries, non-JSON 200, clean verdict, update, superseded head and free-key transport\n'
+printf 'test-ai-review: PASS free provider defaults, chunking, request bounds, aggregation, partial failures, retries, non-JSON 200, clean verdict, update, superseded head and free-key transport\n'
