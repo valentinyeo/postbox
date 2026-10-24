@@ -29,7 +29,7 @@ pub fn progressStatus(out: []u8, should_unarchive: bool, total: usize, remaining
     }) catch null;
 }
 
-pub const Source = enum { shortcut, menu, control, send, kept };
+pub const Source = enum { shortcut, menu, control, resurface, send, kept };
 
 pub fn logLine(out: []u8, jid: []const u8, archived: bool, source: Source) []const u8 {
     return std.fmt.bufPrint(out, "archive: jid={s} archived={} source={s}", .{ jid, archived, @tagName(source) }) catch unreachable;
@@ -42,7 +42,7 @@ pub const Action = enum {
 
     pub fn status(self: Action) []const u8 {
         return switch (self) {
-            .archive => "Archived",
+            .archive => "Archived. Comes back on a new message",
             .keep => "Kept archived. Won't come back",
             .unarchive => "Chat unarchived",
         };
@@ -50,7 +50,7 @@ pub const Action = enum {
 };
 
 pub const Entry = struct {
-    provider: enum { whatsapp, slack, telegram, signal } = .whatsapp,
+    slack: bool = false,
     account: [32]u8 = undefined,
     account_len: u8 = 0,
     jid: [max_jid]u8 = undefined,
@@ -76,43 +76,29 @@ pub const State = struct {
 
     pub fn find(self: *const State, jid: []const u8) ?usize {
         for (self.entries[0..self.count], 0..) |*entry, index| {
-            if (entry.provider == .whatsapp and std.mem.eql(u8, entry.jidSlice(), jid)) return index;
+            if (!entry.slack and std.mem.eql(u8, entry.jidSlice(), jid)) return index;
         }
         return null;
     }
 
     pub fn localArchived(self: *const State, key: anytype) bool {
-        return if (key.provider == .whatsapp) self.find(key.id) != null else if (self.findLocal(key)) |index| self.entries[index].keep else false;
-    }
-
-    pub fn isArchived(self: *const State, key: anytype, provider_archived: bool) bool {
-        if (key.provider != .whatsapp) {
-            if (self.findLocal(key)) |index| return self.entries[index].keep;
-        }
-        return self.localArchived(key) or provider_archived;
-    }
-
-    pub fn setLocalUnarchived(self: *State, key: anytype) bool {
-        if (!self.setLocalArchived(key, true)) return false;
-        self.entries[self.findLocal(key).?].keep = false;
-        return true;
+        if (key.provider != .slack) return self.isKept(key.id);
+        return self.findLocal(key) != null;
     }
 
     fn findLocal(self: *const State, key: anytype) ?usize {
-        if (key.provider == .whatsapp) return null;
+        if (key.provider != .slack) return null;
+        const Key = @TypeOf(key);
         for (self.entries[0..self.count], 0..) |*entry, index| {
-            if (std.mem.eql(u8, @tagName(entry.provider), @tagName(key.provider)) and
-                std.mem.eql(u8, entry.jidSlice(), key.id) and
-                (std.mem.eql(u8, entry.account[0..entry.account_len], key.account) or
-                    (entry.provider != .slack and entry.account_len == 0))) return index;
+            if (entry.slack and Key.eql(key, .{ .provider = .slack, .account = entry.account[0..entry.account_len], .id = entry.jidSlice() })) return index;
         }
         return null;
     }
 
     pub fn setLocalArchived(self: *State, key: anytype, archived: bool) bool {
-        if (key.provider == .whatsapp or key.account.len > 32 or key.id.len == 0 or key.id.len > max_jid) return false;
+        if (key.provider != .slack or key.account.len > 32 or key.id.len == 0 or key.id.len > max_jid) return false;
         if (self.findLocal(key)) |index| {
-            if (!archived) self.removeAt(index) else self.entries[index].keep = true;
+            if (!archived) self.removeAt(index);
             return true;
         }
         if (!archived) return true;
@@ -126,7 +112,7 @@ pub const State = struct {
             if (self.count >= max_entries) return false;
         }
         const entry = &self.entries[self.count];
-        entry.* = .{ .provider = std.meta.stringToEnum(@FieldType(Entry, "provider"), @tagName(key.provider)).?, .keep = true };
+        entry.* = .{ .slack = true, .keep = true };
         @memcpy(entry.account[0..key.account.len], key.account);
         entry.account_len = @intCast(key.account.len);
         @memcpy(entry.jid[0..key.id.len], key.id);
@@ -150,6 +136,7 @@ pub const State = struct {
         if (provider_archived) return false;
         const index = self.find(jid) orelse return false;
         const entry = &self.entries[index];
+        if (!entry.keep) return false;
         const n = @min(ts.len, max_ts);
         if (entry.held and std.mem.eql(u8, entry.held_ts[0..entry.held_ts_len], ts[0..n])) return false;
         @memcpy(entry.held_ts[0..n], ts[0..n]);
@@ -222,8 +209,8 @@ pub const State = struct {
     pub fn format(self: *const State, out: []u8) []const u8 {
         var len: usize = 0;
         for (self.entries[0..self.count]) |*entry| {
-            const line = if (entry.provider != .whatsapp)
-                std.fmt.bufPrint(out[len..], "{s}\t{s}\t{s}{s}\n", .{ @tagName(entry.provider), entry.account[0..entry.account_len], entry.jidSlice(), if (entry.keep) @as([]const u8, "") else "\t0" }) catch break
+            const line = if (entry.slack)
+                std.fmt.bufPrint(out[len..], "slack\t{s}\t{s}\n", .{ entry.account[0..entry.account_len], entry.jidSlice() }) catch break
             else
                 std.fmt.bufPrint(out[len..], "{s}\t{d}\t{s}\n", .{ entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break;
             len += line.len;
@@ -237,12 +224,12 @@ pub const State = struct {
         while (lines.next()) |line| {
             var fields = std.mem.splitScalar(u8, line, '\t');
             const jid = fields.next() orelse continue;
-            if (std.mem.eql(u8, jid, "slack") or std.mem.eql(u8, jid, "telegram") or std.mem.eql(u8, jid, "signal")) {
+            if (std.mem.eql(u8, jid, "slack")) {
                 const account = fields.next() orelse continue;
                 const id = fields.next() orelse continue;
                 if (account.len > 32 or id.len == 0 or id.len > max_jid or self.count >= max_entries) continue;
                 const entry = &self.entries[self.count];
-                entry.* = .{ .provider = std.meta.stringToEnum(@FieldType(Entry, "provider"), jid).?, .keep = !std.mem.eql(u8, fields.next() orelse "1", "0") };
+                entry.* = .{ .slack = true, .keep = true };
                 @memcpy(entry.account[0..account.len], account);
                 entry.account_len = @intCast(account.len);
                 @memcpy(entry.jid[0..id.len], id);
@@ -257,30 +244,19 @@ pub const State = struct {
             const n = @min(ts.len, max_ts);
             @memcpy(entry.ts[0..n], ts[0..n]);
             entry.ts_len = @intCast(n);
-            if (std.mem.startsWith(u8, jid, "telegram:") or std.mem.startsWith(u8, jid, "signal:")) {
-                entry.provider = if (std.mem.startsWith(u8, jid, "telegram:")) .telegram else .signal;
-                entry.keep = true;
-            }
         }
     }
 };
 
-pub const stamp_len = 20;
+pub fn needsProbe(kept: bool, last_ts: []const u8, baseline_ts: []const u8) bool {
+    if (kept or last_ts.len == 0 or baseline_ts.len == 0) return false;
+    return std.mem.order(u8, last_ts, baseline_ts) == .gt;
+}
 
-pub fn archiveBaseline(out: *[stamp_len]u8, row_ts: []const u8, now_seconds: i64) []const u8 {
-    const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(@max(0, now_seconds)) };
-    const year_day = epoch.getEpochDay().calculateYearDay();
-    const month_day = year_day.calculateMonthDay();
-    const day_seconds = epoch.getDaySeconds();
-    const now = std.fmt.bufPrint(out, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", .{
-        year_day.year,
-        month_day.month.numeric(),
-        month_day.day_index + 1,
-        day_seconds.getHoursIntoDay(),
-        day_seconds.getMinutesIntoHour(),
-        day_seconds.getSecondsIntoMinute(),
-    }) catch return row_ts;
-    return if (std.mem.order(u8, row_ts, now) == .gt) row_ts else now;
+pub fn shouldResurface(newest_from_me: bool, kept: bool, newest_ts: []const u8, baseline_ts: []const u8) bool {
+    if (newest_from_me or kept) return false;
+    if (newest_ts.len == 0 or baseline_ts.len == 0) return false;
+    return std.mem.order(u8, newest_ts, baseline_ts) == .gt;
 }
 
 pub fn Selection(comptime capacity: usize) type {
@@ -393,15 +369,27 @@ test "legacy migration preserves existing hub choices and scopes matches to each
     try std.testing.expect(loaded.holdKept(second.id, false, "newer"));
     loaded.setKeep(second.id, false);
     try std.testing.expect(!migrateLegacyKeep(&loaded, &legacy, second, "newest"));
-    try std.testing.expect(loaded.holdKept(second.id, false, "newest"));
+    try std.testing.expect(!loaded.holdKept(second.id, false, "newest"));
 }
 
-test "the baseline is the later of the list row time and the archive moment" {
-    var buffer: [stamp_len]u8 = undefined;
-    const moment: i64 = 1792775400;
-    try std.testing.expectEqualStrings("2026-10-23T17:10:00Z", archiveBaseline(&buffer, "2026-10-23T16:43:39Z", moment));
-    try std.testing.expectEqualStrings("2026-10-23T17:10:00Z", archiveBaseline(&buffer, "", moment));
-    try std.testing.expectEqualStrings("2026-10-23T18:00:00Z", archiveBaseline(&buffer, "2026-10-23T18:00:00Z", moment));
+test "a newer incoming message resurfaces an archived chat" {
+    try std.testing.expect(shouldResurface(false, false, "2026-10-10T10:30:00Z", "2026-10-10T10:24:33Z"));
+}
+
+test "my own newest message, a kept chat or an old stamp never resurface" {
+    try std.testing.expect(!shouldResurface(true, false, "2026-10-10T10:30:00Z", "2026-10-10T10:24:33Z"));
+    try std.testing.expect(!shouldResurface(false, true, "2026-10-10T10:30:00Z", "2026-10-10T10:24:33Z"));
+    try std.testing.expect(!shouldResurface(false, false, "2026-10-10T10:24:33Z", "2026-10-10T10:24:33Z"));
+    try std.testing.expect(!shouldResurface(false, false, "2026-10-10T09:00:00Z", "2026-10-10T10:24:33Z"));
+    try std.testing.expect(!shouldResurface(false, false, "", "2026-10-10T10:24:33Z"));
+    try std.testing.expect(!shouldResurface(false, false, "2026-10-10T10:30:00Z", ""));
+}
+
+test "only moved, unkept chats with a baseline are probed" {
+    try std.testing.expect(needsProbe(false, "2026-10-10T10:30:00Z", "2026-10-10T10:24:33Z"));
+    try std.testing.expect(!needsProbe(true, "2026-10-10T10:30:00Z", "2026-10-10T10:24:33Z"));
+    try std.testing.expect(!needsProbe(false, "2026-10-10T10:24:33Z", "2026-10-10T10:24:33Z"));
+    try std.testing.expect(!needsProbe(false, "2026-10-10T10:30:00Z", ""));
 }
 
 test "state keeps, forgets and round-trips through text" {
@@ -427,7 +415,7 @@ test "state keeps, forgets and round-trips through text" {
     try std.testing.expect(loaded.baseline("a@g.us") == null);
 }
 
-test "all user archives the provider unarchives are held once per new message" {
+test "a kept chat the provider unarchived is held once per new message and plain archives are not" {
     var state = State{};
     try std.testing.expect(state.archive("kept@g.us", "2026-10-10T10:00:00Z", true));
     try std.testing.expect(state.archive("plain@g.us", "2026-10-10T10:00:00Z", false));
@@ -435,9 +423,7 @@ test "all user archives the provider unarchives are held once per new message" {
     try std.testing.expect(state.holdKept("kept@g.us", false, "2026-10-10T11:00:00Z"));
     try std.testing.expect(!state.holdKept("kept@g.us", false, "2026-10-10T11:00:00Z"));
     try std.testing.expect(state.holdKept("kept@g.us", false, "2026-10-10T12:00:00Z"));
-    try std.testing.expect(state.holdKept("plain@g.us", false, "2026-10-10T12:00:00Z"));
     try std.testing.expect(!state.holdKept("plain@g.us", false, "2026-10-10T12:00:00Z"));
-    try std.testing.expect(state.holdKept("plain@g.us", false, "2026-10-10T13:00:00Z"));
     try std.testing.expect(!state.holdKept("other@g.us", false, "2026-10-10T12:00:00Z"));
     state.releaseHold("kept@g.us");
     try std.testing.expect(state.holdKept("kept@g.us", false, "2026-10-10T12:00:00Z"));
@@ -445,7 +431,7 @@ test "all user archives the provider unarchives are held once per new message" {
     var loaded = State{};
     loaded.parse(state.format(&buffer));
     try std.testing.expect(loaded.holdKept("kept@g.us", false, "2026-10-10T12:00:00Z"));
-    loaded.remove("kept@g.us");
+    loaded.setKeep("kept@g.us", false);
     try std.testing.expect(!loaded.holdKept("kept@g.us", false, "2026-10-10T13:00:00Z"));
 }
 
@@ -472,7 +458,8 @@ test "an archived chat keeps its baseline while hundreds of other archived chats
         state.setBaseline(jid, "0001-01-01T00:00:00Z");
     }
     const base = state.baseline("a@s.whatsapp.net") orelse return error.BaselineLost;
-    try std.testing.expectEqualStrings("2026-10-10T10:00:00Z", base);
+    try std.testing.expect(needsProbe(false, "2026-10-10T10:30:00Z", base));
+    try std.testing.expect(shouldResurface(false, false, "2026-10-10T10:30:00Z", base));
 }
 
 test "select-all snapshot holds exactly the rows shown" {
@@ -492,6 +479,26 @@ test "the pane switches when the open chat left the list" {
     try std.testing.expect(!paneNeedsSwitch("a@g.us", "a@g.us"));
 }
 
+test "archive modes survive restart and allow resurfacing undoes keep" {
+    const jid = "kept@g.us";
+    const baseline_ts = "2026-10-10T10:00:00Z";
+    const incoming_ts = "2026-10-10T11:00:00Z";
+    var state = State{};
+    try std.testing.expect(state.archive(jid, baseline_ts, true));
+    var buffer: [512]u8 = undefined;
+    var loaded = State{};
+    loaded.parse(state.format(&buffer));
+    try std.testing.expect(!needsProbe(loaded.isKept(jid), incoming_ts, loaded.baseline(jid).?));
+    try std.testing.expect(!shouldResurface(false, loaded.isKept(jid), incoming_ts, loaded.baseline(jid).?));
+    loaded.setKeep(jid, false);
+    state.parse(loaded.format(&buffer));
+    try std.testing.expect(shouldResurface(false, state.isKept(jid), incoming_ts, state.baseline(jid).?));
+    try std.testing.expect(!shouldResurface(true, state.isKept(jid), incoming_ts, state.baseline(jid).?));
+    try std.testing.expect(state.archive(jid, incoming_ts, false));
+    try std.testing.expect(!shouldResurface(false, state.isKept(jid), incoming_ts, state.baseline(jid).?));
+    try std.testing.expect(shouldResurface(false, state.isKept(jid), "2026-10-10T12:00:00Z", state.baseline(jid).?));
+}
+
 test "a full kept table refuses a new archive without changing existing state" {
     var state = State{};
     var name: [16]u8 = undefined;
@@ -506,12 +513,15 @@ test "a full kept table refuses a new archive without changing existing state" {
     try std.testing.expectEqualStrings("new-baseline", state.baseline("0@g.us").?);
 }
 
-test "plain archive explicitly replaces the legacy keep flag" {
+test "plain archive explicitly replaces keep and own messages never resurface" {
     var state = State{};
     const jid = "a@g.us";
     try std.testing.expect(state.archive(jid, "2026-10-10T10:00:00Z", true));
     try std.testing.expect(state.archive(jid, "2026-10-10T11:00:00Z", false));
     try std.testing.expect(!state.isKept(jid));
+    for ([_]bool{ false, true }) |kept| {
+        try std.testing.expect(!shouldResurface(true, kept, "2026-10-10T12:00:00Z", state.baseline(jid).?));
+    }
 }
 
 test "pending operations hide chats only in the view they are leaving" {
@@ -532,83 +542,4 @@ test "batch progress includes the current operation through the last item" {
     try std.testing.expect(progressStatus(&out, false, 0, 0) == null);
     try std.testing.expect(progressStatus(&out, false, 2, 3) == null);
     try std.testing.expect(progressStatus(out[0..1], false, 250, 239) == null);
-}
-
-test "archive status is Archived" {
-    try std.testing.expectEqualStrings("Archived", Action.archive.status());
-}
-
-test "local Slack Telegram and Signal archives round trip with provider and account identity" {
-    const Key = struct { provider: enum { whatsapp, slack, telegram, signal }, account: []const u8, id: []const u8 };
-    for ([_]Key{
-        .{ .provider = .slack, .account = "team", .id = "shared" },
-        .{ .provider = .telegram, .account = "telegram", .id = "telegram:user:7001" },
-        .{ .provider = .signal, .account = "signal", .id = "signal:fixture" },
-    }) |key| {
-        var state = State{};
-        try std.testing.expect(state.setLocalArchived(key, true));
-        try std.testing.expect(state.localArchived(key));
-        try std.testing.expect(!state.localArchived(Key{ .provider = key.provider, .account = "other", .id = key.id }));
-        try std.testing.expect(!state.localArchived(Key{ .provider = .whatsapp, .account = key.account, .id = key.id }));
-        var buffer: [512]u8 = undefined;
-        var loaded = State{};
-        loaded.parse(state.format(&buffer));
-        try std.testing.expect(loaded.localArchived(key));
-        try std.testing.expectEqual(@as(usize, 1), loaded.count);
-        try std.testing.expect(!loaded.holdKept(key.id, false, "new message"));
-        try std.testing.expect(loaded.localArchived(key));
-        try std.testing.expect(loaded.setLocalArchived(key, false));
-        try std.testing.expect(!loaded.localArchived(key));
-        state.parse(loaded.format(&buffer));
-        try std.testing.expect(!state.localArchived(key));
-    }
-}
-
-test "old plain Telegram and Signal archives become local regardless of keep or timestamp" {
-    const Key = struct { provider: enum { whatsapp, slack, telegram, signal }, account: []const u8, id: []const u8 };
-    for ([_]Key{
-        .{ .provider = .telegram, .account = "telegram", .id = "telegram:user:7001" },
-        .{ .provider = .signal, .account = "signal", .id = "signal:fixture" },
-    }) |key| {
-        for ([_]bool{ false, true }) |keep| {
-            var text: [512]u8 = undefined;
-            var state = State{};
-            state.parse(try std.fmt.bufPrint(&text, "{s}\t{d}\told\n", .{ key.id, @intFromBool(keep) }));
-            try std.testing.expect(state.localArchived(key));
-            try std.testing.expect(state.find(key.id) == null);
-            try std.testing.expect(!state.holdKept(key.id, false, "newer"));
-            var buffer: [512]u8 = undefined;
-            var loaded = State{};
-            loaded.parse(state.format(&buffer));
-            try std.testing.expect(loaded.localArchived(key));
-            try std.testing.expect(loaded.setLocalArchived(key, false));
-            try std.testing.expect(!loaded.localArchived(key));
-            state.parse(loaded.format(&buffer));
-            try std.testing.expect(!state.localArchived(key));
-        }
-    }
-}
-
-test "explicit local unarchive overrides phone archived state after restart without affecting another account" {
-    const Key = struct { provider: enum { whatsapp, slack, telegram, signal }, account: []const u8, id: []const u8 };
-    for ([_]Key{
-        .{ .provider = .telegram, .account = "telegram", .id = "telegram:user:7001" },
-        .{ .provider = .signal, .account = "signal", .id = "signal:fixture" },
-        .{ .provider = .slack, .account = "workspace", .id = "channel" },
-    }) |key| {
-        var state = State{};
-        try std.testing.expect(state.isArchived(key, true));
-        try std.testing.expect(state.setLocalUnarchived(key));
-        try std.testing.expect(!state.isArchived(key, true));
-        try std.testing.expect(!state.localArchived(key));
-        var buffer: [512]u8 = undefined;
-        var loaded = State{};
-        loaded.parse(state.format(&buffer));
-        try std.testing.expect(!loaded.isArchived(key, true));
-        var other = key;
-        other.account = "other";
-        try std.testing.expect(loaded.isArchived(other, true));
-        try std.testing.expect(loaded.setLocalArchived(key, true));
-        try std.testing.expect(loaded.isArchived(key, false));
-    }
 }

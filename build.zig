@@ -319,7 +319,7 @@ pub fn build(b: *std.Build) void {
     b.step("test-edit", "Run native DirectWrite editing tests on Windows").dependOn(&b.addRunArtifact(edit_tests).step);
 
     const test_step = b.step("test", "Run unit tests");
-    for ([_][]const u8{ "src/attachments.zig", "src/staged_images.zig", "src/hub_test.zig", "src/wa_hub_test.zig", "src/pin_icon_test.zig", "src/message_double_click.zig", "src/reaction_chip.zig", "src/passage.zig", "src/recording_paint.zig", "src/font_config.zig", "src/edit_contract.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/chat_rows.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/media_layout.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/slack_emoji.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/update_card_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/slack_oauth.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/environment_keys.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
+    for ([_][]const u8{ "src/attachments.zig", "src/hub_test.zig", "src/wa_hub_test.zig", "src/pin_icon_test.zig", "src/message_double_click.zig", "src/recording_paint.zig", "src/font_config.zig", "src/edit_contract.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/chat_rows.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/update_card_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/slack_oauth.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/environment_keys.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(test_root),
@@ -371,17 +371,12 @@ pub fn build(b: *std.Build) void {
         "fn hubConfigured(_: *const App) bool { return false; }\nfn enqueueHubReaction(_: *App, _: *PendingReaction) void {}\n",
         sourceSection("fn WideText(", "const Chat = struct"),
         sourceSection("const max_pending_reactions =", "const WacliJobKind = enum"),
-        sourceSection("fn selectionPoint(", "fn copyPassage("),
-        sourceSection("fn hitTestWord(", "fn linkSpanHit("),
         sourceSection("fn handleCanvasDoubleClick(", "fn reactToSelected("),
         sourceSection("fn findPendingReaction(", "fn insertEmoji("),
         "fn foldReactions(a: *App) void {\n",
         sourceSection("    var reaction_index: usize = 0;", "    reapplyPendingReactions(a, chat.jid.slice());"),
         "}\n",
-        "fn canvasProc(hwnd: usize, message: u32, wparam: usize, lparam: isize) isize { const a = app_ptr.?; switch (message) {\n",
-        canvas_source[std.mem.indexOf(u8, canvas_source, "        win.WM_TIMER =>").?..std.mem.indexOf(u8, canvas_source, "        win.WM_MOUSEWHEEL =>").?],
-        "win.WM_LBUTTONDOWN => { const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))); const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));\n",
-        sourceSection("            for (a.messages[0..a.message_count]) |*item| {", "            for (a.messages[0..a.message_count], 0..) |*item, index| {"),
+        "fn canvasProc(hwnd: usize, message: u32, wparam: usize, lparam: isize) isize { const a = app_ptr.?; switch (message) { win.WM_LBUTTONDOWN => { const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))); const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));\n",
         canvas_source[canvas_input_start..canvas_input_end],
         "else => return 0, } }\n",
         "fn loadReaction(a: *App, message: *Message, object: std.json.ObjectMap) void { const reaction_to = getString(object, \"ReactionToID\");\n",
@@ -393,7 +388,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = double_click_harness,
         .target = b.resolveTargetQuery(.{}),
         .imports = &.{
-            .{ .name = "passage", .module = b.createModule(.{ .root_source_file = b.path("src/passage.zig"), .target = b.resolveTargetQuery(.{}) }) },
             .{ .name = "send_args", .module = b.createModule(.{
                 .root_source_file = b.path("src/send_args.zig"),
                 .target = b.resolveTargetQuery(.{}),
@@ -429,7 +423,7 @@ pub fn build(b: *std.Build) void {
     const repaint_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("tools/repaint_test.zig"),
         buffer_source[(std.mem.indexOfScalar(u8, buffer_source, '\n') orelse unreachable) + 1 ..],
-        sourceSection("fn stagedPreviewColumns(", "fn layout(a:"),
+        sourceSection("fn layoutComposer(", "fn layout(a:"),
         "fn composeChanged(a: *App) void {\n",
         sourceSection("\n                saveComposerDraft(a);", "            } else if (id == id_search"),
         "}\n",
@@ -519,26 +513,16 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(format_tests).step);
 
-    const control_archive_source = sourceSection("fn controlWhatsAppChats(", "fn controlSortChats(");
-    const control_archive_filter = control_archive_source[std.mem.indexOf(u8, control_archive_source, "        chat.archived =").?..std.mem.indexOf(u8, control_archive_source, "        try list.append").?];
-    const archive_filter_source = @embedFile("src/messenger_view.zig");
     const archive_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/archive_actions_test.zig"),
-        "const messenger_view = struct {\n",
-        archive_filter_source[std.mem.indexOf(u8, archive_filter_source, "pub fn archiveMatches(").?..std.mem.indexOf(u8, archive_filter_source, "pub fn mergeChatData(").?],
-        "};\n",
-        sourceSection("fn getBool(", "fn getInt("),
-        "fn archiveInboxRow(a: *App, row: Chat, object: std.json.ObjectMap) ?Chat { for ([_]Chat{row}) |item| { var chat = item;\n",
-        sourceSection("        chat.archived =", "        a.chats[a.chat_count] = chat;"),
-        "return chat; } return null; }\n",
-        "fn archiveControlRow(a: *App, row: Chat, object: std.json.ObjectMap) ?Chat { const show_archived = a.show_archived; for ([_]Chat{row}) |item| { var chat = item;\n",
-        control_archive_filter,
-        "return chat; } return null; }\n",
         "fn unifiedHub(a: *const App) bool { return a.unified_hub; }\n",
-        "fn hubConfigured(a: *const App) bool { return a.unified_hub; }\n",
-        "fn applyHubArchiveResult(a: *App, result: *const WacliResult) void { switch (result.kind) {\n",
-        sourceSection("        .hub_archive => {\n", "        .hub_media => {\n"),
-        "else => {}, } }\n",
+        sourceSection("fn getBool(", "fn getInt("),
+        "fn filterHubChats(a: *App, raw: []const u8) !void {\n",
+        "const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, raw, .{}); defer parsed.deinit(); a.chat_count = 0;\n",
+        "for (parsed.value.object.get(\"data\").?.array.items) |item| { const object = item.object; const jid = object.get(\"jid\").?.string; var chat = Chat{ .account = a.cache_tag }; chat.jid.set(jid); chat.provider = std.meta.stringToEnum(Provider, object.get(\"provider\").?.string).?;\n",
+        sourceSection("        chat.archived = if (chat.provider == .slack)", "    if (!unifiedHub(a)) {"),
+        "}\n",
+        "fn hubConfigured(_: *const App) bool { return false; }\nfn startHubArchive(_: *App) void {}\n",
         sourceSection("fn retryUnarchiveChat(", "fn startNextArchive("),
         sourceSection("fn queueUnarchiveChat(", "const archived_scan_min_ticks"),
         sourceSection("fn archiveChat(", "fn paneFollowSelection(a: *App, open_jid: []const u8) void {"),
@@ -631,10 +615,6 @@ pub fn build(b: *std.Build) void {
         sourceSection("fn mediaAttempted(", "fn isDownloadableMedia("),
         sourceSection("fn wacliJobArgs(", "fn wacliPendingGet("),
         sourceSection("fn observeBackgroundMediaChats(", "fn ensureAvatarSession("),
-        sourceSection("const MediaDownload = struct", "const background_media_limit ="),
-        "fn finishHubMedia(a: *App, result: *const WacliResult) void { switch (result.kind) {\n",
-        sourceSection("        .hub_media => {\n            for (&a.media_downloads)", "        .hub_avatar => {\n            if (a.avatar_active_index)"),
-        "else => unreachable, } }\n",
     }) catch @panic("Out of memory building background media harness");
     const background_media_files = b.addWriteFiles();
     for ([_][]const u8{ "media_drain.zig", "media_age.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {
@@ -653,15 +633,13 @@ pub fn build(b: *std.Build) void {
     _ = composer_button_files.addCopyFile(b.path("src/compose_layout.zig"), "compose_layout.zig");
     const composer_paint_source = sourceSection("fn drawComposerButton(", "fn drawSetupButton(");
     const composer_paint_start = std.mem.indexOf(u8, composer_paint_source, "    var shapes =") orelse @panic("Missing composer painting body");
-    const composer_layout_source = sourceSection("fn layoutRegion(", "    const header_height:");
-    const composer_layout_start = std.mem.indexOf(u8, composer_layout_source, "    const left_width =") orelse @panic("Missing composer layout body");
     const composer_button_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/composer_button_test.zig"),
         sourceSection("fn drawDictationIcon(", "fn drawComposerButton("),
         "fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {\n",
         composer_paint_source[composer_paint_start..],
         "fn layoutComposer(a: *App, width: i32, height: i32) void {\n",
-        composer_layout_source[composer_layout_start..],
+        sourceSection("    const left_width = std.math.clamp(@divTrunc(width, 3),", "    const header_height:"),
         "    const sizes = .{ .edit_height = px(a, 44) };\n",
         sourceSection("            a.compose_geometry =", "            const inner = a.compose_geometry.text;"),
         sourceSection("    const buttons = [_]?win.HWND", "    updateAttachButton(a);"),
