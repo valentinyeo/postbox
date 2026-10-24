@@ -20995,6 +20995,10 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 setStatus(a, "Archive operation completed");
             } else {
                 if (result.http_status == 502 and (std.mem.startsWith(u8, result.jid.slice(), "signal:") or std.mem.startsWith(u8, result.jid.slice(), "telegram:"))) {
+                    if (a.archive_state) |state| {
+                        state.remove(result.jid.slice());
+                        saveArchiveState(a);
+                    }
                     removeFirstPendingArchive(a);
                     refreshChats(a);
                     setStatus(a, if (std.mem.startsWith(u8, result.jid.slice(), "telegram:")) "Archiving is not available for Telegram chats yet" else "Archiving is not available for Signal chats yet");

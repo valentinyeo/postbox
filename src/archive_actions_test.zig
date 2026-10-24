@@ -40,6 +40,15 @@ const PendingArchive = struct {
     jid: Utf8Text(191) = .{},
     should_unarchive: bool = false,
     source: ArchiveSource = .shortcut,
+    retry_at_ms: u64 = 0,
+};
+const WacliResult = struct {
+    kind: enum { hub_archive, hub_media } = .hub_archive,
+    provider: Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
+    jid: Utf8Text(191) = .{},
+    ok: bool = false,
+    http_status: u32 = 502,
 };
 const App = struct {
     unified_hub: bool = false,
@@ -78,6 +87,10 @@ const App = struct {
     log: Utf8Text(288) = .{},
     log_count: usize = 0,
     spawned_jid: Utf8Text(191) = .{},
+    hub_archive_requests: usize = 0,
+    hub_archive_inflight: bool = false,
+    refresh_key: chat_key.Stored = .{},
+    refresh_stamp: Utf8Text(47) = .{},
     pending_sends: [4]PendingSend = @splat(.{}),
     pending_send_count: usize = 0,
     sent_voice: [voice_sent.max_entries]voice_sent.Entry = @splat(.{}),
@@ -93,6 +106,9 @@ const win = struct {
     const HWND = usize;
     const LPARAM = isize;
     const MSG = struct { lParam: LPARAM = 0 };
+    fn GetTickCount64() u64 {
+        return 1000;
+    }
     fn InvalidateRect(_: usize, _: ?*anyopaque, _: i32) i32 {
         return 1;
     }
@@ -141,6 +157,15 @@ fn stopSync(a: *App, _: []const u8) void {
     spawning_app = a;
 }
 fn startSync(_: *App) void {}
+fn startHubArchive(a: *App) void {
+    if (a.pending_archive_count == 0 or a.hub_archive_inflight) return;
+    a.hub_archive_inflight = true;
+    a.hub_archive_requests += 1;
+    a.spawned_jid = a.pending_archives[0].jid;
+}
+fn refreshChats(a: *App) void {
+    if (a.refresh_key.id_len > 0) _ = holdKeptArchived(a, a.refresh_key.key(), false, a.refresh_stamp.slice());
+}
 fn mediaBusy(_: *App) bool {
     return false;
 }
@@ -847,5 +872,90 @@ test "hub sends clear plain and kept Telegram archives and an out of range row n
         try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
         try std.testing.expect(a.pending_archives[0].should_unarchive);
         try std.testing.expectEqual(ArchiveSource.send, a.pending_archives[0].source);
+    }
+}
+
+test "unsupported hub archive clears saved intent before refresh and never requeues" {
+    for ([_]Provider{ .signal, .telegram }) |provider| {
+        for ([_]bool{ false, true }) |keep| {
+            var state = archive_rules.State{};
+            var a = fixture(&state);
+            a.unified_hub = true;
+            a.cache_tag.set("hub-cache");
+            a.chats[0].provider = provider;
+            a.chats[0].account.set(if (provider == .signal) "signal" else "telegram");
+            a.chats[0].jid.set(if (provider == .signal) "signal:fixture-contact" else "telegram:user:1001");
+            a.refresh_key.set(chat_key.of(&a.chats[0]));
+            a.refresh_stamp.set("2026-10-10T11:00:00Z");
+            const key = a.refresh_key.key();
+            try std.testing.expect(archiveChat(&a, key, if (keep) .keep else .archive, .menu) == null);
+            try std.testing.expect(state.localArchived(key));
+            refreshChats(&a);
+            try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+            try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
+            var result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid };
+            a.hub_archive_inflight = false;
+            applyHubArchiveResult(&a, &result);
+            try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+            try std.testing.expect(!state.localArchived(key));
+            var loaded = archive_rules.State{};
+            loaded.parse(a.saved[0..a.saved_len]);
+            try std.testing.expect(!loaded.localArchived(key));
+            try std.testing.expect(!loaded.holdKept(key.id, false, "2026-10-10T12:00:00Z"));
+            a.refresh_stamp.set("2026-10-10T12:00:00Z");
+            refreshChats(&a);
+            startNextArchive(&a);
+            try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
+            try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+            try std.testing.expectEqualStrings(if (provider == .signal) "Archiving is not available for Signal chats yet" else "Archiving is not available for Telegram chats yet", a.status.slice());
+            result.jid.set("unrelated:fixture");
+            applyHubArchiveResult(&a, &result);
+            try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+        }
+    }
+}
+
+test "successful hub archives stay sticky per timestamp and transient failures retain intent" {
+    for ([_]Provider{ .whatsapp, .signal, .telegram }) |provider| {
+        for ([_]bool{ false, true }) |keep| {
+            var state = archive_rules.State{};
+            var a = fixture(&state);
+            a.unified_hub = true;
+            a.cache_tag.set("hub-cache");
+            a.chats[0].provider = provider;
+            a.chats[0].account.set("fixture-account");
+            a.chats[0].jid.set(if (provider == .whatsapp) "personal:fixture@s.whatsapp.net" else if (provider == .signal) "signal:fixture-contact" else "telegram:user:1001");
+            a.refresh_key.set(chat_key.of(&a.chats[0]));
+            a.refresh_stamp.set("2026-10-10T11:00:00Z");
+            const key = a.refresh_key.key();
+            try std.testing.expect(state.archive(key.id, "baseline", keep));
+            refreshChats(&a);
+            try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
+            var result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .ok = true, .http_status = 200 };
+            a.hub_archive_inflight = false;
+            applyHubArchiveResult(&a, &result);
+            refreshChats(&a);
+            try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+            try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
+            try std.testing.expect(state.localArchived(key));
+            try std.testing.expectEqual(keep, state.isKept(key.id));
+            a.refresh_stamp.set("2026-10-10T12:00:00Z");
+            refreshChats(&a);
+            refreshChats(&a);
+            try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+            try std.testing.expectEqual(@as(usize, 2), a.hub_archive_requests);
+            result.ok = false;
+            result.http_status = 503;
+            a.hub_archive_inflight = false;
+            applyHubArchiveResult(&a, &result);
+            try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+            try std.testing.expect(a.pending_archives[0].retry_at_ms > win.GetTickCount64());
+            try std.testing.expect(state.localArchived(key));
+            try std.testing.expectEqual(keep, state.isKept(key.id));
+            var loaded = archive_rules.State{};
+            loaded.parse(a.saved[0..a.saved_len]);
+            try std.testing.expect(loaded.localArchived(key));
+            try std.testing.expectEqual(keep, loaded.isKept(key.id));
+        }
     }
 }
