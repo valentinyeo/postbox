@@ -1,3 +1,5 @@
+. "$PSScriptRoot/menus.ps1"
+
 function Get-EmojiPixels($Session, [string]$Name, $Rect) {
     $bounds = (Get-Edit (Get-Window $Session) '1024').Current.BoundingRectangle
     $screen = [Windows.Forms.SystemInformation]::VirtualScreen
@@ -25,8 +27,11 @@ function Invoke-SlackEmojiJourney($Session) {
     Send-Keys $Session '^f'
     Send-Keys $Session '^a'
     Send-Keys $Session 'Verification Emoji'
+    $null = Wait-Until {
+        $shown = Read-Control $Session messages
+        $shown.chat.id -eq 'slack:fixture-emoji:channel' -and $shown.chat.provider -eq 'slack' -and $shown.messages.Count -eq 3
+    } 'Slack emoji history'
     Click-Control $Session '1032'
-    $null = Wait-Until { (Read-Control $Session messages).messages.Count -eq 3 } 'Slack emoji history'
     $null = Wait-Until {
         $shown = Read-Control $Session messages
         $standard = @($shown.messages | Where-Object id -eq 'EMOJI-STANDARD')[0]
@@ -60,12 +65,19 @@ function Invoke-SlackEmojiJourney($Session) {
     Send-Keys $Session '^f'
     Send-Keys $Session '^a'
     Send-Keys $Session 'Verification Other'
-    $null = Wait-Until { (Read-Control $Session messages).messages[0].id -eq 'PLAIN' } 'other chat opened'
+    $null = Wait-Until {
+        $shown = Read-Control $Session messages
+        $shown.chat.id -eq 'slack:fixture-emoji:other' -and $shown.chat.provider -eq 'slack' -and $shown.messages[0].id -eq 'PLAIN'
+    } 'other chat opened'
+    Click-Control $Session '1032'
     Send-Keys $Session '^f'
     Send-Keys $Session '^a'
     Send-Keys $Session 'Verification Emoji'
+    $null = Wait-Until {
+        $shown = Read-Control $Session messages
+        $shown.chat.id -eq 'slack:fixture-emoji:channel' -and $shown.chat.provider -eq 'slack' -and $shown.messages.Count -eq 3
+    } 'emoji chat reopened'
     Click-Control $Session '1032'
-    $null = Wait-Until { (Read-Control $Session messages).messages.Count -eq 3 } 'emoji chat reopened'
     Save-Screen $Session reopened
     $after = @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -match '/slack/emoji|/media/.+/GIPHY' }).Count
     Assert-That ($before -eq $after -and $before -gt 0) 'Emoji or GIF was refetched on repaint/reopen'

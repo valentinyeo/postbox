@@ -3,11 +3,15 @@ import hashlib
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import runpy
+import socket
+import struct
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from urllib.parse import quote
 
 
@@ -135,6 +139,43 @@ class EmojiContractChecks(unittest.TestCase):
         self.assertIn('/v1/wazig/slack/emoji/media?account={s}&name={s}', hub)
         self.assertIn('swapRemove("SlackEmojiPaths")', hub)
 
+    def test_keep_alive_client_reset_is_not_a_handler_error(self):
+        finished = threading.Event()
+        errors = []
+        finish_request = self.server.finish_request
+
+        def finish(*args):
+            try:
+                finish_request(*args)
+            except Exception as error:
+                errors.append(error)
+            finally:
+                finished.set()
+
+        with patch.object(self.server, 'finish_request', side_effect=finish):
+            connection = HTTPConnection('127.0.0.1', self.server.server_port, timeout=5)
+            try:
+                connection.request('GET', '/v1/wazig/chats', headers={'Authorization': 'Bearer ' + FIXTURE['bridge'].KEY})
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                response.read()
+                linger = struct.pack('HH' if os.name == 'nt' else 'ii', 1, 0)
+                connection.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, linger)
+            finally:
+                connection.close()
+            self.assertTrue(finished.wait(5), 'Reset connection handler did not finish')
+        self.assertEqual(errors, [])
+        self.assertEqual(self.get('/v1/wazig/chats')[0], 200)
+
+    def test_optional_avatar_and_workspace_icon_are_json_not_handler_errors(self):
+        for path in ['/v1/wazig/avatar/' + quote(FIXTURE['SLACK_EMOJI_CHAT'], safe=''),
+                     '/v1/wazig/workspace-icon/fixture-emoji']:
+            with self.subTest(path=path):
+                self.assertEqual(self.get(path, False)[0], 401)
+                status, raw, mime = self.get(path)
+                self.assertEqual((status, mime), (404, 'application/json'))
+                self.assertEqual(json.loads(raw), {'error': 'unavailable'})
+
     def test_history_reactions_giphy_and_two_frame_bytes(self):
         chat = FIXTURE['SLACK_EMOJI_CHAT']
         status, raw, _ = self.get('/v1/wazig/messages?chat=' + quote(chat, safe=''))
@@ -244,6 +285,16 @@ class EmojiJourneyChecks(unittest.TestCase):
         (self.folder / 'final-data/animation.img').unlink()
         with self.assertRaises(AssertionError):
             CHECK(self.folder)
+
+    def test_journey_loads_click_helper_like_existing_slack_journeys(self):
+        journey = (TOOLS / 'slack-emoji.ps1').read_text()
+        for name in ['slack-emoji', 'link-previews', 'reactions']:
+            self.assertTrue((TOOLS / (name + '.ps1')).read_text().startswith('. "$PSScriptRoot/menus.ps1"\n'))
+        self.assertIn('function Click-Control(', (TOOLS / 'menus.ps1').read_text())
+        for description in ['Slack emoji history', 'other chat opened', 'emoji chat reopened']:
+            self.assertIn("} '" + description + "'\n    Click-Control $Session '1032'", journey)
+        self.assertIn("$shown.chat.id -eq 'slack:fixture-emoji:channel' -and $shown.chat.provider -eq 'slack'", journey)
+        self.assertIn("$shown.chat.id -eq 'slack:fixture-emoji:other' -and $shown.chat.provider -eq 'slack'", journey)
 
     def test_journey_registration(self):
         workflow = (ROOT / '.github/workflows/verify.yml').read_text()
