@@ -6,6 +6,7 @@
 - Archived rows remain marked; Ctrl+E toggles archive without removing mixed rows.
 - Alt+A, the palette command, the existing rounded button and its shortcut tooltip.
 - Same-profile restart restores inbox and account preferences; archived-only stays separate.
+- With Show archived off in hub mode, the sidebar and the read-only chat scans ask the hub for both lists and hide a row only when its local archive entry keeps it archived (IGSH-763).
 
 ## How to get to it (user POV)
 
