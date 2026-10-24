@@ -70,10 +70,10 @@ fixture="$temp/f1-fixtures"
 mkdir -p "$fixture/src" "$fixture/.github/workflows"
 printf 'name: fixture\n' > "$fixture/.github/workflows/fixture.yml"
 : > "$fixture/src/main.zig"
-for mutation in permission secret trigger; do
+for mutation in key paid trigger; do
     case "$mutation" in
-        permission) sed '/models: read/d' "$repo/.github/workflows/ai-review.yml" ;;
-        secret) sed 's/github.token/secrets.OPENAI_API_KEY/g' "$repo/.github/workflows/ai-review.yml" ;;
+        key) sed '/secrets.GROQ_API_KEY/d' "$repo/.github/workflows/ai-review.yml" ;;
+        paid) sed 's/secrets.GROQ_API_KEY/secrets.OPENAI_API_KEY/g' "$repo/.github/workflows/ai-review.yml" ;;
         trigger) sed 's/^  pull_request:/  pull_request_target:/' "$repo/.github/workflows/ai-review.yml" ;;
     esac > "$fixture/.github/workflows/ai-review.yml"
     status=0
@@ -86,7 +86,7 @@ for mutation in permission secret trigger; do
 done
 cp "$repo/.github/workflows/ai-review.yml" "$fixture/.github/workflows/ai-review.yml"
 "$lint" "$fixture"
-printf 'test-lint-repeats: B6 requires free Models permission and rejects secrets and pull_request_target\n'
+printf 'test-lint-repeats: B6 requires the free review key and rejects a paid key and pull_request_target\n'
 mkdir -p "$fixture/tools"
 admit_src="$repo/tools/automerge-admit.sh"
 yml_src="$repo/.github/workflows/automerge.yml"

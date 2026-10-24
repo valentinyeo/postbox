@@ -8,8 +8,10 @@ fi
 pr=$1
 repo=${GITHUB_REPOSITORY:-valentinyeo/wazig}
 root=$(git rev-parse --show-toplevel)
-model=${AI_REVIEW_MODEL:-openai/gpt-4.1}
-api_url=${AI_REVIEW_API_URL:-https://models.github.ai/inference/chat/completions}
+model=${AI_REVIEW_MODEL:-openai/gpt-oss-120b}
+api_url=${AI_REVIEW_API_URL:-https://api.groq.com/openai/v1/chat/completions}
+api_key=${AI_REVIEW_API_KEY:-}
+[[ -n $api_key ]] || { printf 'ai-review: AI_REVIEW_API_KEY is not set\n' >&2; exit 1; }
 marker='<!-- wazig-ai-review -->'
 max_diff=300000
 work=$(mktemp -d)
@@ -101,7 +103,7 @@ for chunk in "$work"/chunk.*.diff; do
         cat "$chunk"
     } > "$work/user.txt"
     jq -n --arg model "$model" --rawfile system "$work/system.txt" --rawfile user "$work/user.txt" \
-        '{model: $model, messages: [{role: "system", content: $system}, {role: "user", content: $user}]}' > "$work/request.json"
+        '{model: $model, max_tokens: 4000, messages: [{role: "system", content: $system}, {role: "user", content: $user}]}' > "$work/request.json"
     chunk_ok=0
     for attempt in 1 2; do
         : > "$work/response.json"
@@ -109,12 +111,13 @@ for chunk in "$work"/chunk.*.diff; do
         status=000
         if status=$(curl --silent --show-error --connect-timeout 30 --max-time 180 \
             --request POST "$api_url" \
-            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Authorization: Bearer $api_key" \
             --header 'Content-Type: application/json' \
             --data-binary @"$work/request.json" \
             --dump-header "$work/headers.txt" --output "$work/response.json" --write-out '%{http_code}'); then
-            if [[ $status == 200 ]] && jq -er '.choices[0].message.content | select(type == "string")' \
-                "$work/response.json" > "$work/review.md" \
+            if [[ $status == 200 ]] && grep -qi '^content-type: *application/json' "$work/headers.txt" \
+                && jq -er '.choices[0].message.content | select(type == "string")' \
+                "$work/response.json" > "$work/review.md" 2>/dev/null \
                 && grep -Eq '^Verdict: (APPROVE|CONCERNS)$' "$work/review.md"; then
                 chunk_ok=1
                 break
@@ -123,9 +126,12 @@ for chunk in "$work"/chunk.*.diff; do
         printf 'ai-review: request failed (HTTP %s): ' "$status" >&2
         python3 - "$work/response.json" <<'PYTHON' >&2
 import os, pathlib, sys
-token = os.environ.get("GH_TOKEN", "").encode()
+secrets = [os.environ.get(name, "").encode() for name in ("AI_REVIEW_API_KEY", "GH_TOKEN")]
 body = pathlib.Path(sys.argv[1]).read_bytes()[:300]
-sys.stdout.buffer.write(body.replace(token, b"[redacted]") if token else body)
+for secret in secrets:
+    if secret:
+        body = body.replace(secret, b"[redacted]")
+sys.stdout.buffer.write(body)
 PYTHON
         printf '\n' >&2
         if [[ $status == 429 && $attempt == 1 ]]; then
@@ -159,12 +165,12 @@ PYTHON
     fi
 done
 if (( ! ok )); then
-    printf 'ai-review: GitHub Models failed or returned no verdict twice for all chunks of PR %s\n' "$pr" >&2
+    printf 'ai-review: the review model failed or returned no verdict twice for all chunks of PR %s\n' "$pr" >&2
     exit 1
 fi
 
 {
-    printf '%s\n### AI review (GitHub Models %s, advisory)\n\nCommit %s\n\nVerdict: %s\n\n' "$marker" "$model" "$head_sha" "$verdict"
+    printf '%s\n### AI review (Groq %s, advisory)\n\nCommit %s\n\nVerdict: %s\n\n' "$marker" "$model" "$head_sha" "$verdict"
     python3 - "$work/findings.txt" <<'PYTHON'
 import pathlib, sys
 findings = pathlib.Path(sys.argv[1]).read_text().splitlines()
