@@ -555,6 +555,17 @@ test "WhatsApp archive entries honor zero and one keep flags after restart" {
     }
 }
 
+test "WhatsApp archive entry overrides the provider flag" {
+    const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
+    var state = State{};
+    state.parse("plain@g.us\t0\tbaseline\nkept@g.us\t1\tbaseline\n");
+    try std.testing.expect(!state.isArchived(Key{ .provider = .whatsapp, .account = "", .id = "plain@g.us" }, true));
+    try std.testing.expect(state.isArchived(Key{ .provider = .whatsapp, .account = "", .id = "kept@g.us" }, false));
+    const missing = Key{ .provider = .whatsapp, .account = "", .id = "missing@g.us" };
+    try std.testing.expect(!state.isArchived(missing, false));
+    try std.testing.expect(state.isArchived(missing, true));
+}
+
 test "WhatsApp archive status keeps the provider flag and adds keep" {
     const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
     var state = State{};
