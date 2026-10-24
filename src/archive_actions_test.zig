@@ -1123,7 +1123,7 @@ test "IGSH-681 WhatsApp archive records override provider flags without changing
         const unarchived = chat_key.Key{ .provider = provider, .account = "fixture", .id = "fixture:unarchived" };
         const archived = chat_key.Key{ .provider = provider, .account = "fixture", .id = "fixture:archived" };
         const missing = chat_key.Key{ .provider = provider, .account = "fixture", .id = "fixture:missing" };
-        for ([_]bool{ false, true }) |provider_archived| {
+        for ([_]bool{ true, false }) |provider_archived| {
             try std.testing.expect(!state.isArchived(unarchived, provider_archived));
             try std.testing.expect(!state.localArchived(unarchived));
             try std.testing.expect(state.isArchived(archived, provider_archived));
