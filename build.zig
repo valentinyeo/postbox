@@ -615,6 +615,10 @@ pub fn build(b: *std.Build) void {
         sourceSection("fn mediaAttempted(", "fn isDownloadableMedia("),
         sourceSection("fn wacliJobArgs(", "fn wacliPendingGet("),
         sourceSection("fn observeBackgroundMediaChats(", "fn ensureAvatarSession("),
+        sourceSection("const MediaDownload = struct", "const background_media_limit ="),
+        "fn finishHubMedia(a: *App, result: *const WacliResult) void { switch (result.kind) {\n",
+        sourceSection("        .hub_media => {\n            for (&a.media_downloads)", "        .hub_avatar => {\n            if (a.avatar_active_index)"),
+        "else => unreachable, } }\n",
     }) catch @panic("Out of memory building background media harness");
     const background_media_files = b.addWriteFiles();
     for ([_][]const u8{ "media_drain.zig", "media_age.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {

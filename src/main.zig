@@ -21099,6 +21099,7 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 slot.hub_pending = false;
                 const ok = result.ok and result.http_status != 202;
                 if (ok) {
+                    markMediaAttempted(a, slot.jid.slice(), slot.id.slice());
                     clearMediaFailure(a, slot.jid.slice(), slot.id.slice());
                 } else {
                     noteMediaFailure(a, slot.jid.slice(), slot.id.slice());

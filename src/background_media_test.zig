@@ -47,6 +47,10 @@ const App = struct {
     job: WacliJob = .{},
     jobs: usize = 0,
     started: Utf8Text(191) = .{},
+    starts: usize = 0,
+    media_downloads: [1]MediaDownload = .{.{}},
+    audio_chain_id: Utf8Text(191) = .{},
+    audio_chain_waiting: bool = false,
     cached: ?[]u8 = null,
 
     fn deinit(a: *App) void {
@@ -89,6 +93,10 @@ fn startMediaDownload(a: *App, jid: []const u8, id: []const u8) bool {
     std.testing.expectEqualStrings(jid, a.background_media.jid.slice()) catch @panic("unexpected chat identity");
     a.busy = true;
     a.started.set(id);
+    a.starts += 1;
+    a.media_downloads[0] = .{ .hub_pending = true, .started_ms = win.now };
+    a.media_downloads[0].jid.set(jid);
+    a.media_downloads[0].id.set(id);
     return true;
 }
 fn fileExistsUtf8(path: []const u8) bool {
@@ -101,8 +109,14 @@ fn msgCacheStore(a: *App, _: chat_key.Key, raw: []const u8) void {
 fn drainMediaDownloads(a: *App) void {
     _ = autoDownloadBackgroundMedia(a);
 }
+const image_viewer = struct {
+    fn downloadFinished(_: *App, _: []const u8, _: []const u8, _: bool) void {}
+};
+fn setStatus(_: *App, _: []const u8) void {}
+fn refreshMessages(_: *App) void {}
 fn finish(a: *App) void {
-    markMediaAttempted(a, a.background_media.jid.slice(), a.started.slice());
+    const result = WacliResult{ .kind = .hub_media, .account = a.cache_tag, .jid = a.media_downloads[0].jid, .msg_id = a.media_downloads[0].id, .ok = true, .http_status = 200 };
+    finishHubMedia(a, &result);
     a.busy = false;
 }
 fn deliver(a: *App, raw: []const u8, ok: bool) void {
@@ -149,6 +163,70 @@ test "background wiring queues the newest chat read-only once and drains all eli
     try std.testing.expectEqualStrings(a.background_media_chats[1].timestamp.slice(), a.background_media_chats[1].swept.slice());
     _ = autoDownloadBackgroundMedia(&a);
     try std.testing.expectEqualStrings("older", a.job.jid.slice());
+}
+
+test "IGSH-670 hub Giphy completion advances the cached batch without refetching on reopen" {
+    win.now = 100_000;
+    var a = App{};
+    defer a.deinit();
+    a.cache_tag.set("account");
+    const jid = "slack:fixture-emoji:channel";
+    try observe(&a, "[{\"jid\":\"slack:fixture-emoji:channel\",\"last_message_ts\":\"2026-09-06T00:00:00\"}]");
+    _ = autoDownloadBackgroundMedia(&a);
+    deliver(&a, "{\"data\":{\"messages\":[{\"MsgID\":\"GIPHY\",\"MediaType\":\"image\",\"MimeType\":\"image/gif\"}]}}", true);
+    try std.testing.expectEqual(@as(usize, 1), a.starts);
+    finish(&a);
+    try std.testing.expect(mediaAttempted(&a, jid, "GIPHY"));
+    try std.testing.expect(!mediaUnavailable(&a, jid, "GIPHY"));
+    try std.testing.expect(!a.media_downloads[0].hub_pending);
+    for (0..3) |_| try std.testing.expect(!autoDownloadBackgroundMedia(&a));
+    try std.testing.expectEqual(.caching, a.background_media.phase);
+    try std.testing.expectEqual(@as(usize, 1), a.starts);
+    try std.testing.expectEqual(@as(usize, 2), a.jobs);
+    media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(jid, "GIPHY"));
+    deliver(&a, "{\"data\":{\"messages\":[{\"MsgID\":\"GIPHY\",\"MediaType\":\"image\",\"LocalPath\":\"cached\"}]}}", true);
+    a.chat_count = 1;
+    a.chats[0] = a.background_media_chats[0];
+    a.displayed_jid = a.chats[0].jid;
+    a.displayed_account = a.cache_tag;
+    try std.testing.expect(!autoDownloadBackgroundMedia(&a));
+    a.chat_count = 0;
+    try std.testing.expect(!autoDownloadBackgroundMedia(&a));
+    try std.testing.expectEqual(@as(usize, 1), a.starts);
+    try std.testing.expectEqual(@as(usize, 2), a.jobs);
+    try observe(&a, "[{\"jid\":\"slack:fixture-emoji:channel\",\"last_message_ts\":\"2026-09-06T01:00:00\"}]");
+    _ = autoDownloadBackgroundMedia(&a);
+    deliver(&a, "{\"data\":{\"messages\":[{\"MsgID\":\"GIPHY\",\"MediaType\":\"image\",\"LocalPath\":\"cached\"}]}}", true);
+    try std.testing.expectEqual(@as(usize, 1), a.starts);
+    try std.testing.expectEqual(.caching, a.background_media.phase);
+}
+
+test "IGSH-670 pending and failed hub media do not suppress a later download" {
+    for ([_]u32{ 202, 404 }) |status| {
+        win.now = 100_000;
+        var a = App{};
+        defer a.deinit();
+        a.cache_tag.set("account");
+        try observe(&a, chats);
+        _ = autoDownloadBackgroundMedia(&a);
+        deliver(&a, "{\"data\":{\"messages\":[{\"MsgID\":\"GIPHY\",\"MediaType\":\"image\"}]}}", true);
+        const slot = &a.media_downloads[0];
+        const result = WacliResult{ .kind = .hub_media, .account = a.cache_tag, .jid = slot.jid, .msg_id = slot.id, .ok = status == 202, .http_status = status };
+        finishHubMedia(&a, &result);
+        try std.testing.expect(!mediaAttempted(&a, "newest", "GIPHY"));
+        try std.testing.expectEqual(status == 202, slot.hub_pending);
+        if (status == 202) {
+            try std.testing.expectEqual(win.now + 1000, slot.hub_retry_ms);
+            finish(&a);
+            try std.testing.expect(mediaAttempted(&a, "newest", "GIPHY"));
+        } else {
+            a.busy = false;
+            try std.testing.expect(!autoDownloadBackgroundMedia(&a));
+            win.now += 30_000;
+            try std.testing.expect(autoDownloadBackgroundMedia(&a));
+            try std.testing.expectEqual(@as(usize, 2), a.starts);
+        }
+    }
 }
 
 test "background wiring leaves selected provider identity alone and waits for open messages and pacing" {

@@ -96,6 +96,21 @@ class EmojiDataChecks(unittest.TestCase):
         self.assertNotIn('chat.provider', reaction_slice)
         self.assertNotIn('slack_emoji', reaction_slice)
 
+    def test_hub_cache_completion_regression_uses_real_handler(self):
+        source = (ROOT / 'src/main.zig').read_text()
+        handler = source.split('        .hub_media => {\n            for (&a.media_downloads)', 1)[1].split('        .hub_avatar => {', 1)[0]
+        success = handler.split('                if (ok) {', 1)[1].split('                } else {', 1)[0]
+        self.assertIn('markMediaAttempted(a, slot.jid.slice(), slot.id.slice());', success)
+        self.assertLess(success.index('markMediaAttempted('), success.index('clearMediaFailure('))
+        build = (ROOT / 'build.zig').read_text()
+        self.assertIn('sourceSection("        .hub_media => {\\n            for (&a.media_downloads)"', build)
+        tests = (ROOT / 'src/background_media_test.zig').read_text()
+        finish = tests.split('fn finish(a: *App) void {', 1)[1].split('\n}', 1)[0]
+        self.assertIn('finishHubMedia(a, &result);', finish)
+        self.assertNotIn('markMediaAttempted(', finish)
+        self.assertIn('IGSH-670 hub Giphy completion advances the cached batch without refetching on reopen', tests)
+        self.assertIn('IGSH-670 pending and failed hub media do not suppress a later download', tests)
+
 
 class EmojiContractChecks(unittest.TestCase):
     def setUp(self):
