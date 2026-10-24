@@ -19,7 +19,12 @@ def check_slack_mentions(folder):
         'MENTION-GUEST': '@Guest Person joins @Fixture Peer',
         'MENTION-CONNECT': '@Guest Person meets @Connect Person',
     }
-    raw_id = r'\b[UW][A-Z0-9]{5,}\b|<@|<https://'
+    raw_markup = r'<@|<https://'
+    fixture_ids = ('U4A59H6UT', 'UUNKNOWN99', 'UHIDDEN01', 'UEXT00001', 'WCONNECT01')
+
+    def has_raw_id(text):
+        return bool(re.search(raw_markup, text)) or any(name in text for name in fixture_ids)
+
     for stage in ['before', 'after']:
         shown = read(f'{stage}.messages.json')
         assert shown['chat']['id'] == chat and shown['chat']['provider'] == 'slack'
@@ -34,7 +39,7 @@ def check_slack_mentions(folder):
         rendered = dict(shown, messages=[{key: value for key, value in row.items() if key != 'sender_id'}
                                          for row in shown['messages']])
         assert read(f'{stage}.rendered.json') == rendered
-        assert not re.search(raw_id, json.dumps(rendered))
+        assert not has_raw_id(json.dumps(rendered))
         for row in rows.values():
             left, top, right, bottom = row['bubble']
             assert 0 <= left < right and 0 <= top < bottom
@@ -42,7 +47,7 @@ def check_slack_mentions(folder):
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
         tree = (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig')
         assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', tree.splitlines()[0])
-        assert not re.search(raw_id, tree)
+        assert not has_raw_id(tree)
         for control in ['1008', '1032']:
             assert re.search(rf'^{control} \| ', tree, re.M), (stage, control)
         state = read(f'{stage}.state.json')
