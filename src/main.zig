@@ -12765,8 +12765,8 @@ fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []c
     if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal))) return false;
     const jid = key.id;
     const state = a.archive_state orelse return false;
-    if (!state.holdKept(jid, provider_archived, ts)) return false;
-    if (archiveChat(a, key, if (state.isKept(jid)) .keep else .archive, .kept) == null) return true;
+    if (!state.isKept(jid) or !state.holdKept(jid, provider_archived, ts)) return false;
+    if (archiveChat(a, key, .keep, .kept) == null) return true;
     state.releaseHold(jid);
     return false;
 }
@@ -13034,13 +13034,13 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
     }
     if (!already_queued and a.pending_archive_count >= a.pending_archives.len) return "Archive queue is full";
     if (a.archive_state) |state| {
-        if (unarchive) {
+        if (action != .keep) {
             state.remove(jid);
         } else {
             const row_stamp = if (visibleChatIndex(a, key)) |index| a.chats[index].timestamp.slice() else "";
             var stamp_buffer: [archive_rules.stamp_len]u8 = undefined;
             const stamp = archive_rules.archiveBaseline(&stamp_buffer, row_stamp, nowUnixSeconds());
-            if (!state.archive(jid, stamp, action == .keep) and action == .keep) return "Keep archived list is full";
+            if (!state.archive(jid, stamp, true)) return "Keep archived list is full";
         }
         saveArchiveState(a);
     } else if (action == .keep) return "Keep archived is not available";
