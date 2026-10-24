@@ -594,3 +594,95 @@ test "Show archived keeps provider flagged Slack rows available to the existing 
     try std.testing.expect(rows[0].object.get("archived").?.bool);
     try std.testing.expectEqualStrings("slack", rows[0].object.get("provider").?.string);
 }
+
+test "IGSH-745 mentions use cached hub sender names including late guests and Slack Connect" {
+    const slack = @import("slack.zig");
+    const allocator = std.testing.allocator;
+    const raw =
+        \\[{"MsgID":"known","ChatJID":"slack:fixture-team:channel","SenderJID":"U1","SenderName":"Fixture Peer","Text":"<@U1> hello"},
+        \\ {"MsgID":"guest","ChatJID":"slack:fixture-team:channel","SenderJID":"UEXT00001","SenderName":"Guest Person","Text":"<@UEXT00001|stale label> thanks <https://example.org/report|report>"},
+        \\ {"MsgID":"connect","ChatJID":"slack:fixture-team:channel","SenderJID":"WCONNECT01","SenderName":"Connect Person","Text":"@Guest Person meets <@WCONNECT01>"},
+        \\ {"MsgID":"nameless","ChatJID":"slack:fixture-team:channel","SenderJID":"UNONAME","SenderName":"UNONAME","Text":"<@UNONAME> <@UUNKNOWN99>"}]
+    ;
+    const normalized = try hub.normalize(allocator, raw, .messages, "slack:fixture-team:channel");
+    defer allocator.free(normalized);
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, normalized, .{});
+    defer parsed.deinit();
+    const rows = hub.messageRows(parsed.value).?;
+    var names = hub.SlackUserNames{ .rows = rows[0..1] };
+    const lookup = slack.UserLookup{ .context = @ptrCast(&names), .lookupFn = hub.SlackUserNames.find };
+    var buffer: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("@Fixture Peer hello", slack.convertMrkdwn(&buffer, rows[0].object.get("Text").?.string, lookup));
+    try std.testing.expectEqualStrings("@Outside Guest", slack.convertMrkdwn(&buffer, "<@UEXT00001|Outside Guest>", lookup));
+    try std.testing.expectEqualStrings("@someone", slack.convertMrkdwn(&buffer, "<@UEXT00001>", lookup));
+    names.rows = rows;
+    try std.testing.expectEqualStrings(rows[1].object.get("SenderName").?.string, lookup.find("UEXT00001").?);
+    try std.testing.expectEqualStrings("@Guest Person", slack.convertMrkdwn(&buffer, "<@UEXT00001>", lookup));
+    var links: [1]slack.MrkdwnLink = undefined;
+    var count: usize = 0;
+    try std.testing.expectEqualStrings("@Guest Person thanks report", slack.convertMrkdwnLinks(&buffer, rows[1].object.get("Text").?.string, lookup, &links, &count));
+    try std.testing.expectEqual(@as(usize, 1), count);
+    try std.testing.expectEqualStrings("https://example.org/report", links[0].url[0..links[0].url_len]);
+    try std.testing.expectEqualStrings("report", buffer[links[0].start..links[0].end]);
+    try std.testing.expectEqualStrings("@Guest Person meets @Connect Person", slack.convertMrkdwn(&buffer, rows[2].object.get("Text").?.string, lookup));
+    try std.testing.expectEqualStrings("@someone @someone", slack.convertMrkdwn(&buffer, rows[3].object.get("Text").?.string, lookup));
+    try std.testing.expectEqualStrings("@Fixture Peer", slack.convertMrkdwn(&buffer, "<@U1|outdated>", lookup));
+    try std.testing.expectEqualStrings("@Guest Person", slack.convertMrkdwn(&buffer, "@Guest Person", null));
+    names.rows = rows[0..1];
+    try std.testing.expectEqualStrings("@Guest Person meets @Fixture Peer", slack.convertMrkdwn(&buffer, "@Guest Person meets <@U1>", lookup));
+    try std.testing.expectEqualStrings("> @Fixture Peer\n@someone replies", slack.convertMrkdwn(&buffer, "> <@U1>\n<@UEXT00001> replies", lookup));
+}
+
+test "IGSH-745 installation names precede row names for history quotes and threads" {
+    const slack = @import("slack.zig");
+    const Installation = struct {
+        peer_name: []const u8 = "Installation Peer",
+        calls: usize = 0,
+
+        fn find(context: *anyopaque, user_id: []const u8) ?[]const u8 {
+            const self: *@This() = @ptrCast(@alignCast(context));
+            self.calls += 1;
+            if (std.mem.eql(u8, user_id, "U1")) return self.peer_name;
+            if (std.mem.eql(u8, user_id, "UEXT00001")) return "Cached Guest";
+            if (std.mem.eql(u8, user_id, "WCONNECT01")) return "Cached Connect";
+            return null;
+        }
+    };
+    var installation = Installation{};
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator,
+        \\[ {"SenderJID":"U1","SenderName":"Row Peer"},
+        \\  {"SenderJID":"UROW","SenderName":"Row Only"},
+        \\  {"SenderJID":"UID","SenderName":"UID"} ]
+    , .{});
+    defer parsed.deinit();
+    var names = hub.SlackUserNames{
+        .rows = parsed.value.array.items,
+        .outer_context = @ptrCast(&installation),
+        .outer_fn = Installation.find,
+    };
+    const lookup = slack.UserLookup{ .context = @ptrCast(&names), .lookupFn = hub.SlackUserNames.find };
+    try std.testing.expectEqualStrings("Installation Peer", lookup.find("U1").?);
+    try std.testing.expectEqual(@as(usize, 1), installation.calls);
+    var buffer: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("@Installation Peer", slack.convertMrkdwn(&buffer, "<@U1|Stale Label>", lookup));
+    try std.testing.expectEqualStrings("@Cached Guest @Cached Connect", slack.convertMrkdwn(&buffer, "<@UEXT00001> <@WCONNECT01|Stale Label>", lookup));
+    try std.testing.expectEqualStrings("@Row Only", slack.convertMrkdwn(&buffer, "<@UROW|Stale Label>", lookup));
+    var links: [1]slack.MrkdwnLink = undefined;
+    var count: usize = 0;
+    try std.testing.expectEqualStrings("> @Installation Peer\n@Cached Guest replies report", slack.convertMrkdwnLinks(&buffer, "> <@U1>\n<@UEXT00001> replies <https://example.org/report|report>", lookup, &links, &count));
+    try std.testing.expectEqual(@as(usize, 1), count);
+    try std.testing.expectEqualStrings("https://example.org/report", links[0].url[0..links[0].url_len]);
+    try std.testing.expectEqualStrings("report", buffer[links[0].start..links[0].end]);
+    installation.peer_name = "U1";
+    try std.testing.expectEqualStrings("@Row Peer", slack.convertMrkdwn(&buffer, "<@U1|Stale Label>", lookup));
+    installation.peer_name = "";
+    try std.testing.expectEqualStrings("@Row Peer", slack.convertMrkdwn(&buffer, "<@U1|Stale Label>", lookup));
+    names.outer_context = null;
+    names.outer_fn = null;
+    try std.testing.expectEqualStrings("@Row Peer @Row Only", slack.convertMrkdwn(&buffer, "<@U1|Stale Label> <@UROW>", lookup));
+    const rendered = slack.convertMrkdwn(&buffer, "<@UEXT00001|Outside Guest> <@UUNKNOWN99> <@UID|UID>", lookup);
+    try std.testing.expectEqualStrings("@Outside Guest @someone @someone", rendered);
+    for ([_][]const u8{ "UEXT00001", "UUNKNOWN99", "UID", "<@" }) |raw_id| {
+        try std.testing.expect(std.mem.indexOf(u8, rendered, raw_id) == null);
+    }
+}

@@ -213,6 +213,23 @@
       "maximize": true
     },
     {
+      "name": "slack-mentions",
+      "pr": true,
+      "hub": "slack-mentions",
+      "evidence": true,
+      "chats": 1,
+      "script": "journey-slack-mentions.ps1",
+      "validator": {
+        "file": "check-slack-mentions-evidence.py",
+        "function": "check_slack_mentions"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "SlackMentionsHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "slack-archive",
       "pr": true,
       "hub": "slack-archive",

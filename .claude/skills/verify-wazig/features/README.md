@@ -18,6 +18,8 @@ The `workspace-icons` journey verifies rounded Slack workspace icon badges, the 
 
 ## Recent changes coverage
 
+- IGSH-745: unresolved Slack mentions -> `slack-mentions` (asserts hub-named and labelled mentions, @someone fallback, no raw user ids, report link cleanup, real keyboard selection and before/after screenshots)
+
 - IGSH-647: local Slack archive -> `slack-archive` (asserts real Ctrl+E, three archived=false incoming hub rows, Archive-only presence, same-profile restart, unarchive and absence of archive endpoint requests; direct Slack remains Zig coverage)
 
 These are source changes in the bounded history window, not claims of live verification. A journey citation names only its actual assertions; unreachable entries identify the missing fixture, hardware, provider or measurement prerequisite. Named CI checks are existing coverage, not checks run during this maintenance pass.

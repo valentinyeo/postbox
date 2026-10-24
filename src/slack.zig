@@ -438,6 +438,8 @@ pub fn convertMrkdwnLinks(buffer: []u8, text: []const u8, users: ?UserLookup, li
     return decodeHtmlEntities(buffer, stage1[0..stage1_len]);
 }
 
+const mentionFallback = "@someone";
+
 fn renderMrkdwnToken(dest: []u8, token: []const u8, users: ?UserLookup) []const u8 {
     if (token.len == 0) return copyClamped(dest, "<>");
     switch (token[0]) {
@@ -447,10 +449,14 @@ fn renderMrkdwnToken(dest: []u8, token: []const u8, users: ?UserLookup) []const 
             const user_id = if (pipe) |p| rest[0..p] else rest;
             const given_name = if (pipe) |p| rest[p + 1 ..] else null;
             if (users) |lookup| {
-                if (lookup.find(user_id)) |resolved_name| return copyClampedPrefixed(dest, "@", resolved_name);
+                if (lookup.find(user_id)) |resolved_name| {
+                    if (resolved_name.len > 0 and !std.mem.eql(u8, resolved_name, user_id)) return copyClampedPrefixed(dest, "@", resolved_name);
+                }
             }
-            if (given_name) |name| return copyClampedPrefixed(dest, "@", name);
-            return copyClamped(dest, user_id);
+            if (given_name) |name| {
+                if (name.len > 0 and !std.mem.eql(u8, name, user_id)) return copyClampedPrefixed(dest, "@", name);
+            }
+            return copyClamped(dest, mentionFallback);
         },
         '#' => {
             const rest = token[1..];
@@ -1104,7 +1110,7 @@ test "convertMrkdwn keeps a bare url" {
     );
 }
 
-test "convertMrkdwn resolves a user mention, falls back to the given name, then the raw id" {
+test "convertMrkdwn resolves a user mention, falls back to the given name, then someone" {
     var buffer: [256]u8 = undefined;
     var table = [1]TestUser{.{ .id = "U4A59H6UT", .name = "Jane Doe" }};
     const lookup = UserLookup{ .context = @ptrCast(&table), .lookupFn = testUserLookup };
@@ -1113,8 +1119,24 @@ test "convertMrkdwn resolves a user mention, falls back to the given name, then 
         convertMrkdwn(&buffer, "<@U4A59H6UT> this guy finally finished...", lookup),
     );
     try std.testing.expectEqualStrings("@Bob", convertMrkdwn(&buffer, "<@U999|Bob>", lookup));
-    try std.testing.expectEqualStrings("U999", convertMrkdwn(&buffer, "<@U999>", lookup));
-    try std.testing.expectEqualStrings("U999", convertMrkdwn(&buffer, "<@U999>", null));
+    try std.testing.expectEqualStrings("@Bob", convertMrkdwn(&buffer, "<@U999|Bob>", null));
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U999>", lookup));
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U999>", null));
+    try std.testing.expectEqualStrings("@someone joins later", convertMrkdwn(&buffer, "<@UUNKNOWN99> joins later", lookup));
+}
+
+test "convertMrkdwn ignores empty and id-valued cached names and labels" {
+    var buffer: [256]u8 = undefined;
+    var table = [1]TestUser{.{ .id = "U1", .name = "U1" }};
+    const lookup = UserLookup{ .context = @ptrCast(&table), .lookupFn = testUserLookup };
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U1>", lookup));
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U1|U1>", lookup));
+    try std.testing.expectEqualStrings("@Guest Person", convertMrkdwn(&buffer, "<@U1|Guest Person>", lookup));
+    table[0].name = "";
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U1>", lookup));
+    try std.testing.expectEqualStrings("@Guest Person", convertMrkdwn(&buffer, "<@U1|Guest Person>", lookup));
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U1|U1>", null));
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U1|>", null));
 }
 
 test "convertMrkdwn converts channel mentions, special mentions and subteam/date tokens" {
