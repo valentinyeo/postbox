@@ -79,9 +79,10 @@ def check_media_fit(folder):
     assert narrow['bubble'][2] - narrow['bubble'][0] - padding < wide['media'][2] - wide['media'][0], 'media-fit: narrow content must exercise downscaling'
     requests = read('media-fit.requests.json')
     for key in ids[1:]:
-        assert any(row['status'] == 200 and unquote(row['wire_path']).endswith('/v1/wazig/media/fixture-media@g.us/' + key) for row in requests)
+        assert any(row.get('status') == 200 and row['method'] == 'GET' and unquote(row['wire_path']).endswith('/v1/wazig/media/fixture-media@g.us/' + key) for row in requests)
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    assert 'Verification Media' in actions and 'keys: {RIGHT}{LEFT 40}{ENTER}' in actions
+    assert 'Verification Media' in actions and 'keys: {RIGHT}{LEFT 4}{ENTER}' in actions
+    assert '{LEFT 40}' not in actions
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
     assert all(final[key] for key in ('production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'))
