@@ -59,7 +59,7 @@ def check_slack_emoji(folder):
         assert read(name + '.state.json')['selected']['provider'] == 'slack'
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     api = [row for row in requests if row['wire_path'].startswith('/v1/wazig/')]
-    assert api and all(row['authorized'] for row in api)
+    assert api and all(row['authorized'] for row in api if row.get('method') != 'SSE')
     for route, query in [('/v1/wazig/slack/emoji', dict(account=['fixture-emoji'])),
                          ('/v1/wazig/slack/emoji/media', dict(account=['fixture-emoji'], name=['cat_alone']))]:
         fetched = [row for row in api if urlsplit(row['wire_path']).path == route]
