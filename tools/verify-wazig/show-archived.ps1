@@ -1,12 +1,22 @@
-function Save-ArchivedSwitch($Session, [string]$Name, [bool]$Enabled, [int]$Count, [int]$Archived) {
+function Save-ArchivedSwitch($Session, [string]$Name, [bool]$Enabled, [int]$Count, [int]$Archived, [bool]$Toggle = $false) {
     $null = Wait-Until {
         $state = Read-Control $Session status
         $rows = @((Read-Control $Session chats).chats)
-        $state.include_archived -eq $Enabled -and -not $state.show_archived -and
+        $timed = $true
+        if ($Toggle) {
+            $lines = @(Get-Content (Join-Path $Session.root 'local/Messages/launch-log.txt') | Where-Object { $_ -match ' archive-toggle:' })
+            $timed = $lines.Count -gt $script:ArchiveToggleIndex + 1 -and $lines[-1].Contains("include=$($Enabled.ToString().ToLowerInvariant()) ")
+        }
+        $timed -and $state.include_archived -eq $Enabled -and -not $state.show_archived -and
             $rows.Count -eq $Count -and @($rows | Where-Object archived).Count -eq $Archived -and
             @($rows | Where-Object { $_.archived -and $_.archive_label -notin @('Archived', 'Kept archived') }).Count -eq 0
     } "show-archived $Name"
     Save-Screen $Session $Name
+    if ($Toggle) {
+        $lines = @(Get-Content (Join-Path $Session.root 'local/Messages/launch-log.txt') | Where-Object { $_ -match ' archive-toggle:' })
+        $script:ArchiveToggleIndex = $lines.Count - 1
+        @{ name = $Name; line = $lines[-1]; index = $script:ArchiveToggleIndex } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence "$Name.toggle.json")
+    }
     Hub-Pass $Session $Name | Out-Null
 }
 
@@ -36,13 +46,18 @@ function Read-ArchivedSwitchTooltip($Session) {
 }
 
 function Invoke-ShowArchivedJourney($Session, $Start) {
+    $script:ArchiveToggleIndex = -1
     Send-Keys $Session '%i'
     $null = Wait-Until { (Read-Control $Session status).current_view.inbox } 'combined inbox'
     Invoke-PaletteCommand $Session 'Toggle unread chats'
     $null = Wait-Until { (Read-Control $Session status).unread_only } 'inbox unread filter enabled'
     Save-ArchivedSwitch $Session inbox-off $false 5 0
     Send-Keys $Session '%a'
-    Save-ArchivedSwitch $Session inbox-on $true 10 5
+    Save-ArchivedSwitch $Session inbox-on $true 10 5 $true
+    Send-Keys $Session '%a'
+    Save-ArchivedSwitch $Session inbox-warm-off $false 5 0 $true
+    Send-Keys $Session '%a'
+    Save-ArchivedSwitch $Session inbox-warm-on $true 10 5 $true
     Assert-That (@((Read-Control $Session chats).chats | Where-Object { -not $_.unread }).Count -eq 0) 'Inbox mixed mode included a read chat'
     Read-ArchivedSwitchTooltip $Session
     Invoke-PaletteCommand $Session 'Toggle unread chats'
@@ -53,12 +68,12 @@ function Invoke-ShowArchivedJourney($Session, $Start) {
         Send-Keys $Session "%$position"
         Save-ArchivedSwitch $Session "view-$position-off" $false 2 0
         Send-Keys $Session '%a'
-        Save-ArchivedSwitch $Session "view-$position-on" $true 4 2
+        Save-ArchivedSwitch $Session "view-$position-on" $true 4 2 $true
         if ($position -eq 1) {
             Invoke-PaletteCommand $Session 'Toggle archived chats in this view' 'palette-switch'
-            Save-ArchivedSwitch $Session palette-off $false 2 0
+            Save-ArchivedSwitch $Session palette-off $false 2 0 $true
             Send-Keys $Session '%a'
-            Save-ArchivedSwitch $Session palette-on $true 4 2
+            Save-ArchivedSwitch $Session palette-on $true 4 2 $true
         }
         Send-Keys $Session '^1'
         $null = Wait-Until { (Read-Control $Session status).selected.name -like '*row 0' } 'normal read row selected'
@@ -70,7 +85,7 @@ function Invoke-ShowArchivedJourney($Session, $Start) {
         Save-ArchivedSwitch $Session "view-$position-unarchived" $true 4 2
         if ($position -ne 1) {
             Send-Keys $Session '%a'
-            Save-ArchivedSwitch $Session "view-$position-disabled" $false 2 0
+            Save-ArchivedSwitch $Session "view-$position-disabled" $false 2 0 $true
         }
     }
     Send-Keys $Session '%1'

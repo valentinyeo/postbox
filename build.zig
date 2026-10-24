@@ -519,6 +519,23 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(format_tests).step);
 
+    const archive_toggle_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("src/archive_toggle_test.zig"),
+        "fn applyChats(a: *App, _: []const u8, fresh: bool) bool { a.rebuilds += 1; const rebuild_started_ms = win.GetTickCount64();\n",
+        sourceSection("    if (a.archive_toggle_started_ms != null) {", "fn invalidateChatRow("),
+        sourceSection("fn refreshChats(", "fn isUnresolvableChatEntry("),
+        sourceSection("fn refilterChats(", "fn loadViewArchiveSetting("),
+        sourceSection("fn updateViewArchiveButton(", "fn switchChatView("),
+    }) catch @panic("Out of memory building archive toggle harness");
+    const archive_toggle_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.addWriteFiles().add("archive_toggle_test.zig", archive_toggle_source),
+        .target = b.resolveTargetQuery(.{}),
+        .imports = &.{
+            .{ .name = "messenger_view", .module = b.createModule(.{ .root_source_file = b.path("src/messenger_view.zig"), .target = b.resolveTargetQuery(.{}) }) },
+        },
+    }) });
+    test_step.dependOn(&b.addRunArtifact(archive_toggle_tests).step);
+
     const control_archive_source = sourceSection("fn controlWhatsAppChats(", "fn controlSortChats(");
     const control_archive_filter = control_archive_source[std.mem.indexOf(u8, control_archive_source, "        chat.archived =").?..std.mem.indexOf(u8, control_archive_source, "        try list.append").?];
     const archive_filter_source = @embedFile("src/messenger_view.zig");

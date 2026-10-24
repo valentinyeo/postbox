@@ -343,6 +343,21 @@ pub fn mergeChatData(allocator: std.mem.Allocator, normal: []const u8, archived:
     defer first.deinit();
     var second = try std.json.parseFromSlice(std.json.Value, allocator, archived, .{});
     defer second.deinit();
+    const Identity = [3][]const u8;
+    const Context = struct {
+        pub fn hash(_: @This(), key: Identity) u64 {
+            var result: u64 = 0;
+            for (key) |part| result = std.hash.Wyhash.hash(result, part);
+            return result;
+        }
+
+        pub fn eql(_: @This(), left: Identity, right: Identity) bool {
+            for (left, right) |a, b| if (!std.mem.eql(u8, a, b)) return false;
+            return true;
+        }
+    };
+    var seen: std.HashMapUnmanaged(Identity, void, Context, 80) = .empty;
+    defer seen.deinit(allocator);
     var rows: std.ArrayList(std.json.Value) = .empty;
     defer rows.deinit(allocator);
     for ([_]std.json.Value{ second.value, first.value }) |root| {
@@ -351,21 +366,14 @@ pub fn mergeChatData(allocator: std.mem.Allocator, normal: []const u8, archived:
         if (data != .array) return error.BadChatList;
         for (data.array.items) |row| {
             if (row != .object) return error.BadChatList;
-            var known = false;
-            for (rows.items) |existing| {
-                const fields = [_][]const u8{ "jid", "provider", "account" };
-                var equal = true;
-                for (fields) |field| {
-                    const left = existing.object.get(field) orelse std.json.Value{ .string = "" };
-                    const right = row.object.get(field) orelse std.json.Value{ .string = "" };
-                    if (left != .string or right != .string or !std.mem.eql(u8, left.string, right.string)) equal = false;
-                }
-                if (equal) {
-                    known = true;
-                    break;
-                }
+            var key: Identity = undefined;
+            for ([_][]const u8{ "jid", "provider", "account" }, 0..) |field, index| {
+                const value = row.object.get(field) orelse std.json.Value{ .string = "" };
+                if (value != .string) return error.BadChatList;
+                key[index] = value.string;
             }
-            if (!known) try rows.append(allocator, row);
+            const entry = try seen.getOrPut(allocator, key);
+            if (!entry.found_existing) try rows.append(allocator, row);
         }
     }
     return std.json.Stringify.valueAlloc(allocator, .{ .data = rows.items }, .{});
@@ -437,4 +445,41 @@ test "mixed chat data keeps every provider including locally archived inbox entr
     try std.testing.expectEqualStrings("telegram", rows[3].object.get("provider").?.string);
     try std.testing.expect(rows[0].object.get("archived").?.bool);
     try std.testing.expect(rows[2].object.get("archived").?.bool);
+}
+
+test "mixed snapshots retain independent inbox and archive ranges and provider account collisions" {
+    const allocator = std.testing.allocator;
+    const Row = struct { jid: []const u8, provider: []const u8, account: []const u8, archived: bool };
+    var accounts: [250][16]u8 = undefined;
+    var normal: [250]Row = undefined;
+    var archived: [250]Row = undefined;
+    for (&normal, &archived, 0..) |*inbox_row, *archive_row, index| {
+        const provider = switch (index % 4) {
+            0 => "whatsapp",
+            1 => "slack",
+            2 => "telegram",
+            else => "signal",
+        };
+        const account = try std.fmt.bufPrint(&accounts[index], "account-{d}", .{index});
+        inbox_row.* = .{ .jid = "shared", .provider = provider, .account = account, .archived = false };
+        archive_row.* = .{ .jid = "archived", .provider = provider, .account = account, .archived = true };
+    }
+    const inbox_json = try std.json.Stringify.valueAlloc(allocator, .{ .data = normal }, .{});
+    defer allocator.free(inbox_json);
+    const archive_json = try std.json.Stringify.valueAlloc(allocator, .{ .data = archived }, .{});
+    defer allocator.free(archive_json);
+    const mixed = try mergeChatData(allocator, inbox_json, archive_json);
+    defer allocator.free(mixed);
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, mixed, .{});
+    defer parsed.deinit();
+    const rows = parsed.value.object.get("data").?.array.items;
+    try std.testing.expectEqual(@as(usize, normal.len + archived.len), rows.len);
+    const repeated = try mergeChatData(allocator, mixed, archive_json);
+    defer allocator.free(repeated);
+    try std.testing.expectEqualStrings(mixed, repeated);
+    for (rows[0..archived.len], rows[archived.len..]) |archive_row, inbox_row| {
+        try std.testing.expect(archive_row.object.get("archived").?.bool);
+        try std.testing.expect(!inbox_row.object.get("archived").?.bool);
+        try std.testing.expectEqualStrings(archive_row.object.get("account").?.string, inbox_row.object.get("account").?.string);
+    }
 }
