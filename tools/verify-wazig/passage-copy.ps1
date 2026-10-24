@@ -82,8 +82,10 @@ function Assert-PassageHighlight($Session, $Messages, $Canvas, [string]$Name, [s
             try { $crop.Save((Join-Path $Session.evidence "$Name-$Id-$phase-row.png"), [Drawing.Imaging.ImageFormat]::Png) } finally { $crop.Dispose() }
         } finally { $image.Dispose() }
     }
-    Assert-That ($metric.fill -ne $metric.bubble -and $metric.contrast -ge 1.3) "$Name $Id highlight must contrast at least 1.3:1 with its screenshot-derived bubble fill"
-    Assert-That ($metric.pixels -ge $metric.required) "$Name $Id text row must contain at least $($metric.required) highlight-fill pixels changed from unselected bubble pixels; found $($metric.pixels)"
+    $direction = if ($message.from_me) { 'own' } else { 'incoming' }
+    $diagnostic = '{0} {1} {2} message highlight not visible: bubble=#{3:X6} fill=#{4:X6} pixels={5} required={6} contrast={7:F3}:1' -f $Name, $Id, $direction, $metric.bubble, $metric.fill, $metric.pixels, $metric.required, $metric.contrast
+    Assert-That ($metric.fill -ne $metric.bubble -and $metric.contrast -ge 1.3) "$diagnostic; requires at least 1.3:1 fill contrast"
+    Assert-That ($metric.pixels -ge $metric.required) "$diagnostic; requires enough highlight-fill pixels changed from unselected bubble pixels"
 }
 
 function Invoke-PassageCopyJourney($Session) {

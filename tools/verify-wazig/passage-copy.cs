@@ -22,6 +22,7 @@ public static class VerifyPassage {
     public static void Wheel(int pid, int delta) { Mouse(pid, 0x0800, unchecked((uint)delta)); }
     public sealed class HighlightMeasurement {
         public int left, top, right, bottom, bubble, fill, pixels, required;
+        public int paddingLeft, paddingTop, paddingRight, paddingBottom, paddingPixels, paddingTotal;
         public double contrast;
     }
     static int Pixel(byte[] image, int stride, int x, int y) {
@@ -51,24 +52,33 @@ public static class VerifyPassage {
         }
         if (lastInk == result.left) throw new Exception("Passage text row has no body ink");
         result.right = lastInk + 1;
+        result.paddingLeft = left + Math.Max(2, 4 * dpi / 96);
+        result.paddingRight = left + Math.Max(3, 8 * dpi / 96);
+        int corner = Math.Max(2, (16 * dpi + 95) / 96);
+        result.paddingTop = top + corner;
+        result.paddingBottom = bottom - corner;
+        if (result.paddingLeft >= result.paddingRight || result.paddingRight > result.left || result.paddingTop >= result.paddingBottom) throw new Exception("Passage bubble has no text-free interior padding");
         var colors = new Dictionary<int, int>();
-        for (int y = result.top; y < result.bottom; y++) for (int x = result.left; x < result.right; x++) {
+        for (int y = result.paddingTop; y < result.paddingBottom; y++) for (int x = result.paddingLeft; x < result.paddingRight; x++) {
             int color = Pixel(before, stride, x, y);
             colors[color] = colors.ContainsKey(color) ? colors[color] + 1 : 1;
         }
-        int baseline = 0;
-        foreach (var color in colors) if (color.Value > baseline) { result.bubble = color.Key; baseline = color.Value; }
-        if (baseline * 2 <= (result.right - result.left) * (result.bottom - result.top)) throw new Exception("Passage row has no dominant unselected bubble fill");
+        foreach (var color in colors) if (color.Value > result.paddingPixels) { result.bubble = color.Key; result.paddingPixels = color.Value; }
+        result.paddingTotal = (result.paddingRight - result.paddingLeft) * (result.paddingBottom - result.paddingTop);
+        if (result.paddingPixels * 5 <= result.paddingTotal * 4) throw new Exception(String.Format("Passage bubble padding has no dominant unselected fill: bubble=#{0:X6} pixels={1}/{2} (requires >80%)", result.bubble, result.paddingPixels, result.paddingTotal));
         colors.Clear();
+        int baseline = 0;
         for (int y = result.top; y < result.bottom; y++) for (int x = result.left; x < result.right; x++) {
             if (Pixel(before, stride, x, y) != result.bubble) continue;
+            baseline++;
             int color = Pixel(after, stride, x, y);
             if (color == result.bubble) continue;
             colors[color] = colors.ContainsKey(color) ? colors[color] + 1 : 1;
         }
         result.fill = result.bubble;
         foreach (var color in colors) if (color.Value > result.pixels) { result.fill = color.Key; result.pixels = color.Value; }
-        result.required = Math.Max(24, (baseline + 3) / 4);
+        int minimum = Math.Max(24, (int)Math.Ceiling(24.0 * dpi * dpi / (96 * 96)));
+        result.required = Math.Max(minimum, (baseline + 3) / 4);
         double a = Luminance(result.bubble), b = Luminance(result.fill);
         result.contrast = (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
         return result;
