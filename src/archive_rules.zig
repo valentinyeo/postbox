@@ -86,10 +86,10 @@ pub const State = struct {
     }
 
     pub fn isArchived(self: *const State, key: anytype, provider_archived: bool) bool {
-        if (key.provider == .whatsapp) {
-            if (self.find(key.id)) |index| return self.entries[index].keep;
-        } else if (self.findLocal(key)) |index| return self.entries[index].keep;
-        return provider_archived;
+        if (key.provider != .whatsapp) {
+            if (self.findLocal(key)) |index| return self.entries[index].keep;
+        }
+        return self.localArchived(key) or provider_archived;
     }
 
     pub fn setLocalUnarchived(self: *State, key: anytype) bool {
@@ -555,14 +555,14 @@ test "WhatsApp archive entries honor zero and one keep flags after restart" {
     }
 }
 
-test "WhatsApp archive entries override provider state and missing entries inherit it" {
+test "WhatsApp archive status keeps the provider flag and adds keep" {
     const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
     var state = State{};
     state.parse("plain@g.us\t0\tbaseline\nkept@g.us\t1\tbaseline\n");
     for ([_]bool{ false, true }) |provider_archived| {
         for ([_]bool{ false, true }) |keep| {
             const key = Key{ .provider = .whatsapp, .account = "fixture-account", .id = if (keep) "kept@g.us" else "plain@g.us" };
-            try std.testing.expectEqual(keep, state.isArchived(key, provider_archived));
+            try std.testing.expectEqual(keep or provider_archived, state.isArchived(key, provider_archived));
         }
         const missing = Key{ .provider = .whatsapp, .account = "fixture-account", .id = "missing@g.us" };
         try std.testing.expect(!state.localArchived(missing));
