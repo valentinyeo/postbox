@@ -37,6 +37,85 @@ def verify_column(source):
     return width
 
 
+def verify_resize(source):
+    for token in (
+        '$app = Get-App $Session',
+        '$window = $app.MainWindowHandle',
+        '[VerifyWindow]::ShowWindow($window, 9)',
+        '$attempt -lt 8;',
+        'if ($canvasWidth -eq 320) { break }',
+        '[VerifyVoice]::Bounds($Session.pid, $window)',
+        '$requestedWidth = $width + 320 - $canvasWidth',
+        '[VerifyWindow]::SetWindowPos($window, [IntPtr]::Zero, 0, 0, $requestedWidth, $height, 6)',
+        '$canvasWidth -ge 300 -and $canvasWidth -le 340',
+        "'media-fit-resize.json'",
+        'window_before = $width; canvas_before = $canvasWidth; requested_window = $requestedWidth',
+    ):
+        assert token in source, f'IGSH-714 measured resize missing {token}'
+    assert 'Send-Keys' not in source, 'IGSH-714 resize must not depend on system-menu keys'
+
+
+class MediaFitResizeTests(unittest.TestCase):
+    def setUp(self):
+        self.journey = (ROOT / 'tools/verify-wazig/media-fit.ps1').read_text()
+
+    def test_IGSH_714_owned_native_resize_retains_narrow_assertions(self):
+        verify_resize(self.journey)
+        self.assertIn("foreach ($size in @('wide', 'narrow'))", self.journey)
+        self.assertIn('$wide.bubble[2] - $wide.bubble[0] -gt $narrow.bubble[2] - $narrow.bubble[0]', self.journey)
+        self.assertIn('$narrow.bubble[2] - $narrow.bubble[0] - $padding -lt $wide.media[2] - $wide.media[0]', self.journey)
+        validator = (ROOT / 'tools/verify-wazig/check-media-fit-evidence.py').read_text()
+        for token in (
+            "resize = read('media-fit-resize.json')",
+            "resize['target'] == 320 and 300 <= resize['canvas'] <= 340",
+            "row['canvas'][2] == resize['canvas']",
+            "step['requested_window'] == step['window_before'] + resize['target'] - step['canvas_before']",
+            "resize['steps'][-1]['canvas_after'] == resize['canvas']",
+        ):
+            self.assertIn(token, validator)
+
+    def test_IGSH_714_corrections_converge_with_real_sidebar_clamps_and_borders(self):
+        verify_resize(self.journey)
+        source = (ROOT / 'src/main.zig').read_text()
+        layout = section(source, 'layoutRegion')
+        minimum, maximum = map(int, re.search(r'const left_width = std.math.clamp\(@divTrunc\(width, 3\), px\(a, (\d+)\), px\(a, (\d+)\)\)', layout).groups())
+        self.assertIn('const chat_width = width - left_width - 1;', layout)
+        self.assertIn('chat_width - panel_width', layout)
+        target = int(re.search(r'\$requestedWidth = \$width \+ (\d+) - \$canvasWidth', self.journey).group(1))
+        attempts = int(re.search(r'\$attempt -lt (\d+)', self.journey).group(1))
+        for dpi in (96, 120, 144, 192):
+            px = lambda n: (n * dpi + 48) // 96
+            for border in (0, px(16), px(32)):
+                def canvas(outer):
+                    client = outer - border
+                    sidebar = min(px(maximum), max(px(minimum), client // 3))
+                    return client - sidebar - 1
+                for initial in (border + px(minimum) + 182, 604, 1024, 1160, 3840):
+                    width = initial
+                    for attempt in range(attempts):
+                        current = canvas(width)
+                        if current == target:
+                            break
+                        width += target - current
+                    with self.subTest(dpi=dpi, border=border, initial=initial):
+                        self.assertEqual(canvas(width), target)
+                        self.assertTrue(300 <= canvas(width) <= 340)
+        self.assertEqual(478 - 16 - 280 - 1, 181)
+
+    def test_IGSH_714_old_resize_and_weakened_band_are_rejected(self):
+        verify_resize(self.journey)
+        for old, new in (
+            ('$requestedWidth = $width + 320 - $canvasWidth', '$requestedWidth = 600'),
+            ('$canvasWidth -ge 300 -and $canvasWidth -le 340', '$canvasWidth -ge 180 -and $canvasWidth -le 340'),
+            ('[VerifyWindow]::SetWindowPos', '[VerifyWindow]::ShowWindow'),
+            ('$attempt -lt 8;', '$attempt -lt 80'),
+        ):
+            with self.subTest(mutation=new), self.assertRaisesRegex(AssertionError, 'IGSH-714'):
+                verify_resize(self.journey.replace(old, new))
+        with self.assertRaisesRegex(AssertionError, 'IGSH-714'):
+            verify_resize(self.journey + "\nSend-Keys $Session '{RIGHT}{LEFT 4}{ENTER}'\n")
+
+
 class MediaLayoutTests(unittest.TestCase):
     def setUp(self):
         self.source = (ROOT / 'src/main.zig').read_text()

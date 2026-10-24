@@ -72,6 +72,17 @@ def check_media_fit(folder):
                           image[oy + y][ox + x][0] > 230 and 120 < image[oy + y][ox + x][1] < 190 and image[oy + y][ox + x][2] < 25)]
             assert pixels and len(pixels) == row['result']['pixels']
             assert all(m[0] <= x < m[2] and m[1] <= y < m[3] and b[0] <= x < b[2] and b[1] <= y < b[3] for x, y in pixels)
+    resize = read('media-fit-resize.json')
+    assert resize['target'] == 320 and 300 <= resize['canvas'] <= 340
+    assert all(row['canvas'][2] == resize['canvas'] for row in checks if row['size'] == 'narrow')
+    assert len(resize['steps']) <= 8
+    for index, step in enumerate(resize['steps']):
+        assert step['requested_window'] == step['window_before'] + resize['target'] - step['canvas_before']
+        assert step['requested_window'] > 0 and step['canvas_after'] > 0
+        if index:
+            assert step['canvas_before'] == resize['steps'][index - 1]['canvas_after']
+    if resize['steps']:
+        assert resize['steps'][-1]['canvas_after'] == resize['canvas']
     assert widths['wide'] > widths['narrow']
     wide, = [row for row in checks if row['size'] == 'wide' and row['id'] == 'landscape']
     narrow, = [row for row in checks if row['size'] == 'narrow' and row['id'] == 'landscape']
@@ -81,8 +92,8 @@ def check_media_fit(folder):
     for key in ids[1:]:
         assert any(row.get('status') == 200 and row['method'] == 'GET' and unquote(row['wire_path']).endswith('/v1/wazig/media/fixture-media@g.us/' + key) for row in requests)
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    assert 'Verification Media' in actions and 'keys: {RIGHT}{LEFT 4}{ENTER}' in actions
-    assert '{LEFT 40}' not in actions
+    assert 'Verification Media' in actions and f"resize: media-fit canvas={resize['canvas']} target=320" in actions
+    assert '{LEFT 4}' not in actions and '{LEFT 40}' not in actions
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
     assert all(final[key] for key in ('production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'))

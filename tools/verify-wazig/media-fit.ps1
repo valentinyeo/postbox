@@ -43,22 +43,29 @@ function Invoke-MediaFitJourney($Session) {
     $problems = [Collections.Generic.List[string]]::new()
     foreach ($size in @('wide', 'narrow')) {
         if ($size -eq 'narrow') {
-            $null = Send-Keys $Session '% '
-            $null = Send-Keys $Session 'r'
+            $app = Get-App $Session
+            $window = $app.MainWindowHandle
+            $null = [VerifyWindow]::ShowWindow($window, 9)
             $canvas = [IntPtr](Get-Edit (Get-Window $Session) '1024').Current.NativeWindowHandle
-            $bounds = [VerifyVoice]::Bounds($Session.pid, $canvas)
-            $canvasWidth = $bounds.Right - $bounds.Left
-            while ($canvasWidth -gt 340) {
-                $previousWidth = $canvasWidth
-                $null = Send-Keys $Session '% '
-                $null = Send-Keys $Session 's'
-                $null = Send-Keys $Session '{RIGHT}{LEFT 4}{ENTER}'
-                $canvas = [IntPtr](Get-Edit (Get-Window $Session) '1024').Current.NativeWindowHandle
+            $steps = [Collections.Generic.List[object]]::new()
+            for ($attempt = 0; $attempt -lt 8; $attempt++) {
                 $bounds = [VerifyVoice]::Bounds($Session.pid, $canvas)
                 $canvasWidth = $bounds.Right - $bounds.Left
-                $null = Assert-That ($canvasWidth -lt $previousWidth) "media-fit: keyboard resize made no progress from $previousWidth px (now $canvasWidth px); cannot reach the 300-340 px canvas band"
+                if ($canvasWidth -eq 320) { break }
+                $outer = [VerifyVoice]::Bounds($Session.pid, $window)
+                $width = $outer.Right - $outer.Left
+                $height = $outer.Bottom - $outer.Top
+                $requestedWidth = $width + 320 - $canvasWidth
+                $null = Assert-That ([VerifyWindow]::SetWindowPos($window, [IntPtr]::Zero, 0, 0, $requestedWidth, $height, 6)) 'media-fit: native resize failed'
+                $null = [VerifyVoice]::FullRepaint($Session.pid, $canvas)
+                $after = [VerifyVoice]::Bounds($Session.pid, $canvas)
+                $null = $steps.Add([ordered]@{ window_before = $width; canvas_before = $canvasWidth; requested_window = $requestedWidth; canvas_after = ($after.Right - $after.Left) })
             }
-            $null = Assert-That ($canvasWidth -ge 300 -and $canvasWidth -le 340) "media-fit: keyboard resize missed the 300-340 px canvas band (now $canvasWidth px)"
+            $bounds = [VerifyVoice]::Bounds($Session.pid, $canvas)
+            $canvasWidth = $bounds.Right - $bounds.Left
+            [ordered]@{ target = 320; canvas = $canvasWidth; steps = $steps.ToArray() } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Session.evidence 'media-fit-resize.json')
+            Add-Content (Join-Path $Session.evidence 'actions.log') "resize: media-fit canvas=$canvasWidth target=320"
+            $null = Assert-That ($canvasWidth -ge 300 -and $canvasWidth -le 340) "media-fit: native resize missed the 300-340 px canvas band (now $canvasWidth px)"
         }
         $null = Set-MediaFitText $Session 'M M M M M M M M'
         $own = Get-MediaFitTarget $Session 'fit-own'
@@ -93,7 +100,7 @@ function Invoke-MediaFitJourney($Session) {
     Read-BridgeRequests $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'media-fit.requests.json')
     $wide = @($checks | Where-Object { $_.size -eq 'wide' -and $_.id -eq 'landscape' })[0]
     $narrow = @($checks | Where-Object { $_.size -eq 'narrow' -and $_.id -eq 'landscape' })[0]
-    $null = Assert-That ($wide.bubble[2] - $wide.bubble[0] -gt $narrow.bubble[2] - $narrow.bubble[0]) 'media-fit: keyboard resize did not narrow bubbles'
+    $null = Assert-That ($wide.bubble[2] - $wide.bubble[0] -gt $narrow.bubble[2] - $narrow.bubble[0]) 'media-fit: native resize did not narrow bubbles'
     $padding = [int][Math]::Floor((24 * $narrow.dpi + 48) / 96)
     $null = Assert-That ($narrow.bubble[2] - $narrow.bubble[0] - $padding -lt $wide.media[2] - $wide.media[0]) 'media-fit: narrow bubble must be smaller than the wide decoded landscape'
     $null = Assert-That ($problems.Count -eq 0) ($problems -join '; ')

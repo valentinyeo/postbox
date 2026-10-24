@@ -481,7 +481,7 @@ assert entries['media-fit']['validator'] == {'file': 'check-media-fit-evidence.p
 assert hub_parser.parse_args(['--media-fit', '--port-file', 'port', '--log', 'log']).mode == 'media-fit'
 assert '.claude/skills/verify-wazig/features/media-fit.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 assert '(features/media-fit.md)' in (skill / 'RULE-MAP.md').read_text(encoding='utf-8')
-for artifact in ['media-fit-checks.json', 'media-fit.requests.json', 'media-fit-fixture.json']:
+for artifact in ['media-fit-checks.json', 'media-fit.requests.json', 'media-fit-fixture.json', 'media-fit-resize.json']:
     assert artifact in media_fit and artifact in (root / 'tools/verify-wazig/check-media-fit-evidence.py').read_text(encoding='utf-8')
 for required in ['canvas = @($ox, $oy, $canvasWidth, $canvasHeight)',
                  '$null = [VerifyVoice]::FullRepaint', '$null = [VerifyVoice]::Wheel',
