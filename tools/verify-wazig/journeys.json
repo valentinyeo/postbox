@@ -220,7 +220,8 @@
       "chats": 1,
       "script": "journey-slack-mentions.ps1",
       "validator": {
-        "file": "evidence-slack-mentions.py"
+        "file": "check-slack-mentions-evidence.py",
+        "function": "check_slack_mentions"
       },
       "hub_handler": {
         "file": "fake-hub.py",

@@ -449,9 +449,13 @@ fn renderMrkdwnToken(dest: []u8, token: []const u8, users: ?UserLookup) []const 
             const user_id = if (pipe) |p| rest[0..p] else rest;
             const given_name = if (pipe) |p| rest[p + 1 ..] else null;
             if (users) |lookup| {
-                if (lookup.find(user_id)) |resolved_name| return copyClampedPrefixed(dest, "@", resolved_name);
+                if (lookup.find(user_id)) |resolved_name| {
+                    if (resolved_name.len > 0 and !std.mem.eql(u8, resolved_name, user_id)) return copyClampedPrefixed(dest, "@", resolved_name);
+                }
             }
-            if (given_name) |name| return copyClampedPrefixed(dest, "@", name);
+            if (given_name) |name| {
+                if (name.len > 0 and !std.mem.eql(u8, name, user_id)) return copyClampedPrefixed(dest, "@", name);
+            }
             return copyClamped(dest, mentionFallback);
         },
         '#' => {
@@ -1119,6 +1123,20 @@ test "convertMrkdwn resolves a user mention, falls back to the given name, then 
     try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U999>", lookup));
     try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U999>", null));
     try std.testing.expectEqualStrings("@someone joins later", convertMrkdwn(&buffer, "<@UUNKNOWN99> joins later", lookup));
+}
+
+test "convertMrkdwn ignores empty and id-valued cached names and labels" {
+    var buffer: [256]u8 = undefined;
+    var table = [1]TestUser{.{ .id = "U1", .name = "U1" }};
+    const lookup = UserLookup{ .context = @ptrCast(&table), .lookupFn = testUserLookup };
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U1>", lookup));
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U1|U1>", lookup));
+    try std.testing.expectEqualStrings("@Guest Person", convertMrkdwn(&buffer, "<@U1|Guest Person>", lookup));
+    table[0].name = "";
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U1>", lookup));
+    try std.testing.expectEqualStrings("@Guest Person", convertMrkdwn(&buffer, "<@U1|Guest Person>", lookup));
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U1|U1>", null));
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U1|>", null));
 }
 
 test "convertMrkdwn converts channel mentions, special mentions and subteam/date tokens" {

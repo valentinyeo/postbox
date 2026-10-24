@@ -27,6 +27,24 @@ pub fn messages(allocator: std.mem.Allocator, chat: []const u8, limit: usize, be
     return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/messages?chat={s}&limit={d}&before={s}", .{ c, limit, b }) };
 }
 
+pub const SlackUserNames = struct {
+    rows: []const std.json.Value,
+
+    pub fn lookup(self: *SlackUserNames) @import("slack.zig").UserLookup {
+        return .{ .context = self, .lookupFn = find };
+    }
+
+    fn find(context: *anyopaque, user_id: []const u8) ?[]const u8 {
+        const self: *const SlackUserNames = @ptrCast(@alignCast(context));
+        for (self.rows) |row| {
+            if (row != .object or !std.mem.eql(u8, string(row.object, "SenderJID"), user_id)) continue;
+            const name = string(row.object, "SenderName");
+            if (name.len > 0 and !std.mem.eql(u8, name, user_id)) return name;
+        }
+        return null;
+    }
+};
+
 pub const older_limit: usize = 80;
 
 pub fn beforeCursor(allocator: std.mem.Allocator, msg_id: []const u8, timestamp: []const u8) ![]u8 {

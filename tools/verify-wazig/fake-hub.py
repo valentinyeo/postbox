@@ -613,6 +613,8 @@ class SlackSortHandler(Handler):
 
 
 MENTIONS_CHAT = 'slack:fixture-mentions:channel'
+MENTIONS_MEMBERS = {'U4A59H6UT': 'Fixture Peer'}
+MENTIONS_INFO = {'UEXT00001': 'Guest Person', 'WCONNECT01': 'Connect Person'}
 
 
 class SlackMentionsHandler(SlackSortHandler):
@@ -627,13 +629,16 @@ class SlackMentionsHandler(SlackSortHandler):
                 dict(jid=MENTIONS_CHAT, name='Verification Mentions', provider='slack', account='fixture-mentions',
                      kind='group', last_message_ts=self.state.stamp, unread_count=0, archived=False)])
         elif url.path == '/v1/wazig/messages' and query.get('chat') == [MENTIONS_CHAT]:
-            texts = [('MENTION-NAMED', '@Fixture Peer hello'),
-                     ('MENTION-UNKNOWN', '<@UUNKNOWN99> joins later'),
-                     ('MENTION-LABELLED', '<@UHIDDEN01|Outside Guest> thanks <https://example.org/report|report>')]
+            texts = [('MENTION-NAMED', 'U4A59H6UT', '<@U4A59H6UT> hello'),
+                     ('MENTION-UNKNOWN', 'U4A59H6UT', '<@UUNKNOWN99> joins later'),
+                     ('MENTION-LABELLED', 'U4A59H6UT', '<@UHIDDEN01|Outside Guest> thanks <https://example.org/report|report>'),
+                     ('MENTION-GUEST', 'UEXT00001', '<@UEXT00001> joins @Fixture Peer'),
+                     ('MENTION-CONNECT', 'WCONNECT01', '@Guest Person meets <@WCONNECT01>')]
+            names = {**MENTIONS_MEMBERS, **MENTIONS_INFO}
             rows = [dict(MsgID=message_id, ChatJID=MENTIONS_CHAT, Timestamp=f'2025-02-19T21:20:{index:02d}Z',
-                         Text=text, FromMe=False, SenderName='Fixture Sender', SenderJID='fixture-sender')
-                    for index, (message_id, text) in enumerate(texts)]
-            self.respond(200, list(reversed(rows)))
+                         Text=text, FromMe=False, SenderName=names[user], SenderJID=user)
+                    for index, (message_id, user, text) in enumerate(texts)]
+            self.respond(200, list(reversed(rows)), members=MENTIONS_MEMBERS, users_info=MENTIONS_INFO, rows=rows)
         elif url.path == '/v1/wazig/events':
             self.events()
         elif url.path == '/v1/wazig/groups':
