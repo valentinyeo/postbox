@@ -519,8 +519,17 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(format_tests).step);
 
+    const control_archive_source = sourceSection("fn controlWhatsAppChats(", "fn controlSortChats(");
+    const control_archive_filter = control_archive_source[std.mem.indexOf(u8, control_archive_source, "        chat.archived =").?..std.mem.indexOf(u8, control_archive_source, "        try list.append").?];
     const archive_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/archive_actions_test.zig"),
+        sourceSection("fn getBool(", "fn getInt("),
+        "fn archiveInboxRow(a: *App, row: Chat, object: std.json.ObjectMap) ?Chat { for ([_]Chat{row}) |item| { var chat = item;\n",
+        sourceSection("        chat.archived =", "        a.chats[a.chat_count] = chat;"),
+        "return chat; } return null; }\n",
+        "fn archiveControlRow(a: *App, row: Chat, object: std.json.ObjectMap) ?Chat { const show_archived = a.show_archived; for ([_]Chat{row}) |item| { var chat = item;\n",
+        control_archive_filter,
+        "return chat; } return null; }\n",
         "fn unifiedHub(a: *const App) bool { return a.unified_hub; }\n",
         "fn hubConfigured(a: *const App) bool { return a.unified_hub; }\n",
         "fn applyHubArchiveResult(a: *App, result: *const WacliResult) void { switch (result.kind) {\n",

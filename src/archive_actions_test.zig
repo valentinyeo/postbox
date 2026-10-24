@@ -1031,3 +1031,28 @@ test "bulk hub Telegram and Signal archives persist every row without a hub requ
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
 }
+
+test "hub Telegram and Signal archives honor both phone and local state in both chat filters" {
+    inline for (.{ archiveInboxRow, archiveControlRow }) |filter| {
+        for ([_]Provider{ .telegram, .signal }) |provider| {
+            for ([_]bool{ false, true }) |local| {
+                var state = archive_rules.State{};
+                var a = fixture(&state);
+                a.unified_hub = true;
+                var chat = Chat{ .provider = provider };
+                chat.account.set(if (provider == .telegram) "telegram" else "signal");
+                chat.jid.set(if (provider == .telegram) "telegram:user:7001" else "signal:fixture");
+                if (local) try std.testing.expect(state.setLocalArchived(chat_key.of(&chat), true));
+                try std.testing.expectEqual(@as(usize, if (local) 1 else 0), state.count);
+                const raw = if (local) "{\"archived\":false}" else "{\"archived\":true}";
+                var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, raw, .{});
+                defer parsed.deinit();
+                try std.testing.expect(filter(&a, chat, parsed.value.object) == null);
+                a.show_archived = true;
+                const archived = filter(&a, chat, parsed.value.object) orelse return error.MissingArchivedChat;
+                try std.testing.expect(archived.archived);
+                try std.testing.expect(chat_key.Key.eql(chat_key.of(&chat), chat_key.of(&archived)));
+            }
+        }
+    }
+}
