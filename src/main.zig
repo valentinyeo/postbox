@@ -2447,7 +2447,7 @@ fn refreshChats(a: *App) void {
     var job = WacliJob{ .account = a.cache_tag, .kind = .chats };
     wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--limit", "250" });
     if (a.show_archived or !a.include_archived or hubConfigured(a)) {
-        job.args[job.arg_count].set(if (a.show_archived) "--archived" else if (a.include_archived) "--include-archived" else "--no-archived");
+        job.args[job.arg_count].set(if (a.show_archived) "--archived" else if (a.include_archived or unifiedHub(a)) "--include-archived" else "--no-archived");
         job.arg_count += 1;
     }
     a.chats_gen += 1;
@@ -21141,11 +21141,11 @@ fn readHubChats(a: *App, archived: bool) ?[]u8 {
     var response = client.call(allocator, request) catch return null;
     defer response.deinit(allocator);
     if (response.status != 200) return null;
-    const normalized = if (unifiedHub(a) and archived) blk: {
-        const inbox = client.call(allocator, hub.chats(allocator, false, 250) catch return null) catch return null;
-        if (inbox.status != 200) return null;
-        break :blk hub.archivedChats(allocator, response.body, inbox.body) catch return null;
-    } else if (unifiedHub(a)) hub.normalize(allocator, response.body, .chats, "") catch return null else wa_hub.normalize(allocator, response.body, account.slice(), .chats) catch return null;
+    const normalized = if (unifiedHub(a)) blk: {
+        const other = client.call(allocator, hub.chats(allocator, !archived, 250) catch return null) catch return null;
+        if (other.status != 200) return null;
+        break :blk hub.archivedChats(allocator, if (archived) response.body else other.body, if (archived) other.body else response.body) catch return null;
+    } else wa_hub.normalize(allocator, response.body, account.slice(), .chats) catch return null;
     return a.allocator.dupe(u8, normalized) catch null;
 }
 
