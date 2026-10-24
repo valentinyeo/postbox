@@ -2587,7 +2587,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         queueUnreadProbe(a, &chat);
         if (a.unread_only and !chat.unread) continue;
         chat.pinned = getBool(object, "pinned");
-        chat.archived = (if (a.archive_state) |state| state.localArchived(chat_key.of(&chat)) else false) or ((chat.provider == .whatsapp or (!unifiedHub(a) and chat.provider != .slack)) and getBool(object, "archived"));
+        chat.archived = (if (a.archive_state) |state| state.localArchived(chat_key.of(&chat)) else false) or (chat.provider != .slack and getBool(object, "archived"));
         if (chat.archived != a.show_archived) continue;
         a.chats[a.chat_count] = chat;
         a.chat_count += 1;
@@ -13446,7 +13446,7 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, acc
         fillSlackTimestamp(a, &chat);
         chat.unread = getBool(object, "unread");
         chat.unread_count = getInt(object, "unread_count");
-        chat.archived = (if (a.archive_state) |state| state.localArchived(chat_key.of(&chat)) else false) or ((chat.provider == .whatsapp or (!unifiedHub(a) and chat.provider != .slack)) and getBool(object, "archived"));
+        chat.archived = (if (a.archive_state) |state| state.localArchived(chat_key.of(&chat)) else false) or (chat.provider != .slack and getBool(object, "archived"));
         if (chat.archived != show_archived) continue;
         try list.append(a.allocator, chat);
     }
