@@ -205,7 +205,7 @@ class ShowArchivedTests(unittest.TestCase):
             refilter = source.split('fn refilterChats(', 1)[1].split('fn loadViewArchiveSetting(', 1)[0]
             toggle = source.split('fn toggleViewArchived(', 1)[1].split('fn switchChatView(', 1)[0]
             self.assertIn('a.chats_raw_flags == 1 or a.chats_raw_flags == flags', refilter)
-            self.assertNotIn('refreshVisibleChats(a)', refilter)
+            self.assertIn('refreshVisibleChats(a)', refilter)
             self.assertNotIn('refreshMessages(a)', toggle)
             self.assertIn('reconcileOpenChat(a)', toggle)
             self.assertIn('archive-toggle: include={} rebuilds={d}', source)

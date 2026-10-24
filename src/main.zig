@@ -4421,6 +4421,7 @@ fn refilterChats(a: *App) void {
             return;
         }
     }
+    refreshVisibleChats(a);
     refreshChats(a);
 }
 

@@ -162,12 +162,12 @@ test "Alt A reuses a mixed snapshot in every account and inbox without a child o
     }
 }
 
-test "cold toggle fetches once without rebuilding an incomplete list or logging an obsolete paint" {
+test "cold toggle repaints the loaded snapshot, fetches once and logs only a covered paint" {
     var a = App{ .chats_raw = "{\"data\":[]}" };
     current_app = &a;
     defer current_app = null;
     toggleViewArchived(&a);
-    try std.testing.expectEqual(@as(usize, 0), a.rebuilds);
+    try std.testing.expectEqual(@as(usize, 1), a.rebuilds);
     try std.testing.expectEqual(@as(usize, 1), a.enqueued);
     try std.testing.expectEqual(@as(u32, 1), a.archive_toggle_fetches);
     try std.testing.expectEqual(@as(u8, 1), a.chats_pending_flags);
@@ -176,7 +176,7 @@ test "cold toggle fetches once without rebuilding an incomplete list or logging 
     try std.testing.expectEqual(@as(usize, 0), a.logs);
     a.chats_raw_flags = 1;
     refilterChats(&a);
-    try std.testing.expectEqual(@as(usize, 1), a.rebuilds);
+    try std.testing.expectEqual(@as(usize, 2), a.rebuilds);
     try std.testing.expectEqual(@as(usize, 1), a.enqueued);
     a.paints.list += 1;
     logArchiveTogglePaint(&a);
@@ -211,7 +211,7 @@ test "unlabelled disk snapshots fetch fresh coverage before completing the toggl
     current_app = &a;
     defer current_app = null;
     toggleViewArchived(&a);
-    try std.testing.expectEqual(@as(usize, 0), a.rebuilds);
+    try std.testing.expectEqual(@as(usize, 1), a.rebuilds);
     try std.testing.expectEqual(@as(usize, 1), a.enqueued);
     try std.testing.expect(!a.archive_toggle_ready);
     _ = applyChats(&a, "{\"data\":[]}", true);
