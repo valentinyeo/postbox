@@ -51,6 +51,8 @@ const App = struct {
     media_downloads: [1]MediaDownload = .{.{}},
     audio_chain_id: Utf8Text(191) = .{},
     audio_chain_waiting: bool = false,
+    cached_media_jid: Utf8Text(191) = .{},
+    cached_media_id: Utf8Text(191) = .{},
     cached: ?[]u8 = null,
 
     fn deinit(a: *App) void {
@@ -99,6 +101,14 @@ fn startMediaDownload(a: *App, jid: []const u8, id: []const u8) bool {
     a.media_downloads[0].id.set(id);
     return true;
 }
+fn hubConfigured(_: *const App) bool {
+    return true;
+}
+fn hubMediaPath(a: *App, allocator: std.mem.Allocator, key: chat_key.Key, id: []const u8) ![]u8 {
+    const cached = std.mem.eql(u8, key.account, a.cache_tag.slice()) and
+        std.mem.eql(u8, key.id, a.cached_media_jid.slice()) and std.mem.eql(u8, id, a.cached_media_id.slice());
+    return allocator.dupe(u8, if (cached) "cached" else "missing");
+}
 fn fileExistsUtf8(path: []const u8) bool {
     return std.mem.eql(u8, path, "cached");
 }
@@ -110,7 +120,11 @@ fn drainMediaDownloads(a: *App) void {
     _ = autoDownloadBackgroundMedia(a);
 }
 const image_viewer = struct {
-    fn downloadFinished(_: *App, _: []const u8, _: []const u8, _: bool) void {}
+    fn downloadFinished(a: *App, jid: []const u8, id: []const u8, ok: bool) void {
+        if (!ok) return;
+        a.cached_media_jid.set(jid);
+        a.cached_media_id.set(id);
+    }
 };
 fn setStatus(_: *App, _: []const u8) void {}
 fn refreshMessages(_: *App) void {}
@@ -179,11 +193,12 @@ test "IGSH-670 hub Giphy completion advances the cached batch without refetching
     try std.testing.expect(mediaAttempted(&a, jid, "GIPHY"));
     try std.testing.expect(!mediaUnavailable(&a, jid, "GIPHY"));
     try std.testing.expect(!a.media_downloads[0].hub_pending);
+    media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(jid, "GIPHY"));
+    try std.testing.expect(!mediaAttempted(&a, jid, "GIPHY"));
     for (0..3) |_| try std.testing.expect(!autoDownloadBackgroundMedia(&a));
     try std.testing.expectEqual(.caching, a.background_media.phase);
     try std.testing.expectEqual(@as(usize, 1), a.starts);
     try std.testing.expectEqual(@as(usize, 2), a.jobs);
-    media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(jid, "GIPHY"));
     deliver(&a, "{\"data\":{\"messages\":[{\"MsgID\":\"GIPHY\",\"MediaType\":\"image\",\"LocalPath\":\"cached\"}]}}", true);
     a.chat_count = 1;
     a.chats[0] = a.background_media_chats[0];
@@ -199,6 +214,12 @@ test "IGSH-670 hub Giphy completion advances the cached batch without refetching
     deliver(&a, "{\"data\":{\"messages\":[{\"MsgID\":\"GIPHY\",\"MediaType\":\"image\",\"LocalPath\":\"cached\"}]}}", true);
     try std.testing.expectEqual(@as(usize, 1), a.starts);
     try std.testing.expectEqual(.caching, a.background_media.phase);
+    deliver(&a, "{\"data\":{\"messages\":[]}}", true);
+    a.cached_media_id.set("");
+    try observe(&a, "[{\"jid\":\"slack:fixture-emoji:channel\",\"last_message_ts\":\"2026-09-06T02:00:00\"}]");
+    _ = autoDownloadBackgroundMedia(&a);
+    deliver(&a, "{\"data\":{\"messages\":[{\"MsgID\":\"GIPHY\",\"MediaType\":\"image\"}]}}", true);
+    try std.testing.expectEqual(@as(usize, 2), a.starts);
 }
 
 test "IGSH-670 pending and failed hub media do not suppress a later download" {

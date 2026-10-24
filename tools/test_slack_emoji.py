@@ -102,6 +102,9 @@ class EmojiDataChecks(unittest.TestCase):
         success = handler.split('                if (ok) {', 1)[1].split('                } else {', 1)[0]
         self.assertIn('markMediaAttempted(a, slot.jid.slice(), slot.id.slice());', success)
         self.assertLess(success.index('markMediaAttempted('), success.index('clearMediaFailure('))
+        queue = source.split('    if (batch.phase == .downloading) {', 1)[1].split('fn ensureAvatarSession(', 1)[0]
+        self.assertIn('hubMediaPath(a, a.allocator, chat_key.of(batch), id.slice())', queue)
+        self.assertIn('.has_local_path = if (path) |cached| fileExistsUtf8(cached) else false,', queue)
         build = (ROOT / 'build.zig').read_text()
         self.assertIn('sourceSection("        .hub_media => {\\n            for (&a.media_downloads)"', build)
         tests = (ROOT / 'src/background_media_test.zig').read_text()

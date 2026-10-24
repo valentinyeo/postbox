@@ -7530,6 +7530,8 @@ fn autoDownloadBackgroundMedia(a: *App) bool {
     if (batch.phase == .downloading) {
         var candidates: [background_media_limit]media_drain.Candidate = undefined;
         for (batch.ids[0..batch.count], 0..) |*id, i| {
+            const path = if (hubConfigured(a)) hubMediaPath(a, a.allocator, chat_key.of(batch), id.slice()) catch null else null;
+            defer if (path) |cached| a.allocator.free(cached);
             var retry_after_ms: u64 = 0;
             const hash = played.Set.pairKey(batch.jid.slice(), id.slice());
             for (a.media_failures) |failure| {
@@ -7539,6 +7541,7 @@ fn autoDownloadBackgroundMedia(a: *App) bool {
                 .index = i,
                 .downloadable = true,
                 .has_id = id.len > 0,
+                .has_local_path = if (path) |cached| fileExistsUtf8(cached) else false,
                 .size_bytes = batch.sizes[i],
                 .whatsapp_store = true,
                 .in_flight = mediaDownloading(a, batch.jid.slice(), id.slice()),
