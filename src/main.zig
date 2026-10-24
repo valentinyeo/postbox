@@ -15057,7 +15057,7 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
         }
     }
     a.compose_strip_top = height - sizes.strip_height;
-    a.search_pill = .{ .left = px(a, 12), .top = header_height + px(a, 8), .right = left_width - px(a, 148), .bottom = header_height + px(a, 8) + px(a, 34) };
+    a.search_pill = .{ .left = px(a, 12), .top = header_height + px(a, 8), .right = px(a, 12) + left_width - px(a, 24), .bottom = header_height + px(a, 8) + px(a, 34) };
     if (a.search) |hwnd| {
         const pill = field_pill.compute(a.search_pill, px(a, theme.radius_field * 2));
         var inner = pill.inner;
@@ -15066,9 +15066,9 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
         _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
         _ = win.SendMessageW(hwnd, win.EM_SETMARGINS, win.EC_LEFTMARGIN | win.EC_RIGHTMARGIN, @as(win.LPARAM, px(a, 2)) | (@as(win.LPARAM, px(a, 2)) << 16));
     }
-    if (a.include_archived_button) |button| _ = win.MoveWindow(button, left_width - px(a, 140), px(a, 8), px(a, 128), px(a, 34), win.TRUE);
+    if (a.include_archived_button) |button| _ = win.MoveWindow(button, left_width - px(a, 152), height - status_height, px(a, 140), status_height, win.TRUE);
     if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, height - header_height - search_height - status_height - updateCardSpan(a), win.TRUE);
-    if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);
+    if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 168), status_height, win.TRUE);
     if (a.thread_parent.len > 0 and (a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) closeSlackThread(a);
     const chat_width = width - left_width - 1;
     const panel_width = if (a.thread_parent.len > 0) @divTrunc(chat_width, 2) else 0;
