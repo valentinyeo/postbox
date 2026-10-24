@@ -2,11 +2,11 @@
 set -euo pipefail
 
 if (( $# == 1 )) && [[ "$1" == --help || "$1" == -h ]]; then
-    printf 'usage: tools/ship.sh <TICKET> "<what changed>"\n'
+    printf 'usage: tools/ship.sh <TICKET> "<what changed>" "<card line or none>"\n'
     exit 0
 fi
-if (( $# != 2 )) || [[ -z "$1" || -z "$2" || "$1" == -* ]]; then
-    printf 'usage: tools/ship.sh <TICKET> "<what changed>"\n' >&2
+if (( $# != 3 )) || [[ -z "$1" || -z "$2" || -z "$3" || "$1" == -* ]]; then
+    printf 'usage: tools/ship.sh <TICKET> "<what changed>" "<card line or none>"\n' >&2
     exit 2
 fi
 
@@ -38,12 +38,15 @@ if [[ ! "$wait_seconds" =~ ^[1-9][0-9]*$ ]]; then
     exit 1
 fi
 
+card_files="$(git diff --name-only origin/main...HEAD)"
+CARD_TEXT="$3" CARD_FILES="$card_files" python3 -c 'import os, sys; sys.path.insert(0, "tools"); from update_cards import validate; validate("Card: " + os.environ["CARD_TEXT"], os.environ["CARD_FILES"].splitlines())'
+
 nice -n 19 ionice -c3 tools/preflight-light.sh
 git push -u origin HEAD
 pr="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
 if [[ -z "$pr" ]]; then
     body="$(git log --reverse --format='- %s' origin/main..HEAD)"
-    body+=$'\n\nOpened by tools/ship.sh.'
+    body+=$'\n\nCard: '"$3"$'\n\nOpened by tools/ship.sh.'
     pr="$(gh pr create --base main --head "$branch" --title "$1: $2" --body "$body")"
 fi
 printf '%s\n' "$pr"

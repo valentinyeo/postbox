@@ -10,15 +10,21 @@ pub const Rect = struct {
 pub const Layout = struct {
     title: Rect,
     line: Rect,
+    notes: Rect,
     button: Rect,
     close: Rect,
     bar: Rect,
 };
 
+pub fn heightForNotes(dpi: i32, notes_height: i32) i32 {
+    return scale(height, dpi) + notes_height;
+}
+
 pub fn compute(card: Rect, dpi: i32) Layout {
     return .{
         .title = .{ .left = card.left + scale(12, dpi), .top = card.top + scale(8, dpi), .right = card.right - scale(32, dpi), .bottom = card.top + scale(30, dpi) },
         .line = .{ .left = card.left + scale(12, dpi), .top = card.top + scale(30, dpi), .right = card.right - scale(12, dpi), .bottom = card.top + scale(50, dpi) },
+        .notes = .{ .left = card.left + scale(12, dpi), .top = card.top + scale(50, dpi), .right = card.right - scale(12, dpi), .bottom = card.bottom - scale(40, dpi) },
         .button = .{ .left = card.left + scale(12, dpi), .top = card.bottom - scale(36, dpi), .right = card.left + scale(124, dpi), .bottom = card.bottom - scale(10, dpi) },
         .close = .{ .left = card.right - scale(28, dpi), .top = card.top + scale(4, dpi), .right = card.right - scale(4, dpi), .bottom = card.top + scale(28, dpi) },
         .bar = .{ .left = card.left + scale(12, dpi), .top = card.bottom - scale(22, dpi), .right = card.right - scale(12, dpi), .bottom = card.bottom - scale(14, dpi) },
@@ -52,6 +58,21 @@ test "IGSH-500 update card text never overlaps the button at any scale" {
             for (busy, 0..) |r, i| {
                 try std.testing.expect(inside(r, card));
                 for (busy[i + 1 ..]) |other| try std.testing.expect(!overlaps(r, other));
+            }
+        }
+    }
+}
+
+test "update card grows for wrapped changes without covering controls" {
+    const std = @import("std");
+    for ([_]i32{ 96, 120, 144, 168, 192 }) |dpi| {
+        for ([_]i32{ 20, 100, 240 }) |notes_height| {
+            const card = Rect{ .left = 0, .top = 0, .right = scale(256, dpi), .bottom = heightForNotes(dpi, scale(notes_height, dpi)) };
+            const l = compute(card, dpi);
+            try std.testing.expectEqual(scale(notes_height, dpi), l.notes.bottom - l.notes.top);
+            try std.testing.expect(inside(l.notes, card));
+            for ([_]Rect{ l.title, l.line, l.button, l.close, l.bar }) |control| {
+                try std.testing.expect(!overlaps(l.notes, control));
             }
         }
     }

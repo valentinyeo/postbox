@@ -141,9 +141,17 @@ jobs:
     needs: [build, smoke]
     permissions:
       contents: write
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compose product release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/update_cards.py release-notes --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.txt"
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -152,5 +160,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Messages-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes \
-            || gh release upload "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Messages-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --clobber
+          gh release create "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Messages-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --verify-tag --notes-file "$RUNNER_TEMP/release-notes.txt" \
+            || { gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --notes-file "$RUNNER_TEMP/release-notes.txt" && gh release upload "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Messages-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --clobber; }

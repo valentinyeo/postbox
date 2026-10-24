@@ -19369,8 +19369,23 @@ fn updateCardVisible(a: *const App) bool {
     return !std.mem.eql(u8, pending.tag[0..@min(pending.tag.len, a.update_dismissed.len)], dismissed);
 }
 
+fn updateCardNotesHeight(a: *const App) i32 {
+    const pending = a.update_pending orelse return 0;
+    const hwnd = a.hwnd orelse return 0;
+    const hdc = win.GetDC(hwnd) orelse return 0;
+    defer _ = win.ReleaseDC(hwnd, hdc);
+    const old_font = win.SelectObject(hdc, @ptrCast(a.font_small orelse return 0));
+    defer _ = win.SelectObject(hdc, old_font);
+    const notes = utf8ToWide(a.allocator, pending.notes) catch return 0;
+    defer a.allocator.free(notes);
+    const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 390));
+    var rect = win.RECT{ .left = 0, .top = 0, .right = left_width - px(a, 48), .bottom = 0 };
+    _ = text_draw.drawText(hdc, notes.ptr, @intCast(notes.len), &rect, win.DT_CALCRECT | win.DT_WORDBREAK | win.DT_NOPREFIX);
+    return rect.bottom - rect.top;
+}
+
 fn updateCardHeight(a: *const App) i32 {
-    return px(a, update_card_layout.height);
+    return update_card_layout.heightForNotes(@intCast(a.dpi), updateCardNotesHeight(a));
 }
 
 fn updateCardSpan(a: *const App) i32 {
@@ -19510,6 +19525,12 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     var line_rc = updateCardWinRect(card_layout.line);
     drawAscii(hdc, &line_rc, line, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX | win.DT_END_ELLIPSIS);
 
+    if (utf8ToWide(a.allocator, pending.notes)) |notes| {
+        defer a.allocator.free(notes);
+        var notes_rc = updateCardWinRect(card_layout.notes);
+        _ = text_draw.drawText(hdc, notes.ptr, @intCast(notes.len), &notes_rc, win.DT_WORDBREAK | win.DT_NOPREFIX);
+    } else |_| {}
+
     if (busy) {
         const bar = updateCardWinRect(card_layout.bar);
         var track = bar;
@@ -19636,8 +19657,33 @@ fn checkForUpdate(allocator: std.mem.Allocator) !?UpdateAvailable {
     defer parsed.deinit();
     const asset = maybe_asset orelse return null;
     if (!update.isNewer(asset.tag, current)) return null;
-    const body = update.releaseBody(parsed.value);
-    const notes = try allocator.dupe(u8, body[0..@min(body.len, 4096)]);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const history_allocator = arena.allocator();
+    var releases: std.ArrayList(update.Release) = .empty;
+    try releases.append(history_allocator, .{ .tag = asset.tag, .body = update.releaseBody(parsed.value) });
+    var page: usize = 1;
+    while (true) : (page += 1) {
+        const path = try std.fmt.allocPrint(allocator, "/repos/valentinyeo/wazig/releases?page={d}", .{page});
+        defer allocator.free(path);
+        const wide_path = try utf8ToWide(allocator, path);
+        defer allocator.free(wide_path);
+        const history_json = try httpGet(allocator, lit("api.github.com"), wide_path.ptr, api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
+        defer allocator.free(history_json);
+        const history = try std.json.parseFromSlice(std.json.Value, allocator, history_json, .{});
+        defer history.deinit();
+        if (history.value != .array) return error.UpdateBadReleaseHistory;
+        if (history.value.array.items.len == 0) break;
+        for (history.value.array.items) |value| {
+            const release = update.releaseFromValue(value) orelse continue;
+            if (!update.isNewer(release.tag, current) or std.mem.eql(u8, release.tag, asset.tag) or update.isNewer(release.tag, asset.version)) continue;
+            try releases.append(history_allocator, .{
+                .tag = try history_allocator.dupe(u8, release.tag),
+                .body = try history_allocator.dupe(u8, release.body),
+            });
+        }
+    }
+    const notes = try update.notesForReleases(allocator, releases.items, current, asset.version);
     errdefer allocator.free(notes);
     const tag = try allocator.dupe(u8, asset.tag);
     return .{ .tag = tag, .notes = notes };
