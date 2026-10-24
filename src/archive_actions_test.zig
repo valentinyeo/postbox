@@ -842,7 +842,8 @@ test "hub Ctrl E archives a one-row bulk selection outside the WhatsApp cache ac
         if (provider == .whatsapp) try std.testing.expectEqualStrings(key.key().id, a.pending_archives[0].jid.slice());
         try std.testing.expectEqual(@as(usize, 0), a.chat_count);
         try std.testing.expectEqual(@as(usize, 0), a.bulk.count);
-        try std.testing.expect(state.localArchived(key.key()));
+        try std.testing.expectEqual(provider != .whatsapp, state.localArchived(key.key()));
+        if (provider == .whatsapp) try std.testing.expect(state.baseline(key.key().id) != null);
     }
 }
 
@@ -983,7 +984,7 @@ test "successful hub archives stay sticky per timestamp and transient failures r
         refreshChats(&a);
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
         try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
-        try std.testing.expect(state.localArchived(key));
+        try std.testing.expectEqual(keep, state.localArchived(key));
         try std.testing.expectEqual(keep, state.isKept(key.id));
         a.refresh_stamp.set("2026-10-10T12:00:00Z");
         refreshChats(&a);
@@ -996,11 +997,12 @@ test "successful hub archives stay sticky per timestamp and transient failures r
         applyHubArchiveResult(&a, &result);
         try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
         try std.testing.expect(a.pending_archives[0].retry_at_ms > win.GetTickCount64());
-        try std.testing.expect(state.localArchived(key));
+        try std.testing.expectEqual(keep, state.localArchived(key));
         try std.testing.expectEqual(keep, state.isKept(key.id));
         var loaded = archive_rules.State{};
         loaded.parse(a.saved[0..a.saved_len]);
-        try std.testing.expect(loaded.localArchived(key));
+        try std.testing.expectEqual(keep, loaded.localArchived(key));
+        try std.testing.expectEqualStrings(state.baseline(key.id).?, loaded.baseline(key.id).?);
         try std.testing.expectEqual(keep, loaded.isKept(key.id));
     }
 }
