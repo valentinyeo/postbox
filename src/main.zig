@@ -2567,7 +2567,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         const jid = getString(object, "jid");
         chat.jid.set(jid);
         if (!chatInView(a, chatViewKey(&chat))) continue;
-        if (fresh and !a.show_archived and chat.provider != .slack) _ = holdKeptArchived(a, jid, getBool(object, "archived"), getString(object, "last_message_ts"));
+        if (fresh and chat.provider != .slack) _ = holdKeptArchived(a, chat_key.of(&chat), getBool(object, "archived"), getString(object, "last_message_ts"));
         if (pendingArchiveHidesChat(a, jid, a.show_archived)) continue;
         const raw_name = if (chat.saved) "Saved Messages" else getString(object, "name");
         const display_name = groupName(a, jid) orelse raw_name;
@@ -2587,8 +2587,8 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         queueUnreadProbe(a, &chat);
         if (a.unread_only and !chat.unread) continue;
         chat.pinned = getBool(object, "pinned");
-        chat.archived = if (chat.provider == .slack) if (a.archive_state) |state| state.localArchived(chat_key.of(&chat)) else false else getBool(object, "archived");
-        if (unifiedHub(a) and chat.archived != a.show_archived) continue;
+        chat.archived = (if (a.archive_state) |state| state.localArchived(chat_key.of(&chat)) else false) or (chat.provider != .slack and getBool(object, "archived"));
+        if (chat.archived != a.show_archived) continue;
         a.chats[a.chat_count] = chat;
         a.chat_count += 1;
     }
@@ -12707,10 +12707,12 @@ fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) vo
     startNextArchive(a);
 }
 
-fn holdKeptArchived(a: *App, jid: []const u8, provider_archived: bool, ts: []const u8) bool {
+fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []const u8) bool {
+    if (key.provider == .slack) return false;
+    const jid = key.id;
     const state = a.archive_state orelse return false;
     if (!state.holdKept(jid, provider_archived, ts)) return false;
-    if (archiveChat(a, .{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = jid }, .keep, .kept) == null) return true;
+    if (archiveChat(a, key, if (state.isKept(jid)) .keep else .archive, .kept) == null) return true;
     state.releaseHold(jid);
     return false;
 }
@@ -12791,12 +12793,7 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
                 }
             }
             if (present) continue;
-            if (entry.keep) {
-                missing_kept = true;
-                continue;
-            }
-            state.remove(entry.jidSlice());
-            changed = true;
+            missing_kept = true;
         }
     }
     if (changed) saveArchiveState(a);
@@ -12825,7 +12822,12 @@ fn applyKeptCheck(a: *App, raw: []const u8) void {
             .object => |o| o,
             else => continue,
         };
-        _ = holdKeptArchived(a, getString(object, "jid"), getBool(object, "archived"), getString(object, "last_message_ts"));
+        const key = chat_key.Key{
+            .provider = if (unifiedHub(a)) hub.sourceProvider(object) orelse continue else .whatsapp,
+            .account = if (unifiedHub(a)) hub.sourceAccount(object, a.cache_tag.slice()) else a.cache_tag.slice(),
+            .id = getString(object, "jid"),
+        };
+        _ = holdKeptArchived(a, key, getBool(object, "archived"), getString(object, "last_message_ts"));
     }
 }
 
@@ -13081,7 +13083,7 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void 
     while (index < a.bulk.count) : (index += 1) {
         const key = a.bulk.atKey(chat_key.Key, index);
         slack_only = slack_only and key.provider == .slack;
-        if (key.provider != .slack and ((!unifiedHub(a) and key.provider != .whatsapp) or !std.mem.eql(u8, key.account, a.cache_tag.slice()))) {
+        if (key.provider != .slack and !unifiedHub(a) and (key.provider != .whatsapp or !std.mem.eql(u8, key.account, a.cache_tag.slice()))) {
             problem = "Archiving is only available for the active WhatsApp account";
             continue;
         }
@@ -13443,8 +13445,8 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, acc
         fillSlackTimestamp(a, &chat);
         chat.unread = getBool(object, "unread");
         chat.unread_count = getInt(object, "unread_count");
-        chat.archived = if (chat.provider == .slack) if (a.archive_state) |state| state.localArchived(chat_key.of(&chat)) else false else getBool(object, "archived");
-        if (unifiedHub(a) and chat.archived != show_archived) continue;
+        chat.archived = (if (a.archive_state) |state| state.localArchived(chat_key.of(&chat)) else false) or (chat.provider != .slack and getBool(object, "archived"));
+        if (chat.archived != show_archived) continue;
         try list.append(a.allocator, chat);
     }
 }
@@ -20993,6 +20995,10 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 setStatus(a, "Archive operation completed");
             } else {
                 if (result.http_status == 502 and (std.mem.startsWith(u8, result.jid.slice(), "signal:") or std.mem.startsWith(u8, result.jid.slice(), "telegram:"))) {
+                    if (a.archive_state) |state| {
+                        state.remove(result.jid.slice());
+                        saveArchiveState(a);
+                    }
                     removeFirstPendingArchive(a);
                     refreshChats(a);
                     setStatus(a, if (std.mem.startsWith(u8, result.jid.slice(), "telegram:")) "Archiving is not available for Telegram chats yet" else "Archiving is not available for Signal chats yet");

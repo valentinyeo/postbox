@@ -156,6 +156,8 @@ ARCHIVE_OTHER = 'personal:15550000003@s.whatsapp.net'
 PLAIN_REACTED = 'personal:15550000005@s.whatsapp.net'
 PLAIN_NEWER = 'personal:15550000006@s.whatsapp.net'
 PLAIN_STAMPS = {PLAIN_REACTED: '2026-10-10T11:30:00Z', PLAIN_NEWER: '2026-10-10T11:00:00Z'}
+ARCHIVE_TELEGRAM = 'telegram:user:7001'
+ARCHIVE_STAMPS = {**PLAIN_STAMPS, ARCHIVE_TELEGRAM: '2026-10-10T10:00:00Z'}
 
 
 MIXED = '15550000005@s.whatsapp.net'
@@ -261,13 +263,16 @@ class HubArchiveHandler(Handler):
             rows = [dict(jid=ARCHIVE_GROUP, name='Verification Group', provider='whatsapp', kind='group',
                          last_message_ts=stamp, archived=archived, unread=True, unread_count=1),
                     dict(jid=ARCHIVE_OTHER, name='Verification Inbox', provider='whatsapp', kind='direct',
-                         last_message_ts='2026-10-10T12:00:00Z', archived=False, unread=False, unread_count=0)]
+                         last_message_ts='2026-10-10T12:00:00Z', archived=self.state.archive_other_archived, unread=False, unread_count=0)]
             with self.state.lock:
                 for jid, plain in self.state.plain_dms.items():
                     rows.append(dict(jid=jid, name='Fixture Contact' if jid == PLAIN_REACTED else 'Fixture Contact Two',
-                                     provider='whatsapp', kind='direct', last_message_ts=plain['after'] or PLAIN_STAMPS[jid],
+                                     provider='telegram' if jid == ARCHIVE_TELEGRAM else 'whatsapp',
+                                     account='telegram' if jid == ARCHIVE_TELEGRAM else 'personal',
+                                     kind='direct', last_message_ts=plain['after'] or ARCHIVE_STAMPS[jid],
                                      archived=plain['archived'], unread=False, unread_count=0))
-            self.respond(200, [row for row in rows if row['archived'] == (query.get('archived') == ['true'])],
+            rows = [row for row in rows if row['archived'] == (query.get('archived') == ['true'])]
+            self.respond(200, rows, rows=rows,
                          group_archived=archived, group_last_message_ts=stamp, group_unread_count=1)
         elif url.path == '/v1/wazig/messages':
             chat = query.get('chat', [''])[0]
@@ -277,7 +282,7 @@ class HubArchiveHandler(Handler):
             with self.state.lock:
                 plain = self.state.plain_dms.get(chat)
                 if plain:
-                    rows = [dict(MsgID='PLAIN-INCOMING', ChatJID=chat, Timestamp=PLAIN_STAMPS[chat],
+                    rows = [dict(MsgID='PLAIN-INCOMING', ChatJID=chat, Timestamp=ARCHIVE_STAMPS[chat],
                                  Text='Synthetic incoming direct message', FromMe=False,
                                  SenderName='Fixture Contact', SenderJID=chat)]
                     if plain['after'] and chat == PLAIN_REACTED:
@@ -313,18 +318,38 @@ class HubArchiveHandler(Handler):
                 for jid in PLAIN_STAMPS:
                     self.state.plain_dms[jid] = dict(archived=False, after='')
             self.respond(200, {'chats': sorted(PLAIN_STAMPS), 'last_message_ts': PLAIN_STAMPS})
+        elif self.path == '/fixture/telegram-dm' and body == {}:
+            with self.state.lock:
+                self.state.plain_dms[ARCHIVE_TELEGRAM] = dict(archived=False, after='')
+            self.respond(200, {'chat': ARCHIVE_TELEGRAM, 'provider': 'telegram', 'account': 'telegram'})
+        elif self.path == '/fixture/plain-incoming' and body == {}:
+            with self.state.lock:
+                stamp = plain_stamp(10)
+                self.state.archive_rearchive_enabled = False
+                for chat in (PLAIN_NEWER, ARCHIVE_TELEGRAM):
+                    self.state.plain_dms[chat].update(archived=False, after=stamp)
+            self.respond(200, {'chats': [PLAIN_NEWER, ARCHIVE_TELEGRAM], 'archived': False, 'last_message_ts': stamp})
+        elif self.path == '/fixture/rearchive-enable' and body == {}:
+            self.state.archive_rearchive_enabled = True
+            self.respond(200, {'ok': True})
+        elif self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and body['chat'] == ARCHIVE_OTHER and isinstance(body['archived'], bool):
+            self.state.archive_other_archived = body['archived']
+            self.respond(200, {'status': 'ok'}, body=body)
         elif self.path == '/v1/wazig/archive' and body == {'chat': ARCHIVE_GROUP, 'archived': True}:
             with self.state.lock:
                 self.state.archive_group_archived = True
             self.respond(200, {'status': 'ok'}, body=body)
-        elif self.path == '/v1/wazig/archive' and body.get('chat') in PLAIN_STAMPS and isinstance(body.get('archived'), bool) and body['chat'] in self.state.plain_dms:
+        elif self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and body.get('chat') in ARCHIVE_STAMPS and isinstance(body.get('archived'), bool) and body['chat'] in self.state.plain_dms:
             with self.state.lock:
                 plain = self.state.plain_dms[body['chat']]
+                if body['archived'] and not self.state.archive_rearchive_enabled:
+                    self.respond(409, {'error': 'fixture awaiting local archive evidence'}, body=body)
+                    return
                 plain['archived'] = body['archived']
-                if body['archived']:
+                if body['archived'] and not plain['after']:
                     plain['after'] = plain_stamp(5)
             self.respond(200, {'status': 'ok'}, body=body)
-        elif self.path == '/v1/wazig/mark-read' and body.get('chat') in (ARCHIVE_GROUP, ARCHIVE_OTHER, PLAIN_REACTED, PLAIN_NEWER):
+        elif self.path == '/v1/wazig/mark-read' and body.get('chat') in (ARCHIVE_GROUP, ARCHIVE_OTHER, PLAIN_REACTED, PLAIN_NEWER, ARCHIVE_TELEGRAM):
             self.respond(200, {'status': 'ok'}, body=body)
         else:
             self.respond(400, {'error': 'unexpected archive fixture write'}, body=body)
@@ -1600,6 +1625,8 @@ def main():
     server.state = bridge.State(args.log)
     server.state.archive_incoming = 0
     server.state.archive_group_archived = False
+    server.state.archive_other_archived = False
+    server.state.archive_rearchive_enabled = True
     server.state.plain_dms = {}
     server.state.view_rows = view_rows()
     server.state.archive_stamp = '2026-10-10T11:00:00Z'

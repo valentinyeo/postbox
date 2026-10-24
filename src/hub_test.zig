@@ -526,7 +526,7 @@ test "Slack thread metadata survives unified normalization and sends retain pare
     try std.testing.expectEqualStrings("1740000000.000100", body.object.get("reply_to").?.string);
 }
 
-test "local Slack Archive uses active hub rows without changing provider archive rows" {
+test "Archive merges inbox candidates for local archives without changing provider flags" {
     const archived = "[{\"provider\":\"whatsapp\",\"jid\":\"fixture-wa\",\"archived\":true},{\"provider\":\"signal\",\"jid\":\"fixture-signal\",\"archived\":true}]";
     const inbox = "[{\"provider\":\"slack\",\"account\":\"fixture-team\",\"jid\":\"fixture-channel\",\"archived\":false,\"unread_count\":3},{\"provider\":\"whatsapp\",\"jid\":\"fixture-inbox\",\"archived\":false}]";
     const raw = try hub.archivedChats(std.testing.allocator, archived, inbox);
@@ -534,13 +534,15 @@ test "local Slack Archive uses active hub rows without changing provider archive
     var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, raw, .{});
     defer parsed.deinit();
     const rows = parsed.value.object.get("data").?.array.items;
-    try std.testing.expectEqual(@as(usize, 3), rows.len);
+    try std.testing.expectEqual(@as(usize, 4), rows.len);
     try std.testing.expectEqualStrings("fixture-wa", rows[0].object.get("jid").?.string);
     try std.testing.expect(rows[0].object.get("archived").?.bool);
     try std.testing.expectEqualStrings("fixture-signal", rows[1].object.get("jid").?.string);
     try std.testing.expectEqualStrings("fixture-channel", rows[2].object.get("jid").?.string);
     try std.testing.expect(!rows[2].object.get("archived").?.bool);
     try std.testing.expectEqual(@as(i64, 3), rows[2].object.get("unread_count").?.integer);
+    try std.testing.expectEqualStrings("fixture-inbox", rows[3].object.get("jid").?.string);
+    try std.testing.expect(!rows[3].object.get("archived").?.bool);
 }
 
 test "IGSH-670 account scoped emoji routes and Giphy attachment media" {
@@ -561,4 +563,22 @@ test "IGSH-670 account scoped emoji routes and Giphy attachment media" {
     try std.testing.expectEqualStrings("image/gif", row.get("MimeType").?.string);
     try std.testing.expectEqualStrings("🍵 1  :custom_fixture: 2", row.get("ReactionEmoji").?.string);
     try std.testing.expect(!row.contains("SlackEmojiPaths"));
+}
+
+test "hub Archive keeps a provider-unarchived Telegram candidate and deduplicates archived rows" {
+    const archived = "[{\"provider\":\"telegram\",\"account\":\"telegram\",\"jid\":\"telegram:user:7001\",\"archived\":true}]";
+    const inbox = "[{\"provider\":\"telegram\",\"account\":\"telegram\",\"jid\":\"telegram:user:7001\",\"archived\":false},{\"provider\":\"telegram\",\"account\":\"telegram\",\"jid\":\"telegram:user:7002\",\"archived\":false}]";
+    const raw = try hub.archivedChats(std.testing.allocator, archived, inbox);
+    defer std.testing.allocator.free(raw);
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, raw, .{});
+    defer parsed.deinit();
+    const rows = parsed.value.object.get("data").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), rows.len);
+    try std.testing.expect(rows[0].object.get("archived").?.bool);
+    try std.testing.expectEqualStrings("telegram:user:7002", rows[1].object.get("jid").?.string);
+    try std.testing.expect(!rows[1].object.get("archived").?.bool);
+    const request = try hub.archive(std.testing.allocator, "telegram:user:7002", true);
+    defer std.testing.allocator.free(request.body);
+    try std.testing.expectEqualStrings("/v1/wazig/archive", request.path);
+    try std.testing.expectEqualStrings("{\"chat\":\"telegram:user:7002\",\"archived\":true}", request.body);
 }

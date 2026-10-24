@@ -521,8 +521,11 @@ pub fn build(b: *std.Build) void {
 
     const archive_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/archive_actions_test.zig"),
-        "fn unifiedHub(_: *const App) bool { return false; }\n",
-        "fn hubConfigured(_: *const App) bool { return false; }\nfn startHubArchive(_: *App) void {}\n",
+        "fn unifiedHub(a: *const App) bool { return a.unified_hub; }\n",
+        "fn hubConfigured(a: *const App) bool { return a.unified_hub; }\n",
+        "fn applyHubArchiveResult(a: *App, result: *const WacliResult) void { switch (result.kind) {\n",
+        sourceSection("        .hub_archive => {\n", "        .hub_media => {\n"),
+        "else => {}, } }\n",
         sourceSection("fn retryUnarchiveChat(", "fn startNextArchive("),
         sourceSection("fn queueUnarchiveChat(", "const archived_scan_min_ticks"),
         sourceSection("fn archiveChat(", "fn paneFollowSelection(a: *App, open_jid: []const u8) void {"),
