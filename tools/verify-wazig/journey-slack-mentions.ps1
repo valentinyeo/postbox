@@ -28,7 +28,13 @@ foreach ($stage in @('before', 'after')) {
     $rendered = $snapshot
     foreach ($row in $rendered.messages) { $row.PSObject.Properties.Remove('sender_id') }
     $rendered | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence "$stage.rendered.json")
-    Assert-That (($rendered | ConvertTo-Json -Depth 12) -cnotmatch '\b[UW][A-Z0-9]{5,}\b|<@|<https://') 'Raw Slack id or link markup reached the rendered snapshot'
-    Assert-That ((Get-Content (Join-Path $Evidence "$stage.uia.txt") -Raw) -cnotmatch '\b[UW][A-Z0-9]{5,}\b|<@') 'Raw Slack id reached UI Automation'
+    $snapshotText = $rendered | ConvertTo-Json -Depth 12
+    $uiaText = Get-Content (Join-Path $Evidence "$stage.uia.txt") -Raw
+    Assert-That ($snapshotText -cnotmatch '<@|<https://') 'Raw Slack mention or link markup reached the rendered snapshot'
+    Assert-That ($uiaText -cnotmatch '<@') 'Raw Slack mention markup reached UI Automation'
+    foreach ($fixtureId in @('U4A59H6UT', 'UUNKNOWN99', 'UHIDDEN01', 'UEXT00001', 'WCONNECT01')) {
+        Assert-That ($snapshotText -cnotmatch [regex]::Escape($fixtureId)) "Fixture Slack id $fixtureId reached the rendered snapshot"
+        Assert-That ($uiaText -cnotmatch [regex]::Escape($fixtureId)) "Fixture Slack id $fixtureId reached UI Automation"
+    }
 }
 Hub-Pass $session mention-display
