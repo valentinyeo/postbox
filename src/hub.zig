@@ -235,7 +235,14 @@ pub fn archivedChats(allocator: std.mem.Allocator, archived_raw: []const u8, inb
         if (sourceProvider(row.object) != .slack) try rows.append(allocator, row);
     }
     for (inbox_rows.value.object.get("data").?.array.items) |row| {
-        if (sourceProvider(row.object) == .slack) try rows.append(allocator, row);
+        var known = false;
+        for (rows.items) |existing| {
+            if (std.mem.eql(u8, string(existing.object, "jid"), string(row.object, "jid"))) {
+                known = true;
+                break;
+            }
+        }
+        if (!known) try rows.append(allocator, row);
     }
     return std.json.Stringify.valueAlloc(allocator, .{ .success = true, .data = rows.items }, .{});
 }

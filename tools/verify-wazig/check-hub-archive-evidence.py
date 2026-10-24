@@ -7,6 +7,7 @@ GROUP = 'personal:120363000000000001@g.us'
 OTHER = 'personal:15550000003@s.whatsapp.net'
 PLAIN_REACTED = 'personal:15550000005@s.whatsapp.net'
 PLAIN_NEWER = 'personal:15550000006@s.whatsapp.net'
+TELEGRAM = 'telegram:user:7001'
 LEGACY = '120363000000000001@g.us\t1\t2026-10-10T10:00:00Z'
 
 
@@ -43,6 +44,66 @@ def check_plain(folder, read, before):
     assert 'hub-archive plain PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
 
 
+def check_telegram(folder, read):
+    assert read('telegram-dm.json') == dict(chat=TELEGRAM, provider='telegram', account='telegram')
+    requests = read('telegram.requests.json')
+
+    def writes(chat):
+        return [(index, row['body']['archived']) for index, row in enumerate(requests)
+                if row['wire_path'] == '/v1/wazig/archive' and row['status'] == 200 and row['body']['chat'] == chat]
+
+    assert [archived for _, archived in writes(TELEGRAM)] == [True, False, True, True], 'Telegram single, explicit unarchive, bulk and incoming archives required'
+    assert [archived for _, archived in writes(PLAIN_NEWER)] == [True, True], 'plain WhatsApp must re-archive once for incoming'
+    assert [archived for _, archived in writes(PLAIN_REACTED)] == [True], 'own reaction must not unarchive'
+    assert [archived for _, archived in writes(OTHER)] == [True, False], 'original inbox must be restored explicitly'
+    incoming, = [index for index, row in enumerate(requests) if row['wire_path'] == '/fixture/plain-incoming']
+    enabled, = [index for index, row in enumerate(requests) if row['wire_path'] == '/fixture/rearchive-enable']
+    assert writes(TELEGRAM)[2][0] < incoming < enabled < writes(TELEGRAM)[3][0]
+    assert writes(PLAIN_NEWER)[0][0] < incoming < enabled < writes(PLAIN_NEWER)[1][0]
+    assert any(row['wire_path'] == '/v1/wazig/archive' and row['status'] == 409 and
+               row['body'] == dict(chat=PLAIN_NEWER, archived=True) for row in requests[incoming:enabled])
+    event = read('plain-incoming.json')
+    assert event['chats'] == [PLAIN_NEWER, TELEGRAM] and event['archived'] is False
+    for chat in event['chats']:
+        before = [item for row in requests[:incoming] for item in row.get('rows', []) if item['jid'] == chat]
+        assert before and event['last_message_ts'] > max(item['last_message_ts'] for item in before)
+        assert any(item['jid'] == chat and item['archived'] is False and item['last_message_ts'] == event['last_message_ts']
+                   for row in requests[incoming:enabled] for item in row.get('rows', [])), 'hub must actually return archived=false'
+    all_chats = [GROUP, OTHER, PLAIN_REACTED, PLAIN_NEWER, TELEGRAM]
+    for name, archived, expected in [
+        ('telegram-only', False, [TELEGRAM]), ('telegram-empty', False, []),
+        ('telegram-bulk-empty', False, []), ('telegram-restart-empty', False, []),
+        ('telegram-restart-archived', True, all_chats), ('plain-incoming-inbox', False, []),
+        ('plain-incoming-archived', True, all_chats), ('plain-rearchived-inbox', False, []),
+        ('plain-rearchived-archived', True, all_chats),
+    ]:
+        state = read(f'{name}.state.json')
+        rows = read(f'{name}.chats.json')
+        assert state['view'] == 'all' and state['show_archived'] == archived
+        assert state['chat_count'] == rows['total'] == len(expected), name
+        assert sorted(row['id'] for row in rows['chats']) == sorted(expected), name
+        assert all(row['archived'] == archived for row in rows['chats']), name
+        if TELEGRAM in expected:
+            row, = [row for row in rows['chats'] if row['id'] == TELEGRAM]
+            assert row['provider'] == 'telegram' and row['account'] == 'telegram', name
+        if not expected:
+            assert state['selected'] is None, name
+            if name != 'plain-incoming-inbox':
+                assert state['pending_archives'] == 0, name
+        if name == 'telegram-only':
+            assert state['selected']['id'] == TELEGRAM
+        image = (folder / f'{name}.png').read_bytes()
+        assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, name
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
+    lines = (folder / 'telegram-archive-state.txt').read_text(encoding='utf-8-sig').splitlines()
+    for chat in all_chats:
+        entry, = [line.split('\t') for line in lines if line.startswith(chat + '\t')]
+        assert entry[1] == ('1' if chat == GROUP else '0'), chat
+    actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
+    assert 'keys: %i' in actions and 'keys: ^a' in actions and 'keys: ^e' in actions
+    assert 'hub-archive telegram-single-bulk-restart-incoming PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
+
+
 def check_hub_archive(folder):
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))
@@ -67,7 +128,11 @@ def check_hub_archive(folder):
     assert (folder / 'final-data/archive-state.txt').read_bytes() == legacy_bytes
     restart = read('restart.json')
     assert (restart['old_pid'], restart['old_start']) != (restart['new_pid'], restart['new_start'])
-    assert restart['new_pid'] == session['pid'] and restart['new_start'] == session['startTicks']
+    telegram_restart = read('telegram-restart.json')
+    assert restart['new_pid'] == telegram_restart['old_pid'] and restart['new_start'] == telegram_restart['old_start']
+    assert (telegram_restart['old_pid'], telegram_restart['old_start']) != (telegram_restart['new_pid'], telegram_restart['new_start'])
+    assert telegram_restart['new_pid'] == session['pid'] and telegram_restart['new_start'] == session['startTicks']
+    assert all(telegram_restart[key] == session[key] for key in ('root', 'id', 'sha256'))
     assert restart['root'] == session['root'] and restart['id'] == session['id'] and restart['sha256'] == session['sha256']
     assert read('restart-incoming.json') == dict(archived=False, last_message_ts='2026-10-10T13:00:00Z', unread_count=1)
     first_requests = read('first.requests.json')
@@ -87,21 +152,26 @@ def check_hub_archive(folder):
         assert incoming and writes and min(incoming) < min(writes), phase
         assert f'hub-archive {phase} PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
     check_plain(folder, read, len(restart_requests))
+    check_telegram(folder, read)
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     for row in requests:
         if row['method'] == 'SSE':
             continue
         assert row['authorized']
         path = urlsplit(row['wire_path']).path
-        assert path.startswith('/v1/wazig/') or path in ('/fixture/archive-incoming', '/fixture/plain-dms')
+        assert path.startswith('/v1/wazig/') or path in ('/fixture/archive-incoming', '/fixture/plain-dms', '/fixture/telegram-dm', '/fixture/plain-incoming', '/fixture/rearchive-enable')
         if row['method'] == 'POST':
-            assert path in ('/v1/wazig/archive', '/v1/wazig/mark-read', '/fixture/archive-incoming', '/fixture/plain-dms')
+            assert path in ('/v1/wazig/archive', '/v1/wazig/mark-read', '/fixture/archive-incoming', '/fixture/plain-dms', '/fixture/telegram-dm', '/fixture/plain-incoming', '/fixture/rearchive-enable')
     state_files = list((folder / 'final-data').glob('hub-*-archive-state.txt'))
     marker_files = list((folder / 'final-data').glob('hub-*-archive-legacy-done.txt'))
     assert len(state_files) == len(marker_files) == 1
     assert state_files[0].name.replace('archive-state', 'archive-legacy-done') == marker_files[0].name
     assert marker_files[0].read_bytes() == (folder / 'first-archive-legacy-done.txt').read_bytes() == (folder / 'restart-archive-legacy-done.txt').read_bytes()
-    assert any(line.startswith(GROUP + '\t1\t') for line in state_files[0].read_text(encoding='utf-8-sig').splitlines())
+    final_lines = state_files[0].read_text(encoding='utf-8-sig').splitlines()
+    assert any(line.startswith(GROUP + '\t1\t') for line in final_lines)
+    for chat in (PLAIN_REACTED, PLAIN_NEWER, TELEGRAM):
+        assert any(line.startswith(chat + '\t0\t') for line in final_lines), chat
+    assert not any(line.startswith(OTHER + '\t') for line in final_lines)
     final = read('side-effects.json')
     assert not final['show_archived'] and final['chat_count'] == 1
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'

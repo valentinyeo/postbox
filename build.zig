@@ -521,7 +521,7 @@ pub fn build(b: *std.Build) void {
 
     const archive_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/archive_actions_test.zig"),
-        "fn unifiedHub(_: *const App) bool { return false; }\n",
+        "fn unifiedHub(a: *const App) bool { return a.unified_hub; }\n",
         "fn hubConfigured(_: *const App) bool { return false; }\nfn startHubArchive(_: *App) void {}\n",
         sourceSection("fn retryUnarchiveChat(", "fn startNextArchive("),
         sourceSection("fn queueUnarchiveChat(", "const archived_scan_min_ticks"),

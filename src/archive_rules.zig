@@ -82,7 +82,7 @@ pub const State = struct {
     }
 
     pub fn localArchived(self: *const State, key: anytype) bool {
-        return self.findLocal(key) != null;
+        return if (key.provider == .slack) self.findLocal(key) != null else self.find(key.id) != null;
     }
 
     fn findLocal(self: *const State, key: anytype) ?usize {
@@ -135,7 +135,6 @@ pub const State = struct {
         if (provider_archived) return false;
         const index = self.find(jid) orelse return false;
         const entry = &self.entries[index];
-        if (!entry.keep) return false;
         const n = @min(ts.len, max_ts);
         if (entry.held and std.mem.eql(u8, entry.held_ts[0..entry.held_ts_len], ts[0..n])) return false;
         @memcpy(entry.held_ts[0..n], ts[0..n]);
@@ -375,7 +374,7 @@ test "legacy migration preserves existing hub choices and scopes matches to each
     try std.testing.expect(loaded.holdKept(second.id, false, "newer"));
     loaded.setKeep(second.id, false);
     try std.testing.expect(!migrateLegacyKeep(&loaded, &legacy, second, "newest"));
-    try std.testing.expect(!loaded.holdKept(second.id, false, "newest"));
+    try std.testing.expect(loaded.holdKept(second.id, false, "newest"));
 }
 
 test "the baseline is the later of the list row time and the archive moment" {
@@ -409,7 +408,7 @@ test "state keeps, forgets and round-trips through text" {
     try std.testing.expect(loaded.baseline("a@g.us") == null);
 }
 
-test "a kept chat the provider unarchived is held once per new message and plain archives are not" {
+test "all user archives the provider unarchives are held once per new message" {
     var state = State{};
     try std.testing.expect(state.archive("kept@g.us", "2026-10-10T10:00:00Z", true));
     try std.testing.expect(state.archive("plain@g.us", "2026-10-10T10:00:00Z", false));
@@ -417,7 +416,9 @@ test "a kept chat the provider unarchived is held once per new message and plain
     try std.testing.expect(state.holdKept("kept@g.us", false, "2026-10-10T11:00:00Z"));
     try std.testing.expect(!state.holdKept("kept@g.us", false, "2026-10-10T11:00:00Z"));
     try std.testing.expect(state.holdKept("kept@g.us", false, "2026-10-10T12:00:00Z"));
+    try std.testing.expect(state.holdKept("plain@g.us", false, "2026-10-10T12:00:00Z"));
     try std.testing.expect(!state.holdKept("plain@g.us", false, "2026-10-10T12:00:00Z"));
+    try std.testing.expect(state.holdKept("plain@g.us", false, "2026-10-10T13:00:00Z"));
     try std.testing.expect(!state.holdKept("other@g.us", false, "2026-10-10T12:00:00Z"));
     state.releaseHold("kept@g.us");
     try std.testing.expect(state.holdKept("kept@g.us", false, "2026-10-10T12:00:00Z"));
@@ -425,7 +426,7 @@ test "a kept chat the provider unarchived is held once per new message and plain
     var loaded = State{};
     loaded.parse(state.format(&buffer));
     try std.testing.expect(loaded.holdKept("kept@g.us", false, "2026-10-10T12:00:00Z"));
-    loaded.setKeep("kept@g.us", false);
+    loaded.remove("kept@g.us");
     try std.testing.expect(!loaded.holdKept("kept@g.us", false, "2026-10-10T13:00:00Z"));
 }
 

@@ -332,5 +332,112 @@ class HubArchiveEvidenceTests(unittest.TestCase):
                 rows[:] = saved
 
 
+class HubTelegramArchiveEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.folder = Path(self.temp.name)
+        self.checker = runpy.run_path(str(ROOT / 'tools/verify-wazig/check-hub-archive-evidence.py'))
+        self.telegram = self.checker['TELEGRAM']
+        self.newer = self.checker['PLAIN_NEWER']
+        self.other = self.checker['OTHER']
+        group, reacted = self.checker['GROUP'], self.checker['PLAIN_REACTED']
+        self.all_chats = [group, self.other, reacted, self.newer, self.telegram]
+        self.data = {
+            'telegram-dm.json': dict(chat=self.telegram, provider='telegram', account='telegram'),
+            'plain-incoming.json': dict(chats=[self.newer, self.telegram], archived=False, last_message_ts='2026-10-10T14:00:00Z'),
+            'telegram.requests.json': [
+                dict(wire_path='/v1/wazig/chats?archived=false&limit=250', status=200,
+                     rows=[dict(jid=chat, last_message_ts='2026-10-10T13:00:00Z', archived=False) for chat in (self.newer, self.telegram)]),
+                self.write(reacted), self.write(self.newer), self.write(self.other),
+                self.write(self.telegram), self.write(self.telegram, False), self.write(self.telegram),
+                dict(wire_path='/fixture/plain-incoming', status=200),
+                dict(wire_path='/v1/wazig/chats?archived=false&limit=250', status=200,
+                     rows=[dict(jid=chat, last_message_ts='2026-10-10T14:00:00Z', archived=False) for chat in (self.newer, self.telegram)]),
+                self.write(self.newer, status=409), dict(wire_path='/fixture/rearchive-enable', status=200),
+                self.write(self.newer), self.write(self.telegram), self.write(self.other, False),
+            ],
+        }
+        for name, archived, chats in [
+            ('telegram-only', False, [self.telegram]), ('telegram-empty', False, []),
+            ('telegram-bulk-empty', False, []), ('telegram-restart-empty', False, []),
+            ('telegram-restart-archived', True, self.all_chats), ('plain-incoming-inbox', False, []),
+            ('plain-incoming-archived', True, self.all_chats), ('plain-rearchived-inbox', False, []),
+            ('plain-rearchived-archived', True, self.all_chats),
+        ]:
+            self.data[f'{name}.state.json'] = dict(view='all', show_archived=archived, chat_count=len(chats), pending_archives=0,
+                                                 selected=dict(id=self.telegram) if chats else None)
+            self.data[f'{name}.chats.json'] = dict(total=len(chats), chats=[dict(id=chat, archived=archived,
+                provider='telegram' if chat == self.telegram else 'whatsapp', account='telegram' if chat == self.telegram else 'personal') for chat in chats])
+            (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(10000))
+            (self.folder / f'{name}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526')
+        (self.folder / 'telegram-archive-state.txt').write_text(''.join(
+            f"{chat}\t{1 if chat == group else 0}\t2026-10-10T14:00:00Z\n" for chat in self.all_chats))
+        (self.folder / 'actions.log').write_text('keys: %i\nkeys: ^a\nkeys: ^e\n')
+        (self.folder / 'hub-proof.log').write_text('hub-archive telegram-single-bulk-restart-incoming PASS')
+
+    def write(self, chat, archived=True, status=200):
+        return dict(wire_path='/v1/wazig/archive', status=status, body=dict(chat=chat, archived=archived))
+
+    def check(self):
+        self.checker['check_telegram'](self.folder, self.data.__getitem__)
+
+    def test_complete_telegram_and_network_unarchive_proof_passes(self):
+        self.check()
+
+    def test_origin_plain_not_held_or_telegram_bulk_rejected_evidence_fails(self):
+        original = copy.deepcopy(self.data['telegram.requests.json'])
+        for index in (6, 11, 12):
+            with self.subTest(missing_archive=index):
+                self.data['telegram.requests.json'] = copy.deepcopy(original)
+                self.data['telegram.requests.json'].pop(index)
+                with self.assertRaises(AssertionError):
+                    self.check()
+
+    def test_duplicate_rearchive_or_wrong_chat_id_fails(self):
+        self.data['telegram.requests.json'].append(self.write(self.telegram))
+        with self.assertRaises(AssertionError):
+            self.check()
+        self.data['telegram.requests.json'].pop()
+        self.data['telegram.requests.json'][-2]['body']['chat'] = 'telegram:user:wrong'
+        with self.assertRaises(AssertionError):
+            self.check()
+
+    def test_hub_must_really_unarchive_both_with_newer_timestamps(self):
+        original = copy.deepcopy(self.data['telegram.requests.json'])
+        for index in (0, 1):
+            for field, value in [('archived', True), ('last_message_ts', '2026-10-10T13:00:00Z')]:
+                with self.subTest(index=index, field=field):
+                    self.data['telegram.requests.json'] = copy.deepcopy(original)
+                    self.data['telegram.requests.json'][8]['rows'][index][field] = value
+                    with self.assertRaises(AssertionError):
+                        self.check()
+
+    def test_inbox_return_missing_restart_archive_or_wrong_provider_fails(self):
+        for name in ('telegram-empty', 'telegram-bulk-empty', 'telegram-restart-empty', 'plain-incoming-inbox', 'plain-rearchived-inbox'):
+            with self.subTest(name=name):
+                self.data[f'{name}.chats.json']['chats'].append(dict(id=self.telegram, archived=False))
+                with self.assertRaises(AssertionError):
+                    self.check()
+                self.data[f'{name}.chats.json']['chats'].clear()
+        for name in ('telegram-restart-archived', 'plain-incoming-archived', 'plain-rearchived-archived'):
+            rows = self.data[f'{name}.chats.json']['chats']
+            row = next(row for row in rows if row['id'] == self.telegram)
+            row['provider'] = 'whatsapp'
+            with self.assertRaises(AssertionError):
+                self.check()
+            row['provider'] = 'telegram'
+            rows.remove(row)
+            with self.assertRaises(AssertionError):
+                self.check()
+            rows.append(row)
+
+    def test_lost_plain_state_fails(self):
+        path = self.folder / 'telegram-archive-state.txt'
+        path.write_text(''.join(line for line in path.read_text().splitlines(keepends=True) if not line.startswith(self.telegram + '\t')))
+        with self.assertRaises(ValueError):
+            self.check()
+
+
 if __name__ == '__main__':
     unittest.main()
