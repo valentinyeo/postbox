@@ -8,6 +8,7 @@ PYTHON_LIGHT_TESTS=(
     test_check_private_markers
     test_fake_wa_bridge
     test_link_previews
+    test_media_layout
     test_no_comments
     test_no_stories
     test_palette_archived

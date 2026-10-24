@@ -64,6 +64,12 @@ class JourneyRegistryTests(unittest.TestCase):
         self.assertTrue(bulk['pr'] and bulk['provider'])
         self.assertEqual(bulk['prepare'], entries['archive']['prepare'])
         self.assertIsNone(bulk['hub'])
+        media = entries['media-fit']
+        self.assertTrue(media['pr'] and media['evidence'])
+        self.assertEqual((media['hub'], media['chats']), ('media-fit', 1))
+        self.assertEqual(media['hub_handler']['class'], 'MediaFitHandler')
+        self.assertEqual(media['library'], 'media-fit.ps1')
+        self.assertEqual(media['validator'], dict(file='check-media-fit-evidence.py', function='check_media_fit'))
         passage = entries['passage-copy']
         self.assertTrue(passage['pr'] and passage['evidence'])
         self.assertEqual((passage['hub'], passage['chats']), ('passage-copy', 2))
@@ -80,7 +86,11 @@ class JourneyRegistryTests(unittest.TestCase):
                                   ('archive-bulk', 'prepare', 'prepare-menus.ps1'),
                                   ('passage-copy', 'evidence', False), ('passage-copy', 'pr', False),
                                   ('passage-copy', 'chats', 3), ('passage-copy', 'hub', 'wrong-mode'),
-                                  ('passage-copy', 'hub_handler', dict(file='fake-hub.py', **{'class': 'Handler'}))]:
+                                  ('passage-copy', 'hub_handler', dict(file='fake-hub.py', **{'class': 'Handler'})),
+                                  ('media-fit', 'pr', False), ('media-fit', 'evidence', False),
+                                  ('media-fit', 'chats', 2), ('media-fit', 'hub', 'wrong-mode'),
+                                  ('media-fit', 'hub_handler', dict(file='fake-hub.py', **{'class': 'Handler'})),
+                                  ('media-fit', 'validator', dict(file='evidence-voice.py'))]:
             with self.subTest(name=name, key=key):
                 original = entries[name][key]
                 entries[name][key] = broken

@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import re
 import socket
+import shutil
+import subprocess
 import struct
 from http.server import ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlencode, urlsplit
@@ -1145,6 +1147,65 @@ class RepaintHandler(Handler):
             self.close_connection = True
 
 
+MEDIA_GROUP = 'fixture-media@g.us'
+MEDIA_COLOURS = {'landscape': (32, 176, 208), 'portrait': (176, 64, 208)}
+
+
+def media_fit_png(width, height, colour):
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+    pixels = (b'\x00' + bytes(colour) * width) * height
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b'')
+
+
+class MediaFitHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        if url.path == '/v1/wazig/chats':
+            self.respond(200, [dict(jid=MEDIA_GROUP, name='Verification Media', provider='whatsapp', kind='group',
+                                    last_message_ts=self.state.stamp, unread_count=0, archived=False)])
+        elif url.path == '/v1/wazig/messages':
+            rows = [dict(MsgID=key, ChatJID=MEDIA_GROUP, Timestamp=self.state.stamp, Text='', FromMe=False,
+                         SenderJID='fixture-media-sender', SenderName='Fixture Sender', MediaType=kind,
+                         MimeType=mime, Filename=key + extension)
+                    for key, (data, mime, extension, kind) in self.state.fit_media.items()]
+            rows.append(dict(MsgID='fit-own', ChatJID=MEDIA_GROUP, Timestamp=self.state.stamp,
+                             Text=self.state.fit_text, FromMe=True, SenderName='', SenderJID='fixture-own'))
+            self.respond(200, list(reversed(rows)))
+        elif url.path.startswith('/v1/wazig/media/'):
+            chat, message = map(unquote, url.path.removeprefix('/v1/wazig/media/').split('/', 1))
+            if chat != MEDIA_GROUP or message not in self.state.fit_media:
+                self.respond(404, {'error': 'unknown media'})
+                return
+            data, mime, extension, kind = self.state.fit_media[message]
+            self.respond(200, data, mime, sha256=hashlib.sha256(data).hexdigest())
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        elif url.path == '/v1/wazig/events':
+            VoiceHandler.events(self)
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/fixture/media-fit-text':
+            self.state.fit_text = body['text']
+            self.respond(200, {'text': self.state.fit_text}, body=body)
+        elif self.path == '/v1/wazig/mark-read':
+            self.respond(200, {'status': 'ok'}, body=body)
+        else:
+            self.respond(400, {'error': 'unexpected media-fit write'}, body=body)
+
+
 VOICE_NOTES = 5
 VOICE_BYTES = b'OggS' + bytes(range(256)) * 8
 
@@ -1482,6 +1543,20 @@ def main():
     server.state.telegram_reaction = None
     server.state.telegram_events = []
     server.state.telegram_read = set()
+    if args.mode == 'media-fit':
+        server.state.fit_text = 'M M M M M M M M'
+        server.state.fit_media = {
+            key: (media_fit_png(w, h, MEDIA_COLOURS[key]), 'image/png', '.png', 'image')
+            for key, w, h in [('landscape', 1600, 1000), ('portrait', 700, 1400)]
+        }
+        ffmpeg = shutil.which('ffmpeg')
+        if ffmpeg:
+            video = args.log.with_name('media-fit.mp4')
+            subprocess.run([ffmpeg, '-y', '-f', 'lavfi', '-i', 'color=c=orange:s=1512x1100:r=1',
+                            '-frames:v', '1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(video)], check=True)
+            server.state.fit_media['video'] = (video.read_bytes(), 'video/mp4', '.mp4', 'video')
+        args.log.with_name('media-fit-fixture.json').write_text(json.dumps(dict(
+            landscape=[1600, 1000], portrait=[700, 1400], video=bool(ffmpeg))), encoding='utf-8')
     if args.mode == 'slack-sort':
         stamp = datetime.fromisoformat(server.state.stamp)
         server.state.sort_times = {

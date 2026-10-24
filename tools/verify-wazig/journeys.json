@@ -439,6 +439,24 @@
         "class": "VoiceHandler"
       },
       "maximize": true
+    },
+    {
+      "name": "media-fit",
+      "pr": true,
+      "hub": "media-fit",
+      "evidence": true,
+      "chats": 1,
+      "script": "journey-media-fit.ps1",
+      "validator": {
+        "file": "check-media-fit-evidence.py",
+        "function": "check_media_fit"
+      },
+      "library": "media-fit.ps1",
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "MediaFitHandler"
+      },
+      "maximize": true
     }
   ]
 }
