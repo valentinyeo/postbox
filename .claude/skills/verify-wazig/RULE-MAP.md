@@ -28,3 +28,5 @@ IGSH-589: update the maps with the implementation and describe only actual asser
 | Media stays inside bubble content at the scaled height cap; time never covers the last text line | media-fit.ps1, MediaFitHandler, media-fit.cs and independent check-media-fit-evidence.py screenshot assertions | [Media fit](features/media-fit.md) |
 
 | Composer border is equally thick on every side | composer-border.ps1 screenshot row/column probes, negative pixel control and saved app text scale cases | [Composer border](features/composer-border.md) |
+
+| Slack standard shortcodes use generated public data; custom images stay account-scoped; Giphy animates through the hub media path | slack-emoji.ps1, SlackEmojiHandler and check-slack-emoji-evidence.py exact state, custom pixels, frame crop differences and cached hub bytes | [Slack emoji](features/slack-emoji.md) |

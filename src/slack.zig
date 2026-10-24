@@ -222,10 +222,8 @@ pub fn formatReactions(buffer: []u8, reactions: []const Reaction) []const u8 {
     for (reactions) |reaction| {
         if (reaction.count <= 0 or reaction.name.len == 0) continue;
         if (writer.end > 0) writer.writeAll("  ") catch break;
-        const shortcodes = @import("shortcodes.zig");
-        var found: [1]shortcodes.Match = undefined;
-        if (shortcodes.matches(reaction.name, &found) > 0 and std.mem.eql(u8, found[0].name(), reaction.name)) {
-            writer.writeAll(found[0].emoji) catch break;
+        if (@import("slack_emoji.zig").standard(reaction.name)) |emoji| {
+            writer.writeAll(emoji) catch break;
         } else writer.print(":{s}:", .{reaction.name}) catch break;
         writer.print(" {d}", .{reaction.count}) catch break;
     }

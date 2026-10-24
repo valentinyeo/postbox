@@ -1,1 +1,2 @@
 *.zig text eol=lf
+src/slack_emoji.tsv text eol=lf
