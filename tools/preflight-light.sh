@@ -20,6 +20,7 @@ PYTHON_LIGHT_TESTS=(
     test_slack_threads
     test_tdlib_release
     test_update_cards
+    test_verify_journeys
     test_workspace_names
 )
 PYTHON_HEAVY_TESTS=(
