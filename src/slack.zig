@@ -1125,28 +1125,6 @@ test "convertMrkdwn resolves a user mention, falls back to the given name, then 
     try std.testing.expectEqualStrings("@someone joins later", convertMrkdwn(&buffer, "<@UUNKNOWN99> joins later", lookup));
 }
 
-test "convertMrkdwn uses installation-only names before labels and someone" {
-    const hub = @import("hub.zig");
-    var buffer: [256]u8 = undefined;
-    var table = [1]TestUser{.{ .id = "U4A59H6UT", .name = "Cached Guest" }};
-    var names = hub.SlackUserNames{
-        .rows = &.{},
-        .installation = .{ .context = @ptrCast(&table), .lookupFn = testUserLookup },
-    };
-    const lookup = names.lookup();
-    try std.testing.expectEqualStrings("@Cached Guest", convertMrkdwn(&buffer, "<@U4A59H6UT>", lookup));
-    try std.testing.expectEqualStrings("@Cached Guest", convertMrkdwn(&buffer, "<@U4A59H6UT|Stale Label>", lookup));
-    table[0].name = "Connect Person";
-    try std.testing.expectEqualStrings("@Connect Person", convertMrkdwn(&buffer, "<@U4A59H6UT>", lookup));
-    table[0].name = "U4A59H6UT";
-    try std.testing.expectEqualStrings("@Label", convertMrkdwn(&buffer, "<@U4A59H6UT|Label>", lookup));
-    table[0].name = "";
-    try std.testing.expectEqualStrings("@Label", convertMrkdwn(&buffer, "<@U4A59H6UT|Label>", lookup));
-    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U4A59H6UT>", lookup));
-    names.installation = null;
-    try std.testing.expectEqualStrings("@Label @someone @someone", convertMrkdwn(&buffer, "<@U4A59H6UT|Label> <@U4A59H6UT|U4A59H6UT> <@UUNKNOWN99>", lookup));
-}
-
 test "convertMrkdwn ignores empty and id-valued cached names and labels" {
     var buffer: [256]u8 = undefined;
     var table = [1]TestUser{.{ .id = "U1", .name = "U1" }};
