@@ -612,6 +612,36 @@ class SlackSortHandler(Handler):
             self.respond(400, {'error': 'invalid sort request'}, body=body)
 
 
+MENTIONS_CHAT = 'slack:fixture-mentions:channel'
+
+
+class SlackMentionsHandler(SlackSortHandler):
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            self.respond(200, [] if query.get('archived') == ['true'] else [
+                dict(jid=MENTIONS_CHAT, name='Verification Mentions', provider='slack', account='fixture-mentions',
+                     kind='group', last_message_ts=self.state.stamp, unread_count=0, archived=False)])
+        elif url.path == '/v1/wazig/messages' and query.get('chat') == [MENTIONS_CHAT]:
+            texts = [('MENTION-NAMED', '@Fixture Peer hello'),
+                     ('MENTION-UNKNOWN', '<@UUNKNOWN99> joins later'),
+                     ('MENTION-LABELLED', '<@UHIDDEN01|Outside Guest> thanks <https://example.org/report|report>')]
+            rows = [dict(MsgID=message_id, ChatJID=MENTIONS_CHAT, Timestamp=f'2025-02-19T21:20:{index:02d}Z',
+                         Text=text, FromMe=False, SenderName='Fixture Sender', SenderJID='fixture-sender')
+                    for index, (message_id, text) in enumerate(texts)]
+            self.respond(200, list(reversed(rows)))
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+
 THREAD_CHAT = 'slack:fixture-threads:channel'
 THREAD_PARENT = '1740000000.000100'
 
