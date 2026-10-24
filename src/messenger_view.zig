@@ -1,4 +1,5 @@
 const std = @import("std");
+const archive_rules = @import("archive_rules.zig");
 const Provider = @import("transport.zig").Provider;
 
 pub const View = enum { whatsapp, slack, telegram, all, signal };
@@ -333,7 +334,8 @@ pub fn archivedSetting(value: ?[]const u8) bool {
     return if (value) |text| std.mem.eql(u8, text, "1") else false;
 }
 
-pub fn archiveMatches(archived_only: bool, include_archived: bool, inbox: bool, unread_only: bool, archived: bool, unread: bool) bool {
+pub fn archiveMatches(archived_only: bool, include_archived: bool, inbox: bool, unread_only: bool, state: archive_rules.ArchiveState, unread: bool) bool {
+    const archived = state != .incoming;
     const needs_unread = unread_only or (inbox and include_archived and !archived_only);
     return (!needs_unread or unread) and (if (archived_only) archived else include_archived or !archived);
 }
@@ -375,14 +377,14 @@ test "Show archived filters unread inbox and independent archived-only mode for 
     for ([_]Provider{ .whatsapp, .telegram, .signal, .slack }) |provider| {
         try std.testing.expect(includes(.all, provider));
         for ([_]bool{ false, true }) |unread| {
-            try std.testing.expect(archiveMatches(false, false, false, false, false, unread));
-            try std.testing.expect(!archiveMatches(false, false, false, false, true, unread));
-            try std.testing.expect(archiveMatches(false, true, false, false, true, unread));
-            try std.testing.expectEqual(unread, archiveMatches(false, true, true, false, true, unread));
-            try std.testing.expectEqual(unread, archiveMatches(false, true, true, false, false, unread));
-            try std.testing.expectEqual(unread, archiveMatches(false, true, false, true, true, unread));
-            try std.testing.expect(archiveMatches(true, true, true, false, true, unread));
-            try std.testing.expect(!archiveMatches(true, true, true, false, false, unread));
+            try std.testing.expect(archiveMatches(false, false, false, false, .incoming, unread));
+            try std.testing.expect(!archiveMatches(false, false, false, false, .archived, unread));
+            try std.testing.expect(archiveMatches(false, true, false, false, .archived, unread));
+            try std.testing.expectEqual(unread, archiveMatches(false, true, true, false, .archived, unread));
+            try std.testing.expectEqual(unread, archiveMatches(false, true, true, false, .incoming, unread));
+            try std.testing.expectEqual(unread, archiveMatches(false, true, false, true, .archived, unread));
+            try std.testing.expect(archiveMatches(true, true, true, false, .archived, unread));
+            try std.testing.expect(!archiveMatches(true, true, true, false, .incoming, unread));
         }
     }
 }
