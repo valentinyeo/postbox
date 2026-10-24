@@ -234,7 +234,6 @@ const reaction_woozy = 3008;
 const reaction_row = 3010;
 const emoji_picker = @import("emoji_picker.zig");
 const emoji_draw = @import("emoji_draw.zig");
-const slack_emoji = @import("slack_emoji.zig");
 const shortcodes = @import("shortcodes.zig");
 const accounts = @import("accounts.zig");
 
@@ -423,14 +422,6 @@ const AvatarEntry = struct {
     status: enum { unknown, loading, ready, unavailable } = .unknown,
     refresh: bool = false,
     workspace_icon: bool = false,
-};
-
-const CustomEmoji = struct {
-    scope: Utf8Text(191) = .{},
-    name: Utf8Text(191) = .{},
-    path: WideText(519) = .{},
-    token: Utf8Text(63) = .{},
-    bitmap: ?win.HBITMAP = null,
 };
 
 const AvatarTarget = union(enum) { chat: usize, participant: usize };
@@ -768,8 +759,6 @@ const App = struct {
     font_small: ?win.HFONT = null,
     font_bold: ?win.HFONT = null,
     font_emoji: ?win.HFONT = null,
-    custom_emoji: std.ArrayList(CustomEmoji) = .empty,
-    custom_emoji_evict: usize = 0,
     font_underline: ?win.HFONT = null,
     palette_links_mode: bool = false,
     palette_accounts_mode: bool = false,
@@ -4622,9 +4611,7 @@ fn buildSlackMessage(a: *App, account: []const u8, item: slack.HistoryItem) Mess
     const lookup = slackUserLookup(installation);
     if (item.share_text.len > 0 or item.share_sender.len > 0) {
         var quote_buffer: [slack.max_text + 1]u8 = undefined;
-        var emoji_buffer: [slack.max_text * 4 + 1]u8 = undefined;
-        const quote = slack_emoji.replace(&emoji_buffer, item.share_text, .{ .context = a, .resolve = resolveCustomEmoji });
-        message.quote.set(a.allocator, slack.convertMrkdwn(&quote_buffer, quote, lookup));
+        message.quote.set(a.allocator, slack.convertMrkdwn(&quote_buffer, item.share_text, lookup));
         message.quote_sender.set(a.allocator, item.share_sender);
     }
     var raw_buffer: [900]u8 = undefined;
@@ -4650,59 +4637,7 @@ fn buildSlackMessage(a: *App, account: []const u8, item: slack.HistoryItem) Mess
 
 fn setSlackMessageText(a: *App, message: *Message, raw: []const u8, lookup: ?slack.UserLookup) void {
     var buffer: [slack.max_text + 1]u8 = undefined;
-    var emoji_buffer: [slack.max_text * 4 + 1]u8 = undefined;
-    const rendered = slack_emoji.replace(&emoji_buffer, raw, .{ .context = a, .resolve = resolveCustomEmoji });
-    message.text.set(a.allocator, slack.convertMrkdwnLinks(&buffer, rendered, lookup, &message.label_links, &message.label_link_count));
-}
-
-fn importCustomEmoji(a: *App, jid: []const u8, object: std.json.ObjectMap) void {
-    const scope = hub.workspaceAvatarKey(jid) orelse return;
-    const paths = object.get("SlackEmojiPaths") orelse return;
-    if (paths != .object) return;
-    var entries = paths.object.iterator();
-    while (entries.next()) |entry| {
-        if (entry.value_ptr.* != .string) continue;
-        var slot: ?usize = null;
-        for (a.custom_emoji.items, 0..) |*existing, index| {
-            if (std.mem.eql(u8, existing.scope.slice(), scope) and std.mem.eql(u8, existing.name.slice(), entry.key_ptr.*)) {
-                slot = index;
-                break;
-            }
-        }
-        if (slot == null) {
-            if (a.custom_emoji.items.len >= 6400) continue;
-            slot = a.custom_emoji.items.len;
-            a.custom_emoji.append(a.allocator, .{}) catch return;
-        }
-        const emoji = &a.custom_emoji.items[slot.?];
-        emoji.scope.set(scope);
-        emoji.name.set(entry.key_ptr.*);
-        const value = entry.value_ptr.string;
-        var path = WideText(519){};
-        if (std.unicode.utf8ValidateSlice(value) and value.len > 0 and value[0] >= 128) {
-            emoji.token.set(value);
-        } else {
-            path.set(a.allocator, value);
-            var token: [4]u8 = undefined;
-            const length = std.unicode.utf8Encode(@intCast(0xE000 + slot.?), &token) catch continue;
-            emoji.token.set(token[0..length]);
-        }
-        if (!std.mem.eql(u16, path.slice(), emoji.path.slice())) {
-            if (emoji.bitmap) |bitmap| _ = win.DeleteObject(bitmap);
-            emoji.bitmap = null;
-            emoji.path = path;
-        }
-    }
-}
-
-fn resolveCustomEmoji(context: *anyopaque, name: []const u8) ?[]const u8 {
-    const a: *App = @ptrCast(@alignCast(context));
-    if (a.selected_chat >= a.chat_count) return null;
-    const scope = hub.workspaceAvatarKey(a.chats[a.selected_chat].jid.slice()) orelse return null;
-    for (a.custom_emoji.items) |*entry| {
-        if (std.mem.eql(u8, entry.scope.slice(), scope) and std.mem.eql(u8, entry.name.slice(), name)) return entry.token.slice();
-    }
-    return null;
+    message.text.set(a.allocator, slack.convertMrkdwnLinks(&buffer, raw, lookup, &message.label_links, &message.label_link_count));
 }
 
 fn formatSlackTime(target: *WideText(15), allocator: std.mem.Allocator, ts: []const u8) void {
@@ -9484,7 +9419,6 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         var message = Message{};
         message.id.set(id);
         if (chat.provider == .slack) {
-            importCustomEmoji(a, chat.jid.slice(), object);
             message.thread_ts.set(getString(object, "thread_ts"));
             message.reply_count = @intCast(@max(0, getInt(object, "reply_count")));
             message.latest_reply.set(getString(object, "latest_reply"));
@@ -9502,9 +9436,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
                 const quoted_sender_jid = getString(object, "quoted_sender_jid");
                 var quote_buffer: [slack.max_text + 1]u8 = undefined;
                 const lookup = if (slackInstallation(a, chat.account.slice())) |installation| slackUserLookup(installation) else null;
-                var emoji_buffer: [slack.max_text * 4 + 1]u8 = undefined;
-                const quote = slack_emoji.replace(&emoji_buffer, parts.quote, .{ .context = a, .resolve = resolveCustomEmoji });
-                message.quote.set(a.allocator, if (unifiedHub(a) and std.mem.startsWith(u8, chat.jid.slice(), "slack:")) slack.convertMrkdwn(&quote_buffer, quote, lookup) else parts.quote);
+                message.quote.set(a.allocator, if (unifiedHub(a) and std.mem.startsWith(u8, chat.jid.slice(), "slack:")) slack.convertMrkdwn(&quote_buffer, parts.quote, lookup) else parts.quote);
                 message.quote_sender_jid.set(quoted_sender_jid);
                 message.quote_sender = resolveQuoteSender(a, chat.jid.slice(), quoted_sender_jid);
                 text = parts.body;
@@ -9537,10 +9469,6 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         if (message.from_me and reaction_to.len > 0) message.my_reaction.set(getString(object, "ReactionEmoji"));
         message.timestamp.set(getString(object, "Timestamp"));
         formatTime(&message.time, a.allocator, getString(object, "Timestamp"));
-        if (chat.provider == .slack) {
-            var reaction_buffer: [4096]u8 = undefined;
-            message.reaction.set(a.allocator, slack_emoji.replace(&reaction_buffer, getString(object, "ReactionEmoji"), .{ .context = a, .resolve = resolveCustomEmoji }));
-        }
         if (chat.provider == .slack and slackThreadsEnabled(a)) rememberSlackThreadRow(a, &message);
         if (source_index >= max_messages) continue;
         a.messages[a.message_count] = message;
@@ -11469,27 +11397,7 @@ fn reactionForCommand(command: u16) ?[]const u8 {
     };
 }
 
-fn copyToClipboard(a: *App, text_in: []const u16) bool {
-    var expanded: std.ArrayList(u16) = .empty;
-    defer expanded.deinit(a.allocator);
-    var text = text_in;
-    const scope = if (a.selected_chat < a.chat_count) hub.workspaceAvatarKey(a.chats[a.selected_chat].jid.slice()) else null;
-    for (text_in, 0..) |unit, index| {
-        if (unit < 0xE000 or unit > 0xF8FF or unit - 0xE000 >= a.custom_emoji.items.len) {
-            if (expanded.items.len > 0) expanded.append(a.allocator, unit) catch return false;
-            continue;
-        }
-        const entry = &a.custom_emoji.items[unit - 0xE000];
-        if (scope == null or !std.mem.eql(u8, entry.scope.slice(), scope.?)) {
-            if (expanded.items.len > 0) expanded.append(a.allocator, unit) catch return false;
-            continue;
-        }
-        if (expanded.items.len == 0) expanded.appendSlice(a.allocator, text_in[0..index]) catch return false;
-        expanded.append(a.allocator, ':') catch return false;
-        for (entry.name.slice()) |byte| expanded.append(a.allocator, byte) catch return false;
-        expanded.append(a.allocator, ':') catch return false;
-    }
-    if (expanded.items.len > 0) text = expanded.items;
+fn copyToClipboard(a: *App, text: []const u16) bool {
     if (a.hwnd == null or text.len == 0) return false;
     if (win.OpenClipboard(a.hwnd.?) == 0) return false;
     defer _ = win.CloseClipboard();
@@ -11677,17 +11585,11 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
             }
             const utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, text) catch return;
             defer a.allocator.free(utf8);
-            const mine = resolveCustomEmoji(a, item.my_reaction.slice()) orelse item.my_reaction.slice();
-            const action = reaction_chip.decide(utf8, segment_index, mine) orelse return;
+            const action = reaction_chip.decide(utf8, segment_index, item.my_reaction.slice()) orelse return;
             a.selected_message = index;
             a.text_selection = .{};
             reactToMessageWithChip(a, a.chats[a.selected_chat].jid.slice(), item.id.slice(), switch (action) {
-                .add => |emoji| blk: {
-                    for (a.custom_emoji.items) |*entry| {
-                        if (entry.path.len > 0 and std.mem.eql(u8, entry.token.slice(), emoji)) break :blk entry.name.slice();
-                    }
-                    break :blk emoji;
-                },
+                .add => |emoji| emoji,
                 .remove => "",
             }, true);
             return;
@@ -13690,7 +13592,6 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try control_api.writeStringUtf16(w, message.reaction.slice());
         try w.writeAll(",\"my_reaction\":");
         try control_api.writeString(w, message.my_reaction.slice());
-        try w.print(",\"gif_frames\":{d},\"gif_frame\":{d}", .{ message.gif_frame_count, message.gif_frame_index });
         try w.writeAll(",\"media_type\":");
         try control_api.writeString(w, message.media_type.slice());
         try w.print(",\"local\":{},\"transcript_chars\":{d},\"expanded\":{}", .{ message.local_path.len > 0, message.transcript.len, message.transcript_expanded });
@@ -15275,8 +15176,7 @@ fn drawProviderMark(shapes: *const smooth.Context, badge: win.RECT, mark: hub.Ba
 }
 
 fn isEmojiCodepoint(cp: u21) bool {
-    return (cp >= 0xE000 and cp <= 0xF8FF) or
-        (cp >= 0x1F000 and cp <= 0x1FAFF) or
+    return (cp >= 0x1F000 and cp <= 0x1FAFF) or
         (cp >= 0xE0020 and cp <= 0xE007F) or
         (cp >= 0x2600 and cp <= 0x27BF) or
         (cp >= 0x2B00 and cp <= 0x2BFF) or
@@ -15339,54 +15239,6 @@ fn runWidth(hdc: win.HDC, text: []const u16) i32 {
 
 fn drawEmojiRun(hdc: win.HDC, emoji_font: win.HFONT, text_ascent: i32, line_height: i32, slice: []const u16, cursor: i32, y: i32, draw: bool) i32 {
     const em = line_height;
-    if (slice.len == 1 and slice[0] >= 0xE000 and slice[0] <= 0xF8FF) {
-        if (app_ptr) |a| {
-            const index: usize = slice[0] - 0xE000;
-            if (index < a.custom_emoji.items.len) {
-                const entry = &a.custom_emoji.items[index];
-                if (draw) {
-                    if (entry.bitmap == null) {
-                        var loaded: usize = 0;
-                        for (a.custom_emoji.items) |cached| {
-                            if (cached.bitmap != null) loaded += 1;
-                        }
-                        while (loaded >= 128) {
-                            const old = &a.custom_emoji.items[a.custom_emoji_evict % a.custom_emoji.items.len];
-                            a.custom_emoji_evict += 1;
-                            if (old.bitmap) |bitmap| {
-                                _ = win.DeleteObject(bitmap);
-                                old.bitmap = null;
-                                loaded -= 1;
-                            }
-                        }
-                        entry.bitmap = loadAvatarBitmap(a, entry.path.ptr());
-                    }
-                    if (entry.bitmap) |bitmap| {
-                        const memory = win.CreateCompatibleDC(hdc) orelse return em;
-                        defer _ = win.DeleteDC(memory);
-                        const old = win.SelectObject(memory, bitmap);
-                        defer _ = win.SelectObject(memory, old);
-                        _ = win.AlphaBlend(hdc, cursor, y, em, em, memory, 0, 0, 42, 42, .{ .BlendOp = win.AC_SRC_OVER, .BlendFlags = 0, .SourceConstantAlpha = 255, .AlphaFormat = win.AC_SRC_ALPHA });
-                    }
-                }
-                return em;
-            }
-        }
-    }
-    if (slice.len > 1) {
-        var start: usize = 0;
-        var width: i32 = 0;
-        for (slice, 0..) |unit, index| {
-            if (unit < 0xE000 or unit > 0xF8FF) continue;
-            if (index > start) width += drawEmojiRun(hdc, emoji_font, text_ascent, line_height, slice[start..index], cursor + width, y, draw);
-            width += drawEmojiRun(hdc, emoji_font, text_ascent, line_height, slice[index .. index + 1], cursor + width, y, draw);
-            start = index + 1;
-        }
-        if (start > 0) {
-            if (start < slice.len) width += drawEmojiRun(hdc, emoji_font, text_ascent, line_height, slice[start..], cursor + width, y, draw);
-            return width;
-        }
-    }
     if (draw) {
         if (emoji_draw.draw(hdc, slice, cursor, y, text_ascent, em)) |run_metrics| return run_metrics.width;
     } else if (emoji_draw.metrics(slice, em)) |run_metrics| {
@@ -16655,7 +16507,10 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 for (runs[0..count]) |run| {
                     const part = slice[run.start..][0..run.len];
                     if (run.emoji) {
-                        cursor += drawEmojiRun(hdc, a.font_emoji orelse a.font.?, fontAscent(hdc, a.font.?), textLineHeight(hdc, a.font.?), part, cursor, span.rect.top, true);
+                        _ = win.TextOutW(hdc, cursor, span.rect.top, part.ptr, @intCast(part.len));
+                        var size: win.SIZE = undefined;
+                        _ = win.GetTextExtentPoint32W(hdc, part.ptr, @intCast(part.len), &size);
+                        cursor += size.cx;
                     } else {
                         _ = text_draw.drawRun(hdc, cursor, span.rect.top, part.ptr, @intCast(part.len));
                         cursor += runWidth(hdc, part);
@@ -17938,10 +17793,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             for (a.participant_avatars[0..a.participant_avatar_count]) |*entry| {
                 if (entry.bitmap) |bitmap| _ = win.DeleteObject(bitmap);
             }
-            for (a.custom_emoji.items) |*entry| {
-                if (entry.bitmap) |bitmap| _ = win.DeleteObject(bitmap);
-            }
-            a.custom_emoji.deinit(a.allocator);
             a.audio_state = .empty;
             clearMessages(a);
             if (a.font) |font| _ = win.DeleteObject(font);
@@ -20629,7 +20480,6 @@ fn hubNormalized(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, ra
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, normalized, .{});
     defer parsed.deinit();
     const rows = parsed.value.object.getPtr("data").?.object.getPtr("messages").?;
-    if (unifiedHub(a)) cacheSlackEmoji(a, allocator, jid, rows.array.items) catch {};
     for (rows.array.items) |*row| {
         const id = getString(row.object, "MsgID");
         const path = try hubMediaPath(a, allocator, .{ .provider = .whatsapp, .account = job.account.slice(), .id = jid }, id);
@@ -20650,66 +20500,6 @@ fn hubNormalized(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, ra
         try row.object.put(allocator, "LocalPath", .{ .string = local_path });
     }
     return std.json.Stringify.valueAlloc(allocator, parsed.value, .{});
-}
-
-fn cacheSlackEmoji(a: *App, allocator: std.mem.Allocator, jid: []const u8, rows: []std.json.Value) !void {
-    const scope = hub.workspaceAvatarKey(jid) orelse return;
-    const account = scope[6 .. scope.len - 1];
-    var needed = false;
-    for (rows) |row| {
-        for ([_][]const u8{ "Text", "DisplayText", "ReactionEmoji" }) |field| {
-            const text = getString(row.object, field);
-            var cursor: usize = 0;
-            while (slack_emoji.next(text, cursor)) |token| {
-                cursor = token.end;
-                if (slack_emoji.standard(token.name) == null) needed = true;
-            }
-        }
-    }
-    if (!needed) return;
-    const client = a.hub_client orelse return;
-    const index_path = try hubMediaPath(a, allocator, .{ .provider = .slack, .account = account, .id = scope }, "emoji-index-v1");
-    const wide = try std.unicode.utf8ToUtf16LeAllocZ(allocator, index_path);
-    const stamp = fileStampSecs(wide.ptr);
-    var raw = if (stamp != null and nowUnixSeconds() - stamp.? < 3600) readFileWin(allocator, index_path, 4 * 1024 * 1024) else null;
-    if (raw == null) {
-        const response = try client.call(allocator, try hub.slackEmoji(allocator, account, null));
-        if (response.status != 200 or response.body.len > 4 * 1024 * 1024) return;
-        raw = response.body;
-        _ = writeCacheFileAtomic(a, index_path, response.body);
-    }
-    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, raw.?, .{});
-    defer parsed.deinit();
-    if (parsed.value != .object) return;
-    const emoji = parsed.value.object.get("emoji") orelse return;
-    if (emoji != .object) return;
-    for (rows) |*row| {
-        var paths: std.json.ObjectMap = .empty;
-        for ([_][]const u8{ "Text", "DisplayText", "ReactionEmoji" }) |field| {
-            const text = getString(row.object, field);
-            var cursor: usize = 0;
-            while (slack_emoji.next(text, cursor)) |token| {
-                cursor = token.end;
-                if (slack_emoji.standard(token.name) != null or paths.contains(token.name)) continue;
-                const name = slack_emoji.customName(emoji.object, token.name) orelse continue;
-                const value = getString(emoji.object, name);
-                if (slack_emoji.standard(name)) |unicode| {
-                    try paths.put(allocator, token.name, .{ .string = unicode });
-                    continue;
-                }
-                if (!std.mem.startsWith(u8, value, "https://") and !std.mem.startsWith(u8, value, "http://")) continue;
-                const cache_id = try std.fmt.allocPrint(allocator, "emoji:{s}:{x}", .{ name, std.hash.Wyhash.hash(0, value) });
-                const path = try hubMediaPath(a, allocator, .{ .provider = .slack, .account = account, .id = scope }, cache_id);
-                if (!fileExistsUtf8(path)) {
-                    const response = client.call(allocator, try hub.slackEmoji(allocator, account, name)) catch continue;
-                    if (response.status != 200 or response.body.len > 1024 * 1024) continue;
-                    if (!writeCacheFileAtomic(a, path, response.body)) continue;
-                }
-                try paths.put(allocator, token.name, .{ .string = path });
-            }
-        }
-        try row.object.put(allocator, "SlackEmojiPaths", .{ .object = paths });
-    }
 }
 
 fn hubArg(job: *const WacliJob, name: []const u8, default: []const u8) []const u8 {
@@ -21607,7 +21397,6 @@ fn applyHubThreadPage(a: *App, result: *const WacliResult) void {
             if (splitQuote(text, getString(object, "Text"))) |parts| text = parts.body;
         }
         const lookup = if (slackInstallation(a, result.account.slice())) |installation| slackUserLookup(installation) else null;
-        importCustomEmoji(a, result.jid.slice(), object);
         setSlackMessageText(a, &message, text, lookup);
         message.timestamp.set(stamp);
         formatTime(&message.time, a.allocator, stamp);
