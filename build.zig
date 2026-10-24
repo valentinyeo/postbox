@@ -524,6 +524,7 @@ pub fn build(b: *std.Build) void {
     const archive_filter_source = @embedFile("src/messenger_view.zig");
     const archive_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/archive_actions_test.zig"),
+        std.mem.replaceOwned(u8, b.allocator, sourceSection("fn refreshChats(", "fn isUnresolvableChatEntry("), "fn refreshChats(", "fn requestChats(") catch @panic("Out of memory building archive scan harness"),
         "const messenger_view = struct {\n",
         archive_filter_source[std.mem.indexOf(u8, archive_filter_source, "pub fn archiveMatches(").?..std.mem.indexOf(u8, archive_filter_source, "pub fn mergeChatData(").?],
         "};\n",

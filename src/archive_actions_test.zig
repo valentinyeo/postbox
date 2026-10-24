@@ -96,6 +96,9 @@ const App = struct {
     hub_archive_inflight: bool = false,
     refresh_key: chat_key.Stored = .{},
     refresh_stamp: Utf8Text(47) = .{},
+    chats_gen: u32 = 0,
+    chats_pending_flags: u8 = 0,
+    chats_request: WacliJob = .{},
     pending_sends: [4]PendingSend = @splat(.{}),
     pending_send_count: usize = 0,
     sent_voice: [voice_sent.max_entries]voice_sent.Entry = @splat(.{}),
@@ -170,6 +173,24 @@ fn startHubArchive(a: *App) void {
 }
 fn refreshChats(a: *App) void {
     if (a.refresh_key.id_len > 0) _ = holdKeptArchived(a, a.refresh_key.key(), false, a.refresh_stamp.slice());
+}
+const WacliJob = struct {
+    account: Utf8Text(32) = .{},
+    kind: enum { chats } = .chats,
+    args: [8]Utf8Text(191) = @splat(.{}),
+    arg_count: usize = 0,
+    gen: u32 = 0,
+};
+fn wacliJobArgs(job: *WacliJob, args: []const []const u8) void {
+    for (args, 0..) |arg, index| job.args[index].set(arg);
+    job.arg_count = args.len;
+}
+fn wacliPendingGet(_: *App, _: @FieldType(WacliJob, "kind")) usize {
+    return 0;
+}
+fn wacliEnqueue(a: *App, job: WacliJob, _: bool) bool {
+    a.chats_request = job;
+    return true;
 }
 fn mediaBusy(_: *App) bool {
     return false;
@@ -1113,6 +1134,47 @@ test "bulk hub Telegram and Signal archives persist every row without a hub requ
     }
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
+}
+
+test "IGSH-763 inbox scan includes locally unarchived provider archived WhatsApp rows" {
+    var state = archive_rules.State{};
+    state.parse("fixture:live@g.us\t0\tbaseline\nfixture:kept@g.us\t1\tbaseline\n");
+    var buffer: [512]u8 = undefined;
+    var loaded = archive_rules.State{};
+    loaded.parse(state.format(&buffer));
+    const rows = [_]struct { id: []const u8, provider_archived: bool, archived: bool }{
+        .{ .id = "fixture:live@g.us", .provider_archived = true, .archived = false },
+        .{ .id = "fixture:kept@g.us", .provider_archived = false, .archived = true },
+        .{ .id = "fixture:phone@g.us", .provider_archived = true, .archived = true },
+        .{ .id = "fixture:inbox@g.us", .provider_archived = false, .archived = false },
+    };
+    inline for (.{ archiveInboxRow, archiveControlRow }) |filter| {
+        var a = fixture(&loaded);
+        a.unified_hub = true;
+        requestChats(&a);
+        try std.testing.expect(!a.show_archived and !a.include_archived);
+        try std.testing.expectEqualStrings("--include-archived", a.chats_request.args[a.chats_request.arg_count - 1].slice());
+        var visible: usize = 0;
+        for (rows) |row| {
+            var chat = Chat{};
+            chat.account.set("fixture-account");
+            chat.jid.set(row.id);
+            var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, if (row.provider_archived) "{\"archived\":true}" else "{\"archived\":false}", .{});
+            defer parsed.deinit();
+            const shown = filter(&a, chat, parsed.value.object);
+            try std.testing.expectEqual(!row.archived, shown != null);
+            if (shown) |current| {
+                try std.testing.expect(!current.archived);
+                if (visible == 0) try std.testing.expectEqualStrings("fixture:live@g.us", current.jid.slice());
+                visible += 1;
+            }
+            a.show_archived = true;
+            const archived = filter(&a, chat, parsed.value.object);
+            try std.testing.expectEqual(row.archived, archived != null);
+            a.show_archived = false;
+        }
+        try std.testing.expectEqual(@as(usize, 2), visible);
+    }
 }
 
 test "hub Telegram and Signal archives honor both phone and local state in both chat filters" {
