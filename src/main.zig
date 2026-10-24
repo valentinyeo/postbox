@@ -9513,7 +9513,10 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
             } else |_| {}
         }
     }
-    var slack_names = hub.SlackUserNames{ .rows = rows };
+    var slack_names = hub.SlackUserNames{
+        .rows = rows,
+        .installation = if (slackInstallation(a, chat.account.slice())) |installation| slackUserLookup(installation) else null,
+    };
     const slack_lookup = slack_names.lookup();
     const take = if (chat.provider == .slack and slackThreadsEnabled(a)) rows.len else @min(rows.len, max_messages);
     var source_index = take;
@@ -21692,7 +21695,10 @@ fn applyHubThreadPage(a: *App, result: *const WacliResult) void {
     const data = parsed.value.object.get("data") orelse return;
     const messages = data.object.get("messages") orelse return;
     var oldest: []const u8 = "";
-    var slack_names = hub.SlackUserNames{ .rows = messages.array.items };
+    var slack_names = hub.SlackUserNames{
+        .rows = messages.array.items,
+        .installation = if (slackInstallation(a, result.account.slice())) |installation| slackUserLookup(installation) else null,
+    };
     const lookup = slack_names.lookup();
     for (messages.array.items) |item| {
         if (item != .object) continue;
