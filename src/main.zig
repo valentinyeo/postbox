@@ -2777,6 +2777,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     if (a.archive_toggle_started_ms != null) {
         a.archive_toggle_rebuilds += 1;
         a.archive_toggle_rebuild_ms += win.GetTickCount64() -| rebuild_started_ms;
+        if (fresh and a.archive_toggle_fetches > 0) a.archive_toggle_fetch_ms = win.GetTickCount64() -| a.archive_toggle_started_ms.?;
         const flags: u8 = if (a.show_archived) 2 else if (a.include_archived) 1 else 0;
         const coverage = if (fresh) a.chats_pending_flags else a.chats_raw_flags;
         a.archive_toggle_ready = coverage == 1 or coverage == flags;
@@ -17214,7 +17215,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                             appendLaunchLog(a, fail_line);
                         }
                     } else if (result.ok and result.gen == a.chats_gen) {
-                        if (a.archive_toggle_started_ms != null) a.archive_toggle_fetch_ms = win.GetTickCount64() -| result.started_ms;
                         if (applyChats(a, result.data, true)) {
                             a.chats_read_retry_ticks = 0;
                             a.chats_read_attempts = 0;
