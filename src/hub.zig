@@ -29,17 +29,16 @@ pub fn messages(allocator: std.mem.Allocator, chat: []const u8, limit: usize, be
 
 pub const SlackUserNames = struct {
     rows: []const std.json.Value,
-    installation: ?@import("slack.zig").UserLookup = null,
+    outer_context: ?*anyopaque = null,
+    outer_fn: ?*const fn (*anyopaque, []const u8) ?[]const u8 = null,
 
-    pub fn lookup(self: *SlackUserNames) @import("slack.zig").UserLookup {
-        return .{ .context = self, .lookupFn = find };
-    }
-
-    fn find(context: *anyopaque, user_id: []const u8) ?[]const u8 {
+    pub fn find(context: *anyopaque, user_id: []const u8) ?[]const u8 {
         const self: *const SlackUserNames = @ptrCast(@alignCast(context));
-        if (self.installation) |users| {
-            if (users.find(user_id)) |name| {
-                if (name.len > 0 and !std.mem.eql(u8, name, user_id)) return name;
+        if (self.outer_fn) |outer| {
+            if (self.outer_context) |ctx| {
+                if (outer(ctx, user_id)) |name| {
+                    if (name.len > 0 and !std.mem.eql(u8, name, user_id)) return name;
+                }
             }
         }
         for (self.rows) |row| {

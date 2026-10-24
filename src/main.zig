@@ -9513,11 +9513,13 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
             } else |_| {}
         }
     }
+    const slack_installation_lookup: ?slack.UserLookup = if (slackInstallation(a, chat.account.slice())) |installation| slackUserLookup(installation) else null;
     var slack_names = hub.SlackUserNames{
         .rows = rows,
-        .installation = if (slackInstallation(a, chat.account.slice())) |installation| slackUserLookup(installation) else null,
+        .outer_context = if (slack_installation_lookup) |lookup| lookup.context else null,
+        .outer_fn = if (slack_installation_lookup) |lookup| lookup.lookupFn else null,
     };
-    const slack_lookup = slack_names.lookup();
+    const slack_lookup = slack.UserLookup{ .context = @ptrCast(&slack_names), .lookupFn = hub.SlackUserNames.find };
     const take = if (chat.provider == .slack and slackThreadsEnabled(a)) rows.len else @min(rows.len, max_messages);
     var source_index = take;
     while (source_index > 0) {
@@ -21695,11 +21697,13 @@ fn applyHubThreadPage(a: *App, result: *const WacliResult) void {
     const data = parsed.value.object.get("data") orelse return;
     const messages = data.object.get("messages") orelse return;
     var oldest: []const u8 = "";
+    const slack_installation_lookup: ?slack.UserLookup = if (slackInstallation(a, result.account.slice())) |installation| slackUserLookup(installation) else null;
     var slack_names = hub.SlackUserNames{
         .rows = messages.array.items,
-        .installation = if (slackInstallation(a, result.account.slice())) |installation| slackUserLookup(installation) else null,
+        .outer_context = if (slack_installation_lookup) |outer| outer.context else null,
+        .outer_fn = if (slack_installation_lookup) |outer| outer.lookupFn else null,
     };
-    const lookup = slack_names.lookup();
+    const lookup = slack.UserLookup{ .context = @ptrCast(&slack_names), .lookupFn = hub.SlackUserNames.find };
     for (messages.array.items) |item| {
         if (item != .object) continue;
         const object = item.object;

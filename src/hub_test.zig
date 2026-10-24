@@ -610,7 +610,7 @@ test "IGSH-745 mentions use cached hub sender names including late guests and Sl
     defer parsed.deinit();
     const rows = hub.messageRows(parsed.value).?;
     var names = hub.SlackUserNames{ .rows = rows[0..1] };
-    const lookup = names.lookup();
+    const lookup = slack.UserLookup{ .context = @ptrCast(&names), .lookupFn = hub.SlackUserNames.find };
     var buffer: [256]u8 = undefined;
     try std.testing.expectEqualStrings("@Fixture Peer hello", slack.convertMrkdwn(&buffer, rows[0].object.get("Text").?.string, lookup));
     try std.testing.expectEqualStrings("@Outside Guest", slack.convertMrkdwn(&buffer, "<@UEXT00001|Outside Guest>", lookup));
@@ -657,9 +657,10 @@ test "IGSH-745 installation names precede row names for history quotes and threa
     defer parsed.deinit();
     var names = hub.SlackUserNames{
         .rows = parsed.value.array.items,
-        .installation = .{ .context = &installation, .lookupFn = Installation.find },
+        .outer_context = @ptrCast(&installation),
+        .outer_fn = Installation.find,
     };
-    const lookup = names.lookup();
+    const lookup = slack.UserLookup{ .context = @ptrCast(&names), .lookupFn = hub.SlackUserNames.find };
     try std.testing.expectEqualStrings("Installation Peer", lookup.find("U1").?);
     try std.testing.expectEqual(@as(usize, 1), installation.calls);
     var buffer: [256]u8 = undefined;
@@ -676,7 +677,8 @@ test "IGSH-745 installation names precede row names for history quotes and threa
     try std.testing.expectEqualStrings("@Row Peer", slack.convertMrkdwn(&buffer, "<@U1|Stale Label>", lookup));
     installation.peer_name = "";
     try std.testing.expectEqualStrings("@Row Peer", slack.convertMrkdwn(&buffer, "<@U1|Stale Label>", lookup));
-    names.installation = null;
+    names.outer_context = null;
+    names.outer_fn = null;
     try std.testing.expectEqualStrings("@Row Peer @Row Only", slack.convertMrkdwn(&buffer, "<@U1|Stale Label> <@UROW>", lookup));
     const rendered = slack.convertMrkdwn(&buffer, "<@UEXT00001|Outside Guest> <@UUNKNOWN99> <@UID|UID>", lookup);
     try std.testing.expectEqualStrings("@Outside Guest @someone @someone", rendered);
