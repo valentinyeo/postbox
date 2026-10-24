@@ -143,6 +143,22 @@
       "maximize": true
     },
     {
+      "name": "whatsapp-history-backfill",
+      "pr": true,
+      "hub": "whatsapp-history-backfill",
+      "evidence": true,
+      "chats": 3,
+      "script": "journey-whatsapp-history-backfill.ps1",
+      "validator": {
+        "file": "evidence-whatsapp-history-backfill.py"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "HistoryBackfillHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "hub",
       "pr": true,
       "hub": "mixed-lid",

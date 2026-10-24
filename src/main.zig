@@ -164,6 +164,7 @@ const command_search = 2001;
 const command_compose = 2002;
 const command_unread = 2003;
 const command_refresh = 2004;
+const command_history_backfill = 2069;
 const command_sync = 2005;
 const command_quit = 2006;
 const command_archive = 2007;
@@ -535,7 +536,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar, hub_thread, hub_older };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar, hub_thread, hub_older, hub_history_backfill };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 const WacliLane = enum { wacli, slack, hub_media };
 
@@ -564,6 +565,7 @@ const WacliResult = struct {
     msg_id: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
     started_ms: u64 = 0,
+    history_backfill: hub.HistoryBackfillResult = .unavailable,
     http_status: u32 = 0,
     slack_error: Utf8Text(63) = .{},
     data: []u8 = &.{},
@@ -580,6 +582,7 @@ const HubOlder = struct {
     origin: chat_key.Stored = .{},
     rows: ?[]u8 = null,
     exhausted: bool = false,
+    recovering: bool = false,
 };
 
 const max_media_children = media_drain.max_children;
@@ -1989,7 +1992,7 @@ fn wacliPendingSub(a: *App, kind: WacliJobKind) void {
 fn jobIsWrite(kind: WacliJobKind) bool {
     return switch (kind) {
         .reaction, .slack_send, .slack_attach, .slack_share => true,
-        .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar => true,
+        .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar, .hub_history_backfill => true,
         else => false,
     };
 }
@@ -13777,6 +13780,7 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "React to message: 😢 Sad", "", reaction_sad);
     appendPalette(a, "React to message: 🙏 Thanks", "", reaction_thanks);
     appendPalette(a, "Remove reaction", "", reaction_remove);
+    if (unifiedHub(a) and a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp) appendPalette(a, "Fetch older history", "", command_history_backfill);
     appendPalette(a, "Refresh", "R", command_refresh);
     appendPalette(a, "Restart live sync", "S", command_sync);
     appendPalette(a, "Manage accounts", "", command_accounts);
@@ -14781,6 +14785,7 @@ fn runCommand(a: *App, command: u16) void {
             saveFontScale(a.font_scale);
             setStatus(a, "Font size 82%");
         },
+        command_history_backfill => requestHubHistoryBackfill(a),
         command_refresh => {
             refreshGroups(a);
             refreshChats(a);
@@ -17058,7 +17063,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 return 0;
             }
             switch (result.kind) {
-                .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar, .hub_thread, .hub_older => applyHubResult(a, result),
+                .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar, .hub_thread, .hub_older, .hub_history_backfill => applyHubResult(a, result),
                 .groups => if (result.ok) applyGroups(a, result.data),
                 .contacts_index => if (result.ok) {
                     a.people.replaceContacts(result.data) catch return 0;
@@ -17148,6 +17153,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         var drop_buffer: [96]u8 = undefined;
                         appendLaunchLog(a, std.fmt.bufPrint(&drop_buffer, "messages-read: dropped reply, {s}", .{reason}) catch "messages-read: dropped reply");
                     }
+                    if (result.ok and a.hub_older.recovering and chat_key.Key.eql(a.hub_older.origin.key(), chat_key.of(result))) requestHubOlder(a);
                     if (refresh_again and result.ok and result.gen == a.messages_gen and a.selected_chat < a.chat_count and
                         chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result))) refreshMessages(a);
                 },
@@ -20790,6 +20796,10 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
     };
     const response = try client.call(allocator, request);
     result.http_status = response.status;
+    if (job.kind == .hub_history_backfill) {
+        result.history_backfill = try hub.historyBackfillResult(allocator, response.status, response.body);
+        return "";
+    }
     if (job.kind == .hub_media) {
         if (unifiedHub(a) and response.status == 206) return error.PartialMedia;
         switch (try wa_hub.mediaState(response.status)) {
@@ -20949,6 +20959,7 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
     switch (result.kind) {
         .hub_thread => applyHubThreadPage(a, result),
         .hub_older => applyHubOlderPage(a, result),
+        .hub_history_backfill => applyHubHistoryBackfill(a, result),
         .hub_send => {
             if (a.pending_send_count == 0 or !std.mem.eql(u8, &a.pending_sends[0].id, result.msg_id.slice())) return;
             if (result.ok) {
@@ -21185,6 +21196,7 @@ fn unifiedHubRequest(a: *App, allocator: std.mem.Allocator, job: *const WacliJob
         .unread_probe => hub.messages(allocator, jid, 20, ""),
         .reaction => hub.react(allocator, jid, job.msg_id.slice(), job.extra.slice(), job.client_id.slice()),
         .hub_read => hub.markRead(allocator, jid, job.msg_id.slice()),
+        .hub_history_backfill => hub.historyBackfill(allocator, jid),
         .hub_archive => hub.archive(allocator, jid, std.mem.eql(u8, job.extra.slice(), "true")),
         .hub_media => hub.binary(allocator, jid, job.msg_id.slice()),
         .hub_avatar => if (std.mem.eql(u8, job.extra.slice(), "workspace-icon")) hub.workspaceIcon(allocator, jid[6 .. jid.len - 1]) else hub.binary(allocator, jid, null),
@@ -21655,31 +21667,102 @@ fn storeHubOlder(a: *App, key: chat_key.Key, rows: []const std.json.Value) void 
     older.rows = text;
 }
 
+fn requestHubHistoryBackfill(a: *App) void {
+    if (!unifiedHub(a) or a.selected_chat >= a.chat_count) return;
+    const chat = &a.chats[a.selected_chat];
+    if (chat.provider != .whatsapp) return;
+    if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat))) {
+        setStatus(a, "Wait for the selected chat to open, then retry Fetch older history");
+        return;
+    }
+    if (wacliPendingGet(a, .hub_history_backfill) > 0 or hubOlderFor(a, chat_key.of(chat)).recovering) {
+        setStatus(a, "Older history fetch in progress; try again later");
+        return;
+    }
+    const job = WacliJob{ .kind = .hub_history_backfill, .provider = chat.provider, .account = chat.account, .jid = chat.jid };
+    if (wacliEnqueue(a, job, false)) setStatus(a, "Fetching older history...") else setStatus(a, "Older history unavailable; not completed, retry Fetch older history");
+}
+
+fn applyHubHistoryBackfill(a: *App, result: *const WacliResult) void {
+    if (!unifiedHub(a)) return;
+    const outcome: hub.HistoryBackfillResult = if (result.ok) result.history_backfill else .unavailable;
+    switch (outcome) {
+        .ok => |recovered| {
+            const key = chat_key.of(result);
+            if (chat_key.Key.eql(a.hub_older.origin.key(), key)) {
+                a.hub_older.exhausted = false;
+                if (a.selected_chat < a.chat_count and chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), key) and chat_key.Key.eql(chat_key.displayed(a), key)) {
+                    a.hub_older.recovering = true;
+                    refreshMessages(a);
+                    requestHubOlder(a);
+                }
+            }
+            var buffer: [128]u8 = undefined;
+            setStatus(a, std.fmt.bufPrint(&buffer, "Older history fetched: {d} recovered", .{recovered}) catch "Older history fetched");
+        },
+        .in_progress => setStatus(a, "Older history fetch in progress; try again later"),
+        .timeout => setStatus(a, "Older history timed out; not completed, retry Fetch older history"),
+        .unavailable => setStatus(a, "Older history unavailable; not completed, retry Fetch older history"),
+    }
+}
+
 fn requestHubOlder(a: *App) void {
-    if (!unifiedHub(a) or a.message_count == 0 or a.message_count >= max_messages or a.selected_chat >= a.chat_count or wacliPendingGet(a, .hub_older) > 0) return;
+    if (!unifiedHub(a) or a.selected_chat >= a.chat_count or wacliPendingGet(a, .hub_older) > 0) return;
     const chat = &a.chats[a.selected_chat];
     const key = chat_key.of(chat);
     if (chat.provider != .whatsapp or !chat_key.Key.eql(chat_key.displayed(a), key)) return;
-    if (hubOlderFor(a, key).exhausted) return;
+    const older = hubOlderFor(a, key);
+    if (older.exhausted) return;
+    if (a.message_count == 0) {
+        if (older.recovering and wacliPendingGet(a, .messages) == 0) {
+            older.recovering = false;
+            setStatus(a, "Older history cursor unavailable; retry Fetch older history");
+        }
+        return;
+    }
+    if (a.message_count >= max_messages) {
+        if (older.recovering) setStatus(a, "Older history fetched; display limit reached");
+        older.recovering = false;
+        return;
+    }
     var oldest: ?*const Message = null;
     for (a.messages[0..a.message_count]) |*message| {
         if (message.send_state != .none or message.id.len == 0 or message.timestamp.len == 0) continue;
         if (oldest == null or std.mem.order(u8, message.timestamp.slice(), oldest.?.timestamp.slice()) == .lt) oldest = message;
     }
-    const first = oldest orelse return;
+    const first = oldest orelse {
+        if (older.recovering) setStatus(a, "Older history cursor unavailable; retry Fetch older history");
+        older.recovering = false;
+        return;
+    };
     var job = WacliJob{ .kind = .hub_older, .provider = .whatsapp, .account = chat.account, .jid = chat.jid, .gen = a.messages_gen, .msg_id = first.id };
     job.extra.set(first.timestamp.slice());
-    _ = wacliEnqueue(a, job, false);
+    if (!wacliEnqueue(a, job, false) and older.recovering) {
+        older.recovering = false;
+        setStatus(a, "Older history page unavailable; retry Fetch older history");
+    }
 }
 
 fn applyHubOlderPage(a: *App, result: *const WacliResult) void {
-    if (!unifiedHub(a) or !result.ok or a.selected_chat >= a.chat_count) return;
+    if (!unifiedHub(a) or a.selected_chat >= a.chat_count) return;
     const key = chat_key.of(&a.chats[a.selected_chat]);
     if (!chat_key.Key.eql(key, chat_key.of(result)) or !chat_key.Key.eql(key, chat_key.displayed(a))) return;
+    if (!result.ok) {
+        if (hubOlderFor(a, key).recovering) {
+            a.hub_older.recovering = false;
+            setStatus(a, "Older history page unavailable; retry Fetch older history");
+        }
+        return;
+    }
     var arena = std.heap.ArenaAllocator.init(a.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     const older = hubOlderFor(a, key);
+    var applied = false;
+    defer if (!applied and older.recovering) {
+        older.recovering = false;
+        setStatus(a, "Older history page unavailable; retry Fetch older history");
+    };
     const page = std.json.parseFromSlice(std.json.Value, allocator, result.data, .{ .allocate = .alloc_always }) catch return;
     const page_rows = hub.messageRows(page.value) orelse return;
     var current: []const std.json.Value = &.{};
@@ -21695,13 +21778,18 @@ fn applyHubOlderPage(a: *App, result: *const WacliResult) void {
     var united: std.ArrayList(std.json.Value) = .empty;
     const added = hub.unite(allocator, current, page_rows, &united) catch return;
     if (added == 0) {
+        applied = true;
         older.exhausted = true;
+        if (older.recovering) setStatus(a, "Older history fetched; stored messages loaded");
+        older.recovering = false;
         return;
     }
     storeHubOlder(a, key, united.items);
     const stored_text = older.rows orelse return;
     const raw = std.fmt.allocPrint(a.allocator, "{{\"data\":{{\"messages\":{s}}}}}", .{stored_text}) catch return;
     defer a.allocator.free(raw);
-    _ = applyMessageData(a, raw, false);
+    if (!applyMessageData(a, raw, false)) return;
+    applied = true;
     a.msg_applied_hash = 0;
+    if (older.recovering) requestHubOlder(a);
 }

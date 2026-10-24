@@ -27,6 +27,33 @@ pub fn messages(allocator: std.mem.Allocator, chat: []const u8, limit: usize, be
     return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/messages?chat={s}&limit={d}&before={s}", .{ c, limit, b }) };
 }
 
+pub fn historyBackfill(allocator: std.mem.Allocator, chat: []const u8) !Request {
+    try validId(chat);
+    return .{ .method = "POST", .path = "/v1/wazig/history-backfill", .body = try std.json.Stringify.valueAlloc(allocator, .{ .chat = chat }, .{}) };
+}
+
+pub const HistoryBackfillResult = union(enum) { ok: u64, in_progress, timeout, unavailable };
+
+pub fn historyBackfillResult(allocator: std.mem.Allocator, status: u32, raw: []const u8) !HistoryBackfillResult {
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, raw, .{});
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.BadResponse;
+    const object = parsed.value.object;
+    switch (status) {
+        200 => {
+            if (!std.mem.eql(u8, string(object, "status"), "ok")) return error.BadResponse;
+            const recovered = object.get("recovered") orelse return error.BadResponse;
+            if (recovered != .integer or recovered.integer < 0) return error.BadResponse;
+            return .{ .ok = @intCast(recovered.integer) };
+        },
+        409 => if (std.mem.eql(u8, string(object, "error"), "in progress")) return .in_progress,
+        504 => if (std.mem.eql(u8, string(object, "status"), "timeout")) return .timeout,
+        503 => if (std.mem.eql(u8, string(object, "status"), "unavailable")) return .unavailable,
+        else => {},
+    }
+    return error.BadResponse;
+}
+
 pub const older_limit: usize = 80;
 
 pub fn beforeCursor(allocator: std.mem.Allocator, msg_id: []const u8, timestamp: []const u8) ![]u8 {

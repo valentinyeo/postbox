@@ -1598,6 +1598,118 @@ class SlackEmojiHandler(VoiceHandler):
             self.respond(404, {'error': 'unavailable'})
 
 
+HISTORY_CHAT = 'personal:15550000681@s.whatsapp.net'
+HISTORY_OTHER = 'personal:15550000682@s.whatsapp.net'
+HISTORY_BUSINESS = 'business:15550000681@s.whatsapp.net'
+
+
+class HistoryBackfillHandler(SignalHandler):
+    def event(self, event_id, kind, chat):
+        data = dict(id=event_id, chat=chat, kind=kind)
+        self.wfile.write(f'id: {event_id}\ndata: {json.dumps(data)}\n\n'.encode())
+        self.wfile.flush()
+        self.state.record(dict(method='SSE', path='/v1/wazig/events', wire_path=self.wire_path, **data))
+
+    def row(self, chat, message_id, stamp, text, **extra):
+        return dict(MsgID=message_id, ChatJID=chat, Timestamp=stamp, Text=text, DisplayText=text,
+                    FromMe=False, SenderName='Fixture Sender', SenderJID='15550000681@s.whatsapp.net', **extra)
+
+    def history(self, chat):
+        if chat != HISTORY_CHAT:
+            return [self.row(chat, 'OTHER' if chat == HISTORY_OTHER else 'BUSINESS', '2026-10-01T00:00:00Z', 'Isolated history')]
+        rows = [self.row(chat, f'HB-{index:03}', f'2026-10-13T08:{index // 60:02}:{index % 60:02}Z', f'Recent history {index}')
+                for index in range(1, 66)]
+        rows += [self.row(chat, f'REACTION-{index}', f'2026-10-13T09:00:{index:02}Z', '',
+                          ReactionToID='HB-065', ReactionEmoji='👍') for index in range(9)]
+        rows.append(self.row(chat, 'PROTOCOL', '2026-07-10T00:00:00Z', '(message)'))
+        if self.state.history_released:
+            rows += [self.row(chat, f'HB-OLD-{index:03}', f'2025-09-19T12:{index // 60:02}:{index % 60:02}Z', f'Older history {index}')
+                     for index in range(1, 69)]
+        if self.state.history_live:
+            rows.append(self.row(chat, 'HB-LIVE', self.state.stamp, 'Live arrival during recovery'))
+        return sorted(rows, key=lambda row: (row['Timestamp'], row['MsgID']), reverse=True)
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query, keep_blank_values=True)
+        if url.path == '/v1/wazig/chats':
+            rows = [] if query.get('archived') == ['true'] else [
+                dict(jid=chat, name=name, provider='whatsapp', account=chat.split(':')[0], kind='direct',
+                     last_message_ts=self.state.stamp, unread_count=0, archived=False)
+                for chat, name in [(HISTORY_CHAT, 'Verification History'), (HISTORY_OTHER, 'Verification Other'),
+                                   (HISTORY_BUSINESS, 'Verification Business')]]
+            self.respond(200, rows)
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            if chat not in (HISTORY_CHAT, HISTORY_OTHER, HISTORY_BUSINESS) or 'account' in query:
+                self.respond(400, {'error': 'wrong chat scope'})
+                return
+            before = query.get('before', [''])[0]
+            with self.state.lock:
+                rows = self.history(chat)
+                released = self.state.history_released
+            if before:
+                msg_id, cutoff = split_before(before)
+                rows = [row for row in rows if datetime.fromisoformat(row['Timestamp']) < cutoff or
+                        (datetime.fromisoformat(row['Timestamp']) == cutoff and row['MsgID'] < msg_id)]
+                if chat == HISTORY_CHAT and not released:
+                    rows = []
+            rows = rows[:int(query.get('limit', ['80'])[0])]
+            self.respond(200, rows, history_chat=chat, history_before=before, history_count=len(rows),
+                         history_ids=[row['MsgID'] for row in rows], history_released=released)
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/v1/wazig/history-backfill':
+            if body != {'chat': HISTORY_CHAT}:
+                self.respond(400, {'error': 'wrong chat scope'}, body=body)
+                return
+            with self.state.lock:
+                self.state.history_attempts += 1
+                attempt = self.state.history_attempts
+            failures = {1: (409, {'error': 'in progress'}), 2: (504, {'status': 'timeout'}),
+                        3: (503, {'status': 'unavailable'})}
+            if attempt in failures:
+                status, reply = failures[attempt]
+                self.respond(status, reply, body=body, history_attempt=attempt)
+                return
+            self.record(0, body=body, history_phase='waiting-for-live')
+            with self.state.lock:
+                self.state.history_started = True
+                arrived = self.state.lock.wait_for(lambda: self.state.history_live, timeout=25)
+                if arrived:
+                    self.state.history_released = True
+                    self.respond(200, {'status': 'ok', 'recovered': 68}, body=body, history_attempt=attempt)
+                    return
+            if not arrived:
+                self.respond(504, {'status': 'timeout'}, body=body, history_attempt=attempt)
+                return
+        elif self.path == '/fixture/live':
+            with self.state.lock:
+                if not self.state.history_started or self.state.history_released or body != {}:
+                    self.respond(409, {'error': 'not recovering'}, body=body)
+                    return
+                self.state.history_live = True
+                self.record(200, body=body, during_recovery=True)
+                self.state.lock.notify_all()
+            self.publish('msg', HISTORY_CHAT)
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/mark-read' and body.get('chat') in (HISTORY_CHAT, HISTORY_OTHER, HISTORY_BUSINESS) and set(body) == {'chat', 'message_id'}:
+            self.respond(200, {'status': 'ok'}, body=body)
+        else:
+            self.respond(400, {'error': 'unexpected write'}, body=body)
+
+
 def journey_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--port-file', type=Path, required=True)
@@ -1639,6 +1751,10 @@ def main():
     server.state.repaint_events = [('reset', '')]
     server.state.reactions = {}
     server.state.signal_reaction = None
+    server.state.history_attempts = 0
+    server.state.history_started = False
+    server.state.history_released = False
+    server.state.history_live = False
     server.state.signal_events = []
     server.state.signal_read = set()
     server.state.telegram_reaction = None
