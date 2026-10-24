@@ -6,9 +6,8 @@ on:
     inputs:
       feature:
         description: User journey to drive
-        type: choice
+        type: string
         default: search
-        options: [search, navigation, drafts, palette, appearance, menus, passage-copy, reactions, paste-image, whatsapp-hub, hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, views, workspace-icons, signal, telegram, notrap, repaint, archive, archive-bulk, text-comparison, window, voice]
   pull_request:
     paths:
       - .github/workflows/verify.yml
@@ -50,13 +49,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Plan registered journeys
+        id: matrix
+        shell: python
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FEATURE: ${{ inputs.feature || 'search' }}
+        run: |
+          import json
+          import os
+          from pathlib import Path
+
+          journeys = json.loads(Path('tools/verify-wazig/journeys.json').read_text())['journeys']
+          feature = os.environ['FEATURE']
+          if os.environ['EVENT_NAME'] == 'pull_request':
+              selected = [row for row in journeys if row['pr']]
+          else:
+              selected = [row for row in journeys if row['name'] == feature]
+              if not selected:
+                  raise SystemExit(f"Unknown verification journey: {feature}. See tools/verify-wazig/journeys.json")
+          matrix = {'include': [{'feature': row['name'], 'evidence': row['evidence']} for row in selected]}
+          value = json.dumps(matrix, separators=(',', ':'))
+          print(value)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'matrix={value}\n')
   verify:
+    needs: plan
     runs-on: windows-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      matrix:
-        feature: ${{ fromJSON(github.event_name == 'pull_request' && '["paste-image","passage-copy","reactions","menus","search","drafts","whatsapp-hub","hub","hub-archive","palette-archived","slack-sort","slack-archive","slack-threads","link-previews","views","workspace-icons","signal","telegram","notrap","text-comparison","repaint","archive-bulk","window","voice"]' || format('["{0}"]', inputs.feature || 'search')) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,7 +125,7 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence
       - name: Validate surviving journey evidence
-        if: matrix.feature == 'paste-image' || matrix.feature == 'repaint' || matrix.feature == 'voice' || matrix.feature == 'passage-copy' || matrix.feature == 'reactions' || matrix.feature == 'search' || matrix.feature == 'whatsapp-hub' || matrix.feature == 'hub' || matrix.feature == 'hub-archive' || matrix.feature == 'palette-archived' || matrix.feature == 'slack-sort' || matrix.feature == 'slack-archive' || matrix.feature == 'slack-threads' || matrix.feature == 'link-previews' || matrix.feature == 'views' || matrix.feature == 'workspace-icons' || matrix.feature == 'signal' || matrix.feature == 'telegram' || matrix.feature == 'notrap' || matrix.feature == 'palette' || matrix.feature == 'appearance' || matrix.feature == 'window'
+        if: matrix.evidence
         shell: pwsh
         run: |
           python tools/verify-wazig/check-evidence.py verification-evidence

@@ -1,39 +1,10 @@
 # Wazig verification map
 
-Start with [the skill](../SKILL.md). The eight offline desktop journeys use the real native window, not the existing headless smoke modes. Each run creates a separate profile and synthetic cached chats `Verification Alpha` and `Verification Beta`, without provider login. Menus seeds one synthetic cached message to reach both message menus; text-comparison loads its synthetic paragraph from `src/verify_text.json`. The baseline is the AMOLED theme, saved-scale default of 82%, All networks, Alpha selected and an empty composer. Never change the product's default font or scale to suit the harness.
+Start with [the skill](../SKILL.md). The offline desktop journeys use the real native window, not the existing headless smoke modes. Each run creates a separate profile and synthetic cached chats `Verification Alpha` and `Verification Beta`, without provider login. Menus seeds one synthetic cached message to reach both message menus; text-comparison loads its synthetic paragraph from `src/verify_text.json`. The baseline is the AMOLED theme, saved-scale default of 82%, All networks, Alpha selected and an empty composer. Never change the product's default font or scale to suit the harness.
 
-| ID / workflow input | User-facing feature | Automated recipe |
-| --- | --- | --- |
-| [paste-image](paste-image.md) | Clipboard images and multiple attachments | Ctrl+V, Enter, full-screen RGBA and 4K on every provider; WhatsApp/Slack + picker, two previews, ordered captioned sends and remove-first |
-| [search](search.md) | Chat search | Ctrl+F, match, clear, no-match, restore |
-| [navigation](navigation.md) | Keyboard chat navigation | Next chat, previous chat |
-| [drafts](drafts.md) | Composer and per-chat drafts | Type, switch away/back, check disk |
-| [palette](palette.md) | Command palette and shortcut discovery | Positive shortcut row, no Status result/sidebar entry, activate help |
-| [appearance](appearance.md) | Theme and saved text size | Choose Green, save larger text, reset scale to 82% |
-| [passage-copy](passage-copy.md) | Cross-message text selection | Real drags on WhatsApp and Slack, partial stamped clipboard, day change and held-edge scrolling |
-| [reactions](reactions.md) | Right-click message reactions | Real mouse laughing-face selection on WhatsApp and Slack; exact hub request and visible chip |
-| [menus](menus.md) | Native menus and custom popups | Measure AMOLED darkness and text contrast, then Green native-menu lightness |
-| [whatsapp-hub](whatsapp-hub.md) | WhatsApp hub transport | Chats, history, live SSE replay, idempotent retry, reads, archive, pending media and DPAPI |
-| [hub-archive](hub-archive.md) | Legacy WhatsApp Keep archived | Seed legacy flag, require hub re-archive and keep state, restart with newer incoming message |
-| [palette-archived](palette-archived.md) | Ctrl+K finds archived chats on every account | Archived WhatsApp, Telegram and Slack names from every view, inbox names from every view, Enter opens without unarchiving |
-| [hub](hub.md) | Unified hub transport (IGSH-531) | Source network identity, list/history, SSE replay, send retry, read/archive, media and DPAPI |
-| [slack-sort](slack-sort.md) | Slack last message order | Newest first, unknown last, incoming and sent promotion with keyboard order |
-| [slack-archive](slack-archive.md) | Local Slack archive | Ctrl+E, three incoming messages, inbox absence, Archive presence, restart and unarchive without hub archive writes |
-| [link-previews](link-previews.md) | Slack labels, linked images and page previews | Real hub messages on four providers, inline image and OG card pixels, image viewer and cache reuse |
-| [slack-threads](slack-threads.md) | Slack threads | Replies line, side panel, threaded send, per-account toggle and restart |
-| [telegram](telegram.md) | Telegram hub account | Prelinked hub chats, Saved Messages, text/file/reply, reactions, reads, live SSE and terminal rate limits |
-| [signal](signal.md) | Signal hub account | Prelinked hub history, text/file, reactions, reads, live events, terminal 429/403 failures |
-| [notrap](notrap.md) | No empty sign-in traps | Saved Signal startup fallback, Esc and every Alt view key from every view, per-view screenshots |
-| [views](views.md) | Account views and combined inbox | Alt+1..4 isolation, inbox titles, drained fixed slots, account send, Alt+I order, Sort views, restart |
-| [workspace-icons](workspace-icons.md) | Slack workspace icon, WhatsApp and Signal mark badges | Two synthetic team icon colours, missing-icon S, green handset, blue Signal mark and persistent avatar cache |
-| [repaint](repaint.md) | Change-driven redraw | 60 seconds without input, baseline refreshes, non-selected incoming messages and full-paint deltas |
-| [voice](voice.md) | Voice message bubbles | Five downloaded voice notes with cached transcripts, wheel scroll, Show more, playback-style partial repaints matching full repaints |
-| [archive-bulk](archive-bulk.md) | Bulk chat archive | Empty composer Ctrl+A, two selected rows, Ctrl+E provider acknowledgements and empty inbox; text select-all |
-| [archive](archive.md) | Archive and Keep archived | Ctrl+E, keep via palette, incoming provider event, Archive presence/unread and inbox absence |
-| [text-comparison](appearance.md) | DirectWrite beside Chrome | Exact text/font/metric parity, paired screenshots and 3x paragraph crops |
-| [window](window.md) | Maximized startup and saved normal placement | Unforced launch, keyboard restore/resize, Alt+F4, same-profile reopen and --update-relaunch |
+Journey IDs, automatic PR coverage and fixture modes are defined in [journeys.json](../../../../tools/verify-wazig/journeys.json). Read `features/<name>.md` for each registered journey's user-facing recipe. Add a journey through one registry entry and its own files; do not maintain another catalog here.
 
-Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Matching PRs run `paste-image`, `passage-copy`, `reactions`, `menus`, `search`, `drafts`, `whatsapp-hub`, `hub`, `hub-archive`, `palette-archived`, `slack-sort`, `slack-archive`, `slack-threads`, `views`, `workspace-icons`, `signal`, `telegram`, `notrap`, `repaint`, `archive-bulk`, `text-comparison`, `window` and `voice`; the other journeys require dispatch; a map entry is not proof that every listed sub-feature was exercised. The automated recipe column is the exact coverage, not a claim to cover all entry points.
+Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Other than registered automatic PR coverage, journeys remain dispatchable; never claim skipped coverage as verification.
 
 The source of truth for commands is `src/main.zig:buildPaletteItems`, for keyboard handling `src/main.zig:handleKeyboard`, and for discoverable help `src/shortcuts.zig`. Every feature file has precisely four H2 sections. Capture the input, resulting UI and durable side effects; preserve proof after cleanup. Only archive adds a synthetic incoming message at the fixture provider boundary; search, navigation, drafts, palette and appearance stay empty. No live send, account login, media, voice playback or transcription claim can be made from these local chats.
 

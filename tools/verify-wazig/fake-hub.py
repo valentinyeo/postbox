@@ -1438,33 +1438,30 @@ class LinkPreviewsHandler(VoiceHandler):
             self.respond(404, {'error': 'unavailable'})
 
 
-def main():
-    if os.environ.get('GITHUB_ACTIONS') != 'true':
-        raise SystemExit('Fake hub runs only on GitHub Actions')
+def journey_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--port-file', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
     modes = parser.add_mutually_exclusive_group()
-    modes.add_argument('--link-previews', action='store_true')
-    modes.add_argument('--paste-image', action='store_true')
-    modes.add_argument('--hub-archive', action='store_true')
-    modes.add_argument('--palette-archived', action='store_true')
-    modes.add_argument('--repaint', action='store_true')
-    modes.add_argument('--voice', action='store_true')
-    modes.add_argument('--mixed-lid', action='store_true')
-    modes.add_argument('--passage-copy', action='store_true')
-    modes.add_argument('--reactions', action='store_true')
-    modes.add_argument('--slack-sort', action='store_true')
-    modes.add_argument('--slack-archive', action='store_true')
-    modes.add_argument('--slack-threads', action='store_true')
-    modes.add_argument('--views', action='store_true')
-    modes.add_argument('--notrap', action='store_true', help='WhatsApp and Slack chats; Signal and Telegram have no rows')
-    modes.add_argument('--workspace-icons', action='store_true')
-    modes.add_argument('--signal', action='store_true')
-    modes.add_argument('--telegram', action='store_true')
+    registry = json.loads(Path(__file__).with_name('journeys.json').read_text(encoding='utf-8'))
+    journeys = {row['hub']: row for row in registry['journeys'] if row['hub'] and row['hub'] != 'legacy'}
+    for mode in journeys:
+        modes.add_argument('--' + mode, dest='mode', action='store_const', const=mode)
+    return parser, journeys
+
+
+def main():
+    if os.environ.get('GITHUB_ACTIONS') != 'true':
+        raise SystemExit('Fake hub runs only on GitHub Actions')
+    parser, journeys = journey_parser()
     args = parser.parse_args()
     loopback = socket.inet_ntoa(struct.pack('!I', socket.INADDR_LOOPBACK))
-    handler = LinkPreviewsHandler if args.link_previews else PassageCopyHandler if args.passage_copy else PasteImageHandler if args.paste_image else SlackArchiveHandler if args.slack_archive else HubArchiveHandler if args.hub_archive else PaletteArchivedHandler if args.palette_archived else MixedLidHandler if args.mixed_lid else SlackThreadsHandler if args.slack_threads else RepaintHandler if args.repaint else VoiceHandler if args.voice else TelegramHandler if args.telegram else SignalHandler if args.signal else ViewsHandler if args.views or args.notrap else WorkspaceIconsHandler if args.workspace_icons else SlackSortHandler if args.slack_sort else ReactionsHandler if args.reactions else Handler
+    config = journeys[args.mode]['hub_handler'] if args.mode else {'file': 'fake-hub.py', 'class': 'Handler'}
+    namespace = globals()
+    if config['file'] != Path(__file__).name:
+        import runpy
+        namespace = runpy.run_path(str(Path(__file__).with_name(config['file'])), init_globals=namespace)
+    handler = namespace[config['class']]
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
@@ -1485,7 +1482,7 @@ def main():
     server.state.telegram_reaction = None
     server.state.telegram_events = []
     server.state.telegram_read = set()
-    if args.slack_sort:
+    if args.mode == 'slack-sort':
         stamp = datetime.fromisoformat(server.state.stamp)
         server.state.sort_times = {
             ALPHA: (stamp - timedelta(hours=3)).isoformat().replace('+00:00', 'Z'),

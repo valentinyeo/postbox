@@ -1,5 +1,8 @@
 from pathlib import Path
+import ast
+import json
 import re
+import runpy
 
 root = Path(__file__).resolve().parents[2]
 skill = root / '.claude/skills/verify-wazig'
@@ -7,7 +10,49 @@ text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
 features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
-assert features == sorted(['appearance', 'archive', 'archive-bulk', 'drafts', 'hub', 'hub-archive', 'link-previews', 'menus', 'navigation', 'notrap', 'palette', 'palette-archived', 'paste-image', 'passage-copy', 'reactions', 'repaint', 'search', 'signal', 'slack-archive', 'slack-sort', 'slack-threads', 'telegram', 'views', 'voice', 'whatsapp-hub', 'workspace-icons', 'window'])
+registry_path = root / 'tools/verify-wazig/journeys.json'
+registry = json.loads(registry_path.read_text(encoding='utf-8'))
+journeys = registry['journeys']
+options = [row['name'] for row in journeys]
+entries = {row['name']: row for row in journeys}
+assert options and len(options) == len(set(options)), 'duplicate or empty registry journeys'
+assert features == sorted(options), 'feature maps must match the journey registry exactly'
+for row in journeys:
+    name = row['name']
+    assert re.fullmatch(r'[a-z][a-z0-9-]*', name), name
+    assert type(row['pr']) is bool and type(row['evidence']) is bool and type(row['maximize']) is bool, name
+    assert row['chats'] is None or (type(row['chats']) is int and row['chats'] > 0 and row['hub']), name
+    assert row['hub'] is None or re.fullmatch(r'[a-z][a-z0-9-]*', row['hub']), name
+    for key in ['script', 'library', 'prepare', 'ready']:
+        if key != 'script' and not row.get(key):
+            continue
+        filename = row[key]
+        assert Path(filename).name == filename and filename.endswith('.ps1'), (name, key)
+        assert (registry_path.parent / filename).is_file(), (name, 'missing journey script', filename)
+    config = row['hub_handler']
+    assert bool(config) == bool(row['hub']), (name, 'missing fake-hub handler')
+    if config:
+        assert Path(config['file']).name == config['file'], name
+        path = registry_path.parent / config['file']
+        assert path.is_file(), (name, 'missing fake-hub handler file')
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        assert any(isinstance(node, ast.ClassDef) and node.name == config['class'] for node in tree.body), (name, 'missing fake-hub handler', config)
+    validator_config = row['validator']
+    assert not row['evidence'] or validator_config, (name, 'missing evidence validator')
+    if validator_config:
+        assert Path(validator_config['file']).name == validator_config['file'], name
+        path = registry_path.parent / validator_config['file']
+        assert path.is_file(), (name, 'missing evidence validator file')
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        if validator_config.get('function'):
+            assert any(isinstance(node, ast.FunctionDef) and node.name == validator_config['function'] for node in tree.body), (name, 'missing evidence function')
+for filename in ['SKILL.md', 'features/README.md', 'INDEX.md']:
+    prose = (skill / filename).read_text(encoding='utf-8')
+    assert 'journeys.json' in prose, (filename, 'must point to the registry')
+    assert not re.search(r'^\|.*\]\([^)]*\.md\)', prose, re.M), (filename, 'hand-maintained journey table')
+    assert not re.search(r'^- \[[^]]+\]\((?:features/)?[^)]+\.md\)', prose, re.M), (filename, 'hand-maintained journey catalog')
+    assert not re.search(r'feature=[a-z-]+\|', prose), (filename, 'hand-maintained journey options')
+    assert not re.search(r'(?:Matching PRs run|path triggers run the) `', prose), (filename, 'hand-maintained PR journey list')
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
     entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
@@ -15,7 +60,6 @@ for feature in features:
         'Sub-features', 'How to get to it (user POV)', 'Driving it with PowerShell UI Automation', 'Gotchas'
     ], feature
     assert f'feature={feature}' in entry
-    assert f'({feature}.md)' in index
 source = (root / 'src/main.zig').read_text(encoding="utf-8")
 for label in ['Search chats', 'Next chat', 'Previous chat', 'Compose message', 'Keyboard shortcuts', 'Theme: Green', 'Make text larger', 'Reset text size', 'Show archived chats', 'Show inbox chats', 'Archive selected chat', 'Unarchive selected chat', 'Archive and keep archived', 'Allow resurfacing']:
     assert f'"{label}"' in source, label
@@ -24,18 +68,13 @@ for control in ['id_search = 1008', 'id_compose = 1032']:
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
-assert 'options: [search, navigation, drafts, palette, appearance, menus, passage-copy, reactions, paste-image, whatsapp-hub, hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, views, workspace-icons, signal, telegram, notrap, repaint, archive, archive-bulk, text-comparison, window, voice]' in workflow
-options_match = re.search(r'^        options: \[(.+)\]$', workflow, re.M)
-assert options_match, 'missing workflow_dispatch journey options'
-options = [option.strip() for option in options_match[1].split(',')]
-assert len(options) == len(set(options)), 'duplicate workflow journey'
-indexed = re.findall(r'^\| \[([^\]]+)\]\(([^)]+)\) \|', index, re.M)
-assert len(indexed) == len({name for name, target in indexed}), 'duplicate README journey'
-assert {name for name, target in indexed} == set(options), 'README table must list every workflow journey exactly once'
-assert {Path(target).stem for name, target in indexed} == set(features), 'each feature map must be indexed'
-for name, target in indexed:
-    assert target in {f'{feature}.md' for feature in features} and (skill / 'features' / target).is_file(), (name, target)
-    assert f'feature={name}' in (skill / 'features' / target).read_text(encoding='utf-8'), name
+assert 'type: string' in workflow and 'options:' not in workflow, 'dispatch must accept a registry-validated string'
+assert '  plan:\n    runs-on: ubuntu-latest' in workflow, 'missing plan job'
+assert '    needs: plan' in workflow, 'verify must depend on plan'
+assert 'matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}' in workflow, 'verify must use plan-job matrix'
+assert 'if: matrix.evidence' in workflow, 'evidence must use registry matrix flag'
+for required in ["journeys.json", "row['pr']", "row['evidence']", "row['name'] == feature", 'Unknown verification journey:', 'GITHUB_OUTPUT']:
+    assert required in workflow, ('missing registry plan wiring', required)
 coverage = index.split('## Recent changes coverage\n', 1)
 assert len(coverage) == 2, 'missing recent changes coverage'
 coverage_ids = set()
@@ -58,7 +97,7 @@ assert 'RegOverridePredefKey' in source and 'VerificationRequiresActions' in sou
 assert 'if (verification_fixture and !hubConfigured(a)) return verificationEnqueue(a, job);' in source
 assert 'if (!verification_fixture) return null;' in source
 assert 'if (verification_fixture) return;' in source
-assert 'whatsapp-hub' in workflow
+assert 'whatsapp-hub' in options
 assert (root / 'tools/verify-wazig/fake-wa-bridge.py').is_file()
 fixture_config = source.split('fn configureWaHub(', 1)[1].split('    a.wa_bridge_url =', 1)[0]
 assert 'if (verification_fixture)' in fixture_config
@@ -66,8 +105,29 @@ assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_URL"))' in fixture_config
 assert 'if (init.environ_map.get("WAZIG_VERIFY_HUB_KEY")) |seed|' in fixture_config
 assert 'if (!slack_win.saveSecret(lit("WaBridgeKey"), seed)) return;' in fixture_config
 runner = (root / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
-assert "if ($Feature -notin @('whatsapp-hub', 'hub', 'hub-archive', 'palette-archived', 'slack-sort', 'slack-archive', 'slack-threads', 'link-previews', 'views', 'workspace-icons', 'signal', 'telegram', 'notrap', 'passage-copy', 'reactions', 'repaint', 'paste-image', 'voice')) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+assert "if (-not $journey.hub) {\n    Set-Content (Join-Path $messages 'account-tag.txt')" in runner
+for required in ["journeys.json", 'Where-Object name -CEQ $Feature', 'Unknown verification journey:', '. (Join-Path $PSScriptRoot $journey.script)', '$journey.chats', '-Mode $journey.hub', '. (Join-Path $PSScriptRoot $journey.library)', '. (Join-Path $PSScriptRoot $journey.prepare)', '. (Join-Path $PSScriptRoot $journey.ready)', 'if ($journey.maximize)', '$journey.arguments', '$journey.result_checks']:
+    assert required in runner, ('missing registry runner wiring', required)
+assert 'ValidateSet(' not in runner and 'switch ($Feature)' not in runner
+runner += '\n' + '\n'.join((registry_path.parent / row[key]).read_text(encoding='utf-8') for row in journeys for key in ['script', 'prepare', 'ready'] if row.get(key))
 harness = (root / 'tools/verify-wazig/harness.ps1').read_text(encoding='utf-8')
+fake_hub = (registry_path.parent / 'fake-hub.py').read_text(encoding='utf-8')
+for required in ["journeys.json", "for mode in journeys:", "modes.add_argument('--' + mode, dest='mode', action='store_const', const=mode)", "namespace[config['class']]"]:
+    assert required in fake_hub, ('missing fake-hub switch or dispatch wiring', required)
+for required in ["journeys.json", '$registry.journeys.hub', '$start.ArgumentList.Add("--$Mode")']:
+    assert required in harness, ('missing fake bridge registry wiring', required)
+hub_namespace = runpy.run_path(str(registry_path.parent / 'fake-hub.py'))
+hub_parser, hub_journeys = hub_namespace['journey_parser']()
+expected_modes = {row['hub'] for row in journeys if row['hub'] and row['hub'] != 'legacy'}
+assert set(hub_journeys) == expected_modes, 'fake-hub mode registry drift'
+actual_modes = {option[2:] for option in hub_parser._option_string_actions if option.startswith('--') and option not in {'--help', '--port-file', '--log'}}
+assert actual_modes == expected_modes, ('missing fake-hub switch', expected_modes - actual_modes)
+for mode in expected_modes:
+    parsed = hub_parser.parse_args(['--' + mode, '--port-file', 'port', '--log', 'log'])
+    assert parsed.mode == mode, ('fake-hub switch selects wrong mode', mode)
+marker_namespace = runpy.run_path(str(root / 'tools/check_private_markers.py'))
+for name in options:
+    assert f'.claude/skills/verify-wazig/features/{name}.md' in marker_namespace['PUBLIC_SKILL_PATHS'], name
 keyboard = harness.split('function Send-Keys(', 1)[1].split('function Get-PaletteWindow(', 1)[0]
 for required in ['$app = Get-App $Session', '$null = Wait-Until {', '$foreground -eq [IntPtr]::Zero -or $ownerPid -ne $Session.pid',
                  '$app.Refresh()', '[VerifyWindow]::SetForegroundWindow($app.MainWindowHandle)',
@@ -85,6 +145,9 @@ for required in ['ReadToEndAsync()', '$child.WaitForExit($TimeoutMilliseconds)',
                  '$shown.messages.Count -eq 0', 'Save-Screen $Session beta-empty']:
     assert required in harness, required
 validator = (root / 'tools/verify-wazig/check-evidence.py').read_text(encoding='utf-8')
+for required in ['journeys.json', "row['name'] == session['feature']", "journey['validator']", "validator['file']", "namespace[validator['function']](folder)"]:
+    assert required in validator, ('missing evidence registry wiring', required)
+validator += '\n' + '\n'.join((registry_path.parent / row['validator']['file']).read_text(encoding='utf-8') for row in journeys if row['validator'])
 for artifact in ['removed-status.json', 'text-scale.json']:
     assert artifact in runner and artifact in validator, artifact
 assert 'a.font_scale = 82;' in source and 'command_font_larger => changeFontScale(a, 10)' in source
@@ -102,18 +165,18 @@ sort_map = (skill / 'features/slack-sort.md').read_text(encoding='utf-8')
 assert 'last message' in sort_map
 for stage in ['before', 'after', 'sent']:
     assert stage in runner and 'navigation.json' in runner and stage in validator
-assert "'slack-sort'" in runner and '--slack-sort' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '"slack-sort"' in workflow and "matrix.feature == 'slack-sort'" in workflow
+assert entries['slack-sort']['script'] == 'journey-slack-sort.ps1' and 'slack-sort' in {row['hub'] for row in journeys}
+assert 'slack-sort' in options and entries['slack-sort']['evidence']
 assert "status = 'failed'" in runner and "status = 'passed'" in runner and "read('result.json')" in validator
 print('SLACK SORT MAP VERIFIED: dispatch, recipe, synthetic hub and passed/failed evidence')
-assert '.claude/skills/verify-wazig/features/slack-sort.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert '.claude/skills/verify-wazig/features/slack-sort.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 
 views = (root / 'tools/verify-wazig/views.ps1').read_text(encoding='utf-8')
 for required in ['Sort views', 'Show combined inbox', 'Alt+I']:
     assert f'"{required}"' in source, required
-for required in ['views', 'src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig']:
+for required in ['src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig']:
     assert required in workflow, required
-assert '"views"' in workflow.split('matrix:', 1)[1]
+assert 'views' in options
 for required in ['Assert-AccountView', 'Verification account send', "Send-Keys $Session '%i'", "Send-Keys $Session '^{DOWN}'", 'WAZIG_VERIFY_RESTART', 'restart.json']:
     assert required in views, required
 assert 'VIEW_ACCOUNTS' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
@@ -128,7 +191,7 @@ reconcile = (root / 'src/chat_reconcile_test.zig').read_text(encoding='utf-8')
 for name in ['hub Slack history refreshes ordering after caching its last message fallback',
              'account view history accepts source accounts without confusing the hub cache namespace']:
     assert f'test "{name}"' in reconcile, name
-sort_journey = runner.split('        slack-sort {', 1)[1].split('        views {', 1)[0]
+sort_journey = (registry_path.parent / 'journey-slack-sort.ps1').read_text(encoding='utf-8')
 assert "Send-Keys $session '%1'" in sort_journey and 'Drive Alt+1' in sort_map
 assert "for keys in ['%1', '^{TAB}'" in validator
 signal = (skill / 'features/signal.md').read_text(encoding='utf-8')
@@ -136,23 +199,23 @@ signal_journey = (root / 'tools/verify-wazig/signal.ps1').read_text(encoding='ut
 signal_validator = (root / 'tools/verify-wazig/check-signal-evidence.py').read_text(encoding='utf-8')
 for gate in ['linked-chats', 'history', 'mark-read', 'media', 'react', 'send-text', 'send-file', 'live-events', 'limited', 'captcha', 'archive-unsupported']:
     assert gate in signal_journey and gate in signal_validator, gate
-for name in ['INDEX.md', 'RULE-MAP.md']:
+for name in ['RULE-MAP.md']:
     assert '(features/signal.md)' in (skill / name).read_text(encoding='utf-8')
 assert 'feature=signal' in signal and 'Invoke-SignalJourney' in runner
-assert 'signal.ps1' in runner and '[switch]$Signal' in harness
-assert '--signal' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '"signal"' in workflow and "matrix.feature == 'signal'" in workflow
-assert 'check-signal-evidence.py' in validator
-assert '.claude/skills/verify-wazig/features/signal.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert entries['signal']['library'] == 'signal.ps1' and 'signal' in {row['hub'] for row in journeys}
+assert 'signal' in {row['hub'] for row in journeys}
+assert 'signal' in options and entries['signal']['evidence']
+assert entries['signal']['validator']['file'] == 'check-signal-evidence.py'
+assert '.claude/skills/verify-wazig/features/signal.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 print(f'MAP VERIFIED: {len(features)} complete feature entries, workflow/index parity, {len(coverage_ids)} coverage dispositions, source labels, stable controls, bounded chat-switch journey and GitHub triggers')
 
 icons_map = (skill / 'features/workspace-icons.md').read_text(encoding='utf-8')
 assert 'workspace icon' in icons_map
-assert "'workspace-icons'" in runner and 'Invoke-WorkspaceIconsJourney $session' in runner
-assert '--workspace-icons' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '"workspace-icons"' in workflow and "matrix.feature == 'workspace-icons'" in workflow
+assert entries['workspace-icons']['script'] == 'journey-workspace-icons.ps1' and 'Invoke-WorkspaceIconsJourney $session' in runner
+assert 'workspace-icons' in {row['hub'] for row in journeys}
+assert 'workspace-icons' in options and entries['workspace-icons']['evidence']
 assert 'check_pixels(folder)' in validator
-assert '.claude/skills/verify-wazig/features/workspace-icons.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert '.claude/skills/verify-wazig/features/workspace-icons.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 for artifact in ['workspace-icons-list', 'badge-icon-', 'workspace-icons-pixels.json']:
     assert artifact in (root / 'tools/verify-wazig/check-workspace-icons.py').read_text(encoding='utf-8')
 print('WORKSPACE ICON MAP VERIFIED: dispatch, synthetic team icons, screenshot pixels and surviving cache evidence')
@@ -169,27 +232,27 @@ telegram_journey = (root / 'tools/verify-wazig/telegram.ps1').read_text(encoding
 telegram_validator = (root / 'tools/verify-wazig/check-telegram-evidence.py').read_text(encoding='utf-8')
 for gate in ['linked-chats', 'history', 'mark-read', 'media', 'react', 'reply', 'send-text', 'send-file', 'live-events', 'limited', 'archive-unsupported']:
     assert gate in telegram_journey and gate in telegram_validator, gate
-for name in ['INDEX.md', 'RULE-MAP.md']:
+for name in ['RULE-MAP.md']:
     assert '(features/telegram.md)' in (skill / name).read_text(encoding='utf-8')
 assert 'feature=telegram' in telegram and 'Invoke-TelegramJourney' in runner
-assert 'telegram.ps1' in runner and '[switch]$Telegram' in harness
-assert '--telegram' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '"telegram"' in workflow and "matrix.feature == 'telegram'" in workflow
-assert 'check-telegram-evidence.py' in validator
-assert '.claude/skills/verify-wazig/features/telegram.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert entries['telegram']['library'] == 'telegram.ps1' and 'telegram' in {row['hub'] for row in journeys}
+assert 'telegram' in {row['hub'] for row in journeys}
+assert 'telegram' in options and entries['telegram']['evidence']
+assert entries['telegram']['validator']['file'] == 'check-telegram-evidence.py'
+assert '.claude/skills/verify-wazig/features/telegram.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 print('TELEGRAM MAP VERIFIED: prelinked hub, messaging journey, CI wiring and indexed evidence')
 
 notrap = (skill / 'features/notrap.md').read_text(encoding='utf-8')
 notrap_journey = (root / 'tools/verify-wazig/notrap.ps1').read_text(encoding='utf-8')
 notrap_validator = (root / 'tools/verify-wazig/check-notrap-evidence.py').read_text(encoding='utf-8')
 assert 'feature=notrap' in notrap and 'Invoke-NotrapJourney $session' in runner
-assert 'notrap.ps1' in runner and '[switch]$Notrap' in harness
-assert '--notrap' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '"notrap"' in workflow and "matrix.feature == 'notrap'" in workflow
+assert entries['notrap']['library'] == 'notrap.ps1' and 'notrap' in {row['hub'] for row in journeys}
+assert 'notrap' in {row['hub'] for row in journeys}
+assert 'notrap' in options and entries['notrap']['evidence']
 assert 'run-name: verify-wazig ${{ inputs.feature' in workflow
-assert 'check-notrap-evidence.py' in validator
-assert '.claude/skills/verify-wazig/features/notrap.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
-for name in ['INDEX.md', 'RULE-MAP.md']:
+assert entries['notrap']['validator']['file'] == 'check-notrap-evidence.py'
+assert '.claude/skills/verify-wazig/features/notrap.md' in marker_namespace['PUBLIC_SKILL_PATHS']
+for name in ['RULE-MAP.md']:
     assert '(features/notrap.md)' in (skill / name).read_text(encoding='utf-8')
 for gate in ['startup-fallback', 'every-view-escape-alt']:
     assert gate in notrap_journey and gate in notrap_validator, gate
@@ -205,10 +268,10 @@ reaction_journey = (root / 'tools/verify-wazig/reactions.ps1').read_text(encodin
 for artifact in ['react-requests.jsonl', 'reaction-clicks.json']:
     assert artifact in reaction_journey and artifact in validator, artifact
 assert 'feature=reactions' in reactions and 'Invoke-ReactionsJourney $session' in runner
-assert '"reactions"' in workflow and '"menus"' in workflow
-assert "matrix.feature == 'reactions'" in workflow
-assert '--reactions' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '.claude/skills/verify-wazig/features/reactions.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert 'reactions' in options and 'menus' in options
+assert entries['reactions']['evidence']
+assert 'reactions' in {row['hub'] for row in journeys}
+assert '.claude/skills/verify-wazig/features/reactions.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 assert "'reaction_laugh'" in reaction_journey and '0x1f602' in reaction_journey
 assert '[VerifyMenus]::Click' in reaction_journey and "'#32768'" in reaction_journey
 print('REACTIONS MAP VERIFIED: real mouse journey, exact hub emoji evidence and PR matrix')
@@ -216,27 +279,28 @@ print('REACTIONS MAP VERIFIED: real mouse journey, exact hub emoji evidence and 
 threads = (root / 'tools/verify-wazig/slack-threads.ps1').read_text(encoding='utf-8')
 for artifact in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart', 'restart.json']:
     assert artifact in threads, artifact
-assert 'slack-threads' in workflow and "matrix.feature == 'slack-threads'" in workflow
-assert 'check-slack-threads-evidence.py' in validator
+assert 'slack-threads' in options and entries['slack-threads']['evidence']
+assert entries['slack-threads']['validator']['file'] == 'check-slack-threads-evidence.py'
 assert 'slack_threads.parent_reply_line' in threads and 'WAZIG_VERIFY_RESTART' in threads
-assert '--slack-threads' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+assert 'slack-threads' in {row['hub'] for row in journeys}
 print('SLACK THREADS MAP VERIFIED: synthetic hub, keyboard journey, read-only measurements and restart')
 
 archive_journey = (root / 'tools/verify-wazig/hub-archive.ps1').read_text(encoding='utf-8')
 archive_validator = (root / 'tools/verify-wazig/check-hub-archive-evidence.py').read_text(encoding='utf-8')
-for name in ['INDEX.md', 'RULE-MAP.md']:
+for name in ['RULE-MAP.md']:
     assert '(features/hub-archive.md)' in (skill / name).read_text(encoding='utf-8')
 assert 'feature=hub-archive' in (skill / 'features/hub-archive.md').read_text(encoding='utf-8')
 assert 'Invoke-HubArchiveJourney $session $messages $start' in runner
 assert 'Wait-HubArchive $session $messages 1' in runner
 assert '120363000000000001@g.us`t1`t2026-10-10T10:00:00Z' in runner
-assert runner.index("Copy-Item (Join-Path $messages 'archive-state.txt')") < runner.index('$app = [Diagnostics.Process]::Start($start)')
-assert '[switch]$HubArchive' in harness and "--hub-archive" in harness
-assert '--hub-archive' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '"hub-archive"' in workflow and "matrix.feature == 'hub-archive'" in workflow
+assert runner.index('if ($journey.prepare)') < runner.index('$app = [Diagnostics.Process]::Start($start)')
+assert "Copy-Item (Join-Path $messages 'archive-state.txt')" in (registry_path.parent / entries['hub-archive']['prepare']).read_text(encoding='utf-8')
+assert 'hub-archive' in {row['hub'] for row in journeys} and 'hub-archive' in {row['hub'] for row in journeys}
+assert 'hub-archive' in {row['hub'] for row in journeys}
+assert 'hub-archive' in options and entries['hub-archive']['evidence']
 assert 'src/archive_rules.zig' in workflow
-assert 'check-hub-archive-evidence.py' in validator
-assert '.claude/skills/verify-wazig/features/hub-archive.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert entries['hub-archive']['validator']['file'] == 'check-hub-archive-evidence.py'
+assert '.claude/skills/verify-wazig/features/hub-archive.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 for artifact in ['legacy-archive-state.txt', 'restart-incoming.json', 'restart.json', 'archive-legacy-done.txt', 'archive-state.txt', '.requests.json']:
     assert artifact in runner + archive_journey and artifact in archive_validator, artifact
 for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages 2', 'Show archived chats', 'Show inbox chats', 'Quit Messages', 'Get-FileHash']:
@@ -248,16 +312,16 @@ print('HUB ARCHIVE MAP VERIFIED: legacy seed, archive request, keep state, same-
 palette_archived_map = (skill / 'features/palette-archived.md').read_text(encoding='utf-8')
 palette_archived_journey = (root / 'tools/verify-wazig/palette-archived.ps1').read_text(encoding='utf-8')
 palette_archived_validator = (root / 'tools/verify-wazig/check-palette-archived-evidence.py').read_text(encoding='utf-8')
-for name in ['INDEX.md', 'RULE-MAP.md']:
+for name in ['RULE-MAP.md']:
     assert '(features/palette-archived.md)' in (skill / name).read_text(encoding='utf-8')
 assert 'feature=palette-archived' in palette_archived_map
-assert 'Invoke-PaletteArchivedJourney $session' in runner and 'palette-archived.ps1' in runner
-assert "elseif ($Feature -eq 'palette-archived') { 3 }" in runner
-assert '[switch]$PaletteArchived' in harness and "--palette-archived" in harness
-assert '--palette-archived' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '"palette-archived"' in workflow and "matrix.feature == 'palette-archived'" in workflow
-assert "session['feature'] == 'palette-archived'" in validator and 'check-palette-archived-evidence.py' in validator
-assert '.claude/skills/verify-wazig/features/palette-archived.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert 'Invoke-PaletteArchivedJourney $session' in runner and entries['palette-archived']['library'] == 'palette-archived.ps1'
+assert entries['palette-archived']['chats'] == 3
+assert 'palette-archived' in {row['hub'] for row in journeys} and 'palette-archived' in {row['hub'] for row in journeys}
+assert 'palette-archived' in {row['hub'] for row in journeys}
+assert 'palette-archived' in options and entries['palette-archived']['evidence']
+assert entries['palette-archived']['validator'] and entries['palette-archived']['validator']['file'] == 'check-palette-archived-evidence.py'
+assert '.claude/skills/verify-wazig/features/palette-archived.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 for fragment in ["'1064'", "'1072'", 'Read-ListLabels', "'%i'", 'view_order', 'selected.id', '/v1/wazig/archive', '/v1/wazig/messages', 'archived=true', 'Get-ArchivedPaletteLabel']:
     assert fragment in palette_archived_journey, fragment
 for forbidden in ['WM_COMMAND', 'SendMessage', 'PostMessage', 'Start-Sleep']:
@@ -269,28 +333,28 @@ print('PALETTE ARCHIVED MAP VERIFIED: synthetic hub, every-view palette queries,
 window = (skill / 'features/window.md').read_text(encoding='utf-8')
 window_journey = (root / 'tools/verify-wazig/window.ps1').read_text(encoding='utf-8')
 assert 'feature=window' in window and 'Invoke-WindowJourney $session $start $app' in runner
-assert 'window.ps1' in runner and "if ($Feature -ne 'window')" in runner
-assert '"window"' in workflow and "matrix.feature == 'window'" in workflow
-assert "session['feature'] == 'window'" in validator
+assert entries['window']['library'] == 'window.ps1' and not entries['window']['maximize']
+assert 'window' in options and entries['window']['evidence']
+assert entries['window']['validator']
 for fragment in ['IsZoomed', 'GetWindowPlacement', 'MonitorFromWindow', 'GetMonitorInfo', "'%{F4}'", '--update-relaunch', 'WAZIG_VERIFY_RESTART', 'session.json', 'window.json']:
     assert fragment in window_journey, fragment
-assert '.claude/skills/verify-wazig/features/window.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert '.claude/skills/verify-wazig/features/window.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 assert '(features/window.md)' in (skill / 'RULE-MAP.md').read_text(encoding='utf-8')
 print('WINDOW MAP VERIFIED: unforced startup, real keyboard restore/close, same-profile relaunch and zoomed evidence')
 
 repaint = (root / 'tools/verify-wazig/repaint.ps1').read_text(encoding='utf-8')
-assert 'Invoke-RepaintJourney $session' in runner and '[switch]$Repaint' in harness
-assert '--repaint' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '"repaint"' in workflow and "matrix.feature == 'repaint'" in workflow
+assert 'Invoke-RepaintJourney $session' in runner and 'repaint' in {row['hub'] for row in journeys}
+assert 'repaint' in {row['hub'] for row in journeys}
+assert 'repaint' in options and entries['repaint']['evidence']
 for artifact in ['paints.json', 'before.chats.json', 'after.chats.json']:
     assert artifact in repaint and artifact in validator, artifact
 assert 'Send-Keys' not in repaint
 assert '$clock.Elapsed.TotalSeconds -ge 60' in repaint
 assert 'full repaints in 60 s, limit 3' in repaint
 voice = (root / 'tools/verify-wazig/voice.ps1').read_text(encoding='utf-8')
-assert 'Invoke-VoiceJourney $session $messages' in runner and '[switch]$Voice' in harness
-assert '--voice' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '"voice"' in workflow and "matrix.feature == 'voice'" in workflow
+assert 'Invoke-VoiceJourney $session $messages' in runner and 'voice' in {row['hub'] for row in journeys}
+assert 'voice' in {row['hub'] for row in journeys}
+assert 'voice' in options and entries['voice']['evidence']
 for artifact in ['voice-checks.json', 'transcripts.json']:
     assert artifact in voice and artifact in validator, artifact
 print('VOICE MAP VERIFIED: voice notes, cached transcripts, scroll, expand and partial-repaint pixel checks')
@@ -300,11 +364,11 @@ archive_map = (skill / 'features/slack-archive.md').read_text(encoding='utf-8')
 archive_journey = (root / 'tools/verify-wazig/slack-archive.ps1').read_text(encoding='utf-8')
 archive_validator = (root / 'tools/verify-wazig/check-slack-archive-evidence.py').read_text(encoding='utf-8')
 assert 'feature=slack-archive' in archive_map
-assert 'Invoke-SlackArchiveJourney $session' in runner and '[switch]$SlackArchive' in harness
-assert '--slack-archive' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '"slack-archive"' in workflow and "matrix.feature == 'slack-archive'" in workflow
-assert 'check-slack-archive-evidence.py' in validator
-for name in ['INDEX.md', 'RULE-MAP.md']:
+assert 'Invoke-SlackArchiveJourney $session' in runner and 'slack-archive' in {row['hub'] for row in journeys}
+assert 'slack-archive' in {row['hub'] for row in journeys}
+assert 'slack-archive' in options and entries['slack-archive']['evidence']
+assert entries['slack-archive']['validator']['file'] == 'check-slack-archive-evidence.py'
+for name in ['RULE-MAP.md']:
     assert '(features/slack-archive.md)' in (skill / name).read_text(encoding='utf-8')
 for artifact in ['archived', 'incoming', 'restart', 'unarchived']:
     assert artifact in archive_journey and artifact in archive_validator, artifact
@@ -316,19 +380,19 @@ assert '$restarted = @(Invoke-SlackArchiveJourney $session $messages $start)' in
 assert '$restarted.Count -eq 1 -and $restarted[0] -is [Diagnostics.Process] -and' in runner
 assert '$restarted[0].Id -eq $session.pid' in runner and '$app = $restarted[0]' in runner
 assert '$app.MainWindowHandle -eq [IntPtr](Get-Window $Session).Current.NativeWindowHandle' in archive_journey
-assert '.claude/skills/verify-wazig/features/slack-archive.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert '.claude/skills/verify-wazig/features/slack-archive.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 print('SLACK ARCHIVE MAP VERIFIED: unified fixture, three deliveries, restart, unarchive and no archive endpoint requests')
 paste_journey = (root / 'tools/verify-wazig/paste-image.ps1').read_text(encoding='utf-8')
 paste_validator = (root / 'tools/verify-wazig/check-paste-image-evidence.py').read_text(encoding='utf-8')
-for name in ['INDEX.md', 'RULE-MAP.md']:
+for name in ['RULE-MAP.md']:
     assert '(features/paste-image.md)' in (skill / name).read_text(encoding='utf-8')
 assert 'Invoke-PasteImageJourney $session' in runner and 'paste-image.ps1' in runner
-assert "'paste-image'" in runner and '[switch]$PasteImage' in harness
-assert '--paste-image' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '"paste-image"' in workflow and "matrix.feature == 'paste-image'" in workflow
+assert entries['paste-image']['script'] == 'journey-paste-image.ps1' and 'paste-image' in {row['hub'] for row in journeys}
+assert 'paste-image' in {row['hub'] for row in journeys}
+assert 'paste-image' in options and entries['paste-image']['evidence']
 assert 'src/paste_image.zig' in workflow
-assert 'check-paste-image-evidence.py' in validator
-assert '.claude/skills/verify-wazig/features/paste-image.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert entries['paste-image']['validator']['file'] == 'check-paste-image-evidence.py'
+assert '.claude/skills/verify-wazig/features/paste-image.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 for artifact in ['sizes.json', 'decoded', 'paste-uploads/', 'bridge-requests.jsonl']:
     assert artifact in paste_journey + harness + (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
     assert artifact in paste_validator
@@ -362,16 +426,17 @@ print('PASTE IMAGE MAP VERIFIED: native clipboard, decoded uploads, four provide
 
 for item in ['link-previews.ps1', 'check-link-previews-evidence.py']:
     assert (root / 'tools/verify-wazig' / item).is_file()
-assert '"link-previews"' in workflow and "matrix.feature == 'link-previews'" in workflow
-assert '--link-previews' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert 'check-link-previews-evidence.py' in validator
+assert 'link-previews' in options and entries['link-previews']['evidence']
+assert 'link-previews' in {row['hub'] for row in journeys}
+assert entries['link-previews']['validator']['file'] == 'check-link-previews-evidence.py'
 print('LINK PREVIEWS MAP VERIFIED: dispatch, PR matrix, hub mode and surviving evidence')
 
 passage = (root / 'tools/verify-wazig/passage-copy.ps1').read_text(encoding='utf-8')
-for value in ['Invoke-PassageCopyJourney $session', "'passage-copy'", '-PassageCopy:']:
-    assert value in runner, value
-for value in ['"passage-copy"', "matrix.feature == 'passage-copy'"]:
-    assert value in workflow, value
+assert 'Invoke-PassageCopyJourney $session' in runner
+assert entries['passage-copy']['hub'] == 'passage-copy'
+assert entries['passage-copy']['hub_handler']['class'] == 'PassageCopyHandler'
+assert entries['passage-copy']['chats'] == 2
+assert entries['passage-copy']['pr'] and entries['passage-copy']['evidence']
 for value in ['clipboard.json', 'passage-fixture.json', 'held drag beyond canvas 1024 bottom']:
     assert value in passage and value in validator, value
 for value in ['[VerifyPassage]::Button', '[VerifyMenus]::Hover', "Send-Keys $Session '^c'", '$actual -ceq $expected']:
@@ -381,14 +446,25 @@ for value in ['$doubleClickDelay = [int][VerifyPassage]::GetDoubleClickTime() + 
               'Assert-That (-not (Test-Path $reactionLog) -or (Get-Item $reactionLog).Length -eq 0)']:
     assert value in passage, value
 assert '[DllImport("user32.dll")] public static extern uint GetDoubleClickTime();' in (root / 'tools/verify-wazig/passage-copy.cs').read_text(encoding='utf-8')
-assert '--passage-copy' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
-assert '.claude/skills/verify-wazig/features/passage-copy.md' in (root / 'tools/check_private_markers.py').read_text(encoding='utf-8')
+assert hub_parser.parse_args(['--passage-copy', '--port-file', 'port', '--log', 'log']).mode == 'passage-copy'
+assert '.claude/skills/verify-wazig/features/passage-copy.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 assert not re.search(r'\$(?:\w+\.)?(?:messages|rows|before|edgeBefore|after)\[\d', passage, re.I), 'passage targets must use PASSAGE ids, not array positions'
 for value in ["$messages['PASSAGE-2']", "$messages['PASSAGE-5']", "$edgeMessages['PASSAGE-6']", "$heldMessages['PASSAGE-7']", '$_.MsgID -ceq "PASSAGE-$index"', '[VerifyPassage]::Wheel($Session.pid, 120)']:
     assert value in passage, value
-passage_validator = validator.split("if session['feature'] == 'passage-copy':", 1)[1].split("if session['feature'] == 'reactions':", 1)[0]
+passage_validator = (registry_path.parent / entries['passage-copy']['validator']['file']).read_text(encoding='utf-8')
 assert not re.search(r"\['(?:before|after|messages)'\]\[\d", passage_validator), 'passage evidence must resolve control messages by id'
 for value in ["passage_messages(check['before'])", "passage_messages(check['after'])", "passage_messages(held['messages'])", "fixture_messages[f'PASSAGE-{index}']", 'timestamps == sorted(timestamps)']:
     assert value in passage_validator, value
 assert 'self.respond(200, list(reversed(passage_rows(chat)))' in (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8'), 'passage message endpoint must be newest-first; clipboard fixture stays chronological'
 print('PASSAGE COPY MAP VERIFIED: id-based targets and evidence, chronological clipboard, newest-first wire rows, real drag and held-edge scrolling on both providers')
+bulk = entries['archive-bulk']
+assert bulk['pr'] and bulk['provider'] and not bulk['hub']
+assert bulk['prepare'] == entries['archive']['prepare'] == 'prepare-archive.ps1'
+bulk_journey = (registry_path.parent / bulk['script']).read_text(encoding='utf-8')
+for required in ["Send-Keys $session '^a'", "Send-Keys $session '^e'", '2 chats selected',
+                 '$state.pending_archives -eq 0', '$state.chat_count -eq 0 -and $inbox.Count -eq 0',
+                 "$selection[0].GetText(-1) -ceq 'hello'", 'Save-Screen $session text-selected']:
+    assert required in bulk_journey, required
+assert "'archive-bulk'" in harness.split('function Save-Screen(', 1)[1].split('function Invoke-Doctor(', 1)[0]
+assert 'check-chat-rows.ps1' in workflow
+print(f'JOURNEY REGISTRY VERIFIED: {len(journeys)} journeys, maps, scripts, hub switches, evidence and plan matrix')

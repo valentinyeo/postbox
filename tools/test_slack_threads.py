@@ -96,7 +96,11 @@ class SlackThreadsTests(unittest.TestCase):
 
     def test_single_chat_baseline_and_native_edit_keyboard_routing(self):
         runner = (ROOT / 'tools/verify-wazig/run.ps1').read_text()
-        self.assertIn("elseif ($Feature -eq 'slack-threads') { 1 }", runner)
+        registry = json.loads((ROOT / 'tools/verify-wazig/journeys.json').read_text())
+        entry = next(row for row in registry['journeys'] if row['name'] == 'slack-threads')
+        self.assertEqual(entry['chats'], 1)
+        self.assertIn('$journey.chats', runner)
+        runner += (ROOT / 'tools/verify-wazig' / entry['script']).read_text()
         source = (ROOT / 'src/main.zig').read_text()
         keyboard = source.split('fn handleKeyboard(', 1)[1].split('fn jumpToLatestMessage(', 1)[0]
         self.assertLess(keyboard.index('sendMessageFrom(a, true);'), keyboard.index('if (a.thread_compose != null and focus == a.thread_compose.?) return false;'))

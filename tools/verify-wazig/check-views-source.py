@@ -179,8 +179,11 @@ def check_integration():
 
 def check_journey():
     runner = read('tools/verify-wazig/run.ps1')
-    require(runner, ["'hub', 'hub-archive', 'palette-archived', 'slack-sort', 'slack-archive', 'slack-threads', 'link-previews', 'views', 'workspace-icons', 'signal', 'telegram'", '-Views:($Feature -eq \'views\')',
-                     '. "$PSScriptRoot/views.ps1"', 'Invoke-ViewsJourney $session $messages $start'])
+    journeys = json.loads(read('tools/verify-wazig/journeys.json'))['journeys']
+    entry = next(row for row in journeys if row['name'] == 'views')
+    assert entry['hub'] == 'views' and entry['chats'] == 8 and entry['pr'] and entry['evidence']
+    require(runner, ['journeys.json', '-Mode $journey.hub', '. (Join-Path $PSScriptRoot $journey.script)'])
+    require(read('tools/verify-wazig/' + entry['script']), ['. "$PSScriptRoot/views.ps1"', 'Invoke-ViewsJourney $session $messages $start'])
     journey = read('tools/verify-wazig/views.ps1')
     require(journey, ['Assert-AccountView', "@('personal', 'business', 'T0ABC123', 'T0DEF456')", 'Where-Object view_account -ne $Account',
                       "Send-Keys $Session '^1'", "Send-Keys $Session '^2'", "Send-Keys $Session '^{TAB}'", "Send-Keys $Session '^+{TAB}'",
@@ -196,16 +199,17 @@ def check_journey():
     assert [provider for provider, _, _ in accounts].count('slack') == 2
     assert len({account for _, account, _ in accounts}) == 4
     require(read('tools/verify-wazig/fake-hub.py'), ['Verification Shared', 'range(2)', 'source_account=view_account(row)',
-                                                  'class ViewsHandler(Handler)', 'bridge.Handler.respond(self', "modes.add_argument('--views'"])
+                                                  'class ViewsHandler(Handler)', 'bridge.Handler.respond(self', "modes.add_argument('--' + mode"])
     evidence = read('tools/verify-wazig/check-views-evidence.py')
     require(evidence, ['assert partition == all_keys', 'assert identities(inbox) == all_keys', 'reverse=True',
                        'source_account', "other['messages']", "restart['new_pid'] == session['pid']", "['root', 'id', 'sha256']",
                        "capture(f'restart-{number}')", "'view-order.txt'", "assert len(set(images)) == 4"])
     require(evidence, ["== expected + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]",
                        "== order + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]", "+ ['telegram:telegram', 'signal:signal']"])
-    require(read('tools/verify-wazig/check-evidence.py'), ["session['feature'] == 'views'", 'check-views-evidence.py'])
+    require(read('tools/verify-wazig/check-evidence.py'), ["row['name'] == session['feature']", "journey['validator']"])
+    require(read('tools/verify-wazig/' + entry['validator']['file']), ['check-views-evidence.py'])
     workflow = read('.github/workflows/verify.yml')
-    require(workflow, ['hub, hub-archive, palette-archived, slack-sort, slack-archive, slack-threads, link-previews, views, workspace-icons, signal, telegram, notrap, repaint, archive', '"hub","hub-archive","palette-archived","slack-sort","slack-archive","slack-threads","link-previews","views","workspace-icons","signal","telegram","notrap","text-comparison","repaint"', "matrix.feature == 'views'",
+    require(workflow, ['fromJSON(needs.plan.outputs.matrix)', 'if: matrix.evidence',
                        'src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig'])
     for path in (root / 'tools/verify-wazig').glob('*.py'):
         ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
@@ -357,7 +361,9 @@ def check_workspace_names():
         require(validator, [f"'{check_id}'"])
     require(journey, ['Read-ListLabels $list', 'VerifyMenus]::Hover', 'tooltips_class32', '$tip.Current.Name',
                       'Save-Screen $Session workspace-palette', 'Save-Screen $Session "inbox-tooltip-$team"'])
-    require(read('tools/verify-wazig/run.ps1'), ['$result.checks', "'workspace-names.json'"])
+    require(read('tools/verify-wazig/run.ps1'), ['$result.checks', '$journey.result_checks'])
+    entry = next(row for row in json.loads(read('tools/verify-wazig/journeys.json'))['journeys'] if row['name'] == 'views')
+    assert entry['result_checks'] == 'workspace-names.json'
     sys.dont_write_bytecode = True
     spec = importlib.util.spec_from_file_location('workspace_names_fixture', root / 'tools/verify-wazig/fake-hub.py')
     fixture = importlib.util.module_from_spec(spec)

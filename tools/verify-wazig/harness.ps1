@@ -252,29 +252,15 @@ function Invoke-Doctor($Session) {
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
-function Start-FakeBridge([string]$Evidence, [string]$Root, [switch]$Unified, [switch]$SlackSort, [switch]$SlackArchive, [switch]$SlackThreads, [switch]$LinkPreviews, [switch]$Views, [switch]$WorkspaceIcons, [switch]$Signal, [switch]$Telegram, [switch]$Notrap, [switch]$PassageCopy, [switch]$Reactions, [switch]$HubArchive, [switch]$PaletteArchived, [switch]$Repaint, [switch]$MixedLid, [switch]$PasteImage, [switch]$Voice) {
+function Start-FakeBridge([string]$Evidence, [string]$Root, [string]$Mode) {
+    $registry = Get-Content (Join-Path $PSScriptRoot 'journeys.json') -Raw | ConvertFrom-Json
+    Assert-That ($Mode -in @($registry.journeys.hub | Where-Object { $_ })) "Unknown fake bridge mode: $Mode"
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
-    $script = if ($Unified) { 'fake-hub.py' } else { 'fake-wa-bridge.py' }
+    $script = if ($Mode -eq 'legacy') { 'fake-wa-bridge.py' } else { 'fake-hub.py' }
     $start.ArgumentList.Add((Join-Path $PSScriptRoot $script))
-    if ($SlackSort) { $start.ArgumentList.Add('--slack-sort') }
-    if ($SlackArchive) { $start.ArgumentList.Add('--slack-archive') }
-    if ($SlackThreads) { $start.ArgumentList.Add('--slack-threads') }
-    if ($LinkPreviews) { $start.ArgumentList.Add('--link-previews') }
-    if ($Views) { $start.ArgumentList.Add('--views') }
-    if ($WorkspaceIcons) { $start.ArgumentList.Add('--workspace-icons') }
-    if ($Signal) { $start.ArgumentList.Add('--signal') }
-    if ($Telegram) { $start.ArgumentList.Add('--telegram') }
-    if ($Notrap) { $start.ArgumentList.Add('--notrap') }
-    if ($PassageCopy) { $start.ArgumentList.Add('--passage-copy') }
-    if ($Reactions) { $start.ArgumentList.Add('--reactions') }
-    if ($PasteImage) { $start.ArgumentList.Add('--paste-image') }
-    if ($HubArchive) { $start.ArgumentList.Add('--hub-archive') }
-    if ($PaletteArchived) { $start.ArgumentList.Add('--palette-archived') }
-    if ($Repaint) { $start.ArgumentList.Add('--repaint') }
-    if ($Voice) { $start.ArgumentList.Add('--voice') }
-    if ($MixedLid) { $start.ArgumentList.Add('--mixed-lid') }
+    if ($Mode -ne 'legacy') { $start.ArgumentList.Add("--$Mode") }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')
