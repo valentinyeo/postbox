@@ -2599,7 +2599,8 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         chat.archived = if (a.archive_state) |state| state.isArchived(chat_key.of(&chat), getBool(object, "archived")) else getBool(object, "archived");
         chat.provider_archived = getBool(object, "archived");
         for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
-            if (chat.provider == .whatsapp and std.mem.eql(u8, pending.jid.slice(), chat.jid.slice())) chat.archived = !pending.should_unarchive;
+            const pending_key = chat_key.Key{ .provider = .whatsapp, .account = chat.account.slice(), .id = pending.jid.slice() };
+            if (chat.provider == .whatsapp and chat_key.Key.eql(chat_key.of(&chat), pending_key)) chat.archived = !pending.should_unarchive;
         }
         if (!messenger_view.archiveMatches(a.show_archived, a.include_archived, activeChatView(a) == .all, a.unread_only, chat.archived, chat.unread)) continue;
         a.chats[a.chat_count] = chat;
