@@ -62,6 +62,13 @@ pub const amoled: Palette = .{
     .@"error" = hex(0xffb4ab),
 };
 
+pub fn selectionColors(palette: Palette, from_me: bool) struct { fill: u32, text: u32 } {
+    return if (from_me)
+        .{ .fill = palette.primary, .text = palette.on_primary }
+    else
+        .{ .fill = palette.secondary_container, .text = palette.on_secondary_container };
+}
+
 pub const Choice = enum(u32) { green = 0, amoled = 1 };
 
 pub var current: *const Palette = &amoled;
@@ -137,6 +144,20 @@ test "IGSH-461 selected row contrast and rectangle radius on every theme" {
         try std.testing.expect(contrastRatio(selected_fill, palette.surface_container_low) >= 1.15);
         try std.testing.expect(contrastRatio(palette.on_surface, selected_fill) >= 4.5);
         try std.testing.expect(contrastRatio(palette.on_surface_variant, selected_fill) >= 4.5);
+    }
+}
+
+test "IGSH-667 selection fill is distinguishable at 1.3:1 and text readable at 4.5:1 on every theme and direction" {
+    const palettes = [_]Palette{ green, amoled };
+    try std.testing.expectEqual(@typeInfo(Choice).@"enum".fields.len, palettes.len);
+    for (palettes) |palette| {
+        for ([_]bool{ false, true }) |from_me| {
+            const colors = selectionColors(palette, from_me);
+            const bubble = if (from_me) palette.primary_container else palette.surface_container_high;
+            try std.testing.expect(colors.fill != bubble);
+            try std.testing.expect(contrastRatio(colors.fill, bubble) >= 1.3);
+            try std.testing.expect(contrastRatio(colors.text, colors.fill) >= 4.5);
+        }
     }
 }
 

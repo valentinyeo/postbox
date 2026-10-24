@@ -62,6 +62,32 @@ function Get-PassagePoint($Session, $Message, [string]$Shot) {
     return @([int]($point[0] + $screen.Left), [int]($point[1] + $screen.Top))
 }
 
+function Assert-PassageHighlight($Session, $Messages, $Canvas, [string]$Name, [string]$Id) {
+    $screen = [Windows.Forms.SystemInformation]::VirtualScreen
+    $before = Read-ScreenshotPixels (Join-Path $Session.evidence "$Name-before.png")
+    $after = Read-ScreenshotPixels (Join-Path $Session.evidence "$Name-after.png")
+    Assert-That ($before.width -eq $after.width -and $before.height -eq $after.height -and $before.stride -eq $after.stride) "$Name passage screenshots must have matching dimensions"
+    $message = $Messages[$Id]
+    Assert-That (Test-PassageVisible $message $Canvas) "$Name $Id highlight must be fully visible"
+    $painted = (Get-PassageMessages (Read-Control $Session messages).messages)[$Id]
+    Assert-That (($message.bubble -join ',') -eq ($painted.bubble -join ',')) "$Name $Id must not move during the partial drag"
+    $b = $message.bubble
+    $metric = [VerifyPassage]::Highlight($before.bytes, $after.bytes, $before.stride, ($Canvas.left + $b[0] - $screen.Left), ($Canvas.top + $b[1] - $screen.Top), ($Canvas.left + $b[2] - $screen.Left), ($Canvas.top + $b[3] - $screen.Top), $Canvas.dpi)
+    $metric | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $Session.evidence "$Name-$Id-highlight.json")
+    foreach ($phase in @('before', 'after')) {
+        $image = [Drawing.Bitmap]::new((Join-Path $Session.evidence "$Name-$phase.png"))
+        try {
+            $rect = [Drawing.Rectangle]::new($metric.left, $metric.top, ($metric.right - $metric.left), ($metric.bottom - $metric.top))
+            $crop = $image.Clone($rect, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            try { $crop.Save((Join-Path $Session.evidence "$Name-$Id-$phase-row.png"), [Drawing.Imaging.ImageFormat]::Png) } finally { $crop.Dispose() }
+        } finally { $image.Dispose() }
+    }
+    $direction = if ($message.from_me) { 'own' } else { 'incoming' }
+    $diagnostic = '{0} {1} {2} message highlight not visible: bubble=#{3:X6} fill=#{4:X6} pixels={5} required={6} contrast={7:F3}:1' -f $Name, $Id, $direction, $metric.bubble, $metric.fill, $metric.pixels, $metric.required, $metric.contrast
+    Assert-That ($metric.fill -ne $metric.bubble -and $metric.contrast -ge 1.3) "$diagnostic; requires at least 1.3:1 fill contrast"
+    Assert-That ($metric.pixels -ge $metric.required) "$diagnostic; requires enough highlight-fill pixels changed from unselected bubble pixels"
+}
+
 function Invoke-PassageCopyJourney($Session) {
     $previousDpi = [VerifyPassage]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
     Assert-That ($previousDpi -ne [IntPtr]::Zero) 'Cannot use physical pixels for passage input and screenshots'
@@ -117,6 +143,10 @@ function Invoke-PassageCopyJourney($Session) {
             ConvertTo-Json -InputObject $checks -Depth 12 | Set-Content (Join-Path $Session.evidence 'clipboard.json')
             Save-Screen $Session "$name-after"
             Assert-That ($actual -ceq $expected) "$name passage clipboard mismatch: expected stamped partial messages 2 through 5"
+            Assert-That (@($fixture.($target.chat) | Where-Object { $_.MsgID -ceq 'PASSAGE-3' -and $_.FromMe }).Count -eq 1) "$name PASSAGE-3 must be the own-message highlight target"
+            Assert-That (@($fixture.($target.chat) | Where-Object { $_.MsgID -ceq 'PASSAGE-4' -and -not $_.FromMe }).Count -eq 1) "$name PASSAGE-4 must be an incoming highlight target"
+            Assert-PassageHighlight $Session $messages $canvas $name 'PASSAGE-4'
+            Assert-PassageHighlight $Session $messages $canvas $name 'PASSAGE-3'
             $canvas = Get-PassageCanvas $Session
             $edgeBefore = (Read-Control $Session messages).messages
             $edgeMessages = Get-PassageMessages $edgeBefore
