@@ -157,19 +157,20 @@ function Invoke-HubTelegramArchiveJourney($Session, [string]$Messages, $Start) {
     Save-Screen $Session telegram-only
     $null = Send-Keys $Session '^e'
     Wait-HubEmptyInbox $Session
-    Assert-That (@(Get-HubArchiveWrites $Session $telegram $true).Count -eq 1) 'Single Telegram Ctrl+E did not reach the hub'
+    Assert-That (@(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/archive' -and $_.body.chat -eq $telegram }).Count -eq 0) 'Single Telegram Ctrl+E must archive locally'
     Save-Screen $Session telegram-empty
     Invoke-PaletteCommand $Session 'Show archived chats'
     $null = Wait-Until { (Read-Control $Session status).chat_count -eq 5 } 'all five chats in Archive'
     Select-HubChat $Session $telegram
     $null = Send-Keys $Session '^e'
-    $null = Wait-Until { @(Get-HubArchiveWrites $Session $telegram $false).Count -eq 1 -and (Read-Control $Session status).pending_archives -eq 0 } 'explicit Telegram unarchive'
+    $null = Wait-Until { (Read-Control $Session status).chat_count -eq 4 -and (Read-Control $Session status).pending_archives -eq 0 } 'explicit local Telegram unarchive'
     Invoke-PaletteCommand $Session 'Show inbox chats'
     $null = Wait-Until { $state = Read-Control $Session status; -not $state.show_archived -and $state.chat_count -eq 1 -and $state.selected.id -eq $telegram } 'only Telegram returns after explicit unarchive'
+    Save-Screen $Session telegram-unarchived
     $null = Send-Keys $Session '^a'
     $null = Send-Keys $Session '^e'
     Wait-HubEmptyInbox $Session
-    Assert-That (@(Get-HubArchiveWrites $Session $telegram $true).Count -eq 2) 'One-row Telegram bulk Ctrl+E did not reach the hub'
+    Assert-That (@(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/archive' -and $_.body.chat -eq $telegram }).Count -eq 0) 'Telegram bulk archive and explicit unarchive must stay local'
     Save-Screen $Session telegram-bulk-empty
     $old = Get-App $Session
     $oldPid = $Session.pid
@@ -220,8 +221,8 @@ function Invoke-HubTelegramArchiveJourney($Session, [string]$Messages, $Start) {
     Invoke-RestMethod -Method Post -Uri "$($Session.bridge_url)/fixture/rearchive-enable" -Headers @{ Authorization = 'Bearer fixture-key-not-a-secret' } -Body '{}' -ContentType 'application/json' | Out-Null
     $null = Wait-Until {
         @(Get-HubArchiveWrites $Session $script:PlainNewer $true).Count -eq 2 -and
-            @(Get-HubArchiveWrites $Session $telegram $true).Count -eq 3 -and (Read-Control $Session status).pending_archives -eq 0
-    } 'both plain chats re-archived once for the newer incoming message'
+            @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/archive' -and $_.body.chat -eq $telegram }).Count -eq 0 -and (Read-Control $Session status).pending_archives -eq 0
+    } 'WhatsApp re-archived once and Telegram remains locally archived without a hub write'
     Invoke-PaletteCommand $Session 'Show inbox chats'
     Invoke-PaletteCommand $Session 'Refresh'
     Wait-HubEmptyInbox $Session
