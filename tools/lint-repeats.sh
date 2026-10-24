@@ -306,7 +306,7 @@ FNR == 1 {
     command = ""
 }
 END {
-    check_models()
+    check_ai_review()
     finish()
     exit failed ? 1 : 0
 }
