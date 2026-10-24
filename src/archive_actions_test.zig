@@ -1111,3 +1111,30 @@ test "mixed locally unarchived phone rows remain unarchived after reloading stat
         try std.testing.expect(!loaded.isArchived(key.key(), true));
     }
 }
+
+test "IGSH-681 WhatsApp archive records override provider flags without changing other providers" {
+    for ([_]Provider{ .whatsapp, .slack, .telegram, .signal }) |provider| {
+        var state = archive_rules.State{};
+        var text: [512]u8 = undefined;
+        state.parse(if (provider == .whatsapp)
+            "fixture:unarchived\t0\tbaseline\nfixture:archived\t1\tbaseline\n"
+        else
+            try std.fmt.bufPrint(&text, "{s}\tfixture\tfixture:unarchived\t0\n{s}\tfixture\tfixture:archived\n", .{ @tagName(provider), @tagName(provider) }));
+        const unarchived = chat_key.Key{ .provider = provider, .account = "fixture", .id = "fixture:unarchived" };
+        const archived = chat_key.Key{ .provider = provider, .account = "fixture", .id = "fixture:archived" };
+        const missing = chat_key.Key{ .provider = provider, .account = "fixture", .id = "fixture:missing" };
+        for ([_]bool{ true, false }) |provider_archived| {
+            try std.testing.expect(!state.isArchived(unarchived, provider_archived));
+            try std.testing.expect(!state.localArchived(unarchived));
+            try std.testing.expect(state.isArchived(archived, provider_archived));
+            try std.testing.expect(state.localArchived(archived));
+            try std.testing.expectEqual(provider_archived, state.isArchived(missing, provider_archived));
+            try std.testing.expect(!state.localArchived(missing));
+            if (provider != .whatsapp) {
+                const other = chat_key.Key{ .provider = provider, .account = "other", .id = archived.id };
+                try std.testing.expectEqual(provider_archived, state.isArchived(other, provider_archived));
+                try std.testing.expect(!state.localArchived(other));
+            }
+        }
+    }
+}
