@@ -46,6 +46,10 @@ function Invoke-VoiceProbe($Session, [string]$Name) {
     $layout = $null
     foreach ($attempt in 1..3) {
         $layout = Get-VoiceLayout $Session
+        $windowRect = (Get-Window $Session).Current.BoundingRectangle
+        [VerifyMenus]::Hover($Session.pid, [int]($windowRect.Left + $windowRect.Width / 2), [int]($windowRect.Top + 10))
+        $null = Wait-Until { (Find-Popup $Session 'tooltips_class32') -eq [IntPtr]::Zero } 'voice: app tooltips hidden before repaint comparison'
+        Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: parked mouse on title bar before $Name repaint comparison"
         [VerifyVoice]::FullRepaint($Session.pid, $handle)
         [System.Threading.Thread]::Sleep(500)
         Save-Screen $Session "$Name-full"
