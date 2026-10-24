@@ -29,7 +29,7 @@ pub fn progressStatus(out: []u8, should_unarchive: bool, total: usize, remaining
     }) catch null;
 }
 
-pub const Source = enum { shortcut, menu, control, resurface, send, kept };
+pub const Source = enum { shortcut, menu, control, send, kept };
 
 pub fn logLine(out: []u8, jid: []const u8, archived: bool, source: Source) []const u8 {
     return std.fmt.bufPrint(out, "archive: jid={s} archived={} source={s}", .{ jid, archived, @tagName(source) }) catch unreachable;
@@ -42,7 +42,7 @@ pub const Action = enum {
 
     pub fn status(self: Action) []const u8 {
         return switch (self) {
-            .archive => "Archived. Comes back on a new message",
+            .archive => "Archived",
             .keep => "Kept archived. Won't come back",
             .unarchive => "Chat unarchived",
         };
@@ -247,11 +247,6 @@ pub const State = struct {
     }
 };
 
-pub fn needsProbe(kept: bool, last_ts: []const u8, baseline_ts: []const u8) bool {
-    if (kept or last_ts.len == 0 or baseline_ts.len == 0) return false;
-    return std.mem.order(u8, last_ts, baseline_ts) == .gt;
-}
-
 pub const stamp_len = 20;
 
 pub fn archiveBaseline(out: *[stamp_len]u8, row_ts: []const u8, now_seconds: i64) []const u8 {
@@ -268,12 +263,6 @@ pub fn archiveBaseline(out: *[stamp_len]u8, row_ts: []const u8, now_seconds: i64
         day_seconds.getSecondsIntoMinute(),
     }) catch return row_ts;
     return if (std.mem.order(u8, row_ts, now) == .gt) row_ts else now;
-}
-
-pub fn shouldResurface(newest_from_me: bool, kept: bool, newest_ts: []const u8, baseline_ts: []const u8) bool {
-    if (newest_from_me or kept) return false;
-    if (newest_ts.len == 0 or baseline_ts.len == 0) return false;
-    return std.mem.order(u8, newest_ts, baseline_ts) == .gt;
 }
 
 pub fn Selection(comptime capacity: usize) type {
@@ -389,41 +378,12 @@ test "legacy migration preserves existing hub choices and scopes matches to each
     try std.testing.expect(!loaded.holdKept(second.id, false, "newest"));
 }
 
-test "a newer incoming message resurfaces an archived chat" {
-    try std.testing.expect(shouldResurface(false, false, "2026-10-10T10:30:00Z", "2026-10-10T10:24:33Z"));
-}
-
 test "the baseline is the later of the list row time and the archive moment" {
     var buffer: [stamp_len]u8 = undefined;
     const moment: i64 = 1792775400;
     try std.testing.expectEqualStrings("2026-10-23T17:10:00Z", archiveBaseline(&buffer, "2026-10-23T16:43:39Z", moment));
     try std.testing.expectEqualStrings("2026-10-23T17:10:00Z", archiveBaseline(&buffer, "", moment));
     try std.testing.expectEqualStrings("2026-10-23T18:00:00Z", archiveBaseline(&buffer, "2026-10-23T18:00:00Z", moment));
-}
-
-test "a reaction that moved the row after the archive does not bring a chat back" {
-    var buffer: [stamp_len]u8 = undefined;
-    const base = archiveBaseline(&buffer, "2026-10-23T16:43:39Z", 1792775400);
-    try std.testing.expect(needsProbe(false, "2026-10-23T17:20:00Z", base));
-    try std.testing.expect(!shouldResurface(false, false, "2026-10-23T16:43:39Z", base));
-    try std.testing.expect(!shouldResurface(false, false, "2026-10-23T17:10:00Z", base));
-    try std.testing.expect(shouldResurface(false, false, "2026-10-23T17:10:01Z", base));
-}
-
-test "my own newest message, a kept chat or an old stamp never resurface" {
-    try std.testing.expect(!shouldResurface(true, false, "2026-10-10T10:30:00Z", "2026-10-10T10:24:33Z"));
-    try std.testing.expect(!shouldResurface(false, true, "2026-10-10T10:30:00Z", "2026-10-10T10:24:33Z"));
-    try std.testing.expect(!shouldResurface(false, false, "2026-10-10T10:24:33Z", "2026-10-10T10:24:33Z"));
-    try std.testing.expect(!shouldResurface(false, false, "2026-10-10T09:00:00Z", "2026-10-10T10:24:33Z"));
-    try std.testing.expect(!shouldResurface(false, false, "", "2026-10-10T10:24:33Z"));
-    try std.testing.expect(!shouldResurface(false, false, "2026-10-10T10:30:00Z", ""));
-}
-
-test "only moved, unkept chats with a baseline are probed" {
-    try std.testing.expect(needsProbe(false, "2026-10-10T10:30:00Z", "2026-10-10T10:24:33Z"));
-    try std.testing.expect(!needsProbe(true, "2026-10-10T10:30:00Z", "2026-10-10T10:24:33Z"));
-    try std.testing.expect(!needsProbe(false, "2026-10-10T10:24:33Z", "2026-10-10T10:24:33Z"));
-    try std.testing.expect(!needsProbe(false, "2026-10-10T10:30:00Z", ""));
 }
 
 test "state keeps, forgets and round-trips through text" {
@@ -492,8 +452,7 @@ test "an archived chat keeps its baseline while hundreds of other archived chats
         state.setBaseline(jid, "0001-01-01T00:00:00Z");
     }
     const base = state.baseline("a@s.whatsapp.net") orelse return error.BaselineLost;
-    try std.testing.expect(needsProbe(false, "2026-10-10T10:30:00Z", base));
-    try std.testing.expect(shouldResurface(false, false, "2026-10-10T10:30:00Z", base));
+    try std.testing.expectEqualStrings("2026-10-10T10:00:00Z", base);
 }
 
 test "select-all snapshot holds exactly the rows shown" {
@@ -513,26 +472,6 @@ test "the pane switches when the open chat left the list" {
     try std.testing.expect(!paneNeedsSwitch("a@g.us", "a@g.us"));
 }
 
-test "archive modes survive restart and allow resurfacing undoes keep" {
-    const jid = "kept@g.us";
-    const baseline_ts = "2026-10-10T10:00:00Z";
-    const incoming_ts = "2026-10-10T11:00:00Z";
-    var state = State{};
-    try std.testing.expect(state.archive(jid, baseline_ts, true));
-    var buffer: [512]u8 = undefined;
-    var loaded = State{};
-    loaded.parse(state.format(&buffer));
-    try std.testing.expect(!needsProbe(loaded.isKept(jid), incoming_ts, loaded.baseline(jid).?));
-    try std.testing.expect(!shouldResurface(false, loaded.isKept(jid), incoming_ts, loaded.baseline(jid).?));
-    loaded.setKeep(jid, false);
-    state.parse(loaded.format(&buffer));
-    try std.testing.expect(shouldResurface(false, state.isKept(jid), incoming_ts, state.baseline(jid).?));
-    try std.testing.expect(!shouldResurface(true, state.isKept(jid), incoming_ts, state.baseline(jid).?));
-    try std.testing.expect(state.archive(jid, incoming_ts, false));
-    try std.testing.expect(!shouldResurface(false, state.isKept(jid), incoming_ts, state.baseline(jid).?));
-    try std.testing.expect(shouldResurface(false, state.isKept(jid), "2026-10-10T12:00:00Z", state.baseline(jid).?));
-}
-
 test "a full kept table refuses a new archive without changing existing state" {
     var state = State{};
     var name: [16]u8 = undefined;
@@ -547,15 +486,12 @@ test "a full kept table refuses a new archive without changing existing state" {
     try std.testing.expectEqualStrings("new-baseline", state.baseline("0@g.us").?);
 }
 
-test "plain archive explicitly replaces keep and own messages never resurface" {
+test "plain archive explicitly replaces the legacy keep flag" {
     var state = State{};
     const jid = "a@g.us";
     try std.testing.expect(state.archive(jid, "2026-10-10T10:00:00Z", true));
     try std.testing.expect(state.archive(jid, "2026-10-10T11:00:00Z", false));
     try std.testing.expect(!state.isKept(jid));
-    for ([_]bool{ false, true }) |kept| {
-        try std.testing.expect(!shouldResurface(true, kept, "2026-10-10T12:00:00Z", state.baseline(jid).?));
-    }
 }
 
 test "pending operations hide chats only in the view they are leaving" {
@@ -576,4 +512,8 @@ test "batch progress includes the current operation through the last item" {
     try std.testing.expect(progressStatus(&out, false, 0, 0) == null);
     try std.testing.expect(progressStatus(&out, false, 2, 3) == null);
     try std.testing.expect(progressStatus(out[0..1], false, 250, 239) == null);
+}
+
+test "archive status is Archived" {
+    try std.testing.expectEqualStrings("Archived", Action.archive.status());
 }

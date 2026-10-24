@@ -60,13 +60,6 @@ function Invoke-HubPlainArchive($Session, [string]$Chat) {
     } "plain archive of $Chat"
 }
 
-function Test-HubProbe($Requests, [string]$Chat) {
-    @($Requests | Where-Object {
-        $_.method -eq 'GET' -and $_.wire_path.StartsWith('/v1/wazig/messages?') -and $_.wire_path.Contains('limit=3&') -and
-            [Uri]::UnescapeDataString($_.wire_path).Contains("chat=$Chat&")
-    }).Count -gt 0
-}
-
 function Invoke-HubPlainJourney($Session, [string]$Messages) {
     Invoke-RestMethod -Method Post -Uri "$($Session.bridge_url)/fixture/plain-dms" -Headers @{ Authorization = 'Bearer fixture-key-not-a-secret' } -Body '{}' -ContentType 'application/json' |
         ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'plain-dms.json')
@@ -81,19 +74,32 @@ function Invoke-HubPlainJourney($Session, [string]$Messages) {
     Assert-That ($files.Count -eq 1) 'Hub archive state missing or ambiguous'
     Copy-Item $files[0].FullName (Join-Path $Session.evidence 'plain-archive-state.txt')
     $mark = @(Read-BridgeRequests $Session).Count
-    $null = Wait-Until {
-        $later = @(Read-BridgeRequests $Session | Select-Object -Skip $mark)
-        (Test-HubProbe $later $script:PlainReacted) -and @(Get-HubArchiveWrites $Session $script:PlainNewer $false).Count -gt 0
-    } 'archived scan probed the reacted chat and resurfaced the chat with a newer message' 360
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    Start-Sleep -Seconds 360
+    $later = @(Read-BridgeRequests $Session | Select-Object -Skip $mark)
+    Assert-That (@($later | Where-Object { $_.method -eq 'GET' -and $_.wire_path -like '/v1/wazig/chats?archived=true&*' }).Count -gt 0) 'Archived scan did not run during the plain archive wait'
+    @{ elapsed_ms = $clock.ElapsedMilliseconds; requests_before = $mark } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'plain-scan.json')
     Start-Sleep -Seconds 3
-    Assert-That (@(Get-HubArchiveWrites $Session $script:PlainReacted $false).Count -eq 0) 'Plain archived chat came back although only his own reaction followed the archive'
+    foreach ($chat in @($script:PlainReacted, $script:PlainNewer)) {
+        Assert-That (@(Get-HubArchiveWrites $Session $chat $false).Count -eq 0) "Plain archived chat $chat was unarchived without a user action"
+    }
     $null = Wait-Until {
         $state = Read-Control $Session status
         $rows = (Read-Control $Session chats).chats
-        $state.pending_archives -eq 0 -and -not $state.show_archived -and $rows.Count -eq 2 -and
-            @($rows | Where-Object id -eq $script:PlainNewer).Count -eq 1 -and @($rows | Where-Object id -eq $script:PlainReacted).Count -eq 0
-    } 'only the chat with a newer message back in the inbox'
+        $state.pending_archives -eq 0 -and -not $state.show_archived -and $rows.Count -eq 1 -and
+            $rows[0].id -eq 'personal:15550000003@s.whatsapp.net'
+    } 'both plain archived chats absent from the inbox'
     Save-Screen $Session plain-inbox
+    Invoke-PaletteCommand $Session 'Show archived chats'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $rows = (Read-Control $Session chats -Arguments @('--archived')).chats
+        $state.show_archived -and $rows.Count -eq 3 -and
+            @($rows | Where-Object { ($_.id -eq $script:PlainReacted -or $_.id -eq $script:PlainNewer) -and $_.archived }).Count -eq 2
+    } 'both plain chats still listed in Archive'
+    Save-Screen $Session plain-archived
+    Invoke-PaletteCommand $Session 'Show inbox chats'
+    $null = Wait-Until { $state = Read-Control $Session status; -not $state.show_archived -and $state.chat_count -eq 1 } 'return to inbox after plain archives'
     Read-BridgeRequests $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'plain.requests.json')
     Hub-Pass $Session plain
 }

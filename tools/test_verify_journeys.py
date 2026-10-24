@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import runpy
 import shutil
@@ -57,6 +58,28 @@ class JourneyRegistryTests(unittest.TestCase):
 
     def test_current_registry_passes(self):
         self.assert_map_passes()
+
+    def test_removed_archive_commands_and_jobs_fail_map(self):
+        path = self.root / 'src/main.zig'
+        original = path.read_text()
+        for removed in ['resurface_probe', 'enqueueResurfaceProbe', 'applyResurfaceProbe',
+                        'command_keep_archived', 'toggleKeepArchived', 'Archive and keep archived', 'Allow resurfacing']:
+            with self.subTest(removed=removed):
+                path.write_text(original + f'\nconst removed_archive_path = "{removed}";\n')
+                self.assertIn('removed archive resurfacing path or command', self.check_map().stderr)
+        path.write_text(original)
+        self.assert_map_passes()
+
+    def test_build_source_section_markers_still_exist_in_order(self):
+        build = (ROOT / 'build.zig').read_text()
+        source = (ROOT / 'src/main.zig').read_text()
+        markers = re.findall(r'sourceSection\(("(?:[^"\\]|\\.)*"), ("(?:[^"\\]|\\.)*")\)', build)
+        self.assertTrue(markers)
+        for start, end in markers:
+            start, end = json.loads(start), json.loads(end)
+            with self.subTest(start=start, end=end):
+                position = source.index(start)
+                self.assertGreaterEqual(source.index(end, position + len(start)), position + len(start))
 
     def test_main_added_journeys_keep_fixture_modes_and_checks(self):
         entries = {row['name']: row for row in self.registry['journeys']}
@@ -241,6 +264,72 @@ class JourneyRegistryTests(unittest.TestCase):
         (self.root / 'extra-proof').unlink()
         self.assertNotEqual(subprocess.run([sys.executable, str(self.tools / 'check-evidence.py'), str(self.root)],
                                           capture_output=True).returncode, 0)
+
+
+class HubArchiveEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.folder = Path(self.temp.name)
+        self.checker = runpy.run_path(str(ROOT / 'tools/verify-wazig/check-hub-archive-evidence.py'))
+        self.reacted = self.checker['PLAIN_REACTED']
+        self.newer = self.checker['PLAIN_NEWER']
+        self.data = {
+            'plain-dms.json': dict(chats=[self.reacted, self.newer], last_message_ts={
+                self.reacted: '2026-10-10T11:30:00Z', self.newer: '2026-10-10T11:00:00Z'}),
+            'plain.requests.json': [self.write(self.reacted, True), self.write(self.newer, True),
+                                    dict(method='GET', wire_path='/v1/wazig/chats?archived=true&limit=500', status=200)],
+            'plain-scan.json': dict(elapsed_ms=360000, requests_before=2),
+        }
+        for name, archived, chats in [('plain-inbox', False, [self.checker['OTHER']]),
+                                     ('plain-archived', True, [self.checker['GROUP'], self.reacted, self.newer])]:
+            self.data[f'{name}.state.json'] = dict(show_archived=archived, chat_count=len(chats))
+            self.data[f'{name}.chats.json'] = dict(total=len(chats), chats=[dict(id=chat, archived=archived) for chat in chats])
+            (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(10000))
+        (self.folder / 'plain-archive-state.txt').write_text(
+            ''.join(f'{chat}\t0\t2026-10-10T12:00:00Z\n' for chat in [self.reacted, self.newer]))
+        (self.folder / 'hub-proof.log').write_text('hub-archive plain PASS')
+
+    def write(self, chat, archived):
+        return dict(method='POST', wire_path='/v1/wazig/archive', status=200, body=dict(chat=chat, archived=archived))
+
+    def check(self):
+        self.checker['check_plain'](self.folder, self.data.__getitem__, 0)
+
+    def test_plain_chats_stay_archived(self):
+        self.check()
+
+    def test_old_app_incoming_unarchive_and_reaction_unarchive_fail(self):
+        for chat in [self.reacted, self.newer]:
+            with self.subTest(chat=chat):
+                self.data['plain.requests.json'].append(self.write(chat, False))
+                with self.assertRaisesRegex(AssertionError, 'unarchived without a user action'):
+                    self.check()
+                self.data['plain.requests.json'].pop()
+
+    def test_short_wait_or_missing_archived_scan_fails(self):
+        self.data['plain-scan.json']['elapsed_ms'] = 359999
+        with self.assertRaises(AssertionError):
+            self.check()
+        self.data['plain-scan.json']['elapsed_ms'] = 360000
+        self.data['plain.requests.json'].pop()
+        with self.assertRaisesRegex(AssertionError, 'archived scan never ran'):
+            self.check()
+
+    def test_inbox_return_or_missing_archived_chat_fails(self):
+        for chat in [self.reacted, self.newer]:
+            with self.subTest(chat=chat):
+                rows = self.data['plain-inbox.chats.json']['chats']
+                rows.append(dict(id=chat, archived=False))
+                with self.assertRaises(AssertionError):
+                    self.check()
+                rows.pop()
+                rows = self.data['plain-archived.chats.json']['chats']
+                saved = rows[:]
+                rows[:] = [row for row in rows if row['id'] != chat]
+                with self.assertRaises(AssertionError):
+                    self.check()
+                rows[:] = saved
 
 
 if __name__ == '__main__':

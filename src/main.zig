@@ -220,7 +220,6 @@ const command_show_slack = 2058;
 const command_show_telegram = 2059;
 const command_sort_views = 2067;
 const command_shortcuts_help = 2060;
-const command_keep_archived = 2061;
 const command_theme_green = 2063;
 const command_theme_amoled = 2064;
 const command_mic_default = 2400;
@@ -536,7 +535,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, resurface_probe, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar, hub_thread, hub_older };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar, hub_thread, hub_older };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 const WacliLane = enum { wacli, slack, hub_media };
 
@@ -739,7 +738,6 @@ const App = struct {
     palette_archive_bulk_count: usize = 0,
     palette_archive_show_archived: bool = false,
     palette_archive_was_archived: bool = false,
-    palette_archive_kept: bool = false,
     emoji_wnd: ?win.HWND = null,
     emoji_edit: ?win.HWND = null,
     emoji_list: ?win.HWND = null,
@@ -835,7 +833,7 @@ const App = struct {
     pending_archive_count: usize = 0,
     archive_batch_total: usize = 0,
     unarchive_retry: Utf8Text(191) = .{},
-    unarchive_retry_source: archive_rules.Source = .resurface,
+    unarchive_retry_source: archive_rules.Source = .send,
     archive_state: ?*archive_rules.State = null,
     archive_state_path: []u8 = &.{},
     archive_legacy_done: bool = false,
@@ -12680,10 +12678,6 @@ fn archiveMarker(a: *const App, chat: *const Chat) ?[*:0]const u16 {
 }
 
 fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) void {
-    if (source == .resurface and isKeptArchived(a, jid)) {
-        if (std.mem.eql(u8, a.unarchive_retry.slice(), jid)) a.unarchive_retry.set("");
-        return;
-    }
     var already_queued = false;
     for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
         if (std.mem.eql(u8, pending.jid.slice(), jid)) already_queued = pending.should_unarchive;
@@ -12723,7 +12717,6 @@ fn holdKeptArchived(a: *App, jid: []const u8, provider_archived: bool, ts: []con
 
 const archived_scan_min_ticks = 20;
 const archived_scan_idle_ticks = 300;
-const max_probes_per_scan = 4;
 
 fn tickArchivedScan(a: *App, store_changed: bool) void {
     if (a.archive_state == null) return;
@@ -12731,20 +12724,12 @@ fn tickArchivedScan(a: *App, store_changed: bool) void {
     a.archived_scan_ticks +|= 1;
     if (a.archived_scan_ticks < archived_scan_min_ticks) return;
     if (!a.archived_scan_dirty and a.archived_scan_ticks < archived_scan_idle_ticks) return;
-    if (wacliPendingGet(a, .archived_scan) > 0 or wacliPendingGet(a, .resurface_probe) > 0) return;
+    if (wacliPendingGet(a, .archived_scan) > 0) return;
     if (a.pending_archive_count > 0 or a.archive_child != null) return;
     a.archived_scan_dirty = false;
     a.archived_scan_ticks = 0;
     var job = WacliJob{ .account = a.cache_tag, .kind = .archived_scan };
     wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--archived", "--limit", "10000" });
-    _ = wacliEnqueue(a, job, false);
-}
-
-fn enqueueResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8) void {
-    var job = WacliJob{ .account = a.cache_tag, .kind = .resurface_probe };
-    job.jid.set(jid);
-    job.extra.set(row_ts);
-    wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "messages", "list", "--chat", jid, "--limit", "3" });
     _ = wacliEnqueue(a, job, false);
 }
 
@@ -12768,7 +12753,6 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
     };
     var changed = false;
     var missing_kept = false;
-    var probes: usize = 0;
     for (rows[0..@min(rows.len, archive_rules.max_entries)]) |item| {
         const object = switch (item) {
             .object => |o| o,
@@ -12784,12 +12768,7 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
             changed = true;
             continue;
         };
-        if (archive_rules.needsProbe(kept, stamp, base)) {
-            if (probes < max_probes_per_scan) {
-                enqueueResurfaceProbe(a, jid, stamp);
-                probes += 1;
-            }
-        } else if (kept and std.mem.order(u8, stamp, base) == .gt) {
+        if (kept and std.mem.order(u8, stamp, base) == .gt) {
             state.setBaseline(jid, stamp);
             changed = true;
         }
@@ -12827,7 +12806,7 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
         _ = wacliEnqueue(a, job, false);
     }
     var log_buffer: [96]u8 = undefined;
-    appendLaunchLog(a, std.fmt.bufPrint(&log_buffer, "archive-scan: {d} archived, {d} to probe", .{ rows.len, probes }) catch "archive-scan");
+    appendLaunchLog(a, std.fmt.bufPrint(&log_buffer, "archive-scan: {d} archived", .{rows.len}) catch "archive-scan");
 }
 
 fn applyKeptCheck(a: *App, raw: []const u8) void {
@@ -12848,46 +12827,6 @@ fn applyKeptCheck(a: *App, raw: []const u8) void {
         };
         _ = holdKeptArchived(a, getString(object, "jid"), getBool(object, "archived"), getString(object, "last_message_ts"));
     }
-}
-
-fn applyResurfaceProbe(a: *App, jid: []const u8, row_ts: []const u8, raw: []const u8) void {
-    const state = a.archive_state orelse return;
-    var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
-    defer parsed.deinit();
-    const root = switch (parsed.value) {
-        .object => |o| o,
-        else => return,
-    };
-    const data_object = switch (root.get("data") orelse return) {
-        .object => |o| o,
-        else => return,
-    };
-    const list = switch (data_object.get("messages") orelse return) {
-        .array => |items| items.items,
-        else => return,
-    };
-    var newest_from_me: ?bool = null;
-    var newest_ts: []const u8 = "";
-    for (list) |item| {
-        const object = switch (item) {
-            .object => |o| o,
-            else => continue,
-        };
-        if (getString(object, "ReactionToID").len > 0 or getString(object, "MsgID").len == 0) continue;
-        newest_from_me = getBool(object, "FromMe");
-        newest_ts = getString(object, "Timestamp");
-        break;
-    }
-    const from_me = newest_from_me orelse return;
-    const base = state.baseline(jid) orelse "";
-    if (archive_rules.shouldResurface(from_me, state.isKept(jid), newest_ts, base)) {
-        var log_buffer: [archive_rules.max_jid + 96]u8 = undefined;
-        appendLaunchLog(a, std.fmt.bufPrint(&log_buffer, "archive-scan: new message in an archived chat, unarchiving {s}", .{jid}) catch "archive-scan: new message in an archived chat, unarchiving");
-        queueUnarchiveChat(a, jid, .resurface);
-        return;
-    }
-    state.setBaseline(jid, row_ts);
-    saveArchiveState(a);
 }
 
 fn retryUnarchiveChat(a: *App) void {
@@ -13093,14 +13032,12 @@ fn unarchiveSentChat(a: *App, jid: []const u8) void {
     if (archived) queueUnarchiveChat(a, jid, .send);
 }
 
-fn archivePaletteSelection(a: *App, keep: bool) void {
-    const jid = if (a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else "";
+fn archivePaletteSelection(a: *App) void {
     if (a.selected_chat >= a.chat_count or !chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), a.palette_archive_key.key()) or
         a.bulk.count != a.palette_archive_bulk_count or a.show_archived != a.palette_archive_show_archived or
-        (a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived != a.palette_archive_was_archived) or
-        (keep and isKeptArchived(a, jid) != a.palette_archive_kept))
+        (a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived != a.palette_archive_was_archived))
         return setStatus(a, "Chat selection changed. Open the command palette again");
-    if (keep) toggleKeepArchived(a, .menu) else archiveSelectedChat(a, false, .menu);
+    archiveSelectedChat(a, false, .menu);
 }
 
 fn archiveSelectedChat(a: *App, keep: bool, source: archive_rules.Source) void {
@@ -13124,7 +13061,7 @@ fn selectAllChats(a: *App) void {
     for (a.chats[0..a.chat_count]) |*chat| a.bulk.addKey(chat_key.of(chat));
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
     var buffer: [128]u8 = undefined;
-    setStatus(a, std.fmt.bufPrint(&buffer, "{d} chats selected - Ctrl+E archives, Ctrl+Shift+E keeps archived, Esc cancels", .{a.bulk.count}) catch "Chats selected");
+    setStatus(a, std.fmt.bufPrint(&buffer, "{d} chats selected - Ctrl+E archives, Esc cancels", .{a.bulk.count}) catch "Chats selected");
 }
 
 fn clearBulkSelection(a: *App) bool {
@@ -13155,25 +13092,6 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void 
     paneFollowSelection(a, open_jid.slice());
     if (problem) |why| return setStatus(a, why);
     setStatus(a, if (slack_only and action != .unarchive) archive_rules.Action.keep.status() else action.status());
-}
-
-fn toggleKeepArchived(a: *App, source: archive_rules.Source) void {
-    if (a.bulk.count > 0) return archiveSelectedChat(a, true, source);
-    if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return setStatus(a, "Select a chat first");
-    const state = a.archive_state orelse return setStatus(a, "Keep archived is not available");
-    const chat = &a.chats[a.selected_chat];
-    if (chat.provider == .slack) return archiveSelectedChat(a, true, source);
-    if (!unifiedHub(a) and chat.provider != .whatsapp) return setStatus(a, "Keep archived works for WhatsApp chats only");
-    var jid = Utf8Text(191){};
-    jid.set(chat.jid.slice());
-    if (state.isKept(jid.slice())) {
-        state.setKeep(jid.slice(), false);
-        saveArchiveState(a);
-        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
-        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
-        return setStatus(a, "New messages can bring this chat back to the inbox again");
-    }
-    archiveSelectedChat(a, true, source);
 }
 
 const control_call_posted: u8 = 0;
@@ -13801,7 +13719,6 @@ fn buildPaletteItems(a: *App) void {
     a.palette_archive_bulk_count = a.bulk.count;
     a.palette_archive_show_archived = a.show_archived;
     a.palette_archive_was_archived = a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived;
-    a.palette_archive_kept = isKeptArchived(a, a.palette_archive_key.key().id);
     a.palette_item_count = 0;
     appendPalette(a, "Search chats", "Ctrl+F", command_search);
     appendPalette(a, "Compose message", "C", command_compose);
@@ -13833,10 +13750,6 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, if (a.selected_chat < a.chat_count and isChatPinned(a, chat_key.of(&a.chats[a.selected_chat]))) "Unpin selected chat" else "Pin chat to top", "", command_pin);
     appendPalette(a, if (a.show_archived) "Show inbox chats" else "Show archived chats", "", command_archived);
     appendPalette(a, if (a.show_archived) "Unarchive selected chat" else "Archive selected chat", "Ctrl+E", command_archive);
-    if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider != .slack and (unifiedHub(a) or a.chats[a.selected_chat].provider == .whatsapp)) {
-        const allow_resurfacing = a.bulk.count == 0 and isKeptArchived(a, a.chats[a.selected_chat].jid.slice());
-        appendPalette(a, if (allow_resurfacing) "Allow resurfacing" else "Archive and keep archived", if (allow_resurfacing) "" else "Ctrl+Shift+E", command_keep_archived);
-    }
     appendPalette(a, "Reply to selected message", "Ctrl+Shift+R", command_reply);
     appendPalette(a, "Resend failed message", "", command_resend);
     appendPalette(a, "React to selected message", "Ctrl+R", command_react_menu);
@@ -14119,8 +14032,8 @@ fn paletteActivate(a: *App) void {
     const command = item.command;
     closePalette(a);
     if (command == 0) return;
-    if (command == command_archive or command == command_keep_archived) {
-        archivePaletteSelection(a, command == command_keep_archived);
+    if (command == command_archive) {
+        archivePaletteSelection(a);
         return;
     }
     runCommand(a, command);
@@ -14790,7 +14703,6 @@ fn runCommand(a: *App, command: u16) void {
             refreshMessages(a);
         },
         command_archive => archiveSelectedChat(a, false, .menu),
-        command_keep_archived => toggleKeepArchived(a, .menu),
         command_pin => togglePinSelected(a),
         command_reply => startReply(a),
         command_resend => {
@@ -16993,14 +16905,12 @@ fn openChatMenu(a: *App, lparam: win.LPARAM) void {
     const choice = menu: {
         const popup = win.CreatePopupMenu() orelse return;
         defer _ = win.DestroyMenu(popup);
-        var out: [3]chat_menu.Item = undefined;
+        var out: [2]chat_menu.Item = undefined;
         const rows = chat_menu.items(.{
-            .whatsapp = chat.provider == .whatsapp,
             .archived = chat.archived,
-            .kept = isKeptArchived(a, chat.jid.slice()),
             .pinned = isChatPinned(a, chat_key.of(chat)),
             .show_archived = a.show_archived,
-        }, .{ .archive = command_archive, .keep = command_keep_archived, .pin = command_pin }, &out);
+        }, .{ .archive = command_archive, .pin = command_pin }, &out);
         for (rows) |item| _ = win.AppendMenuW(popup, win.MF_STRING, item.command, item.label.ptr);
         break :menu win.TrackPopupMenu(popup, win.TPM_RETURNCMD | win.TPM_NONOTIFY | win.TPM_RIGHTBUTTON, point.x, point.y, 0, a.hwnd.?, null);
     };
@@ -17241,7 +17151,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 .background_media => applyBackgroundMedia(a, result),
                 .reaction => applyReaction(a, result),
                 .archived_scan => if (result.ok) applyArchivedScan(a, result.data),
-                .resurface_probe => if (result.ok) applyResurfaceProbe(a, result.jid.slice(), result.extra.slice(), result.data),
                 .kept_check => if (result.ok) applyKeptCheck(a, result.data),
                 .unread_probe => applyUnreadProbe(a, result),
                 .cache_tag => {
@@ -18344,8 +18253,9 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (control and !alt and key == 'E') {
+        if (shift) return false;
         if (!archiveShortcutAllowed(a, focus, message.lParam, true)) return false;
-        archiveSelectedChat(a, shift, .shortcut);
+        archiveSelectedChat(a, false, .shortcut);
         return true;
     }
     if (control and shift and key == 'C') {
@@ -20857,7 +20767,7 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
     else switch (job.kind) {
         .cache_tag => wa_hub.accounts(),
         .chats, .archived_scan, .kept_check, .contacts_index => try wa_hub.chats(allocator, key.account, hubHasArg(job, "--archived"), 500),
-        .messages, .resurface_probe, .background_media => try wa_hub.messages(allocator, key, std.fmt.parseInt(usize, hubArg(job, "--limit", "80"), 10) catch 80, ""),
+        .messages, .background_media => try wa_hub.messages(allocator, key, std.fmt.parseInt(usize, hubArg(job, "--limit", "80"), 10) catch 80, ""),
         .unread_probe => try wa_hub.messages(allocator, key, 20, ""),
         .groups => try wa_hub.list(allocator, key.account, .groups),
         .reaction => try wa_hub.react(allocator, key, job.msg_id.slice(), job.extra.slice(), job.client_id.slice()),
@@ -20922,7 +20832,7 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
     return switch (job.kind) {
         .chats, .archived_scan, .kept_check, .contacts_index => hubNormalized(a, allocator, job, response.body, .chats, ""),
         .groups => hubNormalized(a, allocator, job, response.body, .groups, ""),
-        .messages, .resurface_probe, .unread_probe, .background_media, .hub_thread, .hub_older => hubNormalized(a, allocator, job, response.body, .messages, key.id),
+        .messages, .unread_probe, .background_media, .hub_thread, .hub_older => hubNormalized(a, allocator, job, response.body, .messages, key.id),
         else => response.body,
     };
 }
@@ -21268,7 +21178,7 @@ fn unifiedHubRequest(a: *App, allocator: std.mem.Allocator, job: *const WacliJob
     const jid = job.jid.slice();
     return switch (job.kind) {
         .chats, .archived_scan, .kept_check, .contacts_index => hub.chats(allocator, hubHasArg(job, "--archived"), 500),
-        .messages, .resurface_probe, .background_media => hub.messages(allocator, jid, std.fmt.parseInt(usize, hubArg(job, "--limit", "80"), 10) catch 80, ""),
+        .messages, .background_media => hub.messages(allocator, jid, std.fmt.parseInt(usize, hubArg(job, "--limit", "80"), 10) catch 80, ""),
         .unread_probe => hub.messages(allocator, jid, 20, ""),
         .reaction => hub.react(allocator, jid, job.msg_id.slice(), job.extra.slice(), job.client_id.slice()),
         .hub_read => hub.markRead(allocator, jid, job.msg_id.slice()),

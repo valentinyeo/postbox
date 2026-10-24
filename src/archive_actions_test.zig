@@ -3,9 +3,8 @@ const verification_fixture = false;
 const chat_key = @import("chat_key");
 const archive_rules = @import("archive_rules");
 const voice_sent = @import("voice_sent");
-const ArchiveSource = if (@hasDecl(archive_rules, "Source")) archive_rules.Source else enum { shortcut, menu, control, resurface, send };
+const ArchiveSource = if (@hasDecl(archive_rules, "Source")) archive_rules.Source else enum { shortcut, menu, control, send };
 const command_archive: u16 = 2007;
-const command_keep_archived: u16 = 2061;
 const PendingSend = struct {
     provider: Provider = .whatsapp,
     jid: Utf8Text(191) = .{},
@@ -64,12 +63,11 @@ const App = struct {
     saved_len: usize = 0,
     persisted_before_start: bool = true,
     unarchive_retry: Utf8Text(191) = .{},
-    unarchive_retry_source: ArchiveSource = .resurface,
+    unarchive_retry_source: ArchiveSource = .send,
     palette_archive_key: chat_key.Stored = .{},
     palette_archive_bulk_count: usize = 0,
     palette_archive_show_archived: bool = false,
     palette_archive_was_archived: bool = false,
-    palette_archive_kept: bool = false,
     hwnd: ?usize = null,
     archive_child: ?u8 = null,
     read_child: ?u8 = null,
@@ -159,19 +157,13 @@ fn persistFileOutbox(_: *App) void {}
 fn deleteFileUtf8(_: []const u8) void {}
 fn closePalette(_: *App) void {}
 fn runCommand(a: *App, command: u16) void {
-    if (command == command_keep_archived) keepSelected(a) else archiveSelected(a, false);
+    if (command == command_archive) archiveSelected(a, false);
 }
 fn archiveSelected(a: *App, keep: bool) void {
     if (@typeInfo(@TypeOf(archiveSelectedChat)).@"fn".params.len == 3) archiveSelectedChat(a, keep, .shortcut) else archiveSelectedChat(a, keep);
 }
-fn keepSelected(a: *App) void {
-    if (@typeInfo(@TypeOf(toggleKeepArchived)).@"fn".params.len == 2) toggleKeepArchived(a, .menu) else toggleKeepArchived(a);
-}
 fn archiveRequest(a: *App, jid: []const u8, action: archive_rules.Action) ?[]const u8 {
     return archiveChat(a, archiveChatKey(a, jid), action, .control);
-}
-fn resurfaceRequest(a: *App, jid: []const u8) void {
-    if (@typeInfo(@TypeOf(queueUnarchiveChat)).@"fn".params.len == 3) queueUnarchiveChat(a, jid, .resurface) else queueUnarchiveChat(a, jid);
 }
 fn paneFollowSelection(_: *App, _: []const u8) void {}
 fn holdKept(a: *App, jid: []const u8, provider_archived: bool, ts: []const u8) bool {
@@ -267,7 +259,6 @@ test "keep archives the selected chat and persists before the child starts" {
     var restarted = archive_rules.State{};
     restarted.parse(a.saved[0..a.saved_len]);
     try std.testing.expect(restarted.isKept("a@g.us"));
-    try std.testing.expect(!archive_rules.shouldResurface(false, restarted.isKept("a@g.us"), "2026-10-10T11:00:00Z", restarted.baseline("a@g.us").?));
 }
 
 test "Ctrl+A keep acts on the snapshot and not rows added later" {
@@ -285,44 +276,18 @@ test "Ctrl+A keep acts on the snapshot and not rows added later" {
     try std.testing.expectEqualStrings("later@g.us", a.chats[0].jid.slice());
 }
 
-test "keep shortcut is idempotent in archived view and palette allows resurfacing" {
-    var state = archive_rules.State{};
-    var a = fixture(&state);
-    a.show_archived = true;
-    archiveSelected(&a, true);
-    archiveSelected(&a, true);
-    try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-    try std.testing.expectEqual(@as(usize, 2), a.chat_count);
-    try std.testing.expect(state.isKept("a@g.us"));
-    keepSelected(&a);
-    var restarted = archive_rules.State{};
-    restarted.parse(a.saved[0..a.saved_len]);
-    try std.testing.expect(!restarted.isKept("a@g.us"));
-    try std.testing.expect(archive_rules.shouldResurface(false, restarted.isKept("a@g.us"), "2026-10-10T11:00:00Z", restarted.baseline("a@g.us").?));
-}
-
-test "palette keep applies to the entire selection even when the first chat is kept" {
-    var state = archive_rules.State{};
-    var a = fixture(&state);
-    a.show_archived = true;
-    try std.testing.expect(state.archive("a@g.us", a.chats[0].timestamp.slice(), true));
-    selectAllChats(&a);
-    keepSelected(&a);
-    try std.testing.expect(state.isKept("a@g.us"));
-    try std.testing.expect(state.isKept("b@g.us"));
-    try std.testing.expectEqual(@as(usize, 2), a.pending_archive_count);
-}
-
-test "plain bulk archive resurfaces on incoming but not outgoing messages" {
+test "plain bulk archive persists both archived chats" {
     var state = archive_rules.State{};
     var a = fixture(&state);
     selectAllChats(&a);
     archiveSelected(&a, false);
     try std.testing.expectEqual(@as(usize, 2), a.pending_archive_count);
     try std.testing.expectEqualStrings("Archiving 1 of 2", a.status.slice());
+    var restarted = archive_rules.State{};
+    restarted.parse(a.saved[0..a.saved_len]);
     for ([_][]const u8{ "a@g.us", "b@g.us" }) |jid| {
-        try std.testing.expect(archive_rules.shouldResurface(false, state.isKept(jid), "2026-10-10T11:00:00Z", state.baseline(jid).?));
-        try std.testing.expect(!archive_rules.shouldResurface(true, state.isKept(jid), "2026-10-10T11:00:00Z", state.baseline(jid).?));
+        try std.testing.expect(restarted.find(jid) != null);
+        try std.testing.expect(!restarted.isKept(jid));
     }
 }
 
@@ -331,8 +296,6 @@ test "a plain archive baselines at the archive moment when the list row is stale
     var a = fixture(&state);
     archiveSelected(&a, false);
     try std.testing.expectEqualStrings("2026-10-10T10:30:00Z", state.baseline("a@g.us").?);
-    try std.testing.expect(!archive_rules.shouldResurface(false, false, "2026-10-10T10:00:00Z", state.baseline("a@g.us").?));
-    try std.testing.expect(archive_rules.shouldResurface(false, false, "2026-10-10T10:30:01Z", state.baseline("a@g.us").?));
 }
 
 test "a plain archive keeps a list row time that is later than the archive moment" {
@@ -386,21 +349,6 @@ test "keep overrides an earlier archive followed by an unarchive" {
     try std.testing.expect(state.isKept("a@g.us"));
 }
 
-test "a delayed resurfacing retry cannot unarchive a chat kept since the probe" {
-    var state = archive_rules.State{};
-    var a = fixture(&state);
-    a.unarchive_retry.set("a@g.us");
-    archiveSelected(&a, true);
-    resurfaceRequest(&a, "a@g.us");
-    try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-    try std.testing.expectEqual(@as(usize, 0), a.unarchive_retry.len);
-    try std.testing.expect(state.isKept("a@g.us"));
-
-    resurfaceRequest(&a, "b@g.us");
-    try std.testing.expectEqual(@as(usize, 2), a.pending_archive_count);
-    try std.testing.expect(a.pending_archives[1].should_unarchive);
-}
-
 test "pending archive rows stay hidden through queue advancement and view switches" {
     var state = archive_rules.State{};
     var a = fixture(&state);
@@ -418,7 +366,7 @@ test "pending archive rows stay hidden through queue advancement and view switch
     try std.testing.expect(!pendingArchiveHidesChat(&a, "a@g.us", false));
     removeFirstPendingArchive(&a);
     setStatus(&a, archive_rules.Action.archive.status());
-    try std.testing.expectEqualStrings("Archived. Comes back on a new message", a.status.slice());
+    try std.testing.expectEqualStrings("Archived", a.status.slice());
     try std.testing.expect(!pendingArchiveHidesChat(&a, "b@g.us", false));
     try std.testing.expect(archiveRequest(&a, "later@g.us", .archive) == null);
     try std.testing.expectEqual(@as(usize, 1), a.archive_batch_total);
@@ -429,8 +377,8 @@ test "pending unarchives stay hidden in archived view and share batch accounting
     var a = fixture(&state);
     a.show_archived = true;
     archiveSelected(&a, false);
-    resurfaceRequest(&a, "b@g.us");
-    resurfaceRequest(&a, "b@g.us");
+    queueUnarchiveChat(&a, "b@g.us", .send);
+    queueUnarchiveChat(&a, "b@g.us", .send);
     try std.testing.expectEqual(@as(usize, 2), a.archive_batch_total);
     setStatus(&a, "Refreshed");
     try std.testing.expectEqualStrings("Unarchiving 1 of 2", a.status.slice());
@@ -444,22 +392,22 @@ test "pending unarchives stay hidden in archived view and share batch accounting
     try std.testing.expectEqualStrings("Chat unarchived", a.status.slice());
 }
 
-test "Ctrl+E archives from the compose box" {
-    for ([_]bool{ false, true }) |keep| {
-        var state = archive_rules.State{};
-        var a = fixture(&state);
-        const message = win.MSG{};
-        try std.testing.expect(!archiveKey(&a, 'E', true, true, keep, a.compose, &message));
-        try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-        try std.testing.expect(archiveKey(&a, 'E', true, false, keep, a.compose, &message));
-        try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-        try std.testing.expectEqualStrings("a@g.us", a.pending_archives[0].jid.slice());
-        try std.testing.expect(!a.pending_archives[0].should_unarchive);
-        try std.testing.expectEqual(keep, state.isKept("a@g.us"));
-        const repeated = win.MSG{ .lParam = 1 << 30 };
-        try std.testing.expect(!archiveKey(&a, 'E', true, false, keep, a.compose, &repeated));
-        try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-    }
+test "Ctrl+E archives from the compose box and Ctrl+Shift+E is unbound" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    const message = win.MSG{};
+    try std.testing.expect(!archiveKey(&a, 'E', true, true, false, a.compose, &message));
+    try std.testing.expect(!archiveKey(&a, 'E', true, false, true, a.compose, &message));
+    try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+    try std.testing.expect(archiveKey(&a, 'E', true, false, false, a.compose, &message));
+    try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+    try std.testing.expectEqualStrings("a@g.us", a.pending_archives[0].jid.slice());
+    try std.testing.expect(!a.pending_archives[0].should_unarchive);
+    try std.testing.expect(!state.isKept("a@g.us"));
+    try std.testing.expectEqualStrings("Archived", a.status.slice());
+    const repeated = win.MSG{ .lParam = 1 << 30 };
+    try std.testing.expect(!archiveKey(&a, 'E', true, false, false, a.compose, &repeated));
+    try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
 }
 
 test "archive shortcuts ignore composer search and other edit fields" {
@@ -516,15 +464,13 @@ test "archive shortcut refuses a row that disagrees with the displayed chat" {
 }
 
 test "palette archive refuses a changed chat instead of archiving the replacement row" {
-    for ([_]u16{ command_archive, command_keep_archived }) |command| {
-        var state = archive_rules.State{};
-        var a = fixture(&state);
-        buildPaletteItems(&a);
-        a.chats[0] = a.chats[1];
-        a.chat_count = 1;
-        activateArchivePalette(&a, .{ .command = command });
-        try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-    }
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    buildPaletteItems(&a);
+    a.chats[0] = a.chats[1];
+    a.chat_count = 1;
+    activateArchivePalette(&a, .{ .command = command_archive });
+    try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
 }
 
 test "palette archive rejects a changed bulk selection or archive view" {
@@ -595,16 +541,6 @@ test "local send unarchives its jid even when a different chat is selected" {
     try std.testing.expect(a.pending_archives[0].should_unarchive);
 }
 
-test "resurfacing cannot deduplicate against an unarchive superseded by a later archive" {
-    var state = archive_rules.State{};
-    var a = fixture(&state);
-    try std.testing.expect(archiveRequest(&a, "a@g.us", .unarchive) == null);
-    try std.testing.expect(archiveRequest(&a, "a@g.us", .archive) == null);
-    resurfaceRequest(&a, "a@g.us");
-    try std.testing.expectEqual(@as(usize, 3), a.pending_archive_count);
-    try std.testing.expect(a.pending_archives[2].should_unarchive);
-}
-
 test "every archive child logs its exact jid direction and queued source once" {
     for ([_]archive_rules.Action{ .archive, .unarchive }) |action| {
         var state = archive_rules.State{};
@@ -634,17 +570,6 @@ test "archive shortcuts ignore unrelated windows and buttons" {
         _ = archiveKey(&a, 'E', true, false, false, focus, &message);
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     }
-}
-
-test "palette cannot turn allow resurfacing into keep archived after state changes" {
-    var state = archive_rules.State{};
-    var a = fixture(&state);
-    state.setKeep("a@g.us", true);
-    buildPaletteItems(&a);
-    state.setKeep("a@g.us", false);
-    activateArchivePalette(&a, .{ .command = command_keep_archived });
-    try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-    try std.testing.expect(!state.isKept("a@g.us"));
 }
 
 test "palette cannot turn unarchive into archive after a remote unarchive" {
@@ -685,39 +610,6 @@ test "local send deferred unarchive retains send source past a full queue" {
     try std.testing.expect(!state.isKept("a@g.us"));
 }
 
-test "another resurfacing request cannot erase a deferred send unarchive" {
-    var state = archive_rules.State{};
-    var a = fixture(&state);
-    state.setKeep("a@g.us", true);
-    a.pending_archive_count = a.pending_archives.len;
-    a.read_child = 1;
-    a.pending_sends[0].jid.set("a@g.us");
-    a.pending_send_count = 1;
-    removeFirstPendingSend(&a, true);
-    try std.testing.expectEqualStrings("a@g.us", a.unarchive_retry.slice());
-    removeFirstPendingArchive(&a);
-    resurfaceRequest(&a, "b@g.us");
-    try std.testing.expectEqualStrings("a@g.us", a.unarchive_retry.slice());
-    try std.testing.expectEqual(ArchiveSource.send, a.unarchive_retry_source);
-}
-
-test "local send upgrades an existing resurfacing retry for a kept chat" {
-    var state = archive_rules.State{};
-    var a = fixture(&state);
-    state.setKeep("a@g.us", true);
-    a.unarchive_retry.set("a@g.us");
-    a.pending_archive_count = a.pending_archives.len;
-    a.read_child = 1;
-    a.pending_sends[0].jid.set("a@g.us");
-    a.pending_send_count = 1;
-    removeFirstPendingSend(&a, true);
-    try std.testing.expectEqual(ArchiveSource.send, a.unarchive_retry_source);
-    removeFirstPendingArchive(&a);
-    retryUnarchiveChat(&a);
-    try std.testing.expect(a.pending_archives[a.pending_archive_count - 1].should_unarchive);
-    try std.testing.expect(!state.isKept("a@g.us"));
-}
-
 test "Slack archive persists per Key without ever queuing either archive transport" {
     var state = archive_rules.State{};
     var a = fixture(&state);
@@ -736,7 +628,6 @@ test "Slack archive persists per Key without ever queuing either archive transpo
     loaded.parse(a.saved[0..a.saved_len]);
     try std.testing.expect(loaded.localArchived(key.key()));
     for ([_][]const u8{ "2026-10-10T11:00:00Z", "2026-10-10T12:00:00Z", "2026-10-10T13:00:00Z" }) |stamp| {
-        try std.testing.expect(!archive_rules.shouldResurface(false, loaded.localArchived(key.key()), stamp, "2026-10-10T10:00:00Z"));
         try std.testing.expect(!loaded.holdKept(key.key().id, false, stamp));
         try std.testing.expect(loaded.localArchived(key.key()));
     }
@@ -845,7 +736,6 @@ test "Slack local state coexists with WhatsApp keep and plain archive round trip
     try std.testing.expect(!loaded.localArchived(key));
     try std.testing.expect(loaded.isKept(key.id));
     try std.testing.expect(loaded.archive(key.id, "baseline", false));
-    try std.testing.expect(archive_rules.shouldResurface(false, loaded.isKept(key.id), "new-message", "baseline"));
 }
 
 test "sending to an archived Slack chat never queues unarchive or clears local state" {

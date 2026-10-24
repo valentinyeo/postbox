@@ -7,11 +7,14 @@ $null = Wait-Until {
 } 'Alpha archived through Ctrl+E'
 Invoke-PaletteCommand $session 'Show archived chats'
 $null = Wait-Until { $state = Read-Control $session status; $state.show_archived -and $state.chat_count -eq 1 -and $state.selected.name -eq 'Verification Alpha' } 'Alpha in Archive'
-Invoke-PaletteCommand $session 'Archive and keep archived' action
+Invoke-PaletteCommand $session 'Show inbox chats' action
+$null = Wait-Until { -not (Read-Control $session status).show_archived } 'inbox after archive snapshot'
+Invoke-PaletteCommand $session 'Show archived chats'
+$null = Wait-Until { (Read-Control $session status).show_archived } 'Archive before persisted snapshot'
 $keep = Join-Path $messages 'archive-state.txt'
 $null = Wait-Until {
-    (Read-Control $session status).pending_archives -eq 0 -and (Get-Content $keep -Raw).Contains("verify-alpha@s.whatsapp.net`t1`t")
-} 'Keep archived persisted through palette'
+    (Read-Control $session status).pending_archives -eq 0 -and (Get-Content $keep -Raw).Contains("verify-alpha@s.whatsapp.net`t0`t")
+} 'Plain archive state persisted'
 Copy-Item $keep (Join-Path $Evidence 'kept-archive-state.txt')
 Save-Screen $session kept
 Invoke-PaletteCommand $session 'Show inbox chats'
@@ -19,7 +22,7 @@ $null = Wait-Until { $state = Read-Control $session status; -not $state.show_arc
 $incoming = Get-Content $provider -Raw | ConvertFrom-Json
 $alpha = $incoming.data | Where-Object name -eq 'Verification Alpha'
 Assert-That ($alpha.archived -and $alpha.unread_count -eq 0) 'Unexpected pre-delivery provider state'
-$alpha.archived = $false
+$alpha.archived = $true
 $alpha.unread = $true
 $alpha.unread_count = 1
 $alpha.last_message_ts = '2026-10-10T11:00:00Z'
@@ -31,12 +34,12 @@ Copy-Item (Join-Path $Evidence 'incoming-provider.json') "$provider.next"
 $null = Wait-Until {
     try { [IO.File]::Move("$provider.next", $provider, $true); return $true } catch [IO.IOException] { return $false }
 } 'atomic incoming provider delivery'
-Add-Content (Join-Path $Evidence 'actions.log') 'provider: incoming verify-incoming-1; archived=false; unread_count=1'
+Add-Content (Join-Path $Evidence 'actions.log') 'provider: incoming verify-incoming-1; archived=true; unread_count=1'
 $null = Wait-Until {
     $row = (Get-Content $provider -Raw | ConvertFrom-Json).data | Where-Object name -eq 'Verification Alpha'
     $state = Read-Control $session status
     $row.archived -and $row.unread_count -eq 1 -and $state.pending_archives -eq 0 -and $state.chat_count -eq 1 -and $state.selected.name -eq 'Verification Beta'
-} 'production merge re-archives kept Alpha after provider unarchive'
+} 'incoming delivery leaves Alpha archived'
 Save-Screen $session inbox
 $chats = Read-Control $session chats
 Assert-That ($chats.total -eq 1 -and $chats.chats[0].name -eq 'Verification Beta') 'Alpha resurfaced in the main list'
@@ -44,5 +47,5 @@ Invoke-PaletteCommand $session 'Show archived chats'
 $null = Wait-Until {
     $state = Read-Control $session status
     $state.show_archived -and $state.chat_count -eq 1 -and $state.selected.name -eq 'Verification Alpha' -and $state.selected.archived -and $state.selected.unread -and $state.selected.unread_count -eq 1
-} 'kept Alpha remains in Archive with updated unread count'
+} 'Alpha remains in Archive with updated unread count'
 Save-Screen $session after

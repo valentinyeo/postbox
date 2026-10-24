@@ -62,7 +62,7 @@ else:
         chats = read(f'{stage}.chats.json')
         assert chats['total'] == len(names) and sorted(row['name'] for row in chats['chats']) == names
     incoming = read('incoming-provider.json')
-    assert not alpha(incoming)['archived'] and alpha(incoming)['unread_count'] == 1
+    assert alpha(incoming)['archived'] and alpha(incoming)['unread_count'] == 1
     messages = incoming['messages']['verify-alpha@s.whatsapp.net']['data']['messages']
     assert len(messages) == 1 and messages[0]['MsgID'] == 'verify-incoming-1' and not messages[0]['FromMe']
     assert messages[0]['Timestamp'] == alpha(incoming)['last_message_ts'] == '2026-10-10T11:00:00Z'
@@ -70,10 +70,10 @@ else:
     assert sorted(row['name'] for row in provider['data']) == ['Verification Alpha', 'Verification Beta']
     assert alpha(provider)['archived'] and alpha(provider)['unread_count'] == 1
     assert provider['messages'] == incoming['messages']
-    assert 'archive: jid=verify-alpha@s.whatsapp.net archived=true source=kept' in (folder / 'final-data/launch-log.txt').read_text(encoding='utf-8-sig')
+    assert 'archive: jid=verify-alpha@s.whatsapp.net archived=true source=shortcut' in (folder / 'final-data/launch-log.txt').read_text(encoding='utf-8-sig')
     for name in ('kept-archive-state.txt', 'final-data/archive-state.txt'):
-        assert 'verify-alpha@s.whatsapp.net\t1\t' in (folder / name).read_text(encoding='utf-8-sig')
-    assert 'Archive and keep archived' in (folder / 'action.palette.uia.txt').read_text(encoding='utf-8-sig')
+        assert 'verify-alpha@s.whatsapp.net\t0\t' in (folder / name).read_text(encoding='utf-8-sig')
+    assert 'Show inbox chats' in (folder / 'action.palette.uia.txt').read_text(encoding='utf-8-sig')
 assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
 guards = (folder / 'launch-guards.log').read_text(encoding='utf-8-sig')
 assert 'REJECTED: not-actions' in guards and 'REJECTED: not-isolated' in guards
@@ -81,7 +81,7 @@ assert f'JOURNEY PASSED: {feature}' in (folder / 'result.txt').read_text(encodin
 assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
 assert not (folder / 'failure.txt').exists()
 actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-keys_required = ['^f', 'Beta', '{ESC}', 'NoSuchFixture'] if feature == 'search' else ['^e', '^k', 'Archive and keep archived', 'Show inbox chats', 'Show archived chats', '{ENTER}']
+keys_required = ['^f', 'Beta', '{ESC}', 'NoSuchFixture'] if feature == 'search' else ['^e', '^k', 'Show inbox chats', 'Show archived chats', '{ENTER}']
 for keys in keys_required:
     assert f'keys: {keys}' in actions
 images = []
@@ -96,7 +96,7 @@ if feature == 'search':
     cached = json.loads((folder / 'final-data/chats-0000000000000526.json').read_text(encoding='utf-8-sig'))
     assert sorted(row['name'] for row in cached['data']) == ['Verification Alpha', 'Verification Beta']
 else:
-    ordered_actions = ['keys: ^e', 'keys: Show archived chats', 'keys: Archive and keep archived', 'keys: Show inbox chats', 'provider: incoming verify-incoming-1; archived=false; unread_count=1', 'keys: Show archived chats']
+    ordered_actions = ['keys: ^e', 'keys: Show archived chats', 'keys: Show inbox chats', 'provider: incoming verify-incoming-1; archived=true; unread_count=1', 'keys: Show archived chats']
     position = 0
     for action in ordered_actions:
         position = actions.index(action, position) + len(action)

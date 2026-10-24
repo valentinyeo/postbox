@@ -138,7 +138,7 @@ def check_integration():
     assert source.count('.view_account = hub.viewAccount(object, "")') == 1
     assert source.count('.account = hub.sourceAccount(object, "")') == 1
     routing_function_sha256 = {
-        'unifiedHubRequest': '4ac7160663a8389b9e26ad06773e85e7b4690f1d4cb4edd6dffb3f329dec5a5c',
+        'unifiedHubRequest': '0f3c0953dc5314dc815cfb390dd28e68e6d3e75cc295f2c5f22019056f0d4058',
         'restoreOutbox': '97c3d2512d210e72021031071928cc33ccbf4e3038f427ba57a51fce5bcf3f98',
         'loadOutbox': '040428fa42997f7006f87154b7713db94102b863d4536fa853496fc8c4103f0b',
         'bindOutboxAccount': 'c18bfcb6097cec448f946232c1cc8a5a1d92055cfc533e855132e64ea2412b6b',
