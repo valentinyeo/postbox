@@ -1,6 +1,6 @@
 import re
 import json
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 
 GROUP = 'personal:120363000000000001@g.us'
@@ -18,27 +18,28 @@ def check_plain(folder, read, before):
         return [index for index, row in enumerate(requests) if row['wire_path'] == '/v1/wazig/archive' and
                 row['status'] == 200 and row['body'] == dict(chat=chat, archived=archived)]
 
-    def probes(chat):
-        return [index for index, row in enumerate(requests) if row['method'] == 'GET' and
-                row['wire_path'].startswith('/v1/wazig/messages?') and 'limit=3&' in row['wire_path'] and
-                f'chat={chat}&' in unquote(row['wire_path'])]
-
     reacted, newer = writes(PLAIN_REACTED, True), writes(PLAIN_NEWER, True)
     assert len(reacted) == len(newer) == 1 and reacted[0] < newer[0]
-    assert [index for index in probes(PLAIN_REACTED) if index > newer[0]], 'reacted chat was never probed after the archive'
-    assert not writes(PLAIN_REACTED, False), 'plain archived chat came back after only his own reaction'
-    back = writes(PLAIN_NEWER, False)
-    assert len(back) == 1 and back[0] > newer[0], 'chat with a newer incoming message did not come back'
+    scan = read('plain-scan.json')
+    assert scan['elapsed_ms'] >= 360000
+    assert scan['requests_before'] > before + newer[0]
+    assert any(row['method'] == 'GET' and row['wire_path'].startswith('/v1/wazig/chats?archived=true&')
+               for row in requests[scan['requests_before'] - before:]), 'archived scan never ran after both archives'
+    for chat in (PLAIN_REACTED, PLAIN_NEWER):
+        assert not writes(chat, False), 'plain archived chat was unarchived without a user action'
     lines = (folder / 'plain-archive-state.txt').read_text(encoding='utf-8-sig').splitlines()
     for chat in (PLAIN_REACTED, PLAIN_NEWER):
         entry, = [line.split('\t') for line in lines if line.startswith(chat + '\t')]
         assert entry[1] == '0', chat
-    state = read('plain-inbox.state.json')
-    rows = read('plain-inbox.chats.json')
-    assert not state['show_archived'] and state['chat_count'] == rows['total'] == 2
-    assert sorted(row['id'] for row in rows['chats']) == sorted([OTHER, PLAIN_NEWER]) and not any(row['archived'] for row in rows['chats'])
-    image = (folder / 'plain-inbox.png').read_bytes()
-    assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
+    for name, archived, expected in [('plain-inbox', False, [OTHER]),
+                                     ('plain-archived', True, [GROUP, PLAIN_REACTED, PLAIN_NEWER])]:
+        state = read(f'{name}.state.json')
+        rows = read(f'{name}.chats.json')
+        assert state['show_archived'] == archived and state['chat_count'] == rows['total'] == len(expected)
+        assert sorted(row['id'] for row in rows['chats']) == sorted(expected)
+        assert all(row['archived'] == archived for row in rows['chats'])
+        image = (folder / f'{name}.png').read_bytes()
+        assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
     assert 'hub-archive plain PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
 
 
@@ -102,7 +103,7 @@ def check_hub_archive(folder):
     assert marker_files[0].read_bytes() == (folder / 'first-archive-legacy-done.txt').read_bytes() == (folder / 'restart-archive-legacy-done.txt').read_bytes()
     assert any(line.startswith(GROUP + '\t1\t') for line in state_files[0].read_text(encoding='utf-8-sig').splitlines())
     final = read('side-effects.json')
-    assert not final['show_archived'] and final['chat_count'] == 2
+    assert not final['show_archived'] and final['chat_count'] == 1
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
     assert all(final[key] for key in ['production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'])
     assert 'Show archived chats' in (folder / 'actions.log').read_text(encoding='utf-8-sig')

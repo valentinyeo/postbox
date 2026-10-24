@@ -61,8 +61,10 @@ for feature in features:
     ], feature
     assert f'feature={feature}' in entry
 source = (root / 'src/main.zig').read_text(encoding="utf-8")
-for label in ['Search chats', 'Next chat', 'Previous chat', 'Compose message', 'Keyboard shortcuts', 'Theme: Green', 'Make text larger', 'Reset text size', 'Show archived chats', 'Show inbox chats', 'Archive selected chat', 'Unarchive selected chat', 'Archive and keep archived', 'Allow resurfacing']:
+for label in ['Search chats', 'Next chat', 'Previous chat', 'Compose message', 'Keyboard shortcuts', 'Theme: Green', 'Make text larger', 'Reset text size', 'Show archived chats', 'Show inbox chats', 'Archive selected chat', 'Unarchive selected chat']:
     assert f'"{label}"' in source, label
+for removed in ['resurface_probe', 'enqueueResurfaceProbe', 'applyResurfaceProbe', 'command_keep_archived', 'toggleKeepArchived', 'Archive and keep archived', 'Allow resurfacing']:
+    assert removed not in source, ('removed archive resurfacing path or command', removed)
 for control in ['id_search = 1008', 'id_compose = 1032']:
     assert control in source
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
@@ -90,7 +92,7 @@ for line in coverage[1].splitlines():
     assert (disposition.startswith('unreachable: ') and len(disposition) > len('unreachable: ')) or (journey and journey[1] in options), (ticket, disposition)
 assert coverage_ids, 'empty recent changes coverage'
 assert 'default: search' in workflow
-assert 'Keep archived\\tCtrl+Shift+E' in (root / 'src/chat_menu.zig').read_text(encoding='utf-8')
+assert 'Archive\\tCtrl+E' in (root / 'src/chat_menu.zig').read_text(encoding='utf-8')
 for helper in ['run', 'doctor', 'cleanup', 'harness']:
     assert (root / 'tools/verify-wazig' / f'{helper}.ps1').is_file()
 assert 'RegOverridePredefKey' in source and 'VerificationRequiresActions' in source
