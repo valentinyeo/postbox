@@ -236,7 +236,6 @@ function Invoke-HubTelegramArchiveJourney($Session, [string]$Messages, $Start) {
         @(Get-HubArchiveWrites $Session $script:PlainNewer $true).Count -eq 2 -and
             @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/archive' -and $_.body.chat -eq $telegram }).Count -eq 0 -and (Read-Control $Session status).pending_archives -eq 0
     } 'WhatsApp explicitly archived again and Telegram remains locally archived without a hub write'
-    Invoke-PaletteCommand $Session 'Show inbox chats'
     Invoke-PaletteCommand $Session 'Refresh'
     Wait-HubEmptyInbox $Session
     Save-Screen $Session plain-rearchived-inbox
