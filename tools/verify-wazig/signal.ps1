@@ -116,8 +116,38 @@ function Invoke-SignalJourney($Session, [string]$Messages) {
     }
     Invoke-PaletteCommand $Session 'Verification Signal'
     $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'signal:fixture-contact' } 'Signal chat restored'
-    Invoke-PaletteCommand $Session 'Archive selected chat'
-    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/archive' -and $_.body.chat -eq 'signal:fixture-contact' -and $_.status -eq 502 }).Count -eq 1 -and (Read-Control $Session status).pending_archives -eq 0 } 'Signal unsupported archive settled'
+    Send-Keys $Session '^e'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $rows = (Read-Control $Session chats).chats
+        -not $state.show_archived -and $state.pending_archives -eq 0 -and $state.chat_count -eq 3 -and
+            $rows.Count -eq 3 -and @($rows | Where-Object id -eq 'signal:fixture-contact').Count -eq 0
+    } 'Signal locally archived chat removed'
+    Save-Screen $Session archived-inbox
+    Invoke-PaletteCommand $Session 'Show archived chats'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $rows = (Read-Control $Session chats -Arguments @('--archived')).chats
+        $state.show_archived -and $state.pending_archives -eq 0 -and $state.chat_count -eq 1 -and
+            $state.selected.id -eq 'signal:fixture-contact' -and $rows.Count -eq 1 -and
+            $rows[0].id -eq 'signal:fixture-contact' -and $rows[0].provider -eq 'signal' -and $rows[0].archived
+    } 'Signal locally archived chat visible'
+    Save-Screen $Session archived
+    Send-Keys $Session '^e'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $state.show_archived -and $state.pending_archives -eq 0 -and $state.chat_count -eq 0 -and
+            @((Read-Control $Session chats -Arguments @('--archived')).chats).Count -eq 0
+    } 'Signal unarchived chat removed from Archive'
+    Save-Screen $Session unarchived-archive
+    Invoke-PaletteCommand $Session 'Show inbox chats'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $rows = (Read-Control $Session chats).chats
+        -not $state.show_archived -and $state.pending_archives -eq 0 -and $state.chat_count -eq 4 -and
+            $rows.Count -eq 4 -and @($rows | Where-Object { $_.id -eq 'signal:fixture-contact' -and $_.provider -eq 'signal' -and -not $_.archived }).Count -eq 1
+    } 'Signal unarchived chat restored to inbox'
+    Assert-That (@(Read-BridgeRequests $Session | Where-Object { $_.method -eq 'POST' -and $_.path -eq '/v1/wazig/archive' -and $_.body.chat -eq 'signal:fixture-contact' }).Count -eq 0) 'Signal archive must stay local'
     Save-Screen $Session after
-    Hub-Pass $Session archive-unsupported
+    Hub-Pass $Session local-archive-unarchive
 }

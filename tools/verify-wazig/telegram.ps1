@@ -175,8 +175,38 @@ function Invoke-TelegramJourney($Session, [string]$Messages) {
     Send-Keys $Session '^a{BACKSPACE}'
     Invoke-PaletteCommand $Session 'Verification Telegram'
     $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'telegram:user:1001' } 'Telegram chat restored'
-    Invoke-PaletteCommand $Session 'Archive selected chat'
-    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/archive' -and $_.body.chat -eq 'telegram:user:1001' -and $_.status -eq 502 }).Count -eq 1 -and (Read-Control $Session status).pending_archives -eq 0 } 'Telegram unsupported archive settled'
+    Send-Keys $Session '^e'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $rows = (Read-Control $Session chats).chats
+        -not $state.show_archived -and $state.pending_archives -eq 0 -and $state.chat_count -eq 4 -and
+            $rows.Count -eq 4 -and @($rows | Where-Object id -eq 'telegram:user:1001').Count -eq 0
+    } 'Telegram locally archived chat removed'
+    Save-Screen $Session archived-inbox
+    Invoke-PaletteCommand $Session 'Show archived chats'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $rows = (Read-Control $Session chats -Arguments @('--archived')).chats
+        $state.show_archived -and $state.pending_archives -eq 0 -and $state.chat_count -eq 1 -and
+            $state.selected.id -eq 'telegram:user:1001' -and $rows.Count -eq 1 -and
+            $rows[0].id -eq 'telegram:user:1001' -and $rows[0].provider -eq 'telegram' -and $rows[0].archived
+    } 'Telegram locally archived chat visible'
+    Save-Screen $Session archived
+    Send-Keys $Session '^e'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $state.show_archived -and $state.pending_archives -eq 0 -and $state.chat_count -eq 0 -and
+            @((Read-Control $Session chats -Arguments @('--archived')).chats).Count -eq 0
+    } 'Telegram unarchived chat removed from Archive'
+    Save-Screen $Session unarchived-archive
+    Invoke-PaletteCommand $Session 'Show inbox chats'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $rows = (Read-Control $Session chats).chats
+        -not $state.show_archived -and $state.pending_archives -eq 0 -and $state.chat_count -eq 5 -and
+            $rows.Count -eq 5 -and @($rows | Where-Object { $_.id -eq 'telegram:user:1001' -and $_.provider -eq 'telegram' -and -not $_.archived }).Count -eq 1
+    } 'Telegram unarchived chat restored to inbox'
+    Assert-That (@(Read-BridgeRequests $Session | Where-Object { $_.method -eq 'POST' -and $_.path -eq '/v1/wazig/archive' -and $_.body.chat -eq 'telegram:user:1001' }).Count -eq 0) 'Telegram archive must stay local'
     Save-Screen $Session after
-    Hub-Pass $Session archive-unsupported
+    Hub-Pass $Session local-archive-unarchive
 }
