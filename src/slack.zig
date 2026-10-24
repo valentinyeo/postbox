@@ -438,6 +438,8 @@ pub fn convertMrkdwnLinks(buffer: []u8, text: []const u8, users: ?UserLookup, li
     return decodeHtmlEntities(buffer, stage1[0..stage1_len]);
 }
 
+const mentionFallback = "@someone";
+
 fn renderMrkdwnToken(dest: []u8, token: []const u8, users: ?UserLookup) []const u8 {
     if (token.len == 0) return copyClamped(dest, "<>");
     switch (token[0]) {
@@ -450,7 +452,7 @@ fn renderMrkdwnToken(dest: []u8, token: []const u8, users: ?UserLookup) []const 
                 if (lookup.find(user_id)) |resolved_name| return copyClampedPrefixed(dest, "@", resolved_name);
             }
             if (given_name) |name| return copyClampedPrefixed(dest, "@", name);
-            return copyClamped(dest, user_id);
+            return copyClamped(dest, mentionFallback);
         },
         '#' => {
             const rest = token[1..];
@@ -1104,7 +1106,7 @@ test "convertMrkdwn keeps a bare url" {
     );
 }
 
-test "convertMrkdwn resolves a user mention, falls back to the given name, then the raw id" {
+test "convertMrkdwn resolves a user mention, falls back to the given name, then someone" {
     var buffer: [256]u8 = undefined;
     var table = [1]TestUser{.{ .id = "U4A59H6UT", .name = "Jane Doe" }};
     const lookup = UserLookup{ .context = @ptrCast(&table), .lookupFn = testUserLookup };
@@ -1113,8 +1115,10 @@ test "convertMrkdwn resolves a user mention, falls back to the given name, then 
         convertMrkdwn(&buffer, "<@U4A59H6UT> this guy finally finished...", lookup),
     );
     try std.testing.expectEqualStrings("@Bob", convertMrkdwn(&buffer, "<@U999|Bob>", lookup));
-    try std.testing.expectEqualStrings("U999", convertMrkdwn(&buffer, "<@U999>", lookup));
-    try std.testing.expectEqualStrings("U999", convertMrkdwn(&buffer, "<@U999>", null));
+    try std.testing.expectEqualStrings("@Bob", convertMrkdwn(&buffer, "<@U999|Bob>", null));
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U999>", lookup));
+    try std.testing.expectEqualStrings("@someone", convertMrkdwn(&buffer, "<@U999>", null));
+    try std.testing.expectEqualStrings("@someone joins later", convertMrkdwn(&buffer, "<@UUNKNOWN99> joins later", lookup));
 }
 
 test "convertMrkdwn converts channel mentions, special mentions and subteam/date tokens" {
