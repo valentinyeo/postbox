@@ -116,7 +116,7 @@ def check_integration():
         'if (chat.view_account.len > 0) key.account = chat.view_account.slice()',
         'slack_win.loadInstallation(a.allocator, account)', 'parsed.value.team_name',
         'messenger_view.providerView(chat.provider), chatViewKey(chat).account, view.key.key()',
-        'installation.team_id.slice(), installation.team_name.slice()', 'telegramReady(a)',
+        'installation.team_id.slice(), installation.team_name.slice()', 'messenger_view.Account.init(.telegram, "telegram", "")',
         'appendPalette(a, "Sort views", "", command_sort_views)', 'command_sort_views => openSortViews(a)',
         'a.palette_views_mode and control and !alt and !shift', 'moveView(a, key == win.VK_DOWN)',
         'if (!saveViewOrder(a))', 'fn buildSortViewsItems(', 'item.view_identity.account_len > 0',

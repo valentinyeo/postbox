@@ -106,7 +106,6 @@ const timer_chat_select = 4;
 const timer_update_check = 5;
 const timer_update_restart = 6;
 const timer_update_first_check = 8;
-const timer_telegram = 7;
 const timer_slack_mark = 9;
 const timer_voice = 10;
 const timer_passage_scroll = 11;
@@ -303,18 +302,6 @@ const Group = struct {
     jid: Utf8Text(191) = .{},
     name: Utf8Text(255) = .{},
 };
-
-const max_tg_chats = 64;
-const TgChat = struct {
-    id: i64 = 0,
-    name: WideText(159) = .{},
-    kind: Utf8Text(31) = .{},
-    timestamp: Utf8Text(47) = .{},
-    unread_count: i32 = 0,
-    is_group: bool = false,
-};
-
-const TgLoginMode = enum { none, phone, code, password, api_id, api_hash };
 
 const PendingSend = struct {
     provider: transport.Provider = .whatsapp,
@@ -811,17 +798,6 @@ const App = struct {
     update_dismissed_len: usize = 0,
     chats: []Chat = &.{},
     chat_count: usize = 0,
-    tg_chats: []TgChat = &.{},
-    tg_chat_count: usize = 0,
-    tg_login: TgLoginMode = .none,
-    tg_login_window: ?win.HWND = null,
-    tg_auth: tj.AuthState = .unknown,
-    tg_dirty: bool = false,
-    tg_api_id: i32 = 0,
-    tg_api_hash: Utf8Text(64) = .{},
-    tg_data_dir: Utf8Text(259) = .{},
-    tg_account: Utf8Text(32) = .{},
-    accounts_confirm_remove_tg: bool = false,
     groups: [max_groups]Group = [_]Group{.{}} ** max_groups,
     group_count: usize = 0,
     messages: [max_messages]Message = undefined,
@@ -1008,7 +984,6 @@ const App = struct {
     slack_install_mutex: std.Io.Mutex = .init,
     slack_app_token: []u8 = &.{},
     slack_mark_account: Utf8Text(32) = .{},
-    slack_setup_window: ?win.HWND = null,
     slack_fail_log_ms: [wacli_kind_count]u64 = [_]u64{0} ** wacli_kind_count,
     slack_fail_log_hash: [wacli_kind_count]u64 = [_]u64{0} ** wacli_kind_count,
     slack_count_log_ms: u64 = 0,
@@ -1496,7 +1471,6 @@ fn attachUnavailableReason(a: *App) ?[]const u8 {
         if (slackAccountIsBridge(a, a.chats[a.selected_chat].account.slice())) return "File upload not available over the Slack bridge";
         return null;
     }
-    if (selectedChatIsTelegram(a)) return null;
     return "Open a Slack or Telegram chat first";
 }
 
@@ -1828,11 +1802,6 @@ fn changeTheme(a: *App, choice: theme.Choice) bool {
     }
     saveTheme(choice);
     updateTooltipTheme(a);
-    for ([_]?win.HWND{ a.slack_setup_window, a.tg_login_window }) |window| {
-        const hwnd = window orelse continue;
-        var dark: win.BOOL = if (choice == .amoled) win.TRUE else win.FALSE;
-        _ = win.DwmSetWindowAttribute(hwnd, 20, &dark, @sizeOf(win.BOOL));
-    }
     setStatus(a, if (choice == .amoled) "Theme: AMOLED black" else "Theme: Green");
     _ = win.EnumThreadWindows(win.GetCurrentThreadId(), redrawThemeWindow, 0);
     return true;
@@ -2438,7 +2407,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         }
     }
     const view = activeChatView(a);
-    var needed = data.items.len + a.tg_chat_count + max_chats;
+    var needed = data.items.len + max_chats;
     for (&a.slack_installations) |*installation| if (installation.active) {
         needed += installation.chat_count;
     };
@@ -2703,32 +2672,6 @@ fn applyUnreadProbe(a: *App, result: *const WacliResult) void {
     }
     if (a.unread_only or (a.include_archived and a.chat_view == .all)) refreshChats(a);
 }
-
-fn tgChatIdString(buffer: *[24]u8, chat_id: i64) []const u8 {
-    return std.fmt.bufPrint(buffer, "{d}", .{chat_id}) catch "";
-}
-
-fn selectedChatIsTelegram(a: *const App) bool {
-    _ = a;
-    return false;
-}
-
-fn parseTgApiId(text: []const u8) ?i32 {
-    const parsed = std.fmt.parseInt(i32, text, 10) catch return null;
-    if (parsed <= 0) return null;
-    return parsed;
-}
-
-fn validTgApiHash(text: []const u8) bool {
-    if (text.len != 32) return false;
-    for (text) |c| {
-        const hex = (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
-        if (!hex) return false;
-    }
-    return true;
-}
-
-const tg_api_hash_error = "The api_hash is exactly 32 hexadecimal characters (0-9, a-f). Copy the whole value from my.telegram.org/apps.";
 
 fn setPaletteCue(a: *App) void {
     const edit = a.palette_edit orelse return;
@@ -3009,7 +2952,6 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         .avatar_dir = scratch[0..0],
     };
     defer app.allocator.free(app.chats);
-    defer app.allocator.free(app.tg_chats);
     defer {
         persistDrafts(app);
         app.draft_store.deinit(app.allocator);
@@ -3244,11 +3186,6 @@ fn fillSlackTimestamp(a: *App, chat: *Chat) void {
     }
 }
 
-fn telegramReady(a: *App) bool {
-    _ = a;
-    return false;
-}
-
 fn activeChatView(a: *App) messenger_view.View {
     return a.chat_view;
 }
@@ -3366,7 +3303,6 @@ fn rebuildViews(a: *App, rows: []const std.json.Value) void {
         for (&a.slack_installations) |*installation| {
             if (installation.active) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.slack, installation.team_id.slice(), installation.team_name.slice())) catch return;
         }
-        if (telegramReady(a)) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.telegram, a.tg_account.slice(), a.tg_account.slice())) catch return;
     }
     if (unifiedHub(a)) {
         messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.signal, "signal", "")) catch return;
@@ -4299,7 +4235,6 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         setStatus(a, "Can't resend this message - type it again");
         return true;
     }
-    if (selectedChatIsTelegram(a)) return false;
     if (a.pending_send_count >= max_pending_sends) {
         setStatus(a, "Send queue is full");
         return true;
@@ -8866,10 +8801,6 @@ fn stageImageFromClipboard(a: *App) bool {
         for ([_][]const u8{ "png", "jpg", "jpeg" }) |ext| {
             if (file_extension.len == ext.len + 1 and std.ascii.eqlIgnoreCase(file_extension[1..], ext)) extension = ext;
         }
-        if (selectedChatIsTelegram(a)) {
-            _ = stageFile(a, name_len);
-            return true;
-        }
         if (extension.len == 0) {
             setStatus(a, "Only PNG and JPEG files can be pasted as images");
             return true;
@@ -8995,7 +8926,6 @@ fn stageFile(a: *App, path: []const u8) bool {
 fn stageAttachmentFile(a: *App, path: [*:0]const u16) bool {
     const utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, std.mem.span(path)) catch return false;
     defer a.allocator.free(utf8);
-    if (selectedChatIsTelegram(a) and !unifiedHub(a)) return stageFile(a, utf8);
     var buffer: [520]u8 = undefined;
     const extension = std.fs.path.extension(utf8);
     const length = stageNewPath(a, &buffer, if (extension.len > 1) extension[1..] else "bin") orelse return false;
@@ -11179,9 +11109,6 @@ fn chatProvider(a: *App, jid: []const u8) transport.Provider {
     for (&a.slack_installations) |*installation| {
         if (slackChatById(a, installation.team_id.slice(), jid) != null) return .slack;
     }
-    if (std.fmt.parseInt(i64, jid, 10)) |id| {
-        for (a.tg_chats[0..a.tg_chat_count]) |*chat| if (chat.id == id) return .telegram;
-    } else |_| {}
     return .whatsapp;
 }
 
@@ -11615,26 +11542,6 @@ fn controlChats(a: *App, call: *ControlCall) !void {
                     if ((request.messenger != null or chatInView(a, chat_key.of(chat))) and controlMatches(a, chat, wanted)) try list.append(a.allocator, chat.*);
                 }
             }
-        }
-        if (!unifiedHub(a) and messenger_view.includes(view, .telegram) and !request.archived and telegramReady(a) and a.tg_account.len > 0) {
-            for (a.tg_chats[0..a.tg_chat_count]) |*cached| {
-                var chat = Chat{ .name = cached.name, .unread = cached.unread_count > 0, .unread_count = cached.unread_count, .provider = .telegram, .account = a.tg_account };
-                var id_buffer: [24]u8 = undefined;
-                chat.jid.set(tgChatIdString(&id_buffer, cached.id));
-                chat.kind.set(a.allocator, cached.kind.slice());
-                chat.timestamp.set(cached.timestamp.slice());
-                if ((request.messenger != null or chatInView(a, chat_key.of(&chat))) and controlMatches(a, &chat, wanted)) try list.append(a.allocator, chat);
-            }
-        }
-        if (unifiedHub(a) or messenger_view.includes(view, .whatsapp)) {
-            if (call.whatsapp_raw.len == 0) {
-                call.need_whatsapp = true;
-                return;
-            }
-            controlWhatsAppChats(a, call.whatsapp_raw, view, if (request.messenger == null) a.view_account.slice() else "", request.archived, wanted, &list) catch |err| switch (err) {
-                error.OutOfMemory => return err,
-                else => return control_api.writeError(w, "could not parse the WhatsApp chat list"),
-            };
         }
         controlSortChats(a, list.items, view);
     }
@@ -12168,7 +12075,6 @@ fn paletteMove(a: *App, delta: i32) void {
 fn closePalette(a: *App) void {
     a.palette_views_mode = false;
     a.accounts_confirm_remove = false;
-    a.accounts_confirm_remove_tg = false;
     if (a.palette) |palette| {
         _ = win.DestroyWindow(palette);
     }
@@ -12564,10 +12470,7 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
             if (a.palette_match_count == 0) {
                 _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
                 _ = win.SelectObject(hdc, @ptrCast(a.font.?));
-                const empty_text: [*:0]const u16 = if (a.tg_login != .none)
-                    lit("Type in the box above and press Enter")
-                else
-                    lit("No matching commands");
+                const empty_text = lit("No matching commands");
                 var empty_rect = win.RECT{ .left = 20, .top = palette_edit_zone + 4, .right = client.right - 20, .bottom = palette_edit_zone + 36 };
                 _ = text_draw.drawText(hdc, empty_text, -1, &empty_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
             }
@@ -12623,7 +12526,6 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
             a.palette_views_mode = false;
             a.palette_edit = null;
             a.palette_list = null;
-            a.tg_login = .none;
             if (a.sb_drag == .palette) a.sb_drag = .none;
             return 0;
         },
@@ -16011,7 +15913,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (alt and key == win.VK_MENU) return true;
-    if (a.tg_login_window != null) return false;
     if (a.image_viewer_window != null) return false;
     if (a.shortcut_help != null) return false;
     if (a.voice_active and !a.voice_finishing and (key == win.VK_RETURN or key == win.VK_ESCAPE) and !alt and !control) {
@@ -17017,7 +16918,6 @@ pub fn main(init: std.process.Init) !void {
     app.pending_archives = try app.allocator.alloc(PendingArchive, max_pending_archives);
     defer app.allocator.free(app.pending_archives);
     defer app.bulk.deinit(app.allocator);
-    defer app.allocator.free(app.tg_chats);
     defer {
         persistDrafts(app);
         app.draft_store.deinit(app.allocator);
@@ -17333,9 +17233,6 @@ pub fn main(init: std.process.Init) !void {
                     continue;
                 }
             }
-        }
-        if (app.tg_login_window) |login_wnd| {
-            if (win.IsDialogMessageW(login_wnd, &message) != 0) continue;
         }
         if (message.message == win.WM_MOUSEMOVE and app.chats_hwnd != null and message.hwnd == app.chats_hwnd.?) updateChatTooltip(app, message.lParam);
         if (handleKeyboard(app, &message)) continue;
@@ -18436,30 +18333,6 @@ test "reuseContactAvatar matches a group participant to their contact's cached j
     try std.testing.expectEqualStrings("999@s.whatsapp.net", same_domain.jid.slice());
 
     try std.testing.expect(reuseContactAvatar(a, "") == null);
-}
-
-test "telegram api_id parsing accepts positive numbers only" {
-    try std.testing.expectEqual(@as(?i32, 12345), parseTgApiId("12345"));
-    try std.testing.expectEqual(@as(?i32, null), parseTgApiId(""));
-    try std.testing.expectEqual(@as(?i32, null), parseTgApiId("abc"));
-    try std.testing.expectEqual(@as(?i32, null), parseTgApiId("0"));
-    try std.testing.expectEqual(@as(?i32, null), parseTgApiId("-4"));
-}
-
-test "telegram api_hash must be exactly 32 hex characters" {
-    try std.testing.expect(validTgApiHash("0123456789abcdef0123456789abcdef"));
-    try std.testing.expect(validTgApiHash("0123456789ABCDEF0123456789ABCDEF"));
-    try std.testing.expect(!validTgApiHash("0123456789abcdef"));
-    try std.testing.expect(!validTgApiHash(""));
-    try std.testing.expect(!validTgApiHash("0123456789abcdef0123456789abcdeg"));
-    try std.testing.expect(!validTgApiHash("0123456789abcdef0123456789abcdef0"));
-}
-
-test "telegram api_hash rejection text covers both validation rules" {
-    try std.testing.expect(std.mem.indexOf(u8, tg_api_hash_error, "exactly 32") != null);
-    try std.testing.expect(std.mem.indexOf(u8, tg_api_hash_error, "hexadecimal") != null);
-    try std.testing.expect(std.mem.indexOf(u8, tg_api_hash_error, "too short") == null);
-    try std.testing.expect(std.mem.indexOf(u8, tg_api_hash_error, "letters and digits") == null);
 }
 
 test "unresolvable chat entries are dropped, real chats are kept" {

@@ -411,7 +411,7 @@ pub fn build(b: *std.Build) void {
         sourceSection("fn wacliJobArgs(", "fn wacliPendingGet("),
         sourceSection("fn enqueueSlackOutbox(", "fn requestSlackDownload("),
         "fn resendSlackBubble(a: *App) bool { const message = &a.messages[0];\n",
-        sourceSection("    if (selectedChatIsSlack(a)) {\n        for (a.slack_outbox", "    if (selectedChatIsTelegram(a)) return false;"),
+        sourceSection("    if (selectedChatIsSlack(a)) {\n        for (a.slack_outbox", "    if (a.pending_send_count >= max_pending_sends)"),
         "return false; }\n",
     }) catch @panic("Out of memory building Slack send harness");
     const slack_send_harness = b.addWriteFiles().add("slack_send_test.zig", slack_send_source);
@@ -567,7 +567,7 @@ pub fn build(b: *std.Build) void {
         "fn unifiedHub(_: *const App) bool { return false; }\n",
         "fn hubConfigured(_: *const App) bool { return true; }\n",
         sourceSection("fn invalidateChatRow(", "fn persistReadState("),
-        sourceSection("fn queueUnreadProbe(", "fn tgChatIdString(buffer: *[24]u8, chat_id: i64) []const u8 {"),
+        sourceSection("fn queueUnreadProbe(", "fn setPaletteCue("),
         sourceSection("fn markChatRead(a: *App) void {", "    if (!unifiedHub(a) and chat.provider == .slack)"),
         sourceSection("    const needs_receipt = chat.provider_unread", "const slack_mark_debounce_ms: u32 = 750;"),
         sourceSection("fn startNextMarkRead(a: *App) void {", "const mark_read_hung_child_timeout_ms: u64 = 90_000;"),
