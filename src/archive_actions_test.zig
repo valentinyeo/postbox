@@ -3,6 +3,7 @@ const verification_fixture = false;
 const chat_key = @import("chat_key.zig");
 const archive_rules = @import("archive_rules.zig");
 const read_state = @import("read_state.zig");
+const media_age = @import("media_age.zig");
 const voice_sent = @import("voice_sent.zig");
 const ArchiveSource = if (@hasDecl(archive_rules, "Source")) archive_rules.Source else enum { shortcut, menu, control, send };
 const command_archive: u16 = 2007;
