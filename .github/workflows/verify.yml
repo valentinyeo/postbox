@@ -28,6 +28,7 @@ on:
       - src/hub*.zig
       - src/wa_hub*.zig
       - src/slack_win.zig
+      - src/winhttp.zig
       - src/transport.zig
       - src/messenger_view.zig
       - src/chat_key.zig

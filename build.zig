@@ -222,14 +222,6 @@ pub fn build(b: *std.Build) void {
     const build_info = b.addOptions();
     build_info.addOption([]const u8, "version", version);
 
-    const tdlib_dir = b.option([]const u8, "tdlib", "Path to a built TDLib static install") orelse "";
-    const td_enabled = tdlib_dir.len > 0;
-    build_info.addOption(bool, "td_enabled", td_enabled);
-    const telegram_api_id = b.option(i32, "telegram-api-id", "Telegram application api_id (build-time, from CI secret)") orelse 0;
-    const telegram_api_hash = b.option([]const u8, "telegram-api-hash", "Telegram application api_hash (baked default)") orelse "";
-    build_info.addOption(i32, "telegram_api_id", telegram_api_id);
-    build_info.addOption([]const u8, "telegram_api_hash", telegram_api_hash);
-
     const exe = b.addExecutable(.{
         .name = "Messages",
         .root_module = b.createModule(.{
@@ -262,30 +254,6 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary(library, .{});
     }
     exe.root_module.addWin32ResourceFile(.{ .file = b.path("assets/app.rc") });
-    if (td_enabled) {
-        exe.root_module.addIncludePath(.{ .cwd_relative = tdlib_dir });
-        exe.root_module.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ tdlib_dir, "include" }) });
-        const td_archives = [_][]const u8{
-            "libtdjson_static.a", "libtdjson_private.a", "libtdclient.a", "libtdcore.a",
-            "libtddb.a",          "libtdmtproto.a",      "libtdnet.a",    "libtdactor.a",
-            "libtdapi.a",         "libtdutils.a",        "libtdsqlite.a", "libtde2e.a",
-            "libssl.a",           "libcrypto.a",         "libz.a",
-        };
-        for (td_archives) |archive| {
-            const path = b.pathJoin(&.{ tdlib_dir, "lib", archive });
-            exe.root_module.addObjectFile(.{ .cwd_relative = path });
-        }
-        const mingw_lib_dir = b.option([]const u8, "mingw-lib-dir", "Path to the mingw win32-threads gcc lib directory") orelse b.pathJoin(&.{ tdlib_dir, "lib" });
-        exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libstdc++.a" }) });
-        exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libgcc_eh.a" }) });
-        exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libgcc.a" }) });
-        exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ mingw_lib_dir, "libgcc_s.a" }) });
-        exe.root_module.link_libc = true;
-        for ([_][]const u8{ "ws2_32", "iphlpapi", "crypt32", "bcrypt", "advapi32", "userenv", "ncrypt", "cryptbase", "secur32", "psapi" }) |library| {
-            exe.root_module.linkSystemLibrary(library, .{});
-        }
-        exe.root_module.addCSourceFile(.{ .file = b.path("src/tdlib_mingw_shims.c"), .flags = &.{"-std=gnu11"} });
-    }
     b.installArtifact(exe);
 
     const ctl = b.addExecutable(.{
@@ -319,7 +287,7 @@ pub fn build(b: *std.Build) void {
     b.step("test-edit", "Run native DirectWrite editing tests on Windows").dependOn(&b.addRunArtifact(edit_tests).step);
 
     const test_step = b.step("test", "Run unit tests");
-    for ([_][]const u8{ "src/attachments.zig", "src/staged_images.zig", "src/hub_test.zig", "src/wa_hub_test.zig", "src/pin_icon_test.zig", "src/message_double_click.zig", "src/reaction_chip.zig", "src/passage.zig", "src/recording_paint.zig", "src/font_config.zig", "src/edit_contract.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/chat_rows.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/media_layout.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/slack_emoji.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/update_card_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/slack_oauth.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/environment_keys.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
+    for ([_][]const u8{ "src/attachments.zig", "src/staged_images.zig", "src/hub_test.zig", "src/wa_hub_test.zig", "src/pin_icon_test.zig", "src/message_double_click.zig", "src/reaction_chip.zig", "src/passage.zig", "src/recording_paint.zig", "src/font_config.zig", "src/edit_contract.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/chat_rows.zig", "src/people_index.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/media_layout.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/slack_emoji.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/update_card_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/environment_keys.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(test_root),
@@ -368,7 +336,7 @@ pub fn build(b: *std.Build) void {
     const canvas_input_end = std.mem.indexOf(u8, canvas_source, "        win.WM_RBUTTONUP =>") orelse @panic("Missing canvas input end");
     const double_click_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/message_double_click_test.zig"),
-        "fn hubConfigured(_: *const App) bool { return false; }\nfn enqueueHubReaction(_: *App, _: *PendingReaction) void {}\n",
+        "fn hubConfigured(_: *const App) bool { return true; }\n",
         sourceSection("fn WideText(", "const Chat = struct"),
         sourceSection("const max_pending_reactions =", "const WacliJobKind = enum"),
         sourceSection("fn selectionPoint(", "fn copyPassage("),
@@ -394,10 +362,6 @@ pub fn build(b: *std.Build) void {
         .target = b.resolveTargetQuery(.{}),
         .imports = &.{
             .{ .name = "passage", .module = b.createModule(.{ .root_source_file = b.path("src/passage.zig"), .target = b.resolveTargetQuery(.{}) }) },
-            .{ .name = "send_args", .module = b.createModule(.{
-                .root_source_file = b.path("src/send_args.zig"),
-                .target = b.resolveTargetQuery(.{}),
-            }) },
             .{ .name = "message_double_click", .module = b.createModule(.{
                 .root_source_file = b.path("src/message_double_click.zig"),
                 .target = b.resolveTargetQuery(.{}),
@@ -440,7 +404,6 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(repaint_tests).step);
 
-    const slack_worker_source = @embedFile("src/slack_win.zig");
     const slack_send_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/slack_send_test.zig"),
         sourceSection("const SlackOutbox = struct", "const StagedImage = struct {"),
@@ -450,7 +413,6 @@ pub fn build(b: *std.Build) void {
         "fn resendSlackBubble(a: *App) bool { const message = &a.messages[0];\n",
         sourceSection("    if (selectedChatIsSlack(a)) {\n        for (a.slack_outbox", "    if (selectedChatIsTelegram(a)) return false;"),
         "return false; }\n",
-        slack_worker_source[std.mem.indexOf(u8, slack_worker_source, "fn shareImage(").?..],
     }) catch @panic("Out of memory building Slack send harness");
     const slack_send_harness = b.addWriteFiles().add("slack_send_test.zig", slack_send_source);
     const slack_send_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -554,7 +516,7 @@ pub fn build(b: *std.Build) void {
         control_archive_filter,
         "return chat; } return null; }\n",
         "fn unifiedHub(a: *const App) bool { return a.unified_hub; }\n",
-        "fn hubConfigured(a: *const App) bool { return a.unified_hub; }\n",
+        "fn hubConfigured(_: *const App) bool { return true; }\n",
         "fn applyHubArchiveResult(a: *App, result: *const WacliResult) void { switch (result.kind) {\n",
         sourceSection("        .hub_archive => {\n", "        .hub_media => {\n"),
         "else => {}, } }\n",
@@ -603,10 +565,10 @@ pub fn build(b: *std.Build) void {
     const read_state_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/read_state_test.zig"),
         "fn unifiedHub(_: *const App) bool { return false; }\n",
-        "fn hubConfigured(_: *const App) bool { return false; }\nfn startHubMarkRead(_: *App) void {}\n",
+        "fn hubConfigured(_: *const App) bool { return true; }\n",
         sourceSection("fn invalidateChatRow(", "fn persistReadState("),
         sourceSection("fn queueUnreadProbe(", "fn tgChatIdString(buffer: *[24]u8, chat_id: i64) []const u8 {"),
-        sourceSection("fn markChatRead(a: *App) void {", "    if (!unifiedHub(a) and chat.provider == .telegram)"),
+        sourceSection("fn markChatRead(a: *App) void {", "    if (!unifiedHub(a) and chat.provider == .slack)"),
         sourceSection("    const needs_receipt = chat.provider_unread", "const slack_mark_debounce_ms: u32 = 750;"),
         sourceSection("fn startNextMarkRead(a: *App) void {", "const mark_read_hung_child_timeout_ms: u64 = 90_000;"),
     }) catch @panic("Out of memory building read state harness");

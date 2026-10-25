@@ -209,7 +209,11 @@ fn stopSync(a: *App, _: []const u8) void {
 }
 fn startSync(_: *App) void {}
 fn startHubArchive(a: *App) void {
-    if (a.bulk.items.len > 0 or a.pending_archive_count == 0 or a.hub_archive_inflight) return;
+    if (a.bulk.items.len > 0 or a.pending_archive_count == 0 or a.hub_archive_inflight or a.read_child != null) return;
+    const pending = &a.pending_archives[0];
+    var buffer: [288]u8 = undefined;
+    appendLaunchLog(a, archive_rules.logLine(&buffer, pending.jid.slice(), !pending.should_unarchive, pending.source));
+    a.persisted_before_start = a.persisted_before_start and a.saved_len > 0;
     a.hub_archive_inflight = true;
     a.hub_archive_requests += 1;
     a.hub_archive_batch_count = a.pending_archives[0].batch_count;

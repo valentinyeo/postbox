@@ -4,7 +4,7 @@ const chat_key = @import("chat_key.zig");
 const mic_choice = @import("mic_choice.zig");
 const format_request = @import("format_request.zig");
 const dictation_policy = @import("dictation_policy.zig");
-const slack_win = @import("slack_win.zig");
+const slack_win = @import("winhttp.zig");
 const win = @cImport({
     @cDefine("WIN32_LEAN_AND_MEAN", "1");
     @cDefine("COBJMACROS", "1");

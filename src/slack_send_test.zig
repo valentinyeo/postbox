@@ -269,61 +269,6 @@ test "Slack retains only eight failures and evicts oldest failed before refusing
     try std.testing.expectEqual(@as(usize, 15), a.slack_outbox_count);
 }
 
-const JobContext = struct { host: []const u8 = "slack.com", user_token: []const u8 = "" };
-const Response = struct {
-    status: u32,
-    body: []u8,
-    fn deinit(self: *Response, allocator: std.mem.Allocator) void {
-        allocator.free(self.body);
-    }
-};
-var info_body: []const u8 = "";
-var complete_calls: usize = 0;
-
-fn callWithRetry(allocator: std.mem.Allocator, _: []const u8, _: []const u8, path: []const u8, body: ?[]const u8) !Response {
-    if (std.mem.startsWith(u8, path, "/api/files.info?file=")) {
-        try std.testing.expectEqualStrings("/api/files.info?file=F01234567", path);
-        try std.testing.expect(body == null);
-        return .{ .status = 200, .body = try allocator.dupe(u8, info_body) };
-    }
-    try std.testing.expectEqualStrings("/api/files.completeUploadExternal", path);
-    try std.testing.expect(std.mem.indexOf(u8, body.?, "F01234567") != null);
-    complete_calls += 1;
-    return .{ .status = 200, .body = try allocator.dupe(u8, "{\"ok\":true}") };
-}
-
-fn httpOk(allocator: std.mem.Allocator, body: []const u8) bool {
-    return slack.responseIsOk(allocator, body);
-}
-
-fn bodyOnly(_: std.mem.Allocator, response: Response) []u8 {
-    return response.body;
-}
-
-test "Slack share worker never shares an already shared file again" {
-    info_body = "{\"ok\":true,\"file\":{\"id\":\"F01234567\",\"shares\":{\"private\":{\"C01234567\":[{\"ts\":\"1700000000.000100\"}]}}}}";
-    complete_calls = 0;
-    const body = try shareImage(std.testing.allocator, .{}, "C01234567", "", "F01234567", "caption");
-    defer std.testing.allocator.free(body);
-    try std.testing.expectEqual(@as(usize, 0), complete_calls);
-    try std.testing.expectEqualStrings("{\"ok\":true,\"already_shared\":true}", body);
-}
-
-test "Slack share worker shares unshared files but never missing or unknown files" {
-    info_body = "{\"ok\":true,\"file\":{\"id\":\"F01234567\",\"channels\":[],\"shares\":{}}}";
-    complete_calls = 0;
-    const body = try shareImage(std.testing.allocator, .{}, "C01234567", "", "F01234567", "caption");
-    defer std.testing.allocator.free(body);
-    try std.testing.expectEqual(@as(usize, 1), complete_calls);
-    info_body = "{\"ok\":false,\"error\":\"file_deleted\"}";
-    try std.testing.expectError(error.FileMissing, shareImage(std.testing.allocator, .{}, "C01234567", "", "F01234567", "caption"));
-    info_body = "{\"ok\":false,\"error\":\"file_not_found\"}";
-    try std.testing.expectError(error.FileMissing, shareImage(std.testing.allocator, .{}, "C01234567", "", "F01234567", "caption"));
-    info_body = "invalid json";
-    try std.testing.expectError(error.HttpFailed, shareImage(std.testing.allocator, .{}, "C01234567", "", "F01234567", "caption"));
-    try std.testing.expectEqual(@as(usize, 1), complete_calls);
-}
-
 test "Slack manual resend reuses and resets the failed journal entry" {
     var a = App{};
     const slot = addEntry(&a, false);

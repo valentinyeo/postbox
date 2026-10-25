@@ -1,5 +1,5 @@
 const std = @import("std");
-const slack_win = @import("slack_win.zig");
+const slack_win = @import("winhttp.zig");
 
 pub fn choose(registry_value: ?[]const u8, process_value: ?[]const u8) []const u8 {
     if (registry_value) |value| if (value.len > 0) return value;
