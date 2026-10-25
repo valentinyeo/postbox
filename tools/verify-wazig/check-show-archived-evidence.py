@@ -1,5 +1,7 @@
 import json
 import re
+import runpy
+from pathlib import Path
 from urllib.parse import urlsplit
 
 
@@ -12,7 +14,7 @@ def check_show_archived(folder):
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, name
         tree = (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
         assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', tree.splitlines()[0]), name
-        assert '1146 | Button | Show archived: ' + ('On' if enabled else 'Off') in tree, name
+        assert '1146 |' not in tree and 'Show archived:' not in tree, name
         state = read(f'{name}.state.json')
         rows = read(f'{name}.chats.json')['chats']
         assert state['include_archived'] == enabled and not state['show_archived'], name
@@ -65,10 +67,7 @@ def check_show_archived(folder):
             assert 1 <= rebuilds <= 2, name
         else:
             assert rebuilds == 1 and fetch_ms == 0 and paints == 1, name
-    tip = read('show-archived-tooltip.json')
-    assert tip['control'] == '1146' and 'Show archived' in tip['text'] and 'Alt+A' in tip['text']
-    assert tip['pid'] == read('show-archived-restart.json')['old_pid']
-    assert (folder / 'tooltip.png').read_bytes().startswith(b'\x89PNG')
+    runpy.run_path(str(Path(__file__).with_name('check-archive-presentation.py')))['check_presentation'](folder)
     for position, view in enumerate(views, 1):
         capture(f'view-{position}-off', False, 2, 0, view)
         capture(f'view-{position}-on', True, 4, 2, view)
@@ -120,4 +119,4 @@ def check_show_archived(folder):
     assert all(final[key] for key in ('production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'))
     assert 'JOURNEY PASSED: show-archived' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('SHOW ARCHIVED EVIDENCE VERIFIED: marked unread inbox, independent accounts, mixed actions, tooltip and restart')
+    print('SHOW ARCHIVED EVIDENCE VERIFIED: marked unread inbox, independent accounts, mixed actions, archive presentation and restart')
