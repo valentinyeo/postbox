@@ -135,6 +135,10 @@ jobs:
         run: |
           python tools/verify-wazig/check-evidence.py verification-evidence
           if ($LASTEXITCODE -ne 0) { throw 'Invalid journey evidence' }
+      - name: Archive rows through the production renderer with a light fixture palette
+        if: matrix.feature == 'show-archived'
+        shell: pwsh
+        run: pwsh -NoProfile -File tools/verify-wazig/verify-archive-light.ps1
       - name: Validate search pill ink centering
         if: matrix.feature == 'search'
         shell: pwsh

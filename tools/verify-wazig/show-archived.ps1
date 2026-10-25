@@ -12,12 +12,6 @@ function Save-ArchivedSwitch($Session, [string]$Name, [bool]$Enabled, [int]$Coun
             @($rows | Where-Object { $_.archived -and $_.archive_label -notin @('Archived', 'Kept archived') }).Count -eq 0
     } "show-archived $Name"
     Save-Screen $Session $Name
-    $uia = Join-Path $Session.evidence "$Name.uia.txt"
-    for ($attempt = 0; $attempt -lt 5; $attempt++) {
-        if ((Test-Path $uia) -and (Select-String -Path $uia -Pattern '1146 \| Button \| Show archived: ' -Quiet)) { break }
-        [System.Threading.Thread]::Sleep(200)
-        Save-Screen $Session $Name
-    }
     if ($Toggle) {
         $lines = @(Get-Content (Join-Path $Session.root 'local/Messages/launch-log.txt') | Where-Object { $_ -match ' archive-toggle:' })
         $script:ArchiveToggleIndex = $lines.Count - 1
@@ -26,30 +20,7 @@ function Save-ArchivedSwitch($Session, [string]$Name, [bool]$Enabled, [int]$Coun
     Hub-Pass $Session $Name | Out-Null
 }
 
-function Read-ArchivedSwitchTooltip($Session) {
-    Add-Type -Path "$PSScriptRoot/menus.cs"
-    $button = Get-Edit (Get-Window $Session) '1146'
-    $bounds = $button.Current.BoundingRectangle
-    $null = Get-App $Session
-    [VerifyMenus]::Hover($Session.pid, [int]($bounds.Left + 2), [int]($bounds.Top + 2))
-    [VerifyMenus]::Hover($Session.pid, [int]($bounds.Left + $bounds.Width / 2), [int]($bounds.Top + $bounds.Height / 2))
-    $text = Wait-Until {
-        $condition = [Windows.Automation.AndCondition]::new(
-            [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$Session.pid),
-            [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'tooltips_class32')
-        )
-        foreach ($tip in [Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)) {
-            if (-not $tip.Current.IsOffscreen -and $tip.Current.Name.Contains('Alt+A')) { return $tip.Current.Name }
-        }
-        $native = [VerifyMenus]::Find($Session.pid, 'tooltips_class32')
-        if ($native -ne [IntPtr]::Zero) {
-            $label = Read-EditText $native
-            if ($label.Contains('Alt+A')) { return $label }
-        }
-    } 'Show archived tooltip contains Alt+A'
-    @{ text = $text; control = '1146'; pid = $Session.pid } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'show-archived-tooltip.json')
-    Save-Screen $Session tooltip
-}
+. "$PSScriptRoot/archive-presentation.ps1"
 
 function Invoke-ShowArchivedJourney($Session, $Start) {
     $script:ArchiveToggleIndex = -1
@@ -65,7 +36,7 @@ function Invoke-ShowArchivedJourney($Session, $Start) {
     Send-Keys $Session '%a'
     Save-ArchivedSwitch $Session inbox-warm-on $true 10 5 $true
     Assert-That (@((Read-Control $Session chats).chats | Where-Object { -not $_.unread }).Count -eq 0) 'Inbox mixed mode included a read chat'
-    Read-ArchivedSwitchTooltip $Session
+    Assert-ArchiveFooterRemoved $Session
     Invoke-PaletteCommand $Session 'Toggle unread chats'
     $views = @((Read-Control $Session status).view_order)
     Assert-That ($views.Count -eq 5) 'Expected two WhatsApp and three other account views'
@@ -76,7 +47,7 @@ function Invoke-ShowArchivedJourney($Session, $Start) {
         Send-Keys $Session '%a'
         Save-ArchivedSwitch $Session "view-$position-on" $true 4 2 $true
         if ($position -eq 1) {
-            Invoke-PaletteCommand $Session 'Toggle archived chats in this view' 'palette-switch'
+            Read-ArchivePaletteState $Session $true palette-switch $true
             Save-ArchivedSwitch $Session palette-off $false 2 0 $true
             Send-Keys $Session '%a'
             Save-ArchivedSwitch $Session palette-on $true 4 2 $true
@@ -94,6 +65,7 @@ function Invoke-ShowArchivedJourney($Session, $Start) {
             Save-ArchivedSwitch $Session "view-$position-disabled" $false 2 0 $true
         }
     }
+    Invoke-ArchivePresentation $Session
     Send-Keys $Session '%1'
     Save-ArchivedSwitch $Session account-one-kept $true 4 2
     Send-Keys $Session '%2'
