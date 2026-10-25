@@ -1311,7 +1311,7 @@ test "non hub Telegram and Signal archiving remains unavailable" {
     }
 }
 
-test "plain hub archives return while kept archives stay sticky and transient failures retain intent" {
+test "successful hub archives stay sticky per timestamp and transient failures retain intent" {
     for ([_]bool{ false, true }) |keep| {
         var state = archive_rules.State{};
         var a = fixture(&state);
@@ -1325,7 +1325,7 @@ test "plain hub archives return while kept archives stay sticky and transient fa
         a.refresh_key.set(chat_key.of(&a.chats[0]));
         a.refresh_stamp.set("2026-10-10T11:00:00Z");
         const key = a.refresh_key.key();
-        try std.testing.expect(state.archive(key.id, "2026-10-10T10:00:00Z", keep));
+        try std.testing.expect(state.archive(key.id, "baseline", keep));
         refreshChats(&a);
         if (!keep) {
             refreshChats(&a);
@@ -1335,7 +1335,7 @@ test "plain hub archives return while kept archives stay sticky and transient fa
             try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
             try std.testing.expectEqual(@as(usize, 2), a.chat_count);
             try std.testing.expect(!state.isKept(key.id));
-            try std.testing.expect(state.baseline(key.id) == null);
+            try std.testing.expectEqualStrings("baseline", state.baseline(key.id).?);
             continue;
         }
         try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);

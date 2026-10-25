@@ -95,36 +95,38 @@ class SlackArchiveEvidenceTests(unittest.TestCase):
                             pid=42, startTicks='2', root='synthetic-profile', id='synthetic-id')
         self.write('session.json', self.session)
         self.write('result.json', dict(feature='slack-archive', status='passed'))
-        self.target = dict(id='fixture-alpha', account='fixture-account', provider='slack', archived=False, unread_count=0)
+        self.target = dict(id='fixture-alpha', account='fixture-account', provider='slack', archived=False, unread_count=0,
+                           archive_label='', last_message_time='2026-01-01T01:00:00Z')
         other = dict(self.target, id='fixture-beta')
-        stages = dict(before=(False, [self.target, other]), archived=(True, [dict(self.target, archived=True)]),
-                      incoming=(True, [dict(self.target, archived=True, unread_count=3)]),
-                      restart=(True, [dict(self.target, archived=True, unread_count=3)]),
-                      unarchived=(False, [self.target, other]), **{'unarchived-archive': (True, [])})
-        for stage in ['archived-inbox', 'before-incoming', 'restart-inbox']:
+        incoming = dict(self.target, unread_count=1, last_message_time='2026-01-01T02:00:00Z')
+        rearchived = dict(incoming, archived=True, archive_label='Archived', unread_count=0)
+        stages = dict(before=(False, [self.target, other]),
+                      archived=(True, [dict(self.target, archived=True, archive_label='Archived')]),
+                      rearchived=(True, [rearchived]), restart=(True, [rearchived]),
+                      unarchived=(False, [dict(rearchived, archived=False, archive_label=''), other]),
+                      **{'incoming-inbox': (False, [incoming, other]), 'incoming-archive-empty': (True, []),
+                         'unarchived-archive': (True, [])})
+        for stage in ['archived-inbox', 'before-incoming', 'rearchived-inbox', 'restart-inbox']:
             stages[stage] = (False, [other])
-        for number in range(1, 4):
-            for suffix in ['inbox', 'hidden']:
-                stages[f'incoming-{number}-{suffix}'] = (False, [other])
-            stages[f'incoming-{number}-archive'] = (True, [dict(self.target, archived=True, unread_count=number)])
         for stage, (archived, rows) in stages.items():
             self.write(f'{stage}.state.json', dict(show_archived=archived, chat_count=len(rows), pending_archives=0, pending_sends=0, selected=self.target))
             self.write(f'{stage}.chats.json', dict(archived=archived, total=len(rows), chats=rows))
             (self.folder / f'{stage}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'fixture' * 2000)
             (self.folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526')
         self.write('restart.json', dict(old_pid=41, old_start='1', new_pid=42, new_start='2', root=self.session['root'], id=self.session['id'], sha256=self.session['sha256']))
-        (self.folder / 'slack-archive-state.txt').write_text('synthetic archive state')
-        self.requests = []
-        for number in range(1, 4):
-            self.requests.extend([
-                dict(method='POST', path='/fixture/live', wire_path='/fixture/live', authorized=True, incoming=number),
-                dict(method='SSE', path='/v1/wazig/events', wire_path='/v1/wazig/events', kind='msg', chat='fixture-alpha', incoming=number),
-                dict(method='GET', path='/v1/wazig/chats?archived=false', wire_path='/v1/wazig/chats?archived=false', authorized=True,
-                     incoming=number, archived=False, rows=[dict(jid='fixture-alpha', archived=False, unread_count=number)])])
+        for name, row in [('slack-archive-state.txt', self.target), ('slack-rearchive-state.txt', rearchived)]:
+            (self.folder / name).write_text('\t'.join([row['provider'], row['account'], row['id'], '0', row['last_message_time']]) + '\n')
+        self.requests = [
+            dict(method='POST', path='/fixture/live', wire_path='/fixture/live', authorized=True, incoming=1),
+            dict(method='SSE', path='/v1/wazig/events', wire_path='/v1/wazig/events', kind='msg', chat='fixture-alpha',
+                 incoming=1, ts=incoming['last_message_time']),
+            dict(method='GET', path='/v1/wazig/chats?archived=false', wire_path='/v1/wazig/chats?archived=false', authorized=True,
+                 incoming=1, archived=False, rows=[dict(jid='fixture-alpha', archived=False, unread_count=1,
+                                                      last_message_ts=incoming['last_message_time'])])]
         self.write_requests()
         self.write('side-effects.json', dict(chat_count=2, show_archived=False, pending_sends=0, pending_archives=0, sync='stopped', slack_connected=False,
                                             production_preferences_absent=True, whatsapp_store_absent=True, telegram_store_absent=True))
-        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['%1', '^1', '^e', 'Show archived chats', 'Show inbox chats', 'Refresh', '^e']) + '\n')
+        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['%1', '^1', '^e', 'Show archived chats', 'Show inbox chats', 'Refresh', '^e', '^e']) + '\n')
         (self.folder / 'hub-proof.log').write_text('slack-archive local-archive-incoming-restart-unarchive PASS')
         (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED: synthetic validator input')
         (self.folder / 'result.txt').write_text('JOURNEY PASSED: slack-archive')
@@ -150,11 +152,11 @@ class SlackArchiveEvidenceTests(unittest.TestCase):
             self.assertNotEqual(self.validate().returncode, 0)
             self.requests.pop()
 
-    def test_rejects_resurfacing_lost_restart_wrong_account_and_incomplete_unarchive(self):
+    def test_rejects_sticky_archive_lost_restart_wrong_account_and_incomplete_unarchive(self):
         for name, mutate in [
-            ('incoming-2-inbox.chats.json', lambda v: v['chats'][0].update(self.target)),
+            ('incoming-inbox.chats.json', lambda v: v['chats'][0].update(archived=True, archive_label='Archived')),
             ('restart.chats.json', lambda v: v['chats'][0].update(archived=False)),
-            ('incoming.chats.json', lambda v: v['chats'][0].update(account='another-account')),
+            ('incoming-inbox.chats.json', lambda v: v['chats'][0].update(account='another-account')),
             ('unarchived.chats.json', lambda v: v['chats'][0].update(archived=True)),
             ('result.json', lambda v: v.update(status='failed')),
             ('restart.json', lambda v: v.update(root='another-profile'))]:
@@ -169,19 +171,44 @@ class SlackArchiveEvidenceTests(unittest.TestCase):
 
     def test_rejects_missing_live_delivery_and_false_provider_archive_flag(self):
         original = list(self.requests)
-        self.requests = [row for row in original if not (row['method'] == 'SSE' and row['incoming'] == 2)]
-        self.write_requests()
-        self.assertNotEqual(self.validate().returncode, 0)
+        for method in ['POST', 'SSE']:
+            with self.subTest(method=method):
+                self.requests = [row for row in original if row['method'] != method]
+                self.write_requests()
+                self.assertNotEqual(self.validate().returncode, 0)
         self.requests = original
         self.requests[-1]['rows'][0]['archived'] = True
         self.write_requests()
         self.assertNotEqual(self.validate().returncode, 0)
 
+    def test_rejects_keep_archived_state(self):
+        for name in ['slack-archive-state.txt', 'slack-rearchive-state.txt']:
+            with self.subTest(name=name):
+                path = self.folder / name
+                original = path.read_text()
+                fields = original.rstrip('\n').split('\t')
+                fields[3] = '1'
+                path.write_text('\t'.join(fields) + '\n')
+                self.assertNotEqual(self.validate().returncode, 0)
+                path.write_text(original)
+
+    def test_rejects_kept_archived_label(self):
+        for stage in ['archived', 'rearchived', 'restart']:
+            with self.subTest(stage=stage):
+                name = f'{stage}.chats.json'
+                path = self.folder / name
+                original = path.read_text()
+                value = json.loads(original)
+                value['chats'][0]['archive_label'] = 'Kept archived'
+                self.write(name, value)
+                self.assertNotEqual(self.validate().returncode, 0)
+                path.write_text(original)
+
     def test_rejects_missing_required_screenshot(self):
         (self.folder / 'restart.png').unlink()
         self.assertNotEqual(self.validate().returncode, 0)
 
-    def test_fake_hub_delivers_three_distinct_messages_and_unarchived_rows(self):
+    def test_fake_hub_delivers_one_newer_message_and_unarchived_rows(self):
         import importlib.util
         import io
         from types import SimpleNamespace
@@ -198,21 +225,21 @@ class SlackArchiveEvidenceTests(unittest.TestCase):
         replies = []
         handler.respond = lambda status, data, **extra: replies.append((status, data, extra))
         handler.wfile = io.BytesIO()
-        for number in range(1, 4):
-            handler.path = '/fixture/live'
-            handler.rfile = io.BytesIO(b'{}')
-            handler.do_POST()
-            self.assertEqual(state.archive_incoming, number)
-            handler.event(number + 1, 'msg', number)
-            handler.path = '/v1/wazig/chats?archived=false'
-            handler.do_GET()
-            alpha = replies[-1][1][0]
-            self.assertFalse(alpha['archived'])
-            self.assertEqual(alpha['unread_count'], number)
+        handler.path = '/fixture/live'
+        handler.rfile = io.BytesIO(b'{}')
+        handler.do_POST()
+        self.assertEqual(state.archive_incoming, 1)
+        handler.event(2, 'msg', 1)
+        handler.path = '/v1/wazig/chats?archived=false'
+        handler.do_GET()
+        alpha = replies[-1][1][0]
+        self.assertFalse(alpha['archived'])
+        self.assertEqual(alpha['unread_count'], 1)
+        self.assertGreater(alpha['last_message_ts'], handler.stamp(0))
         handler.path = '/v1/wazig/messages?chat=fixture-alpha'
         handler.do_GET()
-        self.assertEqual(len({row['MsgID'] for row in replies[-1][1]}), 4)
-        self.assertEqual(handler.wfile.getvalue().count(b'"kind": "msg"'), 3)
+        self.assertEqual(len({row['MsgID'] for row in replies[-1][1]}), 2)
+        self.assertEqual(handler.wfile.getvalue().count(b'"kind": "msg"'), 1)
 
 
 if __name__ == '__main__':

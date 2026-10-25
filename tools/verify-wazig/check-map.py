@@ -372,9 +372,19 @@ assert 'slack-archive' in options and entries['slack-archive']['evidence']
 assert entries['slack-archive']['validator']['file'] == 'check-slack-archive-evidence.py'
 for name in ['RULE-MAP.md']:
     assert '(features/slack-archive.md)' in (skill / name).read_text(encoding='utf-8')
-for artifact in ['archived', 'incoming', 'restart', 'unarchived']:
+for artifact in ['archived', 'incoming-inbox', 'incoming-archive-empty', 'rearchived-inbox', 'rearchived', 'restart', 'unarchived',
+                 'slack-archive-state.txt', 'slack-rearchive-state.txt']:
     assert artifact in archive_journey and artifact in archive_validator, artifact
-assert "foreach ($number in 1..3)" in archive_journey and "Send-Keys $Session '^e'" in archive_journey
+assert archive_journey.count("Send-Keys $Session '^e'") == 3
+assert archive_journey.count('/fixture/live') == 1
+assert 'Assert-SlackArchiveView $Session $false 1 incoming-inbox $true' in archive_journey
+assert 'Assert-SlackArchiveView $Session $true 0 incoming-archive-empty $false' in archive_journey
+assert "archive_label -eq $(if ($Archived) { 'Archived' } else { '' })" in archive_journey
+for fragment in ["target[0]['archive_label'] == ('Archived' if archived else '')", "target[0][3] == '0' and target[0][4]",
+                 "[row['incoming'] for row in deliveries] == [1]", "> archive_stamps[0]", "urlsplit(row['wire_path']).path"]:
+    assert fragment in archive_validator, fragment
+for fragment in ['ordinary archive', 'keep=0', 'newer message', 'incoming-archive-empty.png']:
+    assert fragment in archive_map, fragment
 assert 'WAZIG_VERIFY_RESTART' in archive_journey and '$old.Kill()' in archive_journey
 assert '$null = Get-App $Session' in archive_journey
 assert '$app = [Diagnostics.Process]::Start($Start)' in archive_journey and 'return $app' in archive_journey
@@ -383,7 +393,7 @@ assert '$restarted.Count -eq 1 -and $restarted[0] -is [Diagnostics.Process] -and
 assert '$restarted[0].Id -eq $session.pid' in runner and '$app = $restarted[0]' in runner
 assert '$app.MainWindowHandle -eq [IntPtr](Get-Window $Session).Current.NativeWindowHandle' in archive_journey
 assert '.claude/skills/verify-wazig/features/slack-archive.md' in marker_namespace['PUBLIC_SKILL_PATHS']
-print('SLACK ARCHIVE MAP VERIFIED: unified fixture, three deliveries, restart, unarchive and no archive endpoint requests')
+print('SLACK ARCHIVE MAP VERIFIED: ordinary archive, one newer delivery returns to inbox, rearchive, restart, unarchive and no archive endpoint requests')
 paste_journey = (root / 'tools/verify-wazig/paste-image.ps1').read_text(encoding='utf-8')
 paste_validator = (root / 'tools/verify-wazig/check-paste-image-evidence.py').read_text(encoding='utf-8')
 for name in ['RULE-MAP.md']:
