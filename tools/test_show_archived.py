@@ -288,9 +288,30 @@ class ShowArchivedTests(unittest.TestCase):
                         image[y][70:170] = [colour] * 100
                     pixels['write_png'](image_path, image)
                     with self.subTest(light=light, scope=scope, mode=mode):
-                        with self.assertRaises(AssertionError):
+                        message = 'theme colour mix' if mode == 'dim' else 'archived row came back dimmed when hovered or selected'
+                        with self.assertRaisesRegex(AssertionError, message):
                             checker['check_scene'](self.folder, name, capture=True)
                     image_path.write_bytes(original)
+            self.assertEqual(self.validate().returncode, 0)
+
+    def test_full_strength_contrast_tolerates_cleartype_channel_differences(self):
+        checker = runpy.run_path(str(TOOLS / 'check-archive-presentation.py'))
+        pixels = runpy.run_path(str(TOOLS / 'check-workspace-icons.py'))
+        for light in (False, True):
+            self.presentation(light=light)
+            colour = (0, 0, 22) if light else (255, 255, 233)
+            for scope in ('sidebar', 'search', 'inbox'):
+                for mode in ('hover', 'selected'):
+                    name = f'archive-{scope}-{mode}'
+                    image_path = self.folder / f'{name}.png'
+                    _, _, image = pixels['read_png'](image_path)
+                    for y in range(2 * 64 + 16, 2 * 64 + 26):
+                        image[y][70:170] = [colour] * 100
+                    pixels['write_png'](image_path, image)
+                    with self.subTest(light=light, scope=scope, mode=mode):
+                        metrics = checker['check_scene'](self.folder, name, capture=True)
+                        self.assertEqual(metrics['full_strength_colour_distance'], 22)
+                        self.assertGreaterEqual(metrics['archived']['contrast'], metrics['live']['contrast'] * 0.9)
             self.assertEqual(self.validate().returncode, 0)
 
     def archive_colour_contract(self, source):

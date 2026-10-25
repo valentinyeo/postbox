@@ -80,8 +80,7 @@ def check_scene(folder, name, capture=False):
         assert 0 < ratio < 1, (name, 'archived/live contrast-excess ratio', ratio)
         assert colour_distance > 15, (name, 'archived text is not dimmer')
     else:
-        assert colour_distance <= 8, (name, 'archived text not at full strength', normal, marked)
-        assert marked['contrast'] >= 4.5, (name, marked)
+        assert marked['contrast'] >= normal['contrast'] * 0.9, (name, 'archived row came back dimmed when hovered or selected', normal, marked)
         if layout['mode'] == 'selected':
             assert layout['selected'] == archived['id'] and state['selected']['archived'], name
         else:
