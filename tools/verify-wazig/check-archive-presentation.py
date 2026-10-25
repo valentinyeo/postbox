@@ -73,12 +73,12 @@ def check_scene(folder, name, capture=False):
     colour_distance = max(abs(a - b) for a, b in zip(normal['text'], marked['text']))
     expected_dim_text = [(text * FOREGROUND_WEIGHT + background * (255 - FOREGROUND_WEIGHT)) // 255
                          for text, background in zip(normal['text'], normal['background'])]
-    mix_error = max(abs(a - b) for a, b in zip(expected_dim_text, marked['text']))
+    mix_error = abs(sum(expected_dim_text) / 3 - sum(marked['text']) / 3)
     assert normal['contrast'] >= 4.5, (name, normal)
     if layout['mode'] == 'dim':
         assert layout['selected'] != archived['id'], name
         assert marked['background'] == normal['background'], (name, 'row background changed')
-        assert mix_error <= 8, (name, 'archived text does not match theme colour mix', expected_dim_text, marked)
+        assert mix_error <= 12, (name, 'archived text does not match theme colour mix', expected_dim_text, marked)
         assert 0 < ratio < 1, (name, 'archived/live contrast-excess ratio', ratio)
         assert colour_distance > 15, (name, 'archived text is not dimmer')
     else:

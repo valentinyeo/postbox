@@ -294,6 +294,31 @@ class ShowArchivedTests(unittest.TestCase):
                     image_path.write_bytes(original)
             self.assertEqual(self.validate().returncode, 0)
 
+    def test_dim_text_colour_tolerates_cleartype_channel_differences(self):
+        checker = runpy.run_path(str(TOOLS / 'check-archive-presentation.py'))
+        pixels = runpy.run_path(str(TOOLS / 'check-workspace-icons.py'))
+        for light in (False, True):
+            self.presentation(light=light)
+            colour = (0, 0, 32) if light else (255, 255, 223)
+            expected = [75, 75, 97] if light else [180, 180, 157]
+            for scope in ('sidebar', 'search', 'inbox'):
+                name = f'archive-{scope}-dim'
+                image_path = self.folder / f'{name}.png'
+                _, _, image = pixels['read_png'](image_path)
+                rows = self.read(f'{name}.chats.json')['chats']
+                for index, row in enumerate(rows):
+                    if not row['archived']:
+                        for y in range(index * 64 + 16, index * 64 + 26):
+                            image[y][70:170] = [colour] * 100
+                pixels['write_png'](image_path, image)
+                with self.subTest(light=light, scope=scope):
+                    metrics = checker['check_scene'](self.folder, name, capture=True)
+                    self.assertEqual(metrics['expected_dim_text'], expected)
+                    self.assertEqual(metrics['archived']['text'], [75, 75, 75] if light else [180, 180, 180])
+                    self.assertAlmostEqual(metrics['colour_mix_error'], abs(sum(expected) / 3 - sum(metrics['archived']['text']) / 3))
+                    self.assertLessEqual(metrics['colour_mix_error'], 12)
+            self.assertEqual(self.validate().returncode, 0)
+
     def test_full_strength_text_colour_tolerates_cleartype_channel_differences(self):
         checker = runpy.run_path(str(TOOLS / 'check-archive-presentation.py'))
         pixels = runpy.run_path(str(TOOLS / 'check-workspace-icons.py'))
@@ -379,11 +404,25 @@ class ShowArchivedTests(unittest.TestCase):
             image_path = self.folder / f'{name}.png'
             original = image_path.read_bytes()
             _, _, image = pixels['read_png'](image_path)
-            colour = (105, 105, 105) if light else (150, 150, 150)
+            expected_level = 75 if light else 180
+            for offset in (-30, -13, -12, 12, 13, 30):
+                level = expected_level + offset
+                for y in range(2 * 64 + 16, 2 * 64 + 26):
+                    image[y][70:170] = [(level, level, level)] * 100
+                pixels['write_png'](image_path, image)
+                with self.subTest(light=light, offset=offset):
+                    if abs(offset) > 12:
+                        with self.assertRaisesRegex(AssertionError, 'theme colour mix'):
+                            checker['check_scene'](self.folder, name, capture=True)
+                    else:
+                        metrics = checker['check_scene'](self.folder, name, capture=True)
+                        self.assertEqual(metrics['colour_mix_error'], 12)
+            for y in range(2 * 64, 3 * 64):
+                image[y] = [(240, 240, 240) if light else (15, 15, 15)] * 240
             for y in range(2 * 64 + 16, 2 * 64 + 26):
-                image[y][70:170] = [colour] * 100
+                image[y][70:170] = [(expected_level, expected_level, expected_level)] * 100
             pixels['write_png'](image_path, image)
-            with self.subTest(light=light), self.assertRaisesRegex(AssertionError, 'theme colour mix'):
+            with self.subTest(light=light, mutation='background'), self.assertRaisesRegex(AssertionError, 'row background changed'):
                 checker['check_scene'](self.folder, name, capture=True)
             image_path.write_bytes(original)
             layout = self.read(f'{name}.layout.json')
@@ -392,7 +431,8 @@ class ShowArchivedTests(unittest.TestCase):
                 with self.subTest(light=light, key=key), self.assertRaises(AssertionError):
                     checker['check_scene'](self.folder, name, capture=True)
             self.write(f'{name}.layout.json', layout)
-            metrics = checker['check_scene'](self.folder, name)
+            metrics = checker['check_scene'](self.folder, name, capture=True)
+            self.assertEqual(checker['check_scene'](self.folder, name), metrics)
             self.assertEqual(metrics['polarity'], 'light' if light else 'dark')
             self.assertEqual(metrics['colour_mix_error'], 0)
 
