@@ -56,6 +56,39 @@ test "IGSH-681 older rows merge behind the loaded rows without repeating a MsgID
     }
 }
 
+test "IGSH-840 late poll inserts older messages by provider time" {
+    const allocator = std.testing.allocator;
+    var loaded = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[{\"MsgID\":\"A\",\"Timestamp\":\"2026-10-01T13:06:00Z\"}]}}", .{});
+    defer loaded.deinit();
+    var page = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[{\"MsgID\":\"D\",\"Timestamp\":\"2026-10-01T13:07:00Z\"},{\"MsgID\":\"C\",\"Timestamp\":\"2026-10-01T12:30:00Z\"},{\"MsgID\":\"B\",\"Timestamp\":\"2026-10-01T12:29:00Z\"}]}}", .{});
+    defer page.deinit();
+    var rows: std.ArrayList(std.json.Value) = .empty;
+    defer rows.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 3), try hub.unite(allocator, hub.messageRows(loaded.value).?, hub.messageRows(page.value).?, &rows));
+    var index = rows.items.len;
+    for ([_][]const u8{ "B", "C", "A", "D" }) |id| {
+        index -= 1;
+        try std.testing.expectEqualStrings(id, rows.items[index].object.get("MsgID").?.string);
+    }
+}
+
+test "IGSH-840 same timestamp uses message id as stable tie breaker" {
+    const allocator = std.testing.allocator;
+    var loaded = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[{\"MsgID\":\"A\",\"Timestamp\":\"2026-10-01T13:06:00Z\"}]}}", .{});
+    defer loaded.deinit();
+    var page = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[{\"MsgID\":\"B\",\"Timestamp\":\"2026-10-01T13:06:00Z\"}]}}", .{});
+    defer page.deinit();
+    var rows: std.ArrayList(std.json.Value) = .empty;
+    defer rows.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 1), try hub.unite(allocator, hub.messageRows(loaded.value).?, hub.messageRows(page.value).?, &rows));
+    try std.testing.expectEqualStrings("B", rows.items[0].object.get("MsgID").?.string);
+    try std.testing.expectEqualStrings("A", rows.items[1].object.get("MsgID").?.string);
+    rows.clearRetainingCapacity();
+    _ = try hub.unite(allocator, hub.messageRows(page.value).?, hub.messageRows(loaded.value).?, &rows);
+    try std.testing.expectEqualStrings("B", rows.items[0].object.get("MsgID").?.string);
+    try std.testing.expectEqualStrings("A", rows.items[1].object.get("MsgID").?.string);
+}
+
 test "IGSH-681 an empty page or a page of known rows adds nothing" {
     const allocator = std.testing.allocator;
     var loaded = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[{\"MsgID\":\"B\"}]}}", .{ .allocate = .alloc_always });
