@@ -107,6 +107,12 @@ pub fn markRead(allocator: std.mem.Allocator, chat: []const u8, message_id: []co
     return .{ .method = "POST", .path = "/v1/wazig/mark-read", .body = try std.json.Stringify.valueAlloc(allocator, .{ .chat = chat, .message_id = message_id }, .{}) };
 }
 
+pub fn archiveBatch(allocator: std.mem.Allocator, chats_to_archive: []const bridge.ArchiveChat, archived: bool) !Request {
+    var request = try bridge.archiveBatch(allocator, "", chats_to_archive, archived);
+    request.path = "/v1/wazig/archive-batch";
+    return request;
+}
+
 pub fn archive(allocator: std.mem.Allocator, chat: []const u8, archived: bool) !Request {
     try validId(chat);
     return .{ .method = "POST", .path = "/v1/wazig/archive", .body = try std.json.Stringify.valueAlloc(allocator, .{ .chat = chat, .archived = archived }, .{}) };
