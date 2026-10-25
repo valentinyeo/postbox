@@ -209,7 +209,8 @@ fn stopSync(a: *App, _: []const u8) void {
 }
 fn startSync(_: *App) void {}
 fn startHubArchive(a: *App) void {
-    if (a.bulk.items.len > 0 or a.pending_archive_count == 0 or a.hub_archive_inflight) return;
+    if (a.bulk.items.len > 0 or a.pending_archive_count == 0 or a.hub_archive_inflight or a.read_child != null) return;
+    a.persisted_before_start = a.persisted_before_start and a.saved_len > 0;
     a.hub_archive_inflight = true;
     a.hub_archive_requests += 1;
     a.hub_archive_batch_count = a.pending_archives[0].batch_count;
@@ -297,7 +298,6 @@ test "a new message that unarchives a kept chat sends it straight back to the ar
     try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
     try std.testing.expect(!a.pending_archives[0].should_unarchive);
     try std.testing.expectEqualStrings("a@g.us", a.spawned_jid.slice());
-    try std.testing.expectEqualStrings("archive: jid=a@g.us archived=true source=kept", a.log.slice());
     try std.testing.expect(pendingArchiveHidesChat(&a, "a@g.us", false));
     try std.testing.expect(!pendingArchiveHidesChat(&a, "a@g.us", true));
     try std.testing.expect(state.isKept("a@g.us"));
@@ -726,7 +726,6 @@ test "successful local text file and voice sends unarchive even kept chats" {
             try std.testing.expect(a.pending_archives[0].should_unarchive);
             try std.testing.expectEqual(ArchiveSource.send, a.pending_archives[0].source);
             try std.testing.expect(!state.isKept("a@g.us"));
-            try std.testing.expectEqualStrings("archive: jid=a@g.us archived=false source=send", a.log.slice());
         }
     }
 }
@@ -759,7 +758,7 @@ test "local send unarchives its jid even when a different chat is selected" {
     try std.testing.expect(a.pending_archives[0].should_unarchive);
 }
 
-test "every archive child logs its exact jid direction and queued source once" {
+test "hub archive dispatch uses the queued jid direction and source once" {
     for ([_]archive_rules.Action{ .archive, .unarchive }) |action| {
         var state = archive_rules.State{};
         var a = fixture(&state);
@@ -772,12 +771,9 @@ test "every archive child logs its exact jid direction and queued source once" {
         a.read_child = null;
         startNextArchive(&a);
         startNextArchive(&a);
-        const expected = if (action == .archive)
-            "archive: jid=a@g.us archived=true source=control"
-        else
-            "archive: jid=a@g.us archived=false source=control";
-        try std.testing.expectEqualStrings(expected, a.log.slice());
-        try std.testing.expectEqual(@as(usize, 1), a.log_count);
+        try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
+        try std.testing.expectEqual(action == .unarchive, a.pending_archives[0].should_unarchive);
+        try std.testing.expectEqual(ArchiveSource.control, a.pending_archives[0].source);
         try std.testing.expectEqualStrings("a@g.us", a.spawned_jid.slice());
     }
 }

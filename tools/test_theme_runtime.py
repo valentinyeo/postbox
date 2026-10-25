@@ -103,8 +103,6 @@ def verify_popup_focus(main):
     field = section(main, "fn paintPopupInput(", "fn ")
     assert "if (win.GetFocus() == edit) theme.current.primary else theme.current.outline" in field
     for procedure, condition in (
-        ("telegramLoginProc", "id == id_tg_edit"),
-        ("slackSetupProc", "(id == id_slack_user_edit or id == id_slack_app_edit)"),
         ("emojiProc", "id == id_emoji_edit"),
         ("paletteProc", "id == id_palette_edit"),
     ):
@@ -112,11 +110,8 @@ def verify_popup_focus(main):
         command = section(popup, "win.WM_COMMAND => {", "return 0;")
         assert "if (" + condition + " and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS))" in command
         assert "win.InvalidateRect(hwnd, null, win.FALSE);" in command
-    dialog = section(main, "fn telegramLoginProc(", "\nfn ")
-    colors = section(dialog, "win.WM_CTLCOLORSTATIC, win.WM_CTLCOLOREDIT => {", "win.WM_COMMAND => {")
-    assert "theme.choice == .amoled and win.GetDlgItem(hwnd, id_tg_edit) == winHandle(win.HWND, @as(usize, @bitCast(lparam)))" in colors
-    assert "win.SetBkColor(hdc, theme.current.surface_container_high)" in colors
-    assert "return @bitCast(@intFromPtr(a.brush_raised.?));" in colors
+    assert "fn telegramLoginProc(" not in main
+    assert "fn slackSetupProc(" not in main
 
 
 class ThemeRuntimeTests(unittest.TestCase):
@@ -125,15 +120,18 @@ class ThemeRuntimeTests(unittest.TestCase):
         verify_popup_focus(main)
         for token in (
             "if (win.GetFocus() == edit) theme.current.primary else theme.current.outline",
-            "id == id_tg_edit and (notification == win.EN_SETFOCUS",
-            "(id == id_slack_user_edit or id == id_slack_app_edit) and (notification == win.EN_SETFOCUS",
             "id == id_emoji_edit and (notification == win.EN_SETFOCUS",
             "id == id_palette_edit and (notification == win.EN_SETFOCUS",
             "win.InvalidateRect(hwnd, null, win.FALSE);",
-            "theme.choice == .amoled and win.GetDlgItem(hwnd, id_tg_edit) == winHandle(win.HWND, @as(usize, @bitCast(lparam)))",
         ):
             with self.subTest(token=token), self.assertRaises((AssertionError, ValueError)):
                 verify_popup_focus(main.replace(token, ""))
+
+    def test_retired_login_dialogs_cannot_return(self):
+        main = (ROOT / "src/main.zig").read_text()
+        for procedure in ("telegramLoginProc", "slackSetupProc"):
+            with self.subTest(procedure=procedure), self.assertRaises(AssertionError):
+                verify_popup_focus(main + "\nfn " + procedure + "() void {}\n")
 
     @unittest.skipUnless(ZIG, "Zig compiler not found; install Zig or set ZIG")
     def test_IGSH_461_popup_paint_passes_and_rejects_main_before_fix(self):
@@ -191,6 +189,15 @@ class ThemeRuntimeTests(unittest.TestCase):
             result = subprocess.run([ZIG, "test", str(harness)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertRegex(result.stdout + result.stderr, r"All [0-9]+ tests passed\.")
+            for original, broken in (
+                ("_ = win.EnumThreadWindows(win.GetCurrentThreadId(), redrawThemeWindow, 0);", ""),
+                ("win.RDW_ALLCHILDREN", "0"),
+            ):
+                with self.subTest(original=original):
+                    self.assertEqual(source.count(original), 1)
+                    harness.write_text(source.replace(original, broken))
+                    result = subprocess.run([ZIG, "test", str(harness)], capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_IGSH_505_startup_palette_control_and_child_paint_wiring_with_removal_controls(self):
         main = (ROOT / "src/main.zig").read_text()

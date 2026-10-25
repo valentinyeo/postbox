@@ -5,7 +5,6 @@ const menu_theme = @import("menu_theme.zig");
 const smooth = @import("smooth_shapes.zig");
 const smooth_geometry = @import("smooth_geometry.zig");
 const pin_icon = @import("pin_icon.zig");
-const child_process = @import("child_process.zig");
 const auth_status = @import("auth_status.zig");
 const audio = @import("audio.zig");
 const avatar = @import("avatar.zig");
@@ -20,12 +19,10 @@ const paint_buffer = @import("paint_buffer.zig");
 const format_request = @import("format_request.zig");
 const format_cache = @import("format_cache.zig");
 const slack = @import("slack.zig");
-const slack_win = @import("slack_win.zig");
+const slack_win = @import("winhttp.zig");
 const hub = @import("hub.zig");
 const wa_hub = @import("wa_hub.zig");
 const wa_hub_win = @import("wa_hub_win.zig");
-const slack_oauth = @import("slack_oauth.zig");
-const slack_oauth_win = @import("slack_oauth_win.zig");
 const slack_send = @import("slack_send.zig");
 const played = @import("played.zig");
 const voice_pos = @import("voice_pos.zig");
@@ -54,7 +51,6 @@ const sidebar_nav = @import("sidebar_nav.zig");
 const archive_rules = @import("archive_rules.zig");
 const message_filter = @import("message_filter.zig");
 const voice_sent = @import("voice_sent.zig");
-const send_args = @import("send_args.zig");
 const chat_key = @import("chat_key.zig");
 const chat_rows = @import("chat_rows.zig");
 const chat_cache = @import("chat_cache.zig");
@@ -80,7 +76,6 @@ const edit_contract = @import("edit_contract.zig");
 const build_info = @import("build_info");
 const app_version = build_info.version;
 const update = @import("update.zig");
-const tg = if (build_info.td_enabled) @import("telegram.zig") else @import("telegram_stub.zig");
 const tj = @import("telegram_json.zig");
 const transport = @import("transport.zig");
 const messenger_view = @import("messenger_view.zig");
@@ -111,7 +106,6 @@ const timer_chat_select = 4;
 const timer_update_check = 5;
 const timer_update_restart = 6;
 const timer_update_first_check = 8;
-const timer_telegram = 7;
 const timer_slack_mark = 9;
 const timer_voice = 10;
 const timer_passage_scroll = 11;
@@ -123,8 +117,6 @@ const wm_wacli_done = win.WM_APP + 3;
 const wm_hub_event = win.WM_APP + 42;
 const wm_slack_event = win.WM_APP + 4;
 const wm_slack_reload = win.WM_APP + 5;
-const wm_slack_oauth_done = win.WM_APP + 40;
-const wm_slack_oauth_finished = win.WM_APP + 41;
 const wm_unfurl_done = win.WM_APP + 6;
 const wm_control = win.WM_APP + 7;
 const wm_startup_probe = win.WM_APP + 8;
@@ -310,18 +302,6 @@ const Group = struct {
     jid: Utf8Text(191) = .{},
     name: Utf8Text(255) = .{},
 };
-
-const max_tg_chats = 64;
-const TgChat = struct {
-    id: i64 = 0,
-    name: WideText(159) = .{},
-    kind: Utf8Text(31) = .{},
-    timestamp: Utf8Text(47) = .{},
-    unread_count: i32 = 0,
-    is_group: bool = false,
-};
-
-const TgLoginMode = enum { none, phone, code, password, api_id, api_hash };
 
 const PendingSend = struct {
     provider: transport.Provider = .whatsapp,
@@ -818,18 +798,6 @@ const App = struct {
     update_dismissed_len: usize = 0,
     chats: []Chat = &.{},
     chat_count: usize = 0,
-    telegram: ?*tg.Client = null,
-    tg_chats: []TgChat = &.{},
-    tg_chat_count: usize = 0,
-    tg_login: TgLoginMode = .none,
-    tg_login_window: ?win.HWND = null,
-    tg_auth: tj.AuthState = .unknown,
-    tg_dirty: bool = false,
-    tg_api_id: i32 = 0,
-    tg_api_hash: Utf8Text(64) = .{},
-    tg_data_dir: Utf8Text(259) = .{},
-    tg_account: Utf8Text(32) = .{},
-    accounts_confirm_remove_tg: bool = false,
     groups: [max_groups]Group = [_]Group{.{}} ** max_groups,
     group_count: usize = 0,
     messages: [max_messages]Message = undefined,
@@ -917,7 +885,6 @@ const App = struct {
     media_burst_files: usize = 0,
     media_resume_after_ms: u64 = 0,
     media_failures: [16]MediaFailure = [_]MediaFailure{.{}} ** 16,
-    avatar_session: ?*avatar.Session = null,
     transcribe_session: ?*dictation.FileSession = null,
     text_selection: passage.Selection = .{},
     text_dragging: bool = false,
@@ -1001,8 +968,6 @@ const App = struct {
     wacli_refresh_again: bool = false,
     wacli_quit: bool = false,
     wacli_pending: [wacli_kind_count]u32 = [_]u32{0} ** wacli_kind_count,
-    slack_tokens: ?slack_win.Tokens = null,
-    slack_bridge: ?slack_win.Bridge = null,
     slack_poll_ticks: u32 = 0,
     slack_history_hash: u64 = 0,
     slack_mark_channel: Utf8Text(191) = .{},
@@ -1019,10 +984,6 @@ const App = struct {
     slack_install_mutex: std.Io.Mutex = .init,
     slack_app_token: []u8 = &.{},
     slack_mark_account: Utf8Text(32) = .{},
-    slack_setup_window: ?win.HWND = null,
-    slack_oauth_thread: ?std.Thread = null,
-    slack_oauth_task: ?*SlackOAuthTask = null,
-    slack_oauth_stop: std.atomic.Value(bool) = .init(false),
     slack_fail_log_ms: [wacli_kind_count]u64 = [_]u64{0} ** wacli_kind_count,
     slack_fail_log_hash: [wacli_kind_count]u64 = [_]u64{0} ** wacli_kind_count,
     slack_count_log_ms: u64 = 0,
@@ -1383,11 +1344,6 @@ fn drawSetupButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     var shapes = smooth.Context.init(item.hDC);
     defer shapes.deinit();
     const index: usize = switch (item.CtlID) {
-        id_slack_save => 3,
-        id_slack_cancel => 4,
-        id_tg_next => 5,
-        id_tg_cancel => 6,
-        id_tg_open_page => 7,
         id_include_archived => 10,
         else => return,
     };
@@ -1510,7 +1466,6 @@ fn attachUnavailableReason(a: *App) ?[]const u8 {
         if (slackAccountIsBridge(a, a.chats[a.selected_chat].account.slice())) return "File upload not available over the Slack bridge";
         return null;
     }
-    if (selectedChatIsTelegram(a)) return null;
     return "Open a Slack or Telegram chat first";
 }
 
@@ -1842,11 +1797,6 @@ fn changeTheme(a: *App, choice: theme.Choice) bool {
     }
     saveTheme(choice);
     updateTooltipTheme(a);
-    for ([_]?win.HWND{ a.slack_setup_window, a.tg_login_window }) |window| {
-        const hwnd = window orelse continue;
-        var dark: win.BOOL = if (choice == .amoled) win.TRUE else win.FALSE;
-        _ = win.DwmSetWindowAttribute(hwnd, 20, &dark, @sizeOf(win.BOOL));
-    }
     setStatus(a, if (choice == .amoled) "Theme: AMOLED black" else "Theme: Green");
     _ = win.EnumThreadWindows(win.GetCurrentThreadId(), redrawThemeWindow, 0);
     return true;
@@ -2164,137 +2114,15 @@ fn wacliWorkerMain(a: *App, lane: WacliLane) void {
 
 fn wacliRunJob(a: *App, job: WacliJob) void {
     defer if (job.archive_body) |body| a.allocator.free(body);
-    if (!hubConfigured(a) and job.kind != .cache_tag and job.provider == .whatsapp and !std.mem.eql(u8, job.account.slice(), a.cache_tag.slice())) {
-        wacliPendingSub(a, job.kind);
-        return;
-    }
-    var argv: [max_wacli_args][]const u8 = undefined;
-    var count: usize = 0;
-    while (count < job.arg_count) : (count += 1) argv[count] = job.args[count].slice();
     const result = a.allocator.create(WacliResult) catch {
         wacliPendingSub(a, job.kind);
         return;
     };
     result.* = .{ .kind = job.kind, .provider = job.provider, .account = job.account, .gen = job.gen, .jid = job.jid, .msg_id = job.msg_id, .extra = job.extra, .started_ms = job.started_ms };
-    switch (job.kind) {
-        .slack_workspace, .slack_users, .slack_history, .slack_replies, .slack_send, .slack_attach, .slack_share, .slack_download, .slack_auth, .slack_mark => {
-            if (unifiedHub(a)) {
-                result.extra.set("UnsupportedHubAction");
-                wacliPost(a, result);
-                return;
-            }
-            var slack_args: [max_wacli_args][]const u8 = undefined;
-            var slack_count: usize = 0;
-            while (slack_count < job.arg_count) : (slack_count += 1) slack_args[slack_count] = job.args[slack_count].slice();
-            const kind: slack_win.JobKind = switch (job.kind) {
-                .slack_workspace => .workspace,
-                .slack_users => .users,
-                .slack_history => .history,
-                .slack_replies => .replies,
-                .slack_send => .send_text,
-                .slack_attach => .upload_image,
-                .slack_share => .share_image,
-                .slack_auth => .auth,
-                .slack_mark => .mark,
-                else => .download,
-            };
-            slack_win.last_status = 0;
-            slack_win.last_error = [_]u8{0} ** 64;
-            const context = slackContext(a, job.account.slice(), job.kind == .slack_auth and std.mem.eql(u8, job.extra.slice(), "bridge")) orelse {
-                result.extra.set("WorkspaceDisconnected");
-                wacliPost(a, result);
-                return;
-            };
-            defer a.allocator.free(context.user_token);
-            defer a.allocator.free(context.host);
-            defer a.allocator.free(context.media_dir);
-            if (runSlackJob(a, job.account.slice(), context, kind, slack_args[0..slack_count])) |data| {
-                result.data = data;
-                result.ok = true;
-            } else |err| {
-                result.extra.set(@errorName(err));
-            }
-            result.http_status = slack_win.last_status;
-            result.slack_error.set(std.mem.sliceTo(&slack_win.last_error, 0));
-            wacliPost(a, result);
-            return;
-        },
-        else => {},
-    }
     if (hubConfigured(a) and (unifiedHub(a) or job.provider == .whatsapp)) {
         runHubJob(a, job, result);
-        wacliPost(a, result);
-        return;
-    }
-    const mixed_chats = job.kind == .chats and hubHasArg(&job, "--include-archived");
-    if (mixed_chats) {
-        for (argv[0..count]) |*arg| {
-            if (std.mem.eql(u8, arg.*, "--include-archived")) arg.* = "--no-archived";
-        }
-    }
-    const run = child_process.run(a.allocator, a.io, .{
-        .argv = argv[0..count],
-        .stdout_limit = .limited(8 * 1024 * 1024),
-        .stderr_limit = .limited(256 * 1024),
-        .create_no_window = true,
-    }) catch |err| {
-        if (job.kind == .messages) result.extra.set(@errorName(err));
-        wacliPost(a, result);
-        return;
-    };
-    defer {
-        a.allocator.free(run.stdout);
-        a.allocator.free(run.stderr);
-    }
-    result.ok = switch (run.term) {
-        .exited => |code| code == 0,
-        else => false,
-    };
-    if (result.ok and mixed_chats) {
-        for (argv[0..count]) |*arg| {
-            if (std.mem.eql(u8, arg.*, "--no-archived")) arg.* = "--archived";
-        }
-        const archived = child_process.run(a.allocator, a.io, .{
-            .argv = argv[0..count],
-            .stdout_limit = .limited(8 * 1024 * 1024),
-            .stderr_limit = .limited(256 * 1024),
-            .create_no_window = true,
-        }) catch {
-            result.ok = false;
-            wacliPost(a, result);
-            return;
-        };
-        defer a.allocator.free(archived.stdout);
-        defer a.allocator.free(archived.stderr);
-        result.ok = switch (archived.term) {
-            .exited => |code| code == 0,
-            else => false,
-        };
-        if (result.ok) {
-            result.data = messenger_view.mergeChatData(a.allocator, run.stdout, archived.stdout) catch blk: {
-                result.ok = false;
-                break :blk &.{};
-            };
-        }
-    } else if (result.ok) {
-        result.data = a.allocator.dupe(u8, run.stdout) catch blk: {
-            result.ok = false;
-            break :blk &.{};
-        };
-    }
-    if (!result.ok and job.kind == .messages) {
-        const stderr_trim = std.mem.trim(u8, run.stderr, " \t\r\n");
-        const stderr_line = stderr_trim[0..(std.mem.indexOfScalar(u8, stderr_trim, '\n') orelse stderr_trim.len)];
-        if (stderr_line.len > 0) {
-            result.extra.set(stderr_line);
-        } else {
-            var code_buf: [32]u8 = undefined;
-            const text = switch (run.term) {
-                .exited => |code| std.fmt.bufPrint(&code_buf, "exit code {d}", .{code}) catch "wacli failed",
-                else => @tagName(run.term),
-            };
-            result.extra.set(text);
-        }
+    } else {
+        result.extra.set("HubNotConfigured");
     }
     wacliPost(a, result);
 }
@@ -2574,7 +2402,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         }
     }
     const view = activeChatView(a);
-    var needed = data.items.len + a.tg_chat_count + max_chats;
+    var needed = data.items.len + max_chats;
     for (&a.slack_installations) |*installation| if (installation.active) {
         needed += installation.chat_count;
     };
@@ -2654,7 +2482,6 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     }
     if (!unifiedHub(a)) {
         if (messenger_view.includes(view, .slack)) appendSlackChats(a, query_utf8);
-        if (!a.show_archived and messenger_view.includes(view, .telegram)) appendTelegramChats(a, query_utf8);
     }
     controlSortChats(a, a.chats[0..a.chat_count], view);
     if (!unifiedHub(a) and messenger_view.includes(view, .whatsapp) and !a.show_archived and !a.unread_only and !(a.include_archived and view == .all)) {
@@ -2841,750 +2668,10 @@ fn applyUnreadProbe(a: *App, result: *const WacliResult) void {
     if (a.unread_only or (a.include_archived and a.chat_view == .all)) refreshChats(a);
 }
 
-fn tgChatIdString(buffer: *[24]u8, chat_id: i64) []const u8 {
-    return std.fmt.bufPrint(buffer, "{d}", .{chat_id}) catch "";
-}
-
-fn selectedChatIsTelegram(a: *const App) bool {
-    if (unifiedHub(a)) return false;
-    return a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .telegram;
-}
-
-fn tgSelectedChatId(a: *const App) ?i64 {
-    if (!selectedChatIsTelegram(a)) return null;
-    return std.fmt.parseInt(i64, a.chats[a.selected_chat].jid.slice(), 10) catch null;
-}
-
-fn tgSelectedChatIsGroup(a: *App) bool {
-    const chat_id = tgSelectedChatId(a) orelse return false;
-    for (a.tg_chats[0..a.tg_chat_count]) |cached| {
-        if (cached.id == chat_id) return cached.is_group;
-    }
-    return true;
-}
-
-fn upsertTgChat(a: *App, info: *tg.ChatInfo) void {
-    var index: usize = 0;
-    while (index < a.tg_chat_count) : (index += 1) {
-        if (a.tg_chats[index].id == info.id) break;
-    }
-    if (index == a.tg_chat_count) {
-        if (a.tg_chat_count == a.tg_chats.len) {
-            a.tg_chats = a.allocator.realloc(a.tg_chats, @max(max_tg_chats, a.tg_chats.len * 2)) catch return;
-        }
-        a.tg_chat_count += 1;
-        a.tg_chats[index] = .{ .id = info.id };
-    }
-    const cached = &a.tg_chats[index];
-    if (info.title.len > 0) {
-        cached.name.set(a.allocator, info.title);
-        cached.kind.set(if (info.is_channel) "Telegram channel" else if (info.is_group) "Telegram group" else "Telegram");
-        cached.is_group = info.is_group or info.is_channel;
-    }
-    cached.unread_count = info.unread_count;
-    if (info.last_date != 0) {
-        var buffer: [20]u8 = undefined;
-        cached.timestamp.set(tj.formatTimestamp(&buffer, info.last_date));
-    }
-}
-
-fn appendTelegramChats(a: *App, query_utf8: ?[]const u8) void {
-    if (a.telegram == null or a.tg_auth != .ready or a.tg_account.len == 0) return;
-    for (a.tg_chats[0..a.tg_chat_count]) |cached| {
-        if (a.chat_count >= a.chats.len) break;
-        const name_bytes = std.unicode.utf16LeToUtf8Alloc(a.allocator, cached.name.slice()) catch continue;
-        defer a.allocator.free(name_bytes);
-        var chat = Chat{};
-        var id_buffer: [24]u8 = undefined;
-        chat.jid.set(tgChatIdString(&id_buffer, cached.id));
-        chat.name.set(a.allocator, name_bytes);
-        chat.kind.set(a.allocator, cached.kind.slice());
-        chat.timestamp.set(cached.timestamp.slice());
-        chat.unread = cached.unread_count > 0;
-        chat.unread_count = cached.unread_count;
-        chat.provider = .telegram;
-        chat.account = a.tg_account;
-        if (!chatInView(a, chat_key.of(&chat))) continue;
-        if (!messenger_view.matches(activeChatView(a), .telegram, a.unread_only or (a.include_archived and activeChatView(a) == .all), chat.unread, query_utf8 orelse "", name_bytes, chat.jid.slice())) continue;
-        messenger_view.merge(Chat, a.chats, &a.chat_count, &.{chat});
-    }
-}
-
-fn drainTelegram(a: *App) void {
-    const client = a.telegram orelse return;
-    while (client.poll()) |event_in| {
-        var event = event_in;
-        defer event.deinit(a.allocator);
-        switch (event) {
-            .auth => |auth| {
-                if (auth.state != .unknown) {
-                    a.tg_auth = auth.state;
-                    a.tg_dirty = true;
-                }
-                switch (auth.state) {
-                    .wait_phone => if (a.tg_login != .none) {
-                        openTelegramLogin(a, .phone);
-                    },
-                    .wait_code => if (a.tg_login != .none) {
-                        openTelegramLogin(a, .code);
-                    },
-                    .wait_password => if (a.tg_login != .none) {
-                        openTelegramLogin(a, .password);
-                    },
-                    .ready => {
-                        a.tg_login = .none;
-                        if (a.tg_login_window) |window| _ = win.DestroyWindow(window);
-                        client.requestChats();
-                        setStatus(a, "Telegram connected");
-                    },
-                    .closed => {
-                        a.tg_account.set("");
-                        a.tg_login = .none;
-                        if (a.tg_login_window) |window| _ = win.DestroyWindow(window);
-                        a.tg_chat_count = 0;
-                        refreshVisibleChats(a);
-                        setStatus(a, "Telegram disconnected");
-                    },
-                    else => {},
-                }
-                if (auth.error_text.len > 0) {
-                    setStatus(a, auth.error_text);
-                    handleTgAuthError(a, auth.error_text);
-                }
-            },
-            .chat => |*info| {
-                upsertTgChat(a, info);
-                a.tg_dirty = true;
-            },
-            .message => |msg| {
-                if (msg.timestamp.len > 0) {
-                    for (a.tg_chats[0..a.tg_chat_count]) |*cached| {
-                        if (cached.id == msg.chat_id and std.mem.order(u8, msg.timestamp, cached.timestamp.slice()) == .gt) {
-                            cached.timestamp.set(msg.timestamp);
-                            a.tg_dirty = true;
-                        }
-                    }
-                }
-                if (tgSelectedChatId(a)) |selected_id| {
-                    if (msg.chat_id == selected_id) refreshMessages(a);
-                }
-            },
-            .history_done => {
-                if (selectedChatIsTelegram(a)) refreshMessages(a);
-            },
-            .deleted => {
-                if (selectedChatIsTelegram(a)) refreshMessages(a);
-            },
-            .file => |file_update| {
-                if (file_update.local_path.len > 0 and selectedChatIsTelegram(a)) refreshMessages(a);
-            },
-            .chats_synced => {
-                a.tg_dirty = true;
-            },
-            .chat_last_date => |last_message| {
-                var index: usize = 0;
-                while (index < a.tg_chat_count) : (index += 1) {
-                    if (a.tg_chats[index].id == last_message.chat_id) {
-                        a.tg_chats[index].timestamp.set(last_message.timestamp);
-                        a.tg_dirty = true;
-                        break;
-                    }
-                }
-            },
-            .account => |id| {
-                var buffer: [32]u8 = undefined;
-                a.tg_account.set(if (id > 0) std.fmt.bufPrint(&buffer, "{d}", .{id}) catch "" else "");
-                a.tg_dirty = true;
-            },
-            .user => {},
-            .conn, .ignored => {},
-        }
-    }
-    if (a.tg_dirty and !a.show_archived) {
-        const snapshot = client.chatSnapshot(a.allocator);
-        defer client.freeChatSnapshot(a.allocator, snapshot);
-        for (snapshot) |info| {
-            var cached = info;
-            upsertTgChat(a, &cached);
-        }
-        a.tg_dirty = false;
-        refreshVisibleChats(a);
-    } else a.tg_dirty = false;
-}
-
-fn telegramAutoDownload(a: *App) void {
-    const client = a.telegram orelse return;
-    for (a.messages[0..a.message_count]) |*message| {
-        if (message.tg_file_id == 0 or message.local_path.len > 0) continue;
-        client.download(message.tg_file_id);
-    }
-}
-
-fn refreshTelegramMessages(a: *App) void {
-    const client = a.telegram orelse return;
-    const chat_id = tgSelectedChatId(a) orelse return;
-    const snapshot = client.historySnapshot(a.allocator, chat_id);
-    defer client.freeHistorySnapshot(a.allocator, snapshot);
-    const chat_changed = !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]));
-    if (chat_changed) {
-        stopAudio(a);
-        client.requestHistory(chat_id);
-    }
-    var selected_id = Utf8Text(191){};
-    if (a.selected_message) |selected| {
-        if (selected < a.message_count) selected_id.set(a.messages[selected].id.slice());
-    }
-    clearMessages(a);
-    a.selected_message = null;
-    const take = @min(snapshot.len, max_messages);
-    var source_index = take;
-    while (source_index > 0) {
-        source_index -= 1;
-        const msg = &snapshot[source_index];
-        var message = Message{};
-        var id_buffer: [24]u8 = undefined;
-        message.id.set(tgChatIdString(&id_buffer, msg.id));
-        message.sender_jid.set(a.chats[a.selected_chat].jid.slice());
-        message.sender.set(a.allocator, if (msg.sender_name.len > 0) msg.sender_name else "Unknown");
-        message.from_me = msg.from_me;
-        message.text.set(a.allocator, tgDisplayText(msg));
-        if (msg.reply_to != 0) {
-            message.quote.set(a.allocator, "[Original message]");
-            const reply_chat_id = if (msg.reply_chat_id != 0) msg.reply_chat_id else chat_id;
-            const originals = if (reply_chat_id == chat_id) snapshot else client.historySnapshot(a.allocator, reply_chat_id);
-            defer if (reply_chat_id != chat_id) client.freeHistorySnapshot(a.allocator, originals);
-            for (originals) |*original| {
-                if (original.id == msg.reply_to) {
-                    message.quote.set(a.allocator, tgDisplayText(original));
-                    message.quote_sender.set(a.allocator, original.sender_name);
-                    break;
-                }
-            }
-        }
-        message.mime_type.set(msg.mime);
-        message.local_path.set(a.allocator, msg.local_path);
-        message.tg_file_id = msg.file_id;
-        message.media_type.set(switch (msg.media_kind) {
-            .photo => "image",
-            .sticker => "sticker",
-            .voice => "audio",
-            .video => "video",
-            .document => "document",
-            else => "",
-        });
-        if (msg.media_kind == .sticker and msg.animated_sticker) {
-            message.text.set(a.allocator, "[Animated sticker]");
-        }
-        if (msg.duration_ms > 0) {
-            var duration_buffer: [24]u8 = undefined;
-            const duration = std.fmt.bufPrint(&duration_buffer, "[Voice message {d}s]", .{@divTrunc(msg.duration_ms, 1000)}) catch "[Voice message]";
-            if (message.text.len == 0) message.text.set(a.allocator, duration);
-        }
-        formatTime(&message.time, a.allocator, msg.timestamp);
-        a.messages[a.message_count] = message;
-        a.message_count += 1;
-        const stored = &a.messages[a.message_count - 1];
-        if (isAudio(stored)) loadTranscriptCache(a, stored);
-    }
-    if (selected_id.len > 0) {
-        for (a.messages[0..a.message_count], 0..) |*message, index| {
-            if (std.mem.eql(u8, selected_id.slice(), message.id.slice())) {
-                a.selected_message = index;
-                break;
-            }
-        }
-    }
-    if (chat_changed) a.scroll_y = 0;
-    a.displayed_jid.set(a.chats[a.selected_chat].jid.slice());
-    a.displayed_account = a.chats[a.selected_chat].account;
-    a.displayed_provider = a.chats[a.selected_chat].provider;
-    a.displayed_timestamp.set(a.chats[a.selected_chat].timestamp.slice());
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
-    telegramAutoDownload(a);
-    markChatRead(a);
-}
-
-fn tgDisplayText(msg: *const tg.Msg) []const u8 {
-    if (msg.text.len > 0) return msg.text;
-    return switch (msg.media_kind) {
-        .photo => "[Photo]",
-        .sticker => "[Sticker]",
-        .voice => "[Voice message]",
-        .video => "[Video]",
-        .document => "[Document]",
-        else => "",
-    };
-}
-
-fn handleTgAuthError(a: *App, error_text: []const u8) void {
-    if (a.tg_login == .none) return;
-    if (std.mem.indexOf(u8, error_text, "app keys") != null) {
-        wipeBadTelegramKeys(a);
-        return;
-    }
-    if (a.tg_login == .api_id or a.tg_login == .api_hash) {
-        tgLoginShowError(a, error_text);
-        return;
-    }
-    const mode: TgLoginMode = if (std.mem.indexOf(u8, error_text, "phone number") != null)
-        .phone
-    else if (std.mem.indexOf(u8, error_text, "code") != null)
-        .code
-    else if (std.mem.indexOf(u8, error_text, "2FA password") != null)
-        .password
-    else {
-        tgLoginRetryInput(a);
-        tgLoginShowError(a, error_text);
-        return;
-    };
-    openTelegramLogin(a, mode);
-    tgLoginShowError(a, error_text);
-}
-
-fn tgPromptText(mode: TgLoginMode) [*:0]const u16 {
-    return switch (mode) {
-        .phone => lit("Telegram: type your phone number (with country code) and press Next"),
-        .code => lit("Telegram: type the login code Telegram sent you and press Next"),
-        .password => lit("Telegram: type your 2FA password and press Next"),
-        .api_id => lit("Telegram: get api_id and api_hash at my.telegram.org/apps (button below), then type the api_id and press Next"),
-        .api_hash => lit("Telegram: type your api_hash and press Next"),
-        .none => lit("Telegram"),
-    };
-}
-
-fn tgModeSecret(mode: TgLoginMode) bool {
-    return mode == .password or mode == .api_hash;
-}
-
-fn parseTgApiId(text: []const u8) ?i32 {
-    const parsed = std.fmt.parseInt(i32, text, 10) catch return null;
-    if (parsed <= 0) return null;
-    return parsed;
-}
-
-fn validTgApiHash(text: []const u8) bool {
-    if (text.len != 32) return false;
-    for (text) |c| {
-        const hex = (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
-        if (!hex) return false;
-    }
-    return true;
-}
-
-const tg_api_hash_error = "The api_hash is exactly 32 hexadecimal characters (0-9, a-f). Copy the whole value from my.telegram.org/apps.";
-
-fn tgLoginShowError(a: *App, error_text: []const u8) void {
-    const window = a.tg_login_window orelse return;
-    const prompt_ctl = win.GetDlgItem(window, id_tg_prompt) orelse return;
-    const error_wide = utf8ToWide(a.allocator, error_text) catch return;
-    defer a.allocator.free(error_wide);
-    if (a.tg_login == .none) {
-        _ = win.SetWindowTextW(prompt_ctl, error_wide.ptr);
-        return;
-    }
-    const prompt: []const u16 = std.mem.span(tgPromptText(a.tg_login));
-    const buffer = a.allocator.alloc(u16, error_wide.len + 3 + prompt.len + 1) catch return;
-    defer a.allocator.free(buffer);
-    @memcpy(buffer[0..error_wide.len], error_wide);
-    buffer[error_wide.len] = ' ';
-    buffer[error_wide.len + 1] = '-';
-    buffer[error_wide.len + 2] = ' ';
-    @memcpy(buffer[error_wide.len + 3 ..][0..prompt.len], prompt);
-    buffer[buffer.len - 1] = 0;
-    _ = win.SetWindowTextW(prompt_ctl, @ptrCast(buffer.ptr));
-}
-
-fn tgLoginApplyMode(a: *App, window: win.HWND, mode: TgLoginMode) void {
-    const edit = win.GetDlgItem(window, id_tg_edit) orelse return;
-    _ = win.SendMessageW(edit, win.EM_SETPASSWORDCHAR, if (tgModeSecret(mode)) @as(usize, '*') else 0, 0);
-    _ = win.SetWindowTextW(edit, lit(""));
-    _ = win.EnableWindow(edit, 1);
-    if (win.GetDlgItem(window, id_tg_next)) |next| {
-        _ = win.EnableWindow(next, 1);
-        setFont(next, a.font_bold);
-    }
-    if (win.GetDlgItem(window, id_tg_open_page)) |open_page| {
-        _ = win.ShowWindow(open_page, if (mode == .api_id) win.SW_SHOW else win.SW_HIDE);
-    }
-    _ = win.InvalidateRect(edit, null, win.TRUE);
-    _ = win.SetFocus(edit);
-}
-
-fn tgLoginSetChecking(a: *App) void {
-    const window = a.tg_login_window orelse return;
-    const edit = win.GetDlgItem(window, id_tg_edit) orelse return;
-    _ = win.EnableWindow(edit, 0);
-    if (win.GetDlgItem(window, id_tg_next)) |next| _ = win.EnableWindow(next, 0);
-    const prompt = win.GetDlgItem(window, id_tg_prompt) orelse return;
-    _ = win.SetWindowTextW(prompt, lit("Checking with Telegram..."));
-}
-
-fn tgLoginRetryInput(a: *App) void {
-    const window = a.tg_login_window orelse return;
-    const edit = win.GetDlgItem(window, id_tg_edit) orelse return;
-    _ = win.EnableWindow(edit, 1);
-    if (win.GetDlgItem(window, id_tg_next)) |next| _ = win.EnableWindow(next, 1);
-    _ = win.SetFocus(edit);
-}
-
-fn openTelegramLogin(a: *App, mode: TgLoginMode) void {
-    if (hubConfigured(a)) return;
-    a.tg_login = mode;
-    setStatus(a, switch (mode) {
-        .phone => "Telegram: type your phone number in the box and press Next",
-        .code => "Telegram: type the login code and press Next",
-        .password => "Telegram: type your 2FA password and press Next",
-        .api_id => "Telegram: open my.telegram.org/apps below, then type your api_id and press Next",
-        .api_hash => "Telegram: type your api_hash and press Next",
-        .none => "Telegram",
-    });
-    if (a.tg_login_window) |window| {
-        if (win.GetDlgItem(window, id_tg_prompt)) |prompt| _ = win.SetWindowTextW(prompt, tgPromptText(mode));
-        tgLoginApplyMode(a, window, mode);
-        return;
-    }
-    const owner = a.hwnd orelse return;
-    _ = win.EnableWindow(owner, 0);
-    const window = win.CreateWindowExW(
-        win.WS_EX_DLGMODALFRAME,
-        lit("TelegramLogin"),
-        lit("Sign in to Telegram"),
-        win.WS_OVERLAPPED | win.WS_CAPTION | win.WS_SYSMENU,
-        200,
-        200,
-        410,
-        240,
-        owner,
-        null,
-        a.instance,
-        null,
-    ) orelse {
-        _ = win.EnableWindow(owner, 1);
-        a.tg_login = .none;
-        setStatus(a, "Telegram: the sign-in window could not open. Try Add Telegram account again.");
-        return;
-    };
-    a.tg_login_window = window;
-    if (theme.choice == .amoled) {
-        var dark: win.BOOL = win.TRUE;
-        _ = win.DwmSetWindowAttribute(window, 20, &dark, @sizeOf(win.BOOL));
-    }
-    tgLoginApplyMode(a, window, mode);
-    _ = win.ShowWindow(window, win.SW_SHOW);
-}
-
 fn setPaletteCue(a: *App) void {
     const edit = a.palette_edit orelse return;
     const cue: [*:0]const u16 = if (a.palette_views_mode) lit("Ctrl+Up/Down reorders. Enter switches.") else if (a.palette_accounts_mode) lit("Accounts") else lit("Type a command");
     _ = win.SendMessageW(edit, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(cue)));
-}
-
-fn closeTgLogin(a: *App) void {
-    a.tg_login = .none;
-    if (a.tg_login_window) |window| _ = win.DestroyWindow(window);
-}
-
-fn layoutTgLogin(hwnd: win.HWND) void {
-    var client: win.RECT = undefined;
-    _ = win.GetClientRect(hwnd, &client);
-    const btn_w: i32 = 90;
-    const btn_h: i32 = 30;
-    const gap: i32 = 8;
-    const margin: i32 = 16;
-    const bottom = client.bottom - margin - btn_h;
-    if (win.GetDlgItem(hwnd, id_tg_prompt)) |p| _ = win.MoveWindow(p, margin, 14, client.right - 2 * margin, 48, win.TRUE);
-    if (win.GetDlgItem(hwnd, id_tg_edit)) |e| _ = win.MoveWindow(e, margin, 70, client.right - 2 * margin, 28, win.TRUE);
-    if (win.GetDlgItem(hwnd, id_tg_open_page)) |o| _ = win.MoveWindow(o, margin, 106, 210, btn_h, win.TRUE);
-    if (win.GetDlgItem(hwnd, id_tg_cancel)) |c| _ = win.MoveWindow(c, client.right - margin - btn_w, bottom, btn_w, btn_h, win.TRUE);
-    if (win.GetDlgItem(hwnd, id_tg_next)) |n| _ = win.MoveWindow(n, client.right - margin - 2 * btn_w - gap, bottom, btn_w, btn_h, win.TRUE);
-}
-
-fn telegramLoginProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) isize {
-    const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
-    switch (message) {
-        win.WM_CREATE => {
-            _ = win.CreateWindowExW(0, lit("STATIC"), lit(""), win.WS_CHILD | win.WS_VISIBLE, 16, 14, 366, 48, hwnd, controlId(id_tg_prompt), a.instance, null);
-            _ = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_BORDER | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 16, 70, 366, 28, hwnd, controlId(id_tg_edit), a.instance, null);
-            const next = win.CreateWindowExW(0, lit("BUTTON"), lit("Next"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW | win.BS_DEFPUSHBUTTON, 0, 0, 90, 30, hwnd, controlId(id_tg_next), a.instance, null);
-            const cancel = win.CreateWindowExW(0, lit("BUTTON"), lit("Cancel"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 90, 30, hwnd, controlId(id_tg_cancel), a.instance, null);
-            const open_page = win.CreateWindowExW(0, lit("BUTTON"), lit("Open my.telegram.org/apps"), win.WS_CHILD | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 210, 30, hwnd, controlId(id_tg_open_page), a.instance, null);
-            setFont(win.GetDlgItem(hwnd, id_tg_prompt), a.font);
-            setFont(win.GetDlgItem(hwnd, id_tg_edit), a.font);
-            setFont(next, a.font_bold);
-            setFont(cancel, a.font_bold);
-            setFont(open_page, a.font_bold);
-            subclassComposerButton(a, next, 5);
-            subclassComposerButton(a, cancel, 6);
-            subclassComposerButton(a, open_page, 7);
-            layoutTgLogin(hwnd);
-            return 0;
-        },
-        win.WM_SIZE => {
-            layoutTgLogin(hwnd);
-            return 0;
-        },
-        win.WM_ERASEBKGND => {
-            var client: win.RECT = undefined;
-            _ = win.GetClientRect(hwnd, &client);
-            _ = win.FillRect(winHandle(win.HDC, @as(usize, @bitCast(wparam))), &client, a.brush_panel.?);
-            return 1;
-        },
-        win.WM_PAINT => {
-            if (theme.choice != .amoled) return win.DefWindowProcW(hwnd, message, wparam, lparam);
-            var paint: win.PAINTSTRUCT = undefined;
-            const hdc = win.BeginPaint(hwnd, &paint);
-            defer _ = win.EndPaint(hwnd, &paint);
-            var shapes = smooth.Context.init(hdc);
-            defer shapes.deinit();
-            paintPopupInput(&shapes, hwnd, win.GetDlgItem(hwnd, id_tg_edit));
-            return 0;
-        },
-        win.WM_DRAWITEM => {
-            const item: *win.DRAWITEMSTRUCT = winHandle(*win.DRAWITEMSTRUCT, @as(usize, @bitCast(lparam)));
-            drawSetupButton(a, item);
-            return 1;
-        },
-        win.WM_CTLCOLORSTATIC, win.WM_CTLCOLOREDIT => {
-            const hdc: win.HDC = winHandle(win.HDC, wparam);
-            _ = win.SetTextColor(hdc, theme.current.on_surface);
-            if (theme.choice == .amoled and win.GetDlgItem(hwnd, id_tg_edit) == winHandle(win.HWND, @as(usize, @bitCast(lparam)))) {
-                _ = win.SetBkColor(hdc, theme.current.surface_container_high);
-                return @bitCast(@intFromPtr(a.brush_raised.?));
-            }
-            _ = win.SetBkColor(hdc, theme.current.surface_container_low);
-            if (a.brush_panel) |brush| return @bitCast(@intFromPtr(brush));
-            return @bitCast(@intFromPtr(win.GetStockObject(win.BLACK_BRUSH)));
-        },
-        win.WM_COMMAND => {
-            const id = loword(wparam);
-            const notification = hiword(wparam);
-            if (id == id_tg_edit and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {
-                _ = win.InvalidateRect(hwnd, null, win.FALSE);
-                return 0;
-            }
-            if (id == id_tg_next or id == 1) {
-                tgLoginSubmit(a);
-                return 0;
-            }
-            if (id == id_tg_cancel or id == 2) {
-                closeTgLogin(a);
-                return 0;
-            }
-            if (id == id_tg_open_page) {
-                openMyTelegramPage(a);
-                return 0;
-            }
-            return 0;
-        },
-        win.WM_CLOSE => {
-            closeTgLogin(a);
-            return 0;
-        },
-        win.WM_NCDESTROY => {
-            a.tg_login_window = null;
-            if (a.hwnd) |main_hwnd| {
-                _ = win.EnableWindow(main_hwnd, 1);
-                _ = win.SetFocus(main_hwnd);
-            }
-            return 0;
-        },
-        else => {},
-    }
-    return win.DefWindowProcW(hwnd, message, wparam, lparam);
-}
-
-fn tgLoginSubmit(a: *App) void {
-    const window = a.tg_login_window orelse return;
-    const edit = win.GetDlgItem(window, id_tg_edit) orelse return;
-    var wide_buffer: [128]u16 = [_]u16{0} ** 128;
-    const length: usize = @intCast(win.GetWindowTextW(edit, &wide_buffer, wide_buffer.len));
-    if (length == 0) return;
-    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide_buffer[0..length]) catch return;
-    defer a.allocator.free(text);
-    if (hubConfigured(a)) return;
-    const trimmed = std.mem.trim(u8, text, " ");
-    switch (a.tg_login) {
-        .phone, .code, .password => {
-            const client = a.telegram orelse {
-                tgLoginShowError(a, "Telegram is not running. Close this window and choose Add Telegram account again.");
-                return;
-            };
-            switch (a.tg_login) {
-                .phone => client.authPhone(trimmed),
-                .code => client.authCode(trimmed),
-                .password => client.authPassword(trimmed),
-                else => unreachable,
-            }
-            tgLoginSetChecking(a);
-            setStatus(a, "Telegram: checking with Telegram...");
-        },
-        .api_id, .api_hash => handleTgKeyInput(a, trimmed),
-        .none => {},
-    }
-}
-
-fn handleTgKeyInput(a: *App, trimmed: []const u8) void {
-    switch (a.tg_login) {
-        .api_id => {
-            const parsed = parseTgApiId(trimmed) orelse {
-                tgLoginShowError(a, "The api_id is a number. Type it again.");
-                return;
-            };
-            a.tg_api_id = parsed;
-            openTelegramLogin(a, .api_hash);
-        },
-        .api_hash => {
-            if (!validTgApiHash(trimmed)) {
-                tgLoginShowError(a, tg_api_hash_error);
-                return;
-            }
-            a.tg_api_hash.set(trimmed);
-            if (!saveTelegramKeys(a)) {
-                tgLoginShowError(a, "Could not save the Telegram keys on this PC. Try again.");
-                return;
-            }
-            createTelegramClient(a);
-            if (a.telegram == null) {
-                tgLoginShowError(a, "Telegram could not start on this PC. Press Next to try again.");
-                return;
-            }
-            openTelegramLogin(a, .phone);
-            setStatus(a, "Telegram: keys saved. Type your phone number and press Next");
-        },
-        else => {},
-    }
-}
-
-fn openMyTelegramPage(a: *App) void {
-    if (hubConfigured(a)) return;
-    if (!shell_lazy.ensureShell32()) return;
-    const url_wide = utf8ToWide(a.allocator, "https://my.telegram.org/apps") catch return;
-    defer a.allocator.free(url_wide);
-    const result = shell_lazy.shellExecuteW.?(a.hwnd orelse null, lit("open"), url_wide.ptr, null, null, win.SW_SHOWNORMAL);
-    if (@intFromPtr(result) <= 32) setStatus(a, "Windows could not open the browser");
-}
-
-fn createTelegramClient(a: *App) void {
-    if (hubConfigured(a)) return setStatus(a, "Manage accounts on the hub");
-    if (a.telegram != null) return;
-    if (a.tg_api_id == 0 or a.tg_api_hash.len == 0) {
-        setStatus(a, "Telegram needs an api_id and api_hash before it can start");
-        return;
-    }
-    if (a.tg_data_dir.len == 0) {
-        setStatus(a, "Telegram could not start: its data folder is missing");
-        return;
-    }
-    a.telegram = tg.Client.create(a.allocator, a.io, a.tg_api_id, a.tg_api_hash.slice(), a.tg_data_dir.slice());
-    if (a.telegram == null) setStatus(a, "Telegram could not start on this PC");
-}
-
-fn startTelegramAdd(a: *App) void {
-    if (hubConfigured(a)) return setStatus(a, "Manage accounts on the hub");
-    if (!tg.enabled) {
-        setStatus(a, "Telegram is not in this build");
-        return;
-    }
-    if (a.tg_auth == .ready) {
-        setStatus(a, "Telegram is already connected");
-        return;
-    }
-    if (a.telegram == null) {
-        if (a.tg_api_id == 0 or a.tg_api_hash.len == 0) {
-            openTelegramLogin(a, .api_id);
-            return;
-        }
-        createTelegramClient(a);
-        if (a.telegram == null) {
-            if (a.tg_login == .none) openTelegramLogin(a, .api_hash);
-            return;
-        }
-    }
-    openTelegramLogin(a, switch (a.tg_auth) {
-        .wait_code => .code,
-        .wait_password => .password,
-        else => .phone,
-    });
-}
-
-fn saveTelegramKeys(a: *App) bool {
-    var key: win.HKEY = undefined;
-    if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), 0, null, 0, win.KEY_SET_VALUE, null, &key, null) != win.ERROR_SUCCESS) return false;
-    defer _ = win.RegCloseKey(key);
-    var id_buffer: [16]u8 = undefined;
-    const id_text = std.fmt.bufPrint(&id_buffer, "{d}", .{a.tg_api_id}) catch return false;
-    const id_wide = utf8ToWide(a.allocator, id_text) catch return false;
-    defer a.allocator.free(id_wide);
-    const id_saved = win.RegSetValueExW(key, lit("TelegramApiId"), 0, win.REG_SZ, @ptrCast(id_wide.ptr), @intCast((id_wide.len + 1) * 2)) == win.ERROR_SUCCESS;
-    const hash_saved = slack_win.saveSecret(lit("TelegramApiHash"), a.tg_api_hash.slice());
-    if (!id_saved or !hash_saved) {
-        _ = win.RegDeleteValueW(key, lit("TelegramApiId"));
-        _ = win.RegDeleteValueW(key, lit("TelegramApiHash"));
-        return false;
-    }
-    return true;
-}
-
-fn deleteTelegramKeys(a: *App) void {
-    var key: win.HKEY = undefined;
-    if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), 0, null, 0, win.KEY_SET_VALUE, null, &key, null) != win.ERROR_SUCCESS) return;
-    defer _ = win.RegCloseKey(key);
-    _ = win.RegDeleteValueW(key, lit("TelegramApiId"));
-    _ = win.RegDeleteValueW(key, lit("TelegramApiHash"));
-    a.tg_api_id = 0;
-    a.tg_api_hash.set("");
-}
-
-fn wipeBadTelegramKeys(a: *App) void {
-    deleteTelegramKeys(a);
-    if (a.telegram) |client| {
-        a.telegram = null;
-        client.destroy();
-    }
-    openTelegramLogin(a, .api_id);
-}
-
-fn removeTelegramAccount(a: *App) void {
-    if (a.telegram) |client| {
-        a.telegram = null;
-        client.destroy();
-    }
-    deleteTelegramKeys(a);
-    a.tg_login = .none;
-    if (a.tg_login_window) |window| _ = win.DestroyWindow(window);
-    a.tg_auth = .unknown;
-    a.tg_account.set("");
-    a.tg_chat_count = 0;
-    @memset(a.tg_chats, .{});
-    var removed = true;
-    if (a.tg_data_dir.len > 0) {
-        std.Io.Dir.cwd().deleteTree(a.io, a.tg_data_dir.slice()) catch {
-            removed = false;
-        };
-    }
-    refreshVisibleChats(a);
-    if (!messagesAreCurrent(a)) refreshMessages(a);
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
-    setStatus(a, if (removed) "Telegram removed from this PC" else "Telegram signed out, but its files could not be deleted");
-}
-
-fn tdlibSmoke(io: std.Io) u8 {
-    const client = tg.Client.create(std.heap.page_allocator, io, 1, "smoke", "tdlib-smoke") orelse return 1;
-    defer client.destroy();
-    var waited_ms: u32 = 0;
-    while (waited_ms < 20_000) {
-        if (client.poll()) |event_in| {
-            var event = event_in;
-            defer event.deinit(std.heap.page_allocator);
-            if (event == .auth) switch (event.auth.state) {
-                .wait_parameters, .wait_phone, .wait_code, .wait_password, .wait_registration, .wait_email, .ready => return 0,
-                else => return 1,
-            };
-        }
-        io.sleep(std.Io.Duration.fromMilliseconds(100), .awake) catch return 1;
-        waited_ms += 100;
-    }
-    return 1;
 }
 
 var smoke_unfurl_done_count: u32 = 0;
@@ -3860,7 +2947,6 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         .avatar_dir = scratch[0..0],
     };
     defer app.allocator.free(app.chats);
-    defer app.allocator.free(app.tg_chats);
     defer {
         persistDrafts(app);
         app.draft_store.deinit(app.allocator);
@@ -4017,141 +3103,7 @@ fn slackAccountIsBridge(a: *App, account: []const u8) bool {
 
 fn slackConfigured(a: *App) bool {
     for (&a.slack_installations) |*installation| if (installation.active) return true;
-    return a.slack_tokens != null or a.slack_bridge != null;
-}
-
-fn slackContext(a: *App, account: []const u8, legacy_bridge: bool) ?slack_win.JobContext {
-    a.slack_install_mutex.lockUncancelable(a.io);
-    defer a.slack_install_mutex.unlock(a.io);
-    const installation = slackInstallation(a, account);
-    const bridge = if (installation) |install| install.is_bridge else legacy_bridge and a.slack_bridge != null and account.len == 0;
-    const token = if (bridge) (if (a.slack_bridge) |config| config.key else return null) else if (installation) |install| install.user_token else if (account.len == 0 and a.slack_tokens != null) a.slack_tokens.?.user else return null;
-    const host = if (bridge) a.slack_bridge.?.host else "slack.com";
-    const media_dir = if (installation) |install| install.media_dir.slice() else a.slack_media_dir;
-    const owned_token = a.allocator.dupe(u8, token) catch return null;
-    const owned_host = a.allocator.dupe(u8, host) catch {
-        a.allocator.free(owned_token);
-        return null;
-    };
-    const owned_dir = a.allocator.dupe(u8, media_dir) catch {
-        a.allocator.free(owned_token);
-        a.allocator.free(owned_host);
-        return null;
-    };
-    return .{ .user_token = owned_token, .host = owned_host, .is_bridge = bridge, .media_dir = owned_dir, .io = a.io };
-}
-
-fn requireSlackSignIn(a: *App, account: []const u8, failed_token: []const u8) void {
-    a.slack_install_mutex.lockUncancelable(a.io);
-    defer a.slack_install_mutex.unlock(a.io);
-    if (slackInstallation(a, account)) |installation| {
-        if (std.mem.eql(u8, installation.user_token, failed_token)) installation.needs_signin.store(true, .release);
-    }
-}
-
-fn refreshSlackCredentials(a: *App, account: []const u8, auth_error: []const u8, failed_token: []const u8) !void {
-    var arena_state = std.heap.ArenaAllocator.init(a.allocator);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    a.slack_install_mutex.lockUncancelable(a.io);
-    const installation = slackInstallation(a, account) orelse {
-        a.slack_install_mutex.unlock(a.io);
-        return error.WorkspaceDisconnected;
-    };
-    if (installation.is_bridge) {
-        a.slack_install_mutex.unlock(a.io);
-        return;
-    }
-    if (auth_error.len > 0 and !std.mem.eql(u8, installation.user_token, failed_token)) {
-        a.slack_install_mutex.unlock(a.io);
-        return;
-    }
-    if (installation.needs_signin.load(.acquire)) {
-        a.slack_install_mutex.unlock(a.io);
-        return error.SignInRequired;
-    }
-    if (!slack_oauth.refreshDue(nowUnixSeconds(), installation.expires_at, installation.refresh_token.len > 0, auth_error)) {
-        const invalid = auth_error.len > 0 or (installation.expires_at > 0 and nowUnixSeconds() >= installation.expires_at);
-        if (invalid) installation.needs_signin.store(true, .release);
-        a.slack_install_mutex.unlock(a.io);
-        if (invalid) return error.SignInRequired;
-        return;
-    }
-    const generation = installation.generation;
-    const saved: slack_win.Installation = snapshot: {
-        defer a.slack_install_mutex.unlock(a.io);
-        break :snapshot .{
-            .team_id = try arena.dupe(u8, installation.team_id.slice()),
-            .team_name = try arena.dupe(u8, installation.team_name.slice()),
-            .user_id = try arena.dupe(u8, installation.user_id.slice()),
-            .user_token = try arena.dupe(u8, installation.user_token),
-            .refresh_token = try arena.dupe(u8, installation.refresh_token),
-            .expires_at = installation.expires_at,
-        };
-    };
-    const client_id = slack_win.loadClientId(arena) orelse {
-        requireSlackSignIn(a, account, saved.user_token);
-        return error.SignInRequired;
-    };
-    const rotated: anyerror!slack_oauth.RefreshedTokens = exchange: {
-        const body = slack_oauth.buildRefreshBody(arena, client_id, saved.refresh_token) catch |err| break :exchange err;
-        const json = slack_win.exchangeOAuth(arena, body) catch |err| break :exchange err;
-        break :exchange slack_oauth.parseRefreshResponse(arena, json);
-    };
-    a.slack_install_mutex.lockUncancelable(a.io);
-    defer a.slack_install_mutex.unlock(a.io);
-    const current = slackInstallation(a, account) orelse return error.WorkspaceDisconnected;
-    if (current.generation != generation) return error.WorkspaceChanged;
-    const tokens = rotated catch {
-        current.needs_signin.store(true, .release);
-        return error.SignInRequired;
-    };
-    if (!slack_win.isUserToken(tokens.access_token)) {
-        current.needs_signin.store(true, .release);
-        return error.SignInRequired;
-    }
-    const access = a.allocator.dupe(u8, tokens.access_token) catch {
-        current.needs_signin.store(true, .release);
-        return error.SignInRequired;
-    };
-    errdefer a.allocator.free(access);
-    const refresh = a.allocator.dupe(u8, tokens.refresh_token) catch {
-        current.needs_signin.store(true, .release);
-        return error.SignInRequired;
-    };
-    errdefer a.allocator.free(refresh);
-    const expiry = nowUnixSeconds() + @as(i64, @intCast(tokens.expires_in));
-    if (!slack_win.saveInstallation(.{ .team_id = saved.team_id, .team_name = saved.team_name, .user_id = saved.user_id, .user_token = access, .refresh_token = refresh, .expires_at = expiry })) {
-        current.needs_signin.store(true, .release);
-        return error.SignInRequired;
-    }
-    a.allocator.free(current.user_token);
-    a.allocator.free(current.refresh_token);
-    current.user_token = access;
-    current.refresh_token = refresh;
-    current.expires_at = expiry;
-}
-
-fn runSlackJob(a: *App, account: []const u8, initial: slack_win.JobContext, kind: slack_win.JobKind, args: []const []const u8) ![]u8 {
-    if (account.len == 0 or initial.is_bridge) return slack_win.runJob(a.allocator, initial, kind, args);
-    try refreshSlackCredentials(a, account, "", "");
-    var attempt: usize = 0;
-    while (attempt < 2) : (attempt += 1) {
-        const context = slackContext(a, account, false) orelse return error.WorkspaceDisconnected;
-        defer a.allocator.free(context.user_token);
-        defer a.allocator.free(context.host);
-        defer a.allocator.free(context.media_dir);
-        const outcome = slack_win.runJob(a.allocator, context, kind, args);
-        const auth_error = std.mem.sliceTo(&slack_win.last_error, 0);
-        if (!std.mem.eql(u8, auth_error, "invalid_auth") and !std.mem.eql(u8, auth_error, "token_expired")) return outcome;
-        if (outcome) |data| a.allocator.free(data) else |_| {}
-        if (attempt == 1) {
-            requireSlackSignIn(a, account, context.user_token);
-            return error.SignInRequired;
-        }
-        try refreshSlackCredentials(a, account, auth_error, context.user_token);
-    }
-    unreachable;
+    return false;
 }
 
 fn slackUserName(installation: *SlackInstallation, user_id: []const u8) ?[]const u8 {
@@ -4227,10 +3179,6 @@ fn fillSlackTimestamp(a: *App, chat: *Chat) void {
         const timestamp = getString(item.object, "Timestamp");
         if (std.mem.order(u8, timestamp, chat.timestamp.slice()) == .gt) chat.timestamp.set(timestamp);
     }
-}
-
-fn telegramReady(a: *App) bool {
-    return a.telegram != null and a.tg_auth == .ready;
 }
 
 fn activeChatView(a: *App) messenger_view.View {
@@ -4350,7 +3298,6 @@ fn rebuildViews(a: *App, rows: []const std.json.Value) void {
         for (&a.slack_installations) |*installation| {
             if (installation.active) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.slack, installation.team_id.slice(), installation.team_name.slice())) catch return;
         }
-        if (telegramReady(a)) messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.telegram, a.tg_account.slice(), a.tg_account.slice())) catch return;
     }
     if (unifiedHub(a)) {
         messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.signal, "signal", "")) catch return;
@@ -4708,31 +3655,6 @@ fn refreshSlackHistory(a: *App) void {
     job.jid.set(chat.jid.slice());
     wacliJobArgs(&job, &.{chat.jid.slice()});
     _ = wacliEnqueue(a, job, true);
-}
-
-fn pollSlackBridge(a: *App) void {
-    a.slack_poll_ticks += 1;
-    if (a.slack_poll_ticks % 60 == 0) {
-        for (&a.slack_installations) |*installation| {
-            a.slack_install_mutex.lockUncancelable(a.io);
-            const due = installation.active and !installation.is_bridge and !installation.needs_signin.load(.acquire) and
-                (slack_oauth.refreshDue(nowUnixSeconds(), installation.expires_at, installation.refresh_token.len > 0, "") or
-                    (installation.expires_at > 0 and nowUnixSeconds() >= installation.expires_at));
-            const account = installation.team_id;
-            a.slack_install_mutex.unlock(a.io);
-            if (!due) continue;
-            var job = WacliJob{ .provider = .slack, .kind = .slack_auth };
-            job.account = account;
-            _ = wacliEnqueue(a, job, false);
-        }
-    }
-    if (a.slack_bridge == null) return;
-    if (a.hwnd) |hwnd| if (win.IsIconic(hwnd) != 0) return;
-    if (selectedChatIsSlack(a)) {
-        const installation = slackInstallation(a, a.chats[a.selected_chat].account.slice());
-        if (installation != null and installation.?.is_bridge and a.slack_poll_ticks % 5 == 0 and wacliPendingGet(a, .slack_history) == 0) refreshSlackHistory(a);
-    }
-    if (a.slack_poll_ticks % 60 == 0 and wacliPendingGet(a, .slack_workspace) == 0) refreshSlackWorkspace(a);
 }
 
 fn slackMediaKind(mime: []const u8) []const u8 {
@@ -5308,7 +4230,6 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         setStatus(a, "Can't resend this message - type it again");
         return true;
     }
-    if (selectedChatIsTelegram(a)) return false;
     if (a.pending_send_count >= max_pending_sends) {
         setStatus(a, "Send queue is full");
         return true;
@@ -5451,36 +4372,6 @@ fn removeMessageAt(a: *App, index: usize) void {
     a.message_count -= 1;
 }
 
-fn dropPendingForEcho(a: *App, event: *slack_win.Event) void {
-    const cmid = event.clientMsgIdSlice();
-    var index: ?usize = null;
-    if (cmid.len > 0) {
-        for (a.messages[0..a.message_count], 0..) |*message, i| {
-            if (message.from_me and message.send_state != .none and
-                std.mem.eql(u8, message.timestamp.slice(), cmid))
-            {
-                index = i;
-                break;
-            }
-        }
-    } else {
-        for (a.messages[0..a.message_count], 0..) |*message, i| {
-            if (!message.from_me or message.send_state == .none) continue;
-            const bubble_text = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch continue;
-            defer a.allocator.free(bubble_text);
-            if (std.mem.eql(u8, bubble_text, event.textSlice()) or
-                (message.send_state == .failed and bubble_text.len == event.textSlice().len + " (not sent)".len and
-                    std.mem.startsWith(u8, bubble_text, event.textSlice()) and
-                    std.mem.endsWith(u8, bubble_text, " (not sent)")))
-            {
-                index = i;
-                break;
-            }
-        }
-    }
-    if (index) |found| removeMessageAt(a, found);
-}
-
 fn resolveSlackSend(a: *App, result: *WacliResult) void {
     if (!chat_key.Key.eql(chat_key.displayed(a), chat_key.of(result))) return;
     var client_msg_id: []const u8 = "";
@@ -5585,18 +4476,10 @@ fn restoreOutbox(a: *App) void {
     const folder = std.fs.path.dirname(a.outbox_path) orelse return;
     const dir = std.Io.Dir.cwd().openDir(a.io, folder, .{ .iterate = true }) catch return;
     defer dir.close(a.io);
-    var slack_accounts: std.ArrayList([]const u8) = .empty;
-    defer slack_accounts.deinit(a.allocator);
-    const installations = if (!unifiedHub(a)) slack_win.loadSecret(a.allocator, lit("SlackInstallations")) else null;
-    defer if (installations) |stored| a.allocator.free(stored.value);
-    if (installations) |stored| {
-        var ids = std.mem.tokenizeScalar(u8, stored.value, '\n');
-        while (ids.next()) |id| slack_accounts.append(a.allocator, id) catch return;
-    }
     outbox.adopt(a.allocator, a.io, dir, std.fs.path.basename(a.outbox_path), .{
         .account = a.cache_tag.slice(),
         .unified = unifiedHub(a),
-        .slack_accounts = slack_accounts.items,
+        .slack_accounts = &.{},
     }) catch {
         appendLaunchLog(a, "startup: outbox adoption failed");
     };
@@ -5832,319 +4715,6 @@ fn requestSlackDownload(a: *App, account: []const u8, channel: []const u8, item:
     _ = wacliEnqueue(a, job, false);
 }
 
-fn applySlackEvent(a: *App, event: *slack_win.Event) void {
-    defer slack_win.destroyEvent(event);
-    const account = event.teamIdSlice();
-    const installation = slackInstallation(a, account) orelse return;
-    const key = chat_key.Key{ .provider = .slack, .account = account, .id = event.channelSlice() };
-    const is_open = a.selected_chat < a.chat_count and chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), key);
-    if (std.mem.startsWith(u8, event.eventTypeSlice(), "reaction_")) {
-        if (is_open) refreshSlackHistory(a);
-        return;
-    }
-    a.slack_log_mutex.lockUncancelable(a.io);
-    const fresh = a.slack_log.markAccount(account, event.channelSlice(), event.tsSlice());
-    a.slack_log_mutex.unlock(a.io);
-    const from_me = installation.user_id.len > 0 and std.mem.eql(u8, event.userSlice(), installation.user_id.slice());
-    if (from_me and event.clientMsgIdSlice().len > 0) {
-        for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
-            if (slot.entry.file.len == 0 and chat_key.Key.eql(chat_key.of(&slot.entry), key) and
-                std.mem.eql(u8, slot.entry.client_msg_id.slice(), event.clientMsgIdSlice()))
-            {
-                const id = slot.entry.id;
-                setStatus(a, "Sent");
-                retireSlackOutbox(a, &id);
-                break;
-            }
-        }
-    }
-    if (!fresh) return;
-    const channel = event.channelSlice();
-    noteSlackActivity(a, account, channel, slack.tsSeconds(event.tsSlice()) orelse 0);
-    const viewed = is_open and a.user_viewed and a.hwnd != null and win.IsIconic(a.hwnd.?) == 0;
-    if (slackChatById(a, account, channel)) |chat| {
-        if (!from_me and !viewed and slack.compareTs(event.tsSlice(), chat.slack_last_read.slice()) == .gt) {
-            chat.unread = true;
-            chat.unread_count += 1;
-        }
-    } else refreshSlackInstallation(a, installation);
-    if (is_open and chat_key.Key.eql(chat_key.displayed(a), key)) {
-        const item = slack.HistoryItem{
-            .ts = event.tsSlice(),
-            .user = event.userSlice(),
-            .text = event.textSlice(),
-            .thread_ts = event.threadTsSlice(),
-            .file_id = event.fileIdSlice(),
-            .file_url = event.fileUrlSlice(),
-            .file_name = event.fileNameSlice(),
-            .file_mime = event.fileMimeSlice(),
-            .file_size = event.file_size,
-        };
-        if (from_me) dropPendingForEcho(a, event);
-        insertSlackMessageSorted(a, buildSlackMessage(a, account, item));
-        if (viewed) requestSlackMark(a, channel);
-        if (item.file_url.len > 0) requestSlackDownload(a, account, channel, item);
-        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
-    }
-    refreshVisibleChats(a);
-}
-
-fn saveSlackInstallationIndex(a: *App, extra: []const u8, removed: []const u8) bool {
-    var list = std.ArrayList(u8).empty;
-    defer list.deinit(a.allocator);
-    var has_extra = false;
-    for (&a.slack_installations) |*installation| {
-        if (!installation.active or installation.is_bridge or std.mem.eql(u8, installation.team_id.slice(), removed)) continue;
-        if (std.mem.eql(u8, installation.team_id.slice(), extra)) has_extra = true;
-        list.appendSlice(a.allocator, installation.team_id.slice()) catch return false;
-        list.append(a.allocator, '\n') catch return false;
-    }
-    if (extra.len > 0 and !has_extra) list.appendSlice(a.allocator, extra) catch return false;
-    return slack_win.saveSecret(lit("SlackInstallations"), list.items);
-}
-
-fn installSlackWorkspace(a: *App, team_id: []const u8, team_name: []const u8, user_id: []const u8, user_token: []const u8, refresh_token: []const u8, expires_at: i64, is_bridge: bool) bool {
-    if (!slack.validTeamId(team_id)) return false;
-    var target = slackInstallation(a, team_id);
-    if (target == null) for (&a.slack_installations) |*installation| {
-        if (!installation.active) {
-            target = installation;
-            break;
-        }
-    };
-    const installation = target orelse return false;
-    const user = a.allocator.dupe(u8, user_token) catch return false;
-    const refresh = a.allocator.dupe(u8, refresh_token) catch {
-        a.allocator.free(user);
-        return false;
-    };
-    var path_buffer: [519]u8 = undefined;
-    const path = std.fmt.bufPrint(&path_buffer, "{s}\\{s}", .{ a.slack_media_dir, team_id }) catch {
-        a.allocator.free(user);
-        a.allocator.free(refresh);
-        return false;
-    };
-    a.slack_install_mutex.lockUncancelable(a.io);
-    a.allocator.free(installation.user_token);
-    a.allocator.free(installation.refresh_token);
-    if (!installation.active) {
-        installation.chat_count = 0;
-        installation.user_count = 0;
-    }
-    installation.user_token = user;
-    installation.refresh_token = refresh;
-    installation.expires_at = expires_at;
-    installation.generation +%= 1;
-    installation.needs_signin.store(false, .release);
-    installation.team_id.set(team_id);
-    installation.team_name.set(team_name);
-    installation.user_id.set(user_id);
-    installation.media_dir.set(path);
-    installation.is_bridge = is_bridge;
-    installation.active = true;
-    a.slack_install_mutex.unlock(a.io);
-    if (std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path)) |wide| {
-        defer a.allocator.free(wide);
-        _ = win.CreateDirectoryW(wide, null);
-    } else |_| {}
-    refreshSlackInstallation(a, installation);
-    startSlackSocket(a);
-    retrySlackOutbox(a);
-    return true;
-}
-
-pub fn addSlackInstallation(team_id: []const u8, team_name: []const u8, user_id: []const u8, user_token: []const u8, refresh_token: []const u8, expires_at: i64) bool {
-    const a = app_ptr orelse return false;
-    var available = slackInstallation(a, team_id) != null;
-    for (&a.slack_installations) |*installation| if (!installation.active) {
-        available = true;
-    };
-    if (!available) return false;
-    a.slack_install_mutex.lockUncancelable(a.io);
-    const saved = slack_win.saveInstallation(.{ .team_id = team_id, .team_name = team_name, .user_id = user_id, .user_token = user_token, .refresh_token = refresh_token, .expires_at = expires_at }) and saveSlackInstallationIndex(a, team_id, "");
-    if (saved) if (slackInstallation(a, team_id)) |installation| {
-        installation.generation +%= 1;
-    };
-    a.slack_install_mutex.unlock(a.io);
-    if (!saved) return false;
-    return installSlackWorkspace(a, team_id, team_name, user_id, user_token, refresh_token, expires_at, false);
-}
-
-pub fn removeSlackInstallation(team_id: []const u8) bool {
-    const a = app_ptr orelse return false;
-    a.slack_install_mutex.lockUncancelable(a.io);
-    const installation = slackInstallation(a, team_id) orelse {
-        a.slack_install_mutex.unlock(a.io);
-        return false;
-    };
-    if (installation.is_bridge) {
-        slack_win.clearBridge();
-    } else {
-        if (!saveSlackInstallationIndex(a, "", team_id)) {
-            a.slack_install_mutex.unlock(a.io);
-            return false;
-        }
-        slack_win.deleteInstallation(team_id);
-    }
-    installation.active = false;
-    installation.generation +%= 1;
-    a.allocator.free(installation.user_token);
-    a.allocator.free(installation.refresh_token);
-    installation.user_token = &.{};
-    installation.refresh_token = &.{};
-    installation.chat_count = 0;
-    installation.user_count = 0;
-    a.slack_install_mutex.unlock(a.io);
-    slack_win.deleteSecret(lit("SlackUserToken"));
-    a.slack_install_mutex.lockUncancelable(a.io);
-    a.slack_tokens = null;
-    if (installation.is_bridge) a.slack_bridge = null;
-    a.slack_install_mutex.unlock(a.io);
-    cancelSlackMark(a);
-    refreshVisibleChats(a);
-    if (!messagesAreCurrent(a)) refreshMessages(a);
-    return true;
-}
-
-fn bindSlackOutboxAccount(a: *App, team_id: []const u8) void {
-    for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
-        if (slot.entry.account.len == 0) {
-            slot.entry.account.set(team_id);
-            a.slack_outbox_dirty = true;
-        }
-    }
-    if (a.slack_outbox_dirty) _ = persistOutbox(a);
-}
-
-fn loadSlackTokens(a: *App) void {
-    if (a.slack_app_token.len == 0) {
-        if (slack_win.loadSecret(a.allocator, lit("SlackAppToken"))) |stored| a.slack_app_token = stored.value;
-    }
-    if (slack_win.loadSecret(a.allocator, lit("SlackInstallations"))) |stored| {
-        defer a.allocator.free(stored.value);
-        var ids = std.mem.tokenizeScalar(u8, stored.value, '\n');
-        while (ids.next()) |id| {
-            const saved = slack_win.loadInstallation(a.allocator, id) orelse continue;
-            defer saved.deinit();
-            const value = saved.value;
-            _ = installSlackWorkspace(a, value.team_id, value.team_name, value.user_id, value.user_token, value.refresh_token, value.expires_at, false);
-        }
-    }
-    a.slack_install_mutex.lockUncancelable(a.io);
-    if (a.slack_tokens == null) a.slack_tokens = slack_win.loadTokens(a.allocator);
-    if (a.slack_bridge == null) a.slack_bridge = slack_win.loadBridge(a.allocator);
-    a.slack_install_mutex.unlock(a.io);
-    if (a.slack_tokens != null) {
-        const job = WacliJob{ .provider = .slack, .kind = .slack_auth };
-        _ = wacliEnqueue(a, job, false);
-    }
-    if (a.slack_bridge != null) {
-        var job = WacliJob{ .provider = .slack, .kind = .slack_auth };
-        job.extra.set("bridge");
-        _ = wacliEnqueue(a, job, false);
-    }
-    startSlackSocket(a);
-    retrySlackOutbox(a);
-}
-
-const SlackOAuthTask = struct {
-    arena: std.heap.ArenaAllocator,
-    client_id: []const u8,
-    applied: win.HANDLE,
-    response: ?slack_oauth.TokenResponse = null,
-    failure: []const u8 = "",
-    saved: std.atomic.Value(bool) = .init(false),
-    app_token: []const u8 = "",
-    socket_stopped: bool = false,
-};
-
-fn finishSlackSignIn(a: *App) void {
-    if (a.slack_oauth_thread) |thread| thread.join();
-    a.slack_oauth_thread = null;
-    if (a.slack_oauth_task) |task| {
-        _ = win.CloseHandle(task.applied);
-        task.arena.deinit();
-        a.allocator.destroy(task);
-    }
-    a.slack_oauth_task = null;
-}
-
-fn slackSignInWorker(a: *App, task: *SlackOAuthTask) void {
-    var callback: ?slack_oauth_win.Callback = null;
-    defer if (callback) |connection| connection.close();
-    const allocator = task.arena.allocator();
-    if (!std.mem.eql(u8, a.slack_app_token, task.app_token)) {
-        a.slack_stop.store(true, .release);
-        if (a.slack_socket_thread) |thread| thread.join();
-        task.socket_stopped = true;
-    }
-    const outcome: anyerror!slack_oauth.TokenResponse = blk: {
-        callback = slack_oauth_win.authorize(allocator, a.io, task.client_id, &a.slack_oauth_stop) catch |err| break :blk err;
-        const connection = callback.?;
-        const body = slack_oauth.buildAccessBody(allocator, task.client_id, connection.code, &connection.attempt.code_verifier) catch |err| break :blk err;
-        const json = slack_win.exchangeOAuth(allocator, body) catch |err| break :blk err;
-        const response = slack_oauth.parseResponse(allocator, json) catch |err| break :blk err;
-        if (!slack.validTeamId(response.team_id) or response.user_id.len > 32 or response.user_id.len < 2 or
-            response.user_id[0] != 'U' or !slack_win.isUserToken(response.access_token)) break :blk error.UserTokenRequired;
-        break :blk response;
-    };
-    if (outcome) |response| task.response = response else |err| task.failure = @errorName(err);
-    if (!a.slack_oauth_stop.load(.acquire)) {
-        if (a.hwnd) |hwnd| {
-            if (win.PostMessageW(hwnd, wm_slack_oauth_done, 0, 0) != 0) _ = win.WaitForSingleObject(task.applied, win.INFINITE);
-        }
-    }
-    if (callback) |connection| connection.respond(task.saved.load(.acquire), if (task.saved.load(.acquire)) "Return to Messages to view your workspace." else "Return to Messages for details and try connecting again.");
-    if (a.hwnd) |hwnd| _ = win.PostMessageW(hwnd, wm_slack_oauth_finished, 0, 0);
-}
-
-fn startSlackSignIn(a: *App, client_id: []const u8) void {
-    if (unifiedHub(a)) return setStatus(a, "Manage accounts on the hub");
-    if (a.slack_oauth_thread != null) return setStatus(a, "Slack sign-in is already in progress");
-    const app_token = slack_win.loadSecret(a.allocator, lit("SlackAppToken")) orelse return setStatus(a, "Enter a Socket Mode app token in Slack sign-in settings");
-    if (!slack_win.isAppToken(app_token.value)) {
-        a.allocator.free(app_token.value);
-        return setStatus(a, "Invalid Socket Mode app token; open Slack sign-in settings");
-    }
-    defer a.allocator.free(app_token.value);
-    const task = a.allocator.create(SlackOAuthTask) catch return setStatus(a, "Could not start Slack sign-in");
-    const event = win.CreateEventW(null, win.TRUE, win.FALSE, null) orelse {
-        a.allocator.destroy(task);
-        return setStatus(a, "Could not start Slack sign-in");
-    };
-    task.* = .{ .arena = std.heap.ArenaAllocator.init(a.allocator), .client_id = "", .applied = event };
-    task.client_id = task.arena.allocator().dupe(u8, client_id) catch {
-        _ = win.CloseHandle(event);
-        task.arena.deinit();
-        a.allocator.destroy(task);
-        return setStatus(a, "Could not start Slack sign-in");
-    };
-    task.app_token = task.arena.allocator().dupe(u8, app_token.value) catch {
-        _ = win.CloseHandle(event);
-        task.arena.deinit();
-        a.allocator.destroy(task);
-        return setStatus(a, "Could not start Slack sign-in");
-    };
-    a.slack_oauth_task = task;
-    a.slack_oauth_stop.store(false, .release);
-    a.slack_oauth_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, slackSignInWorker, .{ a, task }) catch {
-        finishSlackSignIn(a);
-        return setStatus(a, "Could not start Slack sign-in worker");
-    };
-    setStatus(a, "Sign in with Slack in your browser (5 minute timeout)...");
-}
-
-const id_slack_user_edit = 100;
-const id_slack_app_edit = 101;
-const id_slack_save = 102;
-const id_slack_cancel = 103;
-
-const id_tg_prompt = 110;
-const id_tg_edit = 111;
-const id_tg_next = 112;
-const id_tg_cancel = 113;
-const id_tg_open_page = 114;
-
 const OPENFILENAMEW = extern struct {
     lStructSize: win.DWORD,
     hwndOwner: win.HWND,
@@ -6189,221 +4759,10 @@ fn pickImageFile(a: *App) ?WideText(519) {
     return result;
 }
 
-fn layoutSetupButtons(hwnd: win.HWND) void {
-    var client: win.RECT = undefined;
-    _ = win.GetClientRect(hwnd, &client);
-    const btn_w: i32 = 90;
-    const btn_h: i32 = 30;
-    const gap: i32 = 8;
-    const margin: i32 = 16;
-    const bottom = client.bottom - margin - btn_h;
-    if (win.GetDlgItem(hwnd, id_slack_cancel)) |c| _ = win.MoveWindow(c, client.right - margin - btn_w, bottom, btn_w, btn_h, win.TRUE);
-    if (win.GetDlgItem(hwnd, id_slack_save)) |s| _ = win.MoveWindow(s, client.right - margin - 2 * btn_w - gap, bottom, btn_w, btn_h, win.TRUE);
-}
-
-fn slackSetupProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) isize {
-    const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, @bitCast(wparam), @bitCast(lparam));
-    switch (message) {
-        win.WM_CREATE => {
-            _ = win.CreateWindowExW(0, lit("STATIC"), lit("Slack app Client ID"), win.WS_CHILD | win.WS_VISIBLE, 16, 16, 360, 20, hwnd, null, a.instance, null);
-            _ = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_BORDER | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 16, 38, 360, 26, hwnd, controlId(id_slack_user_edit), a.instance, null);
-            _ = win.CreateWindowExW(0, lit("STATIC"), lit("App token (xapp-) for Socket Mode"), win.WS_CHILD | win.WS_VISIBLE, 16, 74, 360, 20, hwnd, null, a.instance, null);
-            _ = win.CreateWindowExW(0, lit("EDIT"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_BORDER | win.WS_TABSTOP | win.ES_AUTOHSCROLL | win.ES_PASSWORD, 16, 96, 360, 26, hwnd, controlId(id_slack_app_edit), a.instance, null);
-            const save = win.CreateWindowExW(0, lit("BUTTON"), lit("Sign in"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW | win.BS_DEFPUSHBUTTON, 0, 0, 90, 30, hwnd, controlId(id_slack_save), a.instance, null);
-            const cancel = win.CreateWindowExW(0, lit("BUTTON"), lit("Cancel"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 90, 30, hwnd, controlId(id_slack_cancel), a.instance, null);
-            setFont(save, a.font_bold);
-            setFont(cancel, a.font_bold);
-            subclassComposerButton(a, save, 3);
-            subclassComposerButton(a, cancel, 4);
-            if (slack_win.loadClientId(a.allocator)) |client| {
-                defer a.allocator.free(client);
-                var text: WideText(511) = .{};
-                text.set(a.allocator, client);
-                _ = win.SetDlgItemTextW(hwnd, id_slack_user_edit, text.ptr());
-            }
-            if (slack_win.loadSecret(a.allocator, lit("SlackAppToken"))) |stored| {
-                defer a.allocator.free(stored.value);
-                var text: WideText(511) = .{};
-                text.set(a.allocator, stored.value);
-                _ = win.SetDlgItemTextW(hwnd, id_slack_app_edit, text.ptr());
-            }
-            setFont(win.GetDlgItem(hwnd, id_slack_user_edit), a.font);
-            setFont(win.GetDlgItem(hwnd, id_slack_app_edit), a.font);
-            layoutSetupButtons(hwnd);
-            return 0;
-        },
-        win.WM_SIZE => {
-            layoutSetupButtons(hwnd);
-            return 0;
-        },
-        win.WM_ERASEBKGND => {
-            var client: win.RECT = undefined;
-            _ = win.GetClientRect(hwnd, &client);
-            _ = win.FillRect(winHandle(win.HDC, @as(usize, @bitCast(wparam))), &client, a.brush_panel.?);
-            return 1;
-        },
-        win.WM_PAINT => {
-            if (theme.choice != .amoled) return win.DefWindowProcW(hwnd, message, wparam, lparam);
-            var paint: win.PAINTSTRUCT = undefined;
-            const hdc = win.BeginPaint(hwnd, &paint);
-            defer _ = win.EndPaint(hwnd, &paint);
-            var shapes = smooth.Context.init(hdc);
-            defer shapes.deinit();
-            paintPopupInput(&shapes, hwnd, win.GetDlgItem(hwnd, id_slack_user_edit));
-            paintPopupInput(&shapes, hwnd, win.GetDlgItem(hwnd, id_slack_app_edit));
-            return 0;
-        },
-        win.WM_DRAWITEM => {
-            const item: *win.DRAWITEMSTRUCT = winHandle(*win.DRAWITEMSTRUCT, @as(usize, @bitCast(lparam)));
-            if (item.CtlID == id_slack_save or item.CtlID == id_slack_cancel) drawSetupButton(a, item);
-            return 1;
-        },
-        win.WM_CTLCOLORSTATIC, win.WM_CTLCOLOREDIT => {
-            const hdc: win.HDC = winHandle(win.HDC, wparam);
-            _ = win.SetTextColor(hdc, theme.current.on_surface);
-            if (message == win.WM_CTLCOLOREDIT and theme.choice == .amoled) {
-                _ = win.SetBkColor(hdc, theme.current.surface_container_high);
-                return @bitCast(@intFromPtr(a.brush_raised.?));
-            }
-            _ = win.SetBkColor(hdc, theme.current.surface_container_low);
-            if (a.brush_panel) |brush| return @bitCast(@intFromPtr(brush));
-            return @bitCast(@intFromPtr(win.GetStockObject(win.BLACK_BRUSH)));
-        },
-        win.WM_COMMAND => {
-            const id = loword(wparam);
-            const notification = hiword(wparam);
-            if ((id == id_slack_user_edit or id == id_slack_app_edit) and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {
-                _ = win.InvalidateRect(hwnd, null, win.FALSE);
-                return 0;
-            }
-            if (id == id_slack_cancel) {
-                _ = win.DestroyWindow(hwnd);
-                return 0;
-            }
-            if (id != id_slack_save) return 0;
-            var user_wide: [512]u16 = [_]u16{0} ** 512;
-            var app_wide: [512]u16 = [_]u16{0} ** 512;
-            const user_len: usize = @intCast(win.GetDlgItemTextW(hwnd, id_slack_user_edit, &user_wide, user_wide.len));
-            const app_len: usize = @intCast(win.GetDlgItemTextW(hwnd, id_slack_app_edit, &app_wide, app_wide.len));
-            const user = std.unicode.utf16LeToUtf8Alloc(a.allocator, user_wide[0..user_len]) catch return 0;
-            defer a.allocator.free(user);
-            const app = std.unicode.utf16LeToUtf8Alloc(a.allocator, app_wide[0..app_len]) catch return 0;
-            defer a.allocator.free(app);
-            if (!slack_win.validClientId(user) or !slack_win.isAppToken(app)) {
-                setStatus(a, "Enter a Slack Client ID and an xapp- Socket Mode token");
-                return 0;
-            }
-            if (!slack_win.saveClientId(user) or !slack_win.saveSecret(lit("SlackAppToken"), app)) {
-                setStatus(a, "Could not store Slack sign-in settings");
-                return 0;
-            }
-            _ = win.DestroyWindow(hwnd);
-            startSlackSignIn(a, user);
-            return 0;
-        },
-        win.WM_CLOSE => {
-            _ = win.DestroyWindow(hwnd);
-            return 0;
-        },
-        win.WM_NCDESTROY => {
-            a.slack_setup_window = null;
-            if (a.hwnd) |main_hwnd| {
-                _ = win.EnableWindow(main_hwnd, 1);
-                _ = win.SetFocus(main_hwnd);
-            }
-            return 0;
-        },
-        else => {},
-    }
-    return win.DefWindowProcW(hwnd, message, wparam, lparam);
-}
-
-fn openSlackSetup(a: *App) void {
-    if (unifiedHub(a)) return setStatus(a, "Manage accounts on the hub");
-    if (a.slack_setup_window != null) {
-        if (a.slack_setup_window) |setup| _ = win.SetFocus(setup);
-        return;
-    }
-    if (a.hwnd) |main_hwnd| _ = win.EnableWindow(main_hwnd, 0);
-    const wnd = win.CreateWindowExW(
-        win.WS_EX_DLGMODALFRAME,
-        lit("SlackSetup"),
-        lit("Sign in to Slack"),
-        win.WS_OVERLAPPED | win.WS_CAPTION | win.WS_SYSMENU,
-        200,
-        200,
-        410,
-        215,
-        a.hwnd orelse return,
-        null,
-        a.instance,
-        null,
-    ) orelse {
-        if (a.hwnd) |main_hwnd| _ = win.EnableWindow(main_hwnd, 1);
-        return;
-    };
-    a.slack_setup_window = wnd;
-    if (theme.choice == .amoled) {
-        var dark: win.BOOL = win.TRUE;
-        _ = win.DwmSetWindowAttribute(wnd, 20, &dark, @sizeOf(win.BOOL));
-    }
-    _ = win.ShowWindow(wnd, win.SW_SHOW);
-    var msg: win.MSG = undefined;
-    while (true) {
-        const got = win.GetMessageW(&msg, null, 0, 0);
-        if (got == 0) {
-            _ = win.PostQuitMessage(@intCast(msg.wParam));
-            break;
-        }
-        if (got < 0) break;
-        if (win.IsDialogMessageW(wnd, &msg) != 0) {
-            if (a.slack_setup_window == null) break;
-            continue;
-        }
-        _ = win.TranslateMessage(&msg);
-        _ = win.DispatchMessageW(&msg);
-        if (a.slack_setup_window == null) break;
-    }
-}
-
-fn startSlackSocket(a: *App) void {
-    if (!slackConfigured(a) or a.slack_socket_thread != null) return;
-    if (a.slack_app_token.len == 0) return;
-    a.slack_stop.store(false, .release);
-    const config = slack_win.SocketConfig{
-        .user_token = "",
-        .app_token = a.slack_app_token,
-        .stop = &a.slack_stop,
-        .connected = &a.slack_connected,
-        .sink = .{
-            .hwnd = if (a.hwnd) |hwnd| hwnd else return,
-            .message_id = wm_slack_event,
-            .queue = &a.slack_event_pending,
-        },
-    };
-    a.slack_socket_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, slack_win.socketThreadMain, .{config}) catch null;
-    if (a.slack_socket_thread == null) setStatus(a, "Slack connection failed to start");
-}
-
 fn markChatRead(a: *App) void {
     if (!a.user_viewed or a.selected_chat >= a.chat_count) return;
     const chat = &a.chats[a.selected_chat];
     const was_unread = chat.unread or chat.unread_count > 0;
-    if (!unifiedHub(a) and chat.provider == .telegram) {
-        if (a.message_count > 0) {
-            const last = a.messages[a.message_count - 1];
-            const chat_id = tgSelectedChatId(a) orelse return;
-            const message_id = std.fmt.parseInt(i64, last.id.slice(), 10) catch return;
-            if (a.telegram) |client| client.markRead(chat_id, message_id);
-        }
-        chat.unread = false;
-        chat.unread_count = 0;
-        const id = std.fmt.parseInt(i64, chat.jid.slice(), 10) catch return;
-        for (a.tg_chats[0..a.tg_chat_count]) |*cached| if (cached.id == id) {
-            cached.unread_count = 0;
-        };
-        return;
-    }
     if (!unifiedHub(a) and chat.provider == .slack) {
         chat.unread = false;
         chat.unread_count = 0;
@@ -6603,58 +4962,7 @@ fn loadPendingReads(a: *App) void {
 }
 
 fn startNextMarkRead(a: *App) void {
-    if (hubConfigured(a)) {
-        startHubMarkRead(a);
-        return;
-    }
-    if (a.read_child != null or a.pending_read_count == 0) return;
-    if (a.read_backoff_until[0] > win.GetTickCount64()) {
-        const now = win.GetTickCount64();
-        var ready: ?usize = null;
-        var index: usize = 1;
-        while (index < a.pending_read_count) : (index += 1) {
-            if (a.read_backoff_until[index] <= now) {
-                ready = index;
-                break;
-            }
-        }
-        const swap_with = ready orelse return;
-        const jid = a.pending_reads[0];
-        const retries = a.read_retries[0];
-        const backoff = a.read_backoff_until[0];
-        a.pending_reads[0] = a.pending_reads[swap_with];
-        a.read_retries[0] = a.read_retries[swap_with];
-        a.read_backoff_until[0] = a.read_backoff_until[swap_with];
-        a.pending_reads[swap_with] = jid;
-        a.read_retries[swap_with] = retries;
-        a.read_backoff_until[swap_with] = backoff;
-        persistPendingReads(a);
-    }
-    if (a.send_child != null or sendReadyPending(a) or
-        a.archive_child != null or a.pending_archive_count > 0 or
-        avatarBusy(a) or mediaBusy(a)) return;
-    stopSync(a, "mark read");
-    const child = child_process.spawn(a.io, .{
-        .argv = &.{ a.wacli_path, "--json", "--lock-wait", "70s", "chats", "mark-read", "--chat", a.pending_reads[0].slice() },
-        .stdin = .ignore,
-        .stdout = .ignore,
-        .stderr = .ignore,
-        .create_no_window = true,
-    }) catch {
-        a.read_spawn_failures += 1;
-        if (a.read_spawn_failures >= 3) {
-            a.pending_read_count = 0;
-            a.read_queue_dead = true;
-            a.read_spawn_failures = 0;
-            startSync(a);
-            refreshChats(a);
-            setStatus(a, "Could not sync read state; local reads saved");
-        } else setStatus(a, "Could not start mark as read; retrying");
-        return;
-    };
-    a.read_spawn_failures = 0;
-    a.read_child = child;
-    a.read_started_ms = win.GetTickCount64();
+    if (hubConfigured(a)) startHubMarkRead(a);
 }
 
 const mark_read_hung_child_timeout_ms: u64 = 90_000;
@@ -7339,40 +5647,9 @@ fn filetimeToUnixSeconds(ft: win.FILETIME) i64 {
 }
 
 fn startMediaDownload(a: *App, chat_jid: []const u8, message_id: []const u8) bool {
-    if (hubConfigured(a)) {
-        hubTransport(a).downloadMedia(chat_jid, message_id);
-        return mediaDownloading(a, chat_jid, message_id);
-    }
-    if (a.send_child != null or a.pending_send_count > 0 or a.read_child != null or
-        a.archive_child != null or avatarBusy(a)) return false;
-    if (mediaDownloading(a, chat_jid, message_id)) return false;
-    const slot = freeMediaSlot(a) orelse return false;
-    slot.jid.set(chat_jid);
-    slot.id.set(message_id);
-    if (a.sync_child != null or a.media_burst_files == 0) {
-        a.media_burst_started_ms = win.GetTickCount64();
-        a.media_burst_files = 0;
-    }
-    stopSync(a, "media");
-    const args = [_][]const u8{ a.wacli_path, "--json", "--lock-wait", "10s", "--timeout", "60s", "media", "download", "--chat", slot.jid.slice(), "--id", slot.id.slice() };
-    const child = child_process.spawn(a.io, .{
-        .argv = &args,
-        .stdin = .ignore,
-        .stdout = .ignore,
-        .stderr = .ignore,
-        .create_no_window = true,
-    }) catch {
-        slot.jid.set("");
-        slot.id.set("");
-        noteMediaFailure(a, chat_jid, message_id);
-        setStatus(a, "Could not start attachment download");
-        if (!mediaBusy(a)) startSync(a);
-        return false;
-    };
-    slot.child = child;
-    slot.started_ms = win.GetTickCount64();
-    a.media_burst_files += 1;
-    return true;
+    if (!hubConfigured(a)) return false;
+    hubTransport(a).downloadMedia(chat_jid, message_id);
+    return mediaDownloading(a, chat_jid, message_id);
 }
 
 fn downloadMedia(a: *App, message_index: usize, automatic: bool) bool {
@@ -7692,16 +5969,10 @@ fn autoDownloadBackgroundMedia(a: *App) bool {
     return false;
 }
 
-fn ensureAvatarSession(a: *App) ?*avatar.Session {
-    if (a.avatar_session) |session| return session;
-    a.avatar_session = avatar.Session.create(a.allocator, a.io) catch null;
-    return a.avatar_session;
-}
-
 fn avatarBusy(a: *const App) bool {
     if (hubConfigured(a) and a.avatar_active_index != null) return true;
     if (a.avatar_batch_active) return true;
-    return if (a.avatar_session) |session| session.state() == .working else false;
+    return false;
 }
 
 fn avatarBatchBlocked(a: *App) bool {
@@ -7712,35 +5983,7 @@ fn avatarBatchBlocked(a: *App) bool {
 }
 
 fn checkAvatarDownload(a: *App) void {
-    if (hubConfigured(a)) {
-        if (wacliPendingGet(a, .hub_avatar) == 0) requestNextAvatar(a);
-        return;
-    }
-    const session = a.avatar_session orelse {
-        requestNextAvatar(a);
-        return;
-    };
-    const state = session.state();
-    if (state == .working) return;
-    if (state != .idle) {
-        if (a.avatar_active_index) |target| switch (target) {
-            .chat => |index| if (index < a.avatar_count) applyAvatarResult(a, &a.avatars[index], state),
-            .participant => |index| if (index < a.participant_avatar_count) applyAvatarResult(a, &a.participant_avatars[index], state),
-        };
-        a.avatar_active_index = null;
-        session.reset();
-        if (state == .failed) a.avatar_retry_after_ms = win.GetTickCount64() + sync_gate.avatar_failure_backoff_ms;
-        if (a.avatar_batch_active) {
-            const continues = sync_gate.avatarBatchContinues(a.avatar_batch_fetched, a.avatar_batch_started_ms, win.GetTickCount64(), state == .failed) and
-                !avatarBatchBlocked(a);
-            const next = if (continues) nextAvatarTarget(a) else null;
-            if (next == null or !startAvatarFetch(a, next.?)) endAvatarBatch(a);
-        } else startSync(a);
-        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
-        return;
-    }
-    if (a.avatar_batch_active) endAvatarBatch(a);
-    requestNextAvatar(a);
+    if (hubConfigured(a) and wacliPendingGet(a, .hub_avatar) == 0) requestNextAvatar(a);
 }
 
 fn avatarWanted(entry: *const AvatarEntry) bool {
@@ -7798,24 +6041,7 @@ fn endAvatarBatch(a: *App) void {
 }
 
 fn startAvatarFetch(a: *App, target: AvatarTarget) bool {
-    if (hubConfigured(a)) return startHubAvatar(a, target);
-    const entry = switch (target) {
-        .chat => |index| if (index < a.avatar_count) &a.avatars[index] else return false,
-        .participant => |index| if (index < a.participant_avatar_count) &a.participant_avatars[index] else return false,
-    };
-    entry.refresh = false;
-    const session = ensureAvatarSession(a) orelse return false;
-    const destination = std.unicode.utf16LeToUtf8Alloc(a.allocator, entry.path.slice()) catch return false;
-    defer a.allocator.free(destination);
-    if (!session.start(a.wacli_path, entry.jid.slice(), destination)) {
-        if (entry.status == .unknown) entry.status = .unavailable;
-        session.reset();
-        return false;
-    }
-    if (entry.status == .unknown) entry.status = .loading;
-    a.avatar_active_index = target;
-    a.avatar_batch_fetched += 1;
-    return true;
+    return hubConfigured(a) and startHubAvatar(a, target);
 }
 
 fn applyAvatarResult(a: *App, entry: *AvatarEntry, state: avatar.State) void {
@@ -9438,7 +7664,6 @@ fn refreshMessages(a: *App) void {
     if (!unifiedHub(a) and chat.provider != .whatsapp) {
         a.messages_read_key = .{};
         a.messages_refresh_again = false;
-        if (chat.provider == .telegram) return refreshTelegramMessages(a);
         return refreshSlackHistory(a);
     }
     if (chat_key.Key.eql(a.messages_read_key.key(), chat_key.of(chat)) and wacliPendingGet(a, .messages) > 0) {
@@ -9798,70 +8023,7 @@ fn syncStderrMain(a: *App, stderr: std.Io.File) void {
 }
 
 fn startSync(a: *App) void {
-    if (hubConfigured(a)) {
-        startHubEvents(a);
-        return;
-    }
-    if (verification_fixture) return;
-    if (a.sync_logged_out or a.pairing_process != null) return;
-    if (a.accounts_maintenance) {
-        if (!whatsappStorePresent(a)) return;
-        a.accounts_maintenance = false;
-        a.cache_tag.set("");
-        enqueueCacheTagProbe(a);
-        a.last_sync_refresh_ms = null;
-    }
-    if (a.sync_child != null or a.read_child != null or readsPendingBlockingSync(a) or
-        mediaBusy(a) or (a.send_child != null and a.send_direct) or
-        a.archive_child != null or a.pending_archive_count > 0 or avatarBusy(a) or
-        wacliPendingGet(a, .reaction) > 0) return;
-    const now_ms = win.GetTickCount64();
-    const refresh = sync_gate.gapElapsed(a.last_sync_refresh_ms, now_ms, sync_gate.sync_refresh_gap_ms);
-    const base_argv = [_][]const u8{ a.wacli_path, "--events", "sync", "--follow", "--max-reconnect", "0", "--stale-threshold", "1m", "--download-media" };
-    const refresh_argv = base_argv ++ [_][]const u8{ "--refresh-contacts", "--refresh-groups" };
-    const child = child_process.spawn(a.io, .{
-        .argv = if (refresh) &refresh_argv else &base_argv,
-        .stdin = .ignore,
-        .stdout = .ignore,
-        .stderr = .pipe,
-        .create_no_window = true,
-    }) catch {
-        setStatus(a, "Could not start live sync");
-        return;
-    };
-    if (a.sync_job == null) {
-        a.sync_job = win.CreateJobObjectW(null, null);
-        if (a.sync_job) |job| {
-            var info = std.mem.zeroes(win.JOBOBJECT_EXTENDED_LIMIT_INFORMATION);
-            info.BasicLimitInformation.LimitFlags = win.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            _ = win.SetInformationJobObject(job, win.JobObjectExtendedLimitInformation, &info, @sizeOf(win.JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
-        }
-    }
-    if (a.sync_job) |job| {
-        if (child.id) |handle| _ = win.AssignProcessToJobObject(job, handle);
-    }
-    a.sync_child = child;
-    if (a.media_burst_files > 0) a.media_resume_after_ms = now_ms + sync_gate.media_stop_gap_ms;
-    a.media_burst_files = 0;
-    const sync_stderr = a.sync_child.?.stderr;
-    a.sync_child.?.stderr = null;
-    if (sync_stderr) |file| {
-        if (std.Thread.spawn(.{ .stack_size = 256 * 1024 }, syncStderrMain, .{ a, file })) |thread| {
-            thread.detach();
-        } else |_| {
-            file.close(a.io);
-        }
-    }
-    if (refresh) {
-        a.last_sync_refresh_ms = now_ms;
-        refreshContactsIndex(a);
-    }
-    appendLaunchLog(a, if (refresh) "sync: child started (refresh groups)" else "sync: child started");
-    a.sync_started_secs = nowUnixSeconds();
-    a.sync_heartbeat_ticks = 0;
-    a.sync_heartbeat_mtime = 0;
-    a.sync_heartbeat_unreadable = false;
-    setStatus(a, "Live sync running");
+    if (hubConfigured(a)) startHubEvents(a);
 }
 
 fn stopSync(a: *App, reason: []const u8) void {
@@ -10373,34 +8535,6 @@ fn startNextSend(a: *App) void {
         startHubSend(a, pending);
         return;
     }
-    var args: [send_args.max_args][]const u8 = undefined;
-    const count = send_args.buildSend(&args, .{
-        .wacli = a.wacli_path,
-        .jid = pending.jid.slice(),
-        .text = pending.text.slice(),
-        .file = pending.file.slice(),
-        .ptt = pending.ptt,
-        .reply_to = pending.reply_to.slice(),
-        .reply_sender = pending.reply_sender.slice(),
-    });
-    const child = child_process.spawn(a.io, .{
-        .argv = args[0..count],
-        .stdin = .ignore,
-        .stdout = .pipe,
-        .stderr = .pipe,
-        .create_no_window = true,
-    }) catch {
-        failHeadPendingSend(a, 1, false, "spawn failed", false);
-        return;
-    };
-    a.send_child = child;
-    a.send_direct = a.sync_child == null;
-    a.send_started_ms = win.GetTickCount64();
-    var start_buffer: [120]u8 = undefined;
-    if (std.fmt.bufPrint(&start_buffer, "send: start kind={s} waited_in_queue={d}s lock_wait={s}", .{ sendKindName(pending), nowUnixSeconds() - pending.queued_unix, send_args.lock_wait })) |start_line| appendLaunchLog(a, start_line) else |_| {}
-    var status_buffer: [80]u8 = undefined;
-    const status = std.fmt.bufPrint(&status_buffer, "Sending queued message, {d} remaining", .{a.pending_send_count}) catch "Sending queued message...";
-    setStatus(a, status);
 }
 
 fn checkSend(a: *App) void {
@@ -10706,10 +8840,6 @@ fn stageImageFromClipboard(a: *App) bool {
         for ([_][]const u8{ "png", "jpg", "jpeg" }) |ext| {
             if (file_extension.len == ext.len + 1 and std.ascii.eqlIgnoreCase(file_extension[1..], ext)) extension = ext;
         }
-        if (selectedChatIsTelegram(a)) {
-            _ = stageFile(a, name_len);
-            return true;
-        }
         if (extension.len == 0) {
             setStatus(a, "Only PNG and JPEG files can be pasted as images");
             return true;
@@ -10835,7 +8965,6 @@ fn stageFile(a: *App, path: []const u8) bool {
 fn stageAttachmentFile(a: *App, path: [*:0]const u16) bool {
     const utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, std.mem.span(path)) catch return false;
     defer a.allocator.free(utf8);
-    if (selectedChatIsTelegram(a) and !unifiedHub(a)) return stageFile(a, utf8);
     var buffer: [520]u8 = undefined;
     const extension = std.fs.path.extension(utf8);
     const length = stageNewPath(a, &buffer, if (extension.len > 1) extension[1..] else "bin") orelse return false;
@@ -11104,34 +9233,6 @@ fn sendMessageFrom(a: *App, thread: bool) void {
         return;
     }
 
-    if (selectedChatIsTelegram(a)) {
-        const chat_id = tgSelectedChatId(a) orelse return;
-        const client = a.telegram orelse return;
-        const telegram_reply_to = std.fmt.parseInt(i64, reply_to, 10) catch 0;
-        if (!thread and a.staged_images.count > 0) {
-            const plan = a.staged_images.sendPlan(text, .single_file);
-            for (plan.items[0..plan.count]) |send| {
-                if (!client.sendFile(chat_id, a.staged_images.items[0].path.slice(), send.text, telegram_reply_to)) {
-                    layout(a, a.compose_client_width, a.compose_client_height);
-                    setStatus(a, "Telegram refused the message");
-                    return;
-                }
-                removeStagedImage(a, 0, false);
-                _ = win.SetWindowTextW(compose, lit(""));
-                if (!thread) saveComposerDraft(a);
-            }
-        } else if (!client.sendTextReply(chat_id, text, telegram_reply_to)) {
-            setStatus(a, "Telegram refused the message");
-            return;
-        }
-        if (!thread) clearReply(a);
-        _ = win.SetWindowTextW(compose, lit(""));
-        if (!thread) saveComposerDraft(a);
-        layout(a, a.compose_client_width, a.compose_client_height);
-        focusCompose(a);
-        setStatus(a, "Sending...");
-        return;
-    }
     if (selectedChatIsSlack(a)) {
         if (a.slack_outbox_count >= max_slack_outbox and !evictOldestFailedSlackOutbox(a)) {
             setStatus(a, "Send queue is full");
@@ -12038,21 +10139,7 @@ fn reactToMessageWithChip(a: *App, jid: []const u8, msg_id: []const u8, emoji: [
 }
 
 fn enqueueReactionJob(a: *App, entry: *PendingReaction) void {
-    var args: [send_args.max_args][]const u8 = undefined;
-    const count = send_args.buildReact(&args, a.wacli_path, entry.jid.slice(), entry.msg_id.slice(), entry.emoji.slice(), entry.sender.slice());
-    var job = WacliJob{ .provider = entry.provider, .account = entry.account, .kind = .reaction };
-    job.jid.set(entry.jid.slice());
-    job.msg_id.set(entry.msg_id.slice());
-    job.extra.set(entry.emoji.slice());
-    if (hubConfigured(a)) {
-        enqueueHubReaction(a, entry);
-        return;
-    }
-    wacliJobArgs(&job, args[0..count]);
-    if (!wacliEnqueue(a, job, true)) {
-        if (entry.retry_at_ms == 0) entry.retry_at_ms = win.GetTickCount64() + 3_000;
-        setStatus(a, "Reaction queue is full; retrying");
-    }
+    if (hubConfigured(a)) enqueueHubReaction(a, entry);
 }
 
 fn applyReaction(a: *App, result: *WacliResult) void {
@@ -12996,31 +11083,7 @@ fn removeFirstPendingArchive(a: *App) void {
 }
 
 fn startNextArchive(a: *App) void {
-    if (hubConfigured(a)) {
-        startHubArchive(a);
-        return;
-    }
-    if (verification_fixture) return;
-    if (a.pending_archive_count > 0 and a.archive_batch_total > 1) setStatus(a, "");
-    if (a.archive_child != null or a.read_child != null or a.pending_archive_count == 0) return;
-    if (mediaBusy(a) or a.send_child != null or sendReadyPending(a) or avatarBusy(a)) return;
-    stopSync(a, "archive");
-    const pending = &a.pending_archives[0];
-    var log_buffer: [288]u8 = undefined;
-    appendLaunchLog(a, archive_rules.logLine(&log_buffer, pending.jid.slice(), !pending.should_unarchive, pending.source));
-    const child = child_process.spawn(a.io, .{
-        .argv = &.{ a.wacli_path, "--json", "--lock-wait", "10s", "chats", if (pending.should_unarchive) "unarchive" else "archive", "--chat", pending.jid.slice() },
-        .stdin = .ignore,
-        .stdout = .ignore,
-        .stderr = .ignore,
-        .create_no_window = true,
-    }) catch {
-        removeFirstPendingArchive(a);
-        setStatus(a, "Could not start archive operation");
-        startSync(a);
-        return;
-    };
-    a.archive_child = child;
+    if (hubConfigured(a)) startHubArchive(a);
 }
 
 fn checkArchive(a: *App) void {
@@ -13085,9 +11148,6 @@ fn chatProvider(a: *App, jid: []const u8) transport.Provider {
     for (&a.slack_installations) |*installation| {
         if (slackChatById(a, installation.team_id.slice(), jid) != null) return .slack;
     }
-    if (std.fmt.parseInt(i64, jid, 10)) |id| {
-        for (a.tg_chats[0..a.tg_chat_count]) |*chat| if (chat.id == id) return .telegram;
-    } else |_| {}
     return .whatsapp;
 }
 
@@ -13354,21 +11414,7 @@ fn controlRound(a: *App, call: *ControlCall) ControlOutcome {
 }
 
 fn controlReadWhatsAppChats(a: *App, archived: bool) ?[]u8 {
-    if (hubConfigured(a)) return readHubChats(a, archived);
-    const run = child_process.run(a.allocator, a.io, .{
-        .argv = &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--limit", "250", if (archived) "--archived" else "--no-archived" },
-        .stdout_limit = .limited(8 * 1024 * 1024),
-        .stderr_limit = .limited(64 * 1024),
-        .create_no_window = true,
-    }) catch return null;
-    a.allocator.free(run.stderr);
-    const ok = switch (run.term) {
-        .exited => |code| code == 0,
-        else => false,
-    };
-    if (ok and run.stdout.len > 0) return run.stdout;
-    a.allocator.free(run.stdout);
-    return null;
+    return if (hubConfigured(a)) readHubChats(a, archived) else null;
 }
 
 fn controlOnUi(a: *App, call: *ControlCall) void {
@@ -13534,16 +11580,6 @@ fn controlChats(a: *App, call: *ControlCall) !void {
                     if (!messenger_view.archiveMatches(request.archived, false, false, false, chatArchiveState(a, chat), chat.unread)) continue;
                     if ((request.messenger != null or chatInView(a, chat_key.of(chat))) and controlMatches(a, chat, wanted)) try list.append(a.allocator, chat.*);
                 }
-            }
-        }
-        if (!unifiedHub(a) and messenger_view.includes(view, .telegram) and !request.archived and telegramReady(a) and a.tg_account.len > 0) {
-            for (a.tg_chats[0..a.tg_chat_count]) |*cached| {
-                var chat = Chat{ .name = cached.name, .unread = cached.unread_count > 0, .unread_count = cached.unread_count, .provider = .telegram, .account = a.tg_account };
-                var id_buffer: [24]u8 = undefined;
-                chat.jid.set(tgChatIdString(&id_buffer, cached.id));
-                chat.kind.set(a.allocator, cached.kind.slice());
-                chat.timestamp.set(cached.timestamp.slice());
-                if ((request.messenger != null or chatInView(a, chat_key.of(&chat))) and controlMatches(a, &chat, wanted)) try list.append(a.allocator, chat);
             }
         }
         if (unifiedHub(a) or messenger_view.includes(view, .whatsapp)) {
@@ -13938,13 +11974,6 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Refresh", "R", command_refresh);
     appendPalette(a, "Restart live sync", "S", command_sync);
     appendPalette(a, "Manage accounts", "", command_accounts);
-    if (!hubConfigured(a)) {
-        if (a.tg_auth == .ready) {
-            appendPalette(a, "Log out of Telegram", "", command_telegram_logout);
-        } else {
-            appendPalette(a, "Connect Telegram account", "", command_telegram_login);
-        }
-    }
     appendPalette(a, "Open video in external player", "", command_open_video_external);
     appendPalette(a, "Open image in Windows viewer", "", command_open_image_external);
     appendPalette(a, "Attach photo or file", "", command_slack_attach);
@@ -14095,7 +12124,6 @@ fn paletteMove(a: *App, delta: i32) void {
 fn closePalette(a: *App) void {
     a.palette_views_mode = false;
     a.accounts_confirm_remove = false;
-    a.accounts_confirm_remove_tg = false;
     if (a.palette) |palette| {
         _ = win.DestroyWindow(palette);
     }
@@ -14360,123 +12388,14 @@ fn buildAccountsItems(a: *App) void {
             appendPalette(a, "Remove WhatsApp account...", "", command_accounts_remove);
         }
     }
-    if (hubConfigured(a)) return;
-    appendPalette(a, accounts.telegramLabel(a.tg_auth), "", 0);
-    if (a.tg_auth == .ready) {
-        appendPalette(a, "Log out of Telegram", "", command_telegram_logout);
-    } else {
-        appendPalette(a, "Connect Telegram account", "", command_telegram_login);
-    }
-    if (a.telegram != null or a.tg_auth == .ready) {
-        if (a.accounts_confirm_remove_tg) {
-            appendPalette(a, "Confirm: remove the Telegram account from this PC", "", command_accounts_tg_remove_confirm);
-        } else {
-            appendPalette(a, "Remove Telegram account...", "", command_accounts_tg_remove);
-        }
-    }
 }
 
 fn removeWhatsAppAccount(a: *App) void {
-    if (hubConfigured(a)) return setStatus(a, "Manage WhatsApp accounts on the hub");
-    if (mediaBusy(a) or a.send_child != null or a.pending_send_count > 0 or
-        a.read_child != null or a.pending_read_count > 0 or
-        a.archive_child != null or a.pending_archive_count > 0 or avatarBusy(a) or
-        wacliPendingGet(a, .chats) > 0 or wacliPendingGet(a, .groups) > 0 or
-        wacliPendingGet(a, .messages) > 0 or wacliPendingGet(a, .reaction) > 0 or
-        wacliPendingGet(a, .contacts_index) > 0 or wacliPendingGet(a, .archived_scan) > 0)
-    {
-        setStatus(a, "Wait for pending tasks to finish, then remove again");
-        return;
-    }
-    if (a.wacli_dir.len == 0) {
-        setStatus(a, "Could not locate the WhatsApp data folder");
-        return;
-    }
-    stopSync(a, "remove account");
-    const dir_wide = utf8ToWide(a.allocator, a.wacli_dir.slice()) catch {
-        setStatus(a, "Could not locate the WhatsApp data folder");
-        return;
-    };
-    defer a.allocator.free(dir_wide);
-    var target_buf: [300]u8 = undefined;
-    const target = std.fmt.bufPrint(&target_buf, "{s}.old-{d}", .{ a.wacli_dir.slice(), nowUnixSeconds() }) catch {
-        setStatus(a, "Could not locate the WhatsApp data folder");
-        return;
-    };
-    const target_wide = utf8ToWide(a.allocator, target) catch {
-        setStatus(a, "Could not locate the WhatsApp data folder");
-        return;
-    };
-    defer a.allocator.free(target_wide);
-    const moved = win.MoveFileExW(dir_wide.ptr, target_wide.ptr, win.MOVEFILE_WRITE_THROUGH) != 0;
-    if (!moved) {
-        setStatus(a, "WhatsApp is still closing - try Remove again in a few seconds");
-        return;
-    }
-    a.accounts_maintenance = true;
-    deleteAccountCaches(a);
-    for (a.msg_cache[0..a.msg_cache_len]) |*entry| {
-        if (entry.data) |data| a.allocator.free(data);
-        entry.data = null;
-    }
-    a.msg_cache_len = 0;
-    a.people.deinit();
-    a.people_open_jid.set("");
-    if (a.chats_raw) |raw| a.allocator.free(raw);
-    a.chats_raw = null;
-    a.cache_tag.set("");
-    a.cache_tag_gen += 1;
-    if (a.selected_chat < a.chat_count) selectedViewKey(a).set(chat_key.of(&a.chats[a.selected_chat]));
-    a.chat_view_switched = true;
-    a.chat_count = 0;
-    a.selected_chat = 0;
-    switchComposerDraft(a);
-    a.selected_message = null;
-    a.scroll_y = 0;
-    a.max_scroll = 0;
-    a.message_count = 0;
-    a.last_refresh_unix = 0;
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
-    refreshVisibleChats(a);
-    refreshMessages(a);
-    setStatus(a, "WhatsApp signed out - its data was kept as a backup folder; pair again with Add account");
+    setStatus(a, "Manage WhatsApp accounts on the hub");
 }
 
 fn addWhatsAppAccount(a: *App) void {
-    if (hubConfigured(a)) return setStatus(a, "Manage WhatsApp linking on the hub");
-    if (a.pairing_process != null) {
-        setStatus(a, "Pairing window is already open - scan the QR code there");
-        return;
-    }
-    stopSync(a, "pairing");
-    a.sync_fail_count = 0;
-    const exe_wide = utf8ToWide(a.allocator, a.wacli_path) catch {
-        setStatus(a, "Could not open the pairing window");
-        return;
-    };
-    defer a.allocator.free(exe_wide);
-    const command_utf8 = std.fmt.allocPrint(a.allocator, "\"{s}\" auth --idle-exit 10m", .{a.wacli_path}) catch {
-        setStatus(a, "Could not open the pairing window");
-        return;
-    };
-    defer a.allocator.free(command_utf8);
-    const command_wide = utf8ToWide(a.allocator, command_utf8) catch {
-        setStatus(a, "Could not open the pairing window");
-        return;
-    };
-    defer a.allocator.free(command_wide);
-    var startup: win.STARTUPINFOW = std.mem.zeroes(win.STARTUPINFOW);
-    startup.cb = @sizeOf(win.STARTUPINFOW);
-    var process: win.PROCESS_INFORMATION = std.mem.zeroes(win.PROCESS_INFORMATION);
-    const create_new_console: win.DWORD = 0x00000010;
-    if (win.CreateProcessW(exe_wide.ptr, command_wide.ptr, null, null, win.FALSE, create_new_console, null, null, &startup, &process) != 0) {
-        _ = win.CloseHandle(process.hThread);
-        a.pairing_process = process.hProcess;
-        appendLaunchLog(a, "accounts: pairing window opened");
-        setStatus(a, "Pairing window opened - scan the QR code, then close that window to start live sync");
-    } else {
-        setStatus(a, "Could not open the pairing window");
-    }
+    setStatus(a, "Manage WhatsApp linking on the hub");
 }
 
 fn showPaletteWindow(a: *App) void {
@@ -14600,10 +12519,7 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
             if (a.palette_match_count == 0) {
                 _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
                 _ = win.SelectObject(hdc, @ptrCast(a.font.?));
-                const empty_text: [*:0]const u16 = if (a.tg_login != .none)
-                    lit("Type in the box above and press Enter")
-                else
-                    lit("No matching commands");
+                const empty_text = lit("No matching commands");
                 var empty_rect = win.RECT{ .left = 20, .top = palette_edit_zone + 4, .right = client.right - 20, .bottom = palette_edit_zone + 36 };
                 _ = text_draw.drawText(hdc, empty_text, -1, &empty_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
             }
@@ -14659,7 +12575,6 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
             a.palette_views_mode = false;
             a.palette_edit = null;
             a.palette_list = null;
-            a.tg_login = .none;
             if (a.sb_drag == .palette) a.sb_drag = .none;
             return 0;
         },
@@ -14962,49 +12877,10 @@ fn runCommand(a: *App, command: u16) void {
         command_update_install => {
             updateCardClick(a);
         },
-        command_telegram_login => {
-            startTelegramAdd(a);
-        },
-        command_telegram_logout => {
-            if (a.telegram) |client| client.logOut();
-            setStatus(a, "Logging out of Telegram...");
-        },
-        command_slack_connect => {
-            if (slack_win.loadClientId(a.allocator)) |client| {
-                defer a.allocator.free(client);
-                if (slack_win.loadSecret(a.allocator, lit("SlackAppToken"))) |stored| {
-                    defer a.allocator.free(stored.value);
-                    if (slack_win.validClientId(client) and slack_win.isAppToken(stored.value)) {
-                        startSlackSignIn(a, client);
-                        return;
-                    }
-                }
-            }
-            openSlackSetup(a);
-        },
-        command_slack_setup => {
-            if (a.slack_oauth_thread != null) return setStatus(a, "Slack sign-in is already in progress");
-            openSlackSetup(a);
-        },
-        command_slack_disconnect_workspace...command_slack_disconnect_workspace + max_slack_installations - 1 => {
-            const installation = &a.slack_installations[command - command_slack_disconnect_workspace];
-            if (!installation.active) return;
-            const account = installation.team_id;
-            if (removeSlackInstallation(account.slice())) setStatus(a, "Slack workspace disconnected") else setStatus(a, "Could not disconnect Slack workspace");
-        },
-        command_accounts_tg_remove => {
-            a.accounts_confirm_remove_tg = true;
-            openAccountsPalette(a);
-        },
-        command_accounts_tg_remove_confirm => {
-            a.accounts_confirm_remove_tg = false;
-            removeTelegramAccount(a);
-        },
-        command_slack_disconnect => {
-            if (!selectedChatIsSlack(a)) return setStatus(a, "Select a Slack workspace chat to disconnect");
-            const account = a.chats[a.selected_chat].account;
-            if (removeSlackInstallation(account.slice())) setStatus(a, "Slack workspace disconnected") else setStatus(a, "Could not disconnect Slack workspace");
-        },
+        command_telegram_login, command_telegram_logout, command_accounts_tg_remove, command_accounts_tg_remove_confirm => setStatus(a, "Manage accounts on the hub"),
+        command_slack_connect, command_slack_setup => setStatus(a, "Manage accounts on the hub"),
+        command_slack_disconnect => setStatus(a, "Select a Slack workspace chat to disconnect"),
+        command_slack_disconnect_workspace...command_slack_disconnect_workspace + max_slack_installations - 1 => setStatus(a, "Manage Slack accounts on the hub"),
         command_slack_attach => {
             if (attachUnavailableReason(a)) |reason| {
                 setStatus(a, reason);
@@ -17348,33 +15224,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     if (!applySlackUsers(a, result.account.slice(), result.data)) logSlackFailure(a, result.kind, "ParseFailed", result.http_status);
                     refreshVisibleChats(a);
                 },
-                .slack_auth => if (result.ok) {
-                    var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, result.data, .{}) catch return 0;
-                    defer parsed.deinit();
-                    const root = switch (parsed.value) {
-                        .object => |object| object,
-                        else => return 0,
-                    };
-                    const identity = slack.installationIdentity(root) orelse return 0;
-                    if (result.account.len == 0) {
-                        if (std.mem.eql(u8, result.extra.slice(), "bridge")) {
-                            if (slackInstallation(a, identity.team_id) != null or installSlackWorkspace(a, identity.team_id, identity.team_name, identity.user_id, "", "", 0, true)) bindSlackOutboxAccount(a, identity.team_id);
-                        } else if (a.slack_tokens) |tokens| {
-                            if (addSlackInstallation(identity.team_id, identity.team_name, identity.user_id, tokens.user, "", 0)) {
-                                if (a.slack_bridge == null) bindSlackOutboxAccount(a, identity.team_id);
-                                slack_win.deleteSecret(lit("SlackUserToken"));
-                                a.slack_install_mutex.lockUncancelable(a.io);
-                                a.allocator.free(tokens.user);
-                                a.allocator.free(tokens.app);
-                                a.slack_tokens = null;
-                                a.slack_install_mutex.unlock(a.io);
-                            }
-                        }
-                    }
-                    const team = getString(root, "team");
-                    var status_buffer: [96]u8 = undefined;
-                    setStatus(a, std.fmt.bufPrint(&status_buffer, "Slack connected: {s}", .{if (team.len > 0) team else "workspace"}) catch "Slack connected");
-                } else setStatus(a, "Slack tokens are not valid"),
+                .slack_auth => {},
                 .slack_history => {
                     if (!result.ok) {
                         setStatus(a, "Unable to read Slack history");
@@ -17420,53 +15270,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         std.mem.eql(u8, result.msg_id.slice(), a.slack_mark_ts.slice())) cancelSlackMark(a);
                 },
             }
-            return 0;
-        },
-        wm_slack_oauth_done => {
-            const task = a.slack_oauth_task orelse return 0;
-            if (task.socket_stopped) {
-                a.slack_socket_thread = null;
-                const token = a.allocator.dupe(u8, task.app_token) catch null;
-                if (token) |value| {
-                    a.allocator.free(a.slack_app_token);
-                    a.slack_app_token = value;
-                }
-                startSlackSocket(a);
-            }
-            if (task.response) |response| {
-                if (addSlackInstallation(response.team_id, response.team_name, response.user_id, response.access_token, response.refresh_token, if (response.expires_in == 0) 0 else nowUnixSeconds() + @as(i64, @intCast(response.expires_in)))) {
-                    task.saved.store(true, .release);
-                    setStatus(a, "Slack workspace connected");
-                } else setStatus(a, "Could not save Slack workspace; try connecting again");
-            } else {
-                var buffer: [256]u8 = undefined;
-                const detail = if (std.mem.eql(u8, task.failure, "CallbackPortBusy")) "port 53682 is busy; close the other listener and try again" else if (std.mem.eql(u8, task.failure, "CallbackTimedOut")) "browser authorization timed out after 5 minutes" else task.failure;
-                setStatus(a, std.fmt.bufPrint(&buffer, "Slack sign-in failed: {s}", .{detail}) catch "Slack sign-in failed");
-            }
-            _ = win.SetEvent(task.applied);
-            return 0;
-        },
-        wm_slack_oauth_finished => {
-            finishSlackSignIn(a);
-            return 0;
-        },
-        wm_slack_event => {
-            const event: *slack_win.Event = @ptrFromInt(@as(usize, @bitCast(lparam)));
-            _ = a.slack_event_pending.fetchSub(1, .acq_rel);
-            applySlackEvent(a, event);
-            return 0;
-        },
-        wm_slack_reload => {
-            a.slack_install_mutex.lockUncancelable(a.io);
-            if (a.slack_tokens) |tokens| {
-                a.allocator.free(tokens.user);
-                a.allocator.free(tokens.app);
-                a.slack_tokens = null;
-            }
-            a.slack_install_mutex.unlock(a.io);
-            if (!unifiedHub(a)) loadSlackTokens(a);
-            refreshSlackWorkspace(a);
-            startSlackSocket(a);
             return 0;
         },
         wm_unfurl_done => {
@@ -17548,7 +15351,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             layout(a, rc_create.right, rc_create.bottom);
             _ = win.SetTimer(hwnd, timer_refresh, 1000, null);
             _ = win.SetTimer(hwnd, timer_animation, 120, null);
-            _ = win.SetTimer(hwnd, timer_telegram, 250, null);
             _ = win.SetTimer(hwnd, timer_update_first_check, update_first_check_delay_ms, null);
             _ = win.SetTimer(hwnd, timer_update_check, update_check_interval_ms, null);
             if (verification_fixture) {
@@ -17603,10 +15405,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             if (a.sync_logged_out) setStatus(a, logged_out_status);
             startUpdateCheck(hwnd, false);
-            if (!unifiedHub(a)) loadSlackTokens(a);
             if (slackConfigured(a)) {
                 refreshSlackWorkspace(a);
-                startSlackSocket(a);
             }
             return 0;
         },
@@ -17908,7 +15708,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     refreshGroups(a);
                     a.group_refresh_ticks = 0;
                 }
-                pollSlackBridge(a);
                 const changed = storeChanged(a);
                 if (a.chats_read_retry_ticks > 0) {
                     a.chats_read_retry_ticks -= 1;
@@ -17936,8 +15735,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 _ = win.KillTimer(hwnd, timer_search);
                 refilterChats(a);
                 if (!messagesAreCurrent(a)) refreshMessages(a);
-            } else if (wparam == timer_telegram) {
-                drainTelegram(a);
             } else if (wparam == timer_animation) {
                 if (win.IsIconic(hwnd) == 0) {
                     advanceGifs(a);
@@ -18017,9 +15814,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             a.hub_cancel.stop();
             if (a.hub_thread) |thread| thread.join();
             a.hub_thread = null;
-            a.slack_oauth_stop.store(true, .release);
-            if (a.slack_oauth_task) |task| _ = win.SetEvent(task.applied);
-            finishSlackSignIn(a);
             persistDrafts(a);
             a.draft_store.deinit(a.allocator);
             a.thread_rows.deinit(a.allocator);
@@ -18057,10 +15851,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.voice_session) |session| {
                 session.destroy();
                 a.voice_session = null;
-            }
-            if (a.avatar_session) |session| {
-                session.destroy();
-                a.avatar_session = null;
             }
             if (a.transcribe_session) |session| {
                 session.destroy();
@@ -18172,7 +15962,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (alt and key == win.VK_MENU) return true;
-    if (a.tg_login_window != null) return false;
     if (a.image_viewer_window != null) return false;
     if (a.shortcut_help != null) return false;
     if (a.voice_active and !a.voice_finishing and (key == win.VK_RETURN or key == win.VK_ESCAPE) and !alt and !control) {
@@ -18806,51 +16595,6 @@ const cache_tag_timeout_ms: win.DWORD = 20000;
 const ProbeKind = enum(u2) { failed = 0, unlinked = 1, linked = 2 };
 const ProbeResult = struct { kind: ProbeKind, hash: u64 = 0, logged_out: bool = false };
 
-fn probeAccount(gpa: std.mem.Allocator, io: std.Io, wacli_path: []const u8, scratch_dir: []const u8) ProbeResult {
-    const failed = ProbeResult{ .kind = .failed };
-    const out_path = std.fs.path.join(gpa, &.{ scratch_dir, "auth-status.tmp" }) catch return failed;
-    defer gpa.free(out_path);
-    const cwd = std.Io.Dir.cwd();
-    var out_file = cwd.createFile(io, out_path, .{}) catch return failed;
-    const child = child_process.spawn(io, .{
-        .argv = &.{ wacli_path, "--json", "--read-only", "auth", "status" },
-        .stdin = .ignore,
-        .stdout = .{ .file = out_file },
-        .stderr = .ignore,
-        .create_no_window = true,
-    }) catch {
-        out_file.close(io);
-        return failed;
-    };
-    out_file.close(io);
-    const handle = child.id orelse return failed;
-    defer _ = win.CloseHandle(handle);
-    if (win.WaitForSingleObject(handle, cache_tag_timeout_ms) != win.WAIT_OBJECT_0) {
-        _ = win.TerminateProcess(handle, 1);
-        return failed;
-    }
-    var code: win.DWORD = 0;
-    if (win.GetExitCodeProcess(handle, &code) == 0 or code != 0) return failed;
-    const data = readFileWin(gpa, out_path, 64 * 1024) orelse return failed;
-    defer gpa.free(data);
-    deleteFileUtf8(out_path);
-    var parsed = std.json.parseFromSlice(std.json.Value, gpa, data, .{}) catch return failed;
-    defer parsed.deinit();
-    const logged_out = auth_status.unauthenticated(parsed.value) == true;
-    const jid = auth_status.linkedJid(parsed.value) orelse return .{ .kind = .unlinked, .logged_out = logged_out };
-    if (jid.len == 0) return .{ .kind = .unlinked, .logged_out = logged_out };
-    return .{ .kind = .linked, .hash = std.hash.Wyhash.hash(0, jid), .logged_out = logged_out };
-}
-
-const ProbeThread = struct { io: std.Io, hwnd: win.HWND, wacli_path: []const u8, scratch_dir: []const u8 };
-
-fn startupProbeMain(ctx: *ProbeThread) void {
-    defer std.heap.page_allocator.destroy(ctx);
-    const result = probeAccount(std.heap.page_allocator, ctx.io, ctx.wacli_path, ctx.scratch_dir);
-    const code: usize = @as(usize, @intFromEnum(result.kind)) | (if (result.logged_out) @as(usize, 4) else 0);
-    _ = win.PostMessageW(ctx.hwnd, wm_startup_probe, code, @bitCast(result.hash));
-}
-
 const account_tag_file = "account-tag.txt";
 
 fn isHexTag(text: []const u8) bool {
@@ -19154,10 +16898,6 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, argument, "--update-relaunch")) update_relaunch = true;
         if (std.mem.eql(u8, argument, "--verify-fixture")) verification_fixture = true;
         if (std.mem.eql(u8, argument, "--verify-text-comparison")) verification_text_comparison = true;
-        if (std.mem.eql(u8, argument, "--tdlib-smoke")) {
-            if (!tg.enabled) std.process.exit(2);
-            std.process.exit(tdlibSmoke(init.io));
-        }
         if (std.mem.eql(u8, argument, "--unfurl-smoke")) {
             std.process.exit(unfurlSmoke(init));
         }
@@ -19227,7 +16967,6 @@ pub fn main(init: std.process.Init) !void {
     app.pending_archives = try app.allocator.alloc(PendingArchive, max_pending_archives);
     defer app.allocator.free(app.pending_archives);
     defer app.bulk.deinit(app.allocator);
-    defer app.allocator.free(app.tg_chats);
     defer {
         persistDrafts(app);
         app.draft_store.deinit(app.allocator);
@@ -19306,41 +17045,6 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     loadEmojiRecents(app);
-    if (!verification_fixture and !hubConfigured(app)) if (init.environ_map.get("LOCALAPPDATA")) |local| {
-        if (std.fs.path.join(init.gpa, &.{ local, "Messages", "telegram" })) |telegram_dir| {
-            const stored_hash = slack_win.loadSecret(init.gpa, lit("TelegramApiHash"));
-            defer if (stored_hash) |stored| init.gpa.free(stored.value);
-            if (stored_hash) |stored| {
-                switch (stored.outcome) {
-                    .encrypted => appendLaunchLog(app, "startup: telegram key loaded (encrypted)"),
-                    .migrated => {
-                        appendLaunchLog(app, "startup: telegram key migrated to encrypted storage");
-                        appendLaunchLog(app, "startup: telegram key loaded (encrypted)");
-                    },
-                    .migration_failed => appendLaunchLog(app, "startup: telegram key left plain, encryption failed"),
-                }
-            }
-            if (loadRegistryString(init.gpa, lit("TelegramApiId"))) |stored| {
-                defer init.gpa.free(stored);
-                if (std.fmt.parseInt(i32, stored, 10)) |parsed| {
-                    if (parsed != 0) {
-                        app.tg_api_id = parsed;
-                        if (stored_hash) |hash| {
-                            if (hash.value.len > 0) app.tg_api_hash.set(hash.value);
-                        }
-                    }
-                } else |_| {}
-            }
-            if (app.tg_api_id == 0) app.tg_api_id = build_info.telegram_api_id;
-            if (app.tg_api_hash.len == 0) app.tg_api_hash.set(build_info.telegram_api_hash);
-            app.tg_data_dir.set(telegram_dir);
-            if (app.tg_api_id != 0 and app.tg_api_hash.len > 0) {
-                if (tg.Client.create(init.gpa, init.io, app.tg_api_id, app.tg_api_hash.slice(), telegram_dir)) |client| {
-                    app.telegram = client;
-                }
-            }
-        } else |_| {}
-    };
     app.played_path = findPlayedPath(init, init.gpa);
     loadPlayed(app);
     loadArchiveState(app);
@@ -19472,20 +17176,6 @@ pub fn main(init: std.process.Init) !void {
     };
     if (win.RegisterClassExW(&shortcut_help_class) == 0) return error.RegisterShortcutHelpClassFailed;
 
-    var slack_class = std.mem.zeroes(win.WNDCLASSEXW);
-    slack_class.cbSize = @sizeOf(win.WNDCLASSEXW);
-    slack_class.lpfnWndProc = slackSetupProc;
-    slack_class.hInstance = instance;
-    slack_class.lpszClassName = lit("SlackSetup");
-    if (win.RegisterClassExW(&slack_class) == 0) return error.RegisterSlackClassFailed;
-
-    var tg_login_class = std.mem.zeroes(win.WNDCLASSEXW);
-    tg_login_class.cbSize = @sizeOf(win.WNDCLASSEXW);
-    tg_login_class.lpfnWndProc = telegramLoginProc;
-    tg_login_class.hInstance = instance;
-    tg_login_class.lpszClassName = lit("TelegramLogin");
-    if (win.RegisterClassExW(&tg_login_class) == 0) return error.RegisterTelegramLoginClassFailed;
-
     var emoji_class = win.WNDCLASSEXW{
         .cbSize = @sizeOf(win.WNDCLASSEXW),
         .style = 0,
@@ -19560,18 +17250,6 @@ pub fn main(init: std.process.Init) !void {
     _ = win.UpdateWindow(hwnd);
     focusCompose(app);
     logStartupMilestone(app, .window, "window shown");
-    if (!verification_fixture and !hubConfigured(app)) {
-        if (std.heap.page_allocator.create(ProbeThread)) |probe| {
-            probe.* = .{ .io = init.io, .hwnd = hwnd, .wacli_path = wacli_path, .scratch_dir = messages_dir };
-            if (std.Thread.spawn(.{ .stack_size = 512 * 1024 }, startupProbeMain, .{probe})) |thread| {
-                thread.detach();
-            } else |_| {
-                std.heap.page_allocator.destroy(probe);
-                app.startup_probe_pending = false;
-            }
-        } else |_| app.startup_probe_pending = false;
-    }
-
     var message: win.MSG = undefined;
     while (win.GetMessageW(&message, null, 0, 0) > 0) {
         if (message.message == win.WM_MOUSEWHEEL and app.canvas != null) {
@@ -19604,9 +17282,6 @@ pub fn main(init: std.process.Init) !void {
                     continue;
                 }
             }
-        }
-        if (app.tg_login_window) |login_wnd| {
-            if (win.IsDialogMessageW(login_wnd, &message) != 0) continue;
         }
         if (message.message == win.WM_MOUSEMOVE and app.chats_hwnd != null and message.hwnd == app.chats_hwnd.?) updateChatTooltip(app, message.lParam);
         if (handleKeyboard(app, &message)) continue;
@@ -20709,30 +18384,6 @@ test "reuseContactAvatar matches a group participant to their contact's cached j
     try std.testing.expect(reuseContactAvatar(a, "") == null);
 }
 
-test "telegram api_id parsing accepts positive numbers only" {
-    try std.testing.expectEqual(@as(?i32, 12345), parseTgApiId("12345"));
-    try std.testing.expectEqual(@as(?i32, null), parseTgApiId(""));
-    try std.testing.expectEqual(@as(?i32, null), parseTgApiId("abc"));
-    try std.testing.expectEqual(@as(?i32, null), parseTgApiId("0"));
-    try std.testing.expectEqual(@as(?i32, null), parseTgApiId("-4"));
-}
-
-test "telegram api_hash must be exactly 32 hex characters" {
-    try std.testing.expect(validTgApiHash("0123456789abcdef0123456789abcdef"));
-    try std.testing.expect(validTgApiHash("0123456789ABCDEF0123456789ABCDEF"));
-    try std.testing.expect(!validTgApiHash("0123456789abcdef"));
-    try std.testing.expect(!validTgApiHash(""));
-    try std.testing.expect(!validTgApiHash("0123456789abcdef0123456789abcdeg"));
-    try std.testing.expect(!validTgApiHash("0123456789abcdef0123456789abcdef0"));
-}
-
-test "telegram api_hash rejection text covers both validation rules" {
-    try std.testing.expect(std.mem.indexOf(u8, tg_api_hash_error, "exactly 32") != null);
-    try std.testing.expect(std.mem.indexOf(u8, tg_api_hash_error, "hexadecimal") != null);
-    try std.testing.expect(std.mem.indexOf(u8, tg_api_hash_error, "too short") == null);
-    try std.testing.expect(std.mem.indexOf(u8, tg_api_hash_error, "letters and digits") == null);
-}
-
 test "unresolvable chat entries are dropped, real chats are kept" {
     try std.testing.expect(isUnresolvableChatEntry("00C6AD6F2E64", "00C6AD6F2E64", "unknown"));
     try std.testing.expect(isUnresolvableChatEntry("", "00C6AD6F2E64", "unknown"));
@@ -21455,7 +19106,7 @@ fn configureWaHub(a: *App, init: std.process.Init) void {
         }
     } else {
         var buffer: [96]u8 = undefined;
-        appendLaunchLog(a, std.fmt.bufPrint(&buffer, "whatsapp backend: wacli ({s})", .{reason}) catch "whatsapp backend: wacli (configuration failed)");
+        appendLaunchLog(a, std.fmt.bufPrint(&buffer, "whatsapp backend: unavailable ({s})", .{reason}) catch "whatsapp backend: unavailable (configuration failed)");
     }
 }
 

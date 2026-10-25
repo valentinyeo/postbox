@@ -59,6 +59,7 @@ const App = struct {
     read_backoff_until: [max_pending_reads]u64 = [_]u64{0} ** max_pending_reads,
     read_spawn_failures: u32 = 0,
     read_started_ms: u64 = 0,
+    hub_read_requests: usize = 0,
     read_state: read_state.State = .{},
     cache_tag: Utf8Text(32) = .{},
     startup_probe_pending: bool = false,
@@ -241,13 +242,18 @@ test "unviewed or mismatched content cannot advance the selected chat watermark"
     try std.testing.expectEqual(@as(u32, 0), a.persisted);
 }
 
-test "mark-read uses wacli 0.18.1 arguments only after pausing sync" {
+fn startHubMarkRead(a: *App) void {
+    if (a.pending_read_count > 0) a.hub_read_requests += 1;
+}
+
+test "mark-read queues the hub receipt without starting a local child" {
     var a = fixture();
     defer a.read_state.deinit(a.allocator);
     markChatRead(&a);
-    try std.testing.expect(child_process.sync_stopped);
-    try std.testing.expect(child_process.correct_args);
-    try std.testing.expect(a.read_child != null);
+    try std.testing.expect(a.hub_read_requests > 0);
+    try std.testing.expect(!child_process.sync_stopped);
+    try std.testing.expect(!child_process.correct_args);
+    try std.testing.expect(a.read_child == null);
 }
 
 test "marking an already read chat leaves the list alone while a changed dot dirties only its row" {

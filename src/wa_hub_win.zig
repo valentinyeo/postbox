@@ -1,6 +1,6 @@
 const std = @import("std");
 const hub = @import("wa_hub.zig");
-const slack_win = @import("slack_win.zig");
+const slack_win = @import("winhttp.zig");
 
 pub const Client = struct {
     endpoint: hub.Endpoint,

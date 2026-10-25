@@ -2,7 +2,6 @@ const std = @import("std");
 const passage = @import("passage");
 const timer_passage_scroll = 11;
 const message_double_click = @import("message_double_click");
-const send_args = @import("send_args");
 const transport = struct {
     const Provider = enum { whatsapp, slack, telegram, signal };
 };
@@ -103,8 +102,6 @@ const WacliJob = struct {
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
-    args: [send_args.max_args]Utf8Text(256) = @splat(.{}),
-    arg_count: usize = 0,
 };
 const WacliResult = struct {
     msg_id: Utf8Text(191) = .{},
@@ -179,9 +176,12 @@ fn downloadMedia(a: *App, _: usize, _: bool) bool {
     a.downloads += 1;
     return true;
 }
-fn wacliJobArgs(job: *WacliJob, args: []const []const u8) void {
-    job.arg_count = args.len;
-    for (args, 0..) |arg, i| job.args[i].set(arg);
+fn enqueueHubReaction(a: *App, entry: *PendingReaction) void {
+    var job = WacliJob{ .provider = entry.provider, .account = entry.account };
+    job.jid = entry.jid;
+    job.msg_id = entry.msg_id;
+    job.extra = entry.emoji;
+    if (!wacliEnqueue(a, job, true)) entry.retry_at_ms = win.GetTickCount64() + 3_000;
 }
 fn wacliEnqueue(a: *App, job: WacliJob, _: bool) bool {
     if (a.queue_full) return false;
@@ -221,9 +221,6 @@ test "IGSH-463 double-click sends exactly one thumbs up to the clicked message a
     try std.testing.expectEqualStrings("test-account", a.jobs[0].account.slice());
     try std.testing.expectEqualStrings("sender@chat", a.pending_reactions[0].sender.slice());
     try std.testing.expectEqualStrings("👍", a.jobs[0].extra.slice());
-    try std.testing.expectEqualStrings("--lock-wait", a.jobs[0].args[2].slice());
-    try std.testing.expectEqualStrings("--id", a.jobs[0].args[8].slice());
-    try std.testing.expectEqualStrings("received-message", a.jobs[0].args[9].slice());
     try expectReaction(&a, "👍");
     try std.testing.expect(a.messages[0].reaction_pending);
 }

@@ -116,7 +116,7 @@ def check_integration():
         'if (chat.view_account.len > 0) key.account = chat.view_account.slice()',
         'slack_win.loadInstallation(a.allocator, account)', 'parsed.value.team_name',
         'messenger_view.providerView(chat.provider), chatViewKey(chat).account, view.key.key()',
-        'installation.team_id.slice(), installation.team_name.slice()', 'telegramReady(a)',
+        'installation.team_id.slice(), installation.team_name.slice()', 'messenger_view.Account.init(.telegram, "telegram", "")',
         'appendPalette(a, "Sort views", "", command_sort_views)', 'command_sort_views => openSortViews(a)',
         'a.palette_views_mode and control and !alt and !shift', 'moveView(a, key == win.VK_DOWN)',
         'if (!saveViewOrder(a))', 'fn buildSortViewsItems(', 'item.view_identity.account_len > 0',
@@ -139,18 +139,18 @@ def check_integration():
     assert source.count('.account = hub.sourceAccount(object, "")') == 1
     routing_function_sha256 = {
         'unifiedHubRequest': '0f3c0953dc5314dc815cfb390dd28e68e6d3e75cc295f2c5f22019056f0d4058',
-        'restoreOutbox': '97c3d2512d210e72021031071928cc33ccbf4e3038f427ba57a51fce5bcf3f98',
+        'restoreOutbox': 'a791a2544b84c0a64de293d74703552d00d357c798d01e54a7c444326a1ef30d',
         'loadOutbox': '040428fa42997f7006f87154b7713db94102b863d4536fa853496fc8c4103f0b',
         'bindOutboxAccount': 'c18bfcb6097cec448f946232c1cc8a5a1d92055cfc533e855132e64ea2412b6b',
         'startHubSend': '6e4246a0416884bd87273a0e16e9a3ea09f5624ee705592b24dcd2c260074f61',
-        'markChatRead': '5676c98f78dfe3942babf4b8c1f510f3cacd32a975ffb85403bf1ba58d9b3545',
-        'startNextMarkRead': '159224436c04c9369adec4daee7cd3379ceee2554330e8db74b7816423651de1',
+        'markChatRead': 'bea4f8318176998d0b2243a47adf9825f1642f41f0c57f736ed12a9c8047a89e',
+        'startNextMarkRead': '76147cd4d68b60014d2e35c73a6ab0e3aeba34012db7656bdb123b0a5b1cad88',
         'loadPendingReads': 'f24e69e81447328bbb7a6349acade9df6a256cd8374df178570f39bcaef30799',
         'persistPendingReads': '695d922f67253237c5b26207d3f37f19d7274a5a99a33e7e91c612e4f230351e',
         'msgCacheGet': '35de7a11c5298f2b4f7954cda6b73e8b4bb9d54a82e4053b32cc8f4745ac593e',
         'loadMsgCacheDisk': 'd86c62bd4d9c3a242afcd9aeaa3b757af3e09c54fe288a2e73e19dbf31654a19',
         'archiveChat': '1532809c4d435b2b4e1c5e633e193c5dc821bb39562e0bf8a4b98ba372ce2f3f',
-        'startNextArchive': 'c346ccb3d69e3fb5a16f6216f91f8e2390aac40164187b77be632a329df1f67d',
+        'startNextArchive': '989940f8cfbc2655363b514f3a7c205f1ff581c2e3a8f1b0eafe791741dc416b',
     }
     for name, expected in routing_function_sha256.items():
         current = re.search(rf'^fn {name}\([^\n]*\n.*?^}}', source, re.M | re.S)

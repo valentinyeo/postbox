@@ -105,54 +105,30 @@ jobs:
           path: zig-out/bin/
 
   tdlib-cache:
-    uses: ./.github/workflows/tdlib-cache.yml
+    name: tdlib-cache / cache
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject retired desktop dependencies
+        run: python3 tools/check_hub_only.py
 
   tdlib:
     needs: tdlib-cache
     name: tdlib
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-
-      - name: Install toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y g++-mingw-w64-x86-64 gperf php-cli cmake ninja-build
-
-      - name: TDLib revision
-        id: tdlib
-        run: echo "commit=$(cat tools/TDLIB_COMMIT)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore TDLib
-        id: tdcache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: /tmp/tdlib-install
-          key: tdlib-${{ steps.tdlib.outputs.commit }}-${{ hashFiles('tools/build-tdlib.sh') }}
-
-      - name: Build TDLib
-        if: steps.tdcache.outputs.cache-hit != 'true'
-        run: bash tools/build-tdlib.sh
-
-      - name: Build with Telegram (placeholder credentials)
-        run: |
-          zig build -Dtarget=x86_64-windows-gnu --release=small \
-            -Dtdlib=/tmp/tdlib-install \
-            -Dtelegram-api-id=1 \
-            -Dtelegram-api-hash=smoke-placeholder
-
-      - name: Verify x64 TDLib
-        run: python3 -c 'from pathlib import Path; assert b"setTdlibParameters" in Path("zig-out/bin/Messages.exe").read_bytes(), "x64 build is missing TDLib"'
-
+      - name: Build hub-only desktop
+        run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526
+      - name: Verify hub-only binary
+        run: python3 tools/check_hub_only.py --binary zig-out/bin/Messages.exe
       - name: Exe size report
-        run: |
-          du -h zig-out/bin/Messages.exe
-
+        run: du -h zig-out/bin/Messages.exe
       - name: Upload Telegram build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -165,17 +141,30 @@ jobs:
     needs: tdlib
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - name: Download build
         uses: actions/download-artifact@v4
         with:
           name: Messages-windows-x86_64-telegram
           path: bin/
 
-      - name: Run TDLib smoke
+      - name: Run hub smoke
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath "bin\Messages.exe" -ArgumentList "--tdlib-smoke" -Wait -PassThru
-          exit $p.ExitCode
+          tools/verify-wazig/run.ps1 -Feature telegram -Bin bin -Evidence verification-evidence
+      - name: Validate hub smoke evidence
+        shell: pwsh
+        run: python tools/verify-wazig/check-evidence.py verification-evidence
+      - name: Cleanup hub smoke
+        if: always()
+        shell: pwsh
+        run: tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
+      - name: Upload hub smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-hub-smoke
+          path: verification-evidence/
 
   unfurl-verification:
     name: unfurl-verification

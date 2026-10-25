@@ -8,8 +8,6 @@ const App = struct {
     brush_raised: ?usize = null,
     brush_muted: ?usize = null,
     status: []const u8 = "",
-    slack_setup_window: ?usize = null,
-    tg_login_window: ?usize = null,
 };
 
 const win = struct {
@@ -37,7 +35,7 @@ const win = struct {
     var fail_at: ?usize = null;
     var redraws: usize = 0;
     var saves: usize = 0;
-    var dialog_dark: [2]?BOOL = @splat(null);
+    const top_level_windows = [_]HWND{ 11, 23, 37, 41 };
 
     var menu_library_available = true;
     var mode_export_available = true;
@@ -71,12 +69,6 @@ const win = struct {
 
     fn FlushMenuThemes() callconv(.winapi) void {
         menu_flushes += 1;
-    }
-
-    fn DwmSetWindowAttribute(hwnd: HWND, attribute: DWORD, value: *BOOL, size: usize) i32 {
-        std.debug.assert(attribute == 20 and size == @sizeOf(BOOL));
-        dialog_dark[hwnd - 1] = value.*;
-        return 0;
     }
 
     fn RegGetValueW(key: HKEY, path: [*:0]const u16, name: [*:0]const u16, flags: u32, _: ?*anyopaque, out: *u32, size: *u32) i32 {
@@ -122,7 +114,7 @@ const win = struct {
     }
 
     fn RedrawWindow(hwnd: HWND, _: ?*anyopaque, _: ?*anyopaque, flags: u32) i32 {
-        std.debug.assert(hwnd == redraws + 1);
+        std.debug.assert(hwnd == top_level_windows[redraws]);
         std.debug.assert(flags == RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
         redraws += 1;
         return TRUE;
@@ -135,7 +127,7 @@ const win = struct {
     fn EnumThreadWindows(thread: u32, callback: *const fn (HWND, LPARAM) callconv(.winapi) BOOL, param: LPARAM) i32 {
         std.debug.assert(thread == GetCurrentThreadId());
         redraws = 0;
-        for (1..5) |hwnd| std.debug.assert(callback(hwnd, param) == TRUE);
+        for (top_level_windows) |hwnd| std.debug.assert(callback(hwnd, param) == TRUE);
         return TRUE;
     }
 };
@@ -162,7 +154,6 @@ fn reset() void {
     win.fail_at = null;
     win.redraws = 0;
     win.saves = 0;
-    win.dialog_dark = @splat(null);
     menu_theme_module = null;
     win.menu_library_available = true;
     win.mode_export_available = true;
@@ -204,18 +195,15 @@ test "live theme changes replace all brushes, save and redraw every top-level wi
     var app = App{};
     try std.testing.expect(recreateThemeBrushes(&app));
     try expectBrushes(&app, theme.green);
-    app.slack_setup_window = 1;
-    app.tg_login_window = 2;
     for ([_]theme.Choice{ .amoled, .green, .amoled }) |choice| {
-        const old = app.brush_bg.?;
+        const old = [_]usize{ app.brush_bg.?, app.brush_panel.?, app.brush_raised.?, app.brush_muted.? };
         try std.testing.expect(changeTheme(&app, choice));
         try std.testing.expectEqual(choice, theme.choice);
         try std.testing.expectEqual(menu_theme.preferredAppMode(choice), win.menu_mode);
         try std.testing.expectEqual(@intFromEnum(choice), win.stored.?);
-        try std.testing.expectEqual(@as(?u32, null), win.live[old]);
+        for (old) |brush| try std.testing.expectEqual(@as(?u32, null), win.live[brush]);
         try expectBrushes(&app, theme.current.*);
-        try std.testing.expectEqual(@as(usize, 4), win.redraws);
-        for (win.dialog_dark) |dark| try std.testing.expectEqual(@as(?win.BOOL, if (choice == .amoled) win.TRUE else 0), dark);
+        try std.testing.expectEqual(win.top_level_windows.len, win.redraws);
         try std.testing.expectEqualStrings(if (choice == .amoled) "Theme: AMOLED black" else "Theme: Green", app.status);
     }
     try std.testing.expectEqual(@as(usize, 3), win.saves);
