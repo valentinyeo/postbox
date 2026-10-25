@@ -13038,13 +13038,13 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
     }
     if (!already_queued and a.pending_archive_count >= a.pending_archives.len) return "Archive queue is full";
     if (a.archive_state) |state| {
-        if (action != .keep) {
+        if (unarchive) {
             state.remove(jid);
         } else {
             const row_stamp = if (visibleChatIndex(a, key)) |index| a.chats[index].timestamp.slice() else "";
             var stamp_buffer: [archive_rules.stamp_len]u8 = undefined;
             const stamp = archive_rules.archiveBaseline(&stamp_buffer, row_stamp, nowUnixSeconds());
-            if (!state.archive(jid, stamp, true)) return "Keep archived list is full";
+            if (!state.archive(jid, stamp, action == .keep)) return "Keep archived list is full";
         }
         saveArchiveState(a);
     } else if (action == .keep) return "Keep archived is not available";
@@ -18167,7 +18167,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     if (control and !alt and !shift and key == 'A') {
         const in_compose = a.compose != null and focus == a.compose.?;
         const compose_empty = if (in_compose) win.GetWindowTextLengthW(a.compose.?) == 0 else false;
-        if (shortcuts.ctrlASelectsChats(a.chats_hwnd != null and focus == a.chats_hwnd.?, in_compose, compose_empty)) {
+        if (shortcuts.ctrlASelectsChats(focus != null and (focus == a.chats_hwnd or focus == a.canvas or focus == a.hwnd), in_compose, compose_empty)) {
             selectAllChats(a);
             return true;
         }
@@ -21080,7 +21080,7 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
             if (a.pending_archive_count == 0 or !chat_key.Key.eql(.{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = a.pending_archives[0].jid.slice() }, chat_key.of(result))) return;
             if (result.ok) {
                 removeFirstPendingArchive(a);
-                refreshChats(a);
+                if (a.pending_archive_count > 0) startNextArchive(a) else refreshChats(a);
                 setStatus(a, "Archive operation completed");
             } else {
                 if (result.http_status == 502 and (std.mem.startsWith(u8, result.jid.slice(), "signal:") or std.mem.startsWith(u8, result.jid.slice(), "telegram:"))) {
