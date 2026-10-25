@@ -47,13 +47,15 @@ expect "failed query refuses" 1 60 FAIL
 expect "green beside a red rerun tags" 0 60 "[{\"status\":\"completed\",\"conclusion\":\"failure\"},{\"status\":\"completed\",\"conclusion\":\"success\"}]"
 
 workflow="$script_dir/../.github/workflows/auto-release.yml"
-if ! grep -q 'bash tools/ci-green.sh "${sha}"' "$workflow"; then
-    printf 'test-ci-green: FAIL auto-release.yml must prove CI-green with tools/ci-green.sh\n' >&2
+picker="$script_dir/auto-release-pick.sh"
+if ! grep -Fq 'bash tools/auto-release-pick.sh "${GITHUB_REPOSITORY}" origin/main' "$workflow" \
+    || ! grep -Fq 'bash "$script_dir/ci-green.sh" "$sha"' "$picker"; then
+    printf 'test-ci-green: FAIL auto-release picker must prove CI-green with tools/ci-green.sh\n' >&2
     exit 1
 fi
-printf 'test-ci-green: ok auto-release.yml uses ci-green.sh\n'
+printf 'test-ci-green: ok auto-release picker uses ci-green.sh\n'
 
-app_gate="$(sed -n '/- name: Release only when the app itself changed/,/- name: Prove manual runs/p' "$workflow")"
+app_gate="$(sed -n '/- name: Release only when the app itself changed/,/- name: Work out the next version/p' "$workflow")"
 if ! grep -Fq 'GH_TOKEN: ${{ github.token }}' <<< "$app_gate" \
     || ! grep -Fq 'gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate' <<< "$app_gate" \
     || ! grep -Fq 'select(.draft == false and .prerelease == false)' <<< "$app_gate" \
