@@ -162,7 +162,7 @@ def source(text=None):
         edit = (ROOT / 'src/directwrite_edit.zig').read_text()
         theme['verify_wiring'](text, edit)
         for token in ('paintPopupInput(&shapes, hwnd, a.palette_edit);', 'a.palette_edit = directwrite_edit.create(',
-                      'for ([_]?win.HWND{ a.compose }) |control|', 'win.InvalidateRect(hwnd, &dirty, win.FALSE)'):
+                      'for ([_]?win.HWND{a.compose}) |control|', 'win.InvalidateRect(hwnd, &dirty, win.FALSE)'):
             rejected(theme['verify_wiring'], text.replace(token, ''), edit)
         print(f'HARNESS MARKERS VERIFIED: {len(markers)} literal source slices and theme wiring with removal controls')
     print('SEARCH SOURCE VERIFIED: removed control and slot, shared exact filter, unchanged Ctrl+K dispatch, groups and dim ink')

@@ -45,7 +45,7 @@ def verify_wiring(main, edit):
     paint = section(main, "fn paintRoundedButton(", "fn ")
     assert "smooth.strokeRoundRect(shapes, rect, radius, radius, frame_color, 1)" in paint
     colors = main[main.index("win.WM_CTLCOLORSTATIC, win.WM_CTLCOLOREDIT, win.WM_CTLCOLORLISTBOX => {"):]
-    assert "for ([_]?win.HWND{ a.compose }) |control|" in colors
+    assert "for ([_]?win.HWND{a.compose}) |control|" in colors
     assert "win.SetBkColor(hdc, theme.current.surface_container_high)" in colors
     assert "return @bitCast(@intFromPtr(a.brush_raised.?));" in colors
     assert "a.palette_edit = directwrite_edit.create(" in main
@@ -219,7 +219,7 @@ class ThemeRuntimeTests(unittest.TestCase):
             "paintInputField(a, &shapes, hdc, a.compose.?, a.compose_pill);",
             "if (win.GetFocus() == control) theme.current.primary else theme.current.outline",
             "smooth.strokeRoundRect(shapes, rect, radius, radius, frame_color, 1)",
-            "for ([_]?win.HWND{ a.compose }) |control|",
+            "for ([_]?win.HWND{a.compose}) |control|",
             "win.SetBkColor(hdc, theme.current.surface_container_high)",
             "a.palette_edit = directwrite_edit.create(",
             "win.InvalidateRect(hwnd, &dirty, win.FALSE)",
