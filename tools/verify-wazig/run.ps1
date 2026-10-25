@@ -1,7 +1,9 @@
 param(
     [string]$Feature = 'search',
     [string]$Bin = 'zig-out/bin',
-    [string]$Evidence = 'verification-evidence'
+    [string]$Evidence = 'verification-evidence',
+    [ValidatePattern('^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')]
+    [string]$ExpectedVersion = '0.0.526'
 )
 . "$PSScriptRoot/harness.ps1"
 $registry = Get-Content (Join-Path $PSScriptRoot 'journeys.json') -Raw | ConvertFrom-Json
@@ -82,7 +84,7 @@ try {
 $session = [ordered]@{
     id = $id; pid = $app.Id; startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
     root = $root; evidence = $Evidence; exe = $exe; ctl = $ctl; username = "verify-$id"
-    sha256 = (Get-FileHash $exe).Hash; commit = $env:GITHUB_SHA; feature = $Feature
+    sha256 = (Get-FileHash $exe).Hash; commit = $env:GITHUB_SHA; feature = $Feature; expected_version = $ExpectedVersion
 }
 if ($null -ne $bridge) {
     $session['bridge_pid'] = $bridge.process.Id

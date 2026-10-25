@@ -483,7 +483,7 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.folder = Path(self.temp.name)
 
-    def fixture(self, provider):
+    def fixture(self, provider, version='0.0.526'):
         title = provider.title()
         chat = 'telegram:user:1001' if provider == 'telegram' else 'signal:fixture-contact'
         limited = 'telegram:user:1002' if provider == 'telegram' else 'signal:fixture-limited'
@@ -497,7 +497,8 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
         else:
             gates += ['captcha']
         data = {
-            'session.json': dict(feature=provider, sha256='fixture', commit='fixture'),
+            'session.json': dict(feature=provider, sha256='fixture', commit='fixture', expected_version=version),
+            'doctor.json': dict(version=version),
             'result.json': dict(feature=provider, status='passed'),
             'marks.json': dict(brand_blue_pixels=21),
             'palette.json': ['Show Telegram'],
@@ -516,12 +517,12 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
                 selected_rows = [dict(rows[0], archived=True)]
             elif name == 'unarchived-archive':
                 selected_rows = []
-            data[f'{name}.state.json'] = dict(view=provider, current_view=dict(provider=provider, account=provider, label=title, inbox=False),
+            data[f'{name}.state.json'] = dict(version=version, view=provider, current_view=dict(provider=provider, account=provider, label=title, inbox=False),
                                             chat_count=len(selected_rows), show_archived=name in ('archived', 'unarchived-archive'),
                                             pending_archives=0, pending_sends=0, theme='amoled', selected=dict(id=chat))
             data[f'{name}.chats.json'] = dict(total=len(selected_rows), chats=selected_rows)
             (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(10000))
-            (self.folder / f'{name}.uia.txt').write_text(f'MessagesZig | {title} - Wazig v0.0.526')
+            (self.folder / f'{name}.uia.txt').write_text(f'MessagesZig | {title} - Wazig v{version}')
         data['history.messages.json'] = dict(chat=dict(id=chat), messages=[dict(id=message.replace('1001', '1000'), text=f'Synthetic {title} history')])
         data['reacted.messages.json'] = dict(messages=[dict(id=message, reaction='\U0001f44d')])
         data['live.messages.json'] = dict(messages=[dict(id=message.replace('1001', '1002'), text=f'Synthetic {title} live')])
@@ -573,6 +574,25 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
             with self.subTest(provider=provider):
                 self.fixture(provider)
                 self.check()
+
+    def test_telegram_exact_pr_and_release_versions_pass(self):
+        for version in ('0.0.526', '0.9.203', '0.9.204'):
+            with self.subTest(version=version):
+                self.fixture('telegram', version)
+                self.check()
+
+    def test_telegram_wrong_title_control_or_capture_version_fails(self):
+        for defect in ('title', 'control', 'capture'):
+            with self.subTest(defect=defect):
+                self.fixture('telegram', '0.9.204')
+                if defect == 'title':
+                    (self.folder / 'linked.uia.txt').write_text('MessagesZig | Telegram - Wazig v0.0.526')
+                elif defect == 'control':
+                    self.data['doctor.json']['version'] = '0.0.526'
+                else:
+                    self.data['linked.state.json']['version'] = '0.0.526'
+                with self.assertRaises(AssertionError):
+                    self.check()
 
     def test_any_archive_post_for_target_fails(self):
         for provider in ('telegram', 'signal'):
