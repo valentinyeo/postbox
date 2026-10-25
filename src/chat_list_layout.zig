@@ -134,16 +134,19 @@ const TestMetrics = struct {
 };
 
 test "IGSH-829 six long bullets and nested lists keep every continuation under its text" {
-    const text = std.unicode.utf8ToUtf16LeStringLiteral(
-        "• alpha words fill several wrapped lines in the chat bubble at every tested width\n" ++
-            "- bravo words fill several wrapped lines in the chat bubble at every tested width\n" ++
-            "* charlie words fill several wrapped lines in the chat bubble at every tested width\n" ++
-            "1. delta words fill several wrapped lines in the chat bubble at every tested width\n" ++
-            "10. echo words fill several wrapped lines in the chat bubble at every tested width\n" ++
-            "• foxtrot words fill several wrapped lines in the chat bubble at every tested width\n" ++
-            "  • nested words fill several wrapped lines in the chat bubble at every tested width\n" ++
-            "    1. deeper words fill several wrapped lines in the chat bubble at every tested width",
-    );
+    const text = comptime blk: {
+        @setEvalBranchQuota(100000);
+        break :blk std.unicode.utf8ToUtf16LeStringLiteral(
+            "• alpha words fill several wrapped lines in the chat bubble at every tested width\n" ++
+                "- bravo words fill several wrapped lines in the chat bubble at every tested width\n" ++
+                "* charlie words fill several wrapped lines in the chat bubble at every tested width\n" ++
+                "1. delta words fill several wrapped lines in the chat bubble at every tested width\n" ++
+                "10. echo words fill several wrapped lines in the chat bubble at every tested width\n" ++
+                "• foxtrot words fill several wrapped lines in the chat bubble at every tested width\n" ++
+                "  • nested words fill several wrapped lines in the chat bubble at every tested width\n" ++
+                "    1. deeper words fill several wrapped lines in the chat bubble at every tested width",
+        );
+    };
     for ([_]i32{ 1, 2, 4 }) |unit| {
         for ([_]i32{ 24, 40, 60 }) |columns| {
             const metrics = TestMetrics{ .unit = unit };
