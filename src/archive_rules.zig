@@ -466,7 +466,7 @@ test "a full table preserves plain and kept archive entries" {
     try std.testing.expect(state.isKept("keep@g.us"));
     try std.testing.expectEqualStrings("baseline", state.baseline("plain@g.us").?);
     try std.testing.expect(!state.archive("overflow@g.us", "baseline", false));
-    const Key = struct { provider: enum { telegram }, account: []const u8, id: []const u8 };
+    const Key = struct { provider: enum { whatsapp, telegram }, account: []const u8, id: []const u8 };
     try std.testing.expect(!state.setLocalArchived(Key{ .provider = .telegram, .account = "telegram", .id = "telegram:user:overflow" }, true));
     try std.testing.expectEqualStrings("baseline", state.baseline("plain@g.us").?);
 }
