@@ -139,12 +139,14 @@ jobs:
         if: matrix.feature == 'show-archived'
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/verify-archive-light.ps1
-      - name: Validate search pill ink centering
+      - name: Verify offline palette and unconfigured backend after unified search
         if: matrix.feature == 'search'
         shell: pwsh
         run: |
-          python tools/verify-wazig/check-search-center.py verification-evidence
-          if ($LASTEXITCODE -ne 0) { throw 'Search text is not centered' }
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature palette -Bin zig-out/bin -Evidence verification-evidence/palette
+          if ($LASTEXITCODE -ne 0) { throw 'Palette journey failed' }
+          python tools/verify-wazig/check-evidence.py verification-evidence/palette
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid palette evidence' }
       - name: ISSUE-462 validate text comparison artifact
         if: matrix.feature == 'text-comparison'
         shell: pwsh

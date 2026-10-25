@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "rows": [
+    {"jid":"personal:15550000001@s.whatsapp.net","provider":"whatsapp","name":"Verification Alpha","kind":"direct","last_message_ts":"2026-10-24T12:08:00Z","archived":false,"unread":false,"unread_count":0},
+    {"jid":"business:15550000002@s.whatsapp.net","provider":"whatsapp","name":"Verification Beta","kind":"direct","last_message_ts":"2026-10-24T12:07:00Z","archived":false,"unread":false,"unread_count":0},
+    {"jid":"slack:T0SEARCH:C0000000001","provider":"slack","team_name":"Search Workspace","name":"Release planning thread","kind":"group","last_message_ts":"2026-10-24T12:06:00Z","archived":false,"unread":false,"unread_count":0},
+    {"jid":"slack:T0SEARCH:C0000000002","provider":"slack","team_name":"Search Workspace","name":"archive discussion thread","kind":"group","last_message_ts":"2026-10-24T12:05:00Z","archived":false,"unread":false,"unread_count":0},
+    {"jid":"signal:fixture-morgan","provider":"signal","name":"Contact Morgan","kind":"direct","last_message_ts":"2026-10-24T12:04:00Z","archived":false,"unread":false,"unread_count":0},
+    {"jid":"telegram:user:7001","provider":"telegram","name":"Contact Taylor","kind":"direct","last_message_ts":"2026-10-24T12:03:00Z","archived":false,"unread":false,"unread_count":0},
+    {"jid":"personal:15550000003@s.whatsapp.net","provider":"whatsapp","name":"Verification Archived Atlas","kind":"direct","last_message_ts":"2026-10-24T12:02:00Z","archived":true,"unread":false,"unread_count":0}
+  ],
+  "message":"Synthetic rendezvous agenda milestone history",
+  "queries": [
+    {"query":"Verification","category":"thread"},
+    {"query":"Alpha","category":"thread"},
+    {"query":"Beta","category":"thread"},
+    {"query":"verification alpha","category":"thread"},
+    {"query":"Release","category":"thread"},
+    {"query":"planning","category":"thread"},
+    {"query":"thread","category":"thread"},
+    {"query":"discussion","category":"thread"},
+    {"query":"Morgan","category":"contact"},
+    {"query":"Taylor","category":"contact"},
+    {"query":"Contact","category":"contact"},
+    {"query":"fixture-morgan","category":"contact"},
+    {"query":"personal","category":"account"},
+    {"query":"business","category":"account"},
+    {"query":"T0SEARCH","category":"account"},
+    {"query":"telegram:user","category":"account"},
+    {"query":"Archived Atlas","category":"archived","archived_only":true},
+    {"query":"15550000003","category":"archived","archived_only":true},
+    {"query":"rendezvous","category":"message"},
+    {"query":"agenda","category":"message"},
+    {"query":"milestone","category":"message"},
+    {"query":"archive","category":"command"},
+    {"query":"Verification Alpha","category":"empty-list","unread_only":true},
+    {"query":"NoSuchFixture","category":"no-match"}
+  ]
+}

@@ -232,10 +232,17 @@ function Save-Screen($Session, [string]$Name) {
 
 function Invoke-Doctor($Session) {
     $window = Get-Window $Session
-    $search = Get-Edit $window '1008'
     $compose = Get-Edit $window '1032'
     Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable'
-    $null = Read-Edit $search
+    $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1008')
+    $search = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+    if ($null -ne $search) {
+        $null = Read-Edit $search
+    } else {
+        Send-Keys $Session '^k'
+        $null = Read-Edit (Get-Edit (Get-PaletteWindow $Session) '1064')
+        Send-Keys $Session '{ESC}'
+    }
     if ($Session.feature -in @('whatsapp-hub', 'hub')) {
         $null = Wait-Until { (Read-Control $Session status).chat_count -eq $(if ($Session.feature -eq 'hub') { 3 } else { 2 }) } 'hub baseline'
     }

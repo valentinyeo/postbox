@@ -3,14 +3,15 @@
     {
       "name": "search",
       "pr": true,
-      "hub": null,
+      "hub": "search",
       "evidence": true,
-      "chats": null,
+      "chats": 6,
       "script": "journey-search.ps1",
       "validator": {
-        "file": "evidence-search.py"
+        "file": "check-search-evidence.py",
+        "function": "check_evidence"
       },
-      "hub_handler": null,
+      "hub_handler": {"file": "search-fixture.py", "class": "SearchHandler"},
       "maximize": true
     },
     {

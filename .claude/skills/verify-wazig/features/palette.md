@@ -4,6 +4,7 @@ Find commands without a toolbar and open the keyboard-shortcuts overlay through 
 
 ## Sub-features
 
+- `palette-search-entry`: Ctrl+F and slash type into entity search in the same palette; edit 1008 stays absent. `search-shortcuts.json` records both focus and ordered native results.
 - `palette-open`: open the command palette.
 - `palette-filter`: fuzzy-filter registered command labels and chat names.
 - `palette-activate`: Enter activates the selected item; Escape cancels.
