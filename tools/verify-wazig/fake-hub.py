@@ -292,7 +292,7 @@ class HubArchiveHandler(Handler):
                         rows.insert(0, dict(MsgID='PLAIN-REACTION', ChatJID=chat, Timestamp=plain['after'], Text='',
                                             FromMe=True, ReactionToID='PLAIN-INCOMING', SenderName='Fixture Owner',
                                             SenderJID='15550000007@s.whatsapp.net'))
-                    elif plain['after']:
+                    elif plain.get('incoming'):
                         rows.insert(0, dict(MsgID='PLAIN-NEWER', ChatJID=chat, Timestamp=plain['after'],
                                             Text='Synthetic newer direct message', FromMe=False,
                                             SenderName='Fixture Contact Two', SenderJID=chat))
@@ -330,7 +330,7 @@ class HubArchiveHandler(Handler):
                 stamp = plain_stamp(10)
                 self.state.archive_rearchive_enabled = False
                 for chat in (PLAIN_NEWER, ARCHIVE_TELEGRAM):
-                    self.state.plain_dms[chat].update(archived=False, after=stamp)
+                    self.state.plain_dms[chat].update(archived=False, after=stamp, incoming=True)
             self.respond(200, {'chats': [PLAIN_NEWER, ARCHIVE_TELEGRAM], 'archived': False, 'last_message_ts': stamp})
         elif self.path == '/fixture/rearchive-enable' and body == {}:
             self.state.archive_rearchive_enabled = True

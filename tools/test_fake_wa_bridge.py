@@ -157,7 +157,7 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
         self.assertIn(self.group, self.jids('false'))
         self.assertNotIn(self.group, self.jids('true'))
 
-    def test_plain_direct_chats_gain_a_later_reaction_or_a_later_incoming_message_when_archived(self):
+    def test_plain_direct_chats_gain_a_later_reaction_or_only_a_later_row_time_when_archived(self):
         reacted, newer = self.module.PLAIN_REACTED, self.module.PLAIN_NEWER
         self.assertNotIn(reacted, self.jids('false'))
         self.request('POST', '/fixture/plain-dms', {})
@@ -178,7 +178,8 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
         second = self.request('GET', '/v1/wazig/messages?chat=' + newer)
         self.assertFalse(second[0]['FromMe'])
         self.assertNotIn('ReactionToID', second[0])
-        self.assertGreater(second[0]['Timestamp'], '2026-10-23T00:00:00Z')
+        self.assertEqual(second[0]['Timestamp'], '2026-10-10T11:00:00Z')
+        self.assertGreater(rows[newer]['last_message_ts'], second[0]['Timestamp'])
         self.request('POST', '/v1/wazig/archive', dict(chat=newer, archived=False))
         self.assertIn(newer, self.jids('false'))
 

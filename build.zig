@@ -503,11 +503,12 @@ pub fn build(b: *std.Build) void {
     const archive_filter_source = @embedFile("src/messenger_view.zig");
     const archive_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/archive_actions_test.zig"),
+        sourceSection("fn applyUnreadProbe(", "fn setPaletteCue("),
         std.mem.replaceOwned(u8, b.allocator, sourceSection("fn refreshChats(", "fn isUnresolvableChatEntry("), "fn refreshChats(", "fn requestChats(") catch @panic("Out of memory building archive scan harness"),
         "const messenger_view = struct {\n",
         archive_filter_source[std.mem.indexOf(u8, archive_filter_source, "pub fn archiveMatches(").?..std.mem.indexOf(u8, archive_filter_source, "pub fn mergeChatData(").?],
         "};\n",
-        sourceSection("fn getBool(", "fn getInt("),
+        sourceSection("fn getString(", "fn getInt("),
         sourceSection("fn chatArchiveState(", "fn queueUnarchiveChat("),
         "fn archiveInboxRow(a: *App, row: Chat, object: std.json.ObjectMap) ?Chat { for ([_]Chat{row}) |item| { var chat = item;\n",
         sourceSection("        chat.archived =", "        a.chats[a.chat_count] = chat;"),
@@ -544,21 +545,14 @@ pub fn build(b: *std.Build) void {
         sourceSection("    if (key == 'E') {", "    if (key == 'U') {"),
         "return false; }\n",
     }) catch @panic("Out of memory building archive harness");
-    const archive_harness = b.addWriteFiles().add("archive_actions_test.zig", archive_harness_source);
+    const archive_files = b.addWriteFiles();
+    for ([_][]const u8{ "chat_key.zig", "transport.zig", "archive_rules.zig", "read_state.zig", "media_age.zig", "voice_sent.zig" }) |name| {
+        _ = archive_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
+    }
+    const archive_harness = archive_files.add("archive_actions_test.zig", archive_harness_source);
     const archive_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = archive_harness,
         .target = b.resolveTargetQuery(.{}),
-        .imports = &.{
-            .{ .name = "chat_key", .module = b.createModule(.{ .root_source_file = b.path("src/chat_key.zig"), .target = b.resolveTargetQuery(.{}) }) },
-            .{ .name = "archive_rules", .module = b.createModule(.{
-                .root_source_file = b.path("src/archive_rules.zig"),
-                .target = b.resolveTargetQuery(.{}),
-            }) },
-            .{ .name = "voice_sent", .module = b.createModule(.{
-                .root_source_file = b.path("src/voice_sent.zig"),
-                .target = b.resolveTargetQuery(.{}),
-            }) },
-        },
     }) });
     test_step.dependOn(&b.addRunArtifact(archive_tests).step);
 
@@ -576,6 +570,7 @@ pub fn build(b: *std.Build) void {
     _ = read_state_files.addCopyFile(b.path("src/chat_key.zig"), "chat_key.zig");
     _ = read_state_files.addCopyFile(b.path("src/transport.zig"), "transport.zig");
     _ = read_state_files.addCopyFile(b.path("src/read_state.zig"), "read_state.zig");
+    _ = read_state_files.addCopyFile(b.path("src/archive_rules.zig"), "archive_rules.zig");
     _ = read_state_files.addCopyFile(b.path("src/media_age.zig"), "media_age.zig");
     const read_state_harness = read_state_files.add("read_state_test.zig", read_state_source);
     const read_state_tests = b.addTest(.{ .root_module = b.createModule(.{

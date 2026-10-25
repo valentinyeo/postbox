@@ -1,4 +1,5 @@
 const std = @import("std");
+const media_age = @import("media_age.zig");
 
 pub const max_entries = 2048;
 pub const scan_limit = std.fmt.comptimePrint("{d}", .{max_entries});
@@ -48,7 +49,7 @@ pub fn progressStatus(out: []u8, should_unarchive: bool, total: usize, remaining
     }) catch null;
 }
 
-pub const Source = enum { shortcut, menu, control, send, kept };
+pub const Source = enum { shortcut, menu, control, send, kept, incoming };
 
 pub fn logLine(out: []u8, jid: []const u8, archived: bool, source: Source) []const u8 {
     return std.fmt.bufPrint(out, "archive: jid={s} archived={} source={s}", .{ jid, archived, @tagName(source) }) catch unreachable;
@@ -77,6 +78,7 @@ pub const Entry = struct {
     ts: [max_ts]u8 = undefined,
     ts_len: u8 = 0,
     keep: bool = false,
+    checked: i64 = 0,
     held: bool = false,
     held_ts: [max_ts]u8 = undefined,
     held_ts_len: u8 = 0,
@@ -168,6 +170,25 @@ pub const State = struct {
         if (entry.keep or entry.ts_len == 0 or !laterStamp(ts, entry.tsSlice())) return false;
         self.removeAt(index);
         return true;
+    }
+
+    pub fn returnsOn(self: *const State, jid: []const u8, ts: []const u8) bool {
+        const index = self.find(jid) orelse return false;
+        const entry = &self.entries[index];
+        if (entry.keep or entry.ts_len == 0) return false;
+        return laterStamp(ts, entry.tsSlice());
+    }
+
+    pub fn needsReturnProbe(self: *const State, jid: []const u8, ts: []const u8) bool {
+        if (!self.returnsOn(jid, ts)) return false;
+        const seconds = media_age.unixSeconds(ts) orelse return false;
+        return seconds > self.entries[self.find(jid).?].checked;
+    }
+
+    pub fn checkedReturnProbe(self: *State, jid: []const u8, ts: []const u8) void {
+        const index = self.find(jid) orelse return;
+        const seconds = media_age.unixSeconds(ts) orelse return;
+        self.entries[index].checked = @max(self.entries[index].checked, seconds);
     }
 
     pub fn isKept(self: *const State, jid: []const u8) bool {
@@ -389,6 +410,21 @@ pub fn Selection(comptime capacity: usize) type {
 pub fn paneNeedsSwitch(open_jid: []const u8, selected_jid: ?[]const u8) bool {
     const now = selected_jid orelse return true;
     return !std.mem.eql(u8, open_jid, now);
+}
+
+test "IGSH-833 plain WhatsApp archive probes once per newer row and returns only on a newer incoming stamp" {
+    var state = State{};
+    try std.testing.expect(state.archive("g@g.us", "2026-10-10T10:00:00Z", false));
+    try std.testing.expect(!state.needsReturnProbe("g@g.us", "2026-10-10T10:00:00Z"));
+    try std.testing.expect(state.needsReturnProbe("g@g.us", "2026-10-10T12:04:00Z"));
+    state.checkedReturnProbe("g@g.us", "2026-10-10T12:04:00Z");
+    try std.testing.expect(!state.needsReturnProbe("g@g.us", "2026-10-10T12:04:00Z"));
+    try std.testing.expect(state.needsReturnProbe("g@g.us", "2026-10-10T18:34:00Z"));
+    try std.testing.expect(state.returnsOn("g@g.us", "2026-10-10T12:04:00Z"));
+    try std.testing.expect(!state.returnsOn("g@g.us", "2026-10-10T09:00:00Z"));
+    try std.testing.expect(state.archive("k@g.us", "2026-10-10T10:00:00Z", true));
+    try std.testing.expect(!state.needsReturnProbe("k@g.us", "2026-10-10T18:34:00Z"));
+    try std.testing.expect(!state.returnsOn("k@g.us", "2026-10-10T18:34:00Z"));
 }
 
 test "legacy keep migration matches only bare WhatsApp ids and uses the hub message baseline" {

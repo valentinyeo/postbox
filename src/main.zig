@@ -2617,7 +2617,8 @@ fn persistReadState(a: *App) void {
 fn queueUnreadProbe(a: *App, chat: *const Chat) void {
     if ((!unifiedHub(a) and chat.provider != .whatsapp) or a.startup_probe_pending or wacliPendingGet(a, .unread_probe) > 0) return;
     const timestamp = media_age.unixSeconds(chat.timestamp.slice()) orelse return;
-    if (!a.read_state.needsProbe(a.cache_tag.slice(), chat.jid.slice(), timestamp, chat.provider_unread)) return;
+    const archive_probe = chat.provider == .whatsapp and if (a.archive_state) |state| state.needsReturnProbe(chat.jid.slice(), chat.timestamp.slice()) else false;
+    if (!archive_probe and !a.read_state.needsProbe(a.cache_tag.slice(), chat.jid.slice(), timestamp, chat.provider_unread)) return;
     var job = WacliJob{ .account = a.cache_tag, .kind = .unread_probe };
     job.provider = chat.provider;
     job.account = chat.account;
@@ -2632,6 +2633,7 @@ fn applyUnreadProbe(a: *App, result: *const WacliResult) void {
     if (!result.ok or !std.mem.eql(u8, result.msg_id.slice(), a.cache_tag.slice())) return;
     const timestamp = media_age.unixSeconds(result.extra.slice()) orelse return;
     if (!a.read_state.acceptProbe(a.allocator, a.cache_tag.slice(), result.jid.slice(), timestamp, result.data)) return;
+    if (result.provider == .whatsapp) applyArchiveIncoming(a, result.jid.slice(), result.extra.slice(), result.data);
     for (a.chats[0..a.chat_count], 0..) |*chat, index| {
         if (!unifiedHub(a) and chat.provider != .whatsapp) continue;
         const was_unread = chat.unread or chat.unread_count > 0;
@@ -10894,6 +10896,28 @@ fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) vo
     startNextArchive(a);
 }
 
+fn applyArchiveIncoming(a: *App, jid: []const u8, row_ts: []const u8, raw: []const u8) void {
+    const state = a.archive_state orelse return;
+    if (!state.needsReturnProbe(jid, row_ts)) return;
+    var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
+    defer parsed.deinit();
+    if (parsed.value != .object) return;
+    const data = parsed.value.object.get("data") orelse return;
+    if (data != .object) return;
+    const messages = data.object.get("messages") orelse return;
+    if (messages != .array) return;
+    state.checkedReturnProbe(jid, row_ts);
+    for (messages.array.items) |message| {
+        if (message != .object) continue;
+        const from_me = message.object.get("FromMe") orelse continue;
+        if (from_me != .bool or from_me.bool or getString(message.object, "ReactionToID").len > 0) continue;
+        if (!state.returnsOn(jid, getString(message.object, "Timestamp"))) continue;
+        queueUnarchiveChat(a, jid, .incoming);
+        break;
+    }
+    refreshChats(a);
+}
+
 fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []const u8) bool {
     const jid = key.id;
     const state = a.archive_state orelse return false;
@@ -10966,7 +10990,16 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
         const stamp = getString(object, "last_message_ts");
         if (jid.len == 0 or stamp.len == 0 or std.mem.indexOfScalar(u8, jid, '@') == null) continue;
         const kept = state.isKept(jid);
-        if (!kept) continue;
+        if (!kept) {
+            if (state.needsReturnProbe(jid, stamp)) {
+                var probe = Chat{ .provider = .whatsapp };
+                probe.account.set(a.cache_tag.slice());
+                probe.jid.set(jid);
+                probe.timestamp.set(stamp);
+                queueUnreadProbe(a, &probe);
+            }
+            continue;
+        }
         const base = state.baseline(jid) orelse {
             state.setBaseline(jid, stamp);
             changed = true;
