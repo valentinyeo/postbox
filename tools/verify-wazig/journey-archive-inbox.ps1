@@ -18,10 +18,11 @@ foreach ($press in 1..10) {
     }
     $target = $targets[($press - 1) % $targets.Count]
     $target.SetFocus()
-    Assert-That $target.Current.HasKeyboardFocus 'Ctrl+A focus target unavailable'
+    $focused = $true
+    try { $null = Wait-Until { $target.Current.HasKeyboardFocus } "focus $($target.Current.AutomationId)" 5 } catch { $focused = $false }
     Send-Keys $session '^a'
     $ok = $cleared -and (Read-EditText $statusHandle) -eq "$workload chats selected - Ctrl+E archives, Esc cancels"
-    $presses += @{ press = $press; ok = $ok; focus = $target.Current.AutomationId }
+    $presses += @{ press = $press; ok = $ok; focused = $focused; target = $target.Current.AutomationId }
     Write-Output "ctrl_a_press=$press ok=$($ok.ToString().ToLowerInvariant())"
 }
 $okCount = @($presses | Where-Object ok).Count

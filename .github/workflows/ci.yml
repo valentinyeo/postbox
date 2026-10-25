@@ -77,6 +77,7 @@ jobs:
           if [ "$status" -eq 0 ]; then echo 'Old archive resolution unexpectedly passed'; exit 1; fi
           if ! grep -qE 'hub rows without archive metadata preserve saved intent in sidebar and control after restart.*FAIL' "$RUNNER_TEMP/archive-old.log"; then
             echo 'Old archive resolution did not fail the metadata-free regression'
+            tail -40 "$RUNNER_TEMP/archive-old.log"
             exit 1
           fi
           echo 'Old archive resolution fails the metadata-free regression'
