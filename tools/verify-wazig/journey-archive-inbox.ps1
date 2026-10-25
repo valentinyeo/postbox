@@ -44,6 +44,7 @@ $clock.Stop()
 $total = $clock.ElapsedMilliseconds
 $perChat = $total / $workload
 Write-Output "bulk_archive_ms_total=$total bulk_archive_ms_per_chat=$($perChat.ToString('F3', [Globalization.CultureInfo]::InvariantCulture))"
+$writes = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -in @('/v1/wazig/archive', '/v1/wazig/archive-batch') -and $_.status -eq 200 })
 $singles = @($writes | Where-Object wire_path -eq '/v1/wazig/archive')
 $batches = @($writes | Where-Object wire_path -eq '/v1/wazig/archive-batch')
 @{ chats = $workload; remote_chats = 261; total_ms = $total; per_chat_ms = $perChat; single_requests = $singles.Count; batch_requests = $batches.Count } |

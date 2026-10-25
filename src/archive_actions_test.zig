@@ -46,12 +46,15 @@ const Chat = struct {
     } = .{},
 };
 const PendingArchive = struct {
+    batch_count: usize = 0,
     jid: Utf8Text(191) = .{},
     should_unarchive: bool = false,
     source: ArchiveSource = .shortcut,
     retry_at_ms: u64 = 0,
 };
 const WacliResult = struct {
+    gen: u64 = 0,
+    data: []const u8 = "",
     kind: enum { hub_archive, hub_media } = .hub_archive,
     provider: Provider = .whatsapp,
     account: Utf8Text(32) = .{},
@@ -105,6 +108,7 @@ const App = struct {
     log_count: usize = 0,
     spawned_jid: Utf8Text(191) = .{},
     hub_archive_requests: usize = 0,
+    hub_archive_batch_count: usize = 0,
     hub_archive_inflight: bool = false,
     refresh_key: chat_key.Stored = .{},
     refresh_stamp: Utf8Text(47) = .{},
@@ -208,6 +212,7 @@ fn startHubArchive(a: *App) void {
     if (a.pending_archive_count == 0 or a.hub_archive_inflight) return;
     a.hub_archive_inflight = true;
     a.hub_archive_requests += 1;
+    a.hub_archive_batch_count = a.pending_archives[0].batch_count;
     a.spawned_jid = a.pending_archives[0].jid;
 }
 fn refreshChats(a: *App) void {
@@ -1513,7 +1518,7 @@ test "bulk snapshot survives a list refresh to zero rows" {
     try std.testing.expect(state.find("b@g.us") != null);
 }
 
-test "hub bulk completion starts every write and refreshes chats only after the final acknowledgement" {
+test "IGSH-777 bulk hub archive dispatches one batch and refreshes after every result" {
     var state = archive_rules.State{};
     var a = fixture(&state);
     defer a.allocator.free(a.pending_archives);
@@ -1522,14 +1527,32 @@ test "hub bulk completion starts every write and refreshes chats only after the 
     selectAllChats(&a);
     archiveSelected(&a, false);
     try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
-    for (0..2) |index| {
-        const result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .ok = true, .http_status = 200 };
-        a.hub_archive_inflight = false;
-        applyHubArchiveResult(&a, &result);
-        try std.testing.expectEqual(@as(usize, if (index == 0) 0 else 1), a.chats_refreshes);
-    }
-    try std.testing.expectEqual(@as(usize, 2), a.hub_archive_requests);
+    try std.testing.expectEqual(@as(usize, 2), a.hub_archive_batch_count);
+    const result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .gen = 2, .ok = true, .http_status = 200, .data =
+        "{\"results\":[{\"chat\":\"a@g.us\",\"ok\":true},{\"chat\":\"b@g.us\",\"ok\":true}]}" };
+    a.hub_archive_inflight = false;
+    applyHubArchiveResult(&a, &result);
+    try std.testing.expectEqual(@as(usize, 1), a.chats_refreshes);
+    try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+}
+
+test "IGSH-777 failed first result preserves intent without hiding later success" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
+    a.unified_hub = true;
+    selectAllChats(&a);
+    archiveSelected(&a, false);
+    const result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .gen = 2, .ok = true, .http_status = 200, .data =
+        "{\"results\":[{\"chat\":\"a@g.us\",\"ok\":false,\"error\":\"fixture failure\"},{\"chat\":\"b@g.us\",\"ok\":true}]}" };
+    applyHubArchiveResult(&a, &result);
+    try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+    try std.testing.expectEqualStrings("a@g.us", a.pending_archives[0].jid.slice());
+    try std.testing.expect(a.pending_archives[0].retry_at_ms > win.GetTickCount64());
+    try std.testing.expect(state.isArchived(.{ .provider = .whatsapp, .account = "", .id = "a@g.us" }, false));
+    try std.testing.expect(state.isArchived(.{ .provider = .whatsapp, .account = "", .id = "b@g.us" }, false));
 }
 
 test "Ctrl A routes every non-text control and empty composer focus but preserves every text field" {
