@@ -13599,7 +13599,7 @@ fn wrapMixedSinkExtent(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int
         .text = text,
         .width = max_width,
         .line_height = line_height,
-        .lists = if (sink) |target| text.ptr == target.text.ptr() else false,
+        .lists = false,
     };
     while (list_layout.next(metrics)) |placed| {
         const chunk = text[placed.start..][0..placed.len];
