@@ -487,7 +487,7 @@ bulk = entries['archive-bulk']
 assert bulk['pr'] and bulk['provider'] and not bulk['hub']
 assert bulk['prepare'] == entries['archive']['prepare'] == 'prepare-archive.ps1'
 bulk_journey = (registry_path.parent / bulk['script']).read_text(encoding='utf-8')
-for required in ["Send-Keys $session '^a'", "Send-Keys $session '^e'", '2 chats selected',
+for required in ["Send-Keys $session '^a'", "Send-Keys $session '^e'", 'bulk_selected_count -eq 2',
                  '$state.pending_archives -eq 0', '$state.chat_count -eq 0 -and $inbox.Count -eq 0',
                  "$selection[0].GetText(-1) -ceq 'hello'", 'Save-Screen $session text-selected']:
     assert required in bulk_journey, required

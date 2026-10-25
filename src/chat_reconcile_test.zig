@@ -139,6 +139,7 @@ fn applyChats(a: *App, raw: []const u8, _: bool) bool {
 }
 fn saveChatsCache(_: *App, _: []const u8) void {}
 fn setStatus(_: *App, _: []const u8) void {}
+fn showProblem(_: *App, _: []const u8) void {}
 fn appendLaunchLog(a: *App, line: []const u8) void {
     a.log_count += 1;
     a.last_log.set(line);

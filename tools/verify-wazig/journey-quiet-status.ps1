@@ -58,19 +58,28 @@ Assert-That ([VerifyMenus]::Find($session.pid, 'MessagesPalette') -eq [IntPtr]::
 $headers = @{ Authorization = 'Bearer fixture-key-not-a-secret' }
 Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/sync-failure" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
 Invoke-PaletteCommand $session 'Refresh'
-$dialogHandle = Wait-Until { $found = [VerifyMenus]::Find($session.pid, '#32770'); if ($found -ne [IntPtr]::Zero) { $found } } 'sync failure reaches existing native problem dialog'
-$dialog = [Windows.Automation.AutomationElement]::FromHandle($dialogHandle)
-$problemLabels = @($dialog.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name })
 $expectedProblem = 'Unable to read chats from wacli'
-Assert-That ($problemLabels -ccontains $expectedProblem) 'Problem dialog lacks the actual sync-read failure'
+$problem = Wait-Until {
+    Assert-That ([VerifyMenus]::Find($session.pid, '#32770') -eq [IntPtr]::Zero) 'Sync failure opened a modal dialog'
+    $state = Read-Control $session status
+    if ($state.update_card.visible -and $state.update_card.span -gt 0 -and $state.update_card.error -ceq $expectedProblem) { $state.update_card }
+} 'sync failure reaches existing sidebar update card'
+$bounds = $list.Current.BoundingRectangle
+Assert-That ([Math]::Abs($bounds.Bottom - ($origin.Y + $problem.rect[1] - 4 * $scale)) -le 1) 'Visible card did not reclaim its list clearance'
 $requests = @(Get-Content (Join-Path $Evidence 'bridge-requests.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
 $failures = @($requests | Where-Object { $_.wire_path -like '/v1/wazig/chats*' -and $_.status -eq 503 })
 Assert-That ($failures.Count -gt 0) 'Provider never rejected a real sync read'
-@{ class = $dialog.Current.ClassName; pid = $dialog.Current.ProcessId; labels = $problemLabels; expected = $expectedProblem; failures = $failures } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'sync-problem.json')
 Save-Screen $session sync-problem
+Send-Keys $session '^k'
+$palette = Get-PaletteWindow $session
+Send-Keys $session 'version'
+$paletteList = Get-Edit $palette '1072'
+$null = Wait-Until { (Read-ListCount $paletteList) -eq 1 } 'palette remains usable during sync failure'
+Assert-That (@(Read-ListLabels $paletteList)[0] -ceq $expected) 'Sync failure blocked version discovery'
+Send-Keys $session '{ESC}'
+$retained = (Read-Control $session status).update_card
+$dialogHandle = [VerifyMenus]::Find($session.pid, '#32770')
+Assert-That ($dialogHandle -eq [IntPtr]::Zero -and $retained.visible -and $retained.error -ceq $expectedProblem) 'Problem did not persist in the existing card after palette dismissal'
+@{ surface = 'update_card'; pid = $window.Current.ProcessId; card = $problem; retained = $retained; dialog = $dialogHandle.ToInt64(); expected = $expectedProblem; failures = $failures; list_bottom = $bounds.Bottom; card_top = $origin.Y + $problem.rect[1]; gap = 4 * $scale } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'sync-problem.json')
 Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/sync-recover" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
-$null = [VerifyWindow]::SetForegroundWindow($dialogHandle)
-Send-Keys $session '{ENTER}'
-Add-Content (Join-Path $Evidence 'actions.log') 'problem: dismissed owned native dialog'
-$null = Wait-Until { [VerifyMenus]::Find($session.pid, '#32770') -eq [IntPtr]::Zero } 'problem dismissed through real keyboard input'
 Save-Screen $session after

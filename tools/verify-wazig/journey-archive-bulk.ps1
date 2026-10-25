@@ -1,10 +1,9 @@
 $compose.SetFocus()
 Assert-That ($compose.Current.HasKeyboardFocus -and (Read-Edit $compose) -eq '') 'bulk: composer did not start focused and empty'
-$statusHandle = [IntPtr](Get-Edit $window '1048').Current.NativeWindowHandle
 Save-Screen $session before
 Send-Keys $session '^a'
 $null = Wait-Until {
-    (Read-EditText $statusHandle).Contains('2 chats selected')
+    (Read-Control $session status).bulk_selected_count -eq 2
 } 'bulk: Ctrl+A in empty composer selected no chats'
 Save-Screen $session selected
 Assert-That $compose.Current.HasKeyboardFocus 'bulk: selection moved focus out of composer'
@@ -28,7 +27,7 @@ $null = Wait-Until {
     $pattern = $compose.GetCurrentPattern([Windows.Automation.TextPattern]::Pattern)
     $selection = @($pattern.GetSelection())
     $selection.Count -eq 1 -and $selection[0].GetText(-1) -ceq 'hello' -and
-        -not (Read-EditText $statusHandle).Contains('chats selected')
+        (Read-Control $session status).bulk_selected_count -eq 0
 } 'bulk: Ctrl+A with text did not keep text select-all'
 Save-Screen $session text-selected
 Send-Keys $session '{BACKSPACE}'

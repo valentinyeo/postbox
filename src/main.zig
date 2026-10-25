@@ -140,7 +140,6 @@ const id_chats = 1016;
 const id_canvas = 1024;
 const id_compose = 1032;
 const id_send = 1040;
-const id_status = 1048;
 const id_dictate = 1056;
 const id_palette_edit = 1064;
 const id_palette_list = 1072;
@@ -714,7 +713,6 @@ const App = struct {
     compose_prev_proc: usize = 0,
     btn_prev_proc: [10]usize = @splat(0),
     tooltips: ?win.HWND = null,
-    status: ?win.HWND = null,
     palette: ?win.HWND = null,
     palette_edit: ?win.HWND = null,
     palette_list: ?win.HWND = null,
@@ -1828,7 +1826,6 @@ fn recreateFonts(a: *App) void {
     setFont(a.dictate, a.font_bold);
     setFont(a.send, a.font_bold);
     setFont(a.emoji_btn, a.font_emoji);
-    setFont(a.status, a.font_small);
     setFont(a.palette_edit, a.font);
     setFont(a.palette_list, a.font);
     setFont(a.emoji_edit, a.font);
@@ -2328,7 +2325,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     defer if (query_utf8) |query| a.allocator.free(query);
 
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch {
-        setStatus(a, "Unable to read chats from wacli");
+        showProblem(a, "Unable to read chats from wacli");
         return false;
     };
     defer parsed.deinit();
@@ -8060,7 +8057,7 @@ fn markWhatsAppLoggedOut(a: *App) void {
     if (!a.sync_logged_out) appendLaunchLog(a, "sync: WhatsApp logged out, live sync halted");
     a.sync_logged_out = true;
     stopSync(a, "logged out");
-    setStatus(a, logged_out_status);
+    showProblem(a, logged_out_status);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
@@ -8083,7 +8080,7 @@ fn applyPairingProbe(a: *App, ok: bool, data: []const u8) void {
     const unauthenticated = if (ok and parsed != null) auth_status.unauthenticated(parsed.?.value) else null;
     if (unauthenticated == true) {
         a.sync_logged_out = true;
-        setStatus(a, "WhatsApp is still not linked. Press Ctrl+K, Manage accounts, Reconnect WhatsApp");
+        showProblem(a, "WhatsApp is still not linked. Press Ctrl+K, Manage accounts, Reconnect WhatsApp");
         return;
     }
     a.sync_logged_out = false;
@@ -8118,10 +8115,10 @@ fn checkSync(a: *App) void {
                 if (accounts.syncDeathAction(lived_secs, a.sync_fail_count) == .probe_login) {
                     a.sync_auth_probe = true;
                     enqueueCacheTagProbe(a);
-                    setStatus(a, "Live sync keeps stopping - checking WhatsApp login");
+                    showProblem(a, "Live sync keeps stopping - checking WhatsApp login");
                     return;
                 }
-                setStatus(a, "Live sync stopped - restarting");
+                showProblem(a, "Live sync stopped - restarting");
                 startSync(a);
             } else checkSyncHeartbeat(a);
         }
@@ -8131,23 +8128,23 @@ fn checkSync(a: *App) void {
 fn applySyncAuthProbe(a: *App, ok: bool, data: []const u8) void {
     a.sync_auth_probe = false;
     if (!ok) {
-        setStatus(a, "Live sync keeps stopping - run wacli doctor in a terminal");
+        showProblem(a, "Live sync keeps stopping - run wacli doctor in a terminal");
         return;
     }
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, data, .{}) catch {
-        setStatus(a, "Live sync keeps stopping - run wacli doctor in a terminal");
+        showProblem(a, "Live sync keeps stopping - run wacli doctor in a terminal");
         return;
     };
     defer parsed.deinit();
     const root = switch (parsed.value) {
         .object => |object| object,
         else => {
-            setStatus(a, "Live sync keeps stopping - run wacli doctor in a terminal");
+            showProblem(a, "Live sync keeps stopping - run wacli doctor in a terminal");
             return;
         },
     };
     if (root.get("data") == null and root.get("authenticated") == null) {
-        setStatus(a, "Live sync keeps stopping - run wacli doctor in a terminal");
+        showProblem(a, "Live sync keeps stopping - run wacli doctor in a terminal");
         return;
     }
     const holder = root.get("data") orelse parsed.value;
@@ -8159,24 +8156,20 @@ fn applySyncAuthProbe(a: *App, ok: bool, data: []const u8) void {
         markWhatsAppLoggedOut(a);
         return;
     }
-    setStatus(a, "Live sync keeps stopping - press Ctrl+K and pick Restart live sync");
+    showProblem(a, "Live sync keeps stopping - press Ctrl+K and pick Restart live sync");
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn setStatus(a: *App, text: []const u8) void {
-    var buffer: [64]u8 = undefined;
-    const progress = if (a.pending_archive_count > 0)
-        archive_rules.progressStatus(&buffer, a.pending_archives[0].should_unarchive, a.archive_batch_total, a.pending_archive_count)
-    else
-        null;
-    if (a.status) |status| {
-        var wide_text = WideText(255){};
-        wide_text.set(a.allocator, progress orelse text);
-        var previous: [256]u16 = undefined;
-        const length: usize = @intCast(win.GetWindowTextW(status, &previous, previous.len));
-        if (std.mem.eql(u16, previous[0..length], wide_text.slice())) return;
-        _ = win.SetWindowTextW(status, wide_text.ptr());
-    }
+    appendLaunchLog(a, text);
+}
+
+fn showProblem(a: *App, text: []const u8) void {
+    setStatus(a, text);
+    const n = @min(text.len, a.update_card_error.len);
+    @memcpy(a.update_card_error[0..n], text[0..n]);
+    a.update_card_error_len = n;
+    updateCardRefresh(a);
 }
 
 fn sendKindName(pending: *const PendingSend) []const u8 {
@@ -11509,7 +11502,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         try controlWriteView(w, view.key.key(), view.labelText());
     }
     try w.writeByte(']');
-    try w.print(",\"include_archived\":{}", .{a.include_archived});
+    try w.print(",\"include_archived\":{},\"bulk_selected_count\":{d}", .{ a.include_archived, a.bulk.items.len });
     var buffer: [1024]u8 = undefined;
     try w.print(",\"sync\":\"{s}\",\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
         sync,              a.slack_connected.load(.acquire), pending_sends,   a.pending_archive_count,
@@ -11517,6 +11510,10 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.staged_images.count });
+    const card = updateCardRect(a);
+    try w.print(",\"update_card\":{{\"visible\":{},\"span\":{d},\"rect\":[{d},{d},{d},{d}],\"error\":", .{ updateCardVisible(a), updateCardSpan(a), card.left, card.top, card.right, card.bottom });
+    try control_api.writeString(w, a.update_card_error[0..a.update_card_error_len]);
+    try w.writeByte('}');
     try w.writeAll(",\"paints\":");
     try a.paints.write(w);
     const box = a.compose_pill;
@@ -11925,6 +11922,7 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Compose message", "C", command_compose);
     if (slackThreadsAccount(a).len > 0) appendPalette(a, "Slack threads like Slack for this account", if (slackThreadsEnabled(a)) "On" else "Off", command_slack_threads);
     appendPalette(a, "Keyboard shortcuts", "F1", command_shortcuts_help);
+    appendPalette(a, "You are on v" ++ app_version ++ " - this is the newest version", "", 0);
     appendPalette(a, "Dictate", "Ctrl+D", command_dictate);
     appendPalette(a, "Dictation language: Automatic", "", command_dictation_auto);
     appendPalette(a, "Dictation language: English", "", command_dictation_english);
@@ -13025,7 +13023,7 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
     const left_width = std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 390));
     const header_height: i32 = 0;
     const search_height: i32 = px(a, 48);
-    const status_height: i32 = px(a, 26);
+    const list_bottom = if (updateCardVisible(a)) updateCardRect(a).top - px(a, 4) else height;
     var sizes = stagedComposerSizes(a, width, height);
     if (a.compose) |hwnd| {
         for (0..2) |pass| {
@@ -13048,8 +13046,7 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
         _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
         _ = win.SendMessageW(hwnd, win.EM_SETMARGINS, win.EC_LEFTMARGIN | win.EC_RIGHTMARGIN, @as(win.LPARAM, px(a, 2)) | (@as(win.LPARAM, px(a, 2)) << 16));
     }
-    if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, height - header_height - search_height - status_height - updateCardSpan(a), win.TRUE);
-    if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);
+    if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, list_bottom - header_height - search_height, win.TRUE);
     if (a.thread_parent.len > 0 and (a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) closeSlackThread(a);
     const chat_width = width - left_width - 1;
     const panel_width = if (a.thread_parent.len > 0) @divTrunc(chat_width, 2) else 0;
@@ -14319,6 +14316,12 @@ fn countPaint(hwnd: win.HWND, dirty: win.RECT, total: *u64, full: *u64) void {
 fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
     if (message == win.WM_ERASEBKGND) return 1;
+    if (message == win.WM_LBUTTONDOWN) {
+        const point = win.POINT{ .x = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))), .y = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam))))) };
+        const hit: usize = @bitCast(win.SendMessageW(hwnd, win.LB_ITEMFROMPOINT, 0, lparam));
+        var rect: win.RECT = undefined;
+        if (hiword(hit) != 0 or loword(hit) >= a.chat_count or win.SendMessageW(hwnd, win.LB_GETITEMRECT, loword(hit), @intCast(@intFromPtr(&rect))) == win.LB_ERR or win.PtInRect(&rect, point) == 0) return 0;
+    }
     if (message == win.WM_MOUSEMOVE) {
         const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
         const row_height: i32 = @max(1, @as(i32, @intCast(win.SendMessageW(hwnd, win.LB_GETITEMHEIGHT, 0, 0))));
@@ -15112,7 +15115,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 },
                 .chats => {
                     if (!result.ok and result.gen == a.chats_gen) {
-                        setStatus(a, "Unable to read chats from wacli");
+                        showProblem(a, "Unable to read chats from wacli");
                         if (a.chats_read_attempts < 3) {
                             a.chats_read_attempts += 1;
                             a.chats_read_retry_ticks = 2;
@@ -15150,7 +15153,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         }
                     }
                     if (!result.ok) {
-                        setStatus(a, "Unable to read messages from wacli");
+                        showProblem(a, "Unable to read messages from wacli");
                         var fail_buffer: [128]u8 = undefined;
                         const fail_line = std.fmt.bufPrint(&fail_buffer, "messages-read: fail, chat={s} err={s}", .{ kind, result.extra.slice() }) catch "messages-read: fail";
                         appendLaunchLog(a, fail_line);
@@ -15177,7 +15180,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                             a.msg_read_attempts = 0;
                             a.msg_read_retry_ticks = 0;
                         } else {
-                            setStatus(a, "Unable to read messages from wacli");
+                            showProblem(a, "Unable to read messages from wacli");
                             var fail_buffer: [128]u8 = undefined;
                             const fail_line = std.fmt.bufPrint(&fail_buffer, "messages-read: empty payload, chat={s}", .{kind}) catch "messages-read: empty payload";
                             appendLaunchLog(a, fail_line);
@@ -15228,7 +15231,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 .slack_workspace => if (result.ok) {
                     if (!applySlackWorkspace(a, result.account.slice(), result.data)) logSlackFailure(a, result.kind, "ParseFailed", result.http_status);
                     refreshVisibleChats(a);
-                } else if (slackConfigured(a)) setStatus(a, "Unable to read Slack channels"),
+                } else if (slackConfigured(a)) showProblem(a, "Unable to read Slack channels"),
                 .slack_users => if (result.ok) {
                     if (!applySlackUsers(a, result.account.slice(), result.data)) logSlackFailure(a, result.kind, "ParseFailed", result.http_status);
                     refreshVisibleChats(a);
@@ -15236,7 +15239,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 .slack_auth => {},
                 .slack_history => {
                     if (!result.ok) {
-                        setStatus(a, "Unable to read Slack history");
+                        showProblem(a, "Unable to read Slack history");
                     } else if (result.gen == a.messages_gen and selectedChatIsSlack(a) and
                         chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)))
                     {
@@ -15345,7 +15348,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             subclassComposerButton(a, a.dictate, 0);
             subclassComposerButton(a, a.send, 1);
             subclassComposerButton(a, a.emoji_btn, 2);
-            a.status = win.CreateWindowExW(0, lit("STATIC"), lit("Loading..."), win.WS_CHILD | win.WS_VISIBLE | win.SS_LEFT, 0, 0, 0, 0, hwnd, controlId(id_status), a.instance, null);
             createTooltips(a, hwnd);
             text_draw.reset();
             recreateFonts(a);
@@ -15381,7 +15383,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.wacli_thread == null) {
                 a.wacli_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .wacli }) catch null;
             }
-            if (a.wacli_thread == null) setStatus(a, "Background reader failed to start");
+            if (a.wacli_thread == null) showProblem(a, "Background reader failed to start");
             if (hubConfigured(a) and a.hub_media_thread == null) {
                 a.hub_media_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .hub_media }) catch null;
                 if (a.hub_media_thread == null) setStatus(a, "Media worker unavailable; restart Messages");
@@ -15410,7 +15412,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 _ = storeChanged(a);
                 startSync(a);
             }
-            if (a.sync_logged_out) setStatus(a, logged_out_status);
+            if (a.sync_logged_out) showProblem(a, logged_out_status);
             startUpdateCheck(hwnd, false);
             if (slackConfigured(a)) {
                 refreshSlackWorkspace(a);
@@ -15795,12 +15797,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 if (control != null and control_value == @intFromPtr(control.?)) {
                     _ = win.SetBkColor(hdc, theme.current.surface_container_high);
                     return @bitCast(@intFromPtr(a.brush_raised.?));
-                }
-            }
-            if (a.status) |status| {
-                if (control_value == @intFromPtr(status)) {
-                    _ = win.SetBkColor(hdc, theme.current.surface_container_low);
-                    return @bitCast(@intFromPtr(a.brush_panel.?));
                 }
             }
             return @bitCast(@intFromPtr(if (theme.choice == .amoled) a.brush_bg.? else a.brush_raised.?));
@@ -17335,8 +17331,9 @@ const update_card_restart_delay_ms: u32 = 600;
 const UpdateCardHit = enum { none, body, button, close };
 
 fn updateCardVisible(a: *const App) bool {
+    if (a.update_card_error_len > 0) return true;
     const pending = a.update_pending orelse return false;
-    if (a.update_installed or a.update_card_busy or a.update_card_error_len > 0) return true;
+    if (a.update_installed or a.update_card_busy) return true;
     const dismissed = a.update_dismissed[0..a.update_dismissed_len];
     return !std.mem.eql(u8, pending.tag[0..@min(pending.tag.len, a.update_dismissed.len)], dismissed);
 }
@@ -17457,13 +17454,14 @@ fn removeLeftoverOldExe() void {
 
 fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     if (!updateCardVisible(a)) return;
-    const pending = a.update_pending orelse return;
+    const pending_tag = if (a.update_pending) |pending| pending.tag else "";
+    const pending_notes = if (a.update_pending) |pending| pending.notes else "";
     const card = updateCardRect(a);
     paintRoundedButton(a, shapes, hdc, card, theme.current.surface_container_high, theme.current.on_surface, a.font.?, if (theme.choice == .amoled) theme.current.outline_variant else theme.current.secondary_container, &[_]u16{});
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
 
     var title_buf: [64]u8 = undefined;
-    const tag = if (pending.tag.len > 0 and pending.tag[0] == 'v') pending.tag[1..] else pending.tag;
+    const tag = if (pending_tag.len > 0 and pending_tag[0] == 'v') pending_tag[1..] else pending_tag;
     const failed = a.update_card_error_len > 0;
     const title: []const u8 = if (a.update_installed)
         "Restarting..."
@@ -17497,7 +17495,7 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     var line_rc = updateCardWinRect(card_layout.line);
     drawAscii(hdc, &line_rc, line, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX | win.DT_END_ELLIPSIS);
 
-    if (utf8ToWide(a.allocator, pending.notes)) |notes| {
+    if (utf8ToWide(a.allocator, pending_notes)) |notes| {
         defer a.allocator.free(notes);
         var notes_rc = updateCardWinRect(card_layout.notes);
         _ = text_draw.drawText(hdc, notes.ptr, @intCast(notes.len), &notes_rc, win.DT_WORDBREAK | win.DT_NOPREFIX);
@@ -18681,7 +18679,7 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
 fn applyHubAccounts(a: *App, result: *const WacliResult) void {
     a.startup_probe_pending = false;
     if (!result.ok) {
-        setStatus(a, if (unifiedHub(a)) "Message hub configuration unavailable" else "Unable to read WhatsApp hub accounts");
+        showProblem(a, if (unifiedHub(a)) "Message hub configuration unavailable" else "Unable to read WhatsApp hub accounts");
         return;
     }
     var hub_accounts = wa_hub.parseAccounts(a.allocator, result.data) catch return;
@@ -18714,7 +18712,7 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
         setStatus(a, if (unifiedHub(a)) "Message hub connected" else "WhatsApp hub connected");
         return;
     }
-    setStatus(a, "No linked WhatsApp hub account");
+    showProblem(a, "No linked WhatsApp hub account");
 }
 
 fn startHubSend(a: *App, pending: *const PendingSend) void {
