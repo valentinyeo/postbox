@@ -954,8 +954,10 @@ test "stored Slack keep unarchives across restart then shortcut archives without
         state.parse(a.saved[0..a.saved_len]);
         try std.testing.expect(state.localArchived(key));
         try std.testing.expect(!state.localKept(key));
-        try std.testing.expect(!holdKeptArchived(&a, key, true, "2026-10-10T11:00:00Z"));
-        try std.testing.expect(!loaded.isArchived(key, true));
+        try std.testing.expect(!holdKeptArchived(&a, key, false, "2026-10-10T11:00:00Z"));
+        try std.testing.expect(!loaded.localArchived(key));
+        try std.testing.expect(!loaded.isArchived(key, false));
+        try std.testing.expect(loaded.isArchived(key, true));
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     }
 }

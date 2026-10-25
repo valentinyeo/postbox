@@ -165,8 +165,8 @@ pub const State = struct {
     pub fn observeLocal(self: *State, key: anytype, ts: []const u8) bool {
         const index = self.findLocal(key) orelse return false;
         const entry = &self.entries[index];
-        if (entry.keep or entry.ts_len == 0 or std.mem.order(u8, ts, entry.tsSlice()) != .gt) return false;
-        entry.ts_len = 0;
+        if (entry.keep or entry.ts_len == 0 or !laterStamp(ts, entry.tsSlice())) return false;
+        self.removeAt(index);
         return true;
     }
 
@@ -309,7 +309,23 @@ pub fn archiveBaseline(out: *[stamp_len]u8, row_ts: []const u8, now_seconds: i64
         day_seconds.getMinutesIntoHour(),
         day_seconds.getSecondsIntoMinute(),
     }) catch return row_ts;
-    return if (std.mem.order(u8, row_ts, now) == .gt) row_ts else now;
+    return if (laterStamp(row_ts, now)) row_ts else now;
+}
+
+pub fn laterStamp(left: []const u8, right: []const u8) bool {
+    for (0..@min(left.len, right.len)) |index| {
+        const l = if (index == 10 and left[index] == ' ') 'T' else left[index];
+        const r = if (index == 10 and right[index] == ' ') 'T' else right[index];
+        if (l != r) return l > r;
+    }
+    return left.len > right.len;
+}
+
+test "laterStamp compares Slack space stamps with ISO archive stamps" {
+    try std.testing.expect(laterStamp("2026-10-25 15:00:00", "2026-10-25T10:00:00Z"));
+    try std.testing.expect(!laterStamp("2026-10-25 09:00:00", "2026-10-25T10:00:00Z"));
+    try std.testing.expect(laterStamp("2026-10-25T10:00:01Z", "2026-10-25 10:00:00"));
+    try std.testing.expect(!laterStamp("2026-10-25T10:00:00Z", "2026-10-25T10:00:00Z"));
 }
 
 pub fn Selection(comptime capacity: usize) type {
