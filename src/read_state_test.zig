@@ -2,6 +2,7 @@ const std = @import("std");
 const chat_key = @import("chat_key.zig");
 const read_state = @import("read_state.zig");
 const media_age = @import("media_age.zig");
+const archive_rules = @import("archive_rules.zig");
 const max_pending_reads = 8;
 
 fn Utf8Text(comptime capacity: usize) type {
@@ -61,6 +62,7 @@ const App = struct {
     read_started_ms: u64 = 0,
     hub_read_requests: usize = 0,
     read_state: read_state.State = .{},
+    archive_state: ?*archive_rules.State = null,
     cache_tag: Utf8Text(32) = .{},
     startup_probe_pending: bool = false,
     chats: [2]Chat = .{ .{}, .{} },
@@ -270,3 +272,5 @@ test "marking an already read chat leaves the list alone while a changed dot dir
     markChatRead(&a);
     try std.testing.expectEqual(@as(usize, 1), win.row_paints);
 }
+
+fn applyArchiveIncoming(_: *App, _: []const u8, _: []const u8, _: []const u8) void {}

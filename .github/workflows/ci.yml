@@ -60,6 +60,23 @@ jobs:
       - name: Preflight
         run: ZIG=zig bash tools/preflight.sh
 
+      - name: IGSH-833 incoming message regression on main before the fix
+        run: |
+          set -euo pipefail
+          cp src/main.zig "$RUNNER_TEMP/igsh833-main.zig"
+          git show 151e5b6ec06b2bff1d587c7ef5a232d4291973dc:src/main.zig > src/main.zig
+          set +e
+          zig build test > "$RUNNER_TEMP/igsh833-old.log" 2>&1
+          status=$?
+          set -e
+          cp "$RUNNER_TEMP/igsh833-main.zig" src/main.zig
+          if [ "$status" -eq 0 ]; then echo 'Plain archives unexpectedly returned on old main'; exit 1; fi
+          if ! grep -qE "test\.IGSH-833 bulk plain group and direct chat return on an incoming message while kept stays archived.*failed" "$RUNNER_TEMP/igsh833-old.log"; then
+            cat "$RUNNER_TEMP/igsh833-old.log"
+            exit 1
+          fi
+          echo 'IGSH-833 old main fails the incoming message regression'
+
       - name: IGSH-767 archive intent and historical negative control
         run: |
           set -euo pipefail

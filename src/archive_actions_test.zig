@@ -1,8 +1,10 @@
 const std = @import("std");
 const verification_fixture = false;
-const chat_key = @import("chat_key");
-const archive_rules = @import("archive_rules");
-const voice_sent = @import("voice_sent");
+const chat_key = @import("chat_key.zig");
+const archive_rules = @import("archive_rules.zig");
+const read_state = @import("read_state.zig");
+const media_age = @import("media_age.zig");
+const voice_sent = @import("voice_sent.zig");
 const ArchiveSource = if (@hasDecl(archive_rules, "Source")) archive_rules.Source else enum { shortcut, menu, control, send };
 const command_archive: u16 = 2007;
 const PendingSend = struct {
@@ -37,6 +39,7 @@ const Chat = struct {
     archived: bool = false,
     provider_archived: bool = false,
     unread: bool = false,
+    unread_count: i64 = 0,
     pinned: bool = false,
     kind: struct {
         text: []const u16 = &.{},
@@ -55,6 +58,8 @@ const PendingArchive = struct {
 const WacliResult = struct {
     gen: u64 = 0,
     data: []const u8 = "",
+    extra: Utf8Text(47) = .{},
+    msg_id: Utf8Text(191) = .{},
     kind: enum { hub_archive, hub_media } = .hub_archive,
     provider: Provider = .whatsapp,
     account: Utf8Text(32) = .{},
@@ -78,6 +83,8 @@ const App = struct {
     chat_view: enum { all, whatsapp } = .whatsapp,
     bulk: std.ArrayList(Chat) = .empty,
     archive_state: ?*archive_rules.State,
+    read_state: read_state.State = .{ .allow_opaque = true },
+    startup_probe_pending: bool = false,
     pending_archives: []PendingArchive = &.{},
     pending_archive_count: usize = 0,
     archive_batch_total: usize = 0,
@@ -1725,6 +1732,59 @@ test "Ctrl A routes every non-text control and empty composer focus but preserve
                 try std.testing.expectEqual(@as(usize, 0), a.bulk.items.len);
                 try std.testing.expectEqual(before + 1, text_selections);
             }
+        }
+    }
+}
+
+fn queueUnreadProbe(_: *App, _: *const Chat) void {}
+fn invalidateChatRow(_: *App, _: usize) void {}
+
+test "IGSH-833 bulk plain group and direct chat return on an incoming message while kept stays archived" {
+    for ([_][]const u8{ "personal:120363000000000002@g.us", "personal:15550000007@s.whatsapp.net" }) |id| {
+        for ([_]bool{ false, true }) |keep| {
+            var state = archive_rules.State{};
+            var a = fixture(&state);
+            defer a.allocator.free(a.pending_archives);
+            defer a.bulk.deinit(a.allocator);
+            defer a.read_state.deinit(a.allocator);
+            a.unified_hub = true;
+            a.cache_tag.set("0123456789abcdef");
+            a.chats[0].account.set("fixture-account");
+            a.chats[0].jid.set(id);
+            const row = a.chats[0];
+            selectAllChats(&a);
+            archiveSelected(&a, keep);
+            try std.testing.expectEqual(@as(usize, 0), a.chat_count);
+            try std.testing.expectEqual(keep, state.isKept(id));
+            var loaded = archive_rules.State{};
+            loaded.parse(a.saved[0..a.saved_len]);
+            a.archive_state = &loaded;
+            a.pending_archive_count = 0;
+            a.hub_archive_inflight = false;
+            try std.testing.expect(!holdKeptArchived(&a, chat_key.of(&row), true, "2026-10-10T12:04:00Z"));
+            try std.testing.expect(loaded.localArchived(chat_key.of(&row)));
+            try std.testing.expectEqual(!keep, loaded.needsReturnProbe(id, "2026-10-10T12:04:00Z"));
+            var result = WacliResult{ .provider = .whatsapp, .account = row.account, .jid = row.jid, .ok = true };
+            result.msg_id.set(a.cache_tag.slice());
+            result.extra.set("2026-10-10T11:00:00Z");
+            result.data = "{\"data\":{\"messages\":[{\"Timestamp\":\"2026-10-10T11:00:00Z\",\"FromMe\":true,\"ReactionToID\":\"old-message\"}]}}";
+            applyUnreadProbe(&a, &result);
+            try std.testing.expect(loaded.localArchived(chat_key.of(&row)));
+            try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+            result.extra.set("2026-10-10T12:04:00Z");
+            result.data = "{\"data\":{\"messages\":[{\"Timestamp\":\"2026-10-10T12:04:00Z\",\"FromMe\":false}]}}";
+            applyUnreadProbe(&a, &result);
+            try std.testing.expectEqual(keep, loaded.localArchived(chat_key.of(&row)));
+            try std.testing.expectEqual(@as(usize, if (keep) 0 else 1), a.pending_archive_count);
+            if (!keep) try std.testing.expect(a.pending_archives[0].should_unarchive);
+            try std.testing.expectEqual(keep, loaded.isKept(id));
+            var parsed = try std.json.parseFromSlice(std.json.Value, a.allocator, "{\"archived\":true}", .{});
+            defer parsed.deinit();
+            const inbox = archiveInboxRow(&a, row, parsed.value.object);
+            try std.testing.expectEqual(!keep, inbox != null);
+            a.show_archived = true;
+            try std.testing.expectEqual(keep, archiveInboxRow(&a, row, parsed.value.object) != null);
+            if (inbox) |chat| try std.testing.expect(!chat.archived);
         }
     }
 }
