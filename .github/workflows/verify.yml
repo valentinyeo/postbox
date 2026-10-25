@@ -18,6 +18,7 @@ on:
       - src/chat_list_layout.zig
       - src/text_draw.zig
       - src/main.zig
+      - src/theme.zig
       - src/archive_rules.zig
       - src/chat_rows.zig
       - src/chat_order.zig
@@ -127,6 +128,38 @@ jobs:
         run: zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
       - name: Native DirectWrite editing regression tests
         run: zig build test-edit '-Dtarget=x86_64-windows-gnu' --release=small
+      - name: Build and capture the pre-change sidebar baseline
+        if: matrix.feature == 'sidebar-surface'
+        shell: pwsh
+        run: |
+          python tools/verify-wazig/test-sidebar-surface.py
+          if ($LASTEXITCODE -ne 0) { throw 'Sidebar pixel oracle controls failed' }
+          $candidate = (git rev-parse HEAD).Trim()
+          $assertion = (git log -1 --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1).Trim()
+          $baseline = (git rev-parse "$assertion^1").Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Sidebar assertion parent missing' }
+          $source = Join-Path $env:RUNNER_TEMP 'sidebar-baseline-source'
+          $prefix = Join-Path $env:GITHUB_WORKSPACE 'sidebar-baseline-bin'
+          git worktree add --detach $source $baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline checkout failed' }
+          Push-Location $source
+          try {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline build failed' }
+          } finally { Pop-Location }
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          $env:GITHUB_SHA = $baseline
+          try {
+            & tools/verify-wazig/run.ps1 -Feature sidebar-surface -Bin sidebar-baseline-bin/bin -Evidence verification-evidence/baseline
+            if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline capture failed' }
+          } finally { $env:GITHUB_SHA = $candidate }
+          @{
+            candidate_commit = $candidate; baseline_commit = $baseline; assertion_commit = $assertion
+            assertion_parent = (git rev-parse "$assertion^1").Trim()
+            candidate_sha256 = (Get-FileHash zig-out/bin/Messages.exe).Hash
+            baseline_sha256 = (Get-FileHash sidebar-baseline-bin/bin/Messages.exe).Hash
+            fixture_sha256 = (Get-FileHash src/verify_text.json).Hash
+          } | ConvertTo-Json | Set-Content verification-evidence/sidebar-builds.json
       - name: Launch, doctor and drive
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence

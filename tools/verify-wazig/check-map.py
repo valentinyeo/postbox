@@ -516,3 +516,18 @@ for required in ['canvas = @($ox, $oy, $canvasWidth, $canvasHeight)',
     assert required in media_fit, required
 assert '$row.bubble[3] - $row.bubble[1] -gt' not in media_fit
 print('MEDIA FIT MAP VERIFIED: hub downloads, wide/narrow geometry and screenshot pixels, timestamp clearance and PR wiring')
+
+sidebar = entries['sidebar-surface']
+assert sidebar['pr'] and sidebar['evidence'] and sidebar['maximize'] and sidebar['hub'] is None
+assert sidebar['arguments'] == ['--verify-text-comparison']
+assert sidebar['validator'] == {'file': 'check-sidebar-surface.py', 'function': 'check_sidebar_surface'}
+sidebar_journey = (registry_path.parent / sidebar['script']).read_text(encoding='utf-8')
+sidebar_validator = (registry_path.parent / sidebar['validator']['file']).read_text(encoding='utf-8')
+for required in ["@('amoled', 'green')", 'BoundingRectangle', 'GetDpiForWindow', 'ClientToScreen', 'sidebar-layout.json', 'Save-Screen', 'text-metrics.json', "'Search chats'", 'messages.json']:
+    assert required in sidebar_journey, required
+for required in ['sidebar-pixels.json', 'sidebar-builds.json', 'baseline_commit', 'candidate_sha256', 'baseline_sha256', 'assertion_parent', 'fixture_sha256', 'measure_pair', 'validate(metrics)', "row['chat_max_channel_delta'] == row['chat_changed_pixels'] == 0"]:
+    assert required in sidebar_validator, required
+for required in ['src/theme.zig', "if: matrix.feature == 'sidebar-surface'", 'test-sidebar-surface.py', 'git log -1 --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1', 'sidebar-baseline-bin/bin', 'verification-evidence/baseline', 'sidebar-builds.json']:
+    assert required in workflow, required
+assert '.claude/skills/verify-wazig/features/sidebar-surface.md' in marker_namespace['PUBLIC_SKILL_PATHS']
+print('verification skill map passed: sidebar screenshot pairs, historical baseline builds, pixel validator and both dark themes')
