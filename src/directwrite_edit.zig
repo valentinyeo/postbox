@@ -461,7 +461,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     const font_bytes = win.GetObjectW(font, @sizeOf(win.LOGFONTW), &logical);
     std.debug.print("IGSH-466 native font diagnostics: format size={d}, weight offset={d}, mask={x}/{x}, height={d}, weight={d}, font bytes={d}, logical height={d}, logical weight={d}, face={any}\n", .{ @sizeOf(CharacterFormat), @offsetOf(CharacterFormat, "wWeight"), format_mask, format.base.dwMask, format.base.yHeight, format.wWeight, font_bytes, logical.lfHeight, logical.lfWeight, format.base.szFaceName });
     try std.testing.expect(format_mask != 0);
-    try std.testing.expectEqual(@as(u16, 500), format.wWeight);
+    try std.testing.expectEqual(@as(u16, @intCast(@import("font_config.zig").body_weight)), format.wWeight);
     try std.testing.expectEqual(@as(i32, 255), format.base.yHeight);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans"), std.mem.sliceTo(&format.base.szFaceName, 0));
     std.debug.print("IGSH-466 native body font contract passed\n", .{});
