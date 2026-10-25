@@ -46,6 +46,12 @@ Install Zig 0.16, then run:
 zig build --release=small
 ```
 
+## Shipping
+
+Pull requests from the repository owner merge themselves once every check on
+the head commit is green, and a successful `ci` run on `main` publishes the
+release. No release pull request, no manual merge.
+
 ## Slack
 
 Use Ctrl+K > **Connect Slack workspace** to sign in with Slack in your browser.
