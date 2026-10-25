@@ -1,4 +1,5 @@
 const std = @import("std");
+const media_age = @import("media_age.zig");
 
 pub const max_entries = 2048;
 pub const scan_limit = std.fmt.comptimePrint("{d}", .{max_entries});
@@ -48,7 +49,7 @@ pub fn progressStatus(out: []u8, should_unarchive: bool, total: usize, remaining
     }) catch null;
 }
 
-pub const Source = enum { shortcut, menu, control, send, kept };
+pub const Source = enum { shortcut, menu, control, send, kept, incoming };
 
 pub fn logLine(out: []u8, jid: []const u8, archived: bool, source: Source) []const u8 {
     return std.fmt.bufPrint(out, "archive: jid={s} archived={} source={s}", .{ jid, archived, @tagName(source) }) catch unreachable;
@@ -77,6 +78,8 @@ pub const Entry = struct {
     ts: [max_ts]u8 = undefined,
     ts_len: u8 = 0,
     keep: bool = false,
+    pending_baseline: bool = false,
+    checked: i64 = 0,
     held: bool = false,
     held_ts: [max_ts]u8 = undefined,
     held_ts_len: u8 = 0,
@@ -101,14 +104,14 @@ pub const State = struct {
     }
 
     pub fn localArchived(self: *const State, key: anytype) bool {
-        return if (key.provider == .whatsapp) self.find(key.id) != null else if (self.findLocal(key)) |index| (self.entries[index].keep or self.entries[index].ts_len > 0) else false;
+        return if (key.provider == .whatsapp) self.find(key.id) != null else if (self.findLocal(key)) |index| (self.entries[index].keep or self.entries[index].ts_len > 0 or self.entries[index].pending_baseline) else false;
     }
 
     pub fn isArchived(self: *const State, key: anytype, provider_archived: bool) bool {
         if (key.provider == .whatsapp) {
             if (self.find(key.id) != null) return true;
         } else {
-            if (self.findLocal(key)) |index| return self.entries[index].keep or self.entries[index].ts_len > 0;
+            if (self.findLocal(key)) |index| return self.entries[index].keep or self.entries[index].ts_len > 0 or self.entries[index].pending_baseline;
         }
         return self.localArchived(key) or provider_archived;
     }
@@ -136,6 +139,7 @@ pub const State = struct {
             } else {
                 const entry = &self.entries[index];
                 entry.keep = keep;
+                entry.pending_baseline = false;
                 const n = @min(ts.len, max_ts);
                 @memcpy(entry.ts[0..n], ts[0..n]);
                 entry.ts_len = @intCast(n);
@@ -165,9 +169,36 @@ pub const State = struct {
     pub fn observeLocal(self: *State, key: anytype, ts: []const u8) bool {
         const index = self.findLocal(key) orelse return false;
         const entry = &self.entries[index];
+        if (entry.pending_baseline) {
+            if (ts.len == 0) return false;
+            const n = @min(ts.len, max_ts);
+            @memcpy(entry.ts[0..n], ts[0..n]);
+            entry.ts_len = @intCast(n);
+            entry.pending_baseline = false;
+            return true;
+        }
         if (entry.keep or entry.ts_len == 0 or !laterStamp(ts, entry.tsSlice())) return false;
         self.removeAt(index);
         return true;
+    }
+
+    pub fn returnsOn(self: *const State, jid: []const u8, ts: []const u8) bool {
+        const index = self.find(jid) orelse return false;
+        const entry = &self.entries[index];
+        if (entry.keep or entry.ts_len == 0) return false;
+        return laterStamp(ts, entry.tsSlice());
+    }
+
+    pub fn needsReturnProbe(self: *const State, jid: []const u8, ts: []const u8) bool {
+        if (!self.returnsOn(jid, ts)) return false;
+        const seconds = media_age.unixSeconds(ts) orelse return false;
+        return seconds > self.entries[self.find(jid).?].checked;
+    }
+
+    pub fn checkedReturnProbe(self: *State, jid: []const u8, ts: []const u8) void {
+        const index = self.find(jid) orelse return;
+        const seconds = media_age.unixSeconds(ts) orelse return;
+        self.entries[index].checked = @max(self.entries[index].checked, seconds);
     }
 
     pub fn isKept(self: *const State, jid: []const u8) bool {
@@ -247,7 +278,9 @@ pub const State = struct {
     pub fn format(self: *const State, out: []u8) []const u8 {
         var len: usize = 0;
         for (self.entries[0..self.count]) |*entry| {
-            const line = if (entry.provider != .whatsapp)
+            const line = if (entry.provider == .slack and entry.pending_baseline)
+                std.fmt.bufPrint(out[len..], "slack\t{s}\t{s}\n", .{ entry.account[0..entry.account_len], entry.jidSlice() }) catch break
+            else if (entry.provider != .whatsapp)
                 std.fmt.bufPrint(out[len..], "{s}\t{s}\t{s}\t{d}\t{s}\n", .{ @tagName(entry.provider), entry.account[0..entry.account_len], entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break
             else
                 std.fmt.bufPrint(out[len..], "{s}\t{d}\t{s}\n", .{ entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break;
@@ -267,7 +300,9 @@ pub const State = struct {
                 const id = fields.next() orelse continue;
                 if (account.len > 32 or id.len == 0 or id.len > max_jid or self.count >= max_entries) continue;
                 const entry = &self.entries[self.count];
-                entry.* = .{ .provider = std.meta.stringToEnum(@FieldType(Entry, "provider"), jid).?, .keep = !std.mem.eql(u8, fields.next() orelse "1", "0") };
+                const keep_field = fields.next();
+                const legacy_plain = keep_field == null and std.mem.eql(u8, jid, "slack");
+                entry.* = .{ .provider = std.meta.stringToEnum(@FieldType(Entry, "provider"), jid).?, .keep = !legacy_plain and !std.mem.eql(u8, keep_field orelse "1", "0"), .pending_baseline = legacy_plain };
                 const ts = fields.next() orelse "";
                 const n = @min(ts.len, max_ts);
                 @memcpy(entry.ts[0..n], ts[0..n]);
@@ -389,6 +424,51 @@ pub fn Selection(comptime capacity: usize) type {
 pub fn paneNeedsSwitch(open_jid: []const u8, selected_jid: ?[]const u8) bool {
     const now = selected_jid orelse return true;
     return !std.mem.eql(u8, open_jid, now);
+}
+
+test "IGSH-833 Slack archive lines saved before the keep flag load as plain, adopt a baseline and return" {
+    const Key = struct { provider: enum { whatsapp, slack, signal, telegram }, account: []const u8, id: []const u8 };
+    const key = Key{ .provider = .slack, .account = "team", .id = "channel" };
+    var buffer: [256]u8 = undefined;
+    var state = State{};
+    state.parse("slack\tteam\tchannel\n");
+    try std.testing.expect(state.localArchived(key));
+    try std.testing.expect(!state.localKept(key));
+    try std.testing.expectEqualStrings("slack\tteam\tchannel\n", state.format(&buffer));
+    try std.testing.expect(!state.observeLocal(key, ""));
+    try std.testing.expect(state.localArchived(key));
+    try std.testing.expect(state.observeLocal(key, "2026-10-10T10:00:00Z"));
+    try std.testing.expect(state.localArchived(key));
+    try std.testing.expectEqualStrings("slack\tteam\tchannel\t0\t2026-10-10T10:00:00Z\n", state.format(&buffer));
+    try std.testing.expect(!state.observeLocal(key, "2026-10-10T10:00:00Z"));
+    try std.testing.expect(state.observeLocal(key, "2026-10-10T11:00:00Z"));
+    try std.testing.expect(!state.localArchived(key));
+
+    var unarchived = State{};
+    unarchived.parse("slack\tteam\tchannel\t0\t\n");
+    try std.testing.expect(!unarchived.localArchived(key));
+    try std.testing.expect(!unarchived.observeLocal(key, "2026-10-10T11:00:00Z"));
+
+    var kept = State{};
+    kept.parse("slack\tteam\tchannel\t1\t2026-10-10T10:00:00Z\n");
+    try std.testing.expect(kept.localKept(key));
+    try std.testing.expect(!kept.observeLocal(key, "2026-10-10T11:00:00Z"));
+    try std.testing.expect(kept.localArchived(key));
+}
+
+test "IGSH-833 plain WhatsApp archive probes once per newer row and returns only on a newer incoming stamp" {
+    var state = State{};
+    try std.testing.expect(state.archive("g@g.us", "2026-10-10T10:00:00Z", false));
+    try std.testing.expect(!state.needsReturnProbe("g@g.us", "2026-10-10T10:00:00Z"));
+    try std.testing.expect(state.needsReturnProbe("g@g.us", "2026-10-10T12:04:00Z"));
+    state.checkedReturnProbe("g@g.us", "2026-10-10T12:04:00Z");
+    try std.testing.expect(!state.needsReturnProbe("g@g.us", "2026-10-10T12:04:00Z"));
+    try std.testing.expect(state.needsReturnProbe("g@g.us", "2026-10-10T18:34:00Z"));
+    try std.testing.expect(state.returnsOn("g@g.us", "2026-10-10T12:04:00Z"));
+    try std.testing.expect(!state.returnsOn("g@g.us", "2026-10-10T09:00:00Z"));
+    try std.testing.expect(state.archive("k@g.us", "2026-10-10T10:00:00Z", true));
+    try std.testing.expect(!state.needsReturnProbe("k@g.us", "2026-10-10T18:34:00Z"));
+    try std.testing.expect(!state.returnsOn("k@g.us", "2026-10-10T18:34:00Z"));
 }
 
 test "legacy keep migration matches only bare WhatsApp ids and uses the hub message baseline" {
