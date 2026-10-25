@@ -12,6 +12,12 @@ function Save-ArchivedSwitch($Session, [string]$Name, [bool]$Enabled, [int]$Coun
             @($rows | Where-Object { $_.archived -and $_.archive_label -notin @('Archived', 'Kept archived') }).Count -eq 0
     } "show-archived $Name"
     Save-Screen $Session $Name
+    $uia = Join-Path $Session.evidence "$Name.uia.txt"
+    for ($attempt = 0; $attempt -lt 5; $attempt++) {
+        if ((Test-Path $uia) -and (Select-String -Path $uia -Pattern '1146 \| Button \| Show archived: ' -Quiet)) { break }
+        [System.Threading.Thread]::Sleep(200)
+        Save-Screen $Session $Name
+    }
     if ($Toggle) {
         $lines = @(Get-Content (Join-Path $Session.root 'local/Messages/launch-log.txt') | Where-Object { $_ -match ' archive-toggle:' })
         $script:ArchiveToggleIndex = $lines.Count - 1
