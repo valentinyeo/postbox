@@ -219,7 +219,9 @@ class JourneyRegistryTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 args = parser.parse_args(['--' + mode, '--port-file', 'port', '--log', 'log'])
                 self.assertEqual(args.mode, mode)
-                self.assertIn(row['hub_handler']['class'], namespace)
+                config = row['hub_handler']
+                loaded = namespace if config['file'] == 'fake-hub.py' else runpy.run_path(str(self.tools / config['file']), init_globals=namespace)
+                self.assertIn(config['class'], loaded)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             parser.parse_args(['--mixed-lid', '--voice', '--port-file', 'port', '--log', 'log'])
 
