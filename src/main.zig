@@ -721,6 +721,7 @@ const App = struct {
     palette_matches: []usize = &.{},
     palette_match_count: usize = 0,
     palette_selected: usize = 0,
+    palette_keep_selection: bool = false,
     palette_ever_active: bool = false,
     palette_archive_key: chat_key.Stored = .{},
     palette_archive_bulk_count: usize = 0,
@@ -2589,7 +2590,11 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
             if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
         }
     }
-    if (a.palette != null and a.palette_search_mode and !a.palette_filtering) paletteFilter(a);
+    if (a.palette != null and a.palette_search_mode and !a.palette_filtering) {
+        a.palette_keep_selection = true;
+        defer a.palette_keep_selection = false;
+        paletteFilter(a);
+    }
     return true;
 }
 
@@ -12044,6 +12049,17 @@ fn paletteFilter(a: *App) void {
     if (a.palette_filtering) return;
     a.palette_filtering = true;
     defer a.palette_filtering = false;
+    var kept = false;
+    var kept_chat = false;
+    var kept_identity: chat_key.Stored = .{};
+    var kept_label: WideText(63) = .{};
+    if (a.palette_keep_selection and a.palette_selected < a.palette_match_count) {
+        const previous = &a.palette_items[a.palette_matches[a.palette_selected]];
+        kept = true;
+        kept_chat = previous.chat_jid.len > 0;
+        kept_identity = previous.chat_identity;
+        kept_label = previous.label;
+    }
     var query_buf: [256]u16 = [_]u16{0} ** 256;
     const query_len: usize = if (a.palette_edit) |edit| @intCast(win.GetWindowTextW(edit, &query_buf, if (a.palette_search_mode) query_buf.len else 64)) else 0;
     const grouped = !a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode;
@@ -12107,13 +12123,26 @@ fn paletteFilter(a: *App) void {
             chats += 1;
         }
     }
+    if (kept) {
+        for (a.palette_matches[0..a.palette_match_count], 0..) |match, position| {
+            const item = &a.palette_items[match];
+            const same = if (kept_chat)
+                item.chat_jid.len > 0 and chat_key.Key.eql(item.chat_identity.key(), kept_identity.key())
+            else
+                item.chat_jid.len == 0 and std.mem.eql(u16, item.label.slice(), kept_label.slice());
+            if (same) {
+                a.palette_selected = position;
+                break;
+            }
+        }
+    }
     if (a.palette_list) |list| {
         _ = win.SendMessageW(list, win.WM_SETREDRAW, 0, 0);
         _ = win.SendMessageW(list, win.LB_RESETCONTENT, 0, 0);
         for (a.palette_matches[0..a.palette_match_count]) |match| {
             _ = win.SendMessageW(list, win.LB_ADDSTRING, 0, @bitCast(@intFromPtr(a.palette_items[match].label.ptr())));
         }
-        if (a.palette_match_count > 0) _ = win.SendMessageW(list, win.LB_SETCURSEL, 0, 0);
+        if (a.palette_match_count > 0) _ = win.SendMessageW(list, win.LB_SETCURSEL, a.palette_selected, 0);
         _ = win.SendMessageW(list, win.WM_SETREDRAW, 1, 0);
         _ = win.InvalidateRect(list, null, win.TRUE);
     }
@@ -12184,11 +12213,18 @@ fn paletteActivate(a: *App) void {
             setStatus(a, status orelse "Chat not in the current list. Press R to refresh, then try again.");
             return;
         };
+        const wanted_identity = item.chat_identity;
         closePalette(a);
+        const reselected = blk: {
+            for (a.chats[0..a.chat_count], 0..) |*chat, index| {
+                if (chat_key.Key.eql(chat_key.of(chat), wanted_identity.key())) break :blk index;
+            }
+            break :blk selected;
+        };
         discardStagedImage(a);
-        a.selected_chat = @intCast(selected);
+        a.selected_chat = @intCast(reselected);
         switchComposerDraft(a);
-        if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, selected, 0);
+        if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, reselected, 0);
         a.user_viewed = true;
         refreshMessages(a);
         focusCompose(a);
@@ -12621,12 +12657,14 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
             return 0;
         },
         win.WM_DESTROY => {
+            const was_searching = a.palette_search_mode;
             a.palette = null;
             a.palette_search_mode = false;
             a.palette_views_mode = false;
             a.palette_edit = null;
             a.palette_list = null;
             if (a.sb_drag == .palette) a.sb_drag = .none;
+            if (was_searching) _ = clearSearch(a);
             return 0;
         },
         else => return win.DefWindowProcW(hwnd, message, wparam, lparam),
