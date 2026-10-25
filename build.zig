@@ -436,7 +436,7 @@ pub fn build(b: *std.Build) void {
         sourceSection("fn refreshMessages(", "fn reconcileOpenChat(a: *App) void {"),
         sourceSection("fn reconcileOpenChat(", "fn youSender("),
         "fn resultFor(job: WacliJob) WacliResult { var storage = WacliResult{}; const result = &storage;\n",
-        sourceSection("    result.* = .{ .kind = job.kind", "    switch (job.kind)"),
+        sourceSection("    result.* = .{ .kind = job.kind", "    if (hubConfigured(a) and (unifiedHub(a) or job.provider == .whatsapp))"),
         "return storage; }\nfn deliverChats(a: *App, result: *const WacliResult) void {\n",
         sourceSection("                    if (!result.ok and result.gen == a.chats_gen) {", "                },\n                .messages =>"),
         "}\nfn deliver(a: *App, result: *WacliResult) void { a.pending -= 1; _ = deliverResult(a, result); }\nfn deliverResult(a: *App, result: *WacliResult) usize {\n",
