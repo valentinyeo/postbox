@@ -11543,6 +11543,16 @@ fn controlChats(a: *App, call: *ControlCall) !void {
                 }
             }
         }
+        if (unifiedHub(a) or messenger_view.includes(view, .whatsapp)) {
+            if (call.whatsapp_raw.len == 0) {
+                call.need_whatsapp = true;
+                return;
+            }
+            controlWhatsAppChats(a, call.whatsapp_raw, view, if (request.messenger == null) a.view_account.slice() else "", request.archived, wanted, &list) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => return control_api.writeError(w, "could not parse the WhatsApp chat list"),
+            };
+        }
         controlSortChats(a, list.items, view);
     }
     const shown = @min(list.items.len, request.limit orelse std.math.maxInt(u32));
