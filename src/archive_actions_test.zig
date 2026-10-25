@@ -1528,8 +1528,7 @@ test "IGSH-777 bulk hub archive dispatches one batch and refreshes after every r
     archiveSelected(&a, false);
     try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
     try std.testing.expectEqual(@as(usize, 2), a.hub_archive_batch_count);
-    const result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .gen = 2, .ok = true, .http_status = 200, .data =
-        "{\"results\":[{\"chat\":\"a@g.us\",\"ok\":true},{\"chat\":\"b@g.us\",\"ok\":true}]}" };
+    const result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .gen = 2, .ok = true, .http_status = 200, .data = "{\"results\":[{\"chat\":\"a@g.us\",\"ok\":true},{\"chat\":\"b@g.us\",\"ok\":true}]}" };
     a.hub_archive_inflight = false;
     applyHubArchiveResult(&a, &result);
     try std.testing.expectEqual(@as(usize, 1), a.chats_refreshes);
@@ -1545,8 +1544,7 @@ test "IGSH-777 failed first result preserves intent without hiding later success
     a.unified_hub = true;
     selectAllChats(&a);
     archiveSelected(&a, false);
-    const result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .gen = 2, .ok = true, .http_status = 200, .data =
-        "{\"results\":[{\"chat\":\"a@g.us\",\"ok\":false,\"error\":\"fixture failure\"},{\"chat\":\"b@g.us\",\"ok\":true}]}" };
+    const result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .gen = 2, .ok = true, .http_status = 200, .data = "{\"results\":[{\"chat\":\"a@g.us\",\"ok\":false,\"error\":\"fixture failure\"},{\"chat\":\"b@g.us\",\"ok\":true}]}" };
     applyHubArchiveResult(&a, &result);
     try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
     try std.testing.expectEqualStrings("a@g.us", a.pending_archives[0].jid.slice());
