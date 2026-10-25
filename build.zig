@@ -487,7 +487,7 @@ pub fn build(b: *std.Build) void {
         sourceSection("    if (a.archive_toggle_started_ms != null) {", "fn invalidateChatRow("),
         sourceSection("fn refreshChats(", "fn isUnresolvableChatEntry("),
         sourceSection("fn refilterChats(", "fn loadViewArchiveSetting("),
-        sourceSection("fn updateViewArchiveButton(", "fn switchChatView("),
+        sourceSection("fn logArchiveTogglePaint(", "fn switchChatView("),
     }) catch @panic("Out of memory building archive toggle harness");
     const archive_toggle_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.addWriteFiles().add("archive_toggle_test.zig", archive_toggle_source),
@@ -637,7 +637,7 @@ pub fn build(b: *std.Build) void {
     _ = composer_button_files.addCopyFile(b.path("src/main.zig"), "main-source.zig");
     _ = composer_button_files.addCopyFile(b.path("src/theme.zig"), "theme.zig");
     _ = composer_button_files.addCopyFile(b.path("src/compose_layout.zig"), "compose_layout.zig");
-    const composer_paint_source = sourceSection("fn drawComposerButton(", "fn drawSetupButton(");
+    const composer_paint_source = sourceSection("fn drawComposerButton(", "fn setFont(");
     const composer_paint_start = std.mem.indexOf(u8, composer_paint_source, "    var shapes =") orelse @panic("Missing composer painting body");
     const composer_layout_source = sourceSection("fn layoutRegion(", "    const header_height:");
     const composer_layout_start = std.mem.indexOf(u8, composer_layout_source, "    const left_width =") orelse @panic("Missing composer layout body");

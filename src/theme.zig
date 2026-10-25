@@ -98,6 +98,18 @@ pub const unread_dot_px: i32 = 8;
 pub const radius_bubble: i32 = 16;
 pub const radius_field: i32 = 28;
 pub const selected_row_radius: i32 = 8;
+pub const archived_row_foreground_weight: u8 = 180;
+
+pub fn archivedRowColor(color: u32) u32 {
+    const weight: u32 = archived_row_foreground_weight;
+    var result: u32 = 0;
+    inline for ([_]u5{ 0, 8, 16 }) |shift| {
+        const foreground = (color >> shift) & 0xff;
+        const background = (current.surface_container_low >> shift) & 0xff;
+        result |= ((foreground * weight + background * (255 - weight)) / 255) << shift;
+    }
+    return result;
+}
 
 fn linear(channel: u8) f64 {
     const value = @as(f64, @floatFromInt(channel)) / 255.0;

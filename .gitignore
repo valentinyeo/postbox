@@ -11,6 +11,7 @@ probe
 .claude/handoffs/
 CLAUDE.local.md
 HANDOFF.md
+GATES.md
 board.yml
 .claude/skills/*
 !.claude/skills/verify-wazig/

@@ -27,7 +27,6 @@ const App = struct {
     view_account: Text = .{},
     cache_tag: Text = .{},
     wacli_path: []const u8 = "wacli",
-    include_archived_button: ?usize = null,
     chats_hwnd: ?usize = null,
     archive_toggle_started_ms: ?u64 = null,
     archive_toggle_ready: bool = false,

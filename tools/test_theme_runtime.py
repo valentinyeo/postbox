@@ -76,8 +76,7 @@ def verify_wiring(main, edit):
 def verify_amoled_surfaces(main):
     voice = section(main, "fn paintVoiceButton(", "fn ")
     composer = section(main, "fn drawComposerButton(", "fn ")
-    setup = section(main, "fn drawSetupButton(", "fn ")
-    for paint in (voice, composer, setup):
+    for paint in (voice, composer):
         assert "if (theme.choice == .amoled)" in paint
         for state in ("amoled_button", "amoled_button_hover", "amoled_button_pressed"):
             assert "theme." + state in paint

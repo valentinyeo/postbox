@@ -151,7 +151,6 @@ const id_emoji_edit = 1088;
 const id_emoji_list = 1096;
 const command_slack_threads = 2068;
 const command_include_archived = 2069;
-const id_include_archived = 1146;
 const id_thread_list = 1144;
 const id_thread_compose = 1145;
 const command_search = 2001;
@@ -711,9 +710,9 @@ const App = struct {
     voice_origin: drafts.Identity = .{},
     voice_reply_to: Utf8Text(191) = .{},
     voice_reply_sender: Utf8Text(191) = .{},
-    btn_hover: [11]bool = @splat(false),
+    btn_hover: [10]bool = @splat(false),
     compose_prev_proc: usize = 0,
-    btn_prev_proc: [11]usize = @splat(0),
+    btn_prev_proc: [10]usize = @splat(0),
     tooltips: ?win.HWND = null,
     status: ?win.HWND = null,
     palette: ?win.HWND = null,
@@ -809,7 +808,6 @@ const App = struct {
     unread_only: bool = false,
     show_archived: bool = false,
     include_archived: bool = false,
-    include_archived_button: ?win.HWND = null,
     archive_child: ?std.process.Child = null,
     pending_archives: []PendingArchive = &.{},
     pending_archive_count: usize = 0,
@@ -906,6 +904,7 @@ const App = struct {
     paints: control_api.Paints = .{},
     paints_previous: control_api.Paints = .{},
     chats_prev_proc: usize = 0,
+    chat_hover_y: ?i32 = null,
     paint_minute_ticks: u32 = 0,
     transcribe_active_id: Utf8Text(191) = .{},
     transcribe_attempts: [512]u64 = [_]u64{0} ** 512,
@@ -1340,22 +1339,6 @@ fn drawComposerButton(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     }
 }
 
-fn drawSetupButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
-    var shapes = smooth.Context.init(item.hDC);
-    defer shapes.deinit();
-    const index: usize = switch (item.CtlID) {
-        id_include_archived => 10,
-        else => return,
-    };
-    const pressed = (item.itemState & win.ODS_SELECTED) != 0 or (item.CtlID == id_include_archived and a.include_archived);
-    const focused = (item.itemState & win.ODS_FOCUS) != 0;
-    _ = win.FillRect(item.hDC, &item.rcItem, a.brush_panel.?);
-    const face: win.COLORREF = if (theme.choice == .amoled) (if (pressed) theme.amoled_button_pressed else if (a.btn_hover[index]) theme.amoled_button_hover else theme.amoled_button) else if (pressed) theme.current.primary_container else if (a.btn_hover[index]) theme.current.secondary_container else theme.current.surface_container_high;
-    const frame: ?win.COLORREF = if (index == 3 or index == 5 or focused) theme.current.primary else if (theme.choice == .amoled) theme.current.outline_variant else null;
-    var text_buffer: [32]u16 = undefined;
-    paintRoundedButton(a, &shapes, item.hDC, item.rcItem, face, if (!pressed and a.btn_hover[index] and theme.choice == .amoled) theme.current.on_secondary_container else theme.current.on_surface, a.font_bold.?, frame, buttonLabel(item, &text_buffer));
-}
-
 fn setFont(hwnd: ?win.HWND, font: ?win.HFONT) void {
     if (hwnd) |window| {
         _ = win.SendMessageW(window, win.WM_SETFONT, if (font) |value| @intFromPtr(value) else 0, 1);
@@ -1436,7 +1419,6 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
     a.tooltips = tt;
     updateTooltipTheme(a);
     _ = win.SendMessageW(tt, 0x400 + 24, 0, 260);
-    addTooltip(a, tt, a.include_archived_button, lit("Show archived  Alt+A"));
     addTooltip(a, tt, a.search, lit("Search chats  Ctrl+F or /"));
     addTooltip(a, tt, a.chats_hwnd, lit("Chats  ↑/↓ move · Ctrl+Tab next chat"));
     addTooltip(a, tt, a.canvas, lit("Messages  Alt+J/K select · Ctrl+P play voice · Ctrl+T transcript · Ctrl+R react"));
@@ -1838,7 +1820,6 @@ fn recreateFonts(a: *App) void {
     a.font_bold = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_emoji = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
     a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    setFont(a.include_archived_button, a.font_bold);
     setFont(a.search, a.font);
     setFont(a.chats_hwnd, a.font);
     setFont(a.compose, a.font);
@@ -3388,14 +3369,6 @@ fn loadViewArchiveSetting(a: *App) void {
     const value = loadRegistryString(a.allocator, wide.ptr);
     defer if (value) |text| a.allocator.free(text);
     a.include_archived = messenger_view.archivedSetting(value);
-    updateViewArchiveButton(a);
-}
-
-fn updateViewArchiveButton(a: *App) void {
-    if (a.include_archived_button) |button| {
-        _ = win.SetWindowTextW(button, if (a.include_archived) lit("Show archived: On") else lit("Show archived: Off"));
-        _ = win.InvalidateRect(button, null, win.FALSE);
-    }
 }
 
 fn logArchiveTogglePaint(a: *App) void {
@@ -3431,7 +3404,6 @@ fn toggleViewArchived(a: *App) void {
     a.archive_toggle_paints = a.paints.list;
     a.include_archived = !a.include_archived;
     _ = clearBulkSelection(a);
-    updateViewArchiveButton(a);
     refilterChats(a);
     reconcileOpenChat(a);
 }
@@ -11944,7 +11916,7 @@ fn buildPaletteItems(a: *App) void {
         if (a.palette_item_count > before) a.palette_items[before].view_identity = view.key;
     }
     appendPalette(a, if (a.selected_chat < a.chat_count and isChatPinned(a, chat_key.of(&a.chats[a.selected_chat]))) "Unpin selected chat" else "Pin chat to top", "", command_pin);
-    appendPalette(a, "Toggle archived chats in this view", "Alt+A", command_include_archived);
+    appendPalette(a, if (a.include_archived) "Toggle archived chats in this view: On" else "Toggle archived chats in this view: Off", "Alt+A", command_include_archived);
     appendPalette(a, if (a.show_archived) "Show inbox chats" else "Show archived chats", "", command_archived);
     appendPalette(a, if (a.show_archived or (a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived)) "Unarchive selected chat" else "Archive selected chat", "Ctrl+E", command_archive);
     appendPalette(a, "Reply to selected message", "Ctrl+Shift+R", command_reply);
@@ -13043,9 +13015,8 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
         _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
         _ = win.SendMessageW(hwnd, win.EM_SETMARGINS, win.EC_LEFTMARGIN | win.EC_RIGHTMARGIN, @as(win.LPARAM, px(a, 2)) | (@as(win.LPARAM, px(a, 2)) << 16));
     }
-    if (a.include_archived_button) |button| _ = win.MoveWindow(button, left_width - px(a, 152), height - status_height, px(a, 140), status_height, win.TRUE);
     if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, height - header_height - search_height - status_height - updateCardSpan(a), win.TRUE);
-    if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 168), status_height, win.TRUE);
+    if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);
     if (a.thread_parent.len > 0 and (a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) closeSlackThread(a);
     const chat_width = width - left_width - 1;
     const panel_width = if (a.thread_parent.len > 0) @divTrunc(chat_width, 2) else 0;
@@ -13724,6 +13695,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     const chat = &a.chats[index];
     const selected = (item.itemState & win.ODS_SELECTED) != 0;
     const bulk_selected = a.bulk.items.len > 0 and chat_key.indexOf(Chat, a.bulk.items, chat_key.of(chat)) != null;
+    const hovered = if (a.chat_hover_y) |y| y >= item.rcItem.top and y < item.rcItem.bottom else false;
     _ = win.FillRect(item.hDC, &item.rcItem, background);
     _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
     if (bulk_selected) {
@@ -13738,8 +13710,16 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     if (selected or bulk_selected) {
         smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius * 2), px(a, theme.selected_row_radius * 2), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
     }
-    const row_text = if (bulk_selected) theme.current.on_primary_container else theme.current.on_surface;
-    const row_muted = if (bulk_selected) row_text else theme.current.on_surface_variant;
+    var row_text = if (bulk_selected) theme.current.on_primary_container else theme.current.on_surface;
+    var row_muted = if (bulk_selected) row_text else theme.current.on_surface_variant;
+
+    var row_primary = theme.current.primary;
+    const dimmed = chat.archived and !selected and !bulk_selected and !hovered;
+    if (dimmed) {
+        row_text = theme.archivedRowColor(row_text);
+        row_muted = theme.archivedRowColor(row_muted);
+        row_primary = theme.archivedRowColor(row_primary);
+    }
 
     const avatar_left = item.rcItem.left + px(a, 12);
     const avatar_top = item.rcItem.top + px(a, 10);
@@ -13783,7 +13763,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         const diameter = px(a, theme.unread_dot_px);
         const dot_right = item.rcItem.right - px(a, 12);
         const dot_top = item.rcItem.top + @divTrunc(px(a, 35) + px(a, 56) - diameter, 2);
-        smooth.fillEllipse(&shapes, .{ .left = dot_right - diameter, .top = dot_top, .right = dot_right, .bottom = dot_top + diameter }, theme.current.primary);
+        smooth.fillEllipse(&shapes, .{ .left = dot_right - diameter, .top = dot_top, .right = dot_right, .bottom = dot_top + diameter }, row_primary);
     }
     shapes.deinit();
     _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
@@ -13791,7 +13771,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         var initial_length: c_int = 1;
         if (chat.name.buf[0] >= 0xd800 and chat.name.buf[0] <= 0xdbff and chat.name.len > 1) initial_length = 2;
         _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
-        _ = win.SetTextColor(item.hDC, theme.current.on_surface);
+        _ = win.SetTextColor(item.hDC, if (dimmed) theme.archivedRowColor(theme.current.on_surface) else theme.current.on_surface);
         var avatar_rect = win.RECT{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 };
         _ = text_draw.drawText(item.hDC, chat.name.ptr(), initial_length, &avatar_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     }
@@ -13833,7 +13813,8 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
             var wide_label = WideText(191){};
             wide_label.set(a.allocator, label);
             const row_background = if (bulk_selected) theme.current.primary_container else if (selected) theme.current.surface_container_highest else theme.current.surface_container_low;
-            _ = win.SetTextColor(item.hDC, drafts.labelColor(theme.current.*, row_background));
+            const draft_color = drafts.labelColor(theme.current.*, row_background);
+            _ = win.SetTextColor(item.hDC, if (dimmed) theme.archivedRowColor(draft_color) else draft_color);
             var prefix_rect = kind_rect;
             _ = text_draw.drawText(item.hDC, wide_label.ptr(), 7, &prefix_rect, win.DT_CALCRECT | win.DT_SINGLELINE | win.DT_NOPREFIX);
             _ = text_draw.drawText(item.hDC, wide_label.ptr(), 7, &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
@@ -13859,7 +13840,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         _ = text_draw.drawText(item.hDC, kind.ptr(), @intCast(kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
     }
     if (marker) |text| {
-        _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else theme.current.primary);
+        _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else row_primary);
         var marker_rect = win.RECT{ .left = item.rcItem.right - px(a, 128), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, 40), .bottom = item.rcItem.top + px(a, 56) };
         _ = text_draw.drawText(item.hDC, text, -1, &marker_rect, win.DT_RIGHT | win.DT_SINGLELINE);
         _ = win.SetTextColor(item.hDC, row_muted);
@@ -14322,6 +14303,18 @@ fn countPaint(hwnd: win.HWND, dirty: win.RECT, total: *u64, full: *u64) void {
 fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
     if (message == win.WM_ERASEBKGND) return 1;
+    if (message == win.WM_MOUSEMOVE) {
+        const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+        const row_height: i32 = @max(1, @as(i32, @intCast(win.SendMessageW(hwnd, win.LB_GETITEMHEIGHT, 0, 0))));
+        if (a.chat_hover_y == null or @divTrunc(a.chat_hover_y.?, row_height) != @divTrunc(y, row_height)) _ = win.InvalidateRect(hwnd, null, win.FALSE);
+        a.chat_hover_y = y;
+        var track = win.TRACKMOUSEEVENT{ .cbSize = @sizeOf(win.TRACKMOUSEEVENT), .dwFlags = win.TME_LEAVE, .hwndTrack = hwnd, .dwHoverTime = 0 };
+        _ = win.TrackMouseEvent(&track);
+    }
+    if (message == win.WM_MOUSELEAVE) {
+        a.chat_hover_y = null;
+        _ = win.InvalidateRect(hwnd, null, win.FALSE);
+    }
     if (message == win.WM_PAINT) {
         defer logArchiveTogglePaint(a);
         var paint: win.PAINTSTRUCT = undefined;
@@ -15330,8 +15323,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             a.voice_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("Voice"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_voice), a.instance, null);
             a.dictate = win.CreateWindowExW(0, lit("BUTTON"), lit("Dictate"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_dictate), a.instance, null);
             a.emoji_btn = win.CreateWindowExW(0, lit("BUTTON"), lit("😊"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_emoji), a.instance, null);
-            a.include_archived_button = win.CreateWindowExW(0, lit("BUTTON"), if (a.include_archived) lit("Show archived: On") else lit("Show archived: Off"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_include_archived), a.instance, null);
-            subclassComposerButton(a, a.include_archived_button, 10);
             a.send = win.CreateWindowExW(0, lit("BUTTON"), lit("Send"), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.BS_OWNERDRAW, 0, 0, 0, 0, hwnd, controlId(id_send), a.instance, null);
             subclassComposerButton(a, a.attach_btn, 9);
             subclassComposerButton(a, a.voice_btn, 8);
@@ -15606,8 +15597,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 if (item.itemID == reaction_row) drawReactionRow(a, item) else if (theme.choice == .amoled) drawMessageMenuItem(a, item);
             } else if (item.CtlID == id_chats) {
                 drawChat(a, item);
-            } else if (item.CtlID == id_include_archived) {
-                drawSetupButton(a, item);
             } else if (item.CtlID == id_voice) {
                 drawVoiceButton(a, item);
             } else if (item.CtlID == id_dictate or item.CtlID == id_send or item.CtlID == id_emoji or item.CtlID == id_attach) {
@@ -15638,8 +15627,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (id == id_chats and notification == win.LBN_SELCHANGE) {
                 const selected = win.SendMessageW(a.chats_hwnd.?, win.LB_GETCURSEL, 0, 0);
                 if (selected >= 0) selectChatRow(a, @intCast(selected)) else _ = clearBulkSelection(a);
-            } else if (id == id_include_archived and notification == win.BN_CLICKED) {
-                runCommand(a, command_include_archived);
             } else if (id == id_send and notification == win.BN_CLICKED) {
                 sendMessage(a);
             } else if (id == id_dictate and notification == win.BN_CLICKED) {
