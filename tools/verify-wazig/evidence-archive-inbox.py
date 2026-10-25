@@ -50,7 +50,8 @@ assert {line.split('\t')[0] for line in lines if line.split('\t')[0] in remote} 
 assert all(line.split('\t')[1] == '0' for line in lines if line.split('\t')[0] in remote)
 for provider in ('slack', 'telegram', 'signal'):
     row, = [row for row in initial if row['provider'] == provider]
-    assert f"{provider}\t{row['account']}\t{row['id']}" in lines
+    stored, = [line.split('\t') for line in lines if line.split('\t')[:3] == [provider, row['account'], row['id']]]
+    assert stored[3] == '0' and stored[4], stored
 for phase, count, archived in [('before', 264, False), ('selected', 264, False), ('empty', 0, False),
                                 ('archived', 264, True), ('account-empty', 0, False),
                                 ('restart-empty', 0, False), ('after', 264, True)]:
@@ -60,7 +61,7 @@ for phase, count, archived in [('before', 264, False), ('selected', 264, False),
     assert all(row['archived'] is archived for row in rows['chats']), phase
     if archived:
         assert {(row['provider'], row['account'], row['id']) for row in rows['chats']} == identities, phase
-        assert all(row['archive_label'] in ('Archived', 'Kept archived') for row in rows['chats']), phase
+        assert all(row['archive_label'] == 'Archived' for row in rows['chats']), phase
     if not count:
         assert state['selected'] is None, phase
     image = (folder / f'{phase}.png').read_bytes()
