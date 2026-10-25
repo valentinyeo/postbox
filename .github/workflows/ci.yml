@@ -75,7 +75,7 @@ jobs:
           set -e
           cp "$RUNNER_TEMP/archive_rules.zig" "$path"
           if [ "$status" -eq 0 ]; then echo 'Old archive resolution unexpectedly passed'; exit 1; fi
-          if ! grep -qE 'hub rows without archive metadata preserve saved intent in sidebar and control after restart.*FAIL' "$RUNNER_TEMP/archive-old.log"; then
+          if ! grep -qE "archive_rules\.test\.WhatsApp archive (entry overrides the provider flag|presence is independent of keep and the provider flag)' failed" "$RUNNER_TEMP/archive-old.log"; then
             echo 'Old archive resolution did not fail the metadata-free regression'
             tail -40 "$RUNNER_TEMP/archive-old.log"
             exit 1
