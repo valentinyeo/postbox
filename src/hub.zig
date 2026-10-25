@@ -2,6 +2,7 @@ const std = @import("std");
 const bridge = @import("wa_hub.zig");
 const transport = @import("transport.zig");
 const messenger_view = @import("messenger_view.zig");
+const message_filter = @import("message_filter.zig");
 
 pub const igsh_531_hub_provider = true;
 pub const igsh_604_workspace_icons = true;
@@ -83,7 +84,14 @@ pub fn unite(allocator: std.mem.Allocator, first: []const std.json.Value, second
         try out.append(allocator, row);
         added += 1;
     }
+    std.mem.sort(std.json.Value, out.items, {}, newerMessage);
     return added;
+}
+
+fn newerMessage(_: void, left: std.json.Value, right: std.json.Value) bool {
+    const left_time = if (left == .object) string(left.object, "Timestamp") else "";
+    const right_time = if (right == .object) string(right.object, "Timestamp") else "";
+    return message_filter.order(left_time, rowId(left), right_time, rowId(right)) == .gt;
 }
 
 fn rowId(row: std.json.Value) []const u8 {

@@ -15,6 +15,16 @@ pub fn isRealMessage(row: Row) bool {
         row.reaction_to.len > 0;
 }
 
+pub fn order(left_time: []const u8, left_id: []const u8, right_time: []const u8, right_id: []const u8) std.math.Order {
+    var left = std.mem.splitScalar(u8, std.mem.trimEnd(u8, left_time, "Z"), '.');
+    var right = std.mem.splitScalar(u8, std.mem.trimEnd(u8, right_time, "Z"), '.');
+    const by_seconds = std.mem.order(u8, left.first(), right.first());
+    if (by_seconds != .eq) return by_seconds;
+    const by_fraction = std.mem.order(u8, std.mem.trimEnd(u8, left.next() orelse "", "0"), std.mem.trimEnd(u8, right.next() orelse "", "0"));
+    if (by_fraction != .eq) return by_fraction;
+    return std.mem.order(u8, left_id, right_id);
+}
+
 pub fn stripPlaceholder(text: []const u8) []const u8 {
     if (std.mem.eql(u8, text, "(message)")) return "";
     return text;
@@ -52,4 +62,11 @@ test "wacli placeholder counts as no text" {
     try std.testing.expect(isRealMessage(.{ .id = "ABC8", .text = stripPlaceholder("(message)"), .media_type = "gif" }));
     try std.testing.expect(isRealMessage(.{ .id = "ABC9", .text = stripPlaceholder("(message)"), .revoked = true }));
     try std.testing.expect(isRealMessage(.{ .id = "ABC10", .text = stripPlaceholder("(message)"), .reaction_to = "ABC1" }));
+}
+
+test "message order compares provider time before opaque ids" {
+    try std.testing.expectEqual(std.math.Order.lt, order("2026-10-01T12:29:00Z", "Z", "2026-10-01T13:06:00Z", "A"));
+    try std.testing.expectEqual(std.math.Order.lt, order("2026-10-01T13:06:00Z", "Z", "2026-10-01T13:06:00.1Z", "A"));
+    try std.testing.expectEqual(std.math.Order.lt, order("2026-10-01T13:06:00.10Z", "A", "2026-10-01T13:06:00.1Z", "B"));
+    try std.testing.expectEqual(std.math.Order.eq, order("2026-10-01T13:06:00Z", "A", "2026-10-01T13:06:00.000Z", "A"));
 }

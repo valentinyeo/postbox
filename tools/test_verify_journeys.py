@@ -361,15 +361,15 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
                 dict(wire_path='/v1/wazig/chats?archived=false&limit=250', status=200,
                      rows=[dict(jid=chat, last_message_ts='2026-10-10T14:00:00Z', archived=False) for chat in (self.newer, self.telegram)]),
                 dict(wire_path='/fixture/rearchive-enable', status=200),
-                self.write(self.other, False),
+                self.write(self.newer), self.write(self.other, False),
             ],
         }
         for name, archived, chats in [
             ('telegram-only', False, [self.telegram]), ('telegram-empty', False, []),
             ('telegram-unarchived', False, [self.telegram]),
             ('telegram-bulk-empty', False, []), ('telegram-restart-empty', False, []),
-            ('telegram-restart-archived', True, self.all_chats), ('plain-incoming-inbox', False, []),
-            ('plain-incoming-archived', True, self.all_chats),
+            ('telegram-restart-archived', True, self.all_chats), ('plain-incoming-inbox', False, [self.newer, self.telegram]),
+            ('plain-incoming-archived', True, [group, self.other, reacted]),
             ('plain-rearchived-inbox', False, []),
             ('plain-rearchived-archived', True, self.all_chats),
         ]:
@@ -404,7 +404,7 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
 
     def test_missing_initial_archive_or_explicit_unarchive_evidence_fails(self):
         original = copy.deepcopy(self.data['telegram.requests.json'])
-        for index in (2, 7):
+        for index in (2, 7, 8):
             with self.subTest(missing_archive=index):
                 self.data['telegram.requests.json'] = copy.deepcopy(original)
                 self.data['telegram.requests.json'].pop(index)
@@ -455,7 +455,7 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     self.check()
                 self.data[f'{name}.chats.json']['chats'].pop()
-        for name in ('telegram-restart-archived', 'plain-incoming-archived', 'plain-rearchived-archived'):
+        for name in ('telegram-restart-archived', 'plain-incoming-inbox', 'plain-rearchived-archived'):
             rows = self.data[f'{name}.chats.json']['chats']
             row = next(row for row in rows if row['id'] == self.telegram)
             row['provider'] = 'whatsapp'
@@ -466,6 +466,32 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 self.check()
             rows.append(row)
+
+    def test_both_ordinary_archives_must_return_unarchived_on_incoming(self):
+        rows = self.data['plain-incoming-inbox.chats.json']['chats']
+        for row in list(rows):
+            with self.subTest(chat=row['id']):
+                row['archived'] = True
+                with self.assertRaises(AssertionError):
+                    self.check()
+                row['archived'] = False
+                rows.remove(row)
+                with self.assertRaises(AssertionError):
+                    self.check()
+                rows.append(row)
+
+    def test_kept_and_unchanged_archives_must_remain_after_incoming(self):
+        rows = self.data['plain-incoming-archived.chats.json']['chats']
+        for row in list(rows):
+            with self.subTest(chat=row['id']):
+                row['archived'] = False
+                with self.assertRaises(AssertionError):
+                    self.check()
+                row['archived'] = True
+                rows.remove(row)
+                with self.assertRaises(AssertionError):
+                    self.check()
+                rows.append(row)
 
     def test_missing_explicit_unarchive_proof_fails(self):
         self.data['telegram-unarchived.chats.json']['chats'].clear()
@@ -662,6 +688,34 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
                 self.assertIn(fragment, source)
             self.assertNotIn('archive-unsupported', source)
             self.assertNotIn('unsupported archive settled', source)
+
+
+class ChatListAlignmentTests(unittest.TestCase):
+    def test_hanging_indent_evidence_rejects_old_layout_and_weight(self):
+        check = runpy.run_path(str(ROOT / 'tools/verify-wazig/evidence-chat-lists.py'), run_name='alignment_test')['check_alignment']
+        items = [dict(marker_x=10 + depth, text_x=20 + depth, ink_x=21 + depth,
+                      continuations=[dict(x=20 + depth, ink_x=21 + depth, y=30)])
+                 for depth in [0, 0, 0, 0, 0, 0, 4, 8]]
+        checks = [dict(stage=stage, body_weight=400, font_height=height, items=copy.deepcopy(items))
+                  for stage, height in [('baseline', -14), ('larger', -16)]]
+        check(checks)
+        for mutation in ['weight', 'left-edge', 'marker-edge', 'pixels', 'nesting', 'missing-wrap']:
+            broken = copy.deepcopy(checks)
+            row = broken[0]
+            if mutation == 'weight':
+                row['body_weight'] = 500
+            elif mutation == 'left-edge':
+                row['items'][0]['continuations'][0]['x'] = 0
+            elif mutation == 'marker-edge':
+                row['items'][0]['continuations'][0]['x'] = row['items'][0]['marker_x']
+            elif mutation == 'pixels':
+                row['items'][0]['continuations'][0]['ink_x'] -= 5
+            elif mutation == 'nesting':
+                row['items'][6]['text_x'] = row['items'][5]['text_x']
+            else:
+                row['items'][0]['continuations'] = []
+            with self.subTest(mutation=mutation), self.assertRaises(AssertionError):
+                check(broken)
 
 
 if __name__ == '__main__':

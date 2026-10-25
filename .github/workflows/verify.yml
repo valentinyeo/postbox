@@ -15,6 +15,7 @@ on:
       - tools/verify-wazig/**
       - src/verify_text.json
       - src/font_config.zig
+      - src/chat_list_layout.zig
       - src/text_draw.zig
       - src/main.zig
       - src/archive_rules.zig

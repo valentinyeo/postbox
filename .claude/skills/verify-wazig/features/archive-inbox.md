@@ -6,6 +6,7 @@
 - Sidebar and read-only control rows report archived=true and an archive label.
 - Ten independent Ctrl+A presses select all 264 visible chats, including rows beyond the old 256-row snapshot.
 - Ctrl+E sends one WhatsApp batch request, completes every selected provider path and reports total and per-chat elapsed milliseconds.
+- Ctrl+E writes an ordinary archive in every channel: Slack, Telegram and Signal store lines carry keep=0 and an archive time, and every archived row reads Archived, never Kept archived (IGSH-828).
 - One failed batch item does not discard later successes or erase saved archive intent; the native archive harness covers mixed results.
 
 ## How to get to it (user POV)

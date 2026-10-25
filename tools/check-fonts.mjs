@@ -51,13 +51,13 @@ export function verifySources(sources, exists) {
   assert.match(loads[0][1], /plex_loaded == font_files\.len, plex_loaded, font_files\.len/);
   const recreate = section(main, 'fn recreateFonts(', '\nfn changeFontScale');
   assert.match(recreate, /body_weight = @import\("font_config\.zig"\)\.body_weight/);
-  assert.match(recreate, /comptime std\.debug\.assert\(body_weight == win\.FW_MEDIUM\)/);
-  assert.match(sources['src/font_config.zig'], /pub const body_weight: i32 = 500;/);
+  assert.match(recreate, /comptime std\.debug\.assert\(body_weight == win\.FW_NORMAL\)/);
+  assert.match(sources['src/font_config.zig'], /pub const body_weight: i32 = 400;/);
   const fontCalls = [...recreate.matchAll(/a\.(font(?:_small|_bold|_emoji|_underline)?) = win\.CreateFontW\(scaledFontHeight\((\d+), a\.font_scale, dpi\), 0, 0, 0, ([^,]+), 0, ([01]), 0, win\.DEFAULT_CHARSET, win\.OUT_DEFAULT_PRECIS, win\.CLIP_DEFAULT_PRECIS, win\.CLEARTYPE_NATURAL_QUALITY, win\.DEFAULT_PITCH, lit\("([^"]+)"\)\);/g)];
   assert.equal(fontCalls.length, 5, 'all five native fonts must use natural ClearType');
   const expected = {
     font: ['17', 'body_weight', '0', 'IBM Plex Sans'],
-    font_small: ['13', 'body_weight', '0', 'IBM Plex Sans'],
+    font_small: ['13', 'win.FW_MEDIUM', '0', 'IBM Plex Sans'],
     font_bold: ['16', 'win.FW_SEMIBOLD', '0', 'IBM Plex Sans'],
     font_emoji: ['16', 'win.FW_NORMAL', '0', 'Segoe UI Emoji'],
     font_underline: ['17', 'body_weight', '1', 'IBM Plex Sans'],

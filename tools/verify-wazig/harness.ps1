@@ -412,7 +412,14 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
         Assert-That ($paged.chat.id -eq $mixedRow[0].id -and $pagedIds.Count -eq 250) "Scrolled chat holds $($pagedIds.Count) of 250 messages"
         Assert-That (@($pagedIds | Select-Object -Unique).Count -eq 250) 'Scrolled chat shows a message twice'
         for ($position = 0; $position -lt 250; $position++) {
-            Assert-That ($pagedIds[$position] -eq "MIXED-$(250 - $position)") "Scrolled chat is out of order at position $position"
+            Assert-That ($pagedIds -contains "MIXED-$(250 - $position)") "Scrolled chat lost message MIXED-$(250 - $position)"
+            if ($position -gt 0) {
+                $previous = $paged.messages[$position - 1]
+                $current = $paged.messages[$position]
+                $byTime = [string]::CompareOrdinal($previous.time, $current.time)
+                $byId = [string]::CompareOrdinal($previous.id, $current.id)
+                Assert-That ($byTime -lt 0 -or ($byTime -eq 0 -and $byId -lt 0)) "Scrolled chat is out of order at position $position"
+            }
         }
         $olderPages = @(Read-BridgeRequests $Session | Where-Object { [string]$_.mixed_before -ne '' -and $_.status -eq 200 })
         $olderPages | ConvertTo-Json -Depth 12 -AsArray | Set-Content (Join-Path $Session.evidence 'mixed-older.requests.json')

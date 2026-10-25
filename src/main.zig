@@ -1805,7 +1805,7 @@ fn scaledFontHeight(base: i32, scale: i32, dpi: i32) i32 {
 
 fn recreateFonts(a: *App) void {
     const body_weight = @import("font_config.zig").body_weight;
-    comptime std.debug.assert(body_weight == win.FW_MEDIUM);
+    comptime std.debug.assert(body_weight == win.FW_NORMAL);
     const dpi: i32 = @intCast(a.dpi);
     const old_font = a.font;
     const old_small = a.font_small;
@@ -1813,7 +1813,7 @@ fn recreateFonts(a: *App) void {
     const old_underline = a.font_underline;
     const old_emoji = a.font_emoji;
     a.font = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_small = win.CreateFontW(scaledFontHeight(13, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_small = win.CreateFontW(scaledFontHeight(13, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_bold = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_emoji = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
     a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
@@ -2422,7 +2422,6 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         const jid = getString(object, "jid");
         chat.jid.set(jid);
         if (!chatInView(a, chatViewKey(&chat))) continue;
-        if (fresh and chat.provider != .slack) _ = holdKeptArchived(a, chat_key.of(&chat), getBool(object, "archived"), getString(object, "last_message_ts"));
         if (pendingArchiveHidesChat(a, jid, a.show_archived)) continue;
         const raw_name = if (chat.saved) "Saved Messages" else getString(object, "name");
         const display_name = groupName(a, jid) orelse raw_name;
@@ -2434,6 +2433,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         chat.kind.set(a.allocator, if (std.mem.endsWith(u8, jid, "@g.us")) "Group" else getString(object, "kind"));
         chat.timestamp.set(getString(object, "last_message_ts"));
         fillSlackTimestamp(a, &chat);
+        if (fresh) _ = holdKeptArchived(a, chat_key.of(&chat), getBool(object, "archived"), chat.timestamp.slice());
         chat.provider_unread = getBool(object, "unread") or getInt(object, "unread_count") > 0;
         const timestamp = media_age.unixSeconds(chat.timestamp.slice()) orelse 0;
         a.read_state.observeChat(a.allocator, a.cache_tag.slice(), jid, timestamp, chat.provider_unread, fresh and !a.startup_probe_pending);
@@ -3430,6 +3430,7 @@ fn appendSlackChats(a: *App, query_utf8: ?[]const u8) void {
         for (installation.chats[0..installation.chat_count]) |*cached| {
             const name = std.unicode.utf16LeToUtf8Alloc(a.allocator, cached.name.slice()) catch continue;
             defer a.allocator.free(name);
+            _ = holdKeptArchived(a, chat_key.of(cached), false, cached.timestamp.slice());
             cached.archived = if (a.archive_state) |state| state.localArchived(chat_key.of(cached)) else false;
             if (!messenger_view.archiveMatches(a.show_archived, a.include_archived, activeChatView(a) == .all, a.unread_only, chatArchiveState(a, cached), cached.unread)) continue;
             if (!chatInView(a, chat_key.of(cached))) continue;
@@ -3798,8 +3799,7 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
         const item = slack.readHistoryItem(list.items[item_index]) orelse continue;
         newest_seconds = @max(newest_seconds, slack.tsSeconds(item.ts) orelse 0);
         const message = buildSlackMessage(a, chat.account.slice(), item);
-        a.messages[a.message_count] = message;
-        a.message_count += 1;
+        insertMessageSorted(a, message);
         count += 1;
         if (item.reply_count > 0 and reply_parent_count < reply_parents.len) {
             reply_parents[reply_parent_count].set(item.ts);
@@ -3811,8 +3811,7 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
     }
     for (saved[0..saved_count]) |message| {
         if (a.message_count >= max_messages) break;
-        a.messages[a.message_count] = message;
-        a.message_count += 1;
+        insertMessageSorted(a, message);
     }
     if (selected_id.len > 0) {
         for (a.messages[0..a.message_count], 0..) |*message, index| {
@@ -3891,7 +3890,7 @@ fn applySlackReplies(a: *App, raw: []const u8, parent: []const u8) void {
             if (std.mem.eql(u8, existing.id.slice(), item.ts)) known = true;
         }
         if (known) continue;
-        insertSlackMessageSorted(a, message);
+        insertMessageSorted(a, message);
         if (item.file_url.len > 0) requestSlackDownload(a, chat.account.slice(), chat.jid.slice(), item);
     }
     const cursor = slack.nextCursor(root);
@@ -3900,14 +3899,25 @@ fn applySlackReplies(a: *App, raw: []const u8, parent: []const u8) void {
     if (a.user_viewed) requestSlackMark(a, chat.jid.slice());
 }
 
-fn insertSlackMessageSorted(a: *App, message: Message) void {
+fn messageOrder(left: *const Message, right: *const Message) std.math.Order {
+    if (left.timestamp.len == 0 and right.timestamp.len == 0) {
+        const by_time = slack.compareTs(left.id.slice(), right.id.slice());
+        if (by_time != .eq) return by_time;
+    }
+    return message_filter.order(left.timestamp.slice(), left.id.slice(), right.timestamp.slice(), right.id.slice());
+}
+
+fn insertMessageSorted(a: *App, message: Message) void {
     if (a.message_count >= max_messages) return;
     var index: usize = a.message_count;
-    while (index > 0 and slack.compareTs(a.messages[index - 1].id.slice(), message.id.slice()) == .gt) : (index -= 1) {
+    while (message.send_state == .none and index > 0 and (a.messages[index - 1].send_state != .none or messageOrder(&a.messages[index - 1], &message) == .gt)) : (index -= 1) {
         a.messages[index] = a.messages[index - 1];
     }
     a.messages[index] = message;
     a.message_count += 1;
+    if (a.selected_message) |selected| {
+        if (selected >= index) a.selected_message = selected + 1;
+    }
 }
 
 fn appendSlackPending(a: *App, text: []const u8, client_msg_id: []const u8, thread_ts: []const u8) void {
@@ -7759,19 +7769,18 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
     defer united.deinit(a.allocator);
     var kept_rows: ?std.json.Parsed(std.json.Value) = null;
     defer if (kept_rows) |*kept| kept.deinit();
-    var rows: []const std.json.Value = list.items;
+    _ = hub.unite(a.allocator, list.items, &.{}, &united) catch return false;
+    var rows: []const std.json.Value = united.items;
     var merged = false;
     if (unifiedHub(a) and chat.provider == .whatsapp) {
         if (hubOlderFor(a, chat_key.of(chat)).rows) |kept_text| {
             if (std.json.parseFromSlice(std.json.Value, a.allocator, kept_text, .{ .allocate = .alloc_always })) |kept| {
                 kept_rows = kept;
                 if (kept.value == .array) {
-                    if (hub.unite(a.allocator, list.items, kept.value.array.items, &united)) |_| {
+                    if (hub.unite(a.allocator, &.{}, kept.value.array.items, &united)) |_| {
                         rows = united.items;
                         merged = true;
-                    } else |_| {
-                        united.clearRetainingCapacity();
-                    }
+                    } else |_| return false;
                 }
             } else |_| {}
         }
@@ -8424,9 +8433,8 @@ fn applySentVoice(a: *App, jid: []const u8) void {
             message.timestamp.set(text);
             formatTime(&message.time, a.allocator, text);
         } else |_| {}
-        a.messages[a.message_count] = message;
-        a.message_count += 1;
-        loadTranscriptCache(a, &a.messages[a.message_count - 1]);
+        loadTranscriptCache(a, &message);
+        insertMessageSorted(a, message);
     }
 }
 
@@ -10845,7 +10853,7 @@ fn isKeptArchived(a: *const App, jid: []const u8) bool {
 }
 
 fn chatArchiveState(a: *const App, chat: *const Chat) archive_rules.ArchiveState {
-    const kept = chat.provider == .slack or (chat.provider == .whatsapp and isKeptArchived(a, chat.jid.slice()));
+    const kept = if (chat.provider == .whatsapp) isKeptArchived(a, chat.jid.slice()) else if (a.archive_state) |state| state.localKept(chat_key.of(chat)) else false;
     return archive_rules.archiveState(chat.archived, kept);
 }
 
@@ -10887,10 +10895,24 @@ fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) vo
 }
 
 fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []const u8) bool {
-    if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal))) return false;
     const jid = key.id;
     const state = a.archive_state orelse return false;
-    if (!state.isKept(jid) or !state.holdKept(jid, provider_archived, ts)) return false;
+    if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal))) {
+        if (state.observeLocal(key, ts)) saveArchiveState(a);
+        return false;
+    }
+    if (!state.isKept(jid)) {
+        if (!provider_archived) {
+            if (state.baseline(jid)) |base| {
+                if (std.mem.order(u8, ts, base) == .gt) {
+                    state.remove(jid);
+                    saveArchiveState(a);
+                }
+            }
+        }
+        return false;
+    }
+    if (!state.holdKept(jid, provider_archived, ts)) return false;
     if (archiveChat(a, key, .keep, .kept) == null) return true;
     state.releaseHold(jid);
     return false;
@@ -11109,7 +11131,10 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
     if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal))) {
         const state = a.archive_state orelse return "Archive is not available";
         const provider_archived = if (visibleChatIndex(a, key)) |index| a.chats[index].provider_archived else false;
-        const saved = if (unarchive and provider_archived) state.setLocalUnarchived(key) else state.setLocalArchived(key, !unarchive);
+        const row_stamp = if (visibleChatIndex(a, key)) |index| a.chats[index].timestamp.slice() else "";
+        var stamp_buffer: [archive_rules.stamp_len]u8 = undefined;
+        const stamp = archive_rules.archiveBaseline(&stamp_buffer, row_stamp, nowUnixSeconds());
+        const saved = if (unarchive and provider_archived) state.setLocalUnarchived(key) else state.setLocalArchived(key, !unarchive, stamp, action == .keep);
         if (!saved) return "Keep archived list is full";
         saveArchiveState(a);
         if (visibleChatIndex(a, key)) |index| {
@@ -11215,7 +11240,7 @@ fn archiveSelectedChat(a: *App, keep: bool, source: archive_rules.Source) void {
     key.set(chat_key.of(chat));
     if (archiveChat(a, key.key(), action, source)) |problem| return setStatus(a, problem);
     paneFollowSelection(a, open_jid.slice());
-    setStatus(a, if (key.provider == .slack and action != .unarchive) archive_rules.Action.keep.status() else action.status());
+    setStatus(a, action.status());
 }
 
 fn selectAllChats(a: *App) void {
@@ -11243,11 +11268,9 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void 
     if (a.selected_chat < a.chat_count) open_jid.set(a.chats[a.selected_chat].jid.slice());
     const action: archive_rules.Action = if (keep) .keep else if (a.show_archived) .unarchive else .archive;
     var problem: ?[]const u8 = null;
-    var slack_only = true;
     var index: usize = 0;
     while (index < a.bulk.items.len) : (index += 1) {
         const key = chat_key.of(&a.bulk.items[index]);
-        slack_only = slack_only and key.provider == .slack;
         if (key.provider != .slack and !unifiedHub(a) and (key.provider != .whatsapp or !std.mem.eql(u8, key.account, a.cache_tag.slice()))) {
             problem = "Archiving is only available for the active WhatsApp account";
             continue;
@@ -11260,7 +11283,7 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void 
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
     paneFollowSelection(a, open_jid.slice());
     if (problem) |why| return setStatus(a, why);
-    setStatus(a, if (slack_only and action != .unarchive) archive_rules.Action.keep.status() else action.status());
+    setStatus(a, action.status());
 }
 
 const control_call_posted: u8 = 0;
@@ -11792,6 +11815,16 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             .{ .name = "card", .rect = message.unfurl_card_hit },
             .{ .name = "toggle", .rect = message.toggle_hit },
         }) |entry| try w.print(",\"{s}\":[{d},{d},{d},{d}]", .{ entry.name, entry.rect.left, entry.rect.top, entry.rect.right, entry.rect.bottom });
+        if (verification_fixture) {
+            var logical = std.mem.zeroes(win.LOGFONTW);
+            if (a.font) |font| _ = win.GetObjectW(font, @sizeOf(win.LOGFONTW), &logical);
+            try w.print(",\"body_weight\":{d},\"font_height\":{d},\"words\":[", .{ logical.lfWeight, logical.lfHeight });
+            for (message.word_rects[0..message.word_count], 0..) |word, word_index| {
+                if (word_index > 0) try w.writeByte(',');
+                try w.print("{{\"start\":{d},\"len\":{d},\"rect\":[{d},{d},{d},{d}]}}", .{ word.start, word.len, word.rect.left, word.rect.top, word.rect.right, word.rect.bottom });
+            }
+            try w.writeByte(']');
+        }
         try w.print(",\"from_me\":{},\"revoked\":{},\"send_state\":\"{s}\"}}", .{ message.from_me, message.revoked, @tagName(message.send_state) });
     }
     try w.writeAll("]}}\n");
@@ -13672,115 +13705,98 @@ fn wrapMixedSinkExtent(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int
     const emoji_font = a.font_emoji orelse text_font;
     const line_height = textLineHeight(hdc, text_font);
     const text_ascent = fontAscent(hdc, text_font);
-    var line_top = top;
-    var cursor_x = left;
-    var last_right = left;
-    var word_start: usize = 0;
-    var index: usize = 0;
-    while (index <= text.len) {
-        const at_end = index == text.len;
-        if (at_end or text[index] == ' ' or text[index] == '\n') {
-            const word = text[word_start..index];
-            const space_width = runWidth(hdc, &[_]u16{' '});
-            const word_width = mixedSliceWidth(hdc, text_font, emoji_font, line_height, text_ascent, word);
-            if (cursor_x > left and cursor_x + word_width > left + max_width) {
-                line_top += line_height;
-                cursor_x = left;
-                last_right = left;
-            }
-            var wide_url: [519]u16 = undefined;
-            var link_word = word;
-            if (sink) |target| {
-                if (text.ptr == target.text.ptr()) {
-                    for (target.label_links[0..target.label_link_count]) |*link| {
-                        if (word_start >= link.start and word_start < link.end) {
-                            const length = std.unicode.utf8ToUtf16Le(&wide_url, link.url[0..link.url_len]) catch 0;
-                            if (length > 0) link_word = wide_url[0..length];
-                            break;
-                        }
+    const Metrics = struct {
+        hdc: win.HDC,
+        font: win.HFONT,
+        emoji: win.HFONT,
+        line_height: i32,
+        ascent: i32,
+
+        pub fn width(self: @This(), slice: []const u16) i32 {
+            return mixedSliceWidth(self.hdc, self.font, self.emoji, self.line_height, self.ascent, slice);
+        }
+
+        pub fn fit(self: @This(), slice: []const u16, available: i32) usize {
+            const fit_len = fittingPrefixLen(self.hdc, self.font, self.emoji, self.line_height, self.ascent, slice, available);
+            return if (fit_len < slice.len) wrapChunkLen(slice, fit_len) else slice.len;
+        }
+    };
+    const metrics = Metrics{ .hdc = hdc, .font = text_font, .emoji = emoji_font, .line_height = line_height, .ascent = text_ascent };
+    var list_layout = @import("chat_list_layout.zig").Layout{
+        .text = text,
+        .width = max_width,
+        .line_height = line_height,
+        .lists = if (sink) |target| text.ptr == target.text.ptr() else false,
+    };
+    while (list_layout.next(metrics)) |placed| {
+        const chunk = text[placed.start..][0..placed.len];
+        const word_start = placed.word_start;
+        const word = text[word_start..placed.word_end];
+        const line_top = top + placed.y;
+        var cursor_x = left + placed.x;
+        if (!draw) continue;
+        if (placed.space) {
+            _ = win.SelectObject(hdc, @ptrCast(text_font));
+            _ = text_draw.drawRun(hdc, cursor_x, line_top, chunk.ptr, @intCast(chunk.len));
+            continue;
+        }
+        var wide_url: [519]u16 = undefined;
+        var link_word = word;
+        if (sink) |target| {
+            if (text.ptr == target.text.ptr()) {
+                for (target.label_links[0..target.label_link_count]) |*link| {
+                    if (word_start >= link.start and word_start < link.end) {
+                        const length = std.unicode.utf8ToUtf16Le(&wide_url, link.url[0..link.url_len]) catch 0;
+                        if (length > 0) link_word = wide_url[0..length];
+                        break;
                     }
                 }
-            }
-            const is_link = wordIsUrl(link_word);
-            var emitted: usize = 0;
-            while (true) {
-                const remaining = word[emitted..];
-                var chunk = remaining;
-                if (word_width > max_width and remaining.len > 0) {
-                    const fit = fittingPrefixLen(hdc, text_font, emoji_font, line_height, text_ascent, remaining, max_width);
-                    if (fit < remaining.len) chunk = remaining[0..wrapChunkLen(remaining, fit)];
-                }
-                const chunk_start = word_start + emitted;
-                if (draw) {
-                    const word_x_start = cursor_x;
-                    cursor_x = drawWordSlice(hdc, a, text_font, emoji_font, line_height, text_ascent, chunk, cursor_x, line_top, is_link);
-                    if (is_link) {
-                        if (sink) |const_target| {
-                            const target = @constCast(const_target);
-                            const chunk_rect = win.RECT{ .left = word_x_start, .top = line_top, .right = cursor_x, .bottom = line_top + line_height };
-                            var extended = false;
-                            if (target.link_count > 0) {
-                                const last = &target.links[target.link_count - 1];
-                                if (std.mem.eql(u16, last.url.slice(), link_word)) {
-                                    if (last.chunk_count < last.chunk_rects.len) {
-                                        last.chunk_rects[last.chunk_count] = chunk_rect;
-                                        last.chunk_count += 1;
-                                    }
-                                    extended = true;
-                                }
-                            }
-                            if (!extended and target.link_count < target.links.len) {
-                                const span = &target.links[target.link_count];
-                                span.rect = chunk_rect;
-                                span.chunk_count = 0;
-                                if (std.unicode.utf16LeToUtf8Alloc(a.allocator, link_word)) |utf8_word| {
-                                    defer a.allocator.free(utf8_word);
-                                    span.url.set(a.allocator, utf8_word);
-                                    target.link_count += 1;
-                                } else |_| {}
-                            }
-                        }
-                    }
-                    if (sink) |const_target| {
-                        const target = @constCast(const_target);
-                        if (text.ptr == target.text.ptr() and target.word_count < target.word_rects.len) {
-                            const span = &target.word_rects[target.word_count];
-                            span.rect = .{ .left = word_x_start, .top = line_top, .right = cursor_x, .bottom = line_top + line_height };
-                            span.start = @intCast(chunk_start);
-                            span.len = @intCast(chunk.len);
-                            target.word_count += 1;
-                        }
-                    }
-                } else {
-                    cursor_x += mixedSliceWidth(hdc, text_font, emoji_font, line_height, text_ascent, chunk);
-                }
-                if (chunk.len > 0) last_right = cursor_x;
-                emitted += chunk.len;
-                if (emitted >= word.len or chunk.len == 0) break;
-                line_top += line_height;
-                cursor_x = left;
-                last_right = left;
-            }
-            if (!at_end) {
-                if (draw) {
-                    _ = win.SelectObject(hdc, @ptrCast(text_font));
-                    _ = text_draw.drawRun(hdc, cursor_x, line_top, &[_]u16{' '}, 1);
-                }
-                cursor_x += space_width;
-            }
-            word_start = index + 1;
-            if (at_end) break;
-            if (text[index] == '\n') {
-                line_top += line_height;
-                cursor_x = left;
-                last_right = left;
             }
         }
-        index += 1;
+        const is_link = wordIsUrl(link_word);
+        const word_x_start = cursor_x;
+        cursor_x = drawWordSlice(hdc, a, text_font, emoji_font, line_height, text_ascent, chunk, cursor_x, line_top, is_link);
+        if (is_link) {
+            if (sink) |const_target| {
+                const target = @constCast(const_target);
+                const chunk_rect = win.RECT{ .left = word_x_start, .top = line_top, .right = cursor_x, .bottom = line_top + line_height };
+                var extended = false;
+                if (target.link_count > 0) {
+                    const last = &target.links[target.link_count - 1];
+                    if (std.mem.eql(u16, last.url.slice(), link_word)) {
+                        if (last.chunk_count < last.chunk_rects.len) {
+                            last.chunk_rects[last.chunk_count] = chunk_rect;
+                            last.chunk_count += 1;
+                        }
+                        extended = true;
+                    }
+                }
+                if (!extended and target.link_count < target.links.len) {
+                    const span = &target.links[target.link_count];
+                    span.rect = chunk_rect;
+                    span.chunk_count = 0;
+                    if (std.unicode.utf16LeToUtf8Alloc(a.allocator, link_word)) |utf8_word| {
+                        defer a.allocator.free(utf8_word);
+                        span.url.set(a.allocator, utf8_word);
+                        target.link_count += 1;
+                    } else |_| {}
+                }
+            }
+        }
+        if (sink) |const_target| {
+            const target = @constCast(const_target);
+            if (text.ptr == target.text.ptr() and target.word_count < target.word_rects.len) {
+                const span = &target.word_rects[target.word_count];
+                span.rect = .{ .left = word_x_start, .top = line_top, .right = cursor_x, .bottom = line_top + line_height };
+                span.start = @intCast(placed.start);
+                span.len = @intCast(chunk.len);
+                target.word_count += 1;
+            }
+        }
     }
     _ = win.SelectObject(hdc, @ptrCast(text_font));
-    if (last_line_right) |extent| extent.* = last_right - left;
-    return line_height + (line_top - top);
+    if (last_line_right) |extent| extent.* = list_layout.last_right;
+    return list_layout.height();
 }
 
 fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
@@ -16281,9 +16297,8 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (control and !alt and key == 'E') {
-        if (shift) return false;
         if (!archiveShortcutAllowed(a, focus, message.lParam, true)) return false;
-        archiveSelectedChat(a, false, .shortcut);
+        archiveSelectedChat(a, shift, .shortcut);
         return true;
     }
     if (control and shift and key == 'C') {
@@ -19508,7 +19523,7 @@ fn rememberSlackThreadRow(a: *App, message: *const Message) void {
     }
     a.thread_rows.append(a.allocator, row) catch return;
     var index = a.thread_rows.items.len - 1;
-    while (index > 0 and slack.compareTs(a.thread_rows.items[index - 1].id.slice(), row.id.slice()) == .gt) : (index -= 1) {
+    while (index > 0 and (if (row.timestamp.len == 0) slack.compareTs(a.thread_rows.items[index - 1].id.slice(), row.id.slice()) else message_filter.order(a.thread_rows.items[index - 1].timestamp.slice(), a.thread_rows.items[index - 1].id.slice(), row.timestamp.slice(), row.id.slice())) == .gt) : (index -= 1) {
         a.thread_rows.items[index] = a.thread_rows.items[index - 1];
     }
     a.thread_rows.items[index] = row;
