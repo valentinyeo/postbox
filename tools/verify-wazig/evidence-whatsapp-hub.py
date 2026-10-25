@@ -109,7 +109,8 @@ if unified:
     paged = json.loads((folder / 'mixed-paged.messages.json').read_text(encoding='utf-8-sig'))
     paged_ids = [row['id'] for row in paged['messages']]
     assert paged['chat']['id'] == mixed['chat']['id']
-    assert paged_ids == [f'MIXED-{250 - position}' for position in range(250)]
+    assert len(paged_ids) == 250 and set(paged_ids) == {f'MIXED-{number}' for number in range(1, 251)}
+    assert paged['messages'] == sorted(paged['messages'], key=lambda row: (row['time'], row['id']))
     assert len({row['time'] for row in paged['messages']}) == 249
     mixed_reads = [row for row in requests if row.get('wire_path', '').startswith('/v1/wazig/messages?') and 'mixed_count' in row and row['status'] == 200]
     assert mixed_reads[0]['mixed_before'] == '' and mixed_reads[0]['mixed_count'] == 80
