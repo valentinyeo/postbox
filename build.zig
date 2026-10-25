@@ -534,7 +534,7 @@ pub fn build(b: *std.Build) void {
         sourceSection("fn removeFirstPendingSend(", "fn playableVideoPath("),
         sourceSection("fn buildPaletteItems(", "    a.palette_item_count = 0;"),
         "std.mem.doNotOptimizeAway(a); }\nfn activateArchivePalette(a: *App, item: struct { command: u16 }) void {\n",
-        sourceSection("    const command = item.command;\n    closePalette(a);", "fn openSearchPalette("),
+        sourceSection("    const command = item.command;\n    closePalette(a);", "\nfn open"),
         "const shortcuts = struct {\n",
         @embedFile("src/shortcuts.zig")[std.mem.indexOf(u8, @embedFile("src/shortcuts.zig"), "pub fn ctrlASelectsChats(").?..std.mem.indexOf(u8, @embedFile("src/shortcuts.zig"), "pub const Shortcut").?],
         "};\nfn selectAllKey(a: *App, focus: ?win.HWND) bool { const control = true; const alt = false; const shift = false; const key: u32 = 'A';\n",
