@@ -286,7 +286,7 @@ class HubArchiveEvidenceTests(unittest.TestCase):
             self.data[f'{name}.state.json'] = dict(show_archived=archived, chat_count=len(chats))
             self.data[f'{name}.chats.json'] = dict(total=len(chats), chats=[dict(id=chat, archived=archived) for chat in chats])
             (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(10000))
-        (self.folder / 'plain-archive-state.txt').write_text('')
+        (self.folder / 'plain-archive-state.txt').write_text(''.join(f'{chat}\t0\tbaseline\n' for chat in (self.reacted, self.newer)))
         (self.folder / 'hub-proof.log').write_text('hub-archive plain PASS')
 
     def write(self, chat, archived):
@@ -298,10 +298,10 @@ class HubArchiveEvidenceTests(unittest.TestCase):
     def test_plain_chats_stay_archived(self):
         self.check()
 
-    def test_legacy_plain_entry_evidence_fails(self):
+    def test_missing_plain_entry_evidence_fails(self):
         for chat in (self.reacted, self.newer):
             (self.folder / 'plain-archive-state.txt').write_text(f'{chat}\t0\tbaseline\n')
-            with self.assertRaisesRegex(AssertionError, 'must not persist an entry'):
+            with self.assertRaisesRegex(AssertionError, 'must persist intent'):
                 self.check()
 
     def test_old_app_incoming_unarchive_and_reaction_unarchive_fail(self):
@@ -359,15 +359,15 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
                 dict(wire_path='/v1/wazig/chats?archived=false&limit=250', status=200,
                      rows=[dict(jid=chat, last_message_ts='2026-10-10T14:00:00Z', archived=False) for chat in (self.newer, self.telegram)]),
                 dict(wire_path='/fixture/rearchive-enable', status=200),
-                self.write(self.newer), self.write(self.other, False),
+                self.write(self.other, False),
             ],
         }
         for name, archived, chats in [
             ('telegram-only', False, [self.telegram]), ('telegram-empty', False, []),
             ('telegram-unarchived', False, [self.telegram]),
             ('telegram-bulk-empty', False, []), ('telegram-restart-empty', False, []),
-            ('telegram-restart-archived', True, self.all_chats), ('plain-incoming-inbox', False, [self.newer]),
-            ('plain-incoming-archived', True, [chat for chat in self.all_chats if chat != self.newer]),
+            ('telegram-restart-archived', True, self.all_chats), ('plain-incoming-inbox', False, []),
+            ('plain-incoming-archived', True, self.all_chats),
             ('plain-rearchived-inbox', False, []),
             ('plain-rearchived-archived', True, self.all_chats),
         ]:
@@ -379,7 +379,7 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
             (self.folder / f'{name}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526')
         (self.folder / 'telegram-archive-state.txt').write_text(''.join(
             (f"telegram\ttelegram\t{chat}\n" if chat == self.telegram else
-             f"{chat}\t1\t2026-10-10T14:00:00Z\n") for chat in (group, self.telegram)))
+             f"{chat}\t{1 if chat == group else 0}\t2026-10-10T14:00:00Z\n") for chat in self.all_chats))
         (self.folder / 'actions.log').write_text('keys: %i\nkeys: ^a\nkeys: ^e\n')
         (self.folder / 'hub-proof.log').write_text('hub-archive telegram-single-bulk-restart-incoming PASS')
 
@@ -400,7 +400,7 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
     def test_complete_telegram_and_network_unarchive_proof_passes(self):
         self.check()
 
-    def test_missing_initial_or_explicit_plain_archive_evidence_fails(self):
+    def test_missing_initial_archive_or_explicit_unarchive_evidence_fails(self):
         original = copy.deepcopy(self.data['telegram.requests.json'])
         for index in (2, 7):
             with self.subTest(missing_archive=index):
@@ -419,7 +419,7 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.check()
         self.data['telegram.requests.json'].pop()
-        self.data['telegram.requests.json'][-2]['body']['chat'] = 'telegram:user:wrong'
+        self.data['telegram.requests.json'][-1]['body']['chat'] = 'telegram:user:wrong'
         with self.assertRaises(AssertionError):
             self.check()
 
@@ -428,12 +428,12 @@ class HubTelegramArchiveEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'must not auto-rearchive'):
             self.check()
 
-    def test_legacy_plain_entries_after_restart_evidence_fail(self):
+    def test_missing_plain_entries_after_restart_evidence_fail(self):
         path = self.folder / 'telegram-archive-state.txt'
         original = path.read_text()
         for chat in (self.newer, self.other, self.checker['PLAIN_REACTED']):
-            path.write_text(original + f'{chat}\t0\tbaseline\n')
-            with self.assertRaisesRegex(AssertionError, 'must not persist an entry'):
+            path.write_text(''.join(line for line in original.splitlines(keepends=True) if not line.startswith(chat + '\t')))
+            with self.assertRaisesRegex(AssertionError, 'must retain durable non-kept intent'):
                 self.check()
 
     def test_hub_must_really_unarchive_both_with_newer_timestamps(self):

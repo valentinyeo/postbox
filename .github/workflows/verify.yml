@@ -117,6 +117,29 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+      - name: Archive regression and old archive resolution negative control
+        if: matrix.feature == 'archive-inbox'
+        shell: pwsh
+        run: |
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          & zig build test 2>&1 | Tee-Object verification-evidence/archive-tests-fixed.log
+          if ($LASTEXITCODE -ne 0) { throw 'Fixed archive regression tests failed' }
+          $path = (Resolve-Path src/archive_rules.zig).Path
+          $source = [IO.File]::ReadAllText($path)
+          $fixed = 'if (self.find(key.id) != null) return true;'
+          $old = 'if (self.find(key.id)) |index| return self.entries[index].keep;'
+          if (-not $source.Contains($fixed)) { throw 'Archive negative control anchor missing' }
+          try {
+            [IO.File]::WriteAllText($path, $source.Replace($fixed, $old))
+            & zig build test 2>&1 | Tee-Object verification-evidence/archive-tests-old.log
+            if ($LASTEXITCODE -eq 0) { throw 'Old archive resolution unexpectedly passed' }
+            $log = Get-Content verification-evidence/archive-tests-old.log -Raw
+            if ($log -notmatch 'hub rows without archive metadata preserve saved intent in sidebar and control after restart.*FAIL') {
+              throw 'Old archive resolution did not fail the metadata-free regression'
+            }
+          } finally {
+            [IO.File]::WriteAllText($path, $source)
+          }
       - name: ISSUE-462 row-sized DirectWrite regression
         shell: pwsh
         run: |

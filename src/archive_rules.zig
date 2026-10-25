@@ -137,15 +137,7 @@ pub const State = struct {
             return true;
         }
         if (!archived) return true;
-        if (self.count >= max_entries) {
-            for (self.entries[0..self.count], 0..) |*entry, index| {
-                if (!entry.keep) {
-                    self.removeAt(index);
-                    break;
-                }
-            }
-            if (self.count >= max_entries) return false;
-        }
+        if (self.count >= max_entries) return false;
         const entry = &self.entries[self.count];
         entry.* = .{ .provider = std.meta.stringToEnum(@FieldType(Entry, "provider"), @tagName(key.provider)).?, .keep = true };
         @memcpy(entry.account[0..key.account.len], key.account);
@@ -187,17 +179,7 @@ pub const State = struct {
     fn slot(self: *State, jid: []const u8) ?*Entry {
         if (jid.len == 0 or jid.len > max_jid) return null;
         if (self.find(jid)) |index| return &self.entries[index];
-        if (self.count >= max_entries) {
-            var victim: ?usize = null;
-            for (self.entries[0..self.count], 0..) |*entry, index| {
-                if (!entry.keep) {
-                    victim = index;
-                    break;
-                }
-            }
-            const drop = victim orelse return null;
-            self.removeAt(drop);
-        }
+        if (self.count >= max_entries) return null;
         const entry = &self.entries[self.count];
         entry.* = .{};
         @memcpy(entry.jid[0..jid.len], jid);
@@ -470,9 +452,10 @@ test "all user archives the provider unarchives are held once per new message" {
     try std.testing.expect(!loaded.holdKept("kept@g.us", false, "2026-10-10T13:00:00Z"));
 }
 
-test "a full table drops unkept entries first" {
+test "a full table preserves plain and kept archive entries" {
     var state = State{};
     state.setKeep("keep@g.us", true);
+    try std.testing.expect(state.archive("plain@g.us", "baseline", false));
     var i: usize = 0;
     var name: [16]u8 = undefined;
     while (i < max_entries + 5) : (i += 1) {
@@ -481,6 +464,11 @@ test "a full table drops unkept entries first" {
     }
     try std.testing.expectEqual(@as(usize, max_entries), state.count);
     try std.testing.expect(state.isKept("keep@g.us"));
+    try std.testing.expectEqualStrings("baseline", state.baseline("plain@g.us").?);
+    try std.testing.expect(!state.archive("overflow@g.us", "baseline", false));
+    const Key = struct { provider: enum { telegram }, account: []const u8, id: []const u8 };
+    try std.testing.expect(!state.setLocalArchived(Key{ .provider = .telegram, .account = "telegram", .id = "telegram:user:overflow" }, true));
+    try std.testing.expectEqualStrings("baseline", state.baseline("plain@g.us").?);
 }
 
 test "an archived chat keeps its baseline while hundreds of other archived chats are seen" {

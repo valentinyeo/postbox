@@ -60,6 +60,7 @@ const WacliResult = struct {
     http_status: u32 = 502,
 };
 const App = struct {
+    allocator: std.mem.Allocator = std.testing.allocator,
     unified_hub: bool = false,
     cache_tag: Utf8Text(32) = .{},
     chats: [4]Chat = @splat(.{}),
@@ -72,14 +73,18 @@ const App = struct {
     include_archived: bool = false,
     unread_only: bool = false,
     chat_view: enum { all, whatsapp } = .whatsapp,
-    bulk: archive_rules.Selection(4) = .{},
+    bulk: std.ArrayList(Chat) = .empty,
     archive_state: ?*archive_rules.State,
-    pending_archives: [4]PendingArchive = @splat(.{}),
+    pending_archives: []PendingArchive = &.{},
     pending_archive_count: usize = 0,
     archive_batch_total: usize = 0,
     chats_hwnd: ?usize = null,
     canvas: ?usize = null,
     compose: ?usize = null,
+    thread_compose: ?usize = null,
+    search: ?usize = null,
+    emoji_edit: ?usize = null,
+    palette_edit: ?usize = null,
     status: Utf8Text(191) = .{},
     saved: [4096]u8 = undefined,
     saved_len: usize = 0,
@@ -117,15 +122,27 @@ const App = struct {
         }
     } = .{},
 };
+var list_invalidations: usize = 0;
+var compose_text_len: i32 = 0;
+var text_selections: usize = 0;
 const win = struct {
     const FALSE = 0;
+    const EM_SETSEL = 0x00b1;
+    fn GetWindowTextLengthW(_: usize) i32 {
+        return compose_text_len;
+    }
+    fn SendMessageW(_: usize, _: u32, _: usize, _: isize) isize {
+        text_selections += 1;
+        return 0;
+    }
     const HWND = usize;
     const LPARAM = isize;
     const MSG = struct { lParam: LPARAM = 0 };
     fn GetTickCount64() u64 {
         return 1000;
     }
-    fn InvalidateRect(_: usize, _: ?*anyopaque, _: i32) i32 {
+    fn InvalidateRect(handle: usize, _: ?*anyopaque, _: i32) i32 {
+        if (handle == 4) list_invalidations += 1;
         return 1;
     }
 };
@@ -134,6 +151,8 @@ fn lit(comptime text: []const u8) [*:0]const u16 {
 }
 fn fixture(state: *archive_rules.State) App {
     var a = App{ .archive_state = state, .chats_hwnd = 4, .canvas = 6, .hwnd = 5, .compose = 1 };
+    a.pending_archives = std.testing.allocator.alloc(PendingArchive, 4) catch unreachable;
+    @memset(a.pending_archives, .{});
     a.chats[0].jid.set("a@g.us");
     a.chats[1].jid.set("b@g.us");
     for (a.chats[0..2]) |*chat| chat.timestamp.set("2026-10-10T10:00:00Z");
@@ -253,6 +272,8 @@ fn removeChatRow(a: *App, removed: usize) void {
 test "a new message that unarchives a kept chat sends it straight back to the archive" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     try std.testing.expect(state.archive("a@g.us", "2026-10-10T10:00:00Z", true));
     try std.testing.expect(state.archive("b@g.us", "2026-10-10T10:00:00Z", false));
     try std.testing.expect(!holdKept(&a, "a@g.us", true, "2026-10-10T11:00:00Z"));
@@ -277,6 +298,8 @@ test "a plain archive persists intent separately from the keep flag before savin
     for ([_]bool{ false, true }) |keep| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         var key = chat_key.Stored{};
         key.set(chat_key.of(&a.chats[0]));
         try std.testing.expect(state.archive(key.key().id, "baseline", keep));
@@ -297,6 +320,8 @@ test "a plain archive persists intent separately from the keep flag before savin
 test "a legacy non-kept entry alone sends no hub archive request" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     a.unified_hub = true;
     a.refresh_key.set(chat_key.of(&a.chats[0]));
     a.refresh_stamp.set("incoming");
@@ -315,6 +340,8 @@ test "a legacy non-kept entry alone sends no hub archive request" {
 test "a kept entry alone still sends a hub archive request" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     a.unified_hub = true;
     a.refresh_key.set(chat_key.of(&a.chats[0]));
     a.refresh_stamp.set("incoming");
@@ -335,6 +362,8 @@ test "a kept entry alone still sends a hub archive request" {
 test "a kept chat refused by a full archive queue is tried again for the same message" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     try std.testing.expect(state.archive("kept@g.us", "2026-10-10T10:00:00Z", true));
     var name: [16]u8 = undefined;
     for (0..a.pending_archives.len) |i| {
@@ -351,10 +380,14 @@ test "a kept chat refused by a full archive queue is tried again for the same me
 test "a kept chat stays kept through a restart and is archived again on the next new message" {
     var state = archive_rules.State{};
     var before = fixture(&state);
+    defer before.allocator.free(before.pending_archives);
+    defer before.bulk.deinit(before.allocator);
     archiveSelected(&before, true);
     var restarted = archive_rules.State{};
     restarted.parse(before.saved[0..before.saved_len]);
     var a = fixture(&restarted);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     try std.testing.expect(holdKept(&a, "a@g.us", false, "2026-10-10T11:00:00Z"));
     try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
     try std.testing.expect(!a.pending_archives[0].should_unarchive);
@@ -366,6 +399,8 @@ test "a kept chat stays kept through a restart and is archived again on the next
     var buffer: [512]u8 = undefined;
     reloaded.parse(again.format(&buffer));
     var b = fixture(&reloaded);
+    defer b.allocator.free(b.pending_archives);
+    defer b.bulk.deinit(b.allocator);
     try std.testing.expect(!holdKept(&b, "a@g.us", false, "2026-10-10T12:00:00Z"));
     try std.testing.expectEqual(@as(usize, 0), b.pending_archive_count);
 }
@@ -373,6 +408,8 @@ test "a kept chat stays kept through a restart and is archived again on the next
 test "keep archives the selected chat and persists before the child starts" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     archiveSelected(&a, true);
     try std.testing.expect(a.persisted_before_start);
     try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
@@ -388,6 +425,8 @@ test "keep archives the selected chat and persists before the child starts" {
 test "Ctrl+A keep acts on the snapshot and not rows added later" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     selectAllChats(&a);
     a.chats[2].jid.set("later@g.us");
     a.chat_count = 3;
@@ -396,13 +435,15 @@ test "Ctrl+A keep acts on the snapshot and not rows added later" {
     try std.testing.expect(state.isKept("a@g.us"));
     try std.testing.expect(state.isKept("b@g.us"));
     try std.testing.expect(!state.isKept("later@g.us"));
-    try std.testing.expectEqual(@as(usize, 0), a.bulk.count);
+    try std.testing.expectEqual(@as(usize, 0), a.bulk.items.len);
     try std.testing.expectEqualStrings("later@g.us", a.chats[0].jid.slice());
 }
 
 test "plain bulk archive leaves no kept state for either archived chat" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     selectAllChats(&a);
     archiveSelected(&a, false);
     try std.testing.expectEqual(@as(usize, 2), a.pending_archive_count);
@@ -418,6 +459,8 @@ test "plain bulk archive leaves no kept state for either archived chat" {
 test "a kept archive baselines at the archive moment when the list row is stale" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     archiveSelected(&a, true);
     try std.testing.expectEqualStrings("2026-10-10T10:30:00Z", state.baseline("a@g.us").?);
 }
@@ -425,6 +468,8 @@ test "a kept archive baselines at the archive moment when the list row is stale"
 test "a kept archive keeps a list row time that is later than the archive moment" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     a.chats[0].timestamp.set("2026-10-10T12:00:00Z");
     archiveSelected(&a, true);
     try std.testing.expectEqualStrings("2026-10-10T12:00:00Z", state.baseline("a@g.us").?);
@@ -433,6 +478,8 @@ test "a kept archive keeps a list row time that is later than the archive moment
 test "unarchive clears keep while unavailable and full queues do not claim success" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     a.show_archived = true;
     state.setKeep("a@g.us", true);
     archiveSelected(&a, false);
@@ -455,6 +502,8 @@ test "keep rejects other providers without queuing a WhatsApp write" {
     var state = archive_rules.State{};
     for ([_]Provider{ .telegram, .signal }) |provider| {
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         a.chats[0].provider = provider;
         archiveSelected(&a, true);
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
@@ -465,6 +514,8 @@ test "keep rejects other providers without queuing a WhatsApp write" {
 test "keep overrides an earlier archive followed by an unarchive" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     try std.testing.expect(archiveRequest(&a, "a@g.us", .archive) == null);
     try std.testing.expect(archiveRequest(&a, "a@g.us", .unarchive) == null);
     try std.testing.expect(archiveRequest(&a, "a@g.us", .keep) == null);
@@ -476,6 +527,8 @@ test "keep overrides an earlier archive followed by an unarchive" {
 test "pending archive rows stay hidden through queue advancement and view switches" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     selectAllChats(&a);
     archiveSelected(&a, false);
     try std.testing.expectEqual(@as(usize, 2), a.archive_batch_total);
@@ -499,6 +552,8 @@ test "pending archive rows stay hidden through queue advancement and view switch
 test "pending unarchives stay hidden in archived view and share batch accounting" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     a.show_archived = true;
     archiveSelected(&a, false);
     queueUnarchiveChat(&a, "b@g.us", .send);
@@ -519,6 +574,8 @@ test "pending unarchives stay hidden in archived view and share batch accounting
 test "Ctrl+E archives from the compose box and Ctrl+Shift+E is unbound" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     const message = win.MSG{};
     try std.testing.expect(!archiveKey(&a, 'E', true, true, false, a.compose, &message));
     try std.testing.expect(!archiveKey(&a, 'E', true, false, true, a.compose, &message));
@@ -538,6 +595,8 @@ test "archive shortcuts ignore composer search and other edit fields" {
     {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         const message = win.MSG{};
         try std.testing.expect(!archiveKey(&a, 'E', false, false, false, a.compose, &message));
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
@@ -547,6 +606,8 @@ test "archive shortcuts ignore composer search and other edit fields" {
         for ([_]bool{ false, true }) |keep| {
             var state = archive_rules.State{};
             var a = fixture(&state);
+            defer a.allocator.free(a.pending_archives);
+            defer a.bulk.deinit(a.allocator);
             const message = win.MSG{};
             _ = archiveKey(&a, 'E', true, false, keep, focus, &message);
             try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
@@ -559,6 +620,8 @@ test "held archive keys cannot consume successive chats" {
     for ([_]bool{ false, true }) |control| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         const pressed = win.MSG{};
         try std.testing.expect(archiveKey(&a, 'E', control, false, false, 4, &pressed));
         const repeated = win.MSG{ .lParam = 1 << 30 };
@@ -573,6 +636,8 @@ test "modified bare E does not archive" {
     for ([_]bool{ false, true }) |alt| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         const message = win.MSG{};
         _ = archiveKey(&a, 'E', false, alt, !alt, 4, &message);
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
@@ -582,6 +647,8 @@ test "modified bare E does not archive" {
 test "archive shortcut refuses a row that disagrees with the displayed chat" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     a.displayed_jid.set("gone@g.us");
     archiveSelected(&a, false);
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
@@ -590,6 +657,8 @@ test "archive shortcut refuses a row that disagrees with the displayed chat" {
 test "palette archive refuses a changed chat instead of archiving the replacement row" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     buildPaletteItems(&a);
     a.chats[0] = a.chats[1];
     a.chat_count = 1;
@@ -601,6 +670,8 @@ test "palette archive rejects a changed bulk selection or archive view" {
     for ([_]bool{ false, true }) |view_changed| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         selectAllChats(&a);
         buildPaletteItems(&a);
         if (view_changed) a.show_archived = true else a.bulk.clear();
@@ -612,6 +683,8 @@ test "palette archive rejects a changed bulk selection or archive view" {
 test "palette archive follows the same jid through a list reorder" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     buildPaletteItems(&a);
     std.mem.swap(Chat, &a.chats[0], &a.chats[1]);
     a.selected_chat = 1;
@@ -625,6 +698,8 @@ test "successful local text file and voice sends unarchive even kept chats" {
         for (0..3) |kind| {
             var state = archive_rules.State{};
             var a = fixture(&state);
+            defer a.allocator.free(a.pending_archives);
+            defer a.bulk.deinit(a.allocator);
             a.chats[0].archived = true;
             try std.testing.expect(state.archive("a@g.us", "baseline", keep));
             a.pending_sends[0].jid.set("a@g.us");
@@ -645,6 +720,8 @@ test "failed local sends and successful inbox sends do not unarchive" {
     for ([_]bool{ false, true }) |delivered| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         a.chats[0].archived = !delivered;
         a.pending_sends[0].jid.set("a@g.us");
         a.pending_send_count = 1;
@@ -656,6 +733,8 @@ test "failed local sends and successful inbox sends do not unarchive" {
 test "local send unarchives its jid even when a different chat is selected" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     try std.testing.expect(state.archive("sent@g.us", "baseline", false));
     a.pending_sends[0].jid.set("sent@g.us");
     a.pending_send_count = 1;
@@ -669,6 +748,8 @@ test "every archive child logs its exact jid direction and queued source once" {
     for ([_]archive_rules.Action{ .archive, .unarchive }) |action| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         a.read_child = 1;
         try std.testing.expect(archiveRequest(&a, "a@g.us", action) == null);
         a.chats[0].jid.set("replacement@g.us");
@@ -690,6 +771,8 @@ test "archive shortcuts ignore unrelated windows and buttons" {
     for ([_]?usize{ null, 7, 8 }) |focus| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         const message = win.MSG{};
         _ = archiveKey(&a, 'E', true, false, false, focus, &message);
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
@@ -699,6 +782,8 @@ test "archive shortcuts ignore unrelated windows and buttons" {
 test "palette cannot turn unarchive into archive after a remote unarchive" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     a.chats[0].archived = true;
     buildPaletteItems(&a);
     a.chats[0].archived = false;
@@ -709,6 +794,8 @@ test "palette cannot turn unarchive into archive after a remote unarchive" {
 test "oversized archive ids cannot truncate into a different chat" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     var jid: [archive_rules.max_jid + 1]u8 = @splat('a');
     jid[archive_rules.max_jid - 2] = '@';
     try std.testing.expect(archiveRequest(&a, &jid, .archive) != null);
@@ -718,6 +805,8 @@ test "oversized archive ids cannot truncate into a different chat" {
 test "local send deferred unarchive retains send source past a full queue" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     state.setKeep("a@g.us", true);
     a.pending_archive_count = a.pending_archives.len;
     a.read_child = 1;
@@ -737,6 +826,8 @@ test "local send deferred unarchive retains send source past a full queue" {
 test "Slack archive persists per Key without ever queuing either archive transport" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     a.chats[0].provider = .slack;
     a.chats[0].account.set("fixture-first");
     a.chats[0].jid.set("channel-shared");
@@ -765,6 +856,8 @@ test "Slack archive persists per Key without ever queuing either archive transpo
 test "two Slack accounts with the same channel id archive and unarchive independently" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     for (a.chats[0..2], 0..) |*chat, index| {
         chat.provider = .slack;
         chat.account.set(if (index == 0) "fixture-first" else "fixture-second");
@@ -795,6 +888,8 @@ test "Slack Ctrl E bare E and menu archive share the local action" {
     for ([_]bool{ false, true }) |control| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         a.chats[0].provider = .slack;
         a.chats[0].account.set("fixture-team");
         var key = chat_key.Stored{};
@@ -817,6 +912,8 @@ test "Slack Ctrl E bare E and menu archive share the local action" {
 test "Slack palette archive rejects a replacement account with the same channel id" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     a.chats[0].provider = .slack;
     a.chats[0].account.set("fixture-first");
     buildPaletteItems(&a);
@@ -829,6 +926,8 @@ test "Slack palette archive rejects a replacement account with the same channel 
 test "bulk Slack archive keeps account identities and never queues hub archive" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     for (a.chats[0..2], 0..) |*chat, index| {
         chat.provider = .slack;
         chat.account.set(if (index == 0) "fixture-first" else "fixture-second");
@@ -865,6 +964,8 @@ test "Slack local state coexists with WhatsApp keep and plain archive round trip
 test "sending to an archived Slack chat never queues unarchive or clears local state" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     const key = chat_key.Key{ .provider = .slack, .account = "fixture-team", .id = "fixture-channel" };
     try std.testing.expect(state.setLocalArchived(key, true));
     a.pending_sends[0].provider = .slack;
@@ -880,6 +981,8 @@ test "hub Ctrl E locally archives the last Telegram or Signal row from every all
         for ([_]?usize{ 1, 4, 5, 6 }) |focus| {
             var state = archive_rules.State{};
             var a = fixture(&state);
+            defer a.allocator.free(a.pending_archives);
+            defer a.bulk.deinit(a.allocator);
             a.unified_hub = true;
             a.cache_tag.set("hub-cache");
             a.chat_count = 1;
@@ -918,6 +1021,8 @@ test "hub Ctrl E archives a one-row bulk selection outside the WhatsApp cache ac
     for ([_]Provider{ .telegram, .signal, .whatsapp }) |provider| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         a.unified_hub = true;
         a.cache_tag.set("hub-cache");
         a.chat_count = 1;
@@ -933,7 +1038,7 @@ test "hub Ctrl E archives a one-row bulk selection outside the WhatsApp cache ac
         try std.testing.expectEqual(@as(usize, if (provider == .whatsapp) 1 else 0), a.hub_archive_requests);
         if (provider == .whatsapp) try std.testing.expectEqualStrings(key.key().id, a.pending_archives[0].jid.slice());
         try std.testing.expectEqual(@as(usize, 0), a.chat_count);
-        try std.testing.expectEqual(@as(usize, 0), a.bulk.count);
+        try std.testing.expectEqual(@as(usize, 0), a.bulk.items.len);
         try std.testing.expect(state.localArchived(key.key()));
         if (provider == .whatsapp) try std.testing.expect(state.baseline(key.key().id) != null);
     }
@@ -944,6 +1049,8 @@ test "only kept hub archives hold the real provider account and remove the match
         for ([_]bool{ false, true }) |keep| {
             var state = archive_rules.State{};
             var a = fixture(&state);
+            defer a.allocator.free(a.pending_archives);
+            defer a.bulk.deinit(a.allocator);
             a.unified_hub = true;
             a.cache_tag.set("hub-cache");
             a.chats[0].provider = provider;
@@ -989,6 +1096,8 @@ test "hub sends preserve local Telegram and Signal archives and an out of range 
     for ([_]Provider{ .telegram, .signal }) |provider| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         a.unified_hub = true;
         a.chat_count = 1;
         a.selected_chat = 1;
@@ -1011,6 +1120,8 @@ test "a late unsupported hub archive preserves legacy local intent without retry
         for ([_]bool{ false, true }) |keep| {
             var state = archive_rules.State{};
             var a = fixture(&state);
+            defer a.allocator.free(a.pending_archives);
+            defer a.bulk.deinit(a.allocator);
             a.unified_hub = true;
             a.cache_tag.set("hub-cache");
             a.chats[0].provider = provider;
@@ -1050,6 +1161,8 @@ test "non hub Telegram and Signal archiving remains unavailable" {
         for ([_]bool{ false, true }) |bulk| {
             var state = archive_rules.State{};
             var a = fixture(&state);
+            defer a.allocator.free(a.pending_archives);
+            defer a.bulk.deinit(a.allocator);
             a.chat_count = 1;
             a.chats[0].provider = provider;
             a.chats[0].jid.set(if (provider == .signal) "signal:fixture-contact" else "telegram:user:1001");
@@ -1067,6 +1180,8 @@ test "successful hub archives stay sticky per timestamp and transient failures r
     for ([_]bool{ false, true }) |keep| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         a.unified_hub = true;
         a.cache_tag.set("hub-cache");
         a.chats[0].provider = .whatsapp;
@@ -1121,6 +1236,8 @@ test "successful hub archives stay sticky per timestamp and transient failures r
 test "bulk hub Telegram and Signal archives persist every row without a hub request" {
     var state = archive_rules.State{};
     var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
     a.unified_hub = true;
     a.cache_tag.set("hub-cache");
     a.chats[0].provider = .telegram;
@@ -1150,20 +1267,22 @@ test "bulk hub Telegram and Signal archives persist every row without a hub requ
     try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
 }
 
-test "IGSH-763 inbox scan includes locally unarchived provider archived WhatsApp rows" {
+test "inbox and control filters treat plain WhatsApp archive entries as archived" {
     var state = archive_rules.State{};
     state.parse("fixture:live@g.us\t0\tbaseline\nfixture:kept@g.us\t1\tbaseline\n");
     var buffer: [512]u8 = undefined;
     var loaded = archive_rules.State{};
     loaded.parse(state.format(&buffer));
     const rows = [_]struct { id: []const u8, provider_archived: bool, archived: bool }{
-        .{ .id = "fixture:live@g.us", .provider_archived = true, .archived = false },
+        .{ .id = "fixture:live@g.us", .provider_archived = true, .archived = true },
         .{ .id = "fixture:kept@g.us", .provider_archived = false, .archived = true },
         .{ .id = "fixture:phone@g.us", .provider_archived = true, .archived = true },
         .{ .id = "fixture:inbox@g.us", .provider_archived = false, .archived = false },
     };
     inline for (.{ archiveInboxRow, archiveControlRow }) |filter| {
         var a = fixture(&loaded);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         a.unified_hub = true;
         requestChats(&a);
         try std.testing.expect(!a.show_archived and !a.include_archived);
@@ -1179,7 +1298,7 @@ test "IGSH-763 inbox scan includes locally unarchived provider archived WhatsApp
             try std.testing.expectEqual(!row.archived, shown != null);
             if (shown) |current| {
                 try std.testing.expect(!current.archived);
-                if (visible == 0) try std.testing.expectEqualStrings("fixture:live@g.us", current.jid.slice());
+                if (visible == 0) try std.testing.expectEqualStrings("fixture:inbox@g.us", current.jid.slice());
                 visible += 1;
             }
             a.show_archived = true;
@@ -1187,7 +1306,7 @@ test "IGSH-763 inbox scan includes locally unarchived provider archived WhatsApp
             try std.testing.expectEqual(row.archived, archived != null);
             a.show_archived = false;
         }
-        try std.testing.expectEqual(@as(usize, 2), visible);
+        try std.testing.expectEqual(@as(usize, 1), visible);
     }
 }
 
@@ -1197,6 +1316,8 @@ test "hub Telegram and Signal archives honor both phone and local state in both 
             for ([_]bool{ false, true }) |local| {
                 var state = archive_rules.State{};
                 var a = fixture(&state);
+                defer a.allocator.free(a.pending_archives);
+                defer a.bulk.deinit(a.allocator);
                 a.unified_hub = true;
                 var chat = Chat{ .provider = provider };
                 chat.account.set(if (provider == .telegram) "telegram" else "signal");
@@ -1224,6 +1345,8 @@ test "mixed archive and unarchive keep the row selected and visibly marked on ev
     for ([_]Provider{ .whatsapp, .telegram, .signal, .slack }) |provider| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         a.unified_hub = true;
         a.include_archived = true;
         a.chats[0].provider = provider;
@@ -1247,6 +1370,8 @@ test "mixed locally unarchived phone rows remain unarchived after reloading stat
     for ([_]Provider{ .telegram, .signal, .slack }) |provider| {
         var state = archive_rules.State{};
         var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
         a.unified_hub = true;
         a.include_archived = true;
         a.chats[0].provider = provider;
@@ -1273,6 +1398,8 @@ test "archive row labels survive contact kind pin unread and Show archived toggl
                 for ([_]bool{ false, true }) |unread| {
                     var state = archive_rules.State{};
                     var a = fixture(&state);
+                    defer a.allocator.free(a.pending_archives);
+                    defer a.bulk.deinit(a.allocator);
                     a.unified_hub = true;
                     var chat = Chat{ .provider = provider, .archived = expected != .incoming, .pinned = pinned, .unread = unread };
                     chat.jid.set("fixture:row");
@@ -1304,4 +1431,119 @@ test "archive row labels survive contact kind pin unread and Show archived toggl
             }
         }
     }
+}
+
+test "hub rows without archive metadata preserve saved intent in sidebar and control after restart" {
+    inline for (.{ archiveInboxRow, archiveControlRow }) |filter| {
+        for ([_]Provider{ .whatsapp, .slack, .telegram, .signal }) |provider| {
+            for ([_]bool{ false, true }) |keep| {
+                var state = archive_rules.State{};
+                var a = fixture(&state);
+                defer a.allocator.free(a.pending_archives);
+                defer a.bulk.deinit(a.allocator);
+                a.unified_hub = true;
+                a.chats[0].provider = provider;
+                a.chats[0].account.set("fixture-account");
+                a.chats[0].jid.set("fixture:archived@g.us");
+                const row = a.chats[0];
+                try std.testing.expect(archiveChat(&a, chat_key.of(&row), if (keep) .keep else .archive, .shortcut) == null);
+                var loaded = archive_rules.State{};
+                loaded.parse(a.saved[0..a.saved_len]);
+                a.archive_state = &loaded;
+                a.pending_archive_count = 0;
+                for ([_][]const u8{ "{}", "{\"archived\":false}", "{\"archived\":true}" }) |raw| {
+                    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, raw, .{});
+                    defer parsed.deinit();
+                    a.show_archived = false;
+                    a.include_archived = false;
+                    try std.testing.expect(filter(&a, row, parsed.value.object) == null);
+                    a.show_archived = true;
+                    const archived = filter(&a, row, parsed.value.object) orelse return error.ArchiveIntentLost;
+                    try std.testing.expect(archived.archived);
+                    try std.testing.expect(archiveMarker(&a, &archived) != null);
+                    try std.testing.expect(loaded.localArchived(chat_key.of(&row)));
+                    var bytes: [4096]u8 = undefined;
+                    try std.testing.expectEqualStrings(a.saved[0..a.saved_len], loaded.format(&bytes));
+                }
+            }
+        }
+    }
+}
+
+test "ten select all presses rebuild the current snapshot and invalidate the list each time" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
+    for (0..10) |press| {
+        a.chat_count = if (press % 2 == 0) 2 else 1;
+        const before = list_invalidations;
+        selectAllChats(&a);
+        try std.testing.expectEqual(a.chat_count, a.bulk.items.len);
+        try std.testing.expect(list_invalidations > before);
+        for (a.bulk.items, 0..) |*chat, index| try std.testing.expect(chat_key.Key.eql(chat_key.of(chat), chat_key.of(&a.chats[index])));
+        try std.testing.expect(std.mem.indexOf(u8, a.status.slice(), "chats selected") != null);
+    }
+    a.chat_count = 0;
+    selectAllChats(&a);
+    try std.testing.expectEqual(@as(usize, 0), a.bulk.items.len);
+    try std.testing.expectEqualStrings("No chats to select", a.status.slice());
+}
+
+test "bulk snapshot survives a list refresh to zero rows" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
+    selectAllChats(&a);
+    a.chat_count = 0;
+    archiveSelected(&a, false);
+    try std.testing.expectEqual(@as(usize, 2), a.pending_archive_count);
+    try std.testing.expect(state.find("a@g.us") != null);
+    try std.testing.expect(state.find("b@g.us") != null);
+}
+
+test "hub bulk completion starts every write and refreshes chats only after the final acknowledgement" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
+    a.unified_hub = true;
+    selectAllChats(&a);
+    archiveSelected(&a, false);
+    try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
+    for (0..2) |index| {
+        const result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .ok = true, .http_status = 200 };
+        a.hub_archive_inflight = false;
+        applyHubArchiveResult(&a, &result);
+        try std.testing.expectEqual(@as(usize, if (index == 0) 0 else 1), a.chats_refreshes);
+    }
+    try std.testing.expectEqual(@as(usize, 2), a.hub_archive_requests);
+    try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+}
+
+test "Ctrl A routes list canvas main and empty composer focus but preserves every text field" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
+    defer compose_text_len = 0;
+    for ([_]?win.HWND{ a.chats_hwnd, a.canvas, a.hwnd, a.compose }) |focus| {
+        a.bulk.clearRetainingCapacity();
+        try std.testing.expect(selectAllKey(&a, focus));
+        try std.testing.expectEqual(a.chat_count, a.bulk.items.len);
+    }
+    a.bulk.clearRetainingCapacity();
+    a.search = 7;
+    a.thread_compose = 8;
+    a.emoji_edit = 9;
+    a.palette_edit = 10;
+    compose_text_len = 5;
+    for ([_]?win.HWND{ a.compose, a.search, a.thread_compose, a.emoji_edit, a.palette_edit }) |focus| {
+        const before = text_selections;
+        try std.testing.expect(selectAllKey(&a, focus));
+        try std.testing.expectEqual(@as(usize, 0), a.bulk.items.len);
+        try std.testing.expectEqual(before + 1, text_selections);
+    }
+    try std.testing.expect(!selectAllKey(&a, null));
 }

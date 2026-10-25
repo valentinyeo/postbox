@@ -50,3 +50,8 @@ Telegram and Signal use the same local archive path as Slack only in hub mode. L
 Negative controls: the pre-fix client sends Telegram archive writes and removes its saved intent on the real 502, failing the zero-write and empty-inbox requirements. The Python source-contract test is red on commit A and green only once both unsupported providers enter the hub-local route. The evidence checker independently rejects Telegram requests at any status, duplicate WhatsApp re-archives, unchanged timestamps, absent hub flags, wrong provider identity, inbox returns, missing restart rows, missing explicit-unarchive proof and lost local state. The earlier migration, plain WhatsApp and reaction checks remain required.
 
 This journey proves only the configured Telegram client contract; Signal behavior has unit coverage, not a Windows UI journey. Windows runtime execution, Zig unit execution and screenshot inspection still require authorized CI verification. It does not prove live provider delivery or production hub availability. Font, media, voice, toolbar and atomic executable invariants remain untouched.
+
+
+### Durable plain archive intent (IGSH-767)
+
+Plain WhatsApp entries now persist keep=0, which means archived without automatic keep writes, not explicitly unarchived. This supersedes the earlier provider-unarchive return behavior. The incoming phase requires an empty inbox and all five archive rows even when the provider reports archived=false. Enabling fixture writes must not cause another WhatsApp archive request. The journey preserves one initial plain archive per chat and explicitly unarchives only the original inbox chat at the end. Saved plain entries are required in both state snapshots. No new delay is introduced.
