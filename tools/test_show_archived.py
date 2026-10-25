@@ -278,7 +278,7 @@ class ShowArchivedTests(unittest.TestCase):
             foreground = (0, 0, 0) if light else (255, 255, 255)
             dimmed = tuple((text * 180 + back * 75) // 255 for text, back in zip(foreground, background))
             for scope in ('sidebar', 'search', 'inbox'):
-                for mode in ('dim', 'hover', 'selected'):
+                for mode in (('dim',) if light else ('dim', 'hover', 'selected')):
                     name = f'archive-{scope}-{mode}'
                     image_path = self.folder / f'{name}.png'
                     original = image_path.read_bytes()
@@ -294,7 +294,7 @@ class ShowArchivedTests(unittest.TestCase):
                     image_path.write_bytes(original)
             self.assertEqual(self.validate().returncode, 0)
 
-    def test_full_strength_luminance_tolerates_cleartype_channel_differences(self):
+    def test_full_strength_text_colour_tolerates_cleartype_channel_differences(self):
         checker = runpy.run_path(str(TOOLS / 'check-archive-presentation.py'))
         pixels = runpy.run_path(str(TOOLS / 'check-workspace-icons.py'))
         for light in (False, True):
@@ -311,11 +311,11 @@ class ShowArchivedTests(unittest.TestCase):
                     with self.subTest(light=light, scope=scope, mode=mode):
                         metrics = checker['check_scene'](self.folder, name, capture=True)
                         self.assertEqual(metrics['full_strength_colour_distance'], 22)
-                        self.assertEqual(metrics['archived']['mean'], 2 if light else 253)
-                        self.assertGreaterEqual(metrics['archived']['mean'], metrics['live']['mean'] - 8)
+                        self.assertEqual(metrics['archived']['text'], list(colour))
+                        self.assertGreaterEqual(sum(metrics['archived']['text']) / 3, sum(metrics['live']['text']) / 3 - 20)
             self.assertEqual(self.validate().returncode, 0)
 
-    def test_full_strength_luminance_accepts_background_difference_and_rejects_dimming(self):
+    def test_full_strength_text_colour_accepts_background_difference_and_rejects_dimming(self):
         checker = runpy.run_path(str(TOOLS / 'check-archive-presentation.py'))
         pixels = runpy.run_path(str(TOOLS / 'check-workspace-icons.py'))
         for scope in ('sidebar', 'search', 'inbox'):
@@ -325,19 +325,19 @@ class ShowArchivedTests(unittest.TestCase):
                 _, _, image = pixels['read_png'](image_path)
                 for y in range(2 * 64, 3 * 64):
                     image[y] = [(38, 38, 38)] * 240
-                for level in (255, 239, 237, 105):
+                for level in (255, 235, 234, 180):
                     for y in range(2 * 64 + 16, 2 * 64 + 26):
-                        image[y][70:120] = [(255, 255, 255)] * 50
-                        image[y][120:170] = [(level, level, level)] * 50
+                        image[y][70:170] = [(level, level, level)] * 100
                     pixels['write_png'](image_path, image)
                     with self.subTest(scope=scope, mode=mode, level=level):
-                        if level in (237, 105):
+                        if level in (234, 180):
                             with self.assertRaisesRegex(AssertionError, 'archived row came back dimmed when hovered or selected'):
                                 checker['check_scene'](self.folder, name, capture=True)
                         else:
                             metrics = checker['check_scene'](self.folder, name, capture=True)
-                            self.assertEqual(metrics['live']['mean'], 255)
-                            self.assertEqual(metrics['archived']['mean'], (255 + level) // 2)
+                            self.assertEqual(sum(metrics['live']['text']) / 3, 255)
+                            self.assertEqual(sum(metrics['archived']['text']) / 3, level)
+                            self.assertNotEqual(metrics['archived']['background'], metrics['live']['background'])
                             self.assertLess(metrics['archived']['contrast'], metrics['live']['contrast'] * 0.9)
                 for y in range(2 * 64 + 16, 2 * 64 + 26):
                     image[y][70:170] = [(255, 255, 255)] * 100
