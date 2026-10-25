@@ -15,9 +15,11 @@ Text comparison is a verification fixture, not a product command or alternate re
 
 Dispatch `feature=text-comparison`. The helper adds `--verify-text-comparison`, loads the exact `src/verify_text.json` paragraph through the guarded production parser and waits for painted metrics to match the maximized UIA canvas.
 
-`compare-text.ps1` captures the native window, then `chrome-text.cjs` opens installed headed Chrome at device scale 1. Require DirectWrite at 96 DPI, body weight 500, heading weight 600, identical text/sizes/line heights and font hashes.
+`compare-text.ps1` captures the native window, then `chrome-text.cjs` opens installed headed Chrome at device scale 1. Require DirectWrite at 96 DPI, body weight 400, heading weight 600, identical text/sizes/line heights and font hashes.
 
 Retain `text-metrics.json`, `native-capture.json`, `chrome.json`, `chrome.html`, bundled fonts/license, `wazig.png`, `chrome.png`, `text-comparison.png` and `*-paragraph{,-3x}.png`. `check-text-comparison.cjs` rechecks source/fixture contracts, exact font hashes, PNG dimensions/crop scaling, isolated side effects and cleanup.
+
+- **Chat lists:** dispatch `feature=chat-lists` for six long bullets and two nested levels through the real Slack bubble renderer. At baseline and larger text size, the journey checks Regular body weight, measured marker/text columns, full bubble height, and screenshot foreground left edges within one pixel between the first text line and each continuation. See `features/chat-lists.md`.
 
 ## Gotchas
 

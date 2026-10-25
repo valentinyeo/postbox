@@ -105,3 +105,5 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-737: include archived chats per account and inbox -> `show-archived` (Alt+A, marked mixed rows, local archive actions, tooltip and same-profile restart)
 
 - IGSH-777: bulk archive sends one WhatsApp batch and preserves every result -> `archive-inbox` (fixed 264-chat timing, one batch, no single archive requests, durable state and restart)
+
+- IGSH-829: regular message bodies and hanging list indentation -> `chat-lists` (six long bullets and two nested levels, actual font weight and screenshot text-edge alignment at two saved sizes)

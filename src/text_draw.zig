@@ -769,7 +769,7 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
     _ = win.SetTextColor(dc, 0);
     _ = win.SetBkMode(dc, win.TRANSPARENT);
     var font_path: [1024:0]u16 = undefined;
-    const path_len = win.GetFullPathNameW(wide("assets\\IBMPlexSans-Medium.ttf"), font_path.len, &font_path, null);
+    const path_len = win.GetFullPathNameW(wide("assets\\IBMPlexSans-Regular.ttf"), font_path.len, &font_path, null);
     const font_files = @import("font_config.zig").files;
     var bundled_paths: [font_files.len][1024:0]u16 = undefined;
     var font_pointers: [font_files.len][*:0]const u16 = undefined;
@@ -877,7 +877,7 @@ test "bundled DirectWrite raster provenance wrapping origins clipping and timing
         try check(actual_collection.?.lpVtbl.*.GetFontFamily.?(actual_collection.?, family_index, &family));
         defer release(family);
         var resolved_font: ?*c.IDWriteFont = null;
-        try check(family.?.lpVtbl.*.GetFirstMatchingFont.?(family.?, c.DWRITE_FONT_WEIGHT_MEDIUM, c.DWRITE_FONT_STRETCH_NORMAL, c.DWRITE_FONT_STYLE_NORMAL, &resolved_font));
+        try check(family.?.lpVtbl.*.GetFirstMatchingFont.?(family.?, @intCast(@import("font_config.zig").body_weight), c.DWRITE_FONT_STRETCH_NORMAL, c.DWRITE_FONT_STYLE_NORMAL, &resolved_font));
         defer release(resolved_font);
         var face: ?*c.IDWriteFontFace = null;
         try check(resolved_font.?.lpVtbl.*.CreateFontFace.?(resolved_font.?, &face));
@@ -1186,7 +1186,7 @@ test "DirectWrite fifty distinct strings frame benchmark" {
     _ = win.SetTextColor(dc, 0);
     _ = win.SetBkMode(dc, win.TRANSPARENT);
     var font_path: [1024:0]u16 = undefined;
-    _ = win.GetFullPathNameW(wide("assets\\IBMPlexSans-Medium.ttf"), font_path.len, &font_path, null);
+    _ = win.GetFullPathNameW(wide("assets\\IBMPlexSans-Regular.ttf"), font_path.len, &font_path, null);
     setBundledFontPaths(&.{&font_path});
     defer reset();
     _ = available();
