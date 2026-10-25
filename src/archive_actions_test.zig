@@ -674,7 +674,7 @@ test "palette archive rejects a changed bulk selection or archive view" {
         defer a.bulk.deinit(a.allocator);
         selectAllChats(&a);
         buildPaletteItems(&a);
-        if (view_changed) a.show_archived = true else a.bulk.clear();
+        if (view_changed) a.show_archived = true else a.bulk.clearRetainingCapacity();
         activateArchivePalette(&a, .{ .command = command_archive });
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     }
