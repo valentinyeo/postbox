@@ -189,6 +189,15 @@ class ThemeRuntimeTests(unittest.TestCase):
             result = subprocess.run([ZIG, "test", str(harness)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertRegex(result.stdout + result.stderr, r"All [0-9]+ tests passed\.")
+            for original, broken in (
+                ("_ = win.EnumThreadWindows(win.GetCurrentThreadId(), redrawThemeWindow, 0);", ""),
+                ("win.RDW_ALLCHILDREN", "0"),
+            ):
+                with self.subTest(original=original):
+                    self.assertEqual(source.count(original), 1)
+                    harness.write_text(source.replace(original, broken))
+                    result = subprocess.run([ZIG, "test", str(harness)], capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_IGSH_505_startup_palette_control_and_child_paint_wiring_with_removal_controls(self):
         main = (ROOT / "src/main.zig").read_text()

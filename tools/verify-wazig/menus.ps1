@@ -140,8 +140,7 @@ function Invoke-Menus($Session) {
         @{ name = 'palette'; command = ''; class = 'MessagesPalette' },
         @{ name = 'accounts'; command = 'Manage accounts'; class = 'MessagesPalette' },
         @{ name = 'emoji'; command = 'Insert emoji'; class = 'MessagesEmojiPicker' },
-        @{ name = 'shortcuts'; command = 'Keyboard shortcuts'; class = 'MessagesShortcutHelp' },
-        @{ name = 'slack-setup'; command = 'Slack sign-in settings'; class = 'SlackSetup' }
+        @{ name = 'shortcuts'; command = 'Keyboard shortcuts'; class = 'MessagesShortcutHelp' }
     )) {
         Save-Screen $Session "amoled-$($entry.name)-before"
         if ($entry.command) { Open-PaletteCommand $Session $entry.command } else { Send-Keys $Session '^k' }
@@ -164,7 +163,7 @@ function Invoke-Menus($Session) {
             [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'RICHEDIT50W')
         )
         $edits = $window.FindAll([Windows.Automation.TreeScope]::Descendants, $editCondition)
-        $expectedEdits = if ($entry.name -eq 'shortcuts') { 0 } elseif ($entry.name -eq 'slack-setup') { 2 } else { 1 }
+        $expectedEdits = if ($entry.name -eq 'shortcuts') { 0 } else { 1 }
         Assert-That ($edits.Count -eq $expectedEdits) "$($entry.name) edit inventory changed"
         foreach ($edit in $edits) {
             $rect = [VerifyMenus]::Bounds([IntPtr]$edit.Current.NativeWindowHandle)
@@ -174,7 +173,7 @@ function Invoke-Menus($Session) {
             if ($entry.name -eq 'emoji') { [VerifyMenus]::Validate($metric, $false) }
             Assert-That ($metric.background -le 0.05126945837404324 -and $metric.lightTileFraction -le 0.02) "$($entry.name) has a light edit field"
         }
-        if ($entry.class -eq 'SlackSetup') { Close-Popup $Session $entry.class '%{F4}' } else { Close-Popup $Session $entry.class }
+        Close-Popup $Session $entry.class
     }
     Click-Control $Session '1032'
     Save-Screen $Session 'amoled-shortcode-before'

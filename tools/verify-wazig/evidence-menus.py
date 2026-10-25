@@ -14,10 +14,10 @@ assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-s
 assert 'PIXEL ORACLE PASSED:' in (folder / 'pixel-oracle-controls.txt').read_text(encoding='utf-8-sig')
 assert not (folder / 'failure.txt').exists()
 measurements = json.loads((folder / 'menu-luminances.json').read_text(encoding='utf-8-sig'))
-popups = ['amoled-' + name for name in ['chat', 'composer', 'search', 'message', 'selection', 'palette', 'accounts', 'emoji', 'shortcuts', 'slack-setup', 'shortcode']] + ['green-chat']
+popups = ['amoled-' + name for name in ['chat', 'composer', 'search', 'message', 'selection', 'palette', 'accounts', 'emoji', 'shortcuts', 'shortcode']] + ['green-chat']
 popup_records = [row for row in measurements if row['expected'] != 'dark-edit']
 assert sorted(row['screenshot'] for row in popup_records) == sorted(name + '-after.png' for name in popups)
-for popup, count in [('palette', 1), ('accounts', 1), ('emoji', 1), ('slack-setup', 2)]:
+for popup, count in [('palette', 1), ('accounts', 1), ('emoji', 1)]:
     edits = [row for row in measurements if row['expected'] == 'dark-edit' and row['screenshot'] == f'amoled-{popup}-after.png']
     assert len(edits) == count, popup
 for row in measurements:

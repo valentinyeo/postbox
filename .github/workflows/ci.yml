@@ -124,7 +124,7 @@ jobs:
         with:
           version: 0.16.0
       - name: Build hub-only desktop
-        run: zig build -Dtarget=x86_64-windows-gnu --release=small
+        run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526
       - name: Verify hub-only binary
         run: python3 tools/check_hub_only.py --binary zig-out/bin/Messages.exe
       - name: Exe size report
