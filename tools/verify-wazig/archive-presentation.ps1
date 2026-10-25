@@ -36,17 +36,21 @@ function Save-ArchivePresentationScene($Session, [string]$Name, [string]$Mode) {
     $desktop = [System.Windows.Forms.SystemInformation]::VirtualScreen
     $rows = @((Read-Control $Session chats).chats)
     $state = Read-Control $Session status
+    $theme = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../src/theme.zig'))
+    $weight = [regex]::Match($theme, 'pub const archived_row_foreground_weight: u8 = (\d+);')
+    Assert-That ($weight.Success) 'Missing archived row foreground mix weight'
     $layout = @{
         dpi = [VerifyWindow]::GetDpiForWindow($handle); row_height = $rowHeight.ToUInt64(); top = $topIndex.ToUInt64()
         x = $origin.X - $desktop.Left; y = $origin.Y - $desktop.Top; width = $client.Right; height = $client.Bottom
         mode = $Mode; rows = $rows; selected = $state.selected.id
+        colour_model = 'theme-foreground-mix'; foreground_weight = [int]$weight.Groups[1].Value
     }
     $layout | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.layout.json")
     $null = Wait-Until {
         Save-Screen $Session $Name
         & python "$PSScriptRoot/check-archive-presentation.py" $Session.evidence --scene $Name | Out-Host
         $LASTEXITCODE -eq 0
-    } "measured archive row $Name"
+    } "measured colour-mixed archive row $Name"
 }
 
 function Assert-ArchiveFooterRemoved($Session) {

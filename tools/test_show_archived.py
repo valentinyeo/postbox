@@ -3,6 +3,7 @@ from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 import importlib.util
 import json
+import re
 import runpy
 from pathlib import Path
 import subprocess
@@ -66,9 +67,12 @@ class ShowArchivedTests(unittest.TestCase):
         self.save_requests()
         self.presentation()
 
-    def presentation(self):
+    def presentation(self, light=False):
         pixels = runpy.run_path(str(TOOLS / 'check-workspace-icons.py'))
         checker = runpy.run_path(str(TOOLS / 'check-archive-presentation.py'))
+        background = (255, 255, 255) if light else (0, 0, 0)
+        foreground = (0, 0, 0) if light else (255, 255, 255)
+        dimmed = tuple((text * 180 + back * 75) // 255 for text, back in zip(foreground, background))
         for scope in ('sidebar', 'search', 'inbox'):
             rows = self.read('view-1-on.chats.json')['chats']
             for mode in ('dim', 'hover', 'selected'):
@@ -77,10 +81,10 @@ class ShowArchivedTests(unittest.TestCase):
                 state = dict(include_archived=True, show_archived=False, selected=selected, search='row' if scope == 'search' else '', current_view=dict(inbox=scope == 'inbox'))
                 self.write(f'{name}.state.json', state)
                 self.write(f'{name}.chats.json', dict(chats=rows))
-                self.write(f'{name}.layout.json', dict(dpi=96, row_height=64, top=0, x=0, y=0, width=240, height=256, mode=mode, rows=rows, selected=selected['id']))
-                image = [[(0, 0, 0)] * 240 for _ in range(256)]
+                self.write(f'{name}.layout.json', dict(dpi=96, row_height=64, top=0, x=0, y=0, width=240, height=256, mode=mode, rows=rows, selected=selected['id'], colour_model='theme-foreground-mix', foreground_weight=180))
+                image = [[background] * 240 for _ in range(256)]
                 for index, row in enumerate(rows):
-                    colour = (150, 150, 150) if row['archived'] and mode == 'dim' else (255, 255, 255)
+                    colour = dimmed if row['archived'] and mode == 'dim' else foreground
                     for y in range(index * 64 + 16, index * 64 + 26):
                         image[y][70:170] = [colour] * 100
                 pixels['write_png'](self.folder / f'{name}.png', image)
@@ -233,8 +237,15 @@ class ShowArchivedTests(unittest.TestCase):
             self.assertIn(required, source)
         for removed in ('id_include_archived', 'include_archived_button', 'drawSetupButton', 'updateViewArchiveButton', '"Show archived:'):
             self.assertNotIn(removed, source)
-        self.assertIn('theme.archived_row_opacity', source)
-        self.assertIn('if (chatArchiveState(a, chat).archived and !selected and !bulk_selected and !hovered)', source)
+        self.archive_colour_contract(source)
+        theme = (ROOT / 'src/theme.zig').read_text()
+        self.assertIn('pub const archived_row_foreground_weight: u8 = 180;', theme)
+        mix = theme.split('pub fn archivedRowColor(', 1)[1].split('\n}\n', 1)[0]
+        for required in ('const weight: u32 = archived_row_foreground_weight;',
+                         'inline for ([_]u5{ 0, 8, 16 })',
+                         '(color >> shift) & 0xff', '(current.surface_container_low >> shift) & 0xff',
+                         '((foreground * weight + background * (255 - weight)) / 255) << shift'):
+            self.assertIn(required, mix)
         shortcut = source.split('fn handleKeyboard(', 1)[1].split('fn jumpToLatestMessage(', 1)[0]
         self.assertIn("alt and !control and !shift and key == 'A'", shortcut)
 
@@ -259,19 +270,79 @@ class ShowArchivedTests(unittest.TestCase):
         pixels['write_png'](footer_image, image)
         self.assertNotEqual(self.validate().returncode, 0)
         footer_image.write_bytes(footer_bytes)
-        for scope in ('sidebar', 'search', 'inbox'):
-            for mode in ('dim', 'hover', 'selected'):
-                image_path = self.folder / f'archive-{scope}-{mode}.png'
-                original = image_path.read_bytes()
-                _, _, image = pixels['read_png'](image_path)
-                colour = (255, 255, 255) if mode == 'dim' else (150, 150, 150)
-                for y in range(2 * 64 + 16, 2 * 64 + 26):
-                    image[y][70:170] = [colour] * 100
-                pixels['write_png'](image_path, image)
-                with self.subTest(scope=scope, mode=mode):
-                    self.assertNotEqual(self.validate().returncode, 0)
-                image_path.write_bytes(original)
-        self.assertEqual(self.validate().returncode, 0)
+        checker = runpy.run_path(str(TOOLS / 'check-archive-presentation.py'))
+        for light in (False, True):
+            self.presentation(light=light)
+            self.assertEqual(self.validate().returncode, 0)
+            background = (255, 255, 255) if light else (0, 0, 0)
+            foreground = (0, 0, 0) if light else (255, 255, 255)
+            dimmed = tuple((text * 180 + back * 75) // 255 for text, back in zip(foreground, background))
+            for scope in ('sidebar', 'search', 'inbox'):
+                for mode in ('dim', 'hover', 'selected'):
+                    name = f'archive-{scope}-{mode}'
+                    image_path = self.folder / f'{name}.png'
+                    original = image_path.read_bytes()
+                    _, _, image = pixels['read_png'](image_path)
+                    colour = foreground if mode == 'dim' else dimmed
+                    for y in range(2 * 64 + 16, 2 * 64 + 26):
+                        image[y][70:170] = [colour] * 100
+                    pixels['write_png'](image_path, image)
+                    with self.subTest(light=light, scope=scope, mode=mode):
+                        with self.assertRaises(AssertionError):
+                            checker['check_scene'](self.folder, name, capture=True)
+                    image_path.write_bytes(original)
+            self.assertEqual(self.validate().returncode, 0)
+
+    def archive_colour_contract(self, source):
+        row = source.split('fn drawChat(', 1)[1].split('\nfn transcriptLineKind(', 1)[0]
+        self.assertIn('paint_buffer.Buffer.init(', row)
+        self.assertIn('const dimmed = chat.archived and !selected and !bulk_selected and !hovered;', row)
+        block = row.split('if (dimmed) {', 1)[1].split('}', 1)[0]
+        for colour in ('row_text', 'row_muted', 'row_primary'):
+            self.assertIn(f'{colour} = theme.archivedRowColor({colour});', block)
+        for forbidden in ('CreateCompatibleDC', 'CreateCompatibleBitmap', 'AlphaBlend'):
+            self.assertNotIn(forbidden, row)
+
+    def test_colour_source_guards_reject_overlay_and_missing_dimming(self):
+        source = (ROOT / 'src/main.zig').read_text()
+        self.archive_colour_contract(source)
+        for old, new in [('and !hovered;', ';'), ('and !selected', ''), ('and !bulk_selected', ''),
+                         ('row_text = theme.archivedRowColor(row_text);', ''),
+                         ('row_muted = theme.archivedRowColor(row_muted);', ''),
+                         ('row_primary = theme.archivedRowColor(row_primary);', ''),
+                         ('if (dimmed) {', 'if (false) {'),
+                         ('const dimmed = chat.archived', 'const dimmed = false'),
+                         ('var row_text =', 'win.CreateCompatibleDC(); var row_text ='),
+                         ('var row_text =', 'win.CreateCompatibleBitmap(); var row_text ='),
+                         ('var row_text =', 'win.AlphaBlend(); var row_text =')]:
+            with self.subTest(regression=new), self.assertRaises((AssertionError, IndexError)):
+                self.archive_colour_contract(source.replace(old, new))
+
+    def test_colour_mix_oracle_rejects_wrong_mix_and_model(self):
+        checker = runpy.run_path(str(TOOLS / 'check-archive-presentation.py'))
+        pixels = runpy.run_path(str(TOOLS / 'check-workspace-icons.py'))
+        for light in (False, True):
+            self.presentation(light=light)
+            name = 'archive-sidebar-dim'
+            image_path = self.folder / f'{name}.png'
+            original = image_path.read_bytes()
+            _, _, image = pixels['read_png'](image_path)
+            colour = (105, 105, 105) if light else (150, 150, 150)
+            for y in range(2 * 64 + 16, 2 * 64 + 26):
+                image[y][70:170] = [colour] * 100
+            pixels['write_png'](image_path, image)
+            with self.subTest(light=light), self.assertRaisesRegex(AssertionError, 'theme colour mix'):
+                checker['check_scene'](self.folder, name, capture=True)
+            image_path.write_bytes(original)
+            layout = self.read(f'{name}.layout.json')
+            for key, value in [('colour_model', 'alpha-overlay'), ('foreground_weight', 255)]:
+                self.write(f'{name}.layout.json', dict(layout, **{key: value}))
+                with self.subTest(light=light, key=key), self.assertRaises(AssertionError):
+                    checker['check_scene'](self.folder, name, capture=True)
+            self.write(f'{name}.layout.json', layout)
+            metrics = checker['check_scene'](self.folder, name)
+            self.assertEqual(metrics['polarity'], 'light' if light else 'dark')
+            self.assertEqual(metrics['colour_mix_error'], 0)
 
     def test_toggle_path_contract_and_baseline_negative_control(self):
         def contract(source):
@@ -295,7 +366,6 @@ class ShowArchivedTests(unittest.TestCase):
             self.skipTest('shortcut history control no longer available')
         if 'Alt+A' in baseline:
             self.skipTest('shortcut history control no longer available')
-        import re
         def occupied(key):
             return bool(re.search(r"if \(alt and !control and !shift and key == '" + key + r"'\)", baseline))
         self.assertTrue(occupied('I'))

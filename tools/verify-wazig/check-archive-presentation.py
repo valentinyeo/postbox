@@ -3,6 +3,11 @@ from collections import Counter
 import json
 from pathlib import Path
 import runpy
+import re
+
+
+THEME = Path(__file__).resolve().parents[2] / 'src/theme.zig'
+FOREGROUND_WEIGHT = int(re.search(r'pub const archived_row_foreground_weight: u8 = (\d+);', THEME.read_text()).group(1))
 
 
 read_png = runpy.run_path(str(Path(__file__).with_name('check-workspace-icons.py')))['read_png']
@@ -44,6 +49,8 @@ def check_scene(folder, name, capture=False):
     assert (state['search'] == 'row') == ('-search-' in name), name
     assert state['current_view']['inbox'] == ('-inbox-' in name), name
     assert layout['mode'] == name.rsplit('-', 1)[1], name
+    assert layout['colour_model'] == 'theme-foreground-mix', name
+    assert layout['foreground_weight'] == FOREGROUND_WEIGHT and 0 < FOREGROUND_WEIGHT < 255, name
     assert 96 <= layout['dpi'] <= 192 and layout['top'] == 0, name
     scale = layout['dpi'] / 96
     px = lambda value: int(value * scale + 0.5)
@@ -62,10 +69,15 @@ def check_scene(folder, name, capture=False):
     normal, marked = row_measure(live), row_measure(archived)
     ratio = (marked['contrast'] - 1) / (normal['contrast'] - 1)
     colour_distance = max(abs(a - b) for a, b in zip(normal['text'], marked['text']))
+    expected_dim_text = [(text * FOREGROUND_WEIGHT + background * (255 - FOREGROUND_WEIGHT)) // 255
+                         for text, background in zip(normal['text'], normal['background'])]
+    mix_error = max(abs(a - b) for a, b in zip(expected_dim_text, marked['text']))
     assert normal['contrast'] >= 4.5, (name, normal)
     if layout['mode'] == 'dim':
         assert layout['selected'] != archived['id'], name
-        assert 0.2 < ratio < 0.85, (name, 'archived/live contrast-excess ratio', ratio)
+        assert marked['background'] == normal['background'], (name, 'row background changed')
+        assert mix_error <= 8, (name, 'archived text does not match theme colour mix', expected_dim_text, marked)
+        assert 0 < ratio < 1, (name, 'archived/live contrast-excess ratio', ratio)
         assert colour_distance > 15, (name, 'archived text is not dimmer')
     else:
         assert colour_distance <= 8, (name, 'archived text not at full strength', normal, marked)
@@ -74,14 +86,16 @@ def check_scene(folder, name, capture=False):
             assert layout['selected'] == archived['id'] and state['selected']['archived'], name
         else:
             assert layout['selected'] != archived['id'], name
-    metrics = dict(live=normal, archived=marked, dim_ratio=ratio, full_strength_colour_distance=colour_distance,
+    metrics = dict(live=normal, archived=marked, contrast_excess_ratio=ratio, full_strength_colour_distance=colour_distance,
+                   colour_model=layout['colour_model'], foreground_weight=FOREGROUND_WEIGHT,
+                   expected_dim_text=expected_dim_text, colour_mix_error=mix_error,
                    polarity='light' if luminance(normal['background']) > 0.5 else 'dark')
     output = folder / f'{name}.contrast.json'
     if capture:
         output.write_text(json.dumps(metrics, indent=2), encoding='utf-8')
     else:
         assert read(folder, output.name) == metrics, name
-    print(f'{name}: {metrics["polarity"]} live={normal["contrast"]:.6f} archived={marked["contrast"]:.6f} dim_ratio={ratio:.6f} text_delta={colour_distance}')
+    print(f'{name}: {metrics["polarity"]} live={normal["contrast"]:.6f} archived={marked["contrast"]:.6f} contrast_excess_ratio={ratio:.6f} mix_error={mix_error} text_delta={colour_distance}')
     return metrics
 
 
@@ -115,7 +129,7 @@ def check_presentation(folder):
     assert 0 <= left < right <= len(image[0]) and 0 <= top < bottom <= len(image)
     pixels = [pixel for row in image[top:bottom] for pixel in row[left:right]]
     assert Counter(pixels).most_common(1)[0][1] / len(pixels) > 0.995, 'former archive label still drawn'
-    print('ARCHIVE PRESENTATION VERIFIED: absent inert footer, stateful palette and measured dim/full rows')
+    print('ARCHIVE PRESENTATION VERIFIED: absent inert footer, stateful palette and measured colour-mixed/full rows')
 
 
 if __name__ == '__main__':
@@ -134,7 +148,6 @@ if __name__ == '__main__':
         check_presentation(light)
         palette = read(light, 'fixture-palette.json')
         assert palette['kind'] == 'inverted AMOLED fixture palette' and palette['production_rendering']
-        import re
         original = re.findall(r'hex\(0x([0-9a-f]{6})\)', palette['original'])
         inverted = re.findall(r'hex\(0x([0-9a-f]{6})\)', palette['light'])
         assert len(original) == len(inverted) == 16
@@ -144,4 +157,4 @@ if __name__ == '__main__':
             for scope in ('sidebar', 'inbox', 'search'):
                 for mode in ('dim', 'hover', 'selected'):
                     assert read(folder, f'archive-{scope}-{mode}.contrast.json')['polarity'] == polarity
-        print('ARCHIVE LIGHT AND DARK VERIFIED: screenshot contrast and dim ratios retained for both polarities')
+        print('ARCHIVE LIGHT AND DARK VERIFIED: screenshot contrast and colour-mix measurements retained for both polarities')
