@@ -104,6 +104,7 @@ function Invoke-PassageCopyJourney($Session) {
             $name = $target.provider
             Send-Keys $Session '^f'
             Send-Keys $Session $target.search
+            Send-Keys $Session '{ENTER}'
             $null = Wait-Until {
                 $shown = Read-Control $Session messages
                 $messages = Get-PassageMessages $shown.messages
@@ -183,8 +184,6 @@ function Invoke-PassageCopyJourney($Session) {
             Assert-That ($actual -ceq $expected) "$name edge selection did not extend through final message"
             Assert-That (-not (Test-Path $reactionLog) -or (Get-Item $reactionLog).Length -eq 0) "$name passage-copy must not send reaction requests"
             Hub-Pass $Session "$name-passage"
-            Send-Keys $Session '^f'
-            Send-Keys $Session '^a{BACKSPACE}{ESC}'
         }
         Save-Screen $Session after
     } finally {
