@@ -124,7 +124,7 @@ def check_presentation(folder):
     assert footer['after']['include_archived'] and footer['after']['pending_archives'] == 0
     assert read(folder, 'archive-footer.chats.json')['chats'] == footer['rows']
     tree = (folder / 'archive-footer.uia.txt').read_text(encoding='utf-8-sig')
-    assert '1016 | ListBox |' in tree and '1008 | RICHEDIT50W |' in tree
+    assert '1016 | ListBox |' in tree and '1008 | RICHEDIT50W |' not in tree
     assert '1146 |' not in tree and 'Show archived:' not in tree
     print('ARCHIVE PRESENTATION VERIFIED: absent inert footer, stateful palette and measured colour-mixed/full rows')
 

@@ -96,7 +96,7 @@ function Invoke-Menus($Session) {
     Assert-That ((Read-Control $Session status).theme -eq 'amoled') 'Menus must start in default AMOLED'
     $loaded = Read-Control $Session messages
     Assert-That ($loaded.messages.Count -eq 1 -and $loaded.messages[0].id -eq 'verify-menu-message') 'Synthetic message cache did not load'
-    foreach ($entry in @(@{ name = 'chat'; id = '1016' }, @{ name = 'composer'; id = '1032' }, @{ name = 'search'; id = '1008' })) {
+    foreach ($entry in @(@{ name = 'chat'; id = '1016' }, @{ name = 'composer'; id = '1032' }, @{ name = 'search'; id = '1064' })) {
         if ($entry.name -eq 'composer') {
             Click-Control $Session '1032'
             Send-Keys $Session 'Menu draft'

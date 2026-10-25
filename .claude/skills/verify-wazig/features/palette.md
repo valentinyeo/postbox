@@ -13,7 +13,7 @@ Find commands without a toolbar and open the keyboard-shortcuts overlay through 
 
 ## How to get to it (user POV)
 
-- Ctrl+K opens the palette; type a command label.
+- Ctrl+K opens the default fuzzy palette; type a command label. Its command scores and within-group order are unchanged; nonempty queries group chats first so commands cannot bury them. Ctrl+F or slash opens the same palette in exact entity-search mode using the former bar's filters and ranking.
 - Up/Down changes the selection; Enter runs it; Escape closes the palette.
 - Choose `Keyboard shortcuts` in the palette, or press F1 directly to open the same overlay.
 

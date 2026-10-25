@@ -22,7 +22,7 @@ pub const groups = [_]Group{
         .{ .key = "Ctrl+Shift+End", .desc = "Jump to the last chat" },
         .{ .key = "Ctrl+Page Up / Ctrl+Page Down", .desc = "Move the selection by a page" },
         .{ .key = "Mouse wheel over the list", .desc = "Scroll the chat list" },
-        .{ .key = "Ctrl+F or /", .desc = "Focus search" },
+        .{ .key = "Ctrl+F or /", .desc = "Search chats in the command palette" },
         .{ .key = "Esc", .desc = "Clear the search and show all chats" },
         .{ .key = "Alt+A", .desc = "Show or hide archived chats in this view" },
         .{ .key = "U", .desc = "Toggle unread chats" },

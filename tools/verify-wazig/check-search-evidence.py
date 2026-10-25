@@ -49,8 +49,13 @@ def check_parity(data, fixture, fixed):
         expected = [row for row in fixture['rows'] if row['archived'] == case.get('archived_only', False)
                     and not case.get('unread_only', False)
                     and any(case['query'].lower() in row[key].lower() for key in ('name', 'jid'))]
-        assert {row['id'] for row in samples[0]['rows']} == {row['jid'] for row in expected}, case
+        assert {(row['provider'], row['id']) for row in samples[0]['rows']} == {(row['provider'], row['jid']) for row in expected}, case
         for sample in samples:
+            for row in sample['rows']:
+                known = next(item for item in expected if item['jid'] == row['id'])
+                provider = known['provider']
+                scope = known.get('account') or (known['jid'].split(':')[1] if provider == 'slack' else known['jid'].split(':')[0] if provider == 'whatsapp' else provider)
+                assert row['provider'] == provider and row['view_account'] == scope, ('source account mismatch', row)
             assert sample['state']['show_archived'] == case.get('archived_only', False)
             assert sample['state']['unread_only'] == case.get('unread_only', False)
             assert not sample['state']['include_archived'] and sample['state']['current_view']['inbox']
@@ -89,6 +94,19 @@ def check_ink(image, layout):
     return results
 
 
+def check_groups(image, layout):
+    measure = runpy.run_path(str(HERE / 'check-archive-presentation.py'))['measure']
+    sample = layout['sample']
+    check_sample(sample, 'archive', True)
+    commands = len(sample['rows'])
+    assert 0 < commands < len(sample['labels']) and (commands + 1) * layout['row_height'] <= layout['height']
+    for index in (0, commands):
+        x = layout['x'] + layout['width']
+        y = layout['y'] + index * layout['row_height']
+        tag = measure(image, [x - 120, y + 2, x - 16, y + 20])
+        assert tag['contrast'] >= 3, 'missing readable chat/command group tag'
+
+
 def load_parity(folder, fixed):
     fixture = read(folder, 'search-queries.json')
     assert fixture == read(HERE, 'search-queries.json'), 'different query/fixture contract'
@@ -100,12 +118,25 @@ def load_parity(folder, fixed):
     return fixture, data, check_parity(data, fixture, fixed)
 
 
+def source_identities(data):
+    return [[f"{row['provider']}|{row['view_account']}|{row['id']}" for row in record['samples'][0]['rows']]
+            for record in data['records']]
+
+
+def check_cross_run(before, after):
+    assert before == after, ('cross-run identity/order mismatch', before, after)
+
+
 def compare(baseline, fixed):
     fixture, before, old = load_parity(baseline, False)
     other, after, new = load_parity(fixed, True)
+    assert 'Sidebar search bar remains; baseline parity was captured before this intentional red assertion' in (baseline / 'failure.txt').read_text(encoding='utf-8-sig')
+    assert 'CLEANUP PASSED:' in (baseline / 'cleanup.txt').read_text(encoding='utf-8-sig')
+    removal = read(baseline, 'search-removal.json')
+    assert removal['controls'] == 1 and removal['native'] is True
     assert fixture == other and before['query_sha256'] == after['query_sha256']
     assert before['commit'] != after['commit'] and before['sha256'] != after['sha256']
-    assert old == new, [(case['query'], a, b) for case, a, b in zip(fixture['queries'], old, new) if a != b]
+    check_cross_run(source_identities(before), source_identities(after))
     check_evidence(fixed)
     print(f'SEARCH PARITY VERIFIED: {len(old)} queries, exact ordered identities across bar and palette')
 
@@ -117,6 +148,8 @@ def check_evidence(folder):
     read_png = runpy.run_path(str(HERE / 'check-workspace-icons.py'))['read_png']
     _, _, image = read_png(folder / 'search-archive.png')
     check_ink(image, read(folder, 'search-archive.json'))
+    _, _, image = read_png(folder / 'search-groups.png')
+    check_groups(image, read(folder, 'search-groups.json'))
     removed = read(folder, 'removed-status.json')
     assert removed['positive_query'] == 'Keyboard shortcuts' and removed['positive_matches'] == 1
     assert removed['query'] == 'Status' and removed['status_rows'] == removed['sidebar_status_controls'] == 0
@@ -126,7 +159,7 @@ def check_evidence(folder):
     assert before['chat_count'] == 6 and before['search'] == ''
     assert matched['chat_count'] == 1 and matched['search'] == 'Beta' and matched['selected']['name'] == 'Verification Beta'
     assert empty['chat_count'] == 0 and empty['search'] == 'NoSuchFixture'
-    for stage in ('before', 'search-match', 'empty', 'search-archive', 'removed-status', 'action', 'after'):
+    for stage in ('before', 'search-match', 'empty', 'search-archive', 'search-groups', 'removed-status', 'action', 'after'):
         raw = (folder / f'{stage}.png').read_bytes()
         assert raw.startswith(b'\x89PNG\r\n\x1a\n') and len(raw) > 10000
         state = read(folder, f'{stage}.state.json')

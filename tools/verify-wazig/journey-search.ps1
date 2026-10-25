@@ -14,6 +14,7 @@ foreach ($case in $fixture.queries) {
     $samples = @()
     foreach ($shortcut in @('^f', '/')) {
         $samples += Read-SearchSample $session $case.query $shortcut $baseline
+        if (-not $baseline -and $case.category -ceq 'command' -and $shortcut -ceq '^f') { Save-SearchGroups $session $samples[-1] }
         if ($case.query -ceq 'Beta' -and $shortcut -ceq '^f') { Save-Screen $session search-match }
         if ($case.category -ceq 'no-match' -and $shortcut -ceq '^f') { Save-Screen $session empty }
         Send-Keys $session '{ESC}'

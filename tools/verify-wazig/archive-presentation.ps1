@@ -102,10 +102,12 @@ function Invoke-ArchivePresentation($Session) {
             Send-Keys $Session '^f'
             Send-Keys $Session 'row'
             $null = Wait-Until { (Read-Control $Session status).search -ceq 'row' } 'search rows'
+            Send-Keys $Session '{ENTER}'
         }
         if ($scope -eq 'inbox') {
             Send-Keys $Session '^f'
             Send-Keys $Session '^a{BACKSPACE}'
+            Send-Keys $Session '{ESC}'
             Send-Keys $Session '%i'
         }
         Send-Keys $Session '^1'

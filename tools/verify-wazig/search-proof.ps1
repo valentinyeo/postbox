@@ -73,3 +73,16 @@ function Save-PaletteArchiveInk($Session) {
     Invoke-PaletteCommand $Session 'Toggle archived chats in this view'
     Send-Keys $Session '%i'
 }
+function Save-SearchGroups($Session, $Sample) {
+    $list = Get-Edit (Get-PaletteWindow $Session) '1072'
+    $bounds = $list.Current.BoundingRectangle
+    $desktop = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $height = [UIntPtr]::Zero
+    $top = [UIntPtr]::Zero
+    $handle = [IntPtr]$list.Current.NativeWindowHandle
+    Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x01A1, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$height) -ne [IntPtr]::Zero) 'Cannot read group row height'
+    Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x018E, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$top) -ne [IntPtr]::Zero -and $top.ToUInt64() -eq 0) 'Grouped results are scrolled out of view'
+    @{ sample = $Sample; x = [int]($bounds.Left - $desktop.Left); y = [int]($bounds.Top - $desktop.Top); width = [int]$bounds.Width; height = [int]$bounds.Height; row_height = $height.ToUInt64() } |
+        ConvertTo-Json -Depth 14 | Set-Content (Join-Path $Session.evidence 'search-groups.json')
+    Save-Screen $Session search-groups
+}

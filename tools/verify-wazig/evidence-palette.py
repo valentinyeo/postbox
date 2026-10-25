@@ -21,6 +21,9 @@ if feature == 'palette':
     launch = (folder / 'final-data/launch-log.txt').read_text(encoding='utf-8-sig')
     assert 'whatsapp backend: unavailable (URL not configured)' in launch
     assert all(label not in launch for label in ('message backend: hub', 'whatsapp backend: hub', 'whatsapp backend: wacli'))
+    cached = json.loads((folder / 'final-data/chats-0000000000000526.json').read_text(encoding='utf-8-sig'))
+    assert sorted(row['name'] for row in cached['data']) == ['Verification Alpha', 'Verification Beta']
+    assert not (folder / 'final-data/telegram').exists()
     removed = json.loads((folder / 'removed-status.json').read_text(encoding='utf-8-sig'))
     assert removed['positive_query'] == 'Keyboard shortcuts' and removed['positive_matches'] == 1
     assert removed['query'] == 'Status' and removed['status_rows'] == 0

@@ -102,7 +102,7 @@ class ShowArchivedTests(unittest.TestCase):
         self.write('archive-footer.json', dict(before=state, after=state, rows=rows, point=[150, 243], rect=[100, 230, 238, 256]))
         self.write('archive-footer.state.json', state)
         self.write('archive-footer.chats.json', dict(chats=rows))
-        (self.folder / 'archive-footer.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526\n1016 | ListBox | Chats\n1008 | RICHEDIT50W |')
+        (self.folder / 'archive-footer.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526\n1016 | ListBox | Chats')
         pixels['write_png'](self.folder / 'archive-footer.png', [[(0, 0, 0)] * 240 for _ in range(256)])
 
     def control(self, row):
@@ -253,6 +253,9 @@ class ShowArchivedTests(unittest.TestCase):
         tree = self.folder / 'archive-footer.uia.txt'
         original = tree.read_text()
         tree.write_text(original + '\n1146 | Button | Show archived: On')
+        self.assertNotEqual(self.validate().returncode, 0)
+        tree.write_text(original)
+        tree.write_text(original + '\n1008 | RICHEDIT50W | Search All Ctrl+F')
         self.assertNotEqual(self.validate().returncode, 0)
         tree.write_text(original)
         footer = self.read('archive-footer.json')

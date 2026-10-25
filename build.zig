@@ -395,7 +395,7 @@ pub fn build(b: *std.Build) void {
         buffer_source[(std.mem.indexOfScalar(u8, buffer_source, '\n') orelse unreachable) + 1 ..],
         sourceSection("fn stagedPreviewColumns(", "fn layout(a:"),
         "fn composeChanged(a: *App) void {\n",
-        sourceSection("\n                saveComposerDraft(a);", "            } else if (id == id_search"),
+        sourceSection("\n                saveComposerDraft(a);", "            }\n            return 0;\n        },\n        win.WM_TIMER => {"),
         "}\n",
     }) catch @panic("Out of memory building repaint harness");
     const repaint_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -533,7 +533,7 @@ pub fn build(b: *std.Build) void {
         sourceSection("fn removeFirstPendingSend(", "fn playableVideoPath("),
         sourceSection("fn buildPaletteItems(", "    a.palette_item_count = 0;"),
         "std.mem.doNotOptimizeAway(a); }\nfn activateArchivePalette(a: *App, item: struct { command: u16 }) void {\n",
-        sourceSection("    const command = item.command;\n    closePalette(a);", "fn openPalette("),
+        sourceSection("    const command = item.command;\n    closePalette(a);", "fn openSearchPalette("),
         "const shortcuts = struct {\n",
         @embedFile("src/shortcuts.zig")[std.mem.indexOf(u8, @embedFile("src/shortcuts.zig"), "pub fn ctrlASelectsChats(").?..std.mem.indexOf(u8, @embedFile("src/shortcuts.zig"), "pub const Shortcut").?],
         "};\nfn selectAllKey(a: *App, focus: ?win.HWND) bool { const control = true; const alt = false; const shift = false; const key: u32 = 'A';\n",

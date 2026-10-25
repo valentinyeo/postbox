@@ -21,7 +21,7 @@ Dispatch `feature=search`. The isolated unified fake hub reads synthetic rows an
 
 The same journey detects edit 1008 on the evidence-only red build and types into the bar. On the fixed build it types into palette edit 1064. Each query is repeated through Ctrl+F and slash, recording focus, native list labels/count, read-only state and ordered identities in `search-parity.json`. The complete file survives the deliberate red failure at the subsequent bar-removal assertion. No red artifact is accepted as a successful fixed-build journey.
 
-Fixed evidence also includes `search-removal.json`, `search-shortcuts.json`, `search-archive.json`, `search-archive.png`, `search-match.png` and `empty.png`. The search journey runs the palette command-discovery and removed-Status assertions. The workflow additionally runs the standalone offline palette journey under `palette/`, preserving the no-configured-backend assertion.
+Fixed evidence also includes `search-removal.json`, `search-shortcuts.json`, `search-archive.json`, `search-archive.png`, `search-groups.json`, `search-groups.png`, `search-match.png` and `empty.png`. Group-tag ink and archived/live contrast are both measured from screenshots. The search journey runs the palette command-discovery and removed-Status assertions. The workflow additionally runs the standalone offline palette journey under `palette/`, preserving the no-configured-backend assertion.
 
 Download both `verify-wazig-search` artifacts into different directories and run:
 
@@ -29,7 +29,7 @@ Download both `verify-wazig-search` artifacts into different directories and run
 python3 tools/verify-wazig/check-search-evidence.py evidence/fixed --baseline evidence/red
 ```
 
-This requires identical query-file hashes and cases, different build revisions/hashes, exact identity order within each run and across runs, fixed-build focus/removal/group assertions, measurable archived dimming, isolation and cleanup. Inspect the screenshots too. Run `check-evidence.py evidence/fixed/palette` for the separate offline palette evidence.
+This requires identical query-file hashes and cases, different build revisions/hashes, exact identity order within each run and across runs, fixed-build focus/removal/group assertions, measurable archived dimming, isolation and cleanup. Within-run raw provider/cache-account/id lists must match their recorded rows exactly. Cross-run comparison uses the recorded provider/source-account/id fields: local cache-account tags hash the fake server's random URL and are not source identities. Every source account is checked against the shared fixture, so changing an actual account still fails. Inspect the screenshots too. Run `check-evidence.py evidence/fixed/palette` for the separate offline palette evidence.
 
 ## Gotchas
 

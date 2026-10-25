@@ -34,7 +34,6 @@ const chat_menu = @import("chat_menu.zig");
 const chat_reconcile = @import("chat_reconcile.zig");
 const compose_layout = @import("compose_layout.zig");
 const update_card_layout = @import("update_card_layout.zig");
-const field_pill = @import("field_pill.zig");
 const media_age = @import("media_age.zig");
 const media_layout = @import("media_layout.zig");
 const media_drain = @import("media_drain.zig");
@@ -100,7 +99,6 @@ fn sendRetryDelayMs(retries: u8) ?u64 {
 const max_avatars = 256;
 const max_participant_avatars = 64;
 const timer_refresh = 1;
-const timer_search = 2;
 const timer_animation = 3;
 const timer_chat_select = 4;
 const timer_update_check = 5;
@@ -135,7 +133,6 @@ const scrollbar_min_thumb: i32 = 24;
 const chat_wheel_lines_per_notch: i32 = 3;
 const SbDrag = enum { none, chats, compose, palette, canvas, emoji };
 const update_max_asset_bytes: usize = 256 * 1024 * 1024;
-const id_search = 1008;
 const id_chats = 1016;
 const id_canvas = 1024;
 const id_compose = 1032;
@@ -426,6 +423,7 @@ const PaletteItem = struct {
     chat_identity: chat_key.Stored = .{},
     view_identity: chat_key.Stored = .{},
     message_id: Utf8Text(191) = .{},
+    archived: bool = false,
 };
 
 const max_palette_items = 64 + max_chats + 20;
@@ -673,8 +671,9 @@ const App = struct {
     wacli_path: []u8,
     avatar_dir: []u8,
     hwnd: ?win.HWND = null,
-    search: ?win.HWND = null,
-    search_pill: win.RECT = std.mem.zeroes(win.RECT),
+    search_query: WideText(255) = .{},
+    palette_search_mode: bool = false,
+    palette_filtering: bool = false,
     chats_hwnd: ?win.HWND = null,
     canvas: ?win.HWND = null,
     thread_rows: std.ArrayList(SlackThreadRow) = .empty,
@@ -716,10 +715,10 @@ const App = struct {
     palette: ?win.HWND = null,
     palette_edit: ?win.HWND = null,
     palette_list: ?win.HWND = null,
-    palette_items: [max_palette_items]PaletteItem = [_]PaletteItem{.{}} ** max_palette_items,
+    palette_items: []PaletteItem = &.{},
     palette_item_count: usize = 0,
     palette_base_item_count: usize = 0,
-    palette_matches: [max_palette_items]usize = [_]usize{0} ** max_palette_items,
+    palette_matches: []usize = &.{},
     palette_match_count: usize = 0,
     palette_selected: usize = 0,
     palette_ever_active: bool = false,
@@ -1417,7 +1416,6 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
     a.tooltips = tt;
     updateTooltipTheme(a);
     _ = win.SendMessageW(tt, 0x400 + 24, 0, 260);
-    addTooltip(a, tt, a.search, lit("Search chats  Ctrl+F or /"));
     addTooltip(a, tt, a.chats_hwnd, lit("Chats  ↑/↓ move · Ctrl+Tab next chat"));
     addTooltip(a, tt, a.canvas, lit("Messages  Alt+J/K select · Ctrl+P play voice · Ctrl+T transcript · Ctrl+R react"));
     addTooltip(a, tt, a.compose, lit("Message box  Enter sends · Shift+Enter new line"));
@@ -1818,7 +1816,6 @@ fn recreateFonts(a: *App) void {
     a.font_bold = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_emoji = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
     a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    setFont(a.search, a.font);
     setFont(a.chats_hwnd, a.font);
     setFont(a.compose, a.font);
     setFont(a.thread_list, a.font);
@@ -2240,13 +2237,9 @@ fn peopleHubFields(object: std.json.ObjectMap) ?people_index.HubFields {
 fn refreshPeopleSearch(a: *App) void {
     const whatsapp_view = messenger_view.includes(activeChatView(a), .whatsapp);
     if (!unifiedHub(a) and !whatsapp_view) return;
-    if (whatsapp_view and !a.show_archived) {
-        if (a.search) |search| {
-            if (win.GetWindowTextLengthW(search) > 0) {
-                refilterChats(a);
-                if (!messagesAreCurrent(a)) refreshMessages(a);
-            }
-        }
+    if (whatsapp_view and !a.show_archived and a.search_query.len > 0) {
+        refilterChats(a);
+        if (!messagesAreCurrent(a)) refreshMessages(a);
     }
     if (a.palette != null and !a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode) paletteFilter(a);
 }
@@ -2319,9 +2312,8 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     defer a.allocator.free(previous_rows);
     const previous_marker = if (a.selected_chat < a.chat_count) archiveMarker(a, &a.chats[a.selected_chat]) else null;
     const view_switched = a.chat_view_switched;
-    var query_wide: [256]u16 = [_]u16{0} ** 256;
-    const query_len = if (a.search) |search| @as(usize, @intCast(win.GetWindowTextW(search, &query_wide, query_wide.len))) else 0;
-    const query_utf8 = if (query_len > 0) std.unicode.utf16LeToUtf8Alloc(a.allocator, query_wide[0..query_len]) catch null else null;
+    const query_len = a.search_query.len;
+    const query_utf8 = if (query_len > 0) std.unicode.utf16LeToUtf8Alloc(a.allocator, a.search_query.slice()) catch null else null;
     defer if (query_utf8) |query| a.allocator.free(query);
 
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch {
@@ -2518,7 +2510,6 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     }
     switchComposerDraft(a);
     if (a.selected_chat < a.chat_count) selectedViewKey(a).set(chat_key.of(&a.chats[a.selected_chat]));
-    updateSearchCue(a, view);
     updateWindowTitle(a);
     if (a.chats_hwnd) |list| {
         const rows_changed = !chat_rows.equal(Chat, previous_rows, a.chats[0..a.chat_count]);
@@ -2598,6 +2589,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
             if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
         }
     }
+    if (a.palette != null and a.palette_search_mode and !a.palette_filtering) paletteFilter(a);
     return true;
 }
 
@@ -2648,7 +2640,7 @@ fn applyUnreadProbe(a: *App, result: *const WacliResult) void {
 
 fn setPaletteCue(a: *App) void {
     const edit = a.palette_edit orelse return;
-    const cue: [*:0]const u16 = if (a.palette_views_mode) lit("Ctrl+Up/Down reorders. Enter switches.") else if (a.palette_accounts_mode) lit("Accounts") else lit("Type a command");
+    const cue: [*:0]const u16 = if (a.palette_views_mode) lit("Ctrl+Up/Down reorders. Enter switches.") else if (a.palette_accounts_mode) lit("Accounts") else if (a.palette_search_mode) lit("Search chats") else lit("Type a command");
     _ = win.SendMessageW(edit, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(cue)));
 }
 
@@ -2930,6 +2922,8 @@ fn unfurlSmoke(init: std.process.Init) u8 {
         app.draft_store.deinit(app.allocator);
     }
     defer app.people.deinit();
+    defer app.allocator.free(app.palette_items);
+    defer app.allocator.free(app.palette_matches);
     defer if (app.chats_raw) |raw| allocator.free(raw);
     app_ptr = app;
     defer app_ptr = null;
@@ -3324,21 +3318,11 @@ fn saveViewOrder(a: *App) bool {
     return true;
 }
 
-fn updateSearchCue(a: *App, view: messenger_view.View) void {
-    const search = a.search orelse return;
-    var buffer: [300]u8 = undefined;
-    _ = view;
-    const text = std.fmt.bufPrint(&buffer, "Search {s}  Ctrl+F", .{activeViewLabel(a)}) catch return;
-    var wide: [300]u16 = undefined;
-    const len = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], text) catch return;
-    wide[len] = 0;
-    _ = win.SendMessageW(search, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(&wide)));
-}
-
 fn clearSearch(a: *App) bool {
-    const search = a.search orelse return false;
-    if (win.GetWindowTextLengthW(search) == 0) return false;
-    _ = win.SetWindowTextW(search, lit(""));
+    if (a.search_query.len == 0) return false;
+    a.search_query = .{};
+    refilterChats(a);
+    if (!messagesAreCurrent(a)) refreshMessages(a);
     return true;
 }
 
@@ -6214,9 +6198,7 @@ fn chatsCachePath(a: *App) ?[]u8 {
 
 fn saveChatsCache(a: *App, raw: []const u8) void {
     if (a.startup_probe_pending) return;
-    if (a.search) |search| {
-        if (win.GetWindowTextLengthW(search) > 0) return;
-    }
+    if (a.search_query.len > 0) return;
     const path = chatsCachePath(a) orelse return;
     defer a.allocator.free(path);
     _ = writeCacheFileAtomic(a, path, raw);
@@ -11459,10 +11441,7 @@ fn controlWriteChat(a: *const App, w: *std.Io.Writer, chat: *const Chat) !void {
 }
 
 fn controlSearchText(a: *App, buffer: *[1024]u8) []const u8 {
-    const search = a.search orelse return "";
-    var wide: [256]u16 = undefined;
-    const len: usize = @intCast(win.GetWindowTextW(search, &wide, wide.len));
-    const bytes = std.unicode.utf16LeToUtf8(buffer, wide[0..len]) catch return "";
+    const bytes = std.unicode.utf16LeToUtf8(buffer, a.search_query.slice()) catch return "";
     return buffer[0..bytes];
 }
 
@@ -11631,13 +11610,14 @@ fn controlSortChats(a: *const App, chats: []Chat, view: messenger_view.View) voi
 
 fn controlSearch(a: *App, call: *ControlCall) !void {
     const w = &call.out.writer;
-    const search = a.search orelse return control_api.writeError(w, "the search box is not ready");
     if (call.phase == .main) {
         const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, call.parsed.value.text) catch
             return control_api.writeError(w, "search text is not valid UTF-8");
         defer a.allocator.free(wide);
-        _ = win.SetWindowTextW(search, wide.ptr);
-        if (a.hwnd) |hwnd| _ = win.KillTimer(hwnd, timer_search);
+        a.search_query.len = @min(wide.len, a.search_query.buf.len - 1);
+        @memcpy(a.search_query.buf[0..a.search_query.len], wide[0..a.search_query.len]);
+        a.search_query.buf[a.search_query.len] = 0;
+        if (a.palette != null and a.palette_search_mode) _ = win.SetWindowTextW(a.palette_edit.?, a.search_query.ptr());
         refilterChats(a);
         if (!messagesAreCurrent(a)) refreshMessages(a);
         call.phase = .wait;
@@ -11835,8 +11815,19 @@ fn controlArchiveMany(a: *App, w: *std.Io.Writer, ids: []const []const u8) !void
     try w.writeAll("]}}\n");
 }
 
+fn ensurePaletteCapacity(a: *App) bool {
+    const needed = @max(max_palette_items + a.chats.len, a.palette_item_count + 20);
+    if (a.palette_items.len < needed) {
+        const previous = a.palette_items.len;
+        a.palette_items = a.allocator.realloc(a.palette_items, needed) catch return false;
+        @memset(a.palette_items[previous..], .{});
+    }
+    if (a.palette_matches.len < needed) a.palette_matches = a.allocator.realloc(a.palette_matches, needed) catch return false;
+    return true;
+}
+
 fn appendPalette(a: *App, label: []const u8, shortcut: []const u8, command: u16) void {
-    if (a.palette_item_count >= max_palette_items) return;
+    if (!ensurePaletteCapacity(a)) return;
     const item = &a.palette_items[a.palette_item_count];
     a.palette_item_count += 1;
     item.label.set(a.allocator, label);
@@ -11847,10 +11838,11 @@ fn appendPalette(a: *App, label: []const u8, shortcut: []const u8, command: u16)
     item.chat_identity = .{};
     item.view_identity = .{};
     item.message_id = .{};
+    item.archived = false;
 }
 
 fn appendPaletteChat(a: *App, index: usize) void {
-    if (a.palette_item_count >= max_palette_items) return;
+    if (!ensurePaletteCapacity(a)) return;
     const chat = &a.chats[index];
     if (chat.name.len == 0) return;
     const item = &a.palette_items[a.palette_item_count];
@@ -11865,6 +11857,14 @@ fn appendPaletteChat(a: *App, index: usize) void {
     item.chat_jid.set(chat.jid.slice());
     item.chat_identity.set(chat_key.of(chat));
     item.view_identity = .{};
+    item.archived = chat.archived;
+    if (chat.archived and a.palette_search_mode) {
+        const suffix = std.unicode.utf8ToUtf16LeStringLiteral("  ·  Archived");
+        item.label.len = @min(item.label.len, item.label.buf.len - 1 - suffix.len);
+        @memcpy(item.label.buf[item.label.len..][0..suffix.len], suffix);
+        item.label.len += suffix.len;
+        item.label.buf[item.label.len] = 0;
+    }
 }
 
 fn appendMicrophones(a: *App) void {
@@ -11957,7 +11957,9 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Check for updates now", "", command_update_check);
     if (a.update_pending != null) appendPalette(a, "Restart now to install update", "", command_update_install);
     appendPalette(a, "Quit Messages", "Q", command_quit);
-    for (0..a.chat_count) |index| appendPaletteChat(a, index);
+    if (!a.palette_search_mode) {
+        for (0..a.chat_count) |index| appendPaletteChat(a, index);
+    }
     a.palette_base_item_count = a.palette_item_count;
 }
 
@@ -11999,11 +12001,12 @@ fn paletteLayout(a: *App) void {
     }
 }
 
-fn appendPalettePeople(a: *App, query_wide: []const u16, scores: *[max_palette_items]i32, scored: bool) void {
+fn appendPalettePeople(a: *App, query_wide: []const u16, scores: []i32, scored: bool) void {
     if (a.palette_links_mode or a.palette_accounts_mode or a.palette_views_mode or query_wide.len == 0) return;
     const query = std.unicode.utf16LeToUtf8Alloc(a.allocator, query_wide) catch return;
     defer a.allocator.free(query);
-    var exclude: [max_palette_items]people_index.Identity = undefined;
+    const exclude = a.allocator.alloc(people_index.Identity, a.palette_match_count) catch return;
+    defer a.allocator.free(exclude);
     var exclude_count: usize = 0;
     for (a.palette_matches[0..a.palette_match_count]) |match| {
         const item = &a.palette_items[match];
@@ -12015,7 +12018,7 @@ fn appendPalettePeople(a: *App, query_wide: []const u16, scores: *[max_palette_i
     var matches: [20]people_index.Entry = undefined;
     const count = a.people.search(query, exclude[0..exclude_count], a.cache_tag.slice(), &matches, 20);
     for (matches[0..count]) |entry| {
-        if (a.palette_item_count == max_palette_items) break;
+        if (!ensurePaletteCapacity(a)) break;
         const label = (if (entry.origin == .inbox)
             std.fmt.allocPrint(a.allocator, "{s}", .{entry.name})
         else
@@ -12024,6 +12027,7 @@ fn appendPalettePeople(a: *App, query_wide: []const u16, scores: *[max_palette_i
         const index = a.palette_item_count;
         appendPalette(a, label, "", 0);
         const item = &a.palette_items[index];
+        item.archived = entry.origin == .archived;
         item.chat_jid.set(entry.jid);
         item.chat_identity.set(.{
             .provider = std.meta.stringToEnum(transport.Provider, entry.provider) orelse .whatsapp,
@@ -12037,35 +12041,72 @@ fn appendPalettePeople(a: *App, query_wide: []const u16, scores: *[max_palette_i
 }
 
 fn paletteFilter(a: *App) void {
-    var query_buf: [64]u16 = [_]u16{0} ** 64;
-    const query_len: usize = if (a.palette_edit) |edit| @intCast(win.GetWindowTextW(edit, &query_buf, query_buf.len)) else 0;
-    if (!a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode) a.palette_item_count = a.palette_base_item_count;
+    if (a.palette_filtering) return;
+    a.palette_filtering = true;
+    defer a.palette_filtering = false;
+    var query_buf: [256]u16 = [_]u16{0} ** 256;
+    const query_len: usize = if (a.palette_edit) |edit| @intCast(win.GetWindowTextW(edit, &query_buf, if (a.palette_search_mode) query_buf.len else 64)) else 0;
+    const grouped = !a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode;
+    if (a.palette_search_mode) {
+        a.search_query.len = query_len;
+        @memcpy(a.search_query.buf[0..query_len], query_buf[0..query_len]);
+        a.search_query.buf[query_len] = 0;
+        _ = clearBulkSelection(a);
+        refilterChats(a);
+        if (!messagesAreCurrent(a)) refreshMessages(a);
+        buildPaletteItems(a);
+    } else if (grouped) a.palette_item_count = a.palette_base_item_count;
     a.palette_match_count = 0;
     a.palette_selected = 0;
-    var scores: [max_palette_items]i32 = [_]i32{0} ** max_palette_items;
+    const scores = a.allocator.alloc(i32, a.palette_items.len + 20) catch return;
+    defer a.allocator.free(scores);
+    @memset(scores, 0);
     for (0..a.palette_item_count) |index| {
+        const item = &a.palette_items[index];
+        if (a.palette_search_mode and item.chat_jid.len > 0) continue;
         if (query_len == 0) {
             scores[a.palette_match_count] = 0;
             a.palette_matches[a.palette_match_count] = index;
             a.palette_match_count += 1;
             continue;
         }
-        if (paletteScore(a.palette_items[index].label.slice(), query_buf[0..query_len])) |score| {
+        if (paletteScore(item.label.slice(), query_buf[0..query_len])) |score| {
             scores[a.palette_match_count] = score;
             a.palette_matches[a.palette_match_count] = index;
             a.palette_match_count += 1;
         }
     }
-    if (unifiedHub(a)) appendPalettePeople(a, query_buf[0..query_len], &scores, true);
+    if (!a.palette_search_mode and unifiedHub(a)) appendPalettePeople(a, query_buf[0..query_len], scores, true);
     var i: usize = 1;
     while (i < a.palette_match_count) : (i += 1) {
         var j = i;
-        while (j > 0 and scores[j - 1] < scores[j]) : (j -= 1) {
+        while (j > 0) : (j -= 1) {
+            if (scores[j - 1] >= scores[j]) break;
             std.mem.swap(usize, &a.palette_matches[j - 1], &a.palette_matches[j]);
             std.mem.swap(i32, &scores[j - 1], &scores[j]);
         }
     }
-    if (!unifiedHub(a) and messenger_view.includes(activeChatView(a), .whatsapp)) appendPalettePeople(a, query_buf[0..query_len], &scores, false);
+    if (a.palette_search_mode) {
+        const commands = a.palette_match_count;
+        for (0..a.chat_count) |index| {
+            const before = a.palette_item_count;
+            appendPaletteChat(a, index);
+            if (a.palette_item_count == before) continue;
+            a.palette_matches[a.palette_match_count] = before;
+            a.palette_match_count += 1;
+        }
+        std.mem.rotate(usize, a.palette_matches[0..a.palette_match_count], commands);
+    } else if (!unifiedHub(a) and messenger_view.includes(activeChatView(a), .whatsapp)) appendPalettePeople(a, query_buf[0..query_len], scores, false);
+    if (grouped and !a.palette_search_mode and query_len > 0) {
+        var chats: usize = 0;
+        for (0..a.palette_match_count) |index| {
+            const match = a.palette_matches[index];
+            if (a.palette_items[match].chat_jid.len == 0) continue;
+            std.mem.copyBackwards(usize, a.palette_matches[chats + 1 .. index + 1], a.palette_matches[chats..index]);
+            a.palette_matches[chats] = match;
+            chats += 1;
+        }
+    }
     if (a.palette_list) |list| {
         _ = win.SendMessageW(list, win.WM_SETREDRAW, 0, 0);
         _ = win.SendMessageW(list, win.LB_RESETCONTENT, 0, 0);
@@ -12198,11 +12239,30 @@ fn paletteActivate(a: *App) void {
     runCommand(a, command);
 }
 
+fn openSearchPalette(a: *App) void {
+    if (a.palette != null and a.palette_search_mode) {
+        if (a.palette_edit) |edit| {
+            _ = win.SetFocus(edit);
+            _ = win.SendMessageW(edit, win.EM_SETSEL, 0, @bitCast(@as(isize, -1)));
+        }
+        return;
+    }
+    if (a.palette != null) closePalette(a);
+    a.palette_search_mode = true;
+    a.palette_links_mode = false;
+    a.palette_accounts_mode = false;
+    a.palette_views_mode = false;
+    buildPaletteItems(a);
+    showPaletteWindow(a);
+    if (a.palette_edit) |edit| _ = win.SendMessageW(edit, win.EM_SETSEL, 0, @bitCast(@as(isize, -1)));
+}
+
 fn openPalette(a: *App) void {
     if (a.palette != null) {
         closePalette(a);
         return;
     }
+    a.palette_search_mode = false;
     a.palette_links_mode = false;
     a.palette_accounts_mode = false;
     a.palette_views_mode = false;
@@ -12238,7 +12298,7 @@ fn buildLinkPaletteItems(a: *App) void {
                 if (std.mem.eql(u16, existing.url.slice(), span.url.slice())) duplicate = true;
             }
             if (duplicate) continue;
-            if (a.palette_item_count >= max_palette_items) return;
+            if (!ensurePaletteCapacity(a)) return;
             const item = &a.palette_items[a.palette_item_count];
             const url_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, span.url.slice()) catch continue;
             defer a.allocator.free(url_utf8);
@@ -12253,7 +12313,7 @@ fn buildLinkPaletteItems(a: *App) void {
             a.palette_item_count += 1;
         }
         if ((isImage(message) or isVideo(message)) and message.id.len > 0) {
-            if (a.palette_item_count >= max_palette_items) return;
+            if (!ensurePaletteCapacity(a)) return;
             const item = &a.palette_items[a.palette_item_count];
             const sender_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.sender.slice()) catch continue;
             defer a.allocator.free(sender_utf8);
@@ -12399,6 +12459,9 @@ fn showPaletteWindow(a: *App) void {
         _ = win.DestroyWindow(palette);
         return;
     }
+    if (a.palette_search_mode) {
+        _ = win.SetWindowTextW(a.palette_edit.?, a.search_query.ptr());
+    }
     a.palette_list = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_HASSTRINGS | win.LBS_NOINTEGRALHEIGHT, 1, palette_edit_zone, palette_width - 2 - scrollbar_width, palette_max_rows * palette_row_height + 12, palette, controlId(id_palette_list), a.instance, null);
     setFont(a.palette_edit, a.font);
     setFont(a.palette_list, a.font);
@@ -12425,16 +12488,33 @@ fn drawPaletteItem(a: *App, item: *win.DRAWITEMSTRUCT) void {
         var bar = win.RECT{ .left = item.rcItem.left, .top = item.rcItem.top, .right = item.rcItem.left + 3, .bottom = item.rcItem.bottom };
         _ = win.FillRect(item.hDC, &bar, accent_brush);
     }
+    const chat_result = palette_item.chat_jid.len > 0;
+    const group_start = !a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode and
+        (index == 0 or (a.palette_items[a.palette_matches[index - 1]].chat_jid.len > 0) != chat_result);
+    const foreground = if (selected and theme.choice == .amoled) theme.current.on_secondary_container else theme.current.on_surface;
     _ = win.SelectObject(item.hDC, @ptrCast(a.font.?));
-    _ = win.SetTextColor(item.hDC, if (selected and theme.choice == .amoled) theme.current.on_secondary_container else theme.current.on_surface);
-    const label_right = if (palette_item.shortcut.len > 0) item.rcItem.right - 130 else item.rcItem.right - 20;
+    _ = win.SetTextColor(item.hDC, if (chat_result and palette_item.archived) theme.archivedRowColor(foreground) else foreground);
+    const label_right = if (palette_item.shortcut.len > 0 or group_start) item.rcItem.right - 130 else item.rcItem.right - 20;
     var label_rect = win.RECT{ .left = item.rcItem.left + 20, .top = item.rcItem.top, .right = label_right, .bottom = item.rcItem.bottom };
     _ = text_draw.drawText(item.hDC, palette_item.label.ptr(), @intCast(palette_item.label.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     if (palette_item.shortcut.len > 0) {
         _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
         _ = win.SetTextColor(item.hDC, if (selected and theme.choice == .amoled) theme.current.on_secondary_container else theme.current.on_surface_variant);
-        var shortcut_rect = win.RECT{ .left = item.rcItem.right - 120, .top = item.rcItem.top, .right = item.rcItem.right - 16, .bottom = item.rcItem.bottom };
+        var shortcut_rect = win.RECT{ .left = item.rcItem.right - 120, .top = item.rcItem.top + (if (group_start) @as(i32, 16) else 0), .right = item.rcItem.right - 16, .bottom = item.rcItem.bottom };
         _ = text_draw.drawText(item.hDC, palette_item.shortcut.ptr(), @intCast(palette_item.shortcut.len), &shortcut_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
+    }
+    if (group_start) {
+        _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
+        _ = win.SetTextColor(item.hDC, theme.current.on_surface_variant);
+        var group_rect = win.RECT{ .left = item.rcItem.right - 120, .top = item.rcItem.top + 2, .right = item.rcItem.right - 16, .bottom = item.rcItem.top + 20 };
+        const label = if (chat_result) lit("Chats") else lit("Commands");
+        _ = text_draw.drawText(item.hDC, label, -1, &group_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
+        if (index > 0) {
+            const brush = win.CreateSolidBrush(theme.current.outline) orelse return;
+            defer _ = win.DeleteObject(brush);
+            var separator = win.RECT{ .left = item.rcItem.left + 16, .top = item.rcItem.top, .right = item.rcItem.right - 16, .bottom = item.rcItem.top + 1 };
+            _ = win.FillRect(item.hDC, &separator, brush);
+        }
     }
 }
 
@@ -12542,6 +12622,7 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
         },
         win.WM_DESTROY => {
             a.palette = null;
+            a.palette_search_mode = false;
             a.palette_views_mode = false;
             a.palette_edit = null;
             a.palette_list = null;
@@ -12732,9 +12813,7 @@ fn shortcutHelpProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lpara
 fn runCommand(a: *App, command: u16) void {
     switch (command) {
         command_slack_threads => toggleSlackThreads(a),
-        command_search => {
-            if (a.search) |search| _ = win.SetFocus(search);
-        },
+        command_search => openSearchPalette(a),
         command_compose => {
             a.user_viewed = true;
             if (a.compose) |compose| _ = win.SetFocus(compose);
@@ -12989,7 +13068,6 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
     a.compose_client_height = height;
     const left_width = std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 390));
     const header_height: i32 = 0;
-    const search_height: i32 = px(a, 48);
     const list_bottom = if (updateCardVisible(a)) updateCardRect(a).top - px(a, 4) else height;
     var sizes = stagedComposerSizes(a, width, height);
     if (a.compose) |hwnd| {
@@ -13004,16 +13082,7 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
         }
     }
     a.compose_strip_top = height - sizes.strip_height;
-    a.search_pill = .{ .left = px(a, 12), .top = header_height + px(a, 8), .right = px(a, 12) + left_width - px(a, 24), .bottom = header_height + px(a, 8) + px(a, 34) };
-    if (a.search) |hwnd| {
-        const pill = field_pill.compute(a.search_pill, px(a, theme.radius_field * 2));
-        var inner = pill.inner;
-        inner.top += 1;
-        inner.bottom = @max(inner.top, inner.bottom - 1);
-        _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
-        _ = win.SendMessageW(hwnd, win.EM_SETMARGINS, win.EC_LEFTMARGIN | win.EC_RIGHTMARGIN, @as(win.LPARAM, px(a, 2)) | (@as(win.LPARAM, px(a, 2)) << 16));
-    }
-    if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, list_bottom - header_height - search_height, win.TRUE);
+    if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height, left_width - scrollbar_width, list_bottom - header_height, win.TRUE);
     if (a.thread_parent.len > 0 and (a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) closeSlackThread(a);
     const chat_width = width - left_width - 1;
     const panel_width = if (a.thread_parent.len > 0) @divTrunc(chat_width, 2) else 0;
@@ -15309,9 +15378,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             const window_dpi = win.GetDpiForWindow(hwnd);
             a.dpi = if (window_dpi == 0) 96 else window_dpi;
             if (!recreateThemeBrushes(a)) return -1;
-            a.search = directwrite_edit.create(a.instance, hwnd, controlId(id_search), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 0, 0, 0, 0);
-            if (a.search == null) return -1;
-            directwrite_edit.setCentered(a.search.?, true);
             a.chats_hwnd = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_NOINTEGRALHEIGHT, 0, 0, 0, 0, hwnd, controlId(id_chats), a.instance, null);
             if (a.chats_hwnd) |list| a.chats_prev_proc = @bitCast(win.SetWindowLongPtrW(list, win.GWLP_WNDPROC, @intCast(@intFromPtr(&chatsProc))));
             a.canvas = win.CreateWindowExW(0, lit("WacliMessageCanvas"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, hwnd, controlId(id_canvas), a.instance, null);
@@ -15336,7 +15402,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             text_draw.reset();
             recreateFonts(a);
             createTooltips(a, hwnd);
-            updateSearchCue(a, activeChatView(a));
             if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, px(a, 64));
             a.compose_dragged = loadComposeDragged(hwnd);
             var rc_create: win.RECT = undefined;
@@ -15443,7 +15508,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             _ = win.FillRect(hdc, &composer_rect, a.brush_bg.?);
             var shapes = smooth.Context.init(hdc);
             defer shapes.deinit();
-            if (a.search) |search| paintInputField(a, &shapes, hdc, search, a.search_pill);
             if (a.compose != null) paintInputField(a, &shapes, hdc, a.compose.?, a.compose_pill);
             if (a.compose != null) {
                 const cx = @divTrunc(left_width + 1 + client.right, 2);
@@ -15534,12 +15598,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 }
             }
             const point = win.POINT{ .x = x, .y = y };
-            if (a.search) |edit| {
-                if (win.PtInRect(&a.search_pill, point) != 0) {
-                    _ = win.SetFocus(edit);
-                    return 0;
-                }
-            }
             if (a.compose) |edit| {
                 const strip = stripRightOf(edit, hwnd);
                 if (hitStrip(strip, x, y)) {
@@ -15639,17 +15697,14 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 runCommand(a, command_slack_attach);
             } else if (id == id_emoji and notification == win.BN_CLICKED) {
                 openEmojiMenu(a);
-            } else if ((id == id_compose or id == id_search) and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {
+            } else if (id == id_compose and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)) {
                 var dirty = a.compose_pill;
                 _ = win.InflateRect(&dirty, 1, 1);
-                _ = win.InvalidateRect(hwnd, if (id == id_compose) &dirty else &a.search_pill, win.FALSE);
+                _ = win.InvalidateRect(hwnd, &dirty, win.FALSE);
             } else if (id == id_compose and notification == win.EN_CHANGE) {
                 saveComposerDraft(a);
                 layoutComposer(a);
                 shortcodeUpdate(a);
-            } else if (id == id_search and notification == win.EN_CHANGE) {
-                _ = win.KillTimer(hwnd, timer_search);
-                _ = win.SetTimer(hwnd, timer_search, 240, null);
             }
             return 0;
         },
@@ -15719,11 +15774,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 retryUnarchiveChat(a);
                 tickArchivedScan(a, changed);
                 drainMediaDownloads(a);
-            } else if (wparam == timer_search) {
-                _ = clearBulkSelection(a);
-                _ = win.KillTimer(hwnd, timer_search);
-                refilterChats(a);
-                if (!messagesAreCurrent(a)) refreshMessages(a);
             } else if (wparam == timer_animation) {
                 if (win.IsIconic(hwnd) == 0) {
                     advanceGifs(a);
@@ -15777,7 +15827,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     return @bitCast(@intFromPtr(a.brush_raised.?));
                 }
             }
-            for ([_]?win.HWND{ a.compose, a.search }) |control| {
+            for ([_]?win.HWND{ a.compose }) |control| {
                 if (control != null and control_value == @intFromPtr(control.?)) {
                     _ = win.SetBkColor(hdc, theme.current.surface_container_high);
                     return @bitCast(@intFromPtr(a.brush_raised.?));
@@ -15804,7 +15854,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             closePlayer(a);
             closeImageViewer(a);
             _ = win.KillTimer(hwnd, timer_refresh);
-            _ = win.KillTimer(hwnd, timer_search);
             _ = win.KillTimer(hwnd, timer_animation);
             _ = win.KillTimer(hwnd, timer_chat_select);
             for (&a.media_downloads) |*slot| {
@@ -16022,10 +16071,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (control and key == 'F') {
-        if (a.search) |search| {
-            _ = win.SetFocus(search);
-            _ = win.SendMessageW(search, win.EM_SETSEL, 0, @bitCast(@as(isize, -1)));
-        }
+        openSearchPalette(a);
         return true;
     }
     if (control and !alt and !shift and key == 'A') {
@@ -16033,7 +16079,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         const compose_empty = if (in_compose) win.GetWindowTextLengthW(a.compose.?) == 0 else false;
         const in_text_field = (a.compose != null and focus == a.compose.?) or
             (a.thread_compose != null and focus == a.thread_compose.?) or
-            (a.search != null and focus == a.search.?) or
             (a.emoji_edit != null and focus == a.emoji_edit.?) or
             (a.palette_edit != null and focus == a.palette_edit.?);
         if (shortcuts.ctrlASelectsChats(in_text_field, in_compose, compose_empty)) {
@@ -16048,7 +16093,6 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     if (control and !alt and key == win.VK_BACK) {
         const in_text_field = (a.compose != null and focus == a.compose.?) or
             (a.thread_compose != null and focus == a.thread_compose.?) or
-            (a.search != null and focus == a.search.?) or
             (a.emoji_edit != null and focus == a.emoji_edit.?) or
             (a.palette_edit != null and focus == a.palette_edit.?);
         if (in_text_field) {
@@ -16085,7 +16129,9 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             return true;
         }
         if (key == win.VK_ESCAPE) {
+            const search_mode = a.palette_search_mode;
             closePalette(a);
+            if (search_mode) _ = clearSearch(a);
             return true;
         }
         return false;
@@ -16131,7 +16177,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     if (!control and !alt and !shift and key == win.VK_RETURN and a.thread_parent.len == 0 and slackThreadsEnabled(a)) {
         if (a.selected_message) |selected| {
             const empty = if (a.compose) |compose| win.GetWindowTextLengthW(compose) == 0 else true;
-            if ((a.search == null or focus != a.search.?) and empty and selected < a.message_count) {
+            if (empty and selected < a.message_count) {
                 openSlackThread(a, selected);
                 return true;
             }
@@ -16141,8 +16187,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         if (a.selected_message) |selected| {
             if (selected < a.message_count and a.messages[selected].from_me and a.messages[selected].send_state == .failed) {
                 const compose_empty = if (a.compose) |compose| win.GetWindowTextLengthW(compose) == 0 else true;
-                const in_search = if (a.search) |search| focus == search else false;
-                if (compose_empty and !in_search and resendFailedMessage(a, selected)) return true;
+                if (compose_empty and resendFailedMessage(a, selected)) return true;
             }
         }
     }
@@ -16150,8 +16195,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         if (a.selected_message) |selected| {
             if (selected < a.message_count and isImage(&a.messages[selected])) {
                 const compose_empty = if (a.compose) |compose| win.GetWindowTextLengthW(compose) == 0 else true;
-                const in_search = if (a.search) |search| focus == search else false;
-                if (compose_empty and a.staged_images.count == 0 and !in_search) {
+                if (compose_empty and a.staged_images.count == 0) {
                     openImageInViewerOrQueue(a, selected, &a.messages[selected]);
                     return true;
                 }
@@ -16210,7 +16254,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     }
     if (control and key == 'C') {
         const focus_control = win.GetFocus();
-        const in_editor = (a.compose != null and focus_control == a.compose.?) or (a.search != null and focus_control == a.search.?);
+        const in_editor = (a.compose != null and focus_control == a.compose.?);
         if (in_editor) {
             var selection_start: win.DWORD = 0;
             var selection_end: win.DWORD = 0;
@@ -16307,29 +16351,13 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             return false;
         }
     }
-    if (a.search) |search| {
-        if (focus == search) {
-            if (key == win.VK_RETURN) {
-                if (a.compose) |compose| _ = win.SetFocus(compose);
-                return true;
-            }
-            if (key == win.VK_ESCAPE) {
-                _ = clearSearch(a);
-                focusCompose(a);
-                return true;
-            }
-            return false;
-        }
-    }
     if (key == win.VK_RETURN or key == 'C') {
         if (a.compose) |compose| _ = win.SetFocus(compose);
         return true;
     }
     if (key == win.VK_OEM_2) {
-        if (a.search) |search| {
-            _ = win.SetFocus(search);
-            _ = win.SendMessageW(search, win.EM_SETSEL, 0, @bitCast(@as(isize, -1)));
-        }
+        if (control or alt or shift) return false;
+        openSearchPalette(a);
         return true;
     }
     if (key == 'E') {
@@ -16955,6 +16983,8 @@ pub fn main(init: std.process.Init) !void {
         app.draft_store.deinit(app.allocator);
     }
     defer app.people.deinit();
+    defer app.allocator.free(app.palette_items);
+    defer app.allocator.free(app.palette_matches);
     defer if (app.chats_raw) |raw| init.gpa.free(raw);
     app.wacli_dir.set(wacli_dir);
     configureHub(app, init);

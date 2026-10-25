@@ -1555,7 +1555,7 @@ test "Ctrl A routes every non-text control and empty composer focus but preserve
     defer a.allocator.free(a.pending_archives);
     defer a.bulk.deinit(a.allocator);
     defer compose_text_len = 0;
-    a.search = 7;
+    const former_search_control: win.HWND = 7;
     a.thread_compose = 8;
     a.emoji_edit = 9;
     a.palette_edit = 10;
@@ -1564,14 +1564,14 @@ test "Ctrl A routes every non-text control and empty composer focus but preserve
     const list_scrollbar: win.HWND = 13;
     for ([_]i32{ 0, 5 }) |text_len| {
         compose_text_len = text_len;
-        for ([_]?win.HWND{ a.chats_hwnd, a.canvas, a.hwnd, messages_list, button, list_scrollbar, null }) |focus| {
+        for ([_]?win.HWND{ a.chats_hwnd, a.canvas, a.hwnd, messages_list, button, list_scrollbar, former_search_control, null }) |focus| {
             a.bulk.clearRetainingCapacity();
             const before = text_selections;
             try std.testing.expect(selectAllKey(&a, focus));
             try std.testing.expectEqual(a.chat_count, a.bulk.items.len);
             try std.testing.expectEqual(before, text_selections);
         }
-        for ([_]?win.HWND{ a.compose, a.search, a.thread_compose, a.emoji_edit, a.palette_edit }) |focus| {
+        for ([_]?win.HWND{ a.compose, a.thread_compose, a.emoji_edit, a.palette_edit }) |focus| {
             a.bulk.clearRetainingCapacity();
             const before = text_selections;
             try std.testing.expect(selectAllKey(&a, focus));
