@@ -3812,8 +3812,7 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
         const item = slack.readHistoryItem(list.items[item_index]) orelse continue;
         newest_seconds = @max(newest_seconds, slack.tsSeconds(item.ts) orelse 0);
         const message = buildSlackMessage(a, chat.account.slice(), item);
-        a.messages[a.message_count] = message;
-        a.message_count += 1;
+        insertMessageSorted(a, message);
         count += 1;
         if (item.reply_count > 0 and reply_parent_count < reply_parents.len) {
             reply_parents[reply_parent_count].set(item.ts);
@@ -3825,8 +3824,7 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
     }
     for (saved[0..saved_count]) |message| {
         if (a.message_count >= max_messages) break;
-        a.messages[a.message_count] = message;
-        a.message_count += 1;
+        insertMessageSorted(a, message);
     }
     if (selected_id.len > 0) {
         for (a.messages[0..a.message_count], 0..) |*message, index| {
@@ -3905,7 +3903,7 @@ fn applySlackReplies(a: *App, raw: []const u8, parent: []const u8) void {
             if (std.mem.eql(u8, existing.id.slice(), item.ts)) known = true;
         }
         if (known) continue;
-        insertSlackMessageSorted(a, message);
+        insertMessageSorted(a, message);
         if (item.file_url.len > 0) requestSlackDownload(a, chat.account.slice(), chat.jid.slice(), item);
     }
     const cursor = slack.nextCursor(root);
@@ -3914,14 +3912,25 @@ fn applySlackReplies(a: *App, raw: []const u8, parent: []const u8) void {
     if (a.user_viewed) requestSlackMark(a, chat.jid.slice());
 }
 
-fn insertSlackMessageSorted(a: *App, message: Message) void {
+fn messageOrder(left: *const Message, right: *const Message) std.math.Order {
+    if (left.timestamp.len == 0 and right.timestamp.len == 0) {
+        const by_time = slack.compareTs(left.id.slice(), right.id.slice());
+        if (by_time != .eq) return by_time;
+    }
+    return message_filter.order(left.timestamp.slice(), left.id.slice(), right.timestamp.slice(), right.id.slice());
+}
+
+fn insertMessageSorted(a: *App, message: Message) void {
     if (a.message_count >= max_messages) return;
     var index: usize = a.message_count;
-    while (index > 0 and slack.compareTs(a.messages[index - 1].id.slice(), message.id.slice()) == .gt) : (index -= 1) {
+    while (message.send_state == .none and index > 0 and (a.messages[index - 1].send_state != .none or messageOrder(&a.messages[index - 1], &message) == .gt)) : (index -= 1) {
         a.messages[index] = a.messages[index - 1];
     }
     a.messages[index] = message;
     a.message_count += 1;
+    if (a.selected_message) |selected| {
+        if (selected >= index) a.selected_message = selected + 1;
+    }
 }
 
 fn appendSlackPending(a: *App, text: []const u8, client_msg_id: []const u8, thread_ts: []const u8) void {
@@ -7775,19 +7784,18 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
     defer united.deinit(a.allocator);
     var kept_rows: ?std.json.Parsed(std.json.Value) = null;
     defer if (kept_rows) |*kept| kept.deinit();
-    var rows: []const std.json.Value = list.items;
+    _ = hub.unite(a.allocator, list.items, &.{}, &united) catch return false;
+    var rows: []const std.json.Value = united.items;
     var merged = false;
     if (unifiedHub(a) and chat.provider == .whatsapp) {
         if (hubOlderFor(a, chat_key.of(chat)).rows) |kept_text| {
             if (std.json.parseFromSlice(std.json.Value, a.allocator, kept_text, .{ .allocate = .alloc_always })) |kept| {
                 kept_rows = kept;
                 if (kept.value == .array) {
-                    if (hub.unite(a.allocator, list.items, kept.value.array.items, &united)) |_| {
+                    if (hub.unite(a.allocator, &.{}, kept.value.array.items, &united)) |_| {
                         rows = united.items;
                         merged = true;
-                    } else |_| {
-                        united.clearRetainingCapacity();
-                    }
+                    } else |_| return false;
                 }
             } else |_| {}
         }
@@ -8444,9 +8452,8 @@ fn applySentVoice(a: *App, jid: []const u8) void {
             message.timestamp.set(text);
             formatTime(&message.time, a.allocator, text);
         } else |_| {}
-        a.messages[a.message_count] = message;
-        a.message_count += 1;
-        loadTranscriptCache(a, &a.messages[a.message_count - 1]);
+        loadTranscriptCache(a, &message);
+        insertMessageSorted(a, message);
     }
 }
 
@@ -19442,7 +19449,7 @@ fn rememberSlackThreadRow(a: *App, message: *const Message) void {
     }
     a.thread_rows.append(a.allocator, row) catch return;
     var index = a.thread_rows.items.len - 1;
-    while (index > 0 and slack.compareTs(a.thread_rows.items[index - 1].id.slice(), row.id.slice()) == .gt) : (index -= 1) {
+    while (index > 0 and (if (row.timestamp.len == 0) slack.compareTs(a.thread_rows.items[index - 1].id.slice(), row.id.slice()) else message_filter.order(a.thread_rows.items[index - 1].timestamp.slice(), a.thread_rows.items[index - 1].id.slice(), row.timestamp.slice(), row.id.slice())) == .gt) : (index -= 1) {
         a.thread_rows.items[index] = a.thread_rows.items[index - 1];
     }
     a.thread_rows.items[index] = row;

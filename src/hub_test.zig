@@ -72,6 +72,18 @@ test "IGSH-840 late poll inserts older messages by provider time" {
     }
 }
 
+test "IGSH-840 a shuffled history page sorts before display" {
+    const allocator = std.testing.allocator;
+    var page = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[{\"MsgID\":\"C\",\"Timestamp\":\"2026-10-01T12:30:00Z\"},{\"MsgID\":\"A\",\"Timestamp\":\"2026-10-01T13:06:00Z\"},{\"MsgID\":\"B\",\"Timestamp\":\"2026-10-01T12:29:00Z\"}]}}", .{});
+    defer page.deinit();
+    var rows: std.ArrayList(std.json.Value) = .empty;
+    defer rows.deinit(allocator);
+    _ = try hub.unite(allocator, hub.messageRows(page.value).?, &.{}, &rows);
+    for (rows.items, [_][]const u8{ "A", "C", "B" }) |row, id| {
+        try std.testing.expectEqualStrings(id, row.object.get("MsgID").?.string);
+    }
+}
+
 test "IGSH-840 same timestamp uses message id as stable tie breaker" {
     const allocator = std.testing.allocator;
     var loaded = try std.json.parseFromSlice(std.json.Value, allocator, "{\"data\":{\"messages\":[{\"MsgID\":\"A\",\"Timestamp\":\"2026-10-01T13:06:00Z\"}]}}", .{});
