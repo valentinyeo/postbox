@@ -2481,7 +2481,7 @@ fn applyGroups(a: *App, raw: []const u8) void {
 }
 
 fn refreshChats(a: *App) void {
-    const flags: u8 = if (a.chats_raw != null and a.chats_raw_flags == 1) 1 else if (a.show_archived) 2 else if (a.include_archived) 1 else 0;
+    const flags: u8 = if (a.show_archived) 2 else if (a.include_archived or unifiedHub(a) or (a.chats_raw != null and a.chats_raw_flags == 1)) 1 else 0;
     if (wacliPendingGet(a, .chats) > 0 and a.chats_pending_flags == flags) return;
     var job = WacliJob{ .account = a.cache_tag, .kind = .chats, .started_ms = win.GetTickCount64() };
     wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--limit", "250" });
