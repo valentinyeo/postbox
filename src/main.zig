@@ -2602,7 +2602,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
             const pending_key = chat_key.Key{ .provider = .whatsapp, .account = chat.account.slice(), .id = pending.jid.slice() };
             if (chat.provider == .whatsapp and chat_key.Key.eql(chat_key.of(&chat), pending_key)) chat.archived = !pending.should_unarchive;
         }
-        if (!messenger_view.archiveMatches(a.show_archived, a.include_archived, activeChatView(a) == .all, a.unread_only, chat.archived, chat.unread)) continue;
+        if (!messenger_view.archiveMatches(a.show_archived, a.include_archived, activeChatView(a) == .all, a.unread_only, chatArchiveState(a, &chat), chat.unread)) continue;
         a.chats[a.chat_count] = chat;
         a.chat_count += 1;
     }
@@ -4444,7 +4444,7 @@ fn appendSlackChats(a: *App, query_utf8: ?[]const u8) void {
             const name = std.unicode.utf16LeToUtf8Alloc(a.allocator, cached.name.slice()) catch continue;
             defer a.allocator.free(name);
             cached.archived = if (a.archive_state) |state| state.localArchived(chat_key.of(cached)) else false;
-            if (!messenger_view.archiveMatches(a.show_archived, a.include_archived, activeChatView(a) == .all, a.unread_only, cached.archived, cached.unread)) continue;
+            if (!messenger_view.archiveMatches(a.show_archived, a.include_archived, activeChatView(a) == .all, a.unread_only, chatArchiveState(a, cached), cached.unread)) continue;
             if (!chatInView(a, chat_key.of(cached))) continue;
             if (!messenger_view.matches(activeChatView(a), .slack, a.unread_only, cached.unread, query_utf8 orelse "", name, cached.jid.slice())) continue;
             messenger_view.merge(Chat, a.chats, &a.chat_count, &.{cached.*});
@@ -12723,12 +12723,15 @@ fn isKeptArchived(a: *const App, jid: []const u8) bool {
     return state.isKept(jid);
 }
 
+fn chatArchiveState(a: *const App, chat: *const Chat) archive_rules.ArchiveState {
+    const kept = chat.provider == .slack or (chat.provider == .whatsapp and isKeptArchived(a, chat.jid.slice()));
+    return archive_rules.archiveState(chat.archived, kept);
+}
+
 fn archiveMarker(a: *const App, chat: *const Chat) ?[*:0]const u16 {
-    if (chat.provider == .slack) return if (chat.archived) lit("Kept archived") else null;
-    if (chat.provider != .whatsapp) return if (chat.archived) lit("Archived") else null;
-    if (std.mem.eql(u16, chat.kind.slice(), std.mem.span(lit("Contact")))) return lit("Contact");
-    if (!chat.archived and !a.show_archived) return null;
-    return if (isKeptArchived(a, chat.jid.slice())) lit("Kept archived") else lit("Archived");
+    if (chatArchiveState(a, chat).label()) |label| return label;
+    if (chat.provider == .whatsapp and std.mem.eql(u16, chat.kind.slice(), std.mem.span(lit("Contact")))) return lit("Contact");
+    return null;
 }
 
 fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) void {
@@ -13016,7 +13019,7 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
         saveArchiveState(a);
         if (visibleChatIndex(a, key)) |index| {
             a.chats[index].archived = !unarchive;
-            if (!messenger_view.archiveMatches(a.show_archived, a.include_archived, activeChatView(a) == .all, a.unread_only, !unarchive, a.chats[index].unread)) removeChatRow(a, index);
+            if (!messenger_view.archiveMatches(a.show_archived, a.include_archived, activeChatView(a) == .all, a.unread_only, chatArchiveState(a, &a.chats[index]), a.chats[index].unread)) removeChatRow(a, index);
         }
         if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
         if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
@@ -13057,7 +13060,7 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
     }
     if (visibleChatIndex(a, key)) |index| {
         a.chats[index].archived = !unarchive;
-        if (!messenger_view.archiveMatches(a.show_archived, a.include_archived, activeChatView(a) == .all, a.unread_only, !unarchive, a.chats[index].unread)) removeChatRow(a, index);
+        if (!messenger_view.archiveMatches(a.show_archived, a.include_archived, activeChatView(a) == .all, a.unread_only, chatArchiveState(a, &a.chats[index]), a.chats[index].unread)) removeChatRow(a, index);
     }
     startNextArchive(a);
     return null;
@@ -13437,7 +13440,7 @@ fn controlChats(a: *App, call: *ControlCall) !void {
                 if (!installation.active) continue;
                 for (installation.chats[0..installation.chat_count]) |*chat| {
                     chat.archived = if (a.archive_state) |state| state.localArchived(chat_key.of(chat)) else false;
-                    if (chat.archived != request.archived) continue;
+                    if (!messenger_view.archiveMatches(request.archived, false, false, false, chatArchiveState(a, chat), chat.unread)) continue;
                     if ((request.messenger != null or chatInView(a, chat_key.of(chat))) and controlMatches(a, chat, wanted)) try list.append(a.allocator, chat.*);
                 }
             }
@@ -13510,7 +13513,7 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, acc
         chat.unread = getBool(object, "unread");
         chat.unread_count = getInt(object, "unread_count");
         chat.archived = if (a.archive_state) |state| state.isArchived(chat_key.of(&chat), getBool(object, "archived")) else getBool(object, "archived");
-        if (chat.archived != show_archived) continue;
+        if (!messenger_view.archiveMatches(show_archived, false, false, false, chatArchiveState(a, &chat), chat.unread)) continue;
         try list.append(a.allocator, chat);
     }
 }

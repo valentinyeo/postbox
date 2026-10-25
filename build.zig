@@ -529,6 +529,7 @@ pub fn build(b: *std.Build) void {
         archive_filter_source[std.mem.indexOf(u8, archive_filter_source, "pub fn archiveMatches(").?..std.mem.indexOf(u8, archive_filter_source, "pub fn mergeChatData(").?],
         "};\n",
         sourceSection("fn getBool(", "fn getInt("),
+        sourceSection("fn chatArchiveState(", "fn queueUnarchiveChat("),
         "fn archiveInboxRow(a: *App, row: Chat, object: std.json.ObjectMap) ?Chat { for ([_]Chat{row}) |item| { var chat = item;\n",
         sourceSection("        chat.archived =", "        a.chats[a.chat_count] = chat;"),
         "return chat; } return null; }\n",

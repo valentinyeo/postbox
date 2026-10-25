@@ -37,6 +37,13 @@ const Chat = struct {
     archived: bool = false,
     provider_archived: bool = false,
     unread: bool = false,
+    pinned: bool = false,
+    kind: struct {
+        text: []const u16 = &.{},
+        fn slice(self: *const @This()) []const u16 {
+            return self.text;
+        }
+    } = .{},
 };
 const PendingArchive = struct {
     jid: Utf8Text(191) = .{},
@@ -121,6 +128,9 @@ const win = struct {
         return 1;
     }
 };
+fn lit(comptime text: []const u8) [*:0]const u16 {
+    return std.unicode.utf8ToUtf16LeStringLiteral(text);
+}
 fn fixture(state: *archive_rules.State) App {
     var a = App{ .archive_state = state, .chats_hwnd = 4, .canvas = 6, .hwnd = 5, .compose = 1 };
     a.chats[0].jid.set("a@g.us");
@@ -1249,5 +1259,45 @@ test "mixed locally unarchived phone rows remain unarchived after reloading stat
         var loaded = archive_rules.State{};
         loaded.parse(a.saved[0..a.saved_len]);
         try std.testing.expect(!loaded.isArchived(key.key(), true));
+    }
+}
+
+test "archive row labels survive contact kind pin unread and Show archived toggles on every provider" {
+    for ([_]Provider{ .whatsapp, .telegram, .slack, .signal }) |provider| {
+        for ([_]archive_rules.ArchiveState{ .incoming, .archived, .kept_archived }) |expected| {
+            for ([_]bool{ false, true }) |pinned| {
+                for ([_]bool{ false, true }) |unread| {
+                    var state = archive_rules.State{};
+                    var a = fixture(&state);
+                    a.unified_hub = true;
+                    var chat = Chat{ .provider = provider, .archived = expected != .incoming, .pinned = pinned, .unread = unread };
+                    chat.jid.set("fixture:row");
+                    chat.account.set("fixture-account");
+                    chat.kind.text = std.mem.span(lit("Contact"));
+                    if (expected == .kept_archived and provider == .whatsapp) try std.testing.expect(state.archive(chat.jid.slice(), "baseline", true));
+                    const kept = expected == .kept_archived and provider == .whatsapp or provider == .slack;
+                    const row_state = chatArchiveState(&a, &chat);
+                    try std.testing.expectEqual(archive_rules.archiveState(chat.archived, kept), row_state);
+                    if (expected != .incoming) {
+                        const label = archiveMarker(&a, &chat) orelse return error.MissingArchiveLabel;
+                        try std.testing.expectEqualSlices(u16, std.mem.span(if (kept) lit("Kept archived") else lit("Archived")), std.mem.span(label));
+                    } else if (provider != .whatsapp) {
+                        try std.testing.expect(archiveMarker(&a, &chat) == null);
+                    } else {
+                        try std.testing.expectEqualSlices(u16, std.mem.span(lit("Contact")), std.mem.span(archiveMarker(&a, &chat).?));
+                    }
+                    const original_label = archiveMarker(&a, &chat);
+                    for ([_]bool{ false, true }) |include_archived| {
+                        a.include_archived = include_archived;
+                        try std.testing.expectEqual(expected == .incoming or include_archived, messenger_view.archiveMatches(false, a.include_archived, false, false, chatArchiveState(&a, &chat), unread));
+                        try std.testing.expectEqual(expected != .incoming, messenger_view.archiveMatches(true, a.include_archived, false, false, chatArchiveState(&a, &chat), unread));
+                        for ([_]bool{ false, true }) |archived_only| {
+                            a.show_archived = archived_only;
+                            try std.testing.expectEqualSlices(u16, std.mem.span(original_label orelse lit("")), std.mem.span(archiveMarker(&a, &chat) orelse lit("")));
+                        }
+                    }
+                }
+            }
+        }
     }
 }

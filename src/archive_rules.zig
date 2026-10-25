@@ -16,8 +16,27 @@ pub fn migrateLegacyKeep(state: *State, legacy: *const State, key: anytype, ts: 
     return false;
 }
 
+pub const ArchiveState = enum {
+    incoming,
+    archived,
+    kept_archived,
+
+    pub fn label(self: ArchiveState) ?[*:0]const u16 {
+        return switch (self) {
+            .incoming => null,
+            .archived => std.unicode.utf8ToUtf16LeStringLiteral("Archived"),
+            .kept_archived => std.unicode.utf8ToUtf16LeStringLiteral("Kept archived"),
+        };
+    }
+};
+
+pub fn archiveState(archived: bool, kept: bool) ArchiveState {
+    return if (!archived) .incoming else if (kept) .kept_archived else .archived;
+}
+
 pub fn pendingHidesChat(show_archived: bool, should_unarchive: bool) bool {
-    return show_archived == should_unarchive;
+    const pending_state = archiveState(!should_unarchive, false);
+    return (pending_state != .incoming) != show_archived;
 }
 
 pub fn progressStatus(out: []u8, should_unarchive: bool, total: usize, remaining: usize) ?[]const u8 {
@@ -656,4 +675,34 @@ test "explicit local unarchive overrides phone archived state after restart with
         try std.testing.expect(loaded.setLocalArchived(key, true));
         try std.testing.expect(loaded.isArchived(key, false));
     }
+}
+
+test "archive states label every pinned unread and provider combination" {
+    const Provider = @FieldType(Entry, "provider");
+    var count: usize = 0;
+    for ([_]Provider{ .whatsapp, .telegram, .slack, .signal }) |provider| {
+        for ([_]ArchiveState{ .incoming, .archived, .kept_archived }) |expected| {
+            for ([_]bool{ false, true }) |pinned| {
+                for ([_]bool{ false, true }) |unread| {
+                    const row = .{ .provider = provider, .pinned = pinned, .unread = unread, .archived = expected != .incoming, .kept = expected == .kept_archived };
+                    const actual = archiveState(row.archived, row.kept);
+                    try std.testing.expectEqual(expected, actual);
+                    if (expected == .incoming) {
+                        try std.testing.expect(actual.label() == null);
+                    } else {
+                        const label = actual.label() orelse return error.MissingArchiveLabel;
+                        const expected_label: [*:0]const u16 = if (expected == .kept_archived) std.unicode.utf8ToUtf16LeStringLiteral("Kept archived") else std.unicode.utf8ToUtf16LeStringLiteral("Archived");
+                        try std.testing.expectEqualSlices(u16, std.mem.span(expected_label), std.mem.span(label));
+                    }
+                    count += 1;
+                }
+            }
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 48), count);
+}
+
+test "incoming state ignores a stale keep flag" {
+    try std.testing.expectEqual(ArchiveState.incoming, archiveState(false, true));
+    try std.testing.expect(archiveState(false, true).label() == null);
 }
