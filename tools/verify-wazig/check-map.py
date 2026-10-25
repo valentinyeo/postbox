@@ -309,7 +309,7 @@ for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages 2',
     assert fragment in archive_journey, fragment
 for fragment in ["min(incoming) < min(writes)", "kept[1] == '1'", "capture(f'{phase}-inbox', False)", "capture(f'{phase}-archived', True)", "read_bytes() == legacy_bytes"]:
     assert fragment in archive_validator, fragment
-print('HUB ARCHIVE MAP VERIFIED: legacy seed, archive request, keep state, same-profile restart, marker, evidence and PR wiring')
+print('HUB ARCHIVE MAP VERIFIED: ordinary archives return on newer messages; Ctrl+Shift+E keeps archived; legacy seed, archive request, keep state, same-profile restart, marker, evidence and PR wiring')
 
 palette_archived_map = (skill / 'features/palette-archived.md').read_text(encoding='utf-8')
 palette_archived_journey = (root / 'tools/verify-wazig/palette-archived.ps1').read_text(encoding='utf-8')

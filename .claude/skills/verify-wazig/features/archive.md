@@ -1,19 +1,19 @@
 # Archive
 
-Move a chat out of the inbox, keep it archived across incoming messages, and find its updated unread badge in Archive.
+Ctrl+E moves chats out of the inbox. Ordinary archives return on a newer message. Ctrl+Shift+E deliberately keeps chats archived. Same distinction across WhatsApp, Slack, Telegram, and Signal.
 
 ## Sub-features
 
-- `archive-chat`: archive or unarchive the selected WhatsApp or Slack chat; the message pane immediately follows the remaining selection.
-- `archive-legacy-keep`: existing keep flags still re-archive a chat if the provider unarchives it; the separate keep/resurfacing commands are removed.
+- `archive-chat`: archive or unarchive the selected chat. Supports WhatsApp, Slack, Telegram, and Signal. Message pane follows the remaining selection.
+- `archive-legacy-keep`: legacy keep flags remain kept. Kept chats re-archive after provider unarchive. Ctrl+Shift+E explicitly chooses Kept archived.
 - `archive-view`: toggle between inbox and Archive.
-- `archive-incoming`: incoming messages never trigger a client unarchive; legacy kept chats are still re-archived when the provider itself unarchives them.
+- `archive-incoming`: ordinary archives return on newer messages. Kept archives stay archived, including migrated flags.
 - `archive-bulk`: Ctrl+A in the chat list or empty composer selects all visible chats; Ctrl+E archives the selection. The dedicated `archive-bulk` journey proves the empty-composer path and preserves text select-all.
 
 ## How to get to it (user POV)
 
 - Ctrl+A selects all visible chats when the chat list or the empty main composer has focus. With composer text, or in search, thread composer, emoji or palette edits, Ctrl+A still selects text. Esc clears the chat selection.
-- Ctrl+E archives the open chat, including from the composer; in Archive it unarchives. Bare E works outside editable fields. Ctrl+Shift+E is unbound.
+- Ctrl+E ordinarily archives, including from the composer. In Archive, Ctrl+E unarchives. Bare E works outside editable fields. Ctrl+Shift+E deliberately keeps archived across incoming messages.
 - Right-click a chat, or focus the chat list and press Shift+F10, for `Archive` / `Unarchive` and pinning. Labels come from `src/chat_menu.zig:items`; keyboard context menus reach `src/main.zig:openChatMenu`.
 - Ctrl+K → `Archive selected chat` / `Unarchive selected chat`.
 - Ctrl+K → `Show archived chats` opens Archive; `Show inbox chats` returns. These commands live in `src/main.zig:buildPaletteItems`; shortcuts are in `handleKeyboard` and `src/shortcuts.zig`.
@@ -32,9 +32,9 @@ The dedicated [bulk archive journey](archive-bulk.md), `feature=archive-bulk`, f
 
 ## Gotchas
 
-- Slack archives are local to Wazig, keyed by provider, account and chat ID. Channels, groups and DMs stay in Archive across incoming messages, hub sync and restarts until explicitly unarchived. No Slack API archive or hub archive request is sent. See [Slack archive](slack-archive.md).
-- IGSH-734 removes the incoming-message resurfacing path and the separate keep/resurfacing menu and palette commands. Sending into an archived WhatsApp chat still unarchives it. Legacy keep flags and baseline timestamps remain readable; [Hub archive](hub-archive.md) proves legacy keep enforcement, same-profile restart and both plain direct chats staying archived beyond the idle scan.
-- The ordinary archive recipe keeps provider `archived=true` on delivery. Provider-side unarchiving of a legacy kept chat is covered by `hub-archive`, which must fail without `holdKeptArchived`.
+- Slack archives remain local, keyed by provider/account/chat. Ordinary archives return on a newer message. Ctrl+Shift+E keeps channels, groups, and DMs archived. No Slack API or hub archive request. See [Slack archive](slack-archive.md).
+- IGSH-828 supersedes IGSH-734's always-archived rule across channels. Ordinary Ctrl+E archives return on newer messages. Ctrl+Shift+E keeps archived; legacy flags remain kept. Sending into archived WhatsApp still unarchives it. Legacy flags and baseline timestamps remain readable. [Hub archive](hub-archive.md) proves migration and same-profile restart. Its incoming phase proves both ordinary inbox returns.
+- This older recipe retains provider `archived=true` delivery. It does not prove ordinary incoming returns. `hub-archive` proves returns after newer provider-unarchived messages. It also proves legacy kept rearchive enforcement. Removing `holdKeptArchived` must still fail kept checks.
 - Provider reads and archive acknowledgements alone are fixture-backed. All user actions use foreground-checked SendKeys; status/chats are read-only. The hook shares the existing `--verify-fixture` Actions/path/registry isolation guard and cannot enable real provider traffic.
 - Opening a chat explicitly normally marks it read. The recipe changes Archive views without explicitly selecting Alpha after arrival, so the refreshed sidebar can prove its unread badge before a read receipt. It does not verify live WhatsApp delivery, idle-scan persistence, restart persistence or the context-menu path.
 - This verification does not alter the font, saved scale, toolbar policy, media behaviour or updater. No real provider account, store or installed executable is touched.
