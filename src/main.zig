@@ -1344,11 +1344,6 @@ fn drawSetupButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     var shapes = smooth.Context.init(item.hDC);
     defer shapes.deinit();
     const index: usize = switch (item.CtlID) {
-        id_slack_save => 3,
-        id_slack_cancel => 4,
-        id_tg_next => 5,
-        id_tg_cancel => 6,
-        id_tg_open_page => 7,
         id_include_archived => 10,
         else => return,
     };
@@ -4718,6 +4713,50 @@ fn requestSlackDownload(a: *App, account: []const u8, channel: []const u8, item:
     job.msg_id.set(item.ts);
     wacliJobArgs(&job, &.{ item.file_url, item.file_id, item.file_name, channel, item.ts });
     _ = wacliEnqueue(a, job, false);
+}
+
+const OPENFILENAMEW = extern struct {
+    lStructSize: win.DWORD,
+    hwndOwner: win.HWND,
+    hInstance: win.HINSTANCE,
+    lpstrFilter: ?[*:0]const u16,
+    lpstrCustomFilter: ?[*:0]u16,
+    nMaxCustFilter: win.DWORD,
+    nFilterIndex: win.DWORD,
+    lpstrFile: ?[*:0]u16,
+    nMaxFile: win.DWORD,
+    lpstrFileTitle: ?[*:0]u16,
+    nMaxFileTitle: win.DWORD,
+    lpstrInitialDir: ?[*:0]const u16,
+    lpstrTitle: ?[*:0]const u16,
+    Flags: win.DWORD,
+    nFileOffset: u16,
+    nFileExtension: u16,
+    lpstrDefExt: ?[*:0]const u16,
+    lCustData: win.LPARAM,
+    lpfnHook: ?*anyopaque,
+    lpTemplateName: ?[*:0]const u16,
+    pvReserved: ?*anyopaque,
+    dwReserved: win.DWORD,
+    FlagsEx: win.DWORD,
+};
+
+fn pickImageFile(a: *App) ?WideText(519) {
+    if (!shell_lazy.ensureComdlg32()) return null;
+    var buffer: [519]u16 = [_]u16{0} ** 519;
+    var ofn = std.mem.zeroes(OPENFILENAMEW);
+    ofn.lStructSize = @sizeOf(OPENFILENAMEW);
+    ofn.hwndOwner = a.hwnd orelse return null;
+    ofn.lpstrFilter = lit("Images\x00*.png;*.jpg;*.jpeg;*.gif;*.webp\x00All files\x00*.*\x00");
+    ofn.lpstrFile = @ptrCast(&buffer);
+    ofn.nMaxFile = buffer.len;
+    ofn.Flags = 0x00000800 | 0x00001000 | 0x00000008;
+    if (shell_lazy.getOpenFileNameW.?(@ptrCast(&ofn)) == 0) return null;
+    const chosen = std.unicode.utf16LeToUtf8Alloc(a.allocator, std.mem.span(@as([*:0]const u16, @ptrCast(&buffer)))) catch return null;
+    defer a.allocator.free(chosen);
+    var result = WideText(519){};
+    result.set(a.allocator, chosen);
+    return result;
 }
 
 fn markChatRead(a: *App) void {
