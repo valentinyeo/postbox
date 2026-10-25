@@ -1,5 +1,5 @@
 $launch = Get-Content (Join-Path $messages 'launch-log.txt') -Raw
-Assert-That ($launch.Contains('whatsapp backend: unavailable (URL not configured)') -and -not $launch.Contains('message backend: hub') -and -not $launch.Contains('whatsapp backend: wacli')) 'Unconfigured hub did not stay unavailable'
+Assert-That ($launch.Contains('whatsapp backend: unavailable (URL not configured)') -and -not $launch.Contains('message backend: hub') -and -not $launch.Contains('whatsapp backend: hub') -and -not $launch.Contains('whatsapp backend: wacli')) 'Unconfigured hub did not stay unavailable'
 Add-Content (Join-Path $Evidence 'fallback-proof.log') 'hub no-url-unavailable PASS'
 function Save-SearchPill([string]$Name) {
     $bounds = $search.Current.BoundingRectangle

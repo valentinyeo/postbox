@@ -15,7 +15,7 @@ snapshots = ['doctor', 'before', 'after', 'side-effects']
 if feature == 'search':
     assert 'hub no-url-unavailable PASS' in (folder / 'fallback-proof.log').read_text(encoding='utf-8-sig')
     launch = (folder / 'final-data/launch-log.txt').read_text(encoding='utf-8-sig')
-    assert 'whatsapp backend: unavailable (URL not configured)' in launch and 'message backend: hub' not in launch and 'whatsapp backend: wacli' not in launch
+    assert 'whatsapp backend: unavailable (URL not configured)' in launch and 'message backend: hub' not in launch and 'whatsapp backend: hub' not in launch and 'whatsapp backend: wacli' not in launch
     snapshots += ['empty']
 else:
     snapshots += ['action', 'kept', 'inbox']
