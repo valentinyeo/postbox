@@ -292,10 +292,6 @@ class HubArchiveHandler(Handler):
                         rows.insert(0, dict(MsgID='PLAIN-REACTION', ChatJID=chat, Timestamp=plain['after'], Text='',
                                             FromMe=True, ReactionToID='PLAIN-INCOMING', SenderName='Fixture Owner',
                                             SenderJID='15550000007@s.whatsapp.net'))
-                    elif plain['after']:
-                        rows.insert(0, dict(MsgID='PLAIN-NEWER', ChatJID=chat, Timestamp=plain['after'],
-                                            Text='Synthetic newer direct message', FromMe=False,
-                                            SenderName='Fixture Contact Two', SenderJID=chat))
             self.respond(200, rows)
         elif url.path == '/v1/wazig/groups':
             self.respond(200, [])

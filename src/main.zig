@@ -11010,7 +11010,16 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
         const stamp = getString(object, "last_message_ts");
         if (jid.len == 0 or stamp.len == 0 or std.mem.indexOfScalar(u8, jid, '@') == null) continue;
         const kept = state.isKept(jid);
-        if (!kept) continue;
+        if (!kept) {
+            if (state.needsReturnProbe(jid, stamp)) {
+                var probe = Chat{ .provider = .whatsapp };
+                probe.account.set(a.cache_tag.slice());
+                probe.jid.set(jid);
+                probe.timestamp.set(stamp);
+                queueUnreadProbe(a, &probe);
+            }
+            continue;
+        }
         const base = state.baseline(jid) orelse {
             state.setBaseline(jid, stamp);
             changed = true;
