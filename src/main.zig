@@ -13595,13 +13595,13 @@ fn wrapMixedSinkExtent(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int
         }
     };
     const metrics = Metrics{ .hdc = hdc, .font = text_font, .emoji = emoji_font, .line_height = line_height, .ascent = text_ascent };
-    var layout = @import("chat_list_layout.zig").Layout{
+    var list_layout = @import("chat_list_layout.zig").Layout{
         .text = text,
         .width = max_width,
         .line_height = line_height,
         .lists = if (sink) |target| text.ptr == target.text.ptr() else false,
     };
-    while (layout.next(metrics)) |placed| {
+    while (list_layout.next(metrics)) |placed| {
         const chunk = text[placed.start..][0..placed.len];
         const word_start = placed.word_start;
         const word = text[word_start..placed.word_end];
@@ -13668,8 +13668,8 @@ fn wrapMixedSinkExtent(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int
         }
     }
     _ = win.SelectObject(hdc, @ptrCast(text_font));
-    if (last_line_right) |extent| extent.* = layout.last_right;
-    return layout.height();
+    if (last_line_right) |extent| extent.* = list_layout.last_right;
+    return list_layout.height();
 }
 
 fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
