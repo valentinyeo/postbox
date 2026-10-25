@@ -158,6 +158,11 @@ fn fixture(state: *archive_rules.State) App {
     for (a.chats[0..2]) |*chat| chat.timestamp.set("2026-10-10T10:00:00Z");
     return a;
 }
+fn refixture(a: *App, state: *archive_rules.State) void {
+    a.allocator.free(a.pending_archives);
+    a.bulk.deinit(a.allocator);
+    a.* = fixture(state);
+}
 fn nowUnixSeconds() i64 {
     return 1791628200;
 }
@@ -486,12 +491,12 @@ test "unarchive clears keep while unavailable and full queues do not claim succe
     try std.testing.expect(a.pending_archives[0].should_unarchive);
     try std.testing.expect(!state.isKept("a@g.us"));
 
-    a = fixture(&state);
+    refixture(&a, &state);
     a.pending_archive_count = a.pending_archives.len;
     archiveSelected(&a, true);
     try std.testing.expectEqualStrings("Archive queue is full", a.status.slice());
     try std.testing.expect(!state.isKept("a@g.us"));
-    a = fixture(&state);
+    refixture(&a, &state);
     a.archive_state = null;
     archiveSelected(&a, true);
     try std.testing.expectEqualStrings("Keep archived is not available", a.status.slice());
@@ -898,7 +903,7 @@ test "Slack Ctrl E bare E and menu archive share the local action" {
         try std.testing.expect(archiveKey(&a, 'E', control, false, false, a.chats_hwnd, &message));
         try std.testing.expect(state.localArchived(key.key()));
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-        a = fixture(&state);
+        refixture(&a, &state);
         a.chats[0].provider = .slack;
         a.chats[0].account.set("fixture-team");
         a.chats[0].archived = true;
