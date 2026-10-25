@@ -26,11 +26,11 @@ foreach ($stage in @('baseline', 'larger')) {
     if ($stage -eq 'larger') { Invoke-PaletteCommand $session 'Make text larger' }
     $null = Wait-Until {
         $row = (Read-Control $session messages).messages[0]
-        $row.words.Count -gt 8 -and ($stage -eq 'baseline' -or ($row.font_height -lt $baselineHeight -and $row.bubble[3] -ne $baselineBottom -and $row.words[-1].rect[1] -ne $baselineLastTop))
+        $row.words.Count -gt 8 -and ($stage -eq 'baseline' -or ($row.font_height -lt $baselineHeight -and $row.bubble[1] -lt $baselineTop -and $row.words[-1].rect[1] -ne $baselineLastTop))
     } "$stage list font and layout"
     $row = (Read-Control $session messages).messages[0]
     Assert-That ($row.body_weight -eq 400) 'Ordinary message body must use Regular weight'
-    if ($stage -eq 'baseline') { $baselineHeight = $row.font_height; $baselineBottom = $row.bubble[3]; $baselineLastTop = $row.words[-1].rect[1] }
+    if ($stage -eq 'baseline') { $baselineHeight = $row.font_height; $baselineTop = $row.bubble[1]; $baselineLastTop = $row.words[-1].rect[1] }
     $canvas = Get-Edit (Get-Window $session) '1024'
     $bounds = $canvas.Current.BoundingRectangle
     Assert-That ($row.bubble[1] -ge 0 -and $row.bubble[3] -le $bounds.Height) 'The complete list bubble must be visible and fit its measured height'
