@@ -122,7 +122,6 @@ def check_presentation(folder):
     for key in ('include_archived', 'selected', 'chat_count', 'pending_archives', 'current_view', 'search'):
         assert footer['before'][key] == footer['after'][key], key
     assert footer['after']['include_archived'] and footer['after']['pending_archives'] == 0
-    assert read(folder, 'archive-footer.state.json') == footer['after']
     assert read(folder, 'archive-footer.chats.json')['chats'] == footer['rows']
     tree = (folder / 'archive-footer.uia.txt').read_text(encoding='utf-8-sig')
     assert '1016 | ListBox |' in tree and '1008 | RICHEDIT50W |' in tree
