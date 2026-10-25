@@ -770,6 +770,7 @@ const App = struct {
     dpi: u32 = 96,
     brush_bg: ?win.HBRUSH = null,
     brush_panel: ?win.HBRUSH = null,
+    brush_sidebar: ?win.HBRUSH = null,
     brush_raised: ?win.HBRUSH = null,
     brush_muted: ?win.HBRUSH = null,
     sb_drag: SbDrag = .none,
@@ -1733,12 +1734,21 @@ fn recreateThemeBrushes(a: *App) bool {
         _ = win.DeleteObject(raised);
         return false;
     };
+    const sidebar = win.CreateSolidBrush(theme.current.sidebar_surface) orelse {
+        _ = win.DeleteObject(bg);
+        _ = win.DeleteObject(panel);
+        _ = win.DeleteObject(raised);
+        _ = win.DeleteObject(muted);
+        return false;
+    };
     if (a.brush_bg) |brush| _ = win.DeleteObject(brush);
     if (a.brush_panel) |brush| _ = win.DeleteObject(brush);
+    if (a.brush_sidebar) |brush| _ = win.DeleteObject(brush);
     if (a.brush_raised) |brush| _ = win.DeleteObject(brush);
     if (a.brush_muted) |brush| _ = win.DeleteObject(brush);
     a.brush_bg = bg;
     a.brush_panel = panel;
+    a.brush_sidebar = sidebar;
     a.brush_raised = raised;
     a.brush_muted = muted;
     return true;
@@ -13946,7 +13956,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     if (screen_item.itemID == @as(win.UINT, @bitCast(@as(c_int, -1)))) return;
     const index: usize = @intCast(screen_item.itemID);
     if (index >= a.chat_count) return;
-    const background = win.CreateSolidBrush(theme.current.surface_container_low) orelse return;
+    const background = win.CreateSolidBrush(theme.current.sidebar_surface) orelse return;
     defer _ = win.DeleteObject(background);
     var client: win.RECT = undefined;
     _ = win.GetClientRect(screen_item.hwndItem, &client);
@@ -15700,7 +15710,12 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             _ = win.FillRect(hdc, &paint.rcPaint, a.brush_bg.?);
             const left_width = std.math.clamp(@divTrunc(client.right, 3), px(a, 280), px(a, 390));
             var left_rect = win.RECT{ .left = 0, .top = 0, .right = left_width, .bottom = client.bottom };
-            _ = win.FillRect(hdc, &left_rect, a.brush_panel.?);
+            _ = win.FillRect(hdc, &left_rect, a.brush_sidebar.?);
+            if (win.CreateSolidBrush(theme.current.sidebar_divider)) |divider_brush| {
+                defer _ = win.DeleteObject(divider_brush);
+                var divider = win.RECT{ .left = left_width, .top = 0, .right = left_width + 1, .bottom = client.bottom };
+                _ = win.FillRect(hdc, &divider, divider_brush);
+            }
             var composer_rect = win.RECT{ .left = left_width + 1, .top = a.compose_strip_top, .right = client.right, .bottom = client.bottom };
             _ = win.FillRect(hdc, &composer_rect, a.brush_bg.?);
             var shapes = smooth.Context.init(hdc);
@@ -16018,6 +16033,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             _ = win.SetTextColor(hdc, theme.current.on_surface);
             _ = win.SetBkColor(hdc, fieldColor());
             const control_value: usize = @bitCast(lparam);
+            if (a.chats_hwnd != null and control_value == @intFromPtr(a.chats_hwnd.?)) {
+                _ = win.SetBkColor(hdc, theme.current.sidebar_surface);
+                return @bitCast(@intFromPtr(a.brush_sidebar.?));
+            }
             for ([_]?win.HWND{ a.thread_list, a.thread_compose }) |control| {
                 if (control != null and control_value == @intFromPtr(control.?)) {
                     _ = win.SetBkColor(hdc, theme.current.surface_container_high);
@@ -16107,6 +16126,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.font_underline) |font| _ = win.DeleteObject(font);
             if (a.brush_bg) |brush| _ = win.DeleteObject(brush);
             if (a.brush_panel) |brush| _ = win.DeleteObject(brush);
+            if (a.brush_sidebar) |brush| _ = win.DeleteObject(brush);
             if (a.brush_raised) |brush| _ = win.DeleteObject(brush);
             if (a.brush_muted) |brush| _ = win.DeleteObject(brush);
             win.PostQuitMessage(0);

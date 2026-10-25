@@ -6,7 +6,7 @@ $pattern = '(?s)(pub const amoled: Palette = \.\{)(.*?)(\n\};)'
 $match = [regex]::Match($original, $pattern)
 if (-not $match.Success) { throw 'AMOLED palette declaration missing' }
 $colours = [regex]::Matches($match.Groups[2].Value, 'hex\(0x([0-9a-f]{6})\)')
-if ($colours.Count -ne 16) { throw 'Unexpected AMOLED colour token count' }
+if ($colours.Count -ne 18) { throw 'Unexpected AMOLED colour token count' }
 $inverted = [regex]::Replace($match.Groups[2].Value, 'hex\(0x([0-9a-f]{6})\)', {
     param($colour)
     'hex(0x{0:x6})' -f (0xffffff - [Convert]::ToInt32($colour.Groups[1].Value, 16))
