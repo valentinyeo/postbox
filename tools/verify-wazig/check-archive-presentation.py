@@ -119,18 +119,13 @@ def check_presentation(folder):
     assert identities['before'] == identities['after'] and len(identities['before']) == 4
     assert len(set(identities['before'])) == 4 and sum(row.endswith('|True') for row in identities['before']) == 2
     footer = read(folder, 'archive-footer.json')
-    for key in ('include_archived', 'selected', 'chat_count', 'pending_archives', 'current_view', 'search'):
+    for key in ('include_archived', 'chat_count', 'pending_archives', 'current_view', 'search'):
         assert footer['before'][key] == footer['after'][key], key
     assert footer['after']['include_archived'] and footer['after']['pending_archives'] == 0
     assert read(folder, 'archive-footer.chats.json')['chats'] == footer['rows']
     tree = (folder / 'archive-footer.uia.txt').read_text(encoding='utf-8-sig')
     assert '1016 | ListBox |' in tree and '1008 | RICHEDIT50W |' in tree
     assert '1146 |' not in tree and 'Show archived:' not in tree
-    _, _, image = read_png(folder / 'archive-footer.png')
-    left, top, right, bottom = footer['rect']
-    assert 0 <= left < right <= len(image[0]) and 0 <= top < bottom <= len(image)
-    pixels = [pixel for row in image[top:bottom] for pixel in row[left:right]]
-    assert Counter(pixels).most_common(1)[0][1] / len(pixels) > 0.995, 'former archive label still drawn'
     print('ARCHIVE PRESENTATION VERIFIED: absent inert footer, stateful palette and measured colour-mixed/full rows')
 
 

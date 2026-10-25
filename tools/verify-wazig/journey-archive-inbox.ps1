@@ -1,6 +1,5 @@
 $workload = 264
 $list = Get-Edit $window '1016'
-$statusHandle = [IntPtr](Get-Edit $window '1048').Current.NativeWindowHandle
 $compose.SetFocus()
 Send-Keys $session 'hello'
 Send-Keys $session '^a'
@@ -13,14 +12,14 @@ foreach ($press in 1..10) {
     $cleared = $true
     if ($press -gt 1) {
         Send-Keys $session '{ESC}'
-        $cleared = (Read-EditText $statusHandle) -eq 'Selection cleared'
+        $cleared = (Read-Control $session status).bulk_selected_count -eq 0
     }
     $target = $targets[($press - 1) % $targets.Count]
     $focused = $true
     try { $target.SetFocus() } catch { $focused = $false }
     try { $null = Wait-Until { $target.Current.HasKeyboardFocus } "focus $($target.Current.AutomationId)" 5 } catch { $focused = $false }
     Send-Keys $session '^a'
-    $ok = $cleared -and (Read-EditText $statusHandle) -eq "$workload chats selected - Ctrl+E archives, Esc cancels"
+    $ok = $cleared -and (Read-Control $session status).bulk_selected_count -eq $workload
     $presses += @{ press = $press; ok = $ok; focused = $focused; target = $target.Current.AutomationId }
     Write-Output "ctrl_a_press=$press ok=$($ok.ToString().ToLowerInvariant())"
 }

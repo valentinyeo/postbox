@@ -1780,6 +1780,28 @@ class SlackEmojiHandler(VoiceHandler):
             self.respond(404, {'error': 'unavailable'})
 
 
+class QuietStatusHandler(Handler):
+    def do_GET(self):
+        self.wire_path = self.path
+        if urlsplit(self.path).path == '/v1/wazig/chats' and getattr(self.state, 'sync_failure', False):
+            if not self.authorized():
+                return
+            self.respond(503, {'error': 'forced sync read failure'})
+            return
+        super().do_GET()
+
+    def do_POST(self):
+        if self.path in ('/fixture/sync-failure', '/fixture/sync-recover'):
+            self.wire_path = self.path
+            if not self.authorized():
+                return
+            self.rfile.read(int(self.headers.get('Content-Length', '0')))
+            self.state.sync_failure = self.path.endswith('sync-failure')
+            self.respond(200, {'sync_failure': self.state.sync_failure})
+            return
+        super().do_POST()
+
+
 def journey_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--port-file', type=Path, required=True)

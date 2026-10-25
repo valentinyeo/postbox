@@ -33,3 +33,5 @@ Preconditions: doctor passes, no overlay open and no search query.
 - The help popup has no title; its stable selector is its class and owned process, not a fabricated window name.
 - Source: `src/main.zig:12591` registers commands without Status, `src/main.zig:12716` filters real list rows, `src/main.zig:13149` creates edit `1064`, `src/main.zig:13154` creates list `1072`, and `src/main.zig:13417` opens owned shortcut help. `src/shortcuts.zig:69` lists app shortcuts.
 - On a unified hub the palette also lists archived chats and chats of other views, matched by name and scored like commands; archived rows end in `  ·  Archived` and Enter opens them without unarchiving. The `palette-archived` journey drives this; see [palette-archived](palette-archived.md).
+
+The `quiet-status` journey requires Ctrl+K → version to contain exactly `You are on v<running version> - this is the newest version`, with no replacement sidebar status. It also exercises real hub sync failure delivery through the existing sidebar update-card error surface.
