@@ -36,8 +36,10 @@ def measure(image, rect):
     background = Counter(pixels).most_common(1)[0][0]
     ranked = sorted(pixels, key=lambda pixel: contrast(pixel, background), reverse=True)
     text = ranked[23]
-    assert sum(contrast(pixel, background) > 1.5 for pixel in pixels) >= 24, 'missing row text'
-    return dict(text=list(text), background=list(background), contrast=contrast(text, background), rect=rect)
+    text_pixels = [pixel for pixel in pixels if contrast(pixel, background) > 1.5]
+    assert len(text_pixels) >= 24, 'missing row text'
+    mean = round(sum(0.2126 * red + 0.7152 * green + 0.0722 * blue for red, green, blue in text_pixels) / len(text_pixels))
+    return dict(text=list(text), mean=mean, background=list(background), contrast=contrast(text, background), rect=rect)
 
 
 def check_scene(folder, name, capture=False):
@@ -80,7 +82,9 @@ def check_scene(folder, name, capture=False):
         assert 0 < ratio < 1, (name, 'archived/live contrast-excess ratio', ratio)
         assert colour_distance > 15, (name, 'archived text is not dimmer')
     else:
-        assert marked['contrast'] >= normal['contrast'] * 0.9, (name, 'archived row came back dimmed when hovered or selected', normal, marked)
+        assert marked['mean'] >= normal['mean'] - 8, (name, 'archived row came back dimmed when hovered or selected', normal, marked)
+        if luminance(normal['background']) > 0.5:
+            assert marked['mean'] <= normal['mean'] + 8, (name, 'archived row came back dimmed when hovered or selected', normal, marked)
         if layout['mode'] == 'selected':
             assert layout['selected'] == archived['id'] and state['selected']['archived'], name
         else:
