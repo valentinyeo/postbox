@@ -669,6 +669,13 @@ const App = struct {
     people: people_index.Index,
     chats_raw: ?[]u8 = null,
     chats_raw_flags: u8 = 0,
+    archive_toggle_started_ms: ?u64 = null,
+    archive_toggle_ready: bool = false,
+    archive_toggle_rebuilds: u32 = 0,
+    archive_toggle_rebuild_ms: u64 = 0,
+    archive_toggle_fetch_ms: u64 = 0,
+    archive_toggle_fetches: u32 = 0,
+    archive_toggle_paints: u64 = 0,
     people_open_jid: Utf8Text(191) = .{},
     io: std.Io,
     instance: win.HINSTANCE,
@@ -2211,6 +2218,12 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
         wacliPost(a, result);
         return;
     }
+    const mixed_chats = job.kind == .chats and hubHasArg(&job, "--include-archived");
+    if (mixed_chats) {
+        for (argv[0..count]) |*arg| {
+            if (std.mem.eql(u8, arg.*, "--include-archived")) arg.* = "--no-archived";
+        }
+    }
     const run = child_process.run(a.allocator, a.io, .{
         .argv = argv[0..count],
         .stdout_limit = .limited(8 * 1024 * 1024),
@@ -2229,7 +2242,33 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
         .exited => |code| code == 0,
         else => false,
     };
-    if (result.ok) {
+    if (result.ok and mixed_chats) {
+        for (argv[0..count]) |*arg| {
+            if (std.mem.eql(u8, arg.*, "--no-archived")) arg.* = "--archived";
+        }
+        const archived = child_process.run(a.allocator, a.io, .{
+            .argv = argv[0..count],
+            .stdout_limit = .limited(8 * 1024 * 1024),
+            .stderr_limit = .limited(256 * 1024),
+            .create_no_window = true,
+        }) catch {
+            result.ok = false;
+            wacliPost(a, result);
+            return;
+        };
+        defer a.allocator.free(archived.stdout);
+        defer a.allocator.free(archived.stderr);
+        result.ok = switch (archived.term) {
+            .exited => |code| code == 0,
+            else => false,
+        };
+        if (result.ok) {
+            result.data = messenger_view.mergeChatData(a.allocator, run.stdout, archived.stdout) catch blk: {
+                result.ok = false;
+                break :blk &.{};
+            };
+        }
+    } else if (result.ok) {
         result.data = a.allocator.dupe(u8, run.stdout) catch blk: {
             result.ok = false;
             break :blk &.{};
@@ -2442,17 +2481,15 @@ fn applyGroups(a: *App, raw: []const u8) void {
 }
 
 fn refreshChats(a: *App) void {
-    const flags: u8 = if (a.show_archived) 2 else if (a.include_archived) 1 else 0;
+    const flags: u8 = if (a.show_archived) 2 else if (a.include_archived or unifiedHub(a) or (a.chats_raw != null and a.chats_raw_flags == 1)) 1 else 0;
     if (wacliPendingGet(a, .chats) > 0 and a.chats_pending_flags == flags) return;
-    var job = WacliJob{ .account = a.cache_tag, .kind = .chats };
+    var job = WacliJob{ .account = a.cache_tag, .kind = .chats, .started_ms = win.GetTickCount64() };
     wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--limit", "250" });
-    if (a.show_archived or !a.include_archived or hubConfigured(a)) {
-        job.args[job.arg_count].set(if (a.show_archived) "--archived" else if (a.include_archived or unifiedHub(a)) "--include-archived" else "--no-archived");
-        job.arg_count += 1;
-    }
+    job.args[job.arg_count].set(if (flags == 2) "--archived" else if (flags == 1) "--include-archived" else "--no-archived");
+    job.arg_count += 1;
     a.chats_gen += 1;
     job.gen = a.chats_gen;
-    _ = wacliEnqueue(a, job, wacliPendingGet(a, .chats) > 0);
+    if (wacliEnqueue(a, job, wacliPendingGet(a, .chats) > 0) and a.archive_toggle_started_ms != null) a.archive_toggle_fetches += 1;
     a.chats_pending_flags = flags;
 }
 
@@ -2463,6 +2500,7 @@ fn isUnresolvableChatEntry(name: []const u8, jid: []const u8, kind: []const u8) 
 }
 
 fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
+    const rebuild_started_ms = if (a.archive_toggle_started_ms != null) win.GetTickCount64() else 0;
     const previous_rows = a.allocator.dupe(Chat, a.chats[0..a.chat_count]) catch return false;
     defer a.allocator.free(previous_rows);
     const previous_marker = if (a.selected_chat < a.chat_count) archiveMarker(a, &a.chats[a.selected_chat]) else null;
@@ -2735,6 +2773,17 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
             a.chats_raw = copy;
             a.chats_raw_flags = a.chats_pending_flags;
         } else |_| {}
+    }
+    if (a.archive_toggle_started_ms != null) {
+        a.archive_toggle_rebuilds += 1;
+        a.archive_toggle_rebuild_ms += win.GetTickCount64() -| rebuild_started_ms;
+        if (fresh and a.archive_toggle_fetches > 0) a.archive_toggle_fetch_ms = win.GetTickCount64() -| a.archive_toggle_started_ms.?;
+        const flags: u8 = if (a.show_archived) 2 else if (a.include_archived) 1 else 0;
+        const coverage = if (fresh) a.chats_pending_flags else a.chats_raw_flags;
+        a.archive_toggle_ready = coverage == 1 or coverage == flags;
+        if (a.archive_toggle_ready) {
+            if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+        }
     }
     return true;
 }
@@ -4367,7 +4416,7 @@ fn refreshVisibleChats(a: *App) void {
 fn refilterChats(a: *App) void {
     const flags: u8 = if (a.show_archived) 2 else if (a.include_archived) 1 else 0;
     if (a.chats_raw) |raw| {
-        if (a.chats_raw_flags == flags) {
+        if (a.chats_raw_flags == 1 or a.chats_raw_flags == flags) {
             _ = applyChats(a, raw, false);
             return;
         }
@@ -4394,17 +4443,42 @@ fn updateViewArchiveButton(a: *App) void {
     }
 }
 
+fn logArchiveTogglePaint(a: *App) void {
+    const started_ms = a.archive_toggle_started_ms orelse return;
+    if (!a.archive_toggle_ready) return;
+    a.archive_toggle_started_ms = null;
+    var buffer: [256]u8 = undefined;
+    const line = std.fmt.bufPrint(&buffer, "archive-toggle: include={} rebuilds={d} rebuild_ms={d} fetches={d} fetch_ms={d} first_paint_ms={d} paints={d}", .{
+        a.include_archived,
+        a.archive_toggle_rebuilds,
+        a.archive_toggle_rebuild_ms,
+        a.archive_toggle_fetches,
+        a.archive_toggle_fetch_ms,
+        win.GetTickCount64() -| started_ms,
+        a.paints.list -% a.archive_toggle_paints,
+    }) catch return;
+    appendLaunchLog(a, line);
+}
+
 fn toggleViewArchived(a: *App) void {
+    const started_ms = win.GetTickCount64();
     const key = messenger_view.archivedSettingKey(a.allocator, a.chat_view, a.view_account.slice()) catch return;
     defer a.allocator.free(key);
     const wide = utf8ToWide(a.allocator, key) catch return;
     defer a.allocator.free(wide);
     if (!saveRegistryString(a.allocator, wide.ptr, if (a.include_archived) "0" else "1")) return setStatus(a, "Could not save Show archived preference");
+    a.archive_toggle_started_ms = started_ms;
+    a.archive_toggle_ready = false;
+    a.archive_toggle_rebuilds = 0;
+    a.archive_toggle_rebuild_ms = 0;
+    a.archive_toggle_fetch_ms = 0;
+    a.archive_toggle_fetches = 0;
+    a.archive_toggle_paints = a.paints.list;
     a.include_archived = !a.include_archived;
     _ = clearBulkSelection(a);
     updateViewArchiveButton(a);
     refilterChats(a);
-    refreshMessages(a);
+    reconcileOpenChat(a);
 }
 
 fn switchChatView(a: *App, view: messenger_view.View) void {
@@ -7984,7 +8058,7 @@ fn loadChatsCache(a: *App) void {
         if (a.allocator.dupe(u8, data)) |copy| {
             if (a.chats_raw) |old| a.allocator.free(old);
             a.chats_raw = copy;
-            a.chats_raw_flags = if (a.show_archived) 2 else if (a.include_archived) 1 else 0;
+            a.chats_raw_flags = 3;
         } else |_| {}
         logStartupMilestone(a, .chats, "chat list from cache");
     }
@@ -16356,6 +16430,7 @@ fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
     if (message == win.WM_ERASEBKGND) return 1;
     if (message == win.WM_PAINT) {
+        defer logArchiveTogglePaint(a);
         var paint: win.PAINTSTRUCT = undefined;
         const screen_dc = win.BeginPaint(hwnd, &paint);
         defer _ = win.EndPaint(hwnd, &paint);

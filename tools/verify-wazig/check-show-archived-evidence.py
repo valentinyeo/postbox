@@ -40,6 +40,31 @@ def check_show_archived(folder):
     off, _ = capture('inbox-off', False, 5, 0)
     on, _ = capture('inbox-on', True, 10, 5)
     assert off['unread_only'] and on['unread_only']
+    capture('inbox-warm-off', False, 5, 0)
+    capture('inbox-warm-on', True, 10, 5)
+    launch = (folder / 'final-data/launch-log.txt').read_text(encoding='utf-8-sig')
+    toggle_lines = [line for line in launch.splitlines() if ' archive-toggle:' in line]
+    timing_names = [('inbox-on', True), ('inbox-warm-off', False), ('inbox-warm-on', True)]
+    for position in range(1, 6):
+        timing_names.append((f'view-{position}-on', True))
+        if position == 1:
+            timing_names.extend([('palette-off', False), ('palette-on', True)])
+        else:
+            timing_names.append((f'view-{position}-disabled', False))
+    previous_index = -1
+    for name, enabled in timing_names:
+        timing = read(f'{name}.toggle.json')
+        assert timing['name'] == name and previous_index < timing['index'] < len(toggle_lines), name
+        previous_index = timing['index']
+        assert timing['line'] == toggle_lines[timing['index']], name
+        match = re.fullmatch(r'\d+ archive-toggle: include=(true|false) rebuilds=(\d+) rebuild_ms=(\d+) fetches=(\d+) fetch_ms=(\d+) first_paint_ms=(\d+) paints=(\d+)', timing['line'])
+        assert match and (match[1] == 'true') == enabled, name
+        rebuilds, rebuild_ms, fetches, fetch_ms, first_paint_ms, paints = map(int, match.groups()[1:])
+        assert first_paint_ms >= rebuild_ms and paints >= 1, name
+        if fetches > 0:
+            assert 1 <= rebuilds <= 2, name
+        else:
+            assert rebuilds == 1 and fetch_ms == 0 and paints == 1, name
     tip = read('show-archived-tooltip.json')
     assert tip['control'] == '1146' and 'Show archived' in tip['text'] and 'Alt+A' in tip['text']
     assert tip['pid'] == read('show-archived-restart.json')['old_pid']

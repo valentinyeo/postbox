@@ -30,7 +30,7 @@ class ShowArchivedTests(unittest.TestCase):
         self.write('show-archived-views.json', self.views)
         self.write('show-archived-tooltip.json', dict(text='Show archived  Alt+A', control='1146', pid=1))
         self.write('show-archived-restart.json', dict(old_pid=1, old_start='old', new_pid=2, new_start='new', root='isolated', id='id', sha256='hash'))
-        for name, enabled in [('inbox-off', False), ('inbox-on', True), ('inbox-kept', True), ('inbox-return', True), ('restart-inbox', True), ('after', True)]:
+        for name, enabled in [('inbox-off', False), ('inbox-on', True), ('inbox-warm-off', False), ('inbox-warm-on', True), ('inbox-kept', True), ('inbox-return', True), ('restart-inbox', True), ('after', True)]:
             self.capture(name, enabled)
         for position, view in enumerate(self.views, 1):
             for phase, enabled in [('off', False), ('on', True), ('archived', True), ('unarchived', True)]:
@@ -53,6 +53,17 @@ class ShowArchivedTests(unittest.TestCase):
         (self.folder / 'hub-proof.log').write_text('show-archived show-archived-all PASS')
         (self.folder / 'result.txt').write_text('JOURNEY PASSED: show-archived')
         (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED: synthetic evidence')
+        timing_names = [('inbox-on', True), ('inbox-warm-off', False), ('inbox-warm-on', True)]
+        for position in range(1, 6):
+            timing_names.append((f'view-{position}-on', True))
+            timing_names.extend([('palette-off', False), ('palette-on', True)] if position == 1 else [(f'view-{position}-disabled', False)])
+        lines = []
+        for index, (name, enabled) in enumerate(timing_names):
+            line = f'1000 archive-toggle: include={str(enabled).lower()} rebuilds=1 rebuild_ms=2 fetches=0 fetch_ms=0 first_paint_ms=7 paints=1'
+            lines.append(line)
+            self.write(f'{name}.toggle.json', dict(name=name, index=index, line=line))
+        (self.folder / 'final-data').mkdir()
+        (self.folder / 'final-data/launch-log.txt').write_text('\n'.join(lines))
         self.save_requests()
 
     def control(self, row):
@@ -112,6 +123,29 @@ class ShowArchivedTests(unittest.TestCase):
                 self.write(name, original)
         self.assertEqual(self.validate().returncode, 0)
 
+    def test_rejects_missing_repeated_or_slow_path_timing_evidence(self):
+        name = 'inbox-warm-on.toggle.json'
+        original = self.read(name)
+        for line in [original['line'].replace('rebuilds=1', 'rebuilds=3'),
+                     original['line'].replace('fetch_ms=0', 'fetch_ms=42'),
+                     original['line'].replace('paints=1', 'paints=0'),
+                     original['line'].replace('paints=1', 'paints=2'),
+                     original['line'].replace('first_paint_ms=7', 'first_paint_ms=1')]:
+            launch_path = self.folder / 'final-data/launch-log.txt'
+            launch = launch_path.read_text()
+            lines = launch.splitlines()
+            lines[original['index']] = line
+            launch_path.write_text('\n'.join(lines))
+            self.write(name, dict(original, line=line))
+            self.assertNotEqual(self.validate().returncode, 0)
+            launch_path.write_text(launch)
+        self.write(name, dict(original, index=0))
+        self.assertNotEqual(self.validate().returncode, 0)
+        (self.folder / name).unlink()
+        self.assertNotEqual(self.validate().returncode, 0)
+        self.write(name, original)
+        self.assertEqual(self.validate().returncode, 0)
+
     def test_rejects_local_provider_network_archive_and_missing_whatsapp_write(self):
         original = copy.deepcopy(self.requests)
         for provider in ('slack', 'telegram', 'signal'):
@@ -165,6 +199,21 @@ class ShowArchivedTests(unittest.TestCase):
             self.assertIn(required, source)
         shortcut = source.split('fn handleKeyboard(', 1)[1].split('fn jumpToLatestMessage(', 1)[0]
         self.assertIn("alt and !control and !shift and key == 'A'", shortcut)
+
+    def test_toggle_path_contract_and_baseline_negative_control(self):
+        def contract(source):
+            refilter = source.split('fn refilterChats(', 1)[1].split('fn loadViewArchiveSetting(', 1)[0]
+            toggle = source.split('fn toggleViewArchived(', 1)[1].split('fn switchChatView(', 1)[0]
+            self.assertIn('a.chats_raw_flags == 1 or a.chats_raw_flags == flags', refilter)
+            self.assertIn('refreshVisibleChats(a)', refilter)
+            self.assertNotIn('refreshMessages(a)', toggle)
+            self.assertIn('reconcileOpenChat(a)', toggle)
+            self.assertIn('archive-toggle: include={} rebuilds={d}', source)
+            self.assertIn('defer logArchiveTogglePaint(a);', source)
+        contract((ROOT / 'src/main.zig').read_text())
+        baseline = subprocess.check_output(['git', 'show', 'f4e1301:src/main.zig'], cwd=ROOT, text=True)
+        with self.assertRaises(AssertionError):
+            contract(baseline)
 
     def test_shortcut_was_free_at_journey_commit_with_occupied_control(self):
         try:
