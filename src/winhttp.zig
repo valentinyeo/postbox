@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const slack = @import("slack.zig");
 const deepgram_key = @import("deepgram_key.zig");
 const attachments = @import("attachments.zig");
 
@@ -17,6 +18,10 @@ else
     struct {};
 
 pub const max_download_bytes: u64 = 100 * 1024 * 1024;
+
+pub fn isUserToken(token: []const u8) bool {
+    return (std.mem.startsWith(u8, token, "xoxp-") or std.mem.startsWith(u8, token, "xoxe.xoxp-")) and token.len >= 20 and token.len <= 4096;
+}
 
 const DATA_BLOB = extern struct {
     cbData: win.DWORD,
