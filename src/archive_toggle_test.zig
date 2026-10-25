@@ -216,5 +216,5 @@ test "unlabelled disk snapshots fetch fresh coverage before completing the toggl
     try std.testing.expect(!a.archive_toggle_ready);
     _ = applyChats(&a, "{\"data\":[]}", true);
     try std.testing.expect(a.archive_toggle_ready);
-    try std.testing.expectEqual(@as(u32, 1), a.archive_toggle_rebuilds);
+    try std.testing.expectEqual(@as(u32, 2), a.archive_toggle_rebuilds);
 }

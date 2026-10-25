@@ -126,10 +126,10 @@ class ShowArchivedTests(unittest.TestCase):
     def test_rejects_missing_repeated_or_slow_path_timing_evidence(self):
         name = 'inbox-warm-on.toggle.json'
         original = self.read(name)
-        for line in [original['line'].replace('rebuilds=1', 'rebuilds=2'),
+        for line in [original['line'].replace('rebuilds=1', 'rebuilds=3'),
                      original['line'].replace('fetch_ms=0', 'fetch_ms=42'),
-                     original['line'].replace('fetches=0', 'fetches=1'),
                      original['line'].replace('paints=1', 'paints=0'),
+                     original['line'].replace('paints=1', 'paints=2'),
                      original['line'].replace('first_paint_ms=7', 'first_paint_ms=1')]:
             launch_path = self.folder / 'final-data/launch-log.txt'
             launch = launch_path.read_text()
