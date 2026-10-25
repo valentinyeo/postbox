@@ -1496,7 +1496,7 @@ class VoiceHandler(Handler):
 
 class SlackArchiveHandler(SlackSortHandler):
     def stamp(self, incoming):
-        return (datetime.fromisoformat(self.state.stamp) + timedelta(seconds=incoming)).isoformat().replace('+00:00', 'Z')
+        return (datetime.fromisoformat(self.state.stamp) + timedelta(days=1, seconds=incoming)).isoformat().replace('+00:00', 'Z')
 
     def do_GET(self):
         self.wire_path = self.path

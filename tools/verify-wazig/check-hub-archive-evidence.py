@@ -56,12 +56,12 @@ def check_telegram(folder, read):
 
     assert not any(row['wire_path'] == '/v1/wazig/archive' and row.get('body', {}).get('chat') == TELEGRAM
                    for row in requests), 'Telegram archive and unarchive must stay local, even when hub rejects writes'
-    assert [archived for _, archived in writes(PLAIN_NEWER)] == [True], 'plain WhatsApp archive intent must survive incoming without extra writes'
+    assert [archived for _, archived in writes(PLAIN_NEWER)] == [True, True], 'plain WhatsApp must archive once initially and once explicitly after incoming'
     assert [archived for _, archived in writes(PLAIN_REACTED)] == [True], 'own reaction must not unarchive'
     assert [archived for _, archived in writes(OTHER)] == [True, False], 'original inbox must be restored explicitly'
     incoming, = [index for index, row in enumerate(requests) if row['wire_path'] == '/fixture/plain-incoming']
     enabled, = [index for index, row in enumerate(requests) if row['wire_path'] == '/fixture/rearchive-enable']
-    assert writes(PLAIN_NEWER)[0][0] < incoming < enabled
+    assert writes(PLAIN_NEWER)[0][0] < incoming < enabled < writes(PLAIN_NEWER)[1][0]
     assert not any(row['wire_path'] == '/v1/wazig/archive' and
                    row['body'] == dict(chat=PLAIN_NEWER, archived=True) for row in requests[incoming:enabled]), 'plain WhatsApp must not auto-rearchive'
     event = read('plain-incoming.json')
@@ -76,8 +76,8 @@ def check_telegram(folder, read):
         ('telegram-only', False, [TELEGRAM]), ('telegram-empty', False, []),
         ('telegram-unarchived', False, [TELEGRAM]),
         ('telegram-bulk-empty', False, []), ('telegram-restart-empty', False, []),
-        ('telegram-restart-archived', True, all_chats), ('plain-incoming-inbox', False, []),
-        ('plain-incoming-archived', True, all_chats),
+        ('telegram-restart-archived', True, all_chats), ('plain-incoming-inbox', False, [PLAIN_NEWER, TELEGRAM]),
+        ('plain-incoming-archived', True, [GROUP, OTHER, PLAIN_REACTED]),
         ('plain-rearchived-inbox', False, []),
         ('plain-rearchived-archived', True, all_chats),
     ]:
@@ -178,7 +178,8 @@ def check_hub_archive(folder):
     assert marker_files[0].read_bytes() == (folder / 'first-archive-legacy-done.txt').read_bytes() == (folder / 'restart-archive-legacy-done.txt').read_bytes()
     final_lines = state_files[0].read_text(encoding='utf-8-sig').splitlines()
     assert any(line.startswith(GROUP + '\t1\t') for line in final_lines)
-    assert any(line == 'telegram\ttelegram\t' + TELEGRAM for line in final_lines)
+    telegram_final, = [line.split('\t') for line in final_lines if line.split('\t')[:3] == ['telegram', 'telegram', TELEGRAM]]
+    assert len(telegram_final) == 5 and telegram_final[3] == '0' and telegram_final[4], telegram_final
     for chat in (PLAIN_REACTED, PLAIN_NEWER):
         entry, = [line.split('\t') for line in final_lines if line.startswith(chat + '\t')]
         assert entry[1] == '0', 'plain archive intent lost in final data'
