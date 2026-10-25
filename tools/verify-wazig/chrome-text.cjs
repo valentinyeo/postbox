@@ -17,7 +17,7 @@ function sourceContract(main = read('src/main.zig'), config = read('src/font_con
     assert.match(main, /saveVerificationTextMetrics\(a, hdc, message, left \+ px\(a, 12\), text_top, right - left - px\(a, 24\), text_height\);/);
     assert.equal(body, 17);
     assert.equal(heading, 16);
-    assert.equal(weight, 500);
+    assert.equal(weight, 400);
     assert.equal(fixture.data.messages.length, 1);
     assert.equal(fixture.data.messages[0].MsgID, 'ISSUE-462-PARAGRAPH');
     assert.equal(fixture.data.messages[0].SenderName, fixture.chats[0]);
@@ -47,7 +47,7 @@ function html(metrics, fixture) {
     const escape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
     return `<!doctype html><meta charset="utf-8"><title>ISSUE-462 Chrome fixture</title>
 <style>
-@font-face {font-family:Plex;src:url('IBMPlexSans-Medium.ttf');font-weight:500}
+@font-face {font-family:Plex;src:url('IBMPlexSans-Regular.ttf');font-weight:400}
 @font-face {font-family:Plex;src:url('IBMPlexSans-SemiBold.ttf');font-weight:600}
 * {box-sizing:border-box}
 body {margin:0;background:${color(metrics.surface)};color:${color(metrics.foreground)};font-family:Plex;font-size:${metrics.body.px}px;font-weight:${metrics.body.weight};line-height:${metrics.body.line_height}px;font-synthesis:none}
@@ -67,7 +67,7 @@ async function capture(evidence, bin) {
     assert.equal(process.platform, 'win32', 'Chrome capture requires the Windows runner');
     const metrics = JSON.parse(fs.readFileSync(path.join(evidence, 'text-metrics.json'), 'utf8'));
     const contract = verifyMetrics(metrics);
-    for (const file of ['IBMPlexSans-Medium.ttf', 'IBMPlexSans-SemiBold.ttf', 'IBM-Plex-LICENSE.txt']) {
+    for (const file of ['IBMPlexSans-Regular.ttf', 'IBMPlexSans-SemiBold.ttf', 'IBM-Plex-LICENSE.txt']) {
         fs.copyFileSync(path.join(bin, file), path.join(evidence, file));
     }
     const pagePath = path.resolve(evidence, 'chrome.html');
@@ -96,7 +96,7 @@ async function capture(evidence, bin) {
         assert.equal(observed.dpr, 1);
         assert.deepEqual(observed.body, metrics.body);
         assert.deepEqual(observed.heading, metrics.heading);
-        assert.deepEqual(observed.fonts, [{ weight: '500', status: 'loaded' }, { weight: '600', status: 'loaded' }]);
+        assert.deepEqual(observed.fonts, [{ weight: '400', status: 'loaded' }, { weight: '600', status: 'loaded' }]);
         await page.screenshot({ path: path.join(evidence, 'chrome.png') });
         observed.chrome_version = browser.version();
         observed.mode = 'installed Chrome, headed, device scale 1';

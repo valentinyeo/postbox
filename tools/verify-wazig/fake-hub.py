@@ -675,6 +675,31 @@ MENTIONS_MEMBERS = {'U4A59H6UT': 'Fixture Peer'}
 MENTIONS_INFO = {'UEXT00001': 'Guest Person', 'WCONNECT01': 'Connect Person'}
 
 
+class ChatListsHandler(SlackSortHandler):
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        chat = 'slack:fixture-lists:channel'
+        if url.path == '/v1/wazig/chats':
+            self.respond(200, [] if query.get('archived') == ['true'] else [
+                dict(jid=chat, name='Verification Lists', provider='slack', account='fixture-lists',
+                     kind='group', last_message_ts=self.state.stamp, unread_count=0, archived=False)])
+        elif url.path == '/v1/wazig/messages' and query.get('chat') == [chat]:
+            markers = ['• ', '- ', '* ', '1. ', '10. ', '• ', '  • ', '    1. ']
+            text = '\n'.join(marker + ' '.join(['Hanging'] * 20) for marker in markers)
+            self.respond(200, [dict(MsgID='LISTS', ChatJID=chat, Timestamp=self.state.stamp,
+                                   Text=text, FromMe=False, SenderName='Fixture Peer', SenderJID='U_LISTS')])
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+
 class SlackMentionsHandler(SlackSortHandler):
     def do_GET(self):
         self.wire_path = self.path

@@ -642,5 +642,33 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
             self.assertNotIn('unsupported archive settled', source)
 
 
+class ChatListAlignmentTests(unittest.TestCase):
+    def test_hanging_indent_evidence_rejects_old_layout_and_weight(self):
+        check = runpy.run_path(str(ROOT / 'tools/verify-wazig/evidence-chat-lists.py'), run_name='alignment_test')['check_alignment']
+        items = [dict(marker_x=10 + depth, text_x=20 + depth, ink_x=21 + depth,
+                      continuations=[dict(x=20 + depth, ink_x=21 + depth, y=30)])
+                 for depth in [0, 0, 0, 0, 0, 0, 4, 8]]
+        checks = [dict(stage=stage, body_weight=400, font_height=height, items=copy.deepcopy(items))
+                  for stage, height in [('baseline', -14), ('larger', -16)]]
+        check(checks)
+        for mutation in ['weight', 'left-edge', 'marker-edge', 'pixels', 'nesting', 'missing-wrap']:
+            broken = copy.deepcopy(checks)
+            row = broken[0]
+            if mutation == 'weight':
+                row['body_weight'] = 500
+            elif mutation == 'left-edge':
+                row['items'][0]['continuations'][0]['x'] = 0
+            elif mutation == 'marker-edge':
+                row['items'][0]['continuations'][0]['x'] = row['items'][0]['marker_x']
+            elif mutation == 'pixels':
+                row['items'][0]['continuations'][0]['ink_x'] -= 5
+            elif mutation == 'nesting':
+                row['items'][6]['text_x'] = row['items'][5]['text_x']
+            else:
+                row['items'][0]['continuations'] = []
+            with self.subTest(mutation=mutation), self.assertRaises(AssertionError):
+                check(broken)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -537,6 +537,22 @@
         "class": "ArchiveInboxHandler"
       },
       "maximize": true
+    },
+    {
+      "name": "chat-lists",
+      "pr": true,
+      "hub": "chat-lists",
+      "evidence": true,
+      "chats": 1,
+      "script": "journey-chat-lists.ps1",
+      "validator": {
+        "file": "evidence-chat-lists.py"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "ChatListsHandler"
+      },
+      "maximize": true
     }
   ]
 }

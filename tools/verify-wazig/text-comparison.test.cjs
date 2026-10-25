@@ -24,7 +24,7 @@ test('ISSUE-462 Chrome fixture text, font files, sizes, weights and line heights
     const page = html(native, contract.fixture);
     assert.ok(page.includes(contract.fixture.data.messages[0].Text));
     for (const name of contract.fixture.chats) assert.ok(page.includes(name));
-    for (const [file, weight] of [['Medium', 500], ['SemiBold', 600]]) {
+    for (const [file, weight] of [['Regular', 400], ['SemiBold', 600]]) {
         assert.ok(page.includes(`src:url('IBMPlexSans-${file}.ttf');font-weight:${weight}`));
         assert.ok(fs.existsSync(path.join(root, 'assets', `IBMPlexSans-${file}.ttf`)));
     }
@@ -46,12 +46,12 @@ test('ISSUE-462 parity check rejects fixture, source and runtime drift', () => {
         assert.ok(main.includes(before));
         assert.throws(() => sourceContract(main.replace(before, after)));
     }
-    assert.throws(() => sourceContract(main, read('src/font_config.zig').replace('= 500;', '= 400;')));
+    assert.throws(() => sourceContract(main, read('src/font_config.zig').replace('= 400;', '= 500;')));
     for (const mutate of [
         value => { value.text += ' drift'; },
         value => { value.body.px++; },
         value => { value.heading.px++; },
-        value => { value.body.weight = 400; },
+        value => { value.body.weight = 500; },
         value => { value.heading.weight = 500; },
         value => { value.directwrite = false; },
         value => { value.dpi = 120; },

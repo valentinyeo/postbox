@@ -169,7 +169,7 @@ class MediaLayoutTests(unittest.TestCase):
         self.assertIn('top: i32, sink: ?*const Message) i32 {', wrapper)
         self.assertIn('return wrapMixedSinkExtent(hdc, a, text_ptr, len, max_width, draw, left, top, sink, null);', wrapper)
         core = section(self.source, 'wrapMixedSinkExtent')
-        self.assertIn('if (last_line_right) |extent| extent.* = last_right - left;', core)
+        self.assertIn('if (last_line_right) |extent| extent.* = layout.last_right;', core)
         measure = section(self.source, 'measureMessage')
         self.assertIn('text_width, false, 0, 0, message, &last_line_right)', measure)
         self.assertIn('media_layout.needsTimeLine(last_line_right, time_width_with_gap, text_width)', measure)
