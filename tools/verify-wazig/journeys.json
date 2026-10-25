@@ -571,6 +571,23 @@
         "class": "ChatListsHandler"
       },
       "maximize": true
+    },
+    {
+      "name": "quiet-status",
+      "pr": true,
+      "hub": "quiet-status",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-quiet-status.ps1",
+      "validator": {
+        "file": "evidence-quiet-status.py",
+        "function": "check_quiet_status"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "QuietStatusHandler"
+      },
+      "maximize": true
     }
   ]
 }

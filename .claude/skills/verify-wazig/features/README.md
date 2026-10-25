@@ -109,3 +109,6 @@ These are source changes in the bounded history window, not claims of live verif
 
 
 - IGSH-829: regular message bodies and hanging list indentation -> `chat-lists` (six long bullets and two nested levels, actual font weight and screenshot text-edge alignment at two saved sizes)
+
+
+- IGSH-824: remove the sidebar status strip, retain exact version discovery and visible sync failures -> `quiet-status` (native absence, list geometry, real click, version row and forced HTTP 503 in the existing sidebar update card without a modal dialog)
