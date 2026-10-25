@@ -208,34 +208,23 @@ function Invoke-HubTelegramArchiveJourney($Session, [string]$Messages, $Start) {
         $rows = (Read-Control $Session chats).chats
         @($attempts | Where-Object { $_.body.chat -eq $script:PlainNewer }).Count -eq 0 -and
             @(Get-HubArchiveWrites $Session $script:PlainNewer $true).Count -eq 1 -and
-            -not $state.show_archived -and $state.chat_count -eq 1 -and $rows.Count -eq 1 -and
-            $rows[0].id -eq $script:PlainNewer -and -not $rows[0].archived -and $state.pending_archives -eq 0
-    } 'plain WhatsApp returns to inbox without rearchive when the provider unarchives it'
+            -not $state.show_archived -and $state.chat_count -eq 0 -and $rows.Count -eq 0 -and
+            $state.pending_archives -eq 0
+    } 'plain WhatsApp archive intent survives provider archived=false without rearchive'
     Save-Screen $Session plain-incoming-inbox
     Invoke-PaletteCommand $Session 'Show archived chats'
     $null = Wait-Until {
         $state = Read-Control $Session status
         $rows = (Read-Control $Session chats -Arguments @('--archived')).chats
-        $state.show_archived -and $state.chat_count -eq 4 -and $rows.Count -eq 4 -and
-            @($rows | Where-Object { $_.id -eq $telegram -and $_.archived }).Count -eq 1 -and
-            @($rows | Where-Object id -eq $script:PlainNewer).Count -eq 0
-    } 'provider-unarchived Telegram remains local while plain WhatsApp leaves Archive'
+        $state.show_archived -and $state.chat_count -eq 5 -and $rows.Count -eq 5 -and
+            @($rows | Where-Object { $_.id -in @($telegram, $script:PlainNewer) -and $_.archived }).Count -eq 2
+    } 'both Telegram and plain WhatsApp retain local archive intent'
     Save-Screen $Session plain-incoming-archived
     Invoke-RestMethod -Method Post -Uri "$($Session.bridge_url)/fixture/rearchive-enable" -Headers @{ Authorization = 'Bearer fixture-key-not-a-secret' } -Body '{}' -ContentType 'application/json' | Out-Null
     Invoke-PaletteCommand $Session 'Show inbox chats'
-    $null = Wait-Until {
-        $state = Read-Control $Session status
-        $rows = (Read-Control $Session chats).chats
-        -not $state.show_archived -and $state.chat_count -eq 1 -and $rows.Count -eq 1 -and
-            $rows[0].id -eq $script:PlainNewer -and $state.pending_archives -eq 0 -and
-            @(Get-HubArchiveWrites $Session $script:PlainNewer $true).Count -eq 1
-    } 'plain WhatsApp stays in inbox until an explicit archive'
-    Select-HubChat $Session $script:PlainNewer
-    $null = Send-Keys $Session '^e'
-    $null = Wait-Until {
-        @(Get-HubArchiveWrites $Session $script:PlainNewer $true).Count -eq 2 -and
-            @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/archive' -and $_.body.chat -eq $telegram }).Count -eq 0 -and (Read-Control $Session status).pending_archives -eq 0
-    } 'WhatsApp explicitly archived again and Telegram remains locally archived without a hub write'
+    Wait-HubEmptyInbox $Session
+    Assert-That (@(Get-HubArchiveWrites $Session $script:PlainNewer $true).Count -eq 1) 'Plain WhatsApp archive must not trigger redundant hub writes'
+    Assert-That (@(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/archive' -and $_.body.chat -eq $telegram }).Count -eq 0) 'Telegram archive must remain local'
     Invoke-PaletteCommand $Session 'Refresh'
     Wait-HubEmptyInbox $Session
     Save-Screen $Session plain-rearchived-inbox

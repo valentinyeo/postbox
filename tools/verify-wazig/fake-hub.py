@@ -484,6 +484,59 @@ class ShowArchivedHandler(PaletteArchivedHandler):
             self.respond(400, {'error': 'unexpected archive-switch write'}, body=body)
 
 
+def archive_inbox_rows():
+    rows = [dict(jid=f'personal:1555000{number:04}@s.whatsapp.net', provider='whatsapp', account='personal',
+                 name=f'Archive workload {number:03}', kind='direct', last_message_ts='2026-10-24T12:00:00Z',
+                 unread=False, unread_count=0) for number in range(261)]
+    for provider, account, jid in [('slack', 'T0ARCHIVE', 'slack:T0ARCHIVE:C0000000001'),
+                                   ('telegram', 'telegram', 'telegram:user:7001'),
+                                   ('signal', 'signal', 'signal:fixture-archive')]:
+        rows.append(dict(jid=jid, provider=provider, account=account, name=f'Archive workload {provider}',
+                         kind='direct', last_message_ts='2026-10-24T12:00:00Z', unread=False, unread_count=0))
+    return rows
+
+
+class ArchiveInboxHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            rows = [] if query.get('archived') == ['true'] else archive_inbox_rows()
+            self.respond(200, rows, rows=rows)
+        elif url.path == '/v1/wazig/messages':
+            chat = query.get('chat', [''])[0]
+            self.respond(200, [dict(MsgID='ARCHIVE-WORKLOAD', ChatJID=chat, Timestamp='2026-10-24T12:00:00Z',
+                                    Text='Synthetic archive workload', FromMe=True)])
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/v1/wazig/mark-read':
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and body['archived'] is True:
+            row = next((row for row in archive_inbox_rows() if row['jid'] == body['chat']), None)
+            if row is None or row['provider'] != 'whatsapp':
+                self.respond(400, {'error': 'only WhatsApp archives remotely'}, body=body)
+                return
+            self.respond(200, {'status': 'ok'}, body=body)
+        else:
+            self.respond(400, {'error': 'unexpected archive workload write'}, body=body)
+
+
 def passage_rows(chat):
     return [dict(MsgID=f'PASSAGE-{n}', ChatJID=chat,
                  Timestamp=f'2026-10-{10 if n <= 3 else 11}T12:{n:02}:00Z',

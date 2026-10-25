@@ -841,7 +841,7 @@ const App = struct {
     include_archived: bool = false,
     include_archived_button: ?win.HWND = null,
     archive_child: ?std.process.Child = null,
-    pending_archives: [max_pending_archives]PendingArchive = [_]PendingArchive{.{}} ** max_pending_archives,
+    pending_archives: []PendingArchive = &.{},
     pending_archive_count: usize = 0,
     archive_batch_total: usize = 0,
     unarchive_retry: Utf8Text(191) = .{},
@@ -849,7 +849,7 @@ const App = struct {
     archive_state: ?*archive_rules.State = null,
     archive_state_path: []u8 = &.{},
     archive_legacy_done: bool = false,
-    bulk: archive_rules.Selection(max_chats) = .{},
+    bulk: std.ArrayList(Chat) = .empty,
     archived_scan_dirty: bool = true,
     archived_scan_ticks: u32 = 0,
     group_refresh_ticks: u8 = 0,
@@ -12826,6 +12826,7 @@ fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) vo
     }
     if (std.mem.eql(u8, a.unarchive_retry.slice(), jid)) a.unarchive_retry.set("");
     const pending = &a.pending_archives[a.pending_archive_count];
+    pending.* = .{};
     pending.jid.set(jid);
     pending.should_unarchive = true;
     pending.source = source;
@@ -13112,13 +13113,13 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
     }
     if (!already_queued and a.pending_archive_count >= a.pending_archives.len) return "Archive queue is full";
     if (a.archive_state) |state| {
-        if (action != .keep) {
+        if (unarchive) {
             state.remove(jid);
         } else {
             const row_stamp = if (visibleChatIndex(a, key)) |index| a.chats[index].timestamp.slice() else "";
             var stamp_buffer: [archive_rules.stamp_len]u8 = undefined;
             const stamp = archive_rules.archiveBaseline(&stamp_buffer, row_stamp, nowUnixSeconds());
-            if (!state.archive(jid, stamp, true)) return "Keep archived list is full";
+            if (!state.archive(jid, stamp, action == .keep)) return "Keep archived list is full";
         }
         saveArchiveState(a);
     } else if (action == .keep) return "Keep archived is not available";
@@ -13126,6 +13127,7 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     if (!already_queued) {
         const pending = &a.pending_archives[a.pending_archive_count];
+        pending.* = .{};
         pending.jid.set(jid);
         pending.should_unarchive = unarchive;
         pending.source = source;
@@ -13174,15 +13176,15 @@ fn unarchiveSentChat(a: *App, jid: []const u8) void {
 
 fn archivePaletteSelection(a: *App) void {
     if (a.selected_chat >= a.chat_count or !chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), a.palette_archive_key.key()) or
-        a.bulk.count != a.palette_archive_bulk_count or a.show_archived != a.palette_archive_show_archived or
+        a.bulk.items.len != a.palette_archive_bulk_count or a.show_archived != a.palette_archive_show_archived or
         (a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived != a.palette_archive_was_archived))
         return setStatus(a, "Chat selection changed. Open the command palette again");
     archiveSelectedChat(a, false, .menu);
 }
 
 fn archiveSelectedChat(a: *App, keep: bool, source: archive_rules.Source) void {
+    if (a.bulk.items.len > 0) return archiveBulkSelection(a, keep, source);
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
-    if (a.bulk.count > 0) return archiveBulkSelection(a, keep, source);
     const chat = &a.chats[a.selected_chat];
     if (source == .shortcut and a.displayed_jid.len > 0 and !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat)))
         return setStatus(a, "Chat selection changed. Wait for the selected chat to open");
@@ -13197,29 +13199,32 @@ fn archiveSelectedChat(a: *App, keep: bool, source: archive_rules.Source) void {
 }
 
 fn selectAllChats(a: *App) void {
-    a.bulk.clear();
-    for (a.chats[0..a.chat_count]) |*chat| a.bulk.addKey(chat_key.of(chat));
+    a.bulk.clearRetainingCapacity();
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+    if (a.chat_count == 0) return setStatus(a, "No chats to select");
+    a.bulk.appendSlice(a.allocator, a.chats[0..a.chat_count]) catch return setStatus(a, "Could not select chats");
     var buffer: [128]u8 = undefined;
-    setStatus(a, std.fmt.bufPrint(&buffer, "{d} chats selected - Ctrl+E archives, Esc cancels", .{a.bulk.count}) catch "Chats selected");
+    setStatus(a, std.fmt.bufPrint(&buffer, "{d} chats selected - Ctrl+E archives, Esc cancels", .{a.bulk.items.len}) catch "Chats selected");
 }
 
 fn clearBulkSelection(a: *App) bool {
-    if (a.bulk.count == 0) return false;
-    a.bulk.clear();
+    if (a.bulk.items.len == 0) return false;
+    a.bulk.clearRetainingCapacity();
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
     return true;
 }
 
 fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void {
+    const needed = a.pending_archive_count + a.bulk.items.len;
+    if (a.pending_archives.len < needed) a.pending_archives = a.allocator.realloc(a.pending_archives, needed) catch return setStatus(a, "Could not queue selected chats");
     var open_jid = Utf8Text(191){};
     if (a.selected_chat < a.chat_count) open_jid.set(a.chats[a.selected_chat].jid.slice());
     const action: archive_rules.Action = if (keep) .keep else if (a.show_archived) .unarchive else .archive;
     var problem: ?[]const u8 = null;
     var slack_only = true;
     var index: usize = 0;
-    while (index < a.bulk.count) : (index += 1) {
-        const key = a.bulk.atKey(chat_key.Key, index);
+    while (index < a.bulk.items.len) : (index += 1) {
+        const key = chat_key.of(&a.bulk.items[index]);
         slack_only = slack_only and key.provider == .slack;
         if (key.provider != .slack and !unifiedHub(a) and (key.provider != .whatsapp or !std.mem.eql(u8, key.account, a.cache_tag.slice()))) {
             problem = "Archiving is only available for the active WhatsApp account";
@@ -13227,7 +13232,7 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void 
         }
         if (archiveChat(a, key, action, source)) |why| problem = why;
     }
-    a.bulk.clear();
+    a.bulk.clearRetainingCapacity();
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
     paneFollowSelection(a, open_jid.slice());
     if (problem) |why| return setStatus(a, why);
@@ -13859,7 +13864,7 @@ fn appendMicrophones(a: *App) void {
 
 fn buildPaletteItems(a: *App) void {
     a.palette_archive_key.set(if (a.selected_chat < a.chat_count) chat_key.of(&a.chats[a.selected_chat]) else .{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = "" });
-    a.palette_archive_bulk_count = a.bulk.count;
+    a.palette_archive_bulk_count = a.bulk.items.len;
     a.palette_archive_show_archived = a.show_archived;
     a.palette_archive_was_archived = a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived;
     a.palette_item_count = 0;
@@ -15830,7 +15835,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     const item = &buffered;
     const chat = &a.chats[index];
     const selected = (item.itemState & win.ODS_SELECTED) != 0;
-    const bulk_selected = a.bulk.count > 0 and a.bulk.containsKey(chat_key.of(chat));
+    const bulk_selected = a.bulk.items.len > 0 and chat_key.indexOf(Chat, a.bulk.items, chat_key.of(chat)) != null;
     _ = win.FillRect(item.hDC, &item.rcItem, background);
     _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
     if (bulk_selected) {
@@ -17046,7 +17051,7 @@ fn openChatMenu(a: *App, lparam: win.LPARAM) void {
         if (win.SendMessageW(list, win.LB_GETITEMRECT, row, @intCast(@intFromPtr(&rect))) == win.LB_ERR) return;
         if (client.x < rect.left or client.x >= rect.right or client.y < rect.top or client.y >= rect.bottom) return;
     }
-    if (row != a.selected_chat and !(a.bulk.count > 0 and a.bulk.containsKey(chat_key.of(&a.chats[row]))))
+    if (row != a.selected_chat and !(a.bulk.items.len > 0 and chat_key.indexOf(Chat, a.bulk.items, chat_key.of(&a.chats[row])) != null))
         selectChatRow(a, row);
     const chat = &a.chats[row];
     const choice = menu: {
@@ -18242,15 +18247,15 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     if (control and !alt and !shift and key == 'A') {
         const in_compose = a.compose != null and focus == a.compose.?;
         const compose_empty = if (in_compose) win.GetWindowTextLengthW(a.compose.?) == 0 else false;
-        if (shortcuts.ctrlASelectsChats(a.chats_hwnd != null and focus == a.chats_hwnd.?, in_compose, compose_empty)) {
-            selectAllChats(a);
-            return true;
-        }
         const in_text_field = (a.compose != null and focus == a.compose.?) or
             (a.thread_compose != null and focus == a.thread_compose.?) or
             (a.search != null and focus == a.search.?) or
             (a.emoji_edit != null and focus == a.emoji_edit.?) or
             (a.palette_edit != null and focus == a.palette_edit.?);
+        if (shortcuts.ctrlASelectsChats(in_text_field, in_compose, compose_empty)) {
+            selectAllChats(a);
+            return true;
+        }
         if (in_text_field) {
             _ = win.SendMessageW(focus.?, win.EM_SETSEL, 0, @bitCast(@as(isize, -1)));
             return true;
@@ -19207,6 +19212,9 @@ pub fn main(init: std.process.Init) !void {
     defer init.gpa.destroy(app);
     app.* = .{ .allocator = init.gpa, .people = people_index.Index.init(init.gpa), .io = init.io, .instance = instance, .wacli_path = wacli_path, .avatar_dir = avatar_dir, .slack_media_dir = slack_media_dir, .deepgram_configured = deepgram_key.len > 0, .deepgram_key = deepgram_key, .openrouter_key = openrouter_key, .openrouter_model = openrouter_model, .openrouter_configured = openrouter_key.len > 0, .format_workspace = format_workspace, .dictation_language = loadDictationLanguage(), .font_scale = loadFontScale(), .chat_view = loadChatView() };
     defer app.allocator.free(app.chats);
+    app.pending_archives = try app.allocator.alloc(PendingArchive, max_pending_archives);
+    defer app.allocator.free(app.pending_archives);
+    defer app.bulk.deinit(app.allocator);
     defer app.allocator.free(app.tg_chats);
     defer {
         persistDrafts(app);
@@ -21155,7 +21163,7 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
             if (a.pending_archive_count == 0 or !chat_key.Key.eql(.{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = a.pending_archives[0].jid.slice() }, chat_key.of(result))) return;
             if (result.ok) {
                 removeFirstPendingArchive(a);
-                refreshChats(a);
+                if (a.pending_archive_count > 0) startNextArchive(a) else refreshChats(a);
                 setStatus(a, "Archive operation completed");
             } else {
                 if (result.http_status == 502 and (std.mem.startsWith(u8, result.jid.slice(), "signal:") or std.mem.startsWith(u8, result.jid.slice(), "telegram:"))) {

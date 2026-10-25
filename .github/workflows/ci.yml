@@ -60,6 +60,28 @@ jobs:
       - name: Preflight
         run: ZIG=zig bash tools/preflight.sh
 
+      - name: IGSH-767 archive intent and historical negative control
+        run: |
+          set -euo pipefail
+          path=src/archive_rules.zig
+          cp "$path" "$RUNNER_TEMP/archive_rules.zig"
+          fixed='if (self.find(key.id) != null) return true;'
+          old='if (self.find(key.id)) |index| return self.entries[index].keep;'
+          grep -qF "$fixed" "$path" || { echo 'Archive negative control anchor missing'; exit 1; }
+          FIXED="$fixed" OLD="$old" python3 -c "import os,sys;p=sys.argv[1];s=open(p,encoding='utf-8').read();open(p,'w',encoding='utf-8').write(s.replace(os.environ['FIXED'],os.environ['OLD']))" "$path"
+          set +e
+          zig build test > "$RUNNER_TEMP/archive-old.log" 2>&1
+          status=$?
+          set -e
+          cp "$RUNNER_TEMP/archive_rules.zig" "$path"
+          if [ "$status" -eq 0 ]; then echo 'Old archive resolution unexpectedly passed'; exit 1; fi
+          if ! grep -qE "archive_rules\.test\.WhatsApp archive (entry overrides the provider flag|presence is independent of keep and the provider flag)' failed" "$RUNNER_TEMP/archive-old.log"; then
+            echo 'Old archive resolution did not fail the metadata-free regression'
+            tail -40 "$RUNNER_TEMP/archive-old.log"
+            exit 1
+          fi
+          echo 'Old archive resolution fails the metadata-free regression'
+
       - name: Compile ARM64 release
         run: zig build -Dtarget=aarch64-windows-gnu --release=small -p zig-out-arm64
 

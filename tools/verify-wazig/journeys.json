@@ -521,6 +521,22 @@
         "class": "ShowArchivedHandler"
       },
       "maximize": true
+    },
+    {
+      "name": "archive-inbox",
+      "pr": true,
+      "hub": "archive-inbox",
+      "evidence": true,
+      "chats": 264,
+      "script": "journey-archive-inbox.ps1",
+      "validator": {
+        "file": "evidence-archive-inbox.py"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "ArchiveInboxHandler"
+      },
+      "maximize": true
     }
   ]
 }
