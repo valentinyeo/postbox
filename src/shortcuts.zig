@@ -1,7 +1,7 @@
 const std = @import("std");
 
-pub fn ctrlASelectsChats(list_focused: bool, compose_focused: bool, compose_empty: bool) bool {
-    return list_focused or (compose_focused and compose_empty);
+pub fn ctrlASelectsChats(text_field_focused: bool, compose_focused: bool, compose_empty: bool) bool {
+    return !text_field_focused or (compose_focused and compose_empty);
 }
 
 pub const Shortcut = struct {
@@ -107,30 +107,31 @@ test "no empty key or description" {
     }
 }
 
-test "Ctrl+A in the chat list selects chats" {
-    try std.testing.expect(ctrlASelectsChats(true, false, false));
+test "Ctrl+A outside text fields selects chats regardless of the main composer" {
+    try std.testing.expect(ctrlASelectsChats(false, false, false));
+    try std.testing.expect(ctrlASelectsChats(false, false, true));
 }
 
 test "Ctrl+A in the empty main composer selects chats" {
-    try std.testing.expect(ctrlASelectsChats(false, true, true));
+    try std.testing.expect(ctrlASelectsChats(true, true, true));
 }
 
 test "Ctrl+A in the main composer with text selects text" {
-    try std.testing.expect(!ctrlASelectsChats(false, true, false));
+    try std.testing.expect(!ctrlASelectsChats(true, true, false));
 }
 
 test "Ctrl+A in search selects text even with an empty main composer" {
-    try std.testing.expect(!ctrlASelectsChats(false, false, true));
+    try std.testing.expect(!ctrlASelectsChats(true, false, true));
 }
 
 test "Ctrl+A in the thread composer selects text even with an empty main composer" {
-    try std.testing.expect(!ctrlASelectsChats(false, false, true));
+    try std.testing.expect(!ctrlASelectsChats(true, false, true));
 }
 
 test "Ctrl+A in the emoji edit selects text even with an empty main composer" {
-    try std.testing.expect(!ctrlASelectsChats(false, false, true));
+    try std.testing.expect(!ctrlASelectsChats(true, false, true));
 }
 
 test "Ctrl+A in the palette edit selects text even with an empty main composer" {
-    try std.testing.expect(!ctrlASelectsChats(false, false, true));
+    try std.testing.expect(!ctrlASelectsChats(true, false, true));
 }

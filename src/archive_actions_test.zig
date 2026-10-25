@@ -1522,28 +1522,39 @@ test "hub bulk completion starts every write and refreshes chats only after the 
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
 }
 
-test "Ctrl A routes list canvas main and empty composer focus but preserves every text field" {
+test "Ctrl A routes every non-text control and empty composer focus but preserves every text field" {
     var state = archive_rules.State{};
     var a = fixture(&state);
     defer a.allocator.free(a.pending_archives);
     defer a.bulk.deinit(a.allocator);
     defer compose_text_len = 0;
-    for ([_]?win.HWND{ a.chats_hwnd, a.canvas, a.hwnd, a.compose }) |focus| {
-        a.bulk.clearRetainingCapacity();
-        try std.testing.expect(selectAllKey(&a, focus));
-        try std.testing.expectEqual(a.chat_count, a.bulk.items.len);
-    }
-    a.bulk.clearRetainingCapacity();
     a.search = 7;
     a.thread_compose = 8;
     a.emoji_edit = 9;
     a.palette_edit = 10;
-    compose_text_len = 5;
-    for ([_]?win.HWND{ a.compose, a.search, a.thread_compose, a.emoji_edit, a.palette_edit }) |focus| {
-        const before = text_selections;
-        try std.testing.expect(selectAllKey(&a, focus));
-        try std.testing.expectEqual(@as(usize, 0), a.bulk.items.len);
-        try std.testing.expectEqual(before + 1, text_selections);
+    const messages_list: win.HWND = 11;
+    const button: win.HWND = 12;
+    const list_scrollbar: win.HWND = 13;
+    for ([_]i32{ 0, 5 }) |text_len| {
+        compose_text_len = text_len;
+        for ([_]?win.HWND{ a.chats_hwnd, a.canvas, a.hwnd, messages_list, button, list_scrollbar, null }) |focus| {
+            a.bulk.clearRetainingCapacity();
+            const before = text_selections;
+            try std.testing.expect(selectAllKey(&a, focus));
+            try std.testing.expectEqual(a.chat_count, a.bulk.items.len);
+            try std.testing.expectEqual(before, text_selections);
+        }
+        for ([_]?win.HWND{ a.compose, a.search, a.thread_compose, a.emoji_edit, a.palette_edit }) |focus| {
+            a.bulk.clearRetainingCapacity();
+            const before = text_selections;
+            try std.testing.expect(selectAllKey(&a, focus));
+            if (focus == a.compose and text_len == 0) {
+                try std.testing.expectEqual(a.chat_count, a.bulk.items.len);
+                try std.testing.expectEqual(before, text_selections);
+            } else {
+                try std.testing.expectEqual(@as(usize, 0), a.bulk.items.len);
+                try std.testing.expectEqual(before + 1, text_selections);
+            }
+        }
     }
-    try std.testing.expect(!selectAllKey(&a, null));
 }
