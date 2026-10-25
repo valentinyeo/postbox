@@ -19,7 +19,7 @@ Preconditions: doctor passes; synthetic Alpha and Beta are unarchived in `verifi
 
 - **Run:** dispatch `feature=archive-bulk`; recipe: `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature archive-bulk`.
 - **Before:** focus composer `1032`, require empty text and save `before.png` with status and chat snapshots.
-- **Select:** send `^a`; read status control `1048` through bounded read-only WM_GETTEXT and require `2 chats selected`. Save `selected.png` and require composer focus remains unchanged.
+- **Select:** send `^a`; read `wazigctl status` and require `bulk_selected_count=2`. Save `selected.png` and require composer focus remains unchanged.
 - **Archive:** send `^e`; require zero pending archives, both fixture provider rows archived and zero inbox chats through read-only `chats`. Save `after.png` and matching snapshots. Cleanup preserves the provider file in `final-data`.
 - **Text:** the empty inbox disables the composer, so open `Show archived chats` through Ctrl+K before refocusing composer `1032`. Type `hello`, send `^a`, require UIA TextPattern selection to contain all of `hello` and no chats-selected status. Save `text-selected.png`, then clear the composer.
 

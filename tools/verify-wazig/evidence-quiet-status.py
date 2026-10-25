@@ -25,9 +25,16 @@ def check_quiet_status(folder):
     assert version['query'] == 'version' and version['positive'] == ['Keyboard shortcuts']
     assert version['expected'] == expected and version['rows'] == [expected]
     problem = read('sync-problem.json')
-    assert problem['class'] == '#32770' and problem['pid'] == session['pid']
+    assert problem['surface'] == 'update_card' and problem['pid'] == session['pid']
+    assert problem['dialog'] == 0
     assert problem['expected'] == 'Unable to read chats from wacli'
-    assert problem['expected'] in problem['labels']
+    for card in (problem['card'], problem['retained']):
+        assert card['visible'] and card['span'] > 0
+        assert card['error'] == problem['expected']
+        left, top, right, bottom = card['rect']
+        assert 0 <= left < right and 0 <= top < bottom
+    assert problem['card'] == problem['retained']
+    assert abs(problem['list_bottom'] - (problem['card_top'] - problem['gap'])) <= 1
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     failures = [row for row in requests if row.get('wire_path', '').startswith('/v1/wazig/chats') and row['status'] == 503]
     assert failures and all(row in failures for row in problem['failures']) and problem['failures']
@@ -40,8 +47,10 @@ def check_quiet_status(folder):
         state = read(f'{stage}.state.json')
         assert state['version'] == '0.0.526' and state['chat_count'] == 2
         assert state['pending_sends'] == state['pending_archives'] == 0
+        if stage in ('sync-problem', 'after'):
+            assert state['update_card'] == problem['card']
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for keys in ('^k', 'Keyboard shortcuts', 'version', 'Refresh', '{ENTER}'):
+    for keys in ('^k', 'Keyboard shortcuts', 'version', 'Refresh', '{ENTER}', '{ESC}'):
         assert f'keys: {keys}' in actions
     final = read('side-effects.json')
     assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']

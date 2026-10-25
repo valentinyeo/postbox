@@ -50,11 +50,12 @@ class NoStoriesTests(unittest.TestCase):
         start = main.index('fn layoutRegion(')
         layout = main[start:main.index('\nfn ', start + 1)]
         self.assertIn('const search_height: i32 = px(a, 48);', layout)
-        self.assertIn('win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, height - header_height - search_height - status_height - updateCardSpan(a), win.TRUE)', layout)
+        self.assertIn('win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, list_bottom - header_height - search_height, win.TRUE)', layout)
         self.assertNotIn('theme.choice', layout)
         self.assertNotIn('activeChatView', layout)
         self.assertNotIn('win.SW_HIDE', layout)
-        self.assertIn('const status_height: i32 = px(a, 26);', layout)
+        self.assertNotIn('status_height', layout)
+        self.assertIn('const list_bottom = if (updateCardVisible(a)) updateCardRect(a).top - px(a, 4) else height;', layout)
 
 
 if __name__ == '__main__':
