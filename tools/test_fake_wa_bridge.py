@@ -77,6 +77,17 @@ class FakeWaBridgeArchiveTests(unittest.TestCase):
         self.archive(chat, False)
         self.assert_views([])
 
+    def test_batch_archive_reports_failure_and_still_updates_later_chat(self):
+        body = dict(account=self.account or '', chats=[dict(chat='unknown'), dict(chat=self.beta)], archived=True)
+        reply = self.request('POST', '/archive-batch', body)
+        self.assertEqual([row['chat'] for row in reply['results']], ['unknown', self.beta])
+        self.assertEqual([row['ok'] for row in reply['results']], [False, True])
+        self.assertTrue(reply['results'][0]['error'])
+        self.assert_views([self.jids[1]])
+        body.update(chats=[dict(chat=self.beta)], archived=False)
+        self.assertEqual(self.request('POST', '/archive-batch', body)['results'], [dict(chat=self.beta, ok=True)])
+        self.assert_views([])
+
     def test_archive_beta_keeps_alpha_and_unarchive_restores_beta(self):
         self.assert_archive_cycle(self.beta, self.jids[1])
 
