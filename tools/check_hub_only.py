@@ -4,7 +4,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 RETIRED = ('slack_win.zig', 'slack_oauth.zig', 'slack_oauth_win.zig', 'telegram.zig', 'telegram_stub.zig')
-DIRECT = re.compile(r'td_json_client_|setTdlibParameters|apps\.connections\.open|oauth\.v2\.access|slack\.com|child_process\.(?:run|spawn)\s*\(|send_args\.build(?:Send|React)\s*\(|auth --idle-exit|session\.start\(a\.wacli_path')
+DIRECT = re.compile(r'td_json_client_|setTdlibParameters|apps\.connections\.open|oauth\.v2\.access|slack\.com(?![A-Za-z])|child_process\.(?:run|spawn)\s*\(|send_args\.build(?:Send|React)\s*\(|auth --idle-exit|session\.start\(a\.wacli_path')
 
 
 def verify_source(source):
