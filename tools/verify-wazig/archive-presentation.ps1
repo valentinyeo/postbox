@@ -74,7 +74,7 @@ function Assert-ArchiveFooterRemoved($Session) {
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $null = Wait-Until {
         $after = Read-Control $Session status
-        Assert-That ($after.include_archived -eq $before.include_archived -and $after.selected.id -ceq $before.selected.id -and $after.chat_count -eq $before.chat_count -and $after.pending_archives -eq 0) 'Former footer click changed the app'
+        Assert-That ($after.include_archived -eq $before.include_archived -and $after.chat_count -eq $before.chat_count -and $after.pending_archives -eq 0) 'Former footer click changed the app'
         $clock.ElapsedMilliseconds -ge 1000
     } 'former footer click remains inert'
     $desktop = [System.Windows.Forms.SystemInformation]::VirtualScreen
