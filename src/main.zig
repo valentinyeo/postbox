@@ -11896,7 +11896,7 @@ fn appendPaletteChat(a: *App, index: usize) void {
     item.chat_identity.set(chat_key.of(chat));
     item.view_identity = .{};
     item.archived = chat.archived;
-    if (chat.archived and a.palette_search_mode) {
+    if (chat.archived) {
         const suffix = std.unicode.utf8ToUtf16LeStringLiteral("  ·  Archived");
         item.label.len = @min(item.label.len, item.label.buf.len - 1 - suffix.len);
         @memcpy(item.label.buf[item.label.len..][0..suffix.len], suffix);
@@ -12005,6 +12005,23 @@ fn lowerUnit(unit: u16) u16 {
     return if (unit >= 'A' and unit <= 'Z') unit + 32 else unit;
 }
 
+fn wideContainsIgnoreCase(text: []const u16, query: []const u16) bool {
+    if (query.len == 0) return true;
+    if (query.len > text.len) return false;
+    var start: usize = 0;
+    while (start + query.len <= text.len) : (start += 1) {
+        var matched = true;
+        for (query, 0..) |unit, offset| {
+            if (lowerUnit(text[start + offset]) != lowerUnit(unit)) {
+                matched = false;
+                break;
+            }
+        }
+        if (matched) return true;
+    }
+    return false;
+}
+
 fn paletteScore(label: []const u16, query: []const u16) ?i32 {
     var score: i32 = 0;
     var text_index: usize = 0;
@@ -12110,6 +12127,8 @@ fn paletteFilter(a: *App) void {
     const scores = a.allocator.alloc(i32, a.palette_items.len + 20) catch return;
     defer a.allocator.free(scores);
     @memset(scores, 0);
+    const query_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, query_buf[0..query_len]) catch return;
+    defer a.allocator.free(query_utf8);
     for (0..a.palette_item_count) |index| {
         const item = &a.palette_items[index];
         if (a.palette_search_mode and item.chat_jid.len > 0) continue;
@@ -12117,6 +12136,14 @@ fn paletteFilter(a: *App) void {
             scores[a.palette_match_count] = 0;
             a.palette_matches[a.palette_match_count] = index;
             a.palette_match_count += 1;
+            continue;
+        }
+        if (item.chat_jid.len > 0) {
+            if (wideContainsIgnoreCase(item.label.slice(), query_buf[0..query_len]) or containsIgnoreCase(item.chat_jid.slice(), query_utf8)) {
+                scores[a.palette_match_count] = 0;
+                a.palette_matches[a.palette_match_count] = index;
+                a.palette_match_count += 1;
+            }
             continue;
         }
         if (paletteScore(item.label.slice(), query_buf[0..query_len])) |score| {
@@ -15881,7 +15908,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     return @bitCast(@intFromPtr(a.brush_raised.?));
                 }
             }
-            for ([_]?win.HWND{ a.compose }) |control| {
+            for ([_]?win.HWND{a.compose}) |control| {
                 if (control != null and control_value == @intFromPtr(control.?)) {
                     _ = win.SetBkColor(hdc, theme.current.surface_container_high);
                     return @bitCast(@intFromPtr(a.brush_raised.?));
