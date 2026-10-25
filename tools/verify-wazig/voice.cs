@@ -119,7 +119,9 @@ public static class VerifyVoice {
         foreach (var item in shown) {
             var b = item.bubble;
             if (b.Left < 0 || b.Right > width - 10) problems.Add(label + " bubble " + item.id + " leaves the canvas sideways");
-            int fill = Pixel(image, stride, ox + Math.Max(0, Math.Min(width - 1, b.Left + s(4))), oy + Math.Max(0, Math.Min(height - 1, (Math.Max(0, b.Top) + Math.Min(height, b.Bottom)) / 2)));
+            int sampleY = (Math.Max(0, b.Top) + Math.Min(height, b.Bottom)) / 2;
+            int sampleX = b.Left + (sampleY - b.Top < s(16) || b.Bottom - sampleY < s(16) ? s(18) : s(4));
+            int fill = Pixel(image, stride, ox + Math.Max(0, Math.Min(width - 1, sampleX)), oy + Math.Max(0, Math.Min(height - 1, sampleY)));
             if (Distance(fill, background) < 6) problems.Add(label + " bubble " + item.id + " has no visible bubble fill");
             if (!Empty(item.media) && (item.media.Left < b.Left || item.media.Right > b.Right || item.media.Top < b.Top || item.media.Bottom > b.Bottom)) problems.Add(label + " player of " + item.id + " is outside its own bubble");
             if (b.Bottom <= height && b.Bottom - s(30) >= 0) {
