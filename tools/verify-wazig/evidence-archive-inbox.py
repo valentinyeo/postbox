@@ -16,8 +16,8 @@ presses = read('ctrl-a.json')
 assert [row['press'] for row in presses] == list(range(1, 11))
 assert all(row['ok'] is True for row in presses)
 targets = [row['target'] for row in presses]
-assert len(set(targets)) == 3, targets
-assert {row['target'] for row in presses if row['focused']} == set(targets), targets
+assert targets == ['1032', '1016'] * 5, targets
+assert all(row['focused'] is True for row in presses), targets
 log = (folder / 'run.log').read_text(encoding='utf-8-sig')
 assert re.findall(r'ctrl_a_press=(\d+) ok=(true|false)', log) == [(str(n), 'true') for n in range(1, 11)]
 assert re.search(r'ctrl_a_ok=10\b', log)

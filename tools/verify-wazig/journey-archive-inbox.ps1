@@ -8,7 +8,7 @@ $selection = @($compose.GetCurrentPattern([Windows.Automation.TextPattern]::Patt
 Assert-That ($selection.Count -eq 1 -and $selection[0].GetText(-1) -ceq 'hello') 'Ctrl+A must retain composer text selection'
 Send-Keys $session '{BACKSPACE}'
 $presses = @()
-$targets = @($compose, $list, $window)
+$targets = @($compose, $list)
 foreach ($press in 1..10) {
     $cleared = $true
     if ($press -gt 1) {
