@@ -23,7 +23,7 @@ function Read-SearchSample($Session, [string]$Query, [string]$Shortcut, [bool]$B
         $arguments = if ($state.show_archived) { @('--archived') } else { @() }
         $rows = @((Read-Control $Session chats -Arguments $arguments).chats)
         $list = if ($Baseline) { Get-Edit (Get-Window $Session) '1016' } else { Get-Edit $palette '1072' }
-        $labels = if ($Baseline) { @($rows | ForEach-Object name) } else { @(Read-ListLabels $list) }
+        $labels = [string[]]@(if ($Baseline) { $rows | ForEach-Object name } else { Read-ListLabels $list })
         $sample = @{
             query = Read-Edit $edit; shortcut = $Shortcut; focused = $edit.Current.HasKeyboardFocus
             edit_id = $edit.Current.AutomationId; palette = (-not $Baseline); state = $state

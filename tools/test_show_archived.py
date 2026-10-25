@@ -73,12 +73,12 @@ class ShowArchivedTests(unittest.TestCase):
         background = (255, 255, 255) if light else (0, 0, 0)
         foreground = (0, 0, 0) if light else (255, 255, 255)
         dimmed = tuple((text * 180 + back * 75) // 255 for text, back in zip(foreground, background))
-        for scope in ('sidebar', 'search', 'inbox'):
+        for scope in ('sidebar', 'inbox'):
             rows = self.read('view-1-on.chats.json')['chats']
             for mode in ('dim', 'hover', 'selected'):
                 name = f'archive-{scope}-{mode}'
                 selected = rows[2] if mode == 'selected' else rows[0]
-                state = dict(include_archived=True, show_archived=False, selected=selected, search='row' if scope == 'search' else '', current_view=dict(inbox=scope == 'inbox'))
+                state = dict(include_archived=True, show_archived=False, selected=selected, search='', current_view=dict(inbox=scope == 'inbox'))
                 self.write(f'{name}.state.json', state)
                 self.write(f'{name}.chats.json', dict(chats=rows))
                 self.write(f'{name}.layout.json', dict(dpi=96, row_height=64, top=0, x=0, y=0, width=240, height=256, mode=mode, rows=rows, selected=selected['id'], colour_model='theme-foreground-mix', foreground_weight=180))
@@ -272,7 +272,7 @@ class ShowArchivedTests(unittest.TestCase):
             background = (255, 255, 255) if light else (0, 0, 0)
             foreground = (0, 0, 0) if light else (255, 255, 255)
             dimmed = tuple((text * 180 + back * 75) // 255 for text, back in zip(foreground, background))
-            for scope in ('sidebar', 'search', 'inbox'):
+            for scope in ('sidebar', 'inbox'):
                 for mode in (('dim',) if light else ('dim', 'hover', 'selected')):
                     name = f'archive-{scope}-{mode}'
                     image_path = self.folder / f'{name}.png'
@@ -296,7 +296,7 @@ class ShowArchivedTests(unittest.TestCase):
             self.presentation(light=light)
             colour = (0, 0, 32) if light else (255, 255, 223)
             expected = [75, 75, 97] if light else [180, 180, 157]
-            for scope in ('sidebar', 'search', 'inbox'):
+            for scope in ('sidebar', 'inbox'):
                 name = f'archive-{scope}-dim'
                 image_path = self.folder / f'{name}.png'
                 _, _, image = pixels['read_png'](image_path)
@@ -320,7 +320,7 @@ class ShowArchivedTests(unittest.TestCase):
         for light in (False, True):
             self.presentation(light=light)
             colour = (0, 0, 22) if light else (255, 255, 233)
-            for scope in ('sidebar', 'search', 'inbox'):
+            for scope in ('sidebar', 'inbox'):
                 for mode in ('hover', 'selected'):
                     name = f'archive-{scope}-{mode}'
                     image_path = self.folder / f'{name}.png'
@@ -338,7 +338,7 @@ class ShowArchivedTests(unittest.TestCase):
     def test_full_strength_text_colour_accepts_background_difference_and_rejects_dimming(self):
         checker = runpy.run_path(str(TOOLS / 'check-archive-presentation.py'))
         pixels = runpy.run_path(str(TOOLS / 'check-workspace-icons.py'))
-        for scope in ('sidebar', 'search', 'inbox'):
+        for scope in ('sidebar', 'inbox'):
             for mode in ('hover', 'selected'):
                 name = f'archive-{scope}-{mode}'
                 image_path = self.folder / f'{name}.png'

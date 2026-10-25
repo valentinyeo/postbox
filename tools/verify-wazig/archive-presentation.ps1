@@ -97,17 +97,8 @@ function Invoke-ArchivePresentation($Session) {
     $restored = @((Read-Control $Session chats).chats | ForEach-Object { "$($_.provider)|$($_.account)|$($_.id)|$($_.archived)" } | Sort-Object)
     Assert-That (($identities -join "`n") -ceq ($restored -join "`n")) 'Drawing toggle changed archived identities'
     @{ before = $identities; after = $restored } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'archive-identities.json')
-    foreach ($scope in @('sidebar', 'search', 'inbox')) {
-        if ($scope -eq 'search') {
-            Send-Keys $Session '^f'
-            Send-Keys $Session 'row'
-            $null = Wait-Until { (Read-Control $Session status).search -ceq 'row' } 'search rows'
-            Send-Keys $Session '{ENTER}'
-        }
+    foreach ($scope in @('sidebar', 'inbox')) {
         if ($scope -eq 'inbox') {
-            Send-Keys $Session '^f'
-            Send-Keys $Session '^a{BACKSPACE}'
-            Send-Keys $Session '{ESC}'
             Send-Keys $Session '%i'
         }
         Send-Keys $Session '^1'

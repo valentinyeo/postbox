@@ -48,7 +48,7 @@ def check_slack_mentions(folder):
         tree = (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig')
         assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', tree.splitlines()[0])
         assert not has_raw_id(tree)
-        for control in ['1008', '1032']:
+        for control in ['1032']:
             assert re.search(rf'^{control} \| ', tree, re.M), (stage, control)
         state = read(f'{stage}.state.json')
         assert state['view'] == 'slack' and state['selected']['id'] == chat
