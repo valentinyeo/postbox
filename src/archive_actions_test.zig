@@ -209,7 +209,7 @@ fn stopSync(a: *App, _: []const u8) void {
 }
 fn startSync(_: *App) void {}
 fn startHubArchive(a: *App) void {
-    if (a.pending_archive_count == 0 or a.hub_archive_inflight) return;
+    if (a.bulk.items.len > 0 or a.pending_archive_count == 0 or a.hub_archive_inflight) return;
     a.hub_archive_inflight = true;
     a.hub_archive_requests += 1;
     a.hub_archive_batch_count = a.pending_archives[0].batch_count;

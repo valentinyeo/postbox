@@ -12997,7 +12997,6 @@ fn removeFirstPendingArchive(a: *App) void {
 
 fn startNextArchive(a: *App) void {
     if (hubConfigured(a)) {
-        if (a.bulk.items.len > 0) return;
         startHubArchive(a);
         return;
     }
@@ -21091,7 +21090,7 @@ fn startHubMarkRead(a: *App) void {
 }
 
 fn startHubArchive(a: *App) void {
-    if (a.hub_account.len == 0 or a.pending_archive_count == 0 or wacliPendingGet(a, .hub_archive) > 0 or a.pending_archives[0].retry_at_ms > win.GetTickCount64()) return;
+    if (a.bulk.items.len > 0 or a.hub_account.len == 0 or a.pending_archive_count == 0 or wacliPendingGet(a, .hub_archive) > 0 or a.pending_archives[0].retry_at_ms > win.GetTickCount64()) return;
     const archived = !a.pending_archives[0].should_unarchive;
     const count = @min(a.pending_archives[0].batch_count, a.pending_archive_count);
     if (count == 0) {
