@@ -1,33 +1,40 @@
-# Gates: IGSH-824 quiet sidebar correction
+# Gates: sidebar surface and single-pixel divider
 
-OWNS: GATES.md, src/main.zig, tools/test_status_line.py, tools/verify-wazig/journey-quiet-status.ps1, tools/verify-wazig/evidence-quiet-status.py, .claude/skills/verify-wazig/**
+OWNS: GATES.md, src/theme.zig, src/main.zig, tools/verify-wazig/*sidebar*, tools/verify-wazig/journeys.json, tools/verify-wazig/check-map.py, .github/workflows/verify.yml, .claude/skills/verify-wazig/features/sidebar-surface.md
 
-Scope: Correct failure delivery to the existing sidebar update card without changing its look, dismissal, palette version row, commit A or the red branch; amend only commit B.
+Scope: Only lift the sidebar surface and add its faint right-edge divider, with screenshot measurements, unchanged-chat baseline comparison, and separate local red and green commits.
 
-Authorization: Only python3 tools/test_status_line.py, python3 tools/test_no_stories.py and python3 tools/test_repaint.py may execute locally. No builds, Zig, Wine, Gradle, suites, gate checker or linter. Gates record direct authorized output and source/history inspection rather than checker-generated evidence. Windows journeys and screenshot review are runner work, not locally executed proof.
+Authorization: Only directly changed single Python validators/test files may run locally. Builds and Windows execution belong to the runner. The unlazy Node gate checker/linter cannot run under that restriction; direct command transcripts below are not checker-generated certification.
 
-- [x] G1: showProblem logs via setStatus, stores persistent update_card_error and refreshes the existing card; it never opens a dialog and only the already-running warning retains MessageBoxW.
-  EVIDENCE: python3 tools/test_status_line.py: 13 tests OK. showProblem copies bounded text into update_card_error, sets its persistent length and calls updateCardRefresh after setStatus/appendLaunchLog. Source guards reject missing storage, missing refresh, log-side clearing and modal regression, and require exactly one MessageBoxW call: the unchanged already-running instance warning. No timer or replacement indicator was added.
+- [x] G1: Screenshot validator rejects the old surface, missing or wide divider, unreadable text, and changed chat pixels while accepting valid dark and light captures
+  CHECK: python3 tools/verify-wazig/test-sidebar-surface.py
+  EXPECT: SIDEBAR VALIDATOR CONTROLS PASSED
+  EVIDENCE: Direct authorized run exited zero and printed SIDEBAR VALIDATOR CONTROLS PASSED. PNG round trips and measured controls cover AMOLED, Green and an inverted-light synthetic palette; old black/absent-divider pixels and 14 other raster/geometry defects are rejected. These are synthetic controls, not Windows screenshot evidence.
 
-- [x] G2: A sync failure can reveal and paint the existing card without a pending update; only pending-update suppression changes, with identical card geometry, drawing styles, existing update behavior and Esc/dismiss paths.
-  EVIDENCE: python3 tools/test_status_line.py compares update-card geometry, refresh, failure handling, click, dismiss and handleKeyboard byte-for-byte with base 162b5d1. Exact normalized comparisons permit only moving the error visibility check before the pending-update guard and replacing the painter pending-update early return with empty tag/notes fallbacks. The existing error line, colours, fonts, labels, controls, success clearing and dismissal code are unchanged. The existing layout refresh invalidates the main window and reserves only visible-card clearance.
+- [x] G2: Journey registration, retained screenshots, baseline build provenance and theme coverage are consistent
+  CHECK: python3 tools/verify-wazig/check-map.py
+  EXPECT: verification skill map passed
+  EVIDENCE: Direct authorized run exited zero: 36 feature entries and verification skill map passed. The registered PR journey includes both dark themes, real paragraph messages, full desktop captures, historical baseline build/hash binding, exact full-chat comparison, cleanup evidence and a surviving screenshot validator.
 
-- [x] G3: Quiet-status evidence requires the exact failure in the existing visible card, retained across ordinary input/repaint, with no modal dialog and a real authenticated provider 503; positive and rejecting controls cover the corrected contract.
-  EVIDENCE: python3 tools/test_status_line.py accepts synthetic surviving card evidence and rejects wrong surface/PID/text, a modal handle, hidden card, lost persistence, missing card in screenshot state, missing list clearance and absent HTTP 503 proof. The real fake-hub endpoint test proves authenticated baseline 200, unauthorized mutation 401, forced read 503 and recovery 200. The Windows journey uses real Refresh and palette input, read-only card state, native list bounds, no-dialog assertions and matching sync-problem/after screenshot state. Actual Windows execution and visible-pixel inspection are not claimed.
+- [ ] G3: Only sidebar surface and divider rendering change; chat, text, bubbles, geometry, and hit areas remain untouched
+  EVIDENCE: pending
 
-- [x] G4: All three authorized test files pass; source guards still reject the parent and deliberately broken status, palette, problem routing, visibility, painting and evidence.
-  EVIDENCE: Final authorized direct runs: python3 tools/test_status_line.py: 13 tests OK; python3 tools/test_no_stories.py: 4 tests OK; python3 tools/test_repaint.py: 6 tests OK. Parent-source rejection and deliberately broken source/evidence controls pass within the status test. No build, Zig, Wine, Gradle, suite, gate checker or linter was run.
+- [ ] G4: Commit A contains proof only; commit B contains app changes; the red branch contains A cherry-picked onto the requested base
+  EVIDENCE: pending
 
-- [x] G5: Only B is amended, exactly two commits follow the base, A and ceo/IGSH-824-red remain unchanged, and the final tree is clean with no push or PR.
-  EVIDENCE: Amended B retains parent A df614c42a134c1a2a8a24cc8de56545e428fb3aa and exactly two commits over base 162b5d1435c41d026f29532af01ed8b6ab0ed7e2. Red remains 88ee692ef899028fe209cbb642db9637a4d43d1b; its tree and A both remain 6b83dc11148bdd9f86f5c863e6cc0db780527c94. Final history, refs and clean-tree inspection are required immediately after amend before reporting. No push, PR, branch modification or workflow dispatch.
+- [ ] G5: Isolated Windows screenshot evidence fails on the red branch and passes on the app branch, with measured colour, text contrast, divider luminance, and unchanged-chat pixels
+  EVIDENCE: Not executed. No remote branch publication or local Windows/build execution is authorized. Runtime colour values and screenshot review are not claimed.
 
-## Runner handoff
+ABANDON: G5 Required runner handoff: publish both local branches, dispatch the two commands below, download both artifacts, confirm commit/hash provenance, inspect both theme pairs and require red failure plus green success. This gate is not met.
 
-After the runner pushes the two local branches, dispatch and inspect the quiet-status/version/sync-problem screenshots and validator result. Red must fail on the existing native status control; green must show the exact failure in the existing sidebar update card without a dialog. The red branch intentionally retains the original assertion commit unchanged.
+- [ ] G6: No prohibited local builds, Zig, Wine, Gradle, suites, pushes, PRs, or code comments are introduced
+  EVIDENCE: pending
+
+## Runner commands
 
 ```sh
-gh workflow run verify.yml -R valentinyeo/wazig --ref ceo/IGSH-824-red -f feature=quiet-status
-gh workflow run verify.yml -R valentinyeo/wazig --ref ceo/IGSH-824 -f feature=quiet-status
+gh workflow run verify.yml -R valentinyeo/wazig --ref ceo/IGSH-827-red -f feature=sidebar-surface
+gh workflow run verify.yml -R valentinyeo/wazig --ref ceo/IGSH-827 -f feature=sidebar-surface
 ```
 
-Local deliverable ledger: 5 met, 0 unmet, 0 abandoned. Windows execution and visual inspection remain required runner work.
+Both runs retain the real historical-build baseline under baseline/ and measured values in sidebar-pixels.json. The entire chat must match with zero channel tolerance, not just its mean background. No workflow was dispatched in this helper session.
