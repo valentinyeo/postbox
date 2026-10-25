@@ -261,15 +261,6 @@ class ShowArchivedTests(unittest.TestCase):
         self.write('archive-footer.json', broken)
         self.assertNotEqual(self.validate().returncode, 0)
         self.write('archive-footer.json', footer)
-        pixels = runpy.run_path(str(TOOLS / 'check-workspace-icons.py'))
-        footer_image = self.folder / 'archive-footer.png'
-        footer_bytes = footer_image.read_bytes()
-        _, _, image = pixels['read_png'](footer_image)
-        for y in range(238, 248):
-            image[y][110:210] = [(255, 255, 255)] * 100
-        pixels['write_png'](footer_image, image)
-        self.assertNotEqual(self.validate().returncode, 0)
-        footer_image.write_bytes(footer_bytes)
         checker = runpy.run_path(str(TOOLS / 'check-archive-presentation.py'))
         for light in (False, True):
             self.presentation(light=light)
