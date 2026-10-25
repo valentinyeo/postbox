@@ -10942,7 +10942,18 @@ fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []c
         if (state.observeLocal(key, ts)) saveArchiveState(a);
         return false;
     }
-    if (!state.isKept(jid) or !state.holdKept(jid, provider_archived, ts)) return false;
+    if (!state.isKept(jid)) {
+        if (!provider_archived) {
+            if (state.baseline(jid)) |base| {
+                if (std.mem.order(u8, ts, base) == .gt) {
+                    state.remove(jid);
+                    saveArchiveState(a);
+                }
+            }
+        }
+        return false;
+    }
+    if (!state.holdKept(jid, provider_archived, ts)) return false;
     if (archiveChat(a, key, .keep, .kept) == null) return true;
     state.releaseHold(jid);
     return false;
@@ -16221,9 +16232,8 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         return true;
     }
     if (control and !alt and key == 'E') {
-        if (shift) return false;
         if (!archiveShortcutAllowed(a, focus, message.lParam, true)) return false;
-        archiveSelectedChat(a, false, .shortcut);
+        archiveSelectedChat(a, shift, .shortcut);
         return true;
     }
     if (control and shift and key == 'C') {

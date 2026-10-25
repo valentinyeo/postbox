@@ -586,14 +586,25 @@ test "pending unarchives stay hidden in archived view and share batch accounting
     try std.testing.expectEqualStrings("Chat unarchived", a.status.slice());
 }
 
-test "Ctrl+E archives from the compose box and Ctrl+Shift+E is unbound" {
+test "Ctrl+Shift+E keeps the chat archived" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
+    const message = win.MSG{};
+    try std.testing.expect(archiveKey(&a, 'E', true, false, true, a.compose, &message));
+    try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+    try std.testing.expect(state.isKept("a@g.us"));
+    try std.testing.expectEqualStrings(archive_rules.Action.keep.status(), a.status.slice());
+}
+
+test "Ctrl+E archives from the compose box and Ctrl+Alt+E is unbound" {
     var state = archive_rules.State{};
     var a = fixture(&state);
     defer a.allocator.free(a.pending_archives);
     defer a.bulk.deinit(a.allocator);
     const message = win.MSG{};
     try std.testing.expect(!archiveKey(&a, 'E', true, true, false, a.compose, &message));
-    try std.testing.expect(!archiveKey(&a, 'E', true, false, true, a.compose, &message));
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expect(archiveKey(&a, 'E', true, false, false, a.compose, &message));
     try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
@@ -1311,7 +1322,7 @@ test "non hub Telegram and Signal archiving remains unavailable" {
     }
 }
 
-test "successful hub archives stay sticky per timestamp and transient failures retain intent" {
+test "plain hub archives return while kept archives stay sticky and transient failures retain intent" {
     for ([_]bool{ false, true }) |keep| {
         var state = archive_rules.State{};
         var a = fixture(&state);
@@ -1325,7 +1336,7 @@ test "successful hub archives stay sticky per timestamp and transient failures r
         a.refresh_key.set(chat_key.of(&a.chats[0]));
         a.refresh_stamp.set("2026-10-10T11:00:00Z");
         const key = a.refresh_key.key();
-        try std.testing.expect(state.archive(key.id, "baseline", keep));
+        try std.testing.expect(state.archive(key.id, "2026-10-10T10:00:00Z", keep));
         refreshChats(&a);
         if (!keep) {
             refreshChats(&a);
@@ -1335,7 +1346,7 @@ test "successful hub archives stay sticky per timestamp and transient failures r
             try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
             try std.testing.expectEqual(@as(usize, 2), a.chat_count);
             try std.testing.expect(!state.isKept(key.id));
-            try std.testing.expectEqualStrings("baseline", state.baseline(key.id).?);
+            try std.testing.expect(state.baseline(key.id) == null);
             continue;
         }
         try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
