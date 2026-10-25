@@ -131,6 +131,9 @@ class Handler(bridge.Handler):
             return
         data = self.rfile.read(int(self.headers.get('Content-Length', '0')))
         body = json.loads(data)
+        if self.path == '/v1/wazig/archive-batch':
+            self.archive_batch(body, {BETA: bridge.BETA})
+            return
         fields = {
             '/v1/wazig/send': {'chat', 'text', 'reply_to', 'client_id'},
             '/v1/wazig/mark-read': {'chat', 'message_id'},
@@ -527,6 +530,8 @@ class ArchiveInboxHandler(Handler):
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
         if self.path == '/v1/wazig/mark-read':
             self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/archive-batch':
+            self.archive_batch(body, {row['jid']: row['jid'] for row in archive_inbox_rows() if row['provider'] == 'whatsapp'})
         elif self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and body['archived'] is True:
             row = next((row for row in archive_inbox_rows() if row['jid'] == body['chat']), None)
             if row is None or row['provider'] != 'whatsapp':

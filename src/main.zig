@@ -413,6 +413,7 @@ const WordSpan = struct {
 };
 
 const PendingArchive = struct {
+    batch_count: usize = 0,
     jid: Utf8Text(191) = .{},
     should_unarchive: bool = false,
     source: archive_rules.Source = .shortcut,
@@ -547,6 +548,7 @@ const WacliJob = struct {
     account: Utf8Text(32) = .{},
     kind: WacliJobKind = .chats,
     hub_account: Utf8Text(32) = .{},
+    archive_body: ?[]const u8 = null,
     gen: u64 = 0,
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
@@ -2109,6 +2111,10 @@ fn wacliShutdown(a: *App) void {
     a.wacli_slack_thread = null;
     if (a.hub_media_thread) |thread| thread.join();
     a.hub_media_thread = null;
+    for (a.wacli_queue[0..a.wacli_queue_len]) |job| {
+        if (job.archive_body) |body| a.allocator.free(body);
+    }
+    a.wacli_queue_len = 0;
     for (a.msg_cache[0..a.msg_cache_len]) |*entry| {
         if (entry.data) |data| a.allocator.free(data);
         entry.data = null;
@@ -2147,6 +2153,7 @@ fn wacliWorkerMain(a: *App, lane: WacliLane) void {
             job = wacliTakeJob(a, lane);
         }
         if (job == null or a.wacli_quit) {
+            if (job) |abandoned| if (abandoned.archive_body) |body| a.allocator.free(body);
             a.wacli_mutex.unlock(a.io);
             return;
         }
@@ -2156,6 +2163,7 @@ fn wacliWorkerMain(a: *App, lane: WacliLane) void {
 }
 
 fn wacliRunJob(a: *App, job: WacliJob) void {
+    defer if (job.archive_body) |body| a.allocator.free(body);
     if (!hubConfigured(a) and job.kind != .cache_tag and job.provider == .whatsapp and !std.mem.eql(u8, job.account.slice(), a.cache_tag.slice())) {
         wacliPendingSub(a, job.kind);
         return;
@@ -13215,6 +13223,8 @@ fn clearBulkSelection(a: *App) bool {
 }
 
 fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void {
+    const first_pending = a.pending_archive_count;
+    const batch = a.bulk.items.len > 1;
     const needed = a.pending_archive_count + a.bulk.items.len;
     if (a.pending_archives.len < needed) a.pending_archives = a.allocator.realloc(a.pending_archives, needed) catch return setStatus(a, "Could not queue selected chats");
     var open_jid = Utf8Text(191){};
@@ -13232,7 +13242,9 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void 
         }
         if (archiveChat(a, key, action, source)) |why| problem = why;
     }
+    if (batch and a.pending_archive_count > first_pending) a.pending_archives[first_pending].batch_count = a.pending_archive_count - first_pending;
     a.bulk.clearRetainingCapacity();
+    startNextArchive(a);
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
     paneFollowSelection(a, open_jid.slice());
     if (problem) |why| return setStatus(a, why);
@@ -20924,7 +20936,9 @@ fn executeHubJob(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, re
     const key = chat_key.Key{ .provider = .whatsapp, .account = job.hub_account.slice(), .id = job.jid.slice() };
     if (unifiedHub(a) and job.kind == .cache_tag) return "[{\"account\":\"hub\",\"state\":\"linked\"}]";
     if (unifiedHub(a) and job.kind == .groups) return "{\"success\":true,\"data\":[]}";
-    const request: wa_hub.Request = if (unifiedHub(a) and job.kind == .hub_thread)
+    const request: wa_hub.Request = if (job.archive_body) |body|
+        .{ .method = "POST", .path = if (unifiedHub(a)) "/v1/wazig/archive-batch" else "/v1/archive-batch", .body = body }
+    else if (unifiedHub(a) and job.kind == .hub_thread)
         try hub.messages(allocator, job.jid.slice(), 80, job.extra.slice())
     else if (unifiedHub(a) and job.kind == .hub_older)
         try hub.messages(allocator, job.jid.slice(), hub.older_limit, try hub.beforeCursor(allocator, job.msg_id.slice(), job.extra.slice()))
@@ -21076,8 +21090,20 @@ fn startHubMarkRead(a: *App) void {
 }
 
 fn startHubArchive(a: *App) void {
-    if (a.hub_account.len == 0 or a.pending_archive_count == 0 or wacliPendingGet(a, .hub_archive) > 0 or a.pending_archives[0].retry_at_ms > win.GetTickCount64()) return;
-    _ = hubTransport(a).archive(a.pending_archives[0].jid.slice(), !a.pending_archives[0].should_unarchive);
+    if (a.bulk.items.len > 0 or a.hub_account.len == 0 or a.pending_archive_count == 0 or wacliPendingGet(a, .hub_archive) > 0 or a.pending_archives[0].retry_at_ms > win.GetTickCount64()) return;
+    const archived = !a.pending_archives[0].should_unarchive;
+    const count = @min(a.pending_archives[0].batch_count, a.pending_archive_count);
+    if (count == 0) {
+        _ = hubTransport(a).archive(a.pending_archives[0].jid.slice(), archived);
+        return;
+    }
+    const chats_to_archive = a.allocator.alloc(wa_hub.ArchiveChat, count) catch return;
+    defer a.allocator.free(chats_to_archive);
+    for (chats_to_archive, a.pending_archives[0..count]) |*chat, *pending| chat.* = .{ .chat = pending.jid.slice() };
+    const request = (if (unifiedHub(a)) hub.archiveBatch(a.allocator, chats_to_archive, archived) else wa_hub.archiveBatch(a.allocator, a.hub_account.slice(), chats_to_archive, archived)) catch return;
+    var job = WacliJob{ .kind = .hub_archive, .account = a.cache_tag, .gen = count, .archive_body = request.body };
+    job.jid = a.pending_archives[0].jid;
+    if (!wacliEnqueue(a, job, true)) a.allocator.free(request.body);
 }
 
 fn enqueueHubMedia(a: *App, slot: *MediaDownload) bool {
@@ -21160,6 +21186,32 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
             refreshChats(a);
         },
         .hub_archive => {
+            if (result.gen > 0) {
+                const Reply = struct { results: []const struct { chat: []const u8, ok: bool } };
+                var parsed = std.json.parseFromSlice(Reply, a.allocator, result.data, .{ .ignore_unknown_fields = true }) catch null;
+                defer if (parsed) |*reply| reply.deinit();
+                const count: usize = @intCast(@min(result.gen, a.pending_archive_count));
+                var remaining: usize = 0;
+                var failed: usize = 0;
+                for (a.pending_archives[0..a.pending_archive_count], 0..) |pending, index| {
+                    if (index < count) {
+                        const ok = if (parsed) |reply| result.ok and reply.value.results.len == count and reply.value.results[index].ok and std.mem.eql(u8, reply.value.results[index].chat, pending.jid.slice()) else false;
+                        if (ok) continue;
+                        failed += 1;
+                    }
+                    a.pending_archives[remaining] = pending;
+                    if (index < count) {
+                        a.pending_archives[remaining].retry_at_ms = win.GetTickCount64() + 3_000;
+                        a.pending_archives[remaining].batch_count = 0;
+                    }
+                    remaining += 1;
+                }
+                a.pending_archive_count = remaining;
+                if (remaining > 0) startNextArchive(a) else refreshChats(a);
+                var buffer: [128]u8 = undefined;
+                setStatus(a, if (failed == 0) "Archive operation completed" else std.fmt.bufPrint(&buffer, "{d} chats archived; {d} failed; retrying", .{ count - failed, failed }) catch "Archive operations failed; retrying");
+                return;
+            }
             if (a.pending_archive_count == 0 or !chat_key.Key.eql(.{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = a.pending_archives[0].jid.slice() }, chat_key.of(result))) return;
             if (result.ok) {
                 removeFirstPendingArchive(a);

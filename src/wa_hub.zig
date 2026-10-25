@@ -161,6 +161,13 @@ pub fn markRead(allocator: std.mem.Allocator, key: chat_key.Key) !Request {
     return .{ .method = "POST", .path = "/v1/mark-read", .body = try std.json.Stringify.valueAlloc(allocator, .{ .account = key.account, .chat = key.id }, .{}) };
 }
 
+pub const ArchiveChat = struct { chat: []const u8 };
+
+pub fn archiveBatch(allocator: std.mem.Allocator, account: []const u8, chats_to_archive: []const ArchiveChat, archived: bool) !Request {
+    if (chats_to_archive.len == 0) return error.InvalidId;
+    return .{ .method = "POST", .path = "/v1/archive-batch", .body = try std.json.Stringify.valueAlloc(allocator, .{ .account = account, .chats = chats_to_archive, .archived = archived }, .{}) };
+}
+
 pub fn archive(allocator: std.mem.Allocator, key: chat_key.Key, archived: bool) !Request {
     if (key.provider != .whatsapp) return error.WrongProvider;
     return .{ .method = "POST", .path = "/v1/archive", .body = try std.json.Stringify.valueAlloc(allocator, .{ .account = key.account, .chat = key.id, .archived = archived }, .{}) };

@@ -103,3 +103,5 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-670: Slack shortcodes, custom emoji and missing Giphy -> `slack-emoji` (exact Unicode and unknown fallback, custom message/reaction image pixels, two different GIF frame crops and account-scoped hub fetch/cache proof)
 
 - IGSH-737: include archived chats per account and inbox -> `show-archived` (Alt+A, marked mixed rows, local archive actions, tooltip and same-profile restart)
+
+- IGSH-777: bulk archive sends one WhatsApp batch and preserves every result -> `archive-inbox` (fixed 264-chat timing, one batch, no single archive requests, durable state and restart)

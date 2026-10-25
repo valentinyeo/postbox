@@ -180,6 +180,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
         self.state.record(dict(method='SSE', path='/v1/events', id=event_id, kind=kind))
 
+    def archive_batch(self, body, chats):
+        if set(body) != {'account', 'chats', 'archived'} or not isinstance(body['chats'], list) or not body['chats'] or not isinstance(body['archived'], bool):
+            self.respond(400, {'error': 'invalid archive batch'}, body=body)
+            return
+        results = []
+        for item in body['chats']:
+            chat = item.get('chat', '') if isinstance(item, dict) else ''
+            if body['account'] not in ('', ACCOUNT) or chat not in chats:
+                results.append(dict(chat=chat, ok=False, error='unknown chat account'))
+            else:
+                self.state.archived[chats[chat]] = body['archived']
+                results.append(dict(chat=chat, ok=True))
+        self.respond(200, {'results': results}, body=body, results=results)
+
     def do_POST(self):
         if not self.authorized():
             return
@@ -222,6 +236,8 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == '/v1/mark-read':
             state.read = True
             self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/archive-batch':
+            self.archive_batch(body, {ALPHA: ALPHA, BETA: BETA})
         elif self.path == '/v1/archive':
             state.archived[body['chat']] = body['archived']
             self.respond(200, {'status': 'ok'}, body=body)
