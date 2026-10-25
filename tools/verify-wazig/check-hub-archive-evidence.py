@@ -178,7 +178,8 @@ def check_hub_archive(folder):
     assert marker_files[0].read_bytes() == (folder / 'first-archive-legacy-done.txt').read_bytes() == (folder / 'restart-archive-legacy-done.txt').read_bytes()
     final_lines = state_files[0].read_text(encoding='utf-8-sig').splitlines()
     assert any(line.startswith(GROUP + '\t1\t') for line in final_lines)
-    assert any(line == 'telegram\ttelegram\t' + TELEGRAM for line in final_lines)
+    telegram_final, = [line.split('\t') for line in final_lines if line.split('\t')[:3] == ['telegram', 'telegram', TELEGRAM]]
+    assert len(telegram_final) == 5 and telegram_final[3] == '0' and telegram_final[4], telegram_final
     for chat in (PLAIN_REACTED, PLAIN_NEWER):
         entry, = [line.split('\t') for line in final_lines if line.startswith(chat + '\t')]
         assert entry[1] == '0', 'plain archive intent lost in final data'
