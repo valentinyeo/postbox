@@ -94,7 +94,9 @@ jobs:
           exit 0
       - name: Headless Telegram smoke
         shell: pwsh
-        run: tools/verify-wazig/run.ps1 -Feature telegram -Bin "$env:LOCALAPPDATA/Programs/Messages" -Evidence verification-evidence
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: tools/verify-wazig/run.ps1 -Feature telegram -Bin "$env:LOCALAPPDATA/Programs/Messages" -Evidence verification-evidence -ExpectedVersion ($env:RELEASE_TAG -replace '^v', '')
       - name: Validate hub smoke evidence
         shell: pwsh
         run: python tools/verify-wazig/check-evidence.py verification-evidence

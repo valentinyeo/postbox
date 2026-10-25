@@ -82,13 +82,17 @@ def check_telegram(folder):
     def capture(name):
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, name
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v' + re.escape(expected_version), (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
         state = read(f'{name}.state.json')
+        assert state['version'] == expected_version, name
         assert state['view'] == 'telegram', name
         assert state['current_view'] == dict(provider='telegram', account='telegram', label='Telegram', inbox=False)
         return state
 
     session = read('session.json')
+    expected_version = session['expected_version']
+    assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', expected_version)
+    assert read('doctor.json')['version'] == expected_version
     assert session['feature'] == 'telegram' and session['sha256'] and session['commit']
     assert read('result.json') == dict(feature='telegram', status='passed')
     assert not (folder / 'failure.txt').exists()
