@@ -1,6 +1,5 @@
 $workload = 264
 $list = Get-Edit $window '1016'
-$canvas = Get-Edit $window '1024'
 $statusHandle = [IntPtr](Get-Edit $window '1048').Current.NativeWindowHandle
 $compose.SetFocus()
 Send-Keys $session 'hello'
@@ -9,7 +8,7 @@ $selection = @($compose.GetCurrentPattern([Windows.Automation.TextPattern]::Patt
 Assert-That ($selection.Count -eq 1 -and $selection[0].GetText(-1) -ceq 'hello') 'Ctrl+A must retain composer text selection'
 Send-Keys $session '{BACKSPACE}'
 $presses = @()
-$targets = @($compose, $list, $canvas)
+$targets = @($compose, $list, $window)
 foreach ($press in 1..10) {
     $cleared = $true
     if ($press -gt 1) {
@@ -17,8 +16,8 @@ foreach ($press in 1..10) {
         $cleared = (Read-EditText $statusHandle) -eq 'Selection cleared'
     }
     $target = $targets[($press - 1) % $targets.Count]
-    $target.SetFocus()
     $focused = $true
+    try { $target.SetFocus() } catch { $focused = $false }
     try { $null = Wait-Until { $target.Current.HasKeyboardFocus } "focus $($target.Current.AutomationId)" 5 } catch { $focused = $false }
     Send-Keys $session '^a'
     $ok = $cleared -and (Read-EditText $statusHandle) -eq "$workload chats selected - Ctrl+E archives, Esc cancels"
