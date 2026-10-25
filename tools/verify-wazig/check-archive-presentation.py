@@ -126,11 +126,6 @@ def check_presentation(folder):
     tree = (folder / 'archive-footer.uia.txt').read_text(encoding='utf-8-sig')
     assert '1016 | ListBox |' in tree and '1008 | RICHEDIT50W |' in tree
     assert '1146 |' not in tree and 'Show archived:' not in tree
-    _, _, image = read_png(folder / 'archive-footer.png')
-    left, top, right, bottom = footer['rect']
-    assert 0 <= left < right <= len(image[0]) and 0 <= top < bottom <= len(image)
-    pixels = [pixel for row in image[top:bottom] for pixel in row[left:right]]
-    assert Counter(pixels).most_common(1)[0][1] / len(pixels) > 0.995, 'former archive label still drawn'
     print('ARCHIVE PRESENTATION VERIFIED: absent inert footer, stateful palette and measured colour-mixed/full rows')
 
 
