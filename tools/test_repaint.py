@@ -96,8 +96,8 @@ class RepaintTests(unittest.TestCase):
                 self.assertNotIn("return", before_fill)
                 self.assertNotIn("orelse", before_fill)
         chat = function(main, "drawChat")
-        brush = chat.index("win.CreateSolidBrush(theme.current.surface_container_low) orelse return;")
-        self.assertLess(brush, chat.index("paint_buffer.Buffer.init("))
+        brush = chat.index("const background = win.CreateSolidBrush(")
+        self.assertIn("orelse return;", chat[brush:chat.index("paint_buffer.Buffer.init(")])
 
     def test_ISSUE_545_row_sized_buffer_offsets_the_viewport_and_ci_runs_the_pixel_test(self):
         buffer = source("src/paint_buffer.zig")
