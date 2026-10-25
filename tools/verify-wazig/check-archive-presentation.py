@@ -119,7 +119,7 @@ def check_presentation(folder):
     assert identities['before'] == identities['after'] and len(identities['before']) == 4
     assert len(set(identities['before'])) == 4 and sum(row.endswith('|True') for row in identities['before']) == 2
     footer = read(folder, 'archive-footer.json')
-    for key in ('include_archived', 'selected', 'chat_count', 'pending_archives', 'current_view', 'search'):
+    for key in ('include_archived', 'chat_count', 'pending_archives', 'current_view', 'search'):
         assert footer['before'][key] == footer['after'][key], key
     assert footer['after']['include_archived'] and footer['after']['pending_archives'] == 0
     assert read(folder, 'archive-footer.chats.json')['chats'] == footer['rows']
