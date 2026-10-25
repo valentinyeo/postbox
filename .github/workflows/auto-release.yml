@@ -87,14 +87,15 @@ jobs:
 
       - name: Release only when the app itself changed
         if: env.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          last="$(git tag -l 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -1 || true)"
+          releases="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+          last="$(printf '%s\n' "${releases}" | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -1 || true)"
           if [ -z "${last}" ]; then
-            echo "no previous tag, treating as releasable"
-            echo "last_tag=v0.0.0" >> "$GITHUB_ENV"
+            echo "no published release, treating as releasable"
             exit 0
           fi
-          echo "last_tag=${last}" >> "$GITHUB_ENV"
 
           if git diff --name-only "${last}..HEAD" \
              | grep -qE '^(src/|assets/|vendor/|build\.zig)'; then
@@ -118,6 +119,8 @@ jobs:
         env:
           BUMP: ${{ inputs.bump || 'patch' }}
         run: |
+          last_tag="$(git tag -l 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -1 || true)"
+          last_tag="${last_tag:-v0.0.0}"
           v="${last_tag#v}"
           major="${v%%.*}"; rest="${v#*.}"
           minor="${rest%%.*}"; patch="${rest#*.}"

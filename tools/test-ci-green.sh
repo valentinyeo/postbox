@@ -52,3 +52,22 @@ if ! grep -q 'bash tools/ci-green.sh "${sha}"' "$workflow"; then
     exit 1
 fi
 printf 'test-ci-green: ok auto-release.yml uses ci-green.sh\n'
+
+app_gate="$(sed -n '/- name: Release only when the app itself changed/,/- name: Prove manual runs/p' "$workflow")"
+if ! grep -Fq 'GH_TOKEN: ${{ github.token }}' <<< "$app_gate" \
+    || ! grep -Fq 'gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate' <<< "$app_gate" \
+    || ! grep -Fq 'select(.draft == false and .prerelease == false)' <<< "$app_gate" \
+    || ! grep -Fq 'last="$(printf '\''%s\n'\'' "${releases}"' <<< "$app_gate"; then
+    printf 'test-ci-green: FAIL app-change baseline must use authenticated published releases\n' >&2
+    exit 1
+fi
+printf 'test-ci-green: ok app-change baseline uses published releases\n'
+
+version_step="$(sed -n '/- name: Work out the next version/,/- name: Tag it/p' "$workflow")"
+if ! grep -Fq 'last_tag="$(git tag -l '\''v*'\''' <<< "$version_step" \
+    || ! grep -Fq 'sort -V | tail -1' <<< "$version_step" \
+    || ! grep -Fq 'last_tag="${last_tag:-v0.0.0}"' <<< "$version_step"; then
+    printf 'test-ci-green: FAIL next version must advance beyond existing tags\n' >&2
+    exit 1
+fi
+printf 'test-ci-green: ok next version uses existing tags\n'
