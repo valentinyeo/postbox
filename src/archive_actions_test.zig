@@ -179,6 +179,7 @@ fn refreshChats(a: *App) void {
 const WacliJob = struct {
     account: Utf8Text(32) = .{},
     kind: enum { chats } = .chats,
+    started_ms: u64 = 0,
     args: [8]Utf8Text(191) = @splat(.{}),
     arg_count: usize = 0,
     gen: u32 = 0,
