@@ -117,6 +117,10 @@ fn hubConfigured(_: *App) bool {
     return true;
 }
 
+fn unifiedHub(_: *const App) bool {
+    return true;
+}
+
 fn wacliPendingGet(a: *App, _: @FieldType(WacliJob, "kind")) usize {
     return a.pending;
 }
@@ -187,8 +191,8 @@ test "background refresh keeps mixed coverage even with include off or archive o
     for ([_]bool{ false, true }) |archived_only| {
         var a = App{ .chats_raw = "{\"data\":[]}", .chats_raw_flags = 1, .show_archived = archived_only };
         refreshChats(&a);
-        try std.testing.expectEqual(@as(u8, 1), a.chats_pending_flags);
-        try std.testing.expectEqualStrings("--include-archived", a.job.args[a.job.arg_count - 1].slice());
+        try std.testing.expectEqual(@as(u8, if (archived_only) 2 else 1), a.chats_pending_flags);
+        try std.testing.expectEqualStrings(if (archived_only) "--archived" else "--include-archived", a.job.args[a.job.arg_count - 1].slice());
         a.pending = 1;
         refreshChats(&a);
         try std.testing.expectEqual(@as(usize, 1), a.enqueued);
