@@ -349,7 +349,7 @@ test "a legacy non-kept entry alone sends no hub archive request" {
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expect(!a.hub_archive_inflight);
     try std.testing.expectEqual(@as(usize, 2), a.chat_count);
-    try std.testing.expect(!state.entries[state.find(key.id).?].held);
+    try std.testing.expect(state.find(key.id) == null);
 }
 
 test "a kept entry alone still sends a hub archive request" {
@@ -834,6 +834,121 @@ test "local send deferred unarchive retains send source past a full queue" {
     try std.testing.expect(!state.isKept("a@g.us"));
 }
 
+test "shortcut and select all archive are ordinary and return on newer messages on every provider" {
+    for ([_]Provider{ .whatsapp, .slack, .telegram, .signal }) |provider| {
+        for ([_]bool{ false, true }) |bulk| {
+            var state = archive_rules.State{};
+            var a = fixture(&state);
+            defer a.allocator.free(a.pending_archives);
+            defer a.bulk.deinit(a.allocator);
+            a.unified_hub = true;
+            a.include_archived = true;
+            for (a.chats[0..a.chat_count]) |*chat| {
+                chat.provider = provider;
+                chat.account.set("fixture-account");
+            }
+            const rows = a.chats;
+            if (bulk) selectAllChats(&a);
+            const message = win.MSG{};
+            try std.testing.expect(archiveKey(&a, 'E', true, false, false, a.compose, &message));
+            const action: archive_rules.Action = if (state.entries[0].keep) .keep else .archive;
+            try std.testing.expectEqual(archive_rules.Action.archive, action);
+            try std.testing.expectEqualStrings("Archived", action.status());
+            try std.testing.expectEqualStrings(if (bulk and provider == .whatsapp) "Archiving 1 of 2" else action.status(), a.status.slice());
+            try std.testing.expectEqual(@as(usize, if (bulk) 2 else 1), state.count);
+            for (state.entries[0..state.count]) |*entry| try std.testing.expect(!entry.keep);
+            var loaded = archive_rules.State{};
+            loaded.parse(a.saved[0..a.saved_len]);
+            a.archive_state = &loaded;
+            a.pending_archive_count = 0;
+            a.archive_child = null;
+            a.hub_archive_inflight = false;
+            for (rows[0..if (bulk) @as(usize, 2) else 1], 0..) |*row, index| {
+                const key = chat_key.of(row);
+                try std.testing.expect(loaded.localArchived(key));
+                try std.testing.expectEqualSlices(u16, std.mem.span(lit("Archived")), std.mem.span(archiveMarker(&a, &a.chats[index]).?));
+                try std.testing.expect(!holdKeptArchived(&a, key, false, "2026-10-10T10:30:00Z"));
+                try std.testing.expect(loaded.localArchived(key));
+                try std.testing.expect(!holdKeptArchived(&a, key, false, "2026-10-10T11:00:00Z"));
+                try std.testing.expect(!loaded.localArchived(key));
+                var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"archived\":false}", .{});
+                defer parsed.deinit();
+                inline for (.{ archiveInboxRow, archiveControlRow }) |filter| {
+                    const incoming = filter(&a, row.*, parsed.value.object) orelse return error.OrdinaryArchiveDidNotReturn;
+                    try std.testing.expect(!incoming.archived);
+                }
+            }
+            try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+            var restarted = archive_rules.State{};
+            restarted.parse(a.saved[0..a.saved_len]);
+            for (rows[0..if (bulk) @as(usize, 2) else 1]) |*row| try std.testing.expect(!restarted.localArchived(chat_key.of(row)));
+        }
+    }
+}
+
+test "explicit keep alone persists kept status and label on every provider" {
+    for ([_]Provider{ .whatsapp, .slack, .telegram, .signal }) |provider| {
+        var state = archive_rules.State{};
+        var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
+        a.unified_hub = true;
+        a.include_archived = true;
+        a.chats[0].provider = provider;
+        a.chats[0].account.set("fixture-account");
+        const key = chat_key.of(&a.chats[0]);
+        archiveSelected(&a, true);
+        try std.testing.expectEqualStrings("Kept archived. Won't come back", a.status.slice());
+        try std.testing.expectEqualSlices(u16, std.mem.span(lit("Kept archived")), std.mem.span(archiveMarker(&a, &a.chats[0]).?));
+        var loaded = archive_rules.State{};
+        loaded.parse(a.saved[0..a.saved_len]);
+        try std.testing.expect(if (provider == .whatsapp) loaded.isKept(key.id) else loaded.localKept(key));
+        a.archive_state = &loaded;
+        _ = holdKeptArchived(&a, key, false, "2026-10-10T11:00:00Z");
+        try std.testing.expect(loaded.localArchived(key));
+        try std.testing.expect(if (provider == .whatsapp) loaded.isKept(key.id) else loaded.localKept(key));
+    }
+}
+
+test "stored Slack keep unarchives across restart then shortcut archives without keep" {
+    for ([_][]const u8{ "slack\tfixture-team\tchannel-shared\n", "slack\tfixture-team\tchannel-shared\t1\n" }) |stored| {
+        var state = archive_rules.State{};
+        state.parse(stored);
+        var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
+        a.include_archived = true;
+        a.chats[0].provider = .slack;
+        a.chats[0].account.set("fixture-team");
+        a.chats[0].jid.set("channel-shared");
+        a.chats[0].archived = true;
+        a.chats[0].provider_archived = true;
+        const key = chat_key.of(&a.chats[0]);
+        try std.testing.expect(state.localKept(key));
+        archiveSelected(&a, false);
+        try std.testing.expectEqualStrings("Chat unarchived", a.status.slice());
+        try std.testing.expect(!state.localKept(key));
+        var loaded = archive_rules.State{};
+        loaded.parse(a.saved[0..a.saved_len]);
+        a.archive_state = &loaded;
+        for ([_][]const u8{ "2026-10-10T10:00:00Z", "2026-10-10T10:30:00Z" }) |stamp| {
+            try std.testing.expect(!holdKeptArchived(&a, key, true, stamp));
+            try std.testing.expect(!loaded.isArchived(key, true));
+        }
+        archiveSelected(&a, false);
+        try std.testing.expectEqualStrings("Archived", a.status.slice());
+        try std.testing.expect(loaded.localArchived(key));
+        try std.testing.expect(!loaded.localKept(key));
+        try std.testing.expectEqual(archive_rules.ArchiveState.archived, chatArchiveState(&a, &a.chats[0]));
+        state.parse(a.saved[0..a.saved_len]);
+        try std.testing.expect(state.localArchived(key));
+        try std.testing.expect(!state.localKept(key));
+        try std.testing.expect(!holdKeptArchived(&a, key, true, "2026-10-10T11:00:00Z"));
+        try std.testing.expect(!loaded.isArchived(key, true));
+        try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+    }
+}
+
 test "Slack archive persists per Key without ever queuing either archive transport" {
     var state = archive_rules.State{};
     var a = fixture(&state);
@@ -849,7 +964,8 @@ test "Slack archive persists per Key without ever queuing either archive transpo
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expect(a.archive_child == null);
     try std.testing.expectEqual(@as(usize, 0), a.log_count);
-    try std.testing.expectEqualStrings("Kept archived. Won't come back", a.status.slice());
+    try std.testing.expectEqualStrings("Archived", a.status.slice());
+    try std.testing.expect(!state.localKept(key.key()));
     var loaded = archive_rules.State{};
     loaded.parse(a.saved[0..a.saved_len]);
     try std.testing.expect(loaded.localArchived(key.key()));
@@ -908,6 +1024,8 @@ test "Slack Ctrl E bare E and menu archive share the local action" {
         const message = win.MSG{};
         try std.testing.expect(archiveKey(&a, 'E', control, false, false, a.chats_hwnd, &message));
         try std.testing.expect(state.localArchived(key.key()));
+        try std.testing.expect(!state.localKept(key.key()));
+        try std.testing.expectEqualStrings(archive_rules.Action.archive.status(), a.status.slice());
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
         refixture(&a, &state);
         a.chats[0].provider = .slack;
@@ -952,6 +1070,9 @@ test "bulk Slack archive keeps account identities and never queues hub archive" 
     archiveSelected(&a, false);
     try std.testing.expect(state.localArchived(first.key()));
     try std.testing.expect(state.localArchived(second.key()));
+    try std.testing.expect(!state.localKept(first.key()));
+    try std.testing.expect(!state.localKept(second.key()));
+    try std.testing.expectEqualStrings("Archived", a.status.slice());
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expectEqual(@as(usize, 0), a.chat_count);
 }
@@ -960,13 +1081,13 @@ test "Slack local state coexists with WhatsApp keep and plain archive round trip
     var state = archive_rules.State{};
     const key = chat_key.Key{ .provider = .slack, .account = "fixture-team", .id = "shared-chat" };
     try std.testing.expect(state.archive(key.id, "baseline", true));
-    try std.testing.expect(state.setLocalArchived(key, true));
+    try std.testing.expect(state.setLocalArchived(key, true, "baseline", false));
     var buffer: [1024]u8 = undefined;
     var loaded = archive_rules.State{};
     loaded.parse(state.format(&buffer));
     try std.testing.expect(loaded.localArchived(key));
     try std.testing.expect(loaded.isKept(key.id));
-    try std.testing.expect(loaded.setLocalArchived(key, false));
+    try std.testing.expect(loaded.setLocalArchived(key, false, "baseline", false));
     try std.testing.expect(!loaded.localArchived(key));
     try std.testing.expect(loaded.isKept(key.id));
     try std.testing.expect(loaded.archive(key.id, "baseline", false));
@@ -978,7 +1099,7 @@ test "sending to an archived Slack chat never queues unarchive or clears local s
     defer a.allocator.free(a.pending_archives);
     defer a.bulk.deinit(a.allocator);
     const key = chat_key.Key{ .provider = .slack, .account = "fixture-team", .id = "fixture-channel" };
-    try std.testing.expect(state.setLocalArchived(key, true));
+    try std.testing.expect(state.setLocalArchived(key, true, "baseline", false));
     a.pending_sends[0].provider = .slack;
     a.pending_sends[0].jid.set(key.id);
     a.pending_send_count = 1;
@@ -1017,7 +1138,9 @@ test "hub Ctrl E locally archives the last Telegram or Signal row from every all
             a.archive_state = &loaded;
             for ([_][]const u8{ "incoming", "newer" }) |stamp| {
                 try std.testing.expect(!holdKeptArchived(&a, key.key(), false, stamp));
-                try std.testing.expect(loaded.localArchived(key.key()));
+                try std.testing.expect(!loaded.localArchived(key.key()));
+                try std.testing.expect(!loaded.isArchived(key.key(), true));
+                try std.testing.expect(!loaded.localKept(key.key()));
                 try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
             }
             try std.testing.expect(archiveChat(&a, key.key(), .unarchive, .shortcut) == null);
@@ -1070,12 +1193,13 @@ test "only kept hub archives hold the real provider account and remove the match
             var key = chat_key.Stored{};
             key.set(chat_key.of(&a.chats[0]));
             if (provider != .whatsapp) {
-                try std.testing.expect(state.setLocalArchived(key.key(), true));
+                try std.testing.expect(state.setLocalArchived(key.key(), true, "baseline", keep));
                 try std.testing.expect(!holdKeptArchived(&a, key.key(), false, "incoming"));
                 try std.testing.expectEqual(@as(usize, 2), a.chat_count);
                 try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
                 try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
-                try std.testing.expect(state.localArchived(key.key()));
+                try std.testing.expectEqual(keep, state.localArchived(key.key()));
+                try std.testing.expectEqual(keep, state.localKept(key.key()));
                 try std.testing.expect(archiveChat(&a, key.key(), .unarchive, .shortcut) == null);
                 try std.testing.expect(!state.localArchived(key.key()));
                 continue;
@@ -1115,7 +1239,7 @@ test "hub sends preserve local Telegram and Signal archives and an out of range 
         archiveSelected(&a, false);
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
         const key = chat_key.Key{ .provider = provider, .account = "fixture-account", .id = if (provider == .telegram) "telegram:user:7001" else "signal:fixture" };
-        try std.testing.expect(state.setLocalArchived(key, true));
+        try std.testing.expect(state.setLocalArchived(key, true, "baseline", false));
         a.pending_sends[0].provider = provider;
         a.pending_sends[0].jid.set(key.id);
         a.pending_send_count = 1;
@@ -1187,7 +1311,7 @@ test "non hub Telegram and Signal archiving remains unavailable" {
     }
 }
 
-test "successful hub archives stay sticky per timestamp and transient failures retain intent" {
+test "plain hub archives return while kept archives stay sticky and transient failures retain intent" {
     for ([_]bool{ false, true }) |keep| {
         var state = archive_rules.State{};
         var a = fixture(&state);
@@ -1201,7 +1325,7 @@ test "successful hub archives stay sticky per timestamp and transient failures r
         a.refresh_key.set(chat_key.of(&a.chats[0]));
         a.refresh_stamp.set("2026-10-10T11:00:00Z");
         const key = a.refresh_key.key();
-        try std.testing.expect(state.archive(key.id, "baseline", keep));
+        try std.testing.expect(state.archive(key.id, "2026-10-10T10:00:00Z", keep));
         refreshChats(&a);
         if (!keep) {
             refreshChats(&a);
@@ -1211,7 +1335,7 @@ test "successful hub archives stay sticky per timestamp and transient failures r
             try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
             try std.testing.expectEqual(@as(usize, 2), a.chat_count);
             try std.testing.expect(!state.isKept(key.id));
-            try std.testing.expectEqualStrings("baseline", state.baseline(key.id).?);
+            try std.testing.expect(state.baseline(key.id) == null);
             continue;
         }
         try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
@@ -1333,7 +1457,7 @@ test "hub Telegram and Signal archives honor both phone and local state in both 
                 var chat = Chat{ .provider = provider };
                 chat.account.set(if (provider == .telegram) "telegram" else "signal");
                 chat.jid.set(if (provider == .telegram) "telegram:user:7001" else "signal:fixture");
-                if (local) try std.testing.expect(state.setLocalArchived(chat_key.of(&chat), true));
+                if (local) try std.testing.expect(state.setLocalArchived(chat_key.of(&chat), true, "baseline", false));
                 try std.testing.expectEqual(@as(usize, if (local) 1 else 0), state.count);
                 const raw = if (local) "{\"archived\":false}" else "{\"archived\":true}";
                 var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, raw, .{});
@@ -1416,8 +1540,14 @@ test "archive row labels survive contact kind pin unread and Show archived toggl
                     chat.jid.set("fixture:row");
                     chat.account.set("fixture-account");
                     chat.kind.text = std.mem.span(lit("Contact"));
-                    if (expected == .kept_archived and provider == .whatsapp) try std.testing.expect(state.archive(chat.jid.slice(), "baseline", true));
-                    const kept = expected == .kept_archived and provider == .whatsapp or provider == .slack;
+                    const kept = expected == .kept_archived;
+                    if (kept) {
+                        if (provider == .whatsapp) {
+                            try std.testing.expect(state.archive(chat.jid.slice(), "baseline", true));
+                        } else {
+                            try std.testing.expect(state.setLocalArchived(chat_key.of(&chat), true, "baseline", true));
+                        }
+                    }
                     const row_state = chatArchiveState(&a, &chat);
                     try std.testing.expectEqual(archive_rules.archiveState(chat.archived, kept), row_state);
                     if (expected != .incoming) {
