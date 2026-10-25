@@ -1152,7 +1152,7 @@ test "hub Ctrl E locally archives the last Telegram or Signal row from every all
             for ([_][]const u8{ "incoming", "newer" }) |stamp| {
                 try std.testing.expect(!holdKeptArchived(&a, key.key(), false, stamp));
                 try std.testing.expect(!loaded.localArchived(key.key()));
-                try std.testing.expect(!loaded.isArchived(key.key(), true));
+                try std.testing.expect(!loaded.isArchived(key.key(), false));
                 try std.testing.expect(!loaded.localKept(key.key()));
                 try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
             }
