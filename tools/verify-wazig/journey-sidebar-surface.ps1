@@ -18,6 +18,10 @@ foreach ($themeName in @('amoled', 'green')) {
     $list = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
     Assert-That ($null -ne $list) 'Sidebar list missing'
     $listBounds = $list.Current.BoundingRectangle
+    $composerCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1032')
+    $composer = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $composerCondition)
+    Assert-That ($null -ne $composer) 'Sidebar composer missing'
+    $composerBounds = $composer.Current.BoundingRectangle
     $canvasCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'WacliMessageCanvas')
     $canvas = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $canvasCondition)
     Assert-That ($null -ne $canvas) 'Sidebar comparison canvas missing'
@@ -42,6 +46,7 @@ foreach ($themeName in @('amoled', 'green')) {
         client = @($x, $y, ($x + $client.Right), ($y + $client.Bottom))
         edge = $edge
         list = @(([int]$listBounds.Left - $desktop.Left), ([int]$listBounds.Top - $desktop.Top), ([int]$listBounds.Right - $desktop.Left), ([int]$listBounds.Bottom - $desktop.Top))
+        composer = @(([int]$composerBounds.Left - $desktop.Left), ([int]$composerBounds.Top - $desktop.Top), ([int]$composerBounds.Right - $desktop.Left), ([int]$composerBounds.Bottom - $desktop.Top))
     }
 }
 $records | ConvertTo-Json -Depth 12 -AsArray | Set-Content (Join-Path $Evidence 'sidebar-layout.json')

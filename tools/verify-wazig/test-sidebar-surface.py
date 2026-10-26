@@ -5,7 +5,7 @@ import tempfile
 
 
 ORACLE = runpy.run_path(str(Path(__file__).with_name('check-sidebar-surface.py')))
-LAYOUT = dict(theme='amoled', dpi=96, screenshot='sidebar-amoled.png', client=[0, 0, 840, 300], edge=280, list=[0, 0, 272, 300])
+LAYOUT = dict(theme='amoled', dpi=96, screenshot='sidebar-amoled.png', client=[0, 0, 840, 300], edge=280, list=[0, 0, 272, 300], composer=[300, 250, 800, 290])
 PALETTES = {
     'amoled': ((0, 0, 0), (0, 0, 0), (18, 18, 18), (36, 36, 36), (255, 255, 255), (204, 204, 204)),
     'green': ((15, 21, 18), (23, 29, 26), (27, 33, 30), (48, 54, 51), (222, 228, 223), (191, 201, 195)),
@@ -81,6 +81,11 @@ with tempfile.TemporaryDirectory() as directory:
         damaged = copy.deepcopy(after)
         fill(damaged, rect, colour)
         reject(damaged, before, reason)
+    caret = copy.deepcopy(after)
+    fill(caret, [500, 260, 502, 270], (255, 255, 255))
+    ORACLE['validate']([measure(caret, before)])
+    fill(caret, [500, 249, 502, 250], (255, 255, 255))
+    reject(caret, before, 'change just above the composer')
     wrong_layout = copy.deepcopy(LAYOUT)
     wrong_layout['list'][1] += 1
     try:

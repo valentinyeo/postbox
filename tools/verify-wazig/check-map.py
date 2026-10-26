@@ -457,6 +457,15 @@ assert '$Measurement.top -eq $Measurement.left' in composer_border
 assert '.claude/skills/verify-wazig/features/composer-border.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 print('COMPOSER BORDER MAP VERIFIED: four screenshot edges, exact saved text scales, negative oracle and PR wiring')
 
+caret = (root / 'tools/verify-wazig/caret.ps1').read_text(encoding='utf-8')
+assert entries['caret']['library'] == 'caret.ps1'
+assert entries['caret']['script'] == 'journey-caret.ps1'
+assert entries['caret']['pr'] and 'Invoke-CaretJourney $session $start $app' in runner
+for fragment in ['GetGUIThreadInfo', 'GetCaretBlinkTime', "Get-Edit $window '1032'", 'CopyFromScreen', 'Get-CaretOnOff', 'Test-CaretOracle', 'caret.json', 'Theme: Green', '$theme.on -ge 2 -and $theme.off -ge 2']:
+    assert fragment in caret, fragment
+assert '.claude/skills/verify-wazig/features/caret.md' in marker_namespace['PUBLIC_SKILL_PATHS']
+print('CARET MAP VERIFIED: system caret reading, timed composer frames, both themes and PR wiring')
+
 passage = (root / 'tools/verify-wazig/passage-copy.ps1').read_text(encoding='utf-8')
 assert 'Invoke-PassageCopyJourney $session' in runner
 assert entries['passage-copy']['hub'] == 'passage-copy'
