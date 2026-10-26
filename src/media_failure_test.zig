@@ -63,7 +63,7 @@ test "success suppression and transient failures are not terminal failures" {
         noteMediaFailure(&a, jid, id);
         try std.testing.expect(!mediaUnavailable(&a, jid, id));
     }
-    try std.testing.expectEqual(@as(u64, 130_000), a.media_failures[0].retry_after_ms);
+    try std.testing.expectEqual(@as(u64, 160_000), a.media_failures[0].retry_after_ms);
     noteMediaFailure(&a, jid, id);
     try std.testing.expect(mediaUnavailable(&a, jid, id));
     try std.testing.expect(!mediaUnavailable(&a, "other@example.invalid", id));
