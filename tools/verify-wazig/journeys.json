@@ -588,6 +588,18 @@
         "class": "ChatListsHandler"
       },
       "maximize": true
+    },
+    {
+      "name": "caret",
+      "pr": true,
+      "hub": null,
+      "evidence": false,
+      "chats": null,
+      "script": "journey-caret.ps1",
+      "validator": null,
+      "library": "caret.ps1",
+      "hub_handler": null,
+      "maximize": true
     }
   ]
 }
