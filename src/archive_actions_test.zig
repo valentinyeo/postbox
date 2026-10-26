@@ -1190,12 +1190,12 @@ test "hub Ctrl E archives a one-row bulk selection outside the WhatsApp cache ac
         selectAllChats(&a);
         const message = win.MSG{};
         try std.testing.expect(archiveKey(&a, 'E', true, false, false, a.compose, &message));
-        try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-        try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
+        try std.testing.expectEqual(@as(usize, if (provider == .whatsapp) 1 else 0), a.pending_archive_count);
+        try std.testing.expectEqual(@as(usize, if (provider == .whatsapp) 1 else 0), a.hub_archive_requests);
         try std.testing.expectEqual(@as(usize, 0), a.chat_count);
         try std.testing.expectEqual(@as(usize, 0), a.bulk.items.len);
-        try std.testing.expect(state.localArchived(key.key()));
-        if (provider == .whatsapp) try std.testing.expect(state.baseline(key.key().id) != null);
+        try std.testing.expectEqual(provider != .whatsapp, state.localArchived(key.key()));
+        if (provider == .whatsapp) try std.testing.expect(state.baseline(key.key().id) == null);
     }
 }
 
