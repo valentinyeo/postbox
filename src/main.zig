@@ -14604,7 +14604,7 @@ fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
         _ = win.GetClientRect(hwnd, &client);
         var surface = paint_buffer.Buffer.init(screen_dc, client, paint.rcPaint);
         defer surface.deinit();
-        _ = win.FillRect(surface.hdc, &paint.rcPaint, if (theme.choice == .amoled) a.brush_bg.? else a.brush_raised.?);
+        _ = win.FillRect(surface.hdc, &paint.rcPaint, a.brush_sidebar.?);
         _ = win.CallWindowProcW(@ptrFromInt(a.chats_prev_proc), hwnd, win.WM_PRINTCLIENT, @intFromPtr(surface.hdc), win.PRF_CLIENT);
         return 0;
     }

@@ -147,7 +147,7 @@ if __name__ == '__main__':
         assert palette['kind'] == 'inverted AMOLED fixture palette' and palette['production_rendering']
         original = re.findall(r'hex\(0x([0-9a-f]{6})\)', palette['original'])
         inverted = re.findall(r'hex\(0x([0-9a-f]{6})\)', palette['light'])
-        assert len(original) == len(inverted) == 16
+        assert len(original) == len(inverted) == 18
         assert all(int(a, 16) + int(b, 16) == 0xffffff for a, b in zip(original, inverted))
         for folder, polarity in [(args.folder, 'dark'), (light, 'light')]:
             assert read(folder, 'session.json')['sha256'] != read(light if folder == args.folder else args.folder, 'session.json')['sha256']
