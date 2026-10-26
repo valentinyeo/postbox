@@ -38,9 +38,6 @@ class ShowArchivedTests(unittest.TestCase):
                 self.capture(f'view-{position}-{phase}', enabled, view, phase == 'archived')
             if position != 1:
                 self.capture(f'view-{position}-disabled', False, view)
-            if view['provider'] == 'whatsapp':
-                chat = self.read(f'view-{position}-archived.state.json')['selected']['id']
-                self.requests.extend(dict(method='POST', status=200, authorized=True, wire_path='/v1/wazig/archive', body=dict(chat=chat, archived=value)) for value in (True, False))
         for name, enabled, view in [('palette-off', False, self.views[0]), ('palette-on', True, self.views[0]), ('account-one-kept', True, self.views[0]),
                                     ('account-two-off', False, self.views[1]), ('restart-one', True, self.views[0]), ('restart-two', False, self.views[1])]:
             self.capture(name, enabled, view)
@@ -185,18 +182,19 @@ class ShowArchivedTests(unittest.TestCase):
         self.write(name, original)
         self.assertEqual(self.validate().returncode, 0)
 
-    def test_rejects_local_provider_network_archive_and_missing_whatsapp_write(self):
+    def test_rejects_any_network_archive_for_any_provider(self):
         original = copy.deepcopy(self.requests)
-        for provider in ('slack', 'telegram', 'signal'):
+        for provider in ('whatsapp', 'slack', 'telegram', 'signal'):
             chat = next(row['jid'] for row in hub.show_archived_rows() if row['provider'] == provider)
-            self.requests = original + [dict(method='POST', authorized=True, status=200, wire_path='/v1/wazig/archive', body=dict(chat=chat, archived=True))]
-            self.save_requests()
-            self.assertNotEqual(self.validate().returncode, 0)
-        self.requests = original[:-1]
+            for path in ('/v1/wazig/archive', '/v1/wazig/archive-batch'):
+                self.requests = original + [dict(method='POST', authorized=True, status=200, wire_path=path, body=dict(chat=chat, archived=True))]
+                self.save_requests()
+                self.assertNotEqual(self.validate().returncode, 0)
+        self.requests = original
         self.save_requests()
-        self.assertNotEqual(self.validate().returncode, 0)
+        self.assertEqual(self.validate().returncode, 0)
 
-    def test_fixture_filters_and_only_whatsapp_remote_archive(self):
+    def test_fixture_filters_and_rejects_every_archive_write(self):
         server = ThreadingHTTPServer(('127.0.0.1', 0), hub.ShowArchivedHandler)
         server.daemon_threads = True
         server.state = hub.bridge.State(self.folder / 'fixture.jsonl')
@@ -221,13 +219,10 @@ class ShowArchivedTests(unittest.TestCase):
         self.assertEqual((status, status2, len(normal), len(archived)), (200, 200, 10, 10))
         self.assertEqual({row['provider'] for row in archived}, {'whatsapp', 'slack', 'telegram', 'signal'})
         self.assertEqual(sum(row['unread'] for row in archived), 5)
-        chat = normal[0]['jid']
-        self.assertEqual(call('POST', '/v1/wazig/archive', dict(chat=chat, archived=True))[0], 200)
-        self.assertEqual(len(call('GET', '/v1/wazig/chats?archived=true')[1]), 11)
-        self.assertEqual(call('POST', '/v1/wazig/archive', dict(chat=chat, archived=False))[0], 200)
-        for provider in ('slack', 'signal', 'telegram'):
+        for provider in ('whatsapp', 'slack', 'signal', 'telegram'):
             chat = next(row['jid'] for row in normal if row['provider'] == provider)
             self.assertEqual(call('POST', '/v1/wazig/archive', dict(chat=chat, archived=True))[0], 400)
+        self.assertEqual(len(call('GET', '/v1/wazig/chats?archived=true')[1]), 10)
         self.assertEqual(call('GET', '/v1/wazig/messages?chat=' + normal[1]['jid'] + '&limit=20')[1][0]['FromMe'], False)
 
     def test_app_exposes_palette_switch_without_footer(self):

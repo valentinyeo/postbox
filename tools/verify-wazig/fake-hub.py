@@ -465,13 +465,6 @@ class ShowArchivedHandler(PaletteArchivedHandler):
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
         if self.path == '/v1/wazig/mark-read':
             self.respond(200, {'status': 'ok'}, body=body)
-        elif self.path == '/v1/wazig/archive' and isinstance(body.get('archived'), bool):
-            row = next((row for row in self.state.show_archived_rows if row['jid'] == body.get('chat')), None)
-            if row is None or row['provider'] != 'whatsapp':
-                self.respond(400, {'error': 'only WhatsApp archives remotely'}, body=body)
-                return
-            row['archived'] = body['archived']
-            self.respond(200, {'status': 'ok'}, body=body)
         else:
             self.respond(400, {'error': 'unexpected archive-switch write'}, body=body)
 
