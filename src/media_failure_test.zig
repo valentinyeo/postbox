@@ -77,6 +77,19 @@ test "success suppression and transient failures are not terminal failures" {
     try std.testing.expect(!mediaAttempted(&a, jid, id));
 }
 
+test "gone media waits out the bridge failure memory and other failures back off" {
+    var a = fixture();
+    const jid = a.chats[0].jid.slice();
+    const id = a.messages[0].id.slice();
+    noteMediaFailureStatus(&a, jid, id, 410);
+    try std.testing.expectEqual(@as(u64, 100_000 + 15 * 60_000), a.media_failures[0].retry_after_ms);
+    var b = fixture();
+    noteMediaFailureStatus(&b, jid, id, 502);
+    try std.testing.expectEqual(@as(u64, 100_000 + 30_000), b.media_failures[0].retry_after_ms);
+    noteMediaFailureStatus(&b, jid, id, 502);
+    try std.testing.expectEqual(@as(u64, 100_000 + 60_000), b.media_failures[0].retry_after_ms);
+}
+
 test "manual retry resets terminal failure before starting or queuing" {
     for ([_]bool{ false, true }) |busy| {
         var a = fixture();

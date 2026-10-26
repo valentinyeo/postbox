@@ -244,6 +244,8 @@ test "IGSH-670 pending and failed hub media do not suppress a later download" {
             a.busy = false;
             try std.testing.expect(!autoDownloadBackgroundMedia(&a));
             win.now += 30_000;
+            try std.testing.expect(!autoDownloadBackgroundMedia(&a));
+            win.now += 15 * 60_000;
             try std.testing.expect(autoDownloadBackgroundMedia(&a));
             try std.testing.expectEqual(@as(usize, 2), a.starts);
         }
