@@ -1,5 +1,6 @@
 import io
 import os
+import subprocess
 import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -73,6 +74,23 @@ class PrivateMarkers(unittest.TestCase):
         for path in [".claude/skills/verify-wazig/SKILL.md", ".claude/skills/verify-wazig/features/menus.md"]:
             with self.subTest(path=path), mock.patch.object(check_private_markers, "git", return_value=path.encode()), mock.patch.object(os.path, "isfile", return_value=True), mock.patch("builtins.open", mock.mock_open(read_data=b"ZZDEVICE")):
                 self.assertEqual(check_private_markers.scan_tree(load_markers("ZZDEVICE")), [(path, 1, 1)])
+
+    def test_untracked_files_are_scanned_and_ignored_ones_skipped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = lambda *args: subprocess.run(["git", "-C", directory, *args], check=True, capture_output=True)
+            run("init", "-q")
+            Path(directory, ".gitignore").write_text("hidden.txt\n")
+            Path(directory, "tracked.txt").write_text("clean\n")
+            run("add", ".")
+            Path(directory, "fresh.txt").write_text("ZZDEVICE\n")
+            Path(directory, "hidden.txt").write_text("ZZDEVICE\n")
+            previous = os.getcwd()
+            os.chdir(directory)
+            try:
+                hits = check_private_markers.scan_tree(load_markers("ZZDEVICE"))
+            finally:
+                os.chdir(previous)
+        self.assertEqual(hits, [("fresh.txt", 1, 1)])
 
 
 if __name__ == "__main__":

@@ -261,6 +261,28 @@ test('CLI --check fails on a new code comment and names where it is', () => {
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('CLI --check scans new untracked files and skips ignored ones', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'strip-comments-untracked-'));
+  const script = path.join(__dirname, 'strip-comments.mjs');
+  const git = args => execFileSync('git', ['-C', root, ...args], { stdio: 'pipe' });
+  try {
+    git(['init', '-q']);
+    fs.writeFileSync(path.join(root, '.gitignore'), 'hidden.js\n');
+    fs.writeFileSync(path.join(root, 'tool.js'), 'const b = 1;\n');
+    git(['add', '.']);
+    fs.writeFileSync(path.join(root, 'hidden.js'), 'const p = 1; // ignored file\n');
+    assert.equal(spawnSync(process.execPath, [script, '--check', root]).status, 0);
+    fs.mkdirSync(path.join(root, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.github', 'workflows', 'new.yml'), 'name: new\n# planted comment\n');
+    fs.writeFileSync(path.join(root, 'fresh.js'), 'const f = 1; // planted comment\n');
+    const failed = spawnSync(process.execPath, [script, '--check', root], { encoding: 'utf8' });
+    assert.equal(failed.status, 1);
+    assert.match(failed.stderr, /fresh\.js:1: \/\/ planted comment/);
+    assert.match(failed.stderr, /\.github\/workflows\/new\.yml:2: # planted comment/);
+    assert.doesNotMatch(failed.stderr, /hidden\.js/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 for (const [extension, clean, planted] of [
   ['cs', String.raw`var path = @"// literal\";` + '\n', '// planted comment\n/* planted block */\n'],
   ['yml', 'value: "https://example.test/#fragment"\n', '# planted comment\n'],
