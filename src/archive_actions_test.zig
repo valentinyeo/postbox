@@ -1404,7 +1404,9 @@ test "unarchiving a WhatsApp chat in Wazig sends nothing and survives the phone 
     a.chats[0].jid.set("personal:phone@s.whatsapp.net");
     a.chats[0].archived = true;
     a.chats[0].provider_archived = true;
-    const key = chat_key.of(&a.chats[0]);
+    var key = chat_key.of(&a.chats[0]);
+    key.id = "personal:phone@s.whatsapp.net";
+    key.account = "fixture-account";
     try std.testing.expect(archiveChat(&a, key, .unarchive, .shortcut) == null);
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
