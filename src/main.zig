@@ -8196,7 +8196,7 @@ fn removeFirstPendingSend(a: *App, delivered: bool) void {
     if (a.pending_send_count == 0) return;
     if (!completePendingSend(a, delivered)) return;
     const head = &a.pending_sends[0];
-    if (delivered and head.provider != .slack and !(unifiedHub(a) and (head.provider == .telegram or head.provider == .signal))) unarchiveSentChat(a, head.jid.slice());
+    if (delivered and head.provider != .slack and !(unifiedHub(a) and (head.provider == .whatsapp or head.provider == .telegram or head.provider == .signal))) unarchiveSentChat(a, head.jid.slice());
     if (delivered and head.file.len > 0 and head.jid.len <= 191 and head.file.len <= 520) {
         var entry = voice_sent.Entry{ .queued_unix = head.queued_unix, .seconds = head.voice_seconds, .seq = head.seq, .voice = head.ptt };
         @memcpy(entry.jid[0..head.jid.len], head.jid.slice());
@@ -10921,7 +10921,9 @@ fn applyArchiveIncoming(a: *App, jid: []const u8, row_ts: []const u8, raw: []con
         const from_me = message.object.get("FromMe") orelse continue;
         if (from_me != .bool or from_me.bool or getString(message.object, "ReactionToID").len > 0) continue;
         if (!state.returnsOn(jid, getString(message.object, "Timestamp"))) continue;
-        queueUnarchiveChat(a, jid, .incoming);
+        if (unifiedHub(a)) {
+            if (state.returnToInbox(jid)) saveArchiveState(a);
+        } else queueUnarchiveChat(a, jid, .incoming);
         break;
     }
     refreshChats(a);
@@ -10932,6 +10934,15 @@ fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []c
     const state = a.archive_state orelse return false;
     if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal))) {
         if (state.observeLocal(key, ts)) saveArchiveState(a);
+        return false;
+    }
+    if (key.provider == .whatsapp and unifiedHub(a)) {
+        if (provider_archived) {
+            if (state.find(jid) == null and ts.len > 0 and state.archive(jid, ts, false)) saveArchiveState(a);
+        } else if (state.isReturned(jid)) {
+            state.remove(jid);
+            saveArchiveState(a);
+        }
         return false;
     }
     if (!state.isKept(jid)) {
@@ -11019,7 +11030,7 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
             changed = true;
         }
     }
-    if (rows.len < archive_rules.max_entries and a.pending_archive_count == 0 and a.archive_child == null) {
+    if (!unifiedHub(a) and rows.len < archive_rules.max_entries and a.pending_archive_count == 0 and a.archive_child == null) {
         var index = state.count;
         while (index > 0) {
             index -= 1;
@@ -11170,13 +11181,16 @@ fn chatProvider(a: *App, jid: []const u8) transport.Provider {
 fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source: archive_rules.Source) ?[]const u8 {
     const jid = key.id;
     const unarchive = action == .unarchive;
-    if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal))) {
+    if (key.provider == .slack or (unifiedHub(a) and (key.provider == .whatsapp or key.provider == .telegram or key.provider == .signal))) {
         const state = a.archive_state orelse return "Archive is not available";
+        if (key.provider == .whatsapp and (jid.len == 0 or jid.len > archive_rules.max_jid)) return "Unknown chat id";
         const provider_archived = if (visibleChatIndex(a, key)) |index| a.chats[index].provider_archived else false;
         const row_stamp = if (visibleChatIndex(a, key)) |index| a.chats[index].timestamp.slice() else "";
         var stamp_buffer: [archive_rules.stamp_len]u8 = undefined;
         const stamp = archive_rules.archiveBaseline(&stamp_buffer, row_stamp, nowUnixSeconds());
-        const saved = if (unarchive and provider_archived) state.setLocalUnarchived(key) else state.setLocalArchived(key, !unarchive, stamp, action == .keep);
+        const saved = if (key.provider == .whatsapp)
+            (if (unarchive) state.returnToInbox(jid) else state.archive(jid, stamp, action == .keep))
+        else if (unarchive and provider_archived) state.setLocalUnarchived(key) else state.setLocalArchived(key, !unarchive, stamp, action == .keep);
         if (!saved) return "Keep archived list is full";
         saveArchiveState(a);
         if (visibleChatIndex(a, key)) |index| {
