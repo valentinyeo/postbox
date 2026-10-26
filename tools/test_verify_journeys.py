@@ -360,7 +360,7 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
                                             pending_archives=0, pending_sends=0, theme='amoled', selected=dict(id=chat))
             data[f'{name}.chats.json'] = dict(total=len(selected_rows), chats=selected_rows)
             (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(10000))
-            (self.folder / f'{name}.uia.txt').write_text(f'MessagesZig | {title} - Wazig v{version}')
+            (self.folder / f'{name}.uia.txt').write_text(f'MessagesZig | {title} - Postbox v{version}')
         data['history.messages.json'] = dict(chat=dict(id=chat), messages=[dict(id=message.replace('1001', '1000'), text=f'Synthetic {title} history')])
         data['reacted.messages.json'] = dict(messages=[dict(id=message, reaction='\U0001f44d')])
         data['live.messages.json'] = dict(messages=[dict(id=message.replace('1001', '1002'), text=f'Synthetic {title} live')])
@@ -424,7 +424,7 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
             with self.subTest(defect=defect):
                 self.fixture('telegram', '0.9.204')
                 if defect == 'title':
-                    (self.folder / 'linked.uia.txt').write_text('MessagesZig | Telegram - Wazig v0.0.526')
+                    (self.folder / 'linked.uia.txt').write_text('MessagesZig | Telegram - Postbox v0.0.526')
                 elif defect == 'control':
                     self.data['doctor.json']['version'] = '0.0.526'
                 else:

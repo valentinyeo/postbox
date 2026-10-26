@@ -46,7 +46,7 @@ def check_slack_mentions(folder):
         image = (folder / f'{stage}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
         tree = (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig')
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', tree.splitlines()[0])
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', tree.splitlines()[0])
         assert not has_raw_id(tree)
         for control in ['1032']:
             assert re.search(rf'^{control} \| ', tree, re.M), (stage, control)

@@ -65,7 +65,7 @@ for phase, count, archived in [('before', 264, False), ('selected', 264, False),
     image = (folder / f'{phase}.png').read_bytes()
     assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, phase
     title = (folder / f'{phase}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]
-    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', title), phase
+    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', title), phase
 restart = read('restart.json')
 assert restart['new_pid'] == session['pid'] and restart['new_start'] == session['startTicks']
 assert (restart['old_pid'], restart['old_start']) != (restart['new_pid'], restart['new_start'])

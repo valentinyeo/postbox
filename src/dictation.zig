@@ -222,7 +222,7 @@ const Transport = struct {
 };
 
 fn transcribeAt(allocator: std.mem.Allocator, api_key: []const u8, request_path: [*:0]const u16, content_type: []const u8, body: []const u8) ![]u8 {
-    const session = win.WinHttpOpen(lit("Wazig Messages/0.3"), win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, null, null, 0) orelse return error.NetworkFailed;
+    const session = win.WinHttpOpen(lit("Postbox/0.3"), win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, null, null, 0) orelse return error.NetworkFailed;
     defer _ = win.WinHttpCloseHandle(session);
     _ = win.WinHttpSetTimeouts(session, 10_000, 10_000, 30_000, 120_000);
     const connection = win.WinHttpConnect(session, lit("api.deepgram.com"), win.INTERNET_DEFAULT_HTTPS_PORT, 0) orelse return error.NetworkFailed;
@@ -515,7 +515,7 @@ fn formatTranscript(allocator: std.mem.Allocator, transcript: []const u8, api_ke
     const body = try format_request.formatRequestBody(allocator, anthropic, model, full_prompt, transcript);
     defer allocator.free(body);
 
-    const session = win.WinHttpOpen(lit("Wazig Messages/0.9"), win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, null, null, 0) orelse return error.NetworkFailed;
+    const session = win.WinHttpOpen(lit("Postbox/0.9"), win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, null, null, 0) orelse return error.NetworkFailed;
     defer _ = win.WinHttpCloseHandle(session);
     _ = win.WinHttpSetTimeouts(session, 10_000, 10_000, 30_000, 180_000);
     const host = if (anthropic) lit("api.anthropic.com") else lit("openrouter.ai");

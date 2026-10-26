@@ -51,17 +51,17 @@ pub fn label(view: View) []const u8 {
 
 pub fn windowTitle(buffer: []u8, view_label: ?[]const u8, version: []const u8) ![]const u8 {
     return if (view_label) |text|
-        std.fmt.bufPrint(buffer, "{s} - Wazig v{s}", .{ text, version })
+        std.fmt.bufPrint(buffer, "{s} - Postbox v{s}", .{ text, version })
     else
-        std.fmt.bufPrint(buffer, "Wazig v{s}", .{version});
+        std.fmt.bufPrint(buffer, "Postbox v{s}", .{version});
 }
 
-test "window titles use the view label then Wazig v and build version" {
+test "window titles use the view label then Postbox v and build version" {
     var buffer: [512]u8 = undefined;
-    try std.testing.expectEqualStrings("WhatsApp Personal - Wazig v0.9.179", try windowTitle(&buffer, "WhatsApp Personal", "0.9.179"));
-    try std.testing.expectEqualStrings("Slack Workspace - Wazig v0.0.526", try windowTitle(&buffer, "Slack Workspace", "0.0.526"));
-    try std.testing.expectEqualStrings("Combined inbox - Wazig v0.0.526", try windowTitle(&buffer, "Combined inbox", "0.0.526"));
-    try std.testing.expectEqualStrings("Wazig v0.0.526", try windowTitle(&buffer, null, "0.0.526"));
+    try std.testing.expectEqualStrings("WhatsApp Personal - Postbox v0.9.179", try windowTitle(&buffer, "WhatsApp Personal", "0.9.179"));
+    try std.testing.expectEqualStrings("Slack Workspace - Postbox v0.0.526", try windowTitle(&buffer, "Slack Workspace", "0.0.526"));
+    try std.testing.expectEqualStrings("Combined inbox - Postbox v0.0.526", try windowTitle(&buffer, "Combined inbox", "0.0.526"));
+    try std.testing.expectEqualStrings("Postbox v0.0.526", try windowTitle(&buffer, null, "0.0.526"));
 }
 
 pub fn forNumber(number: usize, views: []const Account) ?usize {

@@ -337,7 +337,7 @@ pub fn openHttp(allocator: std.mem.Allocator, host: []const u8, port: u16, secur
     defer allocator.free(wide_path);
     const wide_method = try toWide(allocator, method);
     defer allocator.free(wide_method);
-    const session = win.WinHttpOpen(wideLiteral("Wazig Messages/1.0"), if (secure) win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY else win.WINHTTP_ACCESS_TYPE_NO_PROXY, null, null, 0) orelse return error.NetworkFailed;
+    const session = win.WinHttpOpen(wideLiteral("Postbox/1.0"), if (secure) win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY else win.WINHTTP_ACCESS_TYPE_NO_PROXY, null, null, 0) orelse return error.NetworkFailed;
     errdefer _ = win.WinHttpCloseHandle(session);
     _ = win.WinHttpSetTimeouts(session, 10_000, 10_000, 30_000, 30_000);
     const connection = win.WinHttpConnect(session, wide_host.ptr, port, 0) orelse return error.NetworkFailed;

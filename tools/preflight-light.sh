@@ -14,6 +14,7 @@ PYTHON_LIGHT_TESTS=(
     test_no_stories
     test_palette_archived
     test_pin_icon
+    test_postbox
     test_reaction_layout
     test_recording_paint
     test_repaint

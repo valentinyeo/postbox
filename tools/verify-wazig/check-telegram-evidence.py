@@ -82,7 +82,7 @@ def check_telegram(folder):
     def capture(name):
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, name
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v' + re.escape(expected_version), (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + re.escape(expected_version), (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
         state = read(f'{name}.state.json')
         assert state['version'] == expected_version, name
         assert state['view'] == 'telegram', name

@@ -38,7 +38,7 @@ def check_slack_archive(folder):
                 assert target[0]['unread_count'] == unread, stage
         image = (folder / f'{stage}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, stage
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), stage
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), stage
     restart = read('restart.json')
     assert restart['old_pid'] != restart['new_pid'] == session['pid']
     assert restart['old_start'] != restart['new_start'] == session['startTicks']

@@ -39,7 +39,7 @@ for name in popups:
         data = path.read_bytes()
         assert data.startswith(b'\x89PNG\r\n\x1a\n') and len(data) > 10000
         images.append(hashlib.sha256(data).hexdigest())
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}-{phase}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}-{phase}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
     assert images[0] != images[1], name
 state = json.loads((folder / 'side-effects.json').read_text(encoding='utf-8-sig'))
 assert state['theme'] == 'green' and state['chat_count'] == 2

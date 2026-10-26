@@ -108,7 +108,7 @@ function Restart-ArchiveFixture($Session, $Start, [string]$Name) {
     $old = Get-App $Session
     $oldPid = $Session.pid
     $oldTicks = $Session.startTicks
-    Invoke-PaletteCommand $Session 'Quit Messages'
+    Invoke-PaletteCommand $Session 'Quit Postbox'
     $null = Wait-Until { $old.Refresh(); $old.HasExited } 'fixture app closed for archive restart'
     $Start.Environment['WAZIG_VERIFY_RESTART'] = $Session.id
     $app = [Diagnostics.Process]::Start($Start)
@@ -179,7 +179,7 @@ function Invoke-HubArchiveJourney($Session, [string]$Messages, $Start) {
     $files = @(Get-ChildItem $Messages -Filter 'hub-*-archive-state.txt')
     Assert-That ($files.Count -eq 1) 'Hub archive state missing or ambiguous'
     $old = Get-App $Session
-    Invoke-PaletteCommand $Session 'Quit Messages'
+    Invoke-PaletteCommand $Session 'Quit Postbox'
     $null = Wait-Until { $old.Refresh(); $old.HasExited } 'close before seeding local archive migration'
     "$script:PlainReacted`t0`t2026-10-10T10:00:00Z" | Add-Content $files[0].FullName
     Copy-Item $files[0].FullName (Join-Path $Session.evidence 'migration-before.txt')

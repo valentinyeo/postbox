@@ -85,7 +85,7 @@ images = []
 for name in ['before', 'beta-empty', 'beta', 'history', 'live', 'sent', 'after']:
     image = (folder / f'{name}.png').read_bytes()
     assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
-    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
     if name != 'beta-empty':
         images.append(hashlib.sha256(image).hexdigest())
 assert len(set(images)) >= 4

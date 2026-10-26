@@ -244,7 +244,7 @@ class EmojiJourneyChecks(unittest.TestCase):
             self.proof['frames'].append(dict(screenshot=name + '.png', rect=[20, 175, 116, 223], canvas=[0, 0], amber=amber, cobalt=cobalt))
         self.write('emoji-pixels.json', self.proof)
         for name in ['emoji', 'frame-a', 'frame-b', 'reopened']:
-            (self.folder / (name + '.uia.txt')).write_text('MessagesZig | Wazig v0.0.526')
+            (self.folder / (name + '.uia.txt')).write_text('MessagesZig | Postbox v0.0.526')
             self.write(name + '.state.json', dict(selected=dict(provider='slack')))
         paths = ['/v1/wazig/slack/emoji?account=fixture-emoji', '/v1/wazig/slack/emoji/media?account=fixture-emoji&name=cat_alone',
                  '/v1/wazig/media/slack%3Afixture-emoji%3Achannel/GIPHY']

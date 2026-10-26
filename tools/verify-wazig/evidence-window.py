@@ -39,7 +39,7 @@ for row in steps:
         assert rect['Right'] > rect['Left'] and rect['Bottom'] > rect['Top'], (row['step'], field)
     image = (folder / (row['step'] + '.png')).read_bytes()
     assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
-    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / (row['step'] + '.uia.txt')).read_text(encoding='utf-8-sig').splitlines()[0])
+    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / (row['step'] + '.uia.txt')).read_text(encoding='utf-8-sig').splitlines()[0])
     state = read(row['step'] + '.state.json')
     assert state['sync'] == 'stopped' and state['pending_sends'] == state['pending_archives'] == 0
 normal = steps[1]['normal_rect']

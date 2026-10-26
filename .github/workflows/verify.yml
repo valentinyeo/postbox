@@ -18,6 +18,7 @@ on:
       - src/chat_list_layout.zig
       - src/text_draw.zig
       - src/main.zig
+      - src/messenger_view.zig
       - src/theme.zig
       - src/archive_rules.zig
       - src/chat_rows.zig

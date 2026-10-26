@@ -31,7 +31,7 @@ def check_media_fit(folder):
         b, m = row['bubble'], row['media']
         assert message['bubble'] == b and message['media'] == m
         assert b[2] > b[0] and b[3] > b[1] and row['result']['problems'] == []
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         assert read(f'{name}.state.json')['selected']['id'] == shown['chat']['id']
         width, height, image = read_png(folder / row['screenshot'])
         ox, oy, cw, ch = row['canvas']

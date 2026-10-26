@@ -32,7 +32,7 @@ for stage, expected in orders.items():
     assert f'slack-sort {stage}-last-message-order PASS' in proof
     image = (folder / f'{stage}.png').read_bytes()
     assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
-    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
     assert read(f'{stage}.state.json')['view'] == 'slack'
 initial_times = {row['id']: row['last_message_time'] for row in read('before.chats.json')['chats']}
 assert initial_times['fixture-alpha'] < read('after.chats.json')['chats'][0]['last_message_time']

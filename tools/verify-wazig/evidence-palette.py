@@ -46,7 +46,7 @@ for name in stages:
     image = (folder / f'{name}.png').read_bytes()
     assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
     images.append(hashlib.sha256(image).hexdigest())
-    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
     state = json.loads((folder / f'{name}.state.json').read_text(encoding='utf-8-sig'))
     assert state['version'] == '0.0.526' and state['chat_count'] == 2
     assert state['pending_sends'] == state['pending_archives'] == 0 and state['sync'] == 'stopped'

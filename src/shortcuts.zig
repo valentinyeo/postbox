@@ -28,7 +28,7 @@ pub const groups = [_]Group{
         .{ .key = "Ctrl+E or E", .desc = "Archive or unarchive the selected chat" },
         .{ .key = "Ctrl+A in the chat list or empty message box", .desc = "Select all chats; Ctrl+E archives, Esc cancels" },
         .{ .key = "R", .desc = "Refresh" },
-        .{ .key = "Q", .desc = "Quit Messages" },
+        .{ .key = "Q", .desc = "Quit Postbox" },
     } },
     .{ .name = "Messages", .items = &[_]Shortcut{
         .{ .key = "Alt+J / Alt+K", .desc = "Select the next / previous message" },

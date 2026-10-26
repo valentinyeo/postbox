@@ -87,7 +87,7 @@ function Read-InboxWorkspaceTooltips($Session, $Rows) {
 function Save-ViewTitle($Session, [string]$Capture) {
     $state = Read-Control $Session status
     $label = if ($state.current_view.inbox) { 'Combined inbox' } else { $state.current_view.label }
-    $expected = "$label - Wazig v$($state.version)"
+    $expected = "$label - Postbox v$($state.version)"
     $actual = (Get-Window $Session).Current.Name
     $path = Join-Path $Session.evidence 'title.json'
     $titles = if (Test-Path $path) { Get-Content $path -Raw | ConvertFrom-Json -AsHashtable } else { @{} }
@@ -273,7 +273,7 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     $old = Get-App $Session
     $oldPid = $Session.pid
     $oldTicks = $Session.startTicks
-    Invoke-PaletteCommand $Session 'Quit Messages'
+    Invoke-PaletteCommand $Session 'Quit Postbox'
     $null = Wait-Until { $old.Refresh(); $old.HasExited } 'fixture app closed for restart'
     $Start.Environment['WAZIG_VERIFY_RESTART'] = $Session.id
     $app = [Diagnostics.Process]::Start($Start)

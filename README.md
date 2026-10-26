@@ -1,8 +1,12 @@
-# wazig
+# Postbox
 
-`wazig` is a small native Windows messaging client written in Zig. WhatsApp through `wacli` is the first provider. Slack, Signal, and Telegram can be added behind the same interface later.
+Postbox is a small native Windows messaging client written in Zig. WhatsApp through `wacli` is the first provider. Slack, Signal, and Telegram can be added behind the same interface later.
 
 The interface uses Win32, Windows Imaging Component, and Windows shell thumbnail APIs. It does not embed Electron, WebView, .NET, Node, Java, or a browser engine.
+
+## Existing installations
+
+Existing installs keep messages, settings, and update support. The executable and storage paths stay unchanged. New installers and shortcuts use Postbox. Download from https://github.com/valentinyeo/postbox/releases/latest.
 
 ## Current features
 
@@ -12,7 +16,7 @@ The interface uses Win32, Windows Imaging Component, and Windows shell thumbnail
 - Colour emoji in chat names and message text; if the Windows text engine cannot draw them, messages fall back to monochrome emoji instead of stopping
 - Click-to-download videos and click-to-open local attachments
 - Per-message WhatsApp reactions from the message context menu
-- AMOLED black (default) and Green Material 3 themes, switched live and saved through Ctrl+K or `wazigctl theme green|amoled`
+- AMOLED black (default) and Green Material 3 themes, switched live and saved through Ctrl+K or `postboxctl theme green|amoled`
 - IBM Plex Sans bundled as a private application font
 - Deepgram dictation uses a DPAPI-encrypted key, seeded from the user's saved environment variable `DEEPGRAM_API_KEY` and refreshed when it changes; the variable can then be removed
 
@@ -64,7 +68,7 @@ enable PKCE (this makes the app a public client and is not freely reversible),
 Socket Mode and distribution for multiple workspaces, and register exactly
 `http://localhost:53682/slack/oauth/callback` as an OAuth redirect URL. Approve
 the requested user scopes in each workspace; administrator approval may be
-needed. No client secret is used. Messages listens only on `127.0.0.1:53682`
+needed. No client secret is used. Postbox listens only on `127.0.0.1:53682`
 for one callback, for up to five minutes; a busy port fails without opening a
 browser. The Client ID is saved per-user; tokens are DPAPI-encrypted in the
 registry. Rotating user tokens refresh before expiry. If refresh fails, use
@@ -87,4 +91,4 @@ To enable Deepgram dictation without committing a key, seed it from the user's s
 [Environment]::SetEnvironmentVariable('DEEPGRAM_API_KEY', 'your-key', 'User')
 ```
 
-At startup, Messages reads the user's saved variable from `HKCU\Environment`, not the inherited process environment. It trims whitespace, stores the key encrypted with Windows DPAPI, and refreshes the stored key whenever the saved variable changes. The launch log confirms `startup: deepgram key saved to encrypted storage from environment` for a new key or `startup: deepgram key updated from environment` for a replacement. The variable can then be removed; later starts use the stored key.
+At startup, Postbox reads the user's saved variable from `HKCU\Environment`, not the inherited process environment. It trims whitespace, stores the key encrypted with Windows DPAPI, and refreshes the stored key whenever the saved variable changes. The launch log confirms `startup: deepgram key saved to encrypted storage from environment` for a new key or `startup: deepgram key updated from environment` for a replacement. The variable can then be removed; later starts use the stored key.

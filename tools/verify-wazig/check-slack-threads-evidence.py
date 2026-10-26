@@ -26,7 +26,7 @@ def check_threads(folder):
     for stage in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart']:
         image = (folder / f'{stage}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         state = read(f'{stage}.state.json')
         assert state['selected']['provider'] == 'slack' and state['selected']['id'] == 'slack:fixture-threads:channel'
         if stage != 'thread-reply':
@@ -38,7 +38,7 @@ def check_threads(folder):
                          and row['body']['text'] == 'Synthetic thread reply'
                          and (row['body'].get('reply_to') == parent or row['body'].get('thread_ts') == parent) for row in sends)
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for key in ['^2', '^{UP}', '{ENTER}', 'Synthetic thread reply', '{ESC}', '^k', 'Slack threads like Slack for this account', 'Quit Messages']:
+    for key in ['^2', '^{UP}', '{ENTER}', 'Synthetic thread reply', '{ESC}', '^k', 'Slack threads like Slack for this account', 'Quit Postbox']:
         assert f'keys: {key}' in actions
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'

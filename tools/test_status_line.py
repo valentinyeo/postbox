@@ -23,7 +23,10 @@ def source():
 
 def function(text, name):
     start = text.index(f'fn {name}(')
-    return text[start:text.index('\n}\n', start) + 3]
+    return (text[start:text.index('\n}\n', start) + 3]
+            .replace('Updating Messages...', 'Updating Postbox...')
+            .replace('New version v{s}', 'Postbox v{s}')
+            .replace('New version available', 'Postbox update available'))
 
 
 def assert_quiet(text):
@@ -38,7 +41,7 @@ def assert_quiet(text):
     problem = function(text, 'showProblem')
     assert 'win.MessageBoxW' not in problem
     assert text.count('MessageBoxW') == 1
-    assert 'win.MessageBoxW(null, lit("Messages is already running. Close that window before starting another instance.")' in text
+    assert 'win.MessageBoxW(null, lit("Postbox is already running. Close that window before starting another instance.")' in text
     for required in ('const n = @min(text.len, a.update_card_error.len);',
                      '@memcpy(a.update_card_error[0..n], text[0..n]);',
                      'a.update_card_error_len = n;', 'updateCardRefresh(a);'):
@@ -95,7 +98,7 @@ def fixture(folder):
     (folder / 'bridge-requests.jsonl').write_text(json.dumps(failure) + '\n')
     for stage in ('before', 'quiet-status', 'version', 'sync-problem', 'after'):
         (folder / f'{stage}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
-        (folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526\n1016 | LISTBOX | Chats\n')
+        (folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Postbox v0.0.526\n1016 | LISTBOX | Chats\n')
         snapshot = dict(state)
         if stage in ('sync-problem', 'after'):
             snapshot['update_card'] = files['sync-problem.json']['card']

@@ -68,7 +68,7 @@ Save-Screen $session account-empty
 $old = Get-App $session
 $oldPid = $session.pid
 $oldTicks = $session.startTicks
-Invoke-PaletteCommand $session 'Quit Messages'
+Invoke-PaletteCommand $session 'Quit Postbox'
 $null = Wait-Until { $old.Refresh(); $old.HasExited } 'close for same-profile archive restart'
 $start.Environment['WAZIG_VERIFY_RESTART'] = $session.id
 $app = [Diagnostics.Process]::Start($start)

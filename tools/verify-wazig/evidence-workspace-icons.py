@@ -30,7 +30,7 @@ assert sorted(ids) == sorted(icons.IDS)
 assert all(row['provider'] == ('signal' if row['id'] == 'signal:fixture-contact' else 'whatsapp' if row['id'] == 'whatsapp:fixture:contact-delta' else 'slack') for row in rows['chats'])
 state = read('workspace-icons-list.state.json')
 assert state['view'] == 'all' and state['theme'] == 'amoled'
-assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / 'workspace-icons-list.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / 'workspace-icons-list.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
 requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
 assert all(row['wire_path'].startswith('/v1/wazig/') for row in requests)
 for team, status in [('fixture-amber', 200), ('fixture-cobalt', 200), ('fixture-empty', 404)]:
