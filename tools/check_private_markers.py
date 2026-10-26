@@ -48,7 +48,7 @@ def private_paths(paths):
 
 def scan_tree(markers):
     hits = []
-    paths = git("ls-files", "-z").decode().split("\0")
+    paths = sorted(set(git("ls-files", "-z").decode().split("\0")) | set(git("ls-files", "-z", "--others", "--exclude-standard").decode().split("\0")))
     for path in private_paths(paths):
         hits.append((path, 0, 0))
     for path in paths:

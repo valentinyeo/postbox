@@ -571,7 +571,7 @@ function git(root, args) { return execFileSync('git', ['-C', root, ...args], { e
 
 export function run(root, { verify = false, check = false, base = 'HEAD', exemptions = [] } = {}) {
   root = path.resolve(root);
-  const files = git(root, ['ls-files', '-z']).split('\0').filter(Boolean);
+  const files = [...new Set([...git(root, ['ls-files', '-z']).split('\0'), ...git(root, ['ls-files', '-z', '--others', '--exclude-standard']).split('\0')])].filter(Boolean);
   const report = { root, base, filesChanged: 0, languages: {}, kept: [], exemptions, found: [] };
   const baseFiles = new Set(verify ? git(root, ['ls-tree', '-r', '--name-only', '-z', base]).split('\0') : []);
   for (const file of files) {
