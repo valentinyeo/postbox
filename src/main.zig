@@ -599,6 +599,8 @@ const BackgroundMedia = struct {
 
 const MediaFailure = struct { hash: u64 = 0, count: u8 = 0, retry_after_ms: u64 = 0 };
 const max_media_retries = 3;
+const media_retry_base_ms: u64 = 30_000;
+const gone_media_retry_ms: u64 = 15 * 60_000;
 
 fn mediaBusy(a: *const App) bool {
     for (&a.media_downloads) |*slot| if (slot.child != null or slot.hub_pending) return true;
@@ -5712,7 +5714,16 @@ fn clearMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
     }
 }
 
+fn mediaRetryDelayMs(status: u32, count: u8) u64 {
+    if (status == 404 or status == 410) return gone_media_retry_ms;
+    return media_retry_base_ms * @as(u64, count);
+}
+
 fn noteMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
+    noteMediaFailureStatus(a, jid, id, 0);
+}
+
+fn noteMediaFailureStatus(a: *App, jid: []const u8, id: []const u8, status: u32) void {
     const hash = played.Set.pairKey(jid, id);
     var count: u8 = 0;
     var matched: ?*MediaFailure = null;
@@ -5724,7 +5735,7 @@ fn noteMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
         }
     }
     count += 1;
-    const retry_after_ms = win.GetTickCount64() + 30_000;
+    const retry_after_ms = win.GetTickCount64() + mediaRetryDelayMs(status, count);
     if (count >= max_media_retries) {
         if (matched) |entry| {
             entry.hash = 0;
@@ -19161,7 +19172,7 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                     markMediaAttempted(a, slot.jid.slice(), slot.id.slice());
                     clearMediaFailure(a, slot.jid.slice(), slot.id.slice());
                 } else {
-                    noteMediaFailure(a, slot.jid.slice(), slot.id.slice());
+                    noteMediaFailureStatus(a, slot.jid.slice(), slot.id.slice(), result.http_status);
                     setStatus(a, if (result.http_status == 202) "Media download timed out" else "Media download failed");
                     if (std.mem.eql(u8, slot.id.slice(), a.audio_chain_id.slice())) a.audio_chain_waiting = false;
                 }
