@@ -5,7 +5,7 @@
 - On the unified hub, archiving a WhatsApp chat is stored in Wazig only, like Slack, Telegram and Signal. No archive, archive-batch or unarchive request ever reaches the hub for WhatsApp.
 - A new message from someone else returns an archived chat to the inbox right away. The app marks the chat returned in its archive state, so the choice survives restart even while the hub keeps reporting the chat archived.
 - His own messages, own reactions and a bare hub row-time change leave the chat archived.
-- A chat the phone already shows as archived is seeded as archived the first time, then follows the same rule.
+- A chat the phone already shows as archived is seeded as archived the first time, then follows the same rule. These seeded entries carry a `phone` marker in the saved state. When the 2048 entry table is full, a plain unarchive, archive or keep drops the oldest `phone` entry to make room, never a user, kept or returned entry. A `phone` entry is removed when the phone no longer reports the chat archived (IGSH-920).
 - Ctrl+Shift+E still keeps a chat archived: a kept chat does not return on incoming messages.
 - Legacy bare keep flags migrate into the account-prefixed hub archive state, with a hub-scoped completion marker, without any hub request.
 
@@ -26,6 +26,8 @@ Plain phase: `/fixture/plain-dms` adds two inbox direct chats. Archive each with
 Incoming phase: `/fixture/plain-incoming` gives WhatsApp `personal:15550000006@s.whatsapp.net` and Telegram `telegram:user:7001` a strictly newer message from the other side. The app reads the new message of the archived chat (a probe), and the chats return to the inbox with archived=false (`plain-incoming-inbox`), while the kept group, the original inbox chat and the reaction-only chat stay archived (`plain-incoming-archived`). Zero archive requests at every step.
 
 Telegram part (IGSH-736, IGSH-828): `/fixture/telegram-dm` adds `telegram:user:7001` with provider `telegram` and account `telegram`. Ctrl+E, explicit unarchive, one-row bulk Ctrl+A then Ctrl+E and a profile restart all stay local with no hub request at any status. After the restart Archive holds Telegram with its real account while the inbox is empty. The state file uses `telegram<TAB>telegram<TAB>telegram:user:7001`. Proof marker: `telegram-single-bulk-restart-incoming`.
+
+Unknown ids (IGSH-920): the control client archives and unarchives `telegram:user:99999`, `signal:ghost` and `99999`, which no chat row carries. Every call must answer `Unknown chat id`, send no hub request, and leave no line for those ids in the saved hub archive state (`UNKNOWN_ID_NOT_SAVED`). The full 2048 entry table case is proven in `src/archive_actions_test.zig` instead, because the app shows at most 256 chats per refresh.
 
 Final state: explicitly unarchiving the original inbox chat leaves the final inbox with four chats. The returned chat is stored as `<jid><TAB>0<TAB><TAB>returned` and the checker accepts only that marker for it.
 

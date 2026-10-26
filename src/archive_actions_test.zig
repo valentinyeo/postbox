@@ -283,6 +283,7 @@ fn chatProvider(a: *App, jid: []const u8) Provider {
     for (a.chats[0..a.chat_count]) |*chat| {
         if (std.mem.eql(u8, chat.jid.slice(), jid)) return chat.provider;
     }
+    if (chat_key.providerOfId(jid)) |provider| return provider;
     return .whatsapp;
 }
 fn removeChatRow(a: *App, removed: usize) void {
