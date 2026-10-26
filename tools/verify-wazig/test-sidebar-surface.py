@@ -5,7 +5,7 @@ import tempfile
 
 
 ORACLE = runpy.run_path(str(Path(__file__).with_name('check-sidebar-surface.py')))
-LAYOUT = dict(theme='amoled', dpi=96, screenshot='sidebar-amoled.png', client=[0, 0, 840, 300], edge=280, list=[0, 48, 272, 300])
+LAYOUT = dict(theme='amoled', dpi=96, screenshot='sidebar-amoled.png', client=[0, 0, 840, 300], edge=280, list=[0, 0, 272, 300])
 PALETTES = {
     'amoled': ((0, 0, 0), (0, 0, 0), (18, 18, 18), (36, 36, 36), (255, 255, 255), (204, 204, 204)),
     'green': ((15, 21, 18), (23, 29, 26), (27, 33, 30), (48, 54, 51), (222, 228, 223), (191, 201, 195)),
@@ -25,8 +25,8 @@ def fixture(palette, changed):
     fill(image, [0, 0, 280, 300], new_sidebar if changed else old_sidebar)
     if changed:
         fill(image, [280, 0, 281, 300], divider)
-    fill(image, [70, 124, 130, 136], name)
-    fill(image, [70, 148, 100, 158], kind)
+    fill(image, [70, 76, 130, 88], name)
+    fill(image, [70, 100, 100, 110], kind)
     fill(image, [340, 80, 480, 150], (40, 50, 45))
     return image
 
@@ -69,9 +69,9 @@ with tempfile.TemporaryDirectory() as directory:
         ('heavy divider', [280, 0, 281, 300], (120, 120, 120)),
         ('sidebar still black', [0, 184, 264, 292], (0, 0, 0)),
         ('row surface still black', [2, 112, 8, 176], (0, 0, 0)),
-        ('low contrast list name', [70, 124, 130, 136], (60, 60, 60)),
-        ('low contrast secondary text', [70, 148, 100, 158], (60, 60, 60)),
-        ('text colour changed', [70, 124, 130, 136], (240, 240, 240)),
+        ('low contrast list name', [70, 76, 130, 88], (60, 60, 60)),
+        ('low contrast secondary text', [70, 100, 100, 110], (60, 60, 60)),
+        ('text colour changed', [70, 76, 130, 88], (240, 240, 240)),
         ('one changed chat channel', [500, 200, 501, 201], (0, 0, 1)),
         ('changed message bubble', [340, 80, 341, 81], (41, 50, 45)),
         ('blank screenshot', [0, 0, 840, 300], (0, 0, 0)),

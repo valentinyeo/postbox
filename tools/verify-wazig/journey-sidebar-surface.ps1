@@ -3,7 +3,11 @@ foreach ($themeName in @('amoled', 'green')) {
     Invoke-PaletteCommand $session $(if ($themeName -eq 'amoled') { 'Theme: AMOLED black' } else { 'Theme: Green' })
     $null = Wait-Until { (Read-Control $session status).theme -ceq $themeName } 'sidebar theme applied'
     Invoke-PaletteCommand $session 'Search chats'
+    Send-Keys $session '{ESC}'
+    $null = Wait-Until { (Read-Control $session status).search -ceq '' } 'sidebar search cleared'
     $window = Get-Window $session
+    $paletteCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MessagesPalette')
+    $null = Wait-Until { $null -eq $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $paletteCondition) } 'command palette closed before the sidebar screenshot'
     $handle = [IntPtr]$window.Current.NativeWindowHandle
     $origin = [VerifyWindow+Point]::new()
     $client = [VerifyWindow+Rect]::new()

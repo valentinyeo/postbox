@@ -50,7 +50,7 @@ def measure_pair(image, before, layout, baseline_layout):
     def px(value):
         return (value * dpi + 48) // 96
 
-    assert x == lx and y + px(48) == ly and edge - lr == 8
+    assert x == lx and y == ly and edge - lr == 8
     assert edge - x == max(px(280), min((right - x) // 3, px(390)))
     assert lb == bottom and bottom - ly >= px(192)
     sidebar_rect = [x + px(8), ly + px(136), edge - px(16), bottom - px(8)]

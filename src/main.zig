@@ -14085,7 +14085,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
             defer a.allocator.free(label);
             var wide_label = WideText(191){};
             wide_label.set(a.allocator, label);
-            const row_background = if (bulk_selected) theme.current.primary_container else if (selected) theme.current.surface_container_highest else theme.current.surface_container_low;
+            const row_background = if (bulk_selected) theme.current.primary_container else if (selected) theme.current.surface_container_highest else theme.current.sidebar_surface;
             const draft_color = drafts.labelColor(theme.current.*, row_background);
             _ = win.SetTextColor(item.hDC, if (dimmed) theme.archivedRowColor(draft_color) else draft_color);
             var prefix_rect = kind_rect;
