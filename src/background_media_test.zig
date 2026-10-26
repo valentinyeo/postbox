@@ -389,7 +389,7 @@ test "background wiring exhausted download retries and cache failures cannot blo
         try std.testing.expect(!autoDownloadBackgroundMedia(&a));
         if (attempt + 1 < max_media_retries) {
             try std.testing.expectEqual(.downloading, a.background_media.phase);
-            win.now += 30_000;
+            win.now += media_retry_base_ms * @as(u64, attempt + 1);
             try std.testing.expect(autoDownloadBackgroundMedia(&a));
         }
     }
