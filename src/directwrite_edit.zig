@@ -130,7 +130,9 @@ const Host = struct {
     }
 
     fn drawCaret(self: *Host, dc: win.HDC, color: win.COLORREF) void {
+        const previous = self.caret_rect;
         self.caret_rect = self.caretRectAt(dc) orelse std.mem.zeroes(win.RECT);
+        if (previous.right > previous.left and !std.meta.eql(previous, self.caret_rect)) _ = win.InvalidateRect(self.hwnd, &previous, win.FALSE);
         if (!self.caret_on or self.caret_rect.right <= self.caret_rect.left) return;
         _ = win.SetDCBrushColor(dc, color);
         _ = win.FillRect(dc, &self.caret_rect, @ptrCast(@alignCast(win.GetStockObject(win.DC_BRUSH))));
