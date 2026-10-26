@@ -61,6 +61,10 @@ class ShowArchivedTests(unittest.TestCase):
             self.write(f'{name}.toggle.json', dict(name=name, index=index, line=line))
         (self.folder / 'final-data').mkdir()
         (self.folder / 'final-data/launch-log.txt').write_text('\n'.join(lines))
+        for row in hub.show_archived_rows():
+            if row['provider'] == 'whatsapp' and row['name'].endswith('row 0'):
+                for archived in (True, False):
+                    self.requests.append(dict(method='POST', authorized=True, status=200, wire_path='/v1/wazig/archive', body=dict(chat=row['jid'], archived=archived)))
         self.save_requests()
         self.presentation()
 
@@ -182,7 +186,7 @@ class ShowArchivedTests(unittest.TestCase):
         self.write(name, original)
         self.assertEqual(self.validate().returncode, 0)
 
-    def test_rejects_any_network_archive_for_any_provider(self):
+    def test_rejects_extra_or_wrong_provider_network_archive(self):
         original = copy.deepcopy(self.requests)
         for provider in ('whatsapp', 'slack', 'telegram', 'signal'):
             chat = next(row['jid'] for row in hub.show_archived_rows() if row['provider'] == provider)
@@ -221,8 +225,8 @@ class ShowArchivedTests(unittest.TestCase):
         self.assertEqual(sum(row['unread'] for row in archived), 5)
         for provider in ('whatsapp', 'slack', 'signal', 'telegram'):
             chat = next(row['jid'] for row in normal if row['provider'] == provider)
-            self.assertEqual(call('POST', '/v1/wazig/archive', dict(chat=chat, archived=True))[0], 400)
-        self.assertEqual(len(call('GET', '/v1/wazig/chats?archived=true')[1]), 10)
+            self.assertEqual(call('POST', '/v1/wazig/archive', dict(chat=chat, archived=True))[0], 200 if provider == 'whatsapp' else 400)
+        self.assertEqual(len(call('GET', '/v1/wazig/chats?archived=true')[1]), 11)
         self.assertEqual(call('GET', '/v1/wazig/messages?chat=' + normal[1]['jid'] + '&limit=20')[1][0]['FromMe'], False)
 
     def test_app_exposes_palette_switch_without_footer(self):

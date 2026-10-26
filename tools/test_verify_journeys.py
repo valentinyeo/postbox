@@ -270,243 +270,49 @@ class JourneyRegistryTests(unittest.TestCase):
 
 class HubArchiveEvidenceTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.folder = Path(self.temp.name)
         self.checker = runpy.run_path(str(ROOT / 'tools/verify-wazig/check-hub-archive-evidence.py'))
-        self.reacted = self.checker['PLAIN_REACTED']
-        self.newer = self.checker['PLAIN_NEWER']
-        self.stamp = '2026-10-10T12:00:00Z'
-        self.data = {
-            'plain-dms.json': dict(chats=[self.reacted, self.newer], last_message_ts={
-                self.reacted: '2026-10-10T11:30:00Z', self.newer: '2026-10-10T11:00:00Z'}),
-            'plain-activity.json': dict(chats=[self.reacted, self.newer], archived=False, last_message_ts=self.stamp),
-            'plain.requests.json': [
-                dict(method='POST', wire_path='/fixture/plain-activity', status=200),
-                dict(method='GET', wire_path='/v1/wazig/chats?archived=false&limit=250', status=200,
-                     rows=[dict(jid=chat, archived=False, last_message_ts=self.stamp) for chat in (self.reacted, self.newer)]),
-                self.messages(self.reacted), self.messages(self.newer),
-            ],
-        }
-        for name, archived, chats in [('plain-inbox', False, [self.checker['OTHER']]),
-                                     ('plain-archived', True, [self.checker['GROUP'], self.reacted, self.newer])]:
-            self.data[f'{name}.state.json'] = dict(show_archived=archived, chat_count=len(chats))
-            self.data[f'{name}.chats.json'] = dict(total=len(chats), chats=[dict(id=chat, archived=archived) for chat in chats])
-            (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(10000))
-        (self.folder / 'plain-archive-state.txt').write_text(''.join(f'{chat}\t0\tbaseline\n' for chat in (self.reacted, self.newer)))
-        (self.folder / 'hub-proof.log').write_text('hub-archive plain PASS')
 
-    def messages(self, chat):
-        return dict(method='GET', wire_path=f'/v1/wazig/messages?chat={chat}&limit=20', status=200)
+    def fixture(self):
+        c = self.checker
+        def write(chat, archived):
+            return dict(method='POST', wire_path='/v1/wazig/archive', status=200, body=dict(chat=chat, archived=archived))
+        return [write(c['PLAIN_REACTED'], True), write(c['PLAIN_REACTED'], False), write(c['PLAIN_REACTED'], True),
+                dict(method='POST', wire_path='/fixture/phone-unarchive'),
+                dict(method='GET', wire_path='/v1/wazig/chats', rows=[dict(jid=c['PLAIN_REACTED'], archived=False)]),
+                write(c['PLAIN_NEWER'], True), dict(method='POST', wire_path='/fixture/plain-incoming'),
+                dict(method='GET', wire_path='/v1/wazig/chats', rows=[dict(jid=c['PLAIN_NEWER'], archived=False)]),
+                write(c['OTHER'], True), write(c['PLAIN_NEWER'], True), write(c['PLAIN_REACTED'], True),
+                write(c['PLAIN_REACTED'], False), write(c['PLAIN_REACTED'], True)]
 
-    def write(self, chat, archived, path='/v1/wazig/archive', status=200):
-        return dict(method='POST', wire_path=path, status=status, body=dict(chat=chat, archived=archived))
+    def test_provider_actions_and_phone_events(self):
+        self.checker['check_provider_requests'](self.fixture())
 
-    def check(self):
-        self.checker['check_plain'](self.folder, self.data.__getitem__, 0)
-
-    def test_plain_chats_stay_archived(self):
-        self.check()
-
-    def test_missing_plain_entry_evidence_fails(self):
-        for chat in (self.reacted, self.newer):
-            (self.folder / 'plain-archive-state.txt').write_text(f'{chat}\t0\tbaseline\n')
-            with self.assertRaisesRegex(AssertionError, 'must persist intent'):
-                self.check()
-
-    def test_any_whatsapp_archive_request_fails(self):
-        for chat in [self.reacted, self.newer]:
-            for archived in (True, False):
-                for path in ('/v1/wazig/archive', '/v1/wazig/archive-batch'):
-                    for status in (200, 400, 409):
-                        with self.subTest(chat=chat, archived=archived, path=path, status=status):
-                            self.data['plain.requests.json'].insert(0, self.write(chat, archived, path, status))
-                            with self.assertRaisesRegex(AssertionError, 'NO_WHATSAPP_ARCHIVE_WRITES'):
-                                self.check()
-                            self.data['plain.requests.json'].pop(0)
-
-    def test_hub_row_that_never_moved_or_unread_activity_fails(self):
-        original = copy.deepcopy(self.data['plain.requests.json'])
-        for index in (0, 1):
-            with self.subTest(row=index):
-                self.data['plain.requests.json'] = copy.deepcopy(original)
-                self.data['plain.requests.json'][1]['rows'][index]['last_message_ts'] = '2026-10-10T11:00:00Z'
-                with self.assertRaisesRegex(AssertionError, 'row time never moved'):
-                    self.check()
-        for index in (2, 3):
-            with self.subTest(messages=index):
-                self.data['plain.requests.json'] = copy.deepcopy(original)
-                self.data['plain.requests.json'].pop(index)
-                with self.assertRaisesRegex(AssertionError, 'never read the new activity'):
-                    self.check()
-
-    def test_inbox_return_or_missing_archived_chat_fails(self):
-        for chat in [self.reacted, self.newer]:
-            with self.subTest(chat=chat):
-                rows = self.data['plain-inbox.chats.json']['chats']
-                rows.append(dict(id=chat, archived=False))
+    def test_missing_or_failed_provider_write_is_rejected(self):
+        for index, row in enumerate(self.fixture()):
+            if row['wire_path'] != '/v1/wazig/archive':
+                continue
+            for failure in ('missing', 'failed'):
+                rows = self.fixture()
+                if failure == 'missing':
+                    rows.pop(index)
+                else:
+                    rows[index]['status'] = 502
                 with self.assertRaises(AssertionError):
-                    self.check()
-                rows.pop()
-                rows = self.data['plain-archived.chats.json']['chats']
-                saved = rows[:]
-                rows[:] = [row for row in rows if row['id'] != chat]
-                with self.assertRaises(AssertionError):
-                    self.check()
-                rows[:] = saved
+                    self.checker['check_provider_requests'](rows)
 
+    def test_kept_and_telegram_writes_are_rejected(self):
+        for chat in (self.checker['GROUP'], self.checker['TELEGRAM']):
+            rows = self.fixture()
+            rows.append(dict(method='POST', wire_path='/v1/wazig/archive', status=200, body=dict(chat=chat, archived=True)))
+            with self.assertRaisesRegex(AssertionError, 'KEPT_AND_OTHER_PROVIDERS_STAY_LOCAL'):
+                self.checker['check_provider_requests'](rows)
 
-class HubTelegramArchiveEvidenceTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.folder = Path(self.temp.name)
-        self.checker = runpy.run_path(str(ROOT / 'tools/verify-wazig/check-hub-archive-evidence.py'))
-        self.telegram = self.checker['TELEGRAM']
-        self.newer = self.checker['PLAIN_NEWER']
-        self.other = self.checker['OTHER']
-        group, reacted = self.checker['GROUP'], self.checker['PLAIN_REACTED']
-        self.all_chats = [group, self.other, reacted, self.newer, self.telegram]
-        self.data = {
-            'telegram-dm.json': dict(chat=self.telegram, provider='telegram', account='telegram'),
-            'plain-incoming.json': dict(chats=[self.newer, self.telegram], archived=False, last_message_ts='2026-10-10T14:00:00Z'),
-            'telegram.requests.json': [
-                dict(method='GET', wire_path='/v1/wazig/chats?archived=false&limit=250', status=200,
-                     rows=[dict(jid=chat, last_message_ts='2026-10-10T13:00:00Z', archived=False) for chat in (self.newer, self.telegram)]),
-                dict(method='POST', wire_path='/fixture/plain-incoming', status=200),
-                dict(method='GET', wire_path='/v1/wazig/chats?archived=false&limit=250', status=200,
-                     rows=[dict(jid=chat, last_message_ts='2026-10-10T14:00:00Z', archived=False) for chat in (self.newer, self.telegram)]),
-                dict(method='GET', wire_path=f'/v1/wazig/messages?chat={self.newer}&limit=20', status=200),
-            ],
-        }
-        for name, archived, chats in [
-            ('telegram-only', False, [self.telegram]), ('telegram-empty', False, []),
-            ('telegram-unarchived', False, [self.telegram]),
-            ('telegram-bulk-empty', False, []), ('telegram-restart-empty', False, []),
-            ('telegram-restart-archived', True, self.all_chats), ('plain-incoming-inbox', False, [self.newer, self.telegram]),
-            ('plain-incoming-archived', True, [group, self.other, reacted]),
-            ('plain-rearchived-inbox', False, []),
-            ('plain-rearchived-archived', True, self.all_chats),
-        ]:
-            self.data[f'{name}.state.json'] = dict(view='all', show_archived=archived, chat_count=len(chats), pending_archives=0,
-                                                 selected=dict(id=self.telegram) if chats else None)
-            self.data[f'{name}.chats.json'] = dict(total=len(chats), chats=[dict(id=chat, archived=archived,
-                provider='telegram' if chat == self.telegram else 'whatsapp', account='telegram' if chat == self.telegram else 'personal') for chat in chats])
-            (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(10000))
-            (self.folder / f'{name}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526')
-        (self.folder / 'telegram-archive-state.txt').write_text(''.join(
-            (f"telegram\ttelegram\t{chat}\n" if chat == self.telegram else
-             f"{chat}\t{1 if chat == group else 0}\t2026-10-10T14:00:00Z\n") for chat in self.all_chats))
-        (self.folder / 'actions.log').write_text('keys: %i\nkeys: ^a\nkeys: ^e\n')
-        (self.folder / 'hub-proof.log').write_text('hub-archive telegram-single-bulk-restart-incoming PASS')
-
-    def write(self, chat, archived=True, status=200, path='/v1/wazig/archive'):
-        return dict(method='POST', wire_path=path, status=status, body=dict(chat=chat, archived=archived))
-
-    def check(self):
-        self.checker['check_telegram'](self.folder, self.data.__getitem__)
-
-    def test_hub_unsupported_providers_and_whatsapp_use_local_archive_route(self):
-        source = (ROOT / 'src/main.zig').read_text()
-        archive = source.split('fn archiveChat(', 1)[1].split('fn archiveChatKey(', 1)[0]
-        local_route = archive.split('state.setLocalArchived(key, !unarchive)', 1)[0]
-        self.assertIn('unifiedHub(a)', local_route)
-        self.assertIn('key.provider == .whatsapp', local_route)
-        self.assertIn('key.provider == .telegram', local_route)
-        self.assertIn('key.provider == .signal', local_route)
-
-    def test_complete_local_archive_and_return_proof_passes(self):
-        self.check()
-
-    def test_any_archive_request_for_any_chat_fails(self):
-        for chat in (self.telegram, self.newer, self.other):
-            for archived in (True, False):
-                for status in (200, 400, 409, 502):
-                    for path in ('/v1/wazig/archive', '/v1/wazig/archive-batch'):
-                        with self.subTest(chat=chat, archived=archived, status=status, path=path):
-                            self.data['telegram.requests.json'].append(self.write(chat, archived, status, path))
-                            with self.assertRaisesRegex(AssertionError, 'NO_WHATSAPP_ARCHIVE_WRITES'):
-                                self.check()
-                            self.data['telegram.requests.json'].pop()
-
-    def test_missing_plain_entries_after_restart_evidence_fail(self):
-        path = self.folder / 'telegram-archive-state.txt'
-        original = path.read_text()
-        for chat in (self.newer, self.other, self.checker['PLAIN_REACTED']):
-            path.write_text(''.join(line for line in original.splitlines(keepends=True) if not line.startswith(chat + '\t')))
-            with self.assertRaisesRegex(AssertionError, 'must retain durable non-kept intent'):
-                self.check()
-
-    def test_hub_row_time_must_move_for_both_chats_and_stay_unarchived(self):
-        original = copy.deepcopy(self.data['telegram.requests.json'])
-        for index in (0, 1):
-            for field, value in [('archived', True), ('last_message_ts', '2026-10-10T13:00:00Z')]:
-                with self.subTest(index=index, field=field):
-                    self.data['telegram.requests.json'] = copy.deepcopy(original)
-                    self.data['telegram.requests.json'][2]['rows'][index][field] = value
-                    with self.assertRaises(AssertionError):
-                        self.check()
-
-    def test_app_must_read_the_new_message_of_the_archived_chat(self):
-        self.data['telegram.requests.json'].pop()
-        with self.assertRaisesRegex(AssertionError, 'never read the new message'):
-            self.check()
-
-    def test_inbox_return_missing_restart_archive_or_wrong_provider_fails(self):
-        for name in ('telegram-empty', 'telegram-bulk-empty', 'telegram-restart-empty', 'plain-incoming-inbox', 'plain-rearchived-inbox'):
-            with self.subTest(name=name):
-                self.data[f'{name}.chats.json']['chats'].append(dict(id=self.telegram, archived=False))
-                with self.assertRaises(AssertionError):
-                    self.check()
-                self.data[f'{name}.chats.json']['chats'].pop()
-        for name in ('telegram-restart-archived', 'plain-incoming-inbox', 'plain-rearchived-archived'):
-            rows = self.data[f'{name}.chats.json']['chats']
-            row = next(row for row in rows if row['id'] == self.telegram)
-            row['provider'] = 'whatsapp'
+    def test_missing_phone_or_incoming_state_is_rejected(self):
+        for index in (4, 7):
+            rows = self.fixture()
+            rows[index]['rows'][0]['archived'] = True
             with self.assertRaises(AssertionError):
-                self.check()
-            row['provider'] = 'telegram'
-            rows.remove(row)
-            with self.assertRaises(AssertionError):
-                self.check()
-            rows.append(row)
-
-    def test_both_ordinary_archives_must_return_unarchived_on_incoming(self):
-        rows = self.data['plain-incoming-inbox.chats.json']['chats']
-        for row in list(rows):
-            with self.subTest(chat=row['id']):
-                row['archived'] = True
-                with self.assertRaises(AssertionError):
-                    self.check()
-                row['archived'] = False
-                rows.remove(row)
-                with self.assertRaises(AssertionError):
-                    self.check()
-                rows.append(row)
-
-    def test_kept_and_unchanged_archives_must_remain_after_incoming(self):
-        rows = self.data['plain-incoming-archived.chats.json']['chats']
-        for row in list(rows):
-            with self.subTest(chat=row['id']):
-                row['archived'] = False
-                with self.assertRaises(AssertionError):
-                    self.check()
-                row['archived'] = True
-                rows.remove(row)
-                with self.assertRaises(AssertionError):
-                    self.check()
-                rows.append(row)
-
-    def test_missing_explicit_unarchive_proof_fails(self):
-        self.data['telegram-unarchived.chats.json']['chats'].clear()
-        with self.assertRaises(AssertionError):
-            self.check()
-
-    def test_lost_plain_state_fails(self):
-        path = self.folder / 'telegram-archive-state.txt'
-        path.write_text(''.join(line for line in path.read_text().splitlines(keepends=True) if not line.startswith('telegram\ttelegram\t' + self.telegram)))
-        with self.assertRaises(ValueError):
-            self.check()
+                self.checker['check_provider_requests'](rows)
 
 
 class HubLocalArchiveJourneyTests(unittest.TestCase):

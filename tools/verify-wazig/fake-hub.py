@@ -261,12 +261,12 @@ class HubArchiveHandler(Handler):
         query = parse_qs(url.query)
         if url.path == '/v1/wazig/chats':
             with self.state.lock:
-                archived = False
+                archived = getattr(self.state, "archive_overrides", {}).get(ARCHIVE_GROUP, False)
                 stamp = self.state.archive_stamp
             rows = [dict(jid=ARCHIVE_GROUP, name='Verification Group', provider='whatsapp', kind='group',
                          last_message_ts=stamp, archived=archived, unread=True, unread_count=1),
                     dict(jid=ARCHIVE_OTHER, name='Verification Inbox', provider='whatsapp', kind='direct',
-                         last_message_ts='2026-10-10T12:00:00Z', archived=False, unread=False, unread_count=0)]
+                         last_message_ts='2026-10-10T12:00:00Z', archived=getattr(self.state, 'archive_overrides', {}).get(ARCHIVE_OTHER, False), unread=False, unread_count=0)]
             with self.state.lock:
                 for jid, plain in self.state.plain_dms.items():
                     rows.append(dict(jid=jid, name='Fixture Contact' if jid == PLAIN_REACTED else 'Fixture Contact Two',
@@ -314,6 +314,8 @@ class HubArchiveHandler(Handler):
         if self.path == '/fixture/archive-incoming' and body == {}:
             with self.state.lock:
                 self.state.archive_stamp = '2026-10-10T13:00:00Z'
+                self.state.archive_overrides = getattr(self.state, 'archive_overrides', {})
+                self.state.archive_overrides[ARCHIVE_GROUP] = False
             self.respond(200, {'archived': False, 'last_message_ts': self.state.archive_stamp, 'unread_count': 1})
         elif self.path == '/fixture/plain-dms' and body == {}:
             with self.state.lock:
@@ -336,6 +338,37 @@ class HubArchiveHandler(Handler):
                 for chat in (PLAIN_NEWER, ARCHIVE_TELEGRAM):
                     self.state.plain_dms[chat].update(archived=False, after=stamp, incoming=True)
             self.respond(200, {'chats': [PLAIN_NEWER, ARCHIVE_TELEGRAM], 'archived': False, 'last_message_ts': stamp})
+        elif self.path == '/fixture/phone-unarchive' and body == {}:
+            with self.state.lock:
+                self.state.plain_dms[PLAIN_REACTED]['archived'] = False
+            self.respond(200, {'chat': PLAIN_REACTED, 'archived': False})
+        elif self.path == '/v1/wazig/archive-batch' and set(body) == {'account', 'chats', 'archived'}:
+            results = []
+            with self.state.lock:
+                for item in body['chats']:
+                    chat = item['chat']
+                    if chat in (PLAIN_REACTED, PLAIN_NEWER) and chat in self.state.plain_dms:
+                        self.state.plain_dms[chat]['archived'] = body['archived']
+                    elif chat in (ARCHIVE_GROUP, ARCHIVE_OTHER):
+                        self.state.archive_overrides = getattr(self.state, 'archive_overrides', {})
+                        self.state.archive_overrides[chat] = body['archived']
+                    else:
+                        results.append({'chat': chat, 'ok': False})
+                        continue
+                    results.append({'chat': chat, 'ok': True})
+            self.respond(200, {'results': results}, body=body)
+        elif self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and isinstance(body['archived'], bool):
+            chat = body['chat']
+            with self.state.lock:
+                if chat in (ARCHIVE_GROUP, ARCHIVE_OTHER):
+                    self.state.archive_overrides = getattr(self.state, 'archive_overrides', {})
+                    self.state.archive_overrides[chat] = body['archived']
+                elif chat in (PLAIN_REACTED, PLAIN_NEWER) and chat in self.state.plain_dms:
+                    self.state.plain_dms[chat]['archived'] = body['archived']
+                else:
+                    self.respond(400, {'error': 'unexpected archive fixture write'}, body=body)
+                    return
+            self.respond(200, {'status': 'ok'}, body=body)
         elif self.path == '/v1/wazig/mark-read' and body.get('chat') in (ARCHIVE_GROUP, ARCHIVE_OTHER, PLAIN_REACTED, PLAIN_NEWER, ARCHIVE_TELEGRAM):
             self.respond(200, {'status': 'ok'}, body=body)
         else:
@@ -463,7 +496,17 @@ class ShowArchivedHandler(PaletteArchivedHandler):
         if not self.authorized():
             return
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
-        if self.path == '/v1/wazig/mark-read':
+        if self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and isinstance(body['archived'], bool):
+            rows = getattr(self.state, 'show_archived_rows', None)
+            if rows is None:
+                self.state.show_archived_rows = rows = show_archived_rows()
+            row = next((row for row in rows if row['jid'] == body['chat'] and row['provider'] == 'whatsapp'), None)
+            if row is None:
+                self.respond(400, {'error': 'only WhatsApp archives remotely'}, body=body)
+                return
+            row['archived'] = body['archived']
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/mark-read':
             self.respond(200, {'status': 'ok'}, body=body)
         else:
             self.respond(400, {'error': 'unexpected archive-switch write'}, body=body)
@@ -492,7 +535,11 @@ class ArchiveInboxHandler(Handler):
         url = urlsplit(self.path)
         query = parse_qs(url.query)
         if url.path == '/v1/wazig/chats':
-            rows = [] if query.get('archived') == ['true'] else archive_inbox_rows()
+            rows = archive_inbox_rows()
+            for row in rows:
+                if row['provider'] == 'whatsapp' and self.state.archived.get(row['jid'], False):
+                    row['archived'] = True
+            rows = [row for row in rows if row.get('archived', False) == (query.get('archived') == ['true'])]
             self.respond(200, rows, rows=rows)
         elif url.path == '/v1/wazig/messages':
             chat = query.get('chat', [''])[0]
@@ -519,6 +566,7 @@ class ArchiveInboxHandler(Handler):
             if row is None or row['provider'] != 'whatsapp':
                 self.respond(400, {'error': 'only WhatsApp archives remotely'}, body=body)
                 return
+            self.state.archived[body['chat']] = True
             self.respond(200, {'status': 'ok'}, body=body)
         else:
             self.respond(400, {'error': 'unexpected archive workload write'}, body=body)

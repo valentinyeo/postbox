@@ -149,7 +149,7 @@ def check_integration():
         'persistPendingReads': '695d922f67253237c5b26207d3f37f19d7274a5a99a33e7e91c612e4f230351e',
         'msgCacheGet': '35de7a11c5298f2b4f7954cda6b73e8b4bb9d54a82e4053b32cc8f4745ac593e',
         'loadMsgCacheDisk': 'd86c62bd4d9c3a242afcd9aeaa3b757af3e09c54fe288a2e73e19dbf31654a19',
-        'archiveChat': 'c12639934a6e554864b64dda639eb155107387265a307eaec5d677d1f986aa46',
+        'archiveChat': '8e1ebeac79f217f5f22397c35d1b9149f8e92d0337f8453b8fcd4653992dfdcd',
         'startNextArchive': '989940f8cfbc2655363b514f3a7c205f1ff581c2e3a8f1b0eafe791741dc416b',
     }
     for name, expected in routing_function_sha256.items():
