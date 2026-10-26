@@ -13,6 +13,12 @@ pub const Key = struct {
     }
 };
 
+pub fn providerOfId(id: []const u8) ?transport.Provider {
+    if (std.mem.startsWith(u8, id, "telegram:")) return .telegram;
+    if (std.mem.startsWith(u8, id, "signal:")) return .signal;
+    return null;
+}
+
 pub const Stored = struct {
     provider: transport.Provider = .whatsapp,
     account: [max_account_len]u8 = @splat(0),

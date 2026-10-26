@@ -80,6 +80,7 @@ pub const Entry = struct {
     keep: bool = false,
     checked: i64 = 0,
     returned: bool = false,
+    phone: bool = false,
     held: bool = false,
     held_ts: [max_ts]u8 = undefined,
     held_ts_len: u8 = 0,
@@ -227,7 +228,8 @@ pub const State = struct {
     }
 
     pub fn returnToInbox(self: *State, jid: []const u8) bool {
-        const entry = self.slot(jid) orelse return false;
+        const entry = self.slotReclaiming(jid) orelse return false;
+        entry.phone = false;
         entry.keep = false;
         entry.ts_len = 0;
         entry.checked = 0;
@@ -247,6 +249,43 @@ pub const State = struct {
         return entry;
     }
 
+    fn reclaimPhone(self: *State) bool {
+        for (self.entries[0..self.count], 0..) |*entry, index| {
+            if (entry.provider == .whatsapp and entry.phone and !entry.keep and !entry.returned) {
+                self.removeAt(index);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn slotReclaiming(self: *State, jid: []const u8) ?*Entry {
+        if (jid.len == 0 or jid.len > max_jid) return null;
+        if (self.find(jid) == null and self.count >= max_entries and !self.reclaimPhone()) return null;
+        return self.slot(jid);
+    }
+
+    pub fn observePhone(self: *State, jid: []const u8, ts: []const u8) bool {
+        if (ts.len == 0) return false;
+        if (self.find(jid)) |index| {
+            const existing = &self.entries[index];
+            if (existing.keep or existing.returned or existing.phone) return false;
+            existing.phone = true;
+            return true;
+        }
+        const entry = self.slot(jid) orelse return false;
+        entry.phone = true;
+        const n = @min(ts.len, max_ts);
+        @memcpy(entry.ts[0..n], ts[0..n]);
+        entry.ts_len = @intCast(n);
+        return true;
+    }
+
+    pub fn isPhone(self: *const State, jid: []const u8) bool {
+        const index = self.find(jid) orelse return false;
+        return self.entries[index].phone;
+    }
+
     pub fn setBaseline(self: *State, jid: []const u8, ts: []const u8) void {
         const entry = self.slot(jid) orelse return;
         const n = @min(ts.len, max_ts);
@@ -255,7 +294,8 @@ pub const State = struct {
     }
 
     pub fn archive(self: *State, jid: []const u8, ts: []const u8, keep: bool) bool {
-        const entry = self.slot(jid) orelse return false;
+        const entry = self.slotReclaiming(jid) orelse return false;
+        entry.phone = false;
         entry.keep = keep;
         entry.returned = false;
         if (ts.len > 0) self.setBaseline(jid, ts);
@@ -268,7 +308,8 @@ pub const State = struct {
             self.entries[index].keep = false;
             return;
         }
-        const entry = self.slot(jid) orelse return;
+        const entry = self.slotReclaiming(jid) orelse return;
+        entry.phone = false;
         entry.keep = true;
     }
 
@@ -289,6 +330,8 @@ pub const State = struct {
                 std.fmt.bufPrint(out[len..], "{s}\t{s}\t{s}\t{d}\t{s}\n", .{ @tagName(entry.provider), entry.account[0..entry.account_len], entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break
             else if (entry.returned)
                 std.fmt.bufPrint(out[len..], "{s}\t{d}\t{s}\treturned\n", .{ entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break
+            else if (entry.phone)
+                std.fmt.bufPrint(out[len..], "{s}\t{d}\t{s}\tphone\n", .{ entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break
             else
                 std.fmt.bufPrint(out[len..], "{s}\t{d}\t{s}\n", .{ entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break;
             len += line.len;
@@ -323,7 +366,9 @@ pub const State = struct {
             const ts = fields.next() orelse "";
             const entry = self.slot(jid) orelse continue;
             entry.keep = std.mem.eql(u8, keep, "1");
-            entry.returned = std.mem.eql(u8, fields.next() orelse "", "returned");
+            const marker = fields.next() orelse "";
+            entry.returned = std.mem.eql(u8, marker, "returned");
+            entry.phone = std.mem.eql(u8, marker, "phone");
             const n = @min(ts.len, max_ts);
             @memcpy(entry.ts[0..n], ts[0..n]);
             entry.ts_len = @intCast(n);
@@ -829,4 +874,66 @@ test "WhatsApp archive lines without a returned field load and save unchanged" {
     try std.testing.expect(!state.isReturned("kept@g.us"));
     var buffer: [512]u8 = undefined;
     try std.testing.expectEqualStrings("plain@g.us\t0\tbaseline\nkept@g.us\t1\tbaseline\n", state.format(&buffer));
+}
+
+test "IGSH-920 user actions reclaim only phone observed entries when the table is full" {
+    var state = State{};
+    var name: [32]u8 = undefined;
+    try std.testing.expect(state.archive("mine@s.whatsapp.net", "baseline", false));
+    for (0..max_entries - 1) |i| {
+        const jid = std.fmt.bufPrint(&name, "{d}@s.whatsapp.net", .{i}) catch unreachable;
+        try std.testing.expect(state.observePhone(jid, "2026-10-10T10:00:00Z"));
+    }
+    try std.testing.expectEqual(@as(usize, max_entries), state.count);
+    try std.testing.expect(!state.observePhone("extra@s.whatsapp.net", "2026-10-10T10:00:00Z"));
+    try std.testing.expect(state.find("extra@s.whatsapp.net") == null);
+    try std.testing.expect(state.returnToInbox("phone@s.whatsapp.net"));
+    try std.testing.expectEqual(@as(usize, max_entries), state.count);
+    try std.testing.expect(state.find("0@s.whatsapp.net") == null);
+    try std.testing.expect(state.isReturned("phone@s.whatsapp.net"));
+    try std.testing.expect(state.find("mine@s.whatsapp.net") != null);
+    try std.testing.expect(state.archive("kept@s.whatsapp.net", "baseline", true));
+    try std.testing.expect(state.find("1@s.whatsapp.net") == null);
+    try std.testing.expect(state.isKept("kept@s.whatsapp.net"));
+    const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
+    try std.testing.expect(state.isArchived(Key{ .provider = .whatsapp, .account = "", .id = "mine@s.whatsapp.net" }, false));
+}
+
+test "IGSH-920 a table of user and returned entries is never reclaimed" {
+    var state = State{};
+    var name: [32]u8 = undefined;
+    for (0..max_entries) |i| {
+        const jid = std.fmt.bufPrint(&name, "{d}@s.whatsapp.net", .{i}) catch unreachable;
+        if (i % 2 == 0) try std.testing.expect(state.archive(jid, "baseline", false)) else try std.testing.expect(state.returnToInbox(jid));
+    }
+    try std.testing.expect(!state.returnToInbox("new@s.whatsapp.net"));
+    try std.testing.expect(!state.archive("new@s.whatsapp.net", "baseline", false));
+    try std.testing.expectEqual(@as(usize, max_entries), state.count);
+    try std.testing.expect(state.find("0@s.whatsapp.net") != null);
+    try std.testing.expect(state.isReturned("1@s.whatsapp.net"));
+}
+
+test "IGSH-920 phone entries round trip with a marker and lose it when the user acts" {
+    var state = State{};
+    try std.testing.expect(state.observePhone("a@s.whatsapp.net", "2026-10-10T10:00:00Z"));
+    try std.testing.expect(!state.observePhone("a@s.whatsapp.net", "2026-10-10T11:00:00Z"));
+    try std.testing.expect(!state.observePhone("b@s.whatsapp.net", ""));
+    try std.testing.expect(state.archive("old@s.whatsapp.net", "2026-10-10T09:00:00Z", false));
+    try std.testing.expect(state.observePhone("old@s.whatsapp.net", "2026-10-10T09:00:00Z"));
+    try std.testing.expect(state.isPhone("old@s.whatsapp.net"));
+    try std.testing.expectEqualStrings("2026-10-10T09:00:00Z", state.baseline("old@s.whatsapp.net").?);
+    try std.testing.expect(state.archive("kept@s.whatsapp.net", "2026-10-10T09:00:00Z", true));
+    try std.testing.expect(!state.observePhone("kept@s.whatsapp.net", "2026-10-10T09:00:00Z"));
+    try std.testing.expect(!state.isPhone("kept@s.whatsapp.net"));
+    state.remove("old@s.whatsapp.net");
+    state.remove("kept@s.whatsapp.net");
+    var buffer: [256]u8 = undefined;
+    const text = state.format(&buffer);
+    try std.testing.expectEqualStrings("a@s.whatsapp.net\t0\t2026-10-10T10:00:00Z\tphone\n", text);
+    var loaded = State{};
+    loaded.parse(text);
+    try std.testing.expect(loaded.isPhone("a@s.whatsapp.net"));
+    try std.testing.expect(loaded.archive("a@s.whatsapp.net", "", false));
+    try std.testing.expect(!loaded.isPhone("a@s.whatsapp.net"));
+    try std.testing.expectEqualStrings("a@s.whatsapp.net\t0\t2026-10-10T10:00:00Z\n", loaded.format(&buffer));
 }

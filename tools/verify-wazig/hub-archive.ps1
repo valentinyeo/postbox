@@ -136,8 +136,46 @@ function Invoke-HubArchiveJourney($Session, [string]$Messages, $Start) {
     Save-HubArchive $Session $Messages restart
     Invoke-HubPlainJourney $Session $Messages
     $app = Invoke-HubTelegramArchiveJourney $Session $Messages $Start
+    Invoke-HubUnknownIdJourney $Session $Messages
     Save-Screen $Session after
     return $app
+}
+
+function Read-ControlRefusal($Session, [string]$Command, [string[]]$Arguments, [int]$TimeoutMilliseconds = 15000) {
+    $start = [Diagnostics.ProcessStartInfo]::new($Session.ctl)
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.ArgumentList.Add($Command)
+    foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
+    $start.Environment['USERNAME'] = $Session.username
+    $child = [Diagnostics.Process]::Start($start)
+    try {
+        $output = $child.StandardOutput.ReadToEndAsync()
+        $errorOutput = $child.StandardError.ReadToEndAsync()
+        Assert-That ($child.WaitForExit($TimeoutMilliseconds)) "Control client timed out after $TimeoutMilliseconds ms: $Command"
+        return $output.GetAwaiter().GetResult() + $errorOutput.GetAwaiter().GetResult()
+    } finally {
+        if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
+        $child.Dispose()
+    }
+}
+
+function Invoke-HubUnknownIdJourney($Session, [string]$Messages) {
+    foreach ($id in @('telegram:user:99999', 'signal:ghost', '99999')) {
+        foreach ($command in @('archive', 'unarchive')) {
+            $reply = Read-ControlRefusal $Session $command @($id)
+            Assert-That ($reply -match 'Unknown chat id') "Control $command of unknown id $id was not refused: $reply"
+            Assert-That ($reply -notmatch '"ok"\s*:\s*true') "Control $command of unknown id $id reported success: $reply"
+        }
+    }
+    $state = Read-Control $Session status
+    Assert-That ($state.pending_archives -eq 0) 'Unknown ids left a pending archive'
+    Assert-That ((Get-AnyHubArchiveWrites $Session).Count -eq 0) 'Unknown ids caused a WhatsApp archive request'
+    $files = @(Get-ChildItem $Messages -Filter 'hub-*-archive-state.txt')
+    Assert-That ($files.Count -eq 1) 'Hub archive state missing or ambiguous'
+    Copy-Item $files[0].FullName (Join-Path $Session.evidence 'unknown-ids-archive-state.txt')
+    Hub-Pass $Session unknown-ids | Out-Host
 }
 
 function Wait-HubEmptyInbox($Session) {

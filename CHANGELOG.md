@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IGSH-920: Unarchiving a chat works again when many chats are archived on your phone, because those phone-archived entries no longer block the archive list. Archive commands for a Telegram or Signal id that is not in your chats are now refused instead of being saved as a WhatsApp entry.
+
 - IGSH-902: On the hub, archiving a WhatsApp chat is now kept in Wazig only and no archive request is sent to WhatsApp. A new message from someone else brings an archived chat back to the inbox right away. Your own messages and reactions do not. Chats already archived on your phone show as archived the first time, then follow the same rule, and the choice survives a restart.
 
 - IGSH-531: Remove desktop direct Slack, Telegram and WhatsApp connectors and TDLib release dependencies. Accounts and linking stay managed on the hub; missing hub configuration no longer falls back to local connectors.

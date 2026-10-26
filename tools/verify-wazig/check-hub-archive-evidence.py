@@ -110,6 +110,14 @@ def check_telegram(folder, read):
     assert 'hub-archive telegram-single-bulk-restart-incoming PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
 
 
+def check_unknown_ids(folder):
+    text = (folder / 'unknown-ids-archive-state.txt').read_text(encoding='utf-8-sig')
+    for unknown in ('telegram:user:99999', 'signal:ghost'):
+        assert unknown not in text, 'UNKNOWN_ID_NOT_SAVED: ' + unknown
+    assert not [line for line in text.splitlines() if line.split('\t')[0] == '99999'], 'UNKNOWN_ID_NOT_SAVED: bare id'
+    assert 'hub-archive unknown-ids PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
+
+
 def check_hub_archive(folder):
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))
@@ -158,6 +166,7 @@ def check_hub_archive(folder):
         assert f'hub-archive {phase} PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
     check_plain(folder, read, len(restart_requests))
     check_telegram(folder, read)
+    check_unknown_ids(folder)
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     for row in requests:
         if row['method'] == 'SSE':

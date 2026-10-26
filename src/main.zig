@@ -10948,7 +10948,7 @@ fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []c
     }
     if (key.provider == .whatsapp and unifiedHub(a)) {
         if (provider_archived) {
-            if (state.find(jid) == null and ts.len > 0 and state.archive(jid, ts, false)) saveArchiveState(a);
+            if (state.observePhone(jid, ts)) saveArchiveState(a);
         } else if (state.isReturned(jid)) {
             state.remove(jid);
             saveArchiveState(a);
@@ -11181,6 +11181,7 @@ fn visibleChatIndex(a: *const App, key: chat_key.Key) ?usize {
 fn chatProvider(a: *App, jid: []const u8) transport.Provider {
     if (a.selected_chat < a.chat_count and std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), jid)) return a.chats[a.selected_chat].provider;
     for (a.chats[0..a.chat_count]) |*chat| if (std.mem.eql(u8, chat.jid.slice(), jid)) return chat.provider;
+    if (chat_key.providerOfId(jid)) |provider| return provider;
     if (std.mem.indexOfScalar(u8, jid, '@') != null) return .whatsapp;
     for (&a.slack_installations) |*installation| {
         if (slackChatById(a, installation.team_id.slice(), jid) != null) return .slack;
@@ -11193,6 +11194,11 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
     const unarchive = action == .unarchive;
     if (key.provider == .slack or (unifiedHub(a) and (key.provider == .whatsapp or key.provider == .telegram or key.provider == .signal))) {
         const state = a.archive_state orelse return "Archive is not available";
+        if (source == .control and unifiedHub(a) and visibleChatIndex(a, key) == null) switch (key.provider) {
+            .telegram, .signal => return "Unknown chat id",
+            .whatsapp => if (std.mem.indexOfScalar(u8, jid, '@') == null) return "Unknown chat id",
+            .slack => {},
+        };
         if (key.provider == .whatsapp and (jid.len == 0 or jid.len > archive_rules.max_jid)) return "Unknown chat id";
         const provider_archived = if (visibleChatIndex(a, key)) |index| a.chats[index].provider_archived else false;
         const row_stamp = if (visibleChatIndex(a, key)) |index| a.chats[index].timestamp.slice() else "";

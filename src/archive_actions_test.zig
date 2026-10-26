@@ -283,6 +283,7 @@ fn chatProvider(a: *App, jid: []const u8) Provider {
     for (a.chats[0..a.chat_count]) |*chat| {
         if (std.mem.eql(u8, chat.jid.slice(), jid)) return chat.provider;
     }
+    if (chat_key.providerOfId(jid)) |provider| return provider;
     return .whatsapp;
 }
 fn removeChatRow(a: *App, removed: usize) void {
@@ -1818,6 +1819,57 @@ test "IGSH-833 bulk plain group and direct chat return on an incoming message wh
             a.show_archived = true;
             try std.testing.expectEqual(keep, archiveInboxRow(&a, row, parsed.value.object) != null);
             if (inbox) |chat| try std.testing.expect(!chat.archived);
+        }
+    }
+}
+
+test "a plain unarchive succeeds when phone archived chats fill the table and user archives stay" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
+    a.unified_hub = true;
+    a.show_archived = true;
+    a.cache_tag.set("hub-cache");
+    a.chats[0].provider = .whatsapp;
+    a.chats[0].account.set("fixture-account");
+    a.chats[0].jid.set("personal:phone@s.whatsapp.net");
+    a.chats[0].archived = true;
+    a.chats[0].provider_archived = true;
+    var key = chat_key.of(&a.chats[0]);
+    key.id = "personal:phone@s.whatsapp.net";
+    key.account = "fixture-account";
+    const mine = chat_key.Key{ .provider = .whatsapp, .account = "fixture-account", .id = "personal:mine@s.whatsapp.net" };
+    try std.testing.expect(archiveChat(&a, mine, .archive, .shortcut) == null);
+    var name: [64]u8 = undefined;
+    for (0..archive_rules.max_entries - 1) |i| {
+        const jid = try std.fmt.bufPrint(&name, "personal:{d}@s.whatsapp.net", .{i});
+        const other = chat_key.Key{ .provider = .whatsapp, .account = "fixture-account", .id = jid };
+        try std.testing.expect(!holdKeptArchived(&a, other, true, "2026-10-10T10:00:00Z"));
+    }
+    try std.testing.expectEqual(archive_rules.max_entries, state.count);
+    try std.testing.expect(archiveChat(&a, key, .unarchive, .shortcut) == null);
+    try std.testing.expectEqual(archive_rules.max_entries, state.count);
+    try std.testing.expect(!state.isArchived(key, true));
+    try std.testing.expect(state.isArchived(mine, false));
+    try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+    try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
+}
+
+test "control archive of an unknown Telegram Signal or bare id is rejected and never saved as WhatsApp" {
+    for ([_][]const u8{ "telegram:user:99999", "signal:ghost", "99999" }) |id| {
+        for ([_]archive_rules.Action{ .archive, .unarchive }) |action| {
+            var state = archive_rules.State{};
+            var a = fixture(&state);
+            defer a.allocator.free(a.pending_archives);
+            defer a.bulk.deinit(a.allocator);
+            a.unified_hub = true;
+            a.cache_tag.set("hub-cache");
+            const problem = archiveRequest(&a, id, action) orelse return error.UnknownIdWasSaved;
+            try std.testing.expectEqualStrings("Unknown chat id", problem);
+            try std.testing.expectEqual(@as(usize, 0), state.count);
+            try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+            try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
         }
     }
 }
