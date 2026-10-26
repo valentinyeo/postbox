@@ -368,6 +368,7 @@ PALETTE_ARCHIVED = [
     ('personal:15550000031@s.whatsapp.net', 'Archived Person Alpha', 'whatsapp', 'direct', '2026-09-10T12:00:00Z'),
     ('telegram:user:7001001', 'Archived Telegram Beta', 'telegram', 'direct', '2026-09-09T12:00:00Z'),
     ('slack:T0PALETTE:C0000000002', 'Archived Slack Gamma', 'slack', 'group', '2026-09-08T12:00:00Z'),
+    ('signal:fixture-search', 'Archived Signal Delta', 'signal', 'direct', '2026-09-07T12:00:00Z'),
 ]
 
 
@@ -400,9 +401,15 @@ class PaletteArchivedHandler(Handler):
             if chat not in known:
                 self.respond(404, {'error': 'unknown palette chat'})
                 return
-            self.respond(200, [dict(MsgID='PALETTE-HISTORY', ChatJID=chat, Timestamp=known[chat][4],
-                                    Text='Synthetic palette history', FromMe=False,
-                                    SenderName='Fixture Sender', SenderJID='fixture-sender')])
+            sent = 8 if chat == 'telegram:user:7001001' else 1
+            rows = [dict(MsgID=f'PALETTE-SENT-{number}', ChatJID=chat, Timestamp=known[chat][4],
+                         Text='Synthetic sent history', FromMe=True, SenderName='You', SenderJID='self')
+                    for number in range(sent)]
+            rows.extend(dict(MsgID=f'PALETTE-INCOMING-{number}', ChatJID=chat, Timestamp=known[chat][4],
+                             Text='Synthetic palette history', FromMe=False,
+                             SenderName='Fixture Sender', SenderJID='fixture-sender')
+                        for number in range(1 if sent == 8 else 30))
+            self.respond(200, rows)
         elif url.path == '/v1/wazig/groups':
             self.respond(200, [])
         elif url.path == '/v1/wazig/events':

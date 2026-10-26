@@ -54,6 +54,7 @@ const chat_key = @import("chat_key.zig");
 const chat_rows = @import("chat_rows.zig");
 const chat_cache = @import("chat_cache.zig");
 const people_index = @import("people_index.zig");
+const search_rank = @import("search_rank.zig");
 const unfurl = @import("unfurl.zig");
 const shortcuts = @import("shortcuts.zig");
 const control_api = @import("control.zig");
@@ -1010,6 +1011,7 @@ const App = struct {
     msg_cache: [max_msg_cache]MsgCacheEntry = [_]MsgCacheEntry{.{}} ** max_msg_cache,
     hub_older: HubOlder = .{},
     msg_cache_len: usize = 0,
+    search_counts: std.ArrayList(struct { identity: chat_key.Stored, sent: u32 }) = .empty,
     cache_tag: Utf8Text(32) = .{},
     cache_tag_gen: u64 = 0,
     cache_tag_probe_again: bool = false,
@@ -2144,6 +2146,12 @@ fn msgCacheStore(a: *App, key: chat_key.Key, data: []const u8) void {
     entry.account.set(key.account);
     entry.jid.set(key.id);
     entry.data = copy;
+    for (a.search_counts.items) |*count| {
+        if (chat_key.Key.eql(count.identity.key(), key)) {
+            count.sent = search_rank.sentCount(a.allocator, data);
+            break;
+        }
+    }
     if (a.startup_probe_pending or (!unifiedHub(a) and (key.provider != .whatsapp or !std.mem.eql(u8, key.account, a.cache_tag.slice())))) return;
     if (msgCacheDiskPath(a, key.id)) |path| {
         defer a.allocator.free(path);
@@ -2927,6 +2935,7 @@ fn unfurlSmoke(init: std.process.Init) u8 {
     defer {
         persistDrafts(app);
         app.draft_store.deinit(app.allocator);
+        app.search_counts.deinit(app.allocator);
     }
     defer app.people.deinit();
     defer app.allocator.free(app.palette_items);
@@ -12089,7 +12098,7 @@ fn paletteLayout(a: *App) void {
     }
 }
 
-fn appendPalettePeople(a: *App, query_wide: []const u16, scores: []i32, scored: bool) void {
+fn appendPalettePeople(a: *App, query_wide: []const u16, scores: []i32) void {
     if (a.palette_links_mode or a.palette_accounts_mode or a.palette_views_mode or query_wide.len == 0) return;
     const query = std.unicode.utf16LeToUtf8Alloc(a.allocator, query_wide) catch return;
     defer a.allocator.free(query);
@@ -12103,8 +12112,9 @@ fn appendPalettePeople(a: *App, query_wide: []const u16, scores: []i32, scored: 
         exclude[exclude_count] = .{ .provider = @tagName(key.provider), .account = key.account, .id = key.id };
         exclude_count += 1;
     }
-    var matches: [20]people_index.Entry = undefined;
-    const count = a.people.search(query, exclude[0..exclude_count], a.cache_tag.slice(), &matches, 20);
+    const matches = a.allocator.alloc(people_index.Entry, a.people.archived.entries.len + a.people.contacts.entries.len + a.people.inbox.entries.len) catch return;
+    defer a.allocator.free(matches);
+    const count = a.people.search(query, exclude[0..exclude_count], a.cache_tag.slice(), matches, matches.len);
     for (matches[0..count]) |entry| {
         if (!ensurePaletteCapacity(a)) break;
         const label = (if (entry.origin == .inbox)
@@ -12123,9 +12133,22 @@ fn appendPalettePeople(a: *App, query_wide: []const u16, scores: []i32, scored: 
             .id = entry.jid,
         });
         a.palette_matches[a.palette_match_count] = index;
-        if (scored) scores[a.palette_match_count] = paletteScore(item.label.slice(), query_wide) orelse 0;
+        scores[a.palette_match_count] = search_rank.quality(item.label.slice(), query_wide);
         a.palette_match_count += 1;
     }
+}
+
+fn paletteSentCount(a: *App, key: chat_key.Key) u32 {
+    for (a.search_counts.items) |*count| {
+        if (chat_key.Key.eql(count.identity.key(), key)) return count.sent;
+    }
+    const disk = if (msgCacheGet(a, key) == null and (unifiedHub(a) or (key.provider == .whatsapp and std.mem.eql(u8, key.account, a.cache_tag.slice())))) loadMsgCacheDisk(a, key.id) else null;
+    defer if (disk) |raw| a.allocator.free(raw);
+    const sent = if (msgCacheGet(a, key) orelse disk) |raw| search_rank.sentCount(a.allocator, raw) else 0;
+    var identity: chat_key.Stored = .{};
+    identity.set(key);
+    a.search_counts.append(a.allocator, .{ .identity = identity, .sent = sent }) catch {};
+    return sent;
 }
 
 fn paletteFilter(a: *App) void {
@@ -12157,7 +12180,7 @@ fn paletteFilter(a: *App) void {
     } else if (grouped) a.palette_item_count = a.palette_base_item_count;
     a.palette_match_count = 0;
     a.palette_selected = 0;
-    const scores = a.allocator.alloc(i32, a.palette_items.len + 20) catch return;
+    const scores = a.allocator.alloc(i32, a.palette_items.len + a.people.archived.entries.len + a.people.contacts.entries.len + a.people.inbox.entries.len) catch return;
     defer a.allocator.free(scores);
     @memset(scores, 0);
     const query_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, query_buf[0..query_len]) catch return;
@@ -12173,7 +12196,7 @@ fn paletteFilter(a: *App) void {
         }
         if (item.chat_jid.len > 0) {
             if (wideContainsIgnoreCase(item.label.slice(), query_buf[0..query_len]) or containsIgnoreCase(item.chat_jid.slice(), query_utf8)) {
-                scores[a.palette_match_count] = 0;
+                scores[a.palette_match_count] = search_rank.quality(item.label.slice(), query_buf[0..query_len]);
                 a.palette_matches[a.palette_match_count] = index;
                 a.palette_match_count += 1;
             }
@@ -12185,28 +12208,34 @@ fn paletteFilter(a: *App) void {
             a.palette_match_count += 1;
         }
     }
-    if (!a.palette_search_mode and unifiedHub(a)) appendPalettePeople(a, query_buf[0..query_len], scores, true);
-    var i: usize = 1;
-    while (i < a.palette_match_count) : (i += 1) {
-        var j = i;
-        while (j > 0) : (j -= 1) {
-            if (scores[j - 1] >= scores[j]) break;
-            std.mem.swap(usize, &a.palette_matches[j - 1], &a.palette_matches[j]);
-            std.mem.swap(i32, &scores[j - 1], &scores[j]);
-        }
-    }
     if (a.palette_search_mode) {
-        const commands = a.palette_match_count;
         for (0..a.chat_count) |index| {
             const before = a.palette_item_count;
             appendPaletteChat(a, index);
             if (a.palette_item_count == before) continue;
+            scores[a.palette_match_count] = search_rank.quality(a.palette_items[before].label.slice(), query_buf[0..query_len]);
             a.palette_matches[a.palette_match_count] = before;
             a.palette_match_count += 1;
         }
-        std.mem.rotate(usize, a.palette_matches[0..a.palette_match_count], commands);
-    } else if (!unifiedHub(a) and messenger_view.includes(activeChatView(a), .whatsapp)) appendPalettePeople(a, query_buf[0..query_len], scores, false);
-    if (grouped and !a.palette_search_mode and query_len > 0) {
+    }
+    if (unifiedHub(a) or messenger_view.includes(activeChatView(a), .whatsapp)) appendPalettePeople(a, query_buf[0..query_len], scores);
+    const sent_counts = a.allocator.alloc(u32, a.palette_match_count) catch return;
+    defer a.allocator.free(sent_counts);
+    for (a.palette_matches[0..a.palette_match_count], 0..) |match, position| {
+        const item = &a.palette_items[match];
+        sent_counts[position] = if (query_len > 0 and item.chat_jid.len > 0) paletteSentCount(a, item.chat_identity.key()) else 0;
+    }
+    var i: usize = 1;
+    while (i < a.palette_match_count) : (i += 1) {
+        var j = i;
+        while (j > 0) : (j -= 1) {
+            if (scores[j - 1] > scores[j] or (scores[j - 1] == scores[j] and sent_counts[j - 1] >= sent_counts[j])) break;
+            std.mem.swap(usize, &a.palette_matches[j - 1], &a.palette_matches[j]);
+            std.mem.swap(i32, &scores[j - 1], &scores[j]);
+            std.mem.swap(u32, &sent_counts[j - 1], &sent_counts[j]);
+        }
+    }
+    if (grouped and (a.palette_search_mode or query_len > 0)) {
         var chats: usize = 0;
         for (0..a.palette_match_count) |index| {
             const match = a.palette_matches[index];
@@ -12623,8 +12652,48 @@ fn drawPaletteItem(a: *App, item: *win.DRAWITEMSTRUCT) void {
     const foreground = if (selected and theme.choice == .amoled) theme.current.on_secondary_container else theme.current.on_surface;
     _ = win.SelectObject(item.hDC, @ptrCast(a.font.?));
     _ = win.SetTextColor(item.hDC, if (chat_result and palette_item.archived) theme.archivedRowColor(foreground) else foreground);
+    if (chat_result) {
+        var shapes = smooth.Context.init(item.hDC);
+        const badge = win.RECT{ .left = item.rcItem.left + 16, .top = item.rcItem.top + 11, .right = item.rcItem.left + 36, .bottom = item.rcItem.top + 29 };
+        var bitmap: ?win.HBITMAP = null;
+        if (palette_item.chat_identity.provider == .slack) {
+            if (hub.workspaceAvatarKey(palette_item.chat_jid.slice())) |key| {
+                for (a.avatars[0..a.avatar_count]) |*avatar_entry| {
+                    if (avatar_entry.workspace_icon and std.mem.eql(u8, avatar_entry.jid.slice(), key)) {
+                        bitmap = avatar_entry.bitmap;
+                        break;
+                    }
+                }
+            }
+        }
+        var mark = hub.providerBadge(palette_item.chat_identity.provider, bitmap != null, hub.igsh_604_workspace_icons);
+        if (mark == .workspace_icon) {
+            shapes.deinit();
+            if (!drawWorkspaceBadge(item.hDC, bitmap.?, badge, 4)) mark = .letter_s;
+            shapes = smooth.Context.init(item.hDC);
+        }
+        if (mark == .whatsapp_mark or mark == .signal_mark or mark == .telegram_mark) {
+            drawProviderMark(&shapes, badge, mark);
+        } else if (mark != .workspace_icon) {
+            smooth.fillRoundRect(&shapes, badge, 8, 8, theme.current.primary_container);
+        }
+        shapes.deinit();
+        if (mark == .letter_s or mark == .letter_w or mark == .letter_t) {
+            var rect = badge;
+            _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
+            _ = win.SetTextColor(item.hDC, theme.current.on_primary_container);
+            _ = text_draw.drawText(item.hDC, switch (mark) {
+                .letter_s => lit("S"),
+                .letter_w => lit("W"),
+                .letter_t => lit("T"),
+                else => unreachable,
+            }, 1, &rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+        }
+        _ = win.SelectObject(item.hDC, @ptrCast(a.font.?));
+        _ = win.SetTextColor(item.hDC, if (palette_item.archived) theme.archivedRowColor(foreground) else foreground);
+    }
     const label_right = if (palette_item.shortcut.len > 0 or group_start) item.rcItem.right - 130 else item.rcItem.right - 20;
-    var label_rect = win.RECT{ .left = item.rcItem.left + 20, .top = item.rcItem.top, .right = label_right, .bottom = item.rcItem.bottom };
+    var label_rect = win.RECT{ .left = item.rcItem.left + (if (chat_result) @as(i32, 46) else 20), .top = item.rcItem.top, .right = label_right, .bottom = item.rcItem.bottom };
     _ = text_draw.drawText(item.hDC, palette_item.label.ptr(), @intCast(palette_item.label.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     if (palette_item.shortcut.len > 0) {
         _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
@@ -17094,6 +17163,7 @@ pub fn main(init: std.process.Init) !void {
     defer {
         persistDrafts(app);
         app.draft_store.deinit(app.allocator);
+        app.search_counts.deinit(app.allocator);
     }
     defer app.people.deinit();
     defer app.allocator.free(app.palette_items);

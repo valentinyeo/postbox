@@ -7,6 +7,7 @@ ARCHIVED = {
     'whatsapp': ('personal:15550000031@s.whatsapp.net', 'Archived Person Alpha'),
     'telegram': ('telegram:user:7001001', 'Archived Telegram Beta'),
     'slack': ('slack:T0PALETTE:C0000000002', 'Archived Slack Gamma'),
+    'signal': ('signal:fixture-search', 'Archived Signal Delta'),
 }
 INBOX = {
     'epsilon': 'Inbox WhatsApp Epsilon',
@@ -53,6 +54,14 @@ def check_palette_archived(folder):
         palette = read(f'a-all-{key}.palette.json')
         assert label(name) in palette['labels'] and palette['index'] == row['index']
         capture(f'a-all-{key}')
+    frequency = read('frequency-results.json')
+    assert frequency['frequent'] == label(ARCHIVED['telegram'][1])
+    assert frequency['rare'] == label(ARCHIVED['whatsapp'][1])
+    assert frequency['labels'].index(frequency['frequent']) < frequency['labels'].index(frequency['rare'])
+    assert frequency['row_height'] == 40
+    assert set(read('frequency-badges.json')) == set(ARCHIVED)
+    assert all(value >= 20 for value in read('frequency-badges.json').values())
+    capture('frequency-results')
     assert matrix['a-all-crowded']['informational']
     capture('a-all-crowded')
     for position, view in enumerate(views[:9], 1):

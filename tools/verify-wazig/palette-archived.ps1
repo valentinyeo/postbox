@@ -4,6 +4,7 @@ $script:PaletteArchivedChats = [ordered]@{
     whatsapp = @{ id = 'personal:15550000031@s.whatsapp.net'; name = 'Archived Person Alpha'; provider = 'whatsapp' }
     telegram = @{ id = 'telegram:user:7001001'; name = 'Archived Telegram Beta'; provider = 'telegram' }
     slack = @{ id = 'slack:T0PALETTE:C0000000002'; name = 'Archived Slack Gamma'; provider = 'slack' }
+    signal = @{ id = 'signal:fixture-search'; name = 'Archived Signal Delta'; provider = 'signal' }
 }
 $script:PaletteInboxChats = @(
     @{ id = 'personal:15550000021@s.whatsapp.net'; slug = 'epsilon'; name = 'Inbox WhatsApp Epsilon'; provider = 'whatsapp' },
@@ -232,6 +233,49 @@ function Invoke-PaletteArchivedJourney($Session) {
         foreach ($key in $archived.Keys) {
             Test-PaletteEnter $Session "c-all-$key" 'combined inbox' 'all' $archived[$key] $true
         }
+        Send-Keys $Session '^k'
+        $palette = Get-PaletteWindow $Session
+        $edit = Get-Edit $palette '1064'
+        $list = Get-Edit $palette '1072'
+        Send-Keys $Session 'Archived'
+        $null = Wait-Until { (Read-Edit $edit) -ceq 'Archived' } 'shared name search'
+        $labels = [string[]]@(Read-ListLabels $list)
+        $frequent = Get-ArchivedPaletteLabel $archived.telegram.name
+        $rare = Get-ArchivedPaletteLabel $archived.whatsapp.name
+        Save-Screen $Session 'frequency-results'
+        $handle = [IntPtr]$list.Current.NativeWindowHandle
+        $origin = [VerifyWindow+Point]::new()
+        Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$origin)) 'Cannot locate search results'
+        $rowHeight = [UIntPtr]::Zero
+        Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x01A1, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$rowHeight) -ne [IntPtr]::Zero) 'Cannot read search row height'
+        $desktop = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        [ordered]@{ labels = $labels; frequent = $frequent; rare = $rare; list_x = $origin.X - $desktop.Left; list_y = $origin.Y - $desktop.Top; row_height = $rowHeight.ToUInt64() } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Session.evidence 'frequency-results.json')
+        if ([Array]::IndexOf($labels, $frequent) -lt 0 -or [Array]::IndexOf($labels, $frequent) -ge [Array]::IndexOf($labels, $rare)) {
+            Add-PaletteFailure 'frequency' 'sent-message ordering' "Frequent contact not ahead of rare contact: $($labels -join ' | ')"
+        }
+        $image = [Drawing.Bitmap]::new((Join-Path $Session.evidence 'frequency-results.png'))
+        $badges = [ordered]@{}
+        try {
+            foreach ($key in $archived.Keys) {
+                $row = [Array]::IndexOf($labels, (Get-ArchivedPaletteLabel $archived[$key].name))
+                Assert-That ($row -ge 0) "Missing $key result"
+                $left = $origin.X - $desktop.Left
+                $top = $origin.Y - $desktop.Top + $row * [int]$rowHeight.ToUInt64()
+                $colour = switch ($key) { 'whatsapp' { @(37, 211, 102) } 'telegram' { @(42, 171, 238) } 'signal' { @(58, 118, 240) } 'slack' { @(51, 51, 51) } }
+                $pixels = 0
+                for ($y = 11; $y -lt 29; $y++) {
+                    for ($x = 16; $x -lt 36; $x++) {
+                        $pixel = $image.GetPixel($left + $x, $top + $y)
+                        if ([Math]::Abs([int]$pixel.R - $colour[0]) -le 4 -and [Math]::Abs([int]$pixel.G - $colour[1]) -le 4 -and [Math]::Abs([int]$pixel.B - $colour[2]) -le 4) { $pixels++ }
+                    }
+                }
+                $badges[$key] = $pixels
+                if ($pixels -lt 20) { Add-PaletteFailure 'network-badge' 'missing inline icon' "$key row has only $pixels badge pixels" }
+            }
+        } finally { $image.Dispose() }
+        $badges | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'frequency-badges.json')
+        Close-PaletteWindow $Session
+
         foreach ($key in $archived.Keys) {
             $chat = $archived[$key]
             $position = 0
