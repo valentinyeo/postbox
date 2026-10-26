@@ -6,6 +6,7 @@ const theme = @import("theme.zig");
 pub const class_name = std.unicode.utf8ToUtf16LeStringLiteral("RICHEDIT50W");
 const property_name = std.unicode.utf8ToUtf16LeStringLiteral("Messages.DirectWriteEdit");
 var module: win.HMODULE = null;
+const caret_timer_id: usize = 0x4352;
 
 const CharacterFormat = extern struct {
     base: win.CHARFORMATW,
@@ -82,6 +83,8 @@ const Host = struct {
     assigned_font: win.HFONT = null,
     cue: [256:0]u16 = @splat(0),
     cue_focused: bool = false,
+    caret_on: bool = true,
+    caret_rect: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
 
     fn send(self: *Host, message: u32, wparam: usize, lparam: isize) win.LRESULT {
         return win.CallWindowProcW(self.previous, self.hwnd, message, wparam, lparam);
@@ -112,6 +115,52 @@ const Host = struct {
         var metrics: win.TEXTMETRICW = undefined;
         if (win.GetTextMetricsW(dc, &metrics) == 0) return 1;
         return @max(1, metrics.tmHeight);
+    }
+
+    fn caretRectAt(self: *Host, dc: win.HDC) ?win.RECT {
+        if (win.GetFocus() != self.hwnd) return null;
+        if (self.send(win.EM_GETOPTIONS, 0, 0) & win.ECO_READONLY != 0) return null;
+        var selection = win.CHARRANGE{ .cpMin = 0, .cpMax = 0 };
+        _ = self.send(win.EM_EXGETSEL, 0, @bitCast(@intFromPtr(&selection)));
+        if (selection.cpMin != selection.cpMax) return null;
+        const point = self.position(@intCast(@max(0, selection.cpMin)));
+        var width: win.UINT = 1;
+        _ = win.SystemParametersInfoW(win.SPI_GETCARETWIDTH, 0, &width, 0);
+        return win.RECT{ .left = point.x, .top = point.y, .right = point.x + @as(i32, @intCast(@max(1, width))), .bottom = point.y + self.lineHeight(dc) };
+    }
+
+    fn drawCaret(self: *Host, dc: win.HDC, color: win.COLORREF) void {
+        self.caret_rect = self.caretRectAt(dc) orelse std.mem.zeroes(win.RECT);
+        if (!self.caret_on or self.caret_rect.right <= self.caret_rect.left) return;
+        _ = win.SetDCBrushColor(dc, color);
+        _ = win.FillRect(dc, &self.caret_rect, @ptrCast(@alignCast(win.GetStockObject(win.DC_BRUSH))));
+    }
+
+    fn invalidateCaret(self: *Host) void {
+        if (self.caret_rect.right > self.caret_rect.left) _ = win.InvalidateRect(self.hwnd, &self.caret_rect, win.FALSE);
+    }
+
+    fn restartBlink(self: *Host) void {
+        self.invalidateCaret();
+        self.caret_on = true;
+        if (win.GetFocus() != self.hwnd) return;
+        if (win.GetDC(self.hwnd)) |dc| {
+            defer _ = win.ReleaseDC(self.hwnd, dc);
+            const saved = win.SaveDC(dc);
+            defer _ = win.RestoreDC(dc, saved);
+            _ = win.SelectObject(dc, self.font());
+            if (self.caretRectAt(dc)) |rect| _ = win.InvalidateRect(self.hwnd, &rect, win.FALSE);
+        }
+        _ = win.KillTimer(self.hwnd, caret_timer_id);
+        const interval = win.GetCaretBlinkTime();
+        if (interval == 0 or interval == 0xffffffff) return;
+        _ = win.SetTimer(self.hwnd, caret_timer_id, interval, null);
+    }
+
+    fn stopBlink(self: *Host) void {
+        _ = win.KillTimer(self.hwnd, caret_timer_id);
+        self.invalidateCaret();
+        self.caret_on = false;
     }
 
     fn centerRect(self: *Host) void {
@@ -234,6 +283,7 @@ const Host = struct {
                 const alignment: u32 = if (self.centered) @intCast(win.DT_CENTER | win.DT_VCENTER) else 0;
                 _ = text_draw.drawText(dc, &self.cue, -1, &cue_rect, @as(u32, @intCast(win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_END_ELLIPSIS)) | alignment);
             }
+            self.drawCaret(dc, foreground);
             return;
         }
         const text = std.heap.page_allocator.alloc(u16, length + 1) catch return;
@@ -273,6 +323,7 @@ const Host = struct {
                 _ = win.SetTextColor(dc, foreground);
             }
         }
+        self.drawCaret(dc, foreground);
     }
 
     fn contextMenu(self: *Host, lparam: isize) void {
@@ -310,6 +361,7 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
     switch (message) {
         win.WM_NCDESTROY => {
             const previous = host.previous;
+            _ = win.KillTimer(hwnd, caret_timer_id);
             _ = win.RemovePropW(hwnd, property_name);
             std.heap.page_allocator.destroy(host);
             return win.CallWindowProcW(previous, hwnd, message, wparam, lparam);
@@ -345,7 +397,21 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         win.WM_SIZE, win.WM_CHAR, win.WM_KEYDOWN, win.WM_CUT, win.WM_PASTE, win.WM_CLEAR, win.WM_UNDO, win.EM_UNDO, win.EM_REDO, win.EM_REPLACESEL, win.WM_IME_COMPOSITION, win.EM_SETTEXTEX => {
             const result = host.send(message, wparam, lparam);
             host.centerRect();
+            host.restartBlink();
             return result;
+        },
+        win.WM_SETFOCUS, win.WM_LBUTTONDOWN, win.WM_LBUTTONUP, win.EM_SETSEL, win.EM_EXSETSEL => {
+            const result = host.send(message, wparam, lparam);
+            host.restartBlink();
+            if (message == win.WM_SETFOCUS) _ = win.InvalidateRect(hwnd, null, win.FALSE);
+            return result;
+        },
+        win.WM_TIMER => {
+            if (wparam == caret_timer_id) {
+                host.caret_on = !host.caret_on;
+                host.invalidateCaret();
+                return 0;
+            }
         },
         win.WM_SETTEXT => {
             const mask = host.send(win.EM_SETEVENTMASK, 0, 0);
@@ -359,7 +425,11 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             return result;
         },
         win.WM_IME_STARTCOMPOSITION => host.composing = true,
-        win.WM_IME_ENDCOMPOSITION, win.WM_KILLFOCUS => host.composing = false,
+        win.WM_IME_ENDCOMPOSITION => host.composing = false,
+        win.WM_KILLFOCUS => {
+            host.composing = false;
+            host.stopBlink();
+        },
         win.EM_SETCUEBANNER => {
             const input: [*:0]const u16 = @ptrFromInt(@as(usize, @bitCast(lparam)));
             const count = @min(std.mem.len(input), host.cue.len - 1);
