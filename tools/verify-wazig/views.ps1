@@ -191,8 +191,8 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
         Send-Keys $Session '^e'
         $null = Wait-Until {
             $state = Read-Control $Session status
-            $state.pending_archives -eq 0 -and $state.chat_count -eq $remaining -and @((Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/archive' -and $_.body.archived })).Count -eq (2 - $remaining)
-        } 'account archive write completed'
+            $state.pending_archives -eq 0 -and $state.chat_count -eq $remaining
+        } 'account archive held in Wazig'
     }
     Invoke-PaletteCommand $Session 'Refresh'
     Send-Keys $Session '%1'

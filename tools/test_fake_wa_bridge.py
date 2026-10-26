@@ -121,9 +121,6 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
         server.daemon_threads = True
         server.state = module.bridge.State(Path(self.temp.name) / 'requests.jsonl')
         server.state.archive_incoming = 0
-        server.state.archive_group_archived = False
-        server.state.archive_other_archived = False
-        server.state.archive_rearchive_enabled = True
         server.state.plain_dms = {}
         server.state.archive_stamp = '2026-10-10T11:00:00Z'
         self.module = module
@@ -147,17 +144,27 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
     def jids(self, archived):
         return [row['jid'] for row in self.request('GET', '/v1/wazig/chats?archived=' + archived)]
 
-    def test_group_moves_to_archived_view_and_returns_to_inbox_on_incoming(self):
+    def test_group_stays_in_inbox_for_the_hub_and_only_moves_its_row_time_on_incoming(self):
         self.assertIn(self.group, self.jids('false'))
         self.assertNotIn(self.group, self.jids('true'))
-        self.request('POST', '/v1/wazig/archive', dict(chat=self.group, archived=True))
-        self.assertIn(self.group, self.jids('true'))
-        self.assertNotIn(self.group, self.jids('false'))
+        before = {row['jid']: row['last_message_ts'] for row in self.request('GET', '/v1/wazig/chats?archived=false')}
         self.request('POST', '/fixture/archive-incoming', {})
-        self.assertIn(self.group, self.jids('false'))
+        after = {row['jid']: row['last_message_ts'] for row in self.request('GET', '/v1/wazig/chats?archived=false')}
+        self.assertIn(self.group, after)
+        self.assertGreater(after[self.group], before[self.group])
         self.assertNotIn(self.group, self.jids('true'))
 
-    def test_plain_direct_chats_gain_a_later_reaction_or_only_a_later_row_time_when_archived(self):
+    def test_every_archive_write_is_rejected_and_never_changes_a_chat(self):
+        self.request('POST', '/fixture/plain-dms', {})
+        for chat in (self.group, self.module.PLAIN_REACTED, self.module.PLAIN_NEWER):
+            for archived in (True, False):
+                for path in ('/v1/wazig/archive', '/v1/wazig/archive-batch'):
+                    result = self.request('POST', path, dict(chat=chat, archived=archived), status=400)
+                    self.assertEqual(result, {'error': 'unexpected archive fixture write'})
+        self.assertEqual(self.jids('true'), [])
+        self.assertIn(self.group, self.jids('false'))
+
+    def test_plain_direct_chats_gain_a_later_reaction_or_only_a_later_row_time(self):
         reacted, newer = self.module.PLAIN_REACTED, self.module.PLAIN_NEWER
         self.assertNotIn(reacted, self.jids('false'))
         self.request('POST', '/fixture/plain-dms', {})
@@ -166,10 +173,10 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
         for chat in (reacted, newer):
             before = self.request('GET', '/v1/wazig/messages?chat=' + chat)
             self.assertEqual([row['FromMe'] for row in before], [False])
-            self.request('POST', '/v1/wazig/archive', dict(chat=chat, archived=True))
-            self.assertIn(chat, self.jids('true'))
-            self.assertNotIn(chat, self.jids('false'))
-        rows = {row['jid']: row for row in self.request('GET', '/v1/wazig/chats?archived=true')}
+        event = self.request('POST', '/fixture/plain-activity', {})
+        self.assertEqual(event['chats'], [reacted, newer])
+        self.assertFalse(event['archived'])
+        rows = {row['jid']: row for row in self.request('GET', '/v1/wazig/chats?archived=false')}
         first = self.request('GET', '/v1/wazig/messages?chat=' + reacted)
         self.assertEqual(first[0]['ReactionToID'], 'PLAIN-INCOMING')
         self.assertTrue(first[0]['FromMe'])
@@ -180,16 +187,13 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
         self.assertNotIn('ReactionToID', second[0])
         self.assertEqual(second[0]['Timestamp'], '2026-10-10T11:00:00Z')
         self.assertGreater(rows[newer]['last_message_ts'], second[0]['Timestamp'])
-        self.request('POST', '/v1/wazig/archive', dict(chat=newer, archived=False))
-        self.assertIn(newer, self.jids('false'))
+        self.assertEqual(self.jids('true'), [])
 
     def test_plain_whatsapp_and_local_telegram_receive_new_incoming(self):
         self.request('POST', '/fixture/plain-dms', {})
         self.request('POST', '/fixture/telegram-dm', {})
         newer, telegram = self.module.PLAIN_NEWER, self.module.ARCHIVE_TELEGRAM
-        self.request('POST', '/v1/wazig/archive', dict(chat=newer, archived=True))
-        before = {row['jid']: row['last_message_ts'] for archived in ('true', 'false')
-                  for row in self.request('GET', '/v1/wazig/chats?archived=' + archived)}
+        before = {row['jid']: row['last_message_ts'] for row in self.request('GET', '/v1/wazig/chats?archived=false')}
         event = self.request('POST', '/fixture/plain-incoming', {})
         rows = {row['jid']: row for row in self.request('GET', '/v1/wazig/chats?archived=false')}
         for chat in (newer, telegram):
@@ -201,22 +205,15 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
             self.assertEqual(messages[0]['Timestamp'], event['last_message_ts'])
         self.assertEqual(rows[telegram]['provider'], 'telegram')
         self.assertEqual(rows[telegram]['account'], 'telegram')
-        self.request('POST', '/fixture/rearchive-enable', {})
-        self.request('POST', '/v1/wazig/archive', dict(chat=newer, archived=True))
-        self.assertIn(newer, self.jids('true'))
-        self.assertIn(telegram, self.jids('false'))
-        after = {row['jid']: row['last_message_ts'] for row in self.request('GET', '/v1/wazig/chats?archived=true')}
-        self.assertEqual(after[newer], event['last_message_ts'])
+        self.assertEqual(self.jids('true'), [])
 
-    def test_telegram_only_inbox_row_archive_gets_real_hub_unsupported_answer(self):
-        self.request('POST', '/v1/wazig/archive', dict(chat=self.group, archived=True))
-        self.request('POST', '/v1/wazig/archive', dict(chat=self.module.ARCHIVE_OTHER, archived=True))
+    def test_telegram_archive_write_is_rejected_like_every_other_archive_write(self):
         self.request('POST', '/fixture/telegram-dm', {})
         for archived in (True, False):
             result = self.request('POST', '/v1/wazig/archive',
-                                  dict(chat=self.module.ARCHIVE_TELEGRAM, archived=archived), status=502)
-            self.assertEqual(result, {'error': 'Telegram action unsupported'})
-            self.assertEqual(self.jids('false'), [self.module.ARCHIVE_TELEGRAM])
+                                  dict(chat=self.module.ARCHIVE_TELEGRAM, archived=archived), status=400)
+            self.assertEqual(result, {'error': 'unexpected archive fixture write'})
+            self.assertIn(self.module.ARCHIVE_TELEGRAM, self.jids('false'))
             self.assertNotIn(self.module.ARCHIVE_TELEGRAM, self.jids('true'))
 
 

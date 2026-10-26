@@ -98,15 +98,13 @@ def check_show_archived(folder):
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert any(row['method'] == 'GET' and 'archived=true' in row['wire_path'] and row['status'] == 200 for row in requests)
     writes = [row for row in requests if row['method'] == 'POST' and urlsplit(row['wire_path']).path == '/v1/wazig/archive']
-    assert len(writes) == 4
-    ids = {read(f'view-{position}-archived.state.json')['selected']['id'] for position, view in enumerate(views, 1) if view['provider'] == 'whatsapp'}
-    assert {(row['body']['chat'], row['body']['archived']) for row in writes} == {(chat, archived) for chat in ids for archived in (False, True)}
-    assert all(row['status'] == 200 for row in writes)
+    assert not writes, len(writes)
+    assert not [row for row in requests if row['method'] == 'POST' and urlsplit(row['wire_path']).path == '/v1/wazig/archive-batch']
     for row in requests:
         if row['method'] != 'SSE':
             assert row['authorized'] and row['status'] in (200, 404)
             if row['method'] == 'POST':
-                assert urlsplit(row['wire_path']).path in ('/v1/wazig/archive', '/v1/wazig/mark-read')
+                assert urlsplit(row['wire_path']).path == '/v1/wazig/mark-read'
     preferences = (folder / 'preferences.txt').read_text(encoding='utf-8-sig')
     assert 'ShowArchived' in preferences
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IGSH-902: On the hub, archiving a WhatsApp chat is now kept in Wazig only and no archive request is sent to WhatsApp. A new message from someone else brings an archived chat back to the inbox right away. Your own messages and reactions do not. Chats already archived on your phone show as archived the first time, then follow the same rule, and the choice survives a restart.
+
 - IGSH-531: Remove desktop direct Slack, Telegram and WhatsApp connectors and TDLib release dependencies. Accounts and linking stay managed on the hub; missing hub configuration no longer falls back to local connectors.
 
 - IGSH-670: Render the complete generated standard Slack emoji set and skin-tone aliases, show workspace emoji images in messages and reactions through the hub, and display Giphy attachments as inline animated GIFs. Custom emoji and Giphy require the corresponding hub endpoints and attachment metadata.

@@ -32,24 +32,19 @@ $clock = [Diagnostics.Stopwatch]::StartNew()
 Send-Keys $session '^e'
 $null = Wait-Until {
     $state = Read-Control $session status
-    $writes = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -in @('/v1/wazig/archive', '/v1/wazig/archive-batch') -and $_.status -eq 200 })
-    $acknowledged = 0
-    foreach ($write in $writes) {
-        $acknowledged += if ($write.wire_path -eq '/v1/wazig/archive-batch') { @($write.results | Where-Object ok).Count } else { 1 }
-    }
-    $state.pending_archives -eq 0 -and $state.chat_count -eq 0 -and $acknowledged -eq 261
-} 'complete fixed 264-chat bulk archive including every WhatsApp acknowledgement'
+    $state.pending_archives -eq 0 -and $state.chat_count -eq 0
+} 'complete fixed 264-chat bulk archive held in Wazig'
 $clock.Stop()
 $total = $clock.ElapsedMilliseconds
 $perChat = $total / $workload
 Write-Output "bulk_archive_ms_total=$total bulk_archive_ms_per_chat=$($perChat.ToString('F3', [Globalization.CultureInfo]::InvariantCulture))"
-$writes = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -in @('/v1/wazig/archive', '/v1/wazig/archive-batch') -and $_.status -eq 200 })
+$writes = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -in @('/v1/wazig/archive', '/v1/wazig/archive-batch') })
 $singles = @($writes | Where-Object wire_path -eq '/v1/wazig/archive')
 $batches = @($writes | Where-Object wire_path -eq '/v1/wazig/archive-batch')
 @{ chats = $workload; remote_chats = 261; total_ms = $total; per_chat_ms = $perChat; single_requests = $singles.Count; batch_requests = $batches.Count } |
     ConvertTo-Json | Set-Content (Join-Path $session.evidence 'bulk-timing.json')
 Read-BridgeRequests $session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'archive.requests.json')
-Assert-That ($singles.Count -eq 0 -and $batches.Count -eq 1 -and @($batches[0].body.chats).Count -eq 261) 'Expected one batch archive request and zero single archive requests for the fixed 264-chat workload'
+Assert-That ($singles.Count -eq 0 -and $batches.Count -eq 0) 'Expected zero archive requests for the fixed 264-chat workload because WhatsApp archive stays in Wazig'
 Save-Screen $session empty
 Invoke-PaletteCommand $session 'Refresh'
 $null = Wait-Until { (Read-Control $session status).chat_count -eq 0 } 'archive intent survives metadata-free refresh'

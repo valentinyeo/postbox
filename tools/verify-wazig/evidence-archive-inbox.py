@@ -23,7 +23,7 @@ assert re.findall(r'ctrl_a_press=(\d+) ok=(true|false)', log) == [(str(n), 'true
 assert re.search(r'ctrl_a_ok=10\b', log)
 timing = read('bulk-timing.json')
 assert timing['chats'] == 264 and timing['remote_chats'] == 261
-assert timing['single_requests'] == 0 and timing['batch_requests'] == 1
+assert timing['single_requests'] == 0 and timing['batch_requests'] == 0
 assert timing['total_ms'] > 0 and abs(timing['per_chat_ms'] * 264 - timing['total_ms']) < 0.001
 assert re.search(rf'bulk_archive_ms_total={timing["total_ms"]} bulk_archive_ms_per_chat=\d+\.\d+', log)
 assert re.search(r'archived_among_shown=264\b', log)
@@ -38,12 +38,7 @@ remote = {row['id'] for row in initial if row['provider'] == 'whatsapp'}
 writes = [row for row in requests if row['wire_path'] == '/v1/wazig/archive']
 assert not writes, len(writes)
 batches = [row for row in requests if row['wire_path'] == '/v1/wazig/archive-batch']
-assert len(batches) == 1
-batch = batches[0]
-assert batch['status'] == 200 and batch['body']['archived'] is True
-assert len(batch['body']['chats']) == len(batch['results']) == len(remote)
-assert {row['chat'] for row in batch['body']['chats']} == remote
-assert {row['chat'] for row in batch['results'] if row['ok']} == remote
+assert not batches, len(batches)
 lines = (folder / 'saved-archive-state.txt').read_text(encoding='utf-8-sig').splitlines()
 assert len(lines) == 264
 assert {line.split('\t')[0] for line in lines if line.split('\t')[0] in remote} == remote
@@ -77,4 +72,4 @@ assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'
 assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
 assert 'JOURNEY PASSED: archive-inbox' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
 assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-print('EVIDENCE VERIFIED: metadata-free archives, ten Ctrl+A presses, 264-chat timing, every provider path and restart')
+print('EVIDENCE VERIFIED: metadata-free archives, ten Ctrl+A presses, 264-chat timing, zero archive requests, every provider path and restart')
