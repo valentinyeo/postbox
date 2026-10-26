@@ -22,6 +22,8 @@ pub const Palette = struct {
     secondary_container: u32,
     on_secondary_container: u32,
     @"error": u32,
+    sidebar_surface: u32,
+    sidebar_divider: u32,
 };
 
 pub const green: Palette = .{
@@ -41,6 +43,8 @@ pub const green: Palette = .{
     .secondary_container = hex(0x344c43),
     .on_secondary_container = hex(0xcee9dc),
     .@"error" = hex(0xffb4ab),
+    .sidebar_surface = hex(0x1b211e),
+    .sidebar_divider = hex(0x303633),
 };
 
 pub const amoled: Palette = .{
@@ -60,6 +64,8 @@ pub const amoled: Palette = .{
     .secondary_container = hex(0x333333),
     .on_secondary_container = hex(0xffffff),
     .@"error" = hex(0xffb4ab),
+    .sidebar_surface = hex(0x121212),
+    .sidebar_divider = hex(0x242424),
 };
 
 pub fn selectionColors(palette: Palette, from_me: bool) struct { fill: u32, text: u32 } {
@@ -182,10 +188,12 @@ test "Material 3 text contrast" {
         const pairs = [_][2]u32{
             .{ palette.on_surface, palette.surface },
             .{ palette.on_surface, palette.surface_container_low },
+            .{ palette.on_surface, palette.sidebar_surface },
             .{ palette.on_surface, palette.surface_container },
             .{ palette.on_surface, palette.surface_container_high },
             .{ palette.on_surface, palette.surface_container_highest },
             .{ palette.on_surface_variant, palette.surface_container_low },
+            .{ palette.on_surface_variant, palette.sidebar_surface },
             .{ palette.on_surface_variant, palette.surface_container_high },
             .{ palette.on_surface_variant, palette.primary_container },
             .{ palette.on_primary_container, palette.primary_container },
@@ -203,7 +211,7 @@ test "unread dot size is between 6 and 10" {
 }
 
 test "green palette preserves every original COLORREF" {
-    const expected = [_]u32{ hex(0x0f1512), hex(0x171d1a), hex(0x1b211e), hex(0x252b28), hex(0x303633), hex(0xdee4df), hex(0xbfc9c3), hex(0x89938e), hex(0x3f4944), hex(0x88d6ba), hex(0x00382a), hex(0x00513e), hex(0xa4f2d5), hex(0x344c43), hex(0xcee9dc), hex(0xffb4ab) };
+    const expected = [_]u32{ hex(0x0f1512), hex(0x171d1a), hex(0x1b211e), hex(0x252b28), hex(0x303633), hex(0xdee4df), hex(0xbfc9c3), hex(0x89938e), hex(0x3f4944), hex(0x88d6ba), hex(0x00382a), hex(0x00513e), hex(0xa4f2d5), hex(0x344c43), hex(0xcee9dc), hex(0xffb4ab), hex(0x1b211e), hex(0x303633) };
     inline for (@typeInfo(Palette).@"struct".fields, 0..) |field, index| {
         try std.testing.expectEqual(expected[index], @field(green, field.name));
     }

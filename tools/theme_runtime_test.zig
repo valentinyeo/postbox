@@ -5,6 +5,7 @@ const menu_theme = @import("menu_theme.zig");
 const App = struct {
     brush_bg: ?usize = null,
     brush_panel: ?usize = null,
+    brush_sidebar: ?usize = null,
     brush_raised: ?usize = null,
     brush_muted: ?usize = null,
     status: []const u8 = "",
@@ -167,13 +168,14 @@ fn reset() void {
 fn expectBrushes(a: *const App, palette: theme.Palette) !void {
     try std.testing.expectEqual(palette.surface, win.live[a.brush_bg.?].?);
     try std.testing.expectEqual(palette.surface_container_low, win.live[a.brush_panel.?].?);
+    try std.testing.expectEqual(palette.sidebar_surface, win.live[a.brush_sidebar.?].?);
     try std.testing.expectEqual(palette.surface_container_high, win.live[a.brush_raised.?].?);
     try std.testing.expectEqual(palette.outline, win.live[a.brush_muted.?].?);
     var count: usize = 0;
     for (win.live) |brush| {
         if (brush != null) count += 1;
     }
-    try std.testing.expectEqual(@as(usize, 4), count);
+    try std.testing.expectEqual(@as(usize, 5), count);
 }
 
 test "startup loads valid DWORD themes and defaults missing or unknown values" {
@@ -196,7 +198,7 @@ test "live theme changes replace all brushes, save and redraw every top-level wi
     try std.testing.expect(recreateThemeBrushes(&app));
     try expectBrushes(&app, theme.green);
     for ([_]theme.Choice{ .amoled, .green, .amoled }) |choice| {
-        const old = [_]usize{ app.brush_bg.?, app.brush_panel.?, app.brush_raised.?, app.brush_muted.? };
+        const old = [_]usize{ app.brush_bg.?, app.brush_panel.?, app.brush_sidebar.?, app.brush_raised.?, app.brush_muted.? };
         try std.testing.expect(changeTheme(&app, choice));
         try std.testing.expectEqual(choice, theme.choice);
         try std.testing.expectEqual(menu_theme.preferredAppMode(choice), win.menu_mode);
@@ -213,7 +215,7 @@ test "live theme changes replace all brushes, save and redraw every top-level wi
 }
 
 test "brush allocation failure preserves the previous palette, resources and saved choice" {
-    for (1..5) |failure| {
+    for (1..6) |failure| {
         reset();
         defer theme.set(.amoled);
         var app = App{};
