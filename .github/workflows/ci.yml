@@ -82,8 +82,8 @@ jobs:
           set -euo pipefail
           path=src/archive_rules.zig
           cp "$path" "$RUNNER_TEMP/archive_rules.zig"
-          fixed='if (self.find(key.id) != null) return true;'
-          old='if (self.find(key.id)) |index| return self.entries[index].keep;'
+          fixed='const index = self.find(key.id) orelse return provider_archived;'
+          old='const index = self.find(key.id) orelse return provider_archived; if (!self.entries[index].keep) return provider_archived;'
           grep -qF "$fixed" "$path" || { echo 'Archive negative control anchor missing'; exit 1; }
           FIXED="$fixed" OLD="$old" python3 -c "import os,sys;p=sys.argv[1];s=open(p,encoding='utf-8').read();open(p,'w',encoding='utf-8').write(s.replace(os.environ['FIXED'],os.environ['OLD']))" "$path"
           set +e
