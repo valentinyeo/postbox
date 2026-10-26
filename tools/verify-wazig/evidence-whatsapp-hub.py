@@ -125,7 +125,7 @@ if unified:
     assert (folder / 'mixed-paged.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     assert 'keys: {PGUP}' in actions
     assert not any(row['path'] == '/v1/archive' for row in requests)
-    for keys in ['%1', '%2', '%0']:
+    for keys in ['^2', '^3', '^1']:
         assert f'keys: {keys}' in actions
     subprocess.run([sys.executable, str(Path(__file__).with_name('check-hub-views.py')), str(folder)], check=True)
     assert all(row['wire_path'].startswith('/v1/wazig/') or row['wire_path'] == '/fixture/live' for row in requests)

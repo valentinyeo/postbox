@@ -98,7 +98,7 @@ function Test-PaletteTarget($Session, [string]$Step, [string]$ViewLabel, [string
 
 function Switch-PaletteView($Session, [int]$Position) {
     $order = @((Read-Control $Session status).view_order)
-    Send-Keys $Session "%$Position"
+    Send-Keys $Session "^$($Position + 1)"
     $label = [string]$order[$Position - 1].label
     $null = Wait-Until {
         $state = Read-Control $Session status
@@ -215,7 +215,7 @@ function Invoke-PaletteArchivedJourney($Session) {
         $crowded = Invoke-PaletteQuery $Session 'Archived' (Get-ArchivedPaletteLabel $archived.whatsapp.name) 3 'a-all-crowded'
         $script:PaletteMatrix.Add([ordered]@{ step = 'a-all-crowded'; view = 'combined inbox'; query = 'Archived'; informational = $true; rows = $crowded.rows; labels = $crowded.labels; indexes = @($archived.Keys | ForEach-Object { [Array]::IndexOf($crowded.labels, (Get-ArchivedPaletteLabel $archived[$_].name)) }) })
 
-        for ($position = 1; $position -le [Math]::Min($views.Count, 9); $position++) {
+        for ($position = 1; $position -le [Math]::Min($views.Count, 8); $position++) {
             $viewLabel = Switch-PaletteView $Session $position
             $viewProvider = [string]$views[$position - 1].provider
             Save-Screen $Session "b-view-$position"
@@ -282,8 +282,8 @@ function Invoke-PaletteArchivedJourney($Session) {
             for ($index = 0; $index -lt $views.Count; $index++) {
                 if ($views[$index].provider -eq $chat.provider -and $position -eq 0) { $position = $index + 1 }
             }
-            if ($position -eq 0 -or $position -gt 9) {
-                Add-PaletteFailure "c-own-$key" 'no own view' "no account view for provider $($chat.provider) in the first nine positions"
+            if ($position -eq 0 -or $position -gt 8) {
+                Add-PaletteFailure "c-own-$key" 'no own view' "no account view for provider $($chat.provider) in the first eight positions"
                 continue
             }
             $viewLabel = Switch-PaletteView $Session $position

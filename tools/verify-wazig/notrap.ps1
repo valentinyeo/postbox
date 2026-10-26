@@ -1,10 +1,10 @@
 function Select-NotrapView($Session, $Order, [int]$Number) {
-    Send-Keys $Session "%$Number"
+    Send-Keys $Session "^$($Number + 1)"
     $wanted = $Order[$Number - 1]
     $null = Wait-Until {
         $state = Read-Control $Session status
         $state.current_view.provider -eq $wanted.provider -and $state.current_view.account -eq $wanted.account -and $state.current_view.label -eq $wanted.label -and -not $state.current_view.inbox
-    } "Alt+$Number reaches saved view"
+    } "Ctrl+$($Number + 1) reaches saved view"
     return (Read-Control $Session status)
 }
 
@@ -47,7 +47,7 @@ function Invoke-NotrapJourney($Session) {
             $state = Select-NotrapView $Session $order $target
             $transitions += @{ source = $source; target = $target; current_view = $state.current_view }
         }
-        foreach ($key in @('%0', '%i')) {
+        foreach ($key in @('^1', '%i')) {
             $null = Select-NotrapView $Session $order $source
             Send-Keys $Session $key
             $null = Wait-Until { $state = Read-Control $Session status; $state.current_view.inbox -and $state.chat_count -eq 8 } 'Alt inbox shortcut from every view'

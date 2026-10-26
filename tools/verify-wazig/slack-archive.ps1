@@ -17,8 +17,8 @@ function Assert-SlackArchiveView($Session, [bool]$Archived, [int]$Unread, [strin
 }
 
 function Invoke-SlackArchiveJourney($Session, [string]$Messages, $Start) {
-    $null = Send-Keys $Session '%1'
-    $null = Send-Keys $Session '^1'
+    $null = Send-Keys $Session '^2'
+    $null = Send-Keys $Session '^+{HOME}'
     $null = Wait-Until { $state = Read-Control $Session status; $state.selected.provider -eq 'slack' -and $state.selected.id -eq 'fixture-alpha' } 'Slack channel selected'
     $null = Save-Screen $Session before
     $null = Send-Keys $Session '^e'
@@ -35,7 +35,7 @@ function Invoke-SlackArchiveJourney($Session, [string]$Messages, $Start) {
     $null = Assert-SlackArchiveView $Session $false 1 incoming-inbox $true
     $null = Assert-SlackArchiveView $Session $true 0 incoming-archive-empty $false
     $null = Invoke-PaletteCommand $Session 'Show inbox chats'
-    $null = Send-Keys $Session '^1'
+    $null = Send-Keys $Session '^+{HOME}'
     $null = Wait-Until {
         $state = Read-Control $Session status
         $state.selected.provider -eq 'slack' -and $state.selected.id -eq 'fixture-alpha' -and $state.selected.unread_count -eq 0

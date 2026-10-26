@@ -42,7 +42,7 @@ function Invoke-ShowArchivedJourney($Session, $Start) {
     Assert-That ($views.Count -eq 5) 'Expected two WhatsApp and three other account views'
     $views | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Session.evidence 'show-archived-views.json')
     for ($position = 1; $position -le $views.Count; $position++) {
-        Send-Keys $Session "%$position"
+        Send-Keys $Session "^$($position + 1)"
         Save-ArchivedSwitch $Session "view-$position-off" $false 2 0
         Send-Keys $Session '%a'
         Save-ArchivedSwitch $Session "view-$position-on" $true 4 2 $true
@@ -52,7 +52,7 @@ function Invoke-ShowArchivedJourney($Session, $Start) {
             Send-Keys $Session '%a'
             Save-ArchivedSwitch $Session palette-on $true 4 2 $true
         }
-        Send-Keys $Session '^1'
+        Send-Keys $Session '^+{HOME}'
         $null = Wait-Until { (Read-Control $Session status).selected.name -like '*row 0' } 'normal read row selected'
         $id = (Read-Control $Session status).selected.id
         Send-Keys $Session '^e'
@@ -66,9 +66,9 @@ function Invoke-ShowArchivedJourney($Session, $Start) {
         }
     }
     Invoke-ArchivePresentation $Session
-    Send-Keys $Session '%1'
+    Send-Keys $Session '^2'
     Save-ArchivedSwitch $Session account-one-kept $true 4 2
-    Send-Keys $Session '%2'
+    Send-Keys $Session '^3'
     Save-ArchivedSwitch $Session account-two-off $false 2 0
     Send-Keys $Session '%i'
     Save-ArchivedSwitch $Session inbox-kept $true 10 5
@@ -93,9 +93,9 @@ function Invoke-ShowArchivedJourney($Session, $Start) {
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
     Send-Keys $Session '%i'
     Save-ArchivedSwitch $Session restart-inbox $true 10 5
-    Send-Keys $Session '%1'
+    Send-Keys $Session '^2'
     Save-ArchivedSwitch $Session restart-one $true 4 2
-    Send-Keys $Session '%2'
+    Send-Keys $Session '^3'
     Save-ArchivedSwitch $Session restart-two $false 2 0
     Send-Keys $Session '%i'
     Save-ArchivedSwitch $Session after $true 10 5

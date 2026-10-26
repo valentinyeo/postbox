@@ -108,7 +108,7 @@ def check_show_archived(folder):
     preferences = (folder / 'preferences.txt').read_text(encoding='utf-8-sig')
     assert 'ShowArchived' in preferences
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for key in ('%i', '%1', '%2', '%3', '%4', '%5', '%a', '^e', '^k', '{ENTER}'):
+    for key in ('%i', '^2', '^3', '^4', '^5', '^6', '%a', '^e', '^k', '{ENTER}'):
         assert 'keys: ' + key in actions, key
     assert 'show-archived show-archived-all PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
     final = read('side-effects.json')

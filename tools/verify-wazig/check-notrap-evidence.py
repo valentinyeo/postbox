@@ -43,14 +43,14 @@ def check_notrap(folder):
         assert escaped['current_view'] == (startup['current_view'] if empty else identity(view))
         assert read(f'escape-to-first-{number}.state.json')['current_view'] == identity(order[0])
     transitions = read('transitions.json')
-    expected = {(source, target) for source in range(1, len(order) + 1) for target in [*range(1, len(order) + 1), '%0', '%i']}
+    expected = {(source, target) for source in range(1, len(order) + 1) for target in [*range(1, len(order) + 1), '^1', '%i']}
     assert len(transitions) == len(expected)
     assert {(row['source'], row['target']) for row in transitions} == expected
     for row in transitions:
         wanted = identity(order[row['target'] - 1]) if isinstance(row['target'], int) else startup['current_view']
         assert row['current_view'] == wanted, row
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for key in [*(f'%{number}' for number in range(1, len(order) + 1)), '%0', '%i', '^f', 'no-trap-search', '{ESC}']:
+    for key in [*(f'^{number + 1}' for number in range(1, len(order) + 1)), '^1', '%i', '^f', 'no-trap-search', '{ESC}']:
         assert f'keys: {key}' in actions, key
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert any(row['path'].startswith('/v1/wazig/chats') and row['status'] == 200 for row in requests)

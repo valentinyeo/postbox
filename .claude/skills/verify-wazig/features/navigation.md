@@ -5,14 +5,14 @@ Move between chats while keeping the selected conversation and its composer alig
 ## Sub-features
 
 - `navigation-next`: next and previous chat, with wraparound.
-- `navigation-position`: Ctrl+1 through Ctrl+9 selects a list position.
+- `navigation-position`: Ctrl+number switches views; Ctrl+Shift+Home selects the first chat.
 - `navigation-edges`: jump to the first or last chat.
 - `navigation-page`: move by a page; sidebar arrow keys and mouse selection are also available.
 
 ## How to get to it (user POV)
 
 - Ctrl+Tab / Ctrl+Shift+Tab, or Ctrl+K → `Next chat` / `Previous chat`.
-- Ctrl+1..9; Ctrl+Shift+Home / Ctrl+Shift+End; Ctrl+Page Up / Ctrl+Page Down.
+- Ctrl+Shift+Home / Ctrl+Shift+End; Ctrl+Page Up / Ctrl+Page Down.
 - Focus the chat list for Up/Down, or click a chat row.
 
 ## Driving it with PowerShell UI Automation

@@ -41,7 +41,7 @@ class SlackSortEvidenceTests(unittest.TestCase):
         (self.folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in requests))
         self.write('side-effects.json', dict(chat_count=4, pending_sends=0, pending_archives=0, sync='stopped', slack_connected=False,
                                             production_preferences_absent=True, whatsapp_store_absent=True, telegram_store_absent=True))
-        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['%1', '^{TAB}', '^+{TAB}', 'Compose message', 'Synthetic Slack outgoing', '{ENTER}']))
+        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['^2', '^{TAB}', '^+{TAB}', 'Compose message', 'Synthetic Slack outgoing', '{ENTER}']))
         (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED: synthetic validator input')
         (self.folder / 'result.txt').write_text('JOURNEY PASSED: slack-sort')
 
@@ -126,7 +126,7 @@ class SlackArchiveEvidenceTests(unittest.TestCase):
         self.write_requests()
         self.write('side-effects.json', dict(chat_count=2, show_archived=False, pending_sends=0, pending_archives=0, sync='stopped', slack_connected=False,
                                             production_preferences_absent=True, whatsapp_store_absent=True, telegram_store_absent=True))
-        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['%1', '^1', '^e', 'Show archived chats', 'Show inbox chats', 'Refresh', '^e', '^e']) + '\n')
+        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['^2', '^+{HOME}', '^e', 'Show archived chats', 'Show inbox chats', 'Refresh', '^e', '^e']) + '\n')
         (self.folder / 'hub-proof.log').write_text('slack-archive local-archive-incoming-restart-unarchive PASS')
         (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED: synthetic validator input')
         (self.folder / 'result.txt').write_text('JOURNEY PASSED: slack-archive')

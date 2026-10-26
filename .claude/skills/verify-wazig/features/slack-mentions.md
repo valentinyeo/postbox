@@ -10,7 +10,7 @@
 
 ## How to get to it (user POV)
 
-- Open Messages with the unified hub configured and select the Slack account with Alt+1 in this single-account fixture.
+- Open Messages with the unified hub configured and select the Slack account with Ctrl+2 in this single-account fixture.
 - Use Ctrl+Tab to select Verification Mentions and read its five messages.
 - Expect `@Fixture Peer hello`, `@someone joins later`, `@Outside Guest thanks report`, `@Guest Person joins @Fixture Peer` and `@Guest Person meets @Connect Person`.
 
@@ -20,7 +20,7 @@
 - `SlackMentionsHandler` in `tools/verify-wazig/fake-hub.py` serves `slack:fixture-mentions:channel` through the authenticated unified hub.
 - The fixture's initial member map contains only `U4A59H6UT` with name `Fixture Peer`. Synthetic `users.info` results supply `UEXT00001` as `Guest Person` and `WCONNECT01` as `Connect Person`; these results populate the sender names, not a direct Slack installation. Retain the member map, lookup results and raw wire rows in `bridge-requests.jsonl`.
 - Known, guest and Connect wire mentions deliberately retain markup so the client must use the hub sender-name lookup. The Connect row also contains upstream-resolved `@Guest Person` to assert preservation of mention-only names.
-- `journey-slack-mentions.ps1` sends real Alt+1 and Ctrl+Tab keystrokes. Read-only `Read-Control messages` observes the selected chat's rendered text; nonempty bubble rectangles prove layout.
+- `journey-slack-mentions.ps1` sends real Ctrl+2 and Ctrl+Tab keystrokes. Read-only `Read-Control messages` observes the selected chat's rendered text; nonempty bubble rectangles prove layout.
 - Assert all five exact strings and the named sender lines. Require the `report` link's target to remain `https://example.org/report`.
 - Retain `before.messages.json` and `after.messages.json` intact. Their `sender_id` fields are transport metadata, not rendered text. Separately retain `before.rendered.json` and `after.rendered.json` with the entire snapshot except that non-rendered `sender_id` metadata; reject the five fixture Slack ids by name and any `<@` or `<https://` markup in these rendered snapshots and both UI Automation trees, so ordinary uppercase UI words cannot trip the check.
 - Keep `before.png`, `after.png`, their UI Automation trees and state snapshots, keyboard actions, authenticated requests and `hub-proof.log` after cleanup.
