@@ -135,7 +135,7 @@ jobs:
           python tools/verify-wazig/test-sidebar-surface.py
           if ($LASTEXITCODE -ne 0) { throw 'Sidebar pixel oracle controls failed' }
           $candidate = (git rev-parse HEAD).Trim()
-          $assertion = (git log -1 --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1).Trim()
+          $assertion = (git log --diff-filter=A --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1 | Select-Object -Last 1).Trim()
           $baseline = (git rev-parse "$assertion^1").Trim()
           if ($LASTEXITCODE -ne 0) { throw 'Sidebar assertion parent missing' }
           $source = Join-Path $env:RUNNER_TEMP 'sidebar-baseline-source'

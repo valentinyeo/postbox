@@ -527,7 +527,7 @@ for required in ["@('amoled', 'green')", 'BoundingRectangle', 'GetDpiForWindow',
     assert required in sidebar_journey, required
 for required in ['sidebar-pixels.json', 'sidebar-builds.json', 'baseline_commit', 'candidate_sha256', 'baseline_sha256', 'assertion_parent', 'fixture_sha256', 'measure_pair', 'validate(metrics)', "row['chat_max_channel_delta'] == row['chat_changed_pixels'] == 0"]:
     assert required in sidebar_validator, required
-for required in ['src/theme.zig', "if: matrix.feature == 'sidebar-surface'", 'test-sidebar-surface.py', 'git log -1 --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1', 'sidebar-baseline-bin/bin', 'verification-evidence/baseline', 'sidebar-builds.json']:
+for required in ['src/theme.zig', "if: matrix.feature == 'sidebar-surface'", 'test-sidebar-surface.py', 'git log --diff-filter=A --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1', 'sidebar-baseline-bin/bin', 'verification-evidence/baseline', 'sidebar-builds.json']:
     assert required in workflow, required
 assert '.claude/skills/verify-wazig/features/sidebar-surface.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 print('verification skill map passed: sidebar screenshot pairs, historical baseline builds, pixel validator and both dark themes')

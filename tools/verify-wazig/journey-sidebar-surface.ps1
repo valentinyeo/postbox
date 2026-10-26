@@ -39,9 +39,9 @@ foreach ($themeName in @('amoled', 'green')) {
     Read-Control $session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence "$name.messages.json")
     $records += [ordered]@{
         theme = $themeName; dpi = $dpi; screenshot = "$name.png"
-        client = @($x, $y, $x + $client.Right, $y + $client.Bottom)
+        client = @($x, $y, ($x + $client.Right), ($y + $client.Bottom))
         edge = $edge
-        list = @([int]$listBounds.Left - $desktop.Left, [int]$listBounds.Top - $desktop.Top, [int]$listBounds.Right - $desktop.Left, [int]$listBounds.Bottom - $desktop.Top)
+        list = @(([int]$listBounds.Left - $desktop.Left), ([int]$listBounds.Top - $desktop.Top), ([int]$listBounds.Right - $desktop.Left), ([int]$listBounds.Bottom - $desktop.Top))
     }
 }
 $records | ConvertTo-Json -Depth 12 -AsArray | Set-Content (Join-Path $Evidence 'sidebar-layout.json')
