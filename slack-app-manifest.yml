@@ -1,6 +1,6 @@
 display_information:
-  name: Wazig
-  description: Slack in the Wazig Messages desktop client
+  name: Postbox
+  description: Slack in the Postbox desktop client
   background_color: "#1F2328"
 oauth_config:
   redirect_urls:

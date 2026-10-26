@@ -61,9 +61,9 @@ pub const commands = [_]CommandInfo{
 
 pub const help_text = blk: {
     var text: []const u8 =
-        \\Usage: wazigctl <command> [args]
+        \\Usage: postboxctl <command> [args]
         \\
-        \\Controls the running Wazig Messages app over a local pipe without
+        \\Controls the running Postbox app over a local pipe without
         \\focusing or showing its window. Output is one JSON line on stdout;
         \\exit code 0 on success, 1 when the app reports an error or does not
         \\answer within 45 s, 2 on bad usage, 3 when the app is not running.

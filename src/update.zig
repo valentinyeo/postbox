@@ -1,13 +1,14 @@
 const std = @import("std");
 
 pub fn zipPrefixFor(arm64: bool) []const u8 {
-    return if (arm64) "Messages_arm64-" else "Messages-";
+    return if (arm64) "Postbox_arm64-" else "Postbox-";
 }
 
 pub const zip_asset_prefix = zipPrefixFor(@import("builtin").cpu.arch == .aarch64);
 
 pub fn isZipAssetNameFor(name: []const u8, arm64: bool) bool {
-    return std.mem.startsWith(u8, name, zipPrefixFor(arm64)) and std.mem.endsWith(u8, name, ".zip");
+    const legacy_prefix = if (arm64) "Messages_arm64-" else "Messages-";
+    return (std.mem.startsWith(u8, name, zipPrefixFor(arm64)) or std.mem.startsWith(u8, name, legacy_prefix)) and std.mem.endsWith(u8, name, ".zip");
 }
 
 pub fn isZipAssetName(name: []const u8) bool {
@@ -15,6 +16,10 @@ pub fn isZipAssetName(name: []const u8) bool {
 }
 
 test "channel pick: each CPU takes only its own zip" {
+    try std.testing.expect(isZipAssetNameFor("Postbox-0.9.92.zip", false));
+    try std.testing.expect(isZipAssetNameFor("Postbox_arm64-0.9.92.zip", true));
+    try std.testing.expect(!isZipAssetNameFor("Postbox_arm64-0.9.92.zip", false));
+    try std.testing.expect(!isZipAssetNameFor("Postbox-0.9.92.zip", true));
     try std.testing.expect(isZipAssetNameFor("Messages-0.9.92.zip", false));
     try std.testing.expect(!isZipAssetNameFor("Messages_arm64-0.9.92.zip", false));
     try std.testing.expect(isZipAssetNameFor("Messages_arm64-0.9.92.zip", true));
@@ -291,11 +296,18 @@ fn findAsset(root: std.json.Value) ?Asset {
     const version = parseVersion(tag) orelse return null;
     const assets_value = obj.get("assets") orelse return null;
     if (assets_value != .array) return null;
+    var branded = false;
+    for (assets_value.array.items) |asset_value| {
+        if (asset_value != .object) continue;
+        const name = asset_value.object.get("name") orelse continue;
+        if (name == .string and std.mem.startsWith(u8, name.string, zip_asset_prefix) and std.mem.endsWith(u8, name.string, ".zip")) branded = true;
+    }
     for (assets_value.array.items) |asset_value| {
         if (asset_value != .object) continue;
         const asset = asset_value.object;
         const name = asset.get("name") orelse continue;
         if (name != .string or !isZipAssetName(name.string)) continue;
+        if (branded and !std.mem.startsWith(u8, name.string, zip_asset_prefix)) continue;
         const url = asset.get("browser_download_url") orelse continue;
         if (url != .string) continue;
         const digest = asset.get("digest") orelse continue;
@@ -527,4 +539,23 @@ test isStaleOrphan {
     try std.testing.expect(!isStaleOrphan(100, 200, true, 0));
     try std.testing.expect(!isStaleOrphan(100, 200, false, 60));
     try std.testing.expect(isStaleOrphan(100, 200, false, orphan_min_age_seconds));
+}
+
+test "branded update wins over the compatible old asset, duplicate branded assets fail closed" {
+    const body =
+        \\{"tag_name":"v0.9.999","assets":[
+        \\{"name":"Messages-v0.9.999.zip","browser_download_url":"https://github.com/legacy.zip","size":10,"digest":"sha256:legacy"},
+        \\{"name":"Postbox-v0.9.999.zip","browser_download_url":"https://github.com/postbox.zip","size":20,"digest":"sha256:postbox"}
+        \\]}
+    ;
+    var parsed: std.json.Parsed(std.json.Value) = undefined;
+    const asset = (try pickAsset(std.testing.allocator, body, &parsed)).?;
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("https://github.com/postbox.zip", asset.url);
+    try std.testing.expectEqual(@as(u64, 20), asset.size);
+    const duplicate = try std.mem.replaceOwned(u8, std.testing.allocator, body, "Messages-", "Postbox-");
+    defer std.testing.allocator.free(duplicate);
+    var ambiguous: std.json.Parsed(std.json.Value) = undefined;
+    try std.testing.expect((try pickAsset(std.testing.allocator, duplicate, &ambiguous)) == null);
+    defer ambiguous.deinit();
 }

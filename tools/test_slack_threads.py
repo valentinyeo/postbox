@@ -31,12 +31,12 @@ class SlackThreadsTests(unittest.TestCase):
             if stage != 'thread-reply':
                 self.write(f'{stage}.json', dict(state, **({'restarted': True} if stage == 'threads-restart' else {})))
             (self.folder / f'{stage}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'fixture' * 2000)
-            (self.folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526')
+            (self.folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Postbox v0.0.526')
         self.requests = [dict(method='POST', authorized=True, wire_path='/v1/wazig/send', status=200,
                              body=dict(chat='slack:fixture-threads:channel', text='Synthetic thread reply', reply_to=PARENT))]
         self.save_requests()
         self.write('side-effects.json', dict(pending_sends=0, pending_archives=0, sync='stopped', production_preferences_absent=True, whatsapp_store_absent=True, telegram_store_absent=True))
-        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['^2', '^{UP}', '{ENTER}', 'Synthetic thread reply', '{ESC}', '^k', 'Slack threads like Slack for this account', 'Quit Messages']))
+        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['^2', '^{UP}', '{ENTER}', 'Synthetic thread reply', '{ESC}', '^k', 'Slack threads like Slack for this account', 'Quit Postbox']))
         (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED: synthetic validator input')
         (self.folder / 'result.txt').write_text('JOURNEY PASSED: slack-threads')
 

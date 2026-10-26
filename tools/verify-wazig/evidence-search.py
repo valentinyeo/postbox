@@ -89,7 +89,7 @@ stages = ['before', 'after', 'empty'] if feature == 'search' else ['before', 'ac
 for name in stages:
     image = (folder / f'{name}.png').read_bytes()
     assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
-    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
     images.append(hashlib.sha256(image).hexdigest())
 assert len(set(images)) == len(stages)
 if feature == 'search':

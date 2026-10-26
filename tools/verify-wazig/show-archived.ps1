@@ -80,7 +80,7 @@ function Invoke-ShowArchivedJourney($Session, $Start) {
     $old = Get-App $Session
     $oldPid = $Session.pid
     $oldTicks = $Session.startTicks
-    Invoke-PaletteCommand $Session 'Quit Messages'
+    Invoke-PaletteCommand $Session 'Quit Postbox'
     $null = Wait-Until { $old.Refresh(); $old.HasExited } 'closed for same-profile restart'
     $Start.Environment['WAZIG_VERIFY_RESTART'] = $Session.id
     $app = [Diagnostics.Process]::Start($Start)

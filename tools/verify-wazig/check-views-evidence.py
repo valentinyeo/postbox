@@ -47,7 +47,7 @@ def check_views(folder):
     def capture(name):
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, name
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
         return read(f'{name}.state.json')
 
     check_workspace_names(folder, capture)
@@ -69,7 +69,7 @@ def check_views(folder):
         label = 'Combined inbox' if view['inbox'] else view['label']
         assert row['current_view'] == view
         assert row['version'] == state['version'] == '0.0.526'
-        assert row['actual'] == row['expected'] == f"{label} - Wazig v{state['version']}"
+        assert row['actual'] == row['expected'] == f"{label} - Postbox v{state['version']}"
         assert f"MessagesZig | {row['actual']}" in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
     assert capture('title-view-1')['current_view'] == capture('view-1')['current_view']
     assert capture('title-inbox')['current_view']['inbox']
@@ -157,7 +157,7 @@ def check_views(folder):
         assert len(rows) == 2 and all(row['view_account'] == account for row in rows)
     capture('after')
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for keys in ['^2', '^3', '^4', '^5', '%i', '^k', 'Show', '^+{HOME}', '^+{HOME}^{TAB}', '^{TAB}', '^+{TAB}', '^f', 'Shared', 'Sort views', '^{DOWN}', '{ENTER}', '{ESC}', 'Quit Messages', 'Verification account send']:
+    for keys in ['^2', '^3', '^4', '^5', '%i', '^k', 'Show', '^+{HOME}', '^+{HOME}^{TAB}', '^{TAB}', '^+{TAB}', '^f', 'Shared', 'Sort views', '^{DOWN}', '{ENTER}', '{ESC}', 'Quit Postbox', 'Verification account send']:
         assert f'keys: {keys}' in actions, keys
     shortcuts = read('view-shortcuts.json')
     order = baseline['view_order']

@@ -36,7 +36,7 @@ function Invoke-SlackThreadsJourney($Session, $Start) {
     $old = Get-App $Session
     $oldPid = $Session.pid
     $oldTicks = $Session.startTicks
-    Invoke-PaletteCommand $Session 'Quit Messages'
+    Invoke-PaletteCommand $Session 'Quit Postbox'
     $null = Wait-Until { $old.Refresh(); $old.HasExited } 'fixture closed normally'
     $Start.Environment['WAZIG_VERIFY_RESTART'] = $Session.id
     $app = [Diagnostics.Process]::Start($Start)

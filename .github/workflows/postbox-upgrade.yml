@@ -1,0 +1,96 @@
+name: Postbox in-place upgrade
+on:
+  pull_request:
+    paths:
+      - src/**
+      - assets/installer.wxs
+      - build.zig
+      - tools/verify-wazig/postbox-upgrade.ps1
+      - tools/verify-wazig/fake-github-updates.py
+      - .github/workflows/postbox-upgrade.yml
+      - .github/workflows/release.yml
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release to verify instead of building
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: postbox-upgrade-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  upgrade:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Build candidate or download published release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if ($env:RELEASE_TAG) {
+            if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release tag' }
+            gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern "Postbox-$env:RELEASE_TAG.zip" --dir candidate
+            if ($LASTEXITCODE -ne 0) { throw 'Published package download failed' }
+            Expand-Archive "candidate/Postbox-$env:RELEASE_TAG.zip" zig-out/bin
+            "CANDIDATE_VERSION=$($env:RELEASE_TAG.Substring(1))" >> $env:GITHUB_ENV
+          } else {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.9.999'
+            if ($LASTEXITCODE -ne 0) { throw 'Candidate build failed' }
+            New-Item candidate -ItemType Directory -Force | Out-Null
+            Compress-Archive zig-out/bin/* candidate/Postbox-candidate.zip
+            'CANDIDATE_VERSION=0.9.999' >> $env:GITHUB_ENV
+          }
+      - name: Download immutable pre-rename release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.9.216 --repo $env:GITHUB_REPOSITORY --pattern 'Messages-v0.9.216.msi' --pattern 'Messages-v0.9.216.zip' --dir original
+          if ($LASTEXITCODE -ne 0) { throw 'Original release download failed' }
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v0.9.216" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Original release metadata unavailable' }
+          foreach ($asset in $release.assets | Where-Object name -in @('Messages-v0.9.216.zip', 'Messages-v0.9.216.msi')) {
+            $digest = 'sha256:' + (Get-FileHash "original/$($asset.name)").Hash.ToLowerInvariant()
+            if ($digest -cne $asset.digest) { throw 'Original release digest mismatch' }
+          }
+          Expand-Archive original/Messages-v0.9.216.zip original/bin
+          "ORIGINAL_EXE_SHA256=$((Get-FileHash original/bin/Messages.exe).Hash)" >> $env:GITHUB_ENV
+          New-Item postbox-evidence -ItemType Directory -Force | Out-Null
+          $release.assets | Select-Object name,digest | ConvertTo-Json | Set-Content postbox-evidence/original-assets.json
+          $cache = (& zig run tools/verify-wazig/cache-id.zig 2>&1 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $cache -notmatch '^[0-9a-f]{16}$') { throw 'Unable to derive original cache identity' }
+          "CACHE_ID=$cache" >> $env:GITHUB_ENV
+      - name: Original release fails the same product-name assertion
+        shell: pwsh
+        run: |
+          & tools/verify-wazig/postbox-upgrade.ps1 -Msi original/Messages-v0.9.216.msi -Payload original/Messages-v0.9.216.zip -CacheId $env:CACHE_ID -Version $env:CANDIDATE_VERSION -Evidence postbox-evidence/red -RedControl
+      - name: Original release updates through the real in-app updater
+        shell: pwsh
+        run: |
+          $payload = (Get-ChildItem candidate/*.zip).FullName
+          & tools/verify-wazig/postbox-upgrade.ps1 -Msi original/Messages-v0.9.216.msi -Payload $payload -CacheId $env:CACHE_ID -Version $env:CANDIDATE_VERSION -Evidence postbox-evidence/green
+          if ($LASTEXITCODE -ne 0) { throw 'Upgrade journey failed' }
+      - name: Bind upgrade proof to candidate build
+        shell: pwsh
+        run: |
+          $proof = Get-Content postbox-evidence/green/result.json -Raw | ConvertFrom-Json
+          $candidate = (Get-FileHash zig-out/bin/Messages.exe).Hash
+          if ($proof.status -cne 'passed' -or $proof.new_sha256 -cne $candidate) { throw 'Upgrade proof does not match candidate executable' }
+          @{commit=$env:GITHUB_SHA;tag='${{ inputs.tag }}';version=$env:CANDIDATE_VERSION;sha256=$candidate;payload_sha256=$proof.payload_sha256;run="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"} | ConvertTo-Json | Set-Content postbox-evidence/build.json
+      - name: Preserve upgrade screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postbox-upgrade
+          path: postbox-evidence/
+          if-no-files-found: warn

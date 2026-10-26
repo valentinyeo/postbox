@@ -103,7 +103,7 @@ class ShowArchivedTests(unittest.TestCase):
         self.write('archive-footer.json', dict(before=state, after=state, rows=rows, point=[150, 243], rect=[100, 230, 238, 256]))
         self.write('archive-footer.state.json', state)
         self.write('archive-footer.chats.json', dict(chats=rows))
-        (self.folder / 'archive-footer.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526\n1016 | ListBox | Chats')
+        (self.folder / 'archive-footer.uia.txt').write_text('MessagesZig | Combined inbox - Postbox v0.0.526\n1016 | ListBox | Chats')
         pixels['write_png'](self.folder / 'archive-footer.png', [[(0, 0, 0)] * 240 for _ in range(256)])
 
     def control(self, row):
@@ -123,7 +123,7 @@ class ShowArchivedTests(unittest.TestCase):
         self.write(f'{name}.state.json', dict(include_archived=enabled, show_archived=False, unread_only=view is None,
                                              chat_count=len(rows), current_view=view or dict(inbox=True), selected=rows[0], search=''))
         (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
-        (self.folder / f'{name}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526\n1016 | ListBox | Chats')
+        (self.folder / f'{name}.uia.txt').write_text('MessagesZig | Combined inbox - Postbox v0.0.526\n1016 | ListBox | Chats')
 
     def write(self, name, data):
         (self.folder / name).write_text(json.dumps(data), encoding='utf-8')

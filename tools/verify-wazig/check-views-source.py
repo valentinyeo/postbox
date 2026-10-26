@@ -192,7 +192,7 @@ def check_journey():
     require(journey, ['Assert-AccountView', "@('personal', 'business', 'T0ABC123', 'T0DEF456')", 'Where-Object view_account -ne $Account',
                       "Send-Keys $Session '^+{HOME}'", "Send-Keys $Session '^+{HOME}^{TAB}'", "Send-Keys $Session '^{TAB}'", "Send-Keys $Session '^+{TAB}'",
                       "Send-Keys $Session '^f'", "Send-Keys $Session '%i'", "Send-Keys $Session '^{DOWN}'",
-                      "'Sort views'", "'ViewOrder not saved at move time'", "'Quit Messages'",
+                      "'Sort views'", "'ViewOrder not saved at move time'", "'Quit Postbox'",
                       "WAZIG_VERIFY_RESTART", "'restart.json'", 'restart-4', 'other.messages.json', 'inbox.chats.json'])
     require(journey, ['view_order.Count -eq 6', "(Read-ListCount $list) -eq 6"])
     assert set(re.findall(r'Read-Control \$Session (\w+)', journey)) == {'status', 'chats', 'messages'}

@@ -30,9 +30,9 @@ pub fn main(init: std.process.Init.Minimal) u8 {
     var usage_message: []const u8 = "";
     const request = control.parseArgs(arena, plain_args, &usage_message) catch |err| {
         if (err == error.Usage) {
-            printTo(win.STD_ERROR_HANDLE, "wazigctl: ");
+            printTo(win.STD_ERROR_HANDLE, "postboxctl: ");
             printTo(win.STD_ERROR_HANDLE, usage_message);
-            printTo(win.STD_ERROR_HANDLE, "\nRun `wazigctl --help` for the command list.\n");
+            printTo(win.STD_ERROR_HANDLE, "\nRun `postboxctl --help` for the command list.\n");
             return exit_usage;
         }
         return fail(exit_usage, "out of memory");
@@ -54,11 +54,11 @@ pub fn main(init: std.process.Init.Minimal) u8 {
         if (std.mem.endsWith(u8, reply.items, "\n")) break;
     }
     const line = std.mem.trimEnd(u8, reply.items, "\r\n");
-    if (line.len == 0) return fail(exit_app_error, "Wazig closed the connection without an answer");
+    if (line.len == 0) return fail(exit_app_error, "Postbox closed the connection without an answer");
     printTo(win.STD_OUTPUT_HANDLE, line);
     printTo(win.STD_OUTPUT_HANDLE, "\n");
     if (control.responseOk(line)) return exit_ok;
-    printTo(win.STD_ERROR_HANDLE, "wazigctl: ");
+    printTo(win.STD_ERROR_HANDLE, "postboxctl: ");
     printTo(win.STD_ERROR_HANDLE, control.responseError(line));
     printTo(win.STD_ERROR_HANDLE, "\n");
     return exit_app_error;
@@ -66,7 +66,7 @@ pub fn main(init: std.process.Init.Minimal) u8 {
 
 fn watchdog() void {
     win.Sleep(answer_timeout_ms);
-    _ = fail(exit_app_error, "Wazig did not answer within 45 s");
+    _ = fail(exit_app_error, "Postbox did not answer within 45 s");
     win.ExitProcess(exit_app_error);
 }
 
@@ -83,21 +83,21 @@ fn connect() ?win.HANDLE {
         switch (win.GetLastError()) {
             win.ERROR_PIPE_BUSY => _ = win.WaitNamedPipeW(name.ptr, 2000),
             win.ERROR_FILE_NOT_FOUND => {
-                _ = fail(exit_not_running, "Wazig Messages is not running (no control pipe for this user)");
+                _ = fail(exit_not_running, "Postbox is not running (no control pipe for this user)");
                 return null;
             },
             else => {
-                _ = fail(exit_not_running, "could not connect to Wazig Messages");
+                _ = fail(exit_not_running, "could not connect to Postbox");
                 return null;
             },
         }
     }
-    _ = fail(exit_not_running, "Wazig Messages is busy; try again");
+    _ = fail(exit_not_running, "Postbox is busy; try again");
     return null;
 }
 
 fn fail(code: u8, text: []const u8) u8 {
-    printTo(win.STD_ERROR_HANDLE, "wazigctl: ");
+    printTo(win.STD_ERROR_HANDLE, "postboxctl: ");
     printTo(win.STD_ERROR_HANDLE, text);
     printTo(win.STD_ERROR_HANDLE, "\n");
     return code;

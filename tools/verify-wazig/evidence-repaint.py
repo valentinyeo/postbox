@@ -39,7 +39,7 @@ for phase in ['before', 'after']:
     image = (folder / f'{phase}.png').read_bytes()
     assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
     tree = (folder / f'{phase}.uia.txt').read_text(encoding='utf-8-sig')
-    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', tree.splitlines()[0])
+    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', tree.splitlines()[0])
     assert read(f'{phase}.state.json')['selected']['id'] == 'fixture-alpha'
 final = read('side-effects.json')
 assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'

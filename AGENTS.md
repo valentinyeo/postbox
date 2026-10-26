@@ -1,8 +1,8 @@
-# wazig development instructions
+# Postbox development instructions
 
 - Keep the client and its interface code in Zig. Use native Windows APIs and system libraries. Do not add Electron, WebView, .NET, Node, Java, or another bundled runtime.
 - Keep startup time, installed size, and working-set memory measurable. Build release binaries with `zig build --release=small`.
-- Treat WhatsApp as a provider, not the product name. The app is called `Messages`; Slack, Signal, and Telegram are planned providers.
+- Treat WhatsApp as a provider, not the product name. The app is called `Postbox`; Slack, Signal, and Telegram are planned providers.
 - Use the installed official `wacli.exe` at `%LOCALAPPDATA%\Programs\wacli\wacli.exe` for WhatsApp transport and storage. Do not replace the preserved Go TUI project in the sibling `wacli-tui` directory.
 - Never put API keys, WhatsApp data, contact names, message content, or local store files in Git. The Deepgram key is stored encrypted with DPAPI, seeded from the user's saved environment variable `DEEPGRAM_API_KEY` in `HKCU\Environment` and refreshed when it changes. The variable can then be removed; later starts use the stored key.
 - IBM Plex Sans is loaded privately from the two font files installed beside `Messages.exe`. Keep the OFL license with them.
@@ -15,6 +15,6 @@
 ## Product invariants (Valentin, 2026-09-06). Never regress these; check every one before opening a PR.
 - **All media auto-downloads** the moment a chat is opened: voice notes, images, videos, stickers, documents. No "click to load". Media stays cached for the next open; older than 14 days may be evicted.
 - **Voice notes play in-app** with transcription; transcripts are cached and never re-requested.
-- **No toolbar**: every command lives in the Ctrl+K palette. Window title shows `<view label> - Wazig v<version>` (or `Combined inbox - Wazig v<version>` for the combined inbox; `Wazig v<version>` before a view is known).
+- **No toolbar**: every command lives in the Ctrl+K palette. Window title shows `<view label> - Postbox v<version>` (or `Combined inbox - Postbox v<version>` for the combined inbox; `Postbox v<version>` before a view is known).
 - **Font size** follows the saved scale; never change the default size or the font (IBM Plex Sans).
 - **The installed app must never be left without a runnable `Messages.exe`** (self-update swaps atomically or not at all).

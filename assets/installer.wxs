@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
-           Name="Wazig Messages"
+           Name="Postbox"
            Language="1033"
            Version="$(var.Version)"
-           Manufacturer="Wazig"
+           Manufacturer="Postbox"
            UpgradeCode="E2C53374-5665-593B-94F8-38573F3164D2">
     <Package InstallerVersion="200"
              Compressed="yes"
              InstallScope="perUser"
-             Description="Wazig Messages installer"
-             Manufacturer="Wazig" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Wazig Messages is already installed." />
+             Description="Postbox installer"
+             Manufacturer="Postbox" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Postbox is already installed." />
     <Media Id="1" Cabinet="messages.cab" EmbedCab="yes" />
     <Property Id="DISABLEADVTSHORTCUTS" Value="1" />
 
@@ -30,6 +30,9 @@
       </Component>
       <Component Id="WazigCtlExe" Guid="6EF4C9CC-392A-4939-AC20-1770B9E15633">
         <File Id="WazigCtlExeFile" Name="wazigctl.exe" Source="$(var.BinDir)wazigctl.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="PostboxCtlExe" Guid="0775341F-9661-48BA-93CD-6254EF517E53">
+        <File Id="PostboxCtlExeFile" Name="postboxctl.exe" Source="$(var.BinDir)postboxctl.exe" KeyPath="yes" />
       </Component>
       <Component Id="PlexRegular" Guid="1A96D346-DF77-5C8D-AF3B-857F10E50DFF">
         <File Id="PlexRegularFile" Name="IBMPlexSans-Regular.ttf" Source="$(var.BinDir)IBMPlexSans-Regular.ttf" KeyPath="yes" />
@@ -53,17 +56,18 @@
         <RegistryValue Root="HKCU" Key="Software\Wazig\Messages"
                        Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
         <Shortcut Id="MessagesShortcut"
-                  Name="Messages"
-                  Description="Wazig Messages"
+                  Name="Postbox"
+                  Description="Postbox"
                   Target="[INSTALLDIR]Messages.exe"
                   WorkingDirectory="INSTALLDIR" />
         <RemoveFolder Id="RemoveInstallDir" On="uninstall" />
       </Component>
     </DirectoryRef>
 
-    <Feature Id="Main" Title="Wazig Messages" Level="1">
+    <Feature Id="Main" Title="Postbox" Level="1">
       <ComponentRef Id="MessagesExe" />
       <ComponentRef Id="WazigCtlExe" />
+      <ComponentRef Id="PostboxCtlExe" />
       <ComponentRef Id="PlexRegular" />
       <ComponentRef Id="PlexMedium" />
       <ComponentRef Id="PlexSemiBold" />

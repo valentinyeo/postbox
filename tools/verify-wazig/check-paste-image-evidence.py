@@ -73,7 +73,7 @@ def check_paste_image(folder):
         for phase in ('staged', 'sent'):
             name = f'paste-{index}-{phase}'
             assert (folder / f'{name}.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
-            assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+            assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
             assert read(f'{name}.state.json')['selected']['id'] == send['body']['chat']
         assert f'paste-image paste-{index} PASS' in proof
         assert f'clipboard: paste-{index} {size["mode"]} {width}x{height}' in actions
@@ -102,7 +102,7 @@ def check_paste_image(folder):
             name = f'{provider}/{phase}'
             assert (folder / f'{name}.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
             assert read(f'{name}.state.json')['selected']['id'] == 'paste:' + provider
-            assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+            assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         assert f'paste-image {provider}-multi-remove PASS' in proof
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'

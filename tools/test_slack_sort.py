@@ -32,7 +32,7 @@ class SlackSortEvidenceTests(unittest.TestCase):
             self.write(f'{stage}.navigation.json', order)
             self.write(f'{stage}.state.json', dict(view='slack', selected=dict(id='fixture-gamma')))
             (self.folder / f'{stage}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'fixture' * 2000)
-            (self.folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526')
+            (self.folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Postbox v0.0.526')
         (self.folder / 'hub-proof.log').write_text('\n'.join(f'slack-sort {stage}-last-message-order PASS' for stage in orders))
         requests = [dict(method='SSE', kind='msg', wire_path='/v1/wazig/events'),
                     dict(method='POST', authorized=True, wire_path='/fixture/live', status=200),
@@ -112,7 +112,7 @@ class SlackArchiveEvidenceTests(unittest.TestCase):
             self.write(f'{stage}.state.json', dict(show_archived=archived, chat_count=len(rows), pending_archives=0, pending_sends=0, selected=self.target))
             self.write(f'{stage}.chats.json', dict(archived=archived, total=len(rows), chats=rows))
             (self.folder / f'{stage}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'fixture' * 2000)
-            (self.folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Wazig v0.0.526')
+            (self.folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Postbox v0.0.526')
         self.write('restart.json', dict(old_pid=41, old_start='1', new_pid=42, new_start='2', root=self.session['root'], id=self.session['id'], sha256=self.session['sha256']))
         for name, row in [('slack-archive-state.txt', self.target), ('slack-rearchive-state.txt', rearchived)]:
             (self.folder / name).write_text('\t'.join([row['provider'], row['account'], row['id'], '0', row['last_message_time']]) + '\n')

@@ -243,6 +243,7 @@ pub fn build(b: *std.Build) void {
         "kernel32",
         "comctl32",
         "ole32",
+        "uuid",
         "windowscodecs",
         "dwmapi",
         "mfuuid",
@@ -269,7 +270,10 @@ pub fn build(b: *std.Build) void {
     ctl.root_module.linkSystemLibrary("kernel32", .{});
     const install_ctl = b.addInstallArtifact(ctl, .{});
     b.getInstallStep().dependOn(&install_ctl.step);
-    b.step("wazigctl", "Build only wazigctl.exe").dependOn(&install_ctl.step);
+    b.step("wazigctl", "Build only the compatibility control client").dependOn(&install_ctl.step);
+    const install_postbox_ctl = b.addInstallFile(ctl.getEmittedBin(), "bin/postboxctl.exe");
+    b.getInstallStep().dependOn(&install_postbox_ctl.step);
+    b.step("postboxctl", "Build only postboxctl.exe").dependOn(&install_postbox_ctl.step);
 
     b.installFile("assets/IBMPlexSans-Regular.ttf", "bin/IBMPlexSans-Regular.ttf");
     b.installFile("assets/IBMPlexSans-Medium.ttf", "bin/IBMPlexSans-Medium.ttf");

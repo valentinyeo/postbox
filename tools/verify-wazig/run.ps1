@@ -3,9 +3,11 @@ param(
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence',
     [ValidatePattern('^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')]
-    [string]$ExpectedVersion = '0.0.526'
+    [string]$ExpectedVersion = '0.0.526',
+    [string]$ExpectedProduct = 'Postbox'
 )
 . "$PSScriptRoot/harness.ps1"
+Assert-That ($ExpectedProduct -in @('Postbox', 'Wazig')) 'Unknown product identity'
 $registry = Get-Content (Join-Path $PSScriptRoot 'journeys.json') -Raw | ConvertFrom-Json
 $journey = @($registry.journeys | Where-Object name -CEQ $Feature)
 Assert-That ($journey.Count -eq 1) "Unknown verification journey: $Feature"
@@ -84,7 +86,7 @@ try {
 $session = [ordered]@{
     id = $id; pid = $app.Id; startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
     root = $root; evidence = $Evidence; exe = $exe; ctl = $ctl; username = "verify-$id"
-    sha256 = (Get-FileHash $exe).Hash; commit = $env:GITHUB_SHA; feature = $Feature; expected_version = $ExpectedVersion
+    sha256 = (Get-FileHash $exe).Hash; commit = $env:GITHUB_SHA; feature = $Feature; expected_version = $ExpectedVersion; expected_product = $ExpectedProduct
 }
 if ($null -ne $bridge) {
     $session['bridge_pid'] = $bridge.process.Id

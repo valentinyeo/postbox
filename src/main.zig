@@ -1423,7 +1423,7 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
     updateTooltipTheme(a);
     _ = win.SendMessageW(tt, 0x400 + 24, 0, 260);
     addTooltip(a, tt, a.chats_hwnd, lit("Chats  ↑/↓ move · Ctrl+Tab next chat"));
-    addTooltip(a, tt, a.canvas, lit("Messages  Alt+J/K select · Ctrl+P play voice · Ctrl+T transcript · Ctrl+R react"));
+    addTooltip(a, tt, a.canvas, lit("Postbox  Alt+J/K select · Ctrl+P play voice · Ctrl+T transcript · Ctrl+R react"));
     addTooltip(a, tt, a.compose, lit("Message box  Enter sends · Shift+Enter new line"));
     addTooltip(a, tt, a.dictate, lit("Dictate  Ctrl+D"));
     addTooltip(a, tt, a.send, lit("Send message  Enter"));
@@ -1956,14 +1956,14 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
     if (hubConfigured(a) and !hubJobReady(a, job)) return false;
     if (job.kind == .hub_media or job.kind == .hub_avatar) {
         if (a.hub_media_thread == null) {
-            setStatus(a, "Media worker unavailable; restart Messages");
+            setStatus(a, "Media worker unavailable; restart Postbox");
             return false;
         }
     }
     var queued_job = job;
     if (hubConfigured(a) and (unifiedHub(a) or job.provider == .whatsapp)) queued_job.hub_account = a.hub_account;
     if (jobIsSlack(job.kind) and a.wacli_slack_thread == null) {
-        setStatus(a, "Slack worker unavailable; restart Messages");
+        setStatus(a, "Slack worker unavailable; restart Postbox");
         return false;
     }
     a.wacli_mutex.lockUncancelable(a.io);
@@ -6902,7 +6902,7 @@ fn openPlayerWindow(a: *App, width: i32, height: i32) ?win.HWND {
     const hwnd = win.CreateWindowExW(
         0,
         lit("MessagesVideoPlayer"),
-        lit("Messages · Video"),
+        lit("Postbox · Video"),
         win.WS_OVERLAPPEDWINDOW,
         win.CW_USEDEFAULT,
         win.CW_USEDEFAULT,
@@ -11437,7 +11437,7 @@ fn controlHandle(context: *anyopaque, line: []const u8, out: *std.Io.Writer.Allo
     const a: *App = @ptrCast(@alignCast(context));
     const w = &out.writer;
     const parsed = control_api.parseRequest(a.allocator, line) catch {
-        control_api.writeError(w, "bad request; run wazigctl --help") catch {};
+        control_api.writeError(w, "bad request; run postboxctl --help") catch {};
         return;
     };
     const event = win.CreateEventW(null, win.FALSE, win.FALSE, null) orelse {
@@ -11471,8 +11471,8 @@ const ControlOutcome = enum { answered, abandoned, gone, too_slow, wacli_failed 
 fn controlFinish(call: *ControlCall, outcome: ControlOutcome, w: *std.Io.Writer) void {
     const problem = switch (outcome) {
         .answered => return w.writeAll(call.out.written()) catch {},
-        .abandoned => "Wazig did not answer within 10 s",
-        .gone => "Wazig is closing",
+        .abandoned => "Postbox did not answer within 10 s",
+        .gone => "Postbox is closing",
         .too_slow => "timed out waiting for the app (chat still loading?)",
         .wacli_failed => "could not read the WhatsApp chat list",
     };
@@ -12112,7 +12112,7 @@ fn buildPaletteItems(a: *App) void {
     }
     appendPalette(a, "Check for updates now", "", command_update_check);
     if (a.update_pending != null) appendPalette(a, "Restart now to install update", "", command_update_install);
-    appendPalette(a, "Quit Messages", "Q", command_quit);
+    appendPalette(a, "Quit Postbox", "Q", command_quit);
     if (!a.palette_search_mode) {
         for (0..a.chat_count) |index| appendPaletteChat(a, index);
     }
@@ -15321,7 +15321,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     a.update_install_auto = true;
                     if (!a.update_staged) startUpdateInstall(hwnd, true);
                     var offer_buf: [128]u8 = undefined;
-                    setStatus(a, std.fmt.bufPrint(&offer_buf, "New version {s} is available - use the card to update", .{upd.tag}) catch "New version available");
+                    setStatus(a, std.fmt.bufPrint(&offer_buf, "New version {s} is available - use the card to update", .{upd.tag}) catch "Postbox update available");
                     var offer_log_buf: [160]u8 = undefined;
                     appendLaunchLog(a, std.fmt.bufPrint(&offer_log_buf, "update: card offered {s}", .{upd.tag}) catch "update: card offered");
                     updateCardRefresh(a);
@@ -15346,8 +15346,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     } else {
                         a.update_failures = 0;
                     }
-                    if (!a.update_install_auto or a.update_failures >= 2) setStatus(a, "Update blocked: another copy of Messages is running - close other copies and try again");
-                    updateCardFail(a, "Another copy of Messages is running");
+                    if (!a.update_install_auto or a.update_failures >= 2) setStatus(a, "Update blocked: another copy of Postbox is running - close other copies and try again");
+                    updateCardFail(a, "Another copy of Postbox is running");
                 },
                 8 => {
                     a.update_click_wait = false;
@@ -15694,14 +15694,14 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.wacli_thread == null) showProblem(a, "Background reader failed to start");
             if (hubConfigured(a) and a.hub_media_thread == null) {
                 a.hub_media_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .hub_media }) catch null;
-                if (a.hub_media_thread == null) setStatus(a, "Media worker unavailable; restart Messages");
+                if (a.hub_media_thread == null) setStatus(a, "Media worker unavailable; restart Postbox");
             }
             if (std.Thread.spawn(.{ .stack_size = 256 * 1024 }, controlThreadMain, .{a})) |thread| {
                 thread.detach();
             } else |_| appendLaunchLog(a, "control pipe: thread failed to start");
             if (a.wacli_slack_thread == null) {
                 a.wacli_slack_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .slack }) catch null;
-                if (a.wacli_slack_thread == null) setStatus(a, "Slack worker unavailable; restart Messages");
+                if (a.wacli_slack_thread == null) setStatus(a, "Slack worker unavailable; restart Postbox");
             }
             if (hubConfigured(a)) {
                 loadDrafts(a);
@@ -17189,7 +17189,7 @@ pub fn main(init: std.process.Init) !void {
     defer _ = win.CloseHandle(outbox_mutex);
     const outbox_wait = win.WaitForSingleObject(outbox_mutex, if (update_relaunch) 10_000 else 0);
     if (outbox_wait != win.WAIT_OBJECT_0 and outbox_wait != win.WAIT_ABANDONED) {
-        _ = win.MessageBoxW(null, lit("Messages is already running. Close that window before starting another instance."), lit("Messages"), win.MB_OK);
+        _ = win.MessageBoxW(null, lit("Postbox is already running. Close that window before starting another instance."), lit("Postbox"), win.MB_OK);
         return;
     }
     defer _ = win.ReleaseMutex(outbox_mutex);
@@ -17363,6 +17363,7 @@ pub fn main(init: std.process.Init) !void {
     }
     if (win.OleInitialize(null) < 0) return error.OleInitializeFailed;
     defer win.OleUninitialize();
+    migrateProductName(init);
     defer text_draw.reset();
     defer mf_lazy.unloadIfStarted();
     _ = win.CoCreateInstance(
@@ -17504,7 +17505,7 @@ pub fn main(init: std.process.Init) !void {
     const hwnd = win.CreateWindowExW(
         win.WS_EX_ACCEPTFILES,
         lit("MessagesZig"),
-        lit("Wazig v" ++ app_version),
+        lit("Postbox v" ++ app_version),
         win.WS_OVERLAPPEDWINDOW | win.WS_CLIPCHILDREN | win.WS_MAXIMIZE,
         if (window_rect) |rect| rect.left else win.CW_USEDEFAULT,
         if (window_rect) |rect| rect.top else win.CW_USEDEFAULT,
@@ -17702,7 +17703,7 @@ fn updateCardClick(a: *App) void {
     a.update_install_auto = false;
     a.update_card_busy = true;
     appendLaunchLog(a, "update: card clicked");
-    setStatus(a, "Updating Messages...");
+    setStatus(a, "Updating Postbox...");
     if (a.update_install_running.load(.acquire)) {
         a.update_click_wait = true;
     } else {
@@ -17717,6 +17718,57 @@ fn updateCardDismiss(a: *App) void {
     @memcpy(a.update_dismissed[0..n], pending.tag[0..n]);
     a.update_dismissed_len = n;
     updateCardRefresh(a);
+}
+
+fn migrateProductName(init: std.process.Init) void {
+    if (verification_fixture) return;
+    var exe: [519]u16 = undefined;
+    const exe_len: usize = @intCast(win.GetModuleFileNameW(null, &exe, exe.len));
+    if (exe_len == 0 or exe_len >= exe.len) return;
+    var shell_link: ?*win.IShellLinkW = null;
+    if (win.CoCreateInstance(&win.CLSID_ShellLink, null, win.CLSCTX_INPROC_SERVER, &win.IID_IShellLinkW, @ptrCast(&shell_link)) < 0) return;
+    const link = shell_link orelse return;
+    defer _ = link.lpVtbl.*.Release.?(link);
+    var persist_file: ?*win.IPersistFile = null;
+    if (link.lpVtbl.*.QueryInterface.?(link, &win.IID_IPersistFile, @ptrCast(&persist_file)) < 0) return;
+    const file = persist_file orelse return;
+    defer _ = file.lpVtbl.*.Release.?(file);
+    const folders = [_]struct { variable: []const u8, suffix: []const u8 }{
+        .{ .variable = "APPDATA", .suffix = "Microsoft/Windows/Start Menu/Programs" },
+        .{ .variable = "USERPROFILE", .suffix = "Desktop" },
+        .{ .variable = "APPDATA", .suffix = "Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar" },
+    };
+    for (folders) |folder| {
+        const base = init.environ_map.get(folder.variable) orelse continue;
+        const directory = std.fs.path.join(init.gpa, &.{ base, folder.suffix }) catch continue;
+        defer init.gpa.free(directory);
+        const destination = std.fs.path.join(init.gpa, &.{ directory, "Postbox.lnk" }) catch continue;
+        defer init.gpa.free(destination);
+        const new_wide = utf8ToWide(init.gpa, destination) catch continue;
+        defer init.gpa.free(new_wide);
+        for ([_][]const u8{ "Messages.lnk", "Wazig.lnk", "Wazig Messages.lnk" }) |name| {
+            const source = std.fs.path.join(init.gpa, &.{ directory, name }) catch continue;
+            defer init.gpa.free(source);
+            const old_wide = utf8ToWide(init.gpa, source) catch continue;
+            defer init.gpa.free(old_wide);
+            if (file.lpVtbl.*.Load.?(file, old_wide.ptr, win.STGM_READ) < 0) continue;
+            var target: [519]u16 = @splat(0);
+            if (link.lpVtbl.*.GetPath.?(link, &target, target.len, null, win.SLGP_RAWPATH) < 0) continue;
+            const target_len = std.mem.indexOfScalar(u16, &target, 0) orelse continue;
+            if (!eqlWideIgnoreCase(target[0..target_len], exe[0..exe_len])) continue;
+            if (win.GetFileAttributesW(new_wide.ptr) != win.INVALID_FILE_ATTRIBUTES) {
+                if (file.lpVtbl.*.Load.?(file, new_wide.ptr, win.STGM_READ) < 0) continue;
+                target = @splat(0);
+                if (link.lpVtbl.*.GetPath.?(link, &target, target.len, null, win.SLGP_RAWPATH) < 0) continue;
+                const new_target_len = std.mem.indexOfScalar(u16, &target, 0) orelse continue;
+                if (!eqlWideIgnoreCase(target[0..new_target_len], exe[0..exe_len])) continue;
+            } else {
+                if (link.lpVtbl.*.SetDescription.?(link, lit("Postbox")) < 0) continue;
+                if (file.lpVtbl.*.Save.?(file, new_wide.ptr, win.TRUE) < 0) continue;
+            }
+            _ = win.DeleteFileW(old_wide.ptr);
+        }
+    }
 }
 
 fn removeLeftoverOldExe() void {
@@ -17746,7 +17798,7 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     else if (a.update_card_busy)
         "Updating..."
     else
-        std.fmt.bufPrint(&title_buf, "New version v{s}", .{tag}) catch "New version available";
+        std.fmt.bufPrint(&title_buf, "Postbox v{s}", .{tag}) catch "Postbox update available";
     _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
     _ = win.SetTextColor(hdc, theme.current.on_surface);
     const card_layout = updateCardLayout(a, card);
@@ -17894,9 +17946,9 @@ fn updateThreadMain(ctx: *UpdateContext) void {
 
 fn checkForUpdate(allocator: std.mem.Allocator) !?UpdateAvailable {
     const current = currentVersion() orelse return error.UpdateBadVersion;
-    const api_headers = try utf8ToWide(allocator, "User-Agent: Messages updater\r\nAccept: application/vnd.github+json\r\n");
+    const api_headers = try utf8ToWide(allocator, "User-Agent: Postbox updater\r\nAccept: application/vnd.github+json\r\n");
     defer allocator.free(api_headers);
-    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/wazig/releases/latest"), api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
+    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/postbox/releases/latest"), api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
     defer allocator.free(json);
     var parsed: std.json.Parsed(std.json.Value) = undefined;
     const maybe_asset = try update.pickAsset(allocator, json, &parsed);
@@ -17910,7 +17962,7 @@ fn checkForUpdate(allocator: std.mem.Allocator) !?UpdateAvailable {
     try releases.append(history_allocator, .{ .tag = asset.tag, .body = update.releaseBody(parsed.value) });
     var page: usize = 1;
     while (true) : (page += 1) {
-        const path = try std.fmt.allocPrint(allocator, "/repos/valentinyeo/wazig/releases?page={d}", .{page});
+        const path = try std.fmt.allocPrint(allocator, "/repos/valentinyeo/postbox/releases?page={d}", .{page});
         defer allocator.free(path);
         const wide_path = try utf8ToWide(allocator, path);
         defer allocator.free(wide_path);
@@ -17989,7 +18041,7 @@ fn wideToUtf8(allocator: std.mem.Allocator, wide: []const u16) ![]u8 {
 }
 
 fn httpGet(allocator: std.mem.Allocator, host: [*:0]const u16, path: [*:0]const u16, headers: [*:0]const u16, max_bytes: usize, port: u16, secure: bool, redirects: bool) ![]u8 {
-    const session = win.WinHttpOpen(lit("Messages updater"), win.WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, null, null, 0) orelse return error.UpdateNetwork;
+    const session = win.WinHttpOpen(lit("Postbox updater"), win.WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, null, null, 0) orelse return error.UpdateNetwork;
     defer _ = win.WinHttpCloseHandle(session);
     _ = win.WinHttpSetTimeouts(session, 15000, 15000, 60000, 60000);
     const connection = win.WinHttpConnect(session, host, port, 0) orelse return error.UpdateNetwork;
@@ -18255,9 +18307,9 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
         return swapStaged(io, allocator, root, stage, update_root, exe_path, exe_dir, exe_name, marker.?.inner_root);
     }
 
-    const api_headers = try utf8ToWide(allocator, "User-Agent: Messages updater\r\nAccept: application/vnd.github+json\r\n");
+    const api_headers = try utf8ToWide(allocator, "User-Agent: Postbox updater\r\nAccept: application/vnd.github+json\r\n");
     defer allocator.free(api_headers);
-    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/wazig/releases/latest"), api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
+    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/postbox/releases/latest"), api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
     defer allocator.free(json);
 
     var parsed: std.json.Parsed(std.json.Value) = undefined;
@@ -18271,7 +18323,7 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
 
     const asset_url = try utf8ToWide(allocator, asset.url);
     defer allocator.free(asset_url);
-    const download_headers = try utf8ToWide(allocator, "User-Agent: Messages updater\r\n");
+    const download_headers = try utf8ToWide(allocator, "User-Agent: Postbox updater\r\n");
     defer allocator.free(download_headers);
     update_dl_done.store(0, .release);
     update_dl_total.store(asset.size, .release);
@@ -19152,7 +19204,7 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 if (result.http_status == 502 and (std.mem.startsWith(u8, result.jid.slice(), "signal:") or std.mem.startsWith(u8, result.jid.slice(), "telegram:"))) {
                     removeFirstPendingArchive(a);
                     refreshChats(a);
-                    setStatus(a, "Chat archive is managed locally in Wazig");
+                    setStatus(a, "Chat archive is managed locally in Postbox");
                 } else {
                     a.pending_archives[0].retry_at_ms = win.GetTickCount64() + 3_000;
                     setStatus(a, "Archive operation failed; retrying");

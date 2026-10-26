@@ -305,7 +305,7 @@ assert entries['hub-archive']['validator']['file'] == 'check-hub-archive-evidenc
 assert '.claude/skills/verify-wazig/features/hub-archive.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 for artifact in ['legacy-archive-state.txt', 'restart.json', 'archive-state.txt', 'provider.requests.json', 'migration-before.txt', 'migration-after.txt']:
     assert artifact in runner + archive_journey and artifact in archive_validator, artifact
-for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages', 'Show archived chats', 'Show inbox chats', 'Quit Messages', 'Get-FileHash']:
+for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages', 'Show archived chats', 'Show inbox chats', 'Quit Postbox', 'Get-FileHash']:
     assert fragment in archive_journey, fragment
 for fragment in ['PROVIDER_UNARCHIVE_REQUIRED', 'PHONE_UNARCHIVE_REQUIRED', 'PROVIDER_INCOMING_REQUIRED', 'MIGRATION_ACK_REMOVES_LOCAL_ENTRY']:
     assert fragment in archive_validator, fragment

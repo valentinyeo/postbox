@@ -44,7 +44,7 @@ for provider, chat, message in [('whatsapp', 'fixture-beta', 'BASELINE_BETA'), (
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
         images.append(hashlib.sha256(image).hexdigest())
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         selected = read(f'{name}.state.json')['selected']
         assert selected['id'] == chat and selected['provider'] == provider
     assert images[0] != images[1]

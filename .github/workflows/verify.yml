@@ -18,6 +18,7 @@ on:
       - src/chat_list_layout.zig
       - src/text_draw.zig
       - src/main.zig
+      - src/messenger_view.zig
       - src/theme.zig
       - src/archive_rules.zig
       - src/chat_rows.zig
@@ -150,7 +151,7 @@ jobs:
           New-Item verification-evidence -ItemType Directory -Force | Out-Null
           $env:GITHUB_SHA = $baseline
           try {
-            & tools/verify-wazig/run.ps1 -Feature sidebar-surface -Bin sidebar-baseline-bin/bin -Evidence verification-evidence/baseline
+            & tools/verify-wazig/run.ps1 -Feature sidebar-surface -ExpectedProduct Wazig -Bin sidebar-baseline-bin/bin -Evidence verification-evidence/baseline
             if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline capture failed' }
           } finally { $env:GITHUB_SHA = $candidate }
           @{
@@ -174,7 +175,7 @@ jobs:
             zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
             if ($LASTEXITCODE -ne 0) { throw 'Archive baseline build failed' }
           } finally { Pop-Location }
-          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature hub-archive -Bin archive-baseline-bin/bin -Evidence archive-red-evidence
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature hub-archive -ExpectedProduct Wazig -Bin archive-baseline-bin/bin -Evidence archive-red-evidence
           if ($LASTEXITCODE -eq 0) { throw 'Original main unexpectedly passed provider archive' }
           $failure = Get-Content archive-red-evidence/failure.txt -Raw
           if ($failure -notmatch 'WhatsApp did not acknowledge archive') { throw "Wrong red control failure: $failure" }

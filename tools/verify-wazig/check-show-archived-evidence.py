@@ -13,7 +13,7 @@ def check_show_archived(folder):
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, name
         tree = (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Wazig v0\.0\.526', tree.splitlines()[0]), name
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', tree.splitlines()[0]), name
         assert '1146 |' not in tree and 'Show archived:' not in tree, name
         state = read(f'{name}.state.json')
         rows = read(f'{name}.chats.json')['chats']
