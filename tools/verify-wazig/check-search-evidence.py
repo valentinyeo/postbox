@@ -87,7 +87,7 @@ def check_ink(image, layout):
     for index, row in enumerate(rows):
         y = layout['y'] + index * layout['row_height']
         assert (index + 1) * layout['row_height'] <= layout['height']
-        results['archived' if row['archived'] else 'live'] = measure(image, [layout['x'] + 20, y + 4, layout['x'] + 195, y + layout['row_height'] - 4])
+        results['archived' if row['archived'] else 'live'] = measure(image, [layout['x'] + 46, y + 4, layout['x'] + 221, y + layout['row_height'] - 4])
     live, archived = results['live'], results['archived']
     assert live['contrast'] >= 4.5 and 1.5 < archived['contrast'] < live['contrast']
     assert max(abs(a - b) for a, b in zip(live['text'], archived['text'])) > 15, 'archived ink not dimmed'
