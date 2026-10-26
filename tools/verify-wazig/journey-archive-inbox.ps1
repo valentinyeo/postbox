@@ -44,7 +44,7 @@ $batches = @($writes | Where-Object wire_path -eq '/v1/wazig/archive-batch')
 @{ chats = $workload; remote_chats = 261; total_ms = $total; per_chat_ms = $perChat; single_requests = $singles.Count; batch_requests = $batches.Count } |
     ConvertTo-Json | Set-Content (Join-Path $session.evidence 'bulk-timing.json')
 Read-BridgeRequests $session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'archive.requests.json')
-Assert-That ($singles.Count -eq 0 -and $batches.Count -eq 0) 'Expected zero archive requests for the fixed 264-chat workload because WhatsApp archive stays in Wazig'
+Assert-That ($singles.Count -eq 0 -and $batches.Count -eq 1 -and $batches[0].body.chats.Count -eq 261) 'Expected one batch for 261 WhatsApp chats; other providers remain local'
 Save-Screen $session empty
 Invoke-PaletteCommand $session 'Refresh'
 $null = Wait-Until { (Read-Control $session status).chat_count -eq 0 } 'archive intent survives metadata-free refresh'

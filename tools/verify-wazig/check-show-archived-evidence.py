@@ -98,13 +98,16 @@ def check_show_archived(folder):
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert any(row['method'] == 'GET' and 'archived=true' in row['wire_path'] and row['status'] == 200 for row in requests)
     writes = [row for row in requests if row['method'] == 'POST' and urlsplit(row['wire_path']).path == '/v1/wazig/archive']
-    assert not writes, len(writes)
+    expected = {row['id'] for number in (1, 2) for row in read(f'view-{number}-off.chats.json')['chats'] if row['name'].endswith('row 0')}
+    assert len(writes) == 4 and {row['body']['chat'] for row in writes} == expected
+    assert sum(row['body']['archived'] for row in writes) == 2
+    assert all(row['status'] == 200 for row in writes)
     assert not [row for row in requests if row['method'] == 'POST' and urlsplit(row['wire_path']).path == '/v1/wazig/archive-batch']
     for row in requests:
         if row['method'] != 'SSE':
             assert row['authorized'] and row['status'] in (200, 404)
             if row['method'] == 'POST':
-                assert urlsplit(row['wire_path']).path == '/v1/wazig/mark-read'
+                assert urlsplit(row['wire_path']).path in ('/v1/wazig/mark-read', '/v1/wazig/archive')
     preferences = (folder / 'preferences.txt').read_text(encoding='utf-8-sig')
     assert 'ShowArchived' in preferences
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')

@@ -162,6 +162,17 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
                 self.assertEqual(chat in self.jids('true'), archived)
                 self.assertEqual(chat in self.jids('false'), not archived)
 
+    def test_provider_batch_updates_only_whatsapp_rows(self):
+        self.request('POST', '/fixture/plain-dms', {})
+        self.request('POST', '/fixture/telegram-dm', {})
+        chat = self.module.PLAIN_REACTED
+        telegram = self.module.ARCHIVE_TELEGRAM
+        reply = self.request('POST', '/v1/wazig/archive-batch',
+                             dict(account='', chats=[dict(chat=chat), dict(chat=telegram)], archived=True))
+        self.assertEqual(reply['results'], [dict(chat=chat, ok=True), dict(chat=telegram, ok=False)])
+        self.assertIn(chat, self.jids('true'))
+        self.assertIn(telegram, self.jids('false'))
+
     def test_phone_unarchive_changes_provider_state(self):
         self.request('POST', '/fixture/plain-dms', {})
         chat = self.module.PLAIN_REACTED

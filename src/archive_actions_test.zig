@@ -1223,7 +1223,7 @@ test "hub archives of every provider stay local and never hold or remove a row" 
             try std.testing.expectEqual(@as(usize, 2), a.chat_count);
             try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
             try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
-            try std.testing.expectEqual(keep or provider == state.localArchived(key.key()));
+            try std.testing.expectEqual(keep, state.localArchived(key.key()));
             try std.testing.expectEqual(keep, if (provider == .whatsapp) state.isKept(key.key().id) else state.localKept(key.key()));
             try std.testing.expect(archiveChat(&a, key.key(), .unarchive, .shortcut) == null);
             try std.testing.expect(!state.localArchived(key.key()));

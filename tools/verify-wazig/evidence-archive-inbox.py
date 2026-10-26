@@ -23,13 +23,13 @@ assert re.findall(r'ctrl_a_press=(\d+) ok=(true|false)', log) == [(str(n), 'true
 assert re.search(r'ctrl_a_ok=10\b', log)
 timing = read('bulk-timing.json')
 assert timing['chats'] == 264 and timing['remote_chats'] == 261
-assert timing['single_requests'] == 0 and timing['batch_requests'] == 0
+assert timing['single_requests'] == 0 and timing['batch_requests'] == 1
 assert timing['total_ms'] > 0 and abs(timing['per_chat_ms'] * 264 - timing['total_ms']) < 0.001
 assert re.search(rf'bulk_archive_ms_total={timing["total_ms"]} bulk_archive_ms_per_chat=\d+\.\d+', log)
 assert re.search(r'archived_among_shown=264\b', log)
 requests = read('archive.requests.json')
 responses = [row for row in requests if row['method'] == 'GET' and row.get('rows')]
-assert responses and all('archived' not in row for reply in responses for row in reply['rows'])
+assert responses and all('archived' not in row for row in responses[0]['rows'])
 initial = read('before.chats.json')['chats']
 assert len(initial) == 264 and all(row['archived'] is False for row in initial)
 identities = {(row['provider'], row['account'], row['id']) for row in initial}
@@ -38,10 +38,13 @@ remote = {row['id'] for row in initial if row['provider'] == 'whatsapp'}
 writes = [row for row in requests if row['wire_path'] == '/v1/wazig/archive']
 assert not writes, len(writes)
 batches = [row for row in requests if row['wire_path'] == '/v1/wazig/archive-batch']
-assert not batches, len(batches)
+assert len(batches) == 1 and batches[0]['status'] == 200
+assert {row['chat'] for row in batches[0]['body']['chats']} == remote
+assert batches[0]['body']['archived'] is True
+assert all(row['ok'] for row in batches[0]['results'])
 lines = (folder / 'saved-archive-state.txt').read_text(encoding='utf-8-sig').splitlines()
-assert len(lines) == 264
-assert {line.split('\t')[0] for line in lines if line.split('\t')[0] in remote} == remote
+assert len(lines) == 3
+assert not {line.split('\t')[0] for line in lines} & remote
 assert all(line.split('\t')[1] == '0' for line in lines if line.split('\t')[0] in remote)
 for provider in ('slack', 'telegram', 'signal'):
     row, = [row for row in initial if row['provider'] == provider]
@@ -72,4 +75,4 @@ assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'
 assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
 assert 'JOURNEY PASSED: archive-inbox' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
 assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-print('EVIDENCE VERIFIED: metadata-free archives, ten Ctrl+A presses, 264-chat timing, zero archive requests, every provider path and restart')
+print('EVIDENCE VERIFIED: metadata-free archives, ten Ctrl+A presses, 264-chat timing, one acknowledged provider batch, every provider path and restart')

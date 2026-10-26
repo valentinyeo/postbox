@@ -496,7 +496,17 @@ class ShowArchivedHandler(PaletteArchivedHandler):
         if not self.authorized():
             return
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
-        if self.path == '/v1/wazig/mark-read':
+        if self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and isinstance(body['archived'], bool):
+            rows = getattr(self.state, 'show_archived_rows', None)
+            if rows is None:
+                self.state.show_archived_rows = rows = show_archived_rows()
+            row = next((row for row in rows if row['jid'] == body['chat'] and row['provider'] == 'whatsapp'), None)
+            if row is None:
+                self.respond(400, {'error': 'only WhatsApp archives remotely'}, body=body)
+                return
+            row['archived'] = body['archived']
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/mark-read':
             self.respond(200, {'status': 'ok'}, body=body)
         else:
             self.respond(400, {'error': 'unexpected archive-switch write'}, body=body)
@@ -525,7 +535,11 @@ class ArchiveInboxHandler(Handler):
         url = urlsplit(self.path)
         query = parse_qs(url.query)
         if url.path == '/v1/wazig/chats':
-            rows = [] if query.get('archived') == ['true'] else archive_inbox_rows()
+            rows = archive_inbox_rows()
+            for row in rows:
+                if row['provider'] == 'whatsapp' and self.state.archived.get(row['jid'], False):
+                    row['archived'] = True
+            rows = [row for row in rows if row.get('archived', False) == (query.get('archived') == ['true'])]
             self.respond(200, rows, rows=rows)
         elif url.path == '/v1/wazig/messages':
             chat = query.get('chat', [''])[0]
@@ -552,6 +566,7 @@ class ArchiveInboxHandler(Handler):
             if row is None or row['provider'] != 'whatsapp':
                 self.respond(400, {'error': 'only WhatsApp archives remotely'}, body=body)
                 return
+            self.state.archived[body['chat']] = True
             self.respond(200, {'status': 'ok'}, body=body)
         else:
             self.respond(400, {'error': 'unexpected archive workload write'}, body=body)
