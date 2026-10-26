@@ -8,7 +8,7 @@ function Invoke-SignalJourney($Session, [string]$Messages) {
     $order = (Read-Control $Session status).view_order
     $number = 1
     while ($order[$number - 1].provider -ne 'signal') { $number++ }
-    Send-Keys $Session "%$number"
+    Send-Keys $Session "^$($number + 1)"
     $null = Wait-Until {
         $state = Read-Control $Session status
         $state.view -eq 'signal' -and $state.current_view.account -eq 'signal' -and $state.current_view.label -eq 'Signal' -and $state.chat_count -eq 4

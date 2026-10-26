@@ -12014,13 +12014,13 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Theme: AMOLED black", "", command_theme_amoled);
     appendPalette(a, "Theme: Green", "", command_theme_green);
     appendPalette(a, "Toggle unread chats", "U", command_unread);
-    appendPalette(a, "Show combined inbox", "Alt+I", command_show_all);
+    appendPalette(a, "Show combined inbox", "Ctrl+1 / Alt+I", command_show_all);
     appendPalette(a, "Sort views", "", command_sort_views);
     for (a.views.items, 0..) |*view, index| {
         var shortcut: [16]u8 = undefined;
         var label_buffer: [300]u8 = undefined;
         const before = a.palette_item_count;
-        appendPalette(a, std.fmt.bufPrint(&label_buffer, "Show {s}", .{view.labelText()}) catch continue, if (index < 9) std.fmt.bufPrint(&shortcut, "Alt+{d}", .{index + 1}) catch "" else "", 0);
+        appendPalette(a, std.fmt.bufPrint(&label_buffer, "Show {s}", .{view.labelText()}) catch continue, if (index < 8) std.fmt.bufPrint(&shortcut, "Ctrl+{d}", .{index + 2}) catch "" else "", 0);
         if (a.palette_item_count > before) a.palette_items[before].view_identity = view.key;
     }
     appendPalette(a, if (a.selected_chat < a.chat_count and isChatPinned(a, chat_key.of(&a.chats[a.selected_chat]))) "Unpin selected chat" else "Pin chat to top", "", command_pin);
@@ -12536,7 +12536,7 @@ fn buildSortViewsItems(a: *App) void {
     for (a.views.items, 0..) |*view, index| {
         var shortcut: [16]u8 = undefined;
         const before = a.palette_item_count;
-        appendPalette(a, view.labelText(), if (index < 9) std.fmt.bufPrint(&shortcut, "Alt+{d}", .{index + 1}) catch "" else "", 0);
+        appendPalette(a, view.labelText(), if (index < 8) std.fmt.bufPrint(&shortcut, "Ctrl+{d}", .{index + 2}) catch "" else "", 0);
         if (a.palette_item_count > before) a.palette_items[before].view_identity = view.key;
     }
 }
@@ -16247,16 +16247,8 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         switchChatView(a, .all);
         return true;
     }
-    if (alt and !control and !shift and key >= '0' and key <= '9') {
-        if (key == '0') switchChatView(a, .all) else if (messenger_view.forNumber(key - '0', a.views.items)) |index| switchAccountView(a, a.views.items[index].key.key());
-        return true;
-    }
-    if (control and !alt and key >= '1' and key <= '9') {
-        const target: i32 = @intCast(key - '1');
-        if (target < a.chat_count) {
-            selectChat(a, target - @as(i32, @intCast(a.selected_chat)), false);
-            focusCompose(a);
-        }
+    if (control and !alt and !shift and key >= '1' and key <= '9') {
+        if (key == '1') switchChatView(a, .all) else if (messenger_view.forNumber(key - '1', a.views.items)) |index| switchAccountView(a, a.views.items[index].key.key());
         return true;
     }
     if (control and shift and !alt and (key == win.VK_HOME or key == win.VK_END)) {

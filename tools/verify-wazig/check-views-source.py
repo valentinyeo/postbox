@@ -92,7 +92,7 @@ def check_model():
             raise AssertionError(f'model mutation accepted: {token}')
     main = read('src/main.zig')
     require(main, ['messenger_view.mergeOrder(a.allocator, a.view_order, known.items)',
-                   'messenger_view.forNumber(key - \'0\', a.views.items)',
+                   'messenger_view.forNumber(key - \'1\', a.views.items)',
                    'messenger_view.inboxMoveUp(by_time, jid_order)',
                    'if (!chatInView(a, chat_key.of(cached))) continue;',
                    'if (!chatInView(a, chatViewKey(&chat))) continue;'])
@@ -120,7 +120,7 @@ def check_integration():
         'appendPalette(a, "Sort views", "", command_sort_views)', 'command_sort_views => openSortViews(a)',
         'a.palette_views_mode and control and !alt and !shift', 'moveView(a, key == win.VK_DOWN)',
         'if (!saveViewOrder(a))', 'fn buildSortViewsItems(', 'item.view_identity.account_len > 0',
-        'switchAccountView(a, wanted.key())', 'appendPalette(a, "Show combined inbox", "Alt+I", command_show_all)',
+        'switchAccountView(a, wanted.key())', 'appendPalette(a, "Show combined inbox", "Ctrl+1 / Alt+I", command_show_all)',
         'key == \'I\'', '"Show {s}"', 'activeViewLabel(a)', 'fn updateChatTooltip(',
         'win.TTM_UPDATETIPTEXTW', 'message.hwnd == app.chats_hwnd.?',
         '\\"current_view\\"', '\\"view_order\\"', '\\"provider\\"', '\\"account\\"', '\\"label\\"', '\\"inbox\\"',
@@ -174,7 +174,11 @@ def check_integration():
         last = ast.literal_eval('"' + end + '"')
         assert first in source, f'missing harness start: {first}'
         assert last in source[source.index(first) + len(first):], f'missing harness end: {last}'
-    require(read('src/shortcuts.zig'), ['Alt+I / Alt+1..9'])
+    require(read('src/shortcuts.zig'), ['Ctrl+1 / Alt+I', 'Ctrl+2..9'])
+    require(source, ['"Show combined inbox", "Ctrl+1 / Alt+I"', '"Ctrl+{d}", .{index + 2}',
+                     "if (control and !alt and !shift and key >= '1' and key <= '9')"])
+    assert '"Alt+{d}"' not in source
+    assert 'Open the chat at that position in the list' not in read('src/shortcuts.zig')
 
 
 def check_journey():
@@ -186,7 +190,7 @@ def check_journey():
     require(read('tools/verify-wazig/' + entry['script']), ['. "$PSScriptRoot/views.ps1"', 'Invoke-ViewsJourney $session $messages $start'])
     journey = read('tools/verify-wazig/views.ps1')
     require(journey, ['Assert-AccountView', "@('personal', 'business', 'T0ABC123', 'T0DEF456')", 'Where-Object view_account -ne $Account',
-                      "Send-Keys $Session '^1'", "Send-Keys $Session '^2'", "Send-Keys $Session '^{TAB}'", "Send-Keys $Session '^+{TAB}'",
+                      "Send-Keys $Session '^+{HOME}'", "Send-Keys $Session '^+{HOME}^{TAB}'", "Send-Keys $Session '^{TAB}'", "Send-Keys $Session '^+{TAB}'",
                       "Send-Keys $Session '^f'", "Send-Keys $Session '%i'", "Send-Keys $Session '^{DOWN}'",
                       "'Sort views'", "'ViewOrder not saved at move time'", "'Quit Messages'",
                       "WAZIG_VERIFY_RESTART", "'restart.json'", 'restart-4', 'other.messages.json', 'inbox.chats.json'])

@@ -15,7 +15,7 @@ function Get-ListInkLeft($Image, $Rect, [int]$OriginX, [int]$OriginY) {
     return $found - $OriginX
 }
 
-Send-Keys $session '%1'
+Send-Keys $session '^2'
 Send-Keys $session '^{TAB}'
 $null = Wait-Until {
     $shown = Read-Control $session messages

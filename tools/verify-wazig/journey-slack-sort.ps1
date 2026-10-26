@@ -1,4 +1,4 @@
-Send-Keys $session '%1'
+Send-Keys $session '^2'
 $null = Wait-Until { (Read-Control $session status).view -eq 'slack' } 'Slack sidebar'
 $orders = [ordered]@{
     before = @('fixture-beta', 'fixture-gamma', 'fixture-alpha', 'fixture-unknown')

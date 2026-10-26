@@ -9,8 +9,8 @@
 
 ## How to get to it (user POV)
 
-- Configure the unified hub, then choose Show Signal in Ctrl+K or its next assigned Alt+N view position. No new menu or dedicated shortcut is added.
-- Link Signal through the triage CLI on the hub before opening its chats. Esc leaves an empty view; Alt+number and Alt+I work normally. A saved empty Signal view falls back to the combined inbox at startup.
+- Configure the unified hub, then choose Show Signal in Ctrl+K or its next assigned Ctrl+N (account position plus one) view position. No new menu or dedicated shortcut is added.
+- Link Signal through the triage CLI on the hub before opening its chats. Esc leaves an empty view; Ctrl+number and Alt+I work normally. A saved empty Signal view falls back to the combined inbox at startup.
 - Open a chat, compose and press Enter. Attach photo or file uses the existing file picker; select a message and use the existing reaction palette command.
 - A rejected send shows signal rate limited or signal captcha required in its failed bubble, not a hidden or silently retried send.
 

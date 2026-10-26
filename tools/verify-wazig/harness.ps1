@@ -366,7 +366,7 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
     if ($unified) {
         $sidebar = @{}
         foreach ($view in @('whatsapp', 'slack', 'all')) {
-            $keys = switch ($view) { 'whatsapp' { '%1' } 'slack' { '%2' } 'all' { '%0' } }
+            $keys = switch ($view) { 'whatsapp' { '^2' } 'slack' { '^3' } 'all' { '^1' } }
             Send-Keys $Session $keys
             $null = Wait-Until { (Read-Control $Session status).view -eq $view } "sidebar $view view"
             $sidebar[$view] = @{
@@ -572,7 +572,7 @@ function Assert-ComposerLayout($Session, [string]$Name, [int]$Lines, $Baseline =
 }
 
 function Invoke-WorkspaceIconsJourney($Session) {
-    Send-Keys $Session '%0'
+    Send-Keys $Session '^1'
     $null = Wait-Until { (Read-Control $Session status).view -eq 'all' } 'All networks sidebar'
     $expected = @('slack:fixture-amber:channel-alpha', 'slack:fixture-cobalt:channel-beta', 'whatsapp:fixture:contact-delta', 'slack:fixture-empty:channel-gamma', 'signal:fixture-contact')
     $rows = (Read-Control $Session chats).chats

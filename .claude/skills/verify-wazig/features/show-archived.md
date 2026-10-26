@@ -11,7 +11,7 @@
 
 ## How to get to it (user POV)
 
-Alt+I opens the combined inbox; Alt+1..9 opens an account. Alt+A toggles Show archived for that view. There is no sidebar Show archived button. Ctrl+K offers Toggle archived chats in this view: On/Off, with Alt+A shown. Inbox mixed mode keeps only unread chats, normal and archived, by time. Account mixed mode retains its existing unread filter and includes archived chats. Ctrl+E unarchives an archived selection or archives a normal selection; both stay visible in mixed mode. Show archived chats remains the separate archived-only palette command.
+Alt+I opens the combined inbox; Ctrl+2..9 opens an account. Alt+A toggles Show archived for that view. There is no sidebar Show archived button. Ctrl+K offers Toggle archived chats in this view: On/Off, with Alt+A shown. Inbox mixed mode keeps only unread chats, normal and archived, by time. Account mixed mode retains its existing unread filter and includes archived chats. Ctrl+E unarchives an archived selection or archives a normal selection; both stay visible in mixed mode. Show archived chats remains the separate archived-only palette command.
 
 ## Driving it with PowerShell UI Automation
 

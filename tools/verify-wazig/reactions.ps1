@@ -8,7 +8,7 @@ function Invoke-ReactionsJourney($Session) {
     Assert-That ($laughIndex -ge 0 -and $source.Contains('reaction_laugh => "' + $emoji + '"')) 'Laughing-face source codepoints changed'
     $clicks = @()
     $failures = @()
-    Send-Keys $Session '%0'
+    Send-Keys $Session '^1'
     foreach ($target in @(
         @{ provider = 'whatsapp'; chat = 'fixture-beta'; message = 'BASELINE_BETA'; search = 'Verification Beta' },
         @{ provider = 'slack'; chat = 'fixture-alpha'; message = 'BASELINE'; search = 'Verification Alpha' }

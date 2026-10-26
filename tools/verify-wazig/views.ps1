@@ -98,7 +98,7 @@ function Save-ViewTitle($Session, [string]$Capture) {
 }
 
 function Assert-AccountView($Session, [int]$Number, [string]$Account, [string]$Capture) {
-    Send-Keys $Session "%$Number"
+    Send-Keys $Session "^$($Number + 1)"
     $null = Wait-Until {
         $state = Read-Control $Session status
         $state.current_view.account -eq $Account -and -not $state.current_view.inbox -and $state.chat_count -eq 2
@@ -159,7 +159,7 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
         Assert-That ($baseline.view_order[$index].account -eq $expected[$index]) 'Default account order differs'
         $rows = @(Assert-AccountView $Session ($index + 1) $expected[$index] "view-$($index + 1)")
         if ($index -eq 0) { Save-ViewTitle $Session 'title-view-1' }
-        Send-Keys $Session '^1'
+        Send-Keys $Session '^+{HOME}'
         $null = Wait-Until { (Read-Control $Session status).selected.id -eq $rows[0].id } 'first chat in account'
         Send-Keys $Session '^{TAB}'
         $null = Wait-Until { (Read-Control $Session status).selected.id -eq $rows[1].id } 'next chat within account'
@@ -187,7 +187,7 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     Save-WorkspaceNameCheck $Session 'palette' $labels @('workspace-palette.png') 'Show '
     Send-Keys $Session '{ESC}'
     $null = Assert-AccountView $Session 1 'personal' 'send-account'
-    Send-Keys $Session '^2'
+    Send-Keys $Session '^+{HOME}^{TAB}'
     $target = (Read-Control $Session status).selected
     Invoke-PaletteCommand $Session 'Compose message'
     Send-Keys $Session 'Verification account send'
@@ -203,7 +203,7 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'sent.messages.json')
     Save-Screen $Session sent
     $null = Assert-AccountView $Session 2 'business' 'other-account'
-    Send-Keys $Session '^2'
+    Send-Keys $Session '^+{HOME}^{TAB}'
     $null = Wait-Until {
         $shown = Read-Control $Session messages
         $shown.chat.view_account -eq 'business' -and $shown.messages.Count -gt 0 -and @($shown.messages | Where-Object text -eq 'Verification account send').Count -eq 0
@@ -222,7 +222,7 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     Read-InboxWorkspaceTooltips $Session $inbox.chats
     $null = Assert-AccountView $Session 1 'personal' 'before-drain'
     foreach ($remaining in @(1, 0)) {
-        Send-Keys $Session '^1'
+        Send-Keys $Session '^+{HOME}'
         Assert-That ((Read-Control $Session messages).chat.view_account -eq 'personal') 'Archive target history belongs to the first account'
         Send-Keys $Session '^e'
         $null = Wait-Until {
@@ -231,21 +231,21 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
         } 'account archive held in Wazig'
     }
     Invoke-PaletteCommand $Session 'Refresh'
-    Send-Keys $Session '%1'
+    Send-Keys $Session '^2'
     $null = Wait-Until {
         $state = Read-Control $Session status
         $state.current_view.account -eq 'personal' -and -not $state.current_view.inbox -and $state.chat_count -eq 0 -and $state.pending_archives -eq 0
-    } 'drained account retains Alt+1 with an empty list'
+    } 'drained account retains Ctrl+2 with an empty list'
     $drained = Read-Control $Session status
     Assert-That (($drained.view_order | ConvertTo-Json -Depth 12 -Compress) -ceq ($baseline.view_order | ConvertTo-Json -Depth 12 -Compress)) 'Draining changed account positions'
     Assert-That ((Read-Control $Session chats).total -eq 0) 'Drained account still has visible chats'
     Save-ViewTitle $Session 'drained-alt1'
     $null = Assert-AccountView $Session 2 'business' 'drained-alt2'
-    Send-Keys $Session '%1'
+    Send-Keys $Session '^2'
     Invoke-PaletteCommand $Session 'Show archived chats'
     $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'drained account archived chats'
     foreach ($remaining in @(1, 0)) {
-        Send-Keys $Session '^1'
+        Send-Keys $Session '^+{HOME}'
         Assert-That ((Read-Control $Session messages).chat.view_account -eq 'personal') 'Archive target history belongs to the first account'
         Send-Keys $Session '^e'
         $null = Wait-Until { $state = Read-Control $Session status; $state.pending_archives -eq 0 -and $state.chat_count -eq $remaining } 'restore archived fixture chat'

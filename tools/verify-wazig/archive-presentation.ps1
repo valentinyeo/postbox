@@ -86,7 +86,7 @@ function Assert-ArchiveFooterRemoved($Session) {
 }
 
 function Invoke-ArchivePresentation($Session) {
-    Send-Keys $Session '%1'
+    Send-Keys $Session '^2'
     $null = Wait-Until { -not (Read-Control $Session status).current_view.inbox } 'presentation account'
     if (-not (Read-Control $Session status).include_archived) { Invoke-PaletteCommand $Session 'Toggle archived chats in this view' }
     $identities = @((Read-Control $Session chats).chats | ForEach-Object { "$($_.provider)|$($_.account)|$($_.id)|$($_.archived)" } | Sort-Object)
@@ -101,7 +101,7 @@ function Invoke-ArchivePresentation($Session) {
         if ($scope -eq 'inbox') {
             Send-Keys $Session '%i'
         }
-        Send-Keys $Session '^1'
+        Send-Keys $Session '^+{HOME}'
         $null = Wait-Until { -not (Read-Control $Session status).selected.archived } 'live control selected'
         $list = Get-Edit (Get-Window $Session) '1016'
         $bounds = $list.Current.BoundingRectangle
@@ -122,5 +122,5 @@ function Invoke-ArchivePresentation($Session) {
         [VerifyMenus]::Hover($Session.pid, [int]($canvas.Left + 10), [int]($canvas.Top + 10))
         Save-ArchivePresentationScene $Session "archive-$scope-selected" selected
     }
-    Send-Keys $Session '%1'
+    Send-Keys $Session '^2'
 }

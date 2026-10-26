@@ -9,8 +9,8 @@
 
 ## How to get to it (user POV)
 
-- Configure the triage hub and choose Show Telegram in Ctrl+K or its assigned Alt+N position. Account linking belongs to that hub, not a second Wazig connection.
-- Link Telegram through the triage CLI on the hub, never inside Wazig. Esc leaves an empty view and Alt+number/Alt+I remain usable; a saved empty Telegram view falls back to the combined inbox at startup.
+- Configure the triage hub and choose Show Telegram in Ctrl+K or its assigned Ctrl+N (account position plus one) position. Account linking belongs to that hub, not a second Wazig connection.
+- Link Telegram through the triage CLI on the hub, never inside Wazig. Esc leaves an empty view and Ctrl+number/Alt+I remain usable; a saved empty Telegram view falls back to the combined inbox at startup.
 - Select a chat and use the existing composer, Attach photo or file, Reply to selected message and reaction commands. Saved Messages appears in the same list.
 
 ## Driving it with PowerShell UI Automation

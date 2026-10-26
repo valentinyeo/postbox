@@ -23,7 +23,7 @@ function Get-EmojiPixels($Session, [string]$Name, $Rect) {
 }
 
 function Invoke-SlackEmojiJourney($Session) {
-    Send-Keys $Session '%0'
+    Send-Keys $Session '^1'
     Send-Keys $Session '^f'
     Send-Keys $Session '^a'
     Send-Keys $Session 'Verification Emoji'

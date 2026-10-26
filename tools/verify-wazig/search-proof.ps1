@@ -55,8 +55,8 @@ function Save-PaletteArchiveInk($Session) {
     $views = @((Read-Control $Session status).view_order)
     $index = 0
     while ($index -lt $views.Count -and -not ($views[$index].provider -eq 'whatsapp' -and $views[$index].account -eq 'personal')) { $index++ }
-    Assert-That ($index -lt 9 -and $index -lt $views.Count) 'Personal fixture account missing'
-    Send-Keys $Session "%$($index + 1)"
+    Assert-That ($index -lt 8 -and $index -lt $views.Count) 'Personal fixture account missing'
+    Send-Keys $Session "^$($index + 2)"
     $null = Wait-Until { (Read-Control $Session status).current_view.account -ceq 'personal' } 'personal search account'
     if (-not (Read-Control $Session status).include_archived) { Invoke-PaletteCommand $Session 'Toggle archived chats in this view' }
     $sample = Read-SearchSample $Session 'Verification' '^f' $false

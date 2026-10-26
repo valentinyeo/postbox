@@ -83,7 +83,7 @@ def check_signal(folder):
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped' and not final['slack_connected']
     assert all(final[key] for key in ['production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'])
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for keys in ['%2', '%k', 'Compose message', 'Attach photo or file', 'Synthetic Signal outgoing', 'Synthetic Signal file', 'Synthetic rejected send', 'Like', '^e', 'Show archived chats', 'Show inbox chats', '{ENTER}']:
+    for keys in ['^3', '%k', 'Compose message', 'Attach photo or file', 'Synthetic Signal outgoing', 'Synthetic Signal file', 'Synthetic rejected send', 'Like', '^e', 'Show archived chats', 'Show inbox chats', '{ENTER}']:
         assert f'keys: {keys}' in actions, keys
     assert actions.count('keys: ^e\n') == 2
     assert 'JOURNEY PASSED: signal' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
