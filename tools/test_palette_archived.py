@@ -49,6 +49,9 @@ class PaletteArchivedTests(unittest.TestCase):
             for slug, name in validator.INBOX.items():
                 matrix.append(row(f'b-{position}-inbox-{slug}', view['label'], name, name, [name]))
         self.write('palette-archived.json', dict(row_limit=10, views=self.views, matrix=matrix, failures=[]))
+        self.write('frequency-results.json', dict(frequent=validator.label(names['telegram']), rare=validator.label(names['whatsapp']), labels=[validator.label(names[key]) for key in ['telegram', 'whatsapp', 'slack', 'signal']], row_height=40))
+        self.write('frequency-badges.json', dict.fromkeys(names, 80))
+        self.screen('frequency-results')
         self.requests = [dict(method='GET', authorized=True, status=200, wire_path='/v1/wazig/chats?archived=true&limit=500')]
         for key, (chat, name) in validator.ARCHIVED.items():
             self.requests.append(self.history(chat))
@@ -116,6 +119,17 @@ class PaletteArchivedTests(unittest.TestCase):
         self.screen('c-own-telegram', selected=dict(id='other', archived=True))
         self.assertNotEqual(self.validate().returncode, 0)
 
+    def test_rejects_rare_first_and_missing_icons(self):
+        path = self.folder / 'frequency-results.json'
+        frequency = json.loads(path.read_text())
+        frequency['labels'].reverse()
+        path.write_text(json.dumps(frequency))
+        self.assertNotEqual(self.validate().returncode, 0)
+        frequency['labels'].reverse()
+        path.write_text(json.dumps(frequency))
+        self.write('frequency-badges.json', dict.fromkeys(validator.ARCHIVED, 0))
+        self.assertNotEqual(self.validate().returncode, 0)
+
     def test_fake_hub_serves_archived_and_inbox_rows(self):
         spec = importlib.util.spec_from_file_location('palette_hub', ROOT / 'tools/verify-wazig/fake-hub.py')
         hub = importlib.util.module_from_spec(spec)
@@ -145,7 +159,7 @@ class PaletteArchivedTests(unittest.TestCase):
         self.assertEqual([row['name'] for row in archived], [name for chat, name in validator.ARCHIVED.values()])
         self.assertEqual([row['jid'] for row in archived], [chat for chat, name in validator.ARCHIVED.values()])
         self.assertTrue(all(row['archived'] for row in archived) and not any(row['archived'] for row in inbox))
-        self.assertEqual({row['provider'] for row in inbox + archived}, {'whatsapp', 'telegram', 'slack'})
+        self.assertEqual({row['provider'] for row in inbox + archived}, {'whatsapp', 'telegram', 'slack', 'signal'})
         for chat, name in validator.ARCHIVED.values():
             status, rows = call('GET', '/v1/wazig/messages?chat=' + chat.replace(':', '%3A'))
             self.assertEqual((status, rows[0]['ChatJID']), (200, chat))
@@ -159,7 +173,7 @@ class PaletteArchivedTests(unittest.TestCase):
         runner = (ROOT / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
         registry = json.loads((ROOT / 'tools/verify-wazig/journeys.json').read_text())
         entry = next(row for row in registry['journeys'] if row['name'] == 'palette-archived')
-        self.assertEqual(entry['chats'], 3)
+        self.assertEqual(entry['chats'], 4)
         self.assertIn('$journey.chats', runner)
         runner += (ROOT / 'tools/verify-wazig' / entry['script']).read_text()
         self.assertIn('Invoke-PaletteArchivedJourney $session', runner)

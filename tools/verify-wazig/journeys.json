@@ -184,7 +184,7 @@
       "pr": true,
       "hub": "palette-archived",
       "evidence": true,
-      "chats": 3,
+      "chats": 4,
       "script": "journey-palette-archived.ps1",
       "validator": {
         "file": "check-palette-archived-evidence.py",

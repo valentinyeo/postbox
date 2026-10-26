@@ -318,7 +318,7 @@ for name in ['RULE-MAP.md']:
     assert '(features/palette-archived.md)' in (skill / name).read_text(encoding='utf-8')
 assert 'feature=palette-archived' in palette_archived_map
 assert 'Invoke-PaletteArchivedJourney $session' in runner and entries['palette-archived']['library'] == 'palette-archived.ps1'
-assert entries['palette-archived']['chats'] == 3
+assert entries['palette-archived']['chats'] == 4
 assert 'palette-archived' in {row['hub'] for row in journeys} and 'palette-archived' in {row['hub'] for row in journeys}
 assert 'palette-archived' in {row['hub'] for row in journeys}
 assert 'palette-archived' in options and entries['palette-archived']['evidence']

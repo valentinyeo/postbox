@@ -4,6 +4,7 @@ $script:PaletteArchivedChats = [ordered]@{
     whatsapp = @{ id = 'personal:15550000031@s.whatsapp.net'; name = 'Archived Person Alpha'; provider = 'whatsapp' }
     telegram = @{ id = 'telegram:user:7001001'; name = 'Archived Telegram Beta'; provider = 'telegram' }
     slack = @{ id = 'slack:T0PALETTE:C0000000002'; name = 'Archived Slack Gamma'; provider = 'slack' }
+    signal = @{ id = 'signal:fixture-search'; name = 'Archived Signal Delta'; provider = 'signal' }
 }
 $script:PaletteInboxChats = @(
     @{ id = 'personal:15550000021@s.whatsapp.net'; slug = 'epsilon'; name = 'Inbox WhatsApp Epsilon'; provider = 'whatsapp' },
@@ -252,6 +253,27 @@ function Invoke-PaletteArchivedJourney($Session) {
         if ([Array]::IndexOf($labels, $frequent) -lt 0 -or [Array]::IndexOf($labels, $frequent) -ge [Array]::IndexOf($labels, $rare)) {
             Add-PaletteFailure 'frequency' 'sent-message ordering' "Frequent contact not ahead of rare contact: $($labels -join ' | ')"
         }
+        $image = [Drawing.Bitmap]::new((Join-Path $Session.evidence 'frequency-results.png'))
+        $badges = [ordered]@{}
+        try {
+            foreach ($key in $archived.Keys) {
+                $row = [Array]::IndexOf($labels, (Get-ArchivedPaletteLabel $archived[$key].name))
+                Assert-That ($row -ge 0) "Missing $key result"
+                $left = $origin.X - $desktop.Left
+                $top = $origin.Y - $desktop.Top + $row * [int]$rowHeight.ToUInt64()
+                $background = $image.GetPixel($left + 8, $top + 20)
+                $pixels = 0
+                for ($y = 11; $y -lt 29; $y++) {
+                    for ($x = 16; $x -lt 36; $x++) {
+                        $pixel = $image.GetPixel($left + $x, $top + $y)
+                        if ([Math]::Abs([int]$pixel.R - [int]$background.R) + [Math]::Abs([int]$pixel.G - [int]$background.G) + [Math]::Abs([int]$pixel.B - [int]$background.B) -gt 60) { $pixels++ }
+                    }
+                }
+                $badges[$key] = $pixels
+                if ($pixels -lt 20) { Add-PaletteFailure 'network-badge' 'missing inline icon' "$key row has only $pixels badge pixels" }
+            }
+        } finally { $image.Dispose() }
+        $badges | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'frequency-badges.json')
         Close-PaletteWindow $Session
 
         foreach ($key in $archived.Keys) {
