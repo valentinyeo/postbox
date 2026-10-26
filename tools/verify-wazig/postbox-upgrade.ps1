@@ -39,13 +39,6 @@ $exe = [IO.Path]::GetFullPath("$env:LOCALAPPDATA/Programs/Messages/Messages.exe"
 $ctl = "$env:LOCALAPPDATA/Programs/Messages/wazigctl.exe"
 $shortcut = "$env:APPDATA/Microsoft/Windows/Start Menu/Programs/Postbox.lnk"
 $caseResult = @{status='failed';red=[bool]$RedControl;version=$Version;commit=$env:GITHUB_SHA;payload_sha256=(Get-FileHash $Payload).Hash}
-Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public static class UpgradeWindow {
-    [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr window, uint message, UIntPtr wparam, IntPtr lparam);
-}
-'@
 function Capture-Upgrade([string]$Name, $Session, $Process) {
     $Process.Refresh()
     $title = $Process.MainWindowTitle
@@ -66,6 +59,8 @@ try {
     Assert-That ($LASTEXITCODE -eq 0) 'Original release MSI failed to install'
     Assert-That (Test-Path $exe) 'Original MSI did not install Messages.exe'
     $oldHash = (Get-FileHash $exe).Hash
+    Assert-That ($oldHash -ceq $env:ORIGINAL_EXE_SHA256) 'Installed original executable differs from official archive'
+    $caseResult.original_sha256 = $oldHash
     Copy-Item $Payload "$root/update.zip"
     @{tag="v$Version"} | ConvertTo-Json | Set-Content "$root/offer.json"
     & openssl req -x509 -newkey rsa:2048 -nodes -keyout "$root/key.pem" -out "$root/cert.pem" -days 1 -subj '/CN=api.github.com' -addext 'subjectAltName=DNS:api.github.com' 2> "$Evidence/certificate.log"
@@ -83,7 +78,7 @@ try {
     foreach ($name in @('DEEPGRAM_API_KEY','OPENROUTER_API_KEY','OPENROUTER_MODEL','WA_BRIDGE_KEY','WAZIG_FAKE_VERSION','WAZIG_HUB_URL','WAZIG_HUB_TOKEN','WAZIG_VERIFY_ROOT')) { $null = $start.Environment.Remove($name) }
     $app = [Diagnostics.Process]::Start($start)
     $oldPid = $app.Id
-    $session = @{ctl=$ctl;username="verify-$id"}
+    $session = @{ctl=$ctl;username="verify-$id";pid=$app.Id;startTicks=$app.StartTime.ToUniversalTime().Ticks.ToString();exe=$exe;sha256=$oldHash;expected_version='0.9.216';expected_product='Wazig';evidence=$Evidence}
     $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw 'Original app exited early' }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'old product window'
     $oldTitle = Capture-Upgrade before $session $app
     Assert-That ($oldTitle -match ' - Wazig v0\.9\.216$') 'Original release identity mismatch'
@@ -92,7 +87,7 @@ try {
     $null = Wait-Until { Test-Path "$local/Wazig/update/ready.txt" } 'original updater downloads and verifies package' 90
     Assert-That (((Get-Content "$local/Wazig/update/ready.txt")[0]) -ceq "v$Version") 'Original updater staged wrong version'
     $caseResult.download_verified = $true
-    Assert-That ([UpgradeWindow]::PostMessageW($app.MainWindowHandle, 273, [UIntPtr]2053, [IntPtr]::Zero)) 'Unable to choose original in-app Update action'
+    Invoke-PaletteCommand $session 'Restart now to install update'
     $null = Wait-Until { $app.Refresh(); $app.HasExited } 'original updater completes swap and relaunches' 60
     $app = Wait-Until {
         $owned = @(Get-Process | Where-Object { $_.Id -ne $oldPid -and $_.Path -eq $exe })
@@ -116,7 +111,12 @@ try {
     $next = [version]$Version
     $nextTag = "v$($next.Major).$($next.Minor).$($next.Build + 1)"
     @{tag=$nextTag} | ConvertTo-Json | Set-Content "$root/offer.json"
-    Assert-That ([UpgradeWindow]::PostMessageW($app.MainWindowHandle, 273, [UIntPtr]2052, [IntPtr]::Zero)) 'Unable to check next update'
+    $session.pid = $app.Id
+    $session.startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
+    $session.sha256 = (Get-FileHash $exe).Hash
+    $session.expected_version = $Version
+    $session.expected_product = 'Postbox'
+    Invoke-PaletteCommand $session 'Check for updates now'
     $null = Wait-Until { (Get-Content "$data/launch-log.txt" -Raw) -match ([regex]::Escape("update: card offered $nextTag")) } 'renamed app finds next update' 90
     $null = Capture-Upgrade next-update $session $app
     $paths = @(Get-Content "$root/requests.jsonl" | ForEach-Object { ($_ | ConvertFrom-Json).path })

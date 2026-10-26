@@ -57,16 +57,17 @@ jobs:
         run: |
           gh release download v0.9.216 --repo $env:GITHUB_REPOSITORY --pattern 'Messages-v0.9.216.msi' --pattern 'Messages-v0.9.216.zip' --dir original
           if ($LASTEXITCODE -ne 0) { throw 'Original release download failed' }
-          @'
-          const std = @import("std");
-          pub fn main(init: std.process.Init) !void {
-              var buffer: [64]u8 = undefined;
-              var out = std.Io.File.stdout().writer(init.io, &buffer);
-              try out.interface.print("{x:0>16}", .{std.hash.Wyhash.hash(0, "verify-alpha")});
-              try out.interface.flush();
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v0.9.216" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Original release metadata unavailable' }
+          foreach ($asset in $release.assets | Where-Object name -in @('Messages-v0.9.216.zip', 'Messages-v0.9.216.msi')) {
+            $digest = 'sha256:' + (Get-FileHash "original/$($asset.name)").Hash.ToLowerInvariant()
+            if ($digest -cne $asset.digest) { throw 'Original release digest mismatch' }
           }
-          '@ | Set-Content "$env:RUNNER_TEMP/cache-id.zig"
-          $cache = (& zig run "$env:RUNNER_TEMP/cache-id.zig" 2>&1 | Out-String).Trim()
+          Expand-Archive original/Messages-v0.9.216.zip original/bin
+          "ORIGINAL_EXE_SHA256=$((Get-FileHash original/bin/Messages.exe).Hash)" >> $env:GITHUB_ENV
+          New-Item postbox-evidence -ItemType Directory -Force | Out-Null
+          $release.assets | Select-Object name,digest | ConvertTo-Json | Set-Content postbox-evidence/original-assets.json
+          $cache = (& zig run tools/verify-wazig/cache-id.zig 2>&1 | Out-String).Trim()
           if ($LASTEXITCODE -ne 0 -or $cache -notmatch '^[0-9a-f]{16}$') { throw 'Unable to derive original cache identity' }
           "CACHE_ID=$cache" >> $env:GITHUB_ENV
       - name: Original release fails the same product-name assertion
