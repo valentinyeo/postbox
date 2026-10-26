@@ -17,7 +17,7 @@
 ## Driving it with PowerShell UI Automation
 
 - Run feature=signal on GitHub Actions only. run.ps1 starts fake-hub.py --signal in the isolated native desktop profile; harness.ps1 supplies read-only wazigctl and owned keyboard helpers; signal.ps1 drives the journey.
-- The fake hub starts linked. Press the Signal account's assigned Alt key, require four Signal-only chats, capture linked.png and measure brand-blue pixels in the sidebar. No linking is driven through Wazig.
+- The fake hub starts linked. Press Alt+I and require the four Signal chats in the combined inbox, capture inbox.png and inbox.chats.json, then press the Signal account's assigned Ctrl+number key, require four Signal-only chats, capture linked.png and measure brand-blue pixels in the sidebar. No linking is driven through Wazig.
 - Open Verification Signal through the palette. Assert exact history identity and content, author/timestamp mark-read payload and cleared unread state, automatic attachment download and durable cache.
 - Select an incoming message and choose Like; require a recorded reaction and visible reaction through wazigctl. Send Synthetic Signal outgoing; require one accepted JSON send and visible acknowledged history.
 - Choose Attach photo or file, enter a generated PNG in the owned native picker, then send a caption. Require one multipart write with exact bytes, size, filename, chat and client ID, plus the visible file message.

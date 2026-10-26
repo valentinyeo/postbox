@@ -8,6 +8,16 @@ function Invoke-SignalJourney($Session, [string]$Messages) {
     $order = (Read-Control $Session status).view_order
     $number = 1
     while ($order[$number - 1].provider -ne 'signal') { $number++ }
+    Send-Keys $Session '%i'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $state.current_view.inbox -and $state.chat_count -eq 4
+    } 'Signal chats in combined inbox'
+    $inbox = Read-Control $Session chats
+    Assert-That (@($inbox.chats | Where-Object provider -eq 'signal').Count -eq 4) 'Signal chats missing from combined inbox'
+    $inbox | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'inbox.chats.json')
+    Save-Screen $Session inbox
+    Hub-Pass $Session inbox
     Send-Keys $Session "^$($number + 1)"
     $null = Wait-Until {
         $state = Read-Control $Session status

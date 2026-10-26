@@ -333,7 +333,7 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
         if provider == 'telegram':
             gates += ['avatars', 'reply']
         else:
-            gates += ['captcha']
+            gates += ['captcha', 'inbox']
         data = {
             'session.json': dict(feature=provider, sha256='fixture', commit='fixture', expected_version=version),
             'doctor.json': dict(version=version),
@@ -361,6 +361,10 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
             data[f'{name}.chats.json'] = dict(total=len(selected_rows), chats=selected_rows)
             (self.folder / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(10000))
             (self.folder / f'{name}.uia.txt').write_text(f'MessagesZig | {title} - Postbox v{version}')
+        if provider == 'signal':
+            data['inbox.state.json'] = dict(version=version, view='inbox', current_view=dict(provider='', account='', label='Combined inbox', inbox=True), chat_count=len(rows))
+            data['inbox.chats.json'] = dict(total=len(rows), chats=copy.deepcopy(rows))
+            (self.folder / 'inbox.png').write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(10000))
         data['history.messages.json'] = dict(chat=dict(id=chat), messages=[dict(id=message.replace('1001', '1000'), text=f'Synthetic {title} history')])
         data['reacted.messages.json'] = dict(messages=[dict(id=message, reaction='\U0001f44d')])
         data['live.messages.json'] = dict(messages=[dict(id=message.replace('1001', '1002'), text=f'Synthetic {title} live')])
@@ -394,6 +398,8 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
                 '^e', 'Show archived chats', '^e', 'Show inbox chats']
         if provider == 'telegram':
             keys += ['Reply to selected message', 'Synthetic Telegram reply']
+        else:
+            keys += ['%i']
         (self.folder / 'actions.log').write_text(''.join(f'keys: {key}\n' for key in keys))
         (self.folder / 'hub-proof.log').write_text('\n'.join(f'{provider} {gate} PASS' for gate in gates))
         (self.folder / 'result.txt').write_text(f'JOURNEY PASSED: {provider}')
@@ -412,6 +418,19 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
             with self.subTest(provider=provider):
                 self.fixture(provider)
                 self.check()
+
+    def test_signal_chats_missing_from_combined_inbox_fail(self):
+        for defect in ('empty', 'other-provider'):
+            with self.subTest(defect=defect):
+                self.fixture('signal')
+                if defect == 'empty':
+                    self.data['inbox.chats.json'] = dict(total=0, chats=[])
+                    self.data['inbox.state.json']['chat_count'] = 0
+                else:
+                    for row in self.data['inbox.chats.json']['chats']:
+                        row['provider'] = 'whatsapp'
+                with self.assertRaises(AssertionError):
+                    self.check()
 
     def test_telegram_exact_pr_and_release_versions_pass(self):
         for version in ('0.0.526', '0.9.203', '0.9.204'):

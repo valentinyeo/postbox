@@ -20,6 +20,11 @@ def check_signal(folder):
     assert session['feature'] == 'signal' and session['sha256'] and session['commit']
     assert read('result.json') == dict(feature='signal', status='passed')
     assert not (folder / 'failure.txt').exists()
+    inbox = read('inbox.chats.json')
+    assert inbox['total'] == len(inbox['chats']) == 4 and {row['provider'] for row in inbox['chats']} == {'signal'}
+    inbox_state = read('inbox.state.json')
+    assert inbox_state['current_view']['inbox'] and inbox_state['chat_count'] == 4
+    assert (folder / 'inbox.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     linked = capture('linked')
     assert read('marks.json')['brand_blue_pixels'] > 20
     assert linked['chat_count'] == 4
@@ -77,13 +82,13 @@ def check_signal(folder):
     for name in ['history', 'read', 'reacted', 'text', 'file', 'live', 'after']:
         capture(name)
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
-    for gate in ['linked-chats', 'history', 'mark-read', 'media', 'react', 'send-text', 'send-file', 'live-events', 'limited', 'captcha', 'local-archive-unarchive']:
+    for gate in ['inbox', 'linked-chats', 'history', 'mark-read', 'media', 'react', 'send-text', 'send-file', 'live-events', 'limited', 'captcha', 'local-archive-unarchive']:
         assert f'signal {gate} PASS' in proof, gate
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped' and not final['slack_connected']
     assert all(final[key] for key in ['production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'])
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for keys in ['^3', '%k', 'Compose message', 'Attach photo or file', 'Synthetic Signal outgoing', 'Synthetic Signal file', 'Synthetic rejected send', 'Like', '^e', 'Show archived chats', 'Show inbox chats', '{ENTER}']:
+    for keys in ['%i', '^3', '%k', 'Compose message', 'Attach photo or file', 'Synthetic Signal outgoing', 'Synthetic Signal file', 'Synthetic rejected send', 'Like', '^e', 'Show archived chats', 'Show inbox chats', '{ENTER}']:
         assert f'keys: {keys}' in actions, keys
     assert actions.count('keys: ^e\n') == 2
     assert 'JOURNEY PASSED: signal' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
