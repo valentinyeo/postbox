@@ -112,11 +112,47 @@ function Assert-AccountView($Session, [int]$Number, [string]$Account, [string]$C
     return $rows.chats
 }
 
+function Assert-ViewShortcuts($Session, $Order) {
+    $proof = @()
+    for ($index = 0; $index -lt $Order.Count; $index++) {
+        $key = "^$($index + 2)"
+        Send-Keys $Session $key
+        $wanted = $Order[$index]
+        $null = Wait-Until {
+            $state = Read-Control $Session status
+            -not $state.current_view.inbox -and $state.current_view.provider -eq $wanted.provider -and $state.current_view.account -eq $wanted.account
+        } "Ctrl+$($index + 2) opens saved account $($wanted.account)"
+        $proof += @{ key = $key; current_view = (Read-Control $Session status).current_view }
+        Save-Screen $Session "shortcut-account-$($index + 2)"
+        Send-Keys $Session '^1'
+        $null = Wait-Until { (Read-Control $Session status).current_view.inbox } 'Ctrl+1 opens combined inbox'
+        $proof += @{ key = '^1'; current_view = (Read-Control $Session status).current_view }
+    }
+    Send-Keys $Session '^2'
+    $null = Wait-Until { (Read-Control $Session status).current_view.account -eq $Order[0].account } 'first account before retired shortcuts'
+    foreach ($number in 0..9) {
+        $key = "%$number"
+        Send-Keys $Session $key
+        $state = Read-Control $Session status
+        Assert-That (-not $state.current_view.inbox -and $state.current_view.account -eq $Order[0].account) "Retired Alt+$number changed the view"
+        $proof += @{ key = $key; current_view = $state.current_view }
+    }
+    Send-Keys $Session '%i'
+    $null = Wait-Until { (Read-Control $Session status).current_view.inbox } 'Alt+I remains an inbox alias'
+    $proof += @{ key = '%i'; current_view = (Read-Control $Session status).current_view }
+    $proof | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'view-shortcuts.json')
+    Save-Screen $Session shortcut-inbox
+    Send-Keys $Session '{F1}'
+    Save-Screen $Session shortcut-help
+    Send-Keys $Session '{ESC}'
+}
+
 function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
     $expected = @('personal', 'business', 'T0ABC123', 'T0DEF456')
     $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 6 } 'four populated account views, Telegram and Signal'
     $baseline = Read-Control $Session status
     Assert-That ($baseline.current_view.inbox -and $baseline.chat_count -eq 8) 'Combined inbox baseline missing'
+    Assert-ViewShortcuts $Session $baseline.view_order
     $catalog = Read-Control $Session chats
     $catalog | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'views-catalog.json')
     for ($index = 0; $index -lt $expected.Count; $index++) {
