@@ -266,7 +266,13 @@ pub const State = struct {
     }
 
     pub fn observePhone(self: *State, jid: []const u8, ts: []const u8) bool {
-        if (ts.len == 0 or self.find(jid) != null) return false;
+        if (ts.len == 0) return false;
+        if (self.find(jid)) |index| {
+            const existing = &self.entries[index];
+            if (existing.keep or existing.returned or existing.phone) return false;
+            existing.phone = true;
+            return true;
+        }
         const entry = self.slot(jid) orelse return false;
         entry.phone = true;
         const n = @min(ts.len, max_ts);
@@ -912,6 +918,15 @@ test "IGSH-920 phone entries round trip with a marker and lose it when the user 
     try std.testing.expect(state.observePhone("a@s.whatsapp.net", "2026-10-10T10:00:00Z"));
     try std.testing.expect(!state.observePhone("a@s.whatsapp.net", "2026-10-10T11:00:00Z"));
     try std.testing.expect(!state.observePhone("b@s.whatsapp.net", ""));
+    try std.testing.expect(state.archive("old@s.whatsapp.net", "2026-10-10T09:00:00Z", false));
+    try std.testing.expect(state.observePhone("old@s.whatsapp.net", "2026-10-10T09:00:00Z"));
+    try std.testing.expect(state.isPhone("old@s.whatsapp.net"));
+    try std.testing.expectEqualStrings("2026-10-10T09:00:00Z", state.baseline("old@s.whatsapp.net").?);
+    try std.testing.expect(state.archive("kept@s.whatsapp.net", "2026-10-10T09:00:00Z", true));
+    try std.testing.expect(!state.observePhone("kept@s.whatsapp.net", "2026-10-10T09:00:00Z"));
+    try std.testing.expect(!state.isPhone("kept@s.whatsapp.net"));
+    state.remove("old@s.whatsapp.net");
+    state.remove("kept@s.whatsapp.net");
     var buffer: [256]u8 = undefined;
     const text = state.format(&buffer);
     try std.testing.expectEqualStrings("a@s.whatsapp.net\t0\t2026-10-10T10:00:00Z\tphone\n", text);

@@ -5,7 +5,7 @@
 - On the unified hub, archiving a WhatsApp chat is stored in Wazig only, like Slack, Telegram and Signal. No archive, archive-batch or unarchive request ever reaches the hub for WhatsApp.
 - A new message from someone else returns an archived chat to the inbox right away. The app marks the chat returned in its archive state, so the choice survives restart even while the hub keeps reporting the chat archived.
 - His own messages, own reactions and a bare hub row-time change leave the chat archived.
-- A chat the phone already shows as archived is seeded as archived the first time, then follows the same rule. These seeded entries carry a `phone` marker in the saved state. When the 2048 entry table is full, a plain unarchive, archive or keep drops the oldest `phone` entry to make room, never a user, kept or returned entry. A `phone` entry is removed when the phone no longer reports the chat archived (IGSH-920).
+- A chat the phone already shows as archived is seeded as archived the first time, then follows the same rule. These seeded entries carry a `phone` marker in the saved state. When the 2048 entry table is full, a plain unarchive, archive or keep drops the oldest `phone` entry to make room, never a user, kept or returned entry. Older saved entries get the marker the next time the phone reports the chat archived (IGSH-920).
 - Ctrl+Shift+E still keeps a chat archived: a kept chat does not return on incoming messages.
 - Legacy bare keep flags migrate into the account-prefixed hub archive state, with a hub-scoped completion marker, without any hub request.
 
