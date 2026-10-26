@@ -173,7 +173,7 @@ class PaletteArchivedTests(unittest.TestCase):
         runner = (ROOT / 'tools/verify-wazig/run.ps1').read_text(encoding='utf-8')
         registry = json.loads((ROOT / 'tools/verify-wazig/journeys.json').read_text())
         entry = next(row for row in registry['journeys'] if row['name'] == 'palette-archived')
-        self.assertEqual(entry['chats'], 4)
+        self.assertEqual(entry['chats'], 3)
         self.assertIn('$journey.chats', runner)
         runner += (ROOT / 'tools/verify-wazig' / entry['script']).read_text()
         self.assertIn('Invoke-PaletteArchivedJourney $session', runner)
