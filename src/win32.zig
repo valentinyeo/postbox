@@ -11,7 +11,6 @@ pub const c = @cImport({
     @cInclude("oleacc.h");
     @cInclude("dwmapi.h");
     @cInclude("shellapi.h");
-    @cInclude("msi.h");
     @cInclude("shobjidl.h");
     @cInclude("wincodec.h");
     @cInclude("mfapi.h");

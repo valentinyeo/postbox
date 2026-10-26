@@ -1289,7 +1289,7 @@ test "a late unsupported hub archive preserves legacy local intent without retry
             startNextArchive(&a);
             try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
             try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-            try std.testing.expectEqualStrings("Chat archive is managed locally in Wazig", a.status.slice());
+            try std.testing.expectEqualStrings("Chat archive is managed locally in Postbox", a.status.slice());
             result.jid.set("unrelated:fixture");
             applyHubArchiveResult(&a, &result);
             try std.testing.expect(state.localArchived(key));

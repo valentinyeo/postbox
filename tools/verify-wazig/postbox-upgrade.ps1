@@ -102,8 +102,6 @@ try {
     Assert-That ((Get-FileHash $cache).Hash -eq $cacheHash) 'Existing cache bytes changed during rename'
     $preferences = Get-ItemProperty 'HKCU:\Software\Messages'
     Assert-That ($preferences.FontScale -eq 105 -and $preferences.Theme -eq 1) 'Saved preferences did not survive upgrade'
-    $registered = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' | Where-Object DisplayName -eq 'Postbox')
-    Assert-That ($registered.Count -eq 1) 'Installed app still has its old product name'
     Assert-That (Test-Path $shortcut) 'Old in-app update did not produce Postbox shortcut'
     $shell = New-Object -ComObject WScript.Shell
     Assert-That ($shell.CreateShortcut($shortcut).TargetPath -eq $exe) 'Renamed shortcut points at a different installation'

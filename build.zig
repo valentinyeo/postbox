@@ -244,7 +244,6 @@ pub fn build(b: *std.Build) void {
         "comctl32",
         "ole32",
         "uuid",
-        "msi",
         "windowscodecs",
         "dwmapi",
         "mfuuid",

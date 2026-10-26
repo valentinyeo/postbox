@@ -17722,23 +17722,6 @@ fn updateCardDismiss(a: *App) void {
 
 fn migrateProductName(init: std.process.Init) void {
     if (verification_fixture) return;
-    var index: win.DWORD = 0;
-    while (true) : (index += 1) {
-        var product: [39]u16 = @splat(0);
-        if (win.MsiEnumRelatedProductsW(lit("{E2C53374-5665-593B-94F8-38573F3164D2}"), 0, index, &product) != win.ERROR_SUCCESS) break;
-        const code = wideToUtf8(init.gpa, product[0..38]) catch continue;
-        defer init.gpa.free(code);
-        const path = std.fmt.allocPrint(init.gpa, "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{s}", .{code}) catch continue;
-        defer init.gpa.free(path);
-        const wide_path = utf8ToWide(init.gpa, path) catch continue;
-        defer init.gpa.free(wide_path);
-        var key: win.HKEY = null;
-        if (win.RegOpenKeyExW(winHandle(win.HKEY, 0x80000001), wide_path.ptr, 0, win.KEY_SET_VALUE, &key) != win.ERROR_SUCCESS) continue;
-        defer _ = win.RegCloseKey(key);
-        const display_name = std.mem.span(lit("Postbox"));
-        _ = win.RegSetValueExW(key, lit("DisplayName"), 0, win.REG_SZ, @ptrCast(display_name.ptr), @intCast((display_name.len + 1) * 2));
-        _ = win.RegSetValueExW(key, lit("Publisher"), 0, win.REG_SZ, @ptrCast(display_name.ptr), @intCast((display_name.len + 1) * 2));
-    }
     var exe: [519]u16 = undefined;
     const exe_len: usize = @intCast(win.GetModuleFileNameW(null, &exe, exe.len));
     if (exe_len == 0 or exe_len >= exe.len) return;
