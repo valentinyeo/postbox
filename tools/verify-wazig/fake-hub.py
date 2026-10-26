@@ -261,12 +261,12 @@ class HubArchiveHandler(Handler):
         query = parse_qs(url.query)
         if url.path == '/v1/wazig/chats':
             with self.state.lock:
-                archived = self.state.archive_group_archived
+                archived = False
                 stamp = self.state.archive_stamp
             rows = [dict(jid=ARCHIVE_GROUP, name='Verification Group', provider='whatsapp', kind='group',
                          last_message_ts=stamp, archived=archived, unread=True, unread_count=1),
                     dict(jid=ARCHIVE_OTHER, name='Verification Inbox', provider='whatsapp', kind='direct',
-                         last_message_ts='2026-10-10T12:00:00Z', archived=self.state.archive_other_archived, unread=False, unread_count=0)]
+                         last_message_ts='2026-10-10T12:00:00Z', archived=False, unread=False, unread_count=0)]
             with self.state.lock:
                 for jid, plain in self.state.plain_dms.items():
                     rows.append(dict(jid=jid, name='Fixture Contact' if jid == PLAIN_REACTED else 'Fixture Contact Two',
@@ -313,7 +313,6 @@ class HubArchiveHandler(Handler):
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
         if self.path == '/fixture/archive-incoming' and body == {}:
             with self.state.lock:
-                self.state.archive_group_archived = False
                 self.state.archive_stamp = '2026-10-10T13:00:00Z'
             self.respond(200, {'archived': False, 'last_message_ts': self.state.archive_stamp, 'unread_count': 1})
         elif self.path == '/fixture/plain-dms' and body == {}:
@@ -321,6 +320,12 @@ class HubArchiveHandler(Handler):
                 for jid in PLAIN_STAMPS:
                     self.state.plain_dms[jid] = dict(archived=False, after='')
             self.respond(200, {'chats': sorted(PLAIN_STAMPS), 'last_message_ts': PLAIN_STAMPS})
+        elif self.path == '/fixture/plain-activity' and body == {}:
+            with self.state.lock:
+                stamp = plain_stamp(5)
+                for chat in (PLAIN_REACTED, PLAIN_NEWER):
+                    self.state.plain_dms[chat]['after'] = stamp
+            self.respond(200, {'chats': [PLAIN_REACTED, PLAIN_NEWER], 'archived': False, 'last_message_ts': stamp})
         elif self.path == '/fixture/telegram-dm' and body == {}:
             with self.state.lock:
                 self.state.plain_dms[ARCHIVE_TELEGRAM] = dict(archived=False, after='')
@@ -328,32 +333,9 @@ class HubArchiveHandler(Handler):
         elif self.path == '/fixture/plain-incoming' and body == {}:
             with self.state.lock:
                 stamp = plain_stamp(10)
-                self.state.archive_rearchive_enabled = False
                 for chat in (PLAIN_NEWER, ARCHIVE_TELEGRAM):
                     self.state.plain_dms[chat].update(archived=False, after=stamp, incoming=True)
             self.respond(200, {'chats': [PLAIN_NEWER, ARCHIVE_TELEGRAM], 'archived': False, 'last_message_ts': stamp})
-        elif self.path == '/fixture/rearchive-enable' and body == {}:
-            self.state.archive_rearchive_enabled = True
-            self.respond(200, {'ok': True})
-        elif self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and body['chat'] == ARCHIVE_OTHER and isinstance(body['archived'], bool):
-            self.state.archive_other_archived = body['archived']
-            self.respond(200, {'status': 'ok'}, body=body)
-        elif self.path == '/v1/wazig/archive' and body == {'chat': ARCHIVE_GROUP, 'archived': True}:
-            with self.state.lock:
-                self.state.archive_group_archived = True
-            self.respond(200, {'status': 'ok'}, body=body)
-        elif self.path == '/v1/wazig/archive' and body.get('chat') == ARCHIVE_TELEGRAM:
-            self.respond(502, {'error': 'Telegram action unsupported'}, body=body)
-        elif self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and body.get('chat') in ARCHIVE_STAMPS and isinstance(body.get('archived'), bool) and body['chat'] in self.state.plain_dms:
-            with self.state.lock:
-                plain = self.state.plain_dms[body['chat']]
-                if body['archived'] and not self.state.archive_rearchive_enabled:
-                    self.respond(409, {'error': 'fixture awaiting local archive evidence'}, body=body)
-                    return
-                plain['archived'] = body['archived']
-                if body['archived'] and not plain['after']:
-                    plain['after'] = plain_stamp(5)
-            self.respond(200, {'status': 'ok'}, body=body)
         elif self.path == '/v1/wazig/mark-read' and body.get('chat') in (ARCHIVE_GROUP, ARCHIVE_OTHER, PLAIN_REACTED, PLAIN_NEWER, ARCHIVE_TELEGRAM):
             self.respond(200, {'status': 'ok'}, body=body)
         else:
@@ -1837,9 +1819,6 @@ def main():
     server.daemon_threads = True
     server.state = bridge.State(args.log)
     server.state.archive_incoming = 0
-    server.state.archive_group_archived = False
-    server.state.archive_other_archived = False
-    server.state.archive_rearchive_enabled = True
     server.state.plain_dms = {}
     server.state.view_rows = view_rows()
     server.state.archive_stamp = '2026-10-10T11:00:00Z'

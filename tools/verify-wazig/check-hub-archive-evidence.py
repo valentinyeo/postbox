@@ -1,6 +1,6 @@
 import re
 import json
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 
 GROUP = 'personal:120363000000000001@g.us'
@@ -9,25 +9,34 @@ PLAIN_REACTED = 'personal:15550000005@s.whatsapp.net'
 PLAIN_NEWER = 'personal:15550000006@s.whatsapp.net'
 TELEGRAM = 'telegram:user:7001'
 LEGACY = '120363000000000001@g.us\t1\t2026-10-10T10:00:00Z'
+ARCHIVE_PATHS = ('/v1/wazig/archive', '/v1/wazig/archive-batch')
+FIXTURE_PATHS = ('/fixture/archive-incoming', '/fixture/plain-dms', '/fixture/plain-activity', '/fixture/telegram-dm', '/fixture/plain-incoming')
+
+
+def archive_writes(requests):
+    return [row for row in requests if row['method'] == 'POST' and urlsplit(row['wire_path']).path in ARCHIVE_PATHS]
+
+
+def assert_no_whatsapp_archive_writes(requests, where):
+    assert not archive_writes(requests), 'NO_WHATSAPP_ARCHIVE_WRITES: ' + where
+
+
+def read_messages(requests, chat):
+    return [index for index, row in enumerate(requests) if row['method'] == 'GET' and
+            urlsplit(row['wire_path']).path == '/v1/wazig/messages' and parse_qs(urlsplit(row['wire_path']).query).get('chat') == [chat]]
 
 
 def check_plain(folder, read, before):
     assert read('plain-dms.json') == dict(chats=[PLAIN_REACTED, PLAIN_NEWER], last_message_ts={PLAIN_REACTED: '2026-10-10T11:30:00Z', PLAIN_NEWER: '2026-10-10T11:00:00Z'})
     requests = read('plain.requests.json')[before:]
-
-    def writes(chat, archived):
-        return [index for index, row in enumerate(requests) if row['wire_path'] == '/v1/wazig/archive' and
-                row['status'] == 200 and row['body'] == dict(chat=chat, archived=archived)]
-
-    reacted, newer = writes(PLAIN_REACTED, True), writes(PLAIN_NEWER, True)
-    assert len(reacted) == len(newer) == 1 and reacted[0] < newer[0]
-    scan = read('plain-scan.json')
-    assert scan['elapsed_ms'] >= 360000
-    assert scan['requests_before'] > before + newer[0]
-    assert any(row['method'] == 'GET' and row['wire_path'].startswith('/v1/wazig/chats?archived=true&')
-               for row in requests[scan['requests_before'] - before:]), 'archived scan never ran after both archives'
+    assert_no_whatsapp_archive_writes(requests, 'a plain WhatsApp archive must stay in Wazig')
+    activity, = [index for index, row in enumerate(requests) if row['wire_path'] == '/fixture/plain-activity']
+    event = read('plain-activity.json')
+    assert event['chats'] == [PLAIN_REACTED, PLAIN_NEWER] and event['archived'] is False
     for chat in (PLAIN_REACTED, PLAIN_NEWER):
-        assert not writes(chat, False), 'plain archived chat was unarchived without a user action'
+        assert any(item['jid'] == chat and item['archived'] is False and item['last_message_ts'] == event['last_message_ts']
+                   for row in requests[activity:] for item in row.get('rows', [])), 'the hub row time never moved'
+        assert [index for index in read_messages(requests, chat) if index > activity], 'the app never read the new activity of ' + chat
     lines = (folder / 'plain-archive-state.txt').read_text(encoding='utf-8-sig').splitlines()
     for chat in (PLAIN_REACTED, PLAIN_NEWER):
         entries = [line.split('\t') for line in lines if line.startswith(chat + '\t')]
@@ -49,28 +58,16 @@ def check_plain(folder, read, before):
 def check_telegram(folder, read):
     assert read('telegram-dm.json') == dict(chat=TELEGRAM, provider='telegram', account='telegram')
     requests = read('telegram.requests.json')
-
-    def writes(chat):
-        return [(index, row['body']['archived']) for index, row in enumerate(requests)
-                if row['wire_path'] == '/v1/wazig/archive' and row['status'] == 200 and row['body']['chat'] == chat]
-
-    assert not any(row['wire_path'] == '/v1/wazig/archive' and row.get('body', {}).get('chat') == TELEGRAM
-                   for row in requests), 'Telegram archive and unarchive must stay local, even when hub rejects writes'
-    assert [archived for _, archived in writes(PLAIN_NEWER)] == [True, True], 'plain WhatsApp must archive once initially and once explicitly after incoming'
-    assert [archived for _, archived in writes(PLAIN_REACTED)] == [True], 'own reaction must not unarchive'
-    assert [archived for _, archived in writes(OTHER)] == [True, False], 'original inbox must be restored explicitly'
+    assert_no_whatsapp_archive_writes(requests, 'WhatsApp, Telegram and Signal archives must stay in Wazig')
     incoming, = [index for index, row in enumerate(requests) if row['wire_path'] == '/fixture/plain-incoming']
-    enabled, = [index for index, row in enumerate(requests) if row['wire_path'] == '/fixture/rearchive-enable']
-    assert writes(PLAIN_NEWER)[0][0] < incoming < enabled < writes(PLAIN_NEWER)[1][0]
-    assert not any(row['wire_path'] == '/v1/wazig/archive' and
-                   row['body'] == dict(chat=PLAIN_NEWER, archived=True) for row in requests[incoming:enabled]), 'plain WhatsApp must not auto-rearchive'
     event = read('plain-incoming.json')
     assert event['chats'] == [PLAIN_NEWER, TELEGRAM] and event['archived'] is False
     for chat in event['chats']:
         before = [item for row in requests[:incoming] for item in row.get('rows', []) if item['jid'] == chat]
         assert before and event['last_message_ts'] > max(item['last_message_ts'] for item in before)
         assert any(item['jid'] == chat and item['archived'] is False and item['last_message_ts'] == event['last_message_ts']
-                   for row in requests[incoming:enabled] for item in row.get('rows', [])), 'hub must actually return archived=false'
+                   for row in requests[incoming:] for item in row.get('rows', [])), 'the hub row time never moved'
+    assert [index for index in read_messages(requests, PLAIN_NEWER) if index > incoming], 'the app never read the new message of the archived chat'
     all_chats = [GROUP, OTHER, PLAIN_REACTED, PLAIN_NEWER, TELEGRAM]
     for name, archived, expected in [
         ('telegram-only', False, [TELEGRAM]), ('telegram-empty', False, []),
@@ -156,9 +153,8 @@ def check_hub_archive(folder):
         assert (folder / f'{phase}-archive-legacy-done.txt').read_bytes()
         incoming = [index for index, row in enumerate(requests) if row.get('group_archived') is False and
                     row.get('group_last_message_ts') == stamp and row.get('group_unread_count') == 1]
-        writes = [index for index, row in enumerate(requests) if row['wire_path'] == '/v1/wazig/archive' and
-                  row['status'] == 200 and row['body'] == dict(chat=GROUP, archived=True)]
-        assert incoming and writes and min(incoming) < min(writes), phase
+        assert incoming, phase
+        assert_no_whatsapp_archive_writes(requests, 'the kept group stays archived in Wazig only (' + phase + ')')
         assert f'hub-archive {phase} PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
     check_plain(folder, read, len(restart_requests))
     check_telegram(folder, read)
@@ -168,9 +164,10 @@ def check_hub_archive(folder):
             continue
         assert row['authorized']
         path = urlsplit(row['wire_path']).path
-        assert path.startswith('/v1/wazig/') or path in ('/fixture/archive-incoming', '/fixture/plain-dms', '/fixture/telegram-dm', '/fixture/plain-incoming', '/fixture/rearchive-enable')
+        assert path.startswith('/v1/wazig/') or path in FIXTURE_PATHS
         if row['method'] == 'POST':
-            assert path in ('/v1/wazig/archive', '/v1/wazig/mark-read', '/fixture/archive-incoming', '/fixture/plain-dms', '/fixture/telegram-dm', '/fixture/plain-incoming', '/fixture/rearchive-enable')
+            assert path == '/v1/wazig/mark-read' or path in FIXTURE_PATHS
+    assert_no_whatsapp_archive_writes(requests, 'no archive request may reach the hub in the whole journey')
     state_files = list((folder / 'final-data').glob('hub-*-archive-state.txt'))
     marker_files = list((folder / 'final-data').glob('hub-*-archive-legacy-done.txt'))
     assert len(state_files) == len(marker_files) == 1
@@ -183,7 +180,10 @@ def check_hub_archive(folder):
     for chat in (PLAIN_REACTED, PLAIN_NEWER):
         entry, = [line.split('\t') for line in final_lines if line.startswith(chat + '\t')]
         assert entry[1] == '0', 'plain archive intent lost in final data'
-    assert not any(line.startswith(OTHER + '\t') for line in final_lines)
+    for line in final_lines:
+        if line.startswith(OTHER + '\t'):
+            entry = line.split('\t')
+            assert entry[1] == '0' and entry[2] == '' and entry[3:] == ['returned'], 'unarchived chat must keep only the returned marker'
     final = read('side-effects.json')
     assert not final['show_archived'] and final['chat_count'] == 1
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
@@ -191,4 +191,4 @@ def check_hub_archive(folder):
     assert 'Show archived chats' in (folder / 'actions.log').read_text(encoding='utf-8-sig')
     assert 'JOURNEY PASSED: hub-archive' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('HUB ARCHIVE EVIDENCE VERIFIED: legacy keep migration, hub re-archive, same-profile restart, scoped marker and unchanged legacy file')
+    print('HUB ARCHIVE EVIDENCE VERIFIED: legacy keep migration, no WhatsApp archive request, return on a new message, same-profile restart, scoped marker and unchanged legacy file')

@@ -293,7 +293,7 @@ for name in ['RULE-MAP.md']:
     assert '(features/hub-archive.md)' in (skill / name).read_text(encoding='utf-8')
 assert 'feature=hub-archive' in (skill / 'features/hub-archive.md').read_text(encoding='utf-8')
 assert 'Invoke-HubArchiveJourney $session $messages $start' in runner
-assert 'Wait-HubArchive $session $messages 1' in runner
+assert 'Wait-HubArchive $session $messages' in runner
 assert '120363000000000001@g.us`t1`t2026-10-10T10:00:00Z' in runner
 assert runner.index('if ($journey.prepare)') < runner.index('$app = [Diagnostics.Process]::Start($start)')
 assert "Copy-Item (Join-Path $messages 'archive-state.txt')" in (registry_path.parent / entries['hub-archive']['prepare']).read_text(encoding='utf-8')
@@ -305,11 +305,11 @@ assert entries['hub-archive']['validator']['file'] == 'check-hub-archive-evidenc
 assert '.claude/skills/verify-wazig/features/hub-archive.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 for artifact in ['legacy-archive-state.txt', 'restart-incoming.json', 'restart.json', 'archive-legacy-done.txt', 'archive-state.txt', '.requests.json']:
     assert artifact in runner + archive_journey and artifact in archive_validator, artifact
-for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages 2', 'Show archived chats', 'Show inbox chats', 'Quit Messages', 'Get-FileHash']:
+for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages', 'Show archived chats', 'Show inbox chats', 'Quit Messages', 'Get-FileHash']:
     assert fragment in archive_journey, fragment
-for fragment in ["min(incoming) < min(writes)", "kept[1] == '1'", "capture(f'{phase}-inbox', False)", "capture(f'{phase}-archived', True)", "read_bytes() == legacy_bytes"]:
+for fragment in ["NO_WHATSAPP_ARCHIVE_WRITES", "kept[1] == '1'", "capture(f'{phase}-inbox', False)", "capture(f'{phase}-archived', True)", "read_bytes() == legacy_bytes"]:
     assert fragment in archive_validator, fragment
-print('HUB ARCHIVE MAP VERIFIED: ordinary archives return on newer messages; Ctrl+Shift+E keeps archived; legacy seed, archive request, keep state, same-profile restart, marker, evidence and PR wiring')
+print('HUB ARCHIVE MAP VERIFIED: WhatsApp archives stay in Wazig and return on newer incoming messages; Ctrl+Shift+E keeps archived; legacy seed, keep state, same-profile restart, marker, evidence and PR wiring')
 
 palette_archived_map = (skill / 'features/palette-archived.md').read_text(encoding='utf-8')
 palette_archived_journey = (root / 'tools/verify-wazig/palette-archived.ps1').read_text(encoding='utf-8')

@@ -1,14 +1,18 @@
-function Wait-HubArchive($Session, [string]$Messages, [int]$Requests) {
+function Get-AnyHubArchiveWrites($Session) {
+    @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -in @('/v1/wazig/archive', '/v1/wazig/archive-batch') })
+}
+
+function Wait-HubArchive($Session, [string]$Messages) {
     $null = Wait-Until {
-        $writes = @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/archive' -and $_.status -eq 200 -and $_.body.chat -eq 'personal:120363000000000001@g.us' -and $_.body.archived })
         $files = @(Get-ChildItem $Messages -Filter 'hub-*-archive-state.txt')
-        if ($writes.Count -lt $Requests -or $files.Count -ne 1) { return $false }
+        if ($files.Count -ne 1) { return $false }
         $state = Read-Control $Session status
         $rows = (Read-Control $Session chats).chats
         $state.pending_archives -eq 0 -and -not $state.show_archived -and $state.chat_count -eq 1 -and
             $rows.Count -eq 1 -and $rows[0].id -eq 'personal:15550000003@s.whatsapp.net' -and
             (Get-Content $files[0].FullName -Raw).Contains("personal:120363000000000001@g.us`t1`t")
-    } 'legacy kept group re-archived on hub and absent from inbox'
+    } 'legacy kept group stays archived in Wazig and absent from inbox'
+    Assert-That ((Get-AnyHubArchiveWrites $Session).Count -eq 0) 'Wazig sent a WhatsApp archive request for the kept group'
 }
 
 function Save-HubArchive($Session, [string]$Messages, [string]$Phase) {
@@ -37,10 +41,6 @@ function Save-HubArchive($Session, [string]$Messages, [string]$Phase) {
 $script:PlainReacted = 'personal:15550000005@s.whatsapp.net'
 $script:PlainNewer = 'personal:15550000006@s.whatsapp.net'
 
-function Get-HubArchiveWrites($Session, [string]$Chat, [bool]$Archived) {
-    @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/archive' -and $_.status -eq 200 -and $_.body.chat -eq $Chat -and $_.body.archived -eq $Archived })
-}
-
 function Select-HubChat($Session, [string]$Id) {
     foreach ($attempt in 1..([Math]::Max(1, (Read-Control $Session status).chat_count))) {
         if ((Read-Control $Session status).selected.id -eq $Id) { return }
@@ -56,8 +56,20 @@ function Invoke-HubPlainArchive($Session, [string]$Chat) {
     $null = Wait-Until {
         $state = Read-Control $Session status
         $rows = (Read-Control $Session chats).chats
-        @(Get-HubArchiveWrites $Session $Chat $true).Count -eq 1 -and $state.pending_archives -eq 0 -and @($rows | Where-Object id -eq $Chat).Count -eq 0
+        $state.pending_archives -eq 0 -and @($rows | Where-Object id -eq $Chat).Count -eq 0
     } "plain archive of $Chat"
+    Assert-That ((Get-AnyHubArchiveWrites $Session).Count -eq 0) "Archiving $Chat sent a WhatsApp archive request"
+}
+
+function Wait-HubChatChecked($Session, [string[]]$Chats, [int]$After) {
+    $null = Wait-Until {
+        $later = @(Read-BridgeRequests $Session | Select-Object -Skip $After)
+        foreach ($chat in $Chats) {
+            $probe = @($later | Where-Object { $_.method -eq 'GET' -and $_.wire_path -like '/v1/wazig/messages?*' -and [Uri]::UnescapeDataString($_.wire_path) -like "*chat=$chat*" })
+            if ($probe.Count -eq 0) { return $false }
+        }
+        $true
+    } 'app read the new messages of the archived chats'
 }
 
 function Invoke-HubPlainJourney($Session, [string]$Messages) {
@@ -74,15 +86,12 @@ function Invoke-HubPlainJourney($Session, [string]$Messages) {
     Assert-That ($files.Count -eq 1) 'Hub archive state missing or ambiguous'
     Copy-Item $files[0].FullName (Join-Path $Session.evidence 'plain-archive-state.txt')
     $mark = @(Read-BridgeRequests $Session).Count
-    $clock = [Diagnostics.Stopwatch]::StartNew()
-    Start-Sleep -Seconds 360
-    $later = @(Read-BridgeRequests $Session | Select-Object -Skip $mark)
-    Assert-That (@($later | Where-Object { $_.method -eq 'GET' -and $_.wire_path -like '/v1/wazig/chats?archived=true&*' }).Count -gt 0) 'Archived scan did not run during the plain archive wait'
-    @{ elapsed_ms = $clock.ElapsedMilliseconds; requests_before = $mark } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'plain-scan.json')
+    Invoke-RestMethod -Method Post -Uri "$($Session.bridge_url)/fixture/plain-activity" -Headers @{ Authorization = 'Bearer fixture-key-not-a-secret' } -Body '{}' -ContentType 'application/json' |
+        ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'plain-activity.json')
+    Invoke-PaletteCommand $Session 'Refresh'
+    Wait-HubChatChecked $Session @($script:PlainReacted, $script:PlainNewer) $mark
     Start-Sleep -Seconds 3
-    foreach ($chat in @($script:PlainReacted, $script:PlainNewer)) {
-        Assert-That (@(Get-HubArchiveWrites $Session $chat $false).Count -eq 0) "Plain archived chat $chat was unarchived without a user action"
-    }
+    Assert-That ((Get-AnyHubArchiveWrites $Session).Count -eq 0) 'Plain archived chats caused a WhatsApp archive request'
     $null = Wait-Until {
         $state = Read-Control $Session status
         $rows = (Read-Control $Session chats).chats
@@ -122,7 +131,7 @@ function Invoke-HubArchiveJourney($Session, [string]$Messages, $Start) {
         ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'restart.json')
     $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted fixture window'
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
-    Wait-HubArchive $Session $Messages 2
+    Wait-HubArchive $Session $Messages
     Invoke-Doctor $Session | Out-Null
     Save-HubArchive $Session $Messages restart
     Invoke-HubPlainJourney $Session $Messages
@@ -200,19 +209,17 @@ function Invoke-HubTelegramArchiveJourney($Session, [string]$Messages, $Start) {
     Wait-HubEmptyInbox $Session
     Invoke-RestMethod -Method Post -Uri "$($Session.bridge_url)/fixture/plain-incoming" -Headers @{ Authorization = 'Bearer fixture-key-not-a-secret' } -Body '{}' -ContentType 'application/json' |
         ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'plain-incoming.json')
+    $incomingMark = @(Read-BridgeRequests $Session).Count
     Invoke-PaletteCommand $Session 'Refresh'
     $null = Wait-Until {
-        $requests = @(Read-BridgeRequests $Session)
-        $attempts = @($requests | Where-Object { $_.wire_path -eq '/v1/wazig/archive' -and $_.status -eq 409 -and $_.body.archived })
         $state = Read-Control $Session status
         $rows = (Read-Control $Session chats).chats
-        @($attempts | Where-Object { $_.body.chat -eq $script:PlainNewer }).Count -eq 0 -and
-            @(Get-HubArchiveWrites $Session $script:PlainNewer $true).Count -eq 1 -and
-            -not $state.show_archived -and $state.chat_count -eq 2 -and $rows.Count -eq 2 -and
+        -not $state.show_archived -and $state.chat_count -eq 2 -and $rows.Count -eq 2 -and
             @($rows | Where-Object { $_.id -in @($telegram, $script:PlainNewer) -and -not $_.archived }).Count -eq 2 -and
-            @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/archive' -and $_.body.chat -eq $telegram }).Count -eq 0 -and
             $state.pending_archives -eq 0
-    } 'ordinary WhatsApp and Telegram archives return on newer messages without rearchive'
+    } 'ordinary WhatsApp and Telegram archives return on newer incoming messages'
+    Wait-HubChatChecked $Session @($script:PlainNewer) $incomingMark
+    Assert-That ((Get-AnyHubArchiveWrites $Session).Count -eq 0) 'Returning chats caused a WhatsApp archive request'
     Save-Screen $Session plain-incoming-inbox
     Invoke-PaletteCommand $Session 'Show archived chats'
     $null = Wait-Until {
@@ -223,25 +230,24 @@ function Invoke-HubTelegramArchiveJourney($Session, [string]$Messages, $Start) {
             @($rows | Where-Object { $_.id -in @('personal:120363000000000001@g.us', $other, $script:PlainReacted) -and $_.archived }).Count -eq 3
     } 'legacy kept group and unchanged archives remain while both newer chats leave Archive'
     Save-Screen $Session plain-incoming-archived
-    Invoke-RestMethod -Method Post -Uri "$($Session.bridge_url)/fixture/rearchive-enable" -Headers @{ Authorization = 'Bearer fixture-key-not-a-secret' } -Body '{}' -ContentType 'application/json' | Out-Null
     Invoke-PaletteCommand $Session 'Show inbox chats'
     $null = Wait-Until {
         $state = Read-Control $Session status
         $rows = (Read-Control $Session chats).chats
         -not $state.show_archived -and $state.chat_count -eq 2 -and $rows.Count -eq 2 -and
             @($rows | Where-Object { $_.id -in @($telegram, $script:PlainNewer) -and -not $_.archived }).Count -eq 2 -and
-            $state.pending_archives -eq 0 -and @(Get-HubArchiveWrites $Session $script:PlainNewer $true).Count -eq 1
+            $state.pending_archives -eq 0
     } 'both ordinary chats stay in inbox until explicitly archived again'
     Select-HubChat $Session $script:PlainNewer
     $null = Send-Keys $Session '^e'
     $null = Wait-Until {
-        @(Get-HubArchiveWrites $Session $script:PlainNewer $true).Count -eq 2 -and (Read-Control $Session status).pending_archives -eq 0
+        $state = Read-Control $Session status
+        $state.chat_count -eq 1 -and $state.pending_archives -eq 0
     } 'WhatsApp explicitly archived again'
     Select-HubChat $Session $telegram
     $null = Send-Keys $Session '^e'
     Wait-HubEmptyInbox $Session
-    Assert-That (@(Get-HubArchiveWrites $Session $script:PlainNewer $true).Count -eq 2) 'Plain WhatsApp must archive only initially and explicitly after incoming'
-    Assert-That (@(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/archive' -and $_.body.chat -eq $telegram }).Count -eq 0) 'Telegram archive must remain local'
+    Assert-That ((Get-AnyHubArchiveWrites $Session).Count -eq 0) 'WhatsApp and Telegram archives must remain in Wazig'
     Invoke-PaletteCommand $Session 'Refresh'
     Wait-HubEmptyInbox $Session
     Save-Screen $Session plain-rearchived-inbox
@@ -253,7 +259,8 @@ function Invoke-HubTelegramArchiveJourney($Session, [string]$Messages, $Start) {
     Copy-Item $files[0].FullName (Join-Path $Session.evidence 'telegram-archive-state.txt')
     Select-HubChat $Session $other
     $null = Send-Keys $Session '^e'
-    $null = Wait-Until { @(Get-HubArchiveWrites $Session $other $false).Count -eq 1 -and (Read-Control $Session status).pending_archives -eq 0 } 'restore original inbox chat by explicit unarchive'
+    $null = Wait-Until { (Read-Control $Session status).chat_count -eq 4 -and (Read-Control $Session status).pending_archives -eq 0 } 'restore original inbox chat by explicit unarchive'
+    Assert-That ((Get-AnyHubArchiveWrites $Session).Count -eq 0) 'Explicit unarchive of a WhatsApp chat must stay in Wazig'
     Invoke-PaletteCommand $Session 'Show inbox chats'
     $null = Wait-Until { $state = Read-Control $Session status; -not $state.show_archived -and $state.chat_count -eq 1 -and $state.selected.id -eq $other } 'original inbox preserved'
     Read-BridgeRequests $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'telegram.requests.json')
