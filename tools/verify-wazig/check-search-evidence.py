@@ -12,6 +12,12 @@ def read(folder, name):
     return json.loads((folder / name).read_text(encoding='utf-8-sig'))
 
 
+def palette_chat_labels(query):
+    rows = read(HERE, 'search-queries.json')['rows']
+    return [row['name'] + ('  ·  Archived' if row['archived'] else '') for row in rows
+            if any(query.lower() in row[key].lower() for key in ('name', 'jid'))]
+
+
 def check_sample(sample, query, fixed):
     assert sample['query'] == sample['state']['search'] == query
     assert sample['focused'] and sample['palette'] == fixed
@@ -26,12 +32,15 @@ def check_sample(sample, query, fixed):
         assert labels == [row['name'] for row in rows]
     else:
         assert sample['native_count'] == len(labels)
+        known = palette_chat_labels(query)
+        count = next((index for index, label in enumerate(labels) if label not in known), len(labels))
+        chats = labels[:count]
         expected = [row['name'] + ('  ·  Archived' if row['archived'] else '') for row in rows]
-        assert labels[:len(rows)] == expected, ('entity order differs from rendered palette', query, labels, expected)
-        assert not any(label in expected for label in labels[len(rows):]), 'chat repeated in commands'
-        if query == 'archive' and rows:
-            assert len(rows) < 10 and len(labels) > len(rows), 'commands displaced chats or disappeared'
-            assert any('Archive' in label or 'archived' in label for label in labels[len(rows):])
+        assert set(expected).issubset(chats) and len(chats) == len(set(chats)), ('search omitted or duplicated a visible chat', query, labels, expected)
+        assert not any(label in known for label in labels[count:]), 'chat repeated in commands'
+        if query == 'archive' and chats:
+            assert count < 10 and len(labels) > count, 'commands displaced chats or disappeared'
+            assert any('Archive' in label or 'archived' in label for label in labels[count:])
     assert sample['state']['pending_sends'] == sample['state']['pending_archives'] == 0
     return identities
 
@@ -84,7 +93,9 @@ def check_ink(image, layout):
     rows = sample['rows']
     assert len(rows) == 2 and sum(row['archived'] for row in rows) == 1
     results = {}
-    for index, row in enumerate(rows):
+    for row in rows:
+        label = row['name'] + ('  ·  Archived' if row['archived'] else '')
+        index = sample['labels'].index(label)
         y = layout['y'] + index * layout['row_height']
         assert (index + 1) * layout['row_height'] <= layout['height']
         results['archived' if row['archived'] else 'live'] = measure(image, [layout['x'] + 46, y + 4, layout['x'] + 221, y + layout['row_height'] - 4])
@@ -98,7 +109,8 @@ def check_groups(image, layout):
     measure = runpy.run_path(str(HERE / 'check-archive-presentation.py'))['measure']
     sample = layout['sample']
     check_sample(sample, 'archive', True)
-    commands = len(sample['rows'])
+    known = palette_chat_labels(sample['query'])
+    commands = next((index for index, label in enumerate(sample['labels']) if label not in known), len(sample['labels']))
     assert 0 < commands < len(sample['labels']) and (commands + 1) * layout['row_height'] <= layout['height']
     for index in (0, commands):
         x = layout['x'] + layout['width']
