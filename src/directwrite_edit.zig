@@ -255,7 +255,7 @@ const Host = struct {
         return result;
     }
 
-    fn paint(self: *Host, dc: win.HDC) void {
+    fn paint(self: *Host, dc: win.HDC, with_caret: bool) void {
         const saved = win.SaveDC(dc);
         defer _ = win.RestoreDC(dc, saved);
         _ = win.SetTextColor(dc, theme.current.on_surface);
@@ -283,7 +283,7 @@ const Host = struct {
                 const alignment: u32 = if (self.centered) @intCast(win.DT_CENTER | win.DT_VCENTER) else 0;
                 _ = text_draw.drawText(dc, &self.cue, -1, &cue_rect, @as(u32, @intCast(win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_END_ELLIPSIS)) | alignment);
             }
-            self.drawCaret(dc, foreground);
+            if (with_caret) self.drawCaret(dc, foreground);
             return;
         }
         const text = std.heap.page_allocator.alloc(u16, length + 1) catch return;
@@ -323,7 +323,7 @@ const Host = struct {
                 _ = win.SetTextColor(dc, foreground);
             }
         }
-        self.drawCaret(dc, foreground);
+        if (with_caret) self.drawCaret(dc, foreground);
     }
 
     fn contextMenu(self: *Host, lparam: isize) void {
@@ -372,11 +372,11 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             defer _ = win.EndPaint(hwnd, &ps);
             _ = win.HideCaret(hwnd);
             defer _ = win.ShowCaret(hwnd);
-            host.paint(dc);
+            host.paint(dc, true);
             return 0;
         },
         win.WM_PRINTCLIENT => {
-            host.paint(@ptrFromInt(wparam));
+            host.paint(@ptrFromInt(wparam), false);
             return 0;
         },
         win.WM_ERASEBKGND => return 1,
