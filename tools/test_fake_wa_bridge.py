@@ -154,15 +154,21 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
         self.assertGreater(after[self.group], before[self.group])
         self.assertNotIn(self.group, self.jids('true'))
 
-    def test_every_archive_write_is_rejected_and_never_changes_a_chat(self):
+    def test_whatsapp_archive_and_unarchive_follow_provider_state(self):
         self.request('POST', '/fixture/plain-dms', {})
         for chat in (self.group, self.module.PLAIN_REACTED, self.module.PLAIN_NEWER):
             for archived in (True, False):
-                for path in ('/v1/wazig/archive', '/v1/wazig/archive-batch'):
-                    result = self.request('POST', path, dict(chat=chat, archived=archived), status=400)
-                    self.assertEqual(result, {'error': 'unexpected archive fixture write'})
-        self.assertEqual(self.jids('true'), [])
-        self.assertIn(self.group, self.jids('false'))
+                self.request('POST', '/v1/wazig/archive', dict(chat=chat, archived=archived))
+                self.assertEqual(chat in self.jids('true'), archived)
+                self.assertEqual(chat in self.jids('false'), not archived)
+
+    def test_phone_unarchive_changes_provider_state(self):
+        self.request('POST', '/fixture/plain-dms', {})
+        chat = self.module.PLAIN_REACTED
+        self.request('POST', '/v1/wazig/archive', dict(chat=chat, archived=True))
+        self.request('POST', '/fixture/phone-unarchive', {})
+        self.assertIn(chat, self.jids('false'))
+        self.assertNotIn(chat, self.jids('true'))
 
     def test_plain_direct_chats_gain_a_later_reaction_or_only_a_later_row_time(self):
         reacted, newer = self.module.PLAIN_REACTED, self.module.PLAIN_NEWER

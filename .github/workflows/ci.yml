@@ -60,23 +60,6 @@ jobs:
       - name: Preflight
         run: ZIG=zig bash tools/preflight.sh
 
-      - name: IGSH-902 WhatsApp archive stays in Wazig regression on main before the fix
-        run: |
-          set -euo pipefail
-          cp src/main.zig "$RUNNER_TEMP/igsh902-main.zig"
-          git show 42e938b55ffe0d24e7ca60015967349efdc1b3de:src/main.zig > src/main.zig
-          set +e
-          zig build test > "$RUNNER_TEMP/igsh902-old.log" 2>&1
-          status=$?
-          set -e
-          cp "$RUNNER_TEMP/igsh902-main.zig" src/main.zig
-          if [ "$status" -eq 0 ]; then echo 'WhatsApp archives unexpectedly stayed in Wazig on old main'; exit 1; fi
-          if ! grep -qE "test\.IGSH-902 bulk WhatsApp archive on the unified hub stays in Wazig and sends no hub request.*failed" "$RUNNER_TEMP/igsh902-old.log"; then
-            cat "$RUNNER_TEMP/igsh902-old.log"
-            exit 1
-          fi
-          echo 'IGSH-902 old main fails the WhatsApp archive stays in Wazig regression'
-
       - name: IGSH-767 archive intent and historical negative control
         run: |
           set -euo pipefail

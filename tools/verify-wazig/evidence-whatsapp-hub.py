@@ -40,7 +40,7 @@ if not unified:
 for path in paths:
     assert any(row['path'].startswith(path) and row.get('status') == 200 for row in requests), path
 if unified:
-    assert not any(row['path'] == '/v1/archive' for row in requests)
+    assert any(row['path'] == '/v1/archive' and row['status'] == 200 and row['body']['archived'] for row in requests)
 else:
     assert any(row['path'] == '/v1/archive' and row['body']['archived'] for row in requests)
 assert any(row['method'] == 'SSE' and row['kind'] == 'msg' for row in requests)
@@ -124,7 +124,7 @@ if unified:
     assert all('limit=80' in row['wire_path'] for row in mixed_reads)
     assert (folder / 'mixed-paged.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     assert 'keys: {PGUP}' in actions
-    assert not any(row['path'] == '/v1/archive' for row in requests)
+    assert any(row['path'] == '/v1/archive' and row['status'] == 200 and row['body']['archived'] for row in requests)
     for keys in ['^2', '^3', '^1']:
         assert f'keys: {keys}' in actions
     subprocess.run([sys.executable, str(Path(__file__).with_name('check-hub-views.py')), str(folder)], check=True)

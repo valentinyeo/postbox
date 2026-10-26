@@ -49,7 +49,7 @@ pub fn progressStatus(out: []u8, should_unarchive: bool, total: usize, remaining
     }) catch null;
 }
 
-pub const Source = enum { shortcut, menu, control, send, kept, incoming };
+pub const Source = enum { shortcut, menu, control, send, kept, incoming, migration };
 
 pub fn logLine(out: []u8, jid: []const u8, archived: bool, source: Source) []const u8 {
     return std.fmt.bufPrint(out, "archive: jid={s} archived={} source={s}", .{ jid, archived, @tagName(source) }) catch unreachable;
@@ -111,7 +111,8 @@ pub const State = struct {
     pub fn isArchived(self: *const State, key: anytype, provider_archived: bool) bool {
         if (key.provider == .whatsapp) {
             const index = self.find(key.id) orelse return provider_archived;
-            return !self.entries[index].returned;
+            const entry = &self.entries[index];
+            return provider_archived or entry.keep or (!entry.returned and !entry.phone);
         } else {
             if (self.findLocal(key)) |index| return self.entries[index].keep or self.entries[index].ts_len > 0;
         }
@@ -842,29 +843,18 @@ test "incoming state ignores a stale keep flag" {
     try std.testing.expect(archiveState(false, true).label() == null);
 }
 
-test "a returned WhatsApp chat overrides the phone flag, survives a restart and archives again with a fresh baseline" {
+test "old returned and phone markers never override WhatsApp archive state" {
     const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
     const key = Key{ .provider = .whatsapp, .account = "hub", .id = "personal:phone@s.whatsapp.net" };
     var state = State{};
-    try std.testing.expect(state.isArchived(key, true));
-    try std.testing.expect(state.archive(key.id, "2026-10-10T10:00:00Z", false));
-    try std.testing.expect(state.returnToInbox(key.id));
-    try std.testing.expect(state.isReturned(key.id));
-    try std.testing.expect(!state.isArchived(key, true));
-    try std.testing.expect(!state.localArchived(key));
-    try std.testing.expect(!state.returnsOn(key.id, "2026-10-10T12:00:00Z"));
-    try std.testing.expect(!state.needsReturnProbe(key.id, "2026-10-10T12:00:00Z"));
-    try std.testing.expect(state.baseline(key.id) == null);
-    var buffer: [512]u8 = undefined;
-    var loaded = State{};
-    loaded.parse(state.format(&buffer));
-    try std.testing.expectEqual(@as(usize, 1), loaded.count);
-    try std.testing.expect(loaded.isReturned(key.id));
-    try std.testing.expect(!loaded.isArchived(key, true));
-    try std.testing.expect(loaded.archive(key.id, "2026-10-10T13:00:00Z", false));
-    try std.testing.expect(!loaded.isReturned(key.id));
-    try std.testing.expect(loaded.isArchived(key, false));
-    try std.testing.expect(loaded.returnsOn(key.id, "2026-10-10T14:00:00Z"));
+    for ([_][]const u8{ "returned", "phone" }) |marker| {
+        var buffer: [256]u8 = undefined;
+        state.parse(try std.fmt.bufPrint(&buffer, "{s}\t0\tbaseline\t{s}\n", .{ key.id, marker }));
+        try std.testing.expect(state.isArchived(key, true));
+        try std.testing.expect(!state.isArchived(key, false));
+    }
+    try std.testing.expect(state.archive(key.id, "baseline", true));
+    try std.testing.expect(state.isArchived(key, false));
 }
 
 test "WhatsApp archive lines without a returned field load and save unchanged" {

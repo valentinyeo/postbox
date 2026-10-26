@@ -303,13 +303,13 @@ assert 'hub-archive' in options and entries['hub-archive']['evidence']
 assert 'src/archive_rules.zig' in workflow
 assert entries['hub-archive']['validator']['file'] == 'check-hub-archive-evidence.py'
 assert '.claude/skills/verify-wazig/features/hub-archive.md' in marker_namespace['PUBLIC_SKILL_PATHS']
-for artifact in ['legacy-archive-state.txt', 'restart-incoming.json', 'restart.json', 'archive-legacy-done.txt', 'archive-state.txt', '.requests.json']:
+for artifact in ['legacy-archive-state.txt', 'restart.json', 'archive-state.txt', 'provider.requests.json', 'migration-before.txt', 'migration-after.txt']:
     assert artifact in runner + archive_journey and artifact in archive_validator, artifact
 for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages', 'Show archived chats', 'Show inbox chats', 'Quit Messages', 'Get-FileHash']:
     assert fragment in archive_journey, fragment
-for fragment in ["NO_WHATSAPP_ARCHIVE_WRITES", "kept[1] == '1'", "capture(f'{phase}-inbox', False)", "capture(f'{phase}-archived', True)", "read_bytes() == legacy_bytes"]:
+for fragment in ['PROVIDER_UNARCHIVE_REQUIRED', 'PHONE_UNARCHIVE_REQUIRED', 'PROVIDER_INCOMING_REQUIRED', 'MIGRATION_ACK_REMOVES_LOCAL_ENTRY']:
     assert fragment in archive_validator, fragment
-print('HUB ARCHIVE MAP VERIFIED: WhatsApp archives stay in Wazig and return on newer incoming messages; Ctrl+Shift+E keeps archived; legacy seed, keep state, same-profile restart, marker, evidence and PR wiring')
+print('HUB ARCHIVE MAP VERIFIED: provider archive, phone unarchive, incoming, kept, acknowledged migration and restart')
 
 palette_archived_map = (skill / 'features/palette-archived.md').read_text(encoding='utf-8')
 palette_archived_journey = (root / 'tools/verify-wazig/palette-archived.ps1').read_text(encoding='utf-8')

@@ -111,7 +111,9 @@ def check_views(folder):
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert all(row['authorized'] for row in requests if row['method'] != 'SSE')
     archives = [row for row in requests if row['path'] == '/v1/wazig/archive']
-    assert not archives, len(archives)
+    assert len(archives) == 4, len(archives)
+    assert all(row['status'] == 200 and row['source_provider'] == 'whatsapp' and row['source_account'] == 'personal' for row in archives)
+    assert sum(row['body']['archived'] for row in archives) == 2
     assert not [row for row in requests if row['path'] == '/v1/wazig/archive-batch']
     sends = [row for row in requests if row['path'] == '/v1/wazig/send']
     assert sends and sum(row['accepted'] for row in sends) == 1

@@ -160,6 +160,28 @@ jobs:
             baseline_sha256 = (Get-FileHash sidebar-baseline-bin/bin/Messages.exe).Hash
             fixture_sha256 = (Get-FileHash src/verify_text.json).Hash
           } | ConvertTo-Json | Set-Content verification-evidence/sidebar-builds.json
+      - name: IGSH-949 original-main red control for provider archive
+        if: matrix.feature == 'hub-archive'
+        shell: pwsh
+        run: |
+          $baseline = 'a956b59'
+          $source = Join-Path $env:RUNNER_TEMP 'provider-archive-baseline'
+          $prefix = Join-Path $env:GITHUB_WORKSPACE 'archive-baseline-bin'
+          git worktree add --detach $source $baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Archive baseline checkout failed' }
+          Push-Location $source
+          try {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            if ($LASTEXITCODE -ne 0) { throw 'Archive baseline build failed' }
+          } finally { Pop-Location }
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature hub-archive -Bin archive-baseline-bin/bin -Evidence archive-red-evidence
+          if ($LASTEXITCODE -eq 0) { throw 'Original main unexpectedly passed provider archive' }
+          $failure = Get-Content archive-red-evidence/failure.txt -Raw
+          if ($failure -notmatch 'WhatsApp did not acknowledge archive') { throw "Wrong red control failure: $failure" }
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          Copy-Item archive-red-evidence verification-evidence/red-control -Recurse
+          'IGSH-949 ORIGINAL MAIN RED VERIFIED: WhatsApp did not acknowledge archive' | Set-Content verification-evidence/red-control.txt
+          exit 0
       - name: Launch, doctor and drive
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence
