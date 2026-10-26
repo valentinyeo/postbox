@@ -36,10 +36,13 @@ else:
     assert all(row['body']['account'] == 'personal' and row['body']['chat'] == '15550000001@s.whatsapp.net' for row in sends)
 paths = ['/v1/chats?', '/v1/messages?', '/v1/mark-read']
 if not unified:
-    paths.append('/v1/accounts')
+    paths.extend(['/v1/accounts', '/v1/archive'])
 for path in paths:
     assert any(row['path'].startswith(path) and row.get('status') == 200 for row in requests), path
-assert not any(row['path'] == '/v1/archive' for row in requests)
+if unified:
+    assert not any(row['path'] == '/v1/archive' for row in requests)
+else:
+    assert any(row['path'] == '/v1/archive' and row['body']['archived'] for row in requests)
 assert any(row['method'] == 'SSE' and row['kind'] == 'msg' for row in requests)
 for event_id in ['1', '2']:
     assert any(row['path'] == '/v1/events' and row.get('last_event_id') == event_id for row in requests)

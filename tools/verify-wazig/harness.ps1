@@ -481,8 +481,13 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
     Send-Keys $Session '^k'
     Send-Keys $Session 'Archive selected chat'
     Send-Keys $Session '{ENTER}'
-    $null = Wait-Until { (Read-Control $Session status).chat_count -eq 1 -and (Read-Control $Session status).pending_archives -eq 0 } 'archived chat removed'
-    Assert-That (@(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/archive' -and $_.body.chat -eq $archiveTarget }).Count -eq 0) 'WhatsApp archive wrote to the hub'
+    if ($unified) {
+        $null = Wait-Until { (Read-Control $Session status).chat_count -eq 1 -and (Read-Control $Session status).pending_archives -eq 0 } 'archived chat removed'
+        Assert-That (@(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/archive' -and $_.body.chat -eq $archiveTarget }).Count -eq 0) 'WhatsApp archive wrote to the hub'
+    } else {
+        $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/archive' -and $_.body.archived -eq $true -and $_.body.chat -eq $archiveTarget -and $_.status -eq 200 }).Count -gt 0 } 'hub archive'
+        $null = Wait-Until { (Read-Control $Session status).chat_count -eq 1 -and (Read-Control $Session status).pending_archives -eq 0 } 'archived chat removed'
+    }
     Hub-Pass $Session archive
     Save-Screen $Session after
     $requests = @(Read-BridgeRequests $Session | Where-Object { $_.method -ne 'SSE' })
