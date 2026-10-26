@@ -400,9 +400,14 @@ class PaletteArchivedHandler(Handler):
             if chat not in known:
                 self.respond(404, {'error': 'unknown palette chat'})
                 return
-            self.respond(200, [dict(MsgID='PALETTE-HISTORY', ChatJID=chat, Timestamp=known[chat][4],
-                                    Text='Synthetic palette history', FromMe=False,
-                                    SenderName='Fixture Sender', SenderJID='fixture-sender')])
+            sent = 8 if chat == 'telegram:user:7001001' else 1
+            rows = [dict(MsgID=f'PALETTE-SENT-{number}', ChatJID=chat, Timestamp=known[chat][4],
+                         Text='Synthetic sent history', FromMe=True, SenderName='You', SenderJID='self')
+                    for number in range(sent)]
+            rows.append(dict(MsgID='PALETTE-HISTORY', ChatJID=chat, Timestamp=known[chat][4],
+                             Text='Synthetic palette history', FromMe=False,
+                             SenderName='Fixture Sender', SenderJID='fixture-sender'))
+            self.respond(200, rows)
         elif url.path == '/v1/wazig/groups':
             self.respond(200, [])
         elif url.path == '/v1/wazig/events':

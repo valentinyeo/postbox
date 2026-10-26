@@ -232,6 +232,28 @@ function Invoke-PaletteArchivedJourney($Session) {
         foreach ($key in $archived.Keys) {
             Test-PaletteEnter $Session "c-all-$key" 'combined inbox' 'all' $archived[$key] $true
         }
+        Send-Keys $Session '^k'
+        $palette = Get-PaletteWindow $Session
+        $edit = Get-Edit $palette '1064'
+        $list = Get-Edit $palette '1072'
+        Send-Keys $Session 'Archived'
+        $null = Wait-Until { (Read-Edit $edit) -ceq 'Archived' } 'shared name search'
+        $labels = [string[]]@(Read-ListLabels $list)
+        $frequent = Get-ArchivedPaletteLabel $archived.telegram.name
+        $rare = Get-ArchivedPaletteLabel $archived.whatsapp.name
+        Save-Screen $Session 'frequency-results'
+        $handle = [IntPtr]$list.Current.NativeWindowHandle
+        $origin = [VerifyWindow+Point]::new()
+        Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$origin)) 'Cannot locate search results'
+        $rowHeight = [UIntPtr]::Zero
+        Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x01A1, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$rowHeight) -ne [IntPtr]::Zero) 'Cannot read search row height'
+        $desktop = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        [ordered]@{ labels = $labels; frequent = $frequent; rare = $rare; list_x = $origin.X - $desktop.Left; list_y = $origin.Y - $desktop.Top; row_height = $rowHeight.ToUInt64() } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Session.evidence 'frequency-results.json')
+        if ([Array]::IndexOf($labels, $frequent) -lt 0 -or [Array]::IndexOf($labels, $frequent) -ge [Array]::IndexOf($labels, $rare)) {
+            Add-PaletteFailure 'frequency' 'sent-message ordering' "Frequent contact not ahead of rare contact: $($labels -join ' | ')"
+        }
+        Close-PaletteWindow $Session
+
         foreach ($key in $archived.Keys) {
             $chat = $archived[$key]
             $position = 0
