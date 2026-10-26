@@ -12,6 +12,7 @@ import threading
 import unittest
 
 from check_postbox import check
+from test_outbox_runtime import extract, mutate
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('github_fixture', ROOT / 'tools/verify-wazig/fake-github-updates.py')
@@ -22,6 +23,15 @@ spec.loader.exec_module(fixture)
 class ProductContractTests(unittest.TestCase):
     def test_current_product(self):
         check(ROOT)
+
+    def test_outbox_negative_control_ignores_product_wording(self):
+        body = extract((ROOT / 'src/main.zig').read_text(), 'wacliEnqueue')
+        guard = 'if (jobIsSlack(job.kind) and a.wacli_slack_thread == null)'
+        for brand in ['Postbox', 'Another product']:
+            with self.subTest(brand=brand):
+                original = body.replace('Postbox', brand)
+                self.assertIn(guard, original)
+                self.assertNotIn(guard, mutate(original, 'inline-slack-network'))
 
     def test_product_contract_rejects_boundary_regressions(self):
         with tempfile.TemporaryDirectory() as temp:

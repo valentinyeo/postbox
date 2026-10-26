@@ -26,7 +26,6 @@ def mutate(source, name):
     if name in ("short-job-args", "nul-field", "negative-time", "evict-write"):
         return source
     replacements = {
-        "inline-slack-network": ('if (jobIsSlack(job.kind) and a.wacli_slack_thread == null) {\n        setStatus(a, "Slack worker unavailable; restart Messages");\n        return false;\n    }', ""),
         "ignored-swap": ("if (win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) == 0) return false;", "_ = win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH);"),
         "unflushed-write": ("win.FlushFileBuffers(handle) != 0", "true"),
         "local-zero": ("a.send_seq += 1;\n            pending.seq = a.send_seq;", "pending.seq = 0;"),
@@ -49,6 +48,9 @@ def mutate(source, name):
         "jid-only-dedup": ("if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), key) or !chat_key.Key.eql(chat_key.displayed(a), key)) return false;", "if (!std.mem.eql(u8, a.chats[a.selected_chat].jid.slice(), key.id)) return false;"),
         "partial-load": ("if (win.ReadFile(handle, buffer[total..].ptr, @intCast(buffer.len - total), &got, null) == 0) return;", "if (win.ReadFile(handle, buffer[total..].ptr, @intCast(buffer.len - total), &got, null) == 0) break;"),
     }
+    if name == "inline-slack-network":
+        old = re.search(r'if \(jobIsSlack\(job.kind\) and a.wacli_slack_thread == null\) \{\n        setStatus\(a, "[^"\n]*"\);\n        return false;\n    }', source).group()
+        return source.replace(old, "", 1)
     if name == "overtake-refused":
         old = re.search(r"    for \(a.slack_outbox\[0\.\.a.slack_outbox_count\]\) \|\*earlier\| \{.*?\n    }", source, re.S).group()
         return source.replace(old, "", 1)

@@ -41,10 +41,12 @@ $shortcut = "$env:APPDATA/Microsoft/Windows/Start Menu/Programs/Postbox.lnk"
 $caseResult = @{status='failed';red=[bool]$RedControl;version=$Version;commit=$env:GITHUB_SHA;payload_sha256=(Get-FileHash $Payload).Hash}
 function Capture-Upgrade([string]$Name, $Session, $Process) {
     $Process.Refresh()
+    Assert-That ($Process.Path -eq $exe) 'Capture targets a different executable'
+    [VerifyWindow]::SetForegroundWindow($Process.MainWindowHandle) | Out-Null
+    $null = Wait-Until { [VerifyWindow]::GetForegroundWindow() -eq $Process.MainWindowHandle } 'owned app foreground for visible screenshot'
     $title = $Process.MainWindowTitle
     $title | Set-Content (Join-Path $Evidence "$Name.title.txt")
     Read-Control $Session status | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence "$Name.status.json")
-    Read-Control $Session messages -Arguments @('verify-alpha') | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence "$Name.messages.json")
     $bounds = [Windows.Forms.SystemInformation]::VirtualScreen
     $image = [Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
     $graphics = [Drawing.Graphics]::FromImage($image)
@@ -80,6 +82,7 @@ try {
     $oldPid = $app.Id
     $session = @{ctl=$ctl;username="verify-$id";pid=$app.Id;startTicks=$app.StartTime.ToUniversalTime().Ticks.ToString();exe=$exe;sha256=$oldHash;expected_version='0.9.216';expected_product='Wazig';evidence=$Evidence}
     $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw 'Original app exited early' }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'old product window'
+    Read-Control $session messages -Arguments @('verify-alpha') | ConvertTo-Json -Depth 12 | Set-Content "$Evidence/before.messages.json"
     $oldTitle = Capture-Upgrade before $session $app
     Assert-That ($oldTitle -match ' - Wazig v0\.9\.216$') 'Original release identity mismatch'
     $beforeMessages = Get-Content "$Evidence/before.messages.json" -Raw | ConvertFrom-Json
@@ -94,7 +97,10 @@ try {
         if ($owned.Count -gt 1) { throw 'Multiple replacement processes' }
         if ($owned.Count -eq 1 -and $owned[0].MainWindowHandle -ne [IntPtr]::Zero) { $owned[0] }
     } 'replacement app window' 30
-    $newTitle = Capture-Upgrade after $session $app
+    $app.Refresh()
+    $newTitle = $app.MainWindowTitle
+    Read-Control $session messages -Arguments @('verify-alpha') | ConvertTo-Json -Depth 12 | Set-Content "$Evidence/after.messages.json"
+    if ($RedControl) { $null = Capture-Upgrade after $session $app }
     Assert-That ($newTitle -cmatch (' - Postbox v' + [regex]::Escape($Version) + '$')) 'POSTBOX_TITLE_MISSING'
     Assert-That ((Get-FileHash $exe).Hash -ne $oldHash) 'Original binary did not change through the updater'
     $afterMessages = Get-Content "$Evidence/after.messages.json" -Raw | ConvertFrom-Json
@@ -106,6 +112,11 @@ try {
     $shell = New-Object -ComObject WScript.Shell
     Assert-That ($shell.CreateShortcut($shortcut).TargetPath -eq $exe) 'Renamed shortcut points at a different installation'
     Assert-That (-not (Test-Path "$env:APPDATA/Microsoft/Windows/Start Menu/Programs/Messages.lnk")) 'Legacy shortcut remains'
+    $null = Wait-Until {
+        $log = Get-Content "$data/launch-log.txt" -Raw
+        $lastStart = $log.LastIndexOf('startup: saved account tag loaded')
+        $lastStart -ge 0 -and [regex]::Matches($log.Substring($lastStart), 'messages-read: fail').Count -ge 3
+    } 'offline fixture completes its existing native retries before update-card screenshots' 30
     $next = [version]$Version
     $nextTag = "v$($next.Major).$($next.Minor).$($next.Build + 1)"
     @{tag=$nextTag} | ConvertTo-Json | Set-Content "$root/offer.json"
@@ -116,6 +127,8 @@ try {
     $session.expected_product = 'Postbox'
     Invoke-PaletteCommand $session 'Check for updates now'
     $null = Wait-Until { (Get-Content "$data/launch-log.txt" -Raw) -match ([regex]::Escape("update: card offered $nextTag")) } 'renamed app finds next update' 90
+    $null = Wait-Until { (Read-Control $session status).update_card.error -ceq '' } 'new offer clears the offline fixture warning'
+    $null = Capture-Upgrade after $session $app
     $null = Capture-Upgrade next-update $session $app
     $paths = @(Get-Content "$root/requests.jsonl" | ForEach-Object { ($_ | ConvertFrom-Json).path })
     Assert-That ($paths -contains '/repos/valentinyeo/wazig/releases/latest') 'Original update route was not exercised'
