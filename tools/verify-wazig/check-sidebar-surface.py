@@ -70,9 +70,13 @@ def measure_pair(image, before, layout, baseline_layout):
     for label, top, end in [('name', 10, 34), ('kind', 35, 56)]:
         rect = [lx + px(66), ly + px(64 + top), lr - px(54), ly + px(64 + end)]
         text[label] = dict(rect=rect, after=ink(image, rect, sidebar), before=ink(before, rect, old_row_surface))
-    chat_pixels = pixels(image, [edge + 1, y, right, bottom])
-    before_pixels = pixels(before, [edge + 1, y, right, bottom])
-    differences = [max(abs(a - b) for a, b in zip(one, two)) for one, two in zip(chat_pixels, before_pixels)]
+    cl, ct, cr, cb = layout['composer']
+    differences = []
+    for row in range(y, bottom):
+        for column in range(edge + 1, right):
+            if cl <= column < cr and ct <= row < cb:
+                continue
+            differences.append(max(abs(a - b) for a, b in zip(image[row][column], before[row][column])))
     return dict(theme=layout['theme'], sidebar_rgb=sidebar, row_surface_rgb=row_surface, chat_rgb=chat, baseline_sidebar_rgb=old_sidebar,
                 baseline_row_surface_rgb=old_row_surface, baseline_chat_rgb=old_chat, surface_contrast=contrast(sidebar, chat),
                 surface_luminance_delta=luminance(sidebar) - luminance(chat), divider_rgb=divider,
