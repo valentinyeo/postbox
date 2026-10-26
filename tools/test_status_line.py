@@ -11,7 +11,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE = '151e5b6ec06b2bff1d587c7ef5a232d4291973dc'
+BASE = 'ef54fd8347ab436d94e2aa8683ae884ad32c23c6'
 
 
 def source():
@@ -31,7 +31,8 @@ def assert_quiet(text):
         assert removed not in text, removed
     layout = function(text, 'layoutRegion')
     assert 'const list_bottom = if (updateCardVisible(a)) updateCardRect(a).top - px(a, 4) else height;' in layout
-    assert 'list_bottom - header_height - search_height, win.TRUE)' in layout
+    assert 'list_bottom - header_height, win.TRUE)' in layout
+    assert 'search' not in layout
     palette = function(text, 'buildPaletteItems')
     assert 'appendPalette(a, "You are on v" ++ app_version ++ " - this is the newest version", "", 0);' in palette
     problem = function(text, 'showProblem')
@@ -140,7 +141,7 @@ class StatusLineTests(unittest.TestCase):
         text = source()
         for name in ('updateCardNotesHeight', 'updateCardHeight', 'updateCardSpan', 'updateCardRect',
                      'updateCardLayout', 'updateCardWinRect', 'updateCardButtonRect', 'updateCardCloseRect', 'updateCardPtIn',
-                     'updateCardHit', 'updateCardRefresh', 'updateCardFail', 'updateCardClick', 'updateCardDismiss', 'handleKeyboard'):
+                     'updateCardHit', 'updateCardRefresh', 'updateCardFail', 'updateCardClick', 'updateCardDismiss'):
             with self.subTest(function=name):
                 self.assertEqual(function(parent, name), function(text, name))
 
@@ -163,8 +164,12 @@ class StatusLineTests(unittest.TestCase):
         parent = subprocess.check_output(['git', 'show', f'{BASE}:src/main.zig'], cwd=ROOT, text=True)
         expected = function(parent, 'layoutRegion')
         expected = expected.replace('    const status_height: i32 = px(a, 26);\n', '')
-        expected = expected.replace('    const search_height: i32 = px(a, 48);', '    const search_height: i32 = px(a, 48);\n    const list_bottom = if (updateCardVisible(a)) updateCardRect(a).top - px(a, 4) else height;')
-        expected = expected.replace('height - header_height - search_height - status_height - updateCardSpan(a)', 'list_bottom - header_height - search_height')
+        expected = expected.replace('    const search_height: i32 = px(a, 48);', '    const list_bottom = if (updateCardVisible(a)) updateCardRect(a).top - px(a, 4) else height;')
+        expected = expected.replace('height - header_height - search_height - status_height - updateCardSpan(a)', 'list_bottom - header_height')
+        expected = expected.replace('0, header_height + search_height, left_width', '0, header_height, left_width')
+        first = expected.index('    a.search_pill = ')
+        last = expected.index('    if (a.chats_hwnd) |hwnd|')
+        expected = expected[:first] + expected[last:]
         expected = expected.replace('    if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);\n', '')
         self.assertEqual(expected, function(source(), 'layoutRegion'))
 

@@ -49,8 +49,8 @@ class NoStoriesTests(unittest.TestCase):
         self.assertIn('layoutRegion(a, width, height, null)', wrapper)
         start = main.index('fn layoutRegion(')
         layout = main[start:main.index('\nfn ', start + 1)]
-        self.assertIn('const search_height: i32 = px(a, 48);', layout)
-        self.assertIn('win.MoveWindow(hwnd, 0, header_height + search_height, left_width - scrollbar_width, list_bottom - header_height - search_height, win.TRUE)', layout)
+        self.assertNotIn('search_height', layout)
+        self.assertIn('win.MoveWindow(hwnd, 0, header_height, left_width - scrollbar_width, list_bottom - header_height, win.TRUE)', layout)
         self.assertNotIn('theme.choice', layout)
         self.assertNotIn('activeChatView', layout)
         self.assertNotIn('win.SW_HIDE', layout)

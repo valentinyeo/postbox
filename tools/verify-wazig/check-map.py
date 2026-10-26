@@ -65,7 +65,7 @@ for label in ['Search chats', 'Next chat', 'Previous chat', 'Compose message', '
     assert f'"{label}"' in source, label
 for removed in ['resurface_probe', 'enqueueResurfaceProbe', 'applyResurfaceProbe', 'command_keep_archived', 'toggleKeepArchived', 'Archive and keep archived', 'Allow resurfacing']:
     assert removed not in source, ('removed archive resurfacing path or command', removed)
-for control in ['id_search = 1008', 'id_compose = 1032']:
+for control in ['id_palette_edit = 1064', 'id_compose = 1032']:
     assert control in source
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:

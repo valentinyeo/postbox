@@ -48,7 +48,7 @@ def check_scene(folder, name, capture=False):
     rows = read(folder, f'{name}.chats.json')['chats']
     assert rows == layout['rows'] and state['selected']['id'] == layout['selected'], name
     assert state['include_archived'] and not state['show_archived'], name
-    assert (state['search'] == 'row') == ('-search-' in name), name
+    assert state['search'] == '', name
     assert state['current_view']['inbox'] == ('-inbox-' in name), name
     assert layout['mode'] == name.rsplit('-', 1)[1], name
     assert layout['colour_model'] == 'theme-foreground-mix', name
@@ -103,7 +103,7 @@ def check_scene(folder, name, capture=False):
 
 
 def check_presentation(folder):
-    for scope in ('sidebar', 'inbox', 'search'):
+    for scope in ('sidebar', 'inbox'):
         for mode in ('dim', 'hover', 'selected'):
             check_scene(folder, f'archive-{scope}-{mode}')
     for name, enabled, activated in [('archive-palette-on', True, True), ('archive-palette-off', False, True),
@@ -124,7 +124,7 @@ def check_presentation(folder):
     assert footer['after']['include_archived'] and footer['after']['pending_archives'] == 0
     assert read(folder, 'archive-footer.chats.json')['chats'] == footer['rows']
     tree = (folder / 'archive-footer.uia.txt').read_text(encoding='utf-8-sig')
-    assert '1016 | ListBox |' in tree and '1008 | RICHEDIT50W |' in tree
+    assert '1016 | ListBox |' in tree and '1008 | RICHEDIT50W |' not in tree
     assert '1146 |' not in tree and 'Show archived:' not in tree
     print('ARCHIVE PRESENTATION VERIFIED: absent inert footer, stateful palette and measured colour-mixed/full rows')
 
@@ -151,7 +151,7 @@ if __name__ == '__main__':
         assert all(int(a, 16) + int(b, 16) == 0xffffff for a, b in zip(original, inverted))
         for folder, polarity in [(args.folder, 'dark'), (light, 'light')]:
             assert read(folder, 'session.json')['sha256'] != read(light if folder == args.folder else args.folder, 'session.json')['sha256']
-            for scope in ('sidebar', 'inbox', 'search'):
+            for scope in ('sidebar', 'inbox'):
                 for mode in ('dim', 'hover', 'selected'):
                     assert read(folder, f'archive-{scope}-{mode}.contrast.json')['polarity'] == polarity
         print('ARCHIVE LIGHT AND DARK VERIFIED: screenshot contrast and colour-mix measurements retained for both polarities')

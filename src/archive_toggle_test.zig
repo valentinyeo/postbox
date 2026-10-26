@@ -43,6 +43,10 @@ const App = struct {
     messages_refreshed: usize = 0,
     cleared: usize = 0,
     registry_ok: bool = true,
+    palette: ?usize = null,
+    palette_search_mode: bool = false,
+    palette_filtering: bool = false,
+    palette_keep_selection: bool = false,
     status: Text = .{},
     log: Text = .{},
     logs: usize = 0,
@@ -111,6 +115,8 @@ fn refreshMessages(a: *App) void {
 fn refreshVisibleChats(a: *App) void {
     _ = applyChats(a, a.chats_raw orelse "{\"data\":[]}", false);
 }
+
+fn paletteFilter(_: *App) void {}
 
 fn hubConfigured(_: *App) bool {
     return true;

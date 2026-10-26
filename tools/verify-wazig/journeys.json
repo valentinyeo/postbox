@@ -3,14 +3,15 @@
     {
       "name": "search",
       "pr": true,
-      "hub": null,
+      "hub": "search",
       "evidence": true,
-      "chats": null,
+      "chats": 6,
       "script": "journey-search.ps1",
       "validator": {
-        "file": "evidence-search.py"
+        "file": "check-search-evidence.py",
+        "function": "check_evidence"
       },
-      "hub_handler": null,
+      "hub_handler": {"file": "search-fixture.py", "class": "SearchHandler"},
       "maximize": true
     },
     {
@@ -539,22 +540,6 @@
       "maximize": true
     },
     {
-      "name": "chat-lists",
-      "pr": true,
-      "hub": "chat-lists",
-      "evidence": true,
-      "chats": 1,
-      "script": "journey-chat-lists.ps1",
-      "validator": {
-        "file": "evidence-chat-lists.py"
-      },
-      "hub_handler": {
-        "file": "fake-hub.py",
-        "class": "ChatListsHandler"
-      },
-      "maximize": true
-    },
-    {
       "name": "quiet-status",
       "pr": true,
       "hub": "quiet-status",
@@ -568,6 +553,22 @@
       "hub_handler": {
         "file": "fake-hub.py",
         "class": "QuietStatusHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "chat-lists",
+      "pr": true,
+      "hub": "chat-lists",
+      "evidence": true,
+      "chats": 1,
+      "script": "journey-chat-lists.ps1",
+      "validator": {
+        "file": "evidence-chat-lists.py"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "ChatListsHandler"
       },
       "maximize": true
     }

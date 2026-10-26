@@ -1,39 +1,38 @@
-# Chat search
-
-Find a chat by its displayed name or identifier, distinguish a no-match result and restore the inbox without changing stored chats.
+# Unified palette search
 
 ## Sub-features
 
-- `search-center`: placeholder and typed ink are horizontally and vertically centered in the pill.
-- `search-focus`: focus the sidebar search.
-- `search-match`: live filtering matches names and identifiers case-insensitively.
-- `search-empty`: an absent query produces zero visible chats.
-- `search-clear`: Escape restores the complete chat list.
+- `search-focus`: Ctrl+F and slash focus palette edit 1064 in exact entity-search mode, including from an empty list.
+- `search-match`: reuse the former bar's case-insensitive name/identifier matching, current-view/archive/unread filters and ordering.
+- `search-empty`: no-match and unread-only empty-list cases remain searchable.
+- `search-clear`: Escape clears the query and restores the list.
+- `search-parity`: one shared 24-query contract, two shortcut samples per query and ordered provider/account/id evidence.
+- `search-removal`: no sidebar edit 1008 or native child, no old cue and no reserved layout slot.
+- `search-groups`: chat results precede the separate command group in search mode; archive matches both a thread and commands.
+- `search-archived-ink`: measure archived palette text against a live result using screenshot pixels.
 
 ## How to get to it (user POV)
 
-- Press Ctrl+F, or `/` outside an editable field.
-- Click the sidebar search field, whose cue is `Search All  Ctrl+F` in the baseline view.
-- Ctrl+K → `Search chats` focuses that same field.
+Press Ctrl+F, or `/` outside an editable field. Ctrl+K still opens the default fuzzy command palette; its Search chats command opens the same box in exact entity-search mode. Escape clears search. The archive switch and account view still govern entity search.
 
 ## Driving it with PowerShell UI Automation
 
-Preconditions: a successful doctor, Alpha and Beta in the baseline sidebar, no draft.
+Dispatch `feature=search`. The isolated unified fake hub reads synthetic rows and message text from `tools/verify-wazig/search-queries.json`; the journey reads the same file's queries. No provider accounts are used.
 
-- **Run:** dispatch `feature=search`; the helper is `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature search` on GitHub only.
-- **Before:** `before.png` shows both chats. UI Automation resolves search by AutomationId `1008`.
-- **Center placeholder:** focus `Compose message` through the palette, confirm search is empty and unfocused, and capture `search-center-placeholder.png` cropped to the pill.
-- **Match:** `Send-Keys $session '^f'`, then `Send-Keys $session 'Beta'`. Wait for read-only status `search=Beta`, `chat_count=1`, selected name `Verification Beta`. `after.png` must visibly show Beta and no Alpha.
-- **Center typed:** with search focused and exactly `Beta`, capture `search-center-typed.png`. `search-center-layout.json` records each crop's pill and edit bounds, the UI Automation `1008` screen bounds, DPI, text and focus. Recover the pill from the edit by undoing `layoutRegion`'s one physical pixel vertical inset and `field_pill.compute`'s horizontal inset: ceil(min(scaled 56, edit height + 2) / 2). Both crops use pill-local physical pixels, not window-relative or DPI-scaled coordinates.
-- **Center oracle:** `python tools/verify-wazig/check-search-center.py verification-evidence` compares the text ink bounding-box center to the pill center, excluding rounded edges and thin tall caret columns. It writes `search-center.json` with placeholder and typed `dx`/`dy`. Both must satisfy `|dx| <= 2` and `|dy| <= 1` physical pixels; the search matrix job fails otherwise. The `verify-wazig-search` artifact includes both crops, bounds and offsets, even when the pixel check fails.
-- **Clear:** `Send-Keys $session '{ESC}'`; wait for two chats.
-- **No match:** Ctrl+F, type `NoSuchFixture`; wait for zero chats and capture `empty.png`.
-- **Restore:** Escape must return two chats. Check the unchanged two-entry cached chat file plus zero pending writes in `side-effects.json`.
+The same journey detects edit 1008 on the evidence-only red build and types into the bar. On the fixed build it types into palette edit 1064. Each query is repeated through Ctrl+F and slash, recording focus, native list labels/count, read-only state and ordered identities in `search-parity.json`. The complete file survives the deliberate red failure at the subsequent bar-removal assertion. No red artifact is accepted as a successful fixed-build journey.
+
+Fixed evidence also includes `search-removal.json`, `search-shortcuts.json`, `search-archive.json`, `search-archive.png`, `search-groups.json`, `search-groups.png`, `search-match.png` and `empty.png`. Group-tag ink and archived/live contrast are both measured from screenshots. The search journey runs the palette command-discovery and removed-Status assertions. The workflow additionally runs the standalone offline palette journey under `palette/`, preserving the no-configured-backend assertion.
+
+Download both `verify-wazig-search` artifacts into different directories and run:
+
+```sh
+python3 tools/verify-wazig/check-search-evidence.py evidence/fixed --baseline evidence/red
+```
+
+This requires identical query-file hashes and cases, different build revisions/hashes, exact identity order within each run and across runs, fixed-build focus/removal/group assertions, measurable archived dimming, isolation and cleanup. Within-run raw provider/cache-account/id lists must match their recorded rows exactly. Cross-run comparison uses the recorded provider/source-account/id fields: local cache-account tags hash the fake server's random URL and are not source identities. Every source account is checked against the shared fixture, so changing an actual account still fails. Inspect the screenshots too. Run `check-evidence.py evidence/fixed/palette` for the separate offline palette evidence.
 
 ## Gotchas
 
-- Filtering is debounced by a 240 ms timer; wait for resulting state.
-- Slash in an editable field inserts text instead of focusing search.
-- Palette fuzzy search is a different feature; a palette result is not proof of sidebar filtering.
-- The screenshot, not just a status count, must show the query and remaining chat. The archive provider fixture does not supply `.archived_scan` or `.contacts_index` jobs, so neither this recipe nor archive proves cross-inbox archived/contact lookup. That requires a populated provider people index.
-- Source: `src/main.zig:3915` builds the view-specific cue, `src/main.zig:2410` merges indexed people into inbox search, and `src/main.zig:16157` debounces for 240 ms. `src/main.zig:16521` handles Ctrl+F.
+The former bar searches names and identifiers, not message bodies or account labels. The real fixture message words rendezvous, agenda and milestone deliberately record empty identity lists on both builds; this is parity, not a claim of new full-text search. Account queries use real source identifiers. Contacts are synthetic cached contact chats; this fixture does not claim standalone provider-contact-index coverage.
+
+Slash in an editable field remains text. Entity rows are read from the native palette and checked against the recorded identity order, not inferred from a result count. A missing or reordered result fails. Local source validators do not constitute Windows runtime or cross-run parity proof.

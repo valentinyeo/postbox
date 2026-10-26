@@ -104,7 +104,6 @@ try {
     Invoke-Doctor $session
     $window = Get-Window $session
     $compose = Get-Edit $window '1032'
-    $search = Get-Edit $window '1008'
     Save-Screen $session before
     . (Join-Path $PSScriptRoot $journey.script)
     $final = Read-Control $session status

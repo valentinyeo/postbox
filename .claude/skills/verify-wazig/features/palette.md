@@ -4,6 +4,7 @@ Find commands without a toolbar and open the keyboard-shortcuts overlay through 
 
 ## Sub-features
 
+- `palette-search-entry`: Ctrl+F and slash type into entity search in the same palette; edit 1008 stays absent. `search-shortcuts.json` records both focus and ordered native results.
 - `palette-open`: open the command palette.
 - `palette-filter`: fuzzy-filter registered command labels and chat names.
 - `palette-activate`: Enter activates the selected item; Escape cancels.
@@ -12,7 +13,7 @@ Find commands without a toolbar and open the keyboard-shortcuts overlay through 
 
 ## How to get to it (user POV)
 
-- Ctrl+K opens the palette; type a command label.
+- Ctrl+K opens the default fuzzy palette; type a command label. Its command scores and within-group order are unchanged; nonempty queries group chats first so commands cannot bury them. Ctrl+F or slash opens the same palette in exact entity-search mode using the former bar's filters and ranking.
 - Up/Down changes the selection; Enter runs it; Escape closes the palette.
 - Choose `Keyboard shortcuts` in the palette, or press F1 directly to open the same overlay.
 

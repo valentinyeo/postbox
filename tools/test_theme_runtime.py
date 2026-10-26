@@ -37,7 +37,7 @@ def verify_wiring(main, edit):
     assert "if (!changeTheme(a, choice))" in control
     status = section(main, "fn controlStatus(", "fn ")
     assert '\\"theme\\":\\"{s}\\"' in status and "@tagName(theme.choice)" in status
-    assert "paintInputField(a, &shapes, hdc, search, a.search_pill);" in main
+    assert "paintPopupInput(&shapes, hwnd, a.palette_edit);" in main
     assert "paintInputField(a, &shapes, hdc, a.compose.?, a.compose_pill);" in main
     field = section(main, "fn paintInputField(", "fn ")
     assert "theme.current.surface_container_high, theme.current.on_surface" in field
@@ -45,10 +45,10 @@ def verify_wiring(main, edit):
     paint = section(main, "fn paintRoundedButton(", "fn ")
     assert "smooth.strokeRoundRect(shapes, rect, radius, radius, frame_color, 1)" in paint
     colors = main[main.index("win.WM_CTLCOLORSTATIC, win.WM_CTLCOLOREDIT, win.WM_CTLCOLORLISTBOX => {"):]
-    assert "for ([_]?win.HWND{ a.compose, a.search }) |control|" in colors
+    assert "for ([_]?win.HWND{a.compose}) |control|" in colors
     assert "win.SetBkColor(hdc, theme.current.surface_container_high)" in colors
     assert "return @bitCast(@intFromPtr(a.brush_raised.?));" in colors
-    assert "a.search = directwrite_edit.create(" in main
+    assert "a.palette_edit = directwrite_edit.create(" in main
     paint = section(edit, "    fn paint(", "    fn contextMenu(")
     assert "win.WM_CTLCOLOREDIT" in paint
     assert "win.SetTextColor(dc, theme.current.on_surface)" in paint
@@ -60,10 +60,10 @@ def verify_wiring(main, edit):
     assert "win.SetTextColor(dc, theme.current.on_surface_variant)" in paint
     assert "text_draw.drawText(dc, &self.cue" in paint
     assert "win.HideCaret(hwnd)" in edit and "win.ShowCaret(hwnd)" in edit
-    assert "(id == id_compose or id == id_search) and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)" in main
+    assert "id == id_compose and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)" in main
     assert "win.InflateRect(&dirty, 1, 1)" in main
     assert "compose_layout.composerBorderRect(@bitCast(rect))" in field
-    assert "win.InvalidateRect(hwnd, if (id == id_compose) &dirty else &a.search_pill, win.FALSE)" in main
+    assert "win.InvalidateRect(hwnd, &dirty, win.FALSE)" in main
     assert "win.SetBkColor(hdc, fieldColor())" in main
     assert "if (theme.choice == .amoled) a.brush_bg.? else a.brush_raised.?" in main
     assert "if (!recreateThemeBrushes(a)) return -1;" in main
@@ -215,14 +215,14 @@ class ThemeRuntimeTests(unittest.TestCase):
             'appendPalette(a, "Theme: Green", "", command_theme_green);',
             "_ = changeTheme(a, if (command == command_theme_amoled) .amoled else .green);",
             "if (!changeTheme(a, choice))",
-            "paintInputField(a, &shapes, hdc, search, a.search_pill);",
+            "paintPopupInput(&shapes, hwnd, a.palette_edit);",
             "paintInputField(a, &shapes, hdc, a.compose.?, a.compose_pill);",
             "if (win.GetFocus() == control) theme.current.primary else theme.current.outline",
             "smooth.strokeRoundRect(shapes, rect, radius, radius, frame_color, 1)",
-            "for ([_]?win.HWND{ a.compose, a.search }) |control|",
+            "for ([_]?win.HWND{a.compose}) |control|",
             "win.SetBkColor(hdc, theme.current.surface_container_high)",
-            "a.search = directwrite_edit.create(",
-            "win.InvalidateRect(hwnd, if (id == id_compose) &dirty else &a.search_pill, win.FALSE)",
+            "a.palette_edit = directwrite_edit.create(",
+            "win.InvalidateRect(hwnd, &dirty, win.FALSE)",
             "win.SetBkColor(hdc, fieldColor())",
             "if (!recreateThemeBrushes(a)) return -1;",
         ):

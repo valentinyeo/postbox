@@ -1,3 +1,10 @@
+if ($session.feature -eq 'palette') {
+    $launch = Get-Content (Join-Path $messages 'launch-log.txt') -Raw
+    Assert-That ($launch.Contains('whatsapp backend: unavailable (URL not configured)') -and -not $launch.Contains('message backend: hub') -and -not $launch.Contains('whatsapp backend: hub') -and -not $launch.Contains('whatsapp backend: wacli')) 'Unconfigured hub did not stay unavailable'
+    Add-Content (Join-Path $Evidence 'fallback-proof.log') 'hub no-url-unavailable PASS'
+    . "$PSScriptRoot/search-proof.ps1"
+    Assert-PaletteSearchShortcuts $session
+}
 Send-Keys $session '^k'
 $palette = Get-PaletteWindow $session
 Send-Keys $session 'Keyboard shortcuts'

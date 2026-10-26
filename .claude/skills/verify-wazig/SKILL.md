@@ -32,7 +32,7 @@ The launch helper runs the read-only doctor before input. On the same GitHub run
 pwsh -NoProfile -File tools/verify-wazig/doctor.ps1 -Evidence verification-evidence
 ```
 
-This checks PID plus start time, absolute executable path and SHA-256, exact build title/version, UI Automation process and class, readable search edit `1008`, enabled composer `1032`, stopped sync and no pending sends/archives. It reads `wazigctl status`; it never uses a control command to change state. `doctor.json` records the observed app state. A failed doctor invalidates the journey; fix launch rather than driving another window. The process lasts only for the workflow's drive step, so running doctor after cleanup must fail.
+This checks PID plus start time, absolute executable path and SHA-256, exact build title/version, UI Automation process and class, readable palette edit `1064` (or legacy sidebar edit `1008` on the evidence-only baseline), enabled composer `1032`, stopped sync and no pending sends/archives. It reads `wazigctl status`; it never uses a control command to change state. `doctor.json` records the observed app state. A failed doctor invalidates the journey; fix launch rather than driving another window. The process lasts only for the workflow's drive step, so running doctor after cleanup must fail.
 
 ## Drive
 
