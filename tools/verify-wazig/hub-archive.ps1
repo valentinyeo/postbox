@@ -100,7 +100,7 @@ function Wait-ArchiveRows($Session, [string[]]$Ids) {
         $args = if ($state.show_archived) { @('--archived') } else { @() }
         $rows = @((Read-Control $Session chats -Arguments $args).chats)
         $state.pending_archives -eq 0 -and $rows.Count -eq $Ids.Count -and
-            -not (Compare-Object @($rows | ForEach-Object id | Sort-Object) @($Ids | Sort-Object))
+            (@($rows | ForEach-Object id | Sort-Object) -join ',') -ceq (@($Ids | Sort-Object) -join ',')
     } "archive list matches $($Ids -join ', ')"
 }
 
