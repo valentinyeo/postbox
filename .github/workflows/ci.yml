@@ -60,30 +60,30 @@ jobs:
       - name: Preflight
         run: ZIG=zig bash tools/preflight.sh
 
-      - name: IGSH-833 incoming message regression on main before the fix
+      - name: IGSH-902 WhatsApp archive stays in Wazig regression on main before the fix
         run: |
           set -euo pipefail
-          cp src/main.zig "$RUNNER_TEMP/igsh833-main.zig"
-          git show 151e5b6ec06b2bff1d587c7ef5a232d4291973dc:src/main.zig > src/main.zig
+          cp src/main.zig "$RUNNER_TEMP/igsh902-main.zig"
+          git show 42e938b55ffe0d24e7ca60015967349efdc1b3de:src/main.zig > src/main.zig
           set +e
-          zig build test > "$RUNNER_TEMP/igsh833-old.log" 2>&1
+          zig build test > "$RUNNER_TEMP/igsh902-old.log" 2>&1
           status=$?
           set -e
-          cp "$RUNNER_TEMP/igsh833-main.zig" src/main.zig
-          if [ "$status" -eq 0 ]; then echo 'Plain archives unexpectedly returned on old main'; exit 1; fi
-          if ! grep -qE "test\.IGSH-833 bulk plain group and direct chat return on an incoming message while kept stays archived.*failed" "$RUNNER_TEMP/igsh833-old.log"; then
-            cat "$RUNNER_TEMP/igsh833-old.log"
+          cp "$RUNNER_TEMP/igsh902-main.zig" src/main.zig
+          if [ "$status" -eq 0 ]; then echo 'WhatsApp archives unexpectedly stayed in Wazig on old main'; exit 1; fi
+          if ! grep -qE "test\.IGSH-902 bulk WhatsApp archive on the unified hub stays in Wazig and sends no hub request.*failed" "$RUNNER_TEMP/igsh902-old.log"; then
+            cat "$RUNNER_TEMP/igsh902-old.log"
             exit 1
           fi
-          echo 'IGSH-833 old main fails the incoming message regression'
+          echo 'IGSH-902 old main fails the WhatsApp archive stays in Wazig regression'
 
       - name: IGSH-767 archive intent and historical negative control
         run: |
           set -euo pipefail
           path=src/archive_rules.zig
           cp "$path" "$RUNNER_TEMP/archive_rules.zig"
-          fixed='if (self.find(key.id) != null) return true;'
-          old='if (self.find(key.id)) |index| return self.entries[index].keep;'
+          fixed='const index = self.find(key.id) orelse return provider_archived;'
+          old='const index = self.find(key.id) orelse return provider_archived; if (!self.entries[index].keep) return provider_archived;'
           grep -qF "$fixed" "$path" || { echo 'Archive negative control anchor missing'; exit 1; }
           FIXED="$fixed" OLD="$old" python3 -c "import os,sys;p=sys.argv[1];s=open(p,encoding='utf-8').read();open(p,'w',encoding='utf-8').write(s.replace(os.environ['FIXED'],os.environ['OLD']))" "$path"
           set +e

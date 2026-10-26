@@ -1,1 +1,1 @@
-Wait-HubArchive $session $messages 1
+Wait-HubArchive $session $messages

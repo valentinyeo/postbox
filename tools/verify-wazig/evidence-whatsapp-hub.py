@@ -34,12 +34,15 @@ if unified:
     assert all('account' not in row['body'] and row['body']['chat'] == 'fixture-alpha' for row in sends)
 else:
     assert all(row['body']['account'] == 'personal' and row['body']['chat'] == '15550000001@s.whatsapp.net' for row in sends)
-paths = ['/v1/chats?', '/v1/messages?', '/v1/mark-read', '/v1/archive']
+paths = ['/v1/chats?', '/v1/messages?', '/v1/mark-read']
 if not unified:
-    paths.append('/v1/accounts')
+    paths.extend(['/v1/accounts', '/v1/archive'])
 for path in paths:
     assert any(row['path'].startswith(path) and row.get('status') == 200 for row in requests), path
-assert any(row['path'] == '/v1/archive' and row['body']['archived'] and (not unified or row['body']['chat'] == 'fixture-beta') for row in requests)
+if unified:
+    assert not any(row['path'] == '/v1/archive' for row in requests)
+else:
+    assert any(row['path'] == '/v1/archive' and row['body']['archived'] for row in requests)
 assert any(row['method'] == 'SSE' and row['kind'] == 'msg' for row in requests)
 for event_id in ['1', '2']:
     assert any(row['path'] == '/v1/events' and row.get('last_event_id') == event_id for row in requests)
@@ -121,7 +124,7 @@ if unified:
     assert all('limit=80' in row['wire_path'] for row in mixed_reads)
     assert (folder / 'mixed-paged.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     assert 'keys: {PGUP}' in actions
-    assert any(row['path'] == '/v1/archive' and row['body']['chat'] == mixed['chat']['id'] and row['body']['archived'] and row['status'] == 200 for row in requests)
+    assert not any(row['path'] == '/v1/archive' for row in requests)
     for keys in ['%1', '%2', '%0']:
         assert f'keys: {keys}' in actions
     subprocess.run([sys.executable, str(Path(__file__).with_name('check-hub-views.py')), str(folder)], check=True)

@@ -356,10 +356,10 @@ test "a legacy non-kept entry alone sends no hub archive request" {
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expect(!a.hub_archive_inflight);
     try std.testing.expectEqual(@as(usize, 2), a.chat_count);
-    try std.testing.expect(state.find(key.id) == null);
+    try std.testing.expect(state.find(key.id) != null);
 }
 
-test "a kept entry alone still sends a hub archive request" {
+test "a kept entry alone sends no hub archive request" {
     var state = archive_rules.State{};
     var a = fixture(&state);
     defer a.allocator.free(a.pending_archives);
@@ -371,13 +371,10 @@ test "a kept entry alone still sends a hub archive request" {
     try std.testing.expect(state.archive(key.id, "baseline", true));
     refreshChats(&a);
     refreshChats(&a);
-    try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
-    try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-    try std.testing.expect(a.hub_archive_inflight);
-    try std.testing.expect(!a.pending_archives[0].should_unarchive);
-    try std.testing.expectEqual(ArchiveSource.kept, a.pending_archives[0].source);
-    try std.testing.expectEqualStrings(key.id, a.spawned_jid.slice());
-    try std.testing.expectEqual(@as(usize, 1), a.chat_count);
+    try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
+    try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+    try std.testing.expect(!a.hub_archive_inflight);
+    try std.testing.expectEqual(@as(usize, 2), a.chat_count);
     try std.testing.expect(state.isKept(key.id));
 }
 
@@ -872,7 +869,7 @@ test "shortcut and select all archive are ordinary and return on newer messages 
             const action: archive_rules.Action = if (state.entries[0].keep) .keep else .archive;
             try std.testing.expectEqual(archive_rules.Action.archive, action);
             try std.testing.expectEqualStrings("Archived", action.status());
-            try std.testing.expectEqualStrings(if (bulk and provider == .whatsapp) "Archiving 1 of 2" else action.status(), a.status.slice());
+            try std.testing.expectEqualStrings(action.status(), a.status.slice());
             try std.testing.expectEqual(@as(usize, if (bulk) 2 else 1), state.count);
             for (state.entries[0..state.count]) |*entry| try std.testing.expect(!entry.keep);
             var loaded = archive_rules.State{};
@@ -887,7 +884,11 @@ test "shortcut and select all archive are ordinary and return on newer messages 
                 try std.testing.expectEqualSlices(u16, std.mem.span(lit("Archived")), std.mem.span(archiveMarker(&a, &a.chats[index]).?));
                 try std.testing.expect(!holdKeptArchived(&a, key, false, "2026-10-10T10:30:00Z"));
                 try std.testing.expect(loaded.localArchived(key));
-                try std.testing.expect(!holdKeptArchived(&a, key, false, "2026-10-10T11:00:00Z"));
+                if (provider == .whatsapp) {
+                    applyArchiveIncoming(&a, key.id, "2026-10-10T11:00:00Z", "{\"data\":{\"messages\":[{\"Timestamp\":\"2026-10-10T11:00:00Z\",\"FromMe\":false}]}}");
+                } else {
+                    try std.testing.expect(!holdKeptArchived(&a, key, false, "2026-10-10T11:00:00Z"));
+                }
                 try std.testing.expect(!loaded.localArchived(key));
                 var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"archived\":false}", .{});
                 defer parsed.deinit();
@@ -1188,9 +1189,8 @@ test "hub Ctrl E archives a one-row bulk selection outside the WhatsApp cache ac
         selectAllChats(&a);
         const message = win.MSG{};
         try std.testing.expect(archiveKey(&a, 'E', true, false, false, a.compose, &message));
-        try std.testing.expectEqual(@as(usize, if (provider == .whatsapp) 1 else 0), a.pending_archive_count);
-        try std.testing.expectEqual(@as(usize, if (provider == .whatsapp) 1 else 0), a.hub_archive_requests);
-        if (provider == .whatsapp) try std.testing.expectEqualStrings(key.key().id, a.pending_archives[0].jid.slice());
+        try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+        try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
         try std.testing.expectEqual(@as(usize, 0), a.chat_count);
         try std.testing.expectEqual(@as(usize, 0), a.bulk.items.len);
         try std.testing.expect(state.localArchived(key.key()));
@@ -1198,7 +1198,7 @@ test "hub Ctrl E archives a one-row bulk selection outside the WhatsApp cache ac
     }
 }
 
-test "only kept hub archives hold the real provider account and remove the matching row only" {
+test "hub archives of every provider stay local and never hold or remove a row" {
     for ([_]Provider{ .telegram, .signal, .whatsapp }) |provider| {
         for ([_]bool{ false, true }) |keep| {
             var state = archive_rules.State{};
@@ -1212,37 +1212,22 @@ test "only kept hub archives hold the real provider account and remove the match
             a.chats[0].jid.set(if (provider == .telegram) "telegram:user:7001" else if (provider == .signal) "signal:fixture" else "personal:fixture@s.whatsapp.net");
             var key = chat_key.Stored{};
             key.set(chat_key.of(&a.chats[0]));
-            if (provider != .whatsapp) {
+            if (provider == .whatsapp) {
+                try std.testing.expect(state.archive(key.key().id, "baseline", keep));
+            } else {
                 try std.testing.expect(state.setLocalArchived(key.key(), true, "baseline", keep));
-                try std.testing.expect(!holdKeptArchived(&a, key.key(), false, "incoming"));
-                try std.testing.expectEqual(@as(usize, 2), a.chat_count);
-                try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-                try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
-                try std.testing.expectEqual(keep, state.localArchived(key.key()));
-                try std.testing.expectEqual(keep, state.localKept(key.key()));
-                try std.testing.expect(archiveChat(&a, key.key(), .unarchive, .shortcut) == null);
-                try std.testing.expect(!state.localArchived(key.key()));
-                continue;
             }
-            try std.testing.expect(state.archive(key.key().id, "baseline", keep));
-            if (!keep) {
-                try std.testing.expect(!holdKeptArchived(&a, key.key(), false, "incoming"));
-                try std.testing.expect(!holdKeptArchived(&a, key.key(), false, "newer"));
-                try std.testing.expectEqual(@as(usize, 2), a.chat_count);
-                try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-                try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
-                continue;
-            }
-            try std.testing.expect(holdKeptArchived(&a, key.key(), false, "incoming"));
-            try std.testing.expectEqual(@as(usize, 1), a.chat_count);
-            try std.testing.expectEqualStrings("b@g.us", a.chats[0].jid.slice());
-            try std.testing.expectEqual(keep, state.isKept(key.key().id));
             try std.testing.expect(!holdKeptArchived(&a, key.key(), false, "incoming"));
-            try std.testing.expect(holdKeptArchived(&a, key.key(), false, "newer"));
-            try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
+            try std.testing.expect(!holdKeptArchived(&a, key.key(), false, "newer"));
+            try std.testing.expectEqual(@as(usize, 2), a.chat_count);
+            try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+            try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
+            try std.testing.expectEqual(keep or provider == .whatsapp, state.localArchived(key.key()));
+            try std.testing.expectEqual(keep, if (provider == .whatsapp) state.isKept(key.key().id) else state.localKept(key.key()));
             try std.testing.expect(archiveChat(&a, key.key(), .unarchive, .shortcut) == null);
             try std.testing.expect(!state.localArchived(key.key()));
-            try std.testing.expect(!holdKeptArchived(&a, key.key(), false, "newest"));
+            try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+            try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
         }
     }
 }
@@ -1331,7 +1316,7 @@ test "non hub Telegram and Signal archiving remains unavailable" {
     }
 }
 
-test "plain hub archives return while kept archives stay sticky and transient failures retain intent" {
+test "unified hub WhatsApp archives send nothing to the hub on any refresh" {
     for ([_]bool{ false, true }) |keep| {
         var state = archive_rules.State{};
         var a = fixture(&state);
@@ -1345,46 +1330,113 @@ test "plain hub archives return while kept archives stay sticky and transient fa
         a.refresh_key.set(chat_key.of(&a.chats[0]));
         a.refresh_stamp.set("2026-10-10T11:00:00Z");
         const key = a.refresh_key.key();
-        try std.testing.expect(state.archive(key.id, "2026-10-10T10:00:00Z", keep));
-        refreshChats(&a);
-        if (!keep) {
+        try std.testing.expect(archiveChat(&a, key, if (keep) .keep else .archive, .shortcut) == null);
+        for ([_][]const u8{ "2026-10-10T11:00:00Z", "2026-10-10T12:00:00Z", "2026-10-10T13:00:00Z" }) |stamp| {
+            a.refresh_stamp.set(stamp);
             refreshChats(&a);
-            a.refresh_stamp.set("2026-10-10T12:00:00Z");
-            refreshChats(&a);
-            try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
-            try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-            try std.testing.expectEqual(@as(usize, 2), a.chat_count);
-            try std.testing.expect(!state.isKept(key.id));
-            try std.testing.expect(state.baseline(key.id) == null);
-            continue;
+            startNextArchive(&a);
         }
-        try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
-        var result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .ok = true, .http_status = 200 };
-        a.hub_archive_inflight = false;
-        applyHubArchiveResult(&a, &result);
-        refreshChats(&a);
+        try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
         try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-        try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
-        try std.testing.expect(state.localArchived(key));
-        try std.testing.expectEqual(keep, state.isKept(key.id));
-        a.refresh_stamp.set("2026-10-10T12:00:00Z");
-        refreshChats(&a);
-        refreshChats(&a);
-        try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-        try std.testing.expectEqual(@as(usize, 2), a.hub_archive_requests);
-        result.ok = false;
-        result.http_status = 503;
-        a.hub_archive_inflight = false;
-        applyHubArchiveResult(&a, &result);
-        try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-        try std.testing.expect(a.pending_archives[0].retry_at_ms > win.GetTickCount64());
         try std.testing.expect(state.localArchived(key));
         try std.testing.expectEqual(keep, state.isKept(key.id));
         var loaded = archive_rules.State{};
         loaded.parse(a.saved[0..a.saved_len]);
         try std.testing.expect(loaded.localArchived(key));
-        try std.testing.expectEqualStrings(state.baseline(key.id).?, loaded.baseline(key.id).?);
         try std.testing.expectEqual(keep, loaded.isKept(key.id));
+        try std.testing.expectEqualStrings(state.baseline(key.id).?, loaded.baseline(key.id).?);
+    }
+}
+
+test "a WhatsApp chat archived on the phone shows archived once, returns on a real incoming message and stays back after a restart" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
+    a.unified_hub = true;
+    a.cache_tag.set("hub-cache");
+    a.chats[0].provider = .whatsapp;
+    a.chats[0].account.set("fixture-account");
+    a.chats[0].jid.set("personal:phone@s.whatsapp.net");
+    const key = chat_key.of(&a.chats[0]);
+    try std.testing.expect(state.find(key.id) == null);
+    try std.testing.expect(state.isArchived(key, true));
+    try std.testing.expect(!holdKeptArchived(&a, key, true, "2026-10-10T10:00:00Z"));
+    try std.testing.expect(state.find(key.id) != null);
+    try std.testing.expect(!state.isKept(key.id));
+    try std.testing.expect(state.isArchived(key, true));
+    try std.testing.expectEqualStrings("2026-10-10T10:00:00Z", state.baseline(key.id).?);
+    try std.testing.expect(!holdKeptArchived(&a, key, true, "2026-10-10T10:00:00Z"));
+    try std.testing.expectEqual(@as(usize, 1), state.count);
+    try std.testing.expect(!state.needsReturnProbe(key.id, "2026-10-10T10:00:00Z"));
+    try std.testing.expect(state.needsReturnProbe(key.id, "2026-10-10T11:00:00Z"));
+    applyArchiveIncoming(&a, key.id, "2026-10-10T11:00:00Z", "{\"data\":{\"messages\":[{\"Timestamp\":\"2026-10-10T11:00:00Z\",\"FromMe\":true,\"ReactionToID\":\"old\"}]}}");
+    try std.testing.expect(state.isArchived(key, true));
+    try std.testing.expect(!state.isReturned(key.id));
+    applyArchiveIncoming(&a, key.id, "2026-10-10T12:00:00Z", "{\"data\":{\"messages\":[{\"Timestamp\":\"2026-10-10T12:00:00Z\",\"FromMe\":true}]}}");
+    try std.testing.expect(state.isArchived(key, true));
+    applyArchiveIncoming(&a, key.id, "2026-10-10T13:00:00Z", "{\"data\":{\"messages\":[{\"Timestamp\":\"2026-10-10T13:00:00Z\",\"FromMe\":false}]}}");
+    try std.testing.expect(state.isReturned(key.id));
+    try std.testing.expect(!state.isArchived(key, true));
+    try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+    try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
+    var restarted = archive_rules.State{};
+    restarted.parse(a.saved[0..a.saved_len]);
+    try std.testing.expect(!restarted.isArchived(key, true));
+    a.archive_state = &restarted;
+    try std.testing.expect(!holdKeptArchived(&a, key, true, "2026-10-10T13:00:00Z"));
+    try std.testing.expect(!restarted.isArchived(key, true));
+    try std.testing.expect(!holdKeptArchived(&a, key, false, "2026-10-10T13:00:00Z"));
+    try std.testing.expect(restarted.find(key.id) == null);
+    try std.testing.expect(!restarted.isArchived(key, false));
+}
+
+test "unarchiving a WhatsApp chat in Wazig sends nothing and survives the phone still reporting it archived" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
+    a.unified_hub = true;
+    a.show_archived = true;
+    a.cache_tag.set("hub-cache");
+    a.chats[0].provider = .whatsapp;
+    a.chats[0].account.set("fixture-account");
+    a.chats[0].jid.set("personal:phone@s.whatsapp.net");
+    a.chats[0].archived = true;
+    a.chats[0].provider_archived = true;
+    var key = chat_key.of(&a.chats[0]);
+    key.id = "personal:phone@s.whatsapp.net";
+    key.account = "fixture-account";
+    try std.testing.expect(archiveChat(&a, key, .unarchive, .shortcut) == null);
+    try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+    try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
+    var restarted = archive_rules.State{};
+    restarted.parse(a.saved[0..a.saved_len]);
+    try std.testing.expect(!restarted.isArchived(key, true));
+    a.archive_state = &restarted;
+    try std.testing.expect(!holdKeptArchived(&a, key, true, "2026-10-10T14:00:00Z"));
+    try std.testing.expect(!restarted.isArchived(key, true));
+    try std.testing.expect(!restarted.needsReturnProbe(key.id, "2026-10-10T15:00:00Z"));
+    try std.testing.expect(archiveChat(&a, key, .archive, .shortcut) == null);
+    try std.testing.expect(restarted.isArchived(key, true));
+    try std.testing.expect(!restarted.isReturned(key.id));
+}
+
+test "sending to an archived WhatsApp chat on the unified hub keeps it archived and queues nothing" {
+    for ([_]bool{ false, true }) |keep| {
+        var state = archive_rules.State{};
+        var a = fixture(&state);
+        defer a.allocator.free(a.pending_archives);
+        defer a.bulk.deinit(a.allocator);
+        a.unified_hub = true;
+        try std.testing.expect(state.archive("personal:sent@s.whatsapp.net", "baseline", keep));
+        a.pending_sends[0].jid.set("personal:sent@s.whatsapp.net");
+        a.pending_send_count = 1;
+        removeFirstPendingSend(&a, true);
+        try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+        try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
+        try std.testing.expect(state.find("personal:sent@s.whatsapp.net") != null);
+        try std.testing.expect(!state.isReturned("personal:sent@s.whatsapp.net"));
     }
 }
 
@@ -1517,7 +1569,7 @@ test "mixed archive and unarchive keep the row selected and visibly marked on ev
         try std.testing.expectEqual(@as(usize, 2), a.chat_count);
         try std.testing.expect(!a.chats[0].archived);
         try std.testing.expectEqual(@as(usize, 0), a.selected_chat);
-        if (provider != .whatsapp) try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+        try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     }
 }
 
@@ -1664,7 +1716,7 @@ test "bulk snapshot survives a list refresh to zero rows" {
     try std.testing.expect(state.find("b@g.us") != null);
 }
 
-test "IGSH-777 bulk hub archive dispatches one batch and refreshes after every result" {
+test "IGSH-902 bulk WhatsApp archive on the unified hub stays in Wazig and sends no hub request" {
     var state = archive_rules.State{};
     var a = fixture(&state);
     defer a.allocator.free(a.pending_archives);
@@ -1672,29 +1724,10 @@ test "IGSH-777 bulk hub archive dispatches one batch and refreshes after every r
     a.unified_hub = true;
     selectAllChats(&a);
     archiveSelected(&a, false);
-    try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
-    try std.testing.expectEqual(@as(usize, 2), a.hub_archive_batch_count);
-    const result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .gen = 2, .ok = true, .http_status = 200, .data = "{\"results\":[{\"chat\":\"a@g.us\",\"ok\":true},{\"chat\":\"b@g.us\",\"ok\":true}]}" };
-    a.hub_archive_inflight = false;
-    applyHubArchiveResult(&a, &result);
-    try std.testing.expectEqual(@as(usize, 1), a.chats_refreshes);
-    try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
+    try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-}
-
-test "IGSH-777 failed first result preserves intent without hiding later success" {
-    var state = archive_rules.State{};
-    var a = fixture(&state);
-    defer a.allocator.free(a.pending_archives);
-    defer a.bulk.deinit(a.allocator);
-    a.unified_hub = true;
-    selectAllChats(&a);
-    archiveSelected(&a, false);
-    const result = WacliResult{ .account = a.cache_tag, .jid = a.spawned_jid, .gen = 2, .ok = true, .http_status = 200, .data = "{\"results\":[{\"chat\":\"a@g.us\",\"ok\":false,\"error\":\"fixture failure\"},{\"chat\":\"b@g.us\",\"ok\":true}]}" };
-    applyHubArchiveResult(&a, &result);
-    try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-    try std.testing.expectEqualStrings("a@g.us", a.pending_archives[0].jid.slice());
-    try std.testing.expect(a.pending_archives[0].retry_at_ms > win.GetTickCount64());
+    try std.testing.expectEqual(@as(usize, 0), a.chat_count);
+    try std.testing.expectEqualStrings("Archived", a.status.slice());
     try std.testing.expect(state.isArchived(.{ .provider = .whatsapp, .account = "", .id = "a@g.us" }, false));
     try std.testing.expect(state.isArchived(.{ .provider = .whatsapp, .account = "", .id = "b@g.us" }, false));
 }
@@ -1775,8 +1808,8 @@ test "IGSH-833 bulk plain group and direct chat return on an incoming message wh
             result.data = "{\"data\":{\"messages\":[{\"Timestamp\":\"2026-10-10T12:04:00Z\",\"FromMe\":false}]}}";
             applyUnreadProbe(&a, &result);
             try std.testing.expectEqual(keep, loaded.localArchived(chat_key.of(&row)));
-            try std.testing.expectEqual(@as(usize, if (keep) 0 else 1), a.pending_archive_count);
-            if (!keep) try std.testing.expect(a.pending_archives[0].should_unarchive);
+            try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+            try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
             try std.testing.expectEqual(keep, loaded.isKept(id));
             var parsed = try std.json.parseFromSlice(std.json.Value, a.allocator, "{\"archived\":true}", .{});
             defer parsed.deinit();

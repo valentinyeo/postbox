@@ -90,7 +90,7 @@ The `workspace-icons` journey verifies workspace icon colours, missing-icon S, t
 
 The `telegram` journey verifies the hub-only account view, QR/password linking, Saved Messages, replies and existing hub messaging actions, plus visible terminal rate limits. See [Telegram](features/telegram.md). No direct TDLib sign-in is used.
 
-The `hub-archive` journey seeds legacy WhatsApp keep state before hub launch, requires hub re-archive and durable keep state, then repeats incoming archived=false across a same-profile restart. See [Hub archive](features/hub-archive.md).
+The `hub-archive` journey seeds legacy WhatsApp keep state before hub launch, requires durable keep state with zero hub archive requests, then proves archived WhatsApp chats return on a real incoming message and survive a same-profile restart. See [Hub archive](features/hub-archive.md).
 
 The `palette-archived` journey seeds archived WhatsApp, Telegram and Slack chats on the unified fake hub and requires Ctrl+K to find them, and every inbox chat, from every view, with Enter opening an archived result without a hub archive write. See [Palette archived](features/palette-archived.md).
 

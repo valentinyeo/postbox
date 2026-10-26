@@ -79,6 +79,7 @@ pub const Entry = struct {
     ts_len: u8 = 0,
     keep: bool = false,
     checked: i64 = 0,
+    returned: bool = false,
     held: bool = false,
     held_ts: [max_ts]u8 = undefined,
     held_ts_len: u8 = 0,
@@ -103,12 +104,13 @@ pub const State = struct {
     }
 
     pub fn localArchived(self: *const State, key: anytype) bool {
-        return if (key.provider == .whatsapp) self.find(key.id) != null else if (self.findLocal(key)) |index| (self.entries[index].keep or self.entries[index].ts_len > 0) else false;
+        return if (key.provider == .whatsapp) (if (self.find(key.id)) |index| !self.entries[index].returned else false) else if (self.findLocal(key)) |index| (self.entries[index].keep or self.entries[index].ts_len > 0) else false;
     }
 
     pub fn isArchived(self: *const State, key: anytype, provider_archived: bool) bool {
         if (key.provider == .whatsapp) {
-            if (self.find(key.id) != null) return true;
+            const index = self.find(key.id) orelse return provider_archived;
+            return !self.entries[index].returned;
         } else {
             if (self.findLocal(key)) |index| return self.entries[index].keep or self.entries[index].ts_len > 0;
         }
@@ -175,7 +177,7 @@ pub const State = struct {
     pub fn returnsOn(self: *const State, jid: []const u8, ts: []const u8) bool {
         const index = self.find(jid) orelse return false;
         const entry = &self.entries[index];
-        if (entry.keep or entry.ts_len == 0) return false;
+        if (entry.keep or entry.returned or entry.ts_len == 0) return false;
         return laterStamp(ts, entry.tsSlice());
     }
 
@@ -219,6 +221,20 @@ pub const State = struct {
         self.entries[index].held = false;
     }
 
+    pub fn isReturned(self: *const State, jid: []const u8) bool {
+        const index = self.find(jid) orelse return false;
+        return self.entries[index].returned;
+    }
+
+    pub fn returnToInbox(self: *State, jid: []const u8) bool {
+        const entry = self.slot(jid) orelse return false;
+        entry.keep = false;
+        entry.ts_len = 0;
+        entry.checked = 0;
+        entry.returned = true;
+        return true;
+    }
+
     fn slot(self: *State, jid: []const u8) ?*Entry {
         if (jid.len == 0 or jid.len > max_jid) return null;
         if (self.find(jid)) |index| return &self.entries[index];
@@ -241,6 +257,7 @@ pub const State = struct {
     pub fn archive(self: *State, jid: []const u8, ts: []const u8, keep: bool) bool {
         const entry = self.slot(jid) orelse return false;
         entry.keep = keep;
+        entry.returned = false;
         if (ts.len > 0) self.setBaseline(jid, ts);
         return true;
     }
@@ -270,6 +287,8 @@ pub const State = struct {
         for (self.entries[0..self.count]) |*entry| {
             const line = if (entry.provider != .whatsapp)
                 std.fmt.bufPrint(out[len..], "{s}\t{s}\t{s}\t{d}\t{s}\n", .{ @tagName(entry.provider), entry.account[0..entry.account_len], entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break
+            else if (entry.returned)
+                std.fmt.bufPrint(out[len..], "{s}\t{d}\t{s}\treturned\n", .{ entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break
             else
                 std.fmt.bufPrint(out[len..], "{s}\t{d}\t{s}\n", .{ entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break;
             len += line.len;
@@ -304,6 +323,7 @@ pub const State = struct {
             const ts = fields.next() orelse "";
             const entry = self.slot(jid) orelse continue;
             entry.keep = std.mem.eql(u8, keep, "1");
+            entry.returned = std.mem.eql(u8, fields.next() orelse "", "returned");
             const n = @min(ts.len, max_ts);
             @memcpy(entry.ts[0..n], ts[0..n]);
             entry.ts_len = @intCast(n);
@@ -775,4 +795,38 @@ test "archive states label every pinned unread and provider combination" {
 test "incoming state ignores a stale keep flag" {
     try std.testing.expectEqual(ArchiveState.incoming, archiveState(false, true));
     try std.testing.expect(archiveState(false, true).label() == null);
+}
+
+test "a returned WhatsApp chat overrides the phone flag, survives a restart and archives again with a fresh baseline" {
+    const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
+    const key = Key{ .provider = .whatsapp, .account = "hub", .id = "personal:phone@s.whatsapp.net" };
+    var state = State{};
+    try std.testing.expect(state.isArchived(key, true));
+    try std.testing.expect(state.archive(key.id, "2026-10-10T10:00:00Z", false));
+    try std.testing.expect(state.returnToInbox(key.id));
+    try std.testing.expect(state.isReturned(key.id));
+    try std.testing.expect(!state.isArchived(key, true));
+    try std.testing.expect(!state.localArchived(key));
+    try std.testing.expect(!state.returnsOn(key.id, "2026-10-10T12:00:00Z"));
+    try std.testing.expect(!state.needsReturnProbe(key.id, "2026-10-10T12:00:00Z"));
+    try std.testing.expect(state.baseline(key.id) == null);
+    var buffer: [512]u8 = undefined;
+    var loaded = State{};
+    loaded.parse(state.format(&buffer));
+    try std.testing.expectEqual(@as(usize, 1), loaded.count);
+    try std.testing.expect(loaded.isReturned(key.id));
+    try std.testing.expect(!loaded.isArchived(key, true));
+    try std.testing.expect(loaded.archive(key.id, "2026-10-10T13:00:00Z", false));
+    try std.testing.expect(!loaded.isReturned(key.id));
+    try std.testing.expect(loaded.isArchived(key, false));
+    try std.testing.expect(loaded.returnsOn(key.id, "2026-10-10T14:00:00Z"));
+}
+
+test "WhatsApp archive lines without a returned field load and save unchanged" {
+    var state = State{};
+    state.parse("plain@g.us\t0\tbaseline\nkept@g.us\t1\tbaseline\n");
+    try std.testing.expect(!state.isReturned("plain@g.us"));
+    try std.testing.expect(!state.isReturned("kept@g.us"));
+    var buffer: [512]u8 = undefined;
+    try std.testing.expectEqualStrings("plain@g.us\t0\tbaseline\nkept@g.us\t1\tbaseline\n", state.format(&buffer));
 }
