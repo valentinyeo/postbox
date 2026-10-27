@@ -7645,6 +7645,7 @@ fn advanceGifs(a: *App) void {
 fn refreshMessages(a: *App) void {
     cancelSlackMark(a);
     if (a.chat_count == 0 or a.selected_chat >= a.chat_count) {
+        clearMessageReadProblem(a);
         a.messages_read_key = .{};
         a.messages_refresh_again = false;
         clearMessages(a);

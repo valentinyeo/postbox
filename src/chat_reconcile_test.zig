@@ -817,3 +817,15 @@ test "IGSH-1080 hub providers share the existing bounded read retries" {
         try std.testing.expect(a.update_card_error_len > 0);
     }
 }
+
+test "IGSH-1080 an empty selection clears only its message read error" {
+    for ([_]bool{ false, true }) |read_error| {
+        var a = fixture();
+        a.chat_count = 0;
+        a.update_card_error_source = if (read_error) .message_read else .update;
+        a.update_card_error_len = 7;
+        @memcpy(a.update_card_error[0..7], "install");
+        refreshMessages(&a);
+        try std.testing.expectEqual(@as(usize, if (read_error) 0 else 7), a.update_card_error_len);
+    }
+}
