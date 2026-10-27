@@ -69,8 +69,6 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0

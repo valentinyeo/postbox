@@ -17,7 +17,8 @@ def main():
     parser.add_argument('--zig', required=True)
     args = parser.parse_args()
     fixed = (ROOT / 'src/main.zig').read_text()
-    old = subprocess.check_output(['git', 'show', BASE + ':src/main.zig'], cwd=ROOT, text=True)
+    historical_copy = (ROOT / 'tools/fixtures/transcript-copy-2a746d7.zig').read_text()
+    old = fixed.replace(section(fixed, 'fn copyMarkedTranscripts(', 'fn handleCanvasClick('), historical_copy, 1)
     fixture = (ROOT / 'src/transcript_copy_test.zig').read_text()
     with tempfile.TemporaryDirectory(prefix='transcript-copy-regression-') as directory:
         path = Path(directory) / 'transcripts.zig'
@@ -35,7 +36,7 @@ def main():
                 '-Mformat_cache=' + str(ROOT / 'src/format_cache.zig'),
                 '--test-filter', 'legacy summary sidecars',
             ], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            print(label + ':\n' + result.stdout, flush=True)
+            print(label + (' ' + BASE if label == 'historical' else '') + ':\n' + result.stdout, flush=True)
             assert 'legacy summary sidecars' in result.stdout, 'legacy behavior case did not execute'
             if label == 'historical':
                 assert result.returncode != 0 and 'FAIL (TestExpectedEqual)' in result.stdout, 'old summary export escaped the behavior test'
