@@ -15330,6 +15330,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     if (is_new_offer) {
                         a.update_staged = false;
                         a.update_card_error_len = 0;
+                        a.update_card_error_source = .update;
                     }
                     if (a.update_card_busy or a.update_install_running.load(.acquire)) {
                         updateCardRefresh(a);
@@ -17728,6 +17729,7 @@ fn updateCardClick(a: *App) void {
     if (a.update_pending == null or a.update_installed or a.update_card_busy) return;
     const hwnd = a.hwnd orelse return;
     a.update_card_error_len = 0;
+    a.update_card_error_source = .update;
     a.update_install_auto = false;
     a.update_card_busy = true;
     appendLaunchLog(a, "update: card clicked");

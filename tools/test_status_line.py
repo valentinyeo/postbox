@@ -162,6 +162,8 @@ class StatusLineTests(unittest.TestCase):
                     'updateCardDismiss': '    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) {\n        clearMessageReadProblem(a);\n        return;\n    }\n',
                 }.get(name, '')
                 expected = expected.replace('{\n', '{\n' + added, 1)
+                if name == 'updateCardClick':
+                    expected = expected.replace('    a.update_card_error_len = 0;\n', '    a.update_card_error_len = 0;\n    a.update_card_error_source = .update;\n', 1)
                 self.assertEqual(expected, function(text, name))
 
     def test_only_pending_update_suppression_changes(self):
@@ -364,6 +366,9 @@ class StatusLineTests(unittest.TestCase):
         self.assertIn('refreshMessages(a);', branch)
         self.assertIn('return;', branch)
         self.assertNotIn('startUpdateInstall', branch)
+        self.assertIn('a.update_card_error_source = .update;', click[click.index('if (a.update_pending == null'):])
+        offer = function(text, 'mainProc').split('if (is_new_offer) {', 1)[1].split('}', 1)[0]
+        self.assertIn('a.update_card_error_source = .update;', offer)
         paint = function(text, 'paintUpdateCard')
         self.assertIn('failed and a.update_card_error_source == .message_read', paint)
         self.assertIn('"Messages unavailable"', paint)
