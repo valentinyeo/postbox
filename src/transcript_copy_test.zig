@@ -15,8 +15,16 @@ const Message = struct {
     transcript: WideText(2047) = .{},
     visible: bool = true,
 };
+const Chat = struct {
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
+    jid: Utf8Text(191) = .{},
+};
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
+    chats: [1]Chat = .{.{}},
+    chat_count: usize = 1,
+    selected_chat: usize = 0,
     displayed_provider: transport.Provider = .whatsapp,
     displayed_account: Utf8Text(32) = .{},
     displayed_jid: Utf8Text(191) = .{},
@@ -68,6 +76,8 @@ fn fixture() App {
     var a = App{};
     a.displayed_account.set("account-a");
     a.displayed_jid.set("chat-a");
+    a.chats[0].account.set("account-a");
+    a.chats[0].jid.set("chat-a");
     for (&a.messages, [_][]const u8{ "third", "text", "first", "missing", "second" }, [_][]const u8{ "03", "04", "01", "05", "02" }) |*message, id, stamp| {
         message.id.set(id);
         message.timestamp.set(stamp);
@@ -169,4 +179,16 @@ test "Shift starts from the focused message and excludes hidden thread replies" 
     markMessage(&a, 3, true, false);
     try std.testing.expectEqual(@as(usize, 2), markedMessageCount(&a, false));
     try std.testing.expect(messageMarked(&a, a.messages[1].id.slice()));
+}
+
+test "pending chat switch cannot expose or copy the previous chat marks" {
+    var a = fixture();
+    defer a.marked_messages.deinit(a.allocator);
+    markMessage(&a, 2, false, true);
+    a.chats[0].jid.set("chat-b");
+    try std.testing.expectEqual(@as(usize, 0), markedMessageCount(&a, true));
+    markMessage(&a, 4, false, true);
+    try std.testing.expectEqual(@as(usize, 1), a.marked_messages.items.len);
+    copyMarkedTranscripts(&a);
+    try std.testing.expectEqual(@as(usize, 0), clipboard_len);
 }

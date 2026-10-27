@@ -9941,7 +9941,7 @@ fn linkSpanHit(span: *const LinkSpan, x: i32, y: i32) bool {
 }
 
 fn messageMarked(a: *const App, id: []const u8) bool {
-    if (!chat_key.Key.eql(a.marked_chat.key(), chat_key.displayed(a))) return false;
+    if (a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.marked_chat.key(), chat_key.of(&a.chats[a.selected_chat])) or !chat_key.Key.eql(a.marked_chat.key(), chat_key.displayed(a))) return false;
     for (a.marked_messages.items) |*marked| if (std.mem.eql(u8, marked.slice(), id)) return true;
     return false;
 }
@@ -9966,7 +9966,7 @@ fn clearMessageMarks(a: *App) bool {
 }
 
 fn markMessage(a: *App, index: usize, range: bool, additive: bool) void {
-    if (index >= a.message_count) return;
+    if (index >= a.message_count or a.selected_chat >= a.chat_count or !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[a.selected_chat]))) return;
     if (!chat_key.Key.eql(a.marked_chat.key(), chat_key.displayed(a))) _ = clearMessageMarks(a);
     a.marked_chat.set(chat_key.displayed(a));
     a.transcript_copy_notice = .{};
