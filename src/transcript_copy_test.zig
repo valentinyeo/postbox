@@ -1,5 +1,6 @@
 const std = @import("std");
 const chat_key = @import("chat_key");
+const format_request = @import("format_cache").format_request;
 const format_cache = struct {
     const max_bytes = 64 * 1024;
 };
@@ -48,9 +49,13 @@ const win = struct {
 var clipboard: [20000]u16 = undefined;
 var clipboard_len: usize = 0;
 var raw_texts: [3]?[]const u8 = .{ "first raw", "second raw", "third raw" };
+var verified_raw_texts: [3]?[]const u8 = @splat(null);
 var saved_raw: [20000]u8 = undefined;
 var saved_len: usize = 0;
 fn readFileWin(allocator: std.mem.Allocator, path: []const u8, _: usize) ?[]u8 {
+    for ([_][]const u8{ "a.ogg.raw.txt", "b.ogg.raw.txt", "c.ogg.raw.txt" }, verified_raw_texts) |name, text| {
+        if (std.mem.eql(u8, name, path)) return allocator.dupe(u8, text orelse return null) catch unreachable;
+    }
     for ([_][]const u8{ "a.ogg.txt", "b.ogg.txt", "c.ogg.txt" }, raw_texts) |name, text| {
         if (std.mem.eql(u8, name, path)) return allocator.dupe(u8, text orelse return null) catch unreachable;
     }
@@ -59,6 +64,10 @@ fn readFileWin(allocator: std.mem.Allocator, path: []const u8, _: usize) ?[]u8 {
 fn writeFileWin(_: []const u8, text: []const u8) void {
     saved_len = text.len;
     @memcpy(saved_raw[0..text.len], text);
+}
+fn writeCacheFileAtomic(_: *App, path: []const u8, text: []const u8) bool {
+    writeFileWin(path, text);
+    return true;
 }
 fn copyRawToClipboard(_: *App, text: []const u16) bool {
     clipboard_len = text.len;
@@ -72,6 +81,7 @@ fn setStatus(_: *App, _: []const u8) void {}
 fn updateWindowTitle(_: *App) void {}
 fn fixture() App {
     raw_texts = .{ "first raw", "second raw", "third raw" };
+    verified_raw_texts = @splat(null);
     clipboard_len = 0;
     var a = App{};
     a.displayed_account.set("account-a");
@@ -160,7 +170,7 @@ test "long raw Unicode transcripts bypass display truncation and keep original w
     @memset(raw, 'x');
     @memcpy(raw[0.."  1. Grüße\n".len], "  1. Grüße\n");
     raw[raw.len - 1] = '\n';
-    raw_texts[0] = raw;
+    verified_raw_texts[0] = raw;
     markMessage(&a, 2, false, true);
     copyMarkedTranscripts(&a);
     try expectClipboard(raw);
@@ -191,4 +201,17 @@ test "pending chat switch cannot expose or copy the previous chat marks" {
     try std.testing.expectEqual(@as(usize, 1), a.marked_messages.items.len);
     copyMarkedTranscripts(&a);
     try std.testing.expectEqual(@as(usize, 0), clipboard_len);
+}
+
+test "legacy summary sidecars are missing rather than exported as raw" {
+    var a = fixture();
+    defer a.marked_messages.deinit(a.allocator);
+    raw_texts[2] = "1. Legacy summary written over the old raw sidecar";
+    markMessage(&a, 0, false, true);
+    copyMarkedTranscripts(&a);
+    try std.testing.expectEqual(@as(usize, 0), clipboard_len);
+    try std.testing.expectEqualStrings("Copied 0 transcripts. Missing: 03", a.transcript_copy_notice.slice());
+    verified_raw_texts[2] = "1. A genuine numbered raw transcript";
+    copyMarkedTranscripts(&a);
+    try expectClipboard(verified_raw_texts[2].?);
 }

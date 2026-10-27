@@ -6403,6 +6403,9 @@ fn saveTranscriptCache(a: *App, message: *const Message, raw: []const u8) void {
     const cache_path = std.fmt.allocPrint(a.allocator, "{s}.txt", .{path_utf8}) catch return;
     defer a.allocator.free(cache_path);
     writeFileWin(cache_path, raw);
+    const raw_path = std.fmt.allocPrint(a.allocator, "{s}.raw.txt", .{path_utf8}) catch return;
+    defer a.allocator.free(raw_path);
+    _ = writeCacheFileAtomic(a, raw_path, raw);
 }
 
 fn ensureTranscribeSession(a: *App) ?*dictation.FileSession {
@@ -10035,9 +10038,17 @@ fn copyMarkedTranscripts(a: *App) void {
             if (message.local_path.len == 0) break :raw null;
             const path = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.local_path.slice()) catch break :raw null;
             defer a.allocator.free(path);
-            const cache = std.fmt.allocPrint(a.allocator, "{s}.txt", .{path}) catch break :raw null;
-            defer a.allocator.free(cache);
-            break :raw readFileWin(a.allocator, cache, format_cache.max_bytes);
+            for ([_][]const u8{ ".raw.txt", ".txt" }, 0..) |suffix, candidate| {
+                const cache = std.fmt.allocPrint(a.allocator, "{s}{s}", .{ path, suffix }) catch break :raw null;
+                defer a.allocator.free(cache);
+                const text = readFileWin(a.allocator, cache, format_cache.max_bytes) orelse continue;
+                if (candidate == 1 and format_request.looksFormatted(u8, std.mem.trim(u8, text, " \r\n\t"))) {
+                    a.allocator.free(text);
+                    break :raw null;
+                }
+                break :raw text;
+            }
+            break :raw null;
         };
         defer if (raw) |text| a.allocator.free(text);
         if (raw) |text| {

@@ -312,7 +312,10 @@ pub fn build(b: *std.Build) void {
     const transcript_copy_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.addWriteFiles().add("transcript_copy_test.zig", transcript_copy_source),
         .target = b.resolveTargetQuery(.{}),
-        .imports = &.{.{ .name = "chat_key", .module = b.createModule(.{ .root_source_file = b.path("src/chat_key.zig"), .target = b.resolveTargetQuery(.{}) }) }},
+        .imports = &.{
+            .{ .name = "chat_key", .module = b.createModule(.{ .root_source_file = b.path("src/chat_key.zig"), .target = b.resolveTargetQuery(.{}) }) },
+            .{ .name = "format_cache", .module = b.createModule(.{ .root_source_file = b.path("src/format_cache.zig"), .target = b.resolveTargetQuery(.{}) }) },
+        },
     }) });
     test_step.dependOn(&b.addRunArtifact(transcript_copy_tests).step);
     const message_menu_source = std.mem.concat(b.allocator, u8, &.{

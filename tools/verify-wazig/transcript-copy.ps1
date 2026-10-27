@@ -20,6 +20,7 @@ function Invoke-TranscriptCopyJourney($Session, [string]$Messages) {
     foreach ($file in $files) {
         $text = "Raw words from $($file.BaseName): Grüße, café, punctuation!`nSecond line stays raw."
         Set-Content -LiteralPath "$($file.FullName).txt" -Value $text -NoNewline -Encoding utf8NoBOM
+        Set-Content -LiteralPath "$($file.FullName).raw.txt" -Value $text -NoNewline -Encoding utf8NoBOM
         $expectedByFile[$file.Name] = $text
     }
     Open-VoiceChatAgain $Session
@@ -75,7 +76,8 @@ function Invoke-TranscriptCopyJourney($Session, [string]$Messages) {
     $pasted = [IO.File]::ReadAllText((Join-Path $Session.evidence 'transcripts-pasted.txt'))
     Assert-That ($pasted.Replace("`r`n", "`n") -ceq $expected.Replace("`r`n", "`n")) 'Separate app pasted different transcript words'
     $missingRow = @($rows | Where-Object id -CEQ 'VOICE-4')[0]
-    Remove-Item -LiteralPath "$($missingRow.local_path).txt"
+    Remove-Item -LiteralPath "$($missingRow.local_path).raw.txt"
+    Set-Content -LiteralPath "$($missingRow.local_path).txt" -Value '1. Legacy summary must never be copied as raw words.' -NoNewline -Encoding utf8NoBOM
     $sequence = [VerifyTranscriptCopy]::GetClipboardSequenceNumber()
     Invoke-PaletteCommand $Session 'Copy all transcripts'
     $null = Wait-Until {
