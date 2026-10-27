@@ -42,7 +42,13 @@ function Invoke-TranscriptCopyJourney($Session, [string]$Messages) {
     Assert-That ($labels.Count -eq 1 -and $labels[0] -ceq 'Copy all transcripts') 'Copy all transcripts command missing for three marked voice notes'
     Save-Screen $Session 'transcripts-palette'
     [Windows.Forms.Clipboard]::SetText('clipboard negative control')
+    $sequence = [VerifyTranscriptCopy]::GetClipboardSequenceNumber()
     Send-Keys $Session '{ENTER}'
+    $null = Wait-Until {
+        [VerifyTranscriptCopy]::GetClipboardSequenceNumber() -ne $sequence -and
+        (Get-Window $Session).Current.Name.Contains('Copied 3 transcripts') -and
+        (Find-Popup $Session 'MessagesPalette') -eq [IntPtr]::Zero
+    } 'copy action completes its clipboard write and confirmation'
     $actual = [Windows.Forms.Clipboard]::GetText()
     $rows = @(Read-VoiceMessages $Session | Where-Object { $_.id -in @('VOICE-3', 'VOICE-4', 'VOICE-5') } | Sort-Object time)
     $rawRows = @($rows | ForEach-Object {
@@ -70,7 +76,12 @@ function Invoke-TranscriptCopyJourney($Session, [string]$Messages) {
     Assert-That ($pasted.Replace("`r`n", "`n") -ceq $expected.Replace("`r`n", "`n")) 'Separate app pasted different transcript words'
     $missingRow = @($rows | Where-Object id -CEQ 'VOICE-4')[0]
     Remove-Item -LiteralPath "$($missingRow.local_path).txt"
+    $sequence = [VerifyTranscriptCopy]::GetClipboardSequenceNumber()
     Invoke-PaletteCommand $Session 'Copy all transcripts'
+    $null = Wait-Until {
+        [VerifyTranscriptCopy]::GetClipboardSequenceNumber() -ne $sequence -and
+        (Get-Window $Session).Current.Name.Contains('Copied 2 transcripts. Missing:')
+    } 'missing-transcript action completes its clipboard write and confirmation'
     $partial = [Windows.Forms.Clipboard]::GetText()
     $partialExpected = @($rawRows | Where-Object id -CNE 'VOICE-4' | ForEach-Object raw) -join "`r`n`r`n"
     $missingTime = ([DateTimeOffset]::Parse($missingRow.time)).ToLocalTime().ToString('HH:mm')
