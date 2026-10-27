@@ -8,6 +8,12 @@ on:
         description: User journey to drive
         type: string
         default: search
+      tag:
+        description: Published release to verify instead of building
+        type: string
+        default: ''
+  push:
+    branches: [ceo/igsh-1084, 'verify-release/v*']
   pull_request:
     paths:
       - .github/workflows/verify.yml
@@ -68,7 +74,7 @@ jobs:
         shell: python
         env:
           EVENT_NAME: ${{ github.event_name }}
-          FEATURE: ${{ inputs.feature || 'search' }}
+          FEATURE: ${{ inputs.feature || (github.event_name == 'push' && 'voice' || 'search') }}
         run: |
           import json
           import os
@@ -125,8 +131,28 @@ jobs:
         shell: pwsh
         run: |
           & tools/verify-wazig/check-chat-rows.ps1
-      - name: Build real desktop and control client
-        run: zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
+      - name: Build real desktop or download published release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || (startsWith(github.ref_name, 'verify-release/') && github.ref_name || '') }}
+        run: |
+          $env:RELEASE_TAG = $env:RELEASE_TAG -replace '^verify-release/', ''
+          if ($env:RELEASE_TAG) {
+            if ($env:RELEASE_TAG -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'Invalid release tag' }
+            gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern "Postbox-$env:RELEASE_TAG.zip" --dir candidate
+            if ($LASTEXITCODE -ne 0) { throw 'Published package download failed' }
+            Expand-Archive "candidate/Postbox-$env:RELEASE_TAG.zip" zig-out/bin
+            $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw 'Published package metadata unavailable' }
+            $asset = @($release.assets | Where-Object name -CEQ "Postbox-$env:RELEASE_TAG.zip")
+            if ($asset.Count -ne 1 -or $asset[0].digest -cne ('sha256:' + (Get-FileHash "candidate/Postbox-$env:RELEASE_TAG.zip").Hash.ToLowerInvariant())) { throw 'Published package digest mismatch' }
+            "VERIFY_VERSION=$($env:RELEASE_TAG.Substring(1))" >> $env:GITHUB_ENV
+          } else {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
+            if ($LASTEXITCODE -ne 0) { throw 'Candidate build failed' }
+            'VERIFY_VERSION=0.0.526' >> $env:GITHUB_ENV
+          }
       - name: Native DirectWrite editing regression tests
         run: zig build test-edit '-Dtarget=x86_64-windows-gnu' --release=small
       - name: Build and capture the pre-change sidebar baseline
@@ -185,7 +211,7 @@ jobs:
           exit 0
       - name: Launch, doctor and drive
         shell: pwsh
-        run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence
+        run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence -ExpectedVersion $env:VERIFY_VERSION
       - name: Validate surviving journey evidence
         if: matrix.evidence
         shell: pwsh
@@ -213,7 +239,7 @@ jobs:
       - name: Cleanup even after a failed journey
         if: always()
         shell: pwsh
-        run: pwsh -NoProfile -File tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
+        run: pwsh -NoProfile -File tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence -ExpectedVersion $env:VERIFY_VERSION
       - name: Validate menus evidence
         if: success() && matrix.feature == 'menus'
         shell: pwsh
