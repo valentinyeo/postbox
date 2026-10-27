@@ -98,7 +98,7 @@ def fixture(folder):
     read_path = '/v1/wazig/messages?chat=fixture-alpha&limit=80'
     reads = [dict(wire_path=read_path, status=status) for status in (503, 200, 503, 503, 503, 200)]
     hidden = dict(visible=False, error='')
-    recovery = dict(transient_start=0, persistent_start=2, persistent_end=5, requests=reads,
+    recovery = dict(transient_start=0, persistent_start=2, persistent_end=5, recovery_start=5, requests=reads,
                     transient=hidden, recovered=hidden, problem=dict(visible=True, error='Check your connection, then Retry.'), retry=[80, 800])
     (folder / 'message-read-recovery.json').write_text(json.dumps(recovery))
     for stage in ('message-read-problem', 'message-read-recovered'):
@@ -320,6 +320,19 @@ class StatusLineTests(unittest.TestCase):
             value = json.loads((folder / 'message-read-recovery.json').read_text())
             value['recovered'] = value['problem']
             (folder / 'message-read-recovery.json').write_text(json.dumps(value))
+            with self.assertRaises(AssertionError):
+                validator.check_quiet_status(folder)
+
+    def test_message_recovery_requires_success_after_the_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            fixture(folder)
+            value = json.loads((folder / 'message-read-recovery.json').read_text())
+            value['requests'][0]['status'], value['requests'][1]['status'] = 200, 503
+            (folder / 'message-read-recovery.json').write_text(json.dumps(value))
+            rows = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text().splitlines()]
+            rows[1:] = value['requests']
+            (folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in rows))
             with self.assertRaises(AssertionError):
                 validator.check_quiet_status(folder)
 

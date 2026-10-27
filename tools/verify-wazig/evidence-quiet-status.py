@@ -42,9 +42,11 @@ def check_quiet_status(folder):
     begin, persistent, retried = (recovery[key] for key in ('transient_start', 'persistent_start', 'persistent_end'))
     assert 0 <= begin < persistent < retried < len(reads)
     transient = reads[begin:persistent]
-    assert sum(row['status'] == 503 for row in transient) == 1 and any(row['status'] == 200 for row in transient)
+    assert sum(row['status'] == 503 for row in transient) == 1 and transient[-1]['status'] == 200
     assert sum(row['status'] == 503 for row in reads[persistent:retried]) >= 3
-    assert any(row['status'] == 200 for row in reads[retried:])
+    recovery_start = recovery['recovery_start']
+    assert retried <= recovery_start < len(reads)
+    assert any(row['status'] == 200 for row in reads[recovery_start:])
     for key in ('transient', 'recovered'):
         assert not recovery[key]['visible'] and recovery[key]['error'] == ''
     assert recovery['problem']['visible'] and recovery['problem']['error'] == 'Check your connection, then Retry.'
