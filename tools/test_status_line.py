@@ -336,6 +336,24 @@ class StatusLineTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 validator.check_quiet_status(folder)
 
+    def test_completed_message_recovery_is_not_invalidated_by_later_reads(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            fixture(folder)
+            with (folder / 'bridge-requests.jsonl').open('a') as log:
+                log.write(json.dumps(dict(wire_path='/v1/wazig/messages?chat=fixture-alpha&limit=80', status=200)) + '\n')
+            validator.check_quiet_status(folder)
+
+    def test_message_recovery_cannot_forge_captured_request_history(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            fixture(folder)
+            value = json.loads((folder / 'message-read-recovery.json').read_text())
+            value['requests'][0]['status'] = 200
+            (folder / 'message-read-recovery.json').write_text(json.dumps(value))
+            with self.assertRaises(AssertionError):
+                validator.check_quiet_status(folder)
+
     def test_message_retry_card_is_not_an_update_action(self):
         text = source()
         click = function(text, 'updateCardClick')

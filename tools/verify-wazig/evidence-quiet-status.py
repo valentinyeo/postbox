@@ -38,6 +38,7 @@ def check_quiet_status(folder):
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     recovery = read('message-read-recovery.json')
     reads = [row for row in requests if row.get('wire_path', '').startswith('/v1/wazig/messages') and re.search(r'limit=80(?:&|$)', row['wire_path'])]
+    reads = reads[:len(recovery['requests'])]
     assert recovery['requests'] == reads
     begin, persistent, retried = (recovery[key] for key in ('transient_start', 'persistent_start', 'persistent_end'))
     assert 0 <= begin < persistent < retried < len(reads)
