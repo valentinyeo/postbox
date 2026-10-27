@@ -564,23 +564,63 @@ class AttachmentPickerTests(unittest.TestCase):
         fixture = r"""
 Add-Type @'
 using System;
-public static class VerifyWindow {
-    public static IntPtr GetForegroundWindow() { throw new InvalidOperationException("Global focus is unavailable"); }
-    public static IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title) {
-        if (parent != IntPtr.Zero || className != "#32770") throw new InvalidOperationException("Wrong dialog scope");
-        return after.ToInt64() < 3 ? new IntPtr(after.ToInt64() + 1) : IntPtr.Zero;
+namespace Windows.Automation {
+    public enum TreeScope { Children, Descendants }
+    public class AutomationElement {
+        public static string ProcessIdProperty = "process";
+        public static string ClassNameProperty = "class";
     }
-    public static uint GetWindowThreadProcessId(IntPtr window, out uint owner) { owner = window.ToInt64() == 1 ? 99u : 42u; return 1; }
-    public static bool IsWindowEnabled(IntPtr window) { return window.ToInt64() == 3; }
+    public class PropertyCondition {
+        public string Property;
+        public object Value;
+        public PropertyCondition(string property, object value) { Property = property; Value = value; }
+    }
+    public class AndCondition {
+        public PropertyCondition[] Rules;
+        public AndCondition(PropertyCondition first, PropertyCondition second) { Rules = new[] { first, second }; }
+    }
+}
+public class VerifyWindow {
+    public static IntPtr GetForegroundWindow() { throw new InvalidOperationException("Global focus is unavailable"); }
+    public static IntPtr FindWindowEx(IntPtr parent, IntPtr after, string name, string title) { return IntPtr.Zero; }
+}
+public class FixtureElement {
+    public FixtureElement Current { get { return this; } }
+    public int ProcessId;
+    public string ClassName;
+    public int NativeWindowHandle;
+    public FixtureElement(int pid, string name, int handle) { ProcessId = pid; ClassName = name; NativeWindowHandle = handle; }
+}
+public class FixtureRoot {
+    public static bool ZeroHandle;
+    public FixtureElement FindFirst(Windows.Automation.TreeScope scope, Windows.Automation.AndCondition condition) {
+        if (scope != Windows.Automation.TreeScope.Descendants) throw new InvalidOperationException("Dialog belongs beneath the verified app");
+        foreach (var item in new[] { new FixtureElement(99, "#32770", 1), new FixtureElement(42, "OtherWindow", 2), new FixtureElement(42, "#32770", ZeroHandle ? 0 : 3) }) {
+            bool matches = true;
+            foreach (var rule in condition.Rules) {
+                object value = rule.Property == "process" ? (object)item.ProcessId : item.ClassName;
+                if (!Object.Equals(rule.Value, value)) matches = false;
+            }
+            if (matches) return item;
+        }
+        return null;
+    }
 }
 '@
+function Get-Window($Session) {
+    if ($null -eq $Session) { throw 'Missing verified session' }
+    return [FixtureRoot]::new()
+}
 """
         assertions = r"""
 $found = Get-AttachmentPicker @{ pid = 42 }
-if ($found.ToInt64() -ne 3) { throw 'Did not select the enabled owned dialog' }
+if ($found.ToInt64() -ne 3) { throw 'Did not select the owned dialog in the application tree' }
 $missing = Get-AttachmentPicker @{ pid = 43 }
-if ($null -ne $missing) { throw 'Missing owned dialog must produce no window' }
+if ($null -ne $missing) { throw 'Accepted a dialog from another process' }
 if ($missing) { throw 'Missing dialog prematurely completed the wait' }
+[FixtureRoot]::ZeroHandle = $true
+$zero = Get-AttachmentPicker @{ pid = 42 }
+if ($null -ne $zero) { throw 'Zero handle prematurely completed the wait' }
 Write-Output 'OWNED_PICKER_OK'
 """
         result = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', fixture + helper.group() + assertions], capture_output=True, text=True)

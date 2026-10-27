@@ -30,13 +30,12 @@ public static class VerifyWindow {
 '@
 
 function Get-AttachmentPicker($Session) {
-    $dialog = [VerifyWindow]::FindWindowEx([IntPtr]::Zero, [IntPtr]::Zero, '#32770', $null)
-    while ($dialog -ne [IntPtr]::Zero) {
-        $ownerPid = [uint32]0
-        $null = [VerifyWindow]::GetWindowThreadProcessId($dialog, [ref]$ownerPid)
-        if ($ownerPid -eq $Session.pid -and [VerifyWindow]::IsWindowEnabled($dialog)) { return $dialog }
-        $dialog = [VerifyWindow]::FindWindowEx([IntPtr]::Zero, $dialog, '#32770', $null)
-    }
+    $condition = [Windows.Automation.AndCondition]::new(
+        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$Session.pid),
+        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, '#32770')
+    )
+    $dialog = (Get-Window $Session).FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+    if ($null -ne $dialog -and $dialog.Current.NativeWindowHandle -ne 0) { return [IntPtr]$dialog.Current.NativeWindowHandle }
     return $null
 }
 
