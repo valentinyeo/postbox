@@ -69,6 +69,13 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Raw transcript provenance and historical summary export control
+        run: python tools/check_transcript_copy_regression.py --zig zig
       - name: Plan registered journeys
         id: matrix
         shell: python
