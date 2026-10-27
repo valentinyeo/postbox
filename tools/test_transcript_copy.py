@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -35,6 +36,12 @@ class TranscriptCopyTests(unittest.TestCase):
     def save(self):
         for name, value in self.files.items():
             (self.folder / name).write_text(json.dumps(value))
+
+    def test_copy_command_has_a_distinct_native_routing_id(self):
+        source = (ROOT / 'src/main.zig').read_text()
+        commands = dict(re.findall(r'^const (command_\w+) = (\d+);', source, re.M))
+        copy_id = commands['command_copy_all_transcripts']
+        self.assertEqual([name for name, value in commands.items() if value == copy_id], ['command_copy_all_transcripts'])
 
     def test_exact_raw_transcripts_and_paste_pass(self):
         validator.check_transcript_copy(self.folder)

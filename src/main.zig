@@ -172,7 +172,7 @@ const command_copy_text = 2019;
 const command_copy_link = 2020;
 const command_copy_selection = 2021;
 const command_copy_transcript = 2022;
-const command_copy_all_transcripts = 2068;
+const command_copy_all_transcripts = 2070;
 const command_reply = 2023;
 const command_open_video_external = 2024;
 const command_play_audio = 2028;
@@ -9949,7 +9949,7 @@ fn messageMarked(a: *const App, id: []const u8) bool {
 fn markedMessageCount(a: *const App, voice_only: bool) usize {
     var count: usize = 0;
     for (a.messages[0..a.message_count]) |*message| {
-        if ((!voice_only or isAudio(message)) and messageMarked(a, message.id.slice())) count += 1;
+        if (channelMessageVisible(a, message) and (!voice_only or isAudio(message)) and messageMarked(a, message.id.slice())) count += 1;
     }
     return count;
 }
