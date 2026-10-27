@@ -9972,6 +9972,7 @@ fn markMessage(a: *App, index: usize, range: bool, additive: bool) void {
     a.transcript_copy_notice = .{};
     var first = index;
     if (range) {
+        first = a.selected_message orelse index;
         for (a.messages[0..a.message_count], 0..) |*message, i| {
             if (std.mem.eql(u8, a.marked_anchor.slice(), message.id.slice())) {
                 first = i;
@@ -9992,9 +9993,10 @@ fn markMessage(a: *App, index: usize, range: bool, additive: bool) void {
         }
     }
     for (@min(first, index)..@max(first, index) + 1) |i| {
+        if (!channelMessageVisible(a, &a.messages[i])) continue;
         if (!messageMarked(a, a.messages[i].id.slice())) a.marked_messages.append(a.allocator, a.messages[i].id) catch return;
     }
-    if (a.marked_anchor.len == 0) a.marked_anchor = a.messages[index].id;
+    if (a.marked_anchor.len == 0) a.marked_anchor = a.messages[first].id;
     a.selected_message = index;
     a.text_selection = .{};
     updateWindowTitle(a);
@@ -10011,7 +10013,7 @@ fn copyMarkedTranscripts(a: *App) void {
     var selected: std.ArrayList(usize) = .empty;
     defer selected.deinit(a.allocator);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
-        if (isAudio(message) and messageMarked(a, message.id.slice())) selected.append(a.allocator, index) catch {
+        if (isAudio(message) and channelMessageVisible(a, message) and messageMarked(a, message.id.slice())) selected.append(a.allocator, index) catch {
             setTranscriptCopyNotice(a, "Could not copy transcripts");
             return;
         };
@@ -10039,7 +10041,7 @@ fn copyMarkedTranscripts(a: *App) void {
         };
         defer if (raw) |text| a.allocator.free(text);
         if (raw) |text| {
-            if (std.mem.trim(u8, text, " \r\n\t").len > 0 and std.unicode.utf8ValidateSlice(text)) {
+            if (std.mem.trim(u8, text, " \r\n\t").len > 0 and std.mem.indexOfScalar(u8, text, 0) == null and std.unicode.utf8ValidateSlice(text)) {
                 const wide = std.unicode.utf8ToUtf16LeAlloc(a.allocator, text) catch {
                     setTranscriptCopyNotice(a, "Could not copy transcripts");
                     return;

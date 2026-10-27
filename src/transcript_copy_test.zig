@@ -13,6 +13,7 @@ const Message = struct {
     media_type: Utf8Text(31) = .{},
     local_path: WideText(519) = .{},
     transcript: WideText(2047) = .{},
+    visible: bool = true,
 };
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
@@ -55,6 +56,9 @@ fn copyRawToClipboard(_: *App, text: []const u16) bool {
     clipboard_len = text.len;
     @memcpy(clipboard[0..text.len], text);
     return true;
+}
+fn channelMessageVisible(_: *const App, message: *const Message) bool {
+    return message.visible;
 }
 fn setStatus(_: *App, _: []const u8) void {}
 fn updateWindowTitle(_: *App) void {}
@@ -152,4 +156,17 @@ test "long raw Unicode transcripts bypass display truncation and keep original w
     try expectClipboard(raw);
     saveTranscriptCache(&a, &a.messages[2], raw);
     try std.testing.expectEqualStrings(raw, saved_raw[0..saved_len]);
+}
+
+test "Shift starts from the focused message and excludes hidden thread replies" {
+    var a = fixture();
+    defer a.marked_messages.deinit(a.allocator);
+    a.selected_message = 1;
+    a.messages[2].visible = false;
+    markMessage(&a, 4, true, false);
+    try std.testing.expectEqual(@as(usize, 3), markedMessageCount(&a, false));
+    try std.testing.expect(!messageMarked(&a, a.messages[2].id.slice()));
+    markMessage(&a, 3, true, false);
+    try std.testing.expectEqual(@as(usize, 2), markedMessageCount(&a, false));
+    try std.testing.expect(messageMarked(&a, a.messages[1].id.slice()));
 }
