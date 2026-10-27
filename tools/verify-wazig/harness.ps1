@@ -29,6 +29,17 @@ public static class VerifyWindow {
 }
 '@
 
+function Get-AttachmentPicker($Session) {
+    $dialog = [VerifyWindow]::FindWindowEx([IntPtr]::Zero, [IntPtr]::Zero, '#32770', $null)
+    while ($dialog -ne [IntPtr]::Zero) {
+        $ownerPid = [uint32]0
+        $null = [VerifyWindow]::GetWindowThreadProcessId($dialog, [ref]$ownerPid)
+        if ($ownerPid -eq $Session.pid -and [VerifyWindow]::IsWindowEnabled($dialog)) { return $dialog }
+        $dialog = [VerifyWindow]::FindWindowEx([IntPtr]::Zero, $dialog, '#32770', $null)
+    }
+    return $null
+}
+
 function Assert-That($Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }

@@ -547,5 +547,45 @@ class ChatListAlignmentTests(unittest.TestCase):
                 check(broken)
 
 
+
+class AttachmentPickerTests(unittest.TestCase):
+    def test_owned_attachment_picker_ignores_unavailable_global_focus(self):
+        source = (ROOT / 'tools/verify-wazig/harness.ps1').read_text()
+        helper = re.search(r'function Get-AttachmentPicker\(\$Session\) \{[\s\S]*?\n\}', source)
+        self.assertIsNotNone(helper, 'Attachment selection must use process-owned native dialogs')
+        for feature in ('telegram', 'signal'):
+            journey = (ROOT / f'tools/verify-wazig/{feature}.ps1').read_text()
+            self.assertRegex(journey, r"\$picker = Wait-Until \{\s+Get-AttachmentPicker \$Session\s+\} 'owned attachment picker'")
+            self.assertNotIn('AutomationElement]::FromHandle([VerifyWindow]::GetForegroundWindow())', journey)
+            for required in ('Attachment WM_SETTEXT failed', 'Attachment filename was not set', 'Attachment BM_CLICK timed out'):
+                self.assertIn(required, journey)
+        if not shutil.which('pwsh'):
+            self.skipTest('PowerShell runtime is exercised by GitHub CI')
+        fixture = r"""
+Add-Type @'
+using System;
+public static class VerifyWindow {
+    public static IntPtr GetForegroundWindow() { throw new InvalidOperationException("Global focus is unavailable"); }
+    public static IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title) {
+        if (parent != IntPtr.Zero || className != "#32770") throw new InvalidOperationException("Wrong dialog scope");
+        return after.ToInt64() < 3 ? new IntPtr(after.ToInt64() + 1) : IntPtr.Zero;
+    }
+    public static uint GetWindowThreadProcessId(IntPtr window, out uint owner) { owner = window.ToInt64() == 1 ? 99u : 42u; return 1; }
+    public static bool IsWindowEnabled(IntPtr window) { return window.ToInt64() == 3; }
+}
+'@
+"""
+        assertions = r"""
+$found = Get-AttachmentPicker @{ pid = 42 }
+if ($found.ToInt64() -ne 3) { throw 'Did not select the enabled owned dialog' }
+$missing = Get-AttachmentPicker @{ pid = 43 }
+if ($null -ne $missing) { throw 'Missing owned dialog must produce no window' }
+if ($missing) { throw 'Missing dialog prematurely completed the wait' }
+Write-Output 'OWNED_PICKER_OK'
+"""
+        result = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', fixture + helper.group() + assertions], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('OWNED_PICKER_OK', result.stdout)
+
 if __name__ == '__main__':
     unittest.main()
