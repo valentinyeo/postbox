@@ -9946,7 +9946,7 @@ fn messageMarked(a: *const App, id: []const u8) bool {
     return false;
 }
 
-fn markedMessageCount(a: *const App, voice_only: bool) usize {
+fn markedMessageCount(a: *App, voice_only: bool) usize {
     var count: usize = 0;
     for (a.messages[0..a.message_count]) |*message| {
         if (channelMessageVisible(a, message) and (!voice_only or isAudio(message)) and messageMarked(a, message.id.slice())) count += 1;

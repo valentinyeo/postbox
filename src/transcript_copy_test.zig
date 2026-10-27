@@ -57,7 +57,7 @@ fn copyRawToClipboard(_: *App, text: []const u16) bool {
     @memcpy(clipboard[0..text.len], text);
     return true;
 }
-fn channelMessageVisible(_: *const App, message: *const Message) bool {
+fn channelMessageVisible(_: *App, message: *const Message) bool {
     return message.visible;
 }
 fn setStatus(_: *App, _: []const u8) void {}
