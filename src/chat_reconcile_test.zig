@@ -519,7 +519,8 @@ test "IGSH-575 hub events during uncached history do not supersede its reply" {
     try std.testing.expectEqual(@as(usize, 1), a.message_count);
     try std.testing.expectEqual(@as(u32, 1), a.cached);
     try std.testing.expectEqual(painted + 1, a.painted);
-    try std.testing.expectEqual(@as(usize, 1), a.log_count);
+    try std.testing.expectEqual(@as(usize, 2), a.log_count);
+    try std.testing.expectEqualStrings("messages-read: ok", a.last_log.slice());
     try std.testing.expect(std.mem.indexOf(u8, a.last_log.slice(), "dropped reply") == null);
     try std.testing.expectEqual(@as(u32, 2), a.queued);
     try std.testing.expectEqual(gen + 1, a.messages_gen);
