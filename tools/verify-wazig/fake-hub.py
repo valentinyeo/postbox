@@ -1813,6 +1813,17 @@ class SlackEmojiHandler(VoiceHandler):
 class QuietStatusHandler(Handler):
     def do_GET(self):
         self.wire_path = self.path
+        url = urlsplit(self.path)
+        if url.path == '/v1/wazig/messages' and parse_qs(url.query).get('limit') == ['80']:
+            if not self.authorized():
+                return
+            with self.state.lock:
+                remaining = getattr(self.state, 'message_failures', 0)
+                if remaining > 0:
+                    self.state.message_failures -= 1
+            if remaining != 0:
+                self.respond(503, {'error': 'forced message read failure'})
+                return
         if urlsplit(self.path).path == '/v1/wazig/chats' and getattr(self.state, 'sync_failure', False):
             if not self.authorized():
                 return
@@ -1821,6 +1832,19 @@ class QuietStatusHandler(Handler):
         super().do_GET()
 
     def do_POST(self):
+        if self.path == '/fixture/message-failures':
+            self.wire_path = self.path
+            if not self.authorized():
+                return
+            value = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))))
+            count = value.get('count')
+            if type(count) is not int or count < -1:
+                self.respond(400, {'error': 'invalid failure count'})
+                return
+            with self.state.lock:
+                self.state.message_failures = count
+            self.respond(200, {'count': count})
+            return
         if self.path in ('/fixture/sync-failure', '/fixture/sync-recover'):
             self.wire_path = self.path
             if not self.authorized():

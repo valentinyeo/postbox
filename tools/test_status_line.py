@@ -95,7 +95,15 @@ def fixture(folder):
     }
     for name, value in files.items():
         (folder / name).write_text(json.dumps(value))
-    (folder / 'bridge-requests.jsonl').write_text(json.dumps(failure) + '\n')
+    read_path = '/v1/wazig/messages?chat=fixture-alpha&limit=80'
+    reads = [dict(wire_path=read_path, status=status) for status in (503, 200, 503, 503, 503, 200)]
+    hidden = dict(visible=False, error='')
+    recovery = dict(transient_start=0, persistent_start=2, persistent_end=5, recovery_start=5, requests=reads,
+                    transient=hidden, recovered=hidden, problem=dict(visible=True, error='Check your connection, then Retry.'), retry=[80, 800])
+    (folder / 'message-read-recovery.json').write_text(json.dumps(recovery))
+    for stage in ('message-read-problem', 'message-read-recovered'):
+        (folder / (stage + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(11000))
+    (folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in [failure, *reads]) + '\n')
     for stage in ('before', 'quiet-status', 'version', 'sync-problem', 'after'):
         (folder / f'{stage}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
         (folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Postbox v0.0.526\n1016 | LISTBOX | Chats\n')
@@ -139,14 +147,24 @@ class StatusLineTests(unittest.TestCase):
             with self.subTest(regression=new), self.assertRaises(AssertionError):
                 assert_quiet(text.replace(old, new))
 
-    def test_update_card_unchanged(self):
+    def test_update_card_changes_only_for_owned_message_read_errors(self):
         parent = subprocess.check_output(['git', 'show', f'{BASE}:src/main.zig'], cwd=ROOT, text=True)
         text = source()
         for name in ('updateCardNotesHeight', 'updateCardHeight', 'updateCardSpan', 'updateCardRect',
                      'updateCardLayout', 'updateCardWinRect', 'updateCardButtonRect', 'updateCardCloseRect', 'updateCardPtIn',
                      'updateCardHit', 'updateCardRefresh', 'updateCardFail', 'updateCardClick', 'updateCardDismiss'):
             with self.subTest(function=name):
-                self.assertEqual(function(parent, name), function(text, name))
+                expected = function(parent, name)
+                added = {
+                    'updateCardNotesHeight': '    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) return 0;\n',
+                    'updateCardFail': '    a.update_card_error_source = .update;\n',
+                    'updateCardClick': '    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) {\n        clearMessageReadProblem(a);\n        a.msg_read_attempts = 0;\n        a.msg_read_retry_ticks = 0;\n        refreshMessages(a);\n        return;\n    }\n',
+                    'updateCardDismiss': '    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) {\n        clearMessageReadProblem(a);\n        return;\n    }\n',
+                }.get(name, '')
+                expected = expected.replace('{\n', '{\n' + added, 1)
+                if name == 'updateCardClick':
+                    expected = expected.replace('    a.update_card_error_len = 0;\n', '    a.update_card_error_len = 0;\n    a.update_card_error_source = .update;\n', 1)
+                self.assertEqual(expected, function(text, name))
 
     def test_only_pending_update_suppression_changes(self):
         parent = subprocess.check_output(['git', 'show', f'{BASE}:src/main.zig'], cwd=ROOT, text=True)
@@ -161,6 +179,10 @@ class StatusLineTests(unittest.TestCase):
                                   '    const pending_notes = if (a.update_pending) |pending| pending.notes else "";')
         painter = painter.replace('pending.tag', 'pending_tag').replace('pending.notes', 'pending_notes')
         painter = painter.replace('|pending| pending_tag', '|pending| pending.tag').replace('|pending| pending_notes', '|pending| pending.notes')
+        painter = painter.replace('    const pending_notes = if (a.update_pending)',
+                                  '    const pending_notes = if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) "" else if (a.update_pending)')
+        painter = painter.replace('    else if (failed)\n        "Update failed"',
+                                  '    else if (failed and a.update_card_error_source == .message_read)\n        "Messages unavailable"\n    else if (failed)\n        "Update failed"')
         self.assertEqual(painter, function(source(), 'paintUpdateCard'))
 
     def test_only_list_layout_changes(self):
@@ -202,6 +224,19 @@ class StatusLineTests(unittest.TestCase):
                 with urlopen(Request(origin + '/fixture/sync-recover', data=b'{}', headers=headers)) as reply:
                     self.assertFalse(json.load(reply)['sync_failure'])
                 with urlopen(Request(origin + '/v1/wazig/chats', headers=headers)) as reply:
+                    self.assertEqual(reply.status, 200)
+                endpoint = origin + '/fixture/message-failures'
+                messages = origin + '/v1/wazig/messages?chat=' + hub.ALPHA + '&limit=80'
+                for count, failures in ((1, 1), (-1, 3)):
+                    with urlopen(Request(endpoint, data=json.dumps(dict(count=count)).encode(), headers=headers)) as reply:
+                        self.assertEqual(json.load(reply)['count'], count)
+                    for _ in range(failures):
+                        with self.assertRaises(HTTPError) as failed:
+                            urlopen(Request(messages, headers=headers))
+                        self.assertEqual(failed.exception.code, 503)
+                with urlopen(Request(endpoint, data=b'{"count":0}', headers=headers)) as reply:
+                    self.assertEqual(reply.status, 200)
+                with urlopen(Request(messages, headers=headers)) as reply:
                     self.assertEqual(reply.status, 200)
             finally:
                 server.shutdown()
@@ -279,6 +314,68 @@ class StatusLineTests(unittest.TestCase):
             self.assertIn(expected, script)
             self.assertIn('bulk_selected_count -eq 0', script)
         self.assertIn('fn showProblem(', (ROOT / 'src/chat_reconcile_test.zig').read_text())
+
+    def test_message_recovery_evidence_rejects_hidden_persistent_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            fixture(folder)
+            value = json.loads((folder / 'message-read-recovery.json').read_text())
+            value['recovered'] = value['problem']
+            (folder / 'message-read-recovery.json').write_text(json.dumps(value))
+            with self.assertRaises(AssertionError):
+                validator.check_quiet_status(folder)
+
+    def test_message_recovery_requires_success_after_the_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            fixture(folder)
+            value = json.loads((folder / 'message-read-recovery.json').read_text())
+            value['requests'][0]['status'], value['requests'][1]['status'] = 200, 503
+            (folder / 'message-read-recovery.json').write_text(json.dumps(value))
+            rows = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text().splitlines()]
+            rows[1:] = value['requests']
+            (folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in rows))
+            with self.assertRaises(AssertionError):
+                validator.check_quiet_status(folder)
+
+    def test_completed_message_recovery_is_not_invalidated_by_later_reads(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            fixture(folder)
+            with (folder / 'bridge-requests.jsonl').open('a') as log:
+                log.write(json.dumps(dict(wire_path='/v1/wazig/messages?chat=fixture-alpha&limit=80', status=200)) + '\n')
+            validator.check_quiet_status(folder)
+
+    def test_message_recovery_cannot_forge_captured_request_history(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            fixture(folder)
+            value = json.loads((folder / 'message-read-recovery.json').read_text())
+            value['requests'][0]['status'] = 200
+            (folder / 'message-read-recovery.json').write_text(json.dumps(value))
+            with self.assertRaises(AssertionError):
+                validator.check_quiet_status(folder)
+
+    def test_message_retry_card_is_not_an_update_action(self):
+        text = source()
+        click = function(text, 'updateCardClick')
+        read = click.index('a.update_card_error_source == .message_read')
+        self.assertLess(read, click.index('if (a.update_pending == null'))
+        branch = click[read:click.index('if (a.update_pending == null')]
+        self.assertIn('clearMessageReadProblem(a);', branch)
+        self.assertIn('refreshMessages(a);', branch)
+        self.assertIn('return;', branch)
+        self.assertNotIn('startUpdateInstall', branch)
+        self.assertIn('a.update_card_error_source = .update;', click[click.index('if (a.update_pending == null'):])
+        offer = function(text, 'mainProc').split('if (is_new_offer) {', 1)[1].split('}', 1)[0]
+        self.assertIn('a.update_card_error_source = .update;', offer)
+        paint = function(text, 'paintUpdateCard')
+        self.assertIn('failed and a.update_card_error_source == .message_read', paint)
+        self.assertIn('"Messages unavailable"', paint)
+        self.assertIn('"Update failed"', paint)
+        self.assertIn('a.update_card_error_source = .update;', function(text, 'updateCardFail'))
+        clear = function(text, 'clearMessageReadProblem')
+        self.assertLess(clear.index('a.update_card_error_source != .message_read'), clear.index('a.update_card_error_len = 0'))
 
     def test_journey_is_registered_and_drives_real_input(self):
         registry = json.loads((ROOT / 'tools/verify-wazig/journeys.json').read_text())

@@ -56,6 +56,40 @@ Save-Screen $session version
 Send-Keys $session '{ENTER}'
 Assert-That ([VerifyMenus]::Find($session.pid, 'MessagesPalette') -eq [IntPtr]::Zero) 'Version row did not close palette'
 $headers = @{ Authorization = 'Bearer fixture-key-not-a-secret' }
+$requestLog = Join-Path $Evidence 'bridge-requests.jsonl'
+$readRequests = { @(Get-Content $requestLog | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.wire_path -like '/v1/wazig/messages*' -and $_.wire_path -match 'limit=80(?:&|$)' }) }
+$transientStart = @(& $readRequests).Count
+Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/message-failures" -Headers $headers -Body '{"count":1}' -ContentType 'application/json' | Out-Null
+Invoke-PaletteCommand $session 'Refresh'
+$transient = Wait-Until {
+    $rows = @(& $readRequests) | Select-Object -Skip $transientStart
+    $state = Read-Control $session status
+    Assert-That (-not $state.update_card.visible -and $state.update_card.error -ceq '') 'Short message read glitch raised an update error'
+    if (@($rows).Count -gt 1 -and @($rows | Where-Object status -eq 503).Count -eq 1 -and @($rows)[-1].status -eq 200) { $state.update_card }
+} 'transient message read recovers silently'
+$persistentStart = @(& $readRequests).Count
+Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/message-failures" -Headers $headers -Body '{"count":-1}' -ContentType 'application/json' | Out-Null
+Invoke-PaletteCommand $session 'Refresh'
+$readProblem = Wait-Until {
+    $state = Read-Control $session status
+    if ($state.update_card.visible -and $state.update_card.error -ceq 'Check your connection, then Retry.') { $state.update_card }
+} 'persistent message read exposes actionable retry'
+$persistentEnd = @(& $readRequests).Count
+Assert-That (($persistentEnd - $persistentStart) -ge 3) 'Message card appeared before existing retries finished'
+Save-Screen $session message-read-problem
+Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/message-failures" -Headers $headers -Body '{"count":0}' -ContentType 'application/json' | Out-Null
+$recoveryStart = @(& $readRequests).Count
+Assert-That ((Read-Control $session status).update_card.error -ceq 'Check your connection, then Retry.') 'Message error disappeared before the actual Retry click'
+$retryX = [int]($origin.X + $readProblem.rect[0] + 68 * $scale)
+$retryY = [int]($origin.Y + $readProblem.rect[3] - 23 * $scale)
+[VerifyMenus]::Click($session.pid, $retryX, $retryY, $false)
+$readRecovered = Wait-Until {
+    $rows = @(& $readRequests) | Select-Object -Skip $recoveryStart
+    $state = Read-Control $session status
+    if (@($rows | Where-Object status -eq 200).Count -gt 0 -and -not $state.update_card.visible -and $state.update_card.error -ceq '') { $state.update_card }
+} 'message retry button refreshes messages and clears its own error'
+Save-Screen $session message-read-recovered
+@{ transient_start = $transientStart; persistent_start = $persistentStart; persistent_end = $persistentEnd; recovery_start = $recoveryStart; transient = $transient; problem = $readProblem; recovered = $readRecovered; requests = @(& $readRequests); retry = @($retryX, $retryY) } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'message-read-recovery.json')
 Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/sync-failure" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
 Invoke-PaletteCommand $session 'Refresh'
 $expectedProblem = 'Unable to read chats from wacli'

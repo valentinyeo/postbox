@@ -45,6 +45,7 @@ const WacliResult = struct {
     extra: Utf8Text(63) = .{},
     started_ms: u64 = 0,
     ok: bool = true,
+    http_status: u32 = 0,
     data: []const u8 = "{\"data\":{\"messages\":[]}}",
 };
 const App = struct {
@@ -59,6 +60,11 @@ const App = struct {
     io: std.Io = std.testing.io,
     persisted_tag: Utf8Text(32) = .{},
     log_count: usize = 0,
+    problem_count: usize = 0,
+    update_offer_visible: bool = false,
+    update_card_error: [96]u8 = undefined,
+    update_card_error_len: usize = 0,
+    update_card_error_source: enum { update, general, message_read } = .update,
     last_log: Utf8Text(191) = .{},
     allocator: std.mem.Allocator = std.testing.allocator,
     chats: [2]Chat = .{ .{}, .{} },
@@ -139,7 +145,17 @@ fn applyChats(a: *App, raw: []const u8, _: bool) bool {
 }
 fn saveChatsCache(_: *App, _: []const u8) void {}
 fn setStatus(_: *App, _: []const u8) void {}
-fn showProblem(_: *App, _: []const u8) void {}
+fn showProblem(a: *App, text: []const u8) void {
+    a.problem_count += 1;
+    a.update_card_error_source = .general;
+    const n = @min(text.len, a.update_card_error.len);
+    @memcpy(a.update_card_error[0..n], text[0..n]);
+    a.update_card_error_len = n;
+}
+fn updateCardRefresh(_: *App) void {}
+fn updateCardVisible(a: *const App) bool {
+    return a.update_offer_visible or a.update_card_error_len > 0;
+}
 fn appendLaunchLog(a: *App, line: []const u8) void {
     a.log_count += 1;
     a.last_log.set(line);
@@ -503,7 +519,8 @@ test "IGSH-575 hub events during uncached history do not supersede its reply" {
     try std.testing.expectEqual(@as(usize, 1), a.message_count);
     try std.testing.expectEqual(@as(u32, 1), a.cached);
     try std.testing.expectEqual(painted + 1, a.painted);
-    try std.testing.expectEqual(@as(usize, 1), a.log_count);
+    try std.testing.expectEqual(@as(usize, 2), a.log_count);
+    try std.testing.expectEqualStrings("messages-read: ok", a.last_log.slice());
     try std.testing.expect(std.mem.indexOf(u8, a.last_log.slice(), "dropped reply") == null);
     try std.testing.expectEqual(@as(u32, 2), a.queued);
     try std.testing.expectEqual(gen + 1, a.messages_gen);
@@ -698,4 +715,118 @@ test "unchanged empty history does not repaint and accepts the latest chat times
     deliver(&a, &result);
     try std.testing.expectEqual(painted, a.painted);
     try std.testing.expectEqualStrings(a.chats[0].timestamp.slice(), a.displayed_timestamp.slice());
+}
+
+test "IGSH-1080 transient read failure retries without an update error" {
+    var a = fixture();
+    refreshMessages(&a);
+    var result = resultFor(a.last_job);
+    result.ok = false;
+    deliver(&a, &result);
+    try std.testing.expectEqual(@as(usize, 0), a.problem_count);
+    try std.testing.expectEqual(@as(usize, 0), a.update_card_error_len);
+    tick(&a);
+    tick(&a);
+    result = resultFor(a.last_job);
+    deliver(&a, &result);
+    try std.testing.expectEqual(@as(u32, 0), a.msg_read_attempts);
+    try std.testing.expectEqual(@as(usize, 0), a.update_card_error_len);
+}
+
+test "IGSH-1080 persistent read failure recovers without clearing a real update failure" {
+    var a = fixture();
+    refreshMessages(&a);
+    for (0..3) |index| {
+        var result = resultFor(a.last_job);
+        result.ok = false;
+        deliver(&a, &result);
+        if (index < 2) {
+            try std.testing.expectEqual(@as(usize, 0), a.update_card_error_len);
+            while (a.msg_read_retry_ticks > 0) tick(&a);
+        }
+    }
+    try std.testing.expect(a.update_card_error_len > 0);
+    try std.testing.expect(a.update_card_error_source == .message_read);
+    refreshMessages(&a);
+    var success = resultFor(a.last_job);
+    deliver(&a, &success);
+    try std.testing.expectEqual(@as(usize, 0), a.update_card_error_len);
+    a.update_card_error_source = .update;
+    a.update_card_error_len = 7;
+    @memcpy(a.update_card_error[0..7], "install");
+    refreshMessages(&a);
+    success = resultFor(a.last_job);
+    deliver(&a, &success);
+    try std.testing.expectEqualStrings("install", a.update_card_error[0..a.update_card_error_len]);
+}
+
+test "IGSH-1080 stale failed reply never raises a problem for the current chat" {
+    var a = fixture();
+    refreshMessages(&a);
+    var stale = resultFor(a.last_job);
+    stale.ok = false;
+    a.chats[1].jid.set("b@g.us");
+    a.chat_count = 2;
+    a.selected_chat = 1;
+    refreshMessages(&a);
+    deliver(&a, &stale);
+    try std.testing.expectEqual(@as(usize, 0), a.problem_count);
+    try std.testing.expectEqual(@as(u32, 0), a.msg_read_attempts);
+}
+
+test "IGSH-1080 read failures never replace a real update error or offer" {
+    for ([_]bool{ false, true }) |offer| {
+        var a = fixture();
+        a.update_offer_visible = offer;
+        if (!offer) {
+            a.update_card_error_len = 7;
+            @memcpy(a.update_card_error[0..7], "install");
+        }
+        refreshMessages(&a);
+        for (0..3) |index| {
+            var result = resultFor(a.last_job);
+            result.ok = false;
+            deliver(&a, &result);
+            if (index < 2) {
+                while (a.msg_read_retry_ticks > 0) tick(&a);
+            }
+        }
+        try std.testing.expectEqual(@as(usize, 0), a.problem_count);
+        try std.testing.expect(a.update_card_error_source == .update);
+        if (!offer) try std.testing.expectEqualStrings("install", a.update_card_error[0..a.update_card_error_len]);
+    }
+}
+
+test "IGSH-1080 hub providers share the existing bounded read retries" {
+    for ([_]Provider{ .whatsapp, .slack, .telegram, .signal }) |provider| {
+        var a = fixture();
+        a.unified_hub = true;
+        a.chats[0].provider = provider;
+        a.displayed_provider = provider;
+        refreshMessages(&a);
+        for (0..3) |index| {
+            var result = resultFor(a.last_job);
+            result.ok = false;
+            deliver(&a, &result);
+            if (index < 2) {
+                try std.testing.expectEqual(@as(u32, @intCast(index + 1)), a.msg_read_attempts);
+                try std.testing.expectEqual(@as(usize, 0), a.update_card_error_len);
+                while (a.msg_read_retry_ticks > 0) tick(&a);
+            }
+        }
+        try std.testing.expect(a.update_card_error_source == .message_read);
+        try std.testing.expect(a.update_card_error_len > 0);
+    }
+}
+
+test "IGSH-1080 an empty selection clears only its message read error" {
+    for ([_]bool{ false, true }) |read_error| {
+        var a = fixture();
+        a.chat_count = 0;
+        a.update_card_error_source = if (read_error) .message_read else .update;
+        a.update_card_error_len = 7;
+        @memcpy(a.update_card_error[0..7], "install");
+        refreshMessages(&a);
+        try std.testing.expectEqual(@as(usize, if (read_error) 0 else 7), a.update_card_error_len);
+    }
 }
