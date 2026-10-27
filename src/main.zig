@@ -795,6 +795,7 @@ const App = struct {
     update_click_wait: bool = false,
     update_card_error: [96]u8 = undefined,
     update_card_error_len: usize = 0,
+    update_card_error_source: enum { update, general, message_read } = .update,
     update_dismissed: [32]u8 = undefined,
     update_dismissed_len: usize = 0,
     chats: []Chat = &.{},
@@ -7657,7 +7658,7 @@ fn refreshMessages(a: *App) void {
     }
     const chat = &a.chats[a.selected_chat];
     a.slack_history_hash = 0;
-    if (chat.provider != .whatsapp or !std.mem.eql(u8, a.msg_read_last_jid.slice(), chat.jid.slice())) {
+    if ((!unifiedHub(a) and chat.provider != .whatsapp) or !std.mem.eql(u8, a.msg_read_last_jid.slice(), chat.jid.slice())) {
         a.msg_read_last_jid.set(chat.jid.slice());
         a.msg_read_attempts = 0;
         a.msg_read_retry_ticks = 0;
@@ -7674,6 +7675,7 @@ fn refreshMessages(a: *App) void {
     a.messages_refresh_again = false;
     const chat_changed = !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat));
     if (chat_changed) {
+        clearMessageReadProblem(a);
         stopAudio(a);
         beginTranscriptionOpen(a);
     }
@@ -7717,9 +7719,22 @@ fn reconcileOpenChat(a: *App) void {
 
 fn scheduleMessageReadRetry(a: *App) void {
     const attempt = a.msg_read_attempts + 1;
-    const delay = chat_reconcile.retryDelayTicks(attempt) orelse return;
+    const delay = chat_reconcile.retryDelayTicks(attempt) orelse {
+        if (updateCardVisible(a) and a.update_card_error_source != .message_read) return;
+        showProblem(a, "Check your connection, then Retry.");
+        a.update_card_error_source = .message_read;
+        updateCardRefresh(a);
+        return;
+    };
     a.msg_read_attempts = attempt;
     a.msg_read_retry_ticks = delay;
+}
+
+fn clearMessageReadProblem(a: *App) void {
+    if (a.update_card_error_source != .message_read) return;
+    a.update_card_error_len = 0;
+    a.update_card_error_source = .update;
+    updateCardRefresh(a);
 }
 
 fn youSender(allocator: std.mem.Allocator) WideText(159) {
@@ -8187,6 +8202,7 @@ fn setStatus(a: *App, text: []const u8) void {
 }
 
 fn showProblem(a: *App, text: []const u8) void {
+    a.update_card_error_source = .general;
     setStatus(a, text);
     const n = @min(text.len, a.update_card_error.len);
     @memcpy(a.update_card_error[0..n], text[0..n]);
@@ -15465,9 +15481,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         }
                     }
                     if (!result.ok) {
-                        showProblem(a, "Unable to read messages from wacli");
                         var fail_buffer: [128]u8 = undefined;
-                        const fail_line = std.fmt.bufPrint(&fail_buffer, "messages-read: fail, chat={s} err={s}", .{ kind, result.extra.slice() }) catch "messages-read: fail";
+                        const fail_line = std.fmt.bufPrint(&fail_buffer, "messages-read: fail, chat={s} http={d} err={s}", .{ kind, result.http_status, result.extra.slice() }) catch "messages-read: fail";
                         appendLaunchLog(a, fail_line);
                         if (result.gen == a.messages_gen and a.selected_chat < a.chat_count and
                             chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)))
@@ -15486,13 +15501,16 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                             markChatRead(a);
                             a.msg_read_attempts = 0;
                             a.msg_read_retry_ticks = 0;
+                            clearMessageReadProblem(a);
+                            appendLaunchLog(a, "messages-read: ok");
                         } else if (applyMessageData(a, result.data, true)) {
                             msgCacheStore(a, chat_key.of(result), result.data);
                             if (unifiedHub(a) and a.chats[a.selected_chat].provider == .slack) refreshVisibleChats(a);
                             a.msg_read_attempts = 0;
                             a.msg_read_retry_ticks = 0;
+                            clearMessageReadProblem(a);
+                            appendLaunchLog(a, "messages-read: ok");
                         } else {
-                            showProblem(a, "Unable to read messages from wacli");
                             var fail_buffer: [128]u8 = undefined;
                             const fail_line = std.fmt.bufPrint(&fail_buffer, "messages-read: empty payload, chat={s}", .{kind}) catch "messages-read: empty payload";
                             appendLaunchLog(a, fail_line);
@@ -17616,6 +17634,7 @@ fn updateCardVisible(a: *const App) bool {
 }
 
 fn updateCardNotesHeight(a: *const App) i32 {
+    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) return 0;
     const pending = a.update_pending orelse return 0;
     const hwnd = a.hwnd orelse return 0;
     const hdc = win.GetDC(hwnd) orelse return 0;
@@ -17686,6 +17705,7 @@ fn updateCardRefresh(a: *App) void {
 }
 
 fn updateCardFail(a: *App, text: []const u8) void {
+    a.update_card_error_source = .update;
     a.update_card_busy = false;
     a.update_click_wait = false;
     const n = @min(text.len, a.update_card_error.len);
@@ -17697,6 +17717,13 @@ fn updateCardFail(a: *App, text: []const u8) void {
 }
 
 fn updateCardClick(a: *App) void {
+    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) {
+        clearMessageReadProblem(a);
+        a.msg_read_attempts = 0;
+        a.msg_read_retry_ticks = 0;
+        refreshMessages(a);
+        return;
+    }
     if (a.update_pending == null or a.update_installed or a.update_card_busy) return;
     const hwnd = a.hwnd orelse return;
     a.update_card_error_len = 0;
@@ -17713,6 +17740,10 @@ fn updateCardClick(a: *App) void {
 }
 
 fn updateCardDismiss(a: *App) void {
+    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) {
+        clearMessageReadProblem(a);
+        return;
+    }
     const pending = a.update_pending orelse return;
     const n = @min(pending.tag.len, a.update_dismissed.len);
     @memcpy(a.update_dismissed[0..n], pending.tag[0..n]);
@@ -17783,7 +17814,7 @@ fn removeLeftoverOldExe() void {
 fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     if (!updateCardVisible(a)) return;
     const pending_tag = if (a.update_pending) |pending| pending.tag else "";
-    const pending_notes = if (a.update_pending) |pending| pending.notes else "";
+    const pending_notes = if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) "" else if (a.update_pending) |pending| pending.notes else "";
     const card = updateCardRect(a);
     paintRoundedButton(a, shapes, hdc, card, theme.current.surface_container_high, theme.current.on_surface, a.font.?, if (theme.choice == .amoled) theme.current.outline_variant else theme.current.secondary_container, &[_]u16{});
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
@@ -17793,6 +17824,8 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     const failed = a.update_card_error_len > 0;
     const title: []const u8 = if (a.update_installed)
         "Restarting..."
+    else if (failed and a.update_card_error_source == .message_read)
+        "Messages unavailable"
     else if (failed)
         "Update failed"
     else if (a.update_card_busy)

@@ -795,3 +795,25 @@ test "IGSH-1080 read failures never replace a real update error or offer" {
         if (!offer) try std.testing.expectEqualStrings("install", a.update_card_error[0..a.update_card_error_len]);
     }
 }
+
+test "IGSH-1080 hub providers share the existing bounded read retries" {
+    for ([_]Provider{ .whatsapp, .slack, .telegram, .signal }) |provider| {
+        var a = fixture();
+        a.unified_hub = true;
+        a.chats[0].provider = provider;
+        a.displayed_provider = provider;
+        refreshMessages(&a);
+        for (0..3) |index| {
+            var result = resultFor(a.last_job);
+            result.ok = false;
+            deliver(&a, &result);
+            if (index < 2) {
+                try std.testing.expectEqual(@as(u32, @intCast(index + 1)), a.msg_read_attempts);
+                try std.testing.expectEqual(@as(usize, 0), a.update_card_error_len);
+                while (a.msg_read_retry_ticks > 0) tick(&a);
+            }
+        }
+        try std.testing.expect(a.update_card_error_source == .message_read);
+        try std.testing.expect(a.update_card_error_len > 0);
+    }
+}

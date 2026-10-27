@@ -36,6 +36,21 @@ def check_quiet_status(folder):
     assert problem['card'] == problem['retained']
     assert abs(problem['list_bottom'] - (problem['card_top'] - problem['gap'])) <= 1
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
+    recovery = read('message-read-recovery.json')
+    reads = [row for row in requests if row.get('wire_path', '').startswith('/v1/wazig/messages') and re.search(r'limit=80(?:&|$)', row['wire_path'])]
+    assert recovery['requests'] == reads
+    begin, persistent, retried = (recovery[key] for key in ('transient_start', 'persistent_start', 'persistent_end'))
+    assert 0 <= begin < persistent < retried < len(reads)
+    transient = reads[begin:persistent]
+    assert sum(row['status'] == 503 for row in transient) == 1 and any(row['status'] == 200 for row in transient)
+    assert sum(row['status'] == 503 for row in reads[persistent:retried]) >= 3
+    assert any(row['status'] == 200 for row in reads[retried:])
+    for key in ('transient', 'recovered'):
+        assert not recovery[key]['visible'] and recovery[key]['error'] == ''
+    assert recovery['problem']['visible'] and recovery['problem']['error'] == 'Check your connection, then Retry.'
+    assert len(recovery['retry']) == 2
+    for stage in ('message-read-problem', 'message-read-recovered'):
+        assert (folder / (stage + '.png')).read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     failures = [row for row in requests if row.get('wire_path', '').startswith('/v1/wazig/chats') and row['status'] == 503]
     assert failures and all(row in failures for row in problem['failures']) and problem['failures']
     for stage in ('before', 'quiet-status', 'version', 'sync-problem', 'after'):

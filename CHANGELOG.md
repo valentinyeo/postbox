@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Message refreshes retry quietly, and recovered connection errors no longer look like failed updates.
+
 - IGSH-976: Postbox keeps chats, settings and normal in-app updates.
 
 - IGSH-920: Unarchiving a chat works again when many chats are archived on your phone, because those phone-archived entries no longer block the archive list. Archive commands for a Telegram or Signal id that is not in your chats are now refused instead of being saved as a WhatsApp entry.
