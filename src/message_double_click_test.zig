@@ -12,6 +12,11 @@ const win = struct {
     const POINT = Point;
     const RECT = Rect;
     const WM_TIMER = 6;
+    const VK_CONTROL = 17;
+    const VK_SHIFT = 16;
+    fn GetKeyState(_: u32) i16 {
+        return 0;
+    }
     var timer: usize = 0;
     var cursor: Point = .{};
     fn GetCursorPos(point: *Point) i32 {
@@ -131,6 +136,7 @@ const App = struct {
     click_origin: Point = .{},
     click_moved: bool = false,
     canvas_double_click_handled: bool = false,
+    marking_message: bool = false,
     scroll_y: i32 = 0,
     max_scroll: i32 = 100,
     text_selection: passage.Selection = .{},

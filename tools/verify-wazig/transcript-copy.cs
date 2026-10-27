@@ -11,6 +11,8 @@ public static class VerifyTranscriptCopy {
     [StructLayout(LayoutKind.Sequential)]
     struct Input { public uint type; public MouseInput mouse; }
     [DllImport("user32.dll")] static extern uint SendInput(uint count, Input[] inputs, int size);
+    struct Point { public int X, Y; }
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     static void Button(bool down) {
         var inputs = new Input[] { new Input { mouse = new MouseInput { flags = down ? 2u : 4u } } };
@@ -20,6 +22,8 @@ public static class VerifyTranscriptCopy {
         uint owner;
         GetWindowThreadProcessId(GetForegroundWindow(), out owner);
         if (owner != pid) throw new Exception("Refusing modifier input outside owned process");
+        GetWindowThreadProcessId(WindowFromPoint(new Point { X = x, Y = y }), out owner);
+        if (owner != pid) throw new Exception("Refusing click outside owned process");
         keybd_event(modifier, 0, 0, UIntPtr.Zero);
         try {
             Thread.Sleep(50);

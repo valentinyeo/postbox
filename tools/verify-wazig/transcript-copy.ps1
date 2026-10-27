@@ -29,6 +29,7 @@ function Invoke-TranscriptCopyJourney($Session, [string]$Messages) {
     Invoke-TranscriptMark $Session 'VOICE-5'
     Invoke-TranscriptMark $Session 'VOICE-3'
     Invoke-TranscriptMark $Session 'VOICE-4'
+    Invoke-TranscriptMark $Session 'VOICE-TEXT'
     Save-Screen $Session 'transcripts-marked'
     Send-Keys $Session '^k'
     $palette = Get-PaletteWindow $Session
@@ -44,20 +45,52 @@ function Invoke-TranscriptCopyJourney($Session, [string]$Messages) {
     Send-Keys $Session '{ENTER}'
     $actual = [Windows.Forms.Clipboard]::GetText()
     $rows = @(Read-VoiceMessages $Session | Where-Object { $_.id -in @('VOICE-3', 'VOICE-4', 'VOICE-5') } | Sort-Object time)
-    $expected = @($rows | ForEach-Object {
+    $rawRows = @($rows | ForEach-Object {
         $row = $_
         $file = @($files | Where-Object { $_.Name -ceq [IO.Path]::GetFileName($row.local_path) })
         if ($file.Count -ne 1) { throw "Cannot map raw voice file: $($row.id)" }
-        $expectedByFile[$file[0].Name]
-    }) -join "`r`n`r`n"
-    @{ ids = @($rows.id); expected = $expected; actual = $actual; labels = $labels } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Session.evidence 'transcript-copy.json')
+        @{ id = $row.id; time = $row.time; raw = $expectedByFile[$file[0].Name] }
+    })
+    $expected = @($rawRows.raw) -join "`r`n`r`n"
+    @{ ids = @($rows.id); raw_rows = $rawRows; marked = @(Read-VoiceMessages $Session | Where-Object marked | ForEach-Object id); expected = $expected; actual = $actual; labels = $labels; title = (Get-Window $Session).Current.Name } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Session.evidence 'transcript-copy.json')
     Assert-That ($actual -ceq $expected) 'Copied transcripts differ from raw text or chronological order'
     Save-Screen $Session 'transcripts-copied'
+    $paste = [Diagnostics.ProcessStartInfo]::new('pwsh')
+    $paste.UseShellExecute = $false
+    foreach ($argument in @('-NoProfile', '-STA', '-File', (Join-Path $PSScriptRoot 'paste-transcripts.ps1'), '-Evidence', $Session.evidence)) { $paste.ArgumentList.Add($argument) }
+    $child = [Diagnostics.Process]::Start($paste)
+    try {
+        Assert-That ($child.WaitForExit(20000)) 'Separate paste app timed out'
+        Assert-That ($child.ExitCode -eq 0) 'Separate paste app failed'
+    } finally {
+        if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
+        $child.Dispose()
+    }
+    $pasted = [IO.File]::ReadAllText((Join-Path $Session.evidence 'transcripts-pasted.txt'))
+    Assert-That ($pasted.Replace("`r`n", "`n") -ceq $expected.Replace("`r`n", "`n")) 'Separate app pasted different transcript words'
+    $missingRow = @($rows | Where-Object id -CEQ 'VOICE-4')[0]
+    Remove-Item -LiteralPath "$($missingRow.local_path).txt"
+    Invoke-PaletteCommand $Session 'Copy all transcripts'
+    $partial = [Windows.Forms.Clipboard]::GetText()
+    $partialExpected = @($rawRows | Where-Object id -CNE 'VOICE-4' | ForEach-Object raw) -join "`r`n`r`n"
+    $missingTime = ([DateTimeOffset]::Parse($missingRow.time)).ToLocalTime().ToString('HH:mm')
+    $title = (Get-Window $Session).Current.Name
+    @{ actual = $partial; expected = $partialExpected; missing_id = $missingRow.id; missing_time = $missingTime; title = $title } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Session.evidence 'transcript-missing.json')
+    Assert-That ($partial -ceq $partialExpected -and $title.Contains("Copied 2 transcripts. Missing: $missingTime")) 'Missing transcript was silently omitted or copied from its formatted display'
+    Save-Screen $Session 'transcripts-missing'
     Send-Keys $Session '{ESC}'
     Send-Keys $Session '^k'
     $palette = Get-PaletteWindow $Session
     Send-Keys $Session 'Copy all transcripts'
     $list = Get-Edit $palette '1072'
-    Assert-That ((Read-ListCount $list) -eq 0) 'Escape did not clear transcript marks'
+    $null = Wait-Until { (Read-ListCount $list) -eq 0 } 'Escape clears transcript marks'
+    Assert-That (@(Read-VoiceMessages $Session | Where-Object marked).Count -eq 0) 'Escape left marked messages'
     Send-Keys $Session '{ESC}'
+    Invoke-TranscriptMark $Session 'VOICE-3'
+    Invoke-TranscriptMark $Session 'VOICE-5' 16
+    $ranged = @(Read-VoiceMessages $Session | Where-Object marked | ForEach-Object id)
+    Assert-That (($ranged -join ',') -ceq 'VOICE-3,VOICE-TEXT,VOICE-4,VOICE-5') 'Shift-click did not mark the message range'
+    Open-VoiceChatAgain $Session
+    Assert-That (@(Read-VoiceMessages $Session | Where-Object marked).Count -eq 0) 'Marks leaked across a chat switch'
+    @{ range = $ranged; escape_cleared = $true; chat_switch_cleared = $true; pasted = $pasted } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Session.evidence 'transcript-selection.json')
 }

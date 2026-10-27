@@ -41,5 +41,6 @@ assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'
 assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
 assert 'JOURNEY PASSED: voice' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
 assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
+runpy.run_path(str(Path(__file__).with_name('check-transcript-copy.py')))['check_transcript_copy'](folder)
 print('EVIDENCE VERIFIED: five downloaded voice notes with cached transcripts, scroll and expand, partial repaints match full repaints')
 raise SystemExit(0)

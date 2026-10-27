@@ -1476,6 +1476,8 @@ class VoiceHandler(Handler):
                              SenderJID='fixture-voice-sender', SenderName='Fixture Voice', MediaType='audio',
                              MimeType='audio/ogg', Filename=f'voice-{n}.ogg')
                         for n in range(1, VOICE_NOTES + 1)]
+                rows.insert(3, dict(MsgID='VOICE-TEXT', ChatJID=chat, Timestamp=self.stamp(210),
+                                    Text='Do not copy this marked text message.', FromMe=False, SenderName='Fixture Voice'))
             else:
                 rows = [dict(MsgID='VOICE-BETA', ChatJID=chat, Timestamp=self.stamp(0), Text='Synthetic text',
                              FromMe=False, SenderName='Fixture Sender')]

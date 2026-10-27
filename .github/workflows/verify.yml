@@ -147,6 +147,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Published package metadata unavailable' }
             $asset = @($release.assets | Where-Object name -CEQ "Postbox-$env:RELEASE_TAG.zip")
             if ($asset.Count -ne 1 -or $asset[0].digest -cne ('sha256:' + (Get-FileHash "candidate/Postbox-$env:RELEASE_TAG.zip").Hash.ToLowerInvariant())) { throw 'Published package digest mismatch' }
+            New-Item verification-evidence -ItemType Directory -Force | Out-Null
+            $release | ConvertTo-Json -Depth 20 | Set-Content verification-evidence/published-package.json
+            (Get-FileHash zig-out/bin/Messages.exe).Hash | Set-Content verification-evidence/published-executable.sha256
             "VERIFY_VERSION=$($env:RELEASE_TAG.Substring(1))" >> $env:GITHUB_ENV
           } else {
             zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
@@ -239,7 +242,7 @@ jobs:
       - name: Cleanup even after a failed journey
         if: always()
         shell: pwsh
-        run: pwsh -NoProfile -File tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence -ExpectedVersion $env:VERIFY_VERSION
+        run: pwsh -NoProfile -File tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
       - name: Validate menus evidence
         if: success() && matrix.feature == 'menus'
         shell: pwsh

@@ -172,6 +172,7 @@ const command_copy_text = 2019;
 const command_copy_link = 2020;
 const command_copy_selection = 2021;
 const command_copy_transcript = 2022;
+const command_copy_all_transcripts = 2068;
 const command_reply = 2023;
 const command_open_video_external = 2024;
 const command_play_audio = 2028;
@@ -888,6 +889,11 @@ const App = struct {
     media_failures: [16]MediaFailure = [_]MediaFailure{.{}} ** 16,
     transcribe_session: ?*dictation.FileSession = null,
     text_selection: passage.Selection = .{},
+    marked_messages: std.ArrayList(Utf8Text(191)) = .empty,
+    marked_chat: chat_key.Stored = .{},
+    marked_anchor: Utf8Text(191) = .{},
+    marking_message: bool = false,
+    transcript_copy_notice: Utf8Text(1023) = .{},
     text_dragging: bool = false,
     drag_moved: bool = false,
     drag_origin: win.POINT = .{ .x = 0, .y = 0 },
@@ -3216,12 +3222,17 @@ fn activeViewLabel(a: *App) []const u8 {
 fn updateWindowTitle(a: *App) void {
     const hwnd = a.hwnd orelse return;
     const label = if (activeChatView(a) == .all) "Combined inbox" else activeViewLabel(a);
-    var buffer: [512]u8 = undefined;
-    const text = messenger_view.windowTitle(&buffer, label, app_version) catch return;
-    var wide: [512]u16 = undefined;
+    var buffer: [2048]u8 = undefined;
+    var marked_label: [1800]u8 = undefined;
+    const count = markedMessageCount(a, false);
+    const shown = if (count > 0) std.fmt.bufPrint(&marked_label, "{s} · {d} messages marked", .{ label, count }) catch label else label;
+    var notice_label: [1800]u8 = undefined;
+    const with_notice = if (a.transcript_copy_notice.len > 0) std.fmt.bufPrint(&notice_label, "{s} · {s}", .{ shown, a.transcript_copy_notice.slice() }) catch shown else shown;
+    const text = messenger_view.windowTitle(&buffer, with_notice, app_version) catch return;
+    var wide: [2048]u16 = undefined;
     const len = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], text) catch return;
     wide[len] = 0;
-    var current: [512]u16 = undefined;
+    var current: [2048]u16 = undefined;
     const current_len: usize = @intCast(win.GetWindowTextW(hwnd, &current, current.len));
     if (!std.mem.eql(u16, current[0..current_len], wide[0..len])) _ = win.SetWindowTextW(hwnd, &wide);
 }
@@ -5007,6 +5018,7 @@ fn retryPendingDownload(a: *App) void {
 }
 
 fn clearMessages(a: *App) void {
+    if (a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.marked_chat.key(), chat_key.of(&a.chats[a.selected_chat]))) _ = clearMessageMarks(a);
     a.text_selection = .{};
     a.text_dragging = false;
     if (a.canvas) |canvas| {
@@ -6385,14 +6397,12 @@ fn pruneStaleInDir(a: *App, parent: []const u8, entry: *const win.WIN32_FIND_DAT
     }
 }
 
-fn saveTranscriptCache(a: *App, message: *const Message) void {
+fn saveTranscriptCache(a: *App, message: *const Message, raw: []const u8) void {
     const path_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.local_path.slice()) catch return;
     defer a.allocator.free(path_utf8);
     const cache_path = std.fmt.allocPrint(a.allocator, "{s}.txt", .{path_utf8}) catch return;
     defer a.allocator.free(cache_path);
-    const transcript_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.transcript.slice()) catch return;
-    defer a.allocator.free(transcript_utf8);
-    writeFileWin(cache_path, transcript_utf8);
+    writeFileWin(cache_path, raw);
 }
 
 fn ensureTranscribeSession(a: *App) ?*dictation.FileSession {
@@ -6493,7 +6503,7 @@ fn pollTranscription(a: *App) void {
                 if (transcript.len > 0) {
                     message.transcript.set(a.allocator, transcript);
                     message.transcript_state = .ready;
-                    saveTranscriptCache(a, message);
+                    saveTranscriptCache(a, message, transcript);
                     appendDebugLog(a, "poll: ready len={d}", .{transcript.len});
                 } else {
                     message.transcript_state = .failed;
@@ -9760,6 +9770,10 @@ fn copyToClipboard(a: *App, text_in: []const u16) bool {
         expanded.append(a.allocator, ':') catch return false;
     }
     if (expanded.items.len > 0) text = expanded.items;
+    return copyRawToClipboard(a, text);
+}
+
+fn copyRawToClipboard(a: *App, text: []const u16) bool {
     if (a.hwnd == null or text.len == 0) return false;
     if (win.OpenClipboard(a.hwnd.?) == 0) return false;
     defer _ = win.CloseClipboard();
@@ -9924,6 +9938,140 @@ fn linkSpanHit(span: *const LinkSpan, x: i32, y: i32) bool {
         if (rectHasPoint(rect, x, y)) return true;
     }
     return false;
+}
+
+fn messageMarked(a: *const App, id: []const u8) bool {
+    if (!chat_key.Key.eql(a.marked_chat.key(), chat_key.displayed(a))) return false;
+    for (a.marked_messages.items) |*marked| if (std.mem.eql(u8, marked.slice(), id)) return true;
+    return false;
+}
+
+fn markedMessageCount(a: *const App, voice_only: bool) usize {
+    var count: usize = 0;
+    for (a.messages[0..a.message_count]) |*message| {
+        if ((!voice_only or isAudio(message)) and messageMarked(a, message.id.slice())) count += 1;
+    }
+    return count;
+}
+
+fn clearMessageMarks(a: *App) bool {
+    if (a.marked_messages.items.len == 0) return false;
+    a.marked_messages.clearRetainingCapacity();
+    a.marked_anchor = .{};
+    a.marking_message = false;
+    a.transcript_copy_notice = .{};
+    updateWindowTitle(a);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    return true;
+}
+
+fn markMessage(a: *App, index: usize, range: bool, additive: bool) void {
+    if (index >= a.message_count) return;
+    if (!chat_key.Key.eql(a.marked_chat.key(), chat_key.displayed(a))) _ = clearMessageMarks(a);
+    a.marked_chat.set(chat_key.displayed(a));
+    a.transcript_copy_notice = .{};
+    var first = index;
+    if (range) {
+        for (a.messages[0..a.message_count], 0..) |*message, i| {
+            if (std.mem.eql(u8, a.marked_anchor.slice(), message.id.slice())) {
+                first = i;
+                break;
+            }
+        }
+        if (!additive) a.marked_messages.clearRetainingCapacity();
+    } else {
+        a.marked_anchor = a.messages[index].id;
+        for (a.marked_messages.items, 0..) |*marked, i| {
+            if (std.mem.eql(u8, marked.slice(), a.marked_anchor.slice())) {
+                _ = a.marked_messages.orderedRemove(i);
+                a.selected_message = index;
+                updateWindowTitle(a);
+                if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+                return;
+            }
+        }
+    }
+    for (@min(first, index)..@max(first, index) + 1) |i| {
+        if (!messageMarked(a, a.messages[i].id.slice())) a.marked_messages.append(a.allocator, a.messages[i].id) catch return;
+    }
+    if (a.marked_anchor.len == 0) a.marked_anchor = a.messages[index].id;
+    a.selected_message = index;
+    a.text_selection = .{};
+    updateWindowTitle(a);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+}
+
+fn setTranscriptCopyNotice(a: *App, text: []const u8) void {
+    a.transcript_copy_notice.set(text);
+    setStatus(a, text);
+    updateWindowTitle(a);
+}
+
+fn copyMarkedTranscripts(a: *App) void {
+    var selected: std.ArrayList(usize) = .empty;
+    defer selected.deinit(a.allocator);
+    for (a.messages[0..a.message_count], 0..) |*message, index| {
+        if (isAudio(message) and messageMarked(a, message.id.slice())) selected.append(a.allocator, index) catch {
+            setTranscriptCopyNotice(a, "Could not copy transcripts");
+            return;
+        };
+    }
+    std.mem.sort(usize, selected.items, a, struct {
+        fn lessThan(app: *App, left: usize, right: usize) bool {
+            const order = std.mem.order(u8, app.messages[left].timestamp.slice(), app.messages[right].timestamp.slice());
+            return if (order == .eq) left < right else order == .lt;
+        }
+    }.lessThan);
+    var combined: std.ArrayList(u16) = .empty;
+    defer combined.deinit(a.allocator);
+    var missing: std.ArrayList(u8) = .empty;
+    defer missing.deinit(a.allocator);
+    var copied: usize = 0;
+    for (selected.items) |index| {
+        const message = &a.messages[index];
+        const raw: ?[]u8 = raw: {
+            if (message.local_path.len == 0) break :raw null;
+            const path = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.local_path.slice()) catch break :raw null;
+            defer a.allocator.free(path);
+            const cache = std.fmt.allocPrint(a.allocator, "{s}.txt", .{path}) catch break :raw null;
+            defer a.allocator.free(cache);
+            break :raw readFileWin(a.allocator, cache, format_cache.max_bytes);
+        };
+        defer if (raw) |text| a.allocator.free(text);
+        if (raw) |text| {
+            if (std.mem.trim(u8, text, " \r\n\t").len > 0 and std.unicode.utf8ValidateSlice(text)) {
+                const wide = std.unicode.utf8ToUtf16LeAlloc(a.allocator, text) catch {
+                    setTranscriptCopyNotice(a, "Could not copy transcripts");
+                    return;
+                };
+                defer a.allocator.free(wide);
+                if (copied > 0) combined.appendSlice(a.allocator, &.{ '\r', '\n', '\r', '\n' }) catch {
+                    setTranscriptCopyNotice(a, "Could not copy transcripts");
+                    return;
+                };
+                combined.appendSlice(a.allocator, wide) catch {
+                    setTranscriptCopyNotice(a, "Could not copy transcripts");
+                    return;
+                };
+                copied += 1;
+                continue;
+            }
+        }
+        if (missing.items.len > 0) missing.appendSlice(a.allocator, ", ") catch return;
+        var time: [64]u8 = undefined;
+        const len = std.unicode.utf16LeToUtf8(&time, message.time.slice()) catch 0;
+        missing.appendSlice(a.allocator, if (len > 0) time[0..len] else message.id.slice()) catch return;
+    }
+    if (copied > 0 and !copyRawToClipboard(a, combined.items)) {
+        setTranscriptCopyNotice(a, "Could not copy transcripts");
+        return;
+    }
+    var buffer: [512]u8 = undefined;
+    const notice = if (missing.items.len > 0)
+        std.fmt.bufPrint(&buffer, "Copied {d} transcripts. Missing: {s}", .{ copied, missing.items }) catch "Some marked voice messages have no raw transcript"
+    else
+        std.fmt.bufPrint(&buffer, "Copied {d} transcripts", .{copied}) catch "Transcripts copied";
+    setTranscriptCopyNotice(a, notice);
 }
 
 fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
@@ -11951,6 +12099,8 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             .{ .name = "toggle", .rect = message.toggle_hit },
         }) |entry| try w.print(",\"{s}\":[{d},{d},{d},{d}]", .{ entry.name, entry.rect.left, entry.rect.top, entry.rect.right, entry.rect.bottom });
         if (verification_fixture) {
+            try w.print(",\"marked\":{},\"local_path\":", .{messageMarked(a, message.id.slice())});
+            try control_api.writeStringUtf16(w, message.local_path.slice());
             var logical = std.mem.zeroes(win.LOGFONTW);
             if (a.font) |font| _ = win.GetObjectW(font, @sizeOf(win.LOGFONTW), &logical);
             try w.print(",\"body_weight\":{d},\"font_height\":{d},\"words\":[", .{ logical.lfWeight, logical.lfHeight });
@@ -12096,6 +12246,7 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Copy message text", "Ctrl+C", command_copy_text);
     appendPalette(a, "Copy message link", "", command_copy_link);
     appendPalette(a, "Copy transcript", "", command_copy_transcript);
+    if (markedMessageCount(a, true) > 0) appendPalette(a, "Copy all transcripts", "", command_copy_all_transcripts);
     appendPalette(a, "Play or pause voice message", "Ctrl+P", command_play_audio);
     appendPalette(a, "Show or hide transcript", "Ctrl+T", command_toggle_transcript);
     appendPalette(a, "Select next message", "Alt+J", command_next_message);
@@ -13269,6 +13420,7 @@ fn runCommand(a: *App, command: u16) void {
         },
         command_react_menu => openReactionPicker(a),
         command_copy_text => copySelectedText(a),
+        command_copy_all_transcripts => copyMarkedTranscripts(a),
         command_copy_link => copySelectedLink(a),
         command_play_audio => playSelectedAudio(a),
         command_toggle_transcript => toggleSelectedTranscript(a),
@@ -14772,7 +14924,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             _ = text_draw.drawText(hdc, last_time.ptr(), @intCast(last_time.len), &line_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
         }
-        const selected = if (a.selected_message) |selected_index| selected_index == index else false;
+        const selected = messageMarked(a, message.id.slice()) or if (a.selected_message) |selected_index| selected_index == index else false;
         smooth.fillRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), if (message.from_me) theme.current.primary_container else theme.current.surface_container_high);
         if (selected) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), theme.current.primary, px(a, 2));
 
@@ -15091,6 +15243,19 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                     }
                 }
             }
+            const control = win.GetKeyState(win.VK_CONTROL) < 0;
+            const shift = win.GetKeyState(win.VK_SHIFT) < 0;
+            if (control or shift) {
+                for (a.messages[0..a.message_count], 0..) |*item, index| {
+                    if (item.bubble_hit.right > item.bubble_hit.left and rectHasPoint(item.bubble_hit, x, y)) {
+                        markMessage(a, index, shift, control);
+                        a.marking_message = true;
+                        _ = win.SetFocus(hwnd);
+                        return 0;
+                    }
+                }
+            }
+            _ = clearMessageMarks(a);
             for (a.messages[0..a.message_count]) |*item| {
                 const chip = item.reaction_hit;
                 if (chip.right > chip.left and rectHasPoint(chip, x, y)) {
@@ -15131,6 +15296,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         win.WM_LBUTTONDBLCLK => {
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+            if (win.GetKeyState(win.VK_CONTROL) < 0 or win.GetKeyState(win.VK_SHIFT) < 0) return canvasProc(hwnd, win.WM_LBUTTONDOWN, wparam, lparam);
             if (handleCanvasDoubleClick(a, x, y)) {
                 a.canvas_double_click_handled = true;
                 a.click_moved = true;
@@ -15167,6 +15333,10 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             if (a.sb_drag == .canvas) {
                 _ = win.ReleaseCapture();
                 a.sb_drag = .none;
+                return 0;
+            }
+            if (a.marking_message) {
+                a.marking_message = false;
                 return 0;
             }
             if (a.canvas_double_click_handled) {
@@ -16483,6 +16653,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             }
         }
     }
+    if (key == win.VK_ESCAPE and clearMessageMarks(a)) return true;
     if (key == win.VK_ESCAPE and clearBulkSelection(a)) {
         setStatus(a, "Selection cleared");
         return true;
@@ -17258,6 +17429,7 @@ pub fn main(init: std.process.Init) !void {
     app.pending_archives = try app.allocator.alloc(PendingArchive, max_pending_archives);
     defer app.allocator.free(app.pending_archives);
     defer app.bulk.deinit(app.allocator);
+    defer app.marked_messages.deinit(app.allocator);
     defer {
         persistDrafts(app);
         app.draft_store.deinit(app.allocator);

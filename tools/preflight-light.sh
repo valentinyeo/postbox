@@ -25,6 +25,7 @@ PYTHON_LIGHT_TESTS=(
     test_slack_sort
     test_slack_threads
     test_tdlib_release
+    test_transcript_copy
     test_update_cards
     test_verify_journeys
     test_workspace_names
