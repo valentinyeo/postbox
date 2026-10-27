@@ -45,6 +45,7 @@ const WacliResult = struct {
     extra: Utf8Text(63) = .{},
     started_ms: u64 = 0,
     ok: bool = true,
+    http_status: u32 = 0,
     data: []const u8 = "{\"data\":{\"messages\":[]}}",
 };
 const App = struct {
@@ -60,6 +61,7 @@ const App = struct {
     persisted_tag: Utf8Text(32) = .{},
     log_count: usize = 0,
     problem_count: usize = 0,
+    update_offer_visible: bool = false,
     update_card_error: [96]u8 = undefined,
     update_card_error_len: usize = 0,
     update_card_error_source: enum { update, general, message_read } = .update,
@@ -151,6 +153,9 @@ fn showProblem(a: *App, text: []const u8) void {
     a.update_card_error_len = n;
 }
 fn updateCardRefresh(_: *App) void {}
+fn updateCardVisible(a: *const App) bool {
+    return a.update_offer_visible or a.update_card_error_len > 0;
+}
 fn appendLaunchLog(a: *App, line: []const u8) void {
     a.log_count += 1;
     a.last_log.set(line);
@@ -711,7 +716,6 @@ test "unchanged empty history does not repaint and accepts the latest chat times
     try std.testing.expectEqualStrings(a.chats[0].timestamp.slice(), a.displayed_timestamp.slice());
 }
 
-
 test "IGSH-1080 transient read failure retries without an update error" {
     var a = fixture();
     refreshMessages(&a);
@@ -767,4 +771,27 @@ test "IGSH-1080 stale failed reply never raises a problem for the current chat" 
     deliver(&a, &stale);
     try std.testing.expectEqual(@as(usize, 0), a.problem_count);
     try std.testing.expectEqual(@as(u32, 0), a.msg_read_attempts);
+}
+
+test "IGSH-1080 read failures never replace a real update error or offer" {
+    for ([_]bool{ false, true }) |offer| {
+        var a = fixture();
+        a.update_offer_visible = offer;
+        if (!offer) {
+            a.update_card_error_len = 7;
+            @memcpy(a.update_card_error[0..7], "install");
+        }
+        refreshMessages(&a);
+        for (0..3) |index| {
+            var result = resultFor(a.last_job);
+            result.ok = false;
+            deliver(&a, &result);
+            if (index < 2) {
+                while (a.msg_read_retry_ticks > 0) tick(&a);
+            }
+        }
+        try std.testing.expectEqual(@as(usize, 0), a.problem_count);
+        try std.testing.expect(a.update_card_error_source == .update);
+        if (!offer) try std.testing.expectEqualStrings("install", a.update_card_error[0..a.update_card_error_len]);
+    }
 }
