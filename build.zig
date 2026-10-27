@@ -302,6 +302,22 @@ pub fn build(b: *std.Build) void {
         const run_tests = b.addRunArtifact(tests);
         test_step.dependOn(&run_tests.step);
     }
+    const transcript_copy_source = std.mem.concat(b.allocator, u8, &.{
+        @embedFile("src/transcript_copy_test.zig"),
+        sourceSection("fn WideText(", "const Chat = struct"),
+        sourceSection("fn isAudio(", "fn ensureAudioPlayer("),
+        sourceSection("fn messageMarked(", "fn handleCanvasClick("),
+        sourceSection("fn saveTranscriptCache(", "fn ensureTranscribeSession("),
+    }) catch @panic("Out of memory building transcript copy harness");
+    const transcript_copy_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.addWriteFiles().add("transcript_copy_test.zig", transcript_copy_source),
+        .target = b.resolveTargetQuery(.{}),
+        .imports = &.{
+            .{ .name = "chat_key", .module = b.createModule(.{ .root_source_file = b.path("src/chat_key.zig"), .target = b.resolveTargetQuery(.{}) }) },
+            .{ .name = "format_cache", .module = b.createModule(.{ .root_source_file = b.path("src/format_cache.zig"), .target = b.resolveTargetQuery(.{}) }) },
+        },
+    }) });
+    test_step.dependOn(&b.addRunArtifact(transcript_copy_tests).step);
     const message_menu_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/message_menu_test.zig"),
         sourceSection("fn appendMessageMenuItem(", "fn openUrlWide("),
