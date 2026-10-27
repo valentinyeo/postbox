@@ -562,6 +562,7 @@ class AttachmentPickerTests(unittest.TestCase):
         if not shutil.which('pwsh'):
             self.skipTest('PowerShell runtime is exercised by GitHub CI')
         fixture = r"""
+$ErrorActionPreference = 'Stop'
 Add-Type @'
 using System;
 namespace Windows.Automation {
@@ -614,7 +615,7 @@ function Get-Window($Session) {
 """
         assertions = r"""
 $found = Get-AttachmentPicker @{ pid = 42 }
-if ($found.ToInt64() -ne 3) { throw 'Did not select the owned dialog in the application tree' }
+if ($null -eq $found -or $found.ToInt64() -ne 3) { throw 'Did not select the owned dialog in the application tree' }
 $missing = Get-AttachmentPicker @{ pid = 43 }
 if ($null -ne $missing) { throw 'Accepted a dialog from another process' }
 if ($missing) { throw 'Missing dialog prematurely completed the wait' }
@@ -623,6 +624,17 @@ $zero = Get-AttachmentPicker @{ pid = 42 }
 if ($null -ne $zero) { throw 'Zero handle prematurely completed the wait' }
 Write-Output 'OWNED_PICKER_OK'
 """
+        desktop_child_lookup = r"""
+function Get-AttachmentPicker($Session) {
+    $dialog = [VerifyWindow]::FindWindowEx([IntPtr]::Zero, [IntPtr]::Zero, '#32770', $null)
+    if ($dialog -ne [IntPtr]::Zero) { return $dialog }
+    return $null
+}
+"""
+        broken = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', fixture + desktop_child_lookup + assertions], capture_output=True, text=True)
+        self.assertNotEqual(broken.returncode, 0, broken.stdout + broken.stderr)
+        self.assertIn('Did not select the owned dialog', broken.stderr)
+        self.assertNotIn('OWNED_PICKER_OK', broken.stdout)
         result = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', fixture + helper.group() + assertions], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('OWNED_PICKER_OK', result.stdout)
