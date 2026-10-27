@@ -476,7 +476,7 @@ fn formatWorker(self: *TextSession, text: []u8, api_key: []u8, model: []u8, work
     self.state_value.store(@intFromEnum(State.ready), .release);
 }
 
-fn formatTranscript(allocator: std.mem.Allocator, transcript: []const u8, api_key: []const u8, model: []const u8, workspace: []const u8, speaker: []const u8) ![]u8 {
+pub fn formatTranscript(allocator: std.mem.Allocator, transcript: []const u8, api_key: []const u8, model: []const u8, workspace: []const u8, speaker: []const u8) ![]u8 {
     const system_prompt =
         \\You format raw voice-message transcripts for a reader with ADHD.
         \\
@@ -488,18 +488,18 @@ fn formatTranscript(allocator: std.mem.Allocator, transcript: []const u8, api_ke
         \\
         \\OUTPUT, in this order:
         \\
-        \\1. Start directly with 3 to 5 numbered lines, in the SAME language as the transcript (German transcript: German summary, English transcript: English summary; if it mixes both, use the language of most of the words), summarizing what the speaker actually said. This is the only part you write yourself. One line per topic. Concrete, not vague: "trigger shot at 2am, next step Monday" not "she talks about medical stuff." Do not write any headline or title before or above them.
+        \\1. Start directly with 3 to 5 numbered lines, in the SAME language as the transcript (German transcript: German summary, English transcript: English summary; if it mixes both, use the language of most of the words), summarizing what the speaker actually said. Together with the headers and cutoff note, these are the only words you write yourself. One line per topic. Concrete, not vague: "trigger shot at 2am, next step Monday" not "she talks about medical stuff." Do not write any headline or title before or above them.
         \\
         \\2. A horizontal rule.
         \\
         \\3. The full transcript, segmented:
-        \\- Split the transcript into 3 to 6 topic sections. Give each a short header: a number plus 2 to 4 words naming the topic.
+        \\- Split the transcript into 3 to 6 topic sections. Give each a short header: a number plus 2 to 4 words naming the topic, in the SAME dominant language as the summary.
         \\- Under each header, break the text into bullet points. One bullet per clause or thought unit - roughly where the speaker would breathe.
         \\- Break at natural boundaries: after a completed thought, before "aber", "und dann", "also", "weil", "so", "but", "and then", etc.
         \\- Do NOT bullet every few words. A bullet is a unit of meaning, usually 5 to 25 words.
         \\- Keep punctuation exactly as in the input. Do not add periods to make bullets look finished.
         \\
-        \\4. If the transcript is cut off or incomplete, one final line stating that plainly.
+        \\4. If the transcript is cut off or incomplete, one final line stating that plainly, in the SAME dominant language as the summary and headers.
         \\
         \\PLAIN TEXT ONLY: no markdown. No **bold**, no *italics*, no # headings. The app shows asterisks and hashes literally.
         \\

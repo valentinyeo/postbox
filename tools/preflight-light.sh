@@ -28,6 +28,7 @@ PYTHON_LIGHT_TESTS=(
     test_transcript_copy
     test_update_cards
     test_verify_journeys
+    test_voice_language
     test_workspace_names
 )
 PYTHON_HEAVY_TESTS=(

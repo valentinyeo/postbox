@@ -74,7 +74,7 @@ pub fn formatResponseText(allocator: std.mem.Allocator, anthropic: bool, respons
 
 pub const owner_name = "Valentin";
 
-pub const language_rule = " LANGUAGE: write the summary in the SAME language as the transcript (German transcript: German summary, English transcript: English summary). For a mix, use the language of most of the words. Never translate.";
+pub const language_rule = " LANGUAGE: decide the dominant language once from the transcript, using the language of most of the words. Use that SAME language for ALL generated text: every summary line, every topic header, and the final cutoff or incomplete-note line. German transcript: German summary, German headers, German cutoff note. English transcript: English summary, English headers, English cutoff note. A few spoken foreign phrases, such as Real Life or Energy inside a German sentence, do not change its language. Preserve every spoken word exactly, including foreign phrases; never translate the transcript. Do not default any generated field to English.";
 
 pub fn speakerInstruction(allocator: std.mem.Allocator, from_me: bool, contact: []const u8) ![]u8 {
     const other = if (contact.len > 0) contact else "the other person";
@@ -155,7 +155,7 @@ test "speaker instruction differs for own and received notes" {
 test "language rule is in the prompt and German and English transcripts pass unchanged" {
     const instruction = try speakerInstruction(std.testing.allocator, false, "Jenny Hirtz");
     defer std.testing.allocator.free(instruction);
-    try std.testing.expect(std.mem.indexOf(u8, instruction, "SAME language as the transcript") != null);
+    try std.testing.expect(std.mem.indexOf(u8, instruction, "SAME language for ALL generated text") != null);
     const german = try formatRequestBody(std.testing.allocator, true, "m", instruction, "Hallo, ich komme morgen um zehn.");
     defer std.testing.allocator.free(german);
     try std.testing.expect(std.mem.indexOf(u8, german, "Hallo, ich komme morgen um zehn.") != null);
@@ -209,4 +209,24 @@ test "format response text reads both providers and rejects empty output" {
     try std.testing.expectEqualStrings("ok", o);
     try std.testing.expectError(error.BadResponse, formatResponseText(std.testing.allocator, true, "{\"content\":[{\"type\":\"text\",\"text\":\"  \"}]}"));
     try std.testing.expectError(error.BadResponse, formatResponseText(std.testing.allocator, true, "{\"choices\":[]}"));
+}
+
+test "all generated voice fields share one dominant language while spoken phrases pass unchanged" {
+    for ([_]bool{ true, false }) |own| {
+        const instruction = try speakerInstruction(std.testing.allocator, own, "Alex");
+        defer std.testing.allocator.free(instruction);
+        for ([_][]const u8{ "decide the dominant language once", "every summary line", "every topic header", "final cutoff", "Real Life", "Energy", "never translate the transcript" }) |field| {
+            try std.testing.expect(std.mem.indexOf(u8, instruction, field) != null);
+        }
+        for ([_]bool{ true, false }) |anthropic| {
+            const transcript = "Im Real Life fehlt mir heute die Energy. Morgen sprechen wir weiter.";
+            const body = try formatRequestBody(std.testing.allocator, anthropic, "model", instruction, transcript);
+            defer std.testing.allocator.free(body);
+            const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, body, .{});
+            defer parsed.deinit();
+            const messages = parsed.value.object.get("messages").?.array.items;
+            const content = messages[messages.len - 1].object.get("content").?.string;
+            try std.testing.expectEqualStrings("<transcript>\n" ++ transcript ++ "\n</transcript>", content);
+        }
+    }
 }
