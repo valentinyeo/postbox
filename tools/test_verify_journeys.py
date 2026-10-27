@@ -586,6 +586,7 @@ Write-Output 'OWNED_PICKER_OK'
         result = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', fixture + helper.group() + assertions], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('OWNED_PICKER_OK', result.stdout)
+        print('OWNED_PICKER_RUNTIME_OK')
 
 if __name__ == '__main__':
     unittest.main()
