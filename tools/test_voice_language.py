@@ -4,6 +4,7 @@ import importlib.util
 import json
 import re
 import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +63,45 @@ class VoiceLanguageTests(unittest.TestCase):
             mutate(broken)
             with self.assertRaises(AssertionError):
                 validator.check_results(broken, inputs, '1.2.3', detect)
+
+    def test_desktop_evidence_rejects_old_or_mismatched_output(self):
+        module_spec = importlib.util.spec_from_file_location('voice_ui', ROOT / 'tools/verify-wazig/check-voice-language-ui.py')
+        ui = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(ui)
+        inputs, results = self.evidence()
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            def write(name, value):
+                (folder / name).write_text(json.dumps(value))
+            write('session.json', dict(expected_version='1.2.3', sha256='candidate', commit='head'))
+            write('result.json', dict(feature='voice', status='passed'))
+            write('side-effects.json', dict(production_preferences_absent=True, whatsapp_store_absent=True,
+                                           telegram_store_absent=True, pending_sends=0, pending_archives=0))
+            (folder / 'cleanup.txt').write_text('CLEANUP PASSED: isolated process removed')
+            records = []
+            for language in ('de', 'en'):
+                source = next(row for row in results['cases'] if row['id'] == language + '-short')
+                text = source['formatted']
+                count = len(text.encode('utf-16-le')) // 2
+                records.append(dict(language=language, case=source['id'], formatted=text, chars=count,
+                                    screenshot=language + '.png', message='VOICE-5'))
+                rows = [dict(id=f'VOICE-{n}', media_type='audio', local=True, transcript_chars=count, bubble=[0, 0, 400, 500]) for n in range(1, 6)]
+                write(language + '.messages.json', dict(chat=dict(id='fixture-alpha'), messages=rows))
+                (folder / (language + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + language.encode() * 6000)
+            write('displayed-results.json', records)
+            self.assertEqual(ui.check_display(folder, results), 'VOICE_LANGUAGE_DESKTOP_VERIFIED')
+            for mutation in ('formatted', 'version', 'screenshot'):
+                changed = copy.deepcopy(records)
+                altered = copy.deepcopy(results)
+                if mutation == 'formatted':
+                    changed[0]['formatted'] = 'old mixed language summary'
+                elif mutation == 'version':
+                    altered['version'] = '0.0.1'
+                else:
+                    changed[0]['screenshot'] = 'en.png'
+                write('displayed-results.json', changed)
+                with self.subTest(mutation=mutation), self.assertRaises(AssertionError):
+                    ui.check_display(folder, altered)
 
     def test_all_generated_fields_share_one_language_contract(self):
         check_contract((ROOT / 'src/format_request.zig').read_text(),

@@ -56,6 +56,12 @@ jobs:
             if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release tag' }
             gh release download $tag --pattern "Postbox-$tag.zip" --dir candidate
             if ($LASTEXITCODE) { throw 'Release download failed' }
+            $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+            if ($LASTEXITCODE) { throw 'Published release metadata unavailable' }
+            $asset = @($release.assets | Where-Object name -CEQ "Postbox-$tag.zip")
+            if ($asset.Count -ne 1 -or $asset[0].digest -cne ('sha256:' + (Get-FileHash "candidate/Postbox-$tag.zip").Hash.ToLowerInvariant())) { throw 'Published package digest mismatch' }
+            New-Item language-evidence -ItemType Directory -Force | Out-Null
+            $release | ConvertTo-Json -Depth 20 | Set-Content language-evidence/published-package.json
             Expand-Archive "candidate/Postbox-$tag.zip" zig-out/bin
             "VOICE_LANGUAGE_VERSION=$($tag.Substring(1))" >> $env:GITHUB_ENV
           } else {
@@ -81,6 +87,14 @@ jobs:
         if: always()
         shell: pwsh
         run: Remove-Item HKCU:\Software\Messages -Recurse -Force -ErrorAction SilentlyContinue
+      - name: Display actual formatter output in isolated desktop voice bubbles
+        shell: pwsh
+        run: |
+          $env:VOICE_LANGUAGE_RESULTS = (Resolve-Path language-evidence/results.json).Path
+          & tools/verify-wazig/run.ps1 -Feature voice -ExpectedVersion $env:VOICE_LANGUAGE_VERSION -Evidence language-evidence/desktop
+          if ($LASTEXITCODE) { throw 'Desktop language capture failed' }
+          python tools/verify-wazig/check-voice-language-ui.py language-evidence/desktop
+          if ($LASTEXITCODE) { throw 'Desktop language evidence failed' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
