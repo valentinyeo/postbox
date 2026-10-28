@@ -274,6 +274,9 @@ class HubArchiveHandler(Handler):
                                      account='telegram' if jid == ARCHIVE_TELEGRAM else 'personal',
                                      kind='direct', last_message_ts=plain['after'] or ARCHIVE_STAMPS[jid],
                                      archived=plain['archived'], unread=False, unread_count=0))
+            for jid, item in getattr(self.state, 'notification_rows', {}).items():
+                rows.append(dict(jid=jid, name='Notification Business', provider='whatsapp', account='business', kind='direct',
+                                 last_message_ts=item['stamp'], archived=item['archived'], unread=item['incoming'], unread_count=int(item['incoming'])))
             rows = [row for row in rows if row['archived'] == (query.get('archived') == ['true'])]
             self.respond(200, rows, rows=rows,
                          group_archived=archived, group_last_message_ts=stamp, group_unread_count=1)
@@ -296,6 +299,10 @@ class HubArchiveHandler(Handler):
                         rows.insert(0, dict(MsgID='PLAIN-NEWER', ChatJID=chat, Timestamp=plain['after'],
                                             Text='Synthetic newer direct message', FromMe=False,
                                             SenderName='Fixture Contact Two', SenderJID=chat))
+            item = getattr(self.state, 'notification_rows', {}).get(chat)
+            if item:
+                rows = [dict(MsgID=item['id'], ChatJID=chat, Timestamp=item['stamp'], Text='New business message',
+                             FromMe=not item['incoming'], SenderName='Notification Business')]
             self.respond(200, rows)
         elif url.path == '/v1/wazig/groups':
             self.respond(200, [])
@@ -306,12 +313,53 @@ class HubArchiveHandler(Handler):
         else:
             self.respond(404, {'error': 'unknown archive fixture path'})
 
+    def events(self):
+        self.record(200)
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        last = int(self.headers.get('Last-Event-ID', '0'))
+        if last == 0:
+            self.event(1, 'reset', '')
+            last = 1
+        while True:
+            with self.state.lock:
+                events = list(getattr(self.state, 'notification_events', []))
+                if len(events) + 1 <= last:
+                    self.state.lock.wait(timeout=1)
+            for number, chat in enumerate(events, 2):
+                if number > last:
+                    self.event(number, 'msg', chat)
+                    last = number
+            self.wfile.write(b': heartbeat\n\n')
+            self.wfile.flush()
+
     def do_POST(self):
         self.wire_path = self.path
         if not self.authorized():
             return
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
-        if self.path == '/fixture/archive-incoming' and body == {}:
+        if self.path.startswith('/fixture/notification-'):
+            with self.state.lock:
+                rows = getattr(self.state, 'notification_rows', {})
+                events = getattr(self.state, 'notification_events', [])
+                if self.path == '/fixture/notification-baseline':
+                    for phase in ('archived', 'inbox'):
+                        rows[f'business:notification-{phase}@s.whatsapp.net'] = dict(
+                            archived=phase == 'archived', incoming=False, stamp=plain_stamp(-30), id='BASELINE-' + phase)
+                elif self.path == '/fixture/notification-clear':
+                    rows.clear()
+                else:
+                    phase = self.path.removeprefix('/fixture/notification-')
+                    chat = f'business:notification-{phase}@s.whatsapp.net'
+                    rows[chat].update(incoming=True, stamp=plain_stamp(0), id='NOTIFY-' + phase)
+                    events.append(chat)
+                self.state.notification_rows = rows
+                self.state.notification_events = events
+                self.state.lock.notify_all()
+            self.respond(200, {'ok': True}, body=body)
+        elif self.path == '/fixture/archive-incoming' and body == {}:
             with self.state.lock:
                 self.state.archive_stamp = '2026-10-10T13:00:00Z'
                 self.state.archive_overrides = getattr(self.state, 'archive_overrides', {})
@@ -360,7 +408,9 @@ class HubArchiveHandler(Handler):
         elif self.path == '/v1/wazig/archive' and set(body) == {'chat', 'archived'} and isinstance(body['archived'], bool):
             chat = body['chat']
             with self.state.lock:
-                if chat in (ARCHIVE_GROUP, ARCHIVE_OTHER):
+                if chat in getattr(self.state, 'notification_rows', {}):
+                    self.state.notification_rows[chat]['archived'] = body['archived']
+                elif chat in (ARCHIVE_GROUP, ARCHIVE_OTHER):
                     self.state.archive_overrides = getattr(self.state, 'archive_overrides', {})
                     self.state.archive_overrides[chat] = body['archived']
                 elif chat in (PLAIN_REACTED, PLAIN_NEWER) and chat in self.state.plain_dms:
@@ -369,7 +419,7 @@ class HubArchiveHandler(Handler):
                     self.respond(400, {'error': 'unexpected archive fixture write'}, body=body)
                     return
             self.respond(200, {'status': 'ok'}, body=body)
-        elif self.path == '/v1/wazig/mark-read' and body.get('chat') in (ARCHIVE_GROUP, ARCHIVE_OTHER, PLAIN_REACTED, PLAIN_NEWER, ARCHIVE_TELEGRAM):
+        elif self.path == '/v1/wazig/mark-read' and (body.get('chat') in (ARCHIVE_GROUP, ARCHIVE_OTHER, PLAIN_REACTED, PLAIN_NEWER, ARCHIVE_TELEGRAM) or body.get('chat') in getattr(self.state, 'notification_rows', {})):
             self.respond(200, {'status': 'ok'}, body=body)
         else:
             self.respond(400, {'error': 'unexpected archive fixture write'}, body=body)

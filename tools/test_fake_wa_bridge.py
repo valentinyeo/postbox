@@ -144,6 +144,24 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
     def jids(self, archived):
         return [row['jid'] for row in self.request('GET', '/v1/wazig/chats?archived=' + archived)]
 
+    def test_business_notification_fixture_keeps_archive_until_client_acknowledges(self):
+        self.request('POST', '/fixture/notification-baseline', {})
+        archived = 'business:notification-archived@s.whatsapp.net'
+        self.assertIn(archived, self.jids('true'))
+        self.request('POST', '/fixture/notification-archived', {})
+        self.assertIn(archived, self.jids('true'))
+        messages = self.request('GET', '/v1/wazig/messages?chat=' + quote(archived))
+        self.assertEqual(messages[0]['MsgID'], 'NOTIFY-archived')
+        self.assertFalse(messages[0]['FromMe'])
+        self.request('POST', '/v1/wazig/archive', dict(chat=archived, archived=False))
+        self.assertNotIn(archived, self.jids('true'))
+        self.assertIn(archived, self.jids('false'))
+        self.request('POST', '/fixture/notification-inbox', {})
+        messages = self.request('GET', '/v1/wazig/messages?chat=business:notification-inbox@s.whatsapp.net')
+        self.assertEqual(messages[0]['MsgID'], 'NOTIFY-inbox')
+        self.request('POST', '/fixture/notification-clear', {})
+        self.assertNotIn(archived, self.jids('false'))
+
     def test_group_stays_in_inbox_for_the_hub_and_only_moves_its_row_time_on_incoming(self):
         self.assertIn(self.group, self.jids('false'))
         self.assertNotIn(self.group, self.jids('true'))

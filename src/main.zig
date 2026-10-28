@@ -48,6 +48,7 @@ const reaction_chip = @import("reaction_chip.zig");
 const passage = @import("passage.zig");
 const sidebar_nav = @import("sidebar_nav.zig");
 const archive_rules = @import("archive_rules.zig");
+const message_notifications = @import("message_notifications.zig");
 const message_filter = @import("message_filter.zig");
 const voice_sent = @import("voice_sent.zig");
 const chat_key = @import("chat_key.zig");
@@ -114,6 +115,7 @@ const command_telegram_logout = 2026;
 const wm_update_ready = win.WM_APP + 2;
 const wm_wacli_done = win.WM_APP + 3;
 const wm_hub_event = win.WM_APP + 42;
+const wm_notification = win.WM_APP + 43;
 const wm_slack_event = win.WM_APP + 4;
 const wm_slack_reload = win.WM_APP + 5;
 const wm_unfurl_done = win.WM_APP + 6;
@@ -531,6 +533,7 @@ const WacliJob = struct {
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
+    notification: ?message_notifications.Probe = null,
     started_ms: u64 = 0,
     client_id: Utf8Text(128) = .{},
     arg_count: usize = 0,
@@ -546,6 +549,7 @@ const WacliResult = struct {
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
+    notification: ?message_notifications.Probe = null,
     started_ms: u64 = 0,
     http_status: u32 = 0,
     slack_error: Utf8Text(63) = .{},
@@ -1042,6 +1046,9 @@ const App = struct {
     chats_read_retry_ticks: u32 = 0,
     chats_read_attempts: u32 = 0,
     startup_probe_pending: bool = false,
+    notifications: message_notifications.State = .{},
+    notification_icon: bool = false,
+    notification_message: Utf8Text(191) = .{},
     startup_logged: u8 = 0,
 };
 
@@ -2115,7 +2122,7 @@ fn wacliRunJob(a: *App, job: WacliJob) void {
         wacliPendingSub(a, job.kind);
         return;
     };
-    result.* = .{ .kind = job.kind, .provider = job.provider, .account = job.account, .gen = job.gen, .jid = job.jid, .msg_id = job.msg_id, .extra = job.extra, .started_ms = job.started_ms };
+    result.* = .{ .kind = job.kind, .provider = job.provider, .account = job.account, .gen = job.gen, .jid = job.jid, .msg_id = job.msg_id, .extra = job.extra, .notification = job.notification, .started_ms = job.started_ms };
     if (hubConfigured(a) and (unifiedHub(a) or job.provider == .whatsapp)) {
         runHubJob(a, job, result);
     } else {
@@ -2363,6 +2370,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         migrateWhatsAppArchives(a);
     }
     if (fresh) observeBackgroundMediaChats(a, data.items);
+    if (fresh) observeNotificationChats(a, data.items);
     if (!a.pins_loaded) {
         if (loadPins(a)) {
             a.pins_loaded = true;
@@ -2642,6 +2650,82 @@ fn persistReadState(a: *App) void {
     const data = a.read_state.encode(a.allocator) catch return;
     defer a.allocator.free(data);
     if (writeCacheFileAtomic(a, path, data)) a.read_state.dirty = false;
+}
+
+fn observeNotificationChats(a: *App, rows: []const std.json.Value) void {
+    if (a.startup_probe_pending) return;
+    for (rows) |row| {
+        if (row != .object) continue;
+        const object = row.object;
+        const provider = if (unifiedHub(a)) hub.sourceProvider(object) orelse continue else .whatsapp;
+        if (provider != .whatsapp) continue;
+        const key = chat_key.Key{ .provider = provider, .account = if (unifiedHub(a)) hub.sourceAccount(object, a.cache_tag.slice()) else a.cache_tag.slice(), .id = getString(object, "jid") };
+        const stamp = getString(object, "last_message_ts");
+        const timestamp = media_age.unixSeconds(stamp) orelse continue;
+        const previous = a.notifications.previous(key);
+        if (previous != null and timestamp > previous.?) {
+            var probe = message_notifications.Probe{ .after = previous.?, .archived = getBool(object, "archived") };
+            const name = getString(object, "name");
+            probe.name_len = @min(name.len, probe.name.len);
+            @memcpy(probe.name[0..probe.name_len], name[0..probe.name_len]);
+            var job = WacliJob{ .kind = .unread_probe, .notification = probe };
+            job.provider = provider;
+            job.account.set(key.account);
+            job.jid.set(key.id);
+            job.extra.set(stamp);
+            job.msg_id = a.cache_tag;
+            wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "messages", "list", "--chat", key.id, "--from-them", "--limit", "20" });
+            if (!wacliEnqueue(a, job, false)) continue;
+        }
+        a.notifications.record(a.allocator, key, timestamp);
+    }
+    if (a.notifications.baseline == null) a.notifications.baseline = nowUnixSeconds();
+}
+
+fn notificationIcon(a: *const App) win.NOTIFYICONDATAW {
+    var data = std.mem.zeroes(win.NOTIFYICONDATAW);
+    data.cbSize = @sizeOf(win.NOTIFYICONDATAW);
+    data.hWnd = a.hwnd;
+    data.uID = 1;
+    return data;
+}
+
+fn applyMessageNotification(a: *App, result: *const WacliResult, probe: message_notifications.Probe) void {
+    var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, result.data, .{}) catch return;
+    defer parsed.deinit();
+    if (parsed.value != .object) return;
+    const data = parsed.value.object.get("data") orelse return;
+    if (data != .object) return;
+    const messages = data.object.get("messages") orelse return;
+    if (messages != .array) return;
+    const message = message_notifications.incoming(messages.array.items, probe.after) orelse return;
+    if (probe.archived and !isKeptArchived(a, result.jid.slice())) queueUnarchiveChat(a, result.jid.slice(), .incoming);
+    var icon = notificationIcon(a);
+    if (!a.notification_icon) {
+        icon.uFlags = win.NIF_MESSAGE | win.NIF_ICON | win.NIF_TIP;
+        icon.uCallbackMessage = wm_notification;
+        icon.hIcon = win.LoadIconW(null, win.IDI_APPLICATION);
+        const tip = std.mem.span(lit("Postbox"));
+        @memcpy(icon.szTip[0..tip.len], tip);
+        if (win.Shell_NotifyIconW(win.NIM_ADD, &icon) == 0) {
+            appendLaunchLog(a, "notification: icon registration failed");
+            return;
+        }
+        a.notification_icon = true;
+    }
+    icon.uFlags = win.NIF_INFO;
+    icon.dwInfoFlags = win.NIIF_INFO;
+    var title = WideText(63){};
+    title.set(a.allocator, probe.name[0..probe.name_len]);
+    @memcpy(icon.szInfoTitle[0..title.len], title.slice());
+    var body = WideText(255){};
+    const text = getString(message, "Text");
+    body.set(a.allocator, if (text.len > 0) text else "New WhatsApp message");
+    @memcpy(icon.szInfo[0..body.len], body.slice());
+    a.notification_message.set(getString(message, "MsgID"));
+    var buffer: [512]u8 = undefined;
+    const accepted = win.Shell_NotifyIconW(win.NIM_MODIFY, &icon) != 0;
+    appendLaunchLog(a, std.fmt.bufPrint(&buffer, "notification: {s} chat={s} message={s}", .{ if (accepted) @as([]const u8, "accepted") else "failed", result.jid.slice(), a.notification_message.slice() }) catch return);
 }
 
 fn queueUnreadProbe(a: *App, chat: *const Chat) void {
@@ -15585,6 +15669,13 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             return 0;
         },
+        wm_notification => {
+            if (lparam == win.NIN_BALLOONSHOW) {
+                var buffer: [256]u8 = undefined;
+                appendLaunchLog(a, std.fmt.bufPrint(&buffer, "notification: shown message={s}", .{a.notification_message.slice()}) catch return 0);
+            }
+            return 0;
+        },
         wm_hub_event => {
             a.hub_event_pending.store(false, .release);
             const reset = a.hub_reset_pending.swap(false, .acq_rel);
@@ -15719,7 +15810,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 .reaction => applyReaction(a, result),
                 .archived_scan => if (result.ok) applyArchivedScan(a, result.data),
                 .kept_check => if (result.ok) applyKeptCheck(a, result.data),
-                .unread_probe => applyUnreadProbe(a, result),
+                .unread_probe => {
+                    if (result.ok) if (result.notification) |probe| applyMessageNotification(a, result, probe);
+                    applyUnreadProbe(a, result);
+                },
                 .cache_tag => {
                     if (hubConfigured(a)) {
                         applyHubAccounts(a, result);
@@ -16314,6 +16408,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return 0;
         },
         win.WM_DESTROY => {
+            if (a.notification_icon) {
+                var icon = notificationIcon(a);
+                _ = win.Shell_NotifyIconW(win.NIM_DELETE, &icon);
+            }
+            a.notifications.deinit(a.allocator);
             a.hub_stop.store(true, .release);
             a.hub_cancel.stop();
             if (a.hub_thread) |thread| thread.join();
