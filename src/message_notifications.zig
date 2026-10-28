@@ -2,13 +2,6 @@ const std = @import("std");
 const chat_key = @import("chat_key.zig");
 const media_age = @import("media_age.zig");
 
-pub const Probe = struct {
-    after: i64,
-    archived: bool,
-    name: [256]u8 = @splat(0),
-    name_len: usize = 0,
-};
-
 pub const State = struct {
     timestamps: std.StringHashMapUnmanaged(i64) = .empty,
     baseline: ?i64 = null,

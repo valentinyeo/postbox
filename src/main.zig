@@ -524,6 +524,13 @@ const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 const WacliLane = enum { wacli, slack, hub_media };
 
 const WacliJob = struct {
+    pub const Notification = struct {
+        after: i64,
+        archived: bool,
+        name: [256]u8 = @splat(0),
+        name_len: usize = 0,
+    };
+
     provider: transport.Provider = .whatsapp,
     account: Utf8Text(32) = .{},
     kind: WacliJobKind = .chats,
@@ -533,7 +540,7 @@ const WacliJob = struct {
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
-    notification: ?message_notifications.Probe = null,
+    notification: ?WacliJob.Notification = null,
     started_ms: u64 = 0,
     client_id: Utf8Text(128) = .{},
     arg_count: usize = 0,
@@ -549,7 +556,7 @@ const WacliResult = struct {
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
-    notification: ?message_notifications.Probe = null,
+    notification: ?WacliJob.Notification = null,
     started_ms: u64 = 0,
     http_status: u32 = 0,
     slack_error: Utf8Text(63) = .{},
@@ -2664,7 +2671,7 @@ fn observeNotificationChats(a: *App, rows: []const std.json.Value) void {
         const timestamp = media_age.unixSeconds(stamp) orelse continue;
         const previous = a.notifications.previous(key);
         if (previous != null and timestamp > previous.?) {
-            var probe = message_notifications.Probe{ .after = previous.?, .archived = getBool(object, "archived") };
+            var probe = WacliJob.Notification{ .after = previous.?, .archived = getBool(object, "archived") };
             const name = getString(object, "name");
             probe.name_len = @min(name.len, probe.name.len);
             @memcpy(probe.name[0..probe.name_len], name[0..probe.name_len]);
@@ -2690,7 +2697,7 @@ fn notificationIcon(a: *const App) win.NOTIFYICONDATAW {
     return data;
 }
 
-fn applyMessageNotification(a: *App, result: *const WacliResult, probe: message_notifications.Probe) void {
+fn applyMessageNotification(a: *App, result: *const WacliResult, probe: WacliJob.Notification) void {
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, result.data, .{}) catch return;
     defer parsed.deinit();
     if (parsed.value != .object) return;

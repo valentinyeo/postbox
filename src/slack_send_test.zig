@@ -1,5 +1,4 @@
 const std = @import("std");
-const message_notifications = @import("message_notifications.zig");
 const chat_key = @import("chat_key");
 const transport = struct {
     const Provider = @FieldType(chat_key.Key, "provider");

@@ -33,7 +33,7 @@ const WacliJob = struct {
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
-    notification: ?@import("message_notifications.zig").Probe = null,
+    notification: ?void = null,
     started_ms: u64 = 0,
 };
 const WacliResult = struct {
@@ -44,7 +44,7 @@ const WacliResult = struct {
     jid: Utf8Text(191) = .{},
     msg_id: Utf8Text(191) = .{},
     extra: Utf8Text(63) = .{},
-    notification: ?@import("message_notifications.zig").Probe = null,
+    notification: ?void = null,
     started_ms: u64 = 0,
     ok: bool = true,
     http_status: u32 = 0,
