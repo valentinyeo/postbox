@@ -434,7 +434,11 @@ pub fn build(b: *std.Build) void {
         sourceSection("    if (selectedChatIsSlack(a)) {\n        for (a.slack_outbox", "    if (a.pending_send_count >= max_pending_sends)"),
         "return false; }\n",
     }) catch @panic("Out of memory building Slack send harness");
-    const slack_send_harness = b.addWriteFiles().add("slack_send_test.zig", slack_send_source);
+    const slack_send_files = b.addWriteFiles();
+    for ([_][]const u8{ "message_notifications.zig", "media_age.zig", "chat_key.zig", "transport.zig" }) |name| {
+        _ = slack_send_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
+    }
+    const slack_send_harness = slack_send_files.add("slack_send_test.zig", slack_send_source);
     const slack_send_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = slack_send_harness,
         .target = b.resolveTargetQuery(.{}),
@@ -616,7 +620,7 @@ pub fn build(b: *std.Build) void {
         "return attachment_state; }\n",
     }) catch @panic("Out of memory building media failure harness");
     const media_failure_files = b.addWriteFiles();
-    for ([_][]const u8{ "media_drain.zig", "media_age.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {
+    for ([_][]const u8{ "media_drain.zig", "media_age.zig", "message_notifications.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {
         _ = media_failure_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
     }
     const media_failure_harness = media_failure_files.add("media_failure_test.zig", media_failure_source);
@@ -640,7 +644,7 @@ pub fn build(b: *std.Build) void {
         "else => unreachable, } }\n",
     }) catch @panic("Out of memory building background media harness");
     const background_media_files = b.addWriteFiles();
-    for ([_][]const u8{ "media_drain.zig", "media_age.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {
+    for ([_][]const u8{ "media_drain.zig", "media_age.zig", "message_notifications.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {
         _ = background_media_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
     }
     const background_media_harness = background_media_files.add("background_media_test.zig", background_media_source);

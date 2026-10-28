@@ -2673,7 +2673,7 @@ fn observeNotificationChats(a: *App, rows: []const std.json.Value) void {
             job.account.set(key.account);
             job.jid.set(key.id);
             job.extra.set(stamp);
-            job.msg_id = a.cache_tag;
+            job.msg_id.set(a.cache_tag.slice());
             wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "messages", "list", "--chat", key.id, "--from-them", "--limit", "20" });
             if (!wacliEnqueue(a, job, false)) continue;
         }
@@ -2685,7 +2685,7 @@ fn observeNotificationChats(a: *App, rows: []const std.json.Value) void {
 fn notificationIcon(a: *const App) win.NOTIFYICONDATAW {
     var data = std.mem.zeroes(win.NOTIFYICONDATAW);
     data.cbSize = @sizeOf(win.NOTIFYICONDATAW);
-    data.hWnd = a.hwnd;
+    data.hWnd = a.hwnd orelse null;
     data.uID = 1;
     return data;
 }
@@ -2704,7 +2704,7 @@ fn applyMessageNotification(a: *App, result: *const WacliResult, probe: message_
     if (!a.notification_icon) {
         icon.uFlags = win.NIF_MESSAGE | win.NIF_ICON | win.NIF_TIP;
         icon.uCallbackMessage = wm_notification;
-        icon.hIcon = win.LoadIconW(null, win.IDI_APPLICATION);
+        icon.hIcon = LoadAppIcon(a.instance, 16, 16, win.LR_SHARED);
         const tip = std.mem.span(lit("Postbox"));
         @memcpy(icon.szTip[0..tip.len], tip);
         if (win.Shell_NotifyIconW(win.NIM_ADD, &icon) == 0) {
