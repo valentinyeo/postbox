@@ -123,8 +123,7 @@ function Invoke-TelegramJourney($Session, [string]$Messages) {
     New-Item (Join-Path $Session.root 'profile\Desktop') -ItemType Directory -Force | Out-Null
     Invoke-PaletteCommand $Session 'Attach photo or file'
     $picker = Wait-Until {
-        $foreground = [Windows.Automation.AutomationElement]::FromHandle([VerifyWindow]::GetForegroundWindow())
-        if ($foreground.Current.ProcessId -eq $Session.pid -and $foreground.Current.ClassName -eq '#32770') { return [IntPtr]$foreground.Current.NativeWindowHandle }
+        Get-AttachmentPicker $Session
     } 'owned attachment picker'
     $controls = Wait-Until {
         $combo = [VerifyWindow]::GetDlgItem($picker, 1148)

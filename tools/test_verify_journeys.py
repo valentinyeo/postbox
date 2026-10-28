@@ -547,5 +547,98 @@ class ChatListAlignmentTests(unittest.TestCase):
                 check(broken)
 
 
+
+class AttachmentPickerTests(unittest.TestCase):
+    def test_owned_attachment_picker_ignores_unavailable_global_focus(self):
+        source = (ROOT / 'tools/verify-wazig/harness.ps1').read_text()
+        helper = re.search(r'function Get-AttachmentPicker\(\$Session\) \{[\s\S]*?\n\}', source)
+        self.assertIsNotNone(helper, 'Attachment selection must use process-owned native dialogs')
+        for feature in ('telegram', 'signal'):
+            journey = (ROOT / f'tools/verify-wazig/{feature}.ps1').read_text()
+            self.assertRegex(journey, r"\$picker = Wait-Until \{\s+Get-AttachmentPicker \$Session\s+\} 'owned attachment picker'")
+            self.assertNotIn('AutomationElement]::FromHandle([VerifyWindow]::GetForegroundWindow())', journey)
+            for required in ('Attachment WM_SETTEXT failed', 'Attachment filename was not set', 'Attachment BM_CLICK timed out'):
+                self.assertIn(required, journey)
+        if not shutil.which('pwsh'):
+            self.skipTest('PowerShell runtime is exercised by GitHub CI')
+        fixture = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type @'
+using System;
+namespace Windows.Automation {
+    public enum TreeScope { Children, Descendants }
+    public class AutomationElement {
+        public static string ProcessIdProperty = "process";
+        public static string ClassNameProperty = "class";
+    }
+    public class PropertyCondition {
+        public string Property;
+        public object Value;
+        public PropertyCondition(string property, object value) { Property = property; Value = value; }
+    }
+    public class AndCondition {
+        public PropertyCondition[] Rules;
+        public AndCondition(PropertyCondition first, PropertyCondition second) { Rules = new[] { first, second }; }
+    }
+}
+public class VerifyWindow {
+    public static IntPtr GetForegroundWindow() { throw new InvalidOperationException("Global focus is unavailable"); }
+    public static IntPtr FindWindowEx(IntPtr parent, IntPtr after, string name, string title) { return IntPtr.Zero; }
+}
+public class FixtureElement {
+    public FixtureElement Current { get { return this; } }
+    public int ProcessId;
+    public string ClassName;
+    public int NativeWindowHandle;
+    public FixtureElement(int pid, string name, int handle) { ProcessId = pid; ClassName = name; NativeWindowHandle = handle; }
+}
+public class FixtureRoot {
+    public static bool ZeroHandle;
+    public FixtureElement FindFirst(Windows.Automation.TreeScope scope, Windows.Automation.AndCondition condition) {
+        if (scope != Windows.Automation.TreeScope.Descendants) throw new InvalidOperationException("Dialog belongs beneath the verified app");
+        foreach (var item in new[] { new FixtureElement(99, "#32770", 1), new FixtureElement(42, "OtherWindow", 2), new FixtureElement(42, "#32770", ZeroHandle ? 0 : 3) }) {
+            bool matches = true;
+            foreach (var rule in condition.Rules) {
+                object value = rule.Property == "process" ? (object)item.ProcessId : item.ClassName;
+                if (!Object.Equals(rule.Value, value)) matches = false;
+            }
+            if (matches) return item;
+        }
+        return null;
+    }
+}
+'@
+function Get-Window($Session) {
+    if ($null -eq $Session) { throw 'Missing verified session' }
+    return [FixtureRoot]::new()
+}
+"""
+        assertions = r"""
+$found = Get-AttachmentPicker @{ pid = 42 }
+if ($null -eq $found -or $found.ToInt64() -ne 3) { throw 'Did not select the owned dialog in the application tree' }
+$missing = Get-AttachmentPicker @{ pid = 43 }
+if ($null -ne $missing) { throw 'Accepted a dialog from another process' }
+if ($missing) { throw 'Missing dialog prematurely completed the wait' }
+[FixtureRoot]::ZeroHandle = $true
+$zero = Get-AttachmentPicker @{ pid = 42 }
+if ($null -ne $zero) { throw 'Zero handle prematurely completed the wait' }
+Write-Output 'OWNED_PICKER_OK'
+"""
+        desktop_child_lookup = r"""
+function Get-AttachmentPicker($Session) {
+    $dialog = [VerifyWindow]::FindWindowEx([IntPtr]::Zero, [IntPtr]::Zero, '#32770', $null)
+    if ($dialog -ne [IntPtr]::Zero) { return $dialog }
+    return $null
+}
+"""
+        broken = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', fixture + desktop_child_lookup + assertions], capture_output=True, text=True)
+        self.assertNotEqual(broken.returncode, 0, broken.stdout + broken.stderr)
+        self.assertIn('Did not select the owned dialog', broken.stderr)
+        self.assertNotIn('OWNED_PICKER_OK', broken.stdout)
+        result = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', fixture + helper.group() + assertions], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('OWNED_PICKER_OK', result.stdout)
+        print('OWNED_PICKER_RUNTIME_OK')
+
 if __name__ == '__main__':
     unittest.main()

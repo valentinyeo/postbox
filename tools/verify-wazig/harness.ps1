@@ -29,6 +29,16 @@ public static class VerifyWindow {
 }
 '@
 
+function Get-AttachmentPicker($Session) {
+    $condition = [Windows.Automation.AndCondition]::new(
+        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$Session.pid),
+        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, '#32770')
+    )
+    $dialog = (Get-Window $Session).FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+    if ($null -ne $dialog -and $dialog.Current.NativeWindowHandle -ne 0) { return [IntPtr]$dialog.Current.NativeWindowHandle }
+    return $null
+}
+
 function Assert-That($Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
