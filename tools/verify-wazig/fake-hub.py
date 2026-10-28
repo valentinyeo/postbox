@@ -317,7 +317,7 @@ class HubArchiveHandler(Handler):
         self.record(200)
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
-        self.send_header('Connection', 'close')
+        self.send_header('Transfer-Encoding', 'chunked')
         self.end_headers()
         last = int(self.headers.get('Last-Event-ID', '0'))
         if last == 0:
@@ -332,8 +332,17 @@ class HubArchiveHandler(Handler):
                 if number > last:
                     self.event(number, 'msg', chat)
                     last = number
-            self.wfile.write(b': heartbeat\n\n')
-            self.wfile.flush()
+            self.chunk(b': heartbeat\n\n')
+
+    def chunk(self, payload):
+        self.wfile.write(f'{len(payload):x}\r\n'.encode() + payload + b'\r\n')
+        self.wfile.flush()
+
+    def event(self, event_id, kind, chat):
+        data = dict(id=event_id, kind=kind, chat=chat)
+        self.chunk(f'id: {event_id}\ndata: {json.dumps(data)}\n\n'.encode())
+        self.state.record(dict(method='SSE', path='/v1/wazig/events', wire_path=self.wire_path,
+                               id=event_id, kind=kind))
 
     def do_POST(self):
         self.wire_path = self.path

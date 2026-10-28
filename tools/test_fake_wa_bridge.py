@@ -144,6 +144,16 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
     def jids(self, archived):
         return [row['jid'] for row in self.request('GET', '/v1/wazig/chats?archived=' + archived)]
 
+    def test_archive_live_stream_delivers_a_frame_without_waiting_for_eof(self):
+        connection = HTTPConnection('127.0.0.1', self.port, timeout=2)
+        self.addCleanup(connection.close)
+        connection.request('GET', '/v1/wazig/events', headers=self.headers)
+        response = connection.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader('Transfer-Encoding'), 'chunked')
+        self.assertEqual(response.read(6), b'id: 1\n')
+        connection.close()
+
     def test_business_notification_fixture_keeps_archive_until_client_acknowledges(self):
         self.request('POST', '/fixture/notification-baseline', {})
         archived = 'business:notification-archived@s.whatsapp.net'
