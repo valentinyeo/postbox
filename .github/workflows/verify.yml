@@ -217,6 +217,27 @@ jobs:
           Copy-Item archive-red-evidence verification-evidence/red-control -Recurse
           'IGSH-949 ORIGINAL MAIN RED VERIFIED: WhatsApp did not acknowledge archive' | Set-Content verification-evidence/red-control.txt
           exit 0
+      - name: IGSH-1127 original-source notification red control
+        if: matrix.feature == 'hub-archive'
+        shell: pwsh
+        run: |
+          $baseline = 'a72caf4'
+          $source = Join-Path $env:RUNNER_TEMP 'notification-baseline'
+          $prefix = Join-Path $env:GITHUB_WORKSPACE 'notification-baseline-bin'
+          git worktree add --detach $source $baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Notification baseline checkout failed' }
+          Push-Location $source
+          try {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            if ($LASTEXITCODE -ne 0) { throw 'Notification baseline build failed' }
+          } finally { Pop-Location }
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature hub-archive -Bin notification-baseline-bin/bin -Evidence notification-red-evidence
+          if ($LASTEXITCODE -eq 0) { throw 'Original source unexpectedly notified' }
+          Copy-Item notification-red-evidence verification-evidence/notification-red-control -Recurse
+          $failure = Get-Content notification-red-evidence/failure.txt -Raw
+          if ($failure -notmatch 'incoming archived desktop notification') { throw "Wrong notification red failure: $failure" }
+          'IGSH-1127 ORIGINAL SOURCE RED VERIFIED: incoming archived desktop notification' | Set-Content verification-evidence/notification-red-control.txt
+          exit 0
       - name: Launch, doctor and drive
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence -ExpectedVersion $env:VERIFY_VERSION

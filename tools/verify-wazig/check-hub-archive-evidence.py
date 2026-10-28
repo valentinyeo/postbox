@@ -74,6 +74,20 @@ def check_hub_archive(folder):
         assert restart[key] == session[key]
     unknown = (folder / 'unknown-ids-archive-state.txt').read_text(encoding='utf-8-sig')
     assert all(chat not in unknown for chat in ('telegram:user:99999', 'signal:ghost', '99999\t'))
+    notifications = read('notifications.json')
+    assert [row['phase'] for row in notifications] == ['archived', 'inbox']
+    launch = (folder / 'final-data/launch-log.txt').read_text(encoding='utf-8-sig')
+    for row in notifications:
+        phase, message = row['phase'], row['id']
+        assert 0 <= row['elapsed_seconds'] <= 10
+        assert launch.count(f'notification: accepted chat=business:notification-{phase}@s.whatsapp.net message={message}') == 1
+        image = (folder / f'notification-{phase}.png').read_bytes()
+        assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
+        chats = read(f'notification-{phase}.chats.json')['chats']
+        assert any(chat['id'] == f'business:notification-{phase}@s.whatsapp.net' and chat['archived'] is False for chat in chats)
+    notification_requests = read('notification.requests.json')
+    assert any(row.get('body') == dict(chat='business:notification-archived@s.whatsapp.net', archived=False)
+               and row['status'] == 200 for row in notification_requests)
     final = read('side-effects.json')
     assert final['chat_count'] == final['pending_sends'] == final['pending_archives'] == 0
     assert not final['show_archived'] and final['sync'] == 'stopped'

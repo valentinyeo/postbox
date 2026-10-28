@@ -317,8 +317,11 @@ pub const HttpStream = struct {
     }
 
     pub fn read(self: HttpStream, buffer: []u8) !usize {
+        var available: win.DWORD = 0;
+        if (win.WinHttpQueryDataAvailable(self.request, &available) == 0) return error.NetworkFailed;
+        if (available == 0) return 0;
         var got: win.DWORD = 0;
-        if (win.WinHttpReadData(self.request, buffer.ptr, @intCast(buffer.len), &got) == 0) return error.NetworkFailed;
+        if (win.WinHttpReadData(self.request, buffer.ptr, @intCast(@min(buffer.len, available)), &got) == 0) return error.NetworkFailed;
         return got;
     }
 
