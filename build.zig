@@ -474,6 +474,8 @@ pub fn build(b: *std.Build) void {
     _ = read_files.addCopyFile(b.path("src/wa_hub.zig"), "wa_hub.zig");
     _ = read_files.addCopyFile(b.path("src/transport.zig"), "transport.zig");
     _ = read_files.addCopyFile(b.path("src/chat_key.zig"), "chat_key.zig");
+    _ = read_files.addCopyFile(b.path("src/message_notifications.zig"), "message_notifications.zig");
+    _ = read_files.addCopyFile(b.path("src/media_age.zig"), "media_age.zig");
     const read_harness = read_files.add("chat_reconcile_test.zig", read_harness_source);
     const read_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = read_harness,
