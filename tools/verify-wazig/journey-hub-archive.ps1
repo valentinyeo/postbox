@@ -6,16 +6,20 @@ $all = [Windows.Automation.Condition]::TrueCondition
 $notificationButton = @($desktop.FindAll([Windows.Automation.TreeScope]::Descendants, $all) | Where-Object { $_.Current.Name -like 'Notifications*' })[0]
 if ($notificationButton.Current.Name -match 'Do not disturb on') {
     $notificationButton.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-    $toggle = Wait-Until {
+    $null = Wait-Until {
         foreach ($element in $desktop.FindAll([Windows.Automation.TreeScope]::Descendants, $all)) {
-            if ($element.Current.Name -notmatch 'do not disturb') { continue }
+            if ($element.Current.Name -notmatch 'do not disturb' -or $element.Current.Name -like 'Notifications*') { continue }
+            Write-Host "Do not disturb control: $($element.Current.Name), $($element.Current.ClassName), $($element.GetSupportedPatterns().ProgrammaticName -join ',')"
             $pattern = $null
             if ($element.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) {
-                if ($pattern.Current.ToggleState -eq [Windows.Automation.ToggleState]::On) { return $pattern }
+                if ($pattern.Current.ToggleState -eq [Windows.Automation.ToggleState]::On) { $pattern.Toggle(); return $true }
+            }
+            if ($element.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
+                $pattern.Invoke()
+                return $true
             }
         }
     } 'hosted Windows Do not disturb toggle'
-    $toggle.Toggle()
     $null = Wait-Until {
         $button = @($desktop.FindAll([Windows.Automation.TreeScope]::Descendants, $all) | Where-Object { $_.Current.Name -like 'Notifications*' })[0]
         $button.Current.Name -notmatch 'Do not disturb on'

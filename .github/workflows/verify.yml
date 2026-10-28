@@ -233,9 +233,9 @@ jobs:
           } finally { Pop-Location }
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature hub-archive -Bin notification-baseline-bin/bin -Evidence notification-red-evidence
           if ($LASTEXITCODE -eq 0) { throw 'Original source unexpectedly notified' }
+          Copy-Item notification-red-evidence verification-evidence/notification-red-control -Recurse
           $failure = Get-Content notification-red-evidence/failure.txt -Raw
           if ($failure -notmatch 'incoming archived desktop notification') { throw "Wrong notification red failure: $failure" }
-          Copy-Item notification-red-evidence verification-evidence/notification-red-control -Recurse
           'IGSH-1127 ORIGINAL SOURCE RED VERIFIED: incoming archived desktop notification' | Set-Content verification-evidence/notification-red-control.txt
           exit 0
       - name: Launch, doctor and drive
