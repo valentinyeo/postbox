@@ -157,7 +157,7 @@ test "IGSH-534 composer icons have equal gaps and give freed width to the typing
         try std.testing.expectEqual(px(&app, design.button_size), send.right - send.left);
         for (win.bounds) |rect| {
             try std.testing.expect(rect.left >= app.compose_pill.left and rect.right <= app.compose_pill.right);
-            try std.testing.expectEqual(app.compose_pill.bottom - px(&app, 36), rect.top);
+            try std.testing.expectEqual(app.compose_pill.bottom - px(&app, design.button_size + 6), rect.top);
             try std.testing.expectEqual(px(&app, design.button_size), rect.bottom - rect.top);
         }
         app.voice_active = true;

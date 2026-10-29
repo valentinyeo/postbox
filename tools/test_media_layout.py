@@ -127,13 +127,15 @@ class MediaLayoutTests(unittest.TestCase):
 
     def test_IGSH_714_column_and_media_use_canvas_bounds(self):
         width = verify_column(self.source)
-        maximum = int(re.search(r'pub const bubble_max_width: i32 = (\d+);', (ROOT / 'src/theme.zig').read_text()).group(1))
+        self.assertIn('pub const bubble_max_width: i32 = @divTrunc(design.column_width * 6, 10);', (ROOT / 'src/theme.zig').read_text())
+        column_width = int(re.search(r'pub const column_width: i32 = (\d+);', (ROOT / 'src/design_tokens.zig').read_text()).group(1))
+        maximum = column_width * 6 // 10
         inset = int(re.search(r'available_width - px\(a, (\d+)\)', width).group(1))
         for dpi in (96, 144, 192):
             px = lambda value: (value * dpi + 48) // 96
             for available in (px(317), px(682), px(1200)):
                 bubble = max(1, min(px(maximum), available - px(inset)))
-                column = min(px(760), available - px(32))
+                column = min(px(column_width), available - px(32))
                 incoming_left = (available - column) // 2
                 own_left = incoming_left + column - bubble
                 with self.subTest(dpi=dpi, available=available):

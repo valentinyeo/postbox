@@ -56,7 +56,7 @@ pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool, dictatin
     const height = @max(0, box.bottom - box.top);
     const padding = @min(scale(16, dpi), @divTrunc(width, 12));
     const gap = @min(scale(4, dpi), @divTrunc(width, 32));
-    const vertical = @min(scale(4, dpi), @divTrunc(height, 2));
+    const vertical = @min(scale(6, dpi), @divTrunc(height, 2));
     const icon = @max(0, @min(scale(@import("design_tokens.zig").button_size, dpi), @min(height - 2 * vertical, @divTrunc(width - 2 * padding - 6 * gap, 7))));
     const icon_bottom = box.bottom - vertical;
     const icon_top = icon_bottom - icon;
@@ -178,6 +178,22 @@ test "composer border centreline has equal inset on all four sides at 100 125 15
             try testing.expectEqual(box.top + 1, text.top);
             try testing.expectEqual(box.bottom - 1, text.bottom);
             try testing.expectEqual(text.top - centreline.top, centreline.bottom - text.bottom);
+        }
+    }
+}
+
+test "active dictation keeps the shared pill inside the composer at narrow widths and every DPI" {
+    const testing = @import("std").testing;
+    for ([_]i32{ 96, 120, 144, 192 }) |dpi| {
+        for ([_]i32{ 280, 900 }) |width| {
+            const pane = Rect{ .left = 0, .right = scale(width, dpi), .bottom = scale(900, dpi) };
+            const slots = arrange(pane, scale(44, dpi), dpi, false, true);
+            const pill = slots.dictate;
+            try testing.expect(pill.left >= slots.box.left and pill.right <= slots.box.right);
+            try testing.expect(pill.top >= slots.box.top and pill.bottom <= slots.box.bottom);
+            try testing.expect(slots.text.right <= slots.voice.left and slots.voice.right < pill.left);
+            try testing.expect(slots.emoji.left > pill.right);
+            if (width == 900) try testing.expectEqual(scale(@import("design_tokens.zig").mic_width, dpi), pill.right - pill.left);
         }
     }
 }
