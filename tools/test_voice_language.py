@@ -27,6 +27,8 @@ def check_contract(source, formatter):
                    'never translate the transcript'):
         assert phrase in instruction, phrase
     assert '" ++ language_rule' in source
+    assert 'OUTPUT LANGUAGE: German.' in source and 'OUTPUT LANGUAGE: English.' in source
+    assert source.count('try appendOutputLanguage(&body, allocator, transcript);') == 2
     assert 'in the SAME dominant language as the summary.' in formatter
     assert 'in the SAME dominant language as the summary and headers.' in formatter
     assert 'This is the only part you write yourself.' not in formatter
