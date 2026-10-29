@@ -49,6 +49,7 @@ on:
       - src/edit_contract.zig
       - src/text_draw.zig
       - src/win32.zig
+      - assets/messages.ico
       - build.zig
       - src/compose_layout.zig
       - src/paste_image.zig
@@ -357,6 +358,17 @@ jobs:
             if ($failure -notmatch 'voice: downloaded playback position advances') { throw "Wrong invalid Opus failure: $failure" }
           } finally { [IO.File]::WriteAllBytes($fixture, $valid) }
           'VOICE_INVALID_OPUS_RED_OK' | Set-Content verification-evidence/invalid-opus-red-control.txt
+          exit 0
+      - name: Original chat bubble fails approved icon regression
+        if: matrix.feature == 'app-icon'
+        shell: pwsh
+        run: |
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          python -c "import subprocess,sys; sys.path.insert(0,'tools'); from test_app_icon import check_icon; check_icon(subprocess.check_output(['git','show','9ad8d25:assets/messages.ico']))" *> verification-evidence/icon-red-control.txt
+          if ($LASTEXITCODE -eq 0) { throw 'Original chat bubble unexpectedly passed' }
+          $failure = Get-Content verification-evidence/icon-red-control.txt -Raw
+          if ($failure -notmatch 'Approved red flag missing|Missing app icon sizes') { throw "Wrong icon red failure: $failure" }
+          'ORIGINAL_CHAT_BUBBLE_RED_OK' | Add-Content verification-evidence/icon-red-control.txt
           exit 0
       - name: Install typing recorder
         if: matrix.feature == 'drafts'
