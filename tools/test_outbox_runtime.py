@@ -9,7 +9,7 @@ FUNCTIONS = (
     "stagedFileGoesToWacli", "persistOutbox", "loadOutbox", "bindOutboxAccount", "enqueueSlackOutbox", "retrySlackOutbox",
     "retireSlackOutbox", "evictOldestFailedSlackOutbox", "completePendingSend", "removeFirstPendingSend", "sendMessage", "sendMessageFrom",
     "resolveSlackSend", "pendingByClientMsgId", "jobIsWrite", "jobIsSlack",
-    "wacliEnqueue", "wacliTakeJob", "wacliJobArgs", "storedAfterQueued", "sentMessageExists", "startNextSend", "retryWacliRefreshes", "appendWhatsAppPending", "retryingBubbleText", "localSendId", "replySnippet", "setReplyQuote",
+    "wacliEnqueue", "wacliTakeJob", "wacliJobArgs", "storedAfterQueued", "sentMessageExists", "startNextSend", "retryWacliRefreshes", "appendWhatsAppPending", "retryingBubbleText", "localSendId", "replySnippet", "setReplyQuote", "failHeadPendingSend", "sendRetryDelayMs", "markPendingSendFailed", "markPendingSendRetrying", "sendBaseText", "applyHubResult",
 )
 
 
@@ -17,6 +17,10 @@ def extract(source, name):
     start = source.index(f"fn {name}(")
     end = source.index("\n}\n", start) + 3
     body = source[start:end]
+    if name == "applyHubResult":
+        begin = body.index("        .hub_send => {")
+        end = body.index("        .hub_read =>", begin)
+        body = "fn applyHubResult(a: *App, result: *const WacliResult) void {\n    switch (result.kind) {\n" + body[begin:end] + "        else => {},\n    }\n}\n"
     if name == "startNextSend":
         body = body[:body.index("    const pending = &a.pending_sends[0];")] + "    spawned += 1;\n}\n"
     return body
