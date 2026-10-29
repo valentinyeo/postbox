@@ -37,9 +37,7 @@ const Api = struct {
     GdipSetPenEndCap: *const fn (Handle, c_int) callconv(.winapi) Status,
     GdipFillPath: *const fn (Handle, Handle, Handle) callconv(.winapi) Status,
     GdipDrawPath: *const fn (Handle, Handle, Handle) callconv(.winapi) Status,
-    GdipFillEllipse: *const fn (Handle, Handle, f32, f32, f32, f32) callconv(.winapi) Status,
     GdipDrawArc: *const fn (Handle, Handle, f32, f32, f32, f32, f32, f32) callconv(.winapi) Status,
-    GdipDrawEllipse: *const fn (Handle, Handle, f32, f32, f32, f32) callconv(.winapi) Status,
 };
 
 var api: ?Api = null;
@@ -130,6 +128,10 @@ fn roundPath(rect: win.RECT, corner_width: i32, corner_height: i32) Handle {
 
 fn draw(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i32, color: win.COLORREF, stroke: ?i32, ellipse: bool) void {
     if (rect.right <= rect.left or rect.bottom <= rect.top) return;
+    if (ellipse) {
+        fillCoverage(ctx, null, .{ .rect = @bitCast(rect), .ellipse = true, .stroke = stroke }, color);
+        return;
+    }
     const opened = open(ctx);
     defer close(opened);
     if (opened) |graphics| {
@@ -145,14 +147,7 @@ fn draw(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i
             defer {
                 if (stroke != null) _ = f.GdipDeletePen(resource) else _ = f.GdipDeleteBrush(resource);
             }
-            if (ellipse) {
-                const x: f32 = @floatFromInt(shape.left);
-                const y: f32 = @floatFromInt(shape.top);
-                const w: f32 = @floatFromInt(shape.right - shape.left);
-                const h: f32 = @floatFromInt(shape.bottom - shape.top);
-                const drawn = if (stroke != null) f.GdipDrawEllipse(graphics, resource, x, y, w, h) else f.GdipFillEllipse(graphics, resource, x, y, w, h);
-                if (drawn == 0) return;
-            } else if (roundPath(shape, corner_width, corner_height)) |path| {
+            if (roundPath(shape, corner_width, corner_height)) |path| {
                 defer _ = f.GdipDeletePath(path);
                 const drawn = if (stroke != null) f.GdipDrawPath(graphics, resource, path) else f.GdipFillPath(graphics, resource, path);
                 if (drawn == 0) return;
