@@ -31,8 +31,7 @@ foreach ($target in @(
     Save-Screen $session "$name-before"
     Click-ReplyRect $session $canvas $original.bubble $true
     $null = Wait-Popup $session '#32768'
-    Send-Keys $session '{ESC}'
-    Invoke-PaletteCommand $session 'Reply to selected message'
+    Send-Keys $session '{HOME}{ENTER}'
     $state = Read-Control $session status
     Assert-That ($state.reply.id -ceq 'REPLY-ORIGINAL') 'Reply preview missing'
     Assert-That ($state.reply.sender -ceq 'Fixture Sender') 'Reply sender missing'

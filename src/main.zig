@@ -975,6 +975,8 @@ const App = struct {
     reply_preview: WideText(4095) = .{},
     reply_name: WideText(159) = .{},
     reply_flash: Utf8Text(191) = .{},
+    reply_notice: bool = false,
+    reply_close_hover: bool = false,
     displayed_provider: transport.Provider = .whatsapp,
     displayed_account: Utf8Text(32) = .{},
     displayed_jid: Utf8Text(191) = .{},
@@ -9543,6 +9545,12 @@ fn setReplyQuote(a: *App, message: *Message, id: []const u8) void {
 }
 
 fn clearReply(a: *App) void {
+    if (a.reply_flash.len > 0 or a.reply_notice) {
+        a.reply_flash.set("");
+        a.reply_notice = false;
+        if (a.hwnd) |hwnd| _ = win.KillTimer(hwnd, timer_reply_flash);
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    }
     if (a.reply_to.len == 0) return;
     a.reply_to.set("");
     a.reply_sender.set("");
@@ -9570,7 +9578,7 @@ fn startReply(a: *App) void {
 
 fn replyBarRect(a: *const App) win.RECT {
     if (a.reply_to.len == 0) return std.mem.zeroes(win.RECT);
-    return .{ .left = a.compose_pill.left, .top = a.compose_strip_top, .right = a.compose_pill.right, .bottom = a.compose_strip_top + px(a, 56) };
+    return .{ .left = a.compose_pill.left, .top = a.compose_strip_top + px(a, 11), .right = a.compose_pill.right, .bottom = a.compose_strip_top + px(a, 67) };
 }
 
 fn replyCloseRect(a: *const App) win.RECT {
@@ -9605,7 +9613,7 @@ fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     _ = win.SetTextColor(hdc, rgb(138, 138, 138));
     _ = text_draw.drawText(hdc, a.reply_preview.ptr(), @intCast(a.reply_preview.len), &text, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
     var close = replyCloseRect(a);
-    smooth.fillRoundRect(shapes, close, px(a, 28), px(a, 28), rgb(38, 38, 38));
+    smooth.fillRoundRect(shapes, close, px(a, 28), px(a, 28), if (a.reply_close_hover) rgb(40, 40, 40) else rgb(38, 38, 38));
     _ = text_draw.drawText(hdc, lit("×"), -1, &close, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
 }
 
@@ -9625,7 +9633,9 @@ fn jumpToReply(a: *App, id: []const u8) void {
         if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_reply_flash, 1200, null);
         return;
     }
-    setStatus(a, "Original message not loaded");
+    a.reply_notice = true;
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_reply_flash, 1200, null);
 }
 
 fn focusCompose(a: *App) void {
@@ -12012,6 +12022,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.print(",\"bar\":[{d},{d},{d},{d}],\"close\":[{d},{d},{d},{d}]}}", .{ reply.left, reply.top, reply.right, reply.bottom, close.left, close.top, close.right, close.bottom });
     try w.writeAll(",\"reply_flash\":");
     try control_api.writeString(w, a.reply_flash.slice());
+    try w.print(",\"reply_notice\":{}", .{a.reply_notice});
     const box = a.compose_pill;
     try w.print(",\"composer\":{{\"box\":{{\"left\":{d},\"top\":{d},\"right\":{d},\"bottom\":{d}}},\"lines\":{d},\"controls\":[", .{ box.left, box.top, box.right, box.bottom, if (a.compose) |edit| win.SendMessageW(edit, win.EM_GETLINECOUNT, 0, 0) else 0 });
     const controls = [_]?win.HWND{ a.attach_btn, a.compose, a.voice_btn, a.dictate, a.emoji_btn, a.send };
@@ -13709,8 +13720,9 @@ fn stagedPreviewColumns(a: *const App, width: i32) usize {
 fn stagedComposerSizes(a: *App, width: i32, height: i32) compose_layout.Composer {
     const columns = stagedPreviewColumns(a, width);
     const extra = @as(i32, @intCast((a.staged_images.count -| 1) / columns)) * px(a, compose_layout.preview_band);
-    var sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height - extra, a.staged_images.count > 0, @intCast(a.dpi));
-    sizes.strip_height += extra + if (a.reply_to.len > 0) px(a, 64) else @as(i32, 0);
+    const reply_height = if (a.reply_to.len > 0) px(a, 64) else @as(i32, 0);
+    var sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height - extra - reply_height, a.staged_images.count > 0, @intCast(a.dpi));
+    sizes.strip_height += extra + reply_height;
     return sizes;
 }
 
@@ -15453,6 +15465,13 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = text_draw.drawText(hdc, text, -1, &badge, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
     }
+    if (a.reply_notice) {
+        var notice = win.RECT{ .left = px(a, 24), .top = client.bottom - px(a, 48), .right = @min(client.right - px(a, 12), px(a, 320)), .bottom = client.bottom - px(a, 12) };
+        smooth.fillRoundRect(&shapes, notice, px(a, 16), px(a, 16), theme.current.surface_container_highest);
+        _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+        _ = win.SetTextColor(hdc, theme.current.on_surface);
+        _ = text_draw.drawText(hdc, lit("Original message not loaded"), -1, &notice, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    }
     drawScrollbar(&shapes, canvasStripRect(a), canvasScrollInfo(a), theme.current.outline);
 }
 
@@ -16346,7 +16365,24 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             return win.DefWindowProcW(hwnd, message, wparam, lparam);
         },
+        win.WM_MOUSELEAVE => {
+            a.reply_close_hover = false;
+            var close = replyCloseRect(a);
+            _ = win.InvalidateRect(hwnd, &close, win.FALSE);
+            return 0;
+        },
         win.WM_MOUSEMOVE => {
+            const point = win.POINT{ .x = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))), .y = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam))))) };
+            const hover = a.reply_to.len > 0 and rectHasPoint(replyCloseRect(a), point.x, point.y);
+            if (hover != a.reply_close_hover) {
+                a.reply_close_hover = hover;
+                var close = replyCloseRect(a);
+                _ = win.InvalidateRect(hwnd, &close, win.FALSE);
+                if (hover) {
+                    var track = win.TRACKMOUSEEVENT{ .cbSize = @sizeOf(win.TRACKMOUSEEVENT), .dwFlags = win.TME_LEAVE, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                    _ = win.TrackMouseEvent(&track);
+                }
+            }
             if (a.sb_drag != .none) {
                 const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
                 switch (a.sb_drag) {
@@ -16444,6 +16480,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (wparam == timer_reply_flash) {
                 _ = win.KillTimer(hwnd, timer_reply_flash);
                 a.reply_flash.set("");
+                a.reply_notice = false;
                 if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
             } else if (wparam == timer_voice) {
                 tickVoice(a);
