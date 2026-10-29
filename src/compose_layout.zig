@@ -149,7 +149,7 @@ test "one box contains disjoint text and bottom anchored icons at narrow and wid
                     }
                     for (icons, baseline_icons) |rect, initial| {
                         try testing.expectEqualDeep(initial, rect);
-                        try testing.expectEqual(slots.box.bottom - scale(4, dpi), rect.bottom);
+                        try testing.expectEqual(slots.box.bottom - scale(6, dpi), rect.bottom);
                         try testing.expect(rect.bottom - rect.top <= scale(@import("design_tokens.zig").button_size, dpi));
                         if (!recording or rect.left != slots.voice.left) try testing.expectEqual(rect.bottom - rect.top, rect.right - rect.left);
                         if (width == 900) try testing.expectEqual(scale(@import("design_tokens.zig").button_size, dpi), rect.bottom - rect.top);

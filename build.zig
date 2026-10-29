@@ -322,6 +322,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(transcript_copy_tests).step);
     const message_menu_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/message_menu_test.zig"),
+        "const design = struct {\n",
+        @embedFile("src/design_tokens.zig"),
+        "\n};\n",
         sourceSection("fn appendMessageMenuItem(", "fn openUrlWide("),
         sourceSection("fn openReactionMenu(", "fn measureReactionRow("),
     }) catch @panic("Out of memory building message menu harness");
