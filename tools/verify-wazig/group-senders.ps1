@@ -24,6 +24,7 @@ foreach ($messageId in @('GROUP-FIRST', 'GROUP-SAME', 'GROUP-DAY', 'GROUP-OTHER'
 }
 Assert-That (($rows['GROUP-SAME'].bubble[1] - $rows['GROUP-FIRST'].bubble[3]) -eq 4) 'Same sender messages not tightly grouped'
 Assert-That (($rows['GROUP-QUOTE'].bubble[2] - $rows['GROUP-QUOTE'].bubble[0]) -lt 100) 'Quoted short reply stretches across the screen'
+Assert-That (($rows['GROUP-QUOTE'].quote_line[2] - $rows['GROUP-QUOTE'].quote_line[0]) -gt ($rows['GROUP-QUOTE'].bubble[2] - $rows['GROUP-QUOTE'].bubble[0])) 'Compact reply hides its original-message preview'
 Assert-That ($rows['GROUP-OWN'].bubble[2] -eq ($columnLeft + $columnWidth)) 'Own group message is not right-aligned'
 Save-Screen $session group-senders
 $image = [Drawing.Bitmap]::new((Join-Path $Evidence 'group-senders.png'))

@@ -15416,7 +15416,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         const reply_height = replyLineHeight(hdc, a, message);
         if (reply_height > 0) {
             height -= reply_height;
-            message.quote_hit = .{ .left = left, .top = y, .right = right, .bottom = y + reply_height - px(a, 6) };
+            message.quote_hit = .{ .left = if (message.from_me) right - bubble_width else left, .top = y, .right = if (message.from_me) right else left + bubble_width, .bottom = y + reply_height - px(a, 6) };
             var line = WideText(4095){};
             line.set(a.allocator, "↩ ");
             for ([_][]const u16{ message.quote_sender.slice(), std.mem.span(lit(": ")), if (message.quote.len > 0) message.quote.slice() else std.mem.span(lit("Original message")) }) |part| {
