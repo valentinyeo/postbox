@@ -26,6 +26,12 @@ class DesignKitTests(unittest.TestCase):
         self.assertRegex(source, r'pub const selected_row_radius: i32 = 10;')
         self.assertIn('pub const radius_card: i32 = 16;', source)
 
+    def test_native_font_proof_reads_the_waited_metrics_object(self):
+        source = (ROOT / 'tools/verify-wazig/journey-sidebar-surface.ps1').read_text()
+        self.assertIn('$metrics = Wait-Until {', source)
+        self.assertIn('{ return $metrics }', source)
+        self.assertIn("$metrics.icon_face -ceq 'Segoe Fluent Icons'", source)
+
     def test_native_controls_use_shared_font_and_icon_roles(self):
         source = (ROOT / 'src/main.zig').read_text()
         self.assertTrue('lit("Segoe Fluent Icons")' in source)

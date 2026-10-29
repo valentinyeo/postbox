@@ -16658,7 +16658,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.font_reply_icon) |font| _ = win.DeleteObject(font);
             if (a.font_bold) |font| _ = win.DeleteObject(font);
             if (a.font_underline) |font| _ = win.DeleteObject(font);
-            if (a.font_emoji) |font| _ = win.DeleteObject(font);
             if (a.font_icon) |font| _ = win.DeleteObject(font);
             if (a.font_title) |font| _ = win.DeleteObject(font);
             if (a.font_row) |font| _ = win.DeleteObject(font);

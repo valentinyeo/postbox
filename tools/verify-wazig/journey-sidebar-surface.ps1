@@ -26,11 +26,12 @@ foreach ($themeName in @('amoled')) {
     $canvas = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $canvasCondition)
     Assert-That ($null -ne $canvas) 'Sidebar comparison canvas missing'
     $metricsPath = Join-Path $messages 'text-metrics.json'
-    $null = Wait-Until {
+    $metrics = Wait-Until {
         if (-not (Test-Path $metricsPath)) { return $false }
         $metrics = Get-Content $metricsPath -Raw | ConvertFrom-Json
         $bounds = $canvas.Current.BoundingRectangle
-        $metrics.canvas.width -eq [int]$bounds.Width -and $metrics.canvas.height -eq [int]$bounds.Height
+        if ($metrics.canvas.width -eq [int]$bounds.Width -and $metrics.canvas.height -eq [int]$bounds.Height) { return $metrics }
+        return $false
     } 'sidebar fixture message painted'
     if ($ExpectedProduct -eq 'Postbox') { Assert-That ($metrics.icon_face -ceq 'Segoe Fluent Icons') 'Shared Fluent icon font did not resolve' }
     $state = Read-Control $session status

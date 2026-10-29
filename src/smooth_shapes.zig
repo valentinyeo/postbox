@@ -164,17 +164,19 @@ fn draw(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i
 
 pub fn fillRoundRectGradient(ctx: *const Context, rect: win.RECT, diameter: i32, top: win.COLORREF, bottom: win.COLORREF) void {
     if (rect.right <= rect.left or rect.bottom <= rect.top) return;
-    const graphics = open(ctx);
-    defer close(graphics);
-    if (graphics != null) {
-        const f = api.?;
-        const bounds = GradientRect{ .x = @floatFromInt(rect.left), .y = @floatFromInt(rect.top), .width = @floatFromInt(rect.right - rect.left), .height = @floatFromInt(rect.bottom - rect.top) };
-        var brush: Handle = null;
-        if (f.GdipCreateLineBrushFromRect(&bounds, argb(top), argb(bottom), 1, 0, &brush) == 0 and brush != null) {
-            defer _ = f.GdipDeleteBrush(brush);
-            if (roundPath(rect, diameter, diameter)) |path| {
-                defer _ = f.GdipDeletePath(path);
-                if (f.GdipFillPath(graphics, brush, path) == 0) return;
+    {
+        const graphics = open(ctx);
+        defer close(graphics);
+        if (graphics != null) {
+            const f = api.?;
+            const bounds = GradientRect{ .x = @floatFromInt(rect.left), .y = @floatFromInt(rect.top), .width = @floatFromInt(rect.right - rect.left), .height = @floatFromInt(rect.bottom - rect.top) };
+            var brush: Handle = null;
+            if (f.GdipCreateLineBrushFromRect(&bounds, argb(top), argb(bottom), 1, 0, &brush) == 0 and brush != null) {
+                defer _ = f.GdipDeleteBrush(brush);
+                if (roundPath(rect, diameter, diameter)) |path| {
+                    defer _ = f.GdipDeletePath(path);
+                    if (f.GdipFillPath(graphics, brush, path) == 0) return;
+                }
             }
         }
     }

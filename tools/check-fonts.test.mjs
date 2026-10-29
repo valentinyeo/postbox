@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,4 +45,9 @@ test('IGSH-466 OLE initialization preserves both private font-loader boundaries'
   const changed = main.replace('fonts_loaded[i] = win.AddFontResourceExW(font_path.ptr(), win.FR_PRIVATE, null) > 0;', 'fonts_loaded[i] = false;');
   assert.notEqual(changed, main);
   assert.throws(() => verifySources({ ...sources, 'src/main.zig': changed }, exists));
+});
+
+test('IGSH-1122 rejects the real pre-kit font manifest at 570ac52', () => {
+  const before = execFileSync('git', ['show', '570ac52:src/font_config.zig'], { cwd: root, encoding: 'utf8' });
+  assert.throws(() => verifySources({ ...sources, 'src/font_config.zig': before }, exists), /bundled font set differs/);
 });
