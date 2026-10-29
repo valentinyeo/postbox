@@ -3550,6 +3550,7 @@ fn appendSlackChats(a: *App, query_utf8: ?[]const u8) void {
     for (&a.slack_installations) |*installation| {
         if (!installation.active) continue;
         for (installation.chats[0..installation.chat_count]) |*cached| {
+            cached.timestamp.set(a.chat_activity.retain(a.allocator, chat_key.of(cached), cached.timestamp.slice()) catch cached.timestamp.slice());
             const name = std.unicode.utf16LeToUtf8Alloc(a.allocator, cached.name.slice()) catch continue;
             defer a.allocator.free(name);
             _ = holdKeptArchived(a, chat_key.of(cached), false, cached.timestamp.slice());
@@ -4131,10 +4132,8 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
     message.send_state = .pending;
     a.messages[a.message_count] = message;
     a.message_count += 1;
-    if (!from_reload) {
-        noteChatActivity(a, chat_key.of(pending), pending.queued_unix);
-        refilterChats(a);
-    }
+    noteChatActivity(a, chat_key.of(pending), pending.queued_unix);
+    if (!from_reload) refilterChats(a);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
@@ -8043,6 +8042,9 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         const quoted_id = message.quoted_msg_id;
         setReplyQuote(a, message, quoted_id.slice());
     }
+    for (a.messages[0..a.message_count]) |*message| {
+        _ = a.chat_activity.retain(a.allocator, chat_key.of(chat), message.timestamp.slice()) catch continue;
+    }
     var reaction_index: usize = 0;
     while (reaction_index < a.message_count) {
         const reaction_to = a.messages[reaction_index].reaction_to.slice();
@@ -8060,9 +8062,6 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         var shift = reaction_index;
         while (shift + 1 < a.message_count) : (shift += 1) a.messages[shift] = a.messages[shift + 1];
         a.message_count -= 1;
-    }
-    for (a.messages[0..a.message_count]) |*message| {
-        _ = a.chat_activity.retain(a.allocator, chat_key.of(chat), message.timestamp.slice()) catch continue;
     }
     reapplyPendingReactions(a, chat.jid.slice());
     if (selected_id.len > 0) {
@@ -8348,7 +8347,6 @@ fn removeFirstPendingSend(a: *App, delivered: bool) void {
     if (a.pending_send_count == 0) return;
     if (!completePendingSend(a, delivered)) return;
     const head = &a.pending_sends[0];
-    if (delivered) noteChatActivity(a, chat_key.of(head), head.queued_unix);
     if (delivered and head.provider != .slack and !(unifiedHub(a) and (head.provider == .whatsapp or head.provider == .telegram or head.provider == .signal))) unarchiveSentChat(a, head.jid.slice());
     if (delivered and head.file.len > 0 and head.jid.len <= 191 and head.file.len <= 520) {
         var entry = voice_sent.Entry{ .queued_unix = head.queued_unix, .seconds = head.voice_seconds, .seq = head.seq, .voice = head.ptt };

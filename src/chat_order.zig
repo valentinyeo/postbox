@@ -63,7 +63,6 @@ test "sent and phone activity survives stale snapshots without crossing provider
     }) |other| try std.testing.expectEqualStrings("2026-10-29T10:00:00Z", try activity.retain(std.testing.allocator, other, old));
 }
 
-
 pub fn shouldMoveUp(pin_left: bool, pin_right: bool, by_time: std.math.Order, by_name: std.math.Order, jid_tiebreak: std.math.Order) bool {
     if (pin_right != pin_left) return pin_right;
     return by_time == .lt or (by_time == .eq and (by_name == .gt or (by_name == .eq and jid_tiebreak == .gt)));
