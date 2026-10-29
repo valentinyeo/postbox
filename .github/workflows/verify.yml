@@ -4,10 +4,6 @@ run-name: verify-wazig ${{ inputs.feature || 'pr' }} ${{ github.head_ref || gith
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: Published release tag to verify instead of building
-        type: string
-        default: ""
       feature:
         description: User journey to drive
         type: string
