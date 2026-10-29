@@ -115,6 +115,9 @@ const App = struct {
     outbox_load_failed: bool = false,
     pending_sends: [max_pending_sends]PendingSend = @splat(.{}),
     pending_send_count: usize = 0,
+    activity_key: chat_key.Stored = .{},
+    activity_seconds: i64 = 0,
+    chat_refilters: usize = 0,
     slack_outbox: [max_slack_outbox]SlackOutbox = @splat(.{}),
     slack_outbox_count: usize = 0,
     slack_outbox_dirty: bool = false,
@@ -345,6 +348,13 @@ fn removeStagedImage(a: *App, index: usize, _: bool) void {
     _ = a.staged_images.remove(index);
 }
 fn forgetFailedSend(_: *App, _: chat_key.Key, _: []const u8) void {}
+fn noteChatActivity(a: *App, key: chat_key.Key, seconds: i64) void {
+    a.activity_key.set(key);
+    a.activity_seconds = seconds;
+}
+fn refilterChats(a: *App) void {
+    a.chat_refilters += 1;
+}
 fn nowUnixSeconds() i64 {
     return 42;
 }
@@ -566,6 +576,9 @@ test "fresh WhatsApp send is not suppressed by matching delivered text" {
     sendMessage(&app);
     try std.testing.expectEqual(@as(usize, 1), app.pending_send_count);
     try std.testing.expect(!app.pending_sends[0].from_disk);
+    try std.testing.expectEqual(@as(i64, 42), app.activity_seconds);
+    try std.testing.expect(chat_key.Key.eql(chat_key.of(&app.chats[0]), app.activity_key.key()));
+    try std.testing.expectEqual(@as(usize, 1), app.chat_refilters);
     try std.testing.expectEqual(@as(usize, 1), spawned);
 }
 

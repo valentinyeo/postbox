@@ -894,6 +894,7 @@ const App = struct {
     send_started_ms: u64 = 0,
     pending_sends: [max_pending_sends]PendingSend = [_]PendingSend{.{}} ** max_pending_sends,
     pending_send_count: usize = 0,
+    chat_activity: chat_order.Activity = .{},
     slack_outbox_dirty: bool = false,
     slack_outbox: [max_slack_outbox]SlackOutbox = [_]SlackOutbox{.{}} ** max_slack_outbox,
     slack_outbox_count: usize = 0,
@@ -2461,6 +2462,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         chat.kind.set(a.allocator, if (std.mem.endsWith(u8, jid, "@g.us")) "Group" else getString(object, "kind"));
         chat.timestamp.set(getString(object, "last_message_ts"));
         fillSlackTimestamp(a, &chat);
+        chat.timestamp.set(a.chat_activity.retain(a.allocator, chat_key.of(&chat), chat.timestamp.slice()) catch chat.timestamp.slice());
         if (fresh) _ = holdKeptArchived(a, chat_key.of(&chat), getBool(object, "archived"), chat.timestamp.slice());
         chat.provider_unread = getBool(object, "unread") or getInt(object, "unread_count") > 0;
         const timestamp = media_age.unixSeconds(chat.timestamp.slice()) orelse 0;
@@ -3229,12 +3231,20 @@ fn raiseSlackTimestamp(chat: *Chat, seconds: i64) bool {
     if (seconds <= 0) return false;
     var buffer: [20]u8 = undefined;
     const text = tj.formatTimestamp(&buffer, seconds);
+    if (text.len > 10) buffer[10] = 'T';
     if (text.len == 0 or std.mem.order(u8, text, chat.timestamp.slice()) != .gt) return false;
     chat.timestamp.set(text);
     return true;
 }
 
+fn noteChatActivity(a: *App, key: chat_key.Key, seconds: i64) void {
+    if (seconds <= 0) return;
+    var buffer: [20]u8 = undefined;
+    _ = a.chat_activity.retain(a.allocator, key, tj.formatTimestamp(&buffer, seconds)) catch return;
+}
+
 fn noteSlackActivity(a: *App, account: []const u8, channel: []const u8, seconds: i64) void {
+    noteChatActivity(a, .{ .provider = .slack, .account = account, .id = channel }, seconds);
     if (slackChatById(a, account, channel)) |cached| _ = raiseSlackTimestamp(cached, seconds);
     for (a.chats[0..a.chat_count]) |*chat| {
         if (!chat_key.Key.eql(chat_key.of(chat), .{ .provider = .slack, .account = account, .id = channel })) continue;
@@ -3540,6 +3550,7 @@ fn appendSlackChats(a: *App, query_utf8: ?[]const u8) void {
     for (&a.slack_installations) |*installation| {
         if (!installation.active) continue;
         for (installation.chats[0..installation.chat_count]) |*cached| {
+            cached.timestamp.set(a.chat_activity.retain(a.allocator, chat_key.of(cached), cached.timestamp.slice()) catch cached.timestamp.slice());
             const name = std.unicode.utf16LeToUtf8Alloc(a.allocator, cached.name.slice()) catch continue;
             defer a.allocator.free(name);
             _ = holdKeptArchived(a, chat_key.of(cached), false, cached.timestamp.slice());
@@ -4121,6 +4132,8 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
     message.send_state = .pending;
     a.messages[a.message_count] = message;
     a.message_count += 1;
+    noteChatActivity(a, chat_key.of(pending), pending.queued_unix);
+    if (!from_reload) refilterChats(a);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
@@ -8029,6 +8042,10 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         const quoted_id = message.quoted_msg_id;
         setReplyQuote(a, message, quoted_id.slice());
     }
+    for (a.messages[0..a.message_count]) |*message| {
+        if (message.reaction_to.len > 0) continue;
+        _ = a.chat_activity.retain(a.allocator, chat_key.of(chat), message.timestamp.slice()) catch continue;
+    }
     var reaction_index: usize = 0;
     while (reaction_index < a.message_count) {
         const reaction_to = a.messages[reaction_index].reaction_to.slice();
@@ -9340,6 +9357,9 @@ fn sendMessageFrom(a: *App, thread: bool) void {
     }
 
     if (selectedChatIsSlack(a)) {
+        var sent_key = chat_key.Stored{};
+        sent_key.set(chat_key.of(&a.chats[a.selected_chat]));
+        defer refilterChats(a);
         if (a.slack_outbox_count >= max_slack_outbox and !evictOldestFailedSlackOutbox(a)) {
             setStatus(a, "Send queue is full");
             return;
@@ -9430,6 +9450,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
             enqueueSlackOutbox(a, slot);
             appendSlackPending(a, text, client_msg_id, reply_to);
         }
+        noteChatActivity(a, sent_key.key(), nowUnixSeconds());
         if (staged_file.len > 0) releaseStagedImage(a);
         if (!thread) {
             a.slack_attach.set(a.allocator, "");
@@ -12101,6 +12122,7 @@ fn controlWhatsAppChats(a: *App, raw: []const u8, view: messenger_view.View, acc
         chat.kind.set(a.allocator, if (std.mem.endsWith(u8, jid, "@g.us")) "Group" else getString(object, "kind"));
         chat.timestamp.set(getString(object, "last_message_ts"));
         fillSlackTimestamp(a, &chat);
+        chat.timestamp.set(a.chat_activity.retain(a.allocator, chat_key.of(&chat), chat.timestamp.slice()) catch chat.timestamp.slice());
         chat.unread = getBool(object, "unread");
         chat.unread_count = getInt(object, "unread_count");
         chat.archived = if (a.archive_state) |state| state.isArchived(chat_key.of(&chat), getBool(object, "archived")) else getBool(object, "archived");
@@ -16912,6 +16934,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 _ = win.Shell_NotifyIconW(win.NIM_DELETE, &icon);
             }
             a.notifications.deinit(a.allocator);
+            a.chat_activity.deinit(a.allocator);
             a.hub_stop.store(true, .release);
             a.hub_cancel.stop();
             if (a.hub_thread) |thread| thread.join();

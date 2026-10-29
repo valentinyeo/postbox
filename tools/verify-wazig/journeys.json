@@ -225,7 +225,7 @@
       "pr": true,
       "hub": "slack-sort",
       "evidence": true,
-      "chats": 4,
+      "chats": 8,
       "script": "journey-slack-sort.ps1",
       "validator": {
         "file": "evidence-slack-sort.py"

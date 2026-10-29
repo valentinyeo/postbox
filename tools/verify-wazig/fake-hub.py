@@ -715,7 +715,17 @@ class SlackSortHandler(Handler):
                                        ('fixture-unknown', 'Verification Aardvark'),
                                        ('fixture-gamma', 'Verification Gamma'),
                                        ('fixture-beta', 'Verification Beta')]]
+            rows.extend(dict(jid='wa-' + chat.removeprefix('fixture-'), name=name.replace('Verification', 'WhatsApp'),
+                             provider='whatsapp', kind='direct',
+                             last_message_ts=self.state.sort_times['wa-' + chat.removeprefix('fixture-')],
+                             unread_count=0, archived=False)
+                        for chat, name in [('fixture-alpha', 'Verification Alpha'),
+                                           ('fixture-unknown', 'Verification Aardvark'),
+                                           ('fixture-gamma', 'Verification Gamma'),
+                                           ('fixture-beta', 'Verification Beta')])
             self.respond(200, rows if query.get('archived', ['false'])[0] == 'false' else [])
+        elif url.path == '/fixture/sort-state':
+            self.respond(200, self.state.sort_times)
         elif url.path == '/v1/wazig/messages':
             chat = query.get('chat', [''])[0]
             stamp = self.state.sort_initial.get(chat, '')
@@ -732,7 +742,22 @@ class SlackSortHandler(Handler):
         elif url.path == '/v1/wazig/groups':
             self.respond(200, [])
         elif url.path == '/v1/wazig/events':
-            self.events()
+            self.record(200)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            last = int(self.headers.get('Last-Event-ID', '0'))
+            if last == 0:
+                self.event(1, 'reset', '')
+            else:
+                with self.state.lock:
+                    while len(self.state.sort_events) <= last - 1:
+                        self.state.lock.wait(timeout=2)
+                        self.wfile.write(b': heartbeat\n\n')
+                        self.wfile.flush()
+                    self.event(last + 1, 'msg', self.state.sort_events[last - 1])
+            self.close_connection = True
         elif url.path.startswith('/v1/wazig/avatar/'):
             self.respond(404, {'error': 'unavailable'})
         else:
@@ -747,8 +772,17 @@ class SlackSortHandler(Handler):
             with self.state.lock:
                 self.state.sort_times[ALPHA] = self.state.stamp
                 self.state.live = True
+                self.state.sort_events.append(ALPHA)
                 self.state.lock.notify_all()
             self.respond(200, {'ok': True})
+        elif self.path == '/fixture/phone':
+            with self.state.lock:
+                self.state.sort_times['wa-alpha'] = (datetime.now(timezone.utc) + timedelta(minutes=2)).isoformat(timespec='seconds').replace('+00:00', 'Z')
+                self.state.sort_events.append('wa-alpha')
+                self.state.lock.notify_all()
+            self.respond(200, {'ok': True})
+        elif self.path == '/v1/wazig/send' and body.get('chat') == 'wa-gamma':
+            self.respond(200, dict(client_id=body['client_id'], msg_id='WA-SENT', ts=self.state.stamp, status='sent'), body=body)
         elif self.path == '/v1/wazig/mark-read':
             self.respond(200, {'status': 'ok'}, body=body)
         elif self.path == '/v1/wazig/send' and body.get('chat') == 'fixture-gamma':
@@ -1982,7 +2016,10 @@ def main():
             'fixture-gamma': (stamp - timedelta(hours=2)).isoformat().replace('+00:00', 'Z'),
             'fixture-unknown': '',
         }
+        server.state.sort_times.update({'wa-' + key.removeprefix('fixture-'): value
+                                        for key, value in list(server.state.sort_times.items())})
         server.state.sort_initial = dict(server.state.sort_times)
+        server.state.sort_events = []
     args.port_file.write_text(str(server.server_port), encoding='utf-8')
     server.serve_forever()
 

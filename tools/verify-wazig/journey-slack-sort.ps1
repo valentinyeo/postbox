@@ -1,4 +1,7 @@
-Send-Keys $session '^2'
+$views = @((Read-Control $session status).view_order)
+$slackNumber = 2 + [Array]::IndexOf(@($views.provider), 'slack')
+Assert-That ($slackNumber -ge 2) 'Slack account missing'
+if ($slackNumber -eq 2) { Send-Keys $session '^2' } else { Send-Keys $session "^$slackNumber" }
 $null = Wait-Until { (Read-Control $session status).view -eq 'slack' } 'Slack sidebar'
 $orders = [ordered]@{
     before = @('fixture-beta', 'fixture-gamma', 'fixture-alpha', 'fixture-unknown')
@@ -45,5 +48,36 @@ foreach ($stage in $orders.Keys) {
     } elseif ($stage -eq 'after') {
         Assert-That ($first -eq 'fixture-gamma') 'Incoming message changed selected Slack chat'
     }
+    Hub-Pass $session "$stage-last-message-order"
+}
+
+$waNumber = 2 + [Array]::IndexOf(@($views.provider), 'whatsapp')
+Assert-That ($waNumber -ge 2) 'WhatsApp account missing'
+Send-Keys $session "^$waNumber"
+$null = Wait-Until { (Read-Control $session status).view -eq 'whatsapp' } 'WhatsApp sidebar'
+$waOrders = [ordered]@{
+    'wa-before' = @('wa-beta', 'wa-gamma', 'wa-alpha', 'wa-unknown')
+    'wa-sent' = @('wa-gamma', 'wa-beta', 'wa-alpha', 'wa-unknown')
+    'wa-stale' = @('wa-gamma', 'wa-beta', 'wa-alpha', 'wa-unknown')
+    'wa-phone' = @('wa-alpha', 'wa-gamma', 'wa-beta', 'wa-unknown')
+}
+foreach ($stage in $waOrders.Keys) {
+    if ($stage -eq 'wa-sent') {
+        $null = Wait-Until { if ((Read-Control $session status).selected.id -ne 'wa-gamma') { Send-Keys $session '^{TAB}'; return $false }; return $true } 'select WhatsApp send target'
+        Invoke-PaletteCommand $session 'Compose message'
+        Send-Keys $session 'https://example.com/sent-order'
+        Send-Keys $session '{ENTER}'
+        $null = Wait-Until { (Read-Control $session status).pending_sends -eq 0 } 'WhatsApp send acknowledged'
+    } elseif ($stage -eq 'wa-stale') {
+        $beforeRefresh = @(Read-BridgeRequests $session | Where-Object { $_.wire_path.StartsWith('/v1/wazig/chats?') }).Count
+        Invoke-PaletteCommand $session 'Refresh'
+        $null = Wait-Until { @(Read-BridgeRequests $session | Where-Object { $_.wire_path.StartsWith('/v1/wazig/chats?') }).Count -gt $beforeRefresh } 'stale chat snapshot served'
+        Invoke-RestMethod -Uri "$($session.bridge_url)/fixture/sort-state" -Headers @{ Authorization = 'Bearer fixture-key-not-a-secret' } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'stale-provider.json')
+    } elseif ($stage -eq 'wa-phone') {
+        Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/phone" -Headers @{ Authorization = 'Bearer fixture-key-not-a-secret' } -Body '{}' -ContentType 'application/json' | Out-Null
+    }
+    $expected = $waOrders[$stage]
+    $null = Wait-Until { ((Read-Control $session chats).chats.id -join ',') -eq ($expected -join ',') } "WhatsApp $stage last message order"
+    Save-Screen $session $stage
     Hub-Pass $session "$stage-last-message-order"
 }

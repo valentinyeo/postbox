@@ -30,3 +30,11 @@
 - Equal-time/name ties, pin precedence and cached timestamp fallback are source/CI coverage, not assertions of this four-row journey. Comparator unit tests include equal timestamps with names deliberately opposite to ID order. No Zig, PowerShell or app execution is performed on the development host.
 - Source: `src/main.zig:3891` fills missing Slack times from message cache; `src/main.zig:12392` and `src/chat_order.zig:3` order pinned rows, last message times, names and identity ties; `src/slack.zig:191` reads actual last-message time rather than channel creation/modification time.
 - Journey and evidence: `tools/verify-wazig/run.ps1:143` drives the three stages, `tools/verify-wazig/fake-hub.py:99` supplies the synthetic hub, and `tools/verify-wazig/check-evidence.py:9` validates retained orders, times, keyboard walks, selection, delivery, send and isolation.
+
+### Sent chat retention
+
+- The fixture also contains four WhatsApp chats. The journey reads saved account positions, then uses the matching Ctrl+number shortcut.
+- Sending a link to Gamma must promote it above Beta immediately, even though the hub continues returning Gamma's old timestamp. A keyboard Refresh must retain that ordering.
+- A newer phone-side message to Alpha must then move Alpha above Gamma. The fixture trigger represents an upstream message; it never sends a real message.
+- Retain `wa-before`, `wa-sent`, `wa-stale`, `wa-phone` screenshots and chat snapshots plus `stale-provider.json`. The validator rejects a send that never promotes, stale regression, or failure to yield to newer activity.
+- The branch verification builds historical source `7dc3001` and requires failure specifically at WhatsApp sent promotion before accepting the candidate. Published-release verification skips rebuilding that red control and checks the exact downloaded package.
