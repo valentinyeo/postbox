@@ -640,5 +640,55 @@ function Get-AttachmentPicker($Session) {
         self.assertIn('OWNED_PICKER_OK', result.stdout)
         print('OWNED_PICKER_RUNTIME_OK')
 
+
+
+class AppearanceVersionTests(unittest.TestCase):
+    def fixture(self, folder, version):
+        session = dict(feature='appearance', sha256='fixture-binary', commit='fixture-commit',
+                       expected_version=version, expected_product='Postbox')
+        state = dict(version=version, chat_count=2, pending_sends=0, pending_archives=0,
+                     sync='stopped', search='', theme='amoled', production_preferences_absent=True,
+                     whatsapp_store_absent=True, telegram_store_absent=True)
+        files = {'session.json': session, 'side-effects.json': state,
+                 'text-scale.json': dict(initial_saved=False, larger=92, reset=82,
+                                        baseline_points=10, larger_points=12, reset_points=10)}
+        for name in ('before', 'action', 'text-larger', 'after'):
+            files[name + '.state.json'] = state
+            (folder / (name + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + name.encode() * 11000)
+            (folder / (name + '.uia.txt')).write_text(f'MessagesZig | Combined inbox - Postbox v{version}\n')
+        for name, value in files.items():
+            (folder / name).write_text(json.dumps(value))
+        (folder / 'result.txt').write_text('JOURNEY PASSED: appearance')
+        (folder / 'cleanup.txt').write_text('CLEANUP PASSED: fixture removed')
+        (folder / 'preferences.txt').write_text('FontScale 82')
+        keys = ('^k', 'Theme: Graphite', 'Make text larger', '{ENTER}', '^0')
+        (folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in keys))
+
+    def run_oracle(self, folder, source=None):
+        script = ROOT / 'tools/verify-wazig/evidence-palette.py'
+        if source is not None:
+            script = folder / 'historical-validator.py'
+            script.write_text(source)
+        return subprocess.run([sys.executable, str(script), str(folder)], capture_output=True, text=True)
+
+    def test_published_version_passes_and_historical_fixed_version_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            self.fixture(folder, '1.2.345')
+            result = self.run_oracle(folder)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            old = subprocess.check_output(['git', 'show', '2653484:tools/verify-wazig/evidence-palette.py'], cwd=ROOT, text=True)
+            self.assertNotEqual(self.run_oracle(folder, old).returncode, 0)
+
+    def test_wrong_installed_version_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            self.fixture(folder, '0.0.526')
+            session = json.loads((folder / 'session.json').read_text())
+            session['expected_version'] = '1.2.345'
+            (folder / 'session.json').write_text(json.dumps(session))
+            self.assertNotEqual(self.run_oracle(folder).returncode, 0)
+
+
 if __name__ == '__main__':
     unittest.main()

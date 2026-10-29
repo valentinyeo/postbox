@@ -13,20 +13,19 @@ def section(source, name):
 def verify_column(source):
     width = section(source, 'messageBubbleWidth')
     for token in (
-        'a.displayed_jid.slice()',
-        'a.chats[a.selected_chat].jid.slice()',
-        'std.mem.endsWith(u8, chat_jid, "@g.us")',
-        'const max_width = @max(1, column_width - left_inset - px(a, 24));',
-        'return @min(max_width, std.math.clamp(@divTrunc(column_width * 7, 10), px(a, 280), px(a, theme.bubble_max_width)));',
+        'return @max(1, @min(px(a, theme.bubble_max_width), available_width - px(a, 48)));',
     ):
         assert token in width, f'IGSH-714 message column missing {token}'
+    column = section(source, 'chatColumn')
+    assert '@min(px(a, theme.chat_column_width), available_width - px(a, 32))' in column
+    assert '@divTrunc(available_width - width, 2)' in column
     assert 'bitmap' not in width, 'IGSH-714 bitmap dimensions must not choose the message column'
     paint = section(source, 'drawCanvas')
     scroll = section(source, 'scrollToSelectedMessage')
     measure = section(source, 'measureMessage')
     for token in (
         'const bubble_width = messageBubbleWidth(a, available_width);',
-        'const right = left + bubble_width;',
+        'const right = left + width;',
         'media_layout.fit(message.bitmap_width, message.bitmap_height, bubble_width - px(a, 24), px(a, 250))',
         '.right = image_left + display.width, .bottom = image_top + display.height',
         'text_top += display.height + px(a, 8);',
@@ -127,35 +126,25 @@ class MediaLayoutTests(unittest.TestCase):
 
     def test_IGSH_714_column_and_media_use_canvas_bounds(self):
         width = verify_column(self.source)
-        group_inset, direct_inset = map(int, re.search(r'@as\(i32, (\d+)\) else @as\(i32, (\d+)\)', width).groups())
-        right_inset = int(re.search(r'column_width - left_inset - px\(a, (\d+)\)', width).group(1))
-        numerator, denominator, minimum = map(int, re.search(r'column_width \* (\d+), (\d+)\), px\(a, (\d+)\)', width).groups())
-        tokens = (ROOT / 'src/theme.zig').read_text()
-        maximum = int(re.search(r'pub const bubble_max_width: i32 = (\d+);', tokens).group(1))
-        column_limit = int(re.search(r'pub const chat_column_width: i32 = (\d+);', tokens).group(1))
+        maximum = int(re.search(r'pub const bubble_max_width: i32 = (\d+);', (ROOT / 'src/theme.zig').read_text()).group(1))
+        inset = int(re.search(r'available_width - px\(a, (\d+)\)', width).group(1))
         for dpi in (96, 144, 192):
-            def px(value):
-                return (value * dpi + 48) // 96
+            px = lambda value: (value * dpi + 48) // 96
             for available in (px(317), px(682), px(1200)):
-                for inset in (group_inset, direct_inset):
-                    column = min(available, px(column_limit))
-                    inset_center = max(0, (available - column) // 2)
-                    preferred = min(px(maximum), max(px(minimum), column * numerator // denominator))
-                    bubble = min(max(1, column - px(inset) - px(right_inset)), preferred)
-                    incoming_left = inset_center + px(inset)
-                    own_left = inset_center + column - bubble - px(right_inset)
-                    with self.subTest(dpi=dpi, available=available, inset=inset):
-                        self.assertGreater(bubble - px(24), 0)
-                        self.assertGreaterEqual(own_left, 0)
-                        self.assertLessEqual(incoming_left + bubble, available - px(right_inset))
-                        self.assertLessEqual(own_left + bubble, available)
-                        if preferred <= column - px(inset) - px(right_inset):
-                            self.assertEqual(bubble, preferred)
+                bubble = max(1, min(px(maximum), available - px(inset)))
+                column = min(px(760), available - px(32))
+                incoming_left = (available - column) // 2
+                own_left = incoming_left + column - bubble
+                with self.subTest(dpi=dpi, available=available):
+                    self.assertGreater(bubble - px(28), 0)
+                    self.assertGreaterEqual(own_left, incoming_left)
+                    self.assertLessEqual(incoming_left + bubble, incoming_left + column)
+                    self.assertLessEqual(own_left + bubble, available)
 
     def test_IGSH_714_rejects_uncapped_or_inconsistent_columns(self):
         verify_column(self.source)
         for old, new in (
-            ('return @min(max_width, std.math.clamp(', 'return @max(max_width, std.math.clamp('),
+            ('return @max(1, @min(px(a, theme.bubble_max_width),', 'return @max(1, @max(px(a, theme.bubble_max_width),'),
             ('const bubble_width = messageBubbleWidth(a, available_width);', 'const bubble_width = message.bitmap_width;'),
             ('const bubble_width = messageBubbleWidth(a, client.right - client.left);', 'const bubble_width = 280;'),
             ('bubble_width - px(a, 24), px(a, 250))', 'message.bitmap_width, px(a, 250))'),
@@ -166,13 +155,13 @@ class MediaLayoutTests(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, 'IGSH-714'):
                     verify_column(self.source.replace(old, new))
 
-    def test_IGSH_714_measurement_and_paint_use_the_same_time_box(self):
-        rect = section(self.source, 'messageTimeRect')
+    def test_IGSH_1120_sender_time_stays_outside_the_bubble(self):
         paint = section(self.source, 'drawCanvas')
-        for edge in ('left', 'right', 'bottom'):
-            pattern = rf'\.{edge} = [^,}}]*? - px\(a, (\d+)\)'
-            self.assertEqual(re.search(pattern, rect).group(1), re.search(pattern, paint[paint.rindex('var time_rect ='):]).group(1))
-        self.assertIn('media_layout.needsTimeLine(last_line_right, time_width_with_gap, text_width)', section(self.source, 'measureMessage'))
+        self.assertIn('const bubble_top = y + sender_height;', paint)
+        self.assertIn('.top = y + px(a, 1)', paint)
+        self.assertIn('.bottom = sender_rect.bottom', paint)
+        self.assertNotIn('messageTimeRect', section(self.source, 'measureMessage'))
+        self.assertNotIn('time_width_with_gap', section(self.source, 'measureMessage'))
 
     def test_IGSH_714_wrapper_retains_signature_and_shares_the_core_loop(self):
         wrapper = section(self.source, 'wrapMixedSink')
@@ -181,8 +170,8 @@ class MediaLayoutTests(unittest.TestCase):
         core = section(self.source, 'wrapMixedSinkExtent')
         self.assertIn('if (last_line_right) |extent| extent.* = list_layout.last_right;', core)
         measure = section(self.source, 'measureMessage')
-        self.assertIn('text_width, false, 0, 0, message, &last_line_right)', measure)
-        self.assertIn('media_layout.needsTimeLine(last_line_right, time_width_with_gap, text_width)', measure)
+        self.assertIn('text_width, false, 0, 0, message)', measure)
+        self.assertIn('return formattedMessage(hdc, a, message, max_width, draw, left, top, last_line_right);', core)
 
 
 if __name__ == '__main__':

@@ -67,12 +67,17 @@ function Invoke-VoiceProbe($Session, [string]$Name) {
     $partial = Read-ScreenshotPixels (Join-Path $Session.evidence "$Name.png")
     $full = Read-ScreenshotPixels (Join-Path $Session.evidence "$Name-full.png")
     Assert-That ($partial.width -eq $full.width -and $partial.height -eq $full.height -and $partial.stride -eq $full.stride) 'voice: screenshots differ in size'
-    $all = @($layout.messages | ForEach-Object { ConvertTo-VoiceRect $_.bubble })
+    $all = @($layout.messages | ForEach-Object {
+        ConvertTo-VoiceRect $_.bubble
+        ConvertTo-VoiceRect $_.sender_header
+        ConvertTo-VoiceRect $_.time_header
+    })
     $items = @(Get-VoiceRows $layout | ForEach-Object {
         $item = [VerifyVoice+Item]::new()
         $item.id = $_.id
         $item.bubble = ConvertTo-VoiceRect $_.bubble
         $item.media = ConvertTo-VoiceRect $_.media
+        $item.time = ConvertTo-VoiceRect $_.time_header
         $item
     })
     $dpi = [int][VerifyWindow]::GetDpiForWindow($handle)

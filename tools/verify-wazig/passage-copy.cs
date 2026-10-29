@@ -131,7 +131,7 @@ public static class VerifyPassage {
         if (stride <= 0 || left < 0 || top < 0 || right * 4 > stride || (long)bottom * stride > image.LongLength) throw new Exception("Screenshot does not contain message bubble");
         for (int y = top + 6 * dpi / 96; y < bottom - 5 * dpi / 96; y++) {
             bool ink = false;
-            for (int x = left + inset; x < (left + right) / 2; x++) {
+            for (int x = left + inset; x < right - inset; x++) {
                 int p = y * stride + x * 4;
                 if (image[p] > 170 && image[p + 1] > 170 && image[p + 2] > 170) { ink = true; break; }
             }
@@ -141,7 +141,7 @@ public static class VerifyPassage {
             }
         }
         if (bandTop < 0) throw new Exception("No painted message body");
-        for (int y = bandTop; y <= bandBottom; y++) for (int x = left + inset; x < (left + right) / 2; x++) {
+        for (int y = bandTop; y <= bandBottom; y++) for (int x = left + inset; x < right - inset; x++) {
             int p = y * stride + x * 4;
             if (image[p] > 170 && image[p + 1] > 170 && image[p + 2] > 170) { minX = Math.Min(minX, x); maxX = Math.Max(maxX, x); }
         }

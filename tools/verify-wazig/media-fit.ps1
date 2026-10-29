@@ -15,15 +15,23 @@ function Get-MediaFitTarget($Session, [string]$Id) {
     $height = $bounds.Bottom - $bounds.Top
     $target = Wait-Until {
         $null = [VerifyVoice]::FullRepaint($Session.pid, $canvas)
-        $rows = @((Read-Control $Session messages).messages | Where-Object id -eq $Id)
+        $shown = Read-Control $Session messages
+        $shown | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'media-fit-target.messages.json')
+        $rows = @($shown.messages | Where-Object id -eq $Id)
         $null = Assert-That ($rows.Count -eq 1) "media-fit: expected one message for $Id"
         $row = $rows[0]
-        if ($row.bubble[2] -gt $row.bubble[0] -and $row.bubble[0] -ge 0 -and $row.bubble[2] -le $width -and $row.bubble[1] -ge 0 -and $row.bubble[3] -le $height) { return $row }
-        $direction = if ($row.bubble[1] -lt 0) {
-            [Math]::Min(120, -2 * $row.bubble[1])
+        $top = if ($row.time_header[2] -gt $row.time_header[0]) { $row.time_header[1] } else { $row.bubble[1] }
+        $inset = [int][Math]::Ceiling(72 * [VerifyWindow]::GetDpiForWindow($canvas) / 96)
+        if ($top -ge $inset -and $row.bubble[2] -gt $row.bubble[0] -and $row.bubble[0] -ge 0 -and $row.bubble[2] -le $width -and $row.bubble[1] -ge 0 -and $row.bubble[3] -le $height) { return $row }
+        $direction = if ($row.bubble[2] -gt $row.bubble[0] -and $top -lt $inset) {
+            [Math]::Min(120, 2 * ($inset - $top))
         } elseif ($row.bubble[3] -gt $height) {
             -[Math]::Min(120, 2 * ($row.bubble[3] - $height))
-        } elseif ($row.bubble[2] -eq $row.bubble[0] -and $Id -ne 'fit-own') { 120 } else { -120 }
+        } elseif ($row.bubble[2] -eq $row.bubble[0]) {
+            $order = @($shown.messages.id)
+            $first = @($shown.messages | Where-Object { $_.bubble[2] -gt $_.bubble[0] })[0]
+            if ($order.IndexOf($Id) -lt $order.IndexOf($first.id)) { 120 } else { -120 }
+        } else { -120 }
         $null = [VerifyVoice]::Wheel($Session.pid, [int](($bounds.Left + $bounds.Right) / 2), [int](($bounds.Top + $bounds.Bottom) / 2), $direction)
         return $false
     } "media-fit $Id fully visible"
@@ -84,7 +92,8 @@ function Invoke-MediaFitJourney($Session) {
         $image = Read-ScreenshotPixels (Join-Path $Session.evidence "$size-calibration.png")
         $step = [VerifyMediaFit]::WordStep($image.bytes, $image.stride, $ox, $oy, [int[]]$own.bubble, $dpi)
         $padding = [int][Math]::Floor((24 * $dpi + 48) / 96)
-        $count = [int][Math]::Floor(($own.bubble[2] - $own.bubble[0] - $padding) / $step) - 1
+        $mediaRow = Get-MediaFitTarget $Session 'landscape'
+        $count = [int][Math]::Floor(($mediaRow.bubble[2] - $mediaRow.bubble[0] - $padding - 4 * $dpi / 96) / $step) - 1
         $null = Set-MediaFitText $Session ((@(1..$count | ForEach-Object { 'M' })) -join ' ')
         foreach ($id in @('fit-own') + $ids) {
             $row = Get-MediaFitTarget $Session $id
@@ -94,7 +103,7 @@ function Invoke-MediaFitJourney($Session) {
             $shown | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$name.messages.json")
             $image = Read-ScreenshotPixels (Join-Path $Session.evidence "$name.png")
             $kind = if ($id -eq 'fit-own') { 'own' } else { $id }
-            $result = [VerifyMediaFit]::Check($image.bytes, $image.width, $image.height, $image.stride, $ox, $oy, $canvasWidth, $canvasHeight, [int[]]$row.bubble, [int[]]$row.media, $kind, $dpi)
+            $result = [VerifyMediaFit]::Check($image.bytes, $image.width, $image.height, $image.stride, $ox, $oy, $canvasWidth, $canvasHeight, [int[]]$row.bubble, [int[]]$row.media, [int[]]$row.time_header, $kind, $dpi)
             $null = $checks.Add([ordered]@{ size = $size; id = $id; dpi = $dpi; bubble = $row.bubble; media = $row.media; screenshot = "$name.png"; canvas = @($ox, $oy, $canvasWidth, $canvasHeight); result = $result })
             foreach ($problem in $result.problems) { $null = $problems.Add("${name}: $problem") }
             $checks.ToArray() | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'media-fit-checks.json')

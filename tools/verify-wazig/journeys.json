@@ -71,15 +71,18 @@
     },
     {
       "name": "appearance",
-      "pr": false,
-      "hub": null,
+      "pr": true,
+      "hub": "chat-design",
       "evidence": true,
-      "chats": null,
+      "chats": 2,
       "script": "journey-appearance.ps1",
       "validator": {
         "file": "evidence-palette.py"
       },
-      "hub_handler": null,
+      "hub_handler": {
+        "file": "chat-design-fixture.py",
+        "class": "ChatDesignHandler"
+      },
       "maximize": true
     },
     {

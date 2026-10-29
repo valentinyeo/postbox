@@ -283,6 +283,7 @@ const Chat = struct {
     jid: Utf8Text(191) = .{},
     name: WideText(159) = .{},
     kind: WideText(31) = .{},
+    preview: WideText(255) = .{},
     timestamp: Utf8Text(47) = .{},
     time: WideText(15) = .{},
     unread_count: i64 = 0,
@@ -389,6 +390,7 @@ const WordSpan = struct {
     rect: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     start: u32 = 0,
     len: u32 = 0,
+    style: message_format.Style = .{},
 };
 
 const PendingArchive = struct {
@@ -491,6 +493,8 @@ const Message = struct {
     toggle_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     media_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     bubble_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+    sender_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+    time_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     reaction_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     measure_tag: u64 = 0,
     measure_height: i32 = 0,
@@ -771,6 +775,8 @@ const App = struct {
     last_chat_count: usize = std.math.maxInt(usize),
     font: ?win.HFONT = null,
     font_small: ?win.HFONT = null,
+    message_fonts: [8]?win.HFONT = @splat(null),
+    message_hover: ?usize = null,
     font_reply_label: ?win.HFONT = null,
     font_reply_icon: ?win.HFONT = null,
     font_icon: ?win.HFONT = null,
@@ -1395,7 +1401,6 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
     updateTooltipTheme(a);
     _ = win.SendMessageW(tt, 0x400 + 24, 0, 260);
     addTooltip(a, tt, a.chats_hwnd, lit("Chats  ↑/↓ move · Ctrl+Tab next chat"));
-    addTooltip(a, tt, a.canvas, lit("Postbox  Alt+J/K select · Ctrl+P play voice · Ctrl+T transcript · Ctrl+R react"));
     addTooltip(a, tt, a.compose, lit("Message box  Enter sends · Shift+Enter new line"));
     addTooltip(a, tt, a.dictate, lit("Dictate  Ctrl+D"));
     addTooltip(a, tt, a.send, lit("Send message  Enter"));
@@ -1794,6 +1799,13 @@ fn recreateFonts(a: *App) void {
     comptime std.debug.assert(body_weight == win.FW_NORMAL);
     const dpi: i32 = @intCast(a.dpi);
     const old_font = a.font;
+    const old_message_fonts = a.message_fonts;
+    for (&a.message_fonts, 0..) |*font, index| {
+        font.* = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, if (index & 1 != 0) win.FW_SEMIBOLD else win.FW_NORMAL, @intFromBool(index & 2 != 0), 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, if (index & 4 != 0) lit("IBM Plex Mono") else lit("IBM Plex Sans"));
+    }
+    for (old_message_fonts) |font| if (font) |handle| {
+        _ = win.DeleteObject(handle);
+    };
     const old_small = a.font_small;
     const old_reply_label = a.font_reply_label;
     const old_reply_icon = a.font_reply_icon;
@@ -9843,16 +9855,13 @@ fn selectChat(a: *App, delta: i32, wrap: bool) void {
 }
 
 fn messageBubbleWidth(a: *const App, available_width: i32) i32 {
-    const chat_jid = if (a.displayed_jid.len > 0)
-        a.displayed_jid.slice()
-    else if (a.chat_count > 0 and a.selected_chat < a.chat_count)
-        a.chats[a.selected_chat].jid.slice()
-    else
-        "";
-    const left_inset = px(a, if (std.mem.endsWith(u8, chat_jid, "@g.us")) @as(i32, 62) else @as(i32, 24));
-    const column_width = @min(available_width, px(a, theme.chat_column_width));
-    const max_width = @max(1, column_width - left_inset - px(a, 24));
-    return @min(max_width, std.math.clamp(@divTrunc(column_width * 7, 10), px(a, 280), px(a, theme.bubble_max_width)));
+    return @max(1, @min(px(a, theme.bubble_max_width), available_width - px(a, 48)));
+}
+
+fn chatColumn(a: *const App, available_width: i32) win.RECT {
+    const width = @max(1, @min(px(a, theme.chat_column_width), available_width - px(a, 32)));
+    const left = @divTrunc(available_width - width, 2);
+    return .{ .left = left, .top = 0, .right = left + width, .bottom = 0 };
 }
 
 fn scrollToSelectedMessage(a: *App) void {
@@ -12291,6 +12300,8 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try w.print(",\"local\":{},\"transcript_chars\":{d},\"expanded\":{}", .{ message.local_path.len > 0, message.transcript.len, message.transcript_expanded });
         for ([_]struct { name: []const u8, rect: win.RECT }{
             .{ .name = "bubble", .rect = message.bubble_hit },
+            .{ .name = "sender_header", .rect = message.sender_hit },
+            .{ .name = "time_header", .rect = message.time_hit },
             .{ .name = "quote_line", .rect = message.quote_hit },
             .{ .name = "reaction_chip", .rect = message.reaction_hit },
             .{ .name = "media", .rect = message.media_hit },
@@ -12305,7 +12316,7 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             try w.print(",\"body_weight\":{d},\"font_height\":{d},\"words\":[", .{ logical.lfWeight, logical.lfHeight });
             for (message.word_rects[0..message.word_count], 0..) |word, word_index| {
                 if (word_index > 0) try w.writeByte(',');
-                try w.print("{{\"start\":{d},\"len\":{d},\"rect\":[{d},{d},{d},{d}]}}", .{ word.start, word.len, word.rect.left, word.rect.top, word.rect.right, word.rect.bottom });
+                try w.print("{{\"start\":{d},\"len\":{d},\"rect\":[{d},{d},{d},{d}],\"bold\":{},\"italic\":{},\"strike\":{},\"mono\":{},\"quote\":{}}}", .{ word.start, word.len, word.rect.left, word.rect.top, word.rect.right, word.rect.bottom, word.style.bold, word.style.italic, word.style.strike, word.style.mono, word.style.quote });
             }
             try w.writeByte(']');
         }
@@ -14106,8 +14117,8 @@ fn senderBandHeight(hdc: win.HDC, a: *App) i32 {
 }
 
 fn messageHeaderHeight(hdc: win.HDC, a: *App, show_sender: bool) i32 {
-    if (!show_sender) return px(a, 12);
-    return px(a, 6) + senderBandHeight(hdc, a) + px(a, 8);
+    if (!show_sender) return px(a, 10);
+    return senderBandHeight(hdc, a) + px(a, 18);
 }
 
 fn timeBandHeight(hdc: win.HDC, a: *App) i32 {
@@ -14264,6 +14275,9 @@ fn wrapMixedSink(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int, max_
 }
 
 fn wrapMixedSinkExtent(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int, max_width: i32, draw: bool, left: i32, top: i32, sink: ?*const Message, last_line_right: ?*i32) i32 {
+    if (sink) |message| {
+        if (text_ptr == message.text.ptr()) return formattedMessage(hdc, a, message, max_width, draw, left, top, last_line_right);
+    }
     if (last_line_right) |extent| extent.* = 0;
     const text = text_ptr[0..@intCast(len)];
     if (last_line_right == null and sink == null and !containsEmoji(text) and !containsUrlHint(text)) {
@@ -14374,6 +14388,201 @@ fn wrapMixedSinkExtent(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int
     return list_layout.height();
 }
 
+const message_format = @import("message_format.zig");
+
+fn messageFont(a: *App, style: message_format.Style) win.HFONT {
+    if (style.footer) return a.font_time orelse a.font.?;
+    const index = @as(usize, @intFromBool(style.bold)) | (@as(usize, @intFromBool(style.italic)) << 1) | (@as(usize, @intFromBool(style.mono)) << 2);
+    return a.message_fonts[index] orelse a.font.?;
+}
+
+const MessageMetrics = struct {
+    hdc: win.HDC,
+    app: *App,
+    parsed: *const message_format.Parsed,
+    em: i32,
+
+    fn offset(self: @This(), slice: []const u16) usize {
+        return (@intFromPtr(slice.ptr) - @intFromPtr(&self.parsed.text)) / @sizeOf(u16);
+    }
+
+    pub fn width(self: @This(), slice: []const u16) i32 {
+        if (slice.len == 0) return 0;
+        if (@intFromPtr(slice.ptr) < @intFromPtr(&self.parsed.text) or @intFromPtr(slice.ptr) + slice.len * 2 > @intFromPtr(&self.parsed.text) + self.parsed.len * 2) {
+            const font = self.app.message_fonts[0] orelse self.app.font.?;
+            return mixedSliceWidth(self.hdc, font, self.app.font_emoji orelse font, self.em, fontAscent(self.hdc, font), slice);
+        }
+        const start = self.offset(slice);
+        var x: i32 = 0;
+        var index: usize = 0;
+        while (index < slice.len) {
+            const style = self.parsed.styles[start + index];
+            var end = index + 1;
+            while (end < slice.len and @as(u8, @bitCast(self.parsed.styles[start + end])) == @as(u8, @bitCast(style))) : (end += 1) {}
+            const font = messageFont(self.app, style);
+            x += mixedSliceWidth(self.hdc, font, self.app.font_emoji orelse font, self.em, fontAscent(self.hdc, font), slice[index..end]);
+            index = end;
+        }
+        return x;
+    }
+
+    pub fn fit(self: @This(), slice: []const u16, available: i32) usize {
+        var count: usize = 0;
+        while (count < slice.len) {
+            const next = @min(slice.len, count + emojiUnitAt(slice, count).len);
+            if (count > 0 and self.width(slice[0..next]) > available) break;
+            count = next;
+        }
+        return clampChunkCut(slice, @max(1, count));
+    }
+};
+
+fn formattedMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, draw: bool, left: i32, top: i32, extent: ?*i32) i32 {
+    const parsed = message_format.parse(message.text.slice(), selectedChatIsSlack(a));
+    const em = @max(1, -scaledFontHeight(theme.type_body, a.font_scale, @intCast(a.dpi)));
+    const line_height = @divTrunc(em * 3 + 1, 2);
+    const metrics = MessageMetrics{ .hdc = hdc, .app = a, .parsed = &parsed, .em = em };
+    var y: i32 = 0;
+    var start: usize = 0;
+    var max_right: i32 = 0;
+    var shapes = smooth.Context.init(hdc);
+    defer shapes.deinit();
+    while (start <= parsed.len) {
+        const end = std.mem.indexOfScalarPos(u16, parsed.text[0..parsed.len], start, '\n') orelse parsed.len;
+        const line = parsed.text[start..end];
+        const style = if (start < parsed.len) parsed.styles[start] else message_format.Style{};
+        if (line.len == 0 and style.quote) {
+            y += px(a, 10);
+            start = end + 1;
+            continue;
+        }
+        const inset = px(a, if (style.quote) @as(i32, 13) else if (style.block) @as(i32, 10) else 0);
+        const available = @max(1, width - inset - if (style.block) px(a, 10) else @as(i32, 0));
+        var layout_text = @import("chat_list_layout.zig").Layout{ .text = line, .width = available, .line_height = line_height, .lists = !style.block };
+        if (draw and style.block and (start == 0 or !parsed.styles[start - 1].block)) {
+            var block_end = end;
+            while (block_end < parsed.len and parsed.styles[block_end].block) : (block_end += 1) {}
+            if (block_end > start and parsed.text[block_end - 1] == '\n') block_end -= 1;
+            var sizing = @import("chat_list_layout.zig").Layout{ .text = parsed.text[start..block_end], .width = available, .line_height = line_height, .lists = false };
+            while (sizing.next(metrics)) |_| {}
+            smooth.fillRoundRect(&shapes, .{ .left = left, .top = top + y, .right = left + width, .bottom = top + y + sizing.height() }, px(a, 16), px(a, 16), theme.code_block);
+        }
+        while (layout_text.next(metrics)) |placed| {
+            const chunk = line[placed.start..][0..placed.len];
+            const offset = start + placed.start;
+            const word_start = start + placed.word_start;
+            const word_text = parsed.text[word_start .. start + placed.word_end];
+            var wide_url: [519]u16 = undefined;
+            var link_word = word_text;
+            for (message.label_links[0..message.label_link_count]) |*link| {
+                const source = parsed.source[word_start];
+                if (source >= link.start and source < link.end) {
+                    const length = std.unicode.utf8ToUtf16Le(&wide_url, link.url[0..link.url_len]) catch 0;
+                    if (length > 0) link_word = wide_url[0..length];
+                    break;
+                }
+            }
+            const is_link = wordIsUrl(link_word);
+            const mention = word_text.len > 0 and word_text[0] == '@';
+            var x = left + inset + placed.x;
+            const word_left = x;
+            const line_top = top + y + placed.y;
+            max_right = @max(max_right, inset + placed.x + metrics.width(chunk));
+            if (!draw) continue;
+            var index: usize = 0;
+            while (index < chunk.len) {
+                const run_style = parsed.styles[offset + index];
+                var run_end = index + 1;
+                while (run_end < chunk.len and parsed.source[offset + run_end] == parsed.source[offset + run_end - 1] + 1 and @as(u8, @bitCast(parsed.styles[offset + run_end])) == @as(u8, @bitCast(run_style))) : (run_end += 1) {}
+                const run = chunk[index..run_end];
+                const font = messageFont(a, run_style);
+                const run_width = metrics.width(run);
+                if (run_style.mono and !run_style.block) smooth.fillRoundRect(&shapes, .{ .left = x, .top = line_top, .right = x + run_width, .bottom = line_top + line_height }, px(a, 8), px(a, 8), theme.code_inline);
+                _ = win.SetTextColor(hdc, if (is_link or mention) theme.current.primary else if (run_style.footer) theme.current.on_surface_variant else theme.current.on_surface);
+                _ = drawWordSlice(hdc, a, font, a.font_emoji orelse font, em, fontAscent(hdc, font), run, x, line_top, false);
+                if (run_style.strike) {
+                    smooth.fillRoundRect(&shapes, .{ .left = x, .top = line_top + @divTrunc(em * 2, 3), .right = x + run_width, .bottom = line_top + @divTrunc(em * 2, 3) + px(a, 1) }, 0, 0, theme.current.on_surface);
+                }
+                const target = @constCast(message);
+                if (target.word_count < target.word_rects.len and !placed.space) {
+                    target.word_rects[target.word_count] = .{ .rect = .{ .left = x, .top = line_top, .right = x + run_width, .bottom = line_top + line_height }, .start = parsed.source[offset + index], .len = parsed.source[offset + run_end - 1] + 1 - parsed.source[offset + index], .style = run_style };
+                    target.word_count += 1;
+                }
+                x += run_width;
+                index = run_end;
+            }
+            const target = @constCast(message);
+            const rect = win.RECT{ .left = word_left, .top = line_top, .right = x, .bottom = line_top + line_height };
+            if (is_link) {
+                var extended = false;
+                if (target.link_count > 0) {
+                    const previous = &target.links[target.link_count - 1];
+                    if (std.mem.eql(u16, previous.url.slice(), link_word)) {
+                        if (previous.chunk_count < previous.chunk_rects.len) {
+                            previous.chunk_rects[previous.chunk_count] = rect;
+                            previous.chunk_count += 1;
+                        }
+                        extended = true;
+                    }
+                }
+                if (!extended and target.link_count < target.links.len) {
+                    const link = &target.links[target.link_count];
+                    link.* = .{ .rect = rect };
+                    if (std.unicode.utf16LeToUtf8Alloc(a.allocator, link_word)) |utf8| {
+                        defer a.allocator.free(utf8);
+                        link.url.set(a.allocator, utf8);
+                        target.link_count += 1;
+                    } else |_| {}
+                }
+            }
+        }
+        const height = layout_text.height();
+        if (draw and style.quote) smooth.fillRoundRect(&shapes, .{ .left = left, .top = top + y, .right = left + px(a, 3), .bottom = top + y + height }, px(a, 4), px(a, 4), theme.quote_bar);
+        y += height;
+        start = end + 1;
+    }
+    if (extent) |value| value.* = max_right;
+    return @max(line_height, y);
+}
+
+fn messageWidth(hdc: win.HDC, a: *App, message: *const Message, limit: i32) i32 {
+    if (message.media_type.len > 0 or message.quote.len > 0 or message.transcript.len > 0 or message.unfurl_provider != .none) return limit;
+    var extent: i32 = 0;
+    _ = formattedMessage(hdc, a, message, @max(1, limit - px(a, 28)), false, 0, 0, &extent);
+    const reaction_width = reactionChipSize(hdc, a, message, limit).cx;
+    return @min(limit, @max(extent + px(a, 28), reaction_width + px(a, 24)));
+}
+
+fn cachedChatPreview(a: *App, chat: *Chat) void {
+    const raw = msgCacheGet(a, chat_key.of(chat)) orelse return;
+    var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
+    defer parsed.deinit();
+    if (parsed.value != .object) return;
+    const data = parsed.value.object.get("data") orelse return;
+    if (data != .object) return;
+    const messages = data.object.get("messages") orelse return;
+    if (messages != .array) return;
+    var latest: i64 = std.math.minInt(i64);
+    var text: []const u8 = "";
+    for (messages.array.items) |row| {
+        if (row != .object) continue;
+        const stamp = media_age.unixSeconds(getString(row.object, "Timestamp")) orelse continue;
+        if (stamp < latest) continue;
+        const body = getString(row.object, "Text");
+        if (body.len == 0) continue;
+        latest = stamp;
+        text = body;
+    }
+    var links: [slack.max_text + 1]u8 = undefined;
+    var wide = WideText(4095){};
+    wide.set(a.allocator, if (chat.provider == .slack) slack.convertMrkdwn(&links, text, null) else text);
+    const formatted = message_format.parse(wide.slice(), chat.provider == .slack);
+    const len = @min(chat.preview.buf.len - 1, formatted.len);
+    @memcpy(chat.preview.buf[0..len], formatted.text[0..len]);
+    chat.preview.len = len;
+    chat.preview.buf[len] = 0;
+}
+
 fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     if (screen_item.itemID == @as(win.UINT, @bitCast(@as(c_int, -1)))) return;
     const index: usize = @intCast(screen_item.itemID);
@@ -14388,6 +14597,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     buffered.hDC = surface.hdc;
     const item = &buffered;
     const chat = &a.chats[index];
+    if (chat.preview.len == 0) cachedChatPreview(a, chat);
     const selected = (item.itemState & win.ODS_SELECTED) != 0;
     const bulk_selected = a.bulk.items.len > 0 and chat_key.indexOf(Chat, a.bulk.items, chat_key.of(chat)) != null;
     const hovered = if (a.chat_hover_y) |y| y >= item.rcItem.top and y < item.rcItem.bottom else false;
@@ -14532,6 +14742,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
                 kind.set(a.allocator, std.fmt.bufPrint(&label, "{s} · {s}", .{ kind_utf8[0..kind_len], if (installation.team_name.len > 0) installation.team_name.slice() else installation.team_id.slice() }) catch installation.team_name.slice());
             }
         }
+        if (chat.preview.len > 0) kind = chat.preview;
         if (kind.len == 0) {
             @memcpy(kind.buf[0..chat.kind.len], chat.kind.slice());
             kind.len = chat.kind.len;
@@ -14618,7 +14829,7 @@ fn transcriptRender(hdc: win.HDC, a: *App, message: *const Message, shown: c_int
     return y - top;
 }
 
-fn showSenderName(a: *App, index: usize) bool {
+fn startsSenderGroup(a: *App, index: usize) bool {
     if (index == 0) return true;
     const message = &a.messages[index];
     const previous = &a.messages[index - 1];
@@ -14629,8 +14840,25 @@ fn showSenderName(a: *App, index: usize) bool {
     return !std.mem.eql(u16, message.sender.slice(), previous.sender.slice());
 }
 
+fn groupChat(a: *const App) bool {
+    if (a.selected_chat >= a.chat_count) return false;
+    const chat = &a.chats[a.selected_chat];
+    return std.mem.endsWith(u8, chat.jid.slice(), "@g.us") or startsWithIgnoreCaseUtf16(chat.kind.slice(), "group") or startsWithIgnoreCaseUtf16(chat.kind.slice(), "channel");
+}
+
+fn showSenderName(a: *App, index: usize) bool {
+    return groupChat(a) and startsSenderGroup(a, index);
+}
+
+fn separatorHeight(a: *const App, index: usize) i32 {
+    const current = media_age.unixSeconds(a.messages[index].timestamp.slice()) orelse return 0;
+    if (index == 0) return px(a, 32);
+    const previous = media_age.unixSeconds(a.messages[index - 1].timestamp.slice()) orelse return 0;
+    return if (@divFloor(current, 86400) != @divFloor(previous, 86400) or current - previous >= 3600) px(a, 32) else 0;
+}
+
 fn messageGap(a: *App, index: usize) i32 {
-    return if (showSenderName(a, index)) 8 else 2;
+    return px(a, if (startsSenderGroup(a, index)) @as(i32, 16) else 4) + separatorHeight(a, index);
 }
 
 const quote_inset: i32 = 12;
@@ -14711,16 +14939,15 @@ fn reactionChipSize(hdc: win.HDC, a: *App, message: *const Message, width: i32) 
     return .{ .cx = text_width + px(a, 12), .cy = text_height + px(a, 8) };
 }
 
-fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, show_sender: bool) i32 {
+fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, show_sender: bool) i32 {
+    const width = messageWidth(hdc, a, message, limit);
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
     const header_height = messageHeaderHeight(hdc, a, show_sender);
     const skip_body_line = message.text.len == 0 and message.quote.len > 0;
     var height = quoteBlockHeight(hdc, a, message, width) + header_height;
-    const text_width = width - px(a, 24);
-    var last_line_right: i32 = 0;
+    const text_width = width - px(a, 28);
     if (!skip_body_line) {
-        height += wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), if (message.text.len > 0) @intCast(message.text.len) else 1, width - px(a, 24), false, 0, 0, message);
-        _ = wrapMixedSinkExtent(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), if (message.text.len > 0) @intCast(message.text.len) else 1, text_width, false, 0, 0, message, &last_line_right);
+        height += wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), if (message.text.len > 0) @intCast(message.text.len) else 1, text_width, false, 0, 0, message);
     }
     if (unfurlCardVisible(a, @constCast(message))) height += unfurl_card_height + px(a, 6);
     if (message.bitmap_height > 0) {
@@ -14733,10 +14960,8 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, sh
         const shown: c_int = if (message.transcript_expanded) @intCast(message.transcript.len) else @intCast(@min(message.transcript.len, 400));
         height += transcriptRender(hdc, a, message, shown, width - px(a, 24), false, 0, 0) + px(a, 22);
     }
-    const time_rect = messageTimeRect(hdc, a, width, 0);
-    const time_width_with_gap = px(a, 12) + text_width - time_rect.left + px(a, 4);
-    if (!skip_body_line and message.unfurl_provider == .none and media_layout.needsTimeLine(last_line_right, time_width_with_gap, text_width)) height += timeBandHeight(hdc, a);
-    const min_height: i32 = header_height + timeBandHeight(hdc, a) + px(a, 5);
+    height += px(a, 10);
+    const min_height: i32 = header_height + px(a, 20);
     return @max(height, min_height) + @max(0, reactionChipSize(hdc, a, message, width).cy - px(a, 4));
 }
 
@@ -15025,6 +15250,91 @@ fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
     return win.CallWindowProcW(@ptrFromInt(a.chats_prev_proc), hwnd, message, wparam, lparam);
 }
 
+fn drawChatTitle(shapes: *const smooth.Context, hdc: win.HDC, a: *App, client: win.RECT) void {
+    if (a.selected_chat >= a.chat_count) return;
+    const chat = &a.chats[a.selected_chat];
+    smooth.fillRoundRectGradient(shapes, .{ .left = client.left, .top = client.top, .right = client.right, .bottom = client.top + px(a, 72) }, 1, theme.current.surface, theme.current.surface, 0);
+    if (a.compose) |compose| {
+        var cue = WideText(255){};
+        const prefix = std.unicode.utf8ToUtf16LeStringLiteral("Message ");
+        @memcpy(cue.buf[0..prefix.len], prefix);
+        const count = @min(chat.name.len, cue.buf.len - prefix.len - 1);
+        @memcpy(cue.buf[prefix.len..][0..count], chat.name.slice()[0..count]);
+        cue.buf[prefix.len + count] = 0;
+        _ = win.SendMessageW(compose, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(cue.ptr())));
+    }
+    _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
+    const name_width = @min(px(a, 280), runWidth(hdc, chat.name.slice()));
+    const provider = switch (chat.provider) {
+        .slack => "Slack",
+        .whatsapp => "WhatsApp",
+        .signal => "Signal",
+        .telegram => "Telegram",
+    };
+    var subtitle = WideText(63){};
+    var buffer: [96]u8 = undefined;
+    subtitle.set(a.allocator, std.fmt.bufPrint(&buffer, "{s}{s}", .{ provider, if (groupChat(a)) " · Group" else "" }) catch provider);
+    _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+    const subtitle_width = runWidth(hdc, subtitle.slice());
+    const width = @min(client.right - px(a, 32), name_width + subtitle_width + px(a, 72));
+    const left = @divTrunc(client.right - width, 2);
+    const rect = win.RECT{ .left = left, .top = px(a, 16), .right = left + width, .bottom = px(a, 52) };
+    smooth.fillRoundRect(shapes, rect, px(a, 36), px(a, 36), theme.current.surface_container);
+    smooth.strokeRoundRect(shapes, rect, px(a, 36), px(a, 36), theme.current.outline, px(a, 1));
+    const avatar_rect = win.RECT{ .left = left + px(a, 6), .top = px(a, 22), .right = left + px(a, 30), .bottom = px(a, 46) };
+    smooth.fillEllipse(shapes, avatar_rect, theme.current.surface_container_highest);
+    _ = win.SetBkMode(hdc, win.TRANSPARENT);
+    _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
+    _ = win.SetTextColor(hdc, theme.current.on_surface);
+    var initial = avatar_rect;
+    if (chat.name.len > 0) _ = text_draw.drawText(hdc, chat.name.ptr(), @intCast(senderInitial(chat.name.slice()).len), &initial, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+    var name = win.RECT{ .left = left + px(a, 40), .top = rect.top, .right = rect.right - subtitle_width - px(a, 20), .bottom = rect.bottom };
+    _ = text_draw.drawText(hdc, chat.name.ptr(), @intCast(chat.name.len), &name, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);
+    _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+    var meta = win.RECT{ .left = name.right + px(a, 8), .top = rect.top, .right = rect.right - px(a, 12), .bottom = rect.bottom };
+    _ = text_draw.drawText(hdc, subtitle.ptr(), @intCast(subtitle.len), &meta, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);
+}
+
+fn messageActionsRect(a: *const App, message: *const Message) win.RECT {
+    const bubble = message.bubble_hit;
+    const preferred = if (message.from_me) bubble.left - px(a, 76) else bubble.right + px(a, 4);
+    var client: win.RECT = std.mem.zeroes(win.RECT);
+    if (a.canvas) |canvas| _ = win.GetClientRect(canvas, &client);
+    const left = std.math.clamp(preferred, px(a, 8), @max(px(a, 8), client.right - px(a, 80)));
+    return .{ .left = left, .top = bubble.bottom - px(a, 24), .right = left + px(a, 72), .bottom = bubble.bottom };
+}
+
+fn drawMessageActions(shapes: *const smooth.Context, hdc: win.HDC, a: *App) void {
+    const index = a.message_hover orelse return;
+    if (index >= a.message_count) return;
+    const rect = messageActionsRect(a, &a.messages[index]);
+    smooth.fillRoundRect(shapes, rect, px(a, 16), px(a, 16), theme.current.surface);
+    _ = win.SelectObject(hdc, @ptrCast(a.font.?));
+    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+    inline for (.{ "☺", "↩", "⋯" }, 0..) |label, cell| {
+        var target = rect;
+        target.left += px(a, @as(i32, @intCast(cell)) * 24);
+        target.right = target.left + px(a, 24);
+        _ = text_draw.drawText(hdc, lit(label), -1, &target, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+    }
+}
+
+fn updateMessageHover(a: *App, hwnd: win.HWND, lparam: win.LPARAM) void {
+    const hover_x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
+    const hover_y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+    var hovered: ?usize = null;
+    for (a.messages[0..a.message_count], 0..) |*item, index| {
+        if (item.bubble_hit.right > item.bubble_hit.left and (rectHasPoint(item.bubble_hit, hover_x, hover_y) or rectHasPoint(messageActionsRect(a, item), hover_x, hover_y))) hovered = index;
+    }
+    if (a.message_hover != hovered) {
+        a.message_hover = hovered;
+        _ = win.InvalidateRect(hwnd, null, win.FALSE);
+    }
+    var track = win.TRACKMOUSEEVENT{ .cbSize = @sizeOf(win.TRACKMOUSEEVENT), .dwFlags = win.TME_LEAVE, .hwndTrack = hwnd, .dwHoverTime = 0 };
+    _ = win.TrackMouseEvent(&track);
+}
+
 fn drawCanvas(hwnd: win.HWND, a: *App) void {
     var paint: win.PAINTSTRUCT = undefined;
     const screen_dc = win.BeginPaint(hwnd, &paint);
@@ -15048,7 +15358,8 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         a.chats[a.selected_chat].jid.slice()
     else
         "";
-    const in_group = std.mem.endsWith(u8, chat_jid, "@g.us");
+    _ = chat_jid;
+    const column = chatColumn(a, available_width);
     if (a.message_bitmap_lru.total_bytes > message_bitmap_budget_bytes) {
         var victims: [max_messages]usize = undefined;
         const evicted = a.message_bitmap_lru.evict(message_bitmap_budget_bytes, &victims);
@@ -15064,13 +15375,13 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             }
         }
     }
-    var total_height: i32 = px(a, 18);
+    var total_height: i32 = px(a, 90);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
         if (channelMessageVisible(a, message)) total_height += measureMessageCached(hdc, a, message, bubble_width, showSenderName(a, index)) + messageGap(a, index);
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     a.scroll_y = std.math.clamp(a.scroll_y, 0, a.max_scroll);
-    var y = client.bottom - px(a, 14) + a.scroll_y;
+    var cursor_y = client.bottom - px(a, 14) + a.scroll_y;
     var index = a.message_count;
     while (index > 0) {
         index -= 1;
@@ -15079,6 +15390,8 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         defer clearPaintingMessageId();
         message.media_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.bubble_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+        message.sender_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+        message.time_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.reaction_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.unfurl_card_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.replies_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
@@ -15088,21 +15401,21 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         if (!channelMessageVisible(a, message)) continue;
         const show_sender = showSenderName(a, index);
         const estimated_height = measureMessageCached(hdc, a, message, bubble_width, show_sender);
-        y -= estimated_height + messageGap(a, index);
+        var y = cursor_y - estimated_height;
+        cursor_y = y - messageGap(a, index);
         if (y > client.bottom or y + estimated_height < client.top) continue;
         ensureBitmap(a, message);
         var height = measureMessageStore(hdc, a, message, bubble_width, show_sender);
         y -= height - estimated_height;
+        cursor_y -= height - estimated_height;
         if (y > client.bottom or y + height < client.top) continue;
-        const column_inset = @max(0, @divTrunc(available_width - px(a, theme.chat_column_width), 2));
-        const left: i32 = column_inset + if (message.from_me) @min(available_width, px(a, theme.chat_column_width)) - bubble_width - px(a, 24) else if (in_group) px(a, 62) else px(a, 24);
-        const right = left + bubble_width;
-        const reaction_size = reactionChipSize(hdc, a, message, bubble_width);
+        const width = messageWidth(hdc, a, message, bubble_width);
+        const left: i32 = if (message.from_me) column.right - width else column.left;
+        const right = left + width;
+        const reaction_size = reactionChipSize(hdc, a, message, width);
         const replies_height = threadSummaryHeight(a, message);
         height -= replies_height;
         const reply_height = replyLineHeight(hdc, a, message);
-        const row_top = y;
-        defer y = row_top;
         if (reply_height > 0) {
             height -= reply_height;
             message.quote_hit = .{ .left = left, .top = y, .right = right, .bottom = y + reply_height - px(a, 6) };
@@ -15120,15 +15433,17 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &line_rect, @intCast((if (message.from_me) win.DT_RIGHT else win.DT_LEFT) | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX));
             y += reply_height;
         }
-        const bubble_height = height - @max(0, reaction_size.cy - px(a, 4));
-        message.bubble_hit = .{ .left = left, .top = y, .right = right, .bottom = y + bubble_height };
+        const sender_height = if (show_sender) senderBandHeight(hdc, a) + px(a, 8) else @as(i32, 0);
+        const bubble_top = y + sender_height;
+        const bubble_height = height - sender_height - @max(0, reaction_size.cy - px(a, 4));
+        message.bubble_hit = .{ .left = left, .top = bubble_top, .right = right, .bottom = bubble_top + bubble_height };
         if (replies_height > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             _ = win.SetTextColor(hdc, theme.current.primary);
             var line_buffer: [64]u8 = undefined;
             var line = WideText(63){};
             line.set(a.allocator, slack.repliesLine(&line_buffer, threadReplyCount(a, message)));
-            message.replies_hit = .{ .left = left + px(a, 12), .top = y + bubble_height, .right = right - px(a, 12), .bottom = y + height + replies_height };
+            message.replies_hit = .{ .left = left + px(a, 12), .top = message.bubble_hit.bottom, .right = right - px(a, 12), .bottom = message.bubble_hit.bottom + replies_height };
             var line_rect = message.replies_hit;
             line_rect.bottom = line_rect.top + @divTrunc(replies_height, 2);
             _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &line_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
@@ -15140,35 +15455,42 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = text_draw.drawText(hdc, last_time.ptr(), @intCast(last_time.len), &line_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
         }
         const selected = messageMarked(a, message.id.slice()) or if (a.selected_message) |selected_index| selected_index == index else false;
-        smooth.fillRoundRectGradient(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), if (message.from_me) theme.current.primary_container else theme.current.surface_container_high, if (message.from_me) theme.bubble_own_bottom else theme.bubble_other_bottom);
-        smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), if (message.from_me) theme.bubble_own_outline else theme.current.outline, 1);
-        if (selected) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), theme.current.primary, px(a, 2));
-
+        const fill = if (message.from_me) theme.current.primary_container else theme.current.surface_container_high;
+        const bottom_fill = if (message.from_me) theme.bubble_own_bottom else theme.bubble_other_bottom;
+        smooth.fillRoundRectGradient(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), fill, bottom_fill, 255);
+        smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), if (selected) theme.current.primary else if (message.from_me) theme.bubble_own_outline else theme.current.outline, px(a, if (selected) @as(i32, 2) else 1));
         if (std.mem.eql(u8, a.reply_to.slice(), message.id.slice()) or std.mem.eql(u8, a.reply_flash.slice(), message.id.slice())) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), theme.quote_bar, px(a, 2));
-
-        var text_top = y + messageHeaderHeight(hdc, a, show_sender) - px(a, 6);
+        var text_top = bubble_top + px(a, 10);
         if (show_sender) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
-            const name_tint = if (!message.from_me and in_group and message.sender_jid.len > 0)
-                senderColorFor(message.sender_jid.slice())
-            else
-                null;
-            _ = win.SetTextColor(hdc, if (message.from_me)
-                theme.current.on_primary_container
-            else if (name_tint) |tint|
-                rgb(tint.r, tint.g, tint.b)
-            else
-                theme.current.primary);
-            const sender_band = senderBandHeight(hdc, a);
-            var sender_rect = win.RECT{ .left = left + px(a, 12), .top = y + px(a, 6), .right = right - px(a, 52), .bottom = y + px(a, 6) + sender_band };
-            const sender_text = message.sender.slice();
-            if (containsEmoji(sender_text)) {
-                _ = drawMixedLine(hdc, a.font_bold.?, a.font_emoji orelse a.font_bold.?, sender_text, left + px(a, 12), y + px(a, 6));
-            } else {
-                _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
-            }
+            _ = win.SetTextColor(hdc, theme.current.on_surface);
+            const sender_width = @min(column.right - column.left - px(a, 60), runWidth(hdc, message.sender.slice()));
+            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+            const header_width = sender_width + px(a, 8) + runWidth(hdc, message.time.slice());
+            const header_left = if (message.from_me) @max(column.left, column.right - header_width) else left;
+            _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
+            var sender_rect = win.RECT{ .left = header_left, .top = y, .right = header_left + sender_width, .bottom = bubble_top - px(a, 8) };
+            _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+            _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+            var time_rect = win.RECT{ .left = sender_rect.right + px(a, 8), .top = y + px(a, 1), .right = @min(column.right, header_left + header_width), .bottom = sender_rect.bottom };
+            message.sender_hit = sender_rect;
+            message.time_hit = time_rect;
+            _ = text_draw.drawText(hdc, message.time.ptr(), @intCast(message.time.len), &time_rect, win.DT_LEFT | win.DT_SINGLELINE);
         }
-        if (show_sender and in_group and !message.from_me and message.sender.len > 0) drawSenderAvatar(&shapes, hdc, a, left - px(a, 38), y + px(a, 6), message);
+        const separator = separatorHeight(a, index);
+        if (separator > 0) {
+            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+            _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+            var date = WideText(63){};
+            var buffer: [80]u8 = undefined;
+            const stamp = message.timestamp.slice();
+            var time_buffer: [32]u8 = undefined;
+            const time_len = std.unicode.utf16LeToUtf8(&time_buffer, message.time.slice()) catch 0;
+            date.set(a.allocator, std.fmt.bufPrint(&buffer, "{s}  {s}", .{ stamp[0..@min(10, stamp.len)], time_buffer[0..time_len] }) catch "");
+            var date_rect = win.RECT{ .left = column.left, .top = y - reply_height - separator, .right = column.right, .bottom = y - reply_height - px(a, 8) };
+            _ = text_draw.drawText(hdc, date.ptr(), @intCast(date.len), &date_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+        }
         if (message.quote.len > 0 and message.quoted_msg_id.len == 0) text_top = drawQuoteBlock(&shapes, hdc, a, message, left, right, text_top);
         if (message.bitmap) |bitmap| {
             const display = media_layout.fit(message.bitmap_width, message.bitmap_height, bubble_width - px(a, 24), px(a, 250));
@@ -15351,9 +15673,9 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         _ = win.SetTextColor(hdc, if (message.from_me) theme.current.on_primary_container else theme.current.on_surface);
         const skip_body_line = message.text.len == 0 and message.quote.len > 0;
         const text_len: c_int = if (message.text.len > 0) @intCast(message.text.len) else 1;
-        const text_height: i32 = if (skip_body_line) 0 else wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), text_len, right - left - px(a, 24), true, left + px(a, 12), text_top, message);
+        const text_height: i32 = if (skip_body_line) 0 else wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), text_len, right - left - px(a, 28), true, left + px(a, 14), text_top, message);
         if (verification_fixture and verification_text_comparison and std.mem.eql(u8, message.id.slice(), "ISSUE-462-PARAGRAPH")) {
-            saveVerificationTextMetrics(a, hdc, message, left + px(a, 12), text_top, right - left - px(a, 24), text_height);
+            saveVerificationTextMetrics(a, hdc, message, left + px(a, 14), text_top, right - left - px(a, 28), text_height);
         }
         if (unfurlCardVisible(a, message)) {
             drawUnfurlCard(&shapes, hdc, a, message, left + px(a, 12), text_top + text_height + px(a, 4), right - left - px(a, 24));
@@ -15366,7 +15688,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             for (message.word_rects[0..message.word_count]) |*span| {
                 if (span.start < range.start or @as(usize, span.start) + span.len > range.end) continue;
                 _ = win.FillRect(hdc, &span.rect, highlight);
-                _ = win.SelectObject(hdc, @ptrCast(a.font.?));
+                _ = win.SelectObject(hdc, @ptrCast(messageFont(a, span.style)));
                 _ = win.SetTextColor(hdc, colors.text);
                 const slice = message.text.slice()[span.start..][0..span.len];
                 var runs: [max_text_runs]TextRun = undefined;
@@ -15397,11 +15719,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             smooth.strokeRoundRect(&shapes, chip, px(a, 12), px(a, 12), theme.current.outline_variant, px(a, 1));
             _ = wrapMixedSink(hdc, a, message.reaction.ptr(), @intCast(message.reaction.len), reaction_size.cx - px(a, 12), true, chip.left + px(a, 6), chip.top + px(a, 4), null);
         }
-        _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-        _ = win.SetTextColor(hdc, if (message.send_state == .failed) theme.current.@"error" else theme.current.on_surface_variant);
-        const time_band = timeBandHeight(hdc, a);
-        var time_rect = win.RECT{ .left = right - px(a, 52), .top = y + bubble_height - px(a, 5) - time_band, .right = right - px(a, 10), .bottom = y + bubble_height - px(a, 5) };
-        _ = text_draw.drawText(hdc, message.time.ptr(), @intCast(message.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE);
     }
     if (a.selected_chat < a.chat_count) {
         if (archiveMarker(a, &a.chats[a.selected_chat])) |text| {
@@ -15415,19 +15732,20 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = text_draw.drawText(hdc, text, -1, &badge, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
     }
-    if (a.reply_notice) {
-        var notice = win.RECT{ .left = px(a, 24), .top = client.bottom - px(a, 48), .right = @min(client.right - px(a, 12), px(a, 320)), .bottom = client.bottom - px(a, 12) };
-        smooth.fillRoundRect(&shapes, notice, px(a, 16), px(a, 16), theme.current.surface_container_highest);
-        _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-        _ = win.SetTextColor(hdc, theme.current.on_surface);
-        _ = text_draw.drawText(hdc, lit("Original message not loaded"), -1, &notice, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
-    }
+    drawMessageActions(&shapes, hdc, a);
+    drawChatTitle(&shapes, hdc, a, client);
     drawScrollbar(&shapes, canvasStripRect(a), canvasScrollInfo(a), theme.current.outline);
 }
 
 fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    if (message == win.WM_MOUSEMOVE) updateMessageHover(a, hwnd, lparam);
     switch (message) {
+        win.WM_MOUSELEAVE => {
+            a.message_hover = null;
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
+            return 0;
+        },
         win.WM_PAINT => {
             drawCanvas(hwnd, a);
             return 0;
@@ -15457,6 +15775,25 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         win.WM_LBUTTONDOWN => {
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+            if (a.message_hover) |index| {
+                if (index < a.message_count) {
+                    const actions = messageActionsRect(a, &a.messages[index]);
+                    if (rectHasPoint(actions, x, y)) {
+                        a.selected_message = index;
+                        a.canvas_double_click_handled = true;
+                        switch (@divTrunc(x - actions.left, px(a, 24))) {
+                            0 => openReactionPicker(a),
+                            1 => startReply(a),
+                            else => {
+                                var point = win.POINT{ .x = x, .y = y };
+                                _ = win.ClientToScreen(hwnd, &point);
+                                openReactionMenu(a, point.x, point.y);
+                            },
+                        }
+                        return 0;
+                    }
+                }
+            }
             if (a.canvas != null) {
                 const strip = canvasStripRect(a);
                 const info = canvasScrollInfo(a);
@@ -16638,6 +16975,9 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             clearMessages(a);
             if (a.font) |font| _ = win.DeleteObject(font);
             if (a.font_small) |font| _ = win.DeleteObject(font);
+            for (a.message_fonts) |font| if (font) |handle| {
+                _ = win.DeleteObject(handle);
+            };
             if (a.font_reply_label) |font| _ = win.DeleteObject(font);
             if (a.font_reply_icon) |font| _ = win.DeleteObject(font);
             if (a.font_bold) |font| _ = win.DeleteObject(font);
@@ -17525,7 +17865,7 @@ fn saveVerificationTextMetrics(a: *App, hdc: win.HDC, message: *const Message, x
         .scale = a.font_scale,
         .directwrite = text_draw.directwrite,
         .icon_face = icon_name,
-        .body = .{ .px = -scaledFontHeight(theme.type_body, a.font_scale, dpi), .weight = @import("font_config.zig").body_weight, .line_height = textLineHeight(hdc, a.font.?) },
+        .body = .{ .px = -scaledFontHeight(theme.type_body, a.font_scale, dpi), .weight = @import("font_config.zig").body_weight, .line_height = @divTrunc(-scaledFontHeight(theme.type_body, a.font_scale, dpi) * 3 + 1, 2) },
         .heading = .{ .px = -scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), .weight = win.FW_SEMIBOLD, .line_height = textLineHeight(hdc, a.font_bold.?) },
         .canvas = .{ .width = canvas.right, .height = canvas.bottom },
         .paragraph = .{ .x = origin.x, .y = origin.y, .width = width, .height = height },

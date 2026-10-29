@@ -41,7 +41,7 @@ test('ISSUE-462 parity check rejects fixture, source and runtime drift', () => {
         ['a.font = win.CreateFontW(scaledFontHeight(theme.type_body,', 'a.font = win.CreateFontW(scaledFontHeight(18,'],
         ['a.font_bold = win.CreateFontW(scaledFontHeight(theme.type_chat_name,', 'a.font_bold = win.CreateFontW(scaledFontHeight(18,'],
         ['@embedFile("verify_text.json")', '"different fixture"'],
-        ['.line_height = textLineHeight(hdc, a.font.?)', '.line_height = 20']
+        ['.line_height = @divTrunc(-scaledFontHeight(theme.type_body, a.font_scale, dpi) * 3 + 1, 2)', '.line_height = 20']
     ]) {
         assert.ok(main.includes(before));
         assert.throws(() => sourceContract(main.replace(before, after)));

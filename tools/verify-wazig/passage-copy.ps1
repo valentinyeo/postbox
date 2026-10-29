@@ -49,7 +49,7 @@ function Get-PassageCanvas($Session) {
 
 function Test-PassageVisible($Message, $Canvas) {
     $b = $Message.bubble
-    return $b[2] -gt $b[0] -and $b[3] -gt $b[1] -and $b[0] -ge 0 -and $b[1] -ge 0 -and $b[2] -le $Canvas.width -and $b[3] -le $Canvas.height
+    return $b[2] -gt $b[0] -and $b[3] -gt $b[1] -and $b[0] -ge 0 -and $b[1] -ge [Math]::Ceiling(72 * $Canvas.dpi / 96) -and $b[2] -le $Canvas.width -and $b[3] -le $Canvas.height
 }
 
 function Get-PassagePoint($Session, $Message, [string]$Shot) {

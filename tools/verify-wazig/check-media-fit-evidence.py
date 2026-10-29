@@ -40,27 +40,17 @@ def check_media_fit(folder):
         if key == 'fit-own':
             widths[size] = b[2] - b[0]
             assert message['from_me'] and set(message['text']) == {'M', ' '}
-            time_left = b[2] - px(52)
             ink = lambda x, y: min(image[oy + y][ox + x]) > 110
             text = [(x, y) for y in range(b[1] + px(6), b[3] - px(5))
-                    for x in range(b[0] + px(12), time_left - px(4)) if ink(x, y)]
-            text_bottom = max(y for x, y in text)
-            text_rows = {y for x, y in text}
-            text_top = text_bottom
-            while text_top - 1 in text_rows:
-                text_top -= 1
-            time = [(x, y) for y in range(text_top, b[3] - px(5))
-                    for x in range(time_left, b[2] - px(10)) if ink(x, y)]
+                    for x in range(b[0] + px(12), b[2] - px(12)) if ink(x, y)]
+            t = message['time_header']
+            time = [(x, y) for y in range(max(0, t[1]), min(ch, t[3]))
+                    for x in range(max(0, t[0]), min(cw, t[2])) if ink(x, y)]
             assert text and time
-            text_bottom = max(y for x, y in text)
-            time_rows = {y for x, y in time}
-            time_top = max(time_rows)
-            while time_top - 1 in time_rows:
-                time_top -= 1
-            assert text_bottom < time_top, 'media-fit: time overlaps text pixels'
-            assert any(min(image[oy + y][ox + x]) > 110 for y in range(text_top, text_bottom + 1)
-                       for x in range(time_left, b[2] - px(12))), 'media-fit: text does not exercise the time box'
-            assert text_bottom == row['result']['textBottom'] and time_top == row['result']['timeTop']
+            assert t[3] <= b[1], 'media-fit: time header overlaps bubble'
+            assert max(x for x, y in text) >= b[2] - px(52), 'media-fit: text does not exercise former time box'
+            assert max(y for x, y in text) == row['result']['textBottom']
+            assert t[1] == row['result']['timeTop']
         else:
             assert message['local'] and not message['from_me']
             assert b[0] + px(12) <= m[0] < m[2] <= b[2] - px(12)

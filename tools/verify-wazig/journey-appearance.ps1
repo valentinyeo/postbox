@@ -20,4 +20,5 @@ Assert-That ($resetPoints -eq $baselinePoints) 'Reset did not restore the UI Aut
 @{ initial_saved = $false; larger = $larger; reset = (Get-ItemProperty $preferences).FontScale; baseline_points = $baselinePoints; larger_points = $largerPoints; reset_points = $resetPoints } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'text-scale.json')
 Send-Keys $session '^a{BACKSPACE}'
 $null = Wait-Until { (Read-Edit $compose) -eq '' } 'scale probe cleared'
+. "$PSScriptRoot/chat-design.ps1"
 Save-Screen $session after

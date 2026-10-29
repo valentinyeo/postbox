@@ -16,7 +16,7 @@ public static class VerifyMediaFit {
         int top = -1, bottom = -1;
         for (int y = bubble[1] + Scale(6, dpi); y < bubble[3] - Scale(5, dpi); y++) {
             bool ink = false;
-            for (int x = bubble[0] + Scale(12, dpi); x < bubble[2] - Scale(60, dpi); x++) {
+            for (int x = bubble[0] + Scale(12, dpi); x < bubble[2] - Scale(12, dpi); x++) {
                 if (Ink(Pixel(data, stride, ox + x, oy + y))) { ink = true; break; }
             }
             if (ink) { if (bottom != y - 1) top = y; bottom = y; }
@@ -28,7 +28,7 @@ public static class VerifyMediaFit {
         int[] band = TextBand(data, stride, ox, oy, bubble, dpi);
         var starts = new List<int>();
         bool previous = false;
-        for (int x = bubble[0] + Scale(12, dpi); x < bubble[2] - Scale(60, dpi); x++) {
+        for (int x = bubble[0] + Scale(12, dpi); x < bubble[2] - Scale(12, dpi); x++) {
             bool ink = false;
             for (int y = band[0]; y <= band[1]; y++) {
                 if (Ink(Pixel(data, stride, ox + x, oy + y))) { ink = true; break; }
@@ -41,31 +41,27 @@ public static class VerifyMediaFit {
         for (int i = 2; i < starts.Count; i++) if (starts[i] - starts[i - 1] != step) throw new Exception("media-fit: calibration glyph spacing changed");
         return step;
     }
-    public static Result Check(byte[] data, int width, int height, int stride, int ox, int oy, int cw, int ch, int[] bubble, int[] media, string kind, int dpi) {
+    public static Result Check(byte[] data, int width, int height, int stride, int ox, int oy, int cw, int ch, int[] bubble, int[] media, int[] time, string kind, int dpi) {
         var result = new Result();
         if (ox < 0 || oy < 0 || ox + cw > width || oy + ch > height) throw new Exception("media-fit: canvas outside screenshot");
         if (kind == "own") {
-            int timeLeft = bubble[2] - Scale(52, dpi), timeRight = bubble[2] - Scale(10, dpi);
             int[] band = TextBand(data, stride, ox, oy, bubble, dpi);
             result.textTop = band[0];
             result.textBottom = band[1];
             for (int y = result.textTop; y <= result.textBottom; y++) {
                 for (int x = bubble[0] + Scale(12, dpi); x < bubble[2] - Scale(12, dpi); x++) {
-                    var p = Pixel(data, stride, ox + x, oy + y);
-                    if (Ink(p)) result.textRight = Math.Max(result.textRight, x);
+                    if (Ink(Pixel(data, stride, ox + x, oy + y))) result.textRight = Math.Max(result.textRight, x);
                 }
             }
-            int timeBottom = -1;
-            for (int y = result.textTop; y < bubble[3] - Scale(5, dpi); y++) {
-                bool ink = false;
-                for (int x = timeLeft; x < timeRight; x++) {
-                    if (Ink(Pixel(data, stride, ox + x, oy + y))) { ink = true; result.timePixels++; }
+            result.timeTop = time[1];
+            for (int y = Math.Max(0, time[1]); y < Math.Min(ch, time[3]); y++) {
+                for (int x = Math.Max(0, time[0]); x < Math.Min(cw, time[2]); x++) {
+                    if (Ink(Pixel(data, stride, ox + x, oy + y))) result.timePixels++;
                 }
-                if (ink) { if (timeBottom != y - 1) result.timeTop = y; timeBottom = y; }
             }
-            if (result.textBottom < 0 || result.timePixels == 0) result.problems.Add("missing text or time pixels");
-            if (result.textRight < timeLeft) result.problems.Add("fixture text did not reach the time box");
-            if (result.textBottom >= result.timeTop) result.problems.Add("time overlaps the last text line");
+            if (result.textBottom < 0 || result.timePixels == 0) result.problems.Add("missing text or header time pixels");
+            if (result.textRight < bubble[2] - Scale(52, dpi)) result.problems.Add("fixture text did not reach the former time box");
+            if (time[3] > bubble[1]) result.problems.Add("time header overlaps the bubble");
             return result;
         }
         int mw = media[2] - media[0], mh = media[3] - media[1];

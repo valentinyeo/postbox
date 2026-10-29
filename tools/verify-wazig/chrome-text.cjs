@@ -13,10 +13,10 @@ function sourceContract(main = read('src/main.zig'), config = read('src/font_con
     assert.match(main, /a\.font_bold = win\.CreateFontW\(scaledFontHeight\(theme\.type_chat_name,/);
     const weight = Number(config.match(/body_weight: i32 = (\d+);/)[1]);
     assert.match(main, /if \(verification_text_comparison\) _ = applyMessageData\(a, @embedFile\("verify_text.json"\), false\);/);
-    assert.match(main, /\.body = \.\{ \.px = -scaledFontHeight\(theme\.type_body, a.font_scale, dpi\), \.weight = @import\("font_config.zig"\)\.body_weight, \.line_height = textLineHeight\(hdc, a.font\.\?\) \}/);
+    assert.match(main, /\.body = \.\{ \.px = -scaledFontHeight\(theme\.type_body, a.font_scale, dpi\), \.weight = @import\("font_config.zig"\)\.body_weight, \.line_height = @divTrunc\(-scaledFontHeight\(theme.type_body, a.font_scale, dpi\) \* 3 \+ 1, 2\) \}/);
     assert.match(main, /\.heading = \.\{ \.px = -scaledFontHeight\(theme\.type_chat_name, a.font_scale, dpi\), \.weight = win.FW_SEMIBOLD, \.line_height = textLineHeight\(hdc, a.font_bold\.\?\) \}/);
     assert.match(main, /return -@divTrunc\(base \* scale \* dpi \+ 4800, 9600\);/);
-    assert.match(main, /saveVerificationTextMetrics\(a, hdc, message, left \+ px\(a, 12\), text_top, right - left - px\(a, 24\), text_height\);/);
+    assert.match(main, /saveVerificationTextMetrics\(a, hdc, message, left \+ px\(a, 14\), text_top, right - left - px\(a, 28\), text_height\);/);
     assert.equal(body, 15);
     assert.equal(heading, 15);
     assert.equal(weight, 400);
