@@ -624,6 +624,17 @@
         "class": "ReplyHandler"
       },
       "maximize": true
+    },
+    {
+      "name": "app-icon",
+      "pr": true,
+      "hub": null,
+      "evidence": false,
+      "chats": null,
+      "script": "journey-app-icon.ps1",
+      "validator": null,
+      "hub_handler": null,
+      "maximize": false
     }
   ]
 }
