@@ -9,6 +9,9 @@ import sys
 folder = Path(sys.argv[1])
 session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
 feature = session['feature']
+version = session['expected_version']
+product = session['expected_product']
+assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version)
 assert session['sha256'] and session['commit']
 assert not (folder / 'failure.txt').exists()
 assert f'JOURNEY PASSED: {feature}' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
@@ -46,9 +49,9 @@ for name in stages:
     image = (folder / f'{name}.png').read_bytes()
     assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
     images.append(hashlib.sha256(image).hexdigest())
-    assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+    assert re.fullmatch(rf'MessagesZig \| (?:.+ - )?{re.escape(product)} v{re.escape(version)}', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
     state = json.loads((folder / f'{name}.state.json').read_text(encoding='utf-8-sig'))
-    assert state['version'] == '0.0.526' and state['chat_count'] == 2
+    assert state['version'] == version and state['chat_count'] == 2
     assert state['pending_sends'] == state['pending_archives'] == 0 and state['sync'] == 'stopped'
 assert images[0] != images[1] and images[2] != images[3]
 final = json.loads((folder / 'side-effects.json').read_text(encoding='utf-8-sig'))

@@ -15479,7 +15479,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             var time_buffer: [32]u8 = undefined;
             const time_len = std.unicode.utf16LeToUtf8(&time_buffer, message.time.slice()) catch 0;
             date.set(a.allocator, std.fmt.bufPrint(&buffer, "{s}  {s}", .{ stamp[0..@min(10, stamp.len)], time_buffer[0..time_len] }) catch "");
-            var date_rect = win.RECT{ .left = column.left, .top = y - separator, .right = column.right, .bottom = y - px(a, 8) };
+            var date_rect = win.RECT{ .left = column.left, .top = y - reply_height - separator, .right = column.right, .bottom = y - reply_height - px(a, 8) };
             _ = text_draw.drawText(hdc, date.ptr(), @intCast(date.len), &date_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
         if (message.quote.len > 0 and message.quoted_msg_id.len == 0) text_top = drawQuoteBlock(&shapes, hdc, a, message, left, right, text_top);
