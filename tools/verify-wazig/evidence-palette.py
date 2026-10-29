@@ -9,6 +9,7 @@ import sys
 folder = Path(sys.argv[1])
 session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
 feature = session['feature']
+chat_count = 3 if feature == 'appearance' else 2
 version = session['expected_version']
 product = session['expected_product']
 assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version)
@@ -38,7 +39,10 @@ else:
     assert scale['initial_saved'] is False and scale['larger'] == 110 and scale['reset'] == 100
     assert 0 < scale['baseline_points'] < scale['larger_points']
     assert scale['reset_points'] == scale['baseline_points']
-    stages = ['before', 'action', 'text-larger', 'after']
+    assert (folder / 'group-layout.txt').read_text(encoding='utf-8-sig').startswith('GROUP_LAYOUT_OK:')
+    groups = json.loads((folder / 'group-senders.messages.json').read_text(encoding='utf-8-sig'))
+    assert {row['id'] for row in groups['messages']} == {'GROUP-FIRST', 'GROUP-SAME', 'GROUP-DAY', 'GROUP-OTHER', 'GROUP-QUOTE', 'GROUP-OWN'}
+    stages = ['before', 'action', 'text-larger', 'after', 'group-senders']
     keys = ['^k', 'Theme: Graphite', 'Make text larger', '{ENTER}', '^0']
     preferences = (folder / 'preferences.txt').read_text(encoding='utf-8-sig')
     assert 'FontScale' in preferences and '100' in preferences
@@ -51,13 +55,13 @@ for name in stages:
     images.append(hashlib.sha256(image).hexdigest())
     assert re.fullmatch(rf'MessagesZig \| (?:.+ - )?{re.escape(product)} v{re.escape(version)}', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
     state = json.loads((folder / f'{name}.state.json').read_text(encoding='utf-8-sig'))
-    assert state['version'] == version and state['chat_count'] == 2
+    assert state['version'] == version and state['chat_count'] == chat_count
     assert state['pending_sends'] == state['pending_archives'] == 0 and state['sync'] == 'stopped'
 assert images[0] != images[1] and images[2] != images[3]
 final = json.loads((folder / 'side-effects.json').read_text(encoding='utf-8-sig'))
 assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
 assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
-assert final['chat_count'] == 2 and final['search'] == ''
+assert final['chat_count'] == chat_count and final['search'] == ''
 assert final['theme'] == 'amoled'
 print(f'EVIDENCE VERIFIED: {feature} input, new assertions, surviving screenshots and isolation')
 raise SystemExit(0)

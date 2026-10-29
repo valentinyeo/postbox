@@ -306,6 +306,27 @@ jobs:
           Copy-Item chat-design-red-evidence verification-evidence/chat-design-red-control -Recurse
           'IGSH-1120 ORIGINAL RENDERER RED VERIFIED: visible bold stars' | Set-Content verification-evidence/chat-design-red-control.txt
           exit 0
+      - name: IGSH-1196 original group renderer red control
+        if: matrix.feature == 'appearance'
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:RUNNER_TEMP 'group-senders-baseline'
+          $prefix = Join-Path $env:GITHUB_WORKSPACE 'group-senders-baseline-bin'
+          git worktree add --detach $source 9ad8d25
+          if ($LASTEXITCODE -ne 0) { throw 'Group baseline checkout failed' }
+          Push-Location $source
+          try {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            if ($LASTEXITCODE -ne 0) { throw 'Group baseline build failed' }
+          } finally { Pop-Location }
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature appearance -Bin group-senders-baseline-bin/bin -Evidence group-senders-red-evidence
+          if ($LASTEXITCODE -eq 0) { throw 'Original source unexpectedly passed group sender layout' }
+          $failure = Get-Content group-senders-red-evidence/failure.txt -Raw
+          if ($failure -notmatch 'Incoming messages left the centred column') { throw "Wrong group red failure: $failure" }
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          Copy-Item group-senders-red-evidence verification-evidence/group-senders-red-control -Recurse
+          'GROUP_ORIGINAL_RED_OK: original incoming messages have no avatar gutter' | Set-Content verification-evidence/group-senders-red-control.txt
+          exit 0
       - name: Real playback rejects the original missing output device
         if: matrix.feature == 'voice' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
         shell: pwsh

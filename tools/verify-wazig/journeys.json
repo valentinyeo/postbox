@@ -75,7 +75,7 @@
       "pr": true,
       "hub": "chat-design",
       "evidence": true,
-      "chats": 2,
+      "chats": 3,
       "script": "journey-appearance.ps1",
       "validator": {
         "file": "evidence-palette.py"

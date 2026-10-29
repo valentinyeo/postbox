@@ -25,7 +25,8 @@ foreach ($case in @(@{ provider = 'slack'; chat = 'fixture-alpha' }, @{ provider
     $short = @($shown.messages | Where-Object id -eq 'DESIGN-SAME')[0]
     $columnWidth = [Math]::Min(760, $bounds.Width - 32)
     $columnLeft = [Math]::Floor(($bounds.Width - $columnWidth) / 2)
-    Assert-That ($main.bubble[0] -eq $columnLeft -and $short.bubble[0] -eq $columnLeft) 'Incoming messages left the centred column'
+    $incomingLeft = $columnLeft + $(if ($case.provider -eq 'slack') { 42 } else { 0 })
+    Assert-That ($main.bubble[0] -eq $incomingLeft -and $short.bubble[0] -eq $incomingLeft) 'Incoming messages left the centred column'
     Assert-That ($own.bubble[2] -eq ($columnLeft + $columnWidth) -and $long.bubble[2] -eq $own.bubble[2]) 'Own messages left the centred column'
     Assert-That (($short.bubble[2] - $short.bubble[0]) -lt ($main.bubble[2] - $main.bubble[0])) 'Short bubble did not hug its text'
     Assert-That (($own.bubble[2] - $own.bubble[0]) -lt 72) 'A tiny reply has an unrequested minimum width'
@@ -46,5 +47,7 @@ foreach ($case in @(@{ provider = 'slack'; chat = 'fixture-alpha' }, @{ provider
         Assert-That ($sample.R -eq 74 -and $sample.G -eq 74 -and $sample.B -eq 74) 'Native quote bar does not match the approved grey'
     } finally { $image.Dispose() }
 }
+$null = Read-Control $session select -Arguments @('fixture-group@g.us', '--provider', 'whatsapp')
+& "$PSScriptRoot/group-senders.ps1"
 Invoke-PaletteCommand $session 'Theme: Graphite'
 $null = Wait-Until { (Read-Control $session status).theme -eq 'amoled' } 'appearance journey final theme restored'

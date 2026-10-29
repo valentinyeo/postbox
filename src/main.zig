@@ -9848,7 +9848,8 @@ fn selectChat(a: *App, delta: i32, wrap: bool) void {
 }
 
 fn messageBubbleWidth(a: *const App, available_width: i32) i32 {
-    return @max(1, @min(px(a, theme.bubble_max_width), available_width - px(a, 48)));
+    const gutter = if (groupChat(a)) px(a, 42) else @as(i32, 0);
+    return @max(1, @min(px(a, theme.bubble_max_width), @min(available_width - px(a, 48), chatColumn(a, available_width).right - chatColumn(a, available_width).left - gutter)));
 }
 
 fn chatColumn(a: *const App, available_width: i32) win.RECT {
@@ -14543,7 +14544,7 @@ fn formattedMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, 
 }
 
 fn messageWidth(hdc: win.HDC, a: *App, message: *const Message, limit: i32) i32 {
-    if (message.media_type.len > 0 or message.quote.len > 0 or message.transcript.len > 0 or message.unfurl_provider != .none) return limit;
+    if (message.media_type.len > 0 or (message.quote.len > 0 and message.quoted_msg_id.len == 0) or message.transcript.len > 0 or message.unfurl_provider != .none) return limit;
     var extent: i32 = 0;
     _ = formattedMessage(hdc, a, message, @max(1, limit - px(a, 28)), false, 0, 0, &extent);
     const reaction_width = reactionChipSize(hdc, a, message, limit).cx;
@@ -14827,7 +14828,7 @@ fn transcriptRender(hdc: win.HDC, a: *App, message: *const Message, shown: c_int
 }
 
 fn startsSenderGroup(a: *App, index: usize) bool {
-    if (index == 0) return true;
+    if (index == 0 or separatorHeight(a, index) > 0) return true;
     const message = &a.messages[index];
     const previous = &a.messages[index - 1];
     if (message.from_me != previous.from_me) return true;
@@ -15407,7 +15408,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         cursor_y -= height - estimated_height;
         if (y > client.bottom or y + height < client.top) continue;
         const width = messageWidth(hdc, a, message, bubble_width);
-        const left: i32 = if (message.from_me) column.right - width else column.left;
+        const left: i32 = if (message.from_me) column.right - width else column.left + if (groupChat(a)) px(a, 42) else @as(i32, 0);
         const right = left + width;
         const reaction_size = reactionChipSize(hdc, a, message, width);
         const replies_height = threadSummaryHeight(a, message);
@@ -15415,7 +15416,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         const reply_height = replyLineHeight(hdc, a, message);
         if (reply_height > 0) {
             height -= reply_height;
-            message.quote_hit = .{ .left = left, .top = y, .right = right, .bottom = y + reply_height - px(a, 6) };
+            message.quote_hit = .{ .left = if (message.from_me) right - bubble_width else left, .top = y, .right = if (message.from_me) right else left + bubble_width, .bottom = y + reply_height - px(a, 6) };
             var line = WideText(4095){};
             line.set(a.allocator, "↩ ");
             for ([_][]const u16{ message.quote_sender.slice(), std.mem.span(lit(": ")), if (message.quote.len > 0) message.quote.slice() else std.mem.span(lit("Original message")) }) |part| {
@@ -15460,14 +15461,17 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         var text_top = bubble_top + px(a, 10);
         if (show_sender) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
-            _ = win.SetTextColor(hdc, theme.current.on_surface);
-            const sender_width = @min(column.right - column.left - px(a, 60), runWidth(hdc, message.sender.slice()));
+            if (!message.from_me) drawSenderAvatar(&shapes, hdc, a, left - px(a, 42), y, message);
+            const seed = if (message.sender_jid.len > 0) message.sender_jid.slice() else std.mem.sliceAsBytes(message.sender.slice());
+            const tint = senderColorFor(seed);
+            _ = win.SetTextColor(hdc, rgb(tint.r, tint.g, tint.b));
+            const sender_width = if (message.from_me) @as(i32, 0) else @min(column.right - left - px(a, 60), runWidth(hdc, message.sender.slice()));
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             const header_width = sender_width + px(a, 8) + runWidth(hdc, message.time.slice());
             const header_left = if (message.from_me) @max(column.left, column.right - header_width) else left;
             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
             var sender_rect = win.RECT{ .left = header_left, .top = y, .right = header_left + sender_width, .bottom = bubble_top - px(a, 8) };
-            _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+            if (!message.from_me) _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             var time_rect = win.RECT{ .left = sender_rect.right + px(a, 8), .top = y + px(a, 1), .right = @min(column.right, header_left + header_width), .bottom = sender_rect.bottom };
