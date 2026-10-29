@@ -14545,7 +14545,8 @@ fn messageWidth(hdc: win.HDC, a: *App, message: *const Message, limit: i32) i32 
     if (message.media_type.len > 0 or message.quote.len > 0 or message.transcript.len > 0 or message.unfurl_provider != .none) return limit;
     var extent: i32 = 0;
     _ = formattedMessage(hdc, a, message, @max(1, limit - px(a, 28)), false, 0, 0, &extent);
-    return @min(limit, extent + px(a, 28));
+    const reaction_width = reactionChipSize(hdc, a, message, limit).cx;
+    return @min(limit, @max(extent + px(a, 28), reaction_width + px(a, 24)));
 }
 
 fn cachedChatPreview(a: *App, chat: *Chat) void {
