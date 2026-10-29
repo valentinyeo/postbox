@@ -13,7 +13,7 @@ $dpi = [int][VerifyWindow]::GetDpiForWindow($app.MainWindowHandle)
 $oneLineHeight = [int][Math]::Floor((44 * $dpi + 48) / 96)
 Save-Screen $session composer-empty
 $typingCases = @()
-foreach ($mode in @('fast-long', 'middle', 'wrapped-middle')) {
+foreach ($mode in @('fast-long', 'middle', 'focus-return')) {
     Send-Keys $session '^a{BACKSPACE}'
     $prefix = 'The quick brown fox jumps over the lazy dog. ' * 12
     Send-Keys $session $prefix
@@ -23,6 +23,9 @@ foreach ($mode in @('fast-long', 'middle', 'wrapped-middle')) {
         $expected = $prefix.Insert(40, 'Inserted letters stay together ')
     } else {
         $expected = $prefix + 'Inserted letters stay together '
+    }
+    if ($mode -eq 'focus-return') {
+        Send-Keys $session '%{TAB}'
     }
     Send-Keys $session 'Inserted letters stay together '
     $actual = Read-Edit $compose
