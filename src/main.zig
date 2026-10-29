@@ -9603,9 +9603,6 @@ fn jumpToReply(a: *App, id: []const u8) void {
 fn focusCompose(a: *App) void {
     if (a.compose) |compose| {
         _ = win.SetFocus(compose);
-        const length: usize = @intCast(win.GetWindowTextLengthW(compose));
-        const caret: isize = @intCast(length);
-        _ = win.SendMessageW(compose, win.EM_SETSEL, @bitCast(caret), @bitCast(caret));
     }
 }
 
