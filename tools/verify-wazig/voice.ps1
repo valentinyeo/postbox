@@ -137,6 +137,7 @@ function Invoke-VoicePlayback($Session) {
     Save-Screen $Session 'voice-playing'
     [VerifyMenus]::Click($Session.pid, $x, $y, $false)
     $null = Wait-Until { (Read-Control $Session status).audio.state -eq 'paused' } 'voice: click pauses playback'
+    [Threading.Thread]::Sleep(600)
     $paused = (Read-Control $Session status).audio
     [Threading.Thread]::Sleep(600)
     $after = (Read-Control $Session status).audio
