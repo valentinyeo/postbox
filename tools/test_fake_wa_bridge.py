@@ -383,7 +383,7 @@ class TelegramAvatarEvidenceTests(unittest.TestCase):
             for y in range(px(40)):
                 for x in range(px(40)):
                     if (x - px(40) / 2 + 0.5) ** 2 + (y - px(40) / 2 + 0.5) ** 2 < (px(40) / 2) ** 2:
-                        ink = chat not in self.check['AVATAR_COLOURS'] and not blank_initial and 18 <= x < 22 and 15 <= y < 27
+                        ink = chat not in self.check['AVATAR_COLOURS'] and not blank_initial and px(18) <= x < px(22) and px(15) <= y < px(27)
                         rows[top + y][left + x] = (255, 255, 255) if ink else colour
         self.check['png']['write_png'](self.folder / 'linked.png', rows)
 

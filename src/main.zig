@@ -12216,7 +12216,8 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             try w.print(",\"marked\":{},\"local_path\":", .{messageMarked(a, message.id.slice())});
             try control_api.writeStringUtf16(w, message.local_path.slice());
             var logical = std.mem.zeroes(win.LOGFONTW);
-            if (a.font) |font| _ = win.GetObjectW(font, @sizeOf(win.LOGFONTW), &logical);
+            const body_font = a.message_fonts[0] orelse a.font.?;
+            _ = win.GetObjectW(body_font, @sizeOf(win.LOGFONTW), &logical);
             try w.print(",\"body_weight\":{d},\"font_height\":{d},\"words\":[", .{ logical.lfWeight, logical.lfHeight });
             for (message.word_rects[0..message.word_count], 0..) |word, word_index| {
                 if (word_index > 0) try w.writeByte(',');
@@ -14351,10 +14352,10 @@ fn formattedMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, 
     var max_right: i32 = 0;
     var shapes = smooth.Context.init(hdc);
     defer shapes.deinit();
-    while (start < parsed.len) {
+    while (start <= parsed.len) {
         const end = std.mem.indexOfScalarPos(u16, parsed.text[0..parsed.len], start, '\n') orelse parsed.len;
         const line = parsed.text[start..end];
-        const style = parsed.styles[start];
+        const style = if (start < parsed.len) parsed.styles[start] else message_format.Style{};
         if (line.len == 0 and style.quote) {
             y += px(a, 10);
             start = end + 1;
@@ -15151,6 +15152,16 @@ fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
 fn drawChatTitle(shapes: *const smooth.Context, hdc: win.HDC, a: *App, client: win.RECT) void {
     if (a.selected_chat >= a.chat_count) return;
     const chat = &a.chats[a.selected_chat];
+    smooth.fillGradientRoundRect(shapes, .{ .left = client.left, .top = client.top, .right = client.right, .bottom = client.top + px(a, 72) }, 1, theme.current.surface, theme.current.surface, 0);
+    if (a.compose) |compose| {
+        var cue = WideText(255){};
+        const prefix = std.unicode.utf8ToUtf16LeStringLiteral("Message ");
+        @memcpy(cue.buf[0..prefix.len], prefix);
+        const count = @min(chat.name.len, cue.buf.len - prefix.len - 1);
+        @memcpy(cue.buf[prefix.len..][0..count], chat.name.slice()[0..count]);
+        cue.buf[prefix.len + count] = 0;
+        _ = win.SendMessageW(compose, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(cue.ptr())));
+    }
     _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
     const name_width = @min(px(a, 280), runWidth(hdc, chat.name.slice()));
     const provider = switch (chat.provider) {
@@ -15186,7 +15197,10 @@ fn drawChatTitle(shapes: *const smooth.Context, hdc: win.HDC, a: *App, client: w
 
 fn messageActionsRect(a: *const App, message: *const Message) win.RECT {
     const bubble = message.bubble_hit;
-    const left = if (message.from_me) bubble.left - px(a, 76) else bubble.right + px(a, 4);
+    const preferred = if (message.from_me) bubble.left - px(a, 76) else bubble.right + px(a, 4);
+    var client: win.RECT = std.mem.zeroes(win.RECT);
+    if (a.canvas) |canvas| _ = win.GetClientRect(canvas, &client);
+    const left = std.math.clamp(preferred, px(a, 8), @max(px(a, 8), client.right - px(a, 80)));
     return .{ .left = left, .top = bubble.bottom - px(a, 24), .right = left + px(a, 72), .bottom = bubble.bottom };
 }
 
@@ -15306,7 +15320,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         const selected = messageMarked(a, message.id.slice()) or if (a.selected_message) |selected_index| selected_index == index else false;
         const fill = if (message.from_me) theme.current.primary_container else theme.current.surface_container_high;
         const bottom_fill = if (theme.choice == .amoled) theme.hex(if (message.from_me) @as(u24, 0x3A3A3A) else 0x1E1E1E) else fill;
-        smooth.fillGradientRoundRect(&shapes, message.bubble_hit, px(a, 36), fill, bottom_fill);
+        smooth.fillGradientRoundRect(&shapes, message.bubble_hit, px(a, 36), fill, bottom_fill, 255);
         smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, 36), px(a, 36), if (selected) theme.current.primary else theme.hex(if (message.from_me) @as(u24, 0x4A4A4A) else 0x2E2E2E), px(a, if (selected) @as(i32, 2) else 1));
         var text_top = bubble_top + px(a, 10);
         if (show_sender) {
@@ -16727,7 +16741,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             for ([_]?win.HWND{a.compose}) |control| {
                 if (control != null and control_value == @intFromPtr(control.?)) {
-                    _ = win.SetBkColor(hdc, theme.current.surface_container_high);
+                    _ = win.SetBkColor(hdc, theme.current.surface_container);
                     return @bitCast(@intFromPtr(a.brush_raised.?));
                 }
             }
