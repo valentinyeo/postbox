@@ -13,7 +13,7 @@ on:
         type: string
         default: ''
   push:
-    branches: [ceo/igsh-1084, 'verify-release/v*']
+    branches: [ceo/IGSH-1120, ceo/igsh-1084, 'verify-release/v*']
   pull_request:
     paths:
       - .github/workflows/verify.yml
@@ -237,6 +237,28 @@ jobs:
           $failure = Get-Content notification-red-evidence/failure.txt -Raw
           if ($failure -notmatch 'incoming archived desktop notification') { throw "Wrong notification red failure: $failure" }
           'IGSH-1127 ORIGINAL SOURCE RED VERIFIED: incoming archived desktop notification' | Set-Content verification-evidence/notification-red-control.txt
+          exit 0
+      - name: IGSH-1120 original renderer rejects visible source marks
+        if: matrix.feature == 'appearance'
+        shell: pwsh
+        run: |
+          $baseline = '4e2fddc'
+          $source = Join-Path $env:RUNNER_TEMP 'chat-design-baseline'
+          $prefix = Join-Path $env:GITHUB_WORKSPACE 'chat-design-baseline-bin'
+          git worktree add --detach $source $baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Chat design baseline checkout failed' }
+          Push-Location $source
+          try {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            if ($LASTEXITCODE -ne 0) { throw 'Chat design baseline build failed' }
+          } finally { Pop-Location }
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature appearance -Bin chat-design-baseline-bin/bin -Evidence chat-design-red-evidence
+          if ($LASTEXITCODE -eq 0) { throw 'Original renderer unexpectedly passed chat formatting' }
+          $failure = Get-Content chat-design-red-evidence/failure.txt -Raw
+          if ($failure -notmatch 'Visible markup: bold stars still painted') { throw "Wrong chat design red failure: $failure" }
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          Copy-Item chat-design-red-evidence verification-evidence/chat-design-red-control -Recurse
+          'IGSH-1120 ORIGINAL RENDERER RED VERIFIED: visible bold stars' | Set-Content verification-evidence/chat-design-red-control.txt
           exit 0
       - name: Launch, doctor and drive
         shell: pwsh
