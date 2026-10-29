@@ -3,7 +3,7 @@ import subprocess
 
 path = Path('src/main.zig')
 current = path.read_text(encoding='utf-8')
-historical = subprocess.check_output(['git', 'show', '77ec20f:src/main.zig'], text=True)
+historical = subprocess.check_output(['git', 'show', '77ec20f:src/main.zig'], text=True, encoding='utf-8')
 
 def function(source):
     start = source.index('fn downloadMedia(')
