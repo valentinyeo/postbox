@@ -8058,6 +8058,10 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         if (isAudio(stored)) loadTranscriptCache(a, stored);
     }
     if (merged) storeHubOlder(a, chat_key.of(chat), rows);
+    for (a.messages[0..a.message_count]) |*message| {
+        const quoted_id = message.quoted_msg_id;
+        setReplyQuote(a, message, quoted_id.slice());
+    }
     var reaction_index: usize = 0;
     while (reaction_index < a.message_count) {
         const reaction_to = a.messages[reaction_index].reaction_to.slice();
@@ -8075,10 +8079,6 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         var shift = reaction_index;
         while (shift + 1 < a.message_count) : (shift += 1) a.messages[shift] = a.messages[shift + 1];
         a.message_count -= 1;
-    }
-    for (a.messages[0..a.message_count]) |*message| {
-        const quoted_id = message.quoted_msg_id;
-        setReplyQuote(a, message, quoted_id.slice());
     }
     reapplyPendingReactions(a, chat.jid.slice());
     if (selected_id.len > 0) {
@@ -15168,7 +15168,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             _ = win.SetTextColor(hdc, rgb(138, 138, 138));
             var line_rect = message.quote_hit;
-            _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &line_rect, (if (message.from_me) win.DT_RIGHT else win.DT_LEFT) | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
+            _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &line_rect, @intCast((if (message.from_me) win.DT_RIGHT else win.DT_LEFT) | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX));
             y += reply_height;
         }
         const bubble_height = height - @max(0, reaction_size.cy - px(a, 4));
