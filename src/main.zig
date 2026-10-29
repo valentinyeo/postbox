@@ -1751,7 +1751,7 @@ fn recreateFonts(a: *App) void {
     const old_font = a.font;
     const old_message_fonts = a.message_fonts;
     for (&a.message_fonts, 0..) |*font, index| {
-        font.* = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, if (index & 1 != 0) win.FW_SEMIBOLD else win.FW_NORMAL, @intFromBool(index & 2 != 0), 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, if (index & 4 != 0) lit("IBM Plex Mono") else lit("IBM Plex Sans"));
+        font.* = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, if (index & 1 != 0) win.FW_SEMIBOLD else win.FW_NORMAL, @intFromBool(index & 2 != 0), 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, if (index & 4 != 0) lit("IBM Plex Mono") else lit(design.font_face));
     }
     for (old_message_fonts) |font| if (font) |handle| {
         _ = win.DeleteObject(handle);
@@ -1767,16 +1767,16 @@ fn recreateFonts(a: *App) void {
     const old_font_row = a.font_row;
     const old_font_time = a.font_time;
 
-    a.font = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_small = win.CreateFontW(scaledFontHeight(theme.type_preview, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_bold = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
+    a.font_small = win.CreateFontW(scaledFontHeight(theme.type_preview, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
+    a.font_bold = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
     a.font_emoji = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
-    a.font_underline = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_underline = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
     a.font_icon = win.CreateFontW(scaledFontHeight(theme.icon_size, 100, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
-    a.font_title = win.CreateFontW(scaledFontHeight(theme.type_title, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_row = win.CreateFontW(scaledFontHeight(theme.type_row_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_time = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_reply_label = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_title = win.CreateFontW(scaledFontHeight(theme.type_title, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
+    a.font_row = win.CreateFontW(scaledFontHeight(theme.type_row_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
+    a.font_time = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
+    a.font_reply_label = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
     a.font_reply_icon = win.CreateFontW(scaledFontHeight(theme.icon_size, 100, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
     setFont(a.chats_hwnd, a.font);
     setFont(a.compose, a.font);

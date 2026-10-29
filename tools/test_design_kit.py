@@ -13,7 +13,7 @@ class DesignKitTests(unittest.TestCase):
         palette = source[source.index('pub const amoled: Palette = .{'):].split('\n};', 1)[0]
         for field, token in {
             'surface': 'ReaderBackground', 'surface_container_low': 'ReaderPanel',
-            'surface_container': 'ReaderControl', 'surface_container_high': 'ReaderControl',
+            'surface_container': 'ReaderControl', 'surface_container_high': 'ReaderCard',
             'surface_container_highest': 'ReaderRaised', 'on_surface': 'ReaderForeground',
             'on_surface_variant': 'ReaderHint', 'outline': 'ReaderOutline',
             'outline_variant': 'ReaderOutline', 'primary': 'ReaderForeground',

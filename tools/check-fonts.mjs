@@ -54,21 +54,22 @@ export function verifySources(sources, exists) {
   assert.match(recreate, /comptime std\.debug\.assert\(body_weight == win\.FW_NORMAL\)/);
   assert.match(sources['src/font_config.zig'], /pub const body_weight: i32 = @import\("design_tokens.zig"\)\.body_weight;/);
   assert.match(sources['src/design_tokens.zig'], /pub const body_weight: i32 = 400;/);
-  const fontCalls = [...recreate.matchAll(/a\.(font(?:_small|_bold|_emoji|_underline|_icon|_title|_row|_time|_reply_label|_reply_icon)?) = win\.CreateFontW\(scaledFontHeight\(([\w.]+), (?:a\.font_scale|100), dpi\), 0, 0, 0, ([^,]+), 0, ([01]), 0, win\.DEFAULT_CHARSET, win\.OUT_DEFAULT_PRECIS, win\.CLIP_DEFAULT_PRECIS, win\.CLEARTYPE_NATURAL_QUALITY, win\.DEFAULT_PITCH, lit\("([^"]+)"\)\);/g)];
+  assert.match(sources['src/design_tokens.zig'], /pub const font_face = "IBM Plex Sans";/);
+  const fontCalls = [...recreate.matchAll(/a\.(font(?:_small|_bold|_emoji|_underline|_icon|_title|_row|_time|_reply_label|_reply_icon)?) = win\.CreateFontW\(scaledFontHeight\(([\w.]+), (?:a\.font_scale|100), dpi\), 0, 0, 0, ([^,]+), 0, ([01]), 0, win\.DEFAULT_CHARSET, win\.OUT_DEFAULT_PRECIS, win\.CLIP_DEFAULT_PRECIS, win\.CLEARTYPE_NATURAL_QUALITY, win\.DEFAULT_PITCH, lit\(([^)]+)\)\);/g)];
   assert.match(recreate, /a\.font_icon = win\.CreateFontW\(scaledFontHeight\(theme\.icon_size, 100, dpi\)/);
   assert.equal(fontCalls.length, 11, 'all native fonts must use natural ClearType');
   const expected = {
-    font: ['theme.type_body', 'body_weight', '0', 'IBM Plex Sans'],
-    font_small: ['theme.type_preview', 'win.FW_MEDIUM', '0', 'IBM Plex Sans'],
-    font_bold: ['theme.type_chat_name', 'win.FW_SEMIBOLD', '0', 'IBM Plex Sans'],
-    font_emoji: ['theme.type_chat_name', 'win.FW_NORMAL', '0', 'Segoe UI Emoji'],
-    font_icon: ['theme.icon_size', 'win.FW_NORMAL', '0', 'Segoe Fluent Icons'],
-    font_title: ['theme.type_title', 'win.FW_SEMIBOLD', '0', 'IBM Plex Sans'],
-    font_row: ['theme.type_row_name', 'win.FW_SEMIBOLD', '0', 'IBM Plex Sans'],
-    font_time: ['theme.type_time', 'win.FW_NORMAL', '0', 'IBM Plex Sans'],
-    font_reply_label: ['theme.type_time', 'win.FW_SEMIBOLD', '0', 'IBM Plex Sans'],
-    font_reply_icon: ['theme.icon_size', 'win.FW_NORMAL', '0', 'Segoe Fluent Icons'],
-    font_underline: ['theme.type_body', 'body_weight', '1', 'IBM Plex Sans'],
+    font: ['theme.type_body', 'body_weight', '0', 'design.font_face'],
+    font_small: ['theme.type_preview', 'win.FW_MEDIUM', '0', 'design.font_face'],
+    font_bold: ['theme.type_chat_name', 'win.FW_SEMIBOLD', '0', 'design.font_face'],
+    font_emoji: ['theme.type_chat_name', 'win.FW_NORMAL', '0', '"Segoe UI Emoji"'],
+    font_icon: ['theme.icon_size', 'win.FW_NORMAL', '0', '"Segoe Fluent Icons"'],
+    font_title: ['theme.type_title', 'win.FW_SEMIBOLD', '0', 'design.font_face'],
+    font_row: ['theme.type_row_name', 'win.FW_SEMIBOLD', '0', 'design.font_face'],
+    font_time: ['theme.type_time', 'win.FW_NORMAL', '0', 'design.font_face'],
+    font_reply_label: ['theme.type_time', 'win.FW_SEMIBOLD', '0', 'design.font_face'],
+    font_reply_icon: ['theme.icon_size', 'win.FW_NORMAL', '0', '"Segoe Fluent Icons"'],
+    font_underline: ['theme.type_body', 'body_weight', '1', 'design.font_face'],
   };
   for (const call of fontCalls) assert.deepEqual(call.slice(2), expected[call[1]], `font role changed: ${call[1]}`);
   for (const font of expectedFonts) assert.ok(exists(`assets/${font}`), `missing assets/${font}`);
