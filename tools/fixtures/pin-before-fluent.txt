@@ -1,0 +1,13 @@
+fn drawPinIcon(a: *App, shapes: *const smooth.Context, left: i32, top: i32, color: win.COLORREF, unpin: bool) void {
+    const scale = @as(f32, @floatFromInt(px(a, 24))) / pin_icon.grid_size;
+    const width: f32 = @floatFromInt(@max(1, px(a, @intFromFloat(pin_icon.stroke_width))));
+    inline for (.{ pin_icon.outline, pin_icon.needle, pin_icon.slash }, 0..) |points, index| {
+        if (index != 2 or unpin) {
+            var scaled: [points.len][2]f32 = undefined;
+            for (points, &scaled) |point, *target| {
+                target.* = .{ @as(f32, @floatFromInt(left)) + point[0] * scale, @as(f32, @floatFromInt(top)) + point[1] * scale };
+            }
+            smooth.strokePolyline(shapes, &scaled, color, width);
+        }
+    }
+}

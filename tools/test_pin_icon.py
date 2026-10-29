@@ -43,6 +43,17 @@ def verify(source, smooth):
 
 
 class PinIconTest(unittest.TestCase):
+    def test_00_shared_font_rejects_the_real_cd773f1_vector_renderer(self):
+        source = (ROOT / 'src/main.zig').read_text()
+        smooth = (ROOT / 'src/smooth_shapes.zig').read_text()
+        start = source.index('fn drawPinIcon(')
+        end = source.index('\nfn drawMicIcon(', start)
+        old = (ROOT / 'tools/fixtures/pin-before-fluent.txt').read_text()
+        with self.assertRaises(AssertionError):
+            verify(source[:start] + old + source[end:], smooth)
+        verify(source, smooth)
+        print('PIN RED CONTROL VERIFIED: cd773f1 legacy vector rejected')
+
     def test_IGSH_494_every_pin_site_uses_the_shared_Fluent_font(self):
         verify((ROOT / 'src/main.zig').read_text(), (ROOT / 'src/smooth_shapes.zig').read_text())
 
