@@ -1538,6 +1538,23 @@ class MediaFitHandler(Handler):
             self.respond(400, {'error': 'unexpected media-fit write'}, body=body)
 
 
+def voice_playback_bytes():
+    def page(packet, sequence, granule, flags):
+        header = b'OggS' + bytes([0, flags]) + struct.pack('<QIII', granule, 1, sequence, 0) + bytes([1, len(packet)])
+        data = bytearray(header + packet)
+        crc = 0
+        for value in data:
+            crc ^= value << 24
+            for _ in range(8):
+                crc = ((crc << 1) ^ (0x04c11db7 if crc & 0x80000000 else 0)) & 0xffffffff
+        data[22:26] = struct.pack('<I', crc)
+        return bytes(data)
+    head = b'OpusHead' + struct.pack('<BBHIhB', 1, 1, 312, 48000, 0, 0)
+    tags = b'OpusTags' + struct.pack('<II', 0, 0)
+    return page(head, 0, 0, 2) + page(tags, 1, 0, 0) + b''.join(
+        page(bytes([0xf8, 0xff, 0xfe]), n + 2, (n + 1) * 960, 4 if n == 399 else 0) for n in range(400))
+
+
 VOICE_NOTES = 5
 VOICE_BYTES = Path(__file__).with_name('voice-note.ogg').read_bytes()
 
@@ -2017,10 +2034,7 @@ def main():
     server.state.telegram_events = []
     server.state.telegram_read = set()
     if args.mode == 'voice':
-        audio = args.log.with_name('voice-playback.ogg')
-        subprocess.run(['ffmpeg', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=8',
-                        '-c:a', 'libopus', str(audio)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        server.state.voice_audio = audio.read_bytes()
+        server.state.voice_audio = voice_playback_bytes()
     if args.mode == 'media-fit':
         server.state.fit_text = 'M M M M M M M M'
         server.state.fit_media = {
