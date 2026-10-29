@@ -100,10 +100,26 @@ pub fn sizeFromJson(object: std.json.ObjectMap) u64 {
     return 0;
 }
 
-pub const AttachmentState = enum { local, downloading, oversized, unavailable };
+pub const AttachmentState = enum { local, downloading, oversized, unavailable, retry };
+
+pub fn voiceState(local: bool, in_flight: bool, failed: bool, size_bytes: u64) AttachmentState {
+    if (local) return .local;
+    if (in_flight) return .downloading;
+    if (failed) return .retry;
+    return if (oversized(size_bytes)) .oversized else .downloading;
+}
+
+test "failed voice downloads offer retry until a new attempt starts" {
+    try std.testing.expectEqual(AttachmentState.retry, voiceState(false, false, true, 0));
+    try std.testing.expectEqual(AttachmentState.downloading, voiceState(false, true, true, 0));
+    try std.testing.expectEqual(AttachmentState.local, voiceState(true, false, true, 0));
+    var buffer: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("Voice message · Tap to retry", attachmentLabel(&buffer, "Voice message", 0, .retry));
+}
 
 pub fn attachmentLabel(buffer: []u8, name: []const u8, size_bytes: u64, attachment_state: AttachmentState) []const u8 {
     const state = switch (attachment_state) {
+        .retry => "Tap to retry",
         .local => "Open",
         .downloading => "Downloading...",
         .oversized => "Click to download",

@@ -45,12 +45,20 @@ actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
 assert actions.count('SendInput: wheel') == 4 and 'SendInput: Show more on VOICE-' in actions
 requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
 media = {row['wire_path'] for row in requests if row['method'] == 'GET' and row['wire_path'].startswith('/v1/wazig/media/') and row['status'] == 200}
-assert len(media) == 5, media
+assert len(media) == 9, media
 final = read('side-effects.json')
 assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
 assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
 assert 'JOURNEY PASSED: voice' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
 assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
 runpy.run_path(str(Path(__file__).with_name('check-transcript-copy.py')))['check_transcript_copy'](folder)
+download = read('voice-download.json')
+assert download['pending_sends'] > 0 and download['elapsed_ms'] <= 10000
+assert len(download['downloaded']) == 3 and all(row['local'] for row in download['downloaded'])
+assert download['failed']['download_state'] == 'retry' and not download['failed']['local']
+assert download['retried']['local'] and download['playing']['position_ms'] > 0 and download['playing']['playing']
+for image in ['voice-download-failed.png', 'voice-download-retried.png', 'voice-download-playing.png']:
+    assert (folder / image).read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+assert any(row['status'] == 502 and 'NEW-VOICE-4' in row['wire_path'] for row in requests)
 print('EVIDENCE VERIFIED: five downloaded voice notes with cached transcripts, scroll and expand, partial repaints match full repaints')
 raise SystemExit(0)

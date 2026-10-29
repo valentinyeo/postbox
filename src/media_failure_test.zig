@@ -134,3 +134,17 @@ test "normal and oversized labels preserve old states" {
     try std.testing.expectEqual(media_drain.AttachmentState.oversized, attachmentState(&a, &a.messages[0], false));
     try std.testing.expectEqual(media_drain.AttachmentState.local, attachmentState(&a, &a.messages[0], true));
 }
+
+test "queued sends cannot starve the independent hub media worker" {
+    for ([_]bool{ false, true }) |automatic| {
+        var a = fixture();
+        a.hub = true;
+        a.pending_send_count = 2;
+        a.send_child = 1;
+        a.read_child = 1;
+        a.archive_child = 1;
+        try std.testing.expect(downloadMedia(&a, 0, automatic));
+        try std.testing.expectEqual(@as(usize, 1), a.started);
+        try std.testing.expectEqual(@as(usize, 0), a.pending_download_id.len);
+    }
+}
