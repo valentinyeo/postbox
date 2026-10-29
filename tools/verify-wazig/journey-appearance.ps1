@@ -58,5 +58,6 @@ try {
 @{ width = 1920; height = 1032; draft = (Read-Edit $compose); foreground_pixels = $script:sharedInk; raised_pixels = $script:sharedFill; pill = @{ left = $pill.Left; top = $pill.Top; width = $pill.Width; height = $pill.Height } } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Evidence 'shared-design.json')
 Send-Keys $session '^d'
 $null = Wait-Until { (Read-Edit $compose) -ceq 'Shared design check Go forward ten meters.' } 'recorded PCM reaches the production composer'
+@{ expected = 'Shared design check Go forward ten meters.'; actual = (Read-Edit $compose) } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'dictation-transcript.json') -Encoding utf8
 Send-Keys $session '^a{BACKSPACE}'
 $null = Wait-Until { (Read-Edit $compose) -ceq '' } 'proof draft cleared'

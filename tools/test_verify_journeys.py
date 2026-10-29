@@ -655,7 +655,8 @@ class AppearanceVersionTests(unittest.TestCase):
         files['shared-design.json'] = dict(width=1920, height=1032, draft='Shared design check',
                                            foreground_pixels=100, raised_pixels=3000,
                                            pill=dict(width=116, height=32))
-        (folder / 'run.log').write_text('recorded PCM reaches the production composer')
+        files['dictation-transcript.json'] = dict(expected='Shared design check Go forward ten meters.',
+                                                  actual='Shared design check Go forward ten meters.')
         for name in ('before', 'action', 'text-larger', 'after', 'group-senders'):
             files[name + '.state.json'] = state
             (folder / (name + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + name.encode() * 11000)
@@ -685,6 +686,17 @@ class AppearanceVersionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             old = subprocess.check_output(['git', 'show', '2653484:tools/verify-wazig/evidence-palette.py'], cwd=ROOT, text=True)
             self.assertNotEqual(self.run_oracle(folder, old).returncode, 0)
+
+    def test_actual_dictation_transcript_is_required(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            self.fixture(folder, '1.2.345')
+            (folder / 'run.log').write_text('')
+            self.assertEqual(self.run_oracle(folder).returncode, 0)
+            (folder / 'dictation-transcript.json').write_text(json.dumps(dict(
+                expected='Shared design check Go forward ten meters.', actual='Shared design check')))
+            (folder / 'run.log').write_text('recorded PCM reaches the production composer')
+            self.assertNotEqual(self.run_oracle(folder).returncode, 0)
 
     def test_wrong_installed_version_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

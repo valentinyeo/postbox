@@ -322,14 +322,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(transcript_copy_tests).step);
     const message_menu_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/message_menu_test.zig"),
-        "const design = struct {\n",
-        @embedFile("src/design_tokens.zig"),
-        "\n};\n",
+        "const design = @import(\"design_tokens.zig\");\n",
         sourceSection("fn appendMessageMenuItem(", "fn openUrlWide("),
         sourceSection("fn openReactionMenu(", "fn measureReactionRow("),
     }) catch @panic("Out of memory building message menu harness");
+    const message_menu_files = b.addWriteFiles();
+    _ = message_menu_files.addCopyFile(b.path("src/design_tokens.zig"), "design_tokens.zig");
     const message_menu_tests = b.addTest(.{ .root_module = b.createModule(.{
-        .root_source_file = b.addWriteFiles().add("message_menu_test.zig", message_menu_source),
+        .root_source_file = message_menu_files.add("message_menu_test.zig", message_menu_source),
         .target = b.resolveTargetQuery(.{}),
         .imports = &.{
             .{ .name = "theme", .module = b.createModule(.{ .root_source_file = b.path("src/theme.zig"), .target = b.resolveTargetQuery(.{}) }) },
