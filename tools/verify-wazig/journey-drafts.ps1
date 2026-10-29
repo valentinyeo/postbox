@@ -1,3 +1,16 @@
+Invoke-PaletteCommand $session 'Compose message'
+$empty = Read-Control $session status
+$dpi = [int][VerifyWindow]::GetDpiForWindow($app.MainWindowHandle)
+$oneLineHeight = [int][Math]::Floor((44 * $dpi + 48) / 96)
+Assert-That ($empty.composer.box.bottom - $empty.composer.box.top -eq $oneLineHeight) 'Empty composer must start one line tall despite an old saved height'
+Save-Screen $session composer-empty
+Send-Keys $session 'Draft probe'
+$null = Wait-Until { (Read-Edit $compose) -eq 'Draft probe' } 'composer probe typed'
+Save-Screen $session composer-typed
+Send-Keys $session '^a{BACKSPACE}'
+$null = Wait-Until { (Read-Edit $compose) -eq '' } 'composer probe cleared'
+$reset = Read-Control $session status
+Assert-That ($reset.composer.box.bottom - $reset.composer.box.top -eq $oneLineHeight) 'Cleared composer must return to one line'
 Send-Keys $session 'Verification draft'
 Send-Keys $session '{HOME}{RIGHT 12}+{END}'
 Send-Keys $session 'text'

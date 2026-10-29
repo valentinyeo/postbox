@@ -54,7 +54,8 @@
       "script": "journey-drafts.ps1",
       "validator": null,
       "hub_handler": null,
-      "maximize": true
+      "maximize": true,
+      "prepare": "prepare-drafts.ps1"
     },
     {
       "name": "palette",
