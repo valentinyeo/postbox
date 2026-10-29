@@ -13684,7 +13684,7 @@ fn composerContentHeight(a: *App) i32 {
 
 fn stagedPreviewColumns(a: *const App, width: i32) usize {
     const left_width = @min(px(a, theme.sidebar_width), @divTrunc(width, 2));
-    const available = width - left_width - threadPanelWidth(a, width, left_width) - px(a, 26);
+    const available = @min(width - left_width - threadPanelWidth(a, width, left_width), px(a, theme.chat_column_width)) - px(a, 26);
     return @intCast(@max(1, @divTrunc(available, px(a, 56))));
 }
 
@@ -13700,7 +13700,9 @@ fn stagedComposerSizes(a: *App, width: i32, height: i32) compose_layout.Composer
 fn stagedPreviewRect(a: *const App, index: usize) win.RECT {
     const columns = stagedPreviewColumns(a, a.compose_client_width);
     const left_width = @min(px(a, theme.sidebar_width), @divTrunc(a.compose_client_width, 2));
-    const left = left_width + px(a, 13) + @as(i32, @intCast(index % columns)) * px(a, 56);
+    const pane_width = a.compose_client_width - left_width - threadPanelWidth(a, a.compose_client_width, left_width);
+    const column_inset = @max(0, @divTrunc(pane_width - px(a, theme.chat_column_width), 2));
+    const left = left_width + column_inset + px(a, 13) + @as(i32, @intCast(index % columns)) * px(a, 56);
     const top = a.compose_strip_top + (if (a.reply_to.len > 0) px(a, 64) else @as(i32, 0)) + px(a, 10) + @as(i32, @intCast(index / columns)) * px(a, compose_layout.preview_band);
     return .{ .left = left, .top = top, .right = left + px(a, 44) + 2, .bottom = top + px(a, 44) + 2 };
 }

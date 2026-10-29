@@ -197,7 +197,7 @@ test "live theme changes replace all brushes, save and redraw every top-level wi
     var app = App{};
     try std.testing.expect(recreateThemeBrushes(&app));
     try expectBrushes(&app, theme.amoled);
-    for ([_]theme.Choice{.amoled}) |choice| {
+    for ([_]theme.Choice{ .amoled, .amoled, .amoled }) |choice| {
         const old = [_]usize{ app.brush_bg.?, app.brush_panel.?, app.brush_sidebar.?, app.brush_raised.?, app.brush_muted.? };
         try std.testing.expect(changeTheme(&app, choice));
         try std.testing.expectEqual(choice, theme.choice);
