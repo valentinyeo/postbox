@@ -4,6 +4,7 @@ cd "${1:-$(git rev-parse --show-toplevel)}"
 run() { echo "preflight-light: $*"; "$@"; }
 PYTHON_LIGHT_TESTS=(
     test_ai_review
+    test_design_kit
     test_check_cache_keys
     test_check_hub_only
     test_check_private_markers
