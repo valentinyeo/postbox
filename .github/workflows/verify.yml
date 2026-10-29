@@ -159,6 +159,27 @@ jobs:
           Copy-Item reply-red-evidence verification-evidence/red-control -Recurse
           'REPLY_ORIGINAL_RED_OK: Reply preview missing' | Set-Content verification-evidence/reply-red-control.txt
           exit 0
+      - name: Sent ordering historical red control
+        if: matrix.feature == 'slack-sort' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:RUNNER_TEMP 'sent-order-original'
+          $prefix = Join-Path $env:GITHUB_WORKSPACE 'sent-order-original-bin'
+          git worktree add --detach $source 7dc3001
+          if ($LASTEXITCODE -ne 0) { throw 'Original ordering source unavailable' }
+          Push-Location $source
+          try {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            if ($LASTEXITCODE -ne 0) { throw 'Original ordering build failed' }
+          } finally { Pop-Location }
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature slack-sort -Bin sent-order-original-bin/bin -Evidence sent-order-red-evidence
+          if ($LASTEXITCODE -eq 0) { throw 'Original ordering unexpectedly passed stale WhatsApp sends' }
+          $failure = Get-Content sent-order-red-evidence/failure.txt -Raw
+          if ($failure -notmatch 'WhatsApp wa-sent last message order') { throw "Wrong ordering red failure: $failure" }
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          Copy-Item sent-order-red-evidence verification-evidence/red-control -Recurse
+          'SENT_ORDER_ORIGINAL_RED_OK: WhatsApp wa-sent last message order' | Set-Content verification-evidence/sent-order-red-control.txt
+          exit 0
       - name: Build real desktop or download published release
         shell: pwsh
         env:

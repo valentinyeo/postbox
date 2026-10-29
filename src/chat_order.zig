@@ -1,4 +1,68 @@
 const std = @import("std");
+const chat_key = @import("chat_key.zig");
+
+pub const Activity = struct {
+    const Entry = struct {
+        key: chat_key.Stored = .{},
+        timestamp: [47]u8 = undefined,
+        len: usize = 0,
+
+        fn slice(self: *const Entry) []const u8 {
+            return self.timestamp[0..self.len];
+        }
+    };
+    entries: std.ArrayList(Entry) = .empty,
+
+    pub fn deinit(self: *Activity, allocator: std.mem.Allocator) void {
+        self.entries.deinit(allocator);
+    }
+
+    pub fn retain(self: *Activity, allocator: std.mem.Allocator, key: chat_key.Key, timestamp: []const u8) ![]const u8 {
+        var normalized: [47]u8 = undefined;
+        const len = @min(std.mem.trimEnd(u8, timestamp, "Z").len, normalized.len - 1);
+        @memcpy(normalized[0..len], timestamp[0..len]);
+        if (len > 10 and normalized[10] == ' ') normalized[10] = 'T';
+        var found: ?*Entry = null;
+        for (self.entries.items) |*entry| {
+            if (chat_key.Key.eql(entry.key.key(), key)) {
+                found = entry;
+                break;
+            }
+        }
+        const entry = found orelse blk: {
+            if (len == 0) return "";
+            const entry = try self.entries.addOne(allocator);
+            entry.* = .{};
+            entry.key.set(key);
+            break :blk entry;
+        };
+        if (std.mem.order(u8, normalized[0..len], std.mem.trimEnd(u8, entry.slice(), "Z")) == .gt) {
+            @memcpy(entry.timestamp[0..len], normalized[0..len]);
+            entry.timestamp[len] = 'Z';
+            entry.len = len + 1;
+        }
+        return entry.slice();
+    }
+};
+
+test "sent and phone activity survives stale snapshots without crossing provider or account" {
+    var activity = Activity{};
+    defer activity.deinit(std.testing.allocator);
+    const key = chat_key.Key{ .provider = .whatsapp, .account = "first", .id = "contact" };
+    const old = "2026-10-29T10:00:00Z";
+    const sent = "2026-10-29 12:00:00";
+    const phone = "2026-10-29T12:00:01.123Z";
+    try std.testing.expectEqualStrings("2026-10-29T10:00:00Z", try activity.retain(std.testing.allocator, key, old));
+    try std.testing.expectEqualStrings("2026-10-29T12:00:00Z", try activity.retain(std.testing.allocator, key, sent));
+    try std.testing.expectEqualStrings("2026-10-29T12:00:00Z", try activity.retain(std.testing.allocator, key, old));
+    try std.testing.expectEqualStrings("2026-10-29T12:00:01.123Z", try activity.retain(std.testing.allocator, key, phone));
+    try std.testing.expectEqualStrings("2026-10-29T12:00:01.123Z", try activity.retain(std.testing.allocator, key, ""));
+    for ([_]chat_key.Key{
+        .{ .provider = .whatsapp, .account = "second", .id = key.id },
+        .{ .provider = .slack, .account = key.account, .id = key.id },
+    }) |other| try std.testing.expectEqualStrings("2026-10-29T10:00:00Z", try activity.retain(std.testing.allocator, other, old));
+}
+
 
 pub fn shouldMoveUp(pin_left: bool, pin_right: bool, by_time: std.math.Order, by_name: std.math.Order, jid_tiebreak: std.math.Order) bool {
     if (pin_right != pin_left) return pin_right;

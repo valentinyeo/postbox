@@ -44,6 +44,27 @@ class SlackSortEvidenceTests(unittest.TestCase):
         (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['^2', '^{TAB}', '^+{TAB}', 'Compose message', 'Synthetic Slack outgoing', '{ENTER}']))
         (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED: synthetic validator input')
         (self.folder / 'result.txt').write_text('JOURNEY PASSED: slack-sort')
+        wa_orders = {'wa-before': ['wa-beta', 'wa-gamma', 'wa-alpha', 'wa-unknown'],
+                     'wa-sent': ['wa-gamma', 'wa-beta', 'wa-alpha', 'wa-unknown'],
+                     'wa-stale': ['wa-gamma', 'wa-beta', 'wa-alpha', 'wa-unknown'],
+                     'wa-phone': ['wa-alpha', 'wa-gamma', 'wa-beta', 'wa-unknown']}
+        for stage, order in wa_orders.items():
+            times = {chat.replace('fixture-', 'wa-'): stamp for chat, stamp in initial.items()}
+            if stage != 'wa-before':
+                times['wa-gamma'] = '2026-01-01T05:00:00'
+            if stage == 'wa-phone':
+                times['wa-alpha'] = '2026-01-01T06:00:00'
+            self.write(f'{stage}.chats.json', dict(chats=[dict(id=chat, provider='whatsapp', last_message_time=times[chat]) for chat in order]))
+            (self.folder / f'{stage}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'fixture' * 2000)
+            with (self.folder / 'hub-proof.log').open('a') as stream:
+                stream.write(f'\nslack-sort {stage}-last-message-order PASS')
+        self.write('stale-provider.json', {'wa-gamma': '2026-01-01T02:00:00Z'})
+        with (self.folder / 'bridge-requests.jsonl').open('a') as stream:
+            for row in [dict(method='POST', authorized=True, wire_path='/v1/wazig/send', status=200,
+                             body=dict(chat='wa-gamma', text='https://example.com/sent-order')),
+                        dict(method='POST', authorized=True, wire_path='/fixture/phone', status=200)]:
+                stream.write('\n' + json.dumps(row))
+
 
     def write(self, name, value):
         (self.folder / name).write_text(json.dumps(value), encoding='utf-8')
@@ -62,7 +83,11 @@ class SlackSortEvidenceTests(unittest.TestCase):
                  ('sent.navigation.json', lambda v: v.reverse()),
                  ('result.json', lambda v: v.update(status='failed')),
                  ('after.state.json', lambda v: v.update(selected=dict(id='fixture-alpha'))),
-                 ('side-effects.json', lambda v: v.update(pending_sends=1))]
+                 ('side-effects.json', lambda v: v.update(pending_sends=1)),
+                 ('wa-sent.chats.json', lambda v: v['chats'].reverse()),
+                 ('wa-stale.chats.json', lambda v: v['chats'][0].update(last_message_time='2026-01-01T02:00:00Z')),
+                 ('wa-phone.chats.json', lambda v: v['chats'].reverse()),
+                 ('stale-provider.json', lambda v: v.update({'wa-gamma': '2026-01-01T06:00:00Z'}))]
         for name, mutate in cases:
             with self.subTest(name=name):
                 path = self.folder / name
