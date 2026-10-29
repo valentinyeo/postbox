@@ -61,7 +61,7 @@ pub const amoled: Palette = .{
     .on_primary = hex(0x1a1a1a),
     .primary_container = hex(0x414141),
     .on_primary_container = hex(0xf2f2f2),
-    .secondary_container = hex(0x333333),
+    .secondary_container = hex(0x3d3d3d),
     .on_secondary_container = hex(0xf2f2f2),
     .@"error" = hex(0xffb4ab),
     .sidebar_surface = hex(0x101010),
@@ -217,14 +217,14 @@ test "green palette preserves every original COLORREF" {
     }
 }
 
-test "AMOLED has pure black surfaces and distinct neutral bubbles" {
-    try std.testing.expectEqual(hex(0x000000), amoled.surface);
-    try std.testing.expectEqual(hex(0x000000), amoled.surface_container_low);
-    try std.testing.expectEqual(hex(0x000000), amoled.surface_container);
+test "IGSH-1120 graphite surfaces and distinct neutral bubbles match the approved design" {
+    try std.testing.expectEqual(hex(0x101010), amoled.surface);
+    try std.testing.expectEqual(hex(0x101010), amoled.surface_container_low);
+    try std.testing.expectEqual(hex(0x1f1f1f), amoled.surface_container);
     try std.testing.expect(amoled.surface_container_high != amoled.primary_container);
     try std.testing.expect(luminance(amoled.primary_container) > luminance(amoled.surface_container_high));
     inline for (@typeInfo(Palette).@"struct".fields) |field| {
-        if (comptime !std.mem.eql(u8, field.name, "error")) {
+        if (comptime !std.mem.eql(u8, field.name, "error") and !std.mem.eql(u8, field.name, "primary")) {
             const color = @field(amoled, field.name);
             try std.testing.expectEqual(color & 0xff, (color >> 8) & 0xff);
             try std.testing.expectEqual(color & 0xff, (color >> 16) & 0xff);

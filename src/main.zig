@@ -5943,7 +5943,6 @@ fn observeBackgroundMediaChats(a: *App, rows: []const std.json.Value) void {
         };
         var chat = BackgroundMediaChat{ .account = a.cache_tag };
         chat.jid.set(getString(object, "jid"));
-        chat.preview.set(a.allocator, getString(object, "last_message_preview"));
         chat.timestamp.set(getString(object, "last_message_ts"));
         if (chat.jid.len == 0 or chat.timestamp.len == 0) continue;
         if (chat_key.indexOf(BackgroundMediaChat, a.background_media_chats[0..a.background_media_count], chat_key.of(&chat))) |index| {

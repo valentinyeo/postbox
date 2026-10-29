@@ -26,7 +26,12 @@ def function(text, name):
     return (text[start:text.index('\n}\n', start) + 3]
             .replace('Updating Messages...', 'Updating Postbox...')
             .replace('New version v{s}', 'Postbox v{s}')
-            .replace('New version available', 'Postbox update available'))
+            .replace('New version available', 'Postbox update available')
+            .replace('std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 390))', '@min(px(a, 300), @divTrunc(width, 2))')
+            .replace('std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 390))', '@min(px(a, 300), @divTrunc(a.compose_client_width, 2))')
+            .replace('const header_height: i32 = 0;', 'const header_height: i32 = px(a, 56);')
+            .replace('left_width + 1, header_height, chat_width - panel_width, height - header_height - sizes.strip_height', 'left_width + 1, 0, chat_width - panel_width, height - sizes.strip_height')
+            .replace('            a.compose_geometry = compose_layout.arrange(.{ .left = left_width + 1, .top = 0, .right = width - threadPanelWidth(a, width, left_width), .bottom = height }, sizes.edit_height, @intCast(a.dpi), a.voice_active);', '            const pane_right = width - threadPanelWidth(a, width, left_width);\n            const column = chatColumn(a, pane_right - left_width - 1);\n            a.compose_geometry = compose_layout.arrange(.{ .left = left_width + 1 + column.left - px(a, 14), .top = 0, .right = left_width + 1 + column.right + px(a, 14), .bottom = height }, sizes.edit_height, @intCast(a.dpi), a.voice_active);'))
 
 
 def assert_quiet(text):

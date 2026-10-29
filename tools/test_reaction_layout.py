@@ -36,17 +36,16 @@ def verify(source):
         assert token in size, f'ISSUE-533 chip measurement missing {token}'
     assert 'return @max(height, min_height) + @max(0, reactionChipSize(hdc, a, message, width).cy - px(a, 4));' in measure, 'ISSUE-533 row must reserve the chip overhang after the minimum bubble height'
     for token in (
-        'const reaction_size = reactionChipSize(hdc, a, message, bubble_width);',
-        'const bubble_height = height - @max(0, reaction_size.cy - px(a, 4));',
-        '.bottom = y + bubble_height };',
+        'const reaction_size = reactionChipSize(hdc, a, message, width);',
+        'const bubble_height = height - sender_height - @max(0, reaction_size.cy - px(a, 4));',
+        '.bottom = bubble_top + bubble_height };',
         'const chip_left = if (message.from_me) right - px(a, 12) - reaction_size.cx else left + px(a, 12);',
         'const chip_top = message.bubble_hit.bottom - px(a, 4);',
         '.bottom = chip_top + reaction_size.cy',
         'smooth.fillRoundRect(&shapes, chip,',
         'reaction_size.cx - px(a, 12), true, chip.left + px(a, 6), chip.top + px(a, 4), null)',
-        '.bottom = y + bubble_height - px(a, 5)',
         'total_height += measureMessageCached(',
-        'y -= estimated_height + messageGap(a, index);',
+        'cursor_y = y - messageGap(a, index);',
     ):
         assert token in paint, f'ISSUE-533 chip painting or row placement missing {token}'
     assert 'y + height - timeBandHeight(hdc, a)' not in paint, 'ISSUE-533 reaction is back inside the message text'
@@ -68,9 +67,9 @@ class ReactionLayoutTests(unittest.TestCase):
         for old, new in (
             ('return @max(height, min_height) + @max(0, reactionChipSize(hdc, a, message, width).cy - px(a, 4));', 'return @max(height, min_height);'),
             ('message.bubble_hit.bottom - px(a, 4)', 'y + px(a, 6)'),
-            ('const bubble_height = height - @max(0, reaction_size.cy - px(a, 4));', 'const bubble_height = height;'),
+            ('const bubble_height = height - sender_height - @max(0, reaction_size.cy - px(a, 4));', 'const bubble_height = height;'),
             ('chip.top + px(a, 4), null)', 'y + px(a, 6), null)'),
-            ('.bottom = y + bubble_height - px(a, 5)', '.bottom = y + height - px(a, 5)'),
+            ('.bottom = bubble_top + bubble_height };', '.bottom = bubble_top + height };'),
         ):
             with self.subTest(issue='ISSUE-533', mutation=new):
                 self.assertIn(old, source)
