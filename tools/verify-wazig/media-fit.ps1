@@ -48,6 +48,8 @@ function Invoke-MediaFitJourney($Session) {
             $null = [VerifyWindow]::ShowWindow($window, 9)
             $canvas = [IntPtr](Get-Edit (Get-Window $Session) '1024').Current.NativeWindowHandle
             $steps = [Collections.Generic.List[object]]::new()
+            $dpi = [int][VerifyWindow]::GetDpiForWindow($window)
+            $sidebarLimit = [int][Math]::Floor((300 * $dpi + 48) / 96)
             for ($attempt = 0; $attempt -lt 8; $attempt++) {
                 $bounds = [VerifyVoice]::Bounds($Session.pid, $canvas)
                 $canvasWidth = $bounds.Right - $bounds.Left
@@ -55,15 +57,16 @@ function Invoke-MediaFitJourney($Session) {
                 $outer = [VerifyVoice]::Bounds($Session.pid, $window)
                 $width = $outer.Right - $outer.Left
                 $height = $outer.Bottom - $outer.Top
-                $requestedWidth = $width + 320 - $canvasWidth
+                $gain = if ($canvasWidth -lt $sidebarLimit) { 2 } else { 1 }
+                $requestedWidth = $width + $gain * (320 - $canvasWidth)
                 $null = Assert-That ([VerifyWindow]::SetWindowPos($window, [IntPtr]::Zero, 0, 0, $requestedWidth, $height, 6)) 'media-fit: native resize failed'
                 $null = [VerifyVoice]::FullRepaint($Session.pid, $canvas)
                 $after = [VerifyVoice]::Bounds($Session.pid, $canvas)
-                $null = $steps.Add([ordered]@{ window_before = $width; canvas_before = $canvasWidth; requested_window = $requestedWidth; canvas_after = ($after.Right - $after.Left) })
+                $null = $steps.Add([ordered]@{ window_before = $width; canvas_before = $canvasWidth; gain = $gain; requested_window = $requestedWidth; canvas_after = ($after.Right - $after.Left) })
             }
             $bounds = [VerifyVoice]::Bounds($Session.pid, $canvas)
             $canvasWidth = $bounds.Right - $bounds.Left
-            [ordered]@{ target = 320; canvas = $canvasWidth; steps = $steps.ToArray() } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Session.evidence 'media-fit-resize.json')
+            [ordered]@{ target = 320; dpi = $dpi; sidebar_limit = $sidebarLimit; canvas = $canvasWidth; steps = $steps.ToArray() } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Session.evidence 'media-fit-resize.json')
             Add-Content (Join-Path $Session.evidence 'actions.log') "resize: media-fit canvas=$canvasWidth target=320"
             $null = Assert-That ($canvasWidth -ge 300 -and $canvasWidth -le 340) "media-fit: native resize missed the 300-340 px canvas band (now $canvasWidth px)"
         }

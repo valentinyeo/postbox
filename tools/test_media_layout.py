@@ -45,11 +45,13 @@ def verify_resize(source):
         '$attempt -lt 8;',
         'if ($canvasWidth -eq 320) { break }',
         '[VerifyVoice]::Bounds($Session.pid, $window)',
-        '$requestedWidth = $width + 320 - $canvasWidth',
+        '$requestedWidth = $width + $gain * (320 - $canvasWidth)',
         '[VerifyWindow]::SetWindowPos($window, [IntPtr]::Zero, 0, 0, $requestedWidth, $height, 6)',
         '$canvasWidth -ge 300 -and $canvasWidth -le 340',
         "'media-fit-resize.json'",
-        'window_before = $width; canvas_before = $canvasWidth; requested_window = $requestedWidth',
+        'window_before = $width; canvas_before = $canvasWidth; gain = $gain; requested_window = $requestedWidth',
+        '$gain = if ($canvasWidth -lt $sidebarLimit) { 2 } else { 1 }',
+        '$sidebarLimit = [int][Math]::Floor((300 * $dpi + 48) / 96)',
     ):
         assert token in source, f'IGSH-714 measured resize missing {token}'
     assert 'Send-Keys' not in source, 'IGSH-714 resize must not depend on system-menu keys'
@@ -69,7 +71,7 @@ class MediaFitResizeTests(unittest.TestCase):
             "resize = read('media-fit-resize.json')",
             "resize['target'] == 320 and 300 <= resize['canvas'] <= 340",
             "row['canvas'][2] == resize['canvas']",
-            "step['requested_window'] == step['window_before'] + resize['target'] - step['canvas_before']",
+            "step['requested_window'] == step['window_before'] + step['gain'] * (resize['target'] - step['canvas_before'])",
             "resize['steps'][-1]['canvas_after'] == resize['canvas']",
         ):
             self.assertIn(token, validator)
@@ -83,7 +85,7 @@ class MediaFitResizeTests(unittest.TestCase):
         maximum = int(re.search(r'pub const sidebar_width: i32 = (\d+);', (ROOT / 'src/theme.zig').read_text()).group(1))
         self.assertIn('const chat_width = width - left_width - 1;', layout)
         self.assertIn('chat_width - panel_width', layout)
-        target = int(re.search(r'\$requestedWidth = \$width \+ (\d+) - \$canvasWidth', self.journey).group(1))
+        target = int(re.search(r'\$requestedWidth = \$width \+ \$gain \* \((\d+) - \$canvasWidth\)', self.journey).group(1))
         attempts = int(re.search(r'\$attempt -lt (\d+)', self.journey).group(1))
         for dpi in (96, 120, 144, 192):
             px = lambda n: (n * dpi + 48) // 96
@@ -98,7 +100,8 @@ class MediaFitResizeTests(unittest.TestCase):
                         current = canvas(width)
                         if current == target:
                             break
-                        width += target - current
+                        gain = 2 if current < px(maximum) else 1
+                        width += gain * (target - current)
                     with self.subTest(dpi=dpi, border=border, initial=initial):
                         self.assertEqual(canvas(width), target)
                         self.assertTrue(300 <= canvas(width) <= 340)
@@ -107,7 +110,7 @@ class MediaFitResizeTests(unittest.TestCase):
     def test_IGSH_714_old_resize_and_weakened_band_are_rejected(self):
         verify_resize(self.journey)
         for old, new in (
-            ('$requestedWidth = $width + 320 - $canvasWidth', '$requestedWidth = 600'),
+            ('$requestedWidth = $width + $gain * (320 - $canvasWidth)', '$requestedWidth = 600'),
             ('$canvasWidth -ge 300 -and $canvasWidth -le 340', '$canvasWidth -ge 180 -and $canvasWidth -le 340'),
             ('[VerifyWindow]::SetWindowPos', '[VerifyWindow]::ShowWindow'),
             ('$attempt -lt 8;', '$attempt -lt 80'),
