@@ -661,10 +661,11 @@ pub fn build(b: *std.Build) void {
         sourceSection("fn drawDictationIcon(", "fn drawComposerButton("),
         "fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {\n",
         composer_paint_source[composer_paint_start..],
+        sourceSection("fn chatColumn(", "fn scrollToSelectedMessage("),
         "fn layoutComposer(a: *App, width: i32, height: i32) void {\n",
         composer_layout_source[composer_layout_start..],
         "    const sizes = .{ .edit_height = px(a, 44) };\n",
-        sourceSection("            a.compose_geometry =", "            const inner = a.compose_geometry.text;"),
+        sourceSection("            const pane_right =", "            const inner = a.compose_geometry.text;"),
         sourceSection("    const buttons = [_]?win.HWND", "    updateAttachButton(a);"),
         "}\n",
     }) catch @panic("Out of memory building composer button harness");

@@ -88,7 +88,7 @@ const smooth = struct {
 fn lit(comptime text: []const u8) [*:0]const u16 {
     return std.unicode.utf8ToUtf16LeStringLiteral(text);
 }
-fn px(a: *App, value: i32) i32 {
+fn px(a: *const App, value: i32) i32 {
     return @divTrunc(value * a.dpi + 48, 96);
 }
 fn buttonLabel(item: *win.DRAWITEMSTRUCT, _: []u16) []const u16 {

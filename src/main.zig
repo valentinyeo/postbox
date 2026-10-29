@@ -15221,7 +15221,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     a.scroll_y = std.math.clamp(a.scroll_y, 0, a.max_scroll);
-    var y = client.bottom - px(a, 14) + a.scroll_y;
+    var cursor_y = client.bottom - px(a, 14) + a.scroll_y;
     var index = a.message_count;
     while (index > 0) {
         index -= 1;
@@ -15238,16 +15238,18 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         if (!channelMessageVisible(a, message)) continue;
         const show_sender = showSenderName(a, index);
         const estimated_height = measureMessageCached(hdc, a, message, bubble_width, show_sender);
-        y -= estimated_height + messageGap(a, index);
+        var y = cursor_y - estimated_height;
+        cursor_y = y - messageGap(a, index);
         if (y > client.bottom or y + estimated_height < client.top) continue;
         ensureBitmap(a, message);
         var height = measureMessageStore(hdc, a, message, bubble_width, show_sender);
         y -= height - estimated_height;
+        cursor_y -= height - estimated_height;
         if (y > client.bottom or y + height < client.top) continue;
         const width = messageWidth(hdc, a, message, bubble_width);
         const left: i32 = if (message.from_me) column.right - width else column.left;
         const right = left + width;
-        const reaction_size = reactionChipSize(hdc, a, message, bubble_width);
+        const reaction_size = reactionChipSize(hdc, a, message, width);
         const replies_height = threadSummaryHeight(a, message);
         height -= replies_height;
         const sender_height = if (show_sender) senderBandHeight(hdc, a) + px(a, 8) else @as(i32, 0);
@@ -15260,7 +15262,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             var line_buffer: [64]u8 = undefined;
             var line = WideText(63){};
             line.set(a.allocator, slack.repliesLine(&line_buffer, threadReplyCount(a, message)));
-            message.replies_hit = .{ .left = left + px(a, 12), .top = y + bubble_height, .right = right - px(a, 12), .bottom = y + height + replies_height };
+            message.replies_hit = .{ .left = left + px(a, 12), .top = message.bubble_hit.bottom, .right = right - px(a, 12), .bottom = message.bubble_hit.bottom + replies_height };
             var line_rect = message.replies_hit;
             line_rect.bottom = line_rect.top + @divTrunc(replies_height, 2);
             _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &line_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
@@ -15547,9 +15549,30 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     drawScrollbar(&shapes, canvasStripRect(a), canvasScrollInfo(a), theme.current.outline);
 }
 
+fn updateMessageHover(a: *App, hwnd: win.HWND, lparam: win.LPARAM) void {
+    const hover_x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
+    const hover_y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+    var hovered: ?usize = null;
+    for (a.messages[0..a.message_count], 0..) |*item, index| {
+        if (item.bubble_hit.right > item.bubble_hit.left and (rectHasPoint(item.bubble_hit, hover_x, hover_y) or rectHasPoint(messageActionsRect(a, item), hover_x, hover_y))) hovered = index;
+    }
+    if (a.message_hover != hovered) {
+        a.message_hover = hovered;
+        _ = win.InvalidateRect(hwnd, null, win.FALSE);
+    }
+    var track = win.TRACKMOUSEEVENT{ .cbSize = @sizeOf(win.TRACKMOUSEEVENT), .dwFlags = win.TME_LEAVE, .hwndTrack = hwnd, .dwHoverTime = 0 };
+    _ = win.TrackMouseEvent(&track);
+}
+
 fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    if (message == win.WM_MOUSEMOVE) updateMessageHover(a, hwnd, lparam);
     switch (message) {
+        win.WM_MOUSELEAVE => {
+            a.message_hover = null;
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
+            return 0;
+        },
         win.WM_PAINT => {
             drawCanvas(hwnd, a);
             return 0;
@@ -15670,24 +15693,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             }
             return canvasProc(hwnd, win.WM_LBUTTONDOWN, wparam, lparam);
         },
-        win.WM_MOUSELEAVE => {
-            a.message_hover = null;
-            _ = win.InvalidateRect(hwnd, null, win.FALSE);
-            return 0;
-        },
         win.WM_MOUSEMOVE => {
-            const hover_x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
-            const hover_y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
-            var hovered: ?usize = null;
-            for (a.messages[0..a.message_count], 0..) |*item, index| {
-                if (item.bubble_hit.right > item.bubble_hit.left and (rectHasPoint(item.bubble_hit, hover_x, hover_y) or rectHasPoint(messageActionsRect(a, item), hover_x, hover_y))) hovered = index;
-            }
-            if (a.message_hover != hovered) {
-                a.message_hover = hovered;
-                _ = win.InvalidateRect(hwnd, null, win.FALSE);
-            }
-            var track = win.TRACKMOUSEEVENT{ .cbSize = @sizeOf(win.TRACKMOUSEEVENT), .dwFlags = win.TME_LEAVE, .hwndTrack = hwnd, .dwHoverTime = 0 };
-            _ = win.TrackMouseEvent(&track);
             if (a.sb_drag == .canvas) {
                 const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
                 if (a.canvas != null) dragStrip(a, canvasStripRect(a), canvasScrollInfo(a), y, setCanvasScroll);
