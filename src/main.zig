@@ -14845,7 +14845,7 @@ fn groupChat(a: *const App) bool {
 }
 
 fn showSenderName(a: *App, index: usize) bool {
-    return groupChat(a) and !a.messages[index].from_me and startsSenderGroup(a, index);
+    return groupChat(a) and startsSenderGroup(a, index);
 }
 
 fn separatorHeight(a: *const App, index: usize) i32 {
@@ -15461,17 +15461,17 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         var text_top = bubble_top + px(a, 10);
         if (show_sender) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
-            drawSenderAvatar(&shapes, hdc, a, left - px(a, 42), y, message);
+            if (!message.from_me) drawSenderAvatar(&shapes, hdc, a, left - px(a, 42), y, message);
             const seed = if (message.sender_jid.len > 0) message.sender_jid.slice() else std.mem.sliceAsBytes(message.sender.slice());
             const tint = senderColorFor(seed);
             _ = win.SetTextColor(hdc, rgb(tint.r, tint.g, tint.b));
-            const sender_width = @min(column.right - left - px(a, 60), runWidth(hdc, message.sender.slice()));
+            const sender_width = if (message.from_me) @as(i32, 0) else @min(column.right - left - px(a, 60), runWidth(hdc, message.sender.slice()));
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             const header_width = sender_width + px(a, 8) + runWidth(hdc, message.time.slice());
             const header_left = if (message.from_me) @max(column.left, column.right - header_width) else left;
             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
             var sender_rect = win.RECT{ .left = header_left, .top = y, .right = header_left + sender_width, .bottom = bubble_top - px(a, 8) };
-            _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+            if (!message.from_me) _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             var time_rect = win.RECT{ .left = sender_rect.right + px(a, 8), .top = y + px(a, 1), .right = @min(column.right, header_left + header_width), .bottom = sender_rect.bottom };

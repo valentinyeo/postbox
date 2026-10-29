@@ -13,7 +13,8 @@ def section(source, name):
 def verify_column(source):
     width = section(source, 'messageBubbleWidth')
     for token in (
-        'return @max(1, @min(px(a, theme.bubble_max_width), available_width - px(a, 48)));',
+        'const gutter = if (groupChat(a)) px(a, 42) else @as(i32, 0);',
+        'return @max(1, @min(px(a, theme.bubble_max_width), @min(available_width - px(a, 48), chatColumn(a, available_width).right - chatColumn(a, available_width).left - gutter)));',
     ):
         assert token in width, f'IGSH-714 message column missing {token}'
     column = section(source, 'chatColumn')

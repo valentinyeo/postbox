@@ -652,12 +652,14 @@ class AppearanceVersionTests(unittest.TestCase):
         files = {'session.json': session, 'side-effects.json': state,
                  'text-scale.json': dict(initial_saved=False, larger=110, reset=100,
                                         baseline_points=10, larger_points=12, reset_points=10)}
-        for name in ('before', 'action', 'text-larger', 'after'):
+        for name in ('before', 'action', 'text-larger', 'after', 'group-senders'):
             files[name + '.state.json'] = state
             (folder / (name + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + name.encode() * 11000)
             (folder / (name + '.uia.txt')).write_text(f'MessagesZig | Combined inbox - Postbox v{version}\n')
         for name, value in files.items():
             (folder / name).write_text(json.dumps(value))
+        (folder / 'group-layout.txt').write_text('GROUP_LAYOUT_OK: fixture')
+        (folder / 'group-senders.messages.json').write_text(json.dumps(dict(messages=[dict(id=name) for name in ('GROUP-FIRST', 'GROUP-SAME', 'GROUP-DAY', 'GROUP-OTHER', 'GROUP-QUOTE', 'GROUP-OWN')])))
         (folder / 'result.txt').write_text('JOURNEY PASSED: appearance')
         (folder / 'cleanup.txt').write_text('CLEANUP PASSED: fixture removed')
         (folder / 'preferences.txt').write_text('FontScale 100')
