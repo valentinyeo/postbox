@@ -306,6 +306,12 @@ jobs:
           Copy-Item chat-design-red-evidence verification-evidence/chat-design-red-control -Recurse
           'IGSH-1120 ORIGINAL RENDERER RED VERIFIED: visible bold stars' | Set-Content verification-evidence/chat-design-red-control.txt
           exit 0
+      - name: Install typing recorder
+        if: matrix.feature == 'drafts'
+        shell: pwsh
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Typing recorder installation failed' }
       - name: Launch, doctor and drive
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence -ExpectedVersion $env:VERIFY_VERSION
