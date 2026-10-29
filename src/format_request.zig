@@ -19,6 +19,37 @@ pub fn appendJsonEscaped(list: *std.ArrayList(u8), allocator: std.mem.Allocator,
     }
 }
 
+fn transcriptLanguage(transcript: []const u8) ?enum { german, english } {
+    const words = [_][]const u8{
+        "ich du wir der die das und ist im mit für morgen bitte nicht heute weil am um den dem zum dass aber noch uns ein eine auf haben müssen",
+        "i you we the and is in with for tomorrow please not today because at to that but still us a an on have must will would",
+    };
+    var scores = [_]usize{ 0, 0 };
+    var tokens = std.mem.tokenizeAny(u8, transcript, " \t\r\n.,!?;:\"()");
+    while (tokens.next()) |token| {
+        for (words, 0..) |vocabulary, index| {
+            var candidates = std.mem.tokenizeScalar(u8, vocabulary, ' ');
+            while (candidates.next()) |word| {
+                if (std.ascii.eqlIgnoreCase(token, word)) {
+                    scores[index] += 1;
+                    break;
+                }
+            }
+        }
+    }
+    if (scores[0] > scores[1]) return .german;
+    if (scores[1] > scores[0]) return .english;
+    return null;
+}
+
+fn appendOutputLanguage(body: *std.ArrayList(u8), allocator: std.mem.Allocator, transcript: []const u8) !void {
+    const language = transcriptLanguage(transcript) orelse return;
+    try body.appendSlice(allocator, switch (language) {
+        .german => " OUTPUT LANGUAGE: German. Every generated summary line, topic header and cutoff note must be German, never English. Preserve spoken foreign words only inside the original transcript.",
+        .english => " OUTPUT LANGUAGE: English. Every generated summary line, topic header and cutoff note must be English, never German. Preserve spoken foreign words only inside the original transcript.",
+    });
+}
+
 pub fn formatRequestBody(allocator: std.mem.Allocator, anthropic: bool, model: []const u8, system_prompt: []const u8, transcript: []const u8) ![]u8 {
     var body: std.ArrayList(u8) = .empty;
     errdefer body.deinit(allocator);
@@ -27,10 +58,12 @@ pub fn formatRequestBody(allocator: std.mem.Allocator, anthropic: bool, model: [
     if (anthropic) {
         try body.appendSlice(allocator, "\",\"max_tokens\":8192,\"thinking\":{\"type\":\"disabled\"},\"system\":\"");
         try appendJsonEscaped(&body, allocator, system_prompt);
+        try appendOutputLanguage(&body, allocator, transcript);
         try body.appendSlice(allocator, "\",\"messages\":[{\"role\":\"user\",\"content\":\"");
     } else {
         try body.appendSlice(allocator, "\",\"reasoning\":{\"effort\":\"medium\"},\"temperature\":0.2,\"messages\":[{\"role\":\"system\",\"content\":\"");
         try appendJsonEscaped(&body, allocator, system_prompt);
+        try appendOutputLanguage(&body, allocator, transcript);
         try body.appendSlice(allocator, "\"},{\"role\":\"user\",\"content\":\"");
     }
     try body.appendSlice(allocator, "<transcript>\\n");
@@ -74,7 +107,7 @@ pub fn formatResponseText(allocator: std.mem.Allocator, anthropic: bool, respons
 
 pub const owner_name = "Valentin";
 
-pub const language_rule = " LANGUAGE: write the summary in the SAME language as the transcript (German transcript: German summary, English transcript: English summary). For a mix, use the language of most of the words. Never translate.";
+pub const language_rule = " LANGUAGE: decide the dominant language once from the transcript, using the language of most of the words. Use that SAME language for ALL generated text: every summary line, every topic header, and the final cutoff or incomplete-note line. German transcript: German summary, German headers, German cutoff note. English transcript: English summary, English headers, English cutoff note. A few spoken foreign phrases, such as Real Life or Energy inside a German sentence, do not change its language. Preserve every spoken word exactly, including foreign phrases; never translate the transcript. Do not default any generated field to English.";
 
 pub fn speakerInstruction(allocator: std.mem.Allocator, from_me: bool, contact: []const u8) ![]u8 {
     const other = if (contact.len > 0) contact else "the other person";
@@ -155,7 +188,7 @@ test "speaker instruction differs for own and received notes" {
 test "language rule is in the prompt and German and English transcripts pass unchanged" {
     const instruction = try speakerInstruction(std.testing.allocator, false, "Jenny Hirtz");
     defer std.testing.allocator.free(instruction);
-    try std.testing.expect(std.mem.indexOf(u8, instruction, "SAME language as the transcript") != null);
+    try std.testing.expect(std.mem.indexOf(u8, instruction, "SAME language for ALL generated text") != null);
     const german = try formatRequestBody(std.testing.allocator, true, "m", instruction, "Hallo, ich komme morgen um zehn.");
     defer std.testing.allocator.free(german);
     try std.testing.expect(std.mem.indexOf(u8, german, "Hallo, ich komme morgen um zehn.") != null);
@@ -209,4 +242,34 @@ test "format response text reads both providers and rejects empty output" {
     try std.testing.expectEqualStrings("ok", o);
     try std.testing.expectError(error.BadResponse, formatResponseText(std.testing.allocator, true, "{\"content\":[{\"type\":\"text\",\"text\":\"  \"}]}"));
     try std.testing.expectError(error.BadResponse, formatResponseText(std.testing.allocator, true, "{\"choices\":[]}"));
+}
+
+test "transcript language ignores borrowed phrases and follows dominant function words" {
+    try std.testing.expectEqual(.german, transcriptLanguage("Im Real Life fehlt mir heute die Energy. Morgen sprechen wir weiter.").?);
+    try std.testing.expectEqual(.english, transcriptLanguage("Hi Alex, I will arrive at ten tomorrow. Please bring the documents so we can discuss the schedule together.").?);
+    try std.testing.expectEqual(.german, transcriptLanguage("Hallo Alex, der Zug kommt heute später. Wir treffen uns deshalb erst um elf.").?);
+    try std.testing.expectEqual(.english, transcriptLanguage("Hi Alex, the train will arrive late today. We will therefore meet at eleven instead.").?);
+    try std.testing.expect(transcriptLanguage("Bonjour, rendez-vous jeudi.") == null);
+}
+
+test "all generated voice fields share one dominant language while spoken phrases pass unchanged" {
+    for ([_]bool{ true, false }) |own| {
+        const instruction = try speakerInstruction(std.testing.allocator, own, "Alex");
+        defer std.testing.allocator.free(instruction);
+        for ([_][]const u8{ "decide the dominant language once", "every summary line", "every topic header", "final cutoff", "Real Life", "Energy", "never translate the transcript" }) |field| {
+            try std.testing.expect(std.mem.indexOf(u8, instruction, field) != null);
+        }
+        for ([_]bool{ true, false }) |anthropic| {
+            const transcript = "Im Real Life fehlt mir heute die Energy. Morgen sprechen wir weiter.";
+            const body = try formatRequestBody(std.testing.allocator, anthropic, "model", instruction, transcript);
+            defer std.testing.allocator.free(body);
+            const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, body, .{});
+            defer parsed.deinit();
+            const messages = parsed.value.object.get("messages").?.array.items;
+            const system = if (anthropic) parsed.value.object.get("system").?.string else messages[0].object.get("content").?.string;
+            try std.testing.expect(std.mem.indexOf(u8, system, "OUTPUT LANGUAGE: German.") != null);
+            const content = messages[messages.len - 1].object.get("content").?.string;
+            try std.testing.expectEqualStrings("<transcript>\n" ++ transcript ++ "\n</transcript>", content);
+        }
+    }
 }

@@ -17470,6 +17470,35 @@ fn prepareVerification(init: std.process.Init) !win.HKEY {
     return key;
 }
 
+fn formatSavedTranscripts(init: std.process.Init, input_path: []const u8, output_path: []const u8) !void {
+    const allocator = init.gpa;
+    const raw = try std.Io.Dir.cwd().readFileAlloc(init.io, input_path, allocator, .limited(1024 * 1024));
+    defer allocator.free(raw);
+    const Input = struct { id: []const u8, language: []const u8, transcript: []const u8, from_me: bool };
+    const parsed = try std.json.parseFromSlice([]const Input, allocator, raw, .{});
+    defer parsed.deinit();
+    const key = slack_win.loadSecret(allocator, lit("AnthropicApiKey")) orelse return error.FormatterNotConfigured;
+    defer allocator.free(key.value);
+    const workspace = loadRegistryString(allocator, lit("AnthropicWorkspaceId")) orelse "";
+    defer if (workspace.len > 0) allocator.free(workspace);
+    const Result = struct { id: []const u8, language: []const u8, transcript: []const u8, formatted: []const u8 };
+    var results: std.ArrayList(Result) = .empty;
+    defer {
+        for (results.items) |result| allocator.free(result.formatted);
+        results.deinit(allocator);
+    }
+    for (parsed.value) |input| {
+        const speaker = try format_request.speakerInstruction(allocator, input.from_me, "Alex");
+        defer allocator.free(speaker);
+        const formatted = try dictation.formatTranscript(allocator, input.transcript, key.value, "claude-haiku-5-5", workspace, speaker);
+        errdefer allocator.free(formatted);
+        try results.append(allocator, .{ .id = input.id, .language = input.language, .transcript = input.transcript, .formatted = formatted });
+    }
+    const output = try std.json.Stringify.valueAlloc(allocator, .{ .version = app_version, .host = "api.anthropic.com", .model = "claude-haiku-5-5", .cases = results.items }, .{});
+    defer allocator.free(output);
+    try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = output_path, .data = output });
+}
+
 pub fn main(init: std.process.Init) !void {
     process_start_ms = win.GetTickCount64();
     var update_relaunch = false;
@@ -17479,6 +17508,12 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, argument, "--update-relaunch")) update_relaunch = true;
         if (std.mem.eql(u8, argument, "--verify-fixture")) verification_fixture = true;
         if (std.mem.eql(u8, argument, "--verify-text-comparison")) verification_text_comparison = true;
+        if (std.mem.eql(u8, argument, "--format-saved-transcripts")) {
+            const input = argument_iterator.next() orelse return error.MissingTranscriptInput;
+            const output = argument_iterator.next() orelse return error.MissingTranscriptOutput;
+            try formatSavedTranscripts(init, input, output);
+            return;
+        }
         if (std.mem.eql(u8, argument, "--unfurl-smoke")) {
             std.process.exit(unfurlSmoke(init));
         }

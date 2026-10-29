@@ -1,0 +1,102 @@
+name: voice-language
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag, or empty for candidate
+        type: string
+        default: ''
+  push:
+    branches: ['verify-voice-language/**']
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - run: python3 tools/verify-wazig/check-voice-language-regression.py --zig zig
+  voice-language:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require existing product formatter configuration
+        shell: pwsh
+        env:
+          FORMATTER_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if (-not $env:FORMATTER_KEY) { throw 'Existing product formatter key is not configured for hosted verification' }
+          if (Test-Path HKCU:\Software\Messages) { throw 'Hosted runner already has product configuration' }
+          Add-Type -AssemblyName System.Security
+          $bytes = [Text.Encoding]::UTF8.GetBytes($env:FORMATTER_KEY)
+          $encrypted = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+          New-Item HKCU:\Software\Messages -Force | Out-Null
+          New-ItemProperty HKCU:\Software\Messages -Name AnthropicApiKey -PropertyType Binary -Value $encrypted | Out-Null
+          [Array]::Clear($bytes, 0, $bytes.Length)
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Build candidate or fetch released product
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || (startsWith(github.ref_name, 'verify-voice-language/v') && github.ref_name || '') }}
+        run: |
+          $tag = $env:RELEASE_TAG -replace '^verify-voice-language/', ''
+          if ($tag) {
+            if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release tag' }
+            gh release download $tag --pattern "Postbox-$tag.zip" --dir candidate
+            if ($LASTEXITCODE) { throw 'Release download failed' }
+            $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+            if ($LASTEXITCODE) { throw 'Published release metadata unavailable' }
+            $asset = @($release.assets | Where-Object name -CEQ "Postbox-$tag.zip")
+            if ($asset.Count -ne 1 -or $asset[0].digest -cne ('sha256:' + (Get-FileHash "candidate/Postbox-$tag.zip").Hash.ToLowerInvariant())) { throw 'Published package digest mismatch' }
+            New-Item language-evidence -ItemType Directory -Force | Out-Null
+            $release | ConvertTo-Json -Depth 20 | Set-Content language-evidence/published-package.json
+            Expand-Archive "candidate/Postbox-$tag.zip" zig-out/bin
+            "VOICE_LANGUAGE_VERSION=$($tag.Substring(1))" >> $env:GITHUB_ENV
+          } else {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
+            if ($LASTEXITCODE) { throw 'Build failed' }
+            'VOICE_LANGUAGE_VERSION=0.0.526' >> $env:GITHUB_ENV
+          }
+      - name: Ten saved transcripts through the actual product formatter
+        shell: pwsh
+        run: |
+          New-Item language-evidence -ItemType Directory -Force | Out-Null
+          $app = Start-Process zig-out/bin/Messages.exe -ArgumentList '--format-saved-transcripts', 'tools/verify-wazig/voice-language.json', 'language-evidence/results.json' -PassThru -Wait
+          if ($app.ExitCode) { throw "Product formatter failed: $($app.ExitCode)" }
+          (Get-FileHash zig-out/bin/Messages.exe).Hash | Set-Content language-evidence/executable.sha256
+      - name: Independently check every generated field
+        shell: pwsh
+        run: |
+          pip install lingua-language-detector==2.1.1
+          if ($LASTEXITCODE) { throw 'Language detector installation failed' }
+          python tools/verify-wazig/check-voice-language.py language-evidence/results.json --version $env:VOICE_LANGUAGE_VERSION
+          if ($LASTEXITCODE) { throw 'Language proof failed' }
+      - name: Remove temporary product configuration
+        if: always()
+        shell: pwsh
+        run: Remove-Item HKCU:\Software\Messages -Recurse -Force -ErrorAction SilentlyContinue
+      - name: Display actual formatter output in isolated desktop voice bubbles
+        shell: pwsh
+        run: |
+          $env:VOICE_LANGUAGE_RESULTS = (Resolve-Path language-evidence/results.json).Path
+          & tools/verify-wazig/run.ps1 -Feature voice -ExpectedVersion $env:VOICE_LANGUAGE_VERSION -Evidence language-evidence/desktop
+          if ($LASTEXITCODE) { throw 'Desktop language capture failed' }
+          python tools/verify-wazig/check-voice-language-ui.py language-evidence/desktop
+          if ($LASTEXITCODE) { throw 'Desktop language evidence failed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voice-language
+          path: language-evidence
