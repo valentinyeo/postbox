@@ -33,7 +33,7 @@
 
 ### Sent chat retention
 
-- The fixture also contains four WhatsApp chats. Ctrl+3 opens that account after the Slack stages.
+- The fixture also contains four WhatsApp chats. The journey reads saved account positions, then uses the matching Ctrl+number shortcut.
 - Sending a link to Gamma must promote it above Beta immediately, even though the hub continues returning Gamma's old timestamp. A keyboard Refresh must retain that ordering.
 - A newer phone-side message to Alpha must then move Alpha above Gamma. The fixture trigger represents an upstream message; it never sends a real message.
 - Retain `wa-before`, `wa-sent`, `wa-stale`, `wa-phone` screenshots and chat snapshots plus `stale-provider.json`. The validator rejects a send that never promotes, stale regression, or failure to yield to newer activity.

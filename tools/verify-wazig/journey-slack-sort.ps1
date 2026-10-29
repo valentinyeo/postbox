@@ -1,4 +1,7 @@
-Send-Keys $session '^2'
+$views = @((Read-Control $session status).view_order)
+$slackNumber = 2 + [Array]::IndexOf(@($views.provider), 'slack')
+Assert-That ($slackNumber -ge 2) 'Slack account missing'
+if ($slackNumber -eq 2) { Send-Keys $session '^2' } else { Send-Keys $session "^$slackNumber" }
 $null = Wait-Until { (Read-Control $session status).view -eq 'slack' } 'Slack sidebar'
 $orders = [ordered]@{
     before = @('fixture-beta', 'fixture-gamma', 'fixture-alpha', 'fixture-unknown')
@@ -48,7 +51,9 @@ foreach ($stage in $orders.Keys) {
     Hub-Pass $session "$stage-last-message-order"
 }
 
-Send-Keys $session '^3'
+$waNumber = 2 + [Array]::IndexOf(@($views.provider), 'whatsapp')
+Assert-That ($waNumber -ge 2) 'WhatsApp account missing'
+Send-Keys $session "^$waNumber"
 $null = Wait-Until { (Read-Control $session status).view -eq 'whatsapp' } 'WhatsApp sidebar'
 $waOrders = [ordered]@{
     'wa-before' = @('wa-beta', 'wa-gamma', 'wa-alpha', 'wa-unknown')

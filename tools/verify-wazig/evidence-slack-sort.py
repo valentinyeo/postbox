@@ -53,6 +53,7 @@ assert final['production_preferences_absent'] and final['whatsapp_store_absent']
 actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
 for keys in ['^2', '^{TAB}', '^+{TAB}', 'Compose message', 'Synthetic Slack outgoing', '{ENTER}']:
     assert f'keys: {keys}' in actions
+assert 'keys: ^3' in actions
 assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
 assert 'JOURNEY PASSED: slack-sort' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
 print('EVIDENCE VERIFIED: Slack last message ordering, unknown last, incoming and sent promotion with keyboard order and isolation')

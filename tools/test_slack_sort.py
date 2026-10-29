@@ -41,7 +41,7 @@ class SlackSortEvidenceTests(unittest.TestCase):
         (self.folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in requests))
         self.write('side-effects.json', dict(chat_count=4, pending_sends=0, pending_archives=0, sync='stopped', slack_connected=False,
                                             production_preferences_absent=True, whatsapp_store_absent=True, telegram_store_absent=True))
-        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['^2', '^{TAB}', '^+{TAB}', 'Compose message', 'Synthetic Slack outgoing', '{ENTER}']))
+        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['^2', '^3', '^{TAB}', '^+{TAB}', 'Compose message', 'Synthetic Slack outgoing', '{ENTER}']))
         (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED: synthetic validator input')
         (self.folder / 'result.txt').write_text('JOURNEY PASSED: slack-sort')
         wa_orders = {'wa-before': ['wa-beta', 'wa-gamma', 'wa-alpha', 'wa-unknown'],

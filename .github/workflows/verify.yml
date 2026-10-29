@@ -172,12 +172,11 @@ jobs:
             zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
             if ($LASTEXITCODE -ne 0) { throw 'Original ordering build failed' }
           } finally { Pop-Location }
-          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature slack-sort -Bin sent-order-original-bin/bin -Evidence sent-order-red-evidence
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature slack-sort -Bin sent-order-original-bin/bin -Evidence verification-evidence/red-control
           if ($LASTEXITCODE -eq 0) { throw 'Original ordering unexpectedly passed stale WhatsApp sends' }
-          $failure = Get-Content sent-order-red-evidence/failure.txt -Raw
+          $failure = Get-Content verification-evidence/red-control/failure.txt -Raw
           if ($failure -notmatch 'WhatsApp wa-sent last message order') { throw "Wrong ordering red failure: $failure" }
           New-Item verification-evidence -ItemType Directory -Force | Out-Null
-          Copy-Item sent-order-red-evidence verification-evidence/red-control -Recurse
           'SENT_ORDER_ORIGINAL_RED_OK: WhatsApp wa-sent last message order' | Set-Content verification-evidence/sent-order-red-control.txt
           exit 0
       - name: Build real desktop or download published release
