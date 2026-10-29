@@ -59,7 +59,7 @@ Send-Keys $session '^{HOME}'
 $firstVisible = [ComposerRepaint]::SendMessageW($editHandle, 0xCE, [IntPtr]::Zero, [IntPtr]::Zero).ToInt32()
 Assert-That ($firstVisible -eq 0) 'Long composer did not scroll to its beginning'
 Save-Screen $session composer-scroll-start
-Send-Keys $session '^{END}'
+Send-Keys $session '{DOWN 40}'
 $lastVisible = [ComposerRepaint]::SendMessageW($editHandle, 0xCE, [IntPtr]::Zero, [IntPtr]::Zero).ToInt32()
 Assert-That ($lastVisible -gt $firstVisible) 'Long composer did not scroll internally'
 $measurements['first_visible_line'] = $firstVisible

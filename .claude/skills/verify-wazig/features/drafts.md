@@ -32,6 +32,8 @@ Preconditions: doctor passes; Alpha selected, both chats have empty drafts, comp
 
 ## Gotchas
 
+- Ctrl+End belongs to global chat scrolling. Move Down through the capped draft to prove its own internal scrolling.
+
 - Never press bare Enter in the composer for this journey; Shift+Enter adds lines and palette Enter applies the selected theme. Verification disables sending; a disabled send is not proof of transport.
 - Draft persistence runs on the one-second refresh timer and on chat changes/close; wait for the file.
 - Attach reuses Ctrl+K → `Attach photo or file`: the existing picker stages Slack/Telegram files, with the button disabled and its tooltip explaining unsupported providers or Slack bridges. This journey does not open the picker, record audio or send.
