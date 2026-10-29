@@ -3,6 +3,7 @@ const transport = @import("transport.zig");
 const chat_key = @import("chat_key.zig");
 const media_drain = @import("media_drain.zig");
 const played = @import("played.zig");
+fn appendLaunchLog(_: *App, _: []const u8) void {}
 const max_chats = 4;
 const max_wacli_args = 16;
 const wacli_arg_cap = 256;
