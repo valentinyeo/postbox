@@ -122,6 +122,8 @@ const App = struct {
     slack_outbox_count: usize = 0,
     slack_outbox_dirty: bool = false,
     send_seq: u64 = 0,
+    send_started_ms: u64 = 0,
+    failed_count: usize = 0,
     sent_voice: [voice_sent.max_entries]voice_sent.Entry = @splat(.{}),
     sent_voice_count: usize = 0,
     slack_tokens: ?bool = true,
@@ -306,6 +308,8 @@ fn lit(comptime text: []const u8) [*:0]const u16 {
     return std.unicode.utf8ToUtf16LeStringLiteral(text);
 }
 fn setStatus(_: *App, _: []const u8) void {}
+fn rememberFailedSend(a: *App, _: *const PendingSend) void { a.failed_count += 1; }
+fn restoreFailedSendText(_: *App, _: *const PendingSend) void {}
 fn cancelSlackMark(_: *App) void {}
 fn logSlackFailure(_: *App, _: WacliJobKind, _: []const u8, _: u32) void {}
 fn unarchiveSentChat(_: *App, _: []const u8) void {}
@@ -1109,4 +1113,47 @@ test "pending replies retain original id sender and snippet without overwriting 
     reply.quote.set(app.allocator, "Server-provided excerpt");
     setReplyQuote(&app, reply, "original");
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Server-provided excerpt"), reply.quote.slice());
+}
+
+
+test "IGSH-1213 a failing Slack head becomes retryable failure and releases the WhatsApp group send" {
+    for ([_]u32{ 0, 200, 500, 502, 503 }) |status| {
+        reset();
+        var a = fixture();
+        a.unified_hub = true;
+        a.pending_send_count = 2;
+        a.pending_sends[0].account = a.cache_tag;
+        a.pending_sends[0].provider = .slack;
+        a.pending_sends[0].jid.set("slack:fixture:channel");
+        a.pending_sends[0].text.set("Synthetic failed send");
+        a.pending_sends[0].seq = 1;
+        a.pending_sends[1].account = a.cache_tag;
+        a.pending_sends[1].jid.set("personal:fixture-group@g.us");
+        a.pending_sends[1].seq = 2;
+        a.pending_sends[1].id = @splat('1');
+        a.message_count = 1;
+        a.messages[0].id.set("local-1");
+        var result = WacliResult{ .kind = .hub_send, .http_status = status };
+        result.msg_id.set(&a.pending_sends[0].id);
+        result.extra.set("NetworkFailed");
+        for (0..max_send_retries) |_| applyHubResult(&a, &result);
+        try std.testing.expectEqual(@as(usize, 1), a.pending_send_count);
+        try std.testing.expectEqualStrings("personal:fixture-group@g.us", a.pending_sends[0].jid.slice());
+        try std.testing.expectEqual(@as(usize, 1), a.failed_count);
+        try std.testing.expectEqual(.failed, a.messages[0].send_state);
+        try std.testing.expectEqual(@as(usize, 1), spawned);
+    }
+}
+
+test "IGSH-1213 queued group text is visibly sending before any confirmation" {
+    reset();
+    var a = fixture();
+    a.chats[0].jid.set("personal:fixture-group@g.us");
+    var pending = PendingSend{ .account = a.cache_tag, .seq = 1 };
+    pending.jid = a.chats[0].jid;
+    pending.text.set("Synthetic group message");
+    appendWhatsAppPending(&a, &pending, false);
+    try std.testing.expectEqual(@as(usize, 1), a.message_count);
+    try std.testing.expectEqual(.pending, a.messages[0].send_state);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Synthetic group message (sending)"), a.messages[0].text.slice());
 }

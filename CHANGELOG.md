@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Queued messages show sending. Failed sends no longer block later messages forever.
+
 - Message refreshes retry quietly, and recovered connection errors no longer look like failed updates.
 
 - IGSH-976: Postbox keeps chats, settings and normal in-app updates.

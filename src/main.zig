@@ -4059,7 +4059,8 @@ fn sendBaseText(buffer: []u8, text: []const u8, has_file: bool, ptt: bool, voice
 }
 
 fn retryingBubbleText(buffer: []u8, text: []const u8, retries: u8) []const u8 {
-    if (retries == 0 or text.len == 0) return text;
+    if (text.len == 0) return text;
+    if (retries == 0) return std.fmt.bufPrint(buffer, "{s} (sending)", .{text}) catch text;
     return std.fmt.bufPrint(buffer, "{s} (retrying {d}/{d})", .{ text, retries, max_send_retries - 1 }) catch text;
 }
 
@@ -8429,7 +8430,7 @@ fn loadFileOutbox(a: *App) void {
 }
 
 fn failHeadPendingSend(a: *App, code: u32, ambiguous: bool, detail: []const u8, auth_failed: bool) void {
-    a.pending_sends[0].retries += 1;
+    a.pending_sends[0].retries +|= 1;
     a.pending_sends[0].ambiguous = ambiguous;
     const retries = a.pending_sends[0].retries;
     var log_buffer: [320]u8 = undefined;
@@ -19506,7 +19507,7 @@ test "a stored message only counts as delivering a queued send at or after it wa
 
 test "a retry bubble shows a fresh retry count instead of stacking suffixes" {
     var buffer: [64]u8 = undefined;
-    try std.testing.expectEqualStrings("hi", retryingBubbleText(&buffer, "hi", 0));
+    try std.testing.expectEqualStrings("hi (sending)", retryingBubbleText(&buffer, "hi", 0));
     try std.testing.expectEqualStrings("hi (retrying 1/3)", retryingBubbleText(&buffer, "hi", 1));
     try std.testing.expectEqualStrings("hi (retrying 2/3)", retryingBubbleText(&buffer, "hi", 2));
 }
@@ -20018,13 +20019,8 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
             } else if (result.http_status >= 500 or result.http_status == 200 or
                 (result.http_status == 0 and std.mem.eql(u8, result.extra.slice(), "NetworkFailed")))
             {
-                const pending = &a.pending_sends[0];
-                pending.retries +|= 1;
-                pending.ambiguous = true;
-                pending.not_before_ms = win.GetTickCount64() + (sendRetryDelayMs(pending.retries) orelse 60_000);
+                failHeadPendingSend(a, result.http_status, true, "hub send not confirmed", false);
                 _ = persistOutbox(a);
-                markPendingSendRetrying(a, pending);
-                setStatus(a, "Hub unavailable; queued message will retry");
             } else {
                 failHeadPendingSend(a, result.http_status, false, "hub send rejected", result.http_status == 401 or result.http_status == 403);
             }
