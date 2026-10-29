@@ -1858,7 +1858,7 @@ fn recreateFonts(a: *App) void {
     const old_underline = a.font_underline;
     const old_emoji = a.font_emoji;
     a.font = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_small = win.CreateFontW(scaledFontHeight(13, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_small = win.CreateFontW(scaledFontHeight(15, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_bold = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_emoji = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
     a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
@@ -13583,7 +13583,7 @@ fn composerContentHeight(a: *App) i32 {
 }
 
 fn stagedPreviewColumns(a: *const App, width: i32) usize {
-    const left_width = @min(px(a, 300), @divTrunc(width, 2));
+    const left_width = std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 300));
     const available = width - left_width - threadPanelWidth(a, width, left_width) - px(a, 26);
     return @intCast(@max(1, @divTrunc(available, px(a, 56))));
 }
@@ -13598,7 +13598,7 @@ fn stagedComposerSizes(a: *App, width: i32, height: i32) compose_layout.Composer
 
 fn stagedPreviewRect(a: *const App, index: usize) win.RECT {
     const columns = stagedPreviewColumns(a, a.compose_client_width);
-    const left_width = @min(px(a, 300), @divTrunc(a.compose_client_width, 2));
+    const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 300));
     const left = left_width + px(a, 13) + @as(i32, @intCast(index % columns)) * px(a, 56);
     const top = a.compose_strip_top + px(a, 10) + @as(i32, @intCast(index / columns)) * px(a, compose_layout.preview_band);
     return .{ .left = left, .top = top, .right = left + px(a, 44) + 2, .bottom = top + px(a, 44) + 2 };
@@ -13613,7 +13613,7 @@ fn layoutComposer(a: *App) void {
     const height = a.compose_client_height;
     const sizes = stagedComposerSizes(a, a.compose_client_width, height);
     if (a.compose_strip_top == height - sizes.strip_height and a.compose_pill.top == height - px(a, 11) - sizes.edit_height) return;
-    const left_width = @min(px(a, 300), @divTrunc(a.compose_client_width, 2));
+    const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 300));
     var dirty = win.RECT{ .left = left_width + 1, .top = @min(a.compose_strip_top, height - sizes.strip_height), .right = a.compose_client_width, .bottom = height };
     layoutRegion(a, a.compose_client_width, height, &dirty);
 }
@@ -13625,7 +13625,7 @@ fn layout(a: *App, width: i32, height: i32) void {
 fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void {
     a.compose_client_width = width;
     a.compose_client_height = height;
-    const left_width = @min(px(a, 300), @divTrunc(width, 2));
+    const left_width = std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 300));
     const header_height: i32 = px(a, 56);
     const list_bottom = if (updateCardVisible(a)) updateCardRect(a).top - px(a, 4) else height;
     var sizes = stagedComposerSizes(a, width, height);
@@ -14440,6 +14440,36 @@ fn messageWidth(hdc: win.HDC, a: *App, message: *const Message, limit: i32) i32 
     return @min(limit, @max(px(a, 72), extent + px(a, 28)));
 }
 
+fn cachedChatPreview(a: *App, chat: *Chat) void {
+    const raw = msgCacheGet(a, chat_key.of(chat)) orelse return;
+    var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
+    defer parsed.deinit();
+    if (parsed.value != .object) return;
+    const data = parsed.value.object.get("data") orelse return;
+    if (data != .object) return;
+    const messages = data.object.get("messages") orelse return;
+    if (messages != .array) return;
+    var latest: i64 = std.math.minInt(i64);
+    var text: []const u8 = "";
+    for (messages.array.items) |row| {
+        if (row != .object) continue;
+        const stamp = media_age.unixSeconds(getString(row.object, "Timestamp")) orelse continue;
+        if (stamp < latest) continue;
+        const body = getString(row.object, "Text");
+        if (body.len == 0) continue;
+        latest = stamp;
+        text = body;
+    }
+    var links: [slack.max_text + 1]u8 = undefined;
+    var wide = WideText(4095){};
+    wide.set(a.allocator, if (chat.provider == .slack) slack.convertMrkdwn(&links, text, null) else text);
+    const formatted = message_format.parse(wide.slice(), chat.provider == .slack);
+    const len = @min(chat.preview.buf.len - 1, formatted.len);
+    @memcpy(chat.preview.buf[0..len], formatted.text[0..len]);
+    chat.preview.len = len;
+    chat.preview.buf[len] = 0;
+}
+
 fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     if (screen_item.itemID == @as(win.UINT, @bitCast(@as(c_int, -1)))) return;
     const index: usize = @intCast(screen_item.itemID);
@@ -14454,6 +14484,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     buffered.hDC = surface.hdc;
     const item = &buffered;
     const chat = &a.chats[index];
+    if (chat.preview.len == 0) cachedChatPreview(a, chat);
     const selected = (item.itemState & win.ODS_SELECTED) != 0;
     const bulk_selected = a.bulk.items.len > 0 and chat_key.indexOf(Chat, a.bulk.items, chat_key.of(chat)) != null;
     const hovered = if (a.chat_hover_y) |y| y >= item.rcItem.top and y < item.rcItem.bottom else false;
@@ -14469,7 +14500,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
 
     var shapes = smooth.Context.init(item.hDC);
     if (selected or bulk_selected) {
-        smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, 28), px(a, 28), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
+        smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, 28), px(a, 28), if (bulk_selected) theme.current.primary_container else theme.current.surface_container);
     }
     var row_text = if (bulk_selected) theme.current.on_primary_container else theme.current.on_surface;
     var row_muted = if (bulk_selected) row_text else theme.current.on_surface_variant;
@@ -16348,7 +16379,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             defer surface.deinit();
             const hdc = surface.hdc;
             _ = win.FillRect(hdc, &paint.rcPaint, a.brush_bg.?);
-            const left_width = @min(px(a, 300), @divTrunc(client.right, 2));
+            const left_width = std.math.clamp(@divTrunc(client.right, 3), px(a, 280), px(a, 300));
             var left_rect = win.RECT{ .left = 0, .top = 0, .right = left_width, .bottom = client.bottom };
             _ = win.FillRect(hdc, &left_rect, a.brush_sidebar.?);
             if (win.CreateSolidBrush(theme.current.sidebar_divider)) |divider_brush| {
@@ -16421,7 +16452,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         win.WM_LBUTTONDOWN => {
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
-            if (y < px(a, 56) and x < @min(px(a, 300), @divTrunc(a.compose_client_width, 2))) {
+            if (y < px(a, 56) and x < std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 300))) {
                 openSearchPalette(a);
                 return 0;
             }
@@ -18234,7 +18265,7 @@ fn updateCardNotesHeight(a: *const App) i32 {
     defer _ = win.SelectObject(hdc, old_font);
     const notes = utf8ToWide(a.allocator, pending.notes) catch return 0;
     defer a.allocator.free(notes);
-    const left_width = @min(px(a, 300), @divTrunc(a.compose_client_width, 2));
+    const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 300));
     var rect = win.RECT{ .left = 0, .top = 0, .right = left_width - px(a, 48), .bottom = 0 };
     _ = text_draw.drawText(hdc, notes.ptr, @intCast(notes.len), &rect, win.DT_CALCRECT | win.DT_WORDBREAK | win.DT_NOPREFIX);
     return rect.bottom - rect.top;
@@ -18250,7 +18281,7 @@ fn updateCardSpan(a: *const App) i32 {
 }
 
 fn updateCardRect(a: *const App) win.RECT {
-    const left_width = @min(px(a, 300), @divTrunc(a.compose_client_width, 2));
+    const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 300));
     const bottom = a.compose_client_height - px(a, 26) - px(a, 6);
     return .{ .left = px(a, 12), .top = bottom - updateCardHeight(a), .right = left_width - px(a, 12), .bottom = bottom };
 }

@@ -369,20 +369,20 @@ class TelegramAvatarEvidenceTests(unittest.TestCase):
 
     def screenshot(self, dpi=96, missing_photo=False, bad_fallback=False, blank_initial=False):
         px = lambda value: (value * dpi + 48) // 96
-        layout = dict(dpi=dpi, ids=self.check['AVATAR_IDS'], row_height=px(64), top_index=0,
-                      list_x=10, list_y=10, client_width=px(180), client_height=5 * px(64))
+        layout = dict(dpi=dpi, ids=self.check['AVATAR_IDS'], row_height=px(60), top_index=0,
+                      list_x=10, list_y=10, client_width=px(180), client_height=5 * px(60))
         (self.folder / 'telegram-avatars-layout.json').write_text(json.dumps(layout))
-        rows = [[(0, 0, 0)] * (px(180) + 20) for _ in range(5 * px(64) + 20)]
+        rows = [[(0, 0, 0)] * (px(180) + 20) for _ in range(5 * px(60) + 20)]
         for index, chat in enumerate(layout['ids']):
-            colour = self.check['AVATAR_COLOURS'].get(chat, (38, 38, 38))
+            colour = self.check['AVATAR_COLOURS'].get(chat, (48, 48, 48))
             if missing_photo and chat in self.check['AVATAR_COLOURS']:
-                colour = (38, 38, 38)
+                colour = (48, 48, 48)
             if bad_fallback and chat not in self.check['AVATAR_COLOURS']:
                 colour = next(iter(self.check['AVATAR_COLOURS'].values()))
-            left, top = 10 + px(12), 10 + index * px(64) + px(10)
-            for y in range(42):
-                for x in range(42):
-                    if (x - 20.5) ** 2 + (y - 20.5) ** 2 < 21 ** 2:
+            left, top = 10 + px(12), 10 + index * px(60) + px(10)
+            for y in range(px(40)):
+                for x in range(px(40)):
+                    if (x - px(40) / 2 + 0.5) ** 2 + (y - px(40) / 2 + 0.5) ** 2 < (px(40) / 2) ** 2:
                         ink = chat not in self.check['AVATAR_COLOURS'] and not blank_initial and 18 <= x < 22 and 15 <= y < 27
                         rows[top + y][left + x] = (255, 255, 255) if ink else colour
         self.check['png']['write_png'](self.folder / 'linked.png', rows)

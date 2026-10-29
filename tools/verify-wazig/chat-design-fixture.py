@@ -11,9 +11,9 @@ class ChatDesignHandler(VoiceHandler):
         if url.path == '/v1/wazig/chats':
             self.respond(200, [] if query.get('archived') == ['true'] else [
                 dict(jid='fixture-alpha', name='Graphite team', provider='slack', kind='group', last_message_ts=self.state.stamp,
-                     last_message_preview='Source formatting, calm spacing', unread_count=2, archived=False),
+                     unread_count=2, archived=False),
                 dict(jid='fixture-beta', name='Graphite direct', provider='whatsapp', kind='direct', last_message_ts=self.stamp(-1),
-                     last_message_preview='The same look on WhatsApp', unread_count=0, archived=False)])
+                     unread_count=0, archived=False)])
         elif url.path == '/v1/wazig/messages':
             chat = query.get('chat', [''])[0]
             body = ('*Traffic* 2,124 sessions\n_And the drum roll says..._ *12 new subscribers!*\n'

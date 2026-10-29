@@ -77,7 +77,7 @@ class MediaFitResizeTests(unittest.TestCase):
         verify_resize(self.journey)
         source = (ROOT / 'src/main.zig').read_text()
         layout = section(source, 'layoutRegion')
-        maximum = int(re.search(r'const left_width = @min\(px\(a, (\d+)\), @divTrunc\(width, 2\)\)', layout).group(1))
+        minimum, maximum = map(int, re.search(r'const left_width = std.math.clamp\(@divTrunc\(width, 3\), px\(a, (\d+)\), px\(a, (\d+)\)\)', layout).groups())
         self.assertIn('const chat_width = width - left_width - 1;', layout)
         self.assertIn('chat_width - panel_width', layout)
         target = int(re.search(r'\$requestedWidth = \$width \+ (\d+) - \$canvasWidth', self.journey).group(1))
@@ -87,7 +87,7 @@ class MediaFitResizeTests(unittest.TestCase):
             for border in (0, px(16), px(32)):
                 def canvas(outer):
                     client = outer - border
-                    sidebar = min(px(maximum), client // 2)
+                    sidebar = min(px(maximum), max(px(minimum), client // 3))
                     return client - sidebar - 1
                 for initial in (border + px(maximum) + 182, 604, 1024, 1160, 3840):
                     width = initial
