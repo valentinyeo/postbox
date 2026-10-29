@@ -38,6 +38,7 @@ test('ISSUE-462 Chrome fixture text, font files, sizes, weights and line heights
 test('ISSUE-462 parity check rejects fixture, source and runtime drift', () => {
     const main = read('src/main.zig');
     for (const [before, after] of [
+        ['font_scale: i32 = @import("font_config.zig").default_scale,', 'font_scale: i32 = 82,'],
         ['a.font = win.CreateFontW(scaledFontHeight(theme.type_body,', 'a.font = win.CreateFontW(scaledFontHeight(18,'],
         ['a.font_bold = win.CreateFontW(scaledFontHeight(theme.type_chat_name,', 'a.font_bold = win.CreateFontW(scaledFontHeight(18,'],
         ['@embedFile("verify_text.json")', '"different fixture"'],
