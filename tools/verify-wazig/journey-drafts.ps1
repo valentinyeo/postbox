@@ -12,28 +12,43 @@ $empty = Read-Control $session status
 $dpi = [int][VerifyWindow]::GetDpiForWindow($app.MainWindowHandle)
 $oneLineHeight = [int][Math]::Floor((44 * $dpi + 48) / 96)
 Save-Screen $session composer-empty
-$typingCases = @()
-foreach ($mode in @('fast-long', 'middle', 'focus-return')) {
-    Send-Keys $session '^a{BACKSPACE}'
-    $prefix = 'The quick brown fox jumps over the lazy dog. ' * 12
-    Send-Keys $session $prefix
-    $null = Wait-Until { (Read-Edit $compose) -eq $prefix } "$mode initial long text"
-    if ($mode -ne 'fast-long') {
-        Send-Keys $session '^{HOME}{RIGHT 40}'
-        $expected = $prefix.Insert(40, 'Inserted letters stay together ')
-    } else {
-        $expected = $prefix + 'Inserted letters stay together '
-    }
-    if ($mode -eq 'focus-return') {
-        Send-Keys $session '%{TAB}'
-    }
-    Send-Keys $session 'Inserted letters stay together '
-    $actual = Read-Edit $compose
-    Assert-That ($actual -ceq $expected) "Cursor jumped during $mode typing: expected=[$expected] actual=[$actual]"
-    $typingCases += @{ mode = $mode; expected = $expected; actual = $actual }
-    Save-Screen $session "typing-$mode"
+$recorderStart = [Diagnostics.ProcessStartInfo]::new((Get-Command ffmpeg -ErrorAction Stop).Source)
+$recorderStart.UseShellExecute = $false
+$recorderStart.RedirectStandardInput = $true
+$recorderStart.RedirectStandardError = $true
+foreach ($argument in @('-y', '-loglevel', 'error', '-f', 'gdigrab', '-framerate', '10', '-i', 'desktop', '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', (Join-Path $Evidence 'typing-cursor.mp4'))) {
+    $recorderStart.ArgumentList.Add($argument)
 }
-$typingCases | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Evidence 'typing-cursor.json')
+$recorder = [Diagnostics.Process]::Start($recorderStart)
+try {
+    $typingCases = @()
+    foreach ($mode in @('fast-long', 'middle', 'focus-return')) {
+        Send-Keys $session '^a{BACKSPACE}'
+        $prefix = 'The quick brown fox jumps over the lazy dog. ' * 12
+        Send-Keys $session $prefix
+        $null = Wait-Until { (Read-Edit $compose) -eq $prefix } "$mode initial long text"
+        if ($mode -ne 'fast-long') {
+            Send-Keys $session '^{HOME}{RIGHT 40}'
+            $expected = $prefix.Insert(40, 'Inserted letters stay together ')
+        } else {
+            $expected = $prefix + 'Inserted letters stay together '
+        }
+        if ($mode -eq 'focus-return') {
+            Send-Keys $session '%{TAB}'
+        }
+        Send-Keys $session 'Inserted letters stay together '
+        $actual = Read-Edit $compose
+        Assert-That ($actual -ceq $expected) "Cursor jumped during $mode typing: expected=[$expected] actual=[$actual]"
+        $typingCases += @{ mode = $mode; expected = $expected; actual = $actual }
+        Save-Screen $session "typing-$mode"
+    }
+    $typingCases | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Evidence 'typing-cursor.json')
+} finally {
+    if (-not $recorder.HasExited) { $recorder.StandardInput.WriteLine('q') }
+    if (-not $recorder.WaitForExit(10000)) { $recorder.Kill(); throw 'Typing recorder did not finish' }
+    $recorder.StandardError.ReadToEnd() | Set-Content (Join-Path $Evidence 'typing-recorder.log')
+    Assert-That ($recorder.ExitCode -eq 0) 'Typing recording failed'
+}
 Send-Keys $session '^a{BACKSPACE}'
 Send-Keys $session 'Draft probe'
 $null = Wait-Until { (Read-Edit $compose) -eq 'Draft probe' } 'composer probe typed'
