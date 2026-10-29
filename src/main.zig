@@ -13683,7 +13683,7 @@ fn composerContentHeight(a: *App) i32 {
 }
 
 fn stagedPreviewColumns(a: *const App, width: i32) usize {
-    const left_width = @min(px(a, theme.sidebar_width), @max(0, width - px(a, 280)));
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(width, 2));
     const available = width - left_width - threadPanelWidth(a, width, left_width) - px(a, 26);
     return @intCast(@max(1, @divTrunc(available, px(a, 56))));
 }
@@ -13699,7 +13699,7 @@ fn stagedComposerSizes(a: *App, width: i32, height: i32) compose_layout.Composer
 
 fn stagedPreviewRect(a: *const App, index: usize) win.RECT {
     const columns = stagedPreviewColumns(a, a.compose_client_width);
-    const left_width = @min(px(a, theme.sidebar_width), @max(0, a.compose_client_width - px(a, 280)));
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(a.compose_client_width, 2));
     const left = left_width + px(a, 13) + @as(i32, @intCast(index % columns)) * px(a, 56);
     const top = a.compose_strip_top + (if (a.reply_to.len > 0) px(a, 64) else @as(i32, 0)) + px(a, 10) + @as(i32, @intCast(index / columns)) * px(a, compose_layout.preview_band);
     return .{ .left = left, .top = top, .right = left + px(a, 44) + 2, .bottom = top + px(a, 44) + 2 };
@@ -13714,7 +13714,7 @@ fn layoutComposer(a: *App) void {
     const height = a.compose_client_height;
     const sizes = stagedComposerSizes(a, a.compose_client_width, height);
     if (a.compose_strip_top == height - sizes.strip_height and a.compose_pill.top == height - px(a, 11) - sizes.edit_height) return;
-    const left_width = @min(px(a, theme.sidebar_width), @max(0, a.compose_client_width - px(a, 280)));
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(a.compose_client_width, 2));
     var dirty = win.RECT{ .left = left_width + 1, .top = @min(a.compose_strip_top, height - sizes.strip_height), .right = a.compose_client_width, .bottom = height };
     layoutRegion(a, a.compose_client_width, height, &dirty);
 }
@@ -13726,7 +13726,7 @@ fn layout(a: *App, width: i32, height: i32) void {
 fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void {
     a.compose_client_width = width;
     a.compose_client_height = height;
-    const left_width = @min(px(a, theme.sidebar_width), @max(0, width - px(a, 280)));
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(width, 2));
     const header_height: i32 = 0;
     const list_bottom = if (updateCardVisible(a)) updateCardRect(a).top - px(a, 4) else height;
     var sizes = stagedComposerSizes(a, width, height);
@@ -16205,7 +16205,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             defer surface.deinit();
             const hdc = surface.hdc;
             _ = win.FillRect(hdc, &paint.rcPaint, a.brush_bg.?);
-            const left_width = @min(px(a, theme.sidebar_width), @max(0, client.right - px(a, 280)));
+            const left_width = @min(px(a, theme.sidebar_width), @divTrunc(client.right, 2));
             var left_rect = win.RECT{ .left = 0, .top = 0, .right = left_width, .bottom = client.bottom };
             _ = win.FillRect(hdc, &left_rect, a.brush_sidebar.?);
             if (win.CreateSolidBrush(theme.current.sidebar_divider)) |divider_brush| {
@@ -18155,7 +18155,7 @@ fn updateCardNotesHeight(a: *const App) i32 {
     defer _ = win.SelectObject(hdc, old_font);
     const notes = utf8ToWide(a.allocator, pending.notes) catch return 0;
     defer a.allocator.free(notes);
-    const left_width = @min(px(a, theme.sidebar_width), @max(0, a.compose_client_width - px(a, 280)));
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(a.compose_client_width, 2));
     var rect = win.RECT{ .left = 0, .top = 0, .right = left_width - px(a, 48), .bottom = 0 };
     _ = text_draw.drawText(hdc, notes.ptr, @intCast(notes.len), &rect, win.DT_CALCRECT | win.DT_WORDBREAK | win.DT_NOPREFIX);
     return rect.bottom - rect.top;
@@ -18171,7 +18171,7 @@ fn updateCardSpan(a: *const App) i32 {
 }
 
 fn updateCardRect(a: *const App) win.RECT {
-    const left_width = @min(px(a, theme.sidebar_width), @max(0, a.compose_client_width - px(a, 280)));
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(a.compose_client_width, 2));
     const bottom = a.compose_client_height - px(a, 26) - px(a, 6);
     return .{ .left = px(a, 12), .top = bottom - updateCardHeight(a), .right = left_width - px(a, 12), .bottom = bottom };
 }
