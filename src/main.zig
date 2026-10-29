@@ -109,6 +109,7 @@ const timer_update_first_check = 8;
 const timer_slack_mark = 9;
 const timer_voice = 10;
 const timer_passage_scroll = 11;
+const timer_reply_flash = 12;
 const timer_update_card = 60;
 const command_telegram_login = 2025;
 const command_telegram_logout = 2026;
@@ -448,6 +449,8 @@ const Message = struct {
     sender_jid: Utf8Text(191) = .{},
     sender: WideText(159) = .{},
     text: WideText(4095) = .{},
+    quoted_msg_id: Utf8Text(191) = .{},
+    quote_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     quote: WideText(4095) = .{},
     quote_sender: WideText(159) = .{},
     quote_sender_jid: Utf8Text(191) = .{},
@@ -769,6 +772,8 @@ const App = struct {
     last_chat_count: usize = std.math.maxInt(usize),
     font: ?win.HFONT = null,
     font_small: ?win.HFONT = null,
+    font_reply_label: ?win.HFONT = null,
+    font_reply_icon: ?win.HFONT = null,
     font_bold: ?win.HFONT = null,
     font_emoji: ?win.HFONT = null,
     custom_emoji: std.ArrayList(CustomEmoji) = .empty,
@@ -967,6 +972,11 @@ const App = struct {
     unfurl_evict_slot: usize = 0,
     reply_to: Utf8Text(191) = .{},
     reply_sender: Utf8Text(191) = .{},
+    reply_preview: WideText(4095) = .{},
+    reply_name: WideText(159) = .{},
+    reply_flash: Utf8Text(191) = .{},
+    reply_notice: bool = false,
+    reply_close_hover: bool = false,
     displayed_provider: transport.Provider = .whatsapp,
     displayed_account: Utf8Text(32) = .{},
     displayed_jid: Utf8Text(191) = .{},
@@ -1844,11 +1854,15 @@ fn recreateFonts(a: *App) void {
     const dpi: i32 = @intCast(a.dpi);
     const old_font = a.font;
     const old_small = a.font_small;
+    const old_reply_label = a.font_reply_label;
+    const old_reply_icon = a.font_reply_icon;
     const old_bold = a.font_bold;
     const old_underline = a.font_underline;
     const old_emoji = a.font_emoji;
     a.font = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_small = win.CreateFontW(scaledFontHeight(13, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_reply_label = win.CreateFontW(scaledFontHeight(12, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_reply_icon = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
     a.font_bold = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_emoji = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
     a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
@@ -1864,6 +1878,8 @@ fn recreateFonts(a: *App) void {
     setFont(a.emoji_edit, a.font);
     if (old_font) |font| _ = win.DeleteObject(font);
     if (old_small) |font| _ = win.DeleteObject(font);
+    if (old_reply_label) |font| _ = win.DeleteObject(font);
+    if (old_reply_icon) |font| _ = win.DeleteObject(font);
     if (old_bold) |font| _ = win.DeleteObject(font);
     if (old_underline) |font| _ = win.DeleteObject(font);
     if (old_emoji) |font| _ = win.DeleteObject(font);
@@ -4054,6 +4070,7 @@ fn appendSlackPending(a: *App, text: []const u8, client_msg_id: []const u8, thre
     var message = Message{};
     message.from_me = true;
     message.thread_ts.set(thread_ts);
+    setReplyQuote(a, &message, thread_ts);
     message.sender.set(a.allocator, "You");
     message.text.set(a.allocator, text);
     message.timestamp.set(client_msg_id);
@@ -4115,6 +4132,7 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
     var message = Message{};
     message.from_me = true;
     if (pending.provider == .slack) message.thread_ts.set(pending.reply_to.slice());
+    setReplyQuote(a, &message, pending.reply_to.slice());
     message.sender.set(a.allocator, "You");
     if (pending.ptt) {
         message.media_type.set("audio");
@@ -7975,6 +7993,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         })) continue;
         var message = Message{};
         message.id.set(id);
+        message.quoted_msg_id.set(getString(object, "quoted_msg_id"));
         if (chat.provider == .slack) {
             importCustomEmoji(a, chat.jid.slice(), object);
             message.thread_ts.set(getString(object, "thread_ts"));
@@ -8039,6 +8058,10 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         if (isAudio(stored)) loadTranscriptCache(a, stored);
     }
     if (merged) storeHubOlder(a, chat_key.of(chat), rows);
+    for (a.messages[0..a.message_count]) |*message| {
+        const quoted_id = message.quoted_msg_id;
+        setReplyQuote(a, message, quoted_id.slice());
+    }
     var reaction_index: usize = 0;
     while (reaction_index < a.message_count) {
         const reaction_to = a.messages[reaction_index].reaction_to.slice();
@@ -9488,9 +9511,53 @@ fn sendMessageFrom(a: *App, thread: bool) void {
     startNextSend(a);
 }
 
+fn replySnippet(a: *App, message: *const Message) WideText(4095) {
+    var snippet = WideText(4095){};
+    if (message.text.len > 0) {
+        const line = std.mem.indexOfAny(u16, message.text.slice(), &.{ '\r', '\n' }) orelse message.text.len;
+        snippet.len = line;
+        @memcpy(snippet.buf[0..line], message.text.slice()[0..line]);
+        snippet.buf[line] = 0;
+    } else if (std.ascii.eqlIgnoreCase(message.media_type.slice(), "image")) {
+        snippet.set(a.allocator, "Photo");
+    } else if (std.ascii.eqlIgnoreCase(message.media_type.slice(), "audio")) {
+        snippet.set(a.allocator, "Voice message");
+    } else if (message.filename.len > 0) {
+        snippet.set(a.allocator, "File: ");
+        const count = @min(message.filename.len, snippet.buf.len - 1 - snippet.len);
+        @memcpy(snippet.buf[snippet.len..][0..count], message.filename.slice()[0..count]);
+        snippet.len += count;
+        snippet.buf[snippet.len] = 0;
+    } else snippet.set(a.allocator, "Message");
+    return snippet;
+}
+
+fn setReplyQuote(a: *App, message: *Message, id: []const u8) void {
+    if (id.len == 0) return;
+    message.quoted_msg_id.set(id);
+    for (a.messages[0..a.message_count]) |*original| {
+        if (!std.mem.eql(u8, original.id.slice(), id)) continue;
+        if (message.quote.len == 0) message.quote = replySnippet(a, original);
+        if (message.quote_sender.len == 0) message.quote_sender = original.sender;
+        if (message.quote_sender_jid.len == 0) message.quote_sender_jid = original.sender_jid;
+        return;
+    }
+}
+
 fn clearReply(a: *App) void {
+    if (a.reply_flash.len > 0 or a.reply_notice) {
+        a.reply_flash.set("");
+        a.reply_notice = false;
+        if (a.hwnd) |hwnd| _ = win.KillTimer(hwnd, timer_reply_flash);
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    }
+    if (a.reply_to.len == 0) return;
     a.reply_to.set("");
     a.reply_sender.set("");
+    a.reply_preview = .{};
+    a.reply_name = .{};
+    if (a.compose_client_width > 0) layout(a, a.compose_client_width, a.compose_client_height);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn startReply(a: *App) void {
@@ -9502,16 +9569,73 @@ fn startReply(a: *App) void {
     const message = &a.messages[selected];
     a.reply_to.set(message.id.slice());
     a.reply_sender.set(message.sender_jid.slice());
-    const sender_bytes = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.sender.slice()) catch {
-        setStatus(a, "Reply ready... Esc in the composer cancels");
-        return;
-    };
-    defer a.allocator.free(sender_bytes);
-    const shown = if (sender_bytes.len == 0) "message" else sender_bytes[0..@min(sender_bytes.len, 64)];
-    var status_buffer: [160]u8 = undefined;
-    const status = std.fmt.bufPrint(&status_buffer, "Replying to {s}... Esc in the composer cancels", .{shown}) catch return;
-    setStatus(a, status);
+    a.reply_preview = replySnippet(a, message);
+    a.reply_name = message.sender;
+    layout(a, a.compose_client_width, a.compose_client_height);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     focusCompose(a);
+}
+
+fn replyBarRect(a: *const App) win.RECT {
+    if (a.reply_to.len == 0) return std.mem.zeroes(win.RECT);
+    return .{ .left = a.compose_pill.left, .top = a.compose_strip_top + px(a, 11), .right = a.compose_pill.right, .bottom = a.compose_strip_top + px(a, 67) };
+}
+
+fn replyCloseRect(a: *const App) win.RECT {
+    const bar = replyBarRect(a);
+    return .{ .left = bar.right - px(a, 40), .top = bar.top + px(a, 14), .right = bar.right - px(a, 12), .bottom = bar.top + px(a, 42) };
+}
+
+fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
+    if (a.reply_to.len == 0) return;
+    const bar = replyBarRect(a);
+    const accent = rgb(137, 180, 248);
+    smooth.fillRoundRect(shapes, bar, px(a, 32), px(a, 32), rgb(24, 24, 24));
+    smooth.strokeRoundRect(shapes, bar, px(a, 32), px(a, 32), rgb(46, 46, 46), px(a, 1));
+    _ = win.SetBkMode(hdc, win.TRANSPARENT);
+    _ = win.SelectObject(hdc, @ptrCast(a.font_reply_icon.?));
+    _ = win.SetTextColor(hdc, accent);
+    var icon = win.RECT{ .left = bar.left + px(a, 12), .top = bar.top, .right = bar.left + px(a, 32), .bottom = bar.bottom };
+    _ = text_draw.drawText(hdc, lit("\u{e97a}"), -1, &icon, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
+    smooth.fillRoundRect(shapes, .{ .left = bar.left + px(a, 40), .top = bar.top + px(a, 10), .right = bar.left + px(a, 43), .bottom = bar.bottom - px(a, 10) }, px(a, 4), px(a, 4), accent);
+    var label = WideText(255){};
+    label.set(a.allocator, "Replying to ");
+    const count = @min(a.reply_name.len, label.buf.len - 1 - label.len);
+    @memcpy(label.buf[label.len..][0..count], a.reply_name.slice()[0..count]);
+    label.len += count;
+    label.buf[label.len] = 0;
+    var text = win.RECT{ .left = bar.left + px(a, 54), .top = bar.top + px(a, 8), .right = bar.right - px(a, 48), .bottom = bar.top + px(a, 28) };
+    _ = win.SelectObject(hdc, @ptrCast(a.font_reply_label.?));
+    _ = text_draw.drawText(hdc, label.ptr(), @intCast(label.len), &text, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
+    text.top = bar.top + px(a, 29);
+    text.bottom = bar.bottom - px(a, 7);
+    _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+    _ = win.SetTextColor(hdc, rgb(138, 138, 138));
+    _ = text_draw.drawText(hdc, a.reply_preview.ptr(), @intCast(a.reply_preview.len), &text, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
+    var close = replyCloseRect(a);
+    smooth.fillRoundRect(shapes, close, px(a, 28), px(a, 28), if (a.reply_close_hover) rgb(40, 40, 40) else rgb(38, 38, 38));
+    _ = text_draw.drawText(hdc, lit("×"), -1, &close, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
+}
+
+fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
+    return if (message.quoted_msg_id.len > 0) textLineHeight(hdc, a.font_small.?) + px(a, 6) else 0;
+}
+
+fn jumpToReply(a: *App, id: []const u8) void {
+    for (a.messages[0..a.message_count], 0..) |*message, index| {
+        if (!std.mem.eql(u8, message.id.slice(), id)) continue;
+        const selected = a.selected_message;
+        a.selected_message = index;
+        a.reply_flash.set(id);
+        scrollToSelectedMessage(a);
+        a.selected_message = selected;
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+        if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_reply_flash, 1200, null);
+        return;
+    }
+    a.reply_notice = true;
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_reply_flash, 1200, null);
 }
 
 fn focusCompose(a: *App) void {
@@ -9787,7 +9911,7 @@ fn scrollToSelectedMessage(a: *App) void {
     ensureBitmap(a, &a.messages[selected]);
     var total_height: i32 = px(a, 18);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
-        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, showSenderName(a, index)) + threadSummaryHeight(a, message) + messageGap(a, index);
+        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, showSenderName(a, index)) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message) + messageGap(a, index);
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     var y = client.bottom - px(a, 14) + a.scroll_y;
@@ -9795,7 +9919,7 @@ fn scrollToSelectedMessage(a: *App) void {
     while (index > 0) {
         index -= 1;
         if (!channelMessageVisible(a, &a.messages[index])) continue;
-        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, showSenderName(a, index)) + threadSummaryHeight(a, &a.messages[index]);
+        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, showSenderName(a, index)) + threadSummaryHeight(a, &a.messages[index]) + replyLineHeight(hdc, a, &a.messages[index]);
         y -= height + messageGap(a, index);
         if (index != selected) continue;
         const delta = message_scroll.scrollDelta(y, height, client.top, client.bottom, px(a, 8));
@@ -11887,6 +12011,18 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.writeByte('}');
     try w.writeAll(",\"paints\":");
     try a.paints.write(w);
+    const reply = replyBarRect(a);
+    const close = replyCloseRect(a);
+    try w.writeAll(",\"reply\":{\"id\":");
+    try control_api.writeString(w, a.reply_to.slice());
+    try w.writeAll(",\"sender\":");
+    try control_api.writeStringUtf16(w, a.reply_name.slice());
+    try w.writeAll(",\"preview\":");
+    try control_api.writeStringUtf16(w, a.reply_preview.slice());
+    try w.print(",\"bar\":[{d},{d},{d},{d}],\"close\":[{d},{d},{d},{d}]}}", .{ reply.left, reply.top, reply.right, reply.bottom, close.left, close.top, close.right, close.bottom });
+    try w.writeAll(",\"reply_flash\":");
+    try control_api.writeString(w, a.reply_flash.slice());
+    try w.print(",\"reply_notice\":{}", .{a.reply_notice});
     const box = a.compose_pill;
     try w.print(",\"composer\":{{\"box\":{{\"left\":{d},\"top\":{d},\"right\":{d},\"bottom\":{d}}},\"lines\":{d},\"controls\":[", .{ box.left, box.top, box.right, box.bottom, if (a.compose) |edit| win.SendMessageW(edit, win.EM_GETLINECOUNT, 0, 0) else 0 });
     const controls = [_]?win.HWND{ a.attach_btn, a.compose, a.voice_btn, a.dictate, a.emoji_btn, a.send };
@@ -12164,6 +12300,8 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try control_api.writeString(w, message.timestamp.slice());
         try w.writeAll(",\"text\":");
         try control_api.writeStringUtf16(w, message.text.slice());
+        try w.writeAll(",\"quoted_msg_id\":");
+        try control_api.writeString(w, message.quoted_msg_id.slice());
         try w.writeAll(",\"quote\":");
         try control_api.writeStringUtf16(w, message.quote.slice());
         try w.writeAll(",\"links\":[");
@@ -12197,6 +12335,7 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try w.print(",\"local\":{},\"transcript_chars\":{d},\"expanded\":{}", .{ message.local_path.len > 0, message.transcript.len, message.transcript_expanded });
         for ([_]struct { name: []const u8, rect: win.RECT }{
             .{ .name = "bubble", .rect = message.bubble_hit },
+            .{ .name = "quote_line", .rect = message.quote_hit },
             .{ .name = "reaction_chip", .rect = message.reaction_hit },
             .{ .name = "media", .rect = message.media_hit },
             .{ .name = "card", .rect = message.unfurl_card_hit },
@@ -13581,8 +13720,9 @@ fn stagedPreviewColumns(a: *const App, width: i32) usize {
 fn stagedComposerSizes(a: *App, width: i32, height: i32) compose_layout.Composer {
     const columns = stagedPreviewColumns(a, width);
     const extra = @as(i32, @intCast((a.staged_images.count -| 1) / columns)) * px(a, compose_layout.preview_band);
-    var sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height - extra, a.staged_images.count > 0, @intCast(a.dpi));
-    sizes.strip_height += extra;
+    const reply_height = if (a.reply_to.len > 0) px(a, 64) else @as(i32, 0);
+    var sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height - extra - reply_height, a.staged_images.count > 0, @intCast(a.dpi));
+    sizes.strip_height += extra + reply_height;
     return sizes;
 }
 
@@ -13590,7 +13730,7 @@ fn stagedPreviewRect(a: *const App, index: usize) win.RECT {
     const columns = stagedPreviewColumns(a, a.compose_client_width);
     const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 390));
     const left = left_width + px(a, 13) + @as(i32, @intCast(index % columns)) * px(a, 56);
-    const top = a.compose_strip_top + px(a, 10) + @as(i32, @intCast(index / columns)) * px(a, compose_layout.preview_band);
+    const top = a.compose_strip_top + (if (a.reply_to.len > 0) px(a, 64) else @as(i32, 0)) + px(a, 10) + @as(i32, @intCast(index / columns)) * px(a, compose_layout.preview_band);
     return .{ .left = left, .top = top, .right = left + px(a, 44) + 2, .bottom = top + px(a, 44) + 2 };
 }
 
@@ -14554,7 +14694,7 @@ fn quoteBodyHeight(hdc: win.HDC, a: *App, text: []const u16, width: i32) i32 {
 }
 
 fn quoteBlockHeight(hdc: win.HDC, a: *App, message: *const Message, width: i32) i32 {
-    if (message.quote.len == 0) return 0;
+    if (message.quote.len == 0 or message.quoted_msg_id.len > 0) return 0;
     var name_height: i32 = 0;
     if (message.quote_sender.len > 0) {
         const font = a.font_small orelse return 0;
@@ -14584,6 +14724,7 @@ fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: b
         @intCast(a.font_scale),
         message.text.len,
         message.quote.len,
+        message.quoted_msg_id.len,
         message.quote_sender.len,
         message.transcript.len,
         @intFromBool(message.transcript_expanded),
@@ -14606,7 +14747,7 @@ fn measureMessageCached(hdc: win.HDC, a: *App, message: *Message, width: i32, sh
 }
 
 fn measureMessageStore(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool) i32 {
-    const height = measureMessage(hdc, a, message, width, show_sender) + threadSummaryHeight(a, message);
+    const height = measureMessage(hdc, a, message, width, show_sender) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message);
     message.measure_tag = measureTag(a, message, width, show_sender);
     message.measure_height = height;
     return height;
@@ -14993,6 +15134,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         message.reaction_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.unfurl_card_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.replies_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+        message.quote_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.link_count = 0;
         message.word_count = 0;
         if (!channelMessageVisible(a, message)) continue;
@@ -15009,6 +15151,26 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         const reaction_size = reactionChipSize(hdc, a, message, bubble_width);
         const replies_height = threadSummaryHeight(a, message);
         height -= replies_height;
+        const reply_height = replyLineHeight(hdc, a, message);
+        const row_top = y;
+        defer y = row_top;
+        if (reply_height > 0) {
+            height -= reply_height;
+            message.quote_hit = .{ .left = left, .top = y, .right = right, .bottom = y + reply_height - px(a, 6) };
+            var line = WideText(4095){};
+            line.set(a.allocator, "↩ ");
+            for ([_][]const u16{ message.quote_sender.slice(), std.mem.span(lit(": ")), if (message.quote.len > 0) message.quote.slice() else std.mem.span(lit("Original message")) }) |part| {
+                const count = @min(part.len, line.buf.len - 1 - line.len);
+                @memcpy(line.buf[line.len..][0..count], part[0..count]);
+                line.len += count;
+            }
+            line.buf[line.len] = 0;
+            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+            _ = win.SetTextColor(hdc, rgb(138, 138, 138));
+            var line_rect = message.quote_hit;
+            _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &line_rect, @intCast((if (message.from_me) win.DT_RIGHT else win.DT_LEFT) | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX));
+            y += reply_height;
+        }
         const bubble_height = height - @max(0, reaction_size.cy - px(a, 4));
         message.bubble_hit = .{ .left = left, .top = y, .right = right, .bottom = y + bubble_height };
         if (replies_height > 0) {
@@ -15031,6 +15193,8 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         const selected = messageMarked(a, message.id.slice()) or if (a.selected_message) |selected_index| selected_index == index else false;
         smooth.fillRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), if (message.from_me) theme.current.primary_container else theme.current.surface_container_high);
         if (selected) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), theme.current.primary, px(a, 2));
+
+        if (std.mem.eql(u8, a.reply_to.slice(), message.id.slice()) or std.mem.eql(u8, a.reply_flash.slice(), message.id.slice())) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), rgb(74, 74, 74), px(a, 2));
 
         var text_top = y + messageHeaderHeight(hdc, a, show_sender) - px(a, 6);
         if (show_sender) {
@@ -15055,7 +15219,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             }
         }
         if (show_sender and in_group and !message.from_me and message.sender.len > 0) drawSenderAvatar(&shapes, hdc, a, left - px(a, 38), y + px(a, 6), message);
-        if (message.quote.len > 0) text_top = drawQuoteBlock(&shapes, hdc, a, message, left, right, text_top);
+        if (message.quote.len > 0 and message.quoted_msg_id.len == 0) text_top = drawQuoteBlock(&shapes, hdc, a, message, left, right, text_top);
         if (message.bitmap) |bitmap| {
             const display = media_layout.fit(message.bitmap_width, message.bitmap_height, bubble_width - px(a, 24), px(a, 250));
             const image_left = left + @divTrunc(bubble_width - display.width, 2);
@@ -15301,6 +15465,13 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = text_draw.drawText(hdc, text, -1, &badge, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
     }
+    if (a.reply_notice) {
+        var notice = win.RECT{ .left = px(a, 24), .top = client.bottom - px(a, 48), .right = @min(client.right - px(a, 12), px(a, 320)), .bottom = client.bottom - px(a, 12) };
+        smooth.fillRoundRect(&shapes, notice, px(a, 16), px(a, 16), theme.current.surface_container_highest);
+        _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+        _ = win.SetTextColor(hdc, theme.current.on_surface);
+        _ = text_draw.drawText(hdc, lit("Original message not loaded"), -1, &notice, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    }
     drawScrollbar(&shapes, canvasStripRect(a), canvasScrollInfo(a), theme.current.outline);
 }
 
@@ -15357,6 +15528,12 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                         _ = win.SetFocus(hwnd);
                         return 0;
                     }
+                }
+            }
+            for (a.messages[0..a.message_count]) |*item| {
+                if (item.quote_hit.right > item.quote_hit.left and rectHasPoint(item.quote_hit, x, y)) {
+                    jumpToReply(a, item.quoted_msg_id.slice());
+                    return 0;
                 }
             }
             _ = clearMessageMarks(a);
@@ -16076,6 +16253,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             _ = win.FillRect(hdc, &composer_rect, a.brush_bg.?);
             var shapes = smooth.Context.init(hdc);
             defer shapes.deinit();
+            paintReplyBar(a, &shapes, hdc);
             if (a.compose != null) paintInputField(a, &shapes, hdc, a.compose.?, a.compose_pill);
             if (a.compose != null) {
                 const cx = @divTrunc(left_width + 1 + client.right, 2);
@@ -16142,6 +16320,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 .body => return 0,
                 .none => {},
             }
+            if (a.reply_to.len > 0 and rectHasPoint(replyCloseRect(a), x, y)) {
+                clearReply(a);
+                focusCompose(a);
+                return 0;
+            }
             for (0..a.staged_images.count) |index| {
                 const close_rect = stagedRemoveRect(a, index);
                 if (win.PtInRect(&close_rect, .{ .x = x, .y = y }) != 0) {
@@ -16182,7 +16365,24 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             return win.DefWindowProcW(hwnd, message, wparam, lparam);
         },
+        win.WM_MOUSELEAVE => {
+            a.reply_close_hover = false;
+            var close = replyCloseRect(a);
+            _ = win.InvalidateRect(hwnd, &close, win.FALSE);
+            return 0;
+        },
         win.WM_MOUSEMOVE => {
+            const point = win.POINT{ .x = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))), .y = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam))))) };
+            const hover = a.reply_to.len > 0 and rectHasPoint(replyCloseRect(a), point.x, point.y);
+            if (hover != a.reply_close_hover) {
+                a.reply_close_hover = hover;
+                var close = replyCloseRect(a);
+                _ = win.InvalidateRect(hwnd, &close, win.FALSE);
+                if (hover) {
+                    var track = win.TRACKMOUSEEVENT{ .cbSize = @sizeOf(win.TRACKMOUSEEVENT), .dwFlags = win.TME_LEAVE, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                    _ = win.TrackMouseEvent(&track);
+                }
+            }
             if (a.sb_drag != .none) {
                 const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
                 switch (a.sb_drag) {
@@ -16277,7 +16477,12 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return 0;
         },
         win.WM_TIMER => {
-            if (wparam == timer_voice) {
+            if (wparam == timer_reply_flash) {
+                _ = win.KillTimer(hwnd, timer_reply_flash);
+                a.reply_flash.set("");
+                a.reply_notice = false;
+                if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+            } else if (wparam == timer_voice) {
                 tickVoice(a);
             } else if (wparam == timer_refresh) {
                 persistDrafts(a);
@@ -16483,6 +16688,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             clearMessages(a);
             if (a.font) |font| _ = win.DeleteObject(font);
             if (a.font_small) |font| _ = win.DeleteObject(font);
+            if (a.font_reply_label) |font| _ = win.DeleteObject(font);
+            if (a.font_reply_icon) |font| _ = win.DeleteObject(font);
             if (a.font_bold) |font| _ = win.DeleteObject(font);
             if (a.font_underline) |font| _ = win.DeleteObject(font);
             if (a.brush_bg) |brush| _ = win.DeleteObject(brush);

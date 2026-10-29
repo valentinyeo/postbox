@@ -100,6 +100,7 @@ const App = struct {
     compose_client_width: i32 = 1200,
     compose_client_height: i32 = 800,
     compose_dragged: i32 = 0,
+    reply_to: struct { len: usize = 0 } = .{},
     content_height: i32 = 44,
     compose_strip_top: i32 = 734,
     compose_pill: struct { top: i32 } = .{ .top = 745 },
@@ -295,5 +296,24 @@ test "ISSUE_545 viewport offset keeps window coordinates for drawing clipping an
         buffer.deinit();
         try std.testing.expectEqualDeep(rect, win.copied.?);
         try std.testing.expectEqual(@as(usize, 1), win.blits);
+    }
+}
+
+test "reply preview reserves its band without covering messages or attachments" {
+    for ([_]u32{ 96, 144, 192 }) |dpi| {
+        var a = App{ .dpi = dpi };
+        a.compose_client_height = px(&a, 420);
+        a.compose_dragged = px(&a, 300);
+        const plain = stagedComposerSizes(&a, a.compose_client_width, a.compose_client_height);
+        a.reply_to.len = 1;
+        const reply = stagedComposerSizes(&a, a.compose_client_width, a.compose_client_height);
+        try std.testing.expectEqual(plain.strip_height, reply.strip_height);
+        try std.testing.expectEqual(plain.edit_height - px(&a, 64), reply.edit_height);
+        try std.testing.expect(a.compose_client_height - reply.strip_height >= px(&a, 160));
+        a.staged_images.count = 1;
+        layoutRegion(&a, a.compose_client_width, a.compose_client_height, null);
+        const preview = stagedPreviewRect(&a, 0);
+        try std.testing.expect(preview.top >= a.compose_strip_top + px(&a, 74));
+        try std.testing.expect(preview.bottom <= a.compose_pill.top);
     }
 }

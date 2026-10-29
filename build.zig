@@ -354,6 +354,9 @@ pub fn build(b: *std.Build) void {
     const canvas_source = sourceSection("fn canvasProc(", "fn selectChatRow(");
     const canvas_input_start = std.mem.indexOf(u8, canvas_source, "            a.click_origin =") orelse @panic("Missing canvas input start");
     const canvas_input_end = std.mem.indexOf(u8, canvas_source, "        win.WM_RBUTTONUP =>") orelse @panic("Missing canvas input end");
+    const reaction_input_start = std.mem.indexOf(u8, canvas_source, "            for (a.messages[0..a.message_count]) |*item| {\n                const chip = item.reaction_hit;") orelse @panic("Missing reaction input start");
+    const reaction_input = canvas_source[reaction_input_start..];
+    const reaction_input_end = std.mem.indexOf(u8, reaction_input, "            for (a.messages[0..a.message_count], 0..) |*item, index| {") orelse @panic("Missing reaction input end");
     const double_click_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/message_double_click_test.zig"),
         "fn hubConfigured(_: *const App) bool { return true; }\n",
@@ -369,7 +372,7 @@ pub fn build(b: *std.Build) void {
         "fn canvasProc(hwnd: usize, message: u32, wparam: usize, lparam: isize) isize { const a = app_ptr.?; switch (message) {\n",
         canvas_source[std.mem.indexOf(u8, canvas_source, "        win.WM_TIMER =>").?..std.mem.indexOf(u8, canvas_source, "        win.WM_MOUSEWHEEL =>").?],
         "win.WM_LBUTTONDOWN => { const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))); const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));\n",
-        sourceSection("            for (a.messages[0..a.message_count]) |*item| {", "            for (a.messages[0..a.message_count], 0..) |*item, index| {"),
+        reaction_input[0..reaction_input_end],
         canvas_source[canvas_input_start..canvas_input_end],
         "else => return 0, } }\n",
         "fn loadReaction(a: *App, message: *Message, object: std.json.ObjectMap) void { const reaction_to = getString(object, \"ReactionToID\");\n",

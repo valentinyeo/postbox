@@ -75,6 +75,12 @@ fn WideText(comptime capacity: usize) type {
 }
 const Message = struct {
     thread_ts: Utf8Text(191) = .{},
+    quoted_msg_id: Utf8Text(191) = .{},
+    quote: WideText(4095) = .{},
+    quote_sender: WideText(159) = .{},
+    quote_sender_jid: Utf8Text(191) = .{},
+    sender_jid: Utf8Text(191) = .{},
+    filename: WideText(259) = .{},
     media_type: Utf8Text(31) = .{},
     local_path: WideText(519) = .{},
     from_me: bool = true,
@@ -1048,4 +1054,46 @@ test "verification fixture refuses provider queues and sends without losing a dr
     try std.testing.expect(compose_len > 0);
     try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .messages }, true));
     try std.testing.expectEqual(@as(usize, 0), app.wacli_queue_len);
+}
+
+test "reply previews keep first-line text and label media originals" {
+    var app = fixture();
+    var original = Message{};
+    original.text.set(app.allocator, "First line\nHidden second line");
+    var snippet = replySnippet(&app, &original);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("First line"), snippet.slice());
+    original.text = .{};
+    original.media_type.set("image");
+    snippet = replySnippet(&app, &original);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Photo"), snippet.slice());
+    original.media_type.set("audio");
+    snippet = replySnippet(&app, &original);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Voice message"), snippet.slice());
+    original.media_type.set("document");
+    original.filename.set(app.allocator, "report.pdf");
+    snippet = replySnippet(&app, &original);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("File: report.pdf"), snippet.slice());
+}
+
+test "pending replies retain original id sender and snippet without overwriting server quotes" {
+    var app = fixture();
+    app.chats[0].jid.set("synthetic-chat");
+    app.message_count = 1;
+    app.messages[0].id.set("original");
+    app.messages[0].sender.set(app.allocator, "Synthetic Sender");
+    app.messages[0].sender_jid.set("synthetic-sender");
+    app.messages[0].text.set(app.allocator, "First line\nSecond line");
+    var pending = PendingSend{ .account = app.chats[0].account };
+    pending.jid = app.chats[0].jid;
+    pending.reply_to.set("original");
+    pending.text.set("Answer");
+    appendWhatsAppPending(&app, &pending, false);
+    const reply = &app.messages[1];
+    try std.testing.expectEqualStrings("original", reply.quoted_msg_id.slice());
+    try std.testing.expectEqualStrings("synthetic-sender", reply.quote_sender_jid.slice());
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("First line"), reply.quote.slice());
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Synthetic Sender"), reply.quote_sender.slice());
+    reply.quote.set(app.allocator, "Server-provided excerpt");
+    setReplyQuote(&app, reply, "original");
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Server-provided excerpt"), reply.quote.slice());
 }
