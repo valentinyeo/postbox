@@ -1,7 +1,7 @@
 from urllib.parse import parse_qs, urlsplit
 
 
-class ChatDesignHandler(Handler):
+class ChatDesignHandler(VoiceHandler):
     def do_GET(self):
         self.wire_path = self.path
         if not self.authorized():

@@ -14293,6 +14293,154 @@ fn wrapMixedSinkExtent(hdc: win.HDC, a: *App, text_ptr: [*]const u16, len: c_int
     return list_layout.height();
 }
 
+const message_format = @import("message_format.zig");
+
+fn messageFont(a: *App, style: message_format.Style) win.HFONT {
+    if (style.footer) return a.font_small orelse a.font.?;
+    const index = @as(usize, @intFromBool(style.bold)) | (@as(usize, @intFromBool(style.italic)) << 1) | (@as(usize, @intFromBool(style.mono)) << 2);
+    return a.message_fonts[index] orelse a.font.?;
+}
+
+const MessageMetrics = struct {
+    hdc: win.HDC,
+    app: *App,
+    parsed: *const message_format.Parsed,
+    em: i32,
+
+    fn offset(self: @This(), slice: []const u16) usize {
+        return (@intFromPtr(slice.ptr) - @intFromPtr(&self.parsed.text)) / @sizeOf(u16);
+    }
+
+    pub fn width(self: @This(), slice: []const u16) i32 {
+        if (slice.len == 0) return 0;
+        if (@intFromPtr(slice.ptr) < @intFromPtr(&self.parsed.text) or @intFromPtr(slice.ptr) + slice.len * 2 > @intFromPtr(&self.parsed.text) + self.parsed.len * 2) {
+            const font = self.app.message_fonts[0] orelse self.app.font.?;
+            return mixedSliceWidth(self.hdc, font, self.app.font_emoji orelse font, self.em, fontAscent(self.hdc, font), slice);
+        }
+        const start = self.offset(slice);
+        var x: i32 = 0;
+        var index: usize = 0;
+        while (index < slice.len) {
+            const style = self.parsed.styles[start + index];
+            var end = index + 1;
+            while (end < slice.len and @as(u8, @bitCast(self.parsed.styles[start + end])) == @as(u8, @bitCast(style))) : (end += 1) {}
+            const font = messageFont(self.app, style);
+            x += mixedSliceWidth(self.hdc, font, self.app.font_emoji orelse font, self.em, fontAscent(self.hdc, font), slice[index..end]);
+            index = end;
+        }
+        return x;
+    }
+
+    pub fn fit(self: @This(), slice: []const u16, available: i32) usize {
+        var count: usize = 0;
+        while (count < slice.len) {
+            const next = @min(slice.len, count + emojiUnitAt(slice, count).len);
+            if (count > 0 and self.width(slice[0..next]) > available) break;
+            count = next;
+        }
+        return clampChunkCut(slice, @max(1, count));
+    }
+};
+
+fn formattedMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, draw: bool, left: i32, top: i32, extent: ?*i32) i32 {
+    const parsed = message_format.parse(message.text.slice(), selectedChatIsSlack(a));
+    const em = @max(1, -scaledFontHeight(18, a.font_scale, @intCast(a.dpi)));
+    const line_height = @divTrunc(em * 3 + 1, 2);
+    const metrics = MessageMetrics{ .hdc = hdc, .app = a, .parsed = &parsed, .em = em };
+    var y: i32 = 0;
+    var start: usize = 0;
+    var max_right: i32 = 0;
+    var shapes = smooth.Context.init(hdc);
+    defer shapes.deinit();
+    while (start < parsed.len) {
+        const end = std.mem.indexOfScalarPos(u16, parsed.text[0..parsed.len], start, '\n') orelse parsed.len;
+        const line = parsed.text[start..end];
+        const style = parsed.styles[start];
+        if (line.len == 0 and style.quote) {
+            y += px(a, 10);
+            start = end + 1;
+            continue;
+        }
+        const inset = px(a, if (style.quote) @as(i32, 13) else if (style.block) @as(i32, 10) else 0);
+        const available = @max(1, width - inset - if (style.block) px(a, 10) else @as(i32, 0));
+        var layout_text = @import("chat_list_layout.zig").Layout{ .text = line, .width = available, .line_height = line_height, .lists = !style.block };
+        if (draw and style.block) {
+            var sizing = layout_text;
+            while (sizing.next(metrics)) |_| {}
+            smooth.fillRoundRect(&shapes, .{ .left = left, .top = top + y, .right = left + width, .bottom = top + y + sizing.height() }, px(a, 16), px(a, 16), theme.hex(0x1A1A1A));
+        }
+        while (layout_text.next(metrics)) |placed| {
+            const chunk = line[placed.start..][0..placed.len];
+            const offset = start + placed.start;
+            const word_start = start + placed.word_start;
+            const word_text = parsed.text[word_start .. start + placed.word_end];
+            var wide_url: [519]u16 = undefined;
+            var link_word = word_text;
+            for (message.label_links[0..message.label_link_count]) |*link| {
+                const source = parsed.source[word_start];
+                if (source >= link.start and source < link.end) {
+                    const length = std.unicode.utf8ToUtf16Le(&wide_url, link.url[0..link.url_len]) catch 0;
+                    if (length > 0) link_word = wide_url[0..length];
+                    break;
+                }
+            }
+            const is_link = wordIsUrl(link_word);
+            const mention = word_text.len > 0 and word_text[0] == '@';
+            var x = left + inset + placed.x;
+            const word_left = x;
+            const line_top = top + y + placed.y;
+            max_right = @max(max_right, inset + placed.x + metrics.width(chunk));
+            if (!draw) continue;
+            var index: usize = 0;
+            while (index < chunk.len) {
+                const run_style = parsed.styles[offset + index];
+                var run_end = index + 1;
+                while (run_end < chunk.len and parsed.source[offset + run_end] == parsed.source[offset + run_end - 1] + 1 and @as(u8, @bitCast(parsed.styles[offset + run_end])) == @as(u8, @bitCast(run_style))) : (run_end += 1) {}
+                const run = chunk[index..run_end];
+                const font = messageFont(a, run_style);
+                const run_width = metrics.width(run);
+                if (run_style.mono and !run_style.block) smooth.fillRoundRect(&shapes, .{ .left = x, .top = line_top, .right = x + run_width, .bottom = line_top + line_height }, px(a, 8), px(a, 8), theme.hex(0x2A2A2A));
+                _ = win.SetTextColor(hdc, if (is_link or mention) theme.hex(0x89B4F8) else if (run_style.footer) theme.hex(0x8A8A8A) else theme.current.on_surface);
+                _ = drawWordSlice(hdc, a, font, a.font_emoji orelse font, em, fontAscent(hdc, font), run, x, line_top, false);
+                if (run_style.strike) {
+                    smooth.fillRoundRect(&shapes, .{ .left = x, .top = line_top + @divTrunc(em * 2, 3), .right = x + run_width, .bottom = line_top + @divTrunc(em * 2, 3) + px(a, 1) }, 0, 0, theme.current.on_surface);
+                }
+                const target = @constCast(message);
+                if (target.word_count < target.word_rects.len and !placed.space) {
+                    target.word_rects[target.word_count] = .{ .rect = .{ .left = x, .top = line_top, .right = x + run_width, .bottom = line_top + line_height }, .start = parsed.source[offset + index], .len = parsed.source[offset + run_end - 1] + 1 - parsed.source[offset + index], .style = run_style };
+                    target.word_count += 1;
+                }
+                x += run_width;
+                index = run_end;
+            }
+            const target = @constCast(message);
+            const rect = win.RECT{ .left = word_left, .top = line_top, .right = x, .bottom = line_top + line_height };
+            if (is_link and target.link_count < target.links.len) {
+                const link = &target.links[target.link_count];
+                link.* = .{ .rect = rect };
+                if (std.unicode.utf16LeToUtf8Alloc(a.allocator, link_word)) |utf8| {
+                    defer a.allocator.free(utf8);
+                    link.url.set(a.allocator, utf8);
+                    target.link_count += 1;
+                } else |_| {}
+            }
+        }
+        const height = layout_text.height();
+        if (draw and style.quote) smooth.fillRoundRect(&shapes, .{ .left = left, .top = top + y, .right = left + px(a, 3), .bottom = top + y + height }, px(a, 4), px(a, 4), theme.hex(0x4A4A4A));
+        y += height;
+        start = end + 1;
+    }
+    if (extent) |value| value.* = max_right;
+    return @max(line_height, y);
+}
+
+fn messageWidth(hdc: win.HDC, a: *App, message: *const Message, limit: i32) i32 {
+    if (message.media_type.len > 0 or message.quote.len > 0 or message.transcript.len > 0 or message.unfurl_provider != .none) return limit;
+    var extent: i32 = 0;
+    _ = formattedMessage(hdc, a, message, @max(1, limit - px(a, 28)), false, 0, 0, &extent);
+    return @min(limit, @max(px(a, 72), extent + px(a, 28)));
+}
+
 fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     if (screen_item.itemID == @as(win.UINT, @bitCast(@as(c_int, -1)))) return;
     const index: usize = @intCast(screen_item.itemID);
@@ -14463,154 +14611,6 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         _ = text_draw.drawText(item.hDC, text, -1, &marker_rect, win.DT_RIGHT | win.DT_SINGLELINE);
         _ = win.SetTextColor(item.hDC, row_muted);
     }
-}
-
-const message_format = @import("message_format.zig");
-
-fn messageFont(a: *App, style: message_format.Style) win.HFONT {
-    if (style.footer) return a.font_small orelse a.font.?;
-    const index = @as(usize, @intFromBool(style.bold)) | (@as(usize, @intFromBool(style.italic)) << 1) | (@as(usize, @intFromBool(style.mono)) << 2);
-    return a.message_fonts[index] orelse a.font.?;
-}
-
-const MessageMetrics = struct {
-    hdc: win.HDC,
-    app: *App,
-    parsed: *const message_format.Parsed,
-    em: i32,
-
-    fn offset(self: @This(), slice: []const u16) usize {
-        return (@intFromPtr(slice.ptr) - @intFromPtr(&self.parsed.text)) / @sizeOf(u16);
-    }
-
-    pub fn width(self: @This(), slice: []const u16) i32 {
-        if (slice.len == 0) return 0;
-        if (@intFromPtr(slice.ptr) < @intFromPtr(&self.parsed.text) or @intFromPtr(slice.ptr) + slice.len * 2 > @intFromPtr(&self.parsed.text) + self.parsed.len * 2) {
-            const font = self.app.message_fonts[0] orelse self.app.font.?;
-            return mixedSliceWidth(self.hdc, font, self.app.font_emoji orelse font, self.em, fontAscent(self.hdc, font), slice);
-        }
-        const start = self.offset(slice);
-        var x: i32 = 0;
-        var index: usize = 0;
-        while (index < slice.len) {
-            const style = self.parsed.styles[start + index];
-            var end = index + 1;
-            while (end < slice.len and @as(u8, @bitCast(self.parsed.styles[start + end])) == @as(u8, @bitCast(style))) : (end += 1) {}
-            const font = messageFont(self.app, style);
-            x += mixedSliceWidth(self.hdc, font, self.app.font_emoji orelse font, self.em, fontAscent(self.hdc, font), slice[index..end]);
-            index = end;
-        }
-        return x;
-    }
-
-    pub fn fit(self: @This(), slice: []const u16, available: i32) usize {
-        var count: usize = 0;
-        while (count < slice.len) {
-            const next = @min(slice.len, count + emojiUnitAt(slice, count).len);
-            if (count > 0 and self.width(slice[0..next]) > available) break;
-            count = next;
-        }
-        return clampChunkCut(slice, @max(1, count));
-    }
-};
-
-fn formattedMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, draw: bool, left: i32, top: i32, extent: ?*i32) i32 {
-    const parsed = message_format.parse(message.text.slice(), selectedChatIsSlack(a));
-    const em = @max(1, -scaledFontHeight(18, a.font_scale, @intCast(a.dpi)));
-    const line_height = @divTrunc(em * 3 + 1, 2);
-    const metrics = MessageMetrics{ .hdc = hdc, .app = a, .parsed = &parsed, .em = em };
-    var y: i32 = 0;
-    var start: usize = 0;
-    var max_right: i32 = 0;
-    var shapes = smooth.Context.init(hdc);
-    defer shapes.deinit();
-    while (start < parsed.len) {
-        const end = std.mem.indexOfScalarPos(u16, parsed.text[0..parsed.len], start, '\n') orelse parsed.len;
-        const line = parsed.text[start..end];
-        const style = parsed.styles[start];
-        if (line.len == 0 and style.quote) {
-            y += px(a, 10);
-            start = end + 1;
-            continue;
-        }
-        const inset = px(a, if (style.quote) @as(i32, 13) else if (style.block) @as(i32, 10) else 0);
-        const available = @max(1, width - inset - if (style.block) px(a, 10) else @as(i32, 0));
-        var layout_text = @import("chat_list_layout.zig").Layout{ .text = line, .width = available, .line_height = line_height, .lists = !style.block };
-        if (draw and style.block) {
-            var sizing = layout_text;
-            while (sizing.next(metrics)) |_| {}
-            smooth.fillRoundRect(&shapes, .{ .left = left, .top = top + y, .right = left + width, .bottom = top + y + sizing.height() }, px(a, 16), px(a, 16), theme.hex(0x1A1A1A));
-        }
-        while (layout_text.next(metrics)) |placed| {
-            const chunk = line[placed.start..][0..placed.len];
-            const offset = start + placed.start;
-            const word_start = start + placed.word_start;
-            const word_text = parsed.text[word_start .. start + placed.word_end];
-            var wide_url: [519]u16 = undefined;
-            var link_word = word_text;
-            for (message.label_links[0..message.label_link_count]) |*link| {
-                const source = parsed.source[word_start];
-                if (source >= link.start and source < link.end) {
-                    const length = std.unicode.utf8ToUtf16Le(&wide_url, link.url[0..link.url_len]) catch 0;
-                    if (length > 0) link_word = wide_url[0..length];
-                    break;
-                }
-            }
-            const is_link = wordIsUrl(link_word);
-            const mention = word_text.len > 0 and word_text[0] == '@';
-            var x = left + inset + placed.x;
-            const word_left = x;
-            const line_top = top + y + placed.y;
-            max_right = @max(max_right, inset + placed.x + metrics.width(chunk));
-            if (!draw) continue;
-            var index: usize = 0;
-            while (index < chunk.len) {
-                const run_style = parsed.styles[offset + index];
-                var run_end = index + 1;
-                while (run_end < chunk.len and parsed.source[offset + run_end] == parsed.source[offset + run_end - 1] + 1 and @as(u8, @bitCast(parsed.styles[offset + run_end])) == @as(u8, @bitCast(run_style))) : (run_end += 1) {}
-                const run = chunk[index..run_end];
-                const font = messageFont(a, run_style);
-                const run_width = metrics.width(run);
-                if (run_style.mono and !run_style.block) smooth.fillRoundRect(&shapes, .{ .left = x, .top = line_top, .right = x + run_width, .bottom = line_top + line_height }, px(a, 8), px(a, 8), theme.hex(0x2A2A2A));
-                _ = win.SetTextColor(hdc, if (is_link or mention) theme.hex(0x89B4F8) else if (run_style.footer) theme.hex(0x8A8A8A) else theme.current.on_surface);
-                _ = drawWordSlice(hdc, a, font, a.font_emoji orelse font, em, fontAscent(hdc, font), run, x, line_top, false);
-                if (run_style.strike) {
-                    smooth.fillRoundRect(&shapes, .{ .left = x, .top = line_top + @divTrunc(em * 2, 3), .right = x + run_width, .bottom = line_top + @divTrunc(em * 2, 3) + px(a, 1) }, 0, 0, theme.current.on_surface);
-                }
-                const target = @constCast(message);
-                if (target.word_count < target.word_rects.len and !placed.space) {
-                    target.word_rects[target.word_count] = .{ .rect = .{ .left = x, .top = line_top, .right = x + run_width, .bottom = line_top + line_height }, .start = parsed.source[offset + index], .len = parsed.source[offset + run_end - 1] + 1 - parsed.source[offset + index], .style = run_style };
-                    target.word_count += 1;
-                }
-                x += run_width;
-                index = run_end;
-            }
-            const target = @constCast(message);
-            const rect = win.RECT{ .left = word_left, .top = line_top, .right = x, .bottom = line_top + line_height };
-            if (is_link and target.link_count < target.links.len) {
-                const link = &target.links[target.link_count];
-                link.* = .{ .rect = rect };
-                if (std.unicode.utf16LeToUtf8Alloc(a.allocator, link_word)) |utf8| {
-                    defer a.allocator.free(utf8);
-                    link.url.set(a.allocator, utf8);
-                    target.link_count += 1;
-                } else |_| {}
-            }
-        }
-        const height = layout_text.height();
-        if (draw and style.quote) smooth.fillRoundRect(&shapes, .{ .left = left, .top = top + y, .right = left + px(a, 3), .bottom = top + y + height }, px(a, 4), px(a, 4), theme.hex(0x4A4A4A));
-        y += height;
-        start = end + 1;
-    }
-    if (extent) |value| value.* = max_right;
-    return @max(line_height, y);
-}
-
-fn messageWidth(hdc: win.HDC, a: *App, message: *const Message, limit: i32) i32 {
-    if (message.media_type.len > 0 or message.quote.len > 0 or message.transcript.len > 0 or message.unfurl_provider != .none) return limit;
-    var extent: i32 = 0;
-    _ = formattedMessage(hdc, a, message, @max(1, limit - px(a, 28)), false, 0, 0, &extent);
-    return @min(limit, @max(px(a, 72), extent + px(a, 28)));
 }
 
 fn transcriptLineKind(line: []const u16) enum { text, header, bullet, rule, blank } {
