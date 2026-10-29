@@ -62,6 +62,8 @@ foreach ($target in @(
     $null = Wait-Until { (Read-Control $session status).reply.id -ceq '' } "$name Escape cancels reply"
     Invoke-PaletteCommand $session 'Reply to selected message'
     Send-Keys $session "Synthetic $name reply"
+    Send-Keys $session '+{ENTER}Second line'
+    $null = Wait-Until { (Read-Control $session status).composer.lines -eq 2 } "$name multiline reply draft"
     Send-Keys $session '{ENTER}'
     $null = Wait-Until {
         $requests = Read-BridgeRequests $session
@@ -69,6 +71,10 @@ foreach ($target in @(
             (Read-Control $session status).pending_sends -eq 0
     } "$name reply accepted by hub"
     $null = Wait-Until { (Read-Control $session status).reply.id -ceq '' } "$name send clears preview"
+    $sentState = Read-Control $session status
+    $dpi = [int][VerifyWindow]::GetDpiForWindow($app.MainWindowHandle)
+    Assert-That ((Read-Edit $compose) -eq '' -and $sentState.composer.lines -eq 1) "$name sending clears composer text"
+    Assert-That ($sentState.composer.box.bottom - $sentState.composer.box.top -eq [int][Math]::Floor((44 * $dpi + 48) / 96)) "$name sending restores one-line composer"
     $sent = Wait-Until {
         (Read-Control $session messages).messages | Where-Object { $_.from_me -and $_.quoted_msg_id -ceq 'REPLY-ORIGINAL' -and $_.quote_line[2] -gt $_.quote_line[0] }
     } "$name quoted reply visible"

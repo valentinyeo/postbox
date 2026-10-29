@@ -400,6 +400,7 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             const result = host.send(message, wparam, lparam);
             host.centerRect();
             host.restartBlink();
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return result;
         },
         win.WM_SETFOCUS, win.WM_LBUTTONDOWN, win.WM_LBUTTONUP, win.EM_SETSEL, win.EM_EXSETSEL => {
@@ -420,6 +421,7 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             const result = host.send(message, wparam, lparam);
             host.centerRect();
             _ = host.send(win.EM_SETEVENTMASK, 0, mask);
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
             if (result != 0 and mask & win.ENM_CHANGE != 0) {
                 const id: usize = @intCast(win.GetDlgCtrlID(hwnd));
                 _ = win.SendMessageW(win.GetParent(hwnd), win.WM_COMMAND, id | (@as(usize, win.EN_CHANGE) << 16), @bitCast(@intFromPtr(hwnd)));

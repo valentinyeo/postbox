@@ -17,7 +17,7 @@ def check_reply(folder):
                     row.get('body', {}).get('chat') == chat and row['status'] == 200]
         assert len(accepted) == 1 and accepted[0]['authorized']
         assert accepted[0]['body']['reply_to'] == 'REPLY-ORIGINAL'
-        assert accepted[0]['body']['text'] == f'Synthetic {provider} reply'
+        assert accepted[0]['body']['text'] == f'Synthetic {provider} reply\nSecond line'
         hashes = []
         for phase in ['before', 'replying', 'sent', 'jumped', 'unavailable']:
             name = f'{provider}-{phase}'
@@ -30,6 +30,8 @@ def check_reply(folder):
                 assert state['reply']['id'] == 'REPLY-ORIGINAL'
                 assert state['reply']['sender'] == 'Fixture Sender'
                 assert state['reply']['preview'] == 'First words of the original'
+            if phase == 'sent':
+                assert state['composer']['lines'] == 1
             if phase == 'jumped':
                 assert state['reply_flash'] == 'REPLY-ORIGINAL'
             if phase == 'unavailable':

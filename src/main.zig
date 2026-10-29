@@ -1643,32 +1643,6 @@ fn saveChatView(view: messenger_view.View) void {
     _ = win.RegSetValueExW(key, lit("InboxView"), 0, win.REG_DWORD, @ptrCast(&value), @sizeOf(win.DWORD));
 }
 
-fn loadComposeDragged(hwnd: win.HWND) i32 {
-    var value: win.DWORD = 0;
-    var size: win.DWORD = @sizeOf(win.DWORD);
-    if (win.RegGetValueW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), lit("ComposeMinHeight"), win.RRF_RT_REG_DWORD, null, &value, &size) != win.ERROR_SUCCESS) return 0;
-    var saved_dpi: win.DWORD = 96;
-    var dpi_size: win.DWORD = @sizeOf(win.DWORD);
-    if (win.RegGetValueW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), lit("ComposeDpi"), win.RRF_RT_REG_DWORD, null, &saved_dpi, &dpi_size) != win.ERROR_SUCCESS or saved_dpi < 96) saved_dpi = 96;
-    const dpi: i32 = @intCast(win.GetDpiForWindow(hwnd));
-    if (dpi <= 0) return 0;
-    const logical: i32 = @intCast(value);
-    return std.math.clamp(@divTrunc(logical * dpi, @as(i32, @intCast(saved_dpi))), 0, @divTrunc(400 * dpi, 96));
-}
-
-fn saveComposeDragged(hwnd: win.HWND, dragged: i32) void {
-    var key: win.HKEY = null;
-    var disposition: win.DWORD = 0;
-    if (win.RegCreateKeyExW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), 0, null, 0, win.KEY_SET_VALUE, null, &key, &disposition) != win.ERROR_SUCCESS) return;
-    defer _ = win.RegCloseKey(key);
-    const dpi: i32 = @intCast(win.GetDpiForWindow(hwnd));
-    const logical: i32 = if (dpi > 0) @divTrunc(dragged * 96, dpi) else dragged;
-    var stored: win.DWORD = @intCast(std.math.clamp(logical, 0, 400));
-    _ = win.RegSetValueExW(key, lit("ComposeMinHeight"), 0, win.REG_DWORD, @ptrCast(&stored), @sizeOf(win.DWORD));
-    var saved_dpi: win.DWORD = 96;
-    _ = win.RegSetValueExW(key, lit("ComposeDpi"), 0, win.REG_DWORD, @ptrCast(&saved_dpi), @sizeOf(win.DWORD));
-}
-
 fn loadEmojiRecents(a: *App) void {
     const saved = loadRegistryString(a.allocator, lit("EmojiRecents")) orelse return;
     defer a.allocator.free(saved);
@@ -16452,7 +16426,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             recreateFonts(a);
             createTooltips(a, hwnd);
             if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, px(a, theme.chat_row_height));
-            a.compose_dragged = loadComposeDragged(hwnd);
             var rc_create: win.RECT = undefined;
             _ = win.GetClientRect(hwnd, &rc_create);
             layout(a, rc_create.right, rc_create.bottom);
@@ -16718,7 +16691,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.compose_dragging) {
                 a.compose_dragging = false;
                 _ = win.ReleaseCapture();
-                if (a.compose_dragged > px(a, 44)) saveComposeDragged(hwnd, a.compose_dragged);
                 return 0;
             }
             return win.DefWindowProcW(hwnd, message, wparam, lparam);
@@ -16779,6 +16751,9 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 _ = win.InflateRect(&dirty, 1, 1);
                 _ = win.InvalidateRect(hwnd, &dirty, win.FALSE);
             } else if (id == id_compose and notification == win.EN_CHANGE) {
+                if (a.compose) |compose| {
+                    if (win.GetWindowTextLengthW(compose) == 0) a.compose_dragged = 0;
+                }
                 saveComposerDraft(a);
                 layoutComposer(a);
                 shortcodeUpdate(a);
