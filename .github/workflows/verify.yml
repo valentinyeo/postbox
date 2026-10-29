@@ -92,6 +92,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+          use-cache: false
       - name: ISSUE-462 row-sized DirectWrite regression
         shell: pwsh
         run: |
