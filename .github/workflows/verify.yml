@@ -153,6 +153,8 @@ jobs:
           if ($LASTEXITCODE -eq 0) { throw 'Original source unexpectedly shows reply preview' }
           $failure = Get-Content reply-red-evidence/failure.txt -Raw
           if ($failure -notmatch 'Reply preview missing') { throw "Wrong reply red failure: $failure" }
+          $originalLog = Get-Content reply-red-evidence/final-data/launch-log.txt -Raw
+          if ($originalLog -notmatch 'Replying to Fixture Sender') { throw 'Original source did not select Reply' }
           New-Item verification-evidence -ItemType Directory -Force | Out-Null
           Copy-Item reply-red-evidence verification-evidence/red-control -Recurse
           'REPLY_ORIGINAL_RED_OK: Reply preview missing' | Set-Content verification-evidence/reply-red-control.txt

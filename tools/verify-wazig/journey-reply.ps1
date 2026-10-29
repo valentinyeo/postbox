@@ -30,10 +30,23 @@ foreach ($target in @(
     } "$name original painted"
     Save-Screen $session "$name-before"
     Click-ReplyRect $session $canvas $original.bubble $true
-    $null = Wait-Popup $session '#32768'
-    Send-Keys $session '{HOME}{ENTER}'
-    $state = Read-Control $session status
-    Assert-That ($state.reply.id -ceq 'REPLY-ORIGINAL') 'Reply preview missing'
+    $menu = Wait-Popup $session '#32768'
+    $menuClient = [VerifyWindow+Rect]::new()
+    $menuOrigin = [VerifyWindow+Point]::new()
+    Assert-That ([VerifyWindow]::GetClientRect($menu, [ref]$menuClient)) 'Reply menu client missing'
+    Assert-That ([VerifyWindow]::ClientToScreen($menu, [ref]$menuOrigin)) 'Reply menu origin missing'
+    $dpi = [VerifyWindow]::GetDpiForWindow($menu)
+    $cell = [int][Math]::Floor((36 * $dpi + 48) / 96)
+    $separator = [int][Math]::Floor((8 * $dpi + 48) / 96)
+    $rowHeight = [int](($menuClient.Bottom - $cell - 3 * $separator) / 4)
+    Assert-That ($rowHeight -gt 0) 'Reply menu row missing'
+    Save-Screen $session "$name-reply-menu"
+    [VerifyMenus]::Click($session.pid, $menuOrigin.X + [int]($menuClient.Right / 2), $menuOrigin.Y + [int]($rowHeight / 2), $false)
+    Add-Content (Join-Path $session.evidence 'actions.log') 'SendInput: choose measured Reply menu row'
+    $state = Wait-Until {
+        $observed = Read-Control $session status
+        if ($observed.reply.id -ceq 'REPLY-ORIGINAL') { $observed }
+    } 'Reply preview missing'
     Assert-That ($state.reply.sender -ceq 'Fixture Sender') 'Reply sender missing'
     Assert-That ($state.reply.preview -ceq 'First words of the original') 'Reply preview must use first line'
     Assert-That ($state.reply.bar[0] -eq $state.composer.box.left -and $state.reply.bar[2] -eq $state.composer.box.right) 'Reply and composer edges differ'
