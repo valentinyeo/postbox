@@ -193,21 +193,6 @@ test "IGSH-505 message menu separators are painted on AMOLED not system light" {
     try std.testing.expect(drawn_text == null);
 }
 
-test "IGSH-505 Green message menu keeps native text and separators after AMOLED" {
-    var app: App = .{};
-    for ([_]theme.Choice{ .amoled, .green, .amoled, .green }) |choice| {
-        reset(choice);
-        openReactionMenu(&app, 100, 100);
-        if (choice != .green) continue;
-        try std.testing.expect(menu_info == null);
-        try std.testing.expectEqual(@as(usize, 8), row_count);
-        for (rows, 0..) |row, index| {
-            const expected: u32 = if (index == 2) win.MF_OWNERDRAW else if (row.label == null) win.MF_SEPARATOR else win.MF_STRING;
-            try std.testing.expectEqual(expected, row.flags);
-        }
-    }
-}
-
 test "IGSH-645 reaction cells use screen origin and retain every boundary including plus" {
     for ([_]i32{ -900, 0, 120 }, [_]i32{ 36, 54, 72 }) |left, width| {
         for (0..8) |cell| {

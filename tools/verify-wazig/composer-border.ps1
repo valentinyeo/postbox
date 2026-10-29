@@ -40,6 +40,10 @@ function Test-ComposerBorderOracle {
 function Invoke-ComposerBorderJourney($Session, $Start, $App) {
     Test-ComposerBorderOracle
     $measurements = @()
+    $tokens = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../src/theme.zig'))
+    $bodyMatch = [regex]::Match($tokens, 'pub const type_body: i32 = (\d+);')
+    Assert-That $bodyMatch.Success 'Shared body font token missing'
+    $bodySize = [int]$bodyMatch.Groups[1].Value
     $preferences = "HKCU:\Software\MessagesVerification\$($Session.id)\Software\Messages"
     foreach ($scale in @(100, 125, 150)) {
         $null = Get-App $Session
@@ -62,7 +66,7 @@ function Invoke-ComposerBorderJourney($Session, $Start, $App) {
         $pattern = $edit.GetCurrentPattern([Windows.Automation.TextPattern]::Pattern)
         $points = [double]$pattern.DocumentRange.GetAttributeValue([Windows.Automation.TextPattern]::FontSizeAttribute)
         $dpi = [int][VerifyWindow]::GetDpiForWindow([IntPtr]$window.Current.NativeWindowHandle)
-        $expectedPoints = [Math]::Floor((17 * $scale * $dpi + 4800) / 9600) * 72 / $dpi
+        $expectedPoints = [Math]::Floor(($bodySize * $scale * $dpi + 4800) / 9600) * 72 / $dpi
         Assert-That ([Math]::Abs($points - $expectedPoints) -lt 0.1) 'composer border saved text scale was not applied'
         Send-Keys $Session '^a{BACKSPACE}'
         $null = Wait-Until { (Read-Edit $edit) -eq '' } 'composer border empty edit'

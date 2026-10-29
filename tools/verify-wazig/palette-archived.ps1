@@ -261,7 +261,7 @@ function Invoke-PaletteArchivedJourney($Session) {
                 Assert-That ($row -ge 0) "Missing $key result"
                 $left = $origin.X - $desktop.Left
                 $top = $origin.Y - $desktop.Top + $row * [int]$rowHeight.ToUInt64()
-                $colour = switch ($key) { 'whatsapp' { @(37, 211, 102) } 'telegram' { @(42, 171, 238) } 'signal' { @(58, 118, 240) } 'slack' { @(51, 51, 51) } }
+                $colour = switch ($key) { 'whatsapp' { @(37, 211, 102) } 'telegram' { @(42, 171, 238) } 'signal' { @(58, 118, 240) } 'slack' { @(65, 65, 65) } }
                 $pixels = 0
                 for ($y = 11; $y -lt 29; $y++) {
                     for ($x = 16; $x -lt 36; $x++) {

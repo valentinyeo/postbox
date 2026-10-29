@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const expectedFonts = ['Regular', 'Medium', 'SemiBold', 'Bold'].map(weight => `IBMPlexSans-${weight}.ttf`).sort();
+export const expectedFonts = [...['Regular', 'Medium', 'SemiBold', 'Bold', 'Italic'].map(weight => `IBMPlexSans-${weight}.ttf`), 'IBMPlexMono-Regular.ttf'].sort();
 export const sourcePaths = ['build.zig', 'assets/installer.wxs', '.github/workflows/release.yml', 'src/main.zig', 'src/font_config.zig'];
-const names = source => [...new Set(source.match(/IBMPlexSans-[A-Za-z]+\.ttf/g) ?? [])].sort();
+const names = source => [...new Set(source.match(/IBMPlex(?:Sans|Mono)-[A-Za-z]+\.ttf/g) ?? [])].sort();
 const section = (source, start, end) => {
   const first = source.indexOf(start);
   assert.notEqual(first, -1, `missing section ${start}`);
@@ -19,11 +19,11 @@ export function verifySources(sources, exists) {
   const same = (label, actual) => assert.deepEqual(actual, expectedFonts, `${label}: bundled font set differs`);
   const config = section(sources['src/font_config.zig'], 'pub const files =', '\n};');
   same('font config', names(config));
-  const installCalls = [...sources['build.zig'].matchAll(/b\.installFile\("assets\/(IBMPlexSans-[A-Za-z]+\.ttf)", "bin\/([^"\n]+)"\);/g)];
+  const installCalls = [...sources['build.zig'].matchAll(/b\.installFile\("assets\/(IBMPlex(?:Sans|Mono)-[A-Za-z]+\.ttf)", "bin\/([^"\n]+)"\);/g)];
   same('build install', installCalls.map(match => match[1]).sort());
   for (const match of installCalls) assert.equal(match[1], match[2], 'build install destination differs');
   const installer = sources['assets/installer.wxs'];
-  const components = [...installer.matchAll(/<Component Id="([^"]+)" Guid="([^"]+)">\s*<File [^>]*Name="(IBMPlexSans-[A-Za-z]+\.ttf)"[^>]*Source="\$\(var.BinDir\)([^"]+)"[^>]*KeyPath="yes"/g)];
+  const components = [...installer.matchAll(/<Component Id="([^"]+)" Guid="([^"]+)">\s*<File [^>]*Name="(IBMPlex(?:Sans|Mono)-[A-Za-z]+\.ttf)"[^>]*Source="\$\(var.BinDir\)([^"]+)"[^>]*KeyPath="yes"/g)];
   same('MSI', components.map(match => match[3]).sort());
   assert.equal(new Set(components.map(match => match[2])).size, components.length, 'MSI GUIDs must be distinct');
   for (const match of components) {
@@ -53,14 +53,21 @@ export function verifySources(sources, exists) {
   assert.match(recreate, /body_weight = @import\("font_config\.zig"\)\.body_weight/);
   assert.match(recreate, /comptime std\.debug\.assert\(body_weight == win\.FW_NORMAL\)/);
   assert.match(sources['src/font_config.zig'], /pub const body_weight: i32 = 400;/);
-  const fontCalls = [...recreate.matchAll(/a\.(font(?:_small|_bold|_emoji|_underline)?) = win\.CreateFontW\(scaledFontHeight\((\d+), a\.font_scale, dpi\), 0, 0, 0, ([^,]+), 0, ([01]), 0, win\.DEFAULT_CHARSET, win\.OUT_DEFAULT_PRECIS, win\.CLIP_DEFAULT_PRECIS, win\.CLEARTYPE_NATURAL_QUALITY, win\.DEFAULT_PITCH, lit\("([^"]+)"\)\);/g)];
-  assert.equal(fontCalls.length, 5, 'all five native fonts must use natural ClearType');
+  const fontCalls = [...recreate.matchAll(/a\.(font(?:_small|_bold|_emoji|_underline|_icon|_title|_row|_time|_reply_label|_reply_icon)?) = win\.CreateFontW\(scaledFontHeight\(([\w.]+), (?:a\.font_scale|100), dpi\), 0, 0, 0, ([^,]+), 0, ([01]), 0, win\.DEFAULT_CHARSET, win\.OUT_DEFAULT_PRECIS, win\.CLIP_DEFAULT_PRECIS, win\.CLEARTYPE_NATURAL_QUALITY, win\.DEFAULT_PITCH, lit\("([^"]+)"\)\);/g)];
+  assert.match(recreate, /a\.font_icon = win\.CreateFontW\(scaledFontHeight\(theme\.icon_size, 100, dpi\)/);
+  assert.equal(fontCalls.length, 11, 'all native fonts must use natural ClearType');
   const expected = {
-    font: ['17', 'body_weight', '0', 'IBM Plex Sans'],
-    font_small: ['13', 'win.FW_MEDIUM', '0', 'IBM Plex Sans'],
-    font_bold: ['16', 'win.FW_SEMIBOLD', '0', 'IBM Plex Sans'],
-    font_emoji: ['16', 'win.FW_NORMAL', '0', 'Segoe UI Emoji'],
-    font_underline: ['17', 'body_weight', '1', 'IBM Plex Sans'],
+    font: ['theme.type_body', 'body_weight', '0', 'IBM Plex Sans'],
+    font_small: ['theme.type_preview', 'win.FW_MEDIUM', '0', 'IBM Plex Sans'],
+    font_bold: ['theme.type_chat_name', 'win.FW_SEMIBOLD', '0', 'IBM Plex Sans'],
+    font_emoji: ['theme.type_chat_name', 'win.FW_NORMAL', '0', 'Segoe UI Emoji'],
+    font_icon: ['theme.icon_size', 'win.FW_NORMAL', '0', 'Segoe Fluent Icons'],
+    font_title: ['theme.type_title', 'win.FW_SEMIBOLD', '0', 'IBM Plex Sans'],
+    font_row: ['theme.type_row_name', 'win.FW_SEMIBOLD', '0', 'IBM Plex Sans'],
+    font_time: ['theme.type_time', 'win.FW_NORMAL', '0', 'IBM Plex Sans'],
+    font_reply_label: ['theme.type_time', 'win.FW_SEMIBOLD', '0', 'IBM Plex Sans'],
+    font_reply_icon: ['theme.icon_size', 'win.FW_NORMAL', '0', 'Segoe Fluent Icons'],
+    font_underline: ['theme.type_body', 'body_weight', '1', 'IBM Plex Sans'],
   };
   for (const call of fontCalls) assert.deepEqual(call.slice(2), expected[call[1]], `font role changed: ${call[1]}`);
   for (const font of expectedFonts) assert.ok(exists(`assets/${font}`), `missing assets/${font}`);
@@ -89,10 +96,11 @@ export function checkFonts(root) {
   const sources = Object.fromEntries(sourcePaths.map(file => [file, fs.readFileSync(path.join(root, file), 'utf8')]));
   verifySources(sources, file => fs.existsSync(path.join(root, file)));
   const metadata = expectedFonts.map(file => [file, fontMetadata(fs.readFileSync(path.join(root, 'assets', file)))]);
-  const weights = { Regular: 400, Medium: 500, SemiBold: 600, Bold: 700 };
+  const weights = { Regular: 400, Medium: 500, SemiBold: 600, Bold: 700, Italic: 400 };
   for (const [file, info] of metadata) {
-    assert.equal(info.revision, metadata[0][1].revision, `${file}: font revision differs`);
-    assert.deepEqual(info.versions, metadata[0][1].versions, `${file}: name table version differs`);
+    const reference = file.startsWith('IBMPlexSans') ? metadata.find(([name]) => name === 'IBMPlexSans-Regular.ttf')[1] : info;
+    assert.equal(info.revision, reference.revision, `${file}: font revision differs`);
+    assert.deepEqual(info.versions, reference.versions, `${file}: name table version differs`);
     assert.equal(info.versions.length, 1, `${file}: missing font version`);
     assert.equal(info.weight, weights[file.match(/-([A-Za-z]+)\.ttf$/)[1]], `${file}: wrong weight`);
     console.log(`${file}: ${info.versions.join(', ')}, head.fontRevision=${info.revision}/65536, weight=${info.weight}`);

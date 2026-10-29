@@ -33,11 +33,11 @@ $draft = Join-Path $messages 'drafts.json'
 $null = Wait-Until { (Test-Path $draft) -and (Get-Content $draft -Raw).Contains('Verification draft') } 'persisted draft'
 Copy-Item $draft (Join-Path $Evidence 'drafts.json')
 Save-Screen $session after
-foreach ($theme in @('AMOLED black', 'Green')) {
+foreach ($theme in @('Graphite')) {
     Send-Keys $session '^k'
     Send-Keys $session "Theme: $theme"
     Send-Keys $session '{ENTER}'
-    $themeId = if ($theme -eq 'Green') { 'green' } else { 'amoled' }
+    $themeId = 'amoled'
     $null = Wait-Until { (Read-Control $session status).theme -eq $themeId } 'composer theme applied'
     foreach ($windowSize in @('wide', 'narrow')) {
         if ($windowSize -eq 'wide') {

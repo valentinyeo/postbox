@@ -214,7 +214,6 @@ const command_show_slack = 2058;
 const command_show_telegram = 2059;
 const command_sort_views = 2067;
 const command_shortcuts_help = 2060;
-const command_theme_green = 2063;
 const command_theme_amoled = 2064;
 const command_mic_default = 2400;
 const reaction_like = 3001;
@@ -774,6 +773,11 @@ const App = struct {
     font_small: ?win.HFONT = null,
     font_reply_label: ?win.HFONT = null,
     font_reply_icon: ?win.HFONT = null,
+    font_icon: ?win.HFONT = null,
+    font_title: ?win.HFONT = null,
+    font_row: ?win.HFONT = null,
+    font_time: ?win.HFONT = null,
+
     font_bold: ?win.HFONT = null,
     font_emoji: ?win.HFONT = null,
     custom_emoji: std.ArrayList(CustomEmoji) = .empty,
@@ -1167,12 +1171,12 @@ fn paintRoundedButton(a: *App, shapes: *const smooth.Context, hdc: win.HDC, rect
 fn paintInputField(a: *App, shapes: *const smooth.Context, hdc: win.HDC, control: win.HWND, rect: win.RECT) void {
     if (a.compose != null and control == a.compose.?) {
         const radius = @min(@min(rect.right - rect.left, rect.bottom - rect.top), px(a, theme.radius_field * 2));
-        smooth.fillRoundRect(shapes, rect, radius, radius, theme.current.surface_container_high);
+        smooth.fillRoundRect(shapes, rect, radius, radius, theme.current.surface_container);
         const border: win.RECT = @bitCast(compose_layout.composerBorderRect(@bitCast(rect)));
         smooth.strokeRoundRect(shapes, border, radius, radius, if (win.GetFocus() == control) theme.current.primary else theme.current.outline, 1);
         return;
     }
-    paintRoundedButton(a, shapes, hdc, rect, theme.current.surface_container_high, theme.current.on_surface, a.font.?, if (win.GetFocus() == control) theme.current.primary else theme.current.outline, &.{});
+    paintRoundedButton(a, shapes, hdc, rect, theme.current.surface_container, theme.current.on_surface, a.font.?, if (win.GetFocus() == control) theme.current.primary else theme.current.outline, &.{});
 }
 
 fn paintPopupInput(shapes: *const smooth.Context, owner: win.HWND, control: ?win.HWND) void {
@@ -1182,7 +1186,7 @@ fn paintPopupInput(shapes: *const smooth.Context, owner: win.HWND, control: ?win
     _ = win.GetWindowRect(edit, &rect);
     _ = win.MapWindowPoints(null, owner, @ptrCast(&rect), 2);
     _ = win.InflateRect(&rect, 4, 4);
-    smooth.fillRoundRect(shapes, rect, 8, 8, theme.current.surface_container_high);
+    smooth.fillRoundRect(shapes, rect, 8, 8, theme.current.surface_container);
     smooth.strokeRoundRect(shapes, rect, 8, 8, if (win.GetFocus() == edit) theme.current.primary else theme.current.outline, 1);
 }
 
@@ -1191,44 +1195,28 @@ fn buttonLabel(item: *win.DRAWITEMSTRUCT, buffer: []u16) []const u16 {
     return buffer[0..@intCast(text_len)];
 }
 
-fn drawPinIcon(a: *App, shapes: *const smooth.Context, left: i32, top: i32, color: win.COLORREF, unpin: bool) void {
-    const scale = @as(f32, @floatFromInt(px(a, 24))) / pin_icon.grid_size;
-    const width: f32 = @floatFromInt(@max(1, px(a, @intFromFloat(pin_icon.stroke_width))));
-    inline for (.{ pin_icon.outline, pin_icon.needle, pin_icon.slash }, 0..) |points, index| {
-        if (index != 2 or unpin) {
-            var scaled: [points.len][2]f32 = undefined;
-            for (points, &scaled) |point, *target| {
-                target.* = .{ @as(f32, @floatFromInt(left)) + point[0] * scale, @as(f32, @floatFromInt(top)) + point[1] * scale };
-            }
-            smooth.strokePolyline(shapes, &scaled, color, width);
-        }
+fn drawFluentIcon(a: *App, hdc: win.HDC, bounds: win.RECT, glyph: u16, color: win.COLORREF) void {
+    const previous_font = win.SelectObject(hdc, @ptrCast(a.font_icon orelse return));
+    const previous_color = win.SetTextColor(hdc, color);
+    const previous_mode = win.SetBkMode(hdc, win.TRANSPARENT);
+    defer {
+        _ = win.SelectObject(hdc, previous_font);
+        _ = win.SetTextColor(hdc, previous_color);
+        _ = win.SetBkMode(hdc, previous_mode);
     }
+    var rect = bounds;
+    const text = [_]u16{glyph};
+    _ = text_draw.drawText(hdc, &text, 1, &rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
 }
 
-fn drawMicIcon(a: *App, shapes: *const smooth.Context, hdc: win.HDC, cx: i32, cy: i32, color: win.COLORREF) void {
-    const brush = win.CreateSolidBrush(color) orelse return;
-    defer _ = win.DeleteObject(brush);
-    const pen = win.CreatePen(win.PS_SOLID, @max(1, px(a, smooth_geometry.icon_stroke_width)), color) orelse return;
-    defer _ = win.DeleteObject(pen);
-    const old_brush = win.SelectObject(hdc, brush);
-    const old_pen = win.SelectObject(hdc, pen);
-    defer {
-        _ = win.SelectObject(hdc, old_brush);
-        _ = win.SelectObject(hdc, old_pen);
-    }
-    const half = px(a, 4);
-    const capsule = win.RECT{ .left = cx - half, .top = cy - px(a, 10), .right = cx + half + 1, .bottom = cy + px(a, 3) };
-    smooth.fillRoundRect(shapes, capsule, half * 2, half * 2, color);
-    smooth.strokeRoundRect(shapes, capsule, half * 2, half * 2, color, @max(1, px(a, smooth_geometry.icon_stroke_width)));
-    _ = win.SelectObject(hdc, win.GetStockObject(win.NULL_BRUSH));
-    const arc = px(a, 7);
-    const cradle = win.RECT{ .left = cx - arc, .top = cy - px(a, 7), .right = cx + arc + 1, .bottom = cy + px(a, 6) };
-    const angles = smooth_geometry.counterclockwiseArc(@bitCast(cradle), .{ cx - arc, cy - px(a, 1) }, .{ cx + arc + 1, cy - px(a, 1) });
-    smooth.strokeArc(shapes, cradle, angles.start, angles.sweep, color, @max(1, px(a, smooth_geometry.icon_stroke_width)));
-    _ = win.MoveToEx(hdc, cx, cy + px(a, 6), null);
-    _ = win.LineTo(hdc, cx, cy + px(a, 10));
-    _ = win.MoveToEx(hdc, cx - px(a, 4), cy + px(a, 10), null);
-    _ = win.LineTo(hdc, cx + px(a, 5), cy + px(a, 10));
+fn drawPinIcon(a: *App, shapes: *const smooth.Context, left: i32, top: i32, color: win.COLORREF, unpin: bool) void {
+    const size = px(a, theme.icon_size);
+    drawFluentIcon(a, shapes.hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, if (unpin) pin_icon.unpinned else pin_icon.pinned, color);
+}
+
+fn drawMicIcon(a: *App, hdc: win.HDC, cx: i32, cy: i32, color: win.COLORREF) void {
+    const half = @divTrunc(px(a, theme.icon_size), 2);
+    drawFluentIcon(a, hdc, .{ .left = cx - half, .top = cy - half, .right = cx + half, .bottom = cy + half }, 0xE720, color);
 }
 
 fn drawVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
@@ -1257,15 +1245,15 @@ fn paintVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     _ = win.FillRect(hdc, &item.rcItem, a.brush_raised.?);
     const recording = a.voice_active;
     const face: win.COLORREF = if (theme.choice == .amoled) (if (pressed) theme.amoled_button_pressed else if (a.btn_hover[8]) theme.amoled_button_hover else theme.current.surface_container_high) else if (pressed) theme.current.primary_container else if (a.btn_hover[8]) theme.current.surface_container_highest else theme.current.surface_container_high;
-    const foreground = if (theme.choice == .amoled) theme.amoled_button_text else if (pressed) theme.current.on_primary_container else theme.current.on_secondary_container;
+    const foreground = if (theme.choice == .amoled) (if (pressed or a.btn_hover[8] or recording) theme.amoled_button_text else theme.current.on_surface_variant) else if (pressed) theme.current.on_primary_container else theme.current.on_secondary_container;
     paintRoundedButton(a, &shapes, hdc, item.rcItem, face, foreground, a.font_bold.?, if (recording) theme.current.@"error" else if (focused) theme.current.primary else if (theme.choice == .amoled and a.btn_hover[8]) theme.current.outline_variant else null, &.{});
     const mid_y = @divTrunc(item.rcItem.top + item.rcItem.bottom, 2);
     if (!recording) {
-        drawMicIcon(a, &shapes, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, foreground);
+        drawMicIcon(a, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, foreground);
         return;
     }
     if (!compose_layout.recordingTimerVisible(@bitCast(item.rcItem), @intCast(a.dpi))) {
-        drawMicIcon(a, &shapes, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, theme.current.@"error");
+        drawMicIcon(a, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, theme.current.@"error");
         return;
     }
     const dot = px(a, 5);
@@ -1301,29 +1289,7 @@ fn paintVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
             _ = win.FillRect(hdc, &filled, fill);
         }
     }
-    drawMicIcon(a, &shapes, hdc, item.rcItem.right - px(a, 20), mid_y, theme.current.@"error");
-}
-
-fn drawDictationIcon(a: *App, shapes: *const smooth.Context, cx: i32, cy: i32, color: win.COLORREF) void {
-    const left = cx - px(a, 12);
-    const top = cy - px(a, 12);
-    const stroke = @max(1, px(a, smooth_geometry.icon_stroke_width));
-    smooth.fillRoundRect(shapes, .{ .left = left + px(a, 4), .top = top + px(a, 2), .right = left + px(a, 10), .bottom = top + px(a, 14) }, px(a, 6), px(a, 6), color);
-    smooth.strokeArc(shapes, .{ .left = left + px(a, 1), .top = top + px(a, 5), .right = left + px(a, 13), .bottom = top + px(a, 19) }, 0, 180, color, stroke);
-    inline for (.{
-        [2][2]f32{ .{ 7, 19 }, .{ 7, 22 } },
-        [2][2]f32{ .{ 4, 22 }, .{ 10, 22 } },
-        [2][2]f32{ .{ 17, 6 }, .{ 23, 6 } },
-        [2][2]f32{ .{ 17, 12 }, .{ 21, 12 } },
-        [2][2]f32{ .{ 17, 18 }, .{ 23, 18 } },
-    }) |points| {
-        var scaled: [2][2]f32 = undefined;
-        const scale = @as(f32, @floatFromInt(px(a, 24))) / 24;
-        for (points, &scaled) |point, *target| {
-            target.* = .{ @as(f32, @floatFromInt(left)) + point[0] * scale, @as(f32, @floatFromInt(top)) + point[1] * scale };
-        }
-        smooth.strokePolyline(shapes, &scaled, color, @floatFromInt(stroke));
-    }
+    drawMicIcon(a, hdc, item.rcItem.right - px(a, 20), mid_y, theme.current.@"error");
 }
 
 fn drawComposerButton(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
@@ -1342,35 +1308,10 @@ fn drawComposerButton(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     const focused = (item.itemState & win.ODS_FOCUS) != 0;
     const dictating = a.last_dictation_state == .recording or a.last_dictation_state == .transcribing;
     _ = win.FillRect(item.hDC, &item.rcItem, a.brush_raised.?);
-    const face: win.COLORREF = if (theme.choice == .amoled) (if (index == 1) (if (pressed) theme.amoled_send_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_send_hover else theme.amoled_send) else if (pressed or (index == 0 and dictating)) theme.amoled_button_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_button_hover else theme.current.surface_container_high) else if (index == 1 and !pressed) theme.current.primary else if (pressed or (index == 0 and dictating)) theme.current.primary_container else if (!disabled and a.btn_hover[index]) theme.current.surface_container_highest else theme.current.surface_container_high;
-    const foreground = if (disabled) theme.current.on_surface_variant else if (theme.choice == .amoled) theme.amoled_button_text else if (index == 1 and !pressed) theme.current.on_primary else if (pressed or (index == 0 and dictating)) theme.current.on_primary_container else theme.current.on_surface;
-    paintRoundedButton(a, &shapes, item.hDC, item.rcItem, face, foreground, a.font_bold.?, if (focused) theme.current.primary else if (theme.choice == .amoled and (!disabled and a.btn_hover[index])) theme.current.outline_variant else null, &.{});
-    if (index == 0) {
-        drawDictationIcon(a, &shapes, @divTrunc(item.rcItem.left + item.rcItem.right, 2), @divTrunc(item.rcItem.top + item.rcItem.bottom, 2), foreground);
-        return;
-    }
-    const cx: f32 = @floatFromInt(@divTrunc(item.rcItem.left + item.rcItem.right, 2));
-    const cy: f32 = @floatFromInt(@divTrunc(item.rcItem.top + item.rcItem.bottom, 2));
-    const unit = @as(f32, @floatFromInt(px(a, 24))) / 24;
-    const stroke: f32 = @floatFromInt(@max(1, px(a, smooth_geometry.icon_stroke_width)));
-    if (index == 9) {
-        smooth.strokePolyline(&shapes, &.{ .{ cx - 8 * unit, cy }, .{ cx + 8 * unit, cy } }, foreground, stroke);
-        smooth.strokePolyline(&shapes, &.{ .{ cx, cy - 8 * unit }, .{ cx, cy + 8 * unit } }, foreground, stroke);
-    } else if (index == 1) {
-        smooth.strokePolyline(&shapes, &.{ .{ cx - 7 * unit, cy + 7 * unit }, .{ cx + 7 * unit, cy - 7 * unit }, .{ cx - 5 * unit, cy - 7 * unit } }, foreground, stroke);
-        smooth.strokePolyline(&shapes, &.{ .{ cx + 7 * unit, cy - 7 * unit }, .{ cx + 7 * unit, cy + 5 * unit } }, foreground, stroke);
-    } else {
-        const x: i32 = @intFromFloat(cx);
-        const y: i32 = @intFromFloat(cy);
-        const radius = px(a, 10);
-        const circle = win.RECT{ .left = x - radius, .top = y - radius, .right = x + radius, .bottom = y + radius };
-        smooth.strokeArc(&shapes, circle, 0, 360, foreground, @intFromFloat(stroke));
-        for ([_]i32{ -1, 1 }) |side| {
-            const eye = x + side * px(a, 3);
-            smooth.fillEllipse(&shapes, .{ .left = eye - px(a, 1), .top = y - px(a, 4), .right = eye + px(a, 1), .bottom = y - px(a, 2) }, foreground);
-        }
-        smooth.strokeArc(&shapes, .{ .left = x - px(a, 5), .top = y - px(a, 3), .right = x + px(a, 5), .bottom = y + px(a, 6) }, 20, 140, foreground, @intFromFloat(stroke));
-    }
+    const face: win.COLORREF = if (theme.choice == .amoled) (if (index == 1) (if (pressed) theme.amoled_send_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_send_hover else theme.amoled_send) else if (pressed or (index == 0 and dictating)) theme.amoled_button_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_button_hover else theme.amoled_button) else if (index == 1 and !pressed) theme.current.primary else if (pressed or (index == 0 and dictating)) theme.current.primary_container else if (!disabled and a.btn_hover[index]) theme.current.surface_container_highest else theme.current.surface_container_high;
+    const foreground = if (disabled) theme.current.on_surface_variant else if (theme.choice == .amoled) (if (index == 1) theme.send_text else if (pressed or a.btn_hover[index] or (index == 0 and dictating)) theme.amoled_button_text else theme.current.on_surface_variant) else if (index == 1 and !pressed) theme.current.on_primary else if (pressed or (index == 0 and dictating)) theme.current.on_primary_container else theme.current.on_surface;
+    const glyph: []const u16 = if (index == 0) &.{0xE720} else if (index == 1) &.{0xE724} else if (index == 2) &.{0xE899} else &.{0xE723};
+    paintRoundedButton(a, &shapes, item.hDC, item.rcItem, face, foreground, a.font_icon.?, if (focused) theme.current.primary else if (!disabled and a.btn_hover[index]) theme.current.outline_variant else null, glyph);
 }
 
 fn setFont(hwnd: ?win.HWND, font: ?win.HFONT) void {
@@ -1756,7 +1697,7 @@ fn recreateThemeBrushes(a: *App) bool {
         _ = win.DeleteObject(bg);
         return false;
     };
-    const raised = win.CreateSolidBrush(theme.current.surface_container_high) orelse {
+    const raised = win.CreateSolidBrush(theme.current.surface_container) orelse {
         _ = win.DeleteObject(bg);
         _ = win.DeleteObject(panel);
         return false;
@@ -1821,13 +1762,13 @@ fn changeTheme(a: *App, choice: theme.Choice) bool {
     }
     saveTheme(choice);
     updateTooltipTheme(a);
-    setStatus(a, if (choice == .amoled) "Theme: AMOLED black" else "Theme: Green");
+    setStatus(a, "Theme: Graphite");
     _ = win.EnumThreadWindows(win.GetCurrentThreadId(), redrawThemeWindow, 0);
     return true;
 }
 
 fn fieldColor() win.COLORREF {
-    return if (theme.choice == .amoled) theme.current.surface else theme.current.surface_container_high;
+    return theme.current.surface_container;
 }
 
 fn saveFontScale(scale: i32) void {
@@ -1859,13 +1800,22 @@ fn recreateFonts(a: *App) void {
     const old_bold = a.font_bold;
     const old_underline = a.font_underline;
     const old_emoji = a.font_emoji;
-    a.font = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_small = win.CreateFontW(scaledFontHeight(13, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_reply_label = win.CreateFontW(scaledFontHeight(12, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_reply_icon = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
-    a.font_bold = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_emoji = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
-    a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    const old_font_icon = a.font_icon;
+    const old_font_title = a.font_title;
+    const old_font_row = a.font_row;
+    const old_font_time = a.font_time;
+
+    a.font = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_small = win.CreateFontW(scaledFontHeight(theme.type_preview, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_bold = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_emoji = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
+    a.font_underline = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_icon = win.CreateFontW(scaledFontHeight(theme.icon_size, 100, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
+    a.font_title = win.CreateFontW(scaledFontHeight(theme.type_title, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_row = win.CreateFontW(scaledFontHeight(theme.type_row_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_time = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_reply_label = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_reply_icon = win.CreateFontW(scaledFontHeight(theme.icon_size, 100, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
     setFont(a.chats_hwnd, a.font);
     setFont(a.compose, a.font);
     setFont(a.thread_list, a.font);
@@ -1883,6 +1833,11 @@ fn recreateFonts(a: *App) void {
     if (old_bold) |font| _ = win.DeleteObject(font);
     if (old_underline) |font| _ = win.DeleteObject(font);
     if (old_emoji) |font| _ = win.DeleteObject(font);
+    if (old_font_icon) |font| _ = win.DeleteObject(font);
+    if (old_font_title) |font| _ = win.DeleteObject(font);
+    if (old_font_row) |font| _ = win.DeleteObject(font);
+    if (old_font_time) |font| _ = win.DeleteObject(font);
+
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
@@ -2611,7 +2566,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
                     var tail: win.RECT = undefined;
                     _ = win.GetClientRect(list, &tail);
                     const top = win.SendMessageW(list, win.LB_GETTOPINDEX, 0, 0);
-                    tail.top = @max(0, (@as(i32, @intCast(@min(previous_rows.len, a.chat_count))) - @as(i32, @intCast(top))) * px(a, 64));
+                    tail.top = @max(0, (@as(i32, @intCast(@min(previous_rows.len, a.chat_count))) - @as(i32, @intCast(top))) * px(a, theme.chat_row_height));
                     if (tail.top < tail.bottom) _ = win.InvalidateRect(list, &tail, win.FALSE);
                 }
             }
@@ -7242,8 +7197,8 @@ fn drawUnfurlCard(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     message.unfurl_card_hit = .{ .left = x, .top = top, .right = x + card_width, .bottom = bottom };
     var face = message.unfurl_card_hit;
     face.left += 5;
-    smooth.fillRoundRect(shapes, face, 10, 10, theme.current.surface_container);
-    if (theme.choice == .amoled) smooth.strokeRoundRect(shapes, message.unfurl_card_hit, 10, 10, theme.current.outline_variant, 1);
+    smooth.fillRoundRect(shapes, face, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container_low);
+    if (theme.choice == .amoled) smooth.strokeRoundRect(shapes, message.unfurl_card_hit, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline_variant, 1);
     const old_pen = win.SelectObject(hdc, win.GetStockObject(win.NULL_PEN));
     defer _ = win.SelectObject(hdc, old_pen);
 
@@ -9589,9 +9544,9 @@ fn replyCloseRect(a: *const App) win.RECT {
 fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     if (a.reply_to.len == 0) return;
     const bar = replyBarRect(a);
-    const accent = rgb(137, 180, 248);
-    smooth.fillRoundRect(shapes, bar, px(a, 32), px(a, 32), rgb(24, 24, 24));
-    smooth.strokeRoundRect(shapes, bar, px(a, 32), px(a, 32), rgb(46, 46, 46), px(a, 1));
+    const accent = theme.current.primary;
+    smooth.fillRoundRect(shapes, bar, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container_low);
+    smooth.strokeRoundRect(shapes, bar, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline, px(a, 1));
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
     _ = win.SelectObject(hdc, @ptrCast(a.font_reply_icon.?));
     _ = win.SetTextColor(hdc, accent);
@@ -9610,11 +9565,11 @@ fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     text.top = bar.top + px(a, 29);
     text.bottom = bar.bottom - px(a, 7);
     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-    _ = win.SetTextColor(hdc, rgb(138, 138, 138));
+    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
     _ = text_draw.drawText(hdc, a.reply_preview.ptr(), @intCast(a.reply_preview.len), &text, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
-    var close = replyCloseRect(a);
-    smooth.fillRoundRect(shapes, close, px(a, 28), px(a, 28), if (a.reply_close_hover) rgb(40, 40, 40) else rgb(38, 38, 38));
-    _ = text_draw.drawText(hdc, lit("×"), -1, &close, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
+    const close = replyCloseRect(a);
+    smooth.fillRoundRect(shapes, close, close.right - close.left, close.bottom - close.top, if (a.reply_close_hover) theme.amoled_button_hover else theme.current.surface_container_high);
+    drawFluentIcon(a, hdc, close, 0xE711, theme.current.on_surface_variant);
 }
 
 fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
@@ -9895,8 +9850,9 @@ fn messageBubbleWidth(a: *const App, available_width: i32) i32 {
     else
         "";
     const left_inset = px(a, if (std.mem.endsWith(u8, chat_jid, "@g.us")) @as(i32, 62) else @as(i32, 24));
-    const max_width = @max(1, available_width - left_inset - px(a, 24));
-    return @min(max_width, std.math.clamp(@divTrunc(available_width * 7, 10), px(a, 280), px(a, 620)));
+    const column_width = @min(available_width, px(a, theme.chat_column_width));
+    const max_width = @max(1, column_width - left_inset - px(a, 24));
+    return @min(max_width, std.math.clamp(@divTrunc(column_width * 7, 10), px(a, 280), px(a, theme.bubble_max_width)));
 }
 
 fn scrollToSelectedMessage(a: *App) void {
@@ -10988,7 +10944,7 @@ fn emojiProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
             const hdc: win.HDC = winHandle(win.HDC, wparam);
             _ = win.SetTextColor(hdc, theme.current.on_surface);
             if (message == win.WM_CTLCOLOREDIT and theme.choice == .amoled) {
-                _ = win.SetBkColor(hdc, theme.current.surface_container_high);
+                _ = win.SetBkColor(hdc, theme.current.surface_container);
                 return @bitCast(@intFromPtr(a.brush_raised.?));
             }
             _ = win.SetBkColor(hdc, theme.current.surface_container_low);
@@ -11926,7 +11882,7 @@ fn controlDispatch(a: *App, call: *ControlCall) !void {
     if (call.phase == .select) return controlSelect(a, call);
     switch (request.cmd) {
         .theme => {
-            const choice = request.theme orelse return control_api.writeError(w, "theme needs green or amoled");
+            const choice = request.theme orelse return control_api.writeError(w, "theme needs amoled");
             if (!changeTheme(a, choice)) return control_api.writeError(w, "could not change theme");
             try w.print("{{\"ok\":true,\"result\":{{\"theme\":\"{s}\"}}}}\n", .{@tagName(theme.choice)});
         },
@@ -12467,8 +12423,7 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Make text smaller", "Ctrl+-", command_font_smaller);
     appendPalette(a, "Make text larger", "Ctrl++", command_font_larger);
     appendPalette(a, "Reset text size", "Ctrl+0", command_font_reset);
-    appendPalette(a, "Theme: AMOLED black", "", command_theme_amoled);
-    appendPalette(a, "Theme: Green", "", command_theme_green);
+    appendPalette(a, "Theme: Graphite", "", command_theme_amoled);
     appendPalette(a, "Toggle unread chats", "U", command_unread);
     appendPalette(a, "Show combined inbox", "Ctrl+1 / Alt+I", command_show_all);
     appendPalette(a, "Sort views", "", command_sort_views);
@@ -13235,7 +13190,7 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
             const hdc: win.HDC = winHandle(win.HDC, wparam);
             _ = win.SetTextColor(hdc, theme.current.on_surface);
             if (message == win.WM_CTLCOLOREDIT and theme.choice == .amoled) {
-                _ = win.SetBkColor(hdc, theme.current.surface_container_high);
+                _ = win.SetBkColor(hdc, theme.current.surface_container);
                 return @bitCast(@intFromPtr(a.brush_raised.?));
             }
             _ = win.SetBkColor(hdc, theme.current.surface_container_low);
@@ -13565,8 +13520,8 @@ fn runCommand(a: *App, command: u16) void {
                 setStatus(a, "Microphone changed");
             }
         },
-        command_theme_green, command_theme_amoled => {
-            _ = changeTheme(a, if (command == command_theme_amoled) .amoled else .green);
+        command_theme_amoled => {
+            _ = changeTheme(a, .amoled);
         },
         command_font_smaller => changeFontScale(a, -10),
         command_speed_1, command_speed_150, command_speed_200 => {
@@ -13712,8 +13667,8 @@ fn composerContentHeight(a: *App) i32 {
 }
 
 fn stagedPreviewColumns(a: *const App, width: i32) usize {
-    const left_width = std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 390));
-    const available = width - left_width - threadPanelWidth(a, width, left_width) - px(a, 26);
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(width, 2));
+    const available = @min(width - left_width - threadPanelWidth(a, width, left_width), px(a, theme.chat_column_width)) - px(a, 26);
     return @intCast(@max(1, @divTrunc(available, px(a, 56))));
 }
 
@@ -13728,8 +13683,10 @@ fn stagedComposerSizes(a: *App, width: i32, height: i32) compose_layout.Composer
 
 fn stagedPreviewRect(a: *const App, index: usize) win.RECT {
     const columns = stagedPreviewColumns(a, a.compose_client_width);
-    const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 390));
-    const left = left_width + px(a, 13) + @as(i32, @intCast(index % columns)) * px(a, 56);
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(a.compose_client_width, 2));
+    const pane_width = a.compose_client_width - left_width - threadPanelWidth(a, a.compose_client_width, left_width);
+    const column_inset = @max(0, @divTrunc(pane_width - px(a, theme.chat_column_width), 2));
+    const left = left_width + column_inset + px(a, 13) + @as(i32, @intCast(index % columns)) * px(a, 56);
     const top = a.compose_strip_top + (if (a.reply_to.len > 0) px(a, 64) else @as(i32, 0)) + px(a, 10) + @as(i32, @intCast(index / columns)) * px(a, compose_layout.preview_band);
     return .{ .left = left, .top = top, .right = left + px(a, 44) + 2, .bottom = top + px(a, 44) + 2 };
 }
@@ -13743,7 +13700,7 @@ fn layoutComposer(a: *App) void {
     const height = a.compose_client_height;
     const sizes = stagedComposerSizes(a, a.compose_client_width, height);
     if (a.compose_strip_top == height - sizes.strip_height and a.compose_pill.top == height - px(a, 11) - sizes.edit_height) return;
-    const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 390));
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(a.compose_client_width, 2));
     var dirty = win.RECT{ .left = left_width + 1, .top = @min(a.compose_strip_top, height - sizes.strip_height), .right = a.compose_client_width, .bottom = height };
     layoutRegion(a, a.compose_client_width, height, &dirty);
 }
@@ -13755,7 +13712,7 @@ fn layout(a: *App, width: i32, height: i32) void {
 fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void {
     a.compose_client_width = width;
     a.compose_client_height = height;
-    const left_width = std.math.clamp(@divTrunc(width, 3), px(a, 280), px(a, 390));
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(width, 2));
     const header_height: i32 = 0;
     const list_bottom = if (updateCardVisible(a)) updateCardRect(a).top - px(a, 4) else height;
     var sizes = stagedComposerSizes(a, width, height);
@@ -14449,7 +14406,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius * 2), px(a, theme.selected_row_radius * 2), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
     }
     var row_text = if (bulk_selected) theme.current.on_primary_container else theme.current.on_surface;
-    var row_muted = if (bulk_selected) row_text else theme.current.on_surface_variant;
+    var row_muted = if (bulk_selected or selected) row_text else theme.current.on_surface_variant;
 
     var row_primary = theme.current.primary;
     const dimmed = chat.archived and !selected and !bulk_selected and !hovered;
@@ -14460,17 +14417,17 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     }
 
     const avatar_left = item.rcItem.left + px(a, 12);
-    const avatar_top = item.rcItem.top + px(a, 10);
+    const avatar_top = item.rcItem.top + @divTrunc(px(a, theme.chat_row_height - theme.avatar_size), 2);
     const avatar_entry = if (hub.chatAvatarEnabled(chat.provider, unifiedHub(a), hub.igsh_696_telegram_avatars)) avatarForChat(a, chat.jid.slice()) else null;
     if (avatar_entry == null or avatar_entry.?.bitmap == null) {
-        smooth.fillEllipse(&shapes, .{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 }, theme.current.surface_container_highest);
+        smooth.fillEllipse(&shapes, .{ .left = avatar_left, .top = avatar_top, .right = avatar_left + px(a, theme.avatar_size), .bottom = avatar_top + px(a, theme.avatar_size) }, theme.current.surface_container_highest);
     }
     if (avatar_entry != null and avatar_entry.?.bitmap != null) {
         shapes.deinit();
-        drawAvatarBitmap(item.hDC, avatar_entry.?.bitmap.?, avatar_left, avatar_top, 42);
+        drawAvatarBitmap(item.hDC, avatar_entry.?.bitmap.?, avatar_left, avatar_top, px(a, theme.avatar_size));
         shapes = smooth.Context.init(item.hDC);
     }
-    const badge = win.RECT{ .left = avatar_left + px(a, 27), .top = avatar_top + px(a, 28), .right = avatar_left + px(a, 48), .bottom = avatar_top + px(a, 46) };
+    const badge = win.RECT{ .left = avatar_left + px(a, theme.avatar_size - theme.platform_badge_size), .top = avatar_top + px(a, theme.avatar_size - theme.platform_badge_size), .right = avatar_left + px(a, theme.avatar_size), .bottom = avatar_top + px(a, theme.avatar_size) };
     var workspace_bitmap: ?win.HBITMAP = null;
     if (hub.igsh_604_workspace_icons and unifiedHub(a) and chat.provider == .slack) {
         if (hub.workspaceAvatarKey(chat.jid.slice())) |key| {
@@ -14495,12 +14452,12 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     }
     const pinned_chat = isChatPinned(a, chat_key.of(chat));
     if (pinned_chat) {
-        drawPinIcon(a, &shapes, item.rcItem.right - px(a, 78), item.rcItem.top + px(a, 10), row_muted, false);
+        drawPinIcon(a, &shapes, item.rcItem.right - px(a, 78), item.rcItem.top + px(a, 4), row_muted, false);
     }
     if (chat.unread or chat.unread_count > 0) {
         const diameter = px(a, theme.unread_dot_px);
         const dot_right = item.rcItem.right - px(a, 12);
-        const dot_top = item.rcItem.top + @divTrunc(px(a, 35) + px(a, 56) - diameter, 2);
+        const dot_top = item.rcItem.top + @divTrunc(px(a, 28) + px(a, theme.chat_row_height - 4) - diameter, 2);
         smooth.fillEllipse(&shapes, .{ .left = dot_right - diameter, .top = dot_top, .right = dot_right, .bottom = dot_top + diameter }, row_primary);
     }
     shapes.deinit();
@@ -14508,19 +14465,19 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     if ((avatar_entry == null or avatar_entry.?.bitmap == null) and chat.name.len > 0) {
         var initial_length: c_int = 1;
         if (chat.name.buf[0] >= 0xd800 and chat.name.buf[0] <= 0xdbff and chat.name.len > 1) initial_length = 2;
-        _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
+        _ = win.SelectObject(item.hDC, @ptrCast(a.font_row.?));
         _ = win.SetTextColor(item.hDC, if (dimmed) theme.archivedRowColor(theme.current.on_surface) else theme.current.on_surface);
-        var avatar_rect = win.RECT{ .left = avatar_left, .top = avatar_top, .right = avatar_left + 42, .bottom = avatar_top + 42 };
+        var avatar_rect = win.RECT{ .left = avatar_left, .top = avatar_top, .right = avatar_left + px(a, theme.avatar_size), .bottom = avatar_top + px(a, theme.avatar_size) };
         _ = text_draw.drawText(item.hDC, chat.name.ptr(), initial_length, &avatar_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     }
 
     const name_text = chat.name.slice();
     if (containsEmoji(name_text)) {
-        _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
+        _ = win.SelectObject(item.hDC, @ptrCast(a.font_row.?));
         _ = win.SetTextColor(item.hDC, row_text);
-        const line_h = textLineHeight(item.hDC, a.font_bold.?);
-        const name_y = item.rcItem.top + px(a, 10) + @divTrunc(px(a, 24) - line_h, 2);
-        _ = drawMixedLine(item.hDC, a.font_bold.?, a.font_emoji orelse a.font_bold.?, name_text, item.rcItem.left + px(a, 66), name_y);
+        const line_h = textLineHeight(item.hDC, a.font_row.?);
+        const name_y = item.rcItem.top + px(a, 4) + @divTrunc(px(a, 24) - line_h, 2);
+        _ = drawMixedLine(item.hDC, a.font_row.?, a.font_emoji orelse a.font_row.?, name_text, item.rcItem.left + px(a, 66), name_y);
     }
 
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
@@ -14534,16 +14491,20 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
             else => unreachable,
         }, 1, &badge_text, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     }
-    _ = win.SelectObject(item.hDC, @ptrCast(a.font_bold.?));
+    _ = win.SelectObject(item.hDC, @ptrCast(a.font_row.?));
     _ = win.SetTextColor(item.hDC, row_text);
-    var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 34) };
+    var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 4), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 28) };
     _ = text_draw.drawText(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, row_muted);
-    var time_rect = win.RECT{ .left = item.rcItem.right - px(a, 52), .top = item.rcItem.top + px(a, 10), .right = item.rcItem.right - px(a, 10), .bottom = item.rcItem.top + px(a, 32) };
+    _ = win.SelectObject(item.hDC, @ptrCast(a.font_time.?));
+    if (chat.unread or chat.unread_count > 0) _ = win.SetTextColor(item.hDC, row_primary);
+    var time_rect = win.RECT{ .left = item.rcItem.right - px(a, 52), .top = item.rcItem.top + px(a, 4), .right = item.rcItem.right - px(a, 4), .bottom = item.rcItem.top + px(a, 32) };
     _ = text_draw.drawText(item.hDC, chat.time.ptr(), @intCast(chat.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
+    _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
+    _ = win.SetTextColor(item.hDC, row_muted);
     const marker = archiveMarker(a, chat);
-    var kind_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, if (marker != null) @as(i32, 130) else 42), .bottom = item.rcItem.top + px(a, 56) };
+    var kind_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 28), .right = item.rcItem.right - px(a, if (marker != null) @as(i32, 130) else 42), .bottom = item.rcItem.top + px(a, theme.chat_row_height - 4) };
     const draft_text = a.draft_store.get(chat_key.of(chat));
     if (draft_text.len > 0) {
         if (drafts.label(a.allocator, draft_text)) |label| {
@@ -14579,7 +14540,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     }
     if (marker) |text| {
         _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else row_primary);
-        var marker_rect = win.RECT{ .left = item.rcItem.right - px(a, 128), .top = item.rcItem.top + px(a, 35), .right = item.rcItem.right - px(a, 40), .bottom = item.rcItem.top + px(a, 56) };
+        var marker_rect = win.RECT{ .left = item.rcItem.right - px(a, 128), .top = item.rcItem.top + px(a, 28), .right = item.rcItem.right - px(a, 40), .bottom = item.rcItem.top + px(a, theme.chat_row_height - 4) };
         _ = text_draw.drawText(item.hDC, text, -1, &marker_rect, win.DT_RIGHT | win.DT_SINGLELINE);
         _ = win.SetTextColor(item.hDC, row_muted);
     }
@@ -14629,7 +14590,7 @@ fn transcriptRender(hdc: win.HDC, a: *App, message: *const Message, shown: c_int
                     var content = line;
                     while (content.len > 0 and content[0] == '#') content = content[1..];
                     while (content.len > 0 and content[0] == ' ') content = content[1..];
-                    _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
+                    _ = win.SelectObject(hdc, @ptrCast(a.font_title.?));
                     _ = win.SetTextColor(hdc, theme.current.primary);
                     if (content.len > 0) y += wrapMixedSink(hdc, a, content.ptr, @intCast(content.len), width, draw, left, y, null) + 6;
                 },
@@ -14701,18 +14662,6 @@ fn quoteBlockHeight(hdc: win.HDC, a: *App, message: *const Message, width: i32) 
         name_height = textLineHeight(hdc, font);
     }
     return px(a, quote_vertical_pad) + name_height + quoteBodyHeight(hdc, a, message.quote.slice(), quoteTextWidth(a, width)) + px(a, quote_after_gap);
-}
-
-fn quoteBlockTint(base: win.COLORREF, toward: u8) win.COLORREF {
-    const r: i32 = @intCast(base & 0xff);
-    const g: i32 = @intCast((base >> 8) & 0xff);
-    const b: i32 = @intCast((base >> 16) & 0xff);
-    const t: i32 = toward;
-    return rgb(
-        @intCast(@divTrunc(r * 88 + t * 12, 100)),
-        @intCast(@divTrunc(g * 88 + t * 12, 100)),
-        @intCast(@divTrunc(b * 88 + t * 12, 100)),
-    );
 }
 
 fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: bool) u64 {
@@ -15000,11 +14949,10 @@ fn drawQuoteBlock(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     if (message.quote_sender.len > 0) name_height = textLineHeight(hdc, font);
     const block_bottom = top + px(a, quote_vertical_pad) + name_height + body_height;
 
-    const tint = if (message.from_me) quoteBlockTint(theme.current.primary_container, 0) else quoteBlockTint(theme.current.surface_container_high, 255);
-    smooth.fillRoundRect(shapes, .{ .left = block_left, .top = top, .right = block_right, .bottom = block_bottom }, 8, 8, tint);
+    const tint = theme.code_inline;
+    smooth.fillRoundRect(shapes, .{ .left = block_left, .top = top, .right = block_right, .bottom = block_bottom }, px(a, theme.radius_inline * 2), px(a, theme.radius_inline * 2), tint);
 
-    const accent = senderColorFor(message.quote_sender_jid.slice());
-    const accent_color = rgb(accent.r, accent.g, accent.b);
+    const accent_color = theme.quote_bar;
     if (win.CreateSolidBrush(accent_color)) |bar_brush| {
         var bar = win.RECT{ .left = block_left, .top = top + @divTrunc(px(a, quote_vertical_pad), 2), .right = block_left + px(a, quote_bar_width), .bottom = block_bottom - @divTrunc(px(a, quote_vertical_pad), 2) };
         _ = win.FillRect(hdc, &bar, bar_brush);
@@ -15016,7 +14964,7 @@ fn drawQuoteBlock(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     const text_right = block_right - px(a, quote_text_gap);
     var cursor = top + @divTrunc(px(a, quote_vertical_pad), 2);
     if (message.quote_sender.len > 0) {
-        _ = win.SetTextColor(hdc, accent_color);
+        _ = win.SetTextColor(hdc, theme.current.on_surface);
         var name_rect = win.RECT{ .left = text_left, .top = cursor, .right = text_right, .bottom = cursor + name_height };
         _ = text_draw.drawText(hdc, message.quote_sender.ptr(), @intCast(message.quote_sender.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
         cursor += name_height;
@@ -15146,7 +15094,8 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         var height = measureMessageStore(hdc, a, message, bubble_width, show_sender);
         y -= height - estimated_height;
         if (y > client.bottom or y + height < client.top) continue;
-        const left: i32 = if (message.from_me) client.right - bubble_width - px(a, 24) else if (in_group) px(a, 62) else px(a, 24);
+        const column_inset = @max(0, @divTrunc(available_width - px(a, theme.chat_column_width), 2));
+        const left: i32 = column_inset + if (message.from_me) @min(available_width, px(a, theme.chat_column_width)) - bubble_width - px(a, 24) else if (in_group) px(a, 62) else px(a, 24);
         const right = left + bubble_width;
         const reaction_size = reactionChipSize(hdc, a, message, bubble_width);
         const replies_height = threadSummaryHeight(a, message);
@@ -15166,7 +15115,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             }
             line.buf[line.len] = 0;
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-            _ = win.SetTextColor(hdc, rgb(138, 138, 138));
+            _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             var line_rect = message.quote_hit;
             _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &line_rect, @intCast((if (message.from_me) win.DT_RIGHT else win.DT_LEFT) | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX));
             y += reply_height;
@@ -15191,10 +15140,11 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = text_draw.drawText(hdc, last_time.ptr(), @intCast(last_time.len), &line_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
         }
         const selected = messageMarked(a, message.id.slice()) or if (a.selected_message) |selected_index| selected_index == index else false;
-        smooth.fillRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), if (message.from_me) theme.current.primary_container else theme.current.surface_container_high);
+        smooth.fillRoundRectGradient(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), if (message.from_me) theme.current.primary_container else theme.current.surface_container_high, if (message.from_me) theme.bubble_own_bottom else theme.bubble_other_bottom);
+        smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), if (message.from_me) theme.bubble_own_outline else theme.current.outline, 1);
         if (selected) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), theme.current.primary, px(a, 2));
 
-        if (std.mem.eql(u8, a.reply_to.slice(), message.id.slice()) or std.mem.eql(u8, a.reply_flash.slice(), message.id.slice())) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), rgb(74, 74, 74), px(a, 2));
+        if (std.mem.eql(u8, a.reply_to.slice(), message.id.slice()) or std.mem.eql(u8, a.reply_flash.slice(), message.id.slice())) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), theme.quote_bar, px(a, 2));
 
         var text_top = y + messageHeaderHeight(hdc, a, show_sender) - px(a, 6);
         if (show_sender) {
@@ -15271,7 +15221,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
             } else {
                 const playing_now = active and a.audio_state == .playing;
-                const glyph_brush = win.CreateSolidBrush(if (theme.choice == .amoled) theme.amoled_button_text else theme.current.on_primary) orelse continue;
+                const glyph_brush = win.CreateSolidBrush(if (theme.choice == .amoled) theme.send_text else theme.current.on_primary) orelse continue;
                 const previous_brush = win.SelectObject(hdc, glyph_brush);
                 const previous_pen = win.SelectObject(hdc, win.GetStockObject(win.NULL_PEN));
                 smooth.fillEllipse(&shapes, .{ .left = left + px(a, 12), .top = strip_top + px(a, 4), .right = left + px(a, 40), .bottom = strip_top + px(a, 32) }, if (theme.choice == .amoled) theme.amoled_send else theme.current.primary);
@@ -16142,7 +16092,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             text_draw.reset();
             recreateFonts(a);
             createTooltips(a, hwnd);
-            if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, px(a, 64));
+            if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, px(a, theme.chat_row_height));
             a.compose_dragged = loadComposeDragged(hwnd);
             var rc_create: win.RECT = undefined;
             _ = win.GetClientRect(hwnd, &rc_create);
@@ -16221,7 +16171,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             text_draw.reset();
             recreateFonts(a);
-            if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, px(a, 64));
+            if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, px(a, theme.chat_row_height));
             const suggested: *const win.RECT = @ptrFromInt(@as(usize, @bitCast(lparam)));
             _ = win.SetWindowPos(hwnd, null, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top, win.SWP_NOZORDER | win.SWP_NOACTIVATE);
             var rc_dpi: win.RECT = undefined;
@@ -16241,7 +16191,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             defer surface.deinit();
             const hdc = surface.hdc;
             _ = win.FillRect(hdc, &paint.rcPaint, a.brush_bg.?);
-            const left_width = std.math.clamp(@divTrunc(client.right, 3), px(a, 280), px(a, 390));
+            const left_width = @min(px(a, theme.sidebar_width), @divTrunc(client.right, 2));
             var left_rect = win.RECT{ .left = 0, .top = 0, .right = left_width, .bottom = client.bottom };
             _ = win.FillRect(hdc, &left_rect, a.brush_sidebar.?);
             if (win.CreateSolidBrush(theme.current.sidebar_divider)) |divider_brush| {
@@ -16600,13 +16550,13 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             for ([_]?win.HWND{ a.thread_list, a.thread_compose }) |control| {
                 if (control != null and control_value == @intFromPtr(control.?)) {
-                    _ = win.SetBkColor(hdc, theme.current.surface_container_high);
+                    _ = win.SetBkColor(hdc, theme.current.surface_container);
                     return @bitCast(@intFromPtr(a.brush_raised.?));
                 }
             }
             for ([_]?win.HWND{a.compose}) |control| {
                 if (control != null and control_value == @intFromPtr(control.?)) {
-                    _ = win.SetBkColor(hdc, theme.current.surface_container_high);
+                    _ = win.SetBkColor(hdc, theme.current.surface_container);
                     return @bitCast(@intFromPtr(a.brush_raised.?));
                 }
             }
@@ -16692,6 +16642,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.font_reply_icon) |font| _ = win.DeleteObject(font);
             if (a.font_bold) |font| _ = win.DeleteObject(font);
             if (a.font_underline) |font| _ = win.DeleteObject(font);
+            if (a.font_icon) |font| _ = win.DeleteObject(font);
+            if (a.font_title) |font| _ = win.DeleteObject(font);
+            if (a.font_row) |font| _ = win.DeleteObject(font);
+            if (a.font_time) |font| _ = win.DeleteObject(font);
+
             if (a.brush_bg) |brush| _ = win.DeleteObject(brush);
             if (a.brush_panel) |brush| _ = win.DeleteObject(brush);
             if (a.brush_sidebar) |brush| _ = win.DeleteObject(brush);
@@ -17558,13 +17513,20 @@ fn saveVerificationTextMetrics(a: *App, hdc: win.HDC, message: *const Message, x
     var canvas: win.RECT = undefined;
     _ = win.GetClientRect(canvas_hwnd, &canvas);
     const dpi: i32 = @intCast(a.dpi);
+    var icon_face: [64]u16 = @splat(0);
+    const previous_font = win.SelectObject(hdc, @ptrCast(a.font_icon.?));
+    _ = win.GetTextFaceW(hdc, icon_face.len, &icon_face);
+    _ = win.SelectObject(hdc, previous_font);
+    const icon_name = std.unicode.utf16LeToUtf8Alloc(a.allocator, std.mem.sliceTo(&icon_face, 0)) catch return;
+    defer a.allocator.free(icon_name);
     const data = std.json.Stringify.valueAlloc(a.allocator, .{
         .text = text,
         .dpi = dpi,
         .scale = a.font_scale,
         .directwrite = text_draw.directwrite,
-        .body = .{ .px = -scaledFontHeight(17, a.font_scale, dpi), .weight = @import("font_config.zig").body_weight, .line_height = textLineHeight(hdc, a.font.?) },
-        .heading = .{ .px = -scaledFontHeight(16, a.font_scale, dpi), .weight = win.FW_SEMIBOLD, .line_height = textLineHeight(hdc, a.font_bold.?) },
+        .icon_face = icon_name,
+        .body = .{ .px = -scaledFontHeight(theme.type_body, a.font_scale, dpi), .weight = @import("font_config.zig").body_weight, .line_height = textLineHeight(hdc, a.font.?) },
+        .heading = .{ .px = -scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), .weight = win.FW_SEMIBOLD, .line_height = textLineHeight(hdc, a.font_bold.?) },
         .canvas = .{ .width = canvas.right, .height = canvas.bottom },
         .paragraph = .{ .x = origin.x, .y = origin.y, .width = width, .height = height },
         .foreground = theme.current.on_surface,
@@ -18178,7 +18140,7 @@ fn updateCardNotesHeight(a: *const App) i32 {
     defer _ = win.SelectObject(hdc, old_font);
     const notes = utf8ToWide(a.allocator, pending.notes) catch return 0;
     defer a.allocator.free(notes);
-    const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 390));
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(a.compose_client_width, 2));
     var rect = win.RECT{ .left = 0, .top = 0, .right = left_width - px(a, 48), .bottom = 0 };
     _ = text_draw.drawText(hdc, notes.ptr, @intCast(notes.len), &rect, win.DT_CALCRECT | win.DT_WORDBREAK | win.DT_NOPREFIX);
     return rect.bottom - rect.top;
@@ -18194,7 +18156,7 @@ fn updateCardSpan(a: *const App) i32 {
 }
 
 fn updateCardRect(a: *const App) win.RECT {
-    const left_width = std.math.clamp(@divTrunc(a.compose_client_width, 3), px(a, 280), px(a, 390));
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(a.compose_client_width, 2));
     const bottom = a.compose_client_height - px(a, 26) - px(a, 6);
     return .{ .left = px(a, 12), .top = bottom - updateCardHeight(a), .right = left_width - px(a, 12), .bottom = bottom };
 }
@@ -18352,7 +18314,8 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     const pending_tag = if (a.update_pending) |pending| pending.tag else "";
     const pending_notes = if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) "" else if (a.update_pending) |pending| pending.notes else "";
     const card = updateCardRect(a);
-    paintRoundedButton(a, shapes, hdc, card, theme.current.surface_container_high, theme.current.on_surface, a.font.?, if (theme.choice == .amoled) theme.current.outline_variant else theme.current.secondary_container, &[_]u16{});
+    smooth.fillRoundRect(shapes, card, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container_low);
+    smooth.strokeRoundRect(shapes, card, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline, 1);
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
 
     var title_buf: [64]u8 = undefined;
@@ -18419,7 +18382,7 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     drawAscii(hdc, &close_rc, "x", win.DT_SINGLELINE | win.DT_VCENTER | win.DT_CENTER | win.DT_NOPREFIX);
 
     const label: []const u16 = if (failed) std.unicode.utf8ToUtf16LeStringLiteral("Retry") else std.unicode.utf8ToUtf16LeStringLiteral("Update now");
-    paintRoundedButton(a, shapes, hdc, updateCardButtonRect(a, card), if (theme.choice == .amoled) theme.amoled_send else theme.current.primary, if (theme.choice == .amoled) theme.amoled_button_text else theme.current.on_primary, a.font_bold.?, if (theme.choice == .amoled) theme.current.outline else null, label);
+    paintRoundedButton(a, shapes, hdc, updateCardButtonRect(a, card), if (theme.choice == .amoled) theme.amoled_send else theme.current.primary, if (theme.choice == .amoled) theme.send_text else theme.current.on_primary, a.font_bold.?, if (theme.choice == .amoled) theme.current.outline else null, label);
 }
 
 fn startUpdateCheck(hwnd: win.HWND, manual: bool) void {
@@ -20236,7 +20199,7 @@ fn threadLatestReply(a: *const App, parent: *const Message) []const u8 {
 }
 
 fn threadSummaryHeight(a: *App, message: *const Message) i32 {
-    return if (slackThreadsEnabled(a) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 40), @as(i32, @intCast(@abs(scaledFontHeight(13, a.font_scale, @intCast(a.dpi))))) * 2 + px(a, 8)) else 0;
+    return if (slackThreadsEnabled(a) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 40), @as(i32, @intCast(@abs(scaledFontHeight(theme.type_preview, a.font_scale, @intCast(a.dpi))))) * 2 + px(a, 8)) else 0;
 }
 
 fn threadPanelWidth(a: *const App, width: i32, left_width: i32) i32 {

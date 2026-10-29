@@ -278,6 +278,8 @@ pub fn build(b: *std.Build) void {
     b.installFile("assets/IBMPlexSans-Regular.ttf", "bin/IBMPlexSans-Regular.ttf");
     b.installFile("assets/IBMPlexSans-Medium.ttf", "bin/IBMPlexSans-Medium.ttf");
     b.installFile("assets/IBMPlexSans-SemiBold.ttf", "bin/IBMPlexSans-SemiBold.ttf");
+    b.installFile("assets/IBMPlexSans-Italic.ttf", "bin/IBMPlexSans-Italic.ttf");
+    b.installFile("assets/IBMPlexMono-Regular.ttf", "bin/IBMPlexMono-Regular.ttf");
     b.installFile("assets/IBMPlexSans-Bold.ttf", "bin/IBMPlexSans-Bold.ttf");
     b.installFile("assets/IBM-Plex-LICENSE.txt", "bin/IBM-Plex-LICENSE.txt");
 
@@ -661,7 +663,6 @@ pub fn build(b: *std.Build) void {
     const composer_layout_start = std.mem.indexOf(u8, composer_layout_source, "    const left_width =") orelse @panic("Missing composer layout body");
     const composer_button_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/composer_button_test.zig"),
-        sourceSection("fn drawDictationIcon(", "fn drawComposerButton("),
         "fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {\n",
         composer_paint_source[composer_paint_start..],
         "fn layoutComposer(a: *App, width: i32, height: i32) void {\n",

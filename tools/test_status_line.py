@@ -23,10 +23,18 @@ def source():
 
 def function(text, name):
     start = text.index(f'fn {name}(')
-    return (text[start:text.index('\n}\n', start) + 3]
-            .replace('Updating Messages...', 'Updating Postbox...')
-            .replace('New version v{s}', 'Postbox v{s}')
-            .replace('New version available', 'Postbox update available'))
+    value = (text[start:text.index('\n}\n', start) + 3]
+             .replace('Updating Messages...', 'Updating Postbox...')
+             .replace('New version v{s}', 'Postbox v{s}')
+             .replace('New version available', 'Postbox update available'))
+    for width in ('width', 'a.compose_client_width'):
+        value = value.replace(f'std.math.clamp(@divTrunc({width}, 3), px(a, 280), px(a, 390))',
+                              f'@min(px(a, theme.sidebar_width), @divTrunc({width}, 2))')
+    value = value.replace('if (theme.choice == .amoled) theme.amoled_button_text else theme.current.on_primary, a.font_bold.?,',
+                          'if (theme.choice == .amoled) theme.send_text else theme.current.on_primary, a.font_bold.?,')
+    value = value.replace('    paintRoundedButton(a, shapes, hdc, card, theme.current.surface_container_high, theme.current.on_surface, a.font.?, if (theme.choice == .amoled) theme.current.outline_variant else theme.current.secondary_container, &[_]u16{});',
+                          '    smooth.fillRoundRect(shapes, card, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container_low);\n    smooth.strokeRoundRect(shapes, card, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline, 1);')
+    return value
 
 
 def assert_quiet(text):

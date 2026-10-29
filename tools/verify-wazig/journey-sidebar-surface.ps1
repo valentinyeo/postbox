@@ -1,6 +1,6 @@
 $records = @()
-foreach ($themeName in @('amoled', 'green')) {
-    Invoke-PaletteCommand $session $(if ($themeName -eq 'amoled') { 'Theme: AMOLED black' } else { 'Theme: Green' })
+foreach ($themeName in @('amoled')) {
+    Invoke-PaletteCommand $session $(if ($ExpectedProduct -eq 'Wazig') { 'Theme: AMOLED black' } else { 'Theme: Graphite' })
     $null = Wait-Until { (Read-Control $session status).theme -ceq $themeName } 'sidebar theme applied'
     Invoke-PaletteCommand $session 'Search chats'
     Send-Keys $session '{ESC}'
@@ -26,12 +26,14 @@ foreach ($themeName in @('amoled', 'green')) {
     $canvas = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $canvasCondition)
     Assert-That ($null -ne $canvas) 'Sidebar comparison canvas missing'
     $metricsPath = Join-Path $messages 'text-metrics.json'
-    $null = Wait-Until {
+    $metrics = Wait-Until {
         if (-not (Test-Path $metricsPath)) { return $false }
         $metrics = Get-Content $metricsPath -Raw | ConvertFrom-Json
         $bounds = $canvas.Current.BoundingRectangle
-        $metrics.canvas.width -eq [int]$bounds.Width -and $metrics.canvas.height -eq [int]$bounds.Height
+        if ($metrics.canvas.width -eq [int]$bounds.Width -and $metrics.canvas.height -eq [int]$bounds.Height) { return $metrics }
+        return $false
     } 'sidebar fixture message painted'
+    if ($ExpectedProduct -eq 'Postbox') { Assert-That ($metrics.icon_face -ceq 'Segoe Fluent Icons') 'Shared Fluent icon font did not resolve' }
     $state = Read-Control $session status
     Assert-That ($state.chat_count -eq 2 -and $state.selected.id -ceq 'verify-alpha') 'Sidebar fixture selection changed'
     $desktop = [Windows.Forms.SystemInformation]::VirtualScreen
@@ -44,6 +46,7 @@ foreach ($themeName in @('amoled', 'green')) {
     $records += [ordered]@{
         theme = $themeName; dpi = $dpi; screenshot = "$name.png"
         client = @($x, $y, ($x + $client.Right), ($y + $client.Bottom))
+        canvas = @(([int]$canvas.Current.BoundingRectangle.Left - $desktop.Left), ([int]$canvas.Current.BoundingRectangle.Top - $desktop.Top), ([int]$canvas.Current.BoundingRectangle.Width), ([int]$canvas.Current.BoundingRectangle.Height))
         edge = $edge
         list = @(([int]$listBounds.Left - $desktop.Left), ([int]$listBounds.Top - $desktop.Top), ([int]$listBounds.Right - $desktop.Left), ([int]$listBounds.Bottom - $desktop.Top))
         composer = @(([int]$composerBounds.Left - $desktop.Left), ([int]$composerBounds.Top - $desktop.Top), ([int]$composerBounds.Right - $desktop.Left), ([int]$composerBounds.Bottom - $desktop.Top))

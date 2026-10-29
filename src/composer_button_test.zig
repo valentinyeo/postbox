@@ -11,10 +11,12 @@ const id_emoji = 1080;
 const State = enum { idle, recording, transcribing, ready, failed };
 const App = struct {
     dpi: i32 = 96,
+    font_scale: i32 = 82,
     last_dictation_state: State = .idle,
     btn_hover: [10]bool = @splat(false),
     brush_raised: ?usize = 1,
     font_bold: ?usize = 2,
+    font_icon: ?usize = 4,
     font_emoji: ?usize = 3,
     dictate: ?usize = 0,
     voice_btn: ?usize = 1,
@@ -106,9 +108,9 @@ fn section(start: []const u8, end: []const u8) []const u8 {
     return source[begin..finish];
 }
 
-test "IGSH-534 Dictate draws no text label and uses a distinct smooth glyph in every state" {
-    defer theme.set(.green);
-    for ([_]theme.Choice{ .green, .amoled }) |choice| {
+test "IGSH-534 Dictate draws no text label and uses the shared Fluent dictation glyph in every state" {
+    defer theme.set(.amoled);
+    for ([_]theme.Choice{.amoled}) |choice| {
         theme.set(choice);
         for ([_]State{ .idle, .recording, .transcribing, .ready, .failed }) |state| {
             for ([_]i32{ 96, 144, 192 }) |dpi| {
@@ -116,11 +118,10 @@ test "IGSH-534 Dictate draws no text label and uses a distinct smooth glyph in e
                 var item = win.DRAWITEMSTRUCT{};
                 painted = .{};
                 drawComposerButton(&app, &item);
-                try std.testing.expectEqual(@as(usize, 0), painted.label.len);
-                try std.testing.expectEqual(@as(usize, 1), painted.capsules);
-                try std.testing.expectEqual(@as(usize, 1), painted.arcs);
-                try std.testing.expectEqual(@as(usize, 5), painted.lines);
-                try std.testing.expectEqual(painted.foreground, painted.icon_color);
+                try std.testing.expectEqual(@as(usize, 1), painted.label.len);
+                try std.testing.expectEqual(@as(u16, 0xE720), painted.label[0]);
+                try std.testing.expectEqual(@as(usize, 0), painted.arcs);
+                try std.testing.expectEqual(@as(usize, 0), painted.lines);
             }
         }
     }
@@ -174,9 +175,9 @@ test "IGSH-534 Dictate keeps its accessible name and shortcut tooltip throughout
     try std.testing.expect(std.mem.indexOf(u8, button_source, "TTM_UPDATETIPTEXTW") == null);
 }
 
-test "IGSH-534 Dictate retains theme hover pressed focus and recording colours and leaves Send unchanged" {
-    defer theme.set(.green);
-    for ([_]theme.Choice{ .green, .amoled }) |choice| {
+test "IGSH-534 Dictate retains theme hover pressed focus and recording colours and keeps the shared Send glyph" {
+    defer theme.set(.amoled);
+    for ([_]theme.Choice{.amoled}) |choice| {
         theme.set(choice);
         for ([_]bool{ false, true }) |hover| {
             for ([_]u32{ 0, win.ODS_SELECTED, win.ODS_FOCUS, win.ODS_SELECTED | win.ODS_FOCUS }) |flags| {
@@ -187,9 +188,9 @@ test "IGSH-534 Dictate retains theme hover pressed focus and recording colours a
                     painted = .{};
                     drawComposerButton(&app, &item);
                     const active = flags & win.ODS_SELECTED != 0 or state == .recording or state == .transcribing;
-                    const face = if (choice == .amoled) (if (active) theme.amoled_button_pressed else if (hover) theme.amoled_button_hover else theme.current.surface_container_high) else if (active) theme.current.primary_container else if (hover) theme.current.surface_container_highest else theme.current.surface_container_high;
+                    const face = if (choice == .amoled) (if (active) theme.amoled_button_pressed else if (hover) theme.amoled_button_hover else theme.amoled_button) else if (active) theme.current.primary_container else if (hover) theme.current.surface_container_highest else theme.current.surface_container_high;
                     try std.testing.expectEqual(face, painted.face);
-                    try std.testing.expectEqual(if (choice == .amoled) theme.amoled_button_text else if (active) theme.current.on_primary_container else theme.current.on_surface, painted.foreground);
+                    try std.testing.expectEqual(if (choice == .amoled) (if (active or hover) theme.amoled_button_text else theme.current.on_surface_variant) else if (active) theme.current.on_primary_container else theme.current.on_surface, painted.foreground);
                     const frame: ?u32 = if (flags & win.ODS_FOCUS != 0) theme.current.primary else if (choice == .amoled and hover) theme.current.outline_variant else null;
                     try std.testing.expectEqual(frame, painted.frame);
                 }
@@ -199,9 +200,9 @@ test "IGSH-534 Dictate retains theme hover pressed focus and recording colours a
         var send = win.DRAWITEMSTRUCT{ .CtlID = id_send };
         painted = .{};
         drawComposerButton(&app, &send);
-        try std.testing.expectEqual(@as(usize, 0), painted.label.len);
+        try std.testing.expectEqual(@as(usize, 1), painted.label.len);
         try std.testing.expectEqual(@as(usize, 0), painted.capsules + painted.arcs);
-        try std.testing.expectEqual(@as(usize, 2), painted.lines);
+        try std.testing.expectEqual(@as(u16, 0xE724), painted.label[0]);
         try std.testing.expectEqual(if (choice == .amoled) theme.amoled_send else theme.current.primary, painted.face);
     }
 }

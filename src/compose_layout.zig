@@ -50,7 +50,8 @@ pub const Layout = struct {
 pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool) Layout {
     const margin = @min(scale(14, dpi), @divTrunc(@max(0, pane.right - pane.left), 2));
     const bottom = @max(pane.top, pane.bottom - scale(11, dpi));
-    const box = Rect{ .left = pane.left + margin, .top = @max(pane.top, bottom - edit_height), .right = pane.right - margin, .bottom = bottom };
+    const column_inset = @max(0, @divTrunc(pane.right - pane.left - scale(@import("theme.zig").chat_column_width, dpi), 2));
+    const box = Rect{ .left = pane.left + column_inset + margin, .top = @max(pane.top, bottom - edit_height), .right = pane.right - column_inset - margin, .bottom = bottom };
     const width = @max(0, box.right - box.left);
     const height = @max(0, box.bottom - box.top);
     const padding = @min(scale(16, dpi), @divTrunc(width, 12));

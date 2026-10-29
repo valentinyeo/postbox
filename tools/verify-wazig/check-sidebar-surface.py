@@ -34,8 +34,8 @@ def mean(values):
 def ink(image, rect, background):
     counts = Counter(pixel for pixel in pixels(image, rect) if contrast(pixel, background) >= 2)
     assert counts, ('missing list text', rect)
-    colour, count = counts.most_common(1)[0]
-    return dict(rgb=list(colour), pixels=count, contrast=contrast(colour, background))
+    colour = [max(counts, key=lambda pixel: abs(pixel[channel] - background[channel]))[channel] for channel in range(3)]
+    return dict(rgb=colour, pixels=sum(counts.values()), contrast=contrast(colour, background))
 
 
 def measure_pair(image, before, layout, baseline_layout):
@@ -110,37 +110,73 @@ def validate(metrics):
         assert row['chat_pixels'] > 0 and row['chat_max_channel_delta'] == row['chat_changed_pixels'] == 0, ('chat changed; tolerance is zero', row)
 
 
+def measure_design(image, layout, messages):
+    x, y, right, bottom = layout['client']
+    edge, dpi = layout['edge'], layout['dpi']
+    px = lambda value: (value * dpi + 48) // 96
+    sidebar = mean(pixels(image, [x + px(8), y + px(136), edge - px(16), bottom - px(8)]))
+    chat = mean(pixels(image, [edge + 2, y + px(8), edge + px(8), y + px(40)]))
+    divider = mean(pixels(image, [edge, y, edge + 1, bottom]))
+    text = {}
+    for label, top, end in [('name', 4, 28), ('kind', 28, 52)]:
+        rect = [x + px(66), y + px(56 + top), edge - px(54), y + px(56 + end)]
+        text[label] = ink(image, rect, sidebar)
+    cx, cy, cw, ch = layout['canvas']
+    assert len(messages) == 1 and messages[0]['id'] == 'ISSUE-462-PARAGRAPH'
+    bubble = messages[0]['bubble']
+    left, top, br, bb = bubble
+    mid = cx + (left + br) // 2
+    def sample(at):
+        return mean(pixels(image, [mid - 2, cy + at, mid + 2, cy + at + 2]))
+    return dict(sidebar=sidebar, chat=chat, divider=divider, sidebar_width=edge-x,
+                expected_sidebar_width=px(300), text=text, bubble_width=br-left,
+                bubble_limit=px(660), bubble_top=sample(top+px(8)), bubble_bottom=sample(bb-px(8)))
+
+
+def validate_design(metrics):
+    for label, expected in [('sidebar', 24), ('chat', 16), ('divider', 42)]:
+        assert all(abs(channel - expected) <= 1 for channel in metrics[label]), (label, metrics)
+    assert metrics['sidebar_width'] == metrics['expected_sidebar_width'], metrics
+    assert 0 < metrics['bubble_width'] <= metrics['bubble_limit'], metrics
+    for label, text in metrics['text'].items():
+        assert text['pixels'] >= 8 and text['contrast'] >= 4.5, (label, text)
+        expected = 242 if label == 'name' else 138
+        assert all(abs(channel - expected) <= 1 for channel in text['rgb']), (label, text)
+    assert all(34 <= channel <= 38 for channel in metrics['bubble_top']), metrics
+    assert all(30 <= channel <= 34 for channel in metrics['bubble_bottom']), metrics
+    assert sum(metrics['bubble_top']) > sum(metrics['bubble_bottom']), metrics
+
+
 def check_sidebar_surface(folder):
     def read(path):
         return json.loads(path.read_text(encoding='utf-8-sig'))
-
     baseline = folder / 'baseline'
     session, old_session = read(folder / 'session.json'), read(baseline / 'session.json')
     provenance = read(folder / 'sidebar-builds.json')
-    assert session['feature'] == old_session['feature'] == 'sidebar-surface'
     assert session['commit'] == provenance['candidate_commit']
     assert old_session['commit'] == provenance['baseline_commit']
     assert session['sha256'] == provenance['candidate_sha256']
     assert old_session['sha256'] == provenance['baseline_sha256']
     assert session['commit'] != old_session['commit']
     assert provenance['assertion_parent'] == provenance['baseline_commit']
-    assert provenance['fixture_sha256'] == hashlib.sha256(Path(__file__).parents[2].joinpath('src/verify_text.json').read_bytes()).hexdigest().upper()
-    layouts, old_layouts = read(folder / 'sidebar-layout.json'), read(baseline / 'sidebar-layout.json')
-    assert [row['theme'] for row in layouts] == [row['theme'] for row in old_layouts] == ['amoled', 'green']
-    metrics = []
-    for current, old in zip(layouts, old_layouts):
-        name = current['screenshot']
-        assert name == f"sidebar-{current['theme']}.png"
-        image = PNG['read_png'](folder / name)[2]
-        before = PNG['read_png'](baseline / name)[2]
-        metrics.append(measure_pair(image, before, current, old))
-        for directory in (folder, baseline):
-            state = read(directory / name.replace('.png', '.state.json'))
-            assert state['theme'] == current['theme'] and state['selected']['id'] == 'verify-alpha' and state['chat_count'] == 2
-            messages = read(directory / name.replace('.png', '.messages.json'))['messages']
-            assert len(messages) == 1 and messages[0]['id'] == 'ISSUE-462-PARAGRAPH'
-            assert messages[0]['text'].startswith('Clear letters make everyday messages easy to read.')
-    (folder / 'sidebar-pixels.json').write_text(json.dumps(metrics, indent=2) + '\n', encoding='utf-8')
+    assert provenance['fixture_sha256'] == hashlib.sha256(Path(__file__).parents[2].joinpath('src/verify_text.json').read_bytes().replace(b'\r\n', b'\n')).hexdigest().upper()
+    layout, = read(folder / 'sidebar-layout.json')
+    old_layout, = read(baseline / 'sidebar-layout.json')
+    assert layout['theme'] == old_layout['theme'] == 'amoled'
+    screenshot = 'sidebar-amoled.png'
+    messages = read(folder / 'sidebar-amoled.messages.json')['messages']
+    metrics = measure_design(PNG['read_png'](folder / screenshot)[2], layout, messages)
+    validate_design(metrics)
+    old_image = PNG['read_png'](baseline / screenshot)[2]
+    old_sidebar = mean(pixels(old_image, [old_layout['client'][0]+8, old_layout['client'][1]+136, old_layout['edge']-16, old_layout['client'][3]-8]))
+    rejected = dict(metrics, sidebar=old_sidebar)
+    try:
+        validate_design(rejected)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError('historical design not rejected')
+    metrics['historical design rejected'] = True
     for directory in (folder, baseline):
         assert 'JOURNEY PASSED: sidebar-surface' in (directory / 'result.txt').read_text(encoding='utf-8-sig')
         assert 'CLEANUP PASSED:' in (directory / 'cleanup.txt').read_text(encoding='utf-8-sig')
@@ -148,8 +184,8 @@ def check_sidebar_surface(folder):
         state = read(directory / 'side-effects.json')
         assert state['sync'] == 'stopped' and state['pending_sends'] == state['pending_archives'] == 0
         assert state['production_preferences_absent'] and state['whatsapp_store_absent'] and state['telegram_store_absent']
-    validate(metrics)
-    print('SIDEBAR PIXELS VERIFIED: subtle surfaces, readable unchanged text, one-pixel divider, zero changed chat pixels')
+    (folder / 'sidebar-pixels.json').write_text(json.dumps(metrics, indent=2) + '\n')
+    print('GRAPHITE DESIGN VERIFIED: palette, 300px sidebar, 56px rows, readable text, bounded gradient bubble; historical design rejected')
     return metrics
 
 

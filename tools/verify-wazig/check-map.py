@@ -61,7 +61,7 @@ for feature in features:
     ], feature
     assert f'feature={feature}' in entry
 source = (root / 'src/main.zig').read_text(encoding="utf-8")
-for label in ['Search chats', 'Next chat', 'Previous chat', 'Compose message', 'Keyboard shortcuts', 'Theme: Green', 'Make text larger', 'Reset text size', 'Show archived chats', 'Show inbox chats', 'Archive selected chat', 'Unarchive selected chat']:
+for label in ['Search chats', 'Next chat', 'Previous chat', 'Compose message', 'Keyboard shortcuts', 'Theme: Graphite', 'Make text larger', 'Reset text size', 'Show archived chats', 'Show inbox chats', 'Archive selected chat', 'Unarchive selected chat']:
     assert f'"{label}"' in source, label
 for removed in ['resurface_probe', 'enqueueResurfaceProbe', 'applyResurfaceProbe', 'command_keep_archived', 'toggleKeepArchived', 'Archive and keep archived', 'Allow resurfacing']:
     assert removed not in source, ('removed archive resurfacing path or command', removed)
@@ -461,10 +461,10 @@ caret = (root / 'tools/verify-wazig/caret.ps1').read_text(encoding='utf-8')
 assert entries['caret']['library'] == 'caret.ps1'
 assert entries['caret']['script'] == 'journey-caret.ps1'
 assert entries['caret']['pr'] and 'Invoke-CaretJourney $session $start $app' in runner
-for fragment in ['GetGUIThreadInfo', 'GetCaretBlinkTime', "Get-Edit $window '1032'", 'CopyFromScreen', 'Get-CaretOnOff', 'Test-CaretOracle', 'caret.json', 'Theme: Green', '$theme.on -ge 2 -and $theme.off -ge 2']:
+for fragment in ['GetGUIThreadInfo', 'GetCaretBlinkTime', "Get-Edit $window '1032'", 'CopyFromScreen', 'Get-CaretOnOff', 'Test-CaretOracle', 'caret.json', 'Theme: Graphite', '$theme.on -ge 2 -and $theme.off -ge 2']:
     assert fragment in caret, fragment
 assert '.claude/skills/verify-wazig/features/caret.md' in marker_namespace['PUBLIC_SKILL_PATHS']
-print('CARET MAP VERIFIED: system caret reading, timed composer frames, both themes and PR wiring')
+print('CARET MAP VERIFIED: system caret reading, timed composer frames, graphite reapply and PR wiring')
 
 passage = (root / 'tools/verify-wazig/passage-copy.ps1').read_text(encoding='utf-8')
 assert 'Invoke-PassageCopyJourney $session' in runner
@@ -532,11 +532,11 @@ assert sidebar['arguments'] == ['--verify-text-comparison']
 assert sidebar['validator'] == {'file': 'check-sidebar-surface.py', 'function': 'check_sidebar_surface'}
 sidebar_journey = (registry_path.parent / sidebar['script']).read_text(encoding='utf-8')
 sidebar_validator = (registry_path.parent / sidebar['validator']['file']).read_text(encoding='utf-8')
-for required in ["@('amoled', 'green')", 'BoundingRectangle', 'GetDpiForWindow', 'ClientToScreen', 'sidebar-layout.json', 'Save-Screen', 'text-metrics.json', "'Search chats'", 'messages.json']:
+for required in ["@('amoled')", 'BoundingRectangle', 'GetDpiForWindow', 'ClientToScreen', 'sidebar-layout.json', 'Save-Screen', 'text-metrics.json', "'Search chats'", 'messages.json']:
     assert required in sidebar_journey, required
-for required in ['sidebar-pixels.json', 'sidebar-builds.json', 'baseline_commit', 'candidate_sha256', 'baseline_sha256', 'assertion_parent', 'fixture_sha256', 'measure_pair', 'validate(metrics)', "row['chat_max_channel_delta'] == row['chat_changed_pixels'] == 0"]:
+for required in ['sidebar-pixels.json', 'sidebar-builds.json', 'baseline_commit', 'candidate_sha256', 'baseline_sha256', 'assertion_parent', 'fixture_sha256', 'measure_design', 'validate_design', 'historical design rejected']:
     assert required in sidebar_validator, required
 for required in ['src/theme.zig', "if: matrix.feature == 'sidebar-surface'", 'test-sidebar-surface.py', 'git log --diff-filter=A --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1', 'sidebar-baseline-bin/bin', 'verification-evidence/baseline', 'sidebar-builds.json']:
     assert required in workflow, required
 assert '.claude/skills/verify-wazig/features/sidebar-surface.md' in marker_namespace['PUBLIC_SKILL_PATHS']
-print('verification skill map passed: sidebar screenshot pairs, historical baseline builds, pixel validator and both dark themes')
+print('verification skill map passed: sidebar screenshot pairs, historical baseline builds, pixel validator and approved graphite')

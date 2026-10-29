@@ -60,7 +60,7 @@ test "IGSH-461 AMOLED popup input keeps its raised fill and follows focus in bot
     for ([_]?win.HWND{ null, 2, 3, 2, null }) |focus| {
         win.focus = focus;
         paintPopupInput(&context, 1, 2);
-        try std.testing.expectEqual(theme.amoled.surface_container_high, smooth.fill.?);
+        try std.testing.expectEqual(theme.amoled.surface_container, smooth.fill.?);
         try std.testing.expectEqual(if (focus == 2) theme.amoled.primary else theme.amoled.outline, smooth.border.?);
         try std.testing.expectEqualDeep(win.RECT{ .left = 6, .top = 16, .right = 114, .bottom = 52 }, smooth.bounds.?);
     }
@@ -73,17 +73,6 @@ test "IGSH-461 missing popup input is not painted" {
     smooth.border = null;
     const context = smooth.Context{};
     paintPopupInput(&context, 1, null);
-    try std.testing.expectEqual(@as(?u32, null), smooth.fill);
-    try std.testing.expectEqual(@as(?u32, null), smooth.border);
-}
-
-test "IGSH-461 Green popup inputs keep their native appearance" {
-    theme.set(.green);
-    defer theme.set(.amoled);
-    smooth.fill = null;
-    smooth.border = null;
-    const context = smooth.Context{};
-    paintPopupInput(&context, 1, 2);
     try std.testing.expectEqual(@as(?u32, null), smooth.fill);
     try std.testing.expectEqual(@as(?u32, null), smooth.border);
 }

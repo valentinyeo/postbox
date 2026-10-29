@@ -47,7 +47,7 @@ pub const Request = struct {
 pub const CommandInfo = struct { cmd: Command, usage: []const u8, summary: []const u8 };
 
 pub const commands = [_]CommandInfo{
-    .{ .cmd = .theme, .usage = "theme <green|amoled>", .summary = "switch and save the app theme without focusing it" },
+    .{ .cmd = .theme, .usage = "theme <amoled>", .summary = "switch and save the app theme without focusing it" },
     .{ .cmd = .status, .usage = "status", .summary = "version, theme, current account view and order, selected chat, sync state, pending sends, search text, cumulative surface paint counters" },
     .{ .cmd = .chats, .usage = "chats [--json] [--messenger all|whatsapp|slack|telegram|signal] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
     .{ .cmd = .search, .usage = "search <text>", .summary = "set the sidebar search text (\"\" clears it)" },
@@ -130,8 +130,8 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
     const items = positional.items;
     switch (cmd) {
         .theme => {
-            if (items.len != 1) return usage(message, "theme needs green or amoled");
-            request.theme = std.meta.stringToEnum(theme.Choice, items[0]) orelse return usage(message, "theme needs green or amoled");
+            if (items.len != 1) return usage(message, "theme needs amoled");
+            request.theme = std.meta.stringToEnum(theme.Choice, items[0]) orelse return usage(message, "theme needs amoled");
         },
         .status, .chats => if (items.len != 0) return usage(message, "unexpected argument"),
         .search => {
@@ -388,15 +388,15 @@ test "help lists every command and says nothing sends" {
     try std.testing.expectEqual(@typeInfo(Command).@"enum".fields.len, commands.len);
 }
 
-test "theme accepts both choices and rejects invalid or missing choices" {
-    for ([_]theme.Choice{ .green, .amoled }) |choice| {
+test "theme accepts the graphite choice and rejects invalid or missing choices" {
+    for ([_]theme.Choice{.amoled}) |choice| {
         const request = try parseForTest(&.{ "theme", @tagName(choice) });
         try std.testing.expectEqual(Command.theme, request.cmd);
         try std.testing.expectEqual(@as(?theme.Choice, choice), request.theme);
     }
     var message: []const u8 = "";
     try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{ "theme", "purple" }, &message));
-    try std.testing.expectEqualStrings("theme needs green or amoled", message);
+    try std.testing.expectEqualStrings("theme needs amoled", message);
     try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{"theme"}, &message));
     try std.testing.expectError(error.Usage, parseArgs(std.testing.allocator, &.{ "theme", "amoled", "extra" }, &message));
 }

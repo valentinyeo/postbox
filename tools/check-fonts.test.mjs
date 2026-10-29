@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +23,7 @@ for (const [label, file, change] of [
   ['smoke private load', 'src/main.zig', source => source.replace('const font_files = @import("font_config.zig").files;', 'const font_files = .{"IBMPlexSans-Regular.ttf", "IBMPlexSans-SemiBold.ttf", "IBMPlexSans-Bold.ttf"};')],
   ['startup private load', 'src/main.zig', source => source.replace(/(pub fn main[\s\S]*?)const font_files = @import\("font_config\.zig"\)\.files;/, '$1const font_files = .{"IBMPlexSans-Regular.ttf", "IBMPlexSans-SemiBold.ttf", "IBMPlexSans-Bold.ttf"};')],
   ['body weight', 'src/font_config.zig', source => source.replace('body_weight: i32 = 400', 'body_weight: i32 = 500')],
-  ['body font size', 'src/main.zig', source => source.replace('a.font = win.CreateFontW(scaledFontHeight(17,', 'a.font = win.CreateFontW(scaledFontHeight(18,')],
+  ['body font size', 'src/main.zig', source => source.replace('a.font = win.CreateFontW(scaledFontHeight(theme.type_body,', 'a.font = win.CreateFontW(scaledFontHeight(18,')],
 ]) {
   test(`WAZI-161 rejects missing or incorrect ${label}`, () => {
     verifySources(sources, exists);
@@ -44,4 +45,9 @@ test('IGSH-466 OLE initialization preserves both private font-loader boundaries'
   const changed = main.replace('fonts_loaded[i] = win.AddFontResourceExW(font_path.ptr(), win.FR_PRIVATE, null) > 0;', 'fonts_loaded[i] = false;');
   assert.notEqual(changed, main);
   assert.throws(() => verifySources({ ...sources, 'src/main.zig': changed }, exists));
+});
+
+test('IGSH-1122 rejects the real pre-kit font manifest at 570ac52', () => {
+  const before = execFileSync('git', ['show', '570ac52:src/font_config.zig'], { cwd: root, encoding: 'utf8' });
+  assert.throws(() => verifySources({ ...sources, 'src/font_config.zig': before }, exists), /bundled font set differs/);
 });
