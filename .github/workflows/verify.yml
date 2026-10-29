@@ -165,6 +165,16 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Candidate build failed' }
             'VERIFY_VERSION=0.0.526' >> $env:GITHUB_ENV
           }
+      - name: Start native audio services for voice playback
+        if: matrix.feature == 'voice'
+        shell: pwsh
+        run: |
+          foreach ($name in @('AudioEndpointBuilder', 'Audiosrv')) {
+            Set-Service -Name $name -StartupType Manual
+            Start-Service -Name $name
+          }
+          Get-Service AudioEndpointBuilder, Audiosrv | Format-Table Name, Status
+          Get-PnpDevice -Class AudioEndpoint -ErrorAction SilentlyContinue | Format-Table Status, FriendlyName
       - name: Queued-send voice download historical red control
         if: matrix.feature == 'voice' && inputs.tag == ''
         shell: pwsh
