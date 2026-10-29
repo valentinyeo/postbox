@@ -39,19 +39,19 @@ def verify_wiring(main, edit):
     assert "paintPopupInput(&shapes, hwnd, a.palette_edit);" in main
     assert "paintInputField(a, &shapes, hdc, a.compose.?, a.compose_pill);" in main
     field = section(main, "fn paintInputField(", "fn ")
-    assert "theme.current.surface_container_high, theme.current.on_surface" in field
+    assert "theme.current.surface_container, theme.current.on_surface" in field
     assert "if (win.GetFocus() == control) theme.current.primary else theme.current.outline" in field
     paint = section(main, "fn paintRoundedButton(", "fn ")
     assert "smooth.strokeRoundRect(shapes, rect, radius, radius, frame_color, 1)" in paint
     colors = main[main.index("win.WM_CTLCOLORSTATIC, win.WM_CTLCOLOREDIT, win.WM_CTLCOLORLISTBOX => {"):]
     assert "for ([_]?win.HWND{a.compose}) |control|" in colors
-    assert "win.SetBkColor(hdc, theme.current.surface_container_high)" in colors
+    assert "win.SetBkColor(hdc, theme.current.surface_container)" in colors
     assert "return @bitCast(@intFromPtr(a.brush_raised.?));" in colors
     assert "a.palette_edit = directwrite_edit.create(" in main
     paint = section(edit, "    fn paint(", "    fn contextMenu(")
     assert "win.WM_CTLCOLOREDIT" in paint
     assert "win.SetTextColor(dc, theme.current.on_surface)" in paint
-    assert "win.SetBkColor(dc, theme.current.surface_container_high)" in paint
+    assert "win.SetBkColor(dc, theme.current.surface_container)" in paint
     assert "win.SetDCBrushColor(dc, win.GetBkColor(dc))" in paint
     assert "win.FillRect(dc, &client" in paint
     assert paint.index("win.WM_CTLCOLOREDIT") < paint.index("win.GetBkColor(dc)")
@@ -84,7 +84,7 @@ def verify_amoled_surfaces(main):
         assert "theme." + state in composer
     field = section(main, "fn paintPopupInput(", "fn ")
     assert "if (theme.choice != .amoled) return;" in field
-    assert "theme.current.surface_container_high" in field
+    assert "theme.current.surface_container" in field
     assert "if (win.GetFocus() == edit) theme.current.primary else theme.current.outline, 1)" in field
     for procedure, edit in (("fn emojiProc(", "a.emoji_edit"), ("fn paletteProc(", "a.palette_edit")):
         popup = section(main, procedure, "fn ")
@@ -218,7 +218,7 @@ class ThemeRuntimeTests(unittest.TestCase):
             "if (win.GetFocus() == control) theme.current.primary else theme.current.outline",
             "smooth.strokeRoundRect(shapes, rect, radius, radius, frame_color, 1)",
             "for ([_]?win.HWND{a.compose}) |control|",
-            "win.SetBkColor(hdc, theme.current.surface_container_high)",
+            "win.SetBkColor(hdc, theme.current.surface_container)",
             "a.palette_edit = directwrite_edit.create(",
             "win.InvalidateRect(hwnd, &dirty, win.FALSE)",
             "win.SetBkColor(hdc, fieldColor())",
@@ -229,7 +229,7 @@ class ThemeRuntimeTests(unittest.TestCase):
         for token in (
             "win.WM_CTLCOLOREDIT",
             "win.SetTextColor(dc, theme.current.on_surface)",
-            "win.SetBkColor(dc, theme.current.surface_container_high)",
+            "win.SetBkColor(dc, theme.current.surface_container)",
             "win.SetDCBrushColor(dc, win.GetBkColor(dc))",
             "win.FillRect(dc, &client",
             "if (length == 0)",

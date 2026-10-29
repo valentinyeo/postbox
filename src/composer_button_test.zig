@@ -188,9 +188,9 @@ test "IGSH-534 Dictate retains theme hover pressed focus and recording colours a
                     painted = .{};
                     drawComposerButton(&app, &item);
                     const active = flags & win.ODS_SELECTED != 0 or state == .recording or state == .transcribing;
-                    const face = if (choice == .amoled) (if (active) theme.amoled_button_pressed else if (hover) theme.amoled_button_hover else theme.current.surface_container_high) else if (active) theme.current.primary_container else if (hover) theme.current.surface_container_highest else theme.current.surface_container_high;
+                    const face = if (choice == .amoled) (if (active) theme.amoled_button_pressed else if (hover) theme.amoled_button_hover else theme.amoled_button) else if (active) theme.current.primary_container else if (hover) theme.current.surface_container_highest else theme.current.surface_container_high;
                     try std.testing.expectEqual(face, painted.face);
-                    try std.testing.expectEqual(if (choice == .amoled) theme.amoled_button_text else if (active) theme.current.on_primary_container else theme.current.on_surface, painted.foreground);
+                    try std.testing.expectEqual(if (choice == .amoled) (if (active or hover) theme.amoled_button_text else theme.current.on_surface_variant) else if (active) theme.current.on_primary_container else theme.current.on_surface, painted.foreground);
                     const frame: ?u32 = if (flags & win.ODS_FOCUS != 0) theme.current.primary else if (choice == .amoled and hover) theme.current.outline_variant else null;
                     try std.testing.expectEqual(frame, painted.frame);
                 }

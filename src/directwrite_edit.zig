@@ -261,7 +261,7 @@ const Host = struct {
         const saved = win.SaveDC(dc);
         defer _ = win.RestoreDC(dc, saved);
         _ = win.SetTextColor(dc, theme.current.on_surface);
-        _ = win.SetBkColor(dc, theme.current.surface_container_high);
+        _ = win.SetBkColor(dc, theme.current.surface_container);
         _ = win.SendMessageW(win.GetParent(self.hwnd), win.WM_CTLCOLOREDIT, @intFromPtr(dc), @bitCast(@intFromPtr(self.hwnd)));
         const foreground = win.GetTextColor(dc);
         var client: win.RECT = undefined;
@@ -610,7 +610,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     _ = win.SendMessageW(edit, win.WM_PRINTCLIENT, @intFromPtr(dc), win.PRF_CLIENT);
     _ = win.GdiFlush();
     try std.testing.expect(text_draw.directwrite);
-    const colour = theme.current.surface_container_high;
+    const colour = theme.current.surface_container;
     const background = ((colour & 255) << 16) | (colour & 0xff00) | ((colour >> 16) & 255);
     try std.testing.expectEqual(background, pixels[0] & 0xffffff);
     var ink: usize = 0;
@@ -681,7 +681,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
             _ = win.SelectObject(dc, scaled_font);
             _ = win.SetBkMode(dc, win.TRANSPARENT);
             _ = win.SetTextColor(dc, theme.current.on_surface);
-            _ = win.SetDCBrushColor(dc, theme.current.surface_container_high);
+            _ = win.SetDCBrushColor(dc, theme.current.surface_container);
             const client = win.RECT{ .left = 0, .top = 0, .right = 200, .bottom = 80 };
             _ = win.FillRect(dc, &client, @ptrCast(@alignCast(win.GetStockObject(win.DC_BRUSH))));
             const clip = host.textRect();
@@ -690,7 +690,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
             _ = text_draw.drawText(dc, sample, sample.len, &reference_rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_NOCLIP);
             _ = win.GdiFlush();
             try std.testing.expect(text_draw.directwrite);
-            const bg = rgbPixel(theme.current.surface_container_high);
+            const bg = rgbPixel(theme.current.surface_container);
             var ink_count: usize = 0;
             var left: usize = 200;
             var right: usize = 0;
@@ -730,7 +730,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
         var top: usize = 80;
         var bottom: usize = 0;
         for (pixels, 0..) |pixel, i| {
-            if (pixel & 0xffffff != rgbPixel(theme.current.surface_container_high)) {
+            if (pixel & 0xffffff != rgbPixel(theme.current.surface_container)) {
                 top = @min(top, i / 200);
                 bottom = @max(bottom, i / 200);
             }
@@ -831,7 +831,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
 fn expectSearchAlignment(search: win.HWND, dc: win.HDC, pixels: []const u32, search_height: i32) !win.RECT {
     _ = win.SendMessageW(search, win.WM_PRINTCLIENT, @intFromPtr(dc), win.PRF_CLIENT);
     _ = win.GdiFlush();
-    const bg = rgbPixel(theme.current.surface_container_high);
+    const bg = rgbPixel(theme.current.surface_container);
     var left: i32 = 200;
     var right: i32 = 0;
     var top: i32 = search_height;
@@ -874,7 +874,7 @@ fn testParentProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam:
     if (message == win.WM_CTLCOLOREDIT) {
         const dc: win.HDC = @ptrFromInt(wparam);
         _ = win.SetTextColor(dc, theme.current.on_surface);
-        _ = win.SetBkColor(dc, theme.current.surface_container_high);
+        _ = win.SetBkColor(dc, theme.current.surface_container);
         return @bitCast(@intFromPtr(win.GetStockObject(win.BLACK_BRUSH)));
     }
     return win.DefWindowProcW(hwnd, message, wparam, lparam);

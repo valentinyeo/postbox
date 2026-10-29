@@ -169,7 +169,7 @@ fn expectBrushes(a: *const App, palette: theme.Palette) !void {
     try std.testing.expectEqual(palette.surface, win.live[a.brush_bg.?].?);
     try std.testing.expectEqual(palette.surface_container_low, win.live[a.brush_panel.?].?);
     try std.testing.expectEqual(palette.sidebar_surface, win.live[a.brush_sidebar.?].?);
-    try std.testing.expectEqual(palette.surface_container_high, win.live[a.brush_raised.?].?);
+    try std.testing.expectEqual(palette.surface_container, win.live[a.brush_raised.?].?);
     try std.testing.expectEqual(palette.outline, win.live[a.brush_muted.?].?);
     var count: usize = 0;
     for (win.live) |brush| {
@@ -187,7 +187,7 @@ test "startup loads valid DWORD themes and defaults missing or unknown values" {
         const expected: theme.Choice = .amoled;
         try std.testing.expectEqual(expected, theme.choice);
         try std.testing.expectEqual(menu_theme.preferredAppMode(expected), win.menu_mode);
-        try std.testing.expectEqual(if (expected == .amoled) theme.amoled.surface else theme.amoled.surface_container_high, fieldColor());
+        try std.testing.expectEqual(theme.amoled.surface_container, fieldColor());
     }
 }
 

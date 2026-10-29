@@ -60,7 +60,7 @@ test "IGSH-461 AMOLED popup input keeps its raised fill and follows focus in bot
     for ([_]?win.HWND{ null, 2, 3, 2, null }) |focus| {
         win.focus = focus;
         paintPopupInput(&context, 1, 2);
-        try std.testing.expectEqual(theme.amoled.surface_container_high, smooth.fill.?);
+        try std.testing.expectEqual(theme.amoled.surface_container, smooth.fill.?);
         try std.testing.expectEqual(if (focus == 2) theme.amoled.primary else theme.amoled.outline, smooth.border.?);
         try std.testing.expectEqualDeep(win.RECT{ .left = 6, .top = 16, .right = 114, .bottom = 52 }, smooth.bounds.?);
     }

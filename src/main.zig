@@ -1171,12 +1171,12 @@ fn paintRoundedButton(a: *App, shapes: *const smooth.Context, hdc: win.HDC, rect
 fn paintInputField(a: *App, shapes: *const smooth.Context, hdc: win.HDC, control: win.HWND, rect: win.RECT) void {
     if (a.compose != null and control == a.compose.?) {
         const radius = @min(@min(rect.right - rect.left, rect.bottom - rect.top), px(a, theme.radius_field * 2));
-        smooth.fillRoundRect(shapes, rect, radius, radius, theme.current.surface_container_high);
+        smooth.fillRoundRect(shapes, rect, radius, radius, theme.current.surface_container);
         const border: win.RECT = @bitCast(compose_layout.composerBorderRect(@bitCast(rect)));
         smooth.strokeRoundRect(shapes, border, radius, radius, if (win.GetFocus() == control) theme.current.primary else theme.current.outline, 1);
         return;
     }
-    paintRoundedButton(a, shapes, hdc, rect, theme.current.surface_container_high, theme.current.on_surface, a.font.?, if (win.GetFocus() == control) theme.current.primary else theme.current.outline, &.{});
+    paintRoundedButton(a, shapes, hdc, rect, theme.current.surface_container, theme.current.on_surface, a.font.?, if (win.GetFocus() == control) theme.current.primary else theme.current.outline, &.{});
 }
 
 fn paintPopupInput(shapes: *const smooth.Context, owner: win.HWND, control: ?win.HWND) void {
@@ -1186,7 +1186,7 @@ fn paintPopupInput(shapes: *const smooth.Context, owner: win.HWND, control: ?win
     _ = win.GetWindowRect(edit, &rect);
     _ = win.MapWindowPoints(null, owner, @ptrCast(&rect), 2);
     _ = win.InflateRect(&rect, 4, 4);
-    smooth.fillRoundRect(shapes, rect, 8, 8, theme.current.surface_container_high);
+    smooth.fillRoundRect(shapes, rect, 8, 8, theme.current.surface_container);
     smooth.strokeRoundRect(shapes, rect, 8, 8, if (win.GetFocus() == edit) theme.current.primary else theme.current.outline, 1);
 }
 
@@ -1324,8 +1324,8 @@ fn drawComposerButton(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     const focused = (item.itemState & win.ODS_FOCUS) != 0;
     const dictating = a.last_dictation_state == .recording or a.last_dictation_state == .transcribing;
     _ = win.FillRect(item.hDC, &item.rcItem, a.brush_raised.?);
-    const face: win.COLORREF = if (theme.choice == .amoled) (if (index == 1) (if (pressed) theme.amoled_send_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_send_hover else theme.amoled_send) else if (pressed or (index == 0 and dictating)) theme.amoled_button_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_button_hover else theme.current.surface_container_high) else if (index == 1 and !pressed) theme.current.primary else if (pressed or (index == 0 and dictating)) theme.current.primary_container else if (!disabled and a.btn_hover[index]) theme.current.surface_container_highest else theme.current.surface_container_high;
-    const foreground = if (disabled) theme.current.on_surface_variant else if (theme.choice == .amoled) (if (index == 1) theme.send_text else theme.amoled_button_text) else if (index == 1 and !pressed) theme.current.on_primary else if (pressed or (index == 0 and dictating)) theme.current.on_primary_container else theme.current.on_surface;
+    const face: win.COLORREF = if (theme.choice == .amoled) (if (index == 1) (if (pressed) theme.amoled_send_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_send_hover else theme.amoled_send) else if (pressed or (index == 0 and dictating)) theme.amoled_button_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_button_hover else theme.amoled_button) else if (index == 1 and !pressed) theme.current.primary else if (pressed or (index == 0 and dictating)) theme.current.primary_container else if (!disabled and a.btn_hover[index]) theme.current.surface_container_highest else theme.current.surface_container_high;
+    const foreground = if (disabled) theme.current.on_surface_variant else if (theme.choice == .amoled) (if (index == 1) theme.send_text else if (pressed or a.btn_hover[index] or (index == 0 and dictating)) theme.amoled_button_text else theme.current.on_surface_variant) else if (index == 1 and !pressed) theme.current.on_primary else if (pressed or (index == 0 and dictating)) theme.current.on_primary_container else theme.current.on_surface;
     const glyph: []const u16 = if (index == 0) &.{0xE720} else if (index == 1) &.{0xE724} else if (index == 2) &.{0xE899} else &.{0xE723};
     paintRoundedButton(a, &shapes, item.hDC, item.rcItem, face, foreground, a.font_icon.?, if (focused) theme.current.primary else if (!disabled and a.btn_hover[index]) theme.current.outline_variant else null, glyph);
 }
@@ -1713,7 +1713,7 @@ fn recreateThemeBrushes(a: *App) bool {
         _ = win.DeleteObject(bg);
         return false;
     };
-    const raised = win.CreateSolidBrush(theme.current.surface_container_high) orelse {
+    const raised = win.CreateSolidBrush(theme.current.surface_container) orelse {
         _ = win.DeleteObject(bg);
         _ = win.DeleteObject(panel);
         return false;
@@ -1784,7 +1784,7 @@ fn changeTheme(a: *App, choice: theme.Choice) bool {
 }
 
 fn fieldColor() win.COLORREF {
-    return if (theme.choice == .amoled) theme.current.surface else theme.current.surface_container_high;
+    return theme.current.surface_container;
 }
 
 fn saveFontScale(scale: i32) void {
@@ -7213,7 +7213,7 @@ fn drawUnfurlCard(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     message.unfurl_card_hit = .{ .left = x, .top = top, .right = x + card_width, .bottom = bottom };
     var face = message.unfurl_card_hit;
     face.left += 5;
-    smooth.fillRoundRect(shapes, face, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container);
+    smooth.fillRoundRect(shapes, face, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container_low);
     if (theme.choice == .amoled) smooth.strokeRoundRect(shapes, message.unfurl_card_hit, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline_variant, 1);
     const old_pen = win.SelectObject(hdc, win.GetStockObject(win.NULL_PEN));
     defer _ = win.SelectObject(hdc, old_pen);
@@ -10960,7 +10960,7 @@ fn emojiProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
             const hdc: win.HDC = winHandle(win.HDC, wparam);
             _ = win.SetTextColor(hdc, theme.current.on_surface);
             if (message == win.WM_CTLCOLOREDIT and theme.choice == .amoled) {
-                _ = win.SetBkColor(hdc, theme.current.surface_container_high);
+                _ = win.SetBkColor(hdc, theme.current.surface_container);
                 return @bitCast(@intFromPtr(a.brush_raised.?));
             }
             _ = win.SetBkColor(hdc, theme.current.surface_container_low);
@@ -13206,7 +13206,7 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
             const hdc: win.HDC = winHandle(win.HDC, wparam);
             _ = win.SetTextColor(hdc, theme.current.on_surface);
             if (message == win.WM_CTLCOLOREDIT and theme.choice == .amoled) {
-                _ = win.SetBkColor(hdc, theme.current.surface_container_high);
+                _ = win.SetBkColor(hdc, theme.current.surface_container);
                 return @bitCast(@intFromPtr(a.brush_raised.?));
             }
             _ = win.SetBkColor(hdc, theme.current.surface_container_low);
@@ -16564,13 +16564,13 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             for ([_]?win.HWND{ a.thread_list, a.thread_compose }) |control| {
                 if (control != null and control_value == @intFromPtr(control.?)) {
-                    _ = win.SetBkColor(hdc, theme.current.surface_container_high);
+                    _ = win.SetBkColor(hdc, theme.current.surface_container);
                     return @bitCast(@intFromPtr(a.brush_raised.?));
                 }
             }
             for ([_]?win.HWND{a.compose}) |control| {
                 if (control != null and control_value == @intFromPtr(control.?)) {
-                    _ = win.SetBkColor(hdc, theme.current.surface_container_high);
+                    _ = win.SetBkColor(hdc, theme.current.surface_container);
                     return @bitCast(@intFromPtr(a.brush_raised.?));
                 }
             }
@@ -18329,7 +18329,8 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     const pending_tag = if (a.update_pending) |pending| pending.tag else "";
     const pending_notes = if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) "" else if (a.update_pending) |pending| pending.notes else "";
     const card = updateCardRect(a);
-    paintRoundedButton(a, shapes, hdc, card, theme.current.surface_container_high, theme.current.on_surface, a.font.?, if (theme.choice == .amoled) theme.current.outline_variant else theme.current.secondary_container, &[_]u16{});
+    smooth.fillRoundRect(shapes, card, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container_low);
+    smooth.strokeRoundRect(shapes, card, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline, 1);
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
 
     var title_buf: [64]u8 = undefined;
