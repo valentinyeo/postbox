@@ -493,6 +493,8 @@ const Message = struct {
     toggle_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     media_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     bubble_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+    sender_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+    time_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     reaction_hit: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     measure_tag: u64 = 0,
     measure_height: i32 = 0,
@@ -12298,6 +12300,8 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try w.print(",\"local\":{},\"transcript_chars\":{d},\"expanded\":{}", .{ message.local_path.len > 0, message.transcript.len, message.transcript_expanded });
         for ([_]struct { name: []const u8, rect: win.RECT }{
             .{ .name = "bubble", .rect = message.bubble_hit },
+            .{ .name = "sender_header", .rect = message.sender_hit },
+            .{ .name = "time_header", .rect = message.time_hit },
             .{ .name = "quote_line", .rect = message.quote_hit },
             .{ .name = "reaction_chip", .rect = message.reaction_hit },
             .{ .name = "media", .rect = message.media_hit },
@@ -15386,6 +15390,8 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         defer clearPaintingMessageId();
         message.media_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.bubble_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+        message.sender_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+        message.time_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.reaction_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.unfurl_card_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
         message.replies_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
@@ -15468,6 +15474,8 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             var time_rect = win.RECT{ .left = sender_rect.right + px(a, 8), .top = y + px(a, 1), .right = @min(column.right, header_left + header_width), .bottom = sender_rect.bottom };
+            message.sender_hit = sender_rect;
+            message.time_hit = time_rect;
             _ = text_draw.drawText(hdc, message.time.ptr(), @intCast(message.time.len), &time_rect, win.DT_LEFT | win.DT_SINGLELINE);
         }
         const separator = separatorHeight(a, index);

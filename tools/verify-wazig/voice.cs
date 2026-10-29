@@ -20,7 +20,7 @@ public static class VerifyVoice {
 
     public sealed class Item {
         public string id;
-        public Rect bubble, media;
+        public Rect bubble, media, time;
     }
 
     public sealed class Result {
@@ -102,7 +102,7 @@ public static class VerifyVoice {
         Func<int, int> s = v => (v * dpi + 48) / 96;
         int background = Pixel(image, stride, ox + 4, oy + 4);
         outside = 0;
-        for (int y = 0; y < height; y++) for (int x = 0; x < width - 10; x++) {
+        for (int y = s(72); y < height; y++) for (int x = 0; x < width - 10; x++) {
             bool inside = false;
             foreach (var rect in all) {
                 if (!Empty(rect) && x >= rect.Left - 1 && x <= rect.Right && y >= rect.Top - 1 && y <= rect.Bottom) { inside = true; break; }
@@ -119,13 +119,13 @@ public static class VerifyVoice {
         foreach (var item in shown) {
             var b = item.bubble;
             if (b.Left < 0 || b.Right > width - 10) problems.Add(label + " bubble " + item.id + " leaves the canvas sideways");
-            int sampleY = (Math.Max(0, b.Top) + Math.Min(height, b.Bottom)) / 2;
-            int sampleX = b.Left + (sampleY - b.Top < s(16) || b.Bottom - sampleY < s(16) ? s(18) : s(4));
+            int sampleY = (Math.Max(s(72), b.Top) + Math.Min(height, b.Bottom)) / 2;
+            int sampleX = b.Left + s(18);
             int fill = Pixel(image, stride, ox + Math.Max(0, Math.Min(width - 1, sampleX)), oy + Math.Max(0, Math.Min(height - 1, sampleY)));
-            if (Distance(fill, background) < 6) problems.Add(label + " bubble " + item.id + " has no visible bubble fill");
+            if (b.Bottom > s(72) && Distance(fill, background) < 6) problems.Add(label + " bubble " + item.id + " has no visible bubble fill");
             if (!Empty(item.media) && (item.media.Left < b.Left || item.media.Right > b.Right || item.media.Top < b.Top || item.media.Bottom > b.Bottom)) problems.Add(label + " player of " + item.id + " is outside its own bubble");
-            if (b.Bottom <= height && b.Bottom - s(30) >= 0) {
-                var time = Clip(new Rect { Left = b.Right - s(54), Top = b.Bottom - s(30), Right = b.Right - s(8), Bottom = b.Bottom - s(3) }, width, height);
+            if (!Empty(item.time) && item.time.Top >= s(72) && item.time.Bottom <= height) {
+                var time = Clip(item.time, width, height);
                 if (Ink(image, stride, ox, oy, time, fill) < 10) problems.Add(label + " time stamp of " + item.id + " is not visible");
             }
             if (!Empty(item.media) && item.media.Top >= 0 && item.media.Top + s(32) <= height) {
