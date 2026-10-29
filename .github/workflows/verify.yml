@@ -306,6 +306,37 @@ jobs:
           Copy-Item chat-design-red-evidence verification-evidence/chat-design-red-control -Recurse
           'IGSH-1120 ORIGINAL RENDERER RED VERIFIED: visible bold stars' | Set-Content verification-evidence/chat-design-red-control.txt
           exit 0
+      - name: Real playback rejects the original missing output device
+        if: matrix.feature == 'voice' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
+        shell: pwsh
+        run: |
+          Stop-Service Audiosrv -Force -ErrorAction SilentlyContinue
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature voice -Bin zig-out/bin -Evidence verification-evidence/no-output -ExpectedVersion $env:VERIFY_VERSION
+          if ($LASTEXITCODE -eq 0) { throw 'Missing audio output unexpectedly played' }
+          $failure = Get-Content verification-evidence/no-output/failure.txt -Raw
+          if ($failure -notmatch 'voice: downloaded playback position advances') { throw "Wrong audio negative control failure: $failure" }
+          'VOICE_NO_OUTPUT_RED_OK' | Set-Content verification-evidence/audio-red-control.txt
+          exit 0
+      - name: Install isolated signed audio output
+        if: matrix.feature == 'voice'
+        shell: pwsh
+        run: tools/verify-wazig/install-audio.ps1
+      - name: Real playback rejects the original invalid voice fixture
+        if: matrix.feature == 'voice' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
+        shell: pwsh
+        run: |
+          $fixture = 'tools/verify-wazig/voice-note.ogg'
+          $valid = [IO.File]::ReadAllBytes($fixture)
+          try {
+            $old = [byte[]]([Text.Encoding]::ASCII.GetBytes('OggS') + (@(0..255) * 8))
+            [IO.File]::WriteAllBytes($fixture, $old)
+            pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature voice -Bin zig-out/bin -Evidence verification-evidence/invalid-opus -ExpectedVersion $env:VERIFY_VERSION
+            if ($LASTEXITCODE -eq 0) { throw 'Original invalid voice fixture unexpectedly played' }
+            $failure = Get-Content verification-evidence/invalid-opus/failure.txt -Raw
+            if ($failure -notmatch 'voice: downloaded playback position advances') { throw "Wrong invalid Opus failure: $failure" }
+          } finally { [IO.File]::WriteAllBytes($fixture, $valid) }
+          'VOICE_INVALID_OPUS_RED_OK' | Set-Content verification-evidence/invalid-opus-red-control.txt
+          exit 0
       - name: Launch, doctor and drive
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence -ExpectedVersion $env:VERIFY_VERSION

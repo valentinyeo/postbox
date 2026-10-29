@@ -1539,7 +1539,7 @@ class MediaFitHandler(Handler):
 
 
 VOICE_NOTES = 5
-VOICE_BYTES = b'OggS' + bytes(range(256)) * 8
+VOICE_BYTES = Path(__file__).with_name('voice-note.ogg').read_bytes()
 
 
 class VoiceHandler(Handler):

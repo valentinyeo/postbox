@@ -14,6 +14,16 @@ def read(name):
 assert session['sha256'] and session['commit']
 assert read('result.json') == dict(feature='voice', status='passed')
 assert not (folder / 'failure.txt').exists()
+playback = read('playback.json')
+assert playback['before']['state'] == 'empty'
+samples = [row for row in playback['samples'] if row['id'] == playback['id'] and row['state'] == 'playing']
+assert len(samples) >= 2 and samples[-1]['position_ms'] >= 1000
+assert samples[-1]['position_ms'] > samples[0]['position_ms']
+assert all(11000 <= row['duration_ms'] <= 13000 for row in samples if row['duration_ms'] > 0)
+assert playback['paused']['state'] == playback['after']['state'] == 'paused'
+assert abs(playback['after']['position_ms'] - playback['paused']['position_ms']) <= 100
+for name in ('voice-playing.png', 'voice-paused.png'):
+    assert (folder / name).read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
 transcripts = read('transcripts.json')
 assert len(transcripts) == 5 and all(row['chars'] >= 900 and row['file'].endswith('.ogg') for row in transcripts)
 checks = read('voice-checks.json')

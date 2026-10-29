@@ -116,6 +116,36 @@ function Open-VoiceChatAgain($Session) {
     $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'fixture-alpha' -and (Read-Control $Session messages).chat.id -eq 'fixture-alpha' } 'voice: voice chat shown again'
 }
 
+function Invoke-VoicePlayback($Session) {
+    $handle = Get-VoiceCanvas $Session
+    $canvas = [VerifyVoice]::Bounds($Session.pid, $handle)
+    $height = $canvas.Bottom - $canvas.Top
+    $target = @(Get-VoiceRows (Get-VoiceLayout $Session) | Where-Object { $_.local -and $_.media[1] -ge 0 -and $_.media[3] -le $height -and $_.media[3] -gt $_.media[1] }) | Select-Object -Last 1
+    Assert-That ($null -ne $target) 'voice: no visible downloaded play button'
+    $dpi = [int][VerifyWindow]::GetDpiForWindow($handle)
+    $x = $canvas.Left + $target.media[0] + [int][Math]::Floor((18 * $dpi + 48) / 96)
+    $y = $canvas.Top + $target.media[1] + [int][Math]::Floor((18 * $dpi + 48) / 96)
+    $before = (Read-Control $Session status).audio
+    [VerifyMenus]::Click($Session.pid, $x, $y, $false)
+    Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: Play on $($target.id) x=$x y=$y"
+    $samples = [Collections.Generic.List[object]]::new()
+    $null = Wait-Until {
+        $audio = (Read-Control $Session status).audio
+        $samples.Add($audio)
+        $audio.id -ceq $target.id -and $audio.state -eq 'playing' -and $audio.duration_ms -gt 0 -and $audio.position_ms -ge 1000
+    } 'voice: downloaded playback position advances' -Seconds 15
+    Save-Screen $Session 'voice-playing'
+    [VerifyMenus]::Click($Session.pid, $x, $y, $false)
+    $null = Wait-Until { (Read-Control $Session status).audio.state -eq 'paused' } 'voice: click pauses playback'
+    [Threading.Thread]::Sleep(600)
+    $paused = (Read-Control $Session status).audio
+    [Threading.Thread]::Sleep(600)
+    $after = (Read-Control $Session status).audio
+    Assert-That ([Math]::Abs($after.position_ms - $paused.position_ms) -le 100) 'voice: paused position kept advancing'
+    [ordered]@{ id = $target.id; before = $before; samples = @($samples.ToArray()); paused = $paused; after = $after } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Session.evidence 'playback.json')
+    Save-Screen $Session 'voice-paused'
+}
+
 function Invoke-VoiceJourney($Session, [string]$Messages) {
     $media = Join-Path $Messages 'hub-media'
     $null = Wait-Until {
@@ -146,6 +176,7 @@ function Invoke-VoiceJourney($Session, [string]$Messages) {
         $rows = @(Read-VoiceMessages $Session | Where-Object { $_.media_type -eq 'audio' })
         $rows.Count -eq 5 -and @($rows | Where-Object { $_.transcript_chars -lt 900 }).Count -eq 0
     } 'five cached long transcripts shown' -Seconds 60
+    Invoke-VoicePlayback $Session
     Invoke-VoiceProbe $Session 'voice-opened'
     Invoke-VoiceWheel $Session 4
     Invoke-VoiceProbe $Session 'voice-scrolled-up'
