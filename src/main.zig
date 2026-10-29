@@ -1205,7 +1205,8 @@ fn drawFluentIcon(a: *App, hdc: win.HDC, bounds: win.RECT, glyph: u16, color: wi
         _ = win.SetBkMode(hdc, previous_mode);
     }
     var rect = bounds;
-    _ = text_draw.drawText(hdc, &.{glyph}, 1, &rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
+    const text = [_]u16{glyph};
+    _ = text_draw.drawText(hdc, &text, 1, &rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
 }
 
 fn drawPinIcon(a: *App, shapes: *const smooth.Context, left: i32, top: i32, color: win.COLORREF, unpin: bool) void {
@@ -1813,8 +1814,8 @@ fn recreateFonts(a: *App) void {
     a.font_title = win.CreateFontW(scaledFontHeight(theme.type_title, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_row = win.CreateFontW(scaledFontHeight(theme.type_row_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_time = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_reply_label = win.CreateFontW(scaledFontHeight(12, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_reply_icon = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
+    a.font_reply_label = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_reply_icon = win.CreateFontW(scaledFontHeight(theme.icon_size, 100, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
     setFont(a.chats_hwnd, a.font);
     setFont(a.compose, a.font);
     setFont(a.thread_list, a.font);
@@ -9543,9 +9544,9 @@ fn replyCloseRect(a: *const App) win.RECT {
 fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     if (a.reply_to.len == 0) return;
     const bar = replyBarRect(a);
-    const accent = rgb(137, 180, 248);
-    smooth.fillRoundRect(shapes, bar, px(a, 32), px(a, 32), rgb(24, 24, 24));
-    smooth.strokeRoundRect(shapes, bar, px(a, 32), px(a, 32), rgb(46, 46, 46), px(a, 1));
+    const accent = theme.current.primary;
+    smooth.fillRoundRect(shapes, bar, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container_low);
+    smooth.strokeRoundRect(shapes, bar, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline, px(a, 1));
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
     _ = win.SelectObject(hdc, @ptrCast(a.font_reply_icon.?));
     _ = win.SetTextColor(hdc, accent);
@@ -9564,11 +9565,11 @@ fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     text.top = bar.top + px(a, 29);
     text.bottom = bar.bottom - px(a, 7);
     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-    _ = win.SetTextColor(hdc, rgb(138, 138, 138));
+    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
     _ = text_draw.drawText(hdc, a.reply_preview.ptr(), @intCast(a.reply_preview.len), &text, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
-    var close = replyCloseRect(a);
-    smooth.fillRoundRect(shapes, close, px(a, 28), px(a, 28), if (a.reply_close_hover) rgb(40, 40, 40) else rgb(38, 38, 38));
-    _ = text_draw.drawText(hdc, lit("×"), -1, &close, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
+    const close = replyCloseRect(a);
+    smooth.fillRoundRect(shapes, close, close.right - close.left, close.bottom - close.top, if (a.reply_close_hover) theme.amoled_button_hover else theme.current.surface_container_high);
+    drawFluentIcon(a, hdc, close, 0xE711, theme.current.on_surface_variant);
 }
 
 fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
@@ -15114,7 +15115,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             }
             line.buf[line.len] = 0;
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-            _ = win.SetTextColor(hdc, rgb(138, 138, 138));
+            _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             var line_rect = message.quote_hit;
             _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &line_rect, @intCast((if (message.from_me) win.DT_RIGHT else win.DT_LEFT) | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX));
             y += reply_height;
@@ -15143,7 +15144,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), if (message.from_me) theme.bubble_own_outline else theme.current.outline, 1);
         if (selected) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), theme.current.primary, px(a, 2));
 
-        if (std.mem.eql(u8, a.reply_to.slice(), message.id.slice()) or std.mem.eql(u8, a.reply_flash.slice(), message.id.slice())) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), rgb(74, 74, 74), px(a, 2));
+        if (std.mem.eql(u8, a.reply_to.slice(), message.id.slice()) or std.mem.eql(u8, a.reply_flash.slice(), message.id.slice())) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), theme.quote_bar, px(a, 2));
 
         var text_top = y + messageHeaderHeight(hdc, a, show_sender) - px(a, 6);
         if (show_sender) {
