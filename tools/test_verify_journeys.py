@@ -652,6 +652,10 @@ class AppearanceVersionTests(unittest.TestCase):
         files = {'session.json': session, 'side-effects.json': state,
                  'text-scale.json': dict(initial_saved=False, larger=110, reset=100,
                                         baseline_points=10, larger_points=12, reset_points=10)}
+        files['shared-design.json'] = dict(width=1920, height=1032, draft='Shared design check',
+                                           foreground_pixels=100, raised_pixels=3000,
+                                           pill=dict(width=116, height=32))
+        (folder / 'run.log').write_text('recorded PCM reaches the production composer')
         for name in ('before', 'action', 'text-larger', 'after', 'group-senders'):
             files[name + '.state.json'] = state
             (folder / (name + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + name.encode() * 11000)

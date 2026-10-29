@@ -75,11 +75,14 @@ def verify_wiring(main, edit):
 def verify_amoled_surfaces(main):
     voice = section(main, "fn paintVoiceButton(", "fn ")
     composer = section(main, "fn drawComposerButton(", "fn ")
+    assert "design.roundButton(&shared_canvas" in voice
+    assert "design.wave(&shared_canvas" in voice
+    assert "design.micPill(&shared_canvas" in voice
     for paint in (voice, composer):
-        assert "if (theme.choice == .amoled)" in paint
         for state in ("amoled_button", "amoled_button_hover", "amoled_button_pressed"):
             assert "theme." + state in paint
-        assert "theme.current.outline_variant" in paint
+    assert "if (theme.choice == .amoled)" in composer
+    assert "theme.current.outline_variant" in composer
     for state in ("amoled_send", "amoled_send_hover", "amoled_send_pressed", "amoled_button_text"):
         assert "theme." + state in composer
     field = section(main, "fn paintPopupInput(", "fn ")

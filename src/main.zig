@@ -14603,7 +14603,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
 
     var shapes = smooth.Context.init(item.hDC);
     if (selected or bulk_selected) {
-        var shared_canvas = DesignCanvas{ .hdc = hdc, .shapes = &shapes };
+        var shared_canvas = DesignCanvas{ .hdc = item.hDC, .shapes = &shapes };
         design.row(&shared_canvas, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
     }
     var row_text = if (bulk_selected) theme.current.on_primary_container else theme.current.on_surface;

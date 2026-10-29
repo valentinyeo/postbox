@@ -47,7 +47,7 @@ test('ISSUE-462 parity check rejects fixture, source and runtime drift', () => {
         assert.ok(main.includes(before));
         assert.throws(() => sourceContract(main.replace(before, after)));
     }
-    assert.throws(() => sourceContract(main, read('src/font_config.zig').replace('= 400;', '= 500;')));
+    assert.throws(() => sourceContract(main, read('src/font_config.zig').replace('design_tokens.zig', 'missing-design.zig')));
     for (const mutate of [
         value => { value.text += ' drift'; },
         value => { value.body.px++; },
