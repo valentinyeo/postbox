@@ -278,7 +278,7 @@ class ShowArchivedTests(unittest.TestCase):
                     original = image_path.read_bytes()
                     _, _, image = pixels['read_png'](image_path)
                     colour = foreground if mode == 'dim' else dimmed
-                    for y in range(2 * 64 + 16, 2 * 64 + 26):
+                    for y in range(2 * 56 + 16, 2 * 56 + 26):
                         image[y][70:170] = [colour] * 100
                     pixels['write_png'](image_path, image)
                     with self.subTest(light=light, scope=scope, mode=mode):
@@ -324,7 +324,7 @@ class ShowArchivedTests(unittest.TestCase):
                     name = f'archive-{scope}-{mode}'
                     image_path = self.folder / f'{name}.png'
                     _, _, image = pixels['read_png'](image_path)
-                    for y in range(2 * 64 + 16, 2 * 64 + 26):
+                    for y in range(2 * 56 + 16, 2 * 56 + 26):
                         image[y][70:170] = [colour] * 100
                     pixels['write_png'](image_path, image)
                     with self.subTest(light=light, scope=scope, mode=mode):
@@ -342,10 +342,10 @@ class ShowArchivedTests(unittest.TestCase):
                 name = f'archive-{scope}-{mode}'
                 image_path = self.folder / f'{name}.png'
                 _, _, image = pixels['read_png'](image_path)
-                for y in range(2 * 64, 3 * 64):
+                for y in range(2 * 56, 3 * 56):
                     image[y] = [(38, 38, 38)] * 240
                 for level in (255, 235, 234, 180):
-                    for y in range(2 * 64 + 16, 2 * 64 + 26):
+                    for y in range(2 * 56 + 16, 2 * 56 + 26):
                         image[y][70:170] = [(level, level, level)] * 100
                     pixels['write_png'](image_path, image)
                     with self.subTest(scope=scope, mode=mode, level=level):
@@ -358,7 +358,7 @@ class ShowArchivedTests(unittest.TestCase):
                             self.assertEqual(sum(metrics['archived']['text']) / 3, level)
                             self.assertNotEqual(metrics['archived']['background'], metrics['live']['background'])
                             self.assertLess(metrics['archived']['contrast'], metrics['live']['contrast'] * 0.9)
-                for y in range(2 * 64 + 16, 2 * 64 + 26):
+                for y in range(2 * 56 + 16, 2 * 56 + 26):
                     image[y][70:170] = [(255, 255, 255)] * 100
                 pixels['write_png'](image_path, image)
                 checker['check_scene'](self.folder, name, capture=True)
@@ -401,7 +401,7 @@ class ShowArchivedTests(unittest.TestCase):
             expected_level = 75 if light else 180
             for offset in (-30, -13, -12, 12, 13, 30):
                 level = expected_level + offset
-                for y in range(2 * 64 + 16, 2 * 64 + 26):
+                for y in range(2 * 56 + 16, 2 * 56 + 26):
                     image[y][70:170] = [(level, level, level)] * 100
                 pixels['write_png'](image_path, image)
                 with self.subTest(light=light, offset=offset):
@@ -411,9 +411,9 @@ class ShowArchivedTests(unittest.TestCase):
                     else:
                         metrics = checker['check_scene'](self.folder, name, capture=True)
                         self.assertEqual(metrics['colour_mix_error'], 12)
-            for y in range(2 * 64, 3 * 64):
+            for y in range(2 * 56, 3 * 56):
                 image[y] = [(240, 240, 240) if light else (15, 15, 15)] * 240
-            for y in range(2 * 64 + 16, 2 * 64 + 26):
+            for y in range(2 * 56 + 16, 2 * 56 + 26):
                 image[y][70:170] = [(expected_level, expected_level, expected_level)] * 100
             pixels['write_png'](image_path, image)
             with self.subTest(light=light, mutation='background'), self.assertRaisesRegex(AssertionError, 'row background changed'):
