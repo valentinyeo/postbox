@@ -1195,44 +1195,27 @@ fn buttonLabel(item: *win.DRAWITEMSTRUCT, buffer: []u16) []const u16 {
     return buffer[0..@intCast(text_len)];
 }
 
-fn drawPinIcon(a: *App, shapes: *const smooth.Context, left: i32, top: i32, color: win.COLORREF, unpin: bool) void {
-    const scale = @as(f32, @floatFromInt(px(a, 24))) / pin_icon.grid_size;
-    const width: f32 = @floatFromInt(@max(1, px(a, @intFromFloat(pin_icon.stroke_width))));
-    inline for (.{ pin_icon.outline, pin_icon.needle, pin_icon.slash }, 0..) |points, index| {
-        if (index != 2 or unpin) {
-            var scaled: [points.len][2]f32 = undefined;
-            for (points, &scaled) |point, *target| {
-                target.* = .{ @as(f32, @floatFromInt(left)) + point[0] * scale, @as(f32, @floatFromInt(top)) + point[1] * scale };
-            }
-            smooth.strokePolyline(shapes, &scaled, color, width);
-        }
+fn drawFluentIcon(a: *App, hdc: win.HDC, bounds: win.RECT, glyph: u16, color: win.COLORREF) void {
+    const previous_font = win.SelectObject(hdc, @ptrCast(a.font_icon orelse return));
+    const previous_color = win.SetTextColor(hdc, color);
+    const previous_mode = win.SetBkMode(hdc, win.TRANSPARENT);
+    defer {
+        _ = win.SelectObject(hdc, previous_font);
+        _ = win.SetTextColor(hdc, previous_color);
+        _ = win.SetBkMode(hdc, previous_mode);
     }
+    var rect = bounds;
+    _ = text_draw.drawText(hdc, &.{glyph}, 1, &rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
 }
 
-fn drawMicIcon(a: *App, shapes: *const smooth.Context, hdc: win.HDC, cx: i32, cy: i32, color: win.COLORREF) void {
-    const brush = win.CreateSolidBrush(color) orelse return;
-    defer _ = win.DeleteObject(brush);
-    const pen = win.CreatePen(win.PS_SOLID, @max(1, px(a, smooth_geometry.icon_stroke_width)), color) orelse return;
-    defer _ = win.DeleteObject(pen);
-    const old_brush = win.SelectObject(hdc, brush);
-    const old_pen = win.SelectObject(hdc, pen);
-    defer {
-        _ = win.SelectObject(hdc, old_brush);
-        _ = win.SelectObject(hdc, old_pen);
-    }
-    const half = px(a, 4);
-    const capsule = win.RECT{ .left = cx - half, .top = cy - px(a, 10), .right = cx + half + 1, .bottom = cy + px(a, 3) };
-    smooth.fillRoundRect(shapes, capsule, half * 2, half * 2, color);
-    smooth.strokeRoundRect(shapes, capsule, half * 2, half * 2, color, @max(1, px(a, smooth_geometry.icon_stroke_width)));
-    _ = win.SelectObject(hdc, win.GetStockObject(win.NULL_BRUSH));
-    const arc = px(a, 7);
-    const cradle = win.RECT{ .left = cx - arc, .top = cy - px(a, 7), .right = cx + arc + 1, .bottom = cy + px(a, 6) };
-    const angles = smooth_geometry.counterclockwiseArc(@bitCast(cradle), .{ cx - arc, cy - px(a, 1) }, .{ cx + arc + 1, cy - px(a, 1) });
-    smooth.strokeArc(shapes, cradle, angles.start, angles.sweep, color, @max(1, px(a, smooth_geometry.icon_stroke_width)));
-    _ = win.MoveToEx(hdc, cx, cy + px(a, 6), null);
-    _ = win.LineTo(hdc, cx, cy + px(a, 10));
-    _ = win.MoveToEx(hdc, cx - px(a, 4), cy + px(a, 10), null);
-    _ = win.LineTo(hdc, cx + px(a, 5), cy + px(a, 10));
+fn drawPinIcon(a: *App, shapes: *const smooth.Context, left: i32, top: i32, color: win.COLORREF, unpin: bool) void {
+    const size = px(a, theme.icon_size);
+    drawFluentIcon(a, shapes.hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, if (unpin) pin_icon.unpinned else pin_icon.pinned, color);
+}
+
+fn drawMicIcon(a: *App, hdc: win.HDC, cx: i32, cy: i32, color: win.COLORREF) void {
+    const half = @divTrunc(px(a, theme.icon_size), 2);
+    drawFluentIcon(a, hdc, .{ .left = cx - half, .top = cy - half, .right = cx + half, .bottom = cy + half }, 0xE720, color);
 }
 
 fn drawVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
@@ -1261,15 +1244,15 @@ fn paintVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     _ = win.FillRect(hdc, &item.rcItem, a.brush_raised.?);
     const recording = a.voice_active;
     const face: win.COLORREF = if (theme.choice == .amoled) (if (pressed) theme.amoled_button_pressed else if (a.btn_hover[8]) theme.amoled_button_hover else theme.current.surface_container_high) else if (pressed) theme.current.primary_container else if (a.btn_hover[8]) theme.current.surface_container_highest else theme.current.surface_container_high;
-    const foreground = if (theme.choice == .amoled) theme.amoled_button_text else if (pressed) theme.current.on_primary_container else theme.current.on_secondary_container;
+    const foreground = if (theme.choice == .amoled) (if (pressed or a.btn_hover[8] or recording) theme.amoled_button_text else theme.current.on_surface_variant) else if (pressed) theme.current.on_primary_container else theme.current.on_secondary_container;
     paintRoundedButton(a, &shapes, hdc, item.rcItem, face, foreground, a.font_bold.?, if (recording) theme.current.@"error" else if (focused) theme.current.primary else if (theme.choice == .amoled and a.btn_hover[8]) theme.current.outline_variant else null, &.{});
     const mid_y = @divTrunc(item.rcItem.top + item.rcItem.bottom, 2);
     if (!recording) {
-        drawMicIcon(a, &shapes, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, foreground);
+        drawMicIcon(a, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, foreground);
         return;
     }
     if (!compose_layout.recordingTimerVisible(@bitCast(item.rcItem), @intCast(a.dpi))) {
-        drawMicIcon(a, &shapes, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, theme.current.@"error");
+        drawMicIcon(a, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, theme.current.@"error");
         return;
     }
     const dot = px(a, 5);
@@ -1305,7 +1288,7 @@ fn paintVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
             _ = win.FillRect(hdc, &filled, fill);
         }
     }
-    drawMicIcon(a, &shapes, hdc, item.rcItem.right - px(a, 20), mid_y, theme.current.@"error");
+    drawMicIcon(a, hdc, item.rcItem.right - px(a, 20), mid_y, theme.current.@"error");
 }
 
 fn drawComposerButton(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
@@ -1826,7 +1809,7 @@ fn recreateFonts(a: *App) void {
     a.font_bold = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_emoji = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
     a.font_underline = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_icon = win.CreateFontW(scaledFontHeight(theme.icon_size, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
+    a.font_icon = win.CreateFontW(scaledFontHeight(theme.icon_size, 100, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
     a.font_title = win.CreateFontW(scaledFontHeight(theme.type_title, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_row = win.CreateFontW(scaledFontHeight(theme.type_row_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_time = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
