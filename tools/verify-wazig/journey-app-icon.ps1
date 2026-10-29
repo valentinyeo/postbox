@@ -42,17 +42,18 @@ try {
 Save-AppIcon ([AppIconNative]::GetClassLongPtr($iconApp.MainWindowHandle, -14)) 32 'window-big'
 Save-AppIcon ([AppIconNative]::GetClassLongPtr($iconApp.MainWindowHandle, -34)) 16 'window-small'
 $null = [VerifyWindow]::ShowWindow($iconApp.MainWindowHandle, 9)
-$null = [VerifyWindow]::SetWindowPos($iconApp.MainWindowHandle, [IntPtr]::Zero, 120, 80, 920, 680, 0x14)
+$null = [VerifyWindow]::SetWindowPos($iconApp.MainWindowHandle, [IntPtr]::Zero, 40, 40, 900, 600, 0x14)
 $null = [VerifyWindow]::SetForegroundWindow($iconApp.MainWindowHandle)
 Save-Screen $session 'desktop-taskbar-100'
 [AppIconNative]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
 try {
     [AppIconNative]::keybd_event(0x09, 0, 0, [UIntPtr]::Zero)
     [AppIconNative]::keybd_event(0x09, 0, 2, [UIntPtr]::Zero)
+    [System.Threading.Thread]::Sleep(750)
     Save-Screen $session 'alt-tab'
 } finally { [AppIconNative]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero) }
 $rect = [AppIconNative+Rect]::new()
-$rect.Left = 40; $rect.Top = 40; $rect.Right = 1200; $rect.Bottom = 860
+$rect.Left = 24; $rect.Top = 24; $rect.Right = 1000; $rect.Bottom = 700
 $memory = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf($rect))
 try {
     [Runtime.InteropServices.Marshal]::StructureToPtr($rect, $memory, $false)
