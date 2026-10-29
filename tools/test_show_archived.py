@@ -82,11 +82,11 @@ class ShowArchivedTests(unittest.TestCase):
                 state = dict(include_archived=True, show_archived=False, selected=selected, search='', current_view=dict(inbox=scope == 'inbox'))
                 self.write(f'{name}.state.json', state)
                 self.write(f'{name}.chats.json', dict(chats=rows))
-                self.write(f'{name}.layout.json', dict(dpi=96, row_height=64, top=0, x=0, y=0, width=240, height=256, mode=mode, rows=rows, selected=selected['id'], colour_model='theme-foreground-mix', foreground_weight=180))
+                self.write(f'{name}.layout.json', dict(dpi=96, row_height=56, top=0, x=0, y=0, width=240, height=256, mode=mode, rows=rows, selected=selected['id'], colour_model='theme-foreground-mix', foreground_weight=180))
                 image = [[background] * 240 for _ in range(256)]
                 for index, row in enumerate(rows):
                     colour = dimmed if row['archived'] and mode == 'dim' else foreground
-                    for y in range(index * 64 + 16, index * 64 + 26):
+                    for y in range(index * 56 + 16, index * 56 + 26):
                         image[y][70:170] = [colour] * 100
                 pixels['write_png'](self.folder / f'{name}.png', image)
                 checker['check_scene'](self.folder, name, capture=True)
@@ -302,7 +302,7 @@ class ShowArchivedTests(unittest.TestCase):
                 rows = self.read(f'{name}.chats.json')['chats']
                 for index, row in enumerate(rows):
                     if not row['archived']:
-                        for y in range(index * 64 + 16, index * 64 + 26):
+                        for y in range(index * 56 + 16, index * 56 + 26):
                             image[y][70:170] = [colour] * 100
                 pixels['write_png'](image_path, image)
                 with self.subTest(light=light, scope=scope):

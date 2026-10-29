@@ -464,7 +464,7 @@ assert entries['caret']['pr'] and 'Invoke-CaretJourney $session $start $app' in 
 for fragment in ['GetGUIThreadInfo', 'GetCaretBlinkTime', "Get-Edit $window '1032'", 'CopyFromScreen', 'Get-CaretOnOff', 'Test-CaretOracle', 'caret.json', 'Theme: Graphite', '$theme.on -ge 2 -and $theme.off -ge 2']:
     assert fragment in caret, fragment
 assert '.claude/skills/verify-wazig/features/caret.md' in marker_namespace['PUBLIC_SKILL_PATHS']
-print('CARET MAP VERIFIED: system caret reading, timed composer frames, both themes and PR wiring')
+print('CARET MAP VERIFIED: system caret reading, timed composer frames, graphite reapply and PR wiring')
 
 passage = (root / 'tools/verify-wazig/passage-copy.ps1').read_text(encoding='utf-8')
 assert 'Invoke-PassageCopyJourney $session' in runner
@@ -539,4 +539,4 @@ for required in ['sidebar-pixels.json', 'sidebar-builds.json', 'baseline_commit'
 for required in ['src/theme.zig', "if: matrix.feature == 'sidebar-surface'", 'test-sidebar-surface.py', 'git log --diff-filter=A --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1', 'sidebar-baseline-bin/bin', 'verification-evidence/baseline', 'sidebar-builds.json']:
     assert required in workflow, required
 assert '.claude/skills/verify-wazig/features/sidebar-surface.md' in marker_namespace['PUBLIC_SKILL_PATHS']
-print('verification skill map passed: sidebar screenshot pairs, historical baseline builds, pixel validator and both dark themes')
+print('verification skill map passed: sidebar screenshot pairs, historical baseline builds, pixel validator and approved graphite')
