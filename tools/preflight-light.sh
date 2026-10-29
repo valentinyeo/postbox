@@ -7,6 +7,7 @@ PYTHON_LIGHT_TESTS=(
     test_app_icon
     test_design_kit
     test_font_scale
+    test_shared_design
     test_check_cache_keys
     test_check_hub_only
     test_check_private_markers

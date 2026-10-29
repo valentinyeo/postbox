@@ -22,7 +22,7 @@ for (const [label, file, change] of [
   ['private load list', 'src/font_config.zig', source => source.replace('    "IBMPlexSans-Medium.ttf",\n', '')],
   ['smoke private load', 'src/main.zig', source => source.replace('const font_files = @import("font_config.zig").files;', 'const font_files = .{"IBMPlexSans-Regular.ttf", "IBMPlexSans-SemiBold.ttf", "IBMPlexSans-Bold.ttf"};')],
   ['startup private load', 'src/main.zig', source => source.replace(/(pub fn main[\s\S]*?)const font_files = @import\("font_config\.zig"\)\.files;/, '$1const font_files = .{"IBMPlexSans-Regular.ttf", "IBMPlexSans-SemiBold.ttf", "IBMPlexSans-Bold.ttf"};')],
-  ['body weight', 'src/font_config.zig', source => source.replace('body_weight: i32 = 400', 'body_weight: i32 = 500')],
+  ['body weight', 'src/design_tokens.zig', source => source.replace('body_weight: i32 = 400', 'body_weight: i32 = 500')],
   ['body font size', 'src/main.zig', source => source.replace('a.font = win.CreateFontW(scaledFontHeight(theme.type_body,', 'a.font = win.CreateFontW(scaledFontHeight(18,')],
 ]) {
   test(`WAZI-161 rejects missing or incorrect ${label}`, () => {

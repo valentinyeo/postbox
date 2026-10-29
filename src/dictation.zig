@@ -31,6 +31,9 @@ pub const Session = struct {
     result: [8192]u8 = [_]u8{0} ** 8192,
     result_len: usize = 0,
     origin: drafts.Identity = .{},
+    elapsed_ms: std.atomic.Value(u64) = .init(0),
+    meter_level: std.atomic.Value(u8) = .init(0),
+    fixture: ?struct { pcm: []u8, response: []u8 } = null,
 
     pub fn create(allocator: std.mem.Allocator) !*Session {
         const self = try allocator.create(Session);
@@ -41,11 +44,23 @@ pub const Session = struct {
     pub fn destroy(self: *Session) void {
         self.requestStop();
         if (self.thread) |thread| thread.join();
+        if (self.fixture) |fixture| {
+            self.allocator.free(fixture.pcm);
+            self.allocator.free(fixture.response);
+        }
         self.allocator.destroy(self);
     }
 
     pub fn state(self: *const Session) State {
         return @enumFromInt(self.state_value.load(.acquire));
+    }
+
+    pub fn elapsedMs(self: *const Session) u64 {
+        return self.elapsed_ms.load(.acquire);
+    }
+
+    pub fn level(self: *const Session) u8 {
+        return self.meter_level.load(.acquire);
     }
 
     pub fn start(self: *Session, api_key: []const u8, language: Language, origin: chat_key.Key) bool {
@@ -57,6 +72,8 @@ pub const Session = struct {
         const key = self.allocator.dupe(u8, api_key) catch return false;
         self.origin = drafts.Identity.init(origin);
         self.result_len = 0;
+        self.elapsed_ms.store(0, .release);
+        self.meter_level.store(0, .release);
         self.stop_requested.store(false, .release);
         self.state_value.store(@intFromEnum(State.recording), .release);
         self.thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, workerMain, .{ self, key, language }) catch {
@@ -86,7 +103,7 @@ pub const Session = struct {
 
 fn workerMain(self: *Session, api_key: []u8, language: Language) void {
     defer self.allocator.free(api_key);
-    const wav = captureMicrophone(self) catch {
+    const wav = (if (self.fixture) |fixture| captureFixture(self, fixture.pcm) else captureMicrophone(self)) catch {
         self.state_value.store(@intFromEnum(State.failed), .release);
         return;
     };
@@ -96,7 +113,7 @@ fn workerMain(self: *Session, api_key: []u8, language: Language) void {
         return;
     }
     self.state_value.store(@intFromEnum(State.transcribing), .release);
-    const transcript = transcribe(self.allocator, api_key, language, "audio/wav", wav) catch {
+    const transcript = (if (self.fixture) |fixture| parseResponse(self.allocator, fixture.response) else transcribe(self.allocator, api_key, language, "audio/wav", wav)) catch {
         self.state_value.store(@intFromEnum(State.failed), .release);
         return;
     };
@@ -104,6 +121,21 @@ fn workerMain(self: *Session, api_key: []u8, language: Language) void {
     self.result_len = @min(self.result.len, transcript.len);
     @memcpy(self.result[0..self.result_len], transcript[0..self.result_len]);
     self.state_value.store(@intFromEnum(State.ready), .release);
+}
+
+fn captureFixture(self: *Session, pcm: []const u8) ![]u8 {
+    if (pcm.len < 3200 or pcm.len % 2 != 0) return error.BadAudio;
+    var offset: usize = 0;
+    var elapsed: u64 = 0;
+    while (!self.stop_requested.load(.acquire)) {
+        const end = @min(pcm.len, offset + 3200);
+        self.meter_level.store(@import("dictation_meter.zig").level(pcm[offset..end], 16, false), .release);
+        elapsed += @as(u64, @intCast(end - offset)) * 1000 / 32000;
+        self.elapsed_ms.store(elapsed, .release);
+        offset = if (end == pcm.len) 0 else end;
+        win.Sleep(100);
+    }
+    return self.allocator.dupe(u8, pcm);
 }
 
 fn captureMicrophone(self: *Session) ![]u8 {
@@ -139,6 +171,11 @@ fn captureMicrophone(self: *Session) ![]u8 {
     if (client.?.*.lpVtbl.*.Start.?(client.?) < 0) return error.NoMicrophone;
     defer _ = client.?.*.lpVtbl.*.Stop.?(client.?);
 
+    var float_samples = wave_format.wFormatTag == win.WAVE_FORMAT_IEEE_FLOAT;
+    if (wave_format.wFormatTag == 0xFFFE and wave_format.cbSize >= 22) {
+        const format_bytes: [*]const u8 = @ptrCast(wave_format);
+        float_samples = std.mem.readInt(u32, format_bytes[24..28], .little) == 3;
+    }
     const max_bytes: usize = @as(usize, wave_format.nAvgBytesPerSec) * 10 * 60;
     while (!self.stop_requested.load(.acquire) and pcm.items.len < max_bytes) {
         var packet_frames: win.UINT32 = 0;
@@ -151,6 +188,7 @@ fn captureMicrophone(self: *Session) ![]u8 {
             var qpc_position: win.UINT64 = 0;
             if (capture.?.*.lpVtbl.*.GetBuffer.?(capture.?, &data, &frames, &flags, &device_position, &qpc_position) < 0) return error.CaptureFailed;
             const byte_count: usize = @as(usize, frames) * wave_format.nBlockAlign;
+            const before = pcm.items.len;
             if ((flags & win.AUDCLNT_BUFFERFLAGS_SILENT) != 0) {
                 const old_len = pcm.items.len;
                 try pcm.resize(self.allocator, old_len + byte_count);
@@ -158,6 +196,8 @@ fn captureMicrophone(self: *Session) ![]u8 {
             } else {
                 try pcm.appendSlice(self.allocator, data[0..byte_count]);
             }
+            self.meter_level.store(@import("dictation_meter.zig").level(pcm.items[before..], wave_format.wBitsPerSample, float_samples), .release);
+            if (wave_format.nAvgBytesPerSec > 0) self.elapsed_ms.store(@as(u64, @intCast(pcm.items.len)) * 1000 / wave_format.nAvgBytesPerSec, .release);
             if (capture.?.*.lpVtbl.*.ReleaseBuffer.?(capture.?, frames) < 0) return error.CaptureFailed;
             if (capture.?.*.lpVtbl.*.GetNextPacketSize.?(capture.?, &packet_frames) < 0) return error.CaptureFailed;
         }
@@ -259,7 +299,11 @@ fn transcribeAt(allocator: std.mem.Allocator, api_key: []const u8, request_path:
         response.shrinkRetainingCapacity(old_len + read);
     }
 
-    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, response.items, .{});
+    return parseResponse(allocator, response.items);
+}
+
+fn parseResponse(allocator: std.mem.Allocator, response: []const u8) ![]u8 {
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, response, .{});
     defer parsed.deinit();
     const root = switch (parsed.value) {
         .object => |value| value,

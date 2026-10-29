@@ -44,6 +44,11 @@ else:
     assert {row['id'] for row in groups['messages']} == {'GROUP-FIRST', 'GROUP-SAME', 'GROUP-DAY', 'GROUP-OTHER', 'GROUP-QUOTE', 'GROUP-OWN'}
     stages = ['before', 'action', 'text-larger', 'after', 'group-senders']
     keys = ['^k', 'Theme: Graphite', 'Make text larger', '{ENTER}', '^0']
+    shared = json.loads((folder / 'shared-design.json').read_text(encoding='utf-8-sig'))
+    assert shared['width'] == 1920 and shared['height'] == 1032
+    assert shared['draft'] == 'Shared design check'
+    assert shared['foreground_pixels'] >= 10 and shared['raised_pixels'] > shared['pill']['width'] * shared['pill']['height'] / 2
+    assert 'recorded PCM reaches the production composer' in (folder / 'run.log').read_text(encoding='utf-8-sig')
     preferences = (folder / 'preferences.txt').read_text(encoding='utf-8-sig')
     assert 'FontScale' in preferences and '100' in preferences
 for keys_sent in keys:

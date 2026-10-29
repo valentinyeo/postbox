@@ -7,7 +7,7 @@ pub fn savedScale(value: u32) i32 {
     return @intCast(std.math.clamp(value, 60, 160));
 }
 
-pub const body_weight: i32 = 400;
+pub const body_weight: i32 = @import("design_tokens.zig").body_weight;
 pub const files = [_][]const u8{
     "IBMPlexSans-Regular.ttf",
     "IBMPlexSans-Medium.ttf",

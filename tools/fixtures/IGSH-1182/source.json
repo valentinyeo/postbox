@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/cmusphinx/pocketsphinx",
+  "revision": "f20ff1b7a5db64c5e892a798479e20df86e79a35",
+  "path": "test/data/goforward.raw",
+  "format": "signed 16-bit little-endian mono PCM, 16000 Hz",
+  "spoken": "go forward ten meters",
+  "sha256": "f15c60ec54059d8b66e410d0064945a0b0a04ea56e1ddca1958e493c0cf70e71"
+}

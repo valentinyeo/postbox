@@ -1,5 +1,6 @@
 const std = @import("std");
 const theme = @import("theme.zig");
+const design = @import("design_tokens.zig");
 const compose_layout = @import("compose_layout.zig");
 const source = @embedFile("main-source.zig");
 const smooth_geometry = struct {
@@ -102,6 +103,10 @@ fn paintRoundedButton(_: *App, _: *const smooth.Context, _: win.HDC, _: win.RECT
     painted.foreground = foreground;
     painted.frame = frame;
 }
+fn paintDictationPill(_: *App, _: *const smooth.Context, _: win.HDC, _: win.RECT) void {
+    painted.face = theme.current.surface_container_highest;
+    painted.foreground = theme.current.on_surface;
+}
 fn section(start: []const u8, end: []const u8) []const u8 {
     const begin = std.mem.indexOf(u8, source, start).?;
     const finish = begin + std.mem.indexOf(u8, source[begin..], end).?;
@@ -118,6 +123,11 @@ test "IGSH-534 Dictate draws no text label and uses the shared Fluent dictation 
                 var item = win.DRAWITEMSTRUCT{};
                 painted = .{};
                 drawComposerButton(&app, &item);
+                if (state == .recording or state == .transcribing) {
+                    try std.testing.expectEqual(theme.current.surface_container_highest, painted.face);
+                    try std.testing.expectEqual(theme.current.on_surface, painted.foreground);
+                    continue;
+                }
                 try std.testing.expectEqual(@as(usize, 1), painted.label.len);
                 try std.testing.expectEqual(@as(u16, 0xE720), painted.label[0]);
                 try std.testing.expectEqual(@as(usize, 0), painted.arcs);
@@ -144,11 +154,11 @@ test "IGSH-534 composer icons have equal gaps and give freed width to the typing
         try std.testing.expectEqual(gap, emoji.left - dictate.right);
         try std.testing.expectEqual(gap, send.left - emoji.right);
         try std.testing.expect(app.compose_geometry.text.right < mic.left);
-        try std.testing.expectEqual(px(&app, 36), send.right - send.left);
+        try std.testing.expectEqual(px(&app, design.button_size), send.right - send.left);
         for (win.bounds) |rect| {
             try std.testing.expect(rect.left >= app.compose_pill.left and rect.right <= app.compose_pill.right);
-            try std.testing.expectEqual(app.compose_pill.bottom - px(&app, 40), rect.top);
-            try std.testing.expectEqual(px(&app, 36), rect.bottom - rect.top);
+            try std.testing.expectEqual(app.compose_pill.bottom - px(&app, 36), rect.top);
+            try std.testing.expectEqual(px(&app, design.button_size), rect.bottom - rect.top);
         }
         app.voice_active = true;
         layoutComposer(&app, px(&app, 1200), px(&app, 900));
@@ -187,6 +197,11 @@ test "IGSH-534 Dictate retains theme hover pressed focus and recording colours a
                     var item = win.DRAWITEMSTRUCT{ .itemState = flags };
                     painted = .{};
                     drawComposerButton(&app, &item);
+                    if (state == .recording or state == .transcribing) {
+                        try std.testing.expectEqual(theme.current.surface_container_highest, painted.face);
+                        try std.testing.expectEqual(theme.current.on_surface, painted.foreground);
+                        continue;
+                    }
                     const active = flags & win.ODS_SELECTED != 0 or state == .recording or state == .transcribing;
                     const face = if (choice == .amoled) (if (active) theme.amoled_button_pressed else if (hover) theme.amoled_button_hover else theme.amoled_button) else if (active) theme.current.primary_container else if (hover) theme.current.surface_container_highest else theme.current.surface_container_high;
                     try std.testing.expectEqual(face, painted.face);

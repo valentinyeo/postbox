@@ -40,6 +40,20 @@ jobs:
       - name: No new code comments
         run: python3 tools/check_new_comments.py
 
+      - name: Multiprompt shared design ownership and historical control
+        run: |
+          python3 tools/check_shared_design.py --upstream
+          base=f07df8f
+          mkdir "$RUNNER_TEMP/original-design"
+          git archive "$base" src | tar -x -C "$RUNNER_TEMP/original-design"
+          if python3 tools/check_shared_design.py --root "$RUNNER_TEMP/original-design" > "$RUNNER_TEMP/design-red.log" 2>&1; then
+            echo 'Original independent painters unexpectedly pass shared ownership'
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/design-red.log"
+          python3 -c 'import os,pathlib; assert "Missing Multiprompt-owned design manifest" in pathlib.Path(os.environ["RUNNER_TEMP"],"design-red.log").read_text()'
+          echo 'ORIGINAL_SHARED_DESIGN_RED_PROVEN'
+
       - name: Python tooling tests
         run: python3 -m unittest discover -s tools -p 'test_*.py'
 

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const expectedFonts = [...['Regular', 'Medium', 'SemiBold', 'Bold', 'Italic'].map(weight => `IBMPlexSans-${weight}.ttf`), 'IBMPlexMono-Regular.ttf'].sort();
-export const sourcePaths = ['build.zig', 'assets/installer.wxs', '.github/workflows/release.yml', 'src/main.zig', 'src/font_config.zig'];
+export const sourcePaths = ['build.zig', 'assets/installer.wxs', '.github/workflows/release.yml', 'src/main.zig', 'src/font_config.zig', 'src/design_tokens.zig'];
 const names = source => [...new Set(source.match(/IBMPlex(?:Sans|Mono)-[A-Za-z]+\.ttf/g) ?? [])].sort();
 const section = (source, start, end) => {
   const first = source.indexOf(start);
@@ -52,7 +52,8 @@ export function verifySources(sources, exists) {
   const recreate = section(main, 'fn recreateFonts(', '\nfn changeFontScale');
   assert.match(recreate, /body_weight = @import\("font_config\.zig"\)\.body_weight/);
   assert.match(recreate, /comptime std\.debug\.assert\(body_weight == win\.FW_NORMAL\)/);
-  assert.match(sources['src/font_config.zig'], /pub const body_weight: i32 = 400;/);
+  assert.match(sources['src/font_config.zig'], /pub const body_weight: i32 = @import\("design_tokens.zig"\)\.body_weight;/);
+  assert.match(sources['src/design_tokens.zig'], /pub const body_weight: i32 = 400;/);
   const fontCalls = [...recreate.matchAll(/a\.(font(?:_small|_bold|_emoji|_underline|_icon|_title|_row|_time|_reply_label|_reply_icon)?) = win\.CreateFontW\(scaledFontHeight\(([\w.]+), (?:a\.font_scale|100), dpi\), 0, 0, 0, ([^,]+), 0, ([01]), 0, win\.DEFAULT_CHARSET, win\.OUT_DEFAULT_PRECIS, win\.CLIP_DEFAULT_PRECIS, win\.CLEARTYPE_NATURAL_QUALITY, win\.DEFAULT_PITCH, lit\("([^"]+)"\)\);/g)];
   assert.match(recreate, /a\.font_icon = win\.CreateFontW\(scaledFontHeight\(theme\.icon_size, 100, dpi\)/);
   assert.equal(fontCalls.length, 11, 'all native fonts must use natural ClearType');
