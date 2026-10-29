@@ -13,7 +13,7 @@ on:
         type: string
         default: ''
   push:
-    branches: [ceo/igsh-1084, 'verify-release/v*']
+    branches: [ceo/igsh-1084, ceo/IGSH-1123, 'verify-release/v*']
   pull_request:
     paths:
       - .github/workflows/verify.yml
@@ -79,7 +79,7 @@ jobs:
         shell: python
         env:
           EVENT_NAME: ${{ github.event_name }}
-          FEATURE: ${{ inputs.feature || (github.event_name == 'push' && 'voice' || 'search') }}
+          FEATURE: ${{ inputs.feature || (github.ref_name == 'ceo/IGSH-1123' && 'reply' || (github.event_name == 'push' && 'voice' || 'search')) }}
         run: |
           import json
           import os
@@ -136,6 +136,27 @@ jobs:
         shell: pwsh
         run: |
           & tools/verify-wazig/check-chat-rows.ps1
+      - name: Original-source reply preview red control
+        if: matrix.feature == 'reply' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:RUNNER_TEMP 'reply-original-source'
+          $prefix = Join-Path $env:GITHUB_WORKSPACE 'reply-original-bin'
+          git worktree add --detach $source 570ac52
+          if ($LASTEXITCODE -ne 0) { throw 'Original reply source unavailable' }
+          Push-Location $source
+          try {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            if ($LASTEXITCODE -ne 0) { throw 'Original reply build failed' }
+          } finally { Pop-Location }
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature reply -Bin reply-original-bin/bin -Evidence reply-red-evidence
+          if ($LASTEXITCODE -eq 0) { throw 'Original source unexpectedly shows reply preview' }
+          $failure = Get-Content reply-red-evidence/failure.txt -Raw
+          if ($failure -notmatch 'Reply preview missing') { throw "Wrong reply red failure: $failure" }
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          Copy-Item reply-red-evidence verification-evidence/red-control -Recurse
+          'REPLY_ORIGINAL_RED_OK: Reply preview missing' | Set-Content verification-evidence/reply-red-control.txt
+          exit 0
       - name: Build real desktop or download published release
         shell: pwsh
         env:
