@@ -57,11 +57,13 @@ export function verifySources(sources, exists) {
   assert.equal(fontCalls.length, 5, 'all five native fonts must use natural ClearType');
   const expected = {
     font: ['17', 'body_weight', '0', 'IBM Plex Sans'],
-    font_small: ['13', 'win.FW_MEDIUM', '0', 'IBM Plex Sans'],
+    font_small: ['15', 'win.FW_NORMAL', '0', 'IBM Plex Sans'],
     font_bold: ['16', 'win.FW_SEMIBOLD', '0', 'IBM Plex Sans'],
     font_emoji: ['16', 'win.FW_NORMAL', '0', 'Segoe UI Emoji'],
     font_underline: ['17', 'body_weight', '1', 'IBM Plex Sans'],
   };
+  assert.match(recreate, /font\.\* = win\.CreateFontW\(scaledFontHeight\(18, a.font_scale, dpi\)/);
+  assert.match(recreate, /if \(index & 4 != 0\) lit\("Consolas"\) else lit\("IBM Plex Sans"\)/);
   for (const call of fontCalls) assert.deepEqual(call.slice(2), expected[call[1]], `font role changed: ${call[1]}`);
   for (const font of expectedFonts) assert.ok(exists(`assets/${font}`), `missing assets/${font}`);
   assert.ok(exists('assets/IBM-Plex-LICENSE.txt'), 'missing font license');

@@ -1858,7 +1858,7 @@ fn recreateFonts(a: *App) void {
     const old_underline = a.font_underline;
     const old_emoji = a.font_emoji;
     a.font = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_small = win.CreateFontW(scaledFontHeight(15, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_small = win.CreateFontW(scaledFontHeight(15, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_bold = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
     a.font_emoji = win.CreateFontW(scaledFontHeight(16, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
     a.font_underline = win.CreateFontW(scaledFontHeight(17, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
@@ -14364,8 +14364,11 @@ fn formattedMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, 
         const inset = px(a, if (style.quote) @as(i32, 13) else if (style.block) @as(i32, 10) else 0);
         const available = @max(1, width - inset - if (style.block) px(a, 10) else @as(i32, 0));
         var layout_text = @import("chat_list_layout.zig").Layout{ .text = line, .width = available, .line_height = line_height, .lists = !style.block };
-        if (draw and style.block) {
-            var sizing = layout_text;
+        if (draw and style.block and (start == 0 or !parsed.styles[start - 1].block)) {
+            var block_end = end;
+            while (block_end < parsed.len and parsed.styles[block_end].block) : (block_end += 1) {}
+            if (block_end > start and parsed.text[block_end - 1] == '\n') block_end -= 1;
+            var sizing = @import("chat_list_layout.zig").Layout{ .text = parsed.text[start..block_end], .width = available, .line_height = line_height, .lists = false };
             while (sizing.next(metrics)) |_| {}
             smooth.fillRoundRect(&shapes, .{ .left = left, .top = top + y, .right = left + width, .bottom = top + y + sizing.height() }, px(a, 16), px(a, 16), theme.hex(0x1A1A1A));
         }
@@ -14415,14 +14418,27 @@ fn formattedMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, 
             }
             const target = @constCast(message);
             const rect = win.RECT{ .left = word_left, .top = line_top, .right = x, .bottom = line_top + line_height };
-            if (is_link and target.link_count < target.links.len) {
-                const link = &target.links[target.link_count];
-                link.* = .{ .rect = rect };
-                if (std.unicode.utf16LeToUtf8Alloc(a.allocator, link_word)) |utf8| {
-                    defer a.allocator.free(utf8);
-                    link.url.set(a.allocator, utf8);
-                    target.link_count += 1;
-                } else |_| {}
+            if (is_link) {
+                var extended = false;
+                if (target.link_count > 0) {
+                    const previous = &target.links[target.link_count - 1];
+                    if (std.mem.eql(u16, previous.url.slice(), link_word)) {
+                        if (previous.chunk_count < previous.chunk_rects.len) {
+                            previous.chunk_rects[previous.chunk_count] = rect;
+                            previous.chunk_count += 1;
+                        }
+                        extended = true;
+                    }
+                }
+                if (!extended and target.link_count < target.links.len) {
+                    const link = &target.links[target.link_count];
+                    link.* = .{ .rect = rect };
+                    if (std.unicode.utf16LeToUtf8Alloc(a.allocator, link_word)) |utf8| {
+                        defer a.allocator.free(utf8);
+                        link.url.set(a.allocator, utf8);
+                        target.link_count += 1;
+                    } else |_| {}
+                }
             }
         }
         const height = layout_text.height();

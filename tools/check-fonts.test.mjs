@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { execFileSync } from 'node:child_process';
 import { checkFonts, sourcePaths, verifySources } from './check-fonts.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -44,4 +45,9 @@ test('IGSH-466 OLE initialization preserves both private font-loader boundaries'
   const changed = main.replace('fonts_loaded[i] = win.AddFontResourceExW(font_path.ptr(), win.FR_PRIVATE, null) > 0;', 'fonts_loaded[i] = false;');
   assert.notEqual(changed, main);
   assert.throws(() => verifySources({ ...sources, 'src/main.zig': changed }, exists));
+});
+
+test('IGSH-1120 previous metadata typography fails the approved font roles', () => {
+  const main = execFileSync('git', ['show', '4e2fddc:src/main.zig'], { cwd: root, encoding: 'utf8' });
+  assert.throws(() => verifySources({ ...sources, 'src/main.zig': main }, exists));
 });
