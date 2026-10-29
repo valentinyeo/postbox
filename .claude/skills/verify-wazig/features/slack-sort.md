@@ -31,7 +31,7 @@
 - Source: `src/main.zig:3891` fills missing Slack times from message cache; `src/main.zig:12392` and `src/chat_order.zig:3` order pinned rows, last message times, names and identity ties; `src/slack.zig:191` reads actual last-message time rather than channel creation/modification time.
 - Journey and evidence: `tools/verify-wazig/run.ps1:143` drives the three stages, `tools/verify-wazig/fake-hub.py:99` supplies the synthetic hub, and `tools/verify-wazig/check-evidence.py:9` validates retained orders, times, keyboard walks, selection, delivery, send and isolation.
 
-## Sent chat retention
+### Sent chat retention
 
 - The fixture also contains four WhatsApp chats. Ctrl+3 opens that account after the Slack stages.
 - Sending a link to Gamma must promote it above Beta immediately, even though the hub continues returning Gamma's old timestamp. A keyboard Refresh must retain that ordering.

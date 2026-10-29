@@ -8043,6 +8043,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         setReplyQuote(a, message, quoted_id.slice());
     }
     for (a.messages[0..a.message_count]) |*message| {
+        if (message.reaction_to.len > 0) continue;
         _ = a.chat_activity.retain(a.allocator, chat_key.of(chat), message.timestamp.slice()) catch continue;
     }
     var reaction_index: usize = 0;
