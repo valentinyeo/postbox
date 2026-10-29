@@ -52,7 +52,7 @@ public static class VerifyMediaFit {
             for (int y = result.textTop; y <= result.textBottom; y++) {
                 for (int x = bubble[0] + Scale(12, dpi); x < bubble[2] - Scale(12, dpi); x++) {
                     var p = Pixel(data, stride, ox + x, oy + y);
-                    if (Math.Min(p[0], Math.Min(p[1], p[2])) > 230) result.textRight = Math.Max(result.textRight, x);
+                    if (Ink(p)) result.textRight = Math.Max(result.textRight, x);
                 }
             }
             int timeBottom = -1;

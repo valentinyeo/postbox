@@ -136,6 +136,29 @@ jobs:
         shell: pwsh
         run: |
           & tools/verify-wazig/check-chat-rows.ps1
+      - name: Original-source reply preview red control
+        if: matrix.feature == 'reply' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:RUNNER_TEMP 'reply-original-source'
+          $prefix = Join-Path $env:GITHUB_WORKSPACE 'reply-original-bin'
+          git worktree add --detach $source 570ac52
+          if ($LASTEXITCODE -ne 0) { throw 'Original reply source unavailable' }
+          Push-Location $source
+          try {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            if ($LASTEXITCODE -ne 0) { throw 'Original reply build failed' }
+          } finally { Pop-Location }
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature reply -Bin reply-original-bin/bin -Evidence reply-red-evidence
+          if ($LASTEXITCODE -eq 0) { throw 'Original source unexpectedly shows reply preview' }
+          $failure = Get-Content reply-red-evidence/failure.txt -Raw
+          if ($failure -notmatch 'Reply preview missing') { throw "Wrong reply red failure: $failure" }
+          $originalLog = Get-Content reply-red-evidence/final-data/launch-log.txt -Raw
+          if ($originalLog -notmatch 'Replying to Fixture Sender') { throw 'Original source did not select Reply' }
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          Copy-Item reply-red-evidence verification-evidence/red-control -Recurse
+          'REPLY_ORIGINAL_RED_OK: Reply preview missing' | Set-Content verification-evidence/reply-red-control.txt
+          exit 0
       - name: Build real desktop or download published release
         shell: pwsh
         env:
@@ -188,12 +211,15 @@ jobs:
             & tools/verify-wazig/run.ps1 -Feature sidebar-surface -ExpectedProduct Wazig -Bin sidebar-baseline-bin/bin -Evidence verification-evidence/baseline
             if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline capture failed' }
           } finally { $env:GITHUB_SHA = $candidate }
+          $fixtureText = [IO.File]::ReadAllText((Join-Path $env:GITHUB_WORKSPACE 'src/verify_text.json')).Replace("`r`n", "`n")
+          $fixtureBytes = [Text.Encoding]::UTF8.GetBytes($fixtureText)
+          $fixtureHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($fixtureBytes))
           @{
             candidate_commit = $candidate; baseline_commit = $baseline; assertion_commit = $assertion
             assertion_parent = (git rev-parse "$assertion^1").Trim()
             candidate_sha256 = (Get-FileHash zig-out/bin/Messages.exe).Hash
             baseline_sha256 = (Get-FileHash sidebar-baseline-bin/bin/Messages.exe).Hash
-            fixture_sha256 = (Get-FileHash src/verify_text.json).Hash
+            fixture_sha256 = $fixtureHash
           } | ConvertTo-Json | Set-Content verification-evidence/sidebar-builds.json
       - name: IGSH-949 original-main red control for provider archive
         if: matrix.feature == 'hub-archive'
@@ -242,7 +268,7 @@ jobs:
         if: matrix.feature == 'appearance'
         shell: pwsh
         run: |
-          $baseline = '4e2fddc'
+          $baseline = '2653484'
           $source = Join-Path $env:RUNNER_TEMP 'chat-design-baseline'
           $prefix = Join-Path $env:GITHUB_WORKSPACE 'chat-design-baseline-bin'
           git worktree add --detach $source $baseline

@@ -1,0 +1,62 @@
+[
+  {
+    "id": "de-meeting",
+    "language": "de",
+    "transcript": "Hallo Alex, ich komme morgen um zehn zum Treffen. Bitte bring die Unterlagen mit, damit wir gemeinsam den Zeitplan besprechen können. Danach möchte ich noch über die Kosten sprechen. Die Rechnung vom letzten Monat ist bereits bezahlt. Für den nächsten Termin wäre mir der Donnerstag lieber, weil ich am Freitag unterwegs bin. Sag mir bitte heute Abend Bescheid, ob das bei dir klappt.",
+    "from_me": true
+  },
+  {
+    "id": "en-meeting",
+    "language": "en",
+    "transcript": "Hi Alex, I will arrive at ten tomorrow for the meeting. Please bring the documents so we can discuss the schedule together. After that I want to talk about the costs. The invoice from last month has already been paid. Thursday would be better for our next appointment because I will be travelling on Friday. Please let me know this evening whether that works for you.",
+    "from_me": true
+  },
+  {
+    "id": "de-short",
+    "language": "de",
+    "transcript": "Hallo Alex, der Zug kommt heute später. Wir treffen uns deshalb erst um elf. Bitte warte am Eingang und bring einen Regenschirm mit.",
+    "from_me": false
+  },
+  {
+    "id": "en-short",
+    "language": "en",
+    "transcript": "Hi Alex, the train will arrive late today. We will therefore meet at eleven instead. Please wait by the entrance and bring an umbrella.",
+    "from_me": false
+  },
+  {
+    "id": "de-mixed",
+    "language": "de",
+    "transcript": "Also Alex, ich brauche gerade ein bisschen Abstand. Im Real Life ist das alles viel komplizierter als in unseren Nachrichten. Meine Energy reicht heute einfach nicht für noch ein Treffen. Das heißt aber nicht, dass ich dich nicht sehen möchte. Lass uns morgen in Ruhe telefonieren und dann gemeinsam überlegen, wie wir die nächste Woche planen. Den Spaziergang am Sonntag würde ich gerne beibehalten, weil mir die frische Luft wirklich gut tut.",
+    "from_me": true
+  },
+  {
+    "id": "en-mixed",
+    "language": "en",
+    "transcript": "Well Alex, I need a little distance right now. In real life this is much more complicated than in our messages. I simply do not have the energy for another meeting today. But that does not mean I do not want to see you. Let us talk calmly tomorrow and then plan next week together. I would like to keep our walk on Sunday because the fresh air really helps me.",
+    "from_me": true
+  },
+  {
+    "id": "de-long",
+    "language": "de",
+    "transcript": "Guten Morgen Alex, ich wollte dir noch von unserem Wochenende erzählen. Zuerst haben wir den Garten aufgeräumt und die alten Stühle in den Keller gebracht. Danach sind wir zum Markt gegangen und haben frisches Gemüse gekauft. Am Nachmittag kamen meine Eltern vorbei und wir haben zusammen gekocht. Das Essen war wirklich lecker, obwohl ich am Anfang das Salz vergessen hatte. Für nächste Woche müssen wir noch überlegen, wer die Kinder von der Schule abholt. Am Montag kann ich das übernehmen, aber am Dienstag habe ich einen Arzttermin. Könntest du an diesem Tag einspringen? Außerdem sollten wir endlich die Fahrkarten für unseren Urlaub buchen. Die Verbindung am frühen Morgen ist deutlich günstiger. Bitte schau dir die Zeiten an und sag mir, welche Abfahrt dir am besten passt.",
+    "from_me": false
+  },
+  {
+    "id": "en-long",
+    "language": "en",
+    "transcript": "Good morning Alex, I wanted to tell you about our weekend. First we cleaned up the garden and carried the old chairs into the cellar. Then we went to the market and bought fresh vegetables. My parents came over in the afternoon and we cooked together. The food was delicious even though I initially forgot the salt. We still need to decide who will collect the children from school next week. I can do Monday but I have a medical appointment on Tuesday. Could you help that day? We should also finally book the train tickets for our holiday. The early morning connection is much cheaper. Please look at the times and tell me which departure works best for you.",
+    "from_me": false
+  },
+  {
+    "id": "de-cutoff",
+    "language": "de",
+    "transcript": "Hallo Alex, wir müssen noch über den Umzug sprechen. Die Kartons kommen am Mittwoch und der Transporter ist für Samstag reserviert. Bitte frag deine Schwester, ob sie beim Tragen helfen kann. Die Küche sollten wir zuerst einpacken, weil dort besonders viele zerbrechliche Sachen stehen. Bei den Gläsern müssen wir darauf achten, dass wir jedes einzelne mit Papier umwi",
+    "from_me": true
+  },
+  {
+    "id": "en-cutoff",
+    "language": "en",
+    "transcript": "Hi Alex, we still need to talk about the move. The boxes arrive on Wednesday and the van is reserved for Saturday. Please ask your sister whether she can help with the lifting. We should pack the kitchen first because it contains many fragile things. With the glasses we need to make sure we wrap each one in pap",
+    "from_me": true
+  }
+]

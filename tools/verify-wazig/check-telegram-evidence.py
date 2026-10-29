@@ -21,13 +21,13 @@ def check_avatar_pixels(folder, capture=False):
     def px(value):
         return (value * dpi + 48) // 96
 
-    assert layout['row_height'] == px(60) and layout['top_index'] == 0
-    assert layout['client_height'] >= len(AVATAR_IDS) * px(60) and layout['client_width'] > px(66)
+    assert layout['row_height'] == px(56) and layout['top_index'] == 0
+    assert layout['client_height'] >= len(AVATAR_IDS) * px(56) and layout['client_width'] > px(66)
     width, height, screenshot = png['read_png'](folder / 'linked.png')
     metrics = {}
     for index, chat in enumerate(layout['ids']):
         left = layout['list_x'] + px(12)
-        top = layout['list_y'] + index * layout['row_height'] + px(10)
+        top = layout['list_y'] + index * layout['row_height'] + px(8)
         right, bottom = left + px(40), top + px(40)
         assert 0 <= left < right <= width and 0 <= top < bottom <= height
         rows = [row[left:right] for row in screenshot[top:bottom]]
@@ -41,7 +41,7 @@ def check_avatar_pixels(folder, capture=False):
             fraction = png['measure'](rows, AVATAR_COLOURS[chat])
             assert fraction > 0.55, (chat, 'photo missing', fraction)
         else:
-            fraction = png['measure'](rows, (48, 48, 48))
+            fraction = png['measure'](rows, (53, 53, 53))
             assert fraction > 0.55 and light > 0.01, (chat, 'letter circle missing', fraction, light)
         assert all(png['measure'](rows, colour) < 0.03 for other, colour in AVATAR_COLOURS.items() if other != chat), chat
         metrics[chat] = dict(rect=[left, top, right, bottom], colour_fraction=fraction, light_fraction=light)

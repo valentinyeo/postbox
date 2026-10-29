@@ -1,7 +1,7 @@
-Invoke-PaletteCommand $session 'Theme: Green' action
-$null = Wait-Until { (Read-Control $session status).theme -eq 'green' } 'green theme'
+Invoke-PaletteCommand $session 'Theme: Graphite' action
+$null = Wait-Until { (Read-Control $session status).theme -eq 'amoled' } 'green theme'
 $preferences = "HKCU:\Software\MessagesVerification\$id\Software\Messages"
-Assert-That ((Get-ItemProperty $preferences).Theme -eq 0) 'Theme preference was not saved'
+Assert-That ((Get-ItemProperty $preferences).Theme -eq 1) 'Theme preference was not saved'
 Assert-That ($null -eq (Get-ItemProperty $preferences).FontScale) 'Fresh fixture already has a saved scale'
 Send-Keys $session 'Scale probe'
 $textPattern = $compose.GetCurrentPattern([Windows.Automation.TextPattern]::Pattern)

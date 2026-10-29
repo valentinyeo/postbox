@@ -108,7 +108,9 @@ function Invoke-ArchivePresentation($Session) {
         $rows = @((Read-Control $Session chats).chats)
         $archived = @($rows | Where-Object archived)[0]
         $index = [Array]::IndexOf(@($rows.id), $archived.id)
-        $height = [int][Math]::Round(64 * [VerifyWindow]::GetDpiForWindow([IntPtr]$list.Current.NativeWindowHandle) / 96.0)
+        $rowHeight = [UIntPtr]::Zero
+        Assert-That ([VerifyWindow]::ReadListMetric([IntPtr]$list.Current.NativeWindowHandle, 0x01A1, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$rowHeight) -ne [IntPtr]::Zero) 'Cannot read archived probe row height'
+        $height = [int]$rowHeight.ToUInt64()
         $x = [int]($bounds.Left + 75)
         $y = [int]($bounds.Top + $index * $height + $height / 2)
         Assert-That ($index -ge 0 -and $y -lt $bounds.Bottom) 'Archived probe is not visible'

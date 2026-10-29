@@ -2,7 +2,7 @@ const std = @import("std");
 pub const format_request = @import("format_request.zig");
 
 pub const max_bytes = 64 * 1024;
-const header = "wazig-voice-format v1\n";
+const header = "wazig-voice-format v2\n";
 
 pub const Key = struct {
     account: []const u8,
@@ -158,4 +158,11 @@ test "summaries larger than the old 4 KB limit survive intact" {
     defer allocator.free(wide);
     var requests = Requests{};
     try std.testing.expect(!requests.claim(u16, test_key.message, wide));
+}
+
+test "previous language policy cache is ignored so saved raw speech can be reformatted" {
+    try std.testing.expect(payloadFor("wazig-voice-format v1\naccount-a\nchat-a\nmessage-a\n1. English summary\n---\n1 English heading\n- Guten Morgen", test_key) == null);
+    const stored = try envelope(std.testing.allocator, test_key, test_summary);
+    defer std.testing.allocator.free(stored);
+    try std.testing.expectEqualStrings(test_summary, payloadFor(stored, test_key).?);
 }

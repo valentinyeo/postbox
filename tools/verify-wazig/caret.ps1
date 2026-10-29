@@ -104,10 +104,10 @@ function Invoke-CaretJourney($Session, $Start, $App) {
     $themes = [ordered]@{}
     $themes['amoled'] = Measure-CaretTheme $Session 'amoled'
     Send-Keys $Session '^k'
-    Send-Keys $Session 'Theme: Green'
+    Send-Keys $Session 'Theme: Graphite'
     Send-Keys $Session '{ENTER}'
-    $null = Wait-Until { (Read-Control $Session status).theme -eq 'green' } 'caret green theme'
-    $themes['green'] = Measure-CaretTheme $Session 'green'
+    $null = Wait-Until { (Read-Control $Session status).theme -eq 'amoled' } 'graphite theme reapplied'
+    $themes['reapplied'] = Measure-CaretTheme $Session 'reapplied'
     [ordered]@{ themes = $themes } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'caret.json')
     Save-Screen $Session after
     foreach ($name in $themes.Keys) {

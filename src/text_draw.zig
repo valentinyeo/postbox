@@ -356,7 +356,7 @@ fn keyForDC(dc: win.HDC) !FormatKey {
 }
 fn getFormat(key: FormatKey) !*FormatEntry {
     for (&formats) |*entry| if (entry.format != null and entry.key.eql(key)) return entry;
-    const plex = std.mem.eql(u16, std.mem.sliceTo(&key.family, 0), wide("IBM Plex Sans"));
+    const plex = std.mem.eql(u16, std.mem.sliceTo(&key.family, 0), wide("IBM Plex Sans")) or std.mem.eql(u16, std.mem.sliceTo(&key.family, 0), wide("IBM Plex Mono"));
     var format: ?*c.IDWriteTextFormat = null;
     try check(factory.?.lpVtbl.*.CreateTextFormat.?(factory.?, &key.family, if (plex) collection else null, @intCast(key.weight), if (key.italic) c.DWRITE_FONT_STYLE_ITALIC else c.DWRITE_FONT_STYLE_NORMAL, c.DWRITE_FONT_STRETCH_NORMAL, @floatFromInt(key.height), wide("en-us"), &format));
     const slot = &formats[next_format];

@@ -11,9 +11,9 @@ const StartupInput = extern struct {
     suppress_thread: win.BOOL = 0,
     suppress_codecs: win.BOOL = 0,
 };
-const FloatRect = extern struct { x: f32, y: f32, width: f32, height: f32 };
+const GradientRect = extern struct { x: f32, y: f32, width: f32, height: f32 };
 const Api = struct {
-    GdipCreateLineBrushFromRect: *const fn (*const FloatRect, u32, u32, c_int, c_int, *Handle) callconv(.winapi) Status,
+    GdipCreateLineBrushFromRect: *const fn (*const GradientRect, u32, u32, c_int, c_int, *Handle) callconv(.winapi) Status,
     GdipCreateFromHDC: *const fn (win.HDC, *Handle) callconv(.winapi) Status,
     GdipGetDC: *const fn (Handle, *win.HDC) callconv(.winapi) Status,
     GdipReleaseDC: *const fn (Handle, win.HDC) callconv(.winapi) Status,
@@ -160,6 +160,27 @@ fn draw(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i
         }
     }
     fillCoverage(ctx, opened, .{ .rect = @bitCast(rect), .corner_width = corner_width, .corner_height = corner_height, .ellipse = ellipse, .stroke = stroke }, color);
+}
+
+pub fn fillRoundRectGradient(ctx: *const Context, rect: win.RECT, diameter: i32, top: win.COLORREF, bottom: win.COLORREF, bottom_opacity: u8) void {
+    if (rect.right <= rect.left or rect.bottom <= rect.top) return;
+    {
+        const graphics = open(ctx);
+        defer close(graphics);
+        if (graphics != null) {
+            const f = api.?;
+            const bounds = GradientRect{ .x = @floatFromInt(rect.left), .y = @floatFromInt(rect.top), .width = @floatFromInt(rect.right - rect.left), .height = @floatFromInt(rect.bottom - rect.top) };
+            var brush: Handle = null;
+            if (f.GdipCreateLineBrushFromRect(&bounds, argb(top), (argb(bottom) & 0xffffff) | (@as(u32, bottom_opacity) << 24), 1, 0, &brush) == 0 and brush != null) {
+                defer _ = f.GdipDeleteBrush(brush);
+                if (roundPath(rect, diameter, diameter)) |path| {
+                    defer _ = f.GdipDeletePath(path);
+                    if (f.GdipFillPath(graphics, brush, path) == 0) return;
+                }
+            }
+        }
+    }
+    fillRoundRect(ctx, rect, diameter, diameter, top);
 }
 
 pub fn strokePolyline(ctx: *const Context, points: []const [2]f32, color: win.COLORREF, width: f32) void {
@@ -335,25 +356,6 @@ pub fn fillRoundRect(ctx: *const Context, rect: win.RECT, corner_width: i32, cor
         }
     }
     draw(ctx, rect, corner_width, corner_height, color, null, false);
-}
-
-pub fn fillGradientRoundRect(ctx: *const Context, rect: win.RECT, diameter: i32, top: win.COLORREF, bottom: win.COLORREF, bottom_opacity: u8) void {
-    if (rect.right <= rect.left or rect.bottom <= rect.top) return;
-    const opened = open(ctx);
-    defer close(opened);
-    if (opened) |graphics| {
-        const f = api.?;
-        const bounds = FloatRect{ .x = @floatFromInt(rect.left), .y = @floatFromInt(rect.top), .width = @floatFromInt(rect.right - rect.left), .height = @floatFromInt(rect.bottom - rect.top) };
-        var brush: Handle = null;
-        if (f.GdipCreateLineBrushFromRect(&bounds, argb(top), (argb(bottom) & 0xffffff) | (@as(u32, bottom_opacity) << 24), 1, 0, &brush) == 0 and brush != null) {
-            defer _ = f.GdipDeleteBrush(brush);
-            if (roundPath(rect, diameter, diameter)) |path| {
-                defer _ = f.GdipDeletePath(path);
-                if (f.GdipFillPath(graphics, brush, path) == 0) return;
-            }
-        }
-    }
-    fillRoundRect(ctx, rect, diameter, diameter, top);
 }
 
 pub fn strokeRoundRect(ctx: *const Context, rect: win.RECT, corner_width: i32, corner_height: i32, color: win.COLORREF, width: i32) void {

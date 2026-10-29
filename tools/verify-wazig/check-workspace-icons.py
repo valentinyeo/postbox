@@ -85,16 +85,16 @@ def check_pixels(folder, capture=False):
     def px(value):
         return (value * dpi + 48) // 96
 
-    assert layout['row_height'] == px(60)
-    assert layout['client_height'] >= 5 * px(60) and layout['client_width'] > px(66)
+    assert layout['row_height'] == px(56)
+    assert layout['client_height'] >= 5 * px(56) and layout['client_width'] > px(66)
     width, height, screenshot = read_png(folder / 'workspace-icons-list.png')
     metrics = {}
     for name, chat_id in zip(['amber', 'cobalt', 'whatsapp', 'empty', 'signal'], IDS):
         index = layout['ids'].index(chat_id)
-        left = layout['list_x'] + px(12) + px(28)
-        top = layout['list_y'] + index * px(60) + px(10) + px(28)
-        right = layout['list_x'] + px(12) + px(42)
-        bottom = layout['list_y'] + index * px(60) + px(10) + px(42)
+        left = layout['list_x'] + px(12) + px(24)
+        top = layout['list_y'] + index * px(56) + px(8) + px(24)
+        right = layout['list_x'] + px(12) + px(40)
+        bottom = layout['list_y'] + index * px(56) + px(8) + px(40)
         assert 0 <= left < right <= width and 0 <= top < bottom <= height
         rows = [row[left:right] for row in screenshot[top:bottom]]
         crop = folder / f'badge-icon-{name}.png'

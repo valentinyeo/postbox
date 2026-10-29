@@ -6,6 +6,15 @@ on:
 permissions:
   contents: read
 jobs:
+  font-delivery:
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: node tools/check-fonts.mjs
+      - run: node --test tools/check-fonts.test.mjs
   build:
     name: build
     runs-on: ubuntu-latest
@@ -27,12 +36,12 @@ jobs:
       - name: Package zip
         run: |
           cd zig-out/bin
-          zip -r "${GITHUB_WORKSPACE}/Messages-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe postboxctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf *LICENSE*
+          zip -r "${GITHUB_WORKSPACE}/Messages-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe postboxctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf IBMPlexSans-Italic.ttf IBMPlexMono-Regular.ttf *LICENSE*
       - name: Build and package ARM64
         run: |
           zig build -Dtarget=aarch64-windows-gnu --release=small -Dversion="${GITHUB_REF_NAME#v}" -p zig-out-arm64
           cd zig-out-arm64/bin
-          zip -r "${GITHUB_WORKSPACE}/Messages_arm64-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe postboxctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf *LICENSE*
+          zip -r "${GITHUB_WORKSPACE}/Messages_arm64-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe postboxctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf IBMPlexSans-Italic.ttf IBMPlexMono-Regular.ttf *LICENSE*
       - name: Branded archives with legacy updater aliases
         run: |
           cp "Messages-${GITHUB_REF_NAME}.zip" "Postbox-${GITHUB_REF_NAME}.zip"
@@ -87,7 +96,7 @@ jobs:
           $exe = "$env:LOCALAPPDATA\Programs\Messages\Messages.exe"
           $lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Postbox.lnk"
           if (-not (Test-Path $exe)) { throw "missing $exe" }
-          foreach ($font in @('IBMPlexSans-Regular.ttf', 'IBMPlexSans-Medium.ttf', 'IBMPlexSans-SemiBold.ttf', 'IBMPlexSans-Bold.ttf')) {
+          foreach ($font in @('IBMPlexSans-Regular.ttf', 'IBMPlexSans-Medium.ttf', 'IBMPlexSans-SemiBold.ttf', 'IBMPlexSans-Bold.ttf', 'IBMPlexSans-Italic.ttf', 'IBMPlexMono-Regular.ttf')) {
             if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Messages\$font")) { throw "missing bundled font $font" }
           }
           if (-not (Test-Path $lnk)) { throw "missing Start menu shortcut $lnk" }

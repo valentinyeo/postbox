@@ -1,4 +1,4 @@
-Invoke-PaletteCommand $session 'Theme: AMOLED black'
+Invoke-PaletteCommand $session 'Theme: Graphite'
 $null = Wait-Until { (Read-Control $session status).theme -eq 'amoled' } 'graphite chat theme'
 foreach ($case in @(@{ provider = 'slack'; chat = 'fixture-alpha' }, @{ provider = 'whatsapp'; chat = 'fixture-beta' })) {
     $null = Read-Control $session select -Arguments @($case.chat, '--provider', $case.provider)
@@ -46,5 +46,5 @@ foreach ($case in @(@{ provider = 'slack'; chat = 'fixture-alpha' }, @{ provider
         Assert-That ($sample.R -eq 74 -and $sample.G -eq 74 -and $sample.B -eq 74) 'Native quote bar does not match the approved grey'
     } finally { $image.Dispose() }
 }
-Invoke-PaletteCommand $session 'Theme: Green'
-$null = Wait-Until { (Read-Control $session status).theme -eq 'green' } 'appearance journey final theme restored'
+Invoke-PaletteCommand $session 'Theme: Graphite'
+$null = Wait-Until { (Read-Control $session status).theme -eq 'amoled' } 'appearance journey final theme restored'

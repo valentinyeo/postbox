@@ -369,21 +369,21 @@ class TelegramAvatarEvidenceTests(unittest.TestCase):
 
     def screenshot(self, dpi=96, missing_photo=False, bad_fallback=False, blank_initial=False):
         px = lambda value: (value * dpi + 48) // 96
-        layout = dict(dpi=dpi, ids=self.check['AVATAR_IDS'], row_height=px(60), top_index=0,
-                      list_x=10, list_y=10, client_width=px(180), client_height=5 * px(60))
+        layout = dict(dpi=dpi, ids=self.check['AVATAR_IDS'], row_height=px(56), top_index=0,
+                      list_x=10, list_y=10, client_width=px(180), client_height=5 * px(56))
         (self.folder / 'telegram-avatars-layout.json').write_text(json.dumps(layout))
-        rows = [[(0, 0, 0)] * (px(180) + 20) for _ in range(5 * px(60) + 20)]
+        rows = [[(0, 0, 0)] * (px(180) + 20) for _ in range(5 * px(56) + 20)]
         for index, chat in enumerate(layout['ids']):
-            colour = self.check['AVATAR_COLOURS'].get(chat, (48, 48, 48))
+            colour = self.check['AVATAR_COLOURS'].get(chat, (53, 53, 53))
             if missing_photo and chat in self.check['AVATAR_COLOURS']:
-                colour = (48, 48, 48)
+                colour = (53, 53, 53)
             if bad_fallback and chat not in self.check['AVATAR_COLOURS']:
                 colour = next(iter(self.check['AVATAR_COLOURS'].values()))
-            left, top = 10 + px(12), 10 + index * px(60) + px(10)
+            left, top = 10 + px(12), 10 + index * px(56) + px(8)
             for y in range(px(40)):
                 for x in range(px(40)):
-                    if (x - px(40) / 2 + 0.5) ** 2 + (y - px(40) / 2 + 0.5) ** 2 < (px(40) / 2) ** 2:
-                        ink = chat not in self.check['AVATAR_COLOURS'] and not blank_initial and px(18) <= x < px(22) and px(15) <= y < px(27)
+                    if (x - (px(40) - 1) / 2) ** 2 + (y - (px(40) - 1) / 2) ** 2 < (px(40) / 2) ** 2:
+                        ink = chat not in self.check['AVATAR_COLOURS'] and not blank_initial and px(16) <= x < px(20) and px(13) <= y < px(25)
                         rows[top + y][left + x] = (255, 255, 255) if ink else colour
         self.check['png']['write_png'](self.folder / 'linked.png', rows)
 

@@ -278,6 +278,8 @@ pub fn build(b: *std.Build) void {
     b.installFile("assets/IBMPlexSans-Regular.ttf", "bin/IBMPlexSans-Regular.ttf");
     b.installFile("assets/IBMPlexSans-Medium.ttf", "bin/IBMPlexSans-Medium.ttf");
     b.installFile("assets/IBMPlexSans-SemiBold.ttf", "bin/IBMPlexSans-SemiBold.ttf");
+    b.installFile("assets/IBMPlexSans-Italic.ttf", "bin/IBMPlexSans-Italic.ttf");
+    b.installFile("assets/IBMPlexMono-Regular.ttf", "bin/IBMPlexMono-Regular.ttf");
     b.installFile("assets/IBMPlexSans-Bold.ttf", "bin/IBMPlexSans-Bold.ttf");
     b.installFile("assets/IBM-Plex-LICENSE.txt", "bin/IBM-Plex-LICENSE.txt");
 
@@ -354,6 +356,9 @@ pub fn build(b: *std.Build) void {
     const canvas_source = sourceSection("fn canvasProc(", "fn selectChatRow(");
     const canvas_input_start = std.mem.indexOf(u8, canvas_source, "            a.click_origin =") orelse @panic("Missing canvas input start");
     const canvas_input_end = std.mem.indexOf(u8, canvas_source, "        win.WM_RBUTTONUP =>") orelse @panic("Missing canvas input end");
+    const reaction_input_start = std.mem.indexOf(u8, canvas_source, "            for (a.messages[0..a.message_count]) |*item| {\n                const chip = item.reaction_hit;") orelse @panic("Missing reaction input start");
+    const reaction_input = canvas_source[reaction_input_start..];
+    const reaction_input_end = std.mem.indexOf(u8, reaction_input, "            for (a.messages[0..a.message_count], 0..) |*item, index| {") orelse @panic("Missing reaction input end");
     const double_click_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/message_double_click_test.zig"),
         "fn hubConfigured(_: *const App) bool { return true; }\n",
@@ -369,7 +374,7 @@ pub fn build(b: *std.Build) void {
         "fn canvasProc(hwnd: usize, message: u32, wparam: usize, lparam: isize) isize { const a = app_ptr.?; switch (message) {\n",
         canvas_source[std.mem.indexOf(u8, canvas_source, "        win.WM_TIMER =>").?..std.mem.indexOf(u8, canvas_source, "        win.WM_MOUSEWHEEL =>").?],
         "win.WM_LBUTTONDOWN => { const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))); const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));\n",
-        sourceSection("            for (a.messages[0..a.message_count]) |*item| {", "            for (a.messages[0..a.message_count], 0..) |*item, index| {"),
+        reaction_input[0..reaction_input_end],
         canvas_source[canvas_input_start..canvas_input_end],
         "else => return 0, } }\n",
         "fn loadReaction(a: *App, message: *Message, object: std.json.ObjectMap) void { const reaction_to = getString(object, \"ReactionToID\");\n",
@@ -658,14 +663,12 @@ pub fn build(b: *std.Build) void {
     const composer_layout_start = std.mem.indexOf(u8, composer_layout_source, "    const left_width =") orelse @panic("Missing composer layout body");
     const composer_button_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/composer_button_test.zig"),
-        sourceSection("fn drawDictationIcon(", "fn drawComposerButton("),
         "fn drawComposerButton(a: *App, item: *win.DRAWITEMSTRUCT) void {\n",
         composer_paint_source[composer_paint_start..],
-        sourceSection("fn chatColumn(", "fn scrollToSelectedMessage("),
         "fn layoutComposer(a: *App, width: i32, height: i32) void {\n",
         composer_layout_source[composer_layout_start..],
         "    const sizes = .{ .edit_height = px(a, 44) };\n",
-        sourceSection("            const pane_right =", "            const inner = a.compose_geometry.text;"),
+        sourceSection("            a.compose_geometry =", "            const inner = a.compose_geometry.text;"),
         sourceSection("    const buttons = [_]?win.HWND", "    updateAttachButton(a);"),
         "}\n",
     }) catch @panic("Out of memory building composer button harness");

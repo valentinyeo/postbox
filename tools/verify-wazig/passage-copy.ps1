@@ -89,6 +89,8 @@ function Assert-PassageHighlight($Session, $Messages, $Canvas, [string]$Name, [s
 }
 
 function Invoke-PassageCopyJourney($Session) {
+    [VerifyPassage]::TestGradientOracle()
+    Write-Output 'PASSAGE GRADIENT ORACLE CONTROLS PASSED'
     $previousDpi = [VerifyPassage]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
     Assert-That ($previousDpi -ne [IntPtr]::Zero) 'Cannot use physical pixels for passage input and screenshots'
     try {

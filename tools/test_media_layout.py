@@ -13,11 +13,11 @@ def section(source, name):
 def verify_column(source):
     width = section(source, 'messageBubbleWidth')
     for token in (
-        'return @max(1, @min(px(a, 660), available_width - px(a, 48)));',
+        'return @max(1, @min(px(a, theme.bubble_max_width), available_width - px(a, 48)));',
     ):
         assert token in width, f'IGSH-714 message column missing {token}'
     column = section(source, 'chatColumn')
-    assert '@min(px(a, 760), available_width - px(a, 32))' in column
+    assert '@min(px(a, theme.chat_column_width), available_width - px(a, 32))' in column
     assert '@divTrunc(available_width - width, 2)' in column
     assert 'bitmap' not in width, 'IGSH-714 bitmap dimensions must not choose the message column'
     paint = section(source, 'drawCanvas')
@@ -44,11 +44,13 @@ def verify_resize(source):
         '$attempt -lt 8;',
         'if ($canvasWidth -eq 320) { break }',
         '[VerifyVoice]::Bounds($Session.pid, $window)',
-        '$requestedWidth = $width + 320 - $canvasWidth',
+        '$requestedWidth = $width + $gain * (320 - $canvasWidth)',
         '[VerifyWindow]::SetWindowPos($window, [IntPtr]::Zero, 0, 0, $requestedWidth, $height, 6)',
         '$canvasWidth -ge 300 -and $canvasWidth -le 340',
         "'media-fit-resize.json'",
-        'window_before = $width; canvas_before = $canvasWidth; requested_window = $requestedWidth',
+        'window_before = $width; canvas_before = $canvasWidth; gain = $gain; requested_window = $requestedWidth',
+        '$gain = if ($canvasWidth -lt $sidebarLimit) { 2 } else { 1 }',
+        '$sidebarLimit = [int][Math]::Floor((300 * $dpi + 48) / 96)',
     ):
         assert token in source, f'IGSH-714 measured resize missing {token}'
     assert 'Send-Keys' not in source, 'IGSH-714 resize must not depend on system-menu keys'
@@ -68,7 +70,7 @@ class MediaFitResizeTests(unittest.TestCase):
             "resize = read('media-fit-resize.json')",
             "resize['target'] == 320 and 300 <= resize['canvas'] <= 340",
             "row['canvas'][2] == resize['canvas']",
-            "step['requested_window'] == step['window_before'] + resize['target'] - step['canvas_before']",
+            "step['requested_window'] == step['window_before'] + step['gain'] * (resize['target'] - step['canvas_before'])",
             "resize['steps'][-1]['canvas_after'] == resize['canvas']",
         ):
             self.assertIn(token, validator)
@@ -77,25 +79,28 @@ class MediaFitResizeTests(unittest.TestCase):
         verify_resize(self.journey)
         source = (ROOT / 'src/main.zig').read_text()
         layout = section(source, 'layoutRegion')
-        minimum, maximum = map(int, re.search(r'const left_width = std.math.clamp\(@divTrunc\(width, 3\), px\(a, (\d+)\), px\(a, (\d+)\)\)', layout).groups())
+        self.assertIn('const left_width = @min(px(a, theme.sidebar_width), @divTrunc(width, 2));', layout)
+        minimum = 280
+        maximum = int(re.search(r'pub const sidebar_width: i32 = (\d+);', (ROOT / 'src/theme.zig').read_text()).group(1))
         self.assertIn('const chat_width = width - left_width - 1;', layout)
         self.assertIn('chat_width - panel_width', layout)
-        target = int(re.search(r'\$requestedWidth = \$width \+ (\d+) - \$canvasWidth', self.journey).group(1))
+        target = int(re.search(r'\$requestedWidth = \$width \+ \$gain \* \((\d+) - \$canvasWidth\)', self.journey).group(1))
         attempts = int(re.search(r'\$attempt -lt (\d+)', self.journey).group(1))
         for dpi in (96, 120, 144, 192):
             px = lambda n: (n * dpi + 48) // 96
             for border in (0, px(16), px(32)):
                 def canvas(outer):
                     client = outer - border
-                    sidebar = min(px(maximum), max(px(minimum), client // 3))
+                    sidebar = min(px(maximum), client // 2)
                     return client - sidebar - 1
-                for initial in (border + px(maximum) + 182, 604, 1024, 1160, 3840):
+                for initial in (border + px(minimum) + 182, 604, 1024, 1160, 3840):
                     width = initial
                     for attempt in range(attempts):
                         current = canvas(width)
                         if current == target:
                             break
-                        width += target - current
+                        gain = 2 if current < px(maximum) else 1
+                        width += gain * (target - current)
                     with self.subTest(dpi=dpi, border=border, initial=initial):
                         self.assertEqual(canvas(width), target)
                         self.assertTrue(300 <= canvas(width) <= 340)
@@ -104,7 +109,7 @@ class MediaFitResizeTests(unittest.TestCase):
     def test_IGSH_714_old_resize_and_weakened_band_are_rejected(self):
         verify_resize(self.journey)
         for old, new in (
-            ('$requestedWidth = $width + 320 - $canvasWidth', '$requestedWidth = 600'),
+            ('$requestedWidth = $width + $gain * (320 - $canvasWidth)', '$requestedWidth = 600'),
             ('$canvasWidth -ge 300 -and $canvasWidth -le 340', '$canvasWidth -ge 180 -and $canvasWidth -le 340'),
             ('[VerifyWindow]::SetWindowPos', '[VerifyWindow]::ShowWindow'),
             ('$attempt -lt 8;', '$attempt -lt 80'),
@@ -121,7 +126,8 @@ class MediaLayoutTests(unittest.TestCase):
 
     def test_IGSH_714_column_and_media_use_canvas_bounds(self):
         width = verify_column(self.source)
-        maximum, inset = map(int, re.search(r'@min\(px\(a, (\d+)\), available_width - px\(a, (\d+)\)', width).groups())
+        maximum = int(re.search(r'pub const bubble_max_width: i32 = (\d+);', (ROOT / 'src/theme.zig').read_text()).group(1))
+        inset = int(re.search(r'available_width - px\(a, (\d+)\)', width).group(1))
         for dpi in (96, 144, 192):
             px = lambda value: (value * dpi + 48) // 96
             for available in (px(317), px(682), px(1200)):
@@ -138,7 +144,7 @@ class MediaLayoutTests(unittest.TestCase):
     def test_IGSH_714_rejects_uncapped_or_inconsistent_columns(self):
         verify_column(self.source)
         for old, new in (
-            ('return @max(1, @min(px(a, 660),', 'return @max(1, @max(px(a, 660),'),
+            ('return @max(1, @min(px(a, theme.bubble_max_width),', 'return @max(1, @max(px(a, theme.bubble_max_width),'),
             ('const bubble_width = messageBubbleWidth(a, available_width);', 'const bubble_width = message.bitmap_width;'),
             ('const bubble_width = messageBubbleWidth(a, client.right - client.left);', 'const bubble_width = 280;'),
             ('bubble_width - px(a, 24), px(a, 250))', 'message.bitmap_width, px(a, 250))'),

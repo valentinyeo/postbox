@@ -58,7 +58,7 @@ def check_media_fit(folder):
             while time_top - 1 in time_rows:
                 time_top -= 1
             assert text_bottom < time_top, 'media-fit: time overlaps text pixels'
-            assert any(min(image[oy + y][ox + x]) > 230 for y in range(text_top, text_bottom + 1)
+            assert any(min(image[oy + y][ox + x]) > 110 for y in range(text_top, text_bottom + 1)
                        for x in range(time_left, b[2] - px(12))), 'media-fit: text does not exercise the time box'
             assert text_bottom == row['result']['textBottom'] and time_top == row['result']['timeTop']
         else:
@@ -77,12 +77,14 @@ def check_media_fit(folder):
     assert all(row['canvas'][2] == resize['canvas'] for row in checks if row['size'] == 'narrow')
     assert len(resize['steps']) <= 8
     for index, step in enumerate(resize['steps']):
-        assert step['requested_window'] == step['window_before'] + resize['target'] - step['canvas_before']
+        assert step['requested_window'] == step['window_before'] + step['gain'] * (resize['target'] - step['canvas_before'])
         assert step['requested_window'] > 0 and step['canvas_after'] > 0
         if index:
             assert step['canvas_before'] == resize['steps'][index - 1]['canvas_after']
     if resize['steps']:
         assert resize['steps'][-1]['canvas_after'] == resize['canvas']
+    assert resize['sidebar_limit'] == (300 * resize['dpi'] + 48) // 96
+    assert all(step['gain'] == (2 if step['canvas_before'] < resize['sidebar_limit'] else 1) for step in resize['steps'])
     assert widths['wide'] > widths['narrow']
     wide, = [row for row in checks if row['size'] == 'wide' and row['id'] == 'landscape']
     narrow, = [row for row in checks if row['size'] == 'narrow' and row['id'] == 'landscape']

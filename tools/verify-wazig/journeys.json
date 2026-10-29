@@ -606,6 +606,23 @@
       "library": "caret.ps1",
       "hub_handler": null,
       "maximize": true
+    },
+    {
+      "name": "reply",
+      "pr": true,
+      "hub": "reply",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-reply.ps1",
+      "validator": {
+        "file": "check-reply-evidence.py",
+        "function": "check_reply"
+      },
+      "hub_handler": {
+        "file": "reply-fixture.py",
+        "class": "ReplyHandler"
+      },
+      "maximize": true
     }
   ]
 }

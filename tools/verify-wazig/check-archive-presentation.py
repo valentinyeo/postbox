@@ -56,7 +56,7 @@ def check_scene(folder, name, capture=False):
     assert 96 <= layout['dpi'] <= 192 and layout['top'] == 0, name
     scale = layout['dpi'] / 96
     px = lambda value: int(value * scale + 0.5)
-    assert layout['row_height'] == px(64), name
+    assert layout['row_height'] == px(56), name
     _, _, image = read_png(folder / f'{name}.png')
     archived = next(row for row in rows if row['archived'])
     live = next(row for row in rows if not row['archived'] and row['id'] != layout['selected'])
@@ -65,7 +65,7 @@ def check_scene(folder, name, capture=False):
         index = rows.index(row)
         assert (index + 1) * layout['row_height'] <= layout['height'], name
         x = layout['x'] + px(66)
-        y = layout['y'] + index * layout['row_height'] + px(10)
+        y = layout['y'] + index * layout['row_height'] + px(4)
         return measure(image, [x, y, x + px(125), y + px(24)])
 
     normal, marked = row_measure(live), row_measure(archived)
