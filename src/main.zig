@@ -14454,7 +14454,7 @@ fn messageWidth(hdc: win.HDC, a: *App, message: *const Message, limit: i32) i32 
     if (message.media_type.len > 0 or message.quote.len > 0 or message.transcript.len > 0 or message.unfurl_provider != .none) return limit;
     var extent: i32 = 0;
     _ = formattedMessage(hdc, a, message, @max(1, limit - px(a, 28)), false, 0, 0, &extent);
-    return @min(limit, @max(px(a, 72), extent + px(a, 28)));
+    return @min(limit, extent + px(a, 28));
 }
 
 fn cachedChatPreview(a: *App, chat: *Chat) void {
@@ -15342,12 +15342,16 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         if (show_sender) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
             _ = win.SetTextColor(hdc, theme.current.on_surface);
-            const sender_width = @min(width - px(a, 60), runWidth(hdc, message.sender.slice()));
-            var sender_rect = win.RECT{ .left = left, .top = y, .right = left + sender_width, .bottom = bubble_top - px(a, 8) };
+            const sender_width = @min(column.right - column.left - px(a, 60), runWidth(hdc, message.sender.slice()));
+            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+            const header_width = sender_width + px(a, 8) + runWidth(hdc, message.time.slice());
+            const header_left = if (message.from_me) @max(column.left, column.right - header_width) else left;
+            _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
+            var sender_rect = win.RECT{ .left = header_left, .top = y, .right = header_left + sender_width, .bottom = bubble_top - px(a, 8) };
             _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             _ = win.SetTextColor(hdc, theme.hex(0x8A8A8A));
-            var time_rect = win.RECT{ .left = sender_rect.right + px(a, 8), .top = y + px(a, 1), .right = right, .bottom = sender_rect.bottom };
+            var time_rect = win.RECT{ .left = sender_rect.right + px(a, 8), .top = y + px(a, 1), .right = @min(column.right, header_left + header_width), .bottom = sender_rect.bottom };
             _ = text_draw.drawText(hdc, message.time.ptr(), @intCast(message.time.len), &time_rect, win.DT_LEFT | win.DT_SINGLELINE);
         }
         const separator = separatorHeight(a, index);

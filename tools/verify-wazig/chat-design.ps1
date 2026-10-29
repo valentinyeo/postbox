@@ -28,6 +28,7 @@ foreach ($case in @(@{ provider = 'slack'; chat = 'fixture-alpha' }, @{ provider
     Assert-That ($main.bubble[0] -eq $columnLeft -and $short.bubble[0] -eq $columnLeft) 'Incoming messages left the centred column'
     Assert-That ($own.bubble[2] -eq ($columnLeft + $columnWidth) -and $long.bubble[2] -eq $own.bubble[2]) 'Own messages left the centred column'
     Assert-That (($short.bubble[2] - $short.bubble[0]) -lt ($main.bubble[2] - $main.bubble[0])) 'Short bubble did not hug its text'
+    Assert-That (($own.bubble[2] - $own.bubble[0]) -lt 72) 'A tiny reply has an unrequested minimum width'
     Assert-That (($long.bubble[2] - $long.bubble[0]) -le 660) 'Long bubble exceeds the approved width'
     foreach ($row in $shown.messages) {
         foreach ($word in $row.words) {

@@ -22,7 +22,7 @@ class ChatDesignHandler(VoiceHandler):
                     '1. Another item\nA ~removed~ word, `inline code` and @team\nSent using Claude')
             rows = [dict(MsgID='DESIGN-MAIN', Text=body, FromMe=False, SenderName='Fixture Sender', SenderJID='fixture-sender'),
                     dict(MsgID='DESIGN-SAME', Text='Short follow-up', FromMe=False, SenderName='Fixture Sender', SenderJID='fixture-sender'),
-                    dict(MsgID='DESIGN-OWN', Text='Thank you! *Great result.*', FromMe=True, SenderName='You'),
+                    dict(MsgID='DESIGN-OWN', Text='OK', FromMe=True, SenderName='You'),
                     dict(MsgID='DESIGN-LONG', Text='A longer reply stays inside the same centred chat column. ' * 2, FromMe=True, SenderName='You')]
             for index, row in enumerate(rows):
                 row.update(ChatJID=chat, Timestamp=self.stamp(index))
