@@ -610,13 +610,13 @@ pub fn build(b: *std.Build) void {
 
     const media_failure_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/media_failure_test.zig"),
-        "fn unifiedHub(_: *const App) bool { return false; }\n",
+        "fn unifiedHub(_: *const App) bool { return false; }\nfn hubConfigured(a: *const App) bool { return a.hub; }\n",
         sourceSection("fn Utf8Text(", "const Chat = struct"),
         sourceSection("const MediaFailure = struct", "fn mediaBusy("),
         "const App = struct {\n",
         sourceSection("    media_attempts: [512]u64", "    media_burst_started_ms:"),
         sourceSection("    media_failures: [16]MediaFailure", "    transcribe_session:"),
-        "displayed_provider: @TypeOf((Chat{}).provider) = .whatsapp, displayed_account: Utf8Text(32) = .{}, chats: [1]Chat = .{.{}}, chat_count: usize = 1, selected_chat: usize = 0, displayed_jid: Utf8Text(191) = .{}, messages: [1]Message = .{.{}}, message_count: usize = 1, send_child: ?u8 = null, pending_send_count: usize = 0, read_child: ?u8 = null, archive_child: ?u8 = null, pending_download_jid: Utf8Text(191) = .{}, pending_download_id: Utf8Text(191) = .{}, hwnd: ?usize = null, started: usize = 0 };\n",
+        "displayed_provider: @TypeOf((Chat{}).provider) = .whatsapp, displayed_account: Utf8Text(32) = .{}, chats: [1]Chat = .{.{}}, chat_count: usize = 1, selected_chat: usize = 0, displayed_jid: Utf8Text(191) = .{}, messages: [1]Message = .{.{}}, message_count: usize = 1, send_child: ?u8 = null, pending_send_count: usize = 0, read_child: ?u8 = null, archive_child: ?u8 = null, pending_download_jid: Utf8Text(191) = .{}, pending_download_id: Utf8Text(191) = .{}, hwnd: ?usize = null, hub: bool = false, started: usize = 0 };\n",
         sourceSection("fn downloadMedia(", "fn isDownloadableMedia("),
         "fn attachmentState(a: *const App, message: *const Message, local: bool) media_drain.AttachmentState {\n",
         sourceSection("            const attachment_state: media_drain.AttachmentState", "            const label = media_drain.attachmentLabel"),

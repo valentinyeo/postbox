@@ -1569,6 +1569,9 @@ class VoiceHandler(Handler):
                              SenderJID='fixture-voice-sender', SenderName='Fixture Voice', MediaType='audio',
                              MimeType='audio/ogg', Filename=f'voice-{n}.ogg')
                         for n in range(1, VOICE_NOTES + 1)]
+                if getattr(self.state, 'voice_new', False):
+                    rows.extend(dict(MsgID=f'NEW-VOICE-{n}', ChatJID=chat, Timestamp=self.stamp(600 + n), Text='', FromMe=False,
+                                     SenderName='Fixture Voice', MediaType='audio', MimeType='audio/ogg') for n in range(1, 5))
                 rows.insert(3, dict(MsgID='VOICE-TEXT', ChatJID=chat, Timestamp=self.stamp(210),
                                     Text='Do not copy this marked text message.', FromMe=False, SenderName='Fixture Voice'))
             else:
@@ -1577,7 +1580,12 @@ class VoiceHandler(Handler):
             self.respond(200, list(reversed(rows)))
         elif url.path.startswith('/v1/wazig/media/'):
             chat, message = map(unquote, url.path.removeprefix('/v1/wazig/media/').split('/', 1))
-            if chat == ALPHA and message.startswith('VOICE-'):
+            if chat == ALPHA and message.startswith('NEW-VOICE-'):
+                if message == 'NEW-VOICE-4' and not getattr(self.state, 'voice_retry', False):
+                    self.respond(502, {'error': 'forced download failure'})
+                else:
+                    self.respond(200, self.state.voice_audio, 'audio/ogg')
+            elif chat == ALPHA and message.startswith('VOICE-'):
                 self.respond(200, VOICE_BYTES, 'audio/ogg', sha256=hashlib.sha256(VOICE_BYTES).hexdigest())
             else:
                 self.respond(404, {'error': 'unknown voice note'})
@@ -1593,7 +1601,21 @@ class VoiceHandler(Handler):
         if not self.authorized():
             return
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
-        if self.path == '/v1/wazig/mark-read':
+        if self.path == '/fixture/voice-new':
+            self.state.voice_new = True
+            self.respond(200, {'ready': True}, body=body)
+        elif self.path == '/fixture/voice-retry':
+            self.state.voice_retry = True
+            self.respond(200, {'ready': True}, body=body)
+        elif self.path == '/fixture/voice-send-ready':
+            self.state.voice_send_ready = True
+            self.respond(200, {'ready': True}, body=body)
+        elif self.path == '/v1/wazig/send':
+            if getattr(self.state, 'voice_send_ready', False):
+                self.respond(200, {'status': 'sent', 'client_id': body['client_id']}, body=body)
+            else:
+                self.respond(503, {'error': 'forced queued send'}, body=body)
+        elif self.path == '/v1/wazig/mark-read':
             self.respond(200, {'status': 'ok'}, body=body)
         else:
             self.respond(400, {'error': 'unexpected voice write'}, body=body)
@@ -1994,6 +2016,11 @@ def main():
     server.state.telegram_reaction = None
     server.state.telegram_events = []
     server.state.telegram_read = set()
+    if args.mode == 'voice':
+        audio = args.log.with_name('voice-playback.ogg')
+        subprocess.run(['ffmpeg', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=8',
+                        '-c:a', 'libopus', str(audio)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        server.state.voice_audio = audio.read_bytes()
     if args.mode == 'media-fit':
         server.state.fit_text = 'M M M M M M M M'
         server.state.fit_media = {
