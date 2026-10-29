@@ -29,7 +29,7 @@ function Save-AppIcon([IntPtr]$Icon, [int]$Size, [string]$Name) {
         $bitmap.Save((Join-Path $session.evidence "$Name.png"), [Drawing.Imaging.ImageFormat]::Png)
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
-$app = Get-App $session
+$iconApp = Get-App $session
 $module = [AppIconNative]::LoadLibraryEx($session.exe, [IntPtr]::Zero, 2)
 Assert-That ($module -ne [IntPtr]::Zero) 'Cannot open shipped executable resources'
 try {
@@ -39,11 +39,11 @@ try {
         finally { if ($icon -ne [IntPtr]::Zero) { $null = [AppIconNative]::DestroyIcon($icon) } }
     }
 } finally { $null = [AppIconNative]::FreeLibrary($module) }
-Save-AppIcon ([AppIconNative]::GetClassLongPtr($app.MainWindowHandle, -14)) 32 'window-big'
-Save-AppIcon ([AppIconNative]::GetClassLongPtr($app.MainWindowHandle, -34)) 16 'window-small'
-$null = [VerifyWindow]::ShowWindow($app.MainWindowHandle, 9)
-$null = [VerifyWindow]::SetWindowPos($app.MainWindowHandle, [IntPtr]::Zero, 120, 80, 920, 680, 0x14)
-$null = [VerifyWindow]::SetForegroundWindow($app.MainWindowHandle)
+Save-AppIcon ([AppIconNative]::GetClassLongPtr($iconApp.MainWindowHandle, -14)) 32 'window-big'
+Save-AppIcon ([AppIconNative]::GetClassLongPtr($iconApp.MainWindowHandle, -34)) 16 'window-small'
+$null = [VerifyWindow]::ShowWindow($iconApp.MainWindowHandle, 9)
+$null = [VerifyWindow]::SetWindowPos($iconApp.MainWindowHandle, [IntPtr]::Zero, 120, 80, 920, 680, 0x14)
+$null = [VerifyWindow]::SetForegroundWindow($iconApp.MainWindowHandle)
 Save-Screen $session 'desktop-taskbar-100'
 [AppIconNative]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
 try {
@@ -56,14 +56,14 @@ $rect.Left = 40; $rect.Top = 40; $rect.Right = 1200; $rect.Bottom = 860
 $memory = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf($rect))
 try {
     [Runtime.InteropServices.Marshal]::StructureToPtr($rect, $memory, $false)
-    $null = [AppIconNative]::SendMessage($app.MainWindowHandle, 0x02E0, [UIntPtr](144 -bor (144 -shl 16)), $memory)
+    $null = [AppIconNative]::SendMessage($iconApp.MainWindowHandle, 0x02E0, [UIntPtr](144 -bor (144 -shl 16)), $memory)
     Save-Screen $session 'window-dpi-transition-150'
 } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($memory) }
 @{
     executable_sha256 = (Get-FileHash $session.exe).Hash
     sizes = @(16, 24, 32, 48, 64, 128, 256)
     class_icons = @('big', 'small')
-    host_dpi = [VerifyWindow]::GetDpiForWindow($app.MainWindowHandle)
+    host_dpi = [VerifyWindow]::GetDpiForWindow($iconApp.MainWindowHandle)
     app_dpi_transition = 144
     dpi_method = 'WM_DPICHANGED; shell remains at host DPI, resource-24 proves 150% small icon'
 } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $session.evidence 'icon-proof.json')
