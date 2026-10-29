@@ -59,20 +59,31 @@ public static class VerifyPassage {
         result.paddingBottom = bottom - corner;
         if (result.paddingLeft >= result.paddingRight || result.paddingRight > result.left || result.paddingTop >= result.paddingBottom) throw new Exception("Passage bubble has no text-free interior padding");
         var colors = new Dictionary<int, int>();
-        for (int y = result.paddingTop; y < result.paddingBottom; y++) for (int x = result.paddingLeft; x < result.paddingRight; x++) {
-            int color = Pixel(before, stride, x, y);
-            colors[color] = colors.ContainsKey(color) ? colors[color] + 1 : 1;
+        var rowFills = new Dictionary<int, int>();
+        for (int y = result.paddingTop; y < result.paddingBottom; y++) {
+            colors.Clear();
+            for (int x = result.paddingLeft; x < result.paddingRight; x++) {
+                int color = Pixel(before, stride, x, y);
+                colors[color] = colors.ContainsKey(color) ? colors[color] + 1 : 1;
+            }
+            int fill = 0, count = 0;
+            foreach (var color in colors) if (color.Value > count) { fill = color.Key; count = color.Value; }
+            if (count * 5 <= (result.paddingRight - result.paddingLeft) * 4) throw new Exception("Passage padding row has no dominant unselected fill");
+            rowFills[y] = fill;
+            result.paddingPixels += count;
         }
-        foreach (var color in colors) if (color.Value > result.paddingPixels) { result.bubble = color.Key; result.paddingPixels = color.Value; }
         result.paddingTotal = (result.paddingRight - result.paddingLeft) * (result.paddingBottom - result.paddingTop);
-        if (result.paddingPixels * 5 <= result.paddingTotal * 4) throw new Exception(String.Format("Passage bubble padding has no dominant unselected fill: bubble=#{0:X6} pixels={1}/{2} (requires >80%)", result.bubble, result.paddingPixels, result.paddingTotal));
+        if (!rowFills.ContainsKey(middle[1])) throw new Exception("Passage text row has no interior fill reference");
+        result.bubble = rowFills[middle[1]];
         colors.Clear();
         int baseline = 0;
         for (int y = result.top; y < result.bottom; y++) for (int x = result.left; x < result.right; x++) {
-            if (Pixel(before, stride, x, y) != result.bubble) continue;
+            if (!rowFills.ContainsKey(y)) throw new Exception("Passage text row leaves the fill reference");
+            int unselected = rowFills[y];
+            if (Pixel(before, stride, x, y) != unselected) continue;
             baseline++;
             int color = Pixel(after, stride, x, y);
-            if (color == result.bubble) continue;
+            if (color == unselected) continue;
             colors[color] = colors.ContainsKey(color) ? colors[color] + 1 : 1;
         }
         result.fill = result.bubble;
@@ -82,6 +93,33 @@ public static class VerifyPassage {
         double a = Luminance(result.bubble), b = Luminance(result.fill);
         result.contrast = (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
         return result;
+    }
+    public static void TestGradientOracle() {
+        int width = 160, height = 100, stride = width * 4;
+        byte[] before = new byte[stride * height];
+        Action<byte[], int, int, int> put = (image, x, y, color) => {
+            int at = y * stride + x * 4;
+            image[at] = (byte)color; image[at + 1] = (byte)(color >> 8); image[at + 2] = (byte)(color >> 16); image[at + 3] = 255;
+        };
+        for (int y = 10; y < 90; y++) for (int x = 10; x < 150; x++) {
+            int gray = 38 - (y - 10) * 8 / 80;
+            put(before, x, y, gray * 0x010101);
+        }
+        for (int y = 45; y < 52; y++) for (int x = 30; x < 70; x++) put(before, x, y, 0xf2f2f2);
+        byte[] after = (byte[])before.Clone();
+        for (int y = 45; y < 52; y++) for (int x = 22; x < 70; x++) put(after, x, y, 0x89b4f8);
+        var selected = Highlight(before, after, stride, 10, 10, 150, 90, 96);
+        if (selected.pixels < selected.required || selected.contrast < 1.3) throw new Exception("Gradient selection positive control failed");
+        var unchanged = Highlight(before, before, stride, 10, 10, 150, 90, 96);
+        if (unchanged.pixels >= unchanged.required || unchanged.contrast >= 1.3) throw new Exception("Gradient oracle accepted missing highlight");
+        for (int y = 45; y < 52; y++) for (int x = 22; x < 70; x++) put(after, x, y, 0x242424);
+        var faint = Highlight(before, after, stride, 10, 10, 150, 90, 96);
+        if (faint.contrast >= 1.3) throw new Exception("Gradient oracle accepted a low-contrast highlight");
+        for (int y = 26; y < 74; y++) for (int x = 14; x < 18; x++) put(before, x, y, (30 + x * 10) * 0x010101);
+        bool rejected = false;
+        try { Highlight(before, after, stride, 10, 10, 150, 90, 96); }
+        catch (Exception error) { rejected = error.Message.Contains("padding row"); }
+        if (!rejected) throw new Exception("Gradient oracle accepted horizontally inconsistent padding");
     }
     public static int[] Middle(byte[] image, int stride, int left, int top, int right, int bottom, int dpi) {
         int inset = Math.Max(2, 12 * dpi / 96), bandBottom = -1, bandTop = -1;

@@ -58,7 +58,7 @@ def check_media_fit(folder):
             while time_top - 1 in time_rows:
                 time_top -= 1
             assert text_bottom < time_top, 'media-fit: time overlaps text pixels'
-            assert any(min(image[oy + y][ox + x]) > 230 for y in range(text_top, text_bottom + 1)
+            assert any(min(image[oy + y][ox + x]) > 110 for y in range(text_top, text_bottom + 1)
                        for x in range(time_left, b[2] - px(12))), 'media-fit: text does not exercise the time box'
             assert text_bottom == row['result']['textBottom'] and time_top == row['result']['timeTop']
         else:

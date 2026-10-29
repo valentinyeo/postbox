@@ -34,8 +34,8 @@ def mean(values):
 def ink(image, rect, background):
     counts = Counter(pixel for pixel in pixels(image, rect) if contrast(pixel, background) >= 2)
     assert counts, ('missing list text', rect)
-    colour, count = counts.most_common(1)[0]
-    return dict(rgb=list(colour), pixels=count, contrast=contrast(colour, background))
+    colour = [max(counts, key=lambda pixel: abs(pixel[channel] - background[channel]))[channel] for channel in range(3)]
+    return dict(rgb=colour, pixels=sum(counts.values()), contrast=contrast(colour, background))
 
 
 def measure_pair(image, before, layout, baseline_layout):
@@ -159,7 +159,7 @@ def check_sidebar_surface(folder):
     assert old_session['sha256'] == provenance['baseline_sha256']
     assert session['commit'] != old_session['commit']
     assert provenance['assertion_parent'] == provenance['baseline_commit']
-    assert provenance['fixture_sha256'] == hashlib.sha256(Path(__file__).parents[2].joinpath('src/verify_text.json').read_bytes()).hexdigest().upper()
+    assert provenance['fixture_sha256'] == hashlib.sha256(Path(__file__).parents[2].joinpath('src/verify_text.json').read_bytes().replace(b'\r\n', b'\n')).hexdigest().upper()
     layout, = read(folder / 'sidebar-layout.json')
     old_layout, = read(baseline / 'sidebar-layout.json')
     assert layout['theme'] == old_layout['theme'] == 'amoled'

@@ -15221,7 +15221,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
             } else {
                 const playing_now = active and a.audio_state == .playing;
-                const glyph_brush = win.CreateSolidBrush(if (theme.choice == .amoled) theme.amoled_button_text else theme.current.on_primary) orelse continue;
+                const glyph_brush = win.CreateSolidBrush(if (theme.choice == .amoled) theme.send_text else theme.current.on_primary) orelse continue;
                 const previous_brush = win.SelectObject(hdc, glyph_brush);
                 const previous_pen = win.SelectObject(hdc, win.GetStockObject(win.NULL_PEN));
                 smooth.fillEllipse(&shapes, .{ .left = left + px(a, 12), .top = strip_top + px(a, 4), .right = left + px(a, 40), .bottom = strip_top + px(a, 32) }, if (theme.choice == .amoled) theme.amoled_send else theme.current.primary);

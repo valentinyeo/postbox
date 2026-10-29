@@ -105,3 +105,8 @@ for field, wrong in [('sidebar', [0]*3), ('chat', [0]*3), ('divider', [0]*3), ('
         continue
     raise AssertionError('approved design oracle accepted broken ' + field)
 print('GRAPHITE DESIGN ORACLE CONTROLS PASSED')
+
+fringes = [[(138, 117, 87), (87, 138, 117), (117, 87, 138)] for _ in range(4)]
+text = ORACLE['ink'](fringes, [0, 0, 3, 4], [24, 24, 24])
+assert text['rgb'] == [138, 138, 138] and text['contrast'] >= 4.5
+print('CLEARTYPE FOREGROUND ENVELOPE VERIFIED')

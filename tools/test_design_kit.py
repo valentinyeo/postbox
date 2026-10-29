@@ -26,6 +26,20 @@ class DesignKitTests(unittest.TestCase):
         self.assertRegex(source, r'pub const selected_row_radius: i32 = 10;')
         self.assertIn('pub const radius_card: i32 = 16;', source)
 
+    def test_voice_play_glyph_uses_readable_dark_ink_on_the_light_control(self):
+        source = (ROOT / 'src/main.zig').read_text()
+        self.assertTrue('win.CreateSolidBrush(if (theme.choice == .amoled) theme.send_text else theme.current.on_primary)' in source)
+
+    def test_native_probes_follow_the_shared_font_and_measured_row_size(self):
+        border = (ROOT / 'tools/verify-wazig/composer-border.ps1').read_text()
+        archive = (ROOT / 'tools/verify-wazig/archive-presentation.ps1').read_text()
+        self.assertIn('pub const type_body:', border)
+        self.assertIn('$bodySize * $scale * $dpi', border)
+        self.assertIn('$height = [int]$rowHeight.ToUInt64()', archive)
+        self.assertNotIn('64 * [VerifyWindow]', archive)
+        passage = (ROOT / 'tools/verify-wazig/passage-copy.ps1').read_text()
+        self.assertIn('[VerifyPassage]::TestGradientOracle()', passage)
+
     def test_native_font_proof_reads_the_waited_metrics_object(self):
         source = (ROOT / 'tools/verify-wazig/journey-sidebar-surface.ps1').read_text()
         self.assertIn('$metrics = Wait-Until {', source)

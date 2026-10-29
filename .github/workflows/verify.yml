@@ -211,12 +211,15 @@ jobs:
             & tools/verify-wazig/run.ps1 -Feature sidebar-surface -ExpectedProduct Wazig -Bin sidebar-baseline-bin/bin -Evidence verification-evidence/baseline
             if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline capture failed' }
           } finally { $env:GITHUB_SHA = $candidate }
+          $fixtureText = [IO.File]::ReadAllText((Join-Path $env:GITHUB_WORKSPACE 'src/verify_text.json')).Replace("`r`n", "`n")
+          $fixtureBytes = [Text.Encoding]::UTF8.GetBytes($fixtureText)
+          $fixtureHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($fixtureBytes))
           @{
             candidate_commit = $candidate; baseline_commit = $baseline; assertion_commit = $assertion
             assertion_parent = (git rev-parse "$assertion^1").Trim()
             candidate_sha256 = (Get-FileHash zig-out/bin/Messages.exe).Hash
             baseline_sha256 = (Get-FileHash sidebar-baseline-bin/bin/Messages.exe).Hash
-            fixture_sha256 = (Get-FileHash src/verify_text.json).Hash
+            fixture_sha256 = $fixtureHash
           } | ConvertTo-Json | Set-Content verification-evidence/sidebar-builds.json
       - name: IGSH-949 original-main red control for provider archive
         if: matrix.feature == 'hub-archive'
