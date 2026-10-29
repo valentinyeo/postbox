@@ -35,13 +35,13 @@ if feature == 'palette':
     keys = ['^k', 'Keyboard shortcuts', '^a', 'Status', '{ENTER}', '{ESC}']
 else:
     scale = json.loads((folder / 'text-scale.json').read_text(encoding='utf-8-sig'))
-    assert scale['initial_saved'] is False and scale['larger'] == 92 and scale['reset'] == 82
+    assert scale['initial_saved'] is False and scale['larger'] == 110 and scale['reset'] == 100
     assert 0 < scale['baseline_points'] < scale['larger_points']
     assert scale['reset_points'] == scale['baseline_points']
     stages = ['before', 'action', 'text-larger', 'after']
     keys = ['^k', 'Theme: Graphite', 'Make text larger', '{ENTER}', '^0']
     preferences = (folder / 'preferences.txt').read_text(encoding='utf-8-sig')
-    assert 'FontScale' in preferences and '82' in preferences
+    assert 'FontScale' in preferences and '100' in preferences
 for keys_sent in keys:
     assert f'keys: {keys_sent}' in actions
 images = []

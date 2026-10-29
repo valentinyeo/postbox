@@ -152,7 +152,7 @@ for required in ['journeys.json', "row['name'] == session['feature']", "journey[
 validator += '\n' + '\n'.join((registry_path.parent / row['validator']['file']).read_text(encoding='utf-8') for row in journeys if row['validator'])
 for artifact in ['removed-status.json', 'text-scale.json']:
     assert artifact in runner and artifact in validator, artifact
-assert 'a.font_scale = 82;' in source and 'command_font_larger => changeFontScale(a, 10)' in source
+assert 'a.font_scale = @import("font_config.zig").default_scale;' in source and 'command_font_larger => changeFontScale(a, 10)' in source
 for artifact in ['before-beta.requests.json', 'beta-switch.json', 'beta-empty.messages.json']:
     assert artifact in harness and artifact in validator, artifact
 assert "0 <= switch['elapsed_ms'] <= 1000" in validator

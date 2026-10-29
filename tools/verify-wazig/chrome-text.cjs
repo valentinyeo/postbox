@@ -6,7 +6,9 @@ const root = path.resolve(__dirname, '../..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
 
 function sourceContract(main = read('src/main.zig'), config = read('src/font_config.zig'), fixture = JSON.parse(read('src/verify_text.json')), runner = read('tools/verify-wazig/run.ps1')) {
-    const scale = Number(main.match(/font_scale: i32 = (\d+),/)[1]);
+    assert.match(main, /font_scale: i32 = @import\("font_config\.zig"\)\.default_scale,/);
+    const scale = Number(config.match(/default_scale: i32 = (\d+);/)[1]);
+    assert.equal(scale, 100);
     const body = Number(read('src/theme.zig').match(/pub const type_body: i32 = (\d+);/)[1]);
     assert.match(main, /a\.font = win\.CreateFontW\(scaledFontHeight\(theme\.type_body,/);
     const heading = Number(read('src/theme.zig').match(/pub const type_chat_name: i32 = (\d+);/)[1]);

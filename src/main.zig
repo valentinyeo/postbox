@@ -795,7 +795,7 @@ const App = struct {
     accounts_maintenance: bool = false,
     last_refresh_unix: i64 = 0,
     wacli_dir: Utf8Text(259) = .{},
-    font_scale: i32 = 82,
+    font_scale: i32 = @import("font_config.zig").default_scale,
     dpi: u32 = 96,
     brush_bg: ?win.HBRUSH = null,
     brush_panel: ?win.HBRUSH = null,
@@ -1519,11 +1519,11 @@ fn saveWindowRect(hwnd: win.HWND) void {
 }
 
 fn loadFontScale() i32 {
-    var value: win.DWORD = 82;
+    var value: win.DWORD = @import("font_config.zig").default_scale;
     var size: win.DWORD = @sizeOf(win.DWORD);
     const result = win.RegGetValueW(winHandle(win.HKEY, 0x80000001), lit("Software\\Messages"), lit("FontScale"), win.RRF_RT_REG_DWORD, null, &value, &size);
-    if (result != win.ERROR_SUCCESS) return 82;
-    return std.math.clamp(@as(i32, @intCast(value)), 60, 160);
+    if (result != win.ERROR_SUCCESS) return @import("font_config.zig").default_scale;
+    return @import("font_config.zig").savedScale(value);
 }
 
 fn loadDictationLanguage() dictation.Language {
@@ -13547,7 +13547,7 @@ fn runCommand(a: *App, command: u16) void {
         },
         command_font_larger => changeFontScale(a, 10),
         command_font_reset => {
-            a.font_scale = 82;
+            a.font_scale = @import("font_config.zig").default_scale;
             text_draw.reset();
             recreateFonts(a);
             saveFontScale(a.font_scale);

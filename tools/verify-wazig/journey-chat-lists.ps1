@@ -1,4 +1,7 @@
 . "$PSScriptRoot/menus.ps1"
+Set-DisplayResolution -Width 1280 -Height 1024 -Force
+$null = Wait-Until { [Windows.Forms.SystemInformation]::VirtualScreen.Height -ge 1024 } 'list desktop fits both approved text sizes'
+[VerifyWindow]::ShowWindow((Get-App $session).MainWindowHandle, 3) | Out-Null
 
 function Get-ListInkLeft($Image, $Rect, [int]$OriginX, [int]$OriginY) {
     $found = $Image.width

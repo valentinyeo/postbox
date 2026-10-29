@@ -650,7 +650,7 @@ class AppearanceVersionTests(unittest.TestCase):
                      sync='stopped', search='', theme='amoled', production_preferences_absent=True,
                      whatsapp_store_absent=True, telegram_store_absent=True)
         files = {'session.json': session, 'side-effects.json': state,
-                 'text-scale.json': dict(initial_saved=False, larger=92, reset=82,
+                 'text-scale.json': dict(initial_saved=False, larger=110, reset=100,
                                         baseline_points=10, larger_points=12, reset_points=10)}
         for name in ('before', 'action', 'text-larger', 'after'):
             files[name + '.state.json'] = state
@@ -660,7 +660,7 @@ class AppearanceVersionTests(unittest.TestCase):
             (folder / name).write_text(json.dumps(value))
         (folder / 'result.txt').write_text('JOURNEY PASSED: appearance')
         (folder / 'cleanup.txt').write_text('CLEANUP PASSED: fixture removed')
-        (folder / 'preferences.txt').write_text('FontScale 82')
+        (folder / 'preferences.txt').write_text('FontScale 100')
         keys = ('^k', 'Theme: Graphite', 'Make text larger', '{ENTER}', '^0')
         (folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in keys))
 
