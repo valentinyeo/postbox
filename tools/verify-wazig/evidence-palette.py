@@ -38,7 +38,10 @@ else:
     assert scale['initial_saved'] is False and scale['larger'] == 110 and scale['reset'] == 100
     assert 0 < scale['baseline_points'] < scale['larger_points']
     assert scale['reset_points'] == scale['baseline_points']
-    stages = ['before', 'action', 'text-larger', 'after']
+    assert (folder / 'group-layout.txt').read_text(encoding='utf-8-sig').startswith('GROUP_LAYOUT_OK:')
+    groups = json.loads((folder / 'group-senders.messages.json').read_text(encoding='utf-8-sig'))
+    assert {row['id'] for row in groups['messages']} == {'GROUP-FIRST', 'GROUP-SAME', 'GROUP-DAY', 'GROUP-OTHER', 'GROUP-QUOTE', 'GROUP-OWN'}
+    stages = ['before', 'action', 'text-larger', 'after', 'group-senders']
     keys = ['^k', 'Theme: Graphite', 'Make text larger', '{ENTER}', '^0']
     preferences = (folder / 'preferences.txt').read_text(encoding='utf-8-sig')
     assert 'FontScale' in preferences and '100' in preferences

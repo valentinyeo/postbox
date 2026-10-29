@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Group chats show each sender’s face and coloured name, repeat names after date breaks, and keep short replies compact.
+
 - Queued messages show sending. Failed sends no longer block later messages forever.
 
 - Message refreshes retry quietly, and recovered connection errors no longer look like failed updates.
