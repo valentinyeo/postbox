@@ -55,8 +55,8 @@ public static class VerifyPassage {
         result.paddingLeft = left + Math.Max(2, 4 * dpi / 96);
         result.paddingRight = left + Math.Max(3, 8 * dpi / 96);
         int corner = Math.Max(2, (16 * dpi + 95) / 96);
-        result.paddingTop = top + corner;
-        result.paddingBottom = bottom - corner;
+        result.paddingTop = Math.Min(top + corner, result.top);
+        result.paddingBottom = Math.Max(bottom - corner, result.bottom);
         if (result.paddingLeft >= result.paddingRight || result.paddingRight > result.left || result.paddingTop >= result.paddingBottom) throw new Exception("Passage bubble has no text-free interior padding");
         var colors = new Dictionary<int, int>();
         var rowFills = new Dictionary<int, int>();
@@ -96,30 +96,34 @@ public static class VerifyPassage {
     }
     public static void TestGradientOracle() {
         int width = 160, height = 100, stride = width * 4;
-        byte[] before = new byte[stride * height];
         Action<byte[], int, int, int> put = (image, x, y, color) => {
             int at = y * stride + x * 4;
             image[at] = (byte)color; image[at + 1] = (byte)(color >> 8); image[at + 2] = (byte)(color >> 16); image[at + 3] = 255;
         };
-        for (int y = 10; y < 90; y++) for (int x = 10; x < 150; x++) {
-            int gray = 38 - (y - 10) * 8 / 80;
-            put(before, x, y, gray * 0x010101);
+        foreach (int bubbleHeight in new int[] { 80, 48 }) {
+            byte[] before = new byte[stride * height];
+            int bottom = 10 + bubbleHeight;
+            int textTop = 13 + bubbleHeight / 2;
+            for (int y = 10; y < bottom; y++) for (int x = 10; x < 150; x++) {
+                int gray = 38 - (y - 10) * 8 / bubbleHeight;
+                put(before, x, y, gray * 0x010101);
+            }
+            for (int y = textTop; y < textTop + 7; y++) for (int x = 30; x < 70; x++) put(before, x, y, 0xf2f2f2);
+            byte[] after = (byte[])before.Clone();
+            for (int y = textTop; y < textTop + 7; y++) for (int x = 22; x < 70; x++) put(after, x, y, 0x89b4f8);
+            var selected = Highlight(before, after, stride, 10, 10, 150, bottom, 96);
+            if (selected.pixels < selected.required || selected.contrast < 1.3) throw new Exception("Gradient selection positive control failed");
+            var unchanged = Highlight(before, before, stride, 10, 10, 150, bottom, 96);
+            if (unchanged.pixels >= unchanged.required || unchanged.contrast >= 1.3) throw new Exception("Gradient oracle accepted missing highlight");
+            for (int y = textTop; y < textTop + 7; y++) for (int x = 22; x < 70; x++) put(after, x, y, 0x242424);
+            var faint = Highlight(before, after, stride, 10, 10, 150, bottom, 96);
+            if (faint.contrast >= 1.3) throw new Exception("Gradient oracle accepted a low-contrast highlight");
+            for (int y = 26; y < bottom - 16; y++) for (int x = 14; x < 18; x++) put(before, x, y, (30 + x * 10) * 0x010101);
+            bool rejected = false;
+            try { Highlight(before, after, stride, 10, 10, 150, bottom, 96); }
+            catch (Exception error) { rejected = error.Message.Contains("padding row"); }
+            if (!rejected) throw new Exception("Gradient oracle accepted horizontally inconsistent padding");
         }
-        for (int y = 45; y < 52; y++) for (int x = 30; x < 70; x++) put(before, x, y, 0xf2f2f2);
-        byte[] after = (byte[])before.Clone();
-        for (int y = 45; y < 52; y++) for (int x = 22; x < 70; x++) put(after, x, y, 0x89b4f8);
-        var selected = Highlight(before, after, stride, 10, 10, 150, 90, 96);
-        if (selected.pixels < selected.required || selected.contrast < 1.3) throw new Exception("Gradient selection positive control failed");
-        var unchanged = Highlight(before, before, stride, 10, 10, 150, 90, 96);
-        if (unchanged.pixels >= unchanged.required || unchanged.contrast >= 1.3) throw new Exception("Gradient oracle accepted missing highlight");
-        for (int y = 45; y < 52; y++) for (int x = 22; x < 70; x++) put(after, x, y, 0x242424);
-        var faint = Highlight(before, after, stride, 10, 10, 150, 90, 96);
-        if (faint.contrast >= 1.3) throw new Exception("Gradient oracle accepted a low-contrast highlight");
-        for (int y = 26; y < 74; y++) for (int x = 14; x < 18; x++) put(before, x, y, (30 + x * 10) * 0x010101);
-        bool rejected = false;
-        try { Highlight(before, after, stride, 10, 10, 150, 90, 96); }
-        catch (Exception error) { rejected = error.Message.Contains("padding row"); }
-        if (!rejected) throw new Exception("Gradient oracle accepted horizontally inconsistent padding");
     }
     public static int[] Middle(byte[] image, int stride, int left, int top, int right, int bottom, int dpi) {
         int inset = Math.Max(2, 12 * dpi / 96), bandBottom = -1, bandTop = -1;
