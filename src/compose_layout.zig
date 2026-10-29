@@ -56,8 +56,8 @@ pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool, dictatin
     const height = @max(0, box.bottom - box.top);
     const padding = @min(scale(16, dpi), @divTrunc(width, 12));
     const gap = @min(scale(4, dpi), @divTrunc(width, 32));
-    const vertical = @min(scale(6, dpi), @divTrunc(@max(0, height - scale(@import("design_tokens.zig").button_size, dpi)), 2));
-    const icon = @max(0, @min(scale(@import("design_tokens.zig").button_size, dpi), @min(height - 2 * vertical, @divTrunc(width - 2 * padding - 6 * gap, 7))));
+    const vertical = @min(scale(6, dpi), @divTrunc(height, 2));
+    const icon = @max(0, @min(scale(@import("design_tokens.zig").button_size, dpi), @min(height - @min(scale(12, dpi), height), @divTrunc(width - 2 * padding - 6 * gap, 7))));
     const icon_bottom = box.bottom - vertical;
     const icon_top = icon_bottom - icon;
     const send = Rect{ .left = box.right - padding - icon, .top = icon_top, .right = box.right - padding, .bottom = icon_bottom };
