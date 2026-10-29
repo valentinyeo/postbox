@@ -66,6 +66,13 @@ foreach ($target in @(
     $null = Wait-Until { (Read-Control $session status).reply_flash -ceq 'REPLY-ORIGINAL' } "$name original flashes"
     Save-Screen $session "$name-jumped"
     $null = Wait-Until { (Read-Control $session status).reply_flash -ceq '' } "$name highlight fades"
+    $orphan = Wait-Until {
+        (Read-Control $session messages).messages | Where-Object { $_.id -ceq 'REPLY-ORPHAN' -and $_.quote_line[2] -gt $_.quote_line[0] }
+    } "$name unloaded quote painted"
+    Click-ReplyRect $session $canvas $orphan.quote_line
+    $null = Wait-Until { (Read-Control $session status).reply_notice } "$name missing original notice visible"
+    Save-Screen $session "$name-unavailable"
+    $null = Wait-Until { -not (Read-Control $session status).reply_notice } "$name notice dismisses"
     Hub-Pass $session "$name-reply-preview-cancel-send-jump"
     Send-Keys $session '^f'
     Send-Keys $session '^a{BACKSPACE}{ESC}'

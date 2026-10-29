@@ -19,9 +19,9 @@ class ReplyEvidenceTests(unittest.TestCase):
                                        production_preferences_absent=True, whatsapp_store_absent=True))
         requests = []
         for provider, chat in [('whatsapp', 'fixture-beta'), ('slack', 'fixture-alpha')]:
-            for phase in ['before', 'replying', 'sent', 'jumped']:
+            for phase in ['before', 'replying', 'sent', 'jumped', 'unavailable']:
                 state = dict(selected=dict(id=chat, provider=provider), reply=dict(id='REPLY-ORIGINAL',
-                             sender='Fixture Sender', preview='First words of the original'), reply_flash='REPLY-ORIGINAL')
+                             sender='Fixture Sender', preview='First words of the original'), reply_flash='REPLY-ORIGINAL', reply_notice=True)
                 write(f'{provider}-{phase}.state.json', state)
                 (root / f'{provider}-{phase}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + phase.encode() * 10001)
             write(f'{provider}-sent.messages.json', dict(messages=[dict(from_me=True,

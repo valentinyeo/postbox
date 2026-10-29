@@ -9537,9 +9537,9 @@ fn setReplyQuote(a: *App, message: *Message, id: []const u8) void {
     message.quoted_msg_id.set(id);
     for (a.messages[0..a.message_count]) |*original| {
         if (!std.mem.eql(u8, original.id.slice(), id)) continue;
-        message.quote = replySnippet(a, original);
-        message.quote_sender = original.sender;
-        message.quote_sender_jid = original.sender_jid;
+        if (message.quote.len == 0) message.quote = replySnippet(a, original);
+        if (message.quote_sender.len == 0) message.quote_sender = original.sender;
+        if (message.quote_sender_jid.len == 0) message.quote_sender_jid = original.sender_jid;
         return;
     }
 }

@@ -11,6 +11,9 @@ class ReplyHandler(Handler):
         rows = [dict(MsgID='REPLY-ORIGINAL', ChatJID=chat, Timestamp=self.state.stamp,
                      Text='First words of the original\nSecond line stays out of the preview',
                      FromMe=False, SenderName='Fixture Sender', SenderJID='fixture-sender')]
+        rows.append(dict(MsgID='REPLY-ORPHAN', ChatJID=chat, Timestamp=self.state.stamp,
+                         Text='Reply to an unloaded message', FromMe=False, SenderName='Fixture Sender',
+                         quoted_msg_id='UNLOADED-ORIGINAL', quoted_sender_jid='fixture-sender'))
         with self.state.lock:
             for reply in self.state.sends.values():
                 if reply['chat'] != chat:

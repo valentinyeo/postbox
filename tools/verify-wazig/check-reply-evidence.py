@@ -19,7 +19,7 @@ def check_reply(folder):
         assert accepted[0]['body']['reply_to'] == 'REPLY-ORIGINAL'
         assert accepted[0]['body']['text'] == f'Synthetic {provider} reply'
         hashes = []
-        for phase in ['before', 'replying', 'sent', 'jumped']:
+        for phase in ['before', 'replying', 'sent', 'jumped', 'unavailable']:
             name = f'{provider}-{phase}'
             image = (folder / f'{name}.png').read_bytes()
             assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
@@ -32,6 +32,8 @@ def check_reply(folder):
                 assert state['reply']['preview'] == 'First words of the original'
             if phase == 'jumped':
                 assert state['reply_flash'] == 'REPLY-ORIGINAL'
+            if phase == 'unavailable':
+                assert state['reply_notice']
         assert hashes[0] != hashes[1] and hashes[1] != hashes[2]
         sent, = [row for row in read(f'{provider}-sent.messages.json')['messages'] if row['from_me']]
         assert sent['quoted_msg_id'] == 'REPLY-ORIGINAL'

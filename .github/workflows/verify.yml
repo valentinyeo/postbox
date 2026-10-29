@@ -13,7 +13,7 @@ on:
         type: string
         default: ''
   push:
-    branches: [ceo/igsh-1084, ceo/IGSH-1123, 'verify-release/v*']
+    branches: [ceo/igsh-1084, 'verify-release/v*']
   pull_request:
     paths:
       - .github/workflows/verify.yml
@@ -79,7 +79,7 @@ jobs:
         shell: python
         env:
           EVENT_NAME: ${{ github.event_name }}
-          FEATURE: ${{ inputs.feature || (github.ref_name == 'ceo/IGSH-1123' && 'reply' || (github.event_name == 'push' && 'voice' || 'search')) }}
+          FEATURE: ${{ inputs.feature || (github.event_name == 'push' && 'voice' || 'search') }}
         run: |
           import json
           import os
