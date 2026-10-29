@@ -11969,6 +11969,9 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.print(",\"update_card\":{{\"visible\":{},\"span\":{d},\"rect\":[{d},{d},{d},{d}],\"error\":", .{ updateCardVisible(a), updateCardSpan(a), card.left, card.top, card.right, card.bottom });
     try control_api.writeString(w, a.update_card_error[0..a.update_card_error_len]);
     try w.writeByte('}');
+    try w.writeAll(",\"audio\":{\"id\":");
+    try control_api.writeString(w, a.audio_playing_id.slice());
+    try w.print(",\"state\":\"{s}\",\"position_ms\":{d},\"duration_ms\":{d}}}", .{ @tagName(a.audio_state), a.audio_position_ms, a.audio_duration_ms });
     try w.writeAll(",\"paints\":");
     try a.paints.write(w);
     const reply = replyBarRect(a);
