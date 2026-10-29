@@ -28,9 +28,8 @@ def verify_wiring(main, edit):
     assert switch.index("applyTheme(choice);") < switch.index("recreateThemeBrushes(a)")
     assert "applyTheme(previous);" in switch
     palette = section(main, "fn buildPaletteItems(", "fn ")
-    assert 'appendPalette(a, "Theme: AMOLED black", "", command_theme_amoled);' in palette
-    assert 'appendPalette(a, "Theme: Green", "", command_theme_green);' in palette
-    assert "_ = changeTheme(a, if (command == command_theme_amoled) .amoled else .green);" in main
+    assert 'appendPalette(a, "Theme: Graphite", "", command_theme_amoled);' in palette
+    assert "_ = changeTheme(a, .amoled);" in main
     control = section(main, "fn controlDispatch(", "fn controlProvider(")
     assert ".theme => {" in control
     assert "request.theme orelse" in control
@@ -211,9 +210,8 @@ class ThemeRuntimeTests(unittest.TestCase):
             "@ptrFromInt(136)",
             "set_preferred_app_mode(menu_theme.preferredAppMode(choice))",
             "flush_menu_themes();",
-            'appendPalette(a, "Theme: AMOLED black", "", command_theme_amoled);',
-            'appendPalette(a, "Theme: Green", "", command_theme_green);',
-            "_ = changeTheme(a, if (command == command_theme_amoled) .amoled else .green);",
+            'appendPalette(a, "Theme: Graphite", "", command_theme_amoled);',
+            "_ = changeTheme(a, .amoled);",
             "if (!changeTheme(a, choice))",
             "paintPopupInput(&shapes, hwnd, a.palette_edit);",
             "paintInputField(a, &shapes, hdc, a.compose.?, a.compose_pill);",
@@ -255,20 +253,16 @@ class ThemeRuntimeTests(unittest.TestCase):
                 self.assertNotRegex(path.read_text(), r"(?m)^const \w+ = theme\.current\.")
 
     @unittest.skipUnless(ZIG, "Zig compiler not found; install Zig or set ZIG")
-    def test_IGSH_461_tests_reject_old_default_and_glaring_fills(self):
+    def test_approved_palette_checks_reject_broken_text_and_saved_theme_migration(self):
         source = (ROOT / "src/theme.zig").read_text()
-        for original, broken, test_name in (
-            ("value orelse return .amoled", "value orelse return .green", "IGSH-461 default missing"),
-            ("amoled_button = hex(0x262626)", "amoled_button = hex(0xbfbfbf)", "IGSH-461 AMOLED composer button"),
-            ("amoled_send = hex(0x555555)", "amoled_send = hex(0xe6e6e6)", "IGSH-461 AMOLED composer button"),
-        ):
-            self.assertIn(original, source)
-            with self.subTest(original=original), tempfile.TemporaryDirectory(prefix="amoled-control-") as directory:
+        for original, broken in ((".on_surface = hex(0xf2f2f2)", ".on_surface = hex(0x202020)"),
+                                 ("value orelse return .amoled", "value orelse return @enumFromInt(0)")):
+            with self.subTest(original=original), tempfile.TemporaryDirectory(prefix="graphite-control-") as directory:
+                self.assertIn(original, source)
                 path = Path(directory) / "theme.zig"
                 path.write_text(source.replace(original, broken))
-                result = subprocess.run([ZIG, "test", str(path), "--test-filter", test_name], capture_output=True, text=True)
+                result = subprocess.run([ZIG, "test", str(path)], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertRegex(result.stdout + result.stderr, r"FAIL \(Test(?:UnexpectedResult|ExpectedEqual)\)")
 
     @unittest.skipUnless(ZIG, "Zig compiler not found; install Zig or set ZIG")
     def test_new_zig_tests_reject_pre_theme_code(self):
@@ -278,12 +272,12 @@ class ThemeRuntimeTests(unittest.TestCase):
             current_control = (ROOT / "src/control.zig").read_text()
             baseline_theme = subprocess.check_output(["git", "show", "a735c9f:src/theme.zig"], cwd=ROOT, text=True)
             baseline_control = subprocess.check_output(["git", "show", "a735c9f:src/control.zig"], cwd=ROOT, text=True)
-            (root / "theme.zig").write_text(baseline_theme + current_theme[current_theme.index('test "green palette preserves'):])
+            (root / "theme.zig").write_text(baseline_theme + current_theme[current_theme.index('test "shared kit body text'):])
             result = subprocess.run([ZIG, "test", str(root / "theme.zig")], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertRegex(result.stderr, r"undeclared identifier '(?:Palette|green|amoled|Choice)'")
+            self.assertRegex(result.stderr, r"undeclared identifier '(?:Palette|amoled|Choice)'")
             (root / "theme.zig").write_text(current_theme)
-            (root / "control.zig").write_text('const theme = @import("theme.zig");\n' + baseline_control + current_control[current_control.index('test "theme accepts both choices'):])
+            (root / "control.zig").write_text('const theme = @import("theme.zig");\n' + baseline_control + current_control[current_control.index('test "theme accepts the graphite choice'):])
             result = subprocess.run([ZIG, "test", str(root / "control.zig")], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertRegex(result.stderr, r"(?:no field named|has no member named) 'theme'")

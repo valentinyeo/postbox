@@ -148,7 +148,7 @@ fn setStatus(a: *App, value: []const u8) void {
 fn updateTooltipTheme(_: *App) void {}
 
 fn reset() void {
-    theme.set(.green);
+    theme.set(.amoled);
     win.stored = null;
     win.live = @splat(null);
     win.allocations = 0;
@@ -184,10 +184,10 @@ test "startup loads valid DWORD themes and defaults missing or unknown values" {
     for ([_]?u32{ null, 0, 1, 2, std.math.maxInt(u32) }) |stored| {
         win.stored = stored;
         applyTheme(loadTheme());
-        const expected: theme.Choice = if (stored == 0) .green else .amoled;
+        const expected: theme.Choice = .amoled;
         try std.testing.expectEqual(expected, theme.choice);
         try std.testing.expectEqual(menu_theme.preferredAppMode(expected), win.menu_mode);
-        try std.testing.expectEqual(if (expected == .amoled) theme.amoled.surface else theme.green.surface_container_high, fieldColor());
+        try std.testing.expectEqual(if (expected == .amoled) theme.amoled.surface else theme.amoled.surface_container_high, fieldColor());
     }
 }
 
@@ -196,8 +196,8 @@ test "live theme changes replace all brushes, save and redraw every top-level wi
     defer theme.set(.amoled);
     var app = App{};
     try std.testing.expect(recreateThemeBrushes(&app));
-    try expectBrushes(&app, theme.green);
-    for ([_]theme.Choice{ .amoled, .green, .amoled }) |choice| {
+    try expectBrushes(&app, theme.amoled);
+    for ([_]theme.Choice{.amoled}) |choice| {
         const old = [_]usize{ app.brush_bg.?, app.brush_panel.?, app.brush_sidebar.?, app.brush_raised.?, app.brush_muted.? };
         try std.testing.expect(changeTheme(&app, choice));
         try std.testing.expectEqual(choice, theme.choice);
@@ -206,7 +206,7 @@ test "live theme changes replace all brushes, save and redraw every top-level wi
         for (old) |brush| try std.testing.expectEqual(@as(?u32, null), win.live[brush]);
         try expectBrushes(&app, theme.current.*);
         try std.testing.expectEqual(win.top_level_windows.len, win.redraws);
-        try std.testing.expectEqualStrings(if (choice == .amoled) "Theme: AMOLED black" else "Theme: Green", app.status);
+        try std.testing.expectEqualStrings("Theme: Graphite", app.status);
     }
     try std.testing.expectEqual(@as(usize, 3), win.saves);
     try std.testing.expectEqual(@as(usize, 1), win.menu_loads);
@@ -223,12 +223,12 @@ test "brush allocation failure preserves the previous palette, resources and sav
         const old = app.brush_bg;
         win.fail_at = win.allocations + failure;
         try std.testing.expect(!changeTheme(&app, .amoled));
-        try std.testing.expectEqual(theme.Choice.green, theme.choice);
-        try std.testing.expectEqual(menu_theme.PreferredAppMode.default, win.menu_mode);
+        try std.testing.expectEqual(theme.Choice.amoled, theme.choice);
+        try std.testing.expectEqual(menu_theme.PreferredAppMode.force_dark, win.menu_mode);
         try std.testing.expectEqual(@as(usize, 2), win.mode_calls);
         try std.testing.expectEqual(@as(usize, 2), win.menu_flushes);
         try std.testing.expectEqual(old, app.brush_bg);
-        try expectBrushes(&app, theme.green);
+        try expectBrushes(&app, theme.amoled);
         try std.testing.expectEqual(@as(usize, 0), win.saves);
         try std.testing.expectEqual(@as(usize, 0), win.redraws);
         try std.testing.expectEqualStrings("Could not change theme", app.status);

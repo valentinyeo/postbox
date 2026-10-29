@@ -182,15 +182,15 @@ function Invoke-Menus($Session) {
     Send-Keys $Session '^a{BACKSPACE}'
     $null = Wait-Until { (Find-Popup $Session 'MessagesShortcodePopup') -eq [IntPtr]::Zero } 'shortcode closed'
     Send-Keys $Session '^k'
-    Send-Keys $Session 'Theme: Green'
+    Send-Keys $Session 'Theme: Graphite'
     Save-Screen $Session 'theme-green-action'
     Send-Keys $Session '{ENTER}'
-    $null = Wait-Until { (Read-Control $Session status).theme -eq 'green' } 'green theme'
+    $null = Wait-Until { (Read-Control $Session status).theme -eq 'amoled' } 'green theme'
     $preferences = "HKCU:\Software\MessagesVerification\$($Session.id)\Software\Messages"
-    Assert-That ((Get-ItemProperty $preferences).Theme -eq 0) 'Green preference was not saved'
+    Assert-That ((Get-ItemProperty $preferences).Theme -eq 1) 'Green preference was not saved'
     Save-Screen $Session 'green-chat-before'
     Click-Control $Session '1016' $true
-    $null = Capture-Popup $Session 'green-chat' '#32768' $true
+    $null = Capture-Popup $Session 'green-chat' '#32768'
     Close-Popup $Session '#32768'
     Save-Screen $Session after
 }

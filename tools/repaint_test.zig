@@ -148,7 +148,7 @@ fn shortcodeUpdate(a: *App) void {
 test "IGSH-510 repeated typing requests zero layouts on AMOLED and Green" {
     const previous = theme.choice;
     defer theme.set(previous);
-    for ([_]theme.Choice{ .amoled, .green }) |choice| {
+    for ([_]theme.Choice{.amoled}) |choice| {
         theme.set(choice);
         for ([_]u32{ 96, 120, 144, 192 }) |dpi| {
             var a = App{ .dpi = dpi };
@@ -205,7 +205,7 @@ test "IGSH-510 dirty painting clips and presents only changed pixels once on bot
     const previous = theme.choice;
     defer theme.set(previous);
     const client = win.RECT{ .left = 0, .top = 0, .right = 1200, .bottom = 800 };
-    for ([_]theme.Choice{ .amoled, .green }) |choice| {
+    for ([_]theme.Choice{.amoled}) |choice| {
         theme.set(choice);
         for ([_]win.RECT{
             .{ .left = 400, .top = 700, .right = 1100, .bottom = 790 },

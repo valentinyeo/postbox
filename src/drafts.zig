@@ -211,7 +211,7 @@ test "IGSH-497 draft label text and colour contrast on every row theme" {
     const text = try label(std.testing.allocator, "hello\nworld");
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings("DRAFT: hello world", text);
-    for ([_]theme.Palette{ theme.green, theme.amoled }) |palette| {
+    for ([_]theme.Palette{theme.amoled}) |palette| {
         for ([_]u32{ palette.surface_container_low, palette.surface_container_highest, palette.primary_container }) |background| {
             try std.testing.expect(theme.contrastRatio(labelColor(palette, background), background) >= 4.5);
         }

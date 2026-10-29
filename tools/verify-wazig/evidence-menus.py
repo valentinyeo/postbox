@@ -42,12 +42,12 @@ for name in popups:
         assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}-{phase}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
     assert images[0] != images[1], name
 state = json.loads((folder / 'side-effects.json').read_text(encoding='utf-8-sig'))
-assert state['theme'] == 'green' and state['chat_count'] == 2
+assert state['theme'] == 'amoled' and state['chat_count'] == 2
 assert state['sync'] == 'stopped' and state['pending_sends'] == 0 and state['pending_archives'] == 0
 assert state['production_preferences_absent'] and state['whatsapp_store_absent'] and state['telegram_store_absent']
 cached = json.loads((folder / 'final-data/chats-0000000000000526.json').read_text(encoding='utf-8-sig'))
 assert sorted(row['name'] for row in cached['data']) == ['Verification Alpha', 'Verification Beta']
 actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-assert 'drag-select synthetic message text and right-click' in actions and 'keys: Theme: Green' in actions
+assert 'drag-select synthetic message text and right-click' in actions and 'keys: Theme: Graphite' in actions
 print('EVIDENCE VERIFIED: menus popup pairs, fixed pixel thresholds, negative controls, isolated state and cleanup')
 sys.exit(0)

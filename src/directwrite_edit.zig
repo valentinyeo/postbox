@@ -624,7 +624,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
     _ = win.SendMessageW(edit, win.EM_REPLACESEL, 1, @bitCast(@intFromPtr(std.unicode.utf8ToUtf16LeStringLiteral(" after"))));
     const changes_before_style = test_changes;
     _ = win.SendMessageW(edit, win.WM_SETFONT, @intFromPtr(font), 1);
-    theme.set(.green);
+    theme.set(.amoled);
     _ = win.SendMessageW(edit, win.WM_PRINTCLIENT, @intFromPtr(dc), win.PRF_CLIENT);
     try std.testing.expectEqual(changes_before_style, test_changes);
     try std.testing.expect(win.SendMessageW(edit, win.EM_UNDO, 0, 0) != 0);
@@ -672,7 +672,7 @@ test "IGSH-466 native DirectWrite host maps text selection undo rectangles limit
         _ = win.SendMessageW(edit, win.EM_SETSEL, 0, 0);
         _ = win.SendMessageW(edit, win.EM_LINESCROLL, 0, -100);
         const origin = host.position(0);
-        for ([_]theme.Choice{ .green, .amoled }) |choice| {
+        for ([_]theme.Choice{.amoled}) |choice| {
             theme.set(choice);
             _ = win.SendMessageW(edit, win.WM_PRINTCLIENT, @intFromPtr(dc), win.PRF_CLIENT);
             _ = win.GdiFlush();

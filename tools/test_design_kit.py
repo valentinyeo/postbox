@@ -9,7 +9,7 @@ class DesignKitTests(unittest.TestCase):
     def test_approved_graphite_replaces_the_material_palette(self):
         source = (ROOT / 'src/theme.zig').read_text()
         for literal in ('0x0f1512', '0x88d6ba'):
-            self.assertNotIn(literal, source)
+            self.assertTrue(literal not in source, literal)
         palette = source[source.index('pub const amoled: Palette = .{'):].split('\n};', 1)[0]
         for field, value in {
             'surface': '101010', 'surface_container_low': '181818',
@@ -28,12 +28,12 @@ class DesignKitTests(unittest.TestCase):
 
     def test_native_controls_use_shared_font_and_icon_roles(self):
         source = (ROOT / 'src/main.zig').read_text()
-        self.assertIn('lit("Segoe Fluent Icons")', source)
-        self.assertIn('scaledFontHeight(theme.type_body,', source)
-        self.assertIn('scaledFontHeight(theme.type_title,', source)
-        self.assertIn('px(a, theme.sidebar_width)', source)
-        self.assertIn('px(a, theme.chat_row_height)', source)
-        self.assertIn('px(a, theme.bubble_max_width)', source)
+        self.assertTrue('lit("Segoe Fluent Icons")' in source)
+        self.assertTrue('scaledFontHeight(theme.type_body,' in source)
+        self.assertTrue('scaledFontHeight(theme.type_title,' in source)
+        self.assertTrue('px(a, theme.sidebar_width)' in source)
+        self.assertTrue('px(a, theme.chat_row_height)' in source)
+        self.assertTrue('px(a, theme.bubble_max_width)' in source)
         self.assertNotIn('Theme: Green', source)
         self.assertNotIn('Theme: AMOLED black', source)
 

@@ -6,10 +6,12 @@ pub const files = [_][]const u8{
     "IBMPlexSans-Medium.ttf",
     "IBMPlexSans-SemiBold.ttf",
     "IBMPlexSans-Bold.ttf",
+    "IBMPlexSans-Italic.ttf",
+    "IBMPlexMono-Regular.ttf",
 };
 
-test "WAZI-161 bundled font list includes all four weights" {
-    const expected = [_][]const u8{ "IBMPlexSans-Regular.ttf", "IBMPlexSans-Medium.ttf", "IBMPlexSans-SemiBold.ttf", "IBMPlexSans-Bold.ttf" };
+test "WAZI-161 bundled font list includes all approved weights and code face" {
+    const expected = [_][]const u8{ "IBMPlexSans-Regular.ttf", "IBMPlexSans-Medium.ttf", "IBMPlexSans-SemiBold.ttf", "IBMPlexSans-Bold.ttf", "IBMPlexSans-Italic.ttf", "IBMPlexMono-Regular.ttf" };
     try std.testing.expectEqual(expected.len, files.len);
     for (expected, files) |want, actual| try std.testing.expectEqualStrings(want, actual);
 }

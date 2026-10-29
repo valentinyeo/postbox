@@ -76,14 +76,3 @@ test "IGSH-461 missing popup input is not painted" {
     try std.testing.expectEqual(@as(?u32, null), smooth.fill);
     try std.testing.expectEqual(@as(?u32, null), smooth.border);
 }
-
-test "IGSH-461 Green popup inputs keep their native appearance" {
-    theme.set(.green);
-    defer theme.set(.amoled);
-    smooth.fill = null;
-    smooth.border = null;
-    const context = smooth.Context{};
-    paintPopupInput(&context, 1, 2);
-    try std.testing.expectEqual(@as(?u32, null), smooth.fill);
-    try std.testing.expectEqual(@as(?u32, null), smooth.border);
-}

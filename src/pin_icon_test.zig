@@ -67,7 +67,7 @@ test "IGSH-494 fallback pin strokes have smooth edges and a hollow body at both 
 
 test "IGSH-494 pin colours contrast with AMOLED and Green normal selected and bulk rows" {
     const theme = @import("theme.zig");
-    for ([_]theme.Palette{ theme.amoled, theme.green }) |palette| {
+    for ([_]theme.Palette{theme.amoled}) |palette| {
         for ([_]u32{ palette.surface_container_low, palette.surface_container_highest }) |background| {
             try std.testing.expect(theme.contrastRatio(palette.on_surface_variant, background) >= 3);
         }

@@ -36,7 +36,7 @@ else:
     assert 0 < scale['baseline_points'] < scale['larger_points']
     assert scale['reset_points'] == scale['baseline_points']
     stages = ['before', 'action', 'text-larger', 'after']
-    keys = ['^k', 'Theme: Green', 'Make text larger', '{ENTER}', '^0']
+    keys = ['^k', 'Theme: Graphite', 'Make text larger', '{ENTER}', '^0']
     preferences = (folder / 'preferences.txt').read_text(encoding='utf-8-sig')
     assert 'FontScale' in preferences and '82' in preferences
 for keys_sent in keys:
@@ -55,6 +55,6 @@ final = json.loads((folder / 'side-effects.json').read_text(encoding='utf-8-sig'
 assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
 assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
 assert final['chat_count'] == 2 and final['search'] == ''
-assert final['theme'] == ('green' if feature == 'appearance' else 'amoled')
+assert final['theme'] == 'amoled'
 print(f'EVIDENCE VERIFIED: {feature} input, new assertions, surviving screenshots and isolation')
 raise SystemExit(0)

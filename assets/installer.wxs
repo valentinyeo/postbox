@@ -34,6 +34,12 @@
       <Component Id="PostboxCtlExe" Guid="0775341F-9661-48BA-93CD-6254EF517E53">
         <File Id="PostboxCtlExeFile" Name="postboxctl.exe" Source="$(var.BinDir)postboxctl.exe" KeyPath="yes" />
       </Component>
+      <Component Id="PlexItalic" Guid="9c04ebc4-6aeb-4fb8-b0e9-a4bbfa1b5892">
+        <File Id="PlexItalicFile" Name="IBMPlexSans-Italic.ttf" Source="$(var.BinDir)IBMPlexSans-Italic.ttf" KeyPath="yes" />
+      </Component>
+      <Component Id="PlexMono" Guid="555a0af5-e3c7-456c-a593-68b48c10c9d3">
+        <File Id="PlexMonoFile" Name="IBMPlexMono-Regular.ttf" Source="$(var.BinDir)IBMPlexMono-Regular.ttf" KeyPath="yes" />
+      </Component>
       <Component Id="PlexRegular" Guid="1A96D346-DF77-5C8D-AF3B-857F10E50DFF">
         <File Id="PlexRegularFile" Name="IBMPlexSans-Regular.ttf" Source="$(var.BinDir)IBMPlexSans-Regular.ttf" KeyPath="yes" />
       </Component>
@@ -68,6 +74,8 @@
       <ComponentRef Id="MessagesExe" />
       <ComponentRef Id="WazigCtlExe" />
       <ComponentRef Id="PostboxCtlExe" />
+      <ComponentRef Id="PlexItalic" />
+      <ComponentRef Id="PlexMono" />
       <ComponentRef Id="PlexRegular" />
       <ComponentRef Id="PlexMedium" />
       <ComponentRef Id="PlexSemiBold" />

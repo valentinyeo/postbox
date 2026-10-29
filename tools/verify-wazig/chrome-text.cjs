@@ -7,16 +7,18 @@ const read = name => fs.readFileSync(path.join(root, name), 'utf8');
 
 function sourceContract(main = read('src/main.zig'), config = read('src/font_config.zig'), fixture = JSON.parse(read('src/verify_text.json')), runner = read('tools/verify-wazig/run.ps1')) {
     const scale = Number(main.match(/font_scale: i32 = (\d+),/)[1]);
-    const body = Number(main.match(/a\.font = win\.CreateFontW\(scaledFontHeight\((\d+),/)[1]);
-    const heading = Number(main.match(/a\.font_bold = win\.CreateFontW\(scaledFontHeight\((\d+),/)[1]);
+    const body = Number(read('src/theme.zig').match(/pub const type_body: i32 = (\d+);/)[1]);
+    assert.match(main, /a\.font = win\.CreateFontW\(scaledFontHeight\(theme\.type_body,/);
+    const heading = Number(read('src/theme.zig').match(/pub const type_chat_name: i32 = (\d+);/)[1]);
+    assert.match(main, /a\.font_bold = win\.CreateFontW\(scaledFontHeight\(theme\.type_chat_name,/);
     const weight = Number(config.match(/body_weight: i32 = (\d+);/)[1]);
     assert.match(main, /if \(verification_text_comparison\) _ = applyMessageData\(a, @embedFile\("verify_text.json"\), false\);/);
-    assert.match(main, /\.body = \.\{ \.px = -scaledFontHeight\(17, a.font_scale, dpi\), \.weight = @import\("font_config.zig"\)\.body_weight, \.line_height = textLineHeight\(hdc, a.font\.\?\) \}/);
-    assert.match(main, /\.heading = \.\{ \.px = -scaledFontHeight\(16, a.font_scale, dpi\), \.weight = win.FW_SEMIBOLD, \.line_height = textLineHeight\(hdc, a.font_bold\.\?\) \}/);
+    assert.match(main, /\.body = \.\{ \.px = -scaledFontHeight\(theme\.type_body, a.font_scale, dpi\), \.weight = @import\("font_config.zig"\)\.body_weight, \.line_height = textLineHeight\(hdc, a.font\.\?\) \}/);
+    assert.match(main, /\.heading = \.\{ \.px = -scaledFontHeight\(theme\.type_chat_name, a.font_scale, dpi\), \.weight = win.FW_SEMIBOLD, \.line_height = textLineHeight\(hdc, a.font_bold\.\?\) \}/);
     assert.match(main, /return -@divTrunc\(base \* scale \* dpi \+ 4800, 9600\);/);
     assert.match(main, /saveVerificationTextMetrics\(a, hdc, message, left \+ px\(a, 12\), text_top, right - left - px\(a, 24\), text_height\);/);
-    assert.equal(body, 17);
-    assert.equal(heading, 16);
+    assert.equal(body, 15);
+    assert.equal(heading, 15);
     assert.equal(weight, 400);
     assert.equal(fixture.data.messages.length, 1);
     assert.equal(fixture.data.messages[0].MsgID, 'ISSUE-462-PARAGRAPH');

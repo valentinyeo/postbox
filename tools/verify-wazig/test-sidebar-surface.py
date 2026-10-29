@@ -95,3 +95,13 @@ with tempfile.TemporaryDirectory() as directory:
     else:
         raise AssertionError('accepted changed layout')
 print('SIDEBAR VALIDATOR CONTROLS PASSED')
+
+approved = dict(sidebar=[24]*3, chat=[16]*3, divider=[42]*3, sidebar_width=300, expected_sidebar_width=300, bubble_width=600, bubble_limit=660, bubble_top=[37]*3, bubble_bottom=[31]*3, text={'name': dict(rgb=[242]*3, pixels=30, contrast=15), 'kind': dict(rgb=[138]*3, pixels=30, contrast=5)})
+ORACLE['validate_design'](approved)
+for field, wrong in [('sidebar', [0]*3), ('chat', [0]*3), ('divider', [0]*3), ('sidebar_width', 390), ('bubble_width', 700), ('bubble_top', [26]*3)]:
+    try:
+        ORACLE['validate_design'](dict(approved, **{field: wrong}))
+    except AssertionError:
+        continue
+    raise AssertionError('approved design oracle accepted broken ' + field)
+print('GRAPHITE DESIGN ORACLE CONTROLS PASSED')
