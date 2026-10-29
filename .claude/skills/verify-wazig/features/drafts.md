@@ -5,6 +5,7 @@ Type a message draft, leave the chat and return to the same unsent text without 
 ## Sub-features
 
 - `draft-type`: enter and edit composer text.
+- `composer-compact`: ignore old saved height floors; start empty at one line, clear hint pixels while typing, grow to the existing cap, scroll internally, and shrink after clearing.
 - `draft-switch`: restore each chat's own draft when switching conversations.
 - `draft-persist`: unsent drafts are saved to local storage.
 - `draft-newline`: Shift+Enter inserts a newline; Enter normally sends.
@@ -21,6 +22,7 @@ Type a message draft, leave the chat and return to the same unsent text without 
 Preconditions: doctor passes; Alpha selected, both chats have empty drafts, composer `1032` enabled.
 
 - **Run:** dispatch `feature=drafts`; GitHub helper: `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature drafts`.
+- **Compact sizing:** seed the isolated legacy height preference, capture empty and typed states, compare incremental painting with a clean redraw below the first text row, then prove two-line growth, the existing height cap, native scroll positions and clear/reset screenshots. Preserve `composer-behavior.json`.
 - **Type:** `Send-Keys $session 'Verification draft'` into the focused composer after capturing `before.png`.
 - **Edit:** replace a Shift-arrow selection, undo/redo it, delete a word with Ctrl+Backspace, then exercise Ctrl+V and Shift+Insert guarded paste exactly once. Compare the bounded native text with UIA ValuePattern after each operation; preserve `paste.png`. Shift+Enter plus `second` must produce exactly two lines before restoring the baseline draft.
 - **Switch:** `Send-Keys $session '^{TAB}'`; read composer through bounded read-only `WM_GETTEXT` and require empty text in Beta.

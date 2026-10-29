@@ -5,6 +5,7 @@
 - Reply preview shows the original sender and first line.
 - Close and Escape cancel without sending.
 - WhatsApp and Slack sends retain their reply target.
+- Multiline replies send intact and restore the one-line empty composer.
 - One grey quote line sits above replies.
 - Clicking that line finds and briefly highlights the original.
 

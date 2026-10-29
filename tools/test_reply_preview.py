@@ -21,13 +21,13 @@ class ReplyEvidenceTests(unittest.TestCase):
         for provider, chat in [('whatsapp', 'fixture-beta'), ('slack', 'fixture-alpha')]:
             for phase in ['before', 'replying', 'sent', 'jumped', 'unavailable']:
                 state = dict(selected=dict(id=chat, provider=provider), reply=dict(id='REPLY-ORIGINAL',
-                             sender='Fixture Sender', preview='First words of the original'), reply_flash='REPLY-ORIGINAL', reply_notice=True)
+                             sender='Fixture Sender', preview='First words of the original'), reply_flash='REPLY-ORIGINAL', reply_notice=True, composer=dict(lines=1))
                 write(f'{provider}-{phase}.state.json', state)
                 (root / f'{provider}-{phase}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + phase.encode() * 10001)
             write(f'{provider}-sent.messages.json', dict(messages=[dict(from_me=True,
                   quoted_msg_id='REPLY-ORIGINAL', quote_line=[10, 10, 110, 30], bubble=[10, 36, 110, 80])]))
             requests.append(dict(wire_path='/v1/wazig/send', status=200, authorized=True,
-                                 body=dict(chat=chat, reply_to='REPLY-ORIGINAL', text=f'Synthetic {provider} reply')))
+                                 body=dict(chat=chat, reply_to='REPLY-ORIGINAL', text=f'Synthetic {provider} reply\nSecond line')))
         (root / 'bridge-requests.jsonl').write_text('\n'.join(map(json.dumps, requests)))
 
     def test_complete_two_provider_reply_evidence(self):
@@ -42,6 +42,7 @@ class ReplyEvidenceTests(unittest.TestCase):
             ('slack-sent.messages.json', lambda row: row['messages'][0].update(quoted_msg_id='wrong')),
             ('whatsapp-sent.messages.json', lambda row: row['messages'][0].update(quote_line=[10, 40, 110, 60])),
             ('side-effects.json', lambda row: row.update(pending_sends=1)),
+            ('whatsapp-sent.state.json', lambda row: row['composer'].update(lines=2)),
         ]:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
