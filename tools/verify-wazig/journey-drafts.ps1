@@ -12,6 +12,26 @@ $empty = Read-Control $session status
 $dpi = [int][VerifyWindow]::GetDpiForWindow($app.MainWindowHandle)
 $oneLineHeight = [int][Math]::Floor((44 * $dpi + 48) / 96)
 Save-Screen $session composer-empty
+$typingCases = @()
+foreach ($mode in @('fast-long', 'middle', 'wrapped-middle')) {
+    Send-Keys $session '^a{BACKSPACE}'
+    $prefix = 'The quick brown fox jumps over the lazy dog. ' * 12
+    Send-Keys $session $prefix
+    $null = Wait-Until { (Read-Edit $compose) -eq $prefix } "$mode initial long text"
+    if ($mode -ne 'fast-long') {
+        Send-Keys $session '^{HOME}{RIGHT 40}'
+        $expected = $prefix.Insert(40, 'Inserted letters stay together ')
+    } else {
+        $expected = $prefix + 'Inserted letters stay together '
+    }
+    Send-Keys $session 'Inserted letters stay together '
+    $actual = Read-Edit $compose
+    Assert-That ($actual -ceq $expected) "Cursor jumped during $mode typing: expected=[$expected] actual=[$actual]"
+    $typingCases += @{ mode = $mode; expected = $expected; actual = $actual }
+    Save-Screen $session "typing-$mode"
+}
+$typingCases | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Evidence 'typing-cursor.json')
+Send-Keys $session '^a{BACKSPACE}'
 Send-Keys $session 'Draft probe'
 $null = Wait-Until { (Read-Edit $compose) -eq 'Draft probe' } 'composer probe typed'
 Save-Screen $session composer-typed
