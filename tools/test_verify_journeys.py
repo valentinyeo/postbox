@@ -646,7 +646,7 @@ class AppearanceVersionTests(unittest.TestCase):
     def fixture(self, folder, version):
         session = dict(feature='appearance', sha256='fixture-binary', commit='fixture-commit',
                        expected_version=version, expected_product='Postbox')
-        state = dict(version=version, chat_count=2, pending_sends=0, pending_archives=0,
+        state = dict(version=version, chat_count=3, pending_sends=0, pending_archives=0,
                      sync='stopped', search='', theme='amoled', production_preferences_absent=True,
                      whatsapp_store_absent=True, telegram_store_absent=True)
         files = {'session.json': session, 'side-effects.json': state,

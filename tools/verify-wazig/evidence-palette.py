@@ -9,6 +9,7 @@ import sys
 folder = Path(sys.argv[1])
 session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
 feature = session['feature']
+chat_count = 3 if feature == 'appearance' else 2
 version = session['expected_version']
 product = session['expected_product']
 assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version)
@@ -54,13 +55,13 @@ for name in stages:
     images.append(hashlib.sha256(image).hexdigest())
     assert re.fullmatch(rf'MessagesZig \| (?:.+ - )?{re.escape(product)} v{re.escape(version)}', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
     state = json.loads((folder / f'{name}.state.json').read_text(encoding='utf-8-sig'))
-    assert state['version'] == version and state['chat_count'] == 2
+    assert state['version'] == version and state['chat_count'] == chat_count
     assert state['pending_sends'] == state['pending_archives'] == 0 and state['sync'] == 'stopped'
 assert images[0] != images[1] and images[2] != images[3]
 final = json.loads((folder / 'side-effects.json').read_text(encoding='utf-8-sig'))
 assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
 assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
-assert final['chat_count'] == 2 and final['search'] == ''
+assert final['chat_count'] == chat_count and final['search'] == ''
 assert final['theme'] == 'amoled'
 print(f'EVIDENCE VERIFIED: {feature} input, new assertions, surviving screenshots and isolation')
 raise SystemExit(0)

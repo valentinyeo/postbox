@@ -12,7 +12,9 @@ class ChatDesignHandler(VoiceHandler):
             self.respond(200, [] if query.get('archived') == ['true'] else [
                 dict(jid='fixture-alpha', name='Graphite team', provider='slack', kind='group', last_message_ts=self.state.stamp,
                      unread_count=2, archived=False),
-                dict(jid='fixture-beta', name='Graphite group', provider='whatsapp', kind='group', last_message_ts=self.stamp(-1),
+                dict(jid='fixture-beta', name='Graphite direct', provider='whatsapp', kind='direct', last_message_ts=self.stamp(-1),
+                     unread_count=0, archived=False),
+                dict(jid='fixture-group@g.us', name='Graphite group', provider='whatsapp', kind='group', last_message_ts=self.stamp(-2),
                      unread_count=0, archived=False)])
         elif url.path == '/v1/wazig/messages':
             chat = query.get('chat', [''])[0]
@@ -26,7 +28,7 @@ class ChatDesignHandler(VoiceHandler):
                     dict(MsgID='DESIGN-LONG', Text='A longer reply stays inside the same centred chat column. ' * 2, FromMe=True, SenderName='You')]
             for index, row in enumerate(rows):
                 row.update(ChatJID=chat, Timestamp=self.stamp(index))
-            if chat == 'fixture-beta':
+            if chat == 'fixture-group@g.us':
                 rows = [
                     dict(MsgID='GROUP-FIRST', Text='First note', SenderName='Alex', SenderJID='fixture-alex', Timestamp='2026-10-27T10:00:00Z'),
                     dict(MsgID='GROUP-SAME', Text='Close follow-up', SenderName='Alex', SenderJID='fixture-alex', Timestamp='2026-10-27T10:01:00Z'),
