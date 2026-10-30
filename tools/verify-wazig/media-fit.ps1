@@ -47,6 +47,12 @@ function Invoke-MediaFitJourney($Session) {
         $shown = Read-Control $Session messages
         return ($shown.chat.id -eq 'fixture-media@g.us' -and @($shown.messages | Where-Object { $_.media_type -and $_.local }).Count -eq $ids.Count)
     } 'media-fit automatic hub downloads'
+    $caption = "*Synthetic heading*`n• Grüner Punkt`n• _Second line_"
+    $rows = (Read-Control $Session messages).messages
+    $photo = @($rows | Where-Object { $_.id -ceq 'landscape' })
+    $plain = @($rows | Where-Object { $_.id -ceq 'portrait' })
+    Assert-That ($photo.Count -eq 1 -and $photo[0].text -ceq $caption -and $photo[0].forwarded) 'Forwarded image caption missing or duplicated'
+    Assert-That ($plain.Count -eq 1 -and $plain[0].text -ceq '' -and -not $plain[0].forwarded) 'Uncaptioned image changed'
     $checks = [Collections.Generic.List[object]]::new()
     $problems = [Collections.Generic.List[string]]::new()
     foreach ($size in @('wide', 'narrow')) {
@@ -117,4 +123,15 @@ function Invoke-MediaFitJourney($Session) {
     $null = Assert-That ($narrow.bubble[2] - $narrow.bubble[0] - $padding -lt $wide.media[2] - $wide.media[0]) 'media-fit: narrow bubble must be smaller than the wide decoded landscape'
     $null = Assert-That ($problems.Count -eq 0) ($problems -join '; ')
     $null = Save-Screen $Session after
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $null = Invoke-RestMethod -Method Post -Uri "$($Session.bridge_url)/fixture/media-fit-live" -Headers @{ Authorization = 'Bearer fixture-key-not-a-secret' } -Body '{}' -ContentType 'application/json'
+    $live = Wait-Until {
+        $row = @((Read-Control $Session messages).messages | Where-Object { $_.id -ceq 'fit-live' -and $_.text -ceq '*Live* caption • Grüße' -and $_.forwarded -and $_.local })
+        if ($row.Count -eq 1) { return $row[0] }
+    } 'live forwarded photo and caption'
+    $timer.Stop()
+    Assert-That ($timer.Elapsed.TotalSeconds -lt 10) 'Live photo caption exceeded ten seconds'
+    $live = Get-MediaFitTarget $Session 'fit-live'
+    $live | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'caption-live.json')
+    Save-Screen $Session caption-live
 }

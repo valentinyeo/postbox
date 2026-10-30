@@ -62,6 +62,13 @@ def check_media_fit(folder):
                           image[oy + y][ox + x][0] > 230 and 120 < image[oy + y][ox + x][1] < 190 and image[oy + y][ox + x][2] < 25)]
             assert pixels and len(pixels) == row['result']['pixels']
             assert all(m[0] <= x < m[2] and m[1] <= y < m[3] and b[0] <= x < b[2] and b[1] <= y < b[3] for x, y in pixels)
+            if key == 'landscape':
+                assert message['text'] == '*Synthetic heading*\n• Grüner Punkt\n• _Second line_'
+                assert message['forwarded']
+                ink_rows = [y for y in range(m[3], b[3] - px(5))
+                            if any(min(image[oy + y][ox + x]) > 110
+                                   for x in range(b[0] + px(14), b[2] - px(14)))]
+                assert ink_rows and max(ink_rows) - min(ink_rows) > px(25), 'caption and forwarding ink missing'
     resize = read('media-fit-resize.json')
     assert resize['target'] == 320 and 300 <= resize['canvas'] <= 340
     assert all(row['canvas'][2] == resize['canvas'] for row in checks if row['size'] == 'narrow')

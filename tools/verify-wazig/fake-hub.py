@@ -1727,11 +1727,23 @@ class MediaFitHandler(Handler):
                          SenderJID='fixture-media-sender', SenderName='Fixture Sender', MediaType=kind,
                          MimeType=mime, Filename=key + extension)
                     for key, (data, mime, extension, kind) in self.state.fit_media.items()]
+            for row in rows:
+                if row['MsgID'] == 'landscape':
+                    caption = '*Synthetic heading*\n• Grüner Punkt\n• _Second line_'
+                    row.update(Text=caption, MediaCaption=caption, DisplayText='Sent image', IsForwarded=True)
             rows.append(dict(MsgID='fit-own', ChatJID=MEDIA_GROUP, Timestamp=self.state.stamp,
                              Text=self.state.fit_text, FromMe=True, SenderName='', SenderJID='fixture-own'))
+            if getattr(self.state, 'fit_live', False):
+                rows.append(dict(MsgID='fit-live', ChatJID=MEDIA_GROUP, Timestamp=self.state.stamp,
+                                 Text='*Live* caption • Grüße', MediaCaption='*Live* caption • Grüße',
+                                 DisplayText='Sent image', IsForwarded=True, FromMe=False,
+                                 SenderJID='fixture-media-sender', SenderName='Fixture Sender',
+                                 MediaType='image', MimeType='image/png', Filename='live.png'))
             self.respond(200, list(reversed(rows)))
         elif url.path.startswith('/v1/wazig/media/'):
             chat, message = map(unquote, url.path.removeprefix('/v1/wazig/media/').split('/', 1))
+            if message == 'fit-live':
+                message = 'landscape'
             if chat != MEDIA_GROUP or message not in self.state.fit_media:
                 self.respond(404, {'error': 'unknown media'})
                 return
@@ -1740,16 +1752,48 @@ class MediaFitHandler(Handler):
         elif url.path == '/v1/wazig/groups':
             self.respond(200, [])
         elif url.path == '/v1/wazig/events':
-            VoiceHandler.events(self)
+            self.events()
         else:
             self.respond(404, {'error': 'unavailable'})
+
+    def events(self):
+        self.record(200)
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        last = int(self.headers.get('Last-Event-ID', '0'))
+        try:
+            if last == 0:
+                self.event(1, 'reset', '')
+                self.close_connection = True
+                return
+            while True:
+                with self.state.lock:
+                    if not getattr(self.state, 'fit_live', False) or last >= 2:
+                        self.state.lock.wait(timeout=2)
+                    ready = getattr(self.state, 'fit_live', False) and last < 2
+                if ready:
+                    self.event(2, 'msg', MEDIA_GROUP)
+                    self.close_connection = True
+                    return
+                self.wfile.write(b': heartbeat\n\n')
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
 
     def do_POST(self):
         self.wire_path = self.path
         if not self.authorized():
             return
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
-        if self.path == '/fixture/media-fit-text':
+        if self.path == '/fixture/media-fit-live':
+            with self.state.lock:
+                self.state.fit_live = True
+                self.state.lock.notify_all()
+            self.respond(200, {'ready': True}, body=body)
+        elif self.path == '/fixture/media-fit-text':
             self.state.fit_text = body['text']
             self.respond(200, {'text': self.state.fit_text}, body=body)
         elif self.path == '/v1/wazig/mark-read':
