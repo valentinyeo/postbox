@@ -1,4 +1,8 @@
-Add-Type @'
+$caretReferences = @((Get-ChildItem (Join-Path $PSHOME 'ref') -Filter '*.dll').FullName) + @(
+    [Drawing.Bitmap].Assembly.Location,
+    [Drawing.Color].Assembly.Location
+)
+Add-Type -ReferencedAssemblies ($caretReferences | Group-Object { [IO.Path]::GetFileName($_) } | ForEach-Object { $_.Group[0] }) @'
 using System;
 using System.Runtime.InteropServices;
 public static class VerifyCaret {
@@ -10,6 +14,35 @@ public static class VerifyCaret {
     }
     [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint thread, ref ThreadInfo info);
     [DllImport("user32.dll")] public static extern uint GetCaretBlinkTime();
+    [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, UIntPtr wparam, IntPtr lparam, uint flags, uint timeout, out UIntPtr result);
+    public static int CountInk(System.Drawing.Bitmap image, int fillMax) {
+        int count = 0;
+        for (int y = 0; y < image.Height; y++) for (int x = 0; x < image.Width; x++) {
+            var p = image.GetPixel(x, y);
+            if (Math.Max(p.R, Math.Max(p.G, p.B)) > fillMax + 40) count++;
+        }
+        return count;
+    }
+    public static int[] Measure(System.Drawing.Bitmap off, System.Drawing.Bitmap on, int fillMax) {
+        int left = off.Width, right = -1, top = off.Height, bottom = -1;
+        for (int x = 0; x < off.Width; x++) {
+            int changed = 0, y0 = off.Height, y1 = -1;
+            for (int y = 0; y < off.Height; y++) {
+                var a = off.GetPixel(x, y); var b = on.GetPixel(x, y);
+                if (Math.Abs(a.R - b.R) + Math.Abs(a.G - b.G) + Math.Abs(a.B - b.B) > 100) {
+                    changed++; y0 = Math.Min(y0, y); y1 = Math.Max(y1, y);
+                }
+            }
+            if (changed >= 5) { left = Math.Min(left, x); right = x; top = Math.Min(top, y0); bottom = Math.Max(bottom, y1); }
+        }
+        if (right < 0) return new int[] { -1, -1, -1, -1, -1 };
+        int inkRight = -1;
+        for (int y = top; y <= bottom; y++) for (int x = 0; x < off.Width; x++) {
+            var p = off.GetPixel(x, y);
+            if (Math.Max(p.R, Math.Max(p.G, p.B)) > fillMax + 40) inkRight = Math.Max(inkRight, x);
+        }
+        return new int[] { left, right, top, bottom, inkRight };
+    }
 }
 '@
 
@@ -99,6 +132,87 @@ function Measure-CaretTheme($Session, [string]$Theme) {
     }
 }
 
+function Measure-CaretAlignment($Session, $Edit, [string]$Name, [string]$Text) {
+    Send-Keys $Session '^a{BACKSPACE}'
+    Send-Keys $Session $Text
+    $null = Wait-Until { (Read-Edit $Edit) -ceq $Text } "$Name typed text"
+    Assert-That $Edit.Current.HasKeyboardFocus "$Name edit is not focused"
+    $bounds = $Edit.Current.BoundingRectangle
+    $width = [int]$bounds.Width
+    $height = [int]$bounds.Height
+    Assert-That ($width -gt 2 -and $height -gt 2) "$Name edit bounds missing"
+    $native = [UIntPtr]::Zero
+    $ok = [VerifyCaret]::SendMessageTimeout([IntPtr]$Edit.Current.NativeWindowHandle, 0x00d6, [UIntPtr]$Text.Length, [IntPtr]::Zero, 2, 2000, [ref]$native)
+    Assert-That ($ok -ne [IntPtr]::Zero) "$Name native end position unavailable"
+    $packed = $native.ToUInt64()
+    $nativeX = [int]($packed -band 0xffff)
+    $nativeY = [int](($packed -shr 16) -band 0xffff)
+    if ($nativeX -ge 32768) { $nativeX -= 65536 }
+    if ($nativeY -ge 32768) { $nativeY -= 65536 }
+    Save-Screen $Session "alignment-$Name"
+    $frames = @()
+    $ink = @()
+    try {
+        for ($i = 0; $i -lt 24; $i++) {
+            $image = [Drawing.Bitmap]::new($width, $height)
+            $graphics = [Drawing.Graphics]::FromImage($image)
+            try { $graphics.CopyFromScreen([int]$bounds.Left, [int]$bounds.Top, 0, 0, [Drawing.Size]::new($width, $height)) }
+            finally { $graphics.Dispose() }
+            $frames += $image
+            [System.Threading.Thread]::Sleep(130)
+        }
+        $fill = $frames[0].GetPixel(2, 2)
+        $fillMax = [Math]::Max($fill.R, [Math]::Max($fill.G, $fill.B))
+        foreach ($image in $frames) { $ink += [VerifyCaret]::CountInk($image, $fillMax) }
+        $low = 0; $high = 0
+        for ($i = 1; $i -lt $ink.Count; $i++) {
+            if ($ink[$i] -lt $ink[$low]) { $low = $i }
+            if ($ink[$i] -gt $ink[$high]) { $high = $i }
+        }
+        $frames[$low].Save((Join-Path $Session.evidence "alignment-$Name-off.png"), [Drawing.Imaging.ImageFormat]::Png)
+        $frames[$high].Save((Join-Path $Session.evidence "alignment-$Name-on.png"), [Drawing.Imaging.ImageFormat]::Png)
+        $pixels = [VerifyCaret]::Measure($frames[$low], $frames[$high], $fillMax)
+        $phases = Get-CaretOnOff $ink
+        return [ordered]@{
+            name = $Name; text = $Text; control = $Edit.Current.AutomationId
+            bounds = @{ left = $bounds.Left; top = $bounds.Top; width = $width; height = $height }
+            native_end = @{ x = $nativeX; y = $nativeY }
+            caret = @{ left = $pixels[0]; right = $pixels[1]; top = $pixels[2]; bottom = $pixels[3] }
+            ink_right = $pixels[4]; gap = ($pixels[0] - $pixels[4] - 1)
+            tolerance = 5; on = $phases.on; off = $phases.off; ink = $ink
+        }
+    } finally { foreach ($image in $frames) { $image.Dispose() } }
+}
+
+function Invoke-CaretAlignment($Session) {
+    $samples = @()
+    $short = 'abc'
+    $long = 'mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm'
+    foreach ($entry in @(
+        @{ name = 'composer'; shortcut = ''; id = '1032' },
+        @{ name = 'search'; shortcut = '^f'; id = '1064' },
+        @{ name = 'palette'; shortcut = '^k'; id = '1064' }
+    )) {
+        if ($entry.shortcut) {
+            Send-Keys $Session $entry.shortcut
+            $edit = Get-Edit (Get-PaletteWindow $Session) $entry.id
+        } else {
+            Invoke-PaletteCommand $Session 'Compose message'
+            $edit = Get-Edit (Get-Window $Session) $entry.id
+        }
+        foreach ($case in @(@{ name = 'short'; text = $short }, @{ name = 'long'; text = $long })) {
+            $samples += Measure-CaretAlignment $Session $edit "$($entry.name)-$($case.name)" $case.text
+            $samples | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'alignment.json')
+        }
+        Send-Keys $Session '^a{BACKSPACE}'
+        if ($entry.shortcut) { Send-Keys $Session '{ESC}' }
+    }
+    foreach ($sample in $samples) {
+        Assert-That ($sample.on -ge 2 -and $sample.off -ge 2 -and $sample.caret.left -ge 0 -and $sample.ink_right -ge 0) "$($sample.name): cannot measure caret and ink"
+        Assert-That ($sample.gap -ge -2 -and $sample.gap -le $sample.tolerance) "$($sample.name): caret-to-ink gap $($sample.gap) pixels exceeds tolerance"
+    }
+}
+
 function Invoke-CaretJourney($Session, $Start, $App) {
     Test-CaretOracle
     $themes = [ordered]@{}
@@ -114,5 +228,6 @@ function Invoke-CaretJourney($Session, $Start, $App) {
         $theme = $themes[$name]
         Assert-That ($theme.on -ge 2 -and $theme.off -ge 2) "caret does not blink in $name composer: owner=$($theme.caret_owner) on=$($theme.on) off=$($theme.off) ink=$($theme.ink_low)..$($theme.ink_high)"
     }
+    Invoke-CaretAlignment $Session
     return $App
 }
