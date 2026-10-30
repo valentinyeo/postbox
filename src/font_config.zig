@@ -1,7 +1,7 @@
 const std = @import("std");
 
-pub const min_scale: i32 = 60;
-pub const max_scale: i32 = 160;
+pub const min_scale = 60;
+pub const max_scale = 160;
 
 pub const small_scale: i32 = 80;
 pub const default_scale: i32 = 100;
