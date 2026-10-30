@@ -107,12 +107,30 @@ const TelegramClient = struct {
         return false;
     }
 };
+const FailedSend = struct {
+    unified: bool = false,
+    id: [outbox.id_len]u8 = @splat('0'),
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
+    jid: Utf8Text(191) = .{},
+    text: Utf8Text(4095) = .{},
+    file: Utf8Text(519) = .{},
+    reply_to: Utf8Text(191) = .{},
+    reply_sender: Utf8Text(191) = .{},
+    queued_unix: i64 = 0,
+    ptt: bool = false,
+    voice_seconds: u32 = 0,
+    ambiguous: bool = false,
+};
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     io: std.Io = std.testing.io,
     cache_tag: Utf8Text(32) = .{},
     outbox_path: []const u8 = "outbox.jsonl",
     outbox_load_failed: bool = false,
+    unified_write_fault: enum { none, open, write, flush, close, replace } = .none,
+    failed_sends: [outbox.max_entries]FailedSend = @splat(.{}),
+    failed_send_count: usize = 0,
     pending_sends: [max_pending_sends]PendingSend = @splat(.{}),
     pending_send_count: usize = 0,
     activity_key: chat_key.Stored = .{},
@@ -1156,4 +1174,12 @@ test "IGSH-1213 queued group text is visibly sending before any confirmation" {
     try std.testing.expectEqual(@as(usize, 1), a.message_count);
     try std.testing.expectEqual(.pending, a.messages[0].send_state);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Synthetic group message (sending)"), a.messages[0].text.slice());
+}
+
+test "intermediate unified outbox refuses send jobs" {
+    var app = App{};
+    app.unified_hub = true;
+    const before = app.wacli_queue_len;
+    try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .hub_send }, true));
+    try std.testing.expectEqual(before, app.wacli_queue_len);
 }

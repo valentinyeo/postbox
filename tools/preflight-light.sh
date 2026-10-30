@@ -42,6 +42,7 @@ PYTHON_LIGHT_TESTS=(
 PYTHON_HEAVY_TESTS=(
     'test_theme_runtime: unittest cases invoke Zig compiler and runtime harnesses'
     'test_outbox_runtime: standalone Zig runtime harness; no unittest cases'
+    'test_unified_snapshot_atomic: standalone Zig runtime harness; no unittest cases'
     'test_slack_integration: standalone Zig and optional Windows/Wine harness; no unittest cases'
 )
 run bash tools/test-preflight-guard.sh --check-light

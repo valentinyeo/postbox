@@ -83,6 +83,7 @@ const tj = @import("telegram_json.zig");
 const transport = @import("transport.zig");
 const messenger_view = @import("messenger_view.zig");
 const outbox = @import("outbox.zig");
+const unified_snapshot = @import("unified_snapshot.zig");
 
 const max_chats = 256;
 const max_groups = 1024;
@@ -908,6 +909,12 @@ const App = struct {
     slack_outbox_count: usize = 0,
     outbox_path: []u8 = &.{},
     outbox_load_failed: bool = false,
+    unified_snapshot: ?*unified_snapshot.Snapshot = null,
+    unified_candidate: ?*unified_snapshot.Snapshot = null,
+    unified_snapshot_path: []u8 = &.{},
+    unified_imports_clean: bool = false,
+    unified_storage_blocked: bool = false,
+    unified_write_fault: enum { none, open, write, flush, close, replace } = .none,
     send_seq: u64 = 0,
     failed_sends: [max_unified_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_unified_failed_sends,
     failed_send_count: usize = 0,
@@ -1911,6 +1918,7 @@ fn jobIsWrite(kind: WacliJobKind) bool {
 }
 
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
+    if (unifiedHub(a) and job.kind == .hub_send) return false;
     if (verification_fixture and !hubConfigured(a)) return verificationEnqueue(a, job);
     if (hubConfigured(a) and !hubJobReady(a, job)) return false;
     if (job.kind == .hub_media or job.kind == .hub_avatar) {
@@ -4531,7 +4539,7 @@ fn mintSendId(a: *App, id: *[outbox.id_len]u8) void {
 }
 
 fn persistOutbox(a: *App) bool {
-    if (a.outbox_path.len == 0 or a.outbox_load_failed) return false;
+    if (unifiedHub(a) or a.outbox_path.len == 0 or a.outbox_load_failed) return false;
     var allocating = std.Io.Writer.Allocating.init(a.allocator);
     defer allocating.deinit();
     var entry_count: usize = 0;
@@ -4576,32 +4584,98 @@ fn persistOutbox(a: *App) bool {
         entry.reply_sender.set(failed.reply_sender.slice());
         outbox.writeLine(&allocating.writer, &entry) catch return false;
     }
-    const temp_path = std.fmt.allocPrint(a.allocator, "{s}.new", .{a.outbox_path}) catch return false;
+    if (!writeOutboxAtomic(a, a.outbox_path, allocating.written(), false)) return false;
+    a.slack_outbox_dirty = false;
+    return true;
+}
+
+fn writeOutboxAtomic(a: *App, path: []const u8, data: []const u8, unified: bool) bool {
+    const fault = unified and verification_fixture;
+    const temp_path = std.fmt.allocPrint(a.allocator, "{s}.new", .{path}) catch return false;
     defer a.allocator.free(temp_path);
     const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, temp_path) catch return false;
     defer a.allocator.free(wide);
+    if (fault and a.unified_write_fault == .open) return false;
     const handle = win.CreateFileW(wide.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
     if (handle == win.INVALID_HANDLE_VALUE or handle == null) return false;
     defer _ = win.DeleteFileW(wide.ptr);
-    const data = allocating.written();
     var written_total: usize = 0;
-    var ok = true;
+    var ok = !(fault and a.unified_write_fault == .write);
     while (ok and written_total < data.len) {
         var written: win.DWORD = 0;
         if (win.WriteFile(handle, data[written_total..].ptr, @intCast(data.len - written_total), &written, null) == 0 or written == 0) ok = false;
         written_total += written;
     }
-    const flushed = ok and written_total == data.len and win.FlushFileBuffers(handle) != 0;
+    const flushed = ok and written_total == data.len and !(fault and a.unified_write_fault == .flush) and win.FlushFileBuffers(handle) != 0;
     const closed = win.CloseHandle(handle) != 0;
-    if (!flushed or !closed) return false;
-    const target = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, a.outbox_path) catch return false;
+    if (!flushed or !closed or (fault and a.unified_write_fault == .close)) return false;
+    const target = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch return false;
     defer a.allocator.free(target);
-    if (win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) == 0) return false;
-    a.slack_outbox_dirty = false;
+    if (fault and a.unified_write_fault == .replace) return false;
+    return win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) != 0;
+}
+
+fn saveUnifiedCandidate(a: *App) bool {
+    const candidate = a.unified_candidate orelse return false;
+    const live = a.unified_snapshot orelse return false;
+    if (a.unified_snapshot_path.len == 0 or !std.mem.eql(u8, candidate.backend.slice(), live.backend.slice())) return false;
+    const encoded = unified_snapshot.encode(a.allocator, candidate) catch return false;
+    defer a.allocator.free(encoded);
+    if (!writeOutboxAtomic(a, a.unified_snapshot_path, encoded, true)) return false;
+    a.unified_snapshot = candidate;
+    a.unified_candidate = live;
     return true;
 }
 
+fn prepareUnifiedOutbox(a: *App) void {
+    a.outbox_load_failed = true;
+    a.unified_storage_blocked = true;
+    const endpoint = wa_hub.Endpoint.parse(a.wa_bridge_url, verification_fixture) catch return;
+    const backend = std.fmt.allocPrint(a.allocator, "{s}://{s}:{d}", .{ if (endpoint.secure) "https" else "http", endpoint.host, endpoint.port }) catch return;
+    defer a.allocator.free(backend);
+    if (backend.len > unified_snapshot.max_backend_len or std.mem.indexOfScalar(u8, backend, 0) != null or !std.unicode.utf8ValidateSlice(backend)) return;
+    const live = a.allocator.create(unified_snapshot.Snapshot) catch return;
+    const candidate = a.allocator.create(unified_snapshot.Snapshot) catch {
+        a.allocator.destroy(live);
+        return;
+    };
+    live.* = .{};
+    candidate.* = .{};
+    live.backend.set(backend);
+    candidate.backend.set(backend);
+    const name = std.fmt.allocPrint(a.allocator, "unified-journal-v2/{x:0>16}", .{std.hash.Wyhash.hash(0, backend)}) catch {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    };
+    defer a.allocator.free(name);
+    const folder = messagesDirPath(a, name) orelse {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    };
+    defer a.allocator.free(folder);
+    std.Io.Dir.cwd().createDirPath(a.io, folder) catch {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    };
+    const path = std.fs.path.join(a.allocator, &.{ folder, "snapshot.v2" }) catch {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    };
+    a.unified_snapshot = live;
+    a.unified_candidate = candidate;
+    a.unified_snapshot_path = path;
+}
+
 fn restoreOutbox(a: *App) void {
+    if (unifiedHub(a)) {
+        setStatus(a, "Unified outbox migration incomplete; sends paused");
+        prepareUnifiedOutbox(a);
+        return;
+    }
     a.outbox_load_failed = true;
     if (a.outbox_path.len == 0) return;
     const folder = std.fs.path.dirname(a.outbox_path) orelse return;
@@ -8705,6 +8779,10 @@ fn readChildOutput(a: *App, file: ?std.Io.File) ?[]u8 {
 }
 
 fn startNextSend(a: *App) void {
+    if (unifiedHub(a)) {
+        setStatus(a, "Unified outbox migration incomplete; sends paused");
+        return;
+    }
     if (a.outbox_load_failed) {
         setStatus(a, "Outbox could not be loaded; sends paused");
         return;
@@ -18316,6 +18394,14 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     defer app.read_state.deinit(init.gpa);
+    if (verification_fixture) {
+        if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_FAULT")) |fault| {
+            app.unified_write_fault = std.meta.stringToEnum(@TypeOf(app.unified_write_fault), fault) orelse .none;
+        }
+    }
+    defer if (app.unified_snapshot) |snapshot| app.allocator.destroy(snapshot);
+    defer if (app.unified_candidate) |candidate| app.allocator.destroy(candidate);
+    defer if (app.unified_snapshot_path.len > 0) app.allocator.free(app.unified_snapshot_path);
     app.outbox_path = providerStatePath(app, "outbox.jsonl") orelse &.{};
     defer if (app.outbox_path.len > 0) init.gpa.free(app.outbox_path);
     restoreOutbox(app);
@@ -20045,6 +20131,7 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
 }
 
 fn startHubSend(a: *App, pending: *const PendingSend) void {
+    if (unifiedHub(a)) return;
     if (wacliPendingGet(a, .hub_send) > 0) return;
     var job = WacliJob{ .kind = .hub_send, .provider = pending.provider, .account = pending.account, .jid = pending.jid };
     job.msg_id.set(&pending.id);
