@@ -84,7 +84,8 @@
         "file": "chat-design-fixture.py",
         "class": "ChatDesignHandler"
       },
-      "maximize": true
+      "maximize": true,
+      "prepare": "prepare-shared-design.ps1"
     },
     {
       "name": "menus",

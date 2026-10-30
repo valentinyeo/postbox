@@ -1,3 +1,4 @@
+import re
 import os
 from pathlib import Path
 import subprocess
@@ -109,7 +110,7 @@ class RepaintTests(unittest.TestCase):
         self.assertIn('test "ISSUE-545 row-sized buffer places GDI and GDI+ pixels where unbuffered painting does"', shapes)
         self.assertIn('@import("paint_buffer.zig")', shapes)
         ci = source(".github/workflows/ci.yml")
-        windows = ci.split("  unfurl-verification:", 1)[1].split("\n  notify-release:", 1)[0]
+        windows = re.split(r"\n  [a-z][a-z0-9-]*:\n", ci.split("  unfurl-verification:", 1)[1], maxsplit=1)[0]
         self.assertIn("runs-on: windows-latest", windows)
         self.assertIn("zig test src/smooth_shapes.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-545", windows)
         self.assertIn("ISSUE_545", source("tools/repaint_test.zig"))

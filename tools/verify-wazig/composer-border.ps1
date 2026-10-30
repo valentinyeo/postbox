@@ -40,8 +40,8 @@ function Test-ComposerBorderOracle {
 function Invoke-ComposerBorderJourney($Session, $Start, $App) {
     Test-ComposerBorderOracle
     $measurements = @()
-    $tokens = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../src/theme.zig'))
-    $bodyMatch = [regex]::Match($tokens, 'pub const type_body: i32 = (\d+);')
+    $tokens = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../src/design_tokens.zig'))
+    $bodyMatch = [regex]::Match($tokens, 'pub const body_size: i32 = (\d+);')
     Assert-That $bodyMatch.Success 'Shared body font token missing'
     $bodySize = [int]$bodyMatch.Groups[1].Value
     $preferences = "HKCU:\Software\MessagesVerification\$($Session.id)\Software\Messages"

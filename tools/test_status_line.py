@@ -204,6 +204,7 @@ class StatusLineTests(unittest.TestCase):
         last = expected.index('    if (a.chats_hwnd) |hwnd|')
         expected = expected[:first] + expected[last:]
         expected = expected.replace('    if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);\n', '')
+        expected = expected.replace('a.voice_active);', 'a.voice_active, a.last_dictation_state == .recording or a.last_dictation_state == .transcribing);')
         self.assertEqual(expected, function(source(), 'layoutRegion'))
 
     def test_real_fixture_failure_and_recovery(self):

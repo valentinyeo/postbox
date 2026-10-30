@@ -543,7 +543,7 @@ function Assert-ComposerLayout($Session, [string]$Name, [int]$Lines, $Baseline =
     $dpi = [VerifyWindow]::GetDpiForWindow($handle)
     Assert-That ($dpi -gt 0) 'Cannot measure window DPI'
     $bottomInset = [Math]::Floor((11 * $dpi + 48) / 96)
-    $iconInset = [Math]::Floor((4 * $dpi + 48) / 96)
+    $iconInset = [Math]::Floor((6 * $dpi + 48) / 96)
     $boxBottom = $client.Bottom - $bottomInset
     Assert-That ($box.bottom -eq $boxBottom) "composer-one-box $Name box not anchored to native client bottom"
     $offsetX = $origin.X

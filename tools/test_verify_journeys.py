@@ -48,7 +48,7 @@ class JourneyRegistryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('JOURNEY REGISTRY VERIFIED', result.stdout)
 
-    def plan(self, event='pull_request', feature='search'):
+    def plan(self, event='schedule', feature='search'):
         step = next(step for step in self.workflow['jobs']['plan']['steps'] if step.get('id') == 'matrix')
         output = self.root / 'plan-output'
         output.write_text('')
@@ -181,7 +181,7 @@ class JourneyRegistryTests(unittest.TestCase):
                 self.assertIn('hand-maintained journey table', self.check_map().stderr)
                 path.write_text(original)
 
-    def test_plan_yaml_and_pr_matrix(self):
+    def test_plan_yaml_and_nightly_matrix(self):
         verify = self.workflow['jobs']['verify']
         self.assertEqual(verify['needs'], 'plan')
         self.assertEqual(verify['strategy']['matrix'], '${{ fromJSON(needs.plan.outputs.matrix) }}')
@@ -191,7 +191,7 @@ class JourneyRegistryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         matrix = json.loads(output.removeprefix('matrix='))
         self.assertEqual(matrix['include'], [dict(feature=row['name'], evidence=row['evidence'])
-                                            for row in self.registry['journeys'] if row['pr']])
+                                            for row in self.registry['journeys']])
         self.assertEqual(json.loads(result.stdout), matrix)
 
     def test_plan_dispatch_accepts_every_registered_name_and_rejects_unknown(self):
@@ -206,6 +206,18 @@ class JourneyRegistryTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Unknown verification journey:', result.stderr)
             self.assertEqual(output, '')
+
+    def test_wrong_verification_triggers_fail_map(self):
+        path = self.root / '.github/workflows/verify.yml'
+        original = path.read_text()
+        for changed in [original.replace('  schedule:', '  push:'),
+                        original.replace('  schedule:', '  pull_request:\n  schedule:'),
+                        original.replace('selected = journeys', "selected = [row for row in journeys if row['pr']]")]:
+            with self.subTest(changed=changed != original):
+                self.assertNotEqual(changed, original)
+                path.write_text(changed)
+                self.assertNotEqual(self.check_map().returncode, 0)
+        path.write_text(original)
 
     def test_plan_without_plan_matrix_fails_map(self):
         path = self.root / '.github/workflows/verify.yml'
@@ -652,6 +664,11 @@ class AppearanceVersionTests(unittest.TestCase):
         files = {'session.json': session, 'side-effects.json': state,
                  'text-scale.json': dict(initial_saved=False, larger=110, reset=100,
                                         baseline_points=10, larger_points=12, reset_points=10)}
+        files['shared-design.json'] = dict(width=1920, height=1032, draft='Shared design check',
+                                           foreground_pixels=100, raised_pixels=3000,
+                                           pill=dict(width=116, height=32))
+        files['dictation-transcript.json'] = dict(expected='Shared design check Go forward ten meters.',
+                                                  actual='Shared design check Go forward ten meters.')
         for name in ('before', 'action', 'text-larger', 'after', 'group-senders'):
             files[name + '.state.json'] = state
             (folder / (name + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + name.encode() * 11000)
@@ -681,6 +698,17 @@ class AppearanceVersionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             old = subprocess.check_output(['git', 'show', '2653484:tools/verify-wazig/evidence-palette.py'], cwd=ROOT, text=True)
             self.assertNotEqual(self.run_oracle(folder, old).returncode, 0)
+
+    def test_actual_dictation_transcript_is_required(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            self.fixture(folder, '1.2.345')
+            (folder / 'run.log').write_text('')
+            self.assertEqual(self.run_oracle(folder).returncode, 0)
+            (folder / 'dictation-transcript.json').write_text(json.dumps(dict(
+                expected='Shared design check Go forward ten meters.', actual='Shared design check')))
+            (folder / 'run.log').write_text('recorded PCM reaches the production composer')
+            self.assertNotEqual(self.run_oracle(folder).returncode, 0)
 
     def test_wrong_installed_version_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

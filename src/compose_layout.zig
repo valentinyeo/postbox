@@ -47,7 +47,7 @@ pub const Layout = struct {
     send: Rect = .{},
 };
 
-pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool) Layout {
+pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool, dictating: bool) Layout {
     const margin = @min(scale(14, dpi), @divTrunc(@max(0, pane.right - pane.left), 2));
     const bottom = @max(pane.top, pane.bottom - scale(11, dpi));
     const column_inset = @max(0, @divTrunc(pane.right - pane.left - scale(@import("theme.zig").chat_column_width, dpi), 2));
@@ -56,16 +56,17 @@ pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool) Layout {
     const height = @max(0, box.bottom - box.top);
     const padding = @min(scale(16, dpi), @divTrunc(width, 12));
     const gap = @min(scale(4, dpi), @divTrunc(width, 32));
-    const vertical = @min(scale(4, dpi), @divTrunc(height, 2));
-    const icon = @max(0, @min(scale(36, dpi), @min(height - 2 * vertical, @divTrunc(width - 2 * padding - 6 * gap, 7))));
+    const vertical = @min(scale(6, dpi), @divTrunc(height, 2));
+    const icon = @max(0, @min(scale(@import("design_tokens.zig").button_size, dpi), @min(height - @min(scale(12, dpi), height), @divTrunc(width - 2 * padding - 6 * gap, 7))));
     const icon_bottom = box.bottom - vertical;
     const icon_top = icon_bottom - icon;
     const send = Rect{ .left = box.right - padding - icon, .top = icon_top, .right = box.right - padding, .bottom = icon_bottom };
     const emoji = Rect{ .left = send.left - gap - icon, .top = icon_top, .right = send.left - gap, .bottom = icon_bottom };
-    const dictate = Rect{ .left = emoji.left - gap - icon, .top = icon_top, .right = emoji.left - gap, .bottom = icon_bottom };
+    const text_min = @min(scale(32, dpi), 2 * icon);
+    const dictate_width = if (dictating) @max(icon, @min(scale(@import("design_tokens.zig").mic_width, dpi), width - 2 * padding - 4 * icon - 6 * gap - text_min - scale(8, dpi))) else icon;
+    const dictate = Rect{ .left = emoji.left - gap - dictate_width, .top = icon_top, .right = emoji.left - gap, .bottom = icon_bottom };
     const attach = Rect{ .left = box.left + padding, .top = icon_top, .right = box.left + padding + icon, .bottom = icon_bottom };
     const text_left = attach.right + gap;
-    const text_min = @min(scale(32, dpi), 2 * icon);
     const voice_width = if (recording) @max(icon, @min(scale(200, dpi), dictate.left - text_left - 3 * gap - text_min - scale(8, dpi))) else icon;
     const voice = Rect{ .left = dictate.left - gap - voice_width, .top = icon_top, .right = dictate.left - gap, .bottom = icon_bottom };
     const text = Rect{ .left = text_left, .top = box.top + @min(1, height), .right = @max(text_left, voice.left - gap - @min(scale(8, dpi), icon)), .bottom = @max(box.top + @min(1, height), box.bottom - 1) };
@@ -114,10 +115,10 @@ test "one box contains disjoint text and bottom anchored icons at narrow and wid
         for ([_]i32{ 280, 900 }) |width| {
             const pane = Rect{ .left = scale(300, dpi), .top = 0, .right = scale(300 + width, dpi), .bottom = scale(900, dpi) };
             for ([_]bool{ false, true }) |recording| {
-                const baseline = arrange(pane, scale(44, dpi), dpi, recording);
+                const baseline = arrange(pane, scale(44, dpi), dpi, recording, false);
                 for ([_]i32{ 1, 2, 8 }) |lines| {
                     const size = computeScaled(0, scale(lines * 20 + 16, dpi), pane.bottom, false, dpi);
-                    const slots = arrange(pane, size.edit_height, dpi, recording);
+                    const slots = arrange(pane, size.edit_height, dpi, recording, false);
                     if (recording) {
                         try testing.expectEqual(width == 900, recordingTimerVisible(slots.voice, dpi));
                         try testing.expect(!recordingTimerVisible(.{ .right = scale(120, dpi) - 1 }, dpi));
@@ -148,10 +149,10 @@ test "one box contains disjoint text and bottom anchored icons at narrow and wid
                     }
                     for (icons, baseline_icons) |rect, initial| {
                         try testing.expectEqualDeep(initial, rect);
-                        try testing.expectEqual(slots.box.bottom - scale(4, dpi), rect.bottom);
-                        try testing.expect(rect.bottom - rect.top <= scale(36, dpi));
+                        try testing.expectEqual(slots.box.bottom - scale(6, dpi), rect.bottom);
+                        try testing.expect(rect.bottom - rect.top <= scale(@import("design_tokens.zig").button_size, dpi));
                         if (!recording or rect.left != slots.voice.left) try testing.expectEqual(rect.bottom - rect.top, rect.right - rect.left);
-                        if (width == 900) try testing.expectEqual(scale(36, dpi), rect.bottom - rect.top);
+                        if (width == 900) try testing.expectEqual(scale(@import("design_tokens.zig").button_size, dpi), rect.bottom - rect.top);
                     }
                     try testing.expectEqual(slots.box.left + scale(16, dpi), slots.attach.left);
                     try testing.expectEqual(slots.box.right - scale(16, dpi), slots.send.right);
@@ -173,10 +174,26 @@ test "composer border centreline has equal inset on all four sides at 100 125 15
             const centreline = Rect{ .left = border.left, .top = border.top, .right = border.right - 1, .bottom = border.bottom - 1 };
             const insets = [_]i32{ centreline.left - box.left, centreline.top - box.top, box.right - centreline.right, box.bottom - centreline.bottom };
             for (insets) |inset| try testing.expectEqual(@as(i32, 0), inset);
-            const text = arrange(.{ .left = box.left - scale(14, dpi), .right = box.right + scale(14, dpi), .bottom = box.bottom + scale(11, dpi) }, box.bottom - box.top, dpi, false).text;
+            const text = arrange(.{ .left = box.left - scale(14, dpi), .right = box.right + scale(14, dpi), .bottom = box.bottom + scale(11, dpi) }, box.bottom - box.top, dpi, false, false).text;
             try testing.expectEqual(box.top + 1, text.top);
             try testing.expectEqual(box.bottom - 1, text.bottom);
             try testing.expectEqual(text.top - centreline.top, centreline.bottom - text.bottom);
+        }
+    }
+}
+
+test "active dictation keeps the shared pill inside the composer at narrow widths and every DPI" {
+    const testing = @import("std").testing;
+    for ([_]i32{ 96, 120, 144, 192 }) |dpi| {
+        for ([_]i32{ 280, 900 }) |width| {
+            const pane = Rect{ .left = 0, .right = scale(width, dpi), .bottom = scale(900, dpi) };
+            const slots = arrange(pane, scale(44, dpi), dpi, false, true);
+            const pill = slots.dictate;
+            try testing.expect(pill.left >= slots.box.left and pill.right <= slots.box.right);
+            try testing.expect(pill.top >= slots.box.top and pill.bottom <= slots.box.bottom);
+            try testing.expect(slots.text.right <= slots.voice.left and slots.voice.right < pill.left);
+            try testing.expect(slots.emoji.left > pill.right);
+            if (width == 900) try testing.expectEqual(scale(@import("design_tokens.zig").mic_width, dpi), pill.right - pill.left);
         }
     }
 }

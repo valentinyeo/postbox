@@ -1,4 +1,5 @@
 const std = @import("std");
+const design = @import("design_tokens.zig");
 
 pub fn hex(rgb_value: u24) u32 {
     const value: u32 = rgb_value;
@@ -27,24 +28,24 @@ pub const Palette = struct {
 };
 
 pub const amoled: Palette = .{
-    .surface = hex(0x101010),
-    .surface_container_low = hex(0x181818),
-    .surface_container = hex(0x1f1f1f),
-    .surface_container_high = hex(0x262626),
-    .surface_container_highest = hex(0x353535),
-    .on_surface = hex(0xf2f2f2),
-    .on_surface_variant = hex(0x8a8a8a),
-    .outline = hex(0x2e2e2e),
-    .outline_variant = hex(0x2a2a2a),
-    .primary = hex(0x89b4f8),
-    .on_primary = hex(0x101010),
-    .primary_container = hex(0x414141),
-    .on_primary_container = hex(0xf2f2f2),
-    .secondary_container = hex(0x353535),
-    .on_secondary_container = hex(0xf2f2f2),
-    .@"error" = hex(0xf28b82),
-    .sidebar_surface = hex(0x181818),
-    .sidebar_divider = hex(0x2a2a2a),
+    .surface = design.ReaderBackground,
+    .surface_container_low = design.ReaderPanel,
+    .surface_container = design.ReaderControl,
+    .surface_container_high = design.ReaderCard,
+    .surface_container_highest = design.ReaderRaised,
+    .on_surface = design.ReaderForeground,
+    .on_surface_variant = design.ReaderHint,
+    .outline = design.ReaderOutline,
+    .outline_variant = design.ReaderOutline,
+    .primary = design.ReaderForeground,
+    .on_primary = design.ReaderBackground,
+    .primary_container = design.ReaderUserCard,
+    .on_primary_container = design.ReaderForeground,
+    .secondary_container = design.ReaderRaised,
+    .on_secondary_container = design.ReaderForeground,
+    .@"error" = design.ReaderForeground,
+    .sidebar_surface = design.ReaderPanel,
+    .sidebar_divider = design.ReaderOutline,
 };
 
 pub fn selectionColors(palette: Palette, from_me: bool) struct { fill: u32, text: u32 } {
@@ -63,21 +64,21 @@ pub fn choiceFromSaved(value: ?u32) Choice {
     return std.enums.fromInt(Choice, value orelse return .amoled) orelse .amoled;
 }
 
-pub const amoled_button = hex(0x1f1f1f);
-pub const amoled_button_hover = hex(0x353535);
-pub const amoled_button_pressed = hex(0x414141);
-pub const amoled_send = hex(0xf2f2f2);
-pub const amoled_send_hover = hex(0xdedede);
-pub const amoled_send_pressed = hex(0xcacaca);
-pub const amoled_button_text = hex(0xf2f2f2);
-pub const send_text = hex(0x101010);
-pub const bubble_other_bottom = hex(0x1e1e1e);
-pub const bubble_own_bottom = hex(0x3a3a3a);
-pub const bubble_own_outline = hex(0x4a4a4a);
-pub const quote_bar = hex(0x4a4a4a);
-pub const code_block = hex(0x1a1a1a);
-pub const code_inline = hex(0x2a2a2a);
-pub const online = hex(0x3ba55c);
+pub const amoled_button = design.ReaderControl;
+pub const amoled_button_hover = design.ReaderRaised;
+pub const amoled_button_pressed = design.ReaderUserCard;
+pub const amoled_send = design.ReaderForeground;
+pub const amoled_send_hover = design.ReaderForeground;
+pub const amoled_send_pressed = design.ReaderHint;
+pub const amoled_button_text = design.ReaderForeground;
+pub const send_text = design.ReaderBackground;
+pub const bubble_other_bottom = design.ReaderCard;
+pub const bubble_own_bottom = design.ReaderUserCard;
+pub const bubble_own_outline = design.shift(design.ReaderUserCard, 16);
+pub const quote_bar = design.shift(design.ReaderUserCard, 16);
+pub const code_block = design.ReaderCard;
+pub const code_inline = design.ReaderOutline;
+pub const online = design.ReaderForeground;
 
 pub fn set(selected: Choice) void {
     choice = selected;
@@ -85,23 +86,23 @@ pub fn set(selected: Choice) void {
 }
 
 pub const unread_dot_px: i32 = 8;
-pub const radius_bubble: i32 = 20;
-pub const radius_dialog: i32 = 20;
-pub const radius_card: i32 = 16;
-pub const radius_field: i32 = 28;
+pub const radius_bubble: i32 = design.bubble_radius;
+pub const radius_dialog: i32 = design.bubble_radius;
+pub const radius_card: i32 = design.menu_radius;
+pub const radius_field: i32 = design.field_radius;
 pub const radius_code: i32 = 8;
 pub const radius_inline: i32 = 4;
-pub const selected_row_radius: i32 = 10;
+pub const selected_row_radius: i32 = design.row_radius;
 pub const sidebar_width: i32 = 300;
-pub const chat_column_width: i32 = 760;
-pub const bubble_max_width: i32 = 660;
+pub const chat_column_width: i32 = design.column_width;
+pub const bubble_max_width: i32 = @divTrunc(design.column_width * 6, 10);
 pub const chat_row_height: i32 = 56;
 pub const avatar_size: i32 = 40;
 pub const platform_badge_size: i32 = 16;
 pub const mention_row_height: i32 = 40;
 pub const type_title: i32 = 24;
 pub const type_chat_name: i32 = 15;
-pub const type_body: i32 = 15;
+pub const type_body: i32 = design.body_size;
 pub const type_row_name: i32 = 14;
 pub const type_preview: i32 = 13;
 pub const type_time: i32 = 12;
@@ -166,8 +167,8 @@ test "runtime selection uses the approved graphite palette" {
     set(.amoled);
     try std.testing.expectEqual(Choice.amoled, choice);
     try std.testing.expectEqual(&amoled, current);
-    try std.testing.expectEqual(hex(0x101010), current.surface);
-    try std.testing.expectEqual(hex(0x89b4f8), current.primary);
+    try std.testing.expectEqual(design.ReaderBackground, current.surface);
+    try std.testing.expectEqual(design.ReaderForeground, current.primary);
     try std.testing.expectEqual(@as(i32, 20), radius_bubble);
     try std.testing.expectEqual(@as(i32, 10), selected_row_radius);
 }

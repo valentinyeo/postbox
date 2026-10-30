@@ -15,6 +15,26 @@ const App = struct {
     font: ?*anyopaque = @ptrFromInt(16),
     reaction_row_rect: ?win.RECT = null,
 };
+const smooth = struct {
+    const Context = struct {
+        fn init(_: usize) @This() {
+            return .{};
+        }
+        fn deinit(_: *@This()) void {}
+    };
+};
+const DesignCanvas = struct {
+    hdc: usize,
+    shapes: *const smooth.Context,
+    pub fn roundRect(_: *@This(), rect: design.Rect, radius: i32, color: u32) void {
+        drawn_rect = rect;
+        drawn_radius = radius;
+        fills[fill_count] = color;
+        fill_count += 1;
+    }
+};
+var drawn_rect: design.Rect = undefined;
+var drawn_radius: i32 = 0;
 const MenuItem = struct { flags: u32, command: usize, label: ?[*:0]const u16 };
 var rows: [8]MenuItem = undefined;
 var row_count: usize = 0;
@@ -49,7 +69,7 @@ const win = struct {
     const DT_SINGLELINE = 0x20;
     const DT_VCENTER = 4;
     const DT_NOPREFIX = 0x800;
-    const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 320, bottom: i32 = 24 };
+    const RECT = extern struct { left: i32 = 0, top: i32 = 0, right: i32 = 320, bottom: i32 = 24 };
     const POINT = struct { x: i32 = 0, y: i32 = 0 };
     const SIZE = struct { cx: i32, cy: i32 };
     const MENUINFO = struct { cbSize: u32, fMask: u32, hbrBack: usize };
@@ -172,7 +192,9 @@ test "IGSH-505 message menu sets AMOLED background and owner draws every row" {
             var item: win.DRAWITEMSTRUCT = .{ .itemData = @intFromPtr(label), .itemState = state };
             drawMessageMenuItem(&app, &item);
             try std.testing.expectEqual(@as(usize, 1), fill_count);
-            try std.testing.expectEqual(if (state == win.ODS_SELECTED) app.brush_raised.? else app.brush_panel.?, fills[0]);
+            try std.testing.expectEqual(@as(usize, if (state == win.ODS_SELECTED) design.ReaderRaised else design.ReaderCard), fills[0]);
+            try std.testing.expectEqualDeep(@as(design.Rect, @bitCast(item.rcItem)), drawn_rect);
+            try std.testing.expectEqual(design.row_radius, drawn_radius);
             try std.testing.expectEqual(if (state == win.ODS_DISABLED) theme.amoled.on_surface_variant else theme.amoled.on_surface, text_color);
             try std.testing.expectEqualStrings(std.mem.sliceAsBytes(std.mem.span(label)), std.mem.sliceAsBytes(std.mem.span(drawn_text.?)));
         }
@@ -188,7 +210,7 @@ test "IGSH-505 message menu separators are painted on AMOLED not system light" {
     var item: win.DRAWITEMSTRUCT = .{ .itemData = 0 };
     drawMessageMenuItem(&app, &item);
     try std.testing.expectEqual(@as(usize, 2), fill_count);
-    try std.testing.expectEqual(app.brush_panel.?, fills[0]);
+    try std.testing.expectEqual(@as(usize, design.ReaderCard), fills[0]);
     try std.testing.expectEqual(app.brush_muted.?, fills[1]);
     try std.testing.expect(drawn_text == null);
 }

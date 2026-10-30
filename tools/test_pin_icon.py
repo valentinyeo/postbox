@@ -36,8 +36,9 @@ def verify(source, smooth):
     assert 'drawPinIcon(a, &shapes,' in pinned, 'IGSH-494 chat pin must call drawPinIcon'
     assert 'row_muted, false)' in pinned, 'IGSH-494 pin must follow themed row colours'
     assert len(re.findall(r'\bdrawPinIcon\(', source)) == 2, 'IGSH-494 update the pin-site inventory for every new drawing site'
-    mic = section(source, 'drawMicIcon')
-    assert 'drawFluentIcon(a, hdc,' in mic and '0xE720' in mic
+    composer = section(source, 'drawComposerButton')
+    assert 'if (index == 0) &.{0xE720}' in composer
+    assert 'paintRoundedButton(a, &shapes, item.hDC, item.rcItem, face, foreground, a.font_icon.?' in composer
     assert 'scaledFontHeight(theme.icon_size, 100, dpi)' in source
     assert 'src/pin_icon_test.zig' in (ROOT / 'build.zig').read_text()
 
@@ -47,7 +48,7 @@ class PinIconTest(unittest.TestCase):
         source = (ROOT / 'src/main.zig').read_text()
         smooth = (ROOT / 'src/smooth_shapes.zig').read_text()
         start = source.index('fn drawPinIcon(')
-        end = source.index('\nfn drawMicIcon(', start)
+        end = source.index('\nfn drawVoiceButton(', start)
         old = (ROOT / 'tools/fixtures/pin-before-fluent.txt').read_text()
         with self.assertRaises(AssertionError):
             verify(source[:start] + old + source[end:], smooth)

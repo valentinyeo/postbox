@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 from collections import Counter
 import json
 from pathlib import Path
@@ -6,7 +7,9 @@ import runpy
 import re
 
 
-THEME = Path(__file__).resolve().parents[2] / 'src/theme.zig'
+ROOT = Path(__file__).resolve().parents[2]
+THEME = ROOT / 'src/theme.zig'
+TOKENS = ROOT / 'src/design_tokens.zig'
 FOREGROUND_WEIGHT = int(re.search(r'pub const archived_row_foreground_weight: u8 = (\d+);', THEME.read_text()).group(1))
 
 
@@ -102,6 +105,30 @@ def check_scene(folder, name, capture=False):
     return metrics
 
 
+def check_fixture_palette(palette, theme_source, token_source):
+    assert palette['kind'] == 'inverted AMOLED fixture palette' and palette['production_rendering']
+    assert palette['token_source'] == token_source
+    assert palette['token_sha256'] == hashlib.sha256(token_source.encode('utf-8')).hexdigest()
+    declaration = re.search(r'pub const amoled: Palette = \.\{.*?\n\};', theme_source, re.S)
+    assert declaration and palette['original'] == declaration.group(), 'original palette differs from source'
+    references = re.findall(r'design\.(Reader\w+)', palette['original'])
+    assert len(references) == 18
+
+    resolved = []
+
+    def invert(match):
+        token = match.group(1)
+        values = re.findall(r'pub const ' + re.escape(token) + r': u32 = 0x([0-9a-fA-F]{6});', token_source)
+        assert len(values) == 1, f'missing or duplicate token {token}'
+        value = int(values[0], 16)
+        resolved.append(f'{value:06x}')
+        return f'hex(0x{0xffffff - value:06x})'
+
+    expected_light = re.sub(r'design\.(Reader\w+)', invert, palette['original'])
+    assert palette['resolved_original'] == resolved, 'resolved palette differs from source tokens'
+    assert palette['light'] == expected_light, 'fixture palette differs from inverted source colours'
+
+
 def check_presentation(folder):
     for scope in ('sidebar', 'inbox'):
         for mode in ('dim', 'hover', 'selected'):
@@ -144,11 +171,7 @@ if __name__ == '__main__':
         light = args.folder / 'light'
         check_presentation(light)
         palette = read(light, 'fixture-palette.json')
-        assert palette['kind'] == 'inverted AMOLED fixture palette' and palette['production_rendering']
-        original = re.findall(r'hex\(0x([0-9a-f]{6})\)', palette['original'])
-        inverted = re.findall(r'hex\(0x([0-9a-f]{6})\)', palette['light'])
-        assert len(original) == len(inverted) == 18
-        assert all(int(a, 16) + int(b, 16) == 0xffffff for a, b in zip(original, inverted))
+        check_fixture_palette(palette, THEME.read_bytes().decode('utf-8'), TOKENS.read_bytes().decode('utf-8'))
         for folder, polarity in [(args.folder, 'dark'), (light, 'light')]:
             assert read(folder, 'session.json')['sha256'] != read(light if folder == args.folder else args.folder, 'session.json')['sha256']
             for scope in ('sidebar', 'inbox'):

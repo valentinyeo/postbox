@@ -11,20 +11,20 @@ class DesignKitTests(unittest.TestCase):
         for literal in ('0x0f1512', '0x88d6ba'):
             self.assertTrue(literal not in source, literal)
         palette = source[source.index('pub const amoled: Palette = .{'):].split('\n};', 1)[0]
-        for field, value in {
-            'surface': '101010', 'surface_container_low': '181818',
-            'surface_container': '1f1f1f', 'surface_container_high': '262626',
-            'surface_container_highest': '353535', 'on_surface': 'f2f2f2',
-            'on_surface_variant': '8a8a8a', 'outline': '2e2e2e',
-            'outline_variant': '2a2a2a', 'primary': '89b4f8',
-            'primary_container': '414141', 'sidebar_surface': '181818',
-            'sidebar_divider': '2a2a2a',
+        for field, token in {
+            'surface': 'ReaderBackground', 'surface_container_low': 'ReaderPanel',
+            'surface_container': 'ReaderControl', 'surface_container_high': 'ReaderCard',
+            'surface_container_highest': 'ReaderRaised', 'on_surface': 'ReaderForeground',
+            'on_surface_variant': 'ReaderHint', 'outline': 'ReaderOutline',
+            'outline_variant': 'ReaderOutline', 'primary': 'ReaderForeground',
+            'primary_container': 'ReaderUserCard', 'sidebar_surface': 'ReaderPanel',
+            'sidebar_divider': 'ReaderOutline',
         }.items():
             with self.subTest(field=field):
-                self.assertRegex(palette.lower(), rf'\.{field} = hex\(0x{value}\)')
-        self.assertRegex(source, r'pub const radius_bubble: i32 = 20;')
-        self.assertRegex(source, r'pub const selected_row_radius: i32 = 10;')
-        self.assertIn('pub const radius_card: i32 = 16;', source)
+                self.assertIn(f'.{field} = design.{token}', palette)
+        self.assertIn('pub const radius_bubble: i32 = design.bubble_radius;', source)
+        self.assertIn('pub const selected_row_radius: i32 = design.row_radius;', source)
+        self.assertIn('pub const radius_card: i32 = design.menu_radius;', source)
 
     def test_voice_play_glyph_uses_readable_dark_ink_on_the_light_control(self):
         source = (ROOT / 'src/main.zig').read_text()
@@ -33,7 +33,7 @@ class DesignKitTests(unittest.TestCase):
     def test_native_probes_follow_the_shared_font_and_measured_row_size(self):
         border = (ROOT / 'tools/verify-wazig/composer-border.ps1').read_text()
         archive = (ROOT / 'tools/verify-wazig/archive-presentation.ps1').read_text()
-        self.assertIn('pub const type_body:', border)
+        self.assertIn('pub const body_size:', border)
         self.assertIn('$bodySize * $scale * $dpi', border)
         self.assertIn('$height = [int]$rowHeight.ToUInt64()', archive)
         self.assertNotIn('64 * [VerifyWindow]', archive)

@@ -68,14 +68,17 @@ for removed in ['resurface_probe', 'enqueueResurfaceProbe', 'applyResurfaceProbe
 for control in ['id_palette_edit = 1064', 'id_compose = 1032']:
     assert control in source
 workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
-for required in ['workflow_dispatch:', 'pull_request:', 'windows-latest', '.claude/skills/verify-wazig/**', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
+for required in ['workflow_dispatch:', 'schedule:', 'windows-latest', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
+triggers = workflow.split('\non:\n', 1)[1].split('\npermissions:', 1)[0]
+assert 'pull_request:' not in triggers and 'push:' not in triggers, 'verification is nightly/manual only'
+assert "if os.environ['EVENT_NAME'] == 'schedule':\n              selected = journeys" in workflow, 'nightly must cover every journey'
 assert 'type: string' in workflow and 'options:' not in workflow, 'dispatch must accept a registry-validated string'
 assert '  plan:\n    runs-on: ubuntu-latest' in workflow, 'missing plan job'
 assert '    needs: plan' in workflow, 'verify must depend on plan'
 assert 'matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}' in workflow, 'verify must use plan-job matrix'
 assert 'if: matrix.evidence' in workflow, 'evidence must use registry matrix flag'
-for required in ["journeys.json", "row['pr']", "row['evidence']", "row['name'] == feature", 'Unknown verification journey:', 'GITHUB_OUTPUT']:
+for required in ["journeys.json", "row['evidence']", "row['name'] == feature", 'Unknown verification journey:', 'GITHUB_OUTPUT']:
     assert required in workflow, ('missing registry plan wiring', required)
 coverage = index.split('## Recent changes coverage\n', 1)
 assert len(coverage) == 2, 'missing recent changes coverage'
@@ -177,7 +180,8 @@ views = (root / 'tools/verify-wazig/views.ps1').read_text(encoding='utf-8')
 for required in ['Sort views', 'Show combined inbox', 'Ctrl+1 / Alt+I']:
     assert f'"{required}"' in source, required
 for required in ['src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig']:
-    assert required in workflow, required
+    assert (root / required).is_file(), required
+assert entries['views']['evidence'] and entries['views']['pr']
 assert 'views' in options
 for required in ['Assert-AccountView', 'Verification account send', "Send-Keys $Session '%i'", "Send-Keys $Session '^{DOWN}'", 'WAZIG_VERIFY_RESTART', 'restart.json']:
     assert required in views, required
@@ -300,7 +304,7 @@ assert "Copy-Item (Join-Path $messages 'archive-state.txt')" in (registry_path.p
 assert 'hub-archive' in {row['hub'] for row in journeys} and 'hub-archive' in {row['hub'] for row in journeys}
 assert 'hub-archive' in {row['hub'] for row in journeys}
 assert 'hub-archive' in options and entries['hub-archive']['evidence']
-assert 'src/archive_rules.zig' in workflow
+assert (root / 'src/archive_rules.zig').is_file() and entries['hub-archive']['pr']
 assert entries['hub-archive']['validator']['file'] == 'check-hub-archive-evidence.py'
 assert '.claude/skills/verify-wazig/features/hub-archive.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 for artifact in ['legacy-archive-state.txt', 'restart.json', 'archive-state.txt', 'provider.requests.json', 'migration-before.txt', 'migration-after.txt']:
@@ -402,7 +406,7 @@ assert 'Invoke-PasteImageJourney $session' in runner and 'paste-image.ps1' in ru
 assert entries['paste-image']['script'] == 'journey-paste-image.ps1' and 'paste-image' in {row['hub'] for row in journeys}
 assert 'paste-image' in {row['hub'] for row in journeys}
 assert 'paste-image' in options and entries['paste-image']['evidence']
-assert 'src/paste_image.zig' in workflow
+assert (root / 'src/paste_image.zig').is_file() and entries['paste-image']['pr']
 assert entries['paste-image']['validator']['file'] == 'check-paste-image-evidence.py'
 assert '.claude/skills/verify-wazig/features/paste-image.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 for artifact in ['sizes.json', 'decoded', 'paste-uploads/', 'bridge-requests.jsonl']:
@@ -536,7 +540,8 @@ for required in ["@('amoled')", 'BoundingRectangle', 'GetDpiForWindow', 'ClientT
     assert required in sidebar_journey, required
 for required in ['sidebar-pixels.json', 'sidebar-builds.json', 'baseline_commit', 'candidate_sha256', 'baseline_sha256', 'assertion_parent', 'fixture_sha256', 'measure_design', 'validate_design', 'historical design rejected']:
     assert required in sidebar_validator, required
-for required in ['src/theme.zig', "if: matrix.feature == 'sidebar-surface'", 'test-sidebar-surface.py', 'git log --diff-filter=A --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1', 'sidebar-baseline-bin/bin', 'verification-evidence/baseline', 'sidebar-builds.json']:
+assert (root / 'src/theme.zig').is_file()
+for required in ["if: matrix.feature == 'sidebar-surface'", 'test-sidebar-surface.py', 'git log --diff-filter=A --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1', 'sidebar-baseline-bin/bin', 'verification-evidence/baseline', 'sidebar-builds.json']:
     assert required in workflow, required
 assert '.claude/skills/verify-wazig/features/sidebar-surface.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 print('verification skill map passed: sidebar screenshot pairs, historical baseline builds, pixel validator and approved graphite')

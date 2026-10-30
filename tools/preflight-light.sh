@@ -5,8 +5,10 @@ run() { echo "preflight-light: $*"; "$@"; }
 PYTHON_LIGHT_TESTS=(
     test_ai_review
     test_app_icon
+    test_archive_palette_proof
     test_design_kit
     test_font_scale
+    test_shared_design
     test_check_cache_keys
     test_check_hub_only
     test_check_private_markers
@@ -33,6 +35,7 @@ PYTHON_LIGHT_TESTS=(
     test_update_cards
     test_verify_journeys
     test_voice_language
+    test_workflow_contract
     test_workspace_names
 )
 PYTHON_HEAVY_TESTS=(

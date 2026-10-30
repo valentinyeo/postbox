@@ -1,6 +1,8 @@
 const std = @import("std");
 const staged_images = @import("staged_images.zig");
 const theme = @import("theme.zig");
+const design = @import("design_tokens.zig");
+const DesignCanvas = @import("design_canvas.zig");
 const menu_theme = @import("menu_theme.zig");
 const smooth = @import("smooth_shapes.zig");
 const smooth_geometry = @import("smooth_geometry.zig");
@@ -858,6 +860,7 @@ const App = struct {
     dictation_session: ?*dictation.Session = null,
     dictation_language: dictation.Language = .automatic,
     last_dictation_state: dictation.State = .idle,
+    dictation_wave: [8]u8 = @splat(0),
     sync_child: ?std.process.Child = null,
     sync_job: ?win.HANDLE = null,
     audio_player: ?*audio.Player = null,
@@ -1164,7 +1167,8 @@ fn composeFieldProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lpara
 
 fn paintRoundedButton(a: *App, shapes: *const smooth.Context, hdc: win.HDC, rect: win.RECT, face: win.COLORREF, text_color: win.COLORREF, font: win.HFONT, frame: ?win.COLORREF, text: []const u16) void {
     const radius = @min(@min(rect.right - rect.left, rect.bottom - rect.top), px(a, theme.radius_field * 2));
-    smooth.fillRoundRect(shapes, rect, radius, radius, face);
+    var shared_canvas = DesignCanvas{ .hdc = hdc, .shapes = shapes };
+    design.roundButton(&shared_canvas, @bitCast(rect), face);
     if (frame) |frame_color| smooth.strokeRoundRect(shapes, rect, radius, radius, frame_color, 1);
     if (text.len > 0) {
         _ = win.SetBkMode(hdc, win.TRANSPARENT);
@@ -1177,10 +1181,8 @@ fn paintRoundedButton(a: *App, shapes: *const smooth.Context, hdc: win.HDC, rect
 
 fn paintInputField(a: *App, shapes: *const smooth.Context, hdc: win.HDC, control: win.HWND, rect: win.RECT) void {
     if (a.compose != null and control == a.compose.?) {
-        const radius = @min(@min(rect.right - rect.left, rect.bottom - rect.top), px(a, theme.radius_field * 2));
-        smooth.fillRoundRect(shapes, rect, radius, radius, theme.current.surface_container);
-        const border: win.RECT = @bitCast(compose_layout.composerBorderRect(@bitCast(rect)));
-        smooth.strokeRoundRect(shapes, border, radius, radius, if (win.GetFocus() == control) theme.current.primary else theme.current.outline, 1);
+        var shared_canvas = DesignCanvas{ .hdc = hdc, .shapes = shapes };
+        design.field(&shared_canvas, @bitCast(rect), px(a, theme.radius_field), px(a, 1), theme.current.surface_container, if (win.GetFocus() == control) theme.current.primary else theme.current.outline);
         return;
     }
     paintRoundedButton(a, shapes, hdc, rect, theme.current.surface_container, theme.current.on_surface, a.font.?, if (win.GetFocus() == control) theme.current.primary else theme.current.outline, &.{});
@@ -1221,11 +1223,6 @@ fn drawPinIcon(a: *App, shapes: *const smooth.Context, left: i32, top: i32, colo
     drawFluentIcon(a, shapes.hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, if (unpin) pin_icon.unpinned else pin_icon.pinned, color);
 }
 
-fn drawMicIcon(a: *App, hdc: win.HDC, cx: i32, cy: i32, color: win.COLORREF) void {
-    const half = @divTrunc(px(a, theme.icon_size), 2);
-    drawFluentIcon(a, hdc, .{ .left = cx - half, .top = cy - half, .right = cx + half, .bottom = cy + half }, 0xE720, color);
-}
-
 fn drawVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     const width = item.rcItem.right - item.rcItem.left;
     const height = item.rcItem.bottom - item.rcItem.top;
@@ -1246,57 +1243,19 @@ fn drawVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
 fn paintVoiceButton(a: *App, item: *win.DRAWITEMSTRUCT) void {
     var shapes = smooth.Context.init(item.hDC);
     defer shapes.deinit();
-    const pressed = (item.itemState & win.ODS_SELECTED) != 0;
-    const focused = (item.itemState & win.ODS_FOCUS) != 0;
     const hdc = item.hDC;
     _ = win.FillRect(hdc, &item.rcItem, a.brush_raised.?);
-    const recording = a.voice_active;
-    const face: win.COLORREF = if (theme.choice == .amoled) (if (pressed) theme.amoled_button_pressed else if (a.btn_hover[8]) theme.amoled_button_hover else theme.current.surface_container_high) else if (pressed) theme.current.primary_container else if (a.btn_hover[8]) theme.current.surface_container_highest else theme.current.surface_container_high;
-    const foreground = if (theme.choice == .amoled) (if (pressed or a.btn_hover[8] or recording) theme.amoled_button_text else theme.current.on_surface_variant) else if (pressed) theme.current.on_primary_container else theme.current.on_secondary_container;
-    paintRoundedButton(a, &shapes, hdc, item.rcItem, face, foreground, a.font_bold.?, if (recording) theme.current.@"error" else if (focused) theme.current.primary else if (theme.choice == .amoled and a.btn_hover[8]) theme.current.outline_variant else null, &.{});
-    const mid_y = @divTrunc(item.rcItem.top + item.rcItem.bottom, 2);
-    if (!recording) {
-        drawMicIcon(a, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, foreground);
+    var shared_canvas = DesignCanvas{ .hdc = hdc, .shapes = &shapes };
+    if (!a.voice_active) {
+        const face = if ((item.itemState & win.ODS_SELECTED) != 0) theme.amoled_button_pressed else if (a.btn_hover[8]) theme.amoled_button_hover else theme.amoled_button;
+        design.roundButton(&shared_canvas, @bitCast(item.rcItem), face);
+        const mid = @divTrunc(item.rcItem.top + item.rcItem.bottom, 2);
+        design.wave(&shared_canvas, .{ .left = item.rcItem.left + px(a, 8), .right = item.rcItem.right - px(a, 8), .top = mid - px(a, 7), .bottom = mid + px(a, 7) }, @intCast(a.dpi), theme.current.on_surface_variant, .{ 0, 64, 128, 255, 255, 128, 64, 0 });
         return;
     }
-    if (!compose_layout.recordingTimerVisible(@bitCast(item.rcItem), @intCast(a.dpi))) {
-        drawMicIcon(a, hdc, @divTrunc(item.rcItem.left + item.rcItem.right, 2), mid_y, theme.current.@"error");
-        return;
-    }
-    const dot = px(a, 5);
-    const dot_x = item.rcItem.left + px(a, 16);
-    smooth.fillEllipse(&shapes, .{ .left = dot_x - dot, .top = mid_y - dot, .right = dot_x + dot, .bottom = mid_y + dot }, theme.current.@"error");
-    var seconds: u64 = 0;
-    var level: u32 = 0;
-    if (a.voice_session) |session| {
-        seconds = session.elapsedMs() / 1000;
-        level = session.levelPercent();
-    }
-    var text_utf8: [16]u8 = undefined;
-    const label = std.fmt.bufPrint(&text_utf8, "{d}:{d:0>2}", .{ seconds / 60, seconds % 60 }) catch "";
-    var wide: [16]u16 = undefined;
-    for (label, 0..) |ch, i| wide[i] = ch;
-    _ = win.SetBkMode(hdc, win.TRANSPARENT);
-    _ = win.SetTextColor(hdc, if (theme.choice == .amoled) foreground else theme.current.on_surface);
-    _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
-    var text_rect = win.RECT{ .left = dot_x + px(a, 12), .top = item.rcItem.top, .right = dot_x + px(a, 62), .bottom = item.rcItem.bottom };
-    _ = text_draw.drawText(hdc, &wide, @intCast(label.len), &text_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
-    const meter_left = text_rect.right + px(a, 4);
-    const meter_right = item.rcItem.right - px(a, 38);
-    if (meter_right > meter_left) {
-        const meter = win.RECT{ .left = meter_left, .top = mid_y - px(a, 3), .right = meter_right, .bottom = mid_y + px(a, 3) };
-        if (win.CreateSolidBrush(theme.current.surface)) |track| {
-            defer _ = win.DeleteObject(track);
-            _ = win.FillRect(hdc, &meter, track);
-        }
-        var filled = meter;
-        filled.right = meter.left + @divTrunc((meter.right - meter.left) * @as(i32, @intCast(level)), 100);
-        if (win.CreateSolidBrush(theme.current.primary)) |fill| {
-            defer _ = win.DeleteObject(fill);
-            _ = win.FillRect(hdc, &filled, fill);
-        }
-    }
-    drawMicIcon(a, hdc, item.rcItem.right - px(a, 20), mid_y, theme.current.@"error");
+    const elapsed = if (a.voice_session) |session| session.elapsedMs() / 1000 else 0;
+    const level: u8 = if (a.voice_session) |session| @intCast(session.levelPercent() * 255 / 100) else 0;
+    design.micPill(&shared_canvas, @bitCast(item.rcItem), @intCast(a.dpi), theme.current.on_surface, theme.current.surface_container_highest, elapsed, @splat(level));
 }
 
 fn drawComposerButton(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
@@ -1315,10 +1274,20 @@ fn drawComposerButton(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     const focused = (item.itemState & win.ODS_FOCUS) != 0;
     const dictating = a.last_dictation_state == .recording or a.last_dictation_state == .transcribing;
     _ = win.FillRect(item.hDC, &item.rcItem, a.brush_raised.?);
+    if (index == 0 and dictating) {
+        paintDictationPill(a, &shapes, item.hDC, item.rcItem);
+        return;
+    }
     const face: win.COLORREF = if (theme.choice == .amoled) (if (index == 1) (if (pressed) theme.amoled_send_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_send_hover else theme.amoled_send) else if (pressed or (index == 0 and dictating)) theme.amoled_button_pressed else if (!disabled and a.btn_hover[index]) theme.amoled_button_hover else theme.amoled_button) else if (index == 1 and !pressed) theme.current.primary else if (pressed or (index == 0 and dictating)) theme.current.primary_container else if (!disabled and a.btn_hover[index]) theme.current.surface_container_highest else theme.current.surface_container_high;
     const foreground = if (disabled) theme.current.on_surface_variant else if (theme.choice == .amoled) (if (index == 1) theme.send_text else if (pressed or a.btn_hover[index] or (index == 0 and dictating)) theme.amoled_button_text else theme.current.on_surface_variant) else if (index == 1 and !pressed) theme.current.on_primary else if (pressed or (index == 0 and dictating)) theme.current.on_primary_container else theme.current.on_surface;
     const glyph: []const u16 = if (index == 0) &.{0xE720} else if (index == 1) &.{0xE724} else if (index == 2) &.{0xE899} else &.{0xE723};
     paintRoundedButton(a, &shapes, item.hDC, item.rcItem, face, foreground, a.font_icon.?, if (focused) theme.current.primary else if (!disabled and a.btn_hover[index]) theme.current.outline_variant else null, glyph);
+}
+
+fn paintDictationPill(a: *App, shapes: *const smooth.Context, hdc: win.HDC, rect: win.RECT) void {
+    var shared_canvas = DesignCanvas{ .hdc = hdc, .shapes = shapes };
+    const elapsed = if (a.dictation_session) |session| session.elapsedMs() / 1000 else 0;
+    design.micPill(&shared_canvas, @bitCast(rect), @intCast(a.dpi), theme.current.on_surface, theme.current.surface_container_highest, elapsed, a.dictation_wave);
 }
 
 fn setFont(hwnd: ?win.HWND, font: ?win.HFONT) void {
@@ -1454,7 +1423,13 @@ fn updateAttachButton(a: *App) void {
 }
 
 fn updateDictateButton(a: *App, state: dictation.State) void {
+    const was_active = a.last_dictation_state == .recording or a.last_dictation_state == .transcribing;
+    const active = state == .recording or state == .transcribing;
     a.last_dictation_state = state;
+    if (was_active != active) {
+        if (active) a.dictation_wave = @splat(0);
+        layout(a, a.compose_client_width, a.compose_client_height);
+    }
     const button = a.dictate orelse return;
     _ = win.InvalidateRect(button, null, win.TRUE);
 }
@@ -1776,7 +1751,7 @@ fn recreateFonts(a: *App) void {
     const old_font = a.font;
     const old_message_fonts = a.message_fonts;
     for (&a.message_fonts, 0..) |*font, index| {
-        font.* = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, if (index & 1 != 0) win.FW_SEMIBOLD else win.FW_NORMAL, @intFromBool(index & 2 != 0), 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, if (index & 4 != 0) lit("IBM Plex Mono") else lit("IBM Plex Sans"));
+        font.* = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, if (index & 1 != 0) win.FW_SEMIBOLD else win.FW_NORMAL, @intFromBool(index & 2 != 0), 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, if (index & 4 != 0) lit("IBM Plex Mono") else lit(design.font_face));
     }
     for (old_message_fonts) |font| if (font) |handle| {
         _ = win.DeleteObject(handle);
@@ -1792,16 +1767,16 @@ fn recreateFonts(a: *App) void {
     const old_font_row = a.font_row;
     const old_font_time = a.font_time;
 
-    a.font = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_small = win.CreateFontW(scaledFontHeight(theme.type_preview, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_bold = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
+    a.font_small = win.CreateFontW(scaledFontHeight(theme.type_preview, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
+    a.font_bold = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
     a.font_emoji = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
-    a.font_underline = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_underline = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
     a.font_icon = win.CreateFontW(scaledFontHeight(theme.icon_size, 100, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
-    a.font_title = win.CreateFontW(scaledFontHeight(theme.type_title, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_row = win.CreateFontW(scaledFontHeight(theme.type_row_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_time = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
-    a.font_reply_label = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("IBM Plex Sans"));
+    a.font_title = win.CreateFontW(scaledFontHeight(theme.type_title, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
+    a.font_row = win.CreateFontW(scaledFontHeight(theme.type_row_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
+    a.font_time = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
+    a.font_reply_label = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
     a.font_reply_icon = win.CreateFontW(scaledFontHeight(theme.icon_size, 100, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
     setFont(a.chats_hwnd, a.font);
     setFont(a.compose, a.font);
@@ -7141,9 +7116,9 @@ fn unfurlProviderLabel(provider: unfurl.Provider) []const u8 {
 
 fn unfurlPlaceholderColor(provider: unfurl.Provider) u32 {
     return switch (provider) {
-        .youtube => rgb(197, 40, 40),
-        .instagram => rgb(225, 48, 108),
-        .facebook => rgb(24, 119, 242),
+        .youtube => design.provider_colors.youtube,
+        .instagram => design.provider_colors.instagram,
+        .facebook => design.provider_colors.facebook,
         .none, .page, .image => theme.current.surface_container_highest,
     };
 }
@@ -9732,18 +9707,32 @@ fn switchComposerDraft(a: *App) void {
 fn ensureDictation(a: *App) ?*dictation.Session {
     if (a.dictation_session) |session| return session;
     a.dictation_session = dictation.Session.create(a.allocator) catch null;
+    if (verification_fixture) {
+        if (a.dictation_session) |session| {
+            const pcm_path = messagesDirPath(a, "dictation.pcm") orelse return a.dictation_session;
+            defer a.allocator.free(pcm_path);
+            const response_path = messagesDirPath(a, "dictation-response.json") orelse return a.dictation_session;
+            defer a.allocator.free(response_path);
+            const pcm = readFileWin(a.allocator, pcm_path, 1024 * 1024) orelse return a.dictation_session;
+            const response = readFileWin(a.allocator, response_path, 64 * 1024) orelse {
+                a.allocator.free(pcm);
+                return a.dictation_session;
+            };
+            session.fixture = .{ .pcm = pcm, .response = response };
+        }
+    }
     return a.dictation_session;
 }
 
 fn toggleDictation(a: *App) void {
-    if (!a.deepgram_configured) {
-        setStatus(a, "Set DEEPGRAM_API_KEY to enable dictation");
-        return;
-    }
     const session = ensureDictation(a) orelse {
         setStatus(a, "Could not initialize dictation");
         return;
     };
+    if (!a.deepgram_configured and session.fixture == null) {
+        setStatus(a, "Set DEEPGRAM_API_KEY to enable dictation");
+        return;
+    }
     switch (session.state()) {
         .idle, .failed => {
             if (a.selected_chat >= a.chat_count or a.chats[a.selected_chat].account.len == 0) return;
@@ -11133,7 +11122,10 @@ fn drawMessageMenuItem(a: *App, item: *win.DRAWITEMSTRUCT) void {
     const saved = win.SaveDC(item.hDC);
     defer _ = win.RestoreDC(item.hDC, saved);
     const selected = item.itemState & win.ODS_SELECTED != 0;
-    _ = win.FillRect(item.hDC, &item.rcItem, if (selected) a.brush_raised.? else a.brush_panel.?);
+    var shapes = smooth.Context.init(item.hDC);
+    defer shapes.deinit();
+    var shared_canvas = DesignCanvas{ .hdc = item.hDC, .shapes = &shapes };
+    design.row(&shared_canvas, @bitCast(item.rcItem), px(a, design.row_radius), if (selected) design.ReaderRaised else design.ReaderCard);
     var rect = item.rcItem;
     rect.left += px(a, 16);
     rect.right -= px(a, 16);
@@ -13728,7 +13720,7 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
     if (a.compose) |hwnd| {
         for (0..2) |pass| {
             if (pass > 0) sizes = stagedComposerSizes(a, width, height);
-            a.compose_geometry = compose_layout.arrange(.{ .left = left_width + 1, .top = 0, .right = width - threadPanelWidth(a, width, left_width), .bottom = height }, sizes.edit_height, @intCast(a.dpi), a.voice_active);
+            a.compose_geometry = compose_layout.arrange(.{ .left = left_width + 1, .top = 0, .right = width - threadPanelWidth(a, width, left_width), .bottom = height }, sizes.edit_height, @intCast(a.dpi), a.voice_active, a.last_dictation_state == .recording or a.last_dictation_state == .transcribing);
             a.compose_pill = @bitCast(a.compose_geometry.box);
             const inner = a.compose_geometry.text;
             _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
@@ -13914,7 +13906,7 @@ fn drawProviderMark(shapes: *const smooth.Context, badge: win.RECT, mark: hub.Ba
     const diameter = badge.bottom - badge.top;
     const left = badge.left + @divTrunc(badge.right - badge.left - diameter, 2);
     const circle = win.RECT{ .left = left, .top = badge.top, .right = left + diameter, .bottom = badge.bottom };
-    smooth.fillEllipse(shapes, circle, if (mark == .signal_mark) rgb(58, 118, 240) else if (mark == .telegram_mark) rgb(42, 171, 238) else 0x0066d325);
+    smooth.fillEllipse(shapes, circle, if (mark == .signal_mark) design.provider_colors.signal else if (mark == .telegram_mark) design.provider_colors.telegram else design.provider_colors.whatsapp);
     const x: f32 = @floatFromInt(left);
     const y: f32 = @floatFromInt(badge.top);
     const size: f32 = @floatFromInt(diameter);
@@ -14611,7 +14603,8 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
 
     var shapes = smooth.Context.init(item.hDC);
     if (selected or bulk_selected) {
-        smooth.fillRoundRect(&shapes, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius * 2), px(a, theme.selected_row_radius * 2), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
+        var shared_canvas = DesignCanvas{ .hdc = item.hDC, .shapes = &shapes };
+        design.row(&shared_canvas, .{ .left = item.rcItem.left + px(a, 8), .top = item.rcItem.top + px(a, 2), .right = item.rcItem.right - px(a, 8), .bottom = item.rcItem.bottom - px(a, 2) }, px(a, theme.selected_row_radius), if (bulk_selected) theme.current.primary_container else theme.current.surface_container_highest);
     }
     var row_text = if (bulk_selected) theme.current.on_primary_container else theme.current.on_surface;
     var row_muted = if (bulk_selected or selected) row_text else theme.current.on_surface_variant;
@@ -14963,16 +14956,8 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, sh
     return @max(height, min_height) + @max(0, reactionChipSize(hdc, a, message, width).cy - px(a, 4));
 }
 
-const SenderColor = struct { r: u8, g: u8, b: u8 };
-
-const sender_palette = [_]SenderColor{
-    .{ .r = 0, .g = 168, .b = 132 },
-    .{ .r = 83, .g = 189, .b = 235 },
-    .{ .r = 235, .g = 140, .b = 84 },
-    .{ .r = 178, .g = 132, .b = 235 },
-    .{ .r = 235, .g = 195, .b = 84 },
-    .{ .r = 235, .g = 110, .b = 150 },
-};
+const SenderColor = design.SenderColor;
+const sender_palette = design.sender_palette;
 
 fn senderColorFor(seed: []const u8) SenderColor {
     if (seed.len == 0) return sender_palette[0];
@@ -15453,10 +15438,9 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = text_draw.drawText(hdc, last_time.ptr(), @intCast(last_time.len), &line_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
         }
         const selected = messageMarked(a, message.id.slice()) or if (a.selected_message) |selected_index| selected_index == index else false;
-        const fill = if (message.from_me) theme.current.primary_container else theme.current.surface_container_high;
-        const bottom_fill = if (message.from_me) theme.bubble_own_bottom else theme.bubble_other_bottom;
-        smooth.fillRoundRectGradient(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), fill, bottom_fill, 255);
-        smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), if (selected) theme.current.primary else if (message.from_me) theme.bubble_own_outline else theme.current.outline, px(a, if (selected) @as(i32, 2) else 1));
+        var shared_canvas = DesignCanvas{ .hdc = hdc, .shapes = &shapes };
+        design.bubble(&shared_canvas, @bitCast(message.bubble_hit), px(a, theme.radius_bubble), px(a, 1), if (message.from_me) design.ReaderUserCard else design.ReaderCard, true, true, .{ message.bubble_hit.top, message.bubble_hit.bottom });
+        if (selected) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), theme.current.primary, px(a, 2));
         if (std.mem.eql(u8, a.reply_to.slice(), message.id.slice()) or std.mem.eql(u8, a.reply_flash.slice(), message.id.slice())) smooth.strokeRoundRect(&shapes, message.bubble_hit, px(a, theme.radius_bubble * 2), px(a, theme.radius_bubble * 2), theme.quote_bar, px(a, 2));
         var text_top = bubble_top + px(a, 10);
         if (show_sender) {
@@ -16843,6 +16827,13 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 }
                 updateAudioPlayback(a);
                 updateDictation(a);
+                if (a.last_dictation_state == .recording or a.last_dictation_state == .transcribing) {
+                    if (a.dictation_session) |session| {
+                        std.mem.copyForwards(u8, a.dictation_wave[0..7], a.dictation_wave[1..8]);
+                        a.dictation_wave[7] = if (a.last_dictation_state == .recording) session.level() else 0;
+                    }
+                    if (a.dictate) |button| _ = win.InvalidateRect(button, null, win.FALSE);
+                }
                 pollTranscription(a);
                 scheduleNextTranscription(a);
                 pollFormatting(a);

@@ -36,7 +36,7 @@ class ProductContractTests(unittest.TestCase):
     def test_product_contract_rejects_boundary_regressions(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            for name in ['src/main.zig', 'src/messenger_view.zig', 'src/wazigctl.zig', 'src/control.zig', 'src/update.zig', 'assets/installer.wxs', '.github/workflows/release.yml']:
+            for name in ['src/main.zig', 'src/messenger_view.zig', 'src/wazigctl.zig', 'src/control.zig', 'src/update.zig', 'assets/installer.wxs', '.github/workflows/release.yml', '.github/workflows/release-proof.yml']:
                 target = root / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(ROOT / name, target)
@@ -49,6 +49,7 @@ class ProductContractTests(unittest.TestCase):
                 ('assets/installer.wxs', 'E2C53374-5665-593B-94F8-38573F3164D2', '00000000-0000-0000-0000-000000000000'),
                 ('assets/installer.wxs', 'Target="[INSTALLDIR]Messages.exe"', 'Target="[INSTALLDIR]Postbox.exe"'),
                 ('.github/workflows/release.yml', 'cp "Messages-${GITHUB_REF_NAME}.zip"', 'cp "wrong.zip"'),
+                ('.github/workflows/release-proof.yml', 'Programs\\Postbox.lnk', 'Programs\\wrong.lnk'),
                 ('src/update.zig', 'if (branded and !std.mem.startsWith(u8, name.string, zip_asset_prefix)) continue;', ''),
             ]:
                 with self.subTest(name=name, change=new):

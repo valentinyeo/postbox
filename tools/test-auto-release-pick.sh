@@ -3,10 +3,11 @@ set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 picker="$script_dir/auto-release-pick.sh"
-workflow="$script_dir/../.github/workflows/auto-release.yml"
 temp=$(mktemp -d)
+workflow="$temp/historical-auto-release.yml"
 trap 'rm -rf -- "$temp"' EXIT
 mkdir "$temp/bin" "$temp/repo"
+git -C "$script_dir/.." show e383ae2^:.github/workflows/auto-release.yml > "$workflow"
 
 cat > "$temp/bin/gh" <<'GH'
 #!/usr/bin/env bash

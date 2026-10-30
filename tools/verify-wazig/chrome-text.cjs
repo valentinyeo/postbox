@@ -9,11 +9,14 @@ function sourceContract(main = read('src/main.zig'), config = read('src/font_con
     assert.match(main, /font_scale: i32 = @import\("font_config\.zig"\)\.default_scale,/);
     const scale = Number(config.match(/default_scale: i32 = (\d+);/)[1]);
     assert.equal(scale, 100);
-    const body = Number(read('src/theme.zig').match(/pub const type_body: i32 = (\d+);/)[1]);
+    assert.match(read('src/theme.zig'), /pub const type_body: i32 = design.body_size;/);
+    const design = read('src/design_tokens.zig');
+    const body = Number(design.match(/pub const body_size: i32 = (\d+);/)[1]);
     assert.match(main, /a\.font = win\.CreateFontW\(scaledFontHeight\(theme\.type_body,/);
     const heading = Number(read('src/theme.zig').match(/pub const type_chat_name: i32 = (\d+);/)[1]);
     assert.match(main, /a\.font_bold = win\.CreateFontW\(scaledFontHeight\(theme\.type_chat_name,/);
-    const weight = Number(config.match(/body_weight: i32 = (\d+);/)[1]);
+    assert.match(config, /pub const body_weight: i32 = @import\("design_tokens.zig"\)\.body_weight;/);
+    const weight = Number(design.match(/pub const body_weight: i32 = (\d+);/)[1]);
     assert.match(main, /if \(verification_text_comparison\) _ = applyMessageData\(a, @embedFile\("verify_text.json"\), false\);/);
     assert.match(main, /\.body = \.\{ \.px = -scaledFontHeight\(theme\.type_body, a.font_scale, dpi\), \.weight = @import\("font_config.zig"\)\.body_weight, \.line_height = @divTrunc\(-scaledFontHeight\(theme.type_body, a.font_scale, dpi\) \* 3 \+ 1, 2\) \}/);
     assert.match(main, /\.heading = \.\{ \.px = -scaledFontHeight\(theme\.type_chat_name, a.font_scale, dpi\), \.weight = win.FW_SEMIBOLD, \.line_height = textLineHeight\(hdc, a.font_bold\.\?\) \}/);

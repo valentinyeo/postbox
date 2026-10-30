@@ -12,49 +12,8 @@ on:
         description: Published release to verify instead of building
         type: string
         default: ''
-  push:
-    branches: [ceo/igsh-1084, 'verify-release/v*']
-  pull_request:
-    paths:
-      - .github/workflows/verify.yml
-      - .claude/skills/verify-wazig/**
-      - tools/verify-wazig/**
-      - src/verify_text.json
-      - src/font_config.zig
-      - src/chat_list_layout.zig
-      - src/text_draw.zig
-      - src/main.zig
-      - src/messenger_view.zig
-      - src/theme.zig
-      - src/archive_rules.zig
-      - src/chat_rows.zig
-      - src/chat_order.zig
-      - src/slack_emoji.*
-      - tools/generate-slack-emoji.py
-      - tools/check_slack_emoji.py
-      - tools/test_slack_emoji.py
-      - src/slack.zig
-      - src/hub*.zig
-      - src/wa_hub*.zig
-      - src/slack_win.zig
-      - src/winhttp.zig
-      - src/transport.zig
-      - src/messenger_view.zig
-      - src/chat_key.zig
-      - src/chat_reconcile_test.zig
-      - src/control.zig
-      - src/outbox.zig
-      - src/shortcuts.zig
-      - src/directwrite_edit.zig
-      - src/edit_contract.zig
-      - src/text_draw.zig
-      - src/win32.zig
-      - assets/messages.ico
-      - build.zig
-      - src/compose_layout.zig
-      - src/paste_image.zig
-      - src/paint_buffer.zig
-      - src/smooth_shapes.zig
+  schedule:
+    - cron: "40 2 * * *"
 
 permissions:
   contents: read
@@ -88,8 +47,8 @@ jobs:
 
           journeys = json.loads(Path('tools/verify-wazig/journeys.json').read_text())['journeys']
           feature = os.environ['FEATURE']
-          if os.environ['EVENT_NAME'] == 'pull_request':
-              selected = [row for row in journeys if row['pr']]
+          if os.environ['EVENT_NAME'] == 'schedule':
+              selected = journeys
           else:
               selected = [row for row in journeys if row['name'] == feature]
               if not selected:

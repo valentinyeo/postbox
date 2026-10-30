@@ -26,8 +26,10 @@ def check(root):
     assert shortcut.attrib['Name'] == 'Postbox' and shortcut.attrib['Target'] == '[INSTALLDIR]Messages.exe', 'Shortcut lost the existing installation'
     assert product.find('.//w:Directory[@Id="INSTALLDIR"]', ns).attrib['Name'] == 'Messages', 'Install directory changed'
     release = (root / '.github/workflows/release.yml').read_text()
-    for required in ['cp "Messages-${GITHUB_REF_NAME}.zip" "Postbox-${GITHUB_REF_NAME}.zip"', 'cp "Messages_arm64-${GITHUB_REF_NAME}.zip" "Postbox_arm64-${GITHUB_REF_NAME}.zip"', 'Postbox-*.msi', 'Programs\\Postbox.lnk']:
+    for required in ['cp "Messages-${GITHUB_REF_NAME}.zip" "Postbox-${GITHUB_REF_NAME}.zip"', 'cp "Messages_arm64-${GITHUB_REF_NAME}.zip" "Postbox_arm64-${GITHUB_REF_NAME}.zip"', 'Postbox-*.msi']:
         assert required in release, ('Release compatibility missing', required)
+    proof = (root / '.github/workflows/release-proof.yml').read_text()
+    assert 'Programs\\Postbox.lnk' in proof, 'Release compatibility smoke missing'
     updater = (root / 'src/update.zig').read_text()
     assert '"Messages_arm64-" else "Messages-"' in updater and '"Postbox_arm64-" else "Postbox-"' in updater, 'Old or new updater package selector missing'
     assert 'if (branded and !std.mem.startsWith(u8, name.string, zip_asset_prefix)) continue;' in updater, 'Branded and compatibility packages are ambiguous'

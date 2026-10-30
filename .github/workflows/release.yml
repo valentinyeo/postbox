@@ -31,8 +31,6 @@ jobs:
             || { echo "tag ${GITHUB_REF_NAME} is not strict vX.Y.Z" >&2; exit 1; }
       - name: Build
         run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion="${GITHUB_REF_NAME#v}"
-      - name: Verify hub-only binary
-        run: python3 tools/check_hub_only.py --binary zig-out/bin/Messages.exe
       - name: Package zip
         run: |
           cd zig-out/bin
@@ -69,76 +67,48 @@ jobs:
             Postbox_arm64-*.zip
             SHA256SUMS.txt
 
-  smoke:
-    name: msi smoke test
+  launch:
+    name: Launch Windows app
     needs: build
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 4
     steps:
-      - uses: actions/checkout@v4
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: release-bundle
-      - name: Install silently
+      - name: Open the packaged app and check its main window
         shell: pwsh
         run: |
-          $msi = (Get-ChildItem Postbox-*.msi).FullName
-          & msiexec /i $msi /qn /norestart /L*V install.log | Out-Null
-          $code = $LASTEXITCODE
-          if ($code -ne 0) {
-            Get-Content install.log -Tail 40
-            throw "msiexec install failed: $code"
+          Expand-Archive "Messages-${{ github.ref_name }}.zip" app
+          $app = Start-Process "$PWD/app/Messages.exe" -WorkingDirectory "$PWD/app" -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(60)
+            do {
+              $app.Refresh()
+              if ($app.HasExited) { throw "App exited before opening its window" }
+              if ($app.MainWindowHandle -ne [IntPtr]::Zero) { exit 0 }
+              Start-Sleep -Seconds 1
+            } while ((Get-Date) -lt $deadline)
+            throw 'App did not open a main window'
+          } finally {
+            if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
           }
-      - name: Verify install
-        shell: pwsh
-        run: |
-          $exe = "$env:LOCALAPPDATA\Programs\Messages\Messages.exe"
-          $lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Postbox.lnk"
-          if (-not (Test-Path $exe)) { throw "missing $exe" }
-          foreach ($font in @('IBMPlexSans-Regular.ttf', 'IBMPlexSans-Medium.ttf', 'IBMPlexSans-SemiBold.ttf', 'IBMPlexSans-Bold.ttf', 'IBMPlexSans-Italic.ttf', 'IBMPlexMono-Regular.ttf')) {
-            if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Messages\$font")) { throw "missing bundled font $font" }
-          }
-          if (-not (Test-Path $lnk)) { throw "missing Start menu shortcut $lnk" }
-          $ctl = "$env:LOCALAPPDATA\Programs\Messages\wazigctl.exe"
-          if (-not (Test-Path $ctl)) { throw "missing $ctl" }
-          & $ctl --help | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "wazigctl --help failed: $LASTEXITCODE" }
-          & $ctl status 2>$null | Out-Null
-          if ($LASTEXITCODE -ne 3) { throw "wazigctl status without the app returned $LASTEXITCODE, expected 3" }
-          exit 0
-      - name: Headless Telegram smoke
-        shell: pwsh
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: tools/verify-wazig/run.ps1 -Feature telegram -Bin "$env:LOCALAPPDATA/Programs/Messages" -Evidence verification-evidence -ExpectedVersion ($env:RELEASE_TAG -replace '^v', '')
-      - name: Validate hub smoke evidence
-        shell: pwsh
-        run: python tools/verify-wazig/check-evidence.py verification-evidence
-      - name: Uninstall silently
-        shell: pwsh
-        run: |
-          $msi = (Get-ChildItem Postbox-*.msi).FullName
-          & msiexec /x $msi /qn /norestart | Out-Null
-          $code = $LASTEXITCODE
-          if ($code -ne 0) { throw "msiexec uninstall failed: $code" }
-          if (Test-Path "$env:LOCALAPPDATA\Programs\Messages\Messages.exe") { throw "exe left behind after uninstall" }
-          if (Test-Path "$env:LOCALAPPDATA\Programs\Messages\wazigctl.exe") { throw "wazigctl left behind after uninstall" }
-          if (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Postbox.lnk") { throw "shortcut left behind after uninstall" }
-      - name: Cleanup hub smoke
-        if: always()
-        shell: pwsh
-        run: tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
-      - name: Upload hub smoke evidence
-        if: always()
-        uses: actions/upload-artifact@v4
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
         with:
-          name: telegram-hub-smoke
-          path: verification-evidence/
+          fetch-depth: 0
+      - name: Scan history for secrets
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks detect --no-banner --source . --redact --log-opts "$GITHUB_SHA"
 
   release:
     name: release
-    needs: [build, smoke]
+    needs: [build, launch, gitleaks]
     permissions:
       contents: write
       pull-requests: read

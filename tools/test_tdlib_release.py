@@ -12,11 +12,12 @@ def verify(workflows):
     release = workflows['release']
     assert 'zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=' in release
     assert 'zig build -Dtarget=aarch64-windows-gnu --release=small -Dversion=' in release
-    assert 'python3 tools/check_hub_only.py --binary zig-out/bin/Messages.exe' in release
-    smoke = release.split('      - name: Headless Telegram smoke\n', 1)[1].split('      - name:', 1)[0]
+    proof = workflows['release-proof']
+    assert 'python3 tools/check_hub_only.py --binary zig-out/bin/Messages.exe' in proof
+    smoke = proof.split('      - name: Headless Telegram smoke\n', 1)[1].split('      - name:', 1)[0]
     assert 'if:' not in smoke
     assert 'tools/verify-wazig/run.ps1 -Feature telegram -Bin ' in smoke
-    assert 'python tools/verify-wazig/check-evidence.py verification-evidence' in release
+    assert 'python tools/verify-wazig/check-evidence.py verification-evidence' in proof
     for context in ('tdlib', 'windows-smoke', 'tdlib-cache / cache'):
         assert re.search(r'^    name: ' + re.escape(context) + r'$', workflows['ci'], re.M), context
     assert 'python3 tools/check_hub_only.py' in workflows['ci']
@@ -25,7 +26,7 @@ def verify(workflows):
 
 class TdlibReleaseTest(unittest.TestCase):
     def setUp(self):
-        self.workflows = {name: (ROOT / '.github/workflows' / (name + '.yml')).read_text() for name in ('release', 'ci')}
+        self.workflows = {name: (ROOT / '.github/workflows' / (name + '.yml')).read_text() for name in ('release', 'release-proof', 'ci')}
 
     def test_release_contract(self):
         verify(self.workflows)
@@ -43,12 +44,12 @@ class TdlibReleaseTest(unittest.TestCase):
             verify(self.workflows)
 
     def test_missing_binary_guard_rejected(self):
-        self.workflows['release'] = self.workflows['release'].replace('python3 tools/check_hub_only.py --binary zig-out/bin/Messages.exe', 'true')
+        self.workflows['release-proof'] = self.workflows['release-proof'].replace('python3 tools/check_hub_only.py --binary zig-out/bin/Messages.exe', 'true')
         with self.assertRaises(AssertionError):
             verify(self.workflows)
 
     def test_disabled_smoke_rejected(self):
-        self.workflows['release'] = self.workflows['release'].replace('      - name: Headless Telegram smoke\n', '      - name: Headless Telegram smoke\n        if: false\n')
+        self.workflows['release-proof'] = self.workflows['release-proof'].replace('      - name: Headless Telegram smoke\n', '      - name: Headless Telegram smoke\n        if: false\n')
         with self.assertRaises(AssertionError):
             verify(self.workflows)
 

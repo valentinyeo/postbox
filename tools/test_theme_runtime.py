@@ -61,7 +61,7 @@ def verify_wiring(main, edit):
     assert "win.HideCaret(hwnd)" in edit and "win.ShowCaret(hwnd)" in edit
     assert "id == id_compose and (notification == win.EN_SETFOCUS or notification == win.EN_KILLFOCUS)" in main
     assert "win.InflateRect(&dirty, 1, 1)" in main
-    assert "compose_layout.composerBorderRect(@bitCast(rect))" in field
+    assert "design.field(&shared_canvas" in field
     assert "win.InvalidateRect(hwnd, &dirty, win.FALSE)" in main
     assert "win.SetBkColor(hdc, fieldColor())" in main
     assert "if (theme.choice == .amoled) a.brush_bg.? else a.brush_raised.?" in main
@@ -75,11 +75,14 @@ def verify_wiring(main, edit):
 def verify_amoled_surfaces(main):
     voice = section(main, "fn paintVoiceButton(", "fn ")
     composer = section(main, "fn drawComposerButton(", "fn ")
+    assert "design.roundButton(&shared_canvas" in voice
+    assert "design.wave(&shared_canvas" in voice
+    assert "design.micPill(&shared_canvas" in voice
     for paint in (voice, composer):
-        assert "if (theme.choice == .amoled)" in paint
         for state in ("amoled_button", "amoled_button_hover", "amoled_button_pressed"):
             assert "theme." + state in paint
-        assert "theme.current.outline_variant" in paint
+    assert "if (theme.choice == .amoled)" in composer
+    assert "theme.current.outline_variant" in composer
     for state in ("amoled_send", "amoled_send_hover", "amoled_send_pressed", "amoled_button_text"):
         assert "theme." + state in composer
     field = section(main, "fn paintPopupInput(", "fn ")
@@ -139,6 +142,7 @@ class ThemeRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="theme-popup-") as directory:
             root = Path(directory)
             (root / "theme.zig").write_text((ROOT / "src/theme.zig").read_text())
+            (root / "design_tokens.zig").write_text((ROOT / "src/design_tokens.zig").read_text())
             for source, passes in ((current, True), (baseline, False)):
                 with self.subTest(passes=passes):
                     path = root / "popup.zig"
@@ -181,6 +185,7 @@ class ThemeRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="theme-runtime-") as directory:
             root = Path(directory)
             (root / "theme.zig").write_text((ROOT / "src/theme.zig").read_text())
+            (root / "design_tokens.zig").write_text((ROOT / "src/design_tokens.zig").read_text())
             (root / "menu_theme.zig").write_text((ROOT / "src/menu_theme.zig").read_text())
             harness = root / "runtime.zig"
             harness.write_text(source)
@@ -255,11 +260,12 @@ class ThemeRuntimeTests(unittest.TestCase):
     @unittest.skipUnless(ZIG, "Zig compiler not found; install Zig or set ZIG")
     def test_approved_palette_checks_reject_broken_text_and_saved_theme_migration(self):
         source = (ROOT / "src/theme.zig").read_text()
-        for original, broken in ((".on_surface = hex(0xf2f2f2)", ".on_surface = hex(0x202020)"),
+        for original, broken in ((".on_surface = design.ReaderForeground", ".on_surface = hex(0x202020)"),
                                  ("value orelse return .amoled", "value orelse return @enumFromInt(0)")):
             with self.subTest(original=original), tempfile.TemporaryDirectory(prefix="graphite-control-") as directory:
                 self.assertIn(original, source)
                 path = Path(directory) / "theme.zig"
+                (path.parent / "design_tokens.zig").write_text((ROOT / "src/design_tokens.zig").read_text())
                 path.write_text(source.replace(original, broken))
                 result = subprocess.run([ZIG, "test", str(path)], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -277,6 +283,7 @@ class ThemeRuntimeTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertRegex(result.stderr, r"undeclared identifier '(?:Palette|amoled|Choice)'")
             (root / "theme.zig").write_text(current_theme)
+            (root / "design_tokens.zig").write_text((ROOT / "src/design_tokens.zig").read_text())
             (root / "control.zig").write_text('const theme = @import("theme.zig");\n' + baseline_control + current_control[current_control.index('test "theme accepts the graphite choice'):])
             result = subprocess.run([ZIG, "test", str(root / "control.zig")], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)

@@ -1,14 +1,7 @@
 name: Postbox in-place upgrade
 on:
-  pull_request:
-    paths:
-      - src/**
-      - assets/installer.wxs
-      - build.zig
-      - tools/verify-wazig/postbox-upgrade.ps1
-      - tools/verify-wazig/fake-github-updates.py
-      - .github/workflows/postbox-upgrade.yml
-      - .github/workflows/release.yml
+  schedule:
+    - cron: "35 2 * * *"
   workflow_dispatch:
     inputs:
       tag:
