@@ -90,6 +90,13 @@ $readRecovered = Wait-Until {
 } 'message retry button refreshes messages and clears its own error'
 Save-Screen $session message-read-recovered
 @{ transient_start = $transientStart; persistent_start = $persistentStart; persistent_end = $persistentEnd; recovery_start = $recoveryStart; transient = $transient; problem = $readProblem; recovered = $readRecovered; requests = @(& $readRequests); retry = @($retryX, $retryY) } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'message-read-recovery.json')
+$compose.SetFocus()
+Send-Keys $session 'Recovery draft'
+$draftPath = Join-Path $messages 'drafts.json'
+$null = Wait-Until { (Read-Edit $compose) -ceq 'Recovery draft' -and (Test-Path $draftPath) -and (Get-Content $draftPath -Raw).Contains('Recovery draft') } 'saved recovery draft'
+$originalState = Read-Control $session status
+$originalMessages = Read-Control $session messages
+Assert-That ($originalState.selected.id -and @($originalMessages.messages).Count -gt 0) 'Selected message baseline missing'
 Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/sync-failure" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
 Invoke-PaletteCommand $session 'Refresh'
 $expectedProblem = 'Unable to read chats from wacli'
@@ -115,5 +122,43 @@ $retained = (Read-Control $session status).update_card
 $dialogHandle = [VerifyMenus]::Find($session.pid, '#32770')
 Assert-That ($dialogHandle -eq [IntPtr]::Zero -and $retained.visible -and $retained.error -ceq $expectedProblem) 'Problem did not persist in the existing card after palette dismissal'
 @{ surface = 'update_card'; pid = $window.Current.ProcessId; card = $problem; retained = $retained; dialog = $dialogHandle.ToInt64(); expected = $expectedProblem; failures = $failures; list_bottom = $bounds.Bottom; card_top = $origin.Y + $problem.rect[1]; gap = 4 * $scale } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'sync-problem.json')
+$null = Wait-Until { @((Get-Content $requestLog | ForEach-Object { $_ | ConvertFrom-Json }) | Where-Object { $_.wire_path -like '/v1/wazig/chats*' -and $_.status -eq 503 }).Count -ge 4 } 'automatic chat retries exhausted'
 Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/sync-recover" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
 Save-Screen $session after
+$chatRequests = { @(Get-Content $requestLog | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.wire_path -like '/v1/wazig/chats*' }) }
+$manualStart = @(& $chatRequests).Count
+$retryX = [int]($origin.X + $problem.rect[0] + 68 * $scale)
+$retryY = [int]($origin.Y + $problem.rect[3] - 23 * $scale)
+[VerifyMenus]::Click($session.pid, $retryX, $retryY, $false)
+$manual = Wait-Until {
+    $rows = @(& $chatRequests) | Select-Object -Skip $manualStart
+    $state = Read-Control $session status
+    if (@($rows | Where-Object status -eq 200).Count -gt 0 -and -not $state.update_card.visible -and $state.update_card.error -ceq '') { $state }
+} 'chat Retry fetches chats and clears its own error'
+$manualMessages = Read-Control $session messages
+Assert-That ($manual.selected.id -ceq $originalState.selected.id -and $manual.chat_count -eq 2 -and @($manualMessages.messages).Count -eq @($originalMessages.messages).Count) 'Retry changed selection or messages'
+Assert-That ((Read-Edit $compose) -ceq 'Recovery draft' -and (Get-Content $draftPath -Raw).Contains('Recovery draft')) 'Retry lost saved draft'
+$null = Get-App $session
+Save-Screen $session chat-read-recovered
+Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/sync-failure" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
+Invoke-PaletteCommand $session 'Refresh'
+$automaticProblem = Wait-Until {
+    $state = Read-Control $session status
+    if ($state.update_card.visible -and $state.update_card.error -ceq $expectedProblem) { $state.update_card }
+} 'automatic recovery begins with a chat error'
+$autoStart = @(& $chatRequests).Count
+Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/sync-recover" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
+$automatic = Wait-Until {
+    $rows = @(& $chatRequests) | Select-Object -Skip $autoStart
+    $state = Read-Control $session status
+    if (@($rows | Where-Object status -eq 200).Count -gt 0 -and -not $state.update_card.visible -and $state.update_card.error -ceq '') { $state }
+} 'scheduled fresh chat read clears its own error'
+$automaticMessages = Read-Control $session messages
+Assert-That ($automatic.selected.id -ceq $originalState.selected.id -and $automatic.chat_count -eq 2 -and @($automaticMessages.messages).Count -eq @($originalMessages.messages).Count) 'Automatic recovery changed selection or messages'
+Assert-That ((Read-Edit $compose) -ceq 'Recovery draft' -and (Get-Content $draftPath -Raw).Contains('Recovery draft')) 'Automatic recovery lost saved draft'
+$null = Get-App $session
+$launchLog = Get-Content (Join-Path $messages 'launch-log.txt') -Raw
+Assert-That (-not $launchLog.Contains('update: card clicked')) 'Chat Retry launched an update'
+Save-Screen $session chat-read-auto-recovered
+@{ pid = $session.pid; manual_start = $manualStart; auto_start = $autoStart; requests = @(& $chatRequests); initial = $originalState; manual = $manual; automatic_problem = $automaticProblem; automatic = $automatic; original_messages = $originalMessages; manual_messages = $manualMessages; automatic_messages = $automaticMessages; draft = Read-Edit $compose; retry = @($retryX, $retryY) } | ConvertTo-Json -Depth 16 | Set-Content (Join-Path $Evidence 'chat-read-recovery.json')
+Copy-Item $draftPath (Join-Path $Evidence 'chat-read-draft.json')

@@ -72,7 +72,7 @@ def assert_quiet(text):
     assert 'setStatus(a, text);' in problem
     main = function(text, 'mainProc')
     failed = main.split('if (!result.ok and result.gen == a.chats_gen) {', 1)[1].split('} else if', 1)[0]
-    assert 'showProblem(a, "Unable to read chats from wacli");' in failed
+    assert 'showChatsReadProblem(a);' in failed
     assert 'win.SetWindowTextW' not in function(text, 'setStatus')
     clicks = function(text, 'chatsProc')
     assert 'message == win.WM_LBUTTONDOWN' in clicks and 'win.LB_GETITEMRECT' in clicks
@@ -111,7 +111,18 @@ def fixture(folder):
     (folder / 'message-read-recovery.json').write_text(json.dumps(recovery))
     for stage in ('message-read-problem', 'message-read-recovered'):
         (folder / (stage + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(11000))
-    (folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in [failure, *reads]) + '\n')
+    chat_reads = [dict(wire_path='/v1/wazig/chats?limit=500', status=status) for status in (503, 503, 503, 503, 200, 503, 200)]
+    recovered = dict(state, update_card=hidden)
+    message_rows = dict(messages=[dict(id='fixture-message', text='hello')])
+    chat_recovery = dict(pid=123, manual_start=4, auto_start=6, requests=chat_reads, initial=state,
+                         manual=recovered, automatic_problem=dict(error='Unable to read chats from wacli'), automatic=recovered,
+                         original_messages=message_rows, manual_messages=message_rows, automatic_messages=message_rows,
+                         draft='Recovery draft', retry=[80, 800])
+    (folder / 'chat-read-recovery.json').write_text(json.dumps(chat_recovery))
+    (folder / 'chat-read-draft.json').write_text('Recovery draft')
+    for stage in ('chat-read-recovered', 'chat-read-auto-recovered'):
+        (folder / (stage + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(11000))
+    (folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in [*chat_reads, *reads]) + '\n')
     for stage in ('before', 'quiet-status', 'version', 'sync-problem', 'after'):
         (folder / f'{stage}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
         (folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Postbox v0.0.526\n1016 | LISTBOX | Chats\n')
@@ -142,7 +153,7 @@ class StatusLineTests(unittest.TestCase):
             ('const app_version =', 'const id_status = 1048;\nconst app_version ='),
             ('else height;', 'else height - 26;'),
             ('"You are on v" ++ app_version ++ " - this is the newest version"', '"Version unavailable"'),
-            ('showProblem(a, "Unable to read chats from wacli");', 'setStatus(a, "Unable to read chats from wacli");'),
+            ('showChatsReadProblem(a);', 'setStatus(a, "Unable to read chats from wacli");'),
             ('    updateCardRefresh(a);\n}\n\nfn sendKindName', '    _ = win.MessageBoxW(a.hwnd, lit("error"), lit("Messages"), win.MB_OK);\n}\n\nfn sendKindName'),
             ('    updateCardRefresh(a);\n}\n\nfn sendKindName', '}\n\nfn sendKindName'),
             ('a.update_card_error_len = n;', 'a.update_card_error_len = 0;'),
@@ -164,11 +175,15 @@ class StatusLineTests(unittest.TestCase):
             with self.subTest(function=name):
                 expected = function(parent, name)
                 added = {
-                    'updateCardNotesHeight': '    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) return 0;\n',
+                    'updateCardNotesHeight': '    if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read) and a.update_card_error_len > 0) return 0;\n',
                     'updateCardFail': '    a.update_card_error_source = .update;\n',
                     'updateCardClick': '    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) {\n        clearMessageReadProblem(a);\n        a.msg_read_attempts = 0;\n        a.msg_read_retry_ticks = 0;\n        refreshMessages(a);\n        return;\n    }\n',
                     'updateCardDismiss': '    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) {\n        clearMessageReadProblem(a);\n        return;\n    }\n',
                 }.get(name, '')
+                if name == 'updateCardClick':
+                    added = '    if (a.update_card_error_source == .chats_read and a.update_card_error_len > 0) {\n        a.chats_read_attempts = 0;\n        a.chats_read_retry_ticks = 0;\n        refreshChats(a);\n        return;\n    }\n' + added
+                if name == 'updateCardDismiss':
+                    added = '    if (a.update_card_error_source == .chats_read and a.update_card_error_len > 0) {\n        clearChatsReadProblem(a);\n        return;\n    }\n' + added
                 expected = expected.replace('{\n', '{\n' + added, 1)
                 if name == 'updateCardClick':
                     expected = expected.replace('    a.update_card_error_len = 0;\n', '    a.update_card_error_len = 0;\n    a.update_card_error_source = .update;\n', 1)
@@ -188,9 +203,9 @@ class StatusLineTests(unittest.TestCase):
         painter = painter.replace('pending.tag', 'pending_tag').replace('pending.notes', 'pending_notes')
         painter = painter.replace('|pending| pending_tag', '|pending| pending.tag').replace('|pending| pending_notes', '|pending| pending.notes')
         painter = painter.replace('    const pending_notes = if (a.update_pending)',
-                                  '    const pending_notes = if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) "" else if (a.update_pending)')
+                                  '    const pending_notes = if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read) and a.update_card_error_len > 0) "" else if (a.update_pending)')
         painter = painter.replace('    else if (failed)\n        "Update failed"',
-                                  '    else if (failed and a.update_card_error_source == .message_read)\n        "Messages unavailable"\n    else if (failed)\n        "Update failed"')
+                                  '    else if (failed and a.update_card_error_source == .chats_read)\n        "Chats unavailable"\n    else if (failed and a.update_card_error_source == .message_read)\n        "Messages unavailable"\n    else if (failed)\n        "Update failed"')
         self.assertEqual(painter, function(source(), 'paintUpdateCard'))
 
     def test_only_list_layout_changes(self):
@@ -342,7 +357,7 @@ class StatusLineTests(unittest.TestCase):
             value['requests'][0]['status'], value['requests'][1]['status'] = 200, 503
             (folder / 'message-read-recovery.json').write_text(json.dumps(value))
             rows = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text().splitlines()]
-            rows[1:] = value['requests']
+            rows[-len(value['requests']):] = value['requests']
             (folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in rows))
             with self.assertRaises(AssertionError):
                 validator.check_quiet_status(folder)
@@ -385,6 +400,24 @@ class StatusLineTests(unittest.TestCase):
         self.assertIn('a.update_card_error_source = .update;', function(text, 'updateCardFail'))
         clear = function(text, 'clearMessageReadProblem')
         self.assertLess(clear.index('a.update_card_error_source != .message_read'), clear.index('a.update_card_error_len = 0'))
+
+    def test_chat_recovery_evidence_requires_new_reads_and_saved_draft(self):
+        for change in ('no_manual_read', 'no_auto_read', 'wrong_draft', 'wrong_selection'):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temp:
+                folder = Path(temp)
+                fixture(folder)
+                value = json.loads((folder / 'chat-read-recovery.json').read_text())
+                if change == 'no_manual_read':
+                    value['manual_start'] = value['auto_start']
+                elif change == 'no_auto_read':
+                    value['auto_start'] = len(value['requests'])
+                elif change == 'wrong_draft':
+                    value['draft'] = ''
+                else:
+                    value['manual']['selected']['id'] = 'different'
+                (folder / 'chat-read-recovery.json').write_text(json.dumps(value))
+                with self.assertRaises(AssertionError):
+                    validator.check_quiet_status(folder)
 
     def test_journey_is_registered_and_drives_real_input(self):
         registry = json.loads((ROOT / 'tools/verify-wazig/journeys.json').read_text())
