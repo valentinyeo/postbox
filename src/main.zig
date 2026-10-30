@@ -932,6 +932,8 @@ const App = struct {
     unified_fault_attempt: u64 = 0,
     unified_fault_active: bool = false,
     unified_fault_hits: u64 = 0,
+    verification_retry_evidence: bool = false,
+    verification_mouse_retry: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
     send_seq: u64 = 0,
     failed_sends: [max_unified_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_unified_failed_sends,
     failed_send_count: usize = 0,
@@ -1934,10 +1936,23 @@ fn jobIsWrite(kind: WacliJobKind) bool {
     };
 }
 
+fn recordVerificationDispatch(a: *App, job: *const WacliJob) void {
+    const mouse = if (a.verification_mouse_retry) |accepted| accepted.attempt == job.gen and std.mem.eql(u8, &accepted.id, job.msg_id.slice()) else false;
+    const name = std.fmt.allocPrint(a.allocator, "verification-dispatch-{s}-{d}.json", .{ job.msg_id.slice(), job.gen }) catch return;
+    defer a.allocator.free(name);
+    const path = messagesDirPath(a, name) orelse return;
+    defer a.allocator.free(path);
+    const marker = std.json.Stringify.valueAlloc(a.allocator, .{ .id = job.msg_id.slice(), .attempt = job.gen, .mouse = mouse }, .{}) catch return;
+    defer a.allocator.free(marker);
+    // Never let a later click rewrite an earlier dispatch.
+    unifiedWriteProtected(a, path, marker) catch {};
+}
+
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
     if (unifiedHub(a) and job.kind == .hub_send) {
         const inflight = a.unified_inflight orelse return false;
         if (job.gen != inflight.attempt or !std.mem.eql(u8, job.msg_id.slice(), &inflight.id)) return false;
+        if (verification_fixture and a.verification_retry_evidence) recordVerificationDispatch(a, &job);
     }
     if (verification_fixture and !hubConfigured(a)) return verificationEnqueue(a, job);
     if (hubConfigured(a) and !hubJobReady(a, job)) return false;
@@ -4297,7 +4312,7 @@ fn restoreFailedSendText(a: *App, failed: *const PendingSend) void {
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
 }
 
-fn resendFailedMessage(a: *App, index: usize) bool {
+fn resendFailedMessage(a: *App, index: usize, mouse_input: bool) bool {
     if (unifiedHub(a)) {
         if (index >= a.message_count or a.selected_chat >= a.chat_count) return false;
         const message = &a.messages[index];
@@ -4306,6 +4321,21 @@ fn resendFailedMessage(a: *App, index: usize) bool {
             setStatus(a, "Could not save retry; message remains held");
             return true;
         };
+        if (verification_fixture and a.verification_retry_evidence and mouse_input) {
+            if (a.unified_snapshot) |snapshot| {
+                for (snapshot.records[0..snapshot.count]) |*record| {
+                    if (record.phase != .ready or !std.mem.eql(u8, record.entry.idSlice(), message.timestamp.slice()) or record.attempt_serial == std.math.maxInt(u64)) continue;
+                    const name = std.fmt.allocPrint(a.allocator, "verification-retry-{s}-{d}.json", .{ record.entry.idSlice(), record.attempt_serial + 1 }) catch break;
+                    defer a.allocator.free(name);
+                    const path = messagesDirPath(a, name) orelse break;
+                    defer a.allocator.free(path);
+                    const marker = std.json.Stringify.valueAlloc(a.allocator, .{ .id = record.entry.idSlice(), .attempt = record.attempt_serial + 1, .input = "mouse", .phase = "ready" }, .{}) catch break;
+                    defer a.allocator.free(marker);
+                    if (writeCacheFileAtomic(a, path, marker)) a.verification_mouse_retry = .{ .id = record.entry.id, .attempt = record.attempt_serial + 1 };
+                    break;
+                }
+            }
+        }
         for (a.pending_sends[0..a.pending_send_count]) |*pending| {
             if (!std.mem.eql(u8, &pending.id, message.timestamp.slice())) continue;
             message.send_state = .pending;
@@ -11148,7 +11178,7 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
         const media = item.media_hit;
         const bubble = item.bubble_hit;
         if (item.send_state == .failed and x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom and
-            resendFailedMessage(a, index))
+            resendFailedMessage(a, index, true))
         {
             _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return;
@@ -12826,9 +12856,9 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
                 .held => held += 1,
             };
         }
-        try w.print(",\"unified_snapshot\":{{\"loaded\":{},\"ready\":{d},\"uncertain\":{d},\"held\":{d},\"inflight\":{d},\"storage_blocked\":{},\"unsaved_outcomes\":{d},\"fault_hits\":{d}}}", .{
+        try w.print(",\"unified_snapshot\":{{\"loaded\":{},\"ready\":{d},\"uncertain\":{d},\"held\":{d},\"inflight\":{d},\"hub_jobs\":{d},\"storage_blocked\":{},\"unsaved_outcomes\":{d},\"fault_hits\":{d}}}", .{
             unifiedHub(a) and a.unified_snapshot != null and !a.outbox_load_failed, ready, uncertain, held, @as(u8, if (a.unified_inflight != null) 1 else 0),
-            a.unified_storage_blocked, @as(u8, if (a.unified_unsaved_result != null) 1 else 0), a.unified_fault_hits,
+            wacliPendingGet(a, .hub_send), a.unified_storage_blocked, @as(u8, if (a.unified_unsaved_result != null) 1 else 0), a.unified_fault_hits,
         });
     }
     const card = updateCardRect(a);
@@ -14360,7 +14390,7 @@ fn runCommand(a: *App, command: u16) void {
                 setStatus(a, "Select a failed message first");
                 return;
             }
-            if (!resendFailedMessage(a, selected)) setStatus(a, "Only a failed WhatsApp message can be resent");
+            if (!resendFailedMessage(a, selected, false)) setStatus(a, "Only a failed WhatsApp message can be resent");
         },
         command_sort_views => openSortViews(a),
         command_show_all => switchChatView(a, .all),
@@ -18131,7 +18161,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         if (a.selected_message) |selected| {
             if (selected < a.message_count and a.messages[selected].from_me and a.messages[selected].send_state == .failed) {
                 const compose_empty = if (a.compose) |compose| win.GetWindowTextLengthW(compose) == 0 else true;
-                if (compose_empty and resendFailedMessage(a, selected)) return true;
+                if (compose_empty and resendFailedMessage(a, selected, false)) return true;
             }
         }
     }
@@ -19060,6 +19090,7 @@ pub fn main(init: std.process.Init) !void {
     }
     defer app.read_state.deinit(init.gpa);
     if (verification_fixture) {
+        app.verification_retry_evidence = std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_RETRY_EVIDENCE") orelse "", "1");
         if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_FAULT")) |fault| {
             app.unified_write_fault = std.meta.stringToEnum(@TypeOf(app.unified_write_fault), fault) orelse .none;
             if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_TRANSITION")) |transition| {

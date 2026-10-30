@@ -125,11 +125,19 @@ hub_namespace = runpy.run_path(str(registry_path.parent / 'fake-hub.py'))
 hub_parser, hub_journeys = hub_namespace['journey_parser']()
 expected_modes = {row['hub'] for row in journeys if row['hub'] and row['hub'] != 'legacy'}
 assert set(hub_journeys) == expected_modes, 'fake-hub mode registry drift'
-actual_modes = {option[2:] for option in hub_parser._option_string_actions if option.startswith('--') and option not in {'--help', '--port-file', '--log'}}
-assert actual_modes == expected_modes, ('missing fake-hub switch', expected_modes - actual_modes)
+actual_modes = {option[2:] for option, action in hub_parser._option_string_actions.items() if option.startswith('--') and action.dest == 'mode'}
+assert actual_modes == expected_modes, ('missing fake-hub switch', expected_modes - actual_modes, actual_modes - expected_modes)
+support = {option: action for option, action in hub_parser._option_string_actions.items() if option.startswith('--') and action.dest != 'mode'}
+assert set(support) == {'--help', '--port-file', '--log', '--snapshot-root'}, 'unexpected fake-hub support options'
+assert support['--help'].dest == 'help' and support['--help'].nargs == 0
+for option, dest, required in [('--port-file', 'port_file', True), ('--log', 'log', True), ('--snapshot-root', 'snapshot_root', False)]:
+    action = support[option]
+    assert action.dest == dest and action.type is Path and action.required == required and action.nargs is None, option
 for mode in expected_modes:
     parsed = hub_parser.parse_args(['--' + mode, '--port-file', 'port', '--log', 'log'])
-    assert parsed.mode == mode, ('fake-hub switch selects wrong mode', mode)
+    assert parsed.mode == mode and parsed.snapshot_root is None, ('fake-hub switch selects wrong mode', mode)
+parsed = hub_parser.parse_args(['--mixed-lid', '--port-file', 'port', '--log', 'log', '--snapshot-root', 'snapshot-root'])
+assert parsed.mode == 'mixed-lid' and parsed.snapshot_root == Path('snapshot-root')
 marker_namespace = runpy.run_path(str(root / 'tools/check_private_markers.py'))
 for name in options:
     assert f'.claude/skills/verify-wazig/features/{name}.md' in marker_namespace['PUBLIC_SKILL_PATHS'], name

@@ -122,6 +122,8 @@ const FailedSend = struct {
     voice_seconds: u32 = 0,
     ambiguous: bool = false,
 };
+fn recordVerificationDispatch(_: *App, _: *const WacliJob) void {}
+
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     io: std.Io = std.testing.io,
@@ -129,6 +131,8 @@ const App = struct {
     outbox_path: []const u8 = "outbox.jsonl",
     outbox_load_failed: bool = false,
     unified_write_fault: enum { none, open, write, flush, close, replace } = .none,
+    unified_fault_active: bool = false,
+    unified_fault_hits: u64 = 0,
     failed_sends: [outbox.max_entries]FailedSend = @splat(.{}),
     failed_send_count: usize = 0,
     pending_sends: [max_pending_sends]PendingSend = @splat(.{}),
@@ -155,6 +159,7 @@ const App = struct {
     hub_account: Utf8Text(32) = .{},
     unified_hub: bool = false,
     unified_inflight: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
+    verification_retry_evidence: bool = false,
     wacli_queue: [wacli_queue_size]WacliJob = @splat(.{}),
     wacli_queue_len: usize = 0,
     wacli_refresh_again: bool = false,

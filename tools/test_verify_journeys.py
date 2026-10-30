@@ -146,6 +146,19 @@ class JourneyRegistryTests(unittest.TestCase):
         self.assertIn('missing fake-hub switch', result.stderr)
         self.assertIn('mixed-lid', result.stderr)
 
+    def test_unregistered_fake_hub_mode_or_support_option_fails(self):
+        path = self.tools / 'fake-hub.py'
+        original = path.read_text()
+        anchor = "    return parser, journeys\n"
+        for addition in ("    modes.add_argument('--unregistered', dest='mode', action='store_const', const='unregistered')\n",
+                         "    parser.add_argument('--unregistered-support')\n"):
+            with self.subTest(addition=addition):
+                path.write_text(original.replace(anchor, addition + anchor))
+                result = self.check_map()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('fake-hub', result.stderr)
+        path.write_text(original)
+
     def test_missing_map_script_handler_or_validator_fails(self):
         paths = ['.claude/skills/verify-wazig/features/search.md',
                  'tools/verify-wazig/journey-search.ps1',
@@ -231,6 +244,9 @@ class JourneyRegistryTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 args = parser.parse_args(['--' + mode, '--port-file', 'port', '--log', 'log'])
                 self.assertEqual(args.mode, mode)
+                self.assertIsNone(args.snapshot_root)
+                with_root = parser.parse_args(['--' + mode, '--port-file', 'port', '--log', 'log', '--snapshot-root', 'snapshot'])
+                self.assertEqual((with_root.mode, with_root.snapshot_root), (mode, Path('snapshot')))
                 config = row['hub_handler']
                 loaded = namespace if config['file'] == 'fake-hub.py' else runpy.run_path(str(self.tools / config['file']), init_globals=namespace)
                 self.assertIn(config['class'], loaded)

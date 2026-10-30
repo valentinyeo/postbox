@@ -153,10 +153,21 @@ class Handler(bridge.Handler):
             with (target / payload).open('xb') as stream:
                 stream.write(owned.read_bytes())
         with (target / 'index.jsonl').open('a', encoding='utf-8') as stream:
-            stream.write(json.dumps(dict(id=client_id, attempt=record['attempt_serial'], snapshot=stem + '.snapshot.json', payload=payload)) + '\n')
+            stream.write(json.dumps(dict(id=client_id, attempt=record['attempt_serial'], snapshot=stem + '.snapshot.json', payload=payload,
+                                         retry_marker=self.identity_ingress_markers.get(stem),
+                                         dispatch_marker=self.identity_ingress_dispatches.get(stem))) + '\n')
 
     def do_POST(self):
         self.wire_path = self.path
+        self.identity_ingress_markers = {}
+        self.identity_ingress_dispatches = {}
+        root = getattr(self.state, 'snapshot_root', None)
+        if root is not None and self.path == '/v1/wazig/send':
+            for prefix, target in (('verification-retry-', self.identity_ingress_markers),
+                                   ('verification-dispatch-', self.identity_ingress_dispatches)):
+                for marker in root.parent.glob(prefix + '*.json'):
+                    stem = marker.name.removeprefix(prefix).removesuffix('.json')
+                    target[stem] = json.loads(marker.read_text(encoding='utf-8'))
         if self.path == '/fixture/live':
             super().do_POST()
             return

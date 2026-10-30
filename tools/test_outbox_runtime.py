@@ -6,7 +6,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FUNCTIONS = (
-    "stagedFileGoesToWacli", "persistOutbox", "unifiedNativePath", "writeOutboxAtomic", "loadOutbox", "bindOutboxAccount", "enqueueSlackOutbox", "retrySlackOutbox",
+    "stagedFileGoesToWacli", "persistOutbox", "unifiedNativePath", "unifiedFaultAt", "writeOutboxAtomic", "loadOutbox", "bindOutboxAccount", "enqueueSlackOutbox", "retrySlackOutbox",
     "retireSlackOutbox", "evictOldestFailedSlackOutbox", "completePendingSend", "removeFirstPendingSend", "sendMessage", "sendMessageFrom",
     "resolveSlackSend", "pendingByClientMsgId", "jobIsWrite", "jobIsSlack",
     "wacliEnqueue", "wacliTakeJob", "wacliJobArgs", "storedAfterQueued", "sentMessageExists", "startNextSend", "retryWacliRefreshes", "appendWhatsAppPending", "retryingBubbleText", "localSendId", "replySnippet", "setReplyQuote", "failHeadPendingSend", "sendRetryDelayMs", "markPendingSendFailed", "markPendingSendRetrying", "sendBaseText", "sendKindName", "applyHubResult",

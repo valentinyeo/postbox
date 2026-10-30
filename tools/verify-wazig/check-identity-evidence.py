@@ -31,12 +31,12 @@ def read_identity(folder, requests, backend):
     states = {}
     for prefix in ('identity', 'file-identity'):
         states[prefix] = {}
-        for stage in (('held', 'collision', 'restart', 'idle') if prefix == 'file-identity' else ('held', 'restart', 'idle')):
+        for stage in (('held', 'collision', 'restart', 'idle', 'preclick') if prefix == 'file-identity' else ('held', 'restart', 'idle', 'preclick')):
             name = f'{prefix}-{stage}'
             states[prefix][stage] = dict(snapshot=read_json(folder / f'{name}.snapshot.json'),
                                         status=read_json(folder / f'{name}.status.json'),
                                         messages=read_json(folder / f'{name}.messages.json'))
-            if stage in ('restart', 'idle'):
+            if stage in ('restart', 'idle', 'preclick'):
                 states[prefix][stage]['requests'] = read_json(folder / f'{name}.requests.json')
     return dict(backend=backend, requests=requests, captures=captures, states=states,
                 text_source=read_json(folder / 'identity-source.json'),
@@ -46,7 +46,9 @@ def read_identity(folder, requests, backend):
                 boundaries={prefix: read_json(folder / f'{prefix}-boundary.json')
                             for prefix in ('identity', 'file-identity')},
                 original=(folder / 'identity-original.png').read_bytes(),
-                held_payload=(folder / 'identity-held.payload').read_bytes())
+                held_payload=(folder / 'identity-held.payload').read_bytes(),
+                retry_markers={path.name: read_json(path) for path in (folder / 'final-data').glob('verification-retry-*.json')},
+                dispatch_markers={path.name: read_json(path) for path in (folder / 'final-data').glob('verification-dispatch-*.json')})
 
 
 def record(snapshot, client_id, backend):
@@ -86,6 +88,17 @@ def verify_identity(data):
         row = record(captured['snapshot'], client_id, data['backend'])
         assert row['phase'] == 'uncertain' and row['attempt_serial'] == index['attempt']
         assert index['attempt'] == len(initial.get(client_id, [])) + 1
+        manual = client_id in (text_id, file_id) and index['attempt'] == 5
+        dispatch = dict(id=client_id, attempt=index['attempt'], mouse=manual)
+        assert index['dispatch_marker'] == dispatch
+        assert data['dispatch_markers'][f"verification-dispatch-{client_id}-{index['attempt']}.json"] == dispatch
+        marker = index['retry_marker']
+        if manual:
+            expected_marker = dict(id=client_id, attempt=5, input='mouse', phase='ready')
+            assert marker == expected_marker
+            assert data['retry_markers'][f'verification-retry-{client_id}-5.json'] == expected_marker
+        else:
+            assert marker is None
         initial.setdefault(client_id, []).append(row)
         assert wire['body']['chat'] == row['jid'] and wire['body']['text'] == row['text']
         assert wire['body']['reply_to'] == row['reply_to']
@@ -124,22 +137,22 @@ def verify_identity(data):
     assert initial[second_id][0]['reply_sender'] == original[0]['sender_id']
     for prefix, client_id, label in (('identity', text_id, 'Identity fixture'), ('file-identity', file_id, 'Identity file')):
         stages = data['states'][prefix]
-        for stage in ('held', 'restart', 'idle'):
+        for stage in ('held', 'restart', 'idle', 'preclick'):
             observed = stages[stage]
             row = record(observed['snapshot'], client_id, data['backend'])
             assert row['phase'] == 'held' and row['attempt_serial'] == 4 and row['attempts'] == 4 and row['ambiguous']
             assert fingerprint(row) == fingerprint(initial[client_id][0])
             assert observed['status']['pending_sends'] == 0
             status = observed['status']['unified_snapshot']
-            assert status['loaded'] and status['ready'] == 0 and status['inflight'] == 0 and status['held'] >= 1
-        assert stages['held']['snapshot'] == stages['restart']['snapshot'] == stages['idle']['snapshot']
+            assert status['loaded'] and status['ready'] == 0 and status['uncertain'] == 0 and status['inflight'] == 0 and status['hub_jobs'] == 0 and status['held'] >= 1
+        assert stages['held']['snapshot'] == stages['restart']['snapshot'] == stages['idle']['snapshot'] == stages['preclick']['snapshot']
         if prefix == 'file-identity':
             collision = stages['collision']
             assert collision['snapshot'] == stages['held']['snapshot']
             assert any(m['id'] == 'identity-collision' and m['text'] == 'Identity file' for m in collision['messages']['messages'])
         expected_requests = text[:4] if prefix == 'identity' else files[:4]
-        assert stages['restart']['requests'] == stages['idle']['requests'] == expected_requests
-        for stage in ('restart', 'idle'):
+        assert stages['restart']['requests'] == stages['idle']['requests'] == stages['preclick']['requests'] == expected_requests
+        for stage in ('restart', 'idle', 'preclick'):
             bubbles = [m for m in stages[stage]['messages']['messages'] if m['time'] == client_id and
                        m['text'] == label + ' (unconfirmed)' and m['from_me'] and m['send_state'] == 'failed']
             assert len(bubbles) == 1 and bubbles[0]['bubble'][2] > bubbles[0]['bubble'][0]
@@ -162,6 +175,10 @@ def verify_negative_controls(data):
         'wire filename': lambda m: next(r for r in reversed(m['requests']) if r.get('body', {}).get('text') == 'Identity file')['body'].update(file='changed.png'),
         'wire reply': lambda m: next(r for r in reversed(m['requests']) if r.get('body', {}).get('text') == 'Identity fixture')['body'].update(reply_to='changed'),
         'autoqueue before click': lambda m: m['states']['identity']['restart']['status']['unified_snapshot'].update(ready=1),
+        'pre-click fifth request': lambda m: m['captures'][4]['index']['dispatch_marker'].update(mouse=False),
+        'missing accepted input at ingress': lambda m: m['captures'][4]['index'].update(retry_marker=None),
+        'actual hub job before click': lambda m: m['states']['identity']['preclick']['status']['unified_snapshot'].update(hub_jobs=1),
+        'uncertain before click': lambda m: m['states']['file-identity']['preclick']['status']['unified_snapshot'].update(uncertain=1),
         'inflight before click': lambda m: m['states']['file-identity']['idle']['status']['unified_snapshot'].update(inflight=1),
         'missing terminal bubble': lambda m: m['states']['identity']['restart']['messages'].update(messages=[]),
         'unexpected restart request': lambda m: m['states']['identity']['restart']['requests'].append(m['requests'][-1]),

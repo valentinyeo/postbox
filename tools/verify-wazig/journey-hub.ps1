@@ -9,7 +9,7 @@ function Save-IdentityState($Session, [string]$Name) {
     $status = Read-Control $Session status
     $status | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.status.json")
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.messages.json")
-    Assert-That ($status.pending_sends -eq 0 -and $status.unified_snapshot.loaded -and $status.unified_snapshot.ready -eq 0 -and $status.unified_snapshot.inflight -eq 0) 'Unified outbox is not idle'
+    Assert-That ($status.pending_sends -eq 0 -and $status.unified_snapshot.loaded -and $status.unified_snapshot.ready -eq 0 -and $status.unified_snapshot.uncertain -eq 0 -and $status.unified_snapshot.inflight -eq 0 -and $status.unified_snapshot.hub_jobs -eq 0) 'Unified outbox is not idle'
     return Get-Content $snapshots[0].FullName -Raw | ConvertFrom-Json
 }
 
@@ -52,12 +52,18 @@ function Restart-IdentityApp($Session) {
     $null = Read-Control $Session select -Arguments @('fixture-alpha', '--provider', 'slack')
 }
 
-function Click-IdentityBubble($Session, $Bubble) {
+function Click-IdentityBubble($Session, $Bubble, [string]$Name, [string]$Label, [string]$Id) {
     $canvas = [IntPtr](Get-Edit (Get-Window $Session) '1024').Current.NativeWindowHandle
     $point = [VerifyWindow+Point]::new()
     $point.X = [int](($Bubble.bubble[0] + $Bubble.bubble[2]) / 2)
     $point.Y = [int](($Bubble.bubble[1] + $Bubble.bubble[3]) / 2)
     Assert-That ([VerifyWindow]::ClientToScreen($canvas, [ref]$point)) 'Failed bubble origin missing'
+    $null = Save-IdentityState $Session "$Name-preclick"
+    $requests = @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq $Label })
+    $requests | ConvertTo-Json -Depth 12 -AsArray | Set-Content (Join-Path $Session.evidence "$Name-preclick.requests.json")
+    Assert-That ($requests.Count -eq 4) 'Retry arrived before manual input'
+    Assert-That (-not (Test-Path (Join-Path $messages "verification-retry-$Id-5.json"))) 'Retry marker appeared before manual input'
+    Assert-That (-not (Test-Path (Join-Path $messages "verification-dispatch-$Id-5.json"))) 'Retry dispatched before manual input'
     [VerifyMenus]::Click($Session.pid, $point.X, $point.Y, $false)
     Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: explicit identity retry x=$($point.X) y=$($point.Y)"
 }
@@ -73,7 +79,7 @@ Send-Keys $session '{ENTER}'
 $null = Wait-Until {
     $state = Read-Control $session status
     @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity fixture' }).Count -eq 4 -and
-        $state.pending_sends -eq 0 -and $state.unified_snapshot.loaded -and $state.unified_snapshot.ready -eq 0 -and $state.unified_snapshot.inflight -eq 0 -and $state.unified_snapshot.held -ge 1
+        $state.pending_sends -eq 0 -and $state.unified_snapshot.loaded -and $state.unified_snapshot.ready -eq 0 -and $state.unified_snapshot.uncertain -eq 0 -and $state.unified_snapshot.inflight -eq 0 -and $state.unified_snapshot.hub_jobs -eq 0 -and $state.unified_snapshot.held -ge 1
 } 'identity retry exhaustion' 100
 $before = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity fixture' })
 Assert-That (@($before.body.client_id | Select-Object -Unique).Count -eq 1) 'Automatic retries changed identity'
@@ -97,7 +103,7 @@ $textIdleRequests = @(Read-BridgeRequests $session | Where-Object { $_.wire_path
 $textIdleRequests | ConvertTo-Json -Depth 12 -AsArray | Set-Content (Join-Path $session.evidence 'identity-idle.requests.json')
 Assert-That ($textIdleRequests.Count -eq 4) 'Idle restart retried failure'
 $textClickAt = [DateTime]::UtcNow
-Click-IdentityBubble $session $bubble
+Click-IdentityBubble $session $bubble identity 'Identity fixture' $id
 $null = Wait-Until {
     @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity fixture' -and $_.status -eq 200 }).Count -eq 1 -and
         (Read-Control $session status).unified_snapshot.inflight -eq 0
@@ -134,7 +140,7 @@ Send-Keys $session '{ENTER}'
 $null = Wait-Until {
     $state = Read-Control $session status
     @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity file' }).Count -eq 4 -and
-        $state.pending_sends -eq 0 -and $state.unified_snapshot.loaded -and $state.unified_snapshot.ready -eq 0 -and $state.unified_snapshot.inflight -eq 0 -and $state.unified_snapshot.held -ge 1
+        $state.pending_sends -eq 0 -and $state.unified_snapshot.loaded -and $state.unified_snapshot.ready -eq 0 -and $state.unified_snapshot.uncertain -eq 0 -and $state.unified_snapshot.inflight -eq 0 -and $state.unified_snapshot.hub_jobs -eq 0 -and $state.unified_snapshot.held -ge 1
 } 'file identity retry exhaustion' 100
 $failedSnapshot = Save-IdentityState $session 'file-identity-held'
 $failed = @($failedSnapshot.records | Where-Object { $_.phase -ceq 'held' -and $_.text -ceq 'Identity file' })
@@ -161,7 +167,7 @@ $fileIdleRequests = @(Read-BridgeRequests $session | Where-Object { $_.wire_path
 $fileIdleRequests | ConvertTo-Json -Depth 12 -AsArray | Set-Content (Join-Path $session.evidence 'file-identity-idle.requests.json')
 Assert-That ((Test-Path $filePath) -and $fileIdleRequests.Count -eq 4) 'Idle restart retried file'
 $fileClickAt = [DateTime]::UtcNow
-Click-IdentityBubble $session $fileBubble
+Click-IdentityBubble $session $fileBubble file-identity 'Identity file' $fileId
 $null = Wait-Until {
     @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity file' -and $_.status -eq 200 }).Count -eq 1 -and
         (Read-Control $session status).pending_sends -eq 0 -and (Read-Control $session status).unified_snapshot.inflight -eq 0

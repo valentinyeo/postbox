@@ -64,7 +64,8 @@ $start.Environment['LOCALAPPDATA'] = $local
 $start.Environment['APPDATA'] = $local
 $start.Environment['USERPROFILE'] = $profile
 $start.Environment['USERNAME'] = "verify-$id"
-foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN', 'WAZIG_VERIFY_RESTART')) { $null = $start.Environment.Remove($name) }
+foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN', 'WAZIG_VERIFY_RESTART', 'WAZIG_VERIFY_RETRY_EVIDENCE')) { $null = $start.Environment.Remove($name) }
+if ($Feature -ceq 'hub') { $start.Environment['WAZIG_VERIFY_RETRY_EVIDENCE'] = '1' }
 $bridge = $null
 if ($journey.prepare) { . (Join-Path $PSScriptRoot $journey.prepare) }
 if ($journey.hub) {
