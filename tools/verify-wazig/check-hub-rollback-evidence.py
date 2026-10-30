@@ -1,4 +1,5 @@
 from copy import deepcopy
+from datetime import datetime, timedelta
 import hashlib
 import json
 from pathlib import Path, PureWindowsPath
@@ -20,7 +21,16 @@ def load(folder):
     binaries = {name: (proof / info['path']).read_bytes() for name, info in provenance['files'].items()}
     imports = {p.name: p.read_bytes() for p in (folder / 'rollback-new-imports').glob('*.pending')}
     journals = {p.name: p.read_bytes() for p in (folder / 'rollback-old-journals').glob('*outbox.jsonl')}
+    offline_files = [{p.relative_to(folder / directory).as_posix(): p.read_bytes()
+                      for p in (folder / directory).rglob('*') if p.is_file()}
+                     for directory in ('offline-private-before', 'offline-private-after')]
     return dict(session=read(folder / 'session.json'), provenance=provenance, binaries=binaries,
+                offline=read(folder / 'offline-cleanup.json'), offline_acl=read(folder / 'offline-acl.json'),
+                offline_before=read(folder / 'offline-private-before.json'), offline_after=read(folder / 'offline-private-after.json'),
+                offline_files=offline_files, offline_control=(folder / 'offline-aged-control.before').read_bytes(),
+                offline_control_remaining=(folder / 'final-data/msg-cache-r/rollback-aged-control.msg').exists(),
+                offline_log_before=(folder / 'offline-before.launch.log').read_text(encoding='utf-8-sig'),
+                offline_log_after=(folder / 'offline-after.launch.log').read_text(encoding='utf-8-sig'),
                 old_binary_path=str((proof / 'old-bin/bin/Messages.exe').resolve()),
                 old_control_path=str((proof / 'old-bin/bin/wazigctl.exe').resolve()),
                 log=(proof / 'build.log').read_bytes(), checkout_log=(proof / 'checkout.log').read_bytes(),
@@ -149,6 +159,36 @@ def verify(data):
     for rows in (data['new_requests'], data['old_start_requests'], data['old_requests']):
         assert all(identity not in json.dumps(rows) for identity in IDS)
     assert len(data['old_requests']) >= len(data['old_start_requests'])
+    offline, acl = data['offline'], data['offline_acl']
+    assert re.fullmatch(r'pb[0-9a-f]{12}', offline['username'])
+    assert PureWindowsPath(offline['user_profile_path']).parent.name.lower() == 'users'
+    assert PureWindowsPath(offline['user_profile_path']).name.lower().startswith(offline['username'])
+    assert offline['sid'] != ownership['runner_sid'] == offline['runner_sid']
+    assert offline['sid'] == acl['sid'] and acl['registry_absent']
+    assert (offline['probe_pid'], offline['probe_start_ticks']) == (acl['pid'], acl['start_ticks'])
+    assert offline['pid'] and offline['start_ticks'] and offline['pid'] != acl['pid']
+    assert (offline['pid'], offline['start_ticks']) not in ((new['pid'], new['start_ticks']), (old_process['pid'], old_process['start_ticks']))
+    assert offline['root'] == ownership['root'] and offline['local'] == ownership['local'] and offline['profile'] == ownership['profile']
+    assert PureWindowsPath(offline['exe']) == root / 'offline' / 'Messages.exe'
+    assert offline['sha256'].lower() == files['Messages.exe']['sha256']
+    assert not offline['fixture'] and offline['hub_disabled']
+    assert re.fullmatch(r'postbox-rollback-[0-9a-f]{32}', offline['firewall_rule'])
+    assert offline['firewall_program'] == offline['exe'] and offline['firewall_direction'] == 'Outbound'
+    assert offline['firewall_action'] == 'Block' and offline['firewall_profiles_enabled']
+    assert all(offline[key] for key in ('profile_removed', 'user_removed', 'firewall_removed'))
+    assert PureWindowsPath(offline['control_path']) == root / 'local' / 'Messages' / 'msg-cache-r' / 'rollback-aged-control.msg'
+    assert data['offline_control'] == b'historical cleanup positive control'
+    assert datetime.fromisoformat(offline['observed_utc']) - datetime.fromisoformat(offline['control_written_utc']) > timedelta(days=14)
+    assert offline['control_deleted'] and not data['offline_control_remaining']
+    assert data['offline_log_after'].startswith(data['offline_log_before'])
+    assert 'whatsapp backend: unavailable (URL not configured)' in data['offline_log_after'][len(data['offline_log_before']):]
+    assert data['offline_before'] == data['old_private'] == data['offline_after']
+    assert data['offline_files'][0] == data['offline_files'][1]
+    assert set(data['offline_files'][0]) == set(manifest)
+    for path, content in data['offline_files'][0].items():
+        matches(path, content)
+    assert acl['files_opened_readwrite'] == len(manifest)
+    assert acl['directories_read_write_delete'] == len({str(Path(path).parent) for path in manifest})
 
 
 def negative_controls(data):
@@ -161,6 +201,11 @@ def negative_controls(data):
         'changed private bytes': lambda m: m.update(private_after=b'changed'),
         'unlinked snapshot': lambda m: m['new_private'][0].update(sha256='0' * 64),
         'bypassed mutex': lambda m: m['mutex'].update(reason='unexpected success'),
+        'skipped old cleanup': lambda m: m['offline'].update(control_deleted=False),
+        'changed offline private bytes': lambda m: m['offline_files'][1].update({next(iter(m['offline_files'][1])): b'changed'}),
+        'wrong offline binary': lambda m: m['offline'].update(sha256=m['ownership']['new_sha256']),
+        'same user offline': lambda m: m['offline'].update(sid=m['ownership']['runner_sid']),
+        'missing ACL probe': lambda m: m['offline_acl'].update(directories_read_write_delete=0),
     }
     for name, mutation in controls.items():
         mutant = deepcopy(data)
@@ -179,6 +224,7 @@ def check_hub_rollback(folder):
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
     assert 'hub-rollback complete-migration-old-loader PASS' in proof
     assert 'hub-rollback same-user-profile-mutex PASS' in proof
+    assert 'hub-rollback old-offline-cache-cleanup PASS' in proof
     final = read(folder / 'side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
     assert all(final[key] for key in ('production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'))

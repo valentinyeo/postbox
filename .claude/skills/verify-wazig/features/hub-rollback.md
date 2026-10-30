@@ -3,6 +3,7 @@
 ## Sub-features
 
 - Complete migration, historical loader and shared-profile exclusion.
+- Historical offline cache cleanup with disposable Windows user.
 
 ## How to get to it (user POV)
 
@@ -16,6 +17,7 @@
 ## Gotchas
 
 - This is not complete rollback proof.
-- Historical cleanup, old writes and re-upgrade remain unimplemented.
+- Old writes and re-upgrade remain unimplemented.
+- Offline cleanup requires an isolated Actions runner.
 - Partial migration crashes, capacity and allocator remain unimplemented.
 - Voice and full routing proof remain unimplemented.

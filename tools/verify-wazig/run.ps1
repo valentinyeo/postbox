@@ -127,13 +127,26 @@ try {
     $final | Add-Member -NotePropertyName telegram_store_absent -NotePropertyValue (-not (Test-Path (Join-Path $messages 'telegram')))
     Assert-That $final.production_preferences_absent 'Production app preferences were touched'
     $final | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'side-effects.json')
+    if ($Feature -ceq 'hub-rollback') {
+        Stop-RollbackApp $session
+        . "$PSScriptRoot/rollback-offline-cleanup.ps1"
+    }
     "JOURNEY PASSED: $Feature" | Set-Content (Join-Path $Evidence 'result.txt')
 } catch {
     "${Feature}: $($_.Exception.Message)" | Set-Content (Join-Path $Evidence 'failure.txt')
     try { Save-Screen $session failure } catch { $_ | Out-String | Add-Content (Join-Path $Evidence 'failure.txt') }
     throw
 } finally {
-    & "$PSScriptRoot/cleanup.ps1" -Evidence $Evidence
+    if ($offlineCleanupUnsafe) {
+        $ownedBridge = Get-Process -Id $session.bridge_pid -ErrorAction SilentlyContinue
+        if ($ownedBridge) {
+            Assert-That ($ownedBridge.StartTime.ToUniversalTime().Ticks.ToString() -ceq $session.bridge_start_ticks -and $ownedBridge.Path -ceq $session.bridge_exe) 'Fake bridge PID reused'
+            Stop-Process -Id $ownedBridge.Id -Force
+        }
+        'CLEANUP FAILED: disposable process may be running; root and firewall retained' | Set-Content (Join-Path $Evidence 'cleanup.txt')
+    } else {
+        & "$PSScriptRoot/cleanup.ps1" -Evidence $Evidence
+    }
     $app.StandardError.ReadToEnd() | Set-Content (Join-Path $Evidence 'app.stderr.log')
     Stop-Transcript | Out-Null
 }
