@@ -146,6 +146,16 @@ class Handler(bridge.Handler):
                     body[name] = part.get_filename()
                     image = part.get_payload(decode=True)
             self.wire_body = dict(body)
+            digest = hashlib.sha256(image).hexdigest()
+            with self.state.lock:
+                if not hasattr(self.state, 'identity_file_payloads'):
+                    self.state.identity_file_payloads = {}
+                prior = self.state.identity_file_payloads.get(body.get('client_id'))
+                payload = (dict(body), digest)
+                mismatch = (prior is not None and prior != payload) or body.get('client_id') in getattr(self.state, 'identity_payloads', {})
+            if mismatch:
+                self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False, duplicate=True, file_sha256=digest)
+                return
             if body.get('chat') != ALPHA or body.get('text') != 'Identity file' or not image.startswith(b'\x89PNG\r\n\x1a\n'):
                 self.respond(400, {'error': 'invalid identity file'}, body=body)
                 return
@@ -153,10 +163,16 @@ class Handler(bridge.Handler):
                 if not hasattr(self.state, 'identity_file_attempts'):
                     self.state.identity_file_attempts = {}
                 client_id = body['client_id']
-                count = self.state.identity_file_attempts.get(client_id, 0) + 1
-                self.state.identity_file_attempts[client_id] = count
-                self.state.identity_collision = True
-            digest = hashlib.sha256(image).hexdigest()
+                prior = self.state.identity_file_payloads.get(client_id)
+                mismatch = (prior is not None and prior != payload) or client_id in getattr(self.state, 'identity_payloads', {})
+                if not mismatch:
+                    self.state.identity_file_payloads.setdefault(client_id, payload)
+                    count = self.state.identity_file_attempts.get(client_id, 0) + 1
+                    self.state.identity_file_attempts[client_id] = count
+                    self.state.identity_collision = True
+            if mismatch:
+                self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False, duplicate=True, file_sha256=digest)
+                return
             if count <= 4:
                 self.respond(409, {'client_id': client_id, 'status': 'unknown'}, body=body, accepted=count == 1, duplicate=count > 1, file_sha256=digest)
             else:
@@ -166,6 +182,14 @@ class Handler(bridge.Handler):
         if self.path == '/v1/wazig/archive-batch':
             self.archive_batch(body, {BETA: bridge.BETA})
             return
+        if self.path == '/v1/wazig/send':
+            with self.state.lock:
+                prior = getattr(self.state, 'identity_payloads', {}).get(body.get('client_id'))
+                mismatch = (prior is not None and prior != body) or body.get('client_id') in getattr(self.state, 'identity_file_payloads', {})
+            if mismatch:
+                self.wire_body = dict(body)
+                self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False, duplicate=True)
+                return
         fields = {
             '/v1/wazig/send': {'chat', 'text', 'reply_to', 'client_id'},
             '/v1/wazig/mark-read': {'chat', 'message_id'},
@@ -181,14 +205,22 @@ class Handler(bridge.Handler):
                 if not hasattr(self.state, 'identity_attempts'):
                     self.state.identity_attempts = {}
                     self.state.identity_sends = {}
+                    self.state.identity_payloads = {}
                 client_id = body['client_id']
-                count = self.state.identity_attempts.get(client_id, 0) + 1
-                self.state.identity_attempts[client_id] = count
-                first_intent = not self.state.identity_sends or client_id == next(iter(self.state.identity_sends))
-                new_intent = client_id not in self.state.identity_sends
-                if new_intent:
-                    self.state.identity_sends[client_id] = dict(client_id=client_id, msg_id='identity-message', ts=self.state.stamp, status='sent')
-                reply = dict(self.state.identity_sends[client_id])
+                prior = self.state.identity_payloads.get(client_id)
+                mismatch = (prior is not None and prior != body) or client_id in getattr(self.state, 'identity_file_payloads', {})
+                if not mismatch:
+                    self.state.identity_payloads.setdefault(client_id, dict(body))
+                    count = self.state.identity_attempts.get(client_id, 0) + 1
+                    self.state.identity_attempts[client_id] = count
+                    first_intent = not self.state.identity_sends or client_id == next(iter(self.state.identity_sends))
+                    new_intent = client_id not in self.state.identity_sends
+                    if new_intent:
+                        self.state.identity_sends[client_id] = dict(client_id=client_id, msg_id='identity-message', ts=self.state.stamp, status='sent')
+                    reply = dict(self.state.identity_sends[client_id])
+            if mismatch:
+                self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False, duplicate=True)
+                return
             if first_intent and count <= 4:
                 self.respond(409, {'client_id': client_id, 'status': 'unknown'}, body=body, accepted=count == 1, duplicate=count > 1)
             else:

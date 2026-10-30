@@ -13,6 +13,7 @@ PYTHON_LIGHT_TESTS=(
     test_check_hub_only
     test_check_private_markers
     test_fake_wa_bridge
+    test_identity_fixture
     test_link_previews
     test_media_layout
     test_no_comments

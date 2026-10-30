@@ -27,10 +27,14 @@ $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 
 $null = Wait-Until { (Read-Control $session status).chat_count -gt 0 } 'identity restart chats'
 $null = Read-Control $session select -Arguments @('fixture-alpha', '--provider', 'slack')
 $bubble = Wait-Until {
-    (Read-Control $session messages).messages | Where-Object { $_.text -like '*Identity fixture*' -and $_.bubble[2] -gt $_.bubble[0] }
+    (Read-Control $session messages).messages | Where-Object { $_.text -like '*Identity fixture*unconfirmed*' -and $_.bubble[2] -gt $_.bubble[0] }
 } 'restored failed bubble'
 $afterRestart = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity fixture' })
-Assert-That ($afterRestart.Count -eq 4) 'Restart automatically retried failure'
+Assert-That ($afterRestart.Count -eq 4 -and (Read-Control $session status).pending_sends -eq 0) 'Restart automatically retried failure'
+$textIdleStart = [DateTime]::UtcNow
+Start-Sleep -Seconds 45
+Assert-That (@(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity fixture' }).Count -eq 4 -and (Read-Control $session status).pending_sends -eq 0) 'Idle restart retried failure'
+$textClickAt = [DateTime]::UtcNow
 $canvas = [IntPtr](Get-Edit (Get-Window $session) '1024').Current.NativeWindowHandle
 $point = [VerifyWindow+Point]::new()
 $point.X = [int](($bubble.bubble[0] + $bubble.bubble[2]) / 2)
@@ -43,6 +47,8 @@ $null = Wait-Until {
 $after = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity fixture' })
 Assert-That ($after.Count -eq 5 -and @($after.body.client_id | Select-Object -Unique).Count -eq 1 -and $after[-1].body.client_id -eq $id) 'Explicit retry changed identity'
 Assert-That (@($after | Where-Object accepted -eq $true).Count -eq 1) 'Explicit retry duplicated delivery'
+$null = Wait-Until { (Read-Control $session status).pending_sends -eq 0 } 'retry completion saved'
+@{ idle_start = $textIdleStart.ToString('o'); click = $textClickAt.ToString('o'); before = $afterRestart.Count; after = $after.Count } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'identity-boundary.json')
 Invoke-PaletteCommand $session 'Compose message'
 Send-Keys $session 'Identity fixture'
 Send-Keys $session '{ENTER}'
@@ -85,7 +91,11 @@ $null = Read-Control $session select -Arguments @('fixture-alpha', '--provider',
 $fileBubble = Wait-Until {
     (Read-Control $session messages).messages | Where-Object { $_.text -like '*Identity file*unconfirmed*' -and $_.bubble[2] -gt $_.bubble[0] }
 } 'restored failed file'
-Assert-That ((Test-Path $filePath) -and @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity file' }).Count -eq 4) 'File restart lost intent or retried'
+Assert-That ((Test-Path $filePath) -and @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity file' }).Count -eq 4 -and (Read-Control $session status).pending_sends -eq 0) 'File restart lost intent or retried'
+$fileIdleStart = [DateTime]::UtcNow
+Start-Sleep -Seconds 45
+Assert-That ((Test-Path $filePath) -and @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity file' }).Count -eq 4 -and (Read-Control $session status).pending_sends -eq 0) 'Idle restart retried file'
+$fileClickAt = [DateTime]::UtcNow
 $canvas = [IntPtr](Get-Edit (Get-Window $session) '1024').Current.NativeWindowHandle
 $point = [VerifyWindow+Point]::new()
 $point.X = [int](($fileBubble.bubble[0] + $fileBubble.bubble[2]) / 2)
@@ -99,5 +109,6 @@ $null = Wait-Until {
 $fileSends = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity file' })
 Assert-That ($fileSends.Count -eq 5 -and @($fileSends.body.client_id | Select-Object -Unique).Count -eq 1 -and $fileSends[-1].body.client_id -eq $fileId) 'File retry changed identity'
 Assert-That (@($fileSends.file_sha256 | Select-Object -Unique).Count -eq 1 -and @($fileSends | Where-Object accepted -eq $true).Count -eq 1) 'File retry changed bytes or duplicated delivery'
+@{ idle_start = $fileIdleStart.ToString('o'); click = $fileClickAt.ToString('o'); before = 4; after = $fileSends.Count } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'file-identity-boundary.json')
 [Windows.Forms.Clipboard]::Clear()
 Hub-Pass $session terminal-file-identity-restart

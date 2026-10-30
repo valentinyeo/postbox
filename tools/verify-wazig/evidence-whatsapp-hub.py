@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 import hashlib
 import json
 import re
@@ -37,12 +38,18 @@ if unified:
     assert identity[-1]['body']['client_id'] != identity[0]['body']['client_id']
     assert sum(row['accepted'] for row in identity) == 2
     assert [row['status'] for row in identity] == [409, 409, 409, 409, 200, 200]
+    assert all(row['body'] == identity[0]['body'] for row in identity[:5])
     assert f"{session['feature']} terminal-file-identity-restart PASS" in proof
     files = [row for row in requests if row.get('wire_path') == '/v1/wazig/send' and row.get('body', {}).get('text') == 'Identity file']
     assert len(files) == 5 and len({row['body']['client_id'] for row in files}) == 1
     assert len({row['file_sha256'] for row in files}) == 1
     assert sum(row['accepted'] for row in files) == 1
     assert [row['status'] for row in files] == [409, 409, 409, 409, 200]
+    assert all(row['body'] == files[0]['body'] for row in files)
+    for name in ['identity-boundary.json', 'file-identity-boundary.json']:
+        boundary = json.loads((folder / name).read_text(encoding='utf-8-sig'))
+        assert boundary['before'] == 4 and boundary['after'] == 5
+        assert (datetime.fromisoformat(boundary['click']) - datetime.fromisoformat(boundary['idle_start'])).total_seconds() >= 45
     assert all('account' not in row['body'] and row['body']['chat'] == 'fixture-alpha' for row in sends)
 else:
     assert all(row['body']['account'] == 'personal' and row['body']['chat'] == '15550000001@s.whatsapp.net' for row in sends)
