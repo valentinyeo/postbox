@@ -106,6 +106,75 @@ const Host = struct {
         return point;
     }
 
+    const Line = struct {
+        text: []u16,
+        first: usize,
+        last: usize,
+        point: win.POINTL,
+        rect: win.RECT,
+    };
+
+    fn lineAt(self: *Host, dc: win.HDC, index: usize) ?Line {
+        const length: usize = @intCast(self.send(win.WM_GETTEXTLENGTH, 0, 0));
+        const text = std.heap.page_allocator.alloc(u16, length + 1) catch return null;
+        const request = win.GETTEXTEX{ .cb = @intCast(text.len * 2), .flags = win.GT_DEFAULT, .codepage = 1200, .lpDefaultChar = null, .lpUsedDefChar = null };
+        const count: usize = @intCast(self.send(win.EM_GETTEXTEX, @intFromPtr(&request), @bitCast(@intFromPtr(text.ptr))));
+        const line = self.send(win.EM_LINEFROMCHAR, @min(index, count), 0);
+        if (line < 0) {
+            std.heap.page_allocator.free(text);
+            return null;
+        }
+        const first_result = self.send(win.EM_LINEINDEX, @intCast(line), 0);
+        if (first_result < 0) {
+            std.heap.page_allocator.free(text);
+            return null;
+        }
+        const first: usize = @intCast(first_result);
+        if (first > count) {
+            std.heap.page_allocator.free(text);
+            return null;
+        }
+        const size: usize = @intCast(self.send(win.EM_LINELENGTH, first, 0));
+        const last = @min(count, first + size);
+        const point = self.position(first);
+        const rect = self.textRect();
+        return .{ .text = text, .first = first, .last = last, .point = point, .rect = .{ .left = point.x, .top = point.y, .right = @max(rect.right, point.x + 1), .bottom = point.y + self.lineHeight(dc) } };
+    }
+
+    fn visualPosition(self: *Host, dc: win.HDC, index: usize) win.POINTL {
+        const native = self.position(index);
+        const line = self.lineAt(dc, index) orelse return native;
+        defer std.heap.page_allocator.free(line.text);
+        const hit = text_draw.hitText(dc, line.text[line.first..line.last], line.rect, @min(index -| line.first, line.last - line.first), 0) orelse return native;
+        return .{ .x = hit.x, .y = line.point.y };
+    }
+
+    fn mousePosition(self: *Host, lparam: isize) isize {
+        const bits: usize = @bitCast(lparam);
+        const x: i32 = @as(i16, @bitCast(@as(u16, @truncate(bits))));
+        const y: i32 = @as(i16, @bitCast(@as(u16, @truncate(bits >> 16))));
+        const rect = self.textRect();
+        if (x < rect.left or x >= rect.right or y < rect.top or y >= rect.bottom) return lparam;
+        var query = win.POINTL{ .x = rect.left, .y = y };
+        const index = self.send(win.WM_USER + 39, 0, @bitCast(@intFromPtr(&query)));
+        if (index < 0) return lparam;
+        const dc = win.GetDC(self.hwnd) orelse return lparam;
+        defer _ = win.ReleaseDC(self.hwnd, dc);
+        const saved = win.SaveDC(dc);
+        defer _ = win.RestoreDC(dc, saved);
+        _ = win.SelectObject(dc, self.font());
+        const line = self.lineAt(dc, @intCast(index)) orelse return lparam;
+        defer std.heap.page_allocator.free(line.text);
+        const hit = text_draw.hitText(dc, line.text[line.first..line.last], line.rect, null, x) orelse return lparam;
+        var native = self.position(line.first + hit.index);
+        if (native.y != line.point.y and hit.index > 0) {
+            native = self.position(line.first + hit.index - 1);
+            native.x = @max(native.x, rect.right - 1);
+        }
+        const nx: u16 = @bitCast(@as(i16, @intCast(std.math.clamp(native.x, -32768, 32767))));
+        return @bitCast((bits & ~@as(usize, 0xffff)) | @as(usize, nx));
+    }
+
     fn lineHeight(self: *Host, dc: win.HDC) i32 {
         if (self.send(win.EM_GETLINECOUNT, 0, 0) > 1) {
             const next: usize = @intCast(self.send(win.EM_LINEINDEX, 1, 0));
@@ -123,7 +192,7 @@ const Host = struct {
         var selection = win.CHARRANGE{ .cpMin = 0, .cpMax = 0 };
         _ = self.send(win.EM_EXGETSEL, 0, @bitCast(@intFromPtr(&selection)));
         if (selection.cpMin != selection.cpMax) return null;
-        const point = self.position(@intCast(@max(0, selection.cpMin)));
+        const point = self.visualPosition(dc, @intCast(@max(0, selection.cpMin)));
         var width: win.UINT = 1;
         _ = win.SystemParametersInfoW(win.SPI_GETCARETWIDTH, 0, &width, 0);
         return win.RECT{ .left = point.x, .top = point.y, .right = point.x + @as(i32, @intCast(@max(1, width))), .bottom = point.y + self.lineHeight(dc) };
@@ -309,11 +378,8 @@ const Host = struct {
             const start = @max(first, @as(usize, @intCast(@max(0, selection.cpMin))));
             const end = @min(last, @as(usize, @intCast(@max(0, selection.cpMax))));
             if (end > start and (win.GetFocus() == self.hwnd or win.GetWindowLongPtrW(self.hwnd, win.GWL_STYLE) & win.ES_NOHIDESEL != 0)) {
-                const left = self.position(start).x;
-                const end_point = self.position(end);
-                var measured = line_rect;
-                _ = text_draw.drawText(dc, text.ptr + first, @intCast(last - first), &measured, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_CALCRECT);
-                const right = if (end_point.y == point.y) end_point.x else measured.right;
+                const left = if (text_draw.hitText(dc, text[first..last], line_rect, start - first, 0)) |hit| hit.x else self.position(start).x;
+                const right = if (text_draw.hitText(dc, text[first..last], line_rect, end - first, 0)) |hit| hit.x else self.position(end).x;
                 const selected = win.RECT{ .left = left, .top = point.y, .right = @max(left + 1, right), .bottom = point.y + height };
                 _ = win.SetDCBrushColor(dc, theme.current.primary_container);
                 _ = win.FillRect(dc, &selected, @ptrCast(@alignCast(win.GetStockObject(win.DC_BRUSH))));
@@ -403,7 +469,15 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return result;
         },
-        win.WM_SETFOCUS, win.WM_LBUTTONDOWN, win.WM_LBUTTONUP, win.EM_SETSEL, win.EM_EXSETSEL => {
+        win.WM_LBUTTONDOWN, win.WM_LBUTTONUP, win.WM_LBUTTONDBLCLK => {
+            const result = host.send(message, wparam, host.mousePosition(lparam));
+            host.restartBlink();
+            return result;
+        },
+        win.WM_MOUSEMOVE => {
+            if (wparam & win.MK_LBUTTON != 0) return host.send(message, wparam, host.mousePosition(lparam));
+        },
+        win.WM_SETFOCUS, win.EM_SETSEL, win.EM_EXSETSEL => {
             const result = host.send(message, wparam, lparam);
             host.restartBlink();
             if (message == win.WM_SETFOCUS) _ = win.InvalidateRect(hwnd, null, win.FALSE);
@@ -446,7 +520,12 @@ fn windowProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             return 1;
         },
         win.EM_POSFROMCHAR => {
-            const point = host.position(wparam);
+            const dc = win.GetDC(hwnd) orelse return host.send(message, wparam, lparam);
+            defer _ = win.ReleaseDC(hwnd, dc);
+            const saved = win.SaveDC(dc);
+            defer _ = win.RestoreDC(dc, saved);
+            _ = win.SelectObject(dc, host.font());
+            const point = host.visualPosition(dc, wparam);
             const x: u16 = @bitCast(@as(i16, @intCast(std.math.clamp(point.x, -32768, 32767))));
             const y: u16 = @bitCast(@as(i16, @intCast(std.math.clamp(point.y, -32768, 32767))));
             return @as(isize, x) | (@as(isize, y) << 16);
