@@ -41,6 +41,7 @@ pub const Entry = struct {
     reply_sender: Str(max_jid_len) = .{},
     client_msg_id: Str(max_client_msg_id_len) = .{},
     attempts: u8 = 0,
+    ambiguous: bool = false,
     upload_file_id: Str(max_file_id_len) = .{},
     state: SendState = .queued,
     queued_unix: i64 = 0,
@@ -80,6 +81,7 @@ const line_fields = struct {
     reply_sender: []const u8,
     client_msg_id: []const u8,
     attempts: u8,
+    ambiguous: bool,
     upload_file_id: []const u8,
     state: []const u8,
     queued_unix: i64,
@@ -99,6 +101,7 @@ pub fn writeLine(writer: *std.Io.Writer, entry: *const Entry) !void {
         .reply_sender = entry.reply_sender.slice(),
         .client_msg_id = entry.client_msg_id.slice(),
         .attempts = entry.attempts,
+        .ambiguous = entry.ambiguous,
         .upload_file_id = entry.upload_file_id.slice(),
         .state = @tagName(entry.state),
         .queued_unix = entry.queued_unix,
@@ -119,6 +122,7 @@ const parsed_line = struct {
     reply_sender: []const u8 = "",
     client_msg_id: []const u8 = "",
     attempts: u8 = 0,
+    ambiguous: bool = false,
     upload_file_id: []const u8 = "",
     state: []const u8 = "queued",
     queued_unix: i64 = 0,
@@ -145,7 +149,7 @@ pub fn parseLine(allocator: std.mem.Allocator, line: []const u8, out: *Entry) bo
     for ([_][]const u8{ value.account, value.jid, value.text, value.file, value.reply_to, value.reply_sender, value.client_msg_id, value.upload_file_id }) |field| {
         if (std.mem.indexOfScalar(u8, field, 0) != null) return false;
     }
-    out.* = .{ .provider = provider, .queued_unix = value.queued_unix, .ptt = value.ptt, .voice_seconds = value.voice_seconds, .attempts = value.attempts, .state = state };
+    out.* = .{ .provider = provider, .queued_unix = value.queued_unix, .ptt = value.ptt, .voice_seconds = value.voice_seconds, .attempts = value.attempts, .ambiguous = value.ambiguous, .state = state };
     @memcpy(&out.id, value.id);
     out.account.set(value.account);
     out.jid.set(value.jid);
@@ -201,7 +205,7 @@ pub const AdoptionTarget = struct {
 };
 
 fn adoptIdentity(entry: *Entry, target: AdoptionTarget, source_unified: bool) bool {
-    if (entry.state != .queued) return false;
+    if (entry.state != .queued and !(entry.state == .failed and source_unified and target.unified)) return false;
     if (entry.provider == .whatsapp) {
         if (source_unified and !target.unified) {
             const colon = std.mem.indexOfScalar(u8, entry.jid.slice(), ':');
@@ -751,4 +755,63 @@ test "unified outbox adoption preserves the source account for shared-contact se
     try std.testing.expect(adoptIdentity(&second, target, true));
     try std.testing.expectEqualStrings("wa-a", first.account.slice());
     try std.testing.expectEqualStrings("wa-b", second.account.slice());
+}
+
+test "terminal unified intents keep identity and payload" {
+    const allocator = std.testing.allocator;
+    var first = Entry{ .id = [_]u8{'a'} ** id_len, .provider = .slack, .state = .failed, .ambiguous = true, .queued_unix = 1234, .ptt = true, .voice_seconds = 7 };
+    first.account.set("hub-account");
+    first.jid.set("slack:workspace:channel");
+    first.text.set("same caption");
+    first.file.set("C:\\staged\\image.png");
+    first.reply_to.set("1700000000.000001");
+    first.reply_sender.set("original sender");
+    var second = first;
+    second.id = [_]u8{'b'} ** id_len;
+    var writer = std.Io.Writer.Allocating.init(allocator);
+    defer writer.deinit();
+    try writeLine(&writer.writer, &first);
+    try writeLine(&writer.writer, &second);
+    var scanner = Scanner.init(allocator, writer.written());
+    const restored = (scanner.next() orelse return error.MissingEntry).*;
+    try std.testing.expectEqual(SendState.failed, restored.state);
+    try std.testing.expectEqualSlices(u8, &first.id, &restored.id);
+    try std.testing.expectEqualStrings(first.account.slice(), restored.account.slice());
+    try std.testing.expectEqualStrings(first.jid.slice(), restored.jid.slice());
+    try std.testing.expectEqualStrings(first.text.slice(), restored.text.slice());
+    try std.testing.expectEqualStrings(first.file.slice(), restored.file.slice());
+    try std.testing.expectEqualStrings(first.reply_to.slice(), restored.reply_to.slice());
+    try std.testing.expectEqualStrings(first.reply_sender.slice(), restored.reply_sender.slice());
+    try std.testing.expect(restored.ptt);
+    try std.testing.expect(restored.ambiguous);
+    const other = (scanner.next() orelse return error.MissingEntry).*;
+    try std.testing.expectEqualSlices(u8, &second.id, &other.id);
+    try std.testing.expectEqualStrings(restored.text.slice(), other.text.slice());
+    var retry = restored;
+    retry.state = .queued;
+    retry.attempts = 0;
+    try std.testing.expectEqualSlices(u8, &first.id, &retry.id);
+    try std.testing.expectEqualStrings(first.file.slice(), retry.file.slice());
+    try std.testing.expect(scanner.next() == null);
+}
+
+test "missing identity is not a valid journal entry" {
+    var entry: Entry = .{};
+    try std.testing.expect(!parseLine(std.testing.allocator, "{\"state\":\"failed\",\"provider\":\"slack\",\"jid\":\"channel\",\"text\":\"message\"}", &entry));
+}
+
+test "unified failed adoption retains terminal identity" {
+    var entry = Entry{ .id = [_]u8{'c'} ** id_len, .provider = .slack, .state = .failed, .ambiguous = true };
+    entry.account.set("old-account");
+    entry.jid.set("slack:workspace:channel");
+    entry.text.set("caption");
+    entry.file.set("C:\\staged\\image.png");
+    entry.reply_to.set("1700000000.000001");
+    try std.testing.expect(adoptIdentity(&entry, .{ .account = "new-account", .unified = true }, true));
+    try std.testing.expectEqual(SendState.failed, entry.state);
+    try std.testing.expectEqualStrings("old-account", entry.account.slice());
+    try std.testing.expectEqualStrings("slack:workspace:channel", entry.jid.slice());
+    try std.testing.expectEqualStrings("1700000000.000001", entry.reply_to.slice());
+    try std.testing.expect(entry.ambiguous);
+    try std.testing.expectEqualSlices(u8, &([_]u8{'c'} ** id_len), &entry.id);
 }

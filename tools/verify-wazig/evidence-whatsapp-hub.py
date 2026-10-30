@@ -31,6 +31,18 @@ assert len(sends) >= 2 and len({row['body']['client_id'] for row in sends}) == 1
 assert sum(row['accepted'] for row in sends) == 1
 assert any(row.get('duplicate') and row['status'] == 200 for row in sends)
 if unified:
+    assert f"{session['feature']} terminal-identity-restart PASS" in proof
+    identity = [row for row in requests if row.get('wire_path') == '/v1/wazig/send' and row.get('body', {}).get('text') == 'Identity fixture']
+    assert len(identity) == 6 and len({row['body']['client_id'] for row in identity[:5]}) == 1
+    assert identity[-1]['body']['client_id'] != identity[0]['body']['client_id']
+    assert sum(row['accepted'] for row in identity) == 2
+    assert [row['status'] for row in identity] == [409, 409, 409, 409, 200, 200]
+    assert f"{session['feature']} terminal-file-identity-restart PASS" in proof
+    files = [row for row in requests if row.get('wire_path') == '/v1/wazig/send' and row.get('body', {}).get('text') == 'Identity file']
+    assert len(files) == 5 and len({row['body']['client_id'] for row in files}) == 1
+    assert len({row['file_sha256'] for row in files}) == 1
+    assert sum(row['accepted'] for row in files) == 1
+    assert [row['status'] for row in files] == [409, 409, 409, 409, 200]
     assert all('account' not in row['body'] and row['body']['chat'] == 'fixture-alpha' for row in sends)
 else:
     assert all(row['body']['account'] == 'personal' and row['body']['chat'] == '15550000001@s.whatsapp.net' for row in sends)
@@ -101,7 +113,7 @@ for keys in ['^{TAB}', '^+{TAB}', 'Compose message', 'Fixture outgoing', 'Archiv
     assert f'keys: {keys}' in actions
 launch = (folder / 'final-data/launch-log.txt').read_text(encoding='utf-8')
 backend = 'message backend:' if unified else 'whatsapp backend:'
-assert launch.count(backend) == 1 and backend + ' hub' in launch
+assert launch.count(backend) >= 1 and backend + ' hub' in launch
 if unified:
     assert before['selected']['provider'] == 'slack' and final['selected']['provider'] == 'slack'
     assert 'hub provider-views PASS' in proof and 'hub mixed-lid-page PASS' in proof and 'hub mixed-older-pages PASS' in proof

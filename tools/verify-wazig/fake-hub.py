@@ -66,6 +66,10 @@ class Handler(bridge.Handler):
         super().record(status, wire_path=self.wire_path, **extra)
 
     def respond(self, status, data, content_type='application/json', **extra):
+        if content_type == 'application/json' and isinstance(data, list) and urlsplit(self.path).path == '/v1/messages' and parse_qs(urlsplit(self.path).query).get('chat') == [bridge.ALPHA] and getattr(self.state, 'identity_collision', False):
+            collision = self.state.message(bridge.ALPHA, 'identity-collision', 'Identity file')
+            collision['FromMe'] = True
+            data = data + [collision]
         if content_type == 'application/json' and isinstance(data, list):
             data = json.loads(json.dumps(data).replace(bridge.ACCOUNT + ':', '').replace(bridge.ALPHA, ALPHA).replace(bridge.BETA, BETA))
             for row in data:
@@ -130,6 +134,34 @@ class Handler(bridge.Handler):
         if not self.authorized():
             return
         data = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        if self.path == '/v1/wazig/send' and self.headers.get('Content-Type', '').startswith('multipart/form-data'):
+            envelope = bridge.BytesParser(policy=bridge.policy.default).parsebytes(
+                f'Content-Type: {self.headers["Content-Type"]}\r\nMIME-Version: 1.0\r\n\r\n'.encode() + data)
+            body, image = {}, b''
+            for part in envelope.iter_parts():
+                name = part.get_param('name', header='content-disposition')
+                if part.get_filename() is None:
+                    body[name] = part.get_content()
+                else:
+                    body[name] = part.get_filename()
+                    image = part.get_payload(decode=True)
+            self.wire_body = dict(body)
+            if body.get('chat') != ALPHA or body.get('text') != 'Identity file' or not image.startswith(b'\x89PNG\r\n\x1a\n'):
+                self.respond(400, {'error': 'invalid identity file'}, body=body)
+                return
+            with self.state.lock:
+                if not hasattr(self.state, 'identity_file_attempts'):
+                    self.state.identity_file_attempts = {}
+                client_id = body['client_id']
+                count = self.state.identity_file_attempts.get(client_id, 0) + 1
+                self.state.identity_file_attempts[client_id] = count
+                self.state.identity_collision = True
+            digest = hashlib.sha256(image).hexdigest()
+            if count <= 4:
+                self.respond(409, {'client_id': client_id, 'status': 'unknown'}, body=body, accepted=count == 1, duplicate=count > 1, file_sha256=digest)
+            else:
+                self.respond(200, {'client_id': client_id, 'msg_id': 'identity-file', 'ts': self.state.stamp, 'status': 'sent'}, body=body, accepted=False, duplicate=True, file_sha256=digest)
+            return
         body = json.loads(data)
         if self.path == '/v1/wazig/archive-batch':
             self.archive_batch(body, {BETA: bridge.BETA})
@@ -144,6 +176,24 @@ class Handler(bridge.Handler):
             self.respond(400, {'error': 'invalid unified payload'}, body=body)
             return
         self.wire_body = dict(body)
+        if self.path == '/v1/wazig/send' and body.get('text') == 'Identity fixture':
+            with self.state.lock:
+                if not hasattr(self.state, 'identity_attempts'):
+                    self.state.identity_attempts = {}
+                    self.state.identity_sends = {}
+                client_id = body['client_id']
+                count = self.state.identity_attempts.get(client_id, 0) + 1
+                self.state.identity_attempts[client_id] = count
+                first_intent = not self.state.identity_sends or client_id == next(iter(self.state.identity_sends))
+                new_intent = client_id not in self.state.identity_sends
+                if new_intent:
+                    self.state.identity_sends[client_id] = dict(client_id=client_id, msg_id='identity-message', ts=self.state.stamp, status='sent')
+                reply = dict(self.state.identity_sends[client_id])
+            if first_intent and count <= 4:
+                self.respond(409, {'client_id': client_id, 'status': 'unknown'}, body=body, accepted=count == 1, duplicate=count > 1)
+            else:
+                self.respond(200, reply, body=body, accepted=new_intent, duplicate=not new_intent)
+            return
         body['chat'] = {ALPHA: bridge.ALPHA, BETA: bridge.BETA}[body['chat']]
         body['account'] = bridge.ACCOUNT
         encoded = json.dumps(body).encode()

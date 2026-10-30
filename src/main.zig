@@ -328,7 +328,12 @@ const PendingSend = struct {
 };
 
 const max_failed_sends = 8;
+const max_unified_failed_sends = outbox.max_entries;
 const FailedSend = struct {
+    unified: bool = false,
+    id: [outbox.id_len]u8 = [_]u8{'0'} ** outbox.id_len,
+    reply_sender: Utf8Text(191) = .{},
+    ambiguous: bool = false,
     provider: transport.Provider = .whatsapp,
     account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
@@ -904,7 +909,7 @@ const App = struct {
     outbox_path: []u8 = &.{},
     outbox_load_failed: bool = false,
     send_seq: u64 = 0,
-    failed_sends: [max_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_failed_sends,
+    failed_sends: [max_unified_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_unified_failed_sends,
     failed_send_count: usize = 0,
     sent_voice: [voice_sent.max_entries]voice_sent.Entry = [_]voice_sent.Entry{.{}} ** voice_sent.max_entries,
     sent_voice_count: usize = 0,
@@ -4042,7 +4047,7 @@ fn retryingBubbleText(buffer: []u8, text: []const u8, retries: u8) []const u8 {
 fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool) void {
     if (pending.completed or a.message_count >= max_messages or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
     if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(pending))) return;
-    if (from_reload and !pending.from_disk) {
+    if (!unifiedHub(a) and from_reload and !pending.from_disk) {
         for (a.messages[0..a.message_count]) |*message| {
             if (!message.from_me or message.send_state != .none) continue;
             if (pending.ptt) {
@@ -4094,9 +4099,14 @@ fn markPendingSendFailed(a: *App, pending: *const PendingSend) void {
         if (!message.from_me or message.send_state != .pending or
             !std.mem.eql(u8, message.id.slice(), id)) continue;
         message.send_state = .failed;
+        if (unifiedHub(a)) message.timestamp.set(&pending.id);
         var base_buffer: [48]u8 = undefined;
         const old = sendBaseText(&base_buffer, pending.text.slice(), pending.file.len > 0, pending.ptt, pending.voice_seconds);
-        if (pending.failure_reason.len > 0) {
+        if (unifiedHub(a) and pending.ambiguous) {
+            const marked = std.fmt.allocPrint(a.allocator, "{s} (unconfirmed)", .{old}) catch return;
+            defer a.allocator.free(marked);
+            message.text.set(a.allocator, marked);
+        } else if (pending.failure_reason.len > 0) {
             var buffer: [4095]u8 = undefined;
             var length = @min(old.len, 3900);
             while (!std.unicode.utf8ValidateSlice(old[0..length])) length -= 1;
@@ -4137,7 +4147,11 @@ fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
     message.sender.set(a.allocator, "You");
     var base_buffer: [48]u8 = undefined;
     const base = sendBaseText(&base_buffer, failed.text.slice(), failed.is_file, failed.ptt, failed.voice_seconds);
-    if (failed.failure_reason.len > 0) {
+    if (failed.unified and failed.ambiguous) {
+        const marked = std.fmt.allocPrint(a.allocator, "{s} (unconfirmed)", .{base}) catch return;
+        defer a.allocator.free(marked);
+        message.text.set(a.allocator, marked);
+    } else if (failed.failure_reason.len > 0) {
         var buffer: [4095]u8 = undefined;
         var length = @min(base.len, 3900);
         while (!std.unicode.utf8ValidateSlice(base[0..length])) length -= 1;
@@ -4159,6 +4173,7 @@ fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
         message.time.set(a.allocator, rendered);
     } else |_| {}
     message.send_state = .failed;
+    if (failed.unified) message.timestamp.set(&failed.id);
     a.messages[a.message_count] = message;
     a.message_count += 1;
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
@@ -4166,15 +4181,25 @@ fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
 
 fn rememberFailedSend(a: *App, pending: *const PendingSend) void {
     for (a.failed_sends[0..a.failed_send_count]) |*entry| {
+        if (unifiedHub(a)) {
+            if (entry.unified and std.mem.eql(u8, &entry.id, &pending.id)) return;
+            continue;
+        }
         if (chat_key.Key.eql(chat_key.of(entry), chat_key.of(pending)) and
             std.mem.eql(u8, entry.text.slice(), pending.text.slice()) and
             std.mem.eql(u8, entry.file.slice(), pending.file.slice())) return;
     }
-    if (a.failed_send_count == a.failed_sends.len) {
+    if (a.failed_send_count >= (if (unifiedHub(a)) a.failed_sends.len else max_failed_sends)) {
+        if (unifiedHub(a)) return;
         var index: usize = 1;
         while (index < a.failed_send_count) : (index += 1) a.failed_sends[index - 1] = a.failed_sends[index];
         a.failed_send_count -= 1;
     }
+    a.failed_sends[a.failed_send_count] = .{};
+    a.failed_sends[a.failed_send_count].unified = unifiedHub(a);
+    a.failed_sends[a.failed_send_count].id = pending.id;
+    a.failed_sends[a.failed_send_count].reply_sender = pending.reply_sender;
+    a.failed_sends[a.failed_send_count].ambiguous = pending.ambiguous;
     a.failed_sends[a.failed_send_count].provider = pending.provider;
     a.failed_sends[a.failed_send_count].account = pending.account;
     a.failed_sends[a.failed_send_count].jid.set(pending.jid.slice());
@@ -4190,6 +4215,7 @@ fn rememberFailedSend(a: *App, pending: *const PendingSend) void {
 }
 
 fn forgetFailedSend(a: *App, key: chat_key.Key, text: []const u8) void {
+    if (unifiedHub(a)) return;
     for (a.failed_sends[0..a.failed_send_count], 0..) |*entry, index| {
         if (entry.is_file or !chat_key.Key.eql(chat_key.of(entry), key) or !std.mem.eql(u8, entry.text.slice(), text)) continue;
         var shift = index;
@@ -4201,6 +4227,7 @@ fn forgetFailedSend(a: *App, key: chat_key.Key, text: []const u8) void {
 }
 
 fn pruneFailedSends(a: *App, key: chat_key.Key) void {
+    if (unifiedHub(a)) return;
     var index: usize = 0;
     while (index < a.failed_send_count) {
         const entry = &a.failed_sends[index];
@@ -4289,7 +4316,11 @@ fn resendFailedMessage(a: *App, index: usize) bool {
     for (a.failed_sends[0..a.failed_send_count]) |*candidate| {
         var base_buffer: [48]u8 = undefined;
         const base = sendBaseText(&base_buffer, candidate.text.slice(), candidate.is_file, candidate.ptt, candidate.voice_seconds);
-        if (chat_key.Key.eql(chat_key.of(candidate), chat_key.of(&a.chats[a.selected_chat])) and (std.mem.eql(u8, base, original) or (candidate.failure_reason.len > 0 and original.len >= 3897 and std.mem.startsWith(u8, base, original)))) {
+        if (unifiedHub(a) and candidate.unified and chat_key.Key.eql(chat_key.of(candidate), chat_key.of(&a.chats[a.selected_chat])) and std.mem.eql(u8, &candidate.id, message.timestamp.slice())) {
+            entry = candidate;
+            break;
+        }
+        if (!unifiedHub(a) and chat_key.Key.eql(chat_key.of(candidate), chat_key.of(&a.chats[a.selected_chat])) and (std.mem.eql(u8, base, original) or (candidate.failure_reason.len > 0 and original.len >= 3897 and std.mem.startsWith(u8, base, original)))) {
             entry = candidate;
             break;
         }
@@ -4298,9 +4329,17 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         setStatus(a, "Can't resend this message - type it again");
         return true;
     };
+    if (failed.unified) {
+        for (a.pending_sends[0..a.pending_send_count]) |*queued| {
+            if (std.mem.eql(u8, &queued.id, &failed.id)) {
+                setStatus(a, "Waiting for outbox save");
+                return true;
+            }
+        }
+    }
     if (failed.is_file) {
         if (!fileExistsUtf8(failed.file.slice())) {
-            forgetFailedSendEntry(a, failed);
+            if (!unifiedHub(a)) forgetFailedSendEntry(a, failed);
             setStatus(a, "The file is gone - attach it again");
             return true;
         }
@@ -4310,16 +4349,28 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         file_pending.account = failed.account;
         file_pending.jid.set(jid);
         file_pending.text.set(failed.text.slice());
-        if (failed.provider == .slack) file_pending.reply_to = failed.reply_to;
+        if (failed.provider == .slack or failed.unified) file_pending.reply_to = failed.reply_to;
+        if (failed.unified) file_pending.reply_sender = failed.reply_sender;
         file_pending.file.set(failed.file.slice());
         file_pending.ptt = failed.ptt;
         file_pending.voice_seconds = failed.voice_seconds;
         a.send_seq += 1;
         file_pending.seq = a.send_seq;
-        file_pending.queued_unix = nowUnixSeconds();
-        mintSendId(a, &file_pending.id);
+        file_pending.queued_unix = if (failed.unified) failed.queued_unix else nowUnixSeconds();
+        if (failed.unified) {
+            file_pending.id = failed.id;
+            file_pending.ambiguous = failed.ambiguous;
+        } else {
+            mintSendId(a, &file_pending.id);
+        }
         a.pending_send_count += 1;
+        const saved_failed = failed.*;
+        if (saved_failed.unified) forgetFailedSendEntry(a, failed);
         if (!persistOutbox(a)) {
+            if (saved_failed.unified) {
+                a.failed_sends[a.failed_send_count] = saved_failed;
+                a.failed_send_count += 1;
+            }
             a.pending_send_count -= 1;
             file_pending.* = .{};
             setStatus(a, "Could not save outbox; message not queued");
@@ -4330,7 +4381,7 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         message.text.set(a.allocator, sendBaseText(&label_buffer, file_pending.text.slice(), true, file_pending.ptt, file_pending.voice_seconds));
         var file_id_buffer: [32]u8 = undefined;
         message.id.set(localSendId(&file_id_buffer, file_pending.seq));
-        forgetFailedSendEntry(a, failed);
+        if (!saved_failed.unified) forgetFailedSendEntry(a, failed);
         persistFileOutbox(a);
         setStatus(a, "Resending...");
         if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
@@ -4341,7 +4392,7 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         setStatus(a, "Nothing to resend");
         return true;
     }
-    if (sentMessageExists(a, chat_key.of(failed), original, failed.queued_unix)) {
+    if (!unifiedHub(a) and sentMessageExists(a, chat_key.of(failed), original, failed.queued_unix)) {
         forgetFailedSend(a, chat_key.of(failed), original);
         setStatus(a, "Already sent");
         refreshMessages(a);
@@ -4352,22 +4403,34 @@ fn resendFailedMessage(a: *App, index: usize) bool {
     pending.provider = failed.provider;
     pending.account = failed.account;
     pending.jid.set(jid);
-    pending.text.set(original);
-    if (failed.provider == .slack) pending.reply_to = failed.reply_to;
+    pending.text.set(if (failed.unified) failed.text.slice() else original);
+    if (failed.provider == .slack or failed.unified) pending.reply_to = failed.reply_to;
+    if (failed.unified) pending.reply_sender = failed.reply_sender;
     a.send_seq += 1;
     pending.seq = a.send_seq;
-    pending.queued_unix = nowUnixSeconds();
-    mintSendId(a, &pending.id);
+    pending.queued_unix = if (failed.unified) failed.queued_unix else nowUnixSeconds();
+    if (failed.unified) {
+        pending.id = failed.id;
+        pending.ambiguous = failed.ambiguous;
+    } else {
+        mintSendId(a, &pending.id);
+    }
     a.pending_send_count += 1;
+    const saved_failed = failed.*;
+    if (saved_failed.unified) forgetFailedSendEntry(a, failed);
     if (!persistOutbox(a)) {
+        if (saved_failed.unified) {
+            a.failed_sends[a.failed_send_count] = saved_failed;
+            a.failed_send_count += 1;
+        }
         a.pending_send_count -= 1;
         pending.* = .{};
         setStatus(a, "Could not save outbox; message not queued");
         return true;
     }
-    forgetFailedSend(a, chat_key.of(failed), original);
+    if (!saved_failed.unified) forgetFailedSend(a, chat_key.of(failed), original);
     message.send_state = .pending;
-    message.text.set(a.allocator, original);
+    message.text.set(a.allocator, if (saved_failed.unified) pending.text.slice() else original);
     var id_buffer: [32]u8 = undefined;
     message.id.set(localSendId(&id_buffer, pending.seq));
     if (a.compose) |compose| {
@@ -4376,7 +4439,7 @@ fn resendFailedMessage(a: *App, index: usize) bool {
         if (length > 0) {
             if (std.unicode.utf16LeToUtf8Alloc(a.allocator, wide_buffer[0..length])) |compose_text| {
                 defer a.allocator.free(compose_text);
-                if (std.mem.eql(u8, compose_text, original)) {
+                if (std.mem.eql(u8, compose_text, if (saved_failed.unified) saved_failed.text.slice() else original)) {
                     _ = win.SetWindowTextW(compose, lit(""));
                     saveComposerDraft(a);
                 }
@@ -4471,10 +4534,17 @@ fn persistOutbox(a: *App) bool {
     if (a.outbox_path.len == 0 or a.outbox_load_failed) return false;
     var allocating = std.Io.Writer.Allocating.init(a.allocator);
     defer allocating.deinit();
+    var entry_count: usize = 0;
     for (a.pending_sends[0..a.pending_send_count]) |*pending| {
         if (pending.completed) continue;
+        entry_count += 1;
+        if (entry_count > outbox.max_entries) return false;
         var entry = outbox.Entry{ .queued_unix = pending.queued_unix };
         entry.id = pending.id;
+        if (unifiedHub(a)) {
+            entry.attempts = pending.retries;
+            entry.ambiguous = pending.ambiguous;
+        }
         entry.provider = std.meta.stringToEnum(outbox.Provider, @tagName(pending.provider)) orelse return false;
         entry.account.set(pending.account.slice());
         entry.jid.set(pending.jid.slice());
@@ -4488,7 +4558,23 @@ fn persistOutbox(a: *App) bool {
     }
     for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
         if (slot.completed) continue;
+        entry_count += 1;
+        if (entry_count > outbox.max_entries) return false;
         outbox.writeLine(&allocating.writer, &slot.entry) catch return false;
+    }
+    for (a.failed_sends[0..a.failed_send_count]) |*failed| {
+        if (!failed.unified) continue;
+        entry_count += 1;
+        if (entry_count > outbox.max_entries) return false;
+        var entry = outbox.Entry{ .id = failed.id, .state = .failed, .ambiguous = failed.ambiguous, .queued_unix = failed.queued_unix, .ptt = failed.ptt, .voice_seconds = failed.voice_seconds };
+        entry.provider = std.meta.stringToEnum(outbox.Provider, @tagName(failed.provider)) orelse return false;
+        entry.account.set(failed.account.slice());
+        entry.jid.set(failed.jid.slice());
+        entry.text.set(failed.text.slice());
+        entry.file.set(failed.file.slice());
+        entry.reply_to.set(failed.reply_to.slice());
+        entry.reply_sender.set(failed.reply_sender.slice());
+        outbox.writeLine(&allocating.writer, &entry) catch return false;
     }
     const temp_path = std.fmt.allocPrint(a.allocator, "{s}.new", .{a.outbox_path}) catch return false;
     defer a.allocator.free(temp_path);
@@ -4557,13 +4643,41 @@ fn loadOutbox(a: *App) void {
         if (got == 0) return;
         total += got;
     }
+    if (unifiedHub(a)) {
+        var lines = std.mem.splitScalar(u8, buffer[0..total], '\n');
+        var count: usize = 0;
+        while (lines.next()) |line| {
+            if (std.mem.trim(u8, line, " \t\r").len == 0) continue;
+            var parsed: outbox.Entry = .{};
+            if (!outbox.parseLine(a.allocator, line, &parsed)) return;
+            count += 1;
+            if (count > outbox.max_entries) return;
+        }
+    }
     var scanner = outbox.Scanner.init(a.allocator, buffer[0..total]);
     while (scanner.next()) |entry| {
-        if (entry.provider == .whatsapp or unifiedHub(a)) {
+        if (unifiedHub(a) and entry.state == .failed) {
+            if (a.failed_send_count >= a.failed_sends.len) return;
+            const failed = &a.failed_sends[a.failed_send_count];
+            failed.* = .{ .unified = true, .id = entry.id, .queued_unix = entry.queued_unix, .ptt = entry.ptt, .voice_seconds = entry.voice_seconds, .is_file = entry.file.len > 0, .ambiguous = entry.ambiguous };
+            failed.provider = std.meta.stringToEnum(transport.Provider, @tagName(entry.provider)).?;
+            failed.account.set(entry.account.slice());
+            failed.jid.set(entry.jid.slice());
+            failed.text.set(entry.text.slice());
+            failed.file.set(entry.file.slice());
+            failed.reply_to.set(entry.reply_to.slice());
+            failed.reply_sender.set(entry.reply_sender.slice());
+            if (entry.ambiguous) failed.failure_reason.set("delivery unconfirmed");
+            a.failed_send_count += 1;
+        } else if (entry.provider == .whatsapp or unifiedHub(a)) {
             if (a.pending_send_count >= a.pending_sends.len) return;
             const pending = &a.pending_sends[a.pending_send_count];
             pending.* = .{};
             pending.id = entry.id;
+            if (unifiedHub(a)) {
+                pending.retries = entry.attempts;
+                pending.ambiguous = entry.ambiguous;
+            }
             pending.provider = std.meta.stringToEnum(transport.Provider, @tagName(entry.provider)).?;
             pending.account.set(entry.account.slice());
             pending.jid.set(entry.jid.slice());
@@ -8415,7 +8529,7 @@ fn loadFileOutbox(a: *App) void {
 
 fn failHeadPendingSend(a: *App, code: u32, ambiguous: bool, detail: []const u8, auth_failed: bool) void {
     a.pending_sends[0].retries +|= 1;
-    a.pending_sends[0].ambiguous = ambiguous;
+    a.pending_sends[0].ambiguous = a.pending_sends[0].ambiguous or ambiguous;
     const retries = a.pending_sends[0].retries;
     var log_buffer: [320]u8 = undefined;
     const head = &a.pending_sends[0];
@@ -8432,13 +8546,22 @@ fn failHeadPendingSend(a: *App, code: u32, ambiguous: bool, detail: []const u8, 
             return;
         }
     }
+    if (unifiedHub(a) and a.pending_sends[0].ambiguous) a.pending_sends[0].failure_reason.set("delivery unconfirmed");
     const failed = a.pending_sends[0];
+    if (unifiedHub(a) and a.failed_send_count == a.failed_sends.len) {
+        setStatus(a, "Outbox is full; send not forgotten");
+        return;
+    }
     markPendingSendFailed(a, &failed);
     rememberFailedSend(a, &failed);
     removeFirstPendingSend(a, false);
     restoreFailedSendText(a, &failed);
     var status_buffer: [400]u8 = undefined;
-    const status = if (auth_failed)
+    const status = if (unifiedHub(a) and failed.ambiguous)
+        "Send unconfirmed. Retry from the message."
+    else if (unifiedHub(a) and failed.failure_reason.len > 0)
+        failed.failure_reason.slice()
+    else if (auth_failed)
         "WhatsApp logged out. Press Ctrl+K to reconnect"
     else
         std.fmt.bufPrint(&status_buffer, "Message to {s} failed to send - text copied back to the box", .{failed.jid.slice()}) catch "Message failed to send - text copied back to the box";
@@ -8596,7 +8719,7 @@ fn startNextSend(a: *App) void {
     bindOutboxAccount(a);
     const head = &a.pending_sends[0];
     if (a.slack_outbox_dirty or head.account.len == 0 or (!unifiedHub(a) and !std.mem.eql(u8, head.account.slice(), a.cache_tag.slice()))) return;
-    if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and
+    if (!unifiedHub(a) and (head.from_disk or (head.retries > 0 and head.ambiguous)) and
         sentMessageExists(a, chat_key.of(head), head.text.slice(), head.queued_unix))
     {
         appendLaunchLog(a, "send: matched an already-delivered message, not resending");
@@ -20014,6 +20137,10 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
             } else if ((a.pending_sends[0].provider == .signal and (result.http_status == 429 or result.http_status == 403)) or (a.pending_sends[0].provider == .telegram and result.http_status == 429)) {
                 const reason = if (result.extra.len > 0 and !std.mem.eql(u8, result.extra.slice(), "HubHttpFailed")) result.extra.slice() else if (a.pending_sends[0].provider == .telegram) "Telegram send rejected" else "Signal send rejected";
                 a.pending_sends[0].failure_reason.set(reason);
+                if (unifiedHub(a)) {
+                    failHeadPendingSend(a, result.http_status, false, reason, true);
+                    return;
+                }
                 const failed = a.pending_sends[0];
                 markPendingSendFailed(a, &failed);
                 rememberFailedSend(a, &failed);
