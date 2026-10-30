@@ -836,16 +836,16 @@ test "IGSH-1080 an empty selection clears only its message read error" {
 
 test "IGSH-1169 chat read recovery clears only current valid results" {
     var a = fixture();
-    var failure = WacliResult{ .kind = .chats, .gen = a.chats_gen, .ok = false };
+    const failure = WacliResult{ .kind = .chats, .gen = a.chats_gen, .ok = false };
     deliverChats(&a, &failure);
     try std.testing.expect(a.update_card_error_source == .chats_read);
-    var stale = WacliResult{ .kind = .chats, .gen = a.chats_gen - 1 };
+    const stale = WacliResult{ .kind = .chats, .gen = a.chats_gen - 1 };
     deliverChats(&a, &stale);
     try std.testing.expect(a.update_card_error_source == .chats_read);
-    var malformed = WacliResult{ .kind = .chats, .gen = a.chats_gen, .data = "malformed" };
+    const malformed = WacliResult{ .kind = .chats, .gen = a.chats_gen, .data = "malformed" };
     deliverChats(&a, &malformed);
     try std.testing.expect(a.update_card_error_source == .chats_read);
-    var fresh = WacliResult{ .kind = .chats, .gen = a.chats_gen };
+    const fresh = WacliResult{ .kind = .chats, .gen = a.chats_gen };
     deliverChats(&a, &fresh);
     try std.testing.expectEqual(@as(usize, 0), a.update_card_error_len);
     try std.testing.expectEqual(@as(u32, 0), a.chats_read_attempts);
@@ -858,9 +858,9 @@ test "IGSH-1169 chat results preserve unrelated cards" {
         a.update_card_error_source = source;
         a.update_card_error_len = 7;
         @memcpy(a.update_card_error[0..7], "problem");
-        var failure = WacliResult{ .kind = .chats, .gen = a.chats_gen, .ok = false };
+        const failure = WacliResult{ .kind = .chats, .gen = a.chats_gen, .ok = false };
         deliverChats(&a, &failure);
-        var success = WacliResult{ .kind = .chats, .gen = a.chats_gen };
+        const success = WacliResult{ .kind = .chats, .gen = a.chats_gen };
         deliverChats(&a, &success);
         try std.testing.expectEqual(source, a.update_card_error_source);
         try std.testing.expectEqualStrings("problem", a.update_card_error[0..a.update_card_error_len]);
