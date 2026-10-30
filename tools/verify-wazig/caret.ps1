@@ -1,3 +1,5 @@
+Add-Type -Path "$PSScriptRoot/menus.cs"
+
 $caretReferences = @((Get-ChildItem (Join-Path $PSHOME 'ref') -Filter '*.dll').FullName) + @(
     [Drawing.Bitmap].Assembly.Location,
     [Drawing.Color].Assembly.Location
@@ -14,6 +16,39 @@ public static class VerifyCaret {
     }
     [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint thread, ref ThreadInfo info);
     [DllImport("user32.dll")] public static extern uint GetCaretBlinkTime();
+    [StructLayout(LayoutKind.Sequential)] struct MouseInput { public int x, y; public uint data, flags, time; public UIntPtr extra; }
+    [StructLayout(LayoutKind.Sequential)] struct KeyboardInput { public ushort key, scan; public uint flags, time; public UIntPtr extra; }
+    [StructLayout(LayoutKind.Explicit)] struct InputUnion { [FieldOffset(0)] public MouseInput mouse; [FieldOffset(0)] public KeyboardInput keyboard; }
+    [StructLayout(LayoutKind.Sequential)] struct Input { public uint type; public InputUnion data; }
+    [DllImport("user32.dll")] static extern uint SendInput(uint count, Input[] input, int size);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    public static void TypeUnicode(int pid, string text) {
+        uint owner;
+        GetWindowThreadProcessId(GetForegroundWindow(), out owner);
+        if (owner != pid) throw new Exception("Refusing keyboard input outside owned process");
+        foreach (char unit in text) {
+            var down = new Input { type = 1, data = new InputUnion { keyboard = new KeyboardInput { scan = unit, flags = 4 } } };
+            var up = new Input { type = 1, data = new InputUnion { keyboard = new KeyboardInput { scan = unit, flags = 6 } } };
+            if (SendInput(2, new Input[] { down, up }, Marshal.SizeOf(typeof(Input))) != 2) throw new Exception("Unicode SendInput failed");
+        }
+    }
+    public static int[] FindWordGap(System.Drawing.Bitmap image, int top, int bottom, int fillMax) {
+        int first = -1, last = -1;
+        var occupied = new bool[image.Width];
+        for (int x = 0; x < image.Width; x++) for (int y = top; y <= bottom; y++) {
+            var p = image.GetPixel(x, y);
+            if (Math.Max(p.R, Math.Max(p.G, p.B)) > fillMax + 40) { occupied[x] = true; first = first < 0 ? x : first; last = x; }
+        }
+        int bestStart = -1, bestEnd = -1;
+        for (int x = first + 1; first >= 0 && x < last;) {
+            if (occupied[x]) { x++; continue; }
+            int start = x;
+            while (x < last && !occupied[x]) x++;
+            if (bestStart < 0 || x - start > bestEnd - bestStart) { bestStart = start; bestEnd = x; }
+        }
+        return new int[] { bestStart, bestEnd };
+    }
     [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, UIntPtr wparam, IntPtr lparam, uint flags, uint timeout, out UIntPtr result);
     public static int CountInk(System.Drawing.Bitmap image, int fillMax) {
         int count = 0;
@@ -132,9 +167,12 @@ function Measure-CaretTheme($Session, [string]$Theme) {
     }
 }
 
-function Measure-CaretAlignment($Session, $Edit, [string]$Name, [string]$Text) {
+function Measure-CaretAlignment($Session, $Edit, [string]$Name, [string]$Text, [bool]$Unicode = $false) {
     Send-Keys $Session '^a{BACKSPACE}'
-    Send-Keys $Session $Text
+    if ($Unicode) {
+        [VerifyCaret]::TypeUnicode($Session.pid, $Text)
+        Add-Content (Join-Path $Session.evidence 'actions.log') "Unicode SendInput: $Name"
+    } else { Send-Keys $Session $Text }
     $null = Wait-Until { (Read-Edit $Edit) -ceq $Text } "$Name typed text"
     Assert-That $Edit.Current.HasKeyboardFocus "$Name edit is not focused"
     $bounds = $Edit.Current.BoundingRectangle
@@ -179,7 +217,7 @@ function Measure-CaretAlignment($Session, $Edit, [string]$Name, [string]$Text) {
             native_end = @{ x = $nativeX; y = $nativeY }
             caret = @{ left = $pixels[0]; right = $pixels[1]; top = $pixels[2]; bottom = $pixels[3] }
             ink_right = $pixels[4]; gap = ($pixels[0] - $pixels[4] - 1)
-            tolerance = 5; on = $phases.on; off = $phases.off; ink = $ink
+            tolerance = 5; on = $phases.on; off = $phases.off; ink = $ink; fill_max = $fillMax
         }
     } finally { foreach ($image in $frames) { $image.Dispose() } }
 }
@@ -188,6 +226,9 @@ function Invoke-CaretAlignment($Session) {
     $samples = @()
     $short = 'abc'
     $long = 'mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm'
+    $emoji = [char]::ConvertFromUtf32(0x1f600)
+    $zwj = [char]::ConvertFromUtf32(0x1f469) + [char]0x200d + [char]::ConvertFromUtf32(0x1f4bb)
+    $clicks = @()
     foreach ($entry in @(
         @{ name = 'composer'; shortcut = ''; id = '1032' },
         @{ name = 'search'; shortcut = '^f'; id = '1064' },
@@ -200,12 +241,46 @@ function Invoke-CaretAlignment($Session) {
             Invoke-PaletteCommand $Session 'Compose message'
             $edit = Get-Edit (Get-Window $Session) $entry.id
         }
-        foreach ($case in @(@{ name = 'short'; text = $short }, @{ name = 'long'; text = $long })) {
-            $samples += Measure-CaretAlignment $Session $edit "$($entry.name)-$($case.name)" $case.text
+        foreach ($case in @(
+            @{ name = 'short'; text = $short; unicode = $false },
+            @{ name = 'long'; text = $long; unicode = $false },
+            @{ name = 'kerning'; text = 'AVATAR office Wavy'; unicode = $false },
+            @{ name = 'spaces'; text = 'MMMM        MMMM'; unicode = $false },
+            @{ name = 'emoji'; text = "word $($emoji)x"; unicode = $true },
+            @{ name = 'emoji-zwj'; text = "team $($zwj)x"; unicode = $true }
+        )) {
+            $samples += Measure-CaretAlignment $Session $edit "$($entry.name)-$($case.name)" $case.text $case.unicode
             $samples | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'alignment.json')
+            if ($case.name -eq 'spaces') {
+                $sample = $samples[-1]
+                $image = [Drawing.Bitmap]::new((Join-Path $Session.evidence "alignment-$($entry.name)-spaces-off.png"))
+                try {
+                    $gap = if ($sample.caret.top -ge 0 -and $sample.caret.bottom -lt $image.Height) {
+                        [VerifyCaret]::FindWordGap($image, $sample.caret.top, $sample.caret.bottom, $sample.fill_max)
+                    } else { @(-1, -1) }
+                } finally { $image.Dispose() }
+                $click = [ordered]@{ name = $entry.name; gap_left = $gap[0]; gap_right = $gap[1]; measured = ($gap[0] -ge 0 -and $gap[1] - $gap[0] -ge 8) }
+                if ($click.measured) {
+                    $click.x = [int]$sample.bounds.left + [int](($gap[0] + $gap[1]) / 2)
+                    $click.y = [int]$sample.bounds.top + [int](($sample.caret.top + $sample.caret.bottom) / 2)
+                    [VerifyMenus]::Click($Session.pid, $click.x, $click.y, $false)
+                    Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: $($entry.name) text gap x=$($click.x) y=$($click.y)"
+                    Send-Keys $Session 'x'
+                    $null = Wait-Until { (Read-Edit $edit).Contains('x') } "$($entry.name) click marker inserted"
+                    $click.actual = Read-Edit $edit
+                    $click.marker_index = $click.actual.IndexOf('x')
+                    $click.correct = ($click.marker_index -ge 7 -and $click.marker_index -le 9 -and $click.actual.Replace('x', '') -ceq $case.text)
+                    Save-Screen $Session "alignment-$($entry.name)-click"
+                }
+                $clicks += $click
+                $clicks | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'alignment-clicks.json')
+            }
         }
         Send-Keys $Session '^a{BACKSPACE}'
         if ($entry.shortcut) { Send-Keys $Session '{ESC}' }
+    }
+    foreach ($click in $clicks) {
+        Assert-That ($click.measured -and $click.correct) "$($click.name): click marker missed the visual word gap"
     }
     foreach ($sample in $samples) {
         Assert-That ($sample.on -ge 2 -and $sample.off -ge 2 -and $sample.caret.left -ge 0 -and $sample.ink_right -ge 0) "$($sample.name): cannot measure caret and ink"
