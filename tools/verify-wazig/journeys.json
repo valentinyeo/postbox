@@ -169,6 +169,20 @@
       "maximize": true
     },
     {
+      "name": "send-independence",
+      "pr": false,
+      "hub": "send-independence",
+      "evidence": false,
+      "chats": 2,
+      "script": "journey-send-independence.ps1",
+      "validator": null,
+      "hub_handler": {
+        "file": "send-independence-fixture.py",
+        "class": "SendIndependenceHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "hub",
       "pr": true,
       "hub": "mixed-lid",
