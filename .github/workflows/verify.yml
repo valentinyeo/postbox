@@ -288,6 +288,10 @@ jobs:
           Copy-Item group-senders-red-evidence verification-evidence/group-senders-red-control -Recurse
           'GROUP_ORIGINAL_RED_OK: original incoming messages have no avatar gutter' | Set-Content verification-evidence/group-senders-red-control.txt
           exit 0
+      - name: Voice repaint pixel controls
+        if: matrix.feature == 'voice'
+        shell: pwsh
+        run: tools/verify-wazig/test-voice-pixels.ps1
       - name: Real playback rejects the original missing output device
         if: matrix.feature == 'voice' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
         shell: pwsh
