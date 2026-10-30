@@ -12,6 +12,10 @@ function Select-FixtureChat($Session, [string]$Id) {
     Send-Keys $Session '{ENTER}'
 }
 
+if ($session.expected_version -cne '0.9.236') {
+    . "$PSScriptRoot/journey-send-independence-candidate.ps1"
+    return
+}
 if ($session.expected_version -ceq '0.9.236') {
     Assert-That ($session.sha256 -ceq 'C28BF3C5125E9D6C28144108DFDEEEB603CB8684A23FEEFEA405334F90EE83C3') 'Published executable fingerprint mismatch'
 }

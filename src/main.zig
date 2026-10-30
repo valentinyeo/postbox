@@ -535,7 +535,7 @@ const PendingReaction = struct {
 
 const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar, hub_thread, hub_older };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
-const WacliLane = enum { wacli, slack, hub_media };
+const WacliLane = enum { wacli, slack, hub_media, hub_send };
 
 const WacliJob = struct {
     pub const Notification = struct {
@@ -1038,6 +1038,7 @@ const App = struct {
     wacli_thread: ?std.Thread = null,
     wacli_slack_thread: ?std.Thread = null,
     hub_media_thread: ?std.Thread = null,
+    hub_send_thread: ?std.Thread = null,
     wacli_mutex: std.Io.Mutex = .init,
     wacli_cond: std.Io.Condition = .init,
     wacli_queue: [wacli_queue_size]WacliJob = [_]WacliJob{.{}} ** wacli_queue_size,
@@ -1952,6 +1953,10 @@ fn recordVerificationDispatch(a: *App, job: *const WacliJob) void {
 
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
     if (unifiedHub(a) and job.kind == .hub_send) {
+        if (a.hub_send_thread == null) {
+            setStatus(a, "Send worker unavailable; restart Postbox");
+            return false;
+        }
         const inflight = a.unified_inflight orelse return false;
         if (job.gen != inflight.attempt or !std.mem.eql(u8, job.msg_id.slice(), &inflight.id)) return false;
         if (verification_fixture and a.verification_retry_evidence) recordVerificationDispatch(a, &job);
@@ -1983,7 +1988,7 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
         const victim = outbox.evictionVictim(keep[0..a.wacli_queue_len]) orelse {
             if (!jobIsWrite(job.kind)) a.wacli_refresh_again = true;
             a.wacli_mutex.unlock(a.io);
-            if (a.wacli_thread == null or (jobIsSlack(job.kind) and a.wacli_slack_thread == null)) wacliPumpSync(a);
+            if (!(unifiedHub(a) and job.kind == .hub_send) and (a.wacli_thread == null or (jobIsSlack(job.kind) and a.wacli_slack_thread == null))) wacliPumpSync(a);
             return false;
         };
         a.wacli_pending[@intFromEnum(a.wacli_queue[victim].kind)] -= 1;
@@ -2005,7 +2010,7 @@ fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
     a.wacli_pending[@intFromEnum(job.kind)] += 1;
     a.wacli_cond.broadcast(a.io);
     a.wacli_mutex.unlock(a.io);
-    if (a.wacli_thread == null or (jobIsSlack(job.kind) and a.wacli_slack_thread == null)) wacliPumpSync(a);
+    if (!(unifiedHub(a) and job.kind == .hub_send) and (a.wacli_thread == null or (jobIsSlack(job.kind) and a.wacli_slack_thread == null))) wacliPumpSync(a);
     return true;
 }
 
@@ -2055,6 +2060,8 @@ fn wacliShutdown(a: *App) void {
     a.wacli_slack_thread = null;
     if (a.hub_media_thread) |thread| thread.join();
     a.hub_media_thread = null;
+    if (a.hub_send_thread) |thread| thread.join();
+    a.hub_send_thread = null;
     for (a.wacli_queue[0..a.wacli_queue_len]) |job| {
         if (job.archive_body) |body| a.allocator.free(body);
     }
@@ -2077,7 +2084,7 @@ fn wacliTakeJob(a: *App, lane: WacliLane) ?WacliJob {
     var index: usize = 0;
     while (index < a.wacli_queue_len) : (index += 1) {
         const kind = a.wacli_queue[index].kind;
-        const job_lane: WacliLane = if (jobIsSlack(kind)) .slack else if (kind == .hub_media or kind == .hub_avatar) .hub_media else .wacli;
+        const job_lane: WacliLane = if (unifiedHub(a) and kind == .hub_send) .hub_send else if (jobIsSlack(kind)) .slack else if (kind == .hub_media or kind == .hub_avatar) .hub_media else .wacli;
         if (job_lane != lane) continue;
         const job = a.wacli_queue[index];
         var shift = index;
@@ -17434,6 +17441,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 if (hubConfigured(a)) {
                     a.wacli_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .wacli }) catch return -1;
                     a.hub_media_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .hub_media }) catch return -1;
+                    if (unifiedHub(a)) a.hub_send_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .hub_send }) catch null;
                     enqueueCacheTagProbe(a);
                     startSync(a);
                 } else {
@@ -17451,6 +17459,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (hubConfigured(a) and a.hub_media_thread == null) {
                 a.hub_media_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .hub_media }) catch null;
                 if (a.hub_media_thread == null) setStatus(a, "Media worker unavailable; restart Postbox");
+            }
+            if (hubConfigured(a) and unifiedHub(a) and a.hub_send_thread == null) {
+                a.hub_send_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .hub_send }) catch null;
+                if (a.hub_send_thread == null) setStatus(a, "Send worker unavailable; restart Postbox");
             }
             if (std.Thread.spawn(.{ .stack_size = 256 * 1024 }, controlThreadMain, .{a})) |thread| {
                 thread.detach();
