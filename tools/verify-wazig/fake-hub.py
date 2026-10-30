@@ -2238,7 +2238,7 @@ def main():
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
-    server.state.snapshot_root = args.snapshot_root if args.mode in ('mixed-lid', 'hub-fault') else None
+    server.state.snapshot_root = args.snapshot_root if args.mode in ('mixed-lid', 'hub-fault', 'send-independence') else None
     server.state.archive_incoming = 0
     server.state.plain_dms = {}
     server.state.view_rows = view_rows()

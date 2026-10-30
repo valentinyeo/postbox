@@ -21,7 +21,7 @@ const max_wacli_args = 4;
 const wacli_arg_cap = 4095;
 const wacli_queue_size = 4;
 const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_download, slack_auth, cache_tag, slack_mark };
-const WacliLane = enum { wacli, slack, hub_media };
+const WacliLane = enum { wacli, slack, hub_media, hub_send };
 const WacliJob = struct {
     kind: WacliJobKind = .chats,
     gen: u64 = 0,
@@ -158,6 +158,7 @@ const App = struct {
     wacli_thread: ?bool = true,
     wacli_slack_thread: ?bool = true,
     hub_media_thread: ?bool = null,
+    hub_send_thread: ?bool = true,
     hub_account: Utf8Text(32) = .{},
     unified_hub: bool = false,
     unified_inflight: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
@@ -314,6 +315,7 @@ var closes: usize = 0;
 var try_write_through = false;
 var deleted: usize = 0;
 var spawned: usize = 0;
+var pumped: usize = 0;
 var refreshed: usize = 0;
 var compose_text: [4096]u16 = @splat(0);
 var compose_len: usize = 0;
@@ -326,6 +328,7 @@ fn reset() void {
     closes = 0;
     deleted = 0;
     spawned = 0;
+    pumped = 0;
     try_write_through = false;
     compose_len = 0;
     refreshed = 0;
@@ -395,7 +398,9 @@ fn mintSendId(_: *App, id: *[outbox.id_len]u8) void {
     id.* = outbox.hexId(id[0..16].*);
 }
 fn appendSlackPending(_: *App, _: []const u8, _: []const u8, _: []const u8) void {}
-fn wacliPumpSync(_: *App) void {}
+fn wacliPumpSync(_: *App) void {
+    pumped += 1;
+}
 fn deleteFileUtf8(_: []const u8) void {
     deleted += 1;
 }
@@ -1106,4 +1111,91 @@ test "intermediate unified outbox refuses send jobs" {
     const before = app.wacli_queue_len;
     try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .hub_send }, true));
     try std.testing.expectEqual(before, app.wacli_queue_len);
+}
+
+test "unified sends use independent lane and retain immutable job identity" {
+    reset();
+    var app = fixture();
+    app.unified_hub = true;
+    const id = [_]u8{'a'} ** outbox.id_len;
+    app.unified_inflight = .{ .id = id, .attempt = 7 };
+    var read = WacliJob{ .kind = .messages };
+    read.jid.set("chat-before");
+    try std.testing.expect(wacliEnqueue(&app, read, false));
+    var send = WacliJob{ .kind = .hub_send, .provider = .slack, .gen = 7 };
+    send.account.set("workspace-a");
+    send.jid.set("chat-before");
+    send.msg_id.set(&id);
+    send.unified_filename.set("picture.png");
+    send.unified_file_sha256 = @splat(42);
+    send.unified_file_bytes = 123;
+    try std.testing.expect(wacliEnqueue(&app, send, true));
+    const reader = wacliTakeJob(&app, .wacli).?;
+    try std.testing.expectEqual(WacliJobKind.messages, reader.kind);
+    const outgoing = wacliTakeJob(&app, .hub_send).?;
+    try std.testing.expectEqual(WacliJobKind.hub_send, outgoing.kind);
+    try std.testing.expectEqual(transport.Provider.slack, outgoing.provider);
+    try std.testing.expectEqualStrings("workspace-a", outgoing.account.slice());
+    try std.testing.expectEqualStrings("chat-before", outgoing.jid.slice());
+    try std.testing.expectEqualStrings(&id, outgoing.msg_id.slice());
+    try std.testing.expectEqual(@as(u64, 7), outgoing.gen);
+    try std.testing.expectEqualStrings("picture.png", outgoing.unified_filename.slice());
+    try std.testing.expectEqual(@as(u64, 123), outgoing.unified_file_bytes);
+    try std.testing.expectEqualSlices(u8, &([_]u8{42} ** 32), &outgoing.unified_file_sha256);
+    try std.testing.expect(wacliTakeJob(&app, .hub_send) == null);
+}
+
+test "missing unified sender rejects without synchronous pumping" {
+    reset();
+    var app = fixture();
+    app.unified_hub = true;
+    app.hub_send_thread = null;
+    app.wacli_thread = null;
+    const id = [_]u8{'b'} ** outbox.id_len;
+    app.unified_inflight = .{ .id = id, .attempt = 1 };
+    var job = WacliJob{ .kind = .hub_send, .gen = 1 };
+    job.msg_id.set(&id);
+    try std.testing.expect(!wacliEnqueue(&app, job, true));
+    try std.testing.expectEqual(@as(usize, 0), app.wacli_queue_len);
+    try std.testing.expectEqual(@as(u32, 0), app.wacli_pending[@intFromEnum(WacliJobKind.hub_send)]);
+    try std.testing.expectEqual(@as(usize, 0), pumped);
+}
+
+test "legacy hub sends remain on reader lane" {
+    reset();
+    var app = fixture();
+    try std.testing.expect(wacliEnqueue(&app, .{ .kind = .hub_send }, true));
+    try std.testing.expect(wacliTakeJob(&app, .hub_send) == null);
+    try std.testing.expectEqual(WacliJobKind.hub_send, wacliTakeJob(&app, .wacli).?.kind);
+}
+
+test "unified sender rejects a different checkpoint owner" {
+    reset();
+    var app = fixture();
+    app.unified_hub = true;
+    const id = [_]u8{'c'} ** outbox.id_len;
+    app.unified_inflight = .{ .id = id, .attempt = 3 };
+    var job = WacliJob{ .kind = .hub_send, .gen = 2 };
+    job.msg_id.set(&id);
+    try std.testing.expect(!wacliEnqueue(&app, job, true));
+    job.gen = 3;
+    job.msg_id.set("dddddddddddddddddddddddddddddddd");
+    try std.testing.expect(!wacliEnqueue(&app, job, true));
+    try std.testing.expectEqual(@as(usize, 0), app.wacli_queue_len);
+    try std.testing.expectEqual(@as(u32, 0), app.wacli_pending[@intFromEnum(WacliJobKind.hub_send)]);
+    try std.testing.expectEqual(@as(usize, 0), pumped);
+}
+
+test "unified sender does not pump missing reader on the UI thread" {
+    reset();
+    var app = fixture();
+    app.unified_hub = true;
+    app.wacli_thread = null;
+    const id = [_]u8{'e'} ** outbox.id_len;
+    app.unified_inflight = .{ .id = id, .attempt = 1 };
+    var job = WacliJob{ .kind = .hub_send, .gen = 1 };
+    job.msg_id.set(&id);
+    try std.testing.expect(wacliEnqueue(&app, job, true));
+    try std.testing.expectEqual(@as(usize, 0), pumped);
+    try std.testing.expectEqual(WacliJobKind.hub_send, wacliTakeJob(&app, .hub_send).?.kind);
 }
