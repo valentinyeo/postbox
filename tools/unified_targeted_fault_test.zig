@@ -9,6 +9,14 @@ var disk: [unified_snapshot.max_document_bytes]u8 = undefined;
 var disk_len: usize = 0;
 var temp: [unified_snapshot.max_document_bytes]u8 = undefined;
 var temp_len: usize = 0;
+var before_disk: [unified_snapshot.max_document_bytes]u8 = undefined;
+var before_len: usize = 0;
+
+fn captureVerificationCheckpointBefore(a: *App, _: []const u8) void {
+    if (!verification_fixture or a.unified_fault_transition != .checkpoint) return;
+    @memcpy(before_disk[0..disk_len], disk[0..disk_len]);
+    before_len = disk_len;
+}
 
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
@@ -105,6 +113,7 @@ const Fixture = struct {
     fn init() !Fixture {
         disk_len = 0;
         temp_len = 0;
+        before_len = 0;
         verification_fixture = true;
         const first = try std.testing.allocator.create(unified_snapshot.Snapshot);
         errdefer std.testing.allocator.destroy(first);
@@ -176,6 +185,9 @@ test "targeted checkpoint faults preserve durable ready and enqueue nothing" {
         try std.testing.expectEqual(@as(u64, 1), f.a.unified_fault_hits);
         try std.testing.expect(f.a.unified_storage_blocked and f.a.unified_unsaved_result == null);
         try std.testing.expectEqual(@as(usize, 0), f.a.enqueue_calls);
+        if (f.a.unified_write_fault == .replace) {
+            try std.testing.expectEqualSlices(u8, bytes, before_disk[0..before_len]);
+        } else try std.testing.expectEqual(@as(usize, 0), before_len);
         try assertDurable(f, .ready, &expected, bytes);
         tickUnifiedOutbox(f.a);
         try std.testing.expectEqual(@as(usize, 0), f.a.enqueue_calls);
@@ -209,6 +221,7 @@ test "fourth retryable exhaustion repeatedly fails held save" {
         try std.testing.expectError(error.OutboxUnavailable, retryUnifiedSend(f.a, expected.entry.idSlice(), key));
         for (0..2) |_| tickUnifiedOutbox(f.a);
         try std.testing.expectEqual(@as(u64, 3), f.a.unified_fault_hits);
+        try std.testing.expectEqual(@as(usize, 0), before_len);
         try std.testing.expectEqual(@as(usize, 1), f.a.enqueue_calls);
         try std.testing.expect(f.a.unified_unsaved_result != null and f.a.unified_storage_blocked);
         try assertDurable(f, .uncertain, &expected, bytes);
@@ -238,6 +251,7 @@ test "acknowledgement removal repeatedly fails without retiring intent" {
         finishUnifiedSend(f.a, &result);
         for (0..2) |_| tickUnifiedOutbox(f.a);
         try std.testing.expectEqual(@as(u64, 3), f.a.unified_fault_hits);
+        try std.testing.expectEqual(@as(usize, 0), before_len);
         try std.testing.expectEqual(@as(usize, 1), f.a.enqueue_calls);
         try std.testing.expect(f.a.unified_unsaved_result != null and f.a.unified_storage_blocked and f.a.unified_inflight == null);
         const key = chat_key.Key{ .provider = .slack, .account = "workspace-a", .id = "slack:workspace-a:channel" };

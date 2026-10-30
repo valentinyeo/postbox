@@ -40,9 +40,13 @@ def load(folder):
         assert re.fullmatch(r'[0-9a-f]{32}', entry['id'])
         stem = f"{entry['id']}-{entry['attempt']}"
         assert entry['snapshot'] == stem + '.snapshot.json' and entry['payload'] in ('', stem + '.payload')
-        captures.append(dict(index=entry, snapshot=read(directory / entry['snapshot']),
+        raw = (directory / entry['snapshot']).read_bytes()
+        captures.append(dict(index=entry, snapshot=json.loads(raw.decode('utf-8-sig')), raw=raw,
                              payload=(directory / entry['payload']).read_bytes() if entry['payload'] else b''))
+    checkpoint_raw = (folder / 'checkpoint-before.snapshot.json').read_bytes()
     return dict(session=session, requests=requests, stages=stages, captures=captures,
+                checkpoint_before=dict(raw=checkpoint_raw, snapshot=json.loads(checkpoint_raw.decode('utf-8-sig')),
+                                       meta=read(folder / 'checkpoint-before.meta.json')),
                 checkpoint_resumed=read(folder / 'checkpoint-resumed.meta.json'),
                 sources={name: read(folder / f'{name}.source.json') for name in CASES},
                 originals={name: (folder / f'{name}.original.png').read_bytes() for name in ('terminal', 'ack')},
@@ -134,6 +138,12 @@ def verify(data):
             assert boundary['before'] == before and boundary['after'] == before + 1
             assert (datetime.fromisoformat(boundary['click']) - datetime.fromisoformat(boundary['idle_start'])).total_seconds() >= 45
         else:
+            before_image = data['checkpoint_before']
+            assert before_image['raw'] == blocked['raw']
+            assert before_image['snapshot'] == blocked['snapshot']
+            assert hashlib.sha256(before_image['raw']).hexdigest() == before_image['meta']['snapshot_sha256'] == blocked['meta']['snapshot_sha256']
+            assert all(before_image['meta'][key] == blocked['meta'][key] for key in
+                       ('pid', 'start_ticks', 'exe', 'sha256', 'commit', 'root', 'backend', 'fault', 'transition', 'attempt'))
             assert not durable['file'] and not durable['owned_file'] and not durable['attachment_ready']
             assert blocked['meta']['composer_text'] == ''
             resumed = data['checkpoint_resumed']
@@ -157,6 +167,11 @@ def verify(data):
         row = get_record(capture['snapshot'], ids[name], session['bridge_url'])
         durable = get_record(data['stages'][name]['blocked']['snapshot'], ids[name], session['bridge_url'])
         assert index['id'] == ids[name] and row['phase'] == 'uncertain' and row['attempt_serial'] == index['attempt']
+        assert hashlib.sha256(capture['raw']).hexdigest() == index['snapshot_sha256']
+        if (name, index['attempt']) in (('terminal', 4), ('ack', 1)):
+            blocked = data['stages'][name]['blocked']
+            assert capture['raw'] == blocked['raw']
+            assert index['snapshot_sha256'] == blocked['meta']['snapshot_sha256']
         assert immutable(row) == immutable(durable)
         assert wire['body']['chat'] == row['jid'] and wire['body']['reply_to'] == row['reply_to']
         manual = name != 'checkpoint' and index['attempt'] == CASES[name][1] + 1
@@ -187,7 +202,24 @@ def negative_controls(data):
     def record_at(m, case, stage):
         return m['stages'][case][stage]['snapshot']['records'][0]
 
+    def change_before_only(m, name):
+        if name == 'checkpoint':
+            before = m['checkpoint_before']
+            digest = before['meta']
+        else:
+            identity = m['stages'][name]['blocked']['snapshot']['records'][0]['id']
+            attempt = 4 if name == 'terminal' else 1
+            before = next(c for c in m['captures'] if c['index']['id'] == identity and c['index']['attempt'] == attempt)
+            digest = before['index']
+        row = before['snapshot']['records'][0]
+        row['attempts'] = row['attempts'] - 1 if row['attempts'] else 1
+        before['raw'] = json.dumps(before['snapshot'], ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        digest['snapshot_sha256'] = hashlib.sha256(before['raw']).hexdigest()
+
     controls = {
+        'checkpoint before-image only': lambda m: change_before_only(m, 'checkpoint'),
+        'terminal before-image only': lambda m: change_before_only(m, 'terminal'),
+        'ack before-image only': lambda m: change_before_only(m, 'ack'),
         'missing fault hit': lambda m: m['stages']['terminal']['blocked']['status']['unified_snapshot'].update(fault_hits=0),
         'wrong durable phase': lambda m: record_at(m, 'terminal', 'blocked').update(phase='held'),
         'wrong durable hash': lambda m: m['stages']['ack']['blocked']['meta'].update(snapshot_sha256='0' * 64),

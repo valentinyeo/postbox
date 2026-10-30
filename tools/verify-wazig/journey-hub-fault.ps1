@@ -106,6 +106,11 @@ $null = Wait-Until {
 } 'checkpoint replacement blocked'
 Assert-That ((Read-Edit (Get-Edit (Get-Window $session) '1032')) -ceq '') 'Accepted checkpoint input not cleared'
 Assert-That (@(Fault-Requests $session 'Fault checkpoint').Count -eq 0) 'Checkpoint failure sent request'
+$beforePath = Join-Path $messages 'verification-checkpoint-before.v2'
+Assert-That (Test-Path $beforePath) 'Checkpoint before-image missing'
+$beforeApp = Get-App $session
+Copy-Item $beforePath (Join-Path $session.evidence 'checkpoint-before.snapshot.json')
+@{ pid = $beforeApp.Id; start_ticks = $session.startTicks; exe = $session.exe; sha256 = $session.sha256; commit = $session.commit; root = $session.root; backend = $session.bridge_url; fault = $start.Environment['WAZIG_VERIFY_OUTBOX_FAULT']; transition = $start.Environment['WAZIG_VERIFY_OUTBOX_TRANSITION']; attempt = $start.Environment['WAZIG_VERIFY_OUTBOX_ATTEMPT']; snapshot_sha256 = (Get-FileHash $beforePath -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $session.evidence 'checkpoint-before.meta.json')
 $checkpoint = Save-FaultEvidence $session 'checkpoint-blocked' 'Fault checkpoint'
 Start-Sleep -Seconds 3
 $null = Save-FaultEvidence $session 'checkpoint-still-blocked' 'Fault checkpoint'

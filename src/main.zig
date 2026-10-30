@@ -4619,6 +4619,15 @@ fn unifiedFaultAt(a: *App, stage: @TypeOf(a.unified_write_fault)) bool {
     return true;
 }
 
+fn captureVerificationCheckpointBefore(a: *App, path: []const u8) void {
+    if (!verification_fixture or a.unified_fault_transition != .checkpoint) return;
+    const before = (unifiedReadAttachment(a, path) catch return) orelse return;
+    defer a.allocator.free(before);
+    const evidence = messagesDirPath(a, "verification-checkpoint-before.v2") orelse return;
+    defer a.allocator.free(evidence);
+    unifiedWriteProtected(a, evidence, before) catch {};
+}
+
 fn writeOutboxAtomic(a: *App, path: []const u8, data: []const u8, unified: bool) bool {
     const fault = unified and verification_fixture;
     const temp_path = std.fmt.allocPrint(a.allocator, "{s}.new", .{path}) catch return false;
@@ -4641,7 +4650,10 @@ fn writeOutboxAtomic(a: *App, path: []const u8, data: []const u8, unified: bool)
     if (!flushed or !closed or (fault and unifiedFaultAt(a, .close))) return false;
     const target = (if (unified) unifiedNativePath(a.allocator, path) else std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path)) catch return false;
     defer a.allocator.free(target);
-    if (fault and unifiedFaultAt(a, .replace)) return false;
+    if (fault and unifiedFaultAt(a, .replace)) {
+        captureVerificationCheckpointBefore(a, path);
+        return false;
+    }
     return win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) != 0;
 }
 

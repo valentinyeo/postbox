@@ -6,6 +6,8 @@ var disk_len: usize = 0;
 var temp: [unified_snapshot.max_document_bytes]u8 = undefined;
 var temp_len: usize = 0;
 
+fn captureVerificationCheckpointBefore(_: *App, _: []const u8) void {}
+
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     unified_snapshot: ?*unified_snapshot.Snapshot = null,

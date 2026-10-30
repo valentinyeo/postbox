@@ -153,7 +153,7 @@ class Handler(bridge.Handler):
             with (target / payload).open('xb') as stream:
                 stream.write(owned.read_bytes())
         with (target / 'index.jsonl').open('a', encoding='utf-8') as stream:
-            stream.write(json.dumps(dict(id=client_id, attempt=record['attempt_serial'], snapshot=stem + '.snapshot.json', payload=payload,
+            stream.write(json.dumps(dict(id=client_id, attempt=record['attempt_serial'], snapshot=stem + '.snapshot.json', snapshot_sha256=hashlib.sha256(raw).hexdigest(), payload=payload,
                                          retry_marker=self.identity_ingress_markers.get(stem),
                                          dispatch_marker=self.identity_ingress_dispatches.get(stem))) + '\n')
 

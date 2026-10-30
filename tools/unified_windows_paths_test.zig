@@ -8,6 +8,8 @@ const win = @cImport({
 const wa_hub = struct { const max_file_bytes = 64 * 1024 * 1024; };
 const max_pending_sends = 32;
 const verification_fixture = false;
+fn captureVerificationCheckpointBefore(_: *App, _: []const u8) void {}
+
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     io: std.Io = std.testing.io,
