@@ -1,5 +1,8 @@
 name: giphy-loopback
 on:
+  push:
+    branches:
+      - postbox-dev/IGSH-1242
   workflow_dispatch:
   schedule:
     - cron: '15 4 * * *'
