@@ -9,6 +9,8 @@ const App = struct {
     outbox_load_failed: bool = false,
     unified_storage_blocked: bool = false,
     hub_account: Utf8Text(32) = .{},
+    cache_tag: Utf8Text(32) = .{},
+    view_account: Utf8Text(32) = .{},
     unified_imports_clean: bool = true,
     unified_inflight: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
     unified_unsaved_result: ?unified_snapshot.UnifiedOutcome = null,
@@ -352,4 +354,51 @@ test "failed source refill blocks later dispatch" {
     try std.testing.expect(!f.a.unified_imports_clean);
     beginUnifiedSend(f.a, 20_000);
     try std.testing.expectEqual(@as(usize, 1), f.a.enqueue_calls);
+}
+
+test "retry and dispatch retain source account across view switches" {
+    const f = try Fixture.init();
+    defer f.deinit();
+    f.a.cache_tag.set("hub-cache");
+    f.a.view_account.set("different-display");
+    const first = &f.first.records[0];
+    first.phase = .held;
+    first.entry.provider = .whatsapp;
+    first.entry.account.set("personal");
+    first.entry.jid.set("same-contact");
+    first.entry.file.set("");
+    first.entry.ptt = false;
+    first.entry.voice_seconds = 0;
+    first.owned_file.set("");
+    first.wire_filename.set("");
+    first.file_sha256 = @splat(0);
+    first.file_bytes = 0;
+    first.attachment_ready = false;
+    const second = &f.first.records[1];
+    second.* = first.*;
+    second.entry.id = [_]u8{'b'} ** outbox.id_len;
+    second.entry.account.set("business");
+    f.first.count = 2;
+    const wrong = chat_key.Key{ .provider = .whatsapp, .account = "business", .id = "same-contact" };
+    try std.testing.expectError(error.IntentNotFound, retryUnifiedSend(f.a, first.entry.idSlice(), wrong));
+    const right = chat_key.Key{ .provider = .whatsapp, .account = "personal", .id = "same-contact" };
+    try retryUnifiedSend(f.a, first.entry.idSlice(), right);
+    beginUnifiedSend(f.a, 100);
+    const job = f.a.observed_job.?;
+    try std.testing.expectEqualStrings("personal", job.account.slice());
+    try std.testing.expectEqualStrings("same-contact", job.jid.slice());
+    try std.testing.expectEqualStrings("reply-id", job.args[2].slice());
+    try std.testing.expectEqualStrings("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", job.msg_id.slice());
+}
+
+test "slack workspaces retain retry account and thread reply" {
+    const f = try Fixture.init();
+    defer f.deinit();
+    f.a.cache_tag.set("hub-cache");
+    f.a.view_account.set("workspace-b");
+    f.first.records[0].phase = .held;
+    try retryUnifiedSend(f.a, f.first.records[0].entry.idSlice(), .{ .provider = .slack, .account = "workspace-a", .id = "slack:workspace-a:channel" });
+    beginUnifiedSend(f.a, 100);
+    try std.testing.expectEqualStrings("workspace-a", f.a.observed_job.?.account.slice());
+    try std.testing.expectEqualStrings("reply-id", f.a.observed_job.?.args[2].slice());
 }

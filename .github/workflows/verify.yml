@@ -34,6 +34,11 @@ jobs:
           version: 0.16.0
       - name: Raw transcript provenance and historical summary export control
         run: python tools/check_transcript_copy_regression.py --zig zig
+      - name: Unified snapshot and checkpoint proofs
+        run: |
+          zig test src/unified_snapshot.zig
+          python tools/test_unified_snapshot_atomic.py --zig zig
+          python tools/test_unified_checkpoint.py --zig zig --negative-controls
       - name: Plan registered journeys
         id: matrix
         shell: python
