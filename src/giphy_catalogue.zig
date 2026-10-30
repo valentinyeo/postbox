@@ -106,20 +106,39 @@ fn validId(id: []const u8) bool {
 }
 
 fn validMediaUrl(url: []const u8, id: []const u8) bool {
-    const prefix = "https://";
-    if (!std.mem.startsWith(u8, url, prefix) or url.len > 512) return false;
-    const rest = url[prefix.len..];
-    const slash = std.mem.indexOfScalar(u8, rest, '/') orelse return false;
-    const host = rest[0..slash];
+    if (url.len > 512 or !validId(id)) return false;
+    const uri = std.Uri.parse(url) catch return false;
+    if (!std.mem.eql(u8, uri.scheme, "https") or uri.user != null or uri.password != null or uri.port != null or uri.fragment != null) return false;
+    const host = (uri.host orelse return false).percent_encoded;
     if (!std.mem.startsWith(u8, host, "media") or !std.mem.endsWith(u8, host, ".giphy.com")) return false;
     const suffix = host[5 .. host.len - ".giphy.com".len];
     for (suffix) |c| if (!std.ascii.isDigit(c)) return false;
-    const path = rest[slash..];
+    const path = uri.path.percent_encoded;
     if (!std.mem.startsWith(u8, path, "/media/") or !std.mem.endsWith(u8, path, ".gif")) return false;
-    const tail = path[7..];
-    if (!std.mem.startsWith(u8, tail, id) or tail.len <= id.len or tail[id.len] != '/') return false;
-    for (tail[id.len + 1 ..]) |c| {
-        if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '-' and c != '.') return false;
+    var segments = std.mem.splitScalar(u8, path[7..], '/');
+    var content_id = segments.next() orelse return false;
+    if (std.mem.startsWith(u8, content_id, "v1.")) {
+        const token = content_id[3..];
+        if (token.len == 0) return false;
+        for (token) |c| if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_') return false;
+        content_id = segments.next() orelse return false;
+    }
+    if (!std.mem.eql(u8, content_id, id)) return false;
+    const filename = segments.next() orelse return false;
+    if (filename.len <= 4 or segments.next() != null or std.mem.indexOf(u8, filename, "..") != null) return false;
+    for (filename) |c| if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '-' and c != '.') return false;
+    if (uri.query) |component| {
+        const query = component.percent_encoded;
+        var i: usize = 0;
+        while (i < query.len) : (i += 1) {
+            const c = query[i];
+            if (c == '%') {
+                if (query.len - i < 3 or !std.ascii.isHex(query[i + 1]) or !std.ascii.isHex(query[i + 2])) return false;
+                const decoded = std.fmt.parseUnsigned(u8, query[i + 1 ..][0..2], 16) catch return false;
+                if (decoded < 32 or decoded == 127 or decoded == '\\') return false;
+                i += 2;
+            } else if (!std.ascii.isAlphanumeric(c) and std.mem.indexOfScalar(u8, "-._~!$&'()*+,;=:@/?", c) == null) return false;
+        }
     }
     return true;
 }
@@ -244,14 +263,25 @@ test "catalogue separates preview and original" {
 
 test "only matching giphy GIF media is accepted" {
     try std.testing.expect(validMediaUrl("https://media0.giphy.com/media/abc123/200.gif", "abc123"));
+    try std.testing.expect(validMediaUrl("https://media0.giphy.com/media/abc123/200.gif?cid=example&rid=200.gif&ct=g", "abc123"));
+    try std.testing.expect(validMediaUrl("https://media1.giphy.com/media/v1.dG9rZW4/abc123/giphy.gif?cid=example%2Fvalue&rid=giphy.gif&ct=g", "abc123"));
+    try std.testing.expect(validMediaUrl("https://media.giphy.com/media/abc123/giphy.gif?next=https%3A%2F%2Fexample.test", "abc123"));
     for ([_][]const u8{
         "http://media.giphy.com/media/abc123/giphy.gif",
         "https://media.giphy.com@evil.test/media/abc123/giphy.gif",
         "https://media.giphy.com.evil.test/media/abc123/giphy.gif",
         "https://media.giphy.com:443/media/abc123/giphy.gif",
         "https://media.giphy.com/media/other/giphy.gif",
-        "https://media.giphy.com/media/abc123/giphy.gif?redirect=evil",
         "https://media.giphy.com/media/abc123/../giphy.gif",
+        "https://media.giphy.com/media/v1.dG9rZW4/other/giphy.gif?cid=example",
+        "https://media.giphy.com/media/v1./abc123/giphy.gif",
+        "https://media.giphy.com/media/v1.%2e%2e/abc123/giphy.gif",
+        "https://media.giphy.com/media/abc123/%2e%2e/giphy.gif",
+        "https://media.giphy.com/media/abc123/giphy.gif#fragment",
+        "https://media.giphy.com/media/abc123/giphy.gif?cid=%0d%0aHost:evil",
+        "https://media.giphy.com/media/abc123/giphy.gif?cid=%GG",
+        "https://evilmedia.giphy.com/media/abc123/giphy.gif",
+        "https://media1.giphy.com.evil.test/media/abc123/giphy.gif",
     }) |url| try std.testing.expect(!validMediaUrl(url, "abc123"));
     try std.testing.expectError(error.InvalidMedia, rendition(.{ .url = "https://media.giphy.com/media/abc123/giphy.gif", .width = "0", .height = "5", .size = "1" }, "abc123"));
 }
@@ -285,4 +315,16 @@ test "duplicate IDs and malformed responses are rejected" {
     try std.testing.expectError(error.DuplicateId, parse(std.testing.allocator, duplicate, 0, 25));
     try std.testing.expectError(error.InvalidPage, parse(std.testing.allocator, duplicate, 0, 1));
     if (parse(std.testing.allocator, "{", 0, 1)) |_| return error.TestUnexpectedResult else |_| {}
+}
+
+
+test "tracked CDN URLs survive catalogue JSON parsing unchanged" {
+    const tracked =
+        \\{"data":[{"type":"gif","id":"abc123","images":{"fixed_width":{"url":"https://media1.giphy.com/media/v1.dG9rZW4/abc123/200.gif?cid=example&rid=200.gif&ct=g","width":"200","height":"112","size":"4117","mp4_size":"3210"},"original":{"url":"https://media.giphy.com/media/abc123/giphy.gif?cid=example&rid=giphy.gif&ct=g","width":"480","height":"270","size":"20000","frames":"20"}}}],"pagination":{"total_count":100,"count":1,"offset":0},"meta":{"status":200,"msg":"OK"}}
+    ;
+    const page = try parse(std.testing.allocator, tracked, 0, 25);
+    try std.testing.expectEqualStrings("https://media1.giphy.com/media/v1.dG9rZW4/abc123/200.gif?cid=example&rid=200.gif&ct=g", page.items[0].preview.url.slice());
+    try std.testing.expectEqualStrings("https://media.giphy.com/media/abc123/giphy.gif?cid=example&rid=giphy.gif&ct=g", page.items[0].original.url.slice());
+    try std.testing.expectEqual(@as(u32, 4117), page.items[0].preview.size);
+    try std.testing.expectEqual(@as(u32, 270), page.items[0].original.height);
 }
