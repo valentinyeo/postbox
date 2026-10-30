@@ -5040,7 +5040,7 @@ fn checkMarkRead(a: *App) void {
 }
 
 fn retryPendingDownload(a: *App) void {
-    if (a.pending_download_id.len == 0 or freeMediaSlot(a) == null or a.send_child != null) return;
+    if (a.pending_download_id.len == 0 or freeMediaSlot(a) == null or (!hubConfigured(a) and a.send_child != null)) return;
     if (a.selected_chat >= a.chat_count) return;
     if (!std.mem.eql(u8, a.pending_download_jid.slice(), a.chats[a.selected_chat].jid.slice())) {
         a.pending_download_jid.set("");
@@ -5712,8 +5712,8 @@ fn downloadMedia(a: *App, message_index: usize, automatic: bool) bool {
         media_drain.forgetAttempt(&a.media_attempts, &a.media_attempt_count, played.Set.pairKey(chat.jid.slice(), message.id.slice()));
     }
     if (mediaDownloading(a, a.chats[a.selected_chat].jid.slice(), message.id.slice())) return false;
-    if (freeMediaSlot(a) == null or a.send_child != null or a.pending_send_count > 0 or
-        a.read_child != null or a.archive_child != null or avatarBusy(a))
+    if (freeMediaSlot(a) == null or (!hubConfigured(a) and (a.send_child != null or a.pending_send_count > 0 or
+        a.read_child != null or a.archive_child != null or avatarBusy(a))))
     {
         if (!automatic) {
             a.pending_download_jid.set(chat.jid.slice());
@@ -5744,6 +5744,15 @@ fn markMediaAttempted(a: *App, jid: []const u8, id: []const u8) void {
 
 fn mediaUnavailable(a: *const App, jid: []const u8, id: []const u8) bool {
     return std.mem.indexOfScalar(u64, a.media_unavailable[0..a.media_unavailable_count], played.Set.pairKey(jid, id)) != null;
+}
+
+fn mediaFailed(a: *const App, jid: []const u8, id: []const u8) bool {
+    if (mediaUnavailable(a, jid, id)) return true;
+    const hash = played.Set.pairKey(jid, id);
+    for (a.media_failures) |entry| {
+        if (entry.hash == hash and entry.count > 0) return true;
+    }
+    return false;
 }
 
 fn markMediaUnavailable(a: *App, jid: []const u8, id: []const u8) void {
@@ -12299,6 +12308,9 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             .{ .name = "toggle", .rect = message.toggle_hit },
         }) |entry| try w.print(",\"{s}\":[{d},{d},{d},{d}]", .{ entry.name, entry.rect.left, entry.rect.top, entry.rect.right, entry.rect.bottom });
         if (verification_fixture) {
+            try w.writeAll(",\"download_state\":");
+            try control_api.writeString(w, @tagName(media_drain.voiceState(message.local_path.len > 0, mediaDownloading(a, a.displayed_jid.slice(), message.id.slice()), mediaFailed(a, a.displayed_jid.slice(), message.id.slice()), message.media_size)));
+            try w.print(",\"playing\":{},\"position_ms\":{d}", .{ std.mem.eql(u8, a.audio_playing_id.slice(), message.id.slice()) and a.audio_state == .playing, a.audio_position_ms });
             try w.print(",\"marked\":{},\"local_path\":", .{messageMarked(a, message.id.slice())});
             try control_api.writeStringUtf16(w, message.local_path.slice());
             var logical = std.mem.zeroes(win.LOGFONTW);
@@ -15524,7 +15536,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 var media_rect = win.RECT{ .left = left + px(a, 12), .top = strip_top, .right = right - px(a, 12), .bottom = strip_top + px(a, 42) };
                 var label_buffer: [128]u8 = undefined;
                 var label_wide = WideText(127){};
-                label_wide.set(a.allocator, media_drain.attachmentLabel(&label_buffer, "Voice message", message.media_size, if (media_drain.oversized(message.media_size)) .oversized else .downloading));
+                label_wide.set(a.allocator, media_drain.attachmentLabel(&label_buffer, "Voice message", message.media_size, media_drain.voiceState(false, mediaDownloading(a, a.displayed_jid.slice(), message.id.slice()), mediaFailed(a, a.displayed_jid.slice(), message.id.slice()), message.media_size)));
                 _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
             } else {
                 const playing_now = active and a.audio_state == .playing;
@@ -19956,6 +19968,7 @@ fn enqueueHubMedia(a: *App, slot: *MediaDownload) bool {
     if (!wacliEnqueue(a, job, false)) return false;
     slot.hub_pending = true;
     slot.hub_retry_ms = 0;
+    appendLaunchLog(a, "media: download started");
     return true;
 }
 
@@ -20080,6 +20093,7 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                     return;
                 }
                 slot.hub_pending = false;
+                appendLaunchLog(a, if (result.ok and result.http_status != 202) "media: download finished" else "media: download failed");
                 const ok = result.ok and result.http_status != 202;
                 if (ok) {
                     markMediaAttempted(a, slot.jid.slice(), slot.id.slice());

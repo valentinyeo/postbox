@@ -1538,6 +1538,23 @@ class MediaFitHandler(Handler):
             self.respond(400, {'error': 'unexpected media-fit write'}, body=body)
 
 
+def voice_playback_bytes():
+    def page(packet, sequence, granule, flags):
+        header = b'OggS' + bytes([0, flags]) + struct.pack('<QIII', granule, 1, sequence, 0) + bytes([1, len(packet)])
+        data = bytearray(header + packet)
+        crc = 0
+        for value in data:
+            crc ^= value << 24
+            for _ in range(8):
+                crc = ((crc << 1) ^ (0x04c11db7 if crc & 0x80000000 else 0)) & 0xffffffff
+        data[22:26] = struct.pack('<I', crc)
+        return bytes(data)
+    head = b'OpusHead' + struct.pack('<BBHIhB', 1, 1, 312, 48000, 0, 0)
+    tags = b'OpusTags' + struct.pack('<II', 0, 0)
+    return page(head, 0, 0, 2) + page(tags, 1, 0, 0) + b''.join(
+        page(bytes([0xf8, 0xff, 0xfe]), n + 2, (n + 1) * 960, 4 if n == 399 else 0) for n in range(400))
+
+
 VOICE_NOTES = 5
 VOICE_BYTES = Path(__file__).with_name('voice-note.ogg').read_bytes()
 
@@ -1569,6 +1586,9 @@ class VoiceHandler(Handler):
                              SenderJID='fixture-voice-sender', SenderName='Fixture Voice', MediaType='audio',
                              MimeType='audio/ogg', Filename=f'voice-{n}.ogg')
                         for n in range(1, VOICE_NOTES + 1)]
+                if getattr(self.state, 'voice_new', False):
+                    rows.extend(dict(MsgID=f'NEW-VOICE-{n}', ChatJID=chat, Timestamp=self.stamp(600 + n), Text='', FromMe=False,
+                                     SenderName='Fixture Voice', MediaType='audio', MimeType='audio/ogg') for n in range(1, 5))
                 rows.insert(3, dict(MsgID='VOICE-TEXT', ChatJID=chat, Timestamp=self.stamp(210),
                                     Text='Do not copy this marked text message.', FromMe=False, SenderName='Fixture Voice'))
             else:
@@ -1577,7 +1597,12 @@ class VoiceHandler(Handler):
             self.respond(200, list(reversed(rows)))
         elif url.path.startswith('/v1/wazig/media/'):
             chat, message = map(unquote, url.path.removeprefix('/v1/wazig/media/').split('/', 1))
-            if chat == ALPHA and message.startswith('VOICE-'):
+            if chat == ALPHA and message.startswith('NEW-VOICE-'):
+                if message == 'NEW-VOICE-4' and not getattr(self.state, 'voice_retry', False):
+                    self.respond(502, {'error': 'forced download failure'})
+                else:
+                    self.respond(200, self.state.voice_audio, 'audio/ogg')
+            elif chat == ALPHA and message.startswith('VOICE-'):
                 self.respond(200, VOICE_BYTES, 'audio/ogg', sha256=hashlib.sha256(VOICE_BYTES).hexdigest())
             else:
                 self.respond(404, {'error': 'unknown voice note'})
@@ -1593,7 +1618,21 @@ class VoiceHandler(Handler):
         if not self.authorized():
             return
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
-        if self.path == '/v1/wazig/mark-read':
+        if self.path == '/fixture/voice-new':
+            self.state.voice_new = True
+            self.respond(200, {'ready': True}, body=body)
+        elif self.path == '/fixture/voice-retry':
+            self.state.voice_retry = True
+            self.respond(200, {'ready': True}, body=body)
+        elif self.path == '/fixture/voice-send-ready':
+            self.state.voice_send_ready = True
+            self.respond(200, {'ready': True}, body=body)
+        elif self.path == '/v1/wazig/send':
+            if getattr(self.state, 'voice_send_ready', False):
+                self.respond(200, {'status': 'sent', 'client_id': body['client_id']}, body=body)
+            else:
+                self.respond(503, {'error': 'forced queued send'}, body=body)
+        elif self.path == '/v1/wazig/mark-read':
             self.respond(200, {'status': 'ok'}, body=body)
         else:
             self.respond(400, {'error': 'unexpected voice write'}, body=body)
@@ -1994,6 +2033,8 @@ def main():
     server.state.telegram_reaction = None
     server.state.telegram_events = []
     server.state.telegram_read = set()
+    if args.mode == 'voice':
+        server.state.voice_audio = voice_playback_bytes()
     if args.mode == 'media-fit':
         server.state.fit_text = 'M M M M M M M M'
         server.state.fit_media = {

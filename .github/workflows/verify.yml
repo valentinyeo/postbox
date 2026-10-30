@@ -92,6 +92,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+          use-cache: false
       - name: ISSUE-462 row-sized DirectWrite regression
         shell: pwsh
         run: |
@@ -302,6 +303,27 @@ jobs:
         if: matrix.feature == 'voice'
         shell: pwsh
         run: tools/verify-wazig/install-audio.ps1
+      - name: Queued-send voice download historical red control
+        if: matrix.feature == 'voice' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
+        shell: pwsh
+        run: |
+          $original = [IO.File]::ReadAllText('src/main.zig')
+          try {
+            python tools/verify-wazig/voice-download-red.py
+            if ($LASTEXITCODE -ne 0) { throw 'Historical download extraction failed' }
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix voice-red-bin
+            if ($LASTEXITCODE -ne 0) { throw 'Historical media build failed' }
+          } finally { [IO.File]::WriteAllText('src/main.zig', $original) }
+          $failed = $false
+          try {
+            & tools/verify-wazig/run.ps1 -Feature voice -Bin voice-red-bin/bin -Evidence voice-red-evidence
+          } catch { $failed = $true }
+          if (-not $failed) { throw 'Historical queued-send starvation escaped verification' }
+          $reason = Get-Content voice-red-evidence/failure.txt -Raw
+          if (-not $reason.Contains('new voice downloads despite queued send')) { throw "Wrong red failure: $reason" }
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          Copy-Item voice-red-evidence/failure.txt verification-evidence/voice-download-red.txt
+          'HISTORICAL_VOICE_STARVATION_CAUGHT' | Add-Content verification-evidence/voice-download-red.txt
       - name: Real playback rejects the original invalid voice fixture
         if: matrix.feature == 'voice' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
         shell: pwsh
