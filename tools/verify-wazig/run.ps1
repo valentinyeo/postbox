@@ -142,7 +142,8 @@ try {
     $app.StandardError.ReadToEnd() | Set-Content (Join-Path $Evidence 'app.stderr.log')
     Stop-Transcript | Out-Null
 }
-$result = @{ feature = $Feature; status = $(if ($FontBaseline) { 'baseline-captured' } else { 'passed' }) }
+$result = @{ feature = $Feature; status = 'passed' }
+if ($FontBaseline) { $result.status = 'baseline-captured' }
 if (-not $FontBaseline -and $journey.result_checks) {
     $result.checks = Get-Content (Join-Path $Evidence $journey.result_checks) -Raw | ConvertFrom-Json -AsHashtable
 }
