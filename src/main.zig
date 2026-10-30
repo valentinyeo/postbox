@@ -12868,9 +12868,11 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
                 .held => held += 1,
             };
         }
-        try w.print(",\"unified_snapshot\":{{\"loaded\":{},\"ready\":{d},\"uncertain\":{d},\"held\":{d},\"inflight\":{d},\"hub_jobs\":{d},\"storage_blocked\":{},\"unsaved_outcomes\":{d},\"fault_hits\":{d}}}", .{
+        try w.print(",\"legacy_hub_tag\":\"{x:0>16}\"", .{std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, a.wa_bridge_url), "hub")});
+        try w.print(",\"unified_snapshot\":{{\"loaded\":{},\"ready\":{d},\"uncertain\":{d},\"held\":{d},\"inflight\":{d},\"hub_jobs\":{d},\"storage_blocked\":{},\"unsaved_outcomes\":{d},\"fault_hits\":{d},\"imports_clean\":{},\"import_unresolved\":{d},\"import_overflow\":{d}}}", .{
             unifiedHub(a) and a.unified_snapshot != null and !a.outbox_load_failed, ready, uncertain, held, @as(u8, if (a.unified_inflight != null) 1 else 0),
             wacliPendingGet(a, .hub_send), a.unified_storage_blocked, @as(u8, if (a.unified_unsaved_result != null) 1 else 0), a.unified_fault_hits,
+            a.unified_imports_clean, a.unified_import_unresolved, a.unified_import_overflow,
         });
     }
     const card = updateCardRect(a);
