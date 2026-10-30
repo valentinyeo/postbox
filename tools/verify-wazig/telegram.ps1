@@ -234,8 +234,11 @@ function Invoke-TelegramJourney($Session, [string]$Messages) {
     $beforeClear = Save-TelegramArchiveObservation $Session 'before-clear'
     Assert-That ($beforeClear.focused_hwnd -eq $beforeClear.composer_hwnd -and $beforeClear.focused_automation_id -eq '1032' -and $beforeClear.focused_class -eq 'RICHEDIT50W') 'Telegram composer does not own focus before clear'
     Assert-That ($beforeClear.selected.id -eq 'telegram:user:1002' -and $beforeClear.bulk_selected_count -eq 0) 'Telegram clear started in the wrong selection'
-    Send-Keys $Session '^a{BACKSPACE}'
+    Add-Content (Join-Path $Session.evidence 'actions.log') 'telegram-clear: begin'
+    if ($beforeClear.composer_text.Length -gt 0) { Send-Keys $Session '^a{BACKSPACE}' }
+    Add-Content (Join-Path $Session.evidence 'actions.log') 'telegram-clear: end'
     $afterClear = Save-TelegramArchiveObservation $Session 'after-clear'
+    Assert-That ($afterClear.focused_hwnd -eq $afterClear.composer_hwnd -and $afterClear.focused_automation_id -eq '1032' -and $afterClear.focused_class -eq 'RICHEDIT50W') 'Telegram composer lost focus during clear'
     Assert-That ($afterClear.composer_text -ceq '' -and $afterClear.selected.id -eq 'telegram:user:1002' -and $afterClear.bulk_selected_count -eq 0) 'Telegram clear changed the chat selection'
     Invoke-PaletteCommand $Session 'Verification Telegram'
     $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'telegram:user:1001' } 'Telegram chat restored'

@@ -94,7 +94,11 @@ def check_archive_observations(folder, session):
     assert before['focused_hwnd'] == before['composer_hwnd'], 'composer must own focus before clear'
     assert before['focused_class'] == 'RICHEDIT50W' and before['focused_automation_id'] == '1032'
     assert before['focused_text'] == before['composer_text']
-    assert observations['after-clear']['composer_text'] == ''
+    after = observations['after-clear']
+    assert after['focused_hwnd'] == after['composer_hwnd']
+    assert after['focused_class'] == 'RICHEDIT50W' and after['focused_automation_id'] == '1032'
+    assert after['focused_text'] == after['composer_text'] == ''
+    return before['composer_text']
 
 
 def check_telegram(folder):
@@ -172,7 +176,7 @@ def check_telegram(folder):
         assert shown['chat']['id'] == 'telegram:user:1002'
         assert sum(row['send_state'] == 'failed' and reason in row['text'] for row in shown['messages']) == 1
         assert capture(name)['pending_sends'] == 0
-    check_archive_observations(folder, session)
+    before_clear_text = check_archive_observations(folder, session)
     archives = [row for row in requests if row['method'] == 'POST' and row['path'] == '/v1/wazig/archive' and row['body']['chat'] == 'telegram:user:1001']
     assert not archives, 'Telegram archive must stay local'
     for name, archived, count in [('archived-inbox', False, 4), ('archived', True, 1), ('unarchived-archive', True, 0), ('after', False, 5)]:
@@ -199,8 +203,13 @@ def check_telegram(folder):
     for keys in ['^2', 'Reply to selected message', 'Synthetic Telegram reply', '%k', 'Compose message', 'Attach photo or file', 'Synthetic Telegram outgoing', 'Synthetic Telegram file', 'Synthetic rejected send', 'Like', '^e', 'Show archived chats', 'Show inbox chats', '{ENTER}']:
         assert f'keys: {keys}' in actions, keys
     assert actions.count('keys: ^e\n') == 2
-    assert 'keys: ^a{BACKSPACE}\n' in actions
-    tail = actions[actions.index('keys: ^a{BACKSPACE}\n'):]
+    begin, end = 'telegram-clear: begin\n', 'telegram-clear: end\n'
+    assert actions.count(begin) == actions.count(end) == 1
+    start = actions.index(begin) + len(begin)
+    finish = actions.index(end)
+    assert start <= finish
+    assert actions[start:finish] == ('keys: ^a{BACKSPACE}\n' if before_clear_text else '')
+    tail = actions[finish + len(end):]
     assert 'keys: Verification Telegram\n' in tail and 'keys: ^e\n' in tail
     assert tail.index('keys: Verification Telegram\n') < tail.index('keys: ^e\n')
     assert 'JOURNEY PASSED: telegram' in (folder / 'result.txt').read_text(encoding='utf-8-sig')

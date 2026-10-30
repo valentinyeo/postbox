@@ -417,13 +417,16 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
         keys = ['^2' if provider == 'telegram' else '^3', '%k', 'Compose message', 'Attach photo or file',
                 f'Synthetic {title} outgoing', f'Synthetic {title} file', 'Synthetic rejected send', 'Like', '{ENTER}']
         if provider == 'telegram':
-            keys += ['^a{BACKSPACE}', 'Verification Telegram']
+            keys += ['Verification Telegram']
         keys += ['^e', 'Show archived chats', '^e', 'Show inbox chats']
         if provider == 'telegram':
             keys += ['Reply to selected message', 'Synthetic Telegram reply']
         else:
             keys += ['%i']
-        (self.folder / 'actions.log').write_text(''.join(f'keys: {key}\n' for key in keys))
+        actions = ''.join(f'keys: {key}\n' for key in keys)
+        if provider == 'telegram':
+            actions = actions.replace('keys: Verification Telegram\n', 'telegram-clear: begin\ntelegram-clear: end\nkeys: Verification Telegram\n')
+        (self.folder / 'actions.log').write_text(actions)
         (self.folder / 'hub-proof.log').write_text('\n'.join(f'{provider} {gate} PASS' for gate in gates))
         (self.folder / 'result.txt').write_text(f'JOURNEY PASSED: {provider}')
         (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED:')
@@ -450,6 +453,7 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
             ('before-clear', 'gui_thread_ok', False),
             ('before-clear', 'focused_automation_id', '1016'),
             ('after-clear', 'composer_text', 'not cleared'),
+            ('after-clear', 'focused_hwnd', 102),
             ('after-clear', 'bulk_selected_count', 5),
             ('after-palette', 'selected', dict(id='telegram:user:1002')),
             ('before-archive', 'bulk_selected_count', 5),
@@ -457,6 +461,34 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
             with self.subTest(phase=phase, field=field):
                 self.fixture('telegram')
                 self.data[f'telegram-archive-{phase}.json'][field] = value
+                with self.assertRaises(AssertionError):
+                    self.check()
+
+    def test_telegram_clear_requires_keys_only_for_nonempty_composer(self):
+        marker = 'telegram-clear: begin\ntelegram-clear: end\n'
+        key = 'keys: ^a{BACKSPACE}\n'
+        for nonempty, logged in ((False, False), (True, True), (False, True), (True, False)):
+            with self.subTest(nonempty=nonempty, logged=logged):
+                self.fixture('telegram')
+                before = self.data['telegram-archive-before-clear.json']
+                before['composer_text'] = before['focused_text'] = 'retained draft' if nonempty else ''
+                path = self.folder / 'actions.log'
+                actions = path.read_text()
+                if logged:
+                    actions = actions.replace(marker, 'telegram-clear: begin\n' + key + 'telegram-clear: end\n')
+                path.write_text(actions)
+                if nonempty == logged:
+                    self.check()
+                else:
+                    with self.assertRaises(AssertionError):
+                        self.check()
+
+    def test_telegram_clear_rejects_missing_or_reordered_boundaries(self):
+        for replacement in ('', 'telegram-clear: end\ntelegram-clear: begin\n'):
+            with self.subTest(replacement=replacement):
+                self.fixture('telegram')
+                path = self.folder / 'actions.log'
+                path.write_text(path.read_text().replace('telegram-clear: begin\ntelegram-clear: end\n', replacement))
                 with self.assertRaises(AssertionError):
                     self.check()
 
