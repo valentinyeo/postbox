@@ -245,6 +245,7 @@ function Invoke-CaretAlignment($Session) {
             @{ name = 'short'; text = $short; unicode = $false },
             @{ name = 'long'; text = $long; unicode = $false },
             @{ name = 'kerning'; text = 'AVATAR office Wavy'; unicode = $false },
+            @{ name = 'url'; text = 'https://example.test/path/012345678901234567890123456789'; unicode = $false },
             @{ name = 'spaces'; text = 'MMMM        MMMM'; unicode = $false },
             @{ name = 'emoji'; text = "word $($emoji)x"; unicode = $true },
             @{ name = 'emoji-zwj'; text = "team $($zwj)x"; unicode = $true }
