@@ -138,11 +138,11 @@ def check_integration():
     assert source.count('.view_account = hub.viewAccount(object, "")') == 1
     assert source.count('.account = hub.sourceAccount(object, "")') == 1
     routing_function_sha256 = {
-        'unifiedHubRequest': '0f3c0953dc5314dc815cfb390dd28e68e6d3e75cc295f2c5f22019056f0d4058',
-        'restoreOutbox': 'a791a2544b84c0a64de293d74703552d00d357c798d01e54a7c444326a1ef30d',
-        'loadOutbox': '040428fa42997f7006f87154b7713db94102b863d4536fa853496fc8c4103f0b',
+        'unifiedHubRequest': 'f18609b293a502c4f164abd8982e545a609f945871d764c43be8d2e2a0d2bba6',
+        'restoreOutbox': '983dd22862da7ee5dfdb612a58c418c8313fdf6716b5c8229393ad5f8d28b53b',
+        'loadOutbox': 'd39e4c56fba50b39b65f8941ceeb6359d306fb169e6548e4ae4351b91e5bc395',
         'bindOutboxAccount': 'c18bfcb6097cec448f946232c1cc8a5a1d92055cfc533e855132e64ea2412b6b',
-        'startHubSend': '6e4246a0416884bd87273a0e16e9a3ea09f5624ee705592b24dcd2c260074f61',
+        'startHubSend': '2ee09e2344812f9092854f1f764ef3f889b95ef73154d2f112f46a992bf08236',
         'markChatRead': 'bea4f8318176998d0b2243a47adf9825f1642f41f0c57f736ed12a9c8047a89e',
         'startNextMarkRead': '76147cd4d68b60014d2e35c73a6ab0e3aeba34012db7656bdb123b0a5b1cad88',
         'loadPendingReads': 'f24e69e81447328bbb7a6349acade9df6a256cd8374df178570f39bcaef30799',
@@ -157,7 +157,7 @@ def check_integration():
         assert current, f'missing identity audit function: {name}'
         assert hashlib.sha256(current.group().encode()).hexdigest() == expected, f'routing identity path changed: {name}'
     routing_file_sha256 = {
-        'src/outbox.zig': '4e39faf317e342d24ff3ff38b997df2e1b7b3ffdf89b968af8d7c2df94908f6f',
+        'src/outbox.zig': 'a3381c8d27417eead0b553544e0d2d3dfae8073d9a875f1c014dc181ecab9ad9',
         'src/chat_cache.zig': 'fe97020e73578d02e52daf25961b65a2151c38b67bbfaa0942e459df05732013',
         'src/read_state.zig': 'c40146cd2dc3ab78a3ad91e5b868a2edf1ae0da2e277eceb5328663af1f13f07',
         'src/pending_reads.zig': 'bac1f5848428e4e9fdc00033eb94386fcce945aa759aef0d8576b2a00df98f4f',

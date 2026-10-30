@@ -83,6 +83,7 @@ const tj = @import("telegram_json.zig");
 const transport = @import("transport.zig");
 const messenger_view = @import("messenger_view.zig");
 const outbox = @import("outbox.zig");
+const unified_snapshot = @import("unified_snapshot.zig");
 
 const max_chats = 256;
 const max_groups = 1024;
@@ -328,7 +329,12 @@ const PendingSend = struct {
 };
 
 const max_failed_sends = 8;
+const max_unified_failed_sends = outbox.max_entries;
 const FailedSend = struct {
+    unified: bool = false,
+    id: [outbox.id_len]u8 = [_]u8{'0'} ** outbox.id_len,
+    reply_sender: Utf8Text(191) = .{},
+    ambiguous: bool = false,
     provider: transport.Provider = .whatsapp,
     account: Utf8Text(32) = .{},
     jid: Utf8Text(191) = .{},
@@ -551,6 +557,9 @@ const WacliJob = struct {
     notification: ?WacliJob.Notification = null,
     started_ms: u64 = 0,
     client_id: Utf8Text(128) = .{},
+    unified_filename: Utf8Text(outbox.max_file_len) = .{},
+    unified_file_sha256: [32]u8 = @splat(0),
+    unified_file_bytes: u64 = 0,
     arg_count: usize = 0,
     args: [max_wacli_args]Utf8Text(wacli_arg_cap) = [_]Utf8Text(wacli_arg_cap){.{}} ** max_wacli_args,
 };
@@ -664,6 +673,8 @@ const SlackInstallation = struct {
     workspace_pages: u32 = 0,
     user_pages: u32 = 0,
 };
+
+const UnifiedFaultTransition = enum { any, checkpoint, held, acknowledged };
 
 const App = struct {
     allocator: std.mem.Allocator,
@@ -903,8 +914,31 @@ const App = struct {
     slack_outbox_count: usize = 0,
     outbox_path: []u8 = &.{},
     outbox_load_failed: bool = false,
+    unified_snapshot: ?*unified_snapshot.Snapshot = null,
+    unified_candidate: ?*unified_snapshot.Snapshot = null,
+    unified_snapshot_path: []u8 = &.{},
+    unified_imports_clean: bool = false,
+    unified_import_unresolved: usize = 0,
+    unified_import_alias_blocked: bool = false,
+    unified_import_overflow: usize = 0,
+    unified_storage_blocked: bool = false,
+    unified_inflight: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
+    unified_unsaved_result: ?unified_snapshot.UnifiedOutcome = null,
+    unified_result_lost: std.atomic.Value(bool) = .init(false),
+    unified_refill_pending: bool = false,
+    unified_refill_retry_at_ms: u64 = 0,
+    unified_write_fault: enum { none, open, write, flush, close, replace } = .none,
+    unified_fault_transition: UnifiedFaultTransition = .any,
+    unified_fault_attempt: u64 = 0,
+    unified_fault_active: bool = false,
+    unified_fault_hits: u64 = 0,
+    verification_retry_evidence: bool = false,
+    verification_migration_stop_id: []const u8 = "",
+    verification_migration_stop_root: []const u8 = "",
+    verification_migration_stop_before_rename: bool = false,
+    verification_mouse_retry: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
     send_seq: u64 = 0,
-    failed_sends: [max_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_failed_sends,
+    failed_sends: [max_unified_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_unified_failed_sends,
     failed_send_count: usize = 0,
     sent_voice: [voice_sent.max_entries]voice_sent.Entry = [_]voice_sent.Entry{.{}} ** voice_sent.max_entries,
     sent_voice_count: usize = 0,
@@ -1905,7 +1939,23 @@ fn jobIsWrite(kind: WacliJobKind) bool {
     };
 }
 
+fn recordVerificationDispatch(a: *App, job: *const WacliJob) void {
+    const mouse = if (a.verification_mouse_retry) |accepted| accepted.attempt == job.gen and std.mem.eql(u8, &accepted.id, job.msg_id.slice()) else false;
+    const name = std.fmt.allocPrint(a.allocator, "verification-dispatch-{s}-{d}.json", .{ job.msg_id.slice(), job.gen }) catch return;
+    defer a.allocator.free(name);
+    const path = messagesDirPath(a, name) orelse return;
+    defer a.allocator.free(path);
+    const marker = std.json.Stringify.valueAlloc(a.allocator, .{ .id = job.msg_id.slice(), .attempt = job.gen, .mouse = mouse }, .{}) catch return;
+    defer a.allocator.free(marker);
+    unifiedWriteProtected(a, path, marker) catch {};
+}
+
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
+    if (unifiedHub(a) and job.kind == .hub_send) {
+        const inflight = a.unified_inflight orelse return false;
+        if (job.gen != inflight.attempt or !std.mem.eql(u8, job.msg_id.slice(), &inflight.id)) return false;
+        if (verification_fixture and a.verification_retry_evidence) recordVerificationDispatch(a, &job);
+    }
     if (verification_fixture and !hubConfigured(a)) return verificationEnqueue(a, job);
     if (hubConfigured(a) and !hubJobReady(a, job)) return false;
     if (job.kind == .hub_media or job.kind == .hub_avatar) {
@@ -2059,6 +2109,7 @@ fn wacliWorkerMain(a: *App, lane: WacliLane) void {
 fn wacliRunJob(a: *App, job: WacliJob) void {
     defer if (job.archive_body) |body| a.allocator.free(body);
     const result = a.allocator.create(WacliResult) catch {
+        if (unifiedHub(a) and job.kind == .hub_send) a.unified_result_lost.store(true, .release);
         wacliPendingSub(a, job.kind);
         return;
     };
@@ -2081,6 +2132,7 @@ fn wacliPost(a: *App, result: *WacliResult) void {
 
 fn wacliDiscard(a: *App, result: *WacliResult) void {
     const kind = result.kind;
+    if (unifiedHub(a) and kind == .hub_send) a.unified_result_lost.store(true, .release);
     if (result.data.len > 0) a.allocator.free(result.data);
     a.allocator.destroy(result);
     wacliPendingSub(a, kind);
@@ -4042,7 +4094,7 @@ fn retryingBubbleText(buffer: []u8, text: []const u8, retries: u8) []const u8 {
 fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool) void {
     if (pending.completed or a.message_count >= max_messages or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
     if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(pending))) return;
-    if (from_reload and !pending.from_disk) {
+    if (!unifiedHub(a) and from_reload and !pending.from_disk) {
         for (a.messages[0..a.message_count]) |*message| {
             if (!message.from_me or message.send_state != .none) continue;
             if (pending.ptt) {
@@ -4094,9 +4146,14 @@ fn markPendingSendFailed(a: *App, pending: *const PendingSend) void {
         if (!message.from_me or message.send_state != .pending or
             !std.mem.eql(u8, message.id.slice(), id)) continue;
         message.send_state = .failed;
+        if (unifiedHub(a)) message.timestamp.set(&pending.id);
         var base_buffer: [48]u8 = undefined;
         const old = sendBaseText(&base_buffer, pending.text.slice(), pending.file.len > 0, pending.ptt, pending.voice_seconds);
-        if (pending.failure_reason.len > 0) {
+        if (unifiedHub(a) and pending.ambiguous) {
+            const marked = std.fmt.allocPrint(a.allocator, "{s} (unconfirmed)", .{old}) catch return;
+            defer a.allocator.free(marked);
+            message.text.set(a.allocator, marked);
+        } else if (pending.failure_reason.len > 0) {
             var buffer: [4095]u8 = undefined;
             var length = @min(old.len, 3900);
             while (!std.unicode.utf8ValidateSlice(old[0..length])) length -= 1;
@@ -4137,7 +4194,11 @@ fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
     message.sender.set(a.allocator, "You");
     var base_buffer: [48]u8 = undefined;
     const base = sendBaseText(&base_buffer, failed.text.slice(), failed.is_file, failed.ptt, failed.voice_seconds);
-    if (failed.failure_reason.len > 0) {
+    if (failed.unified and failed.ambiguous) {
+        const marked = std.fmt.allocPrint(a.allocator, "{s} (unconfirmed)", .{base}) catch return;
+        defer a.allocator.free(marked);
+        message.text.set(a.allocator, marked);
+    } else if (failed.failure_reason.len > 0) {
         var buffer: [4095]u8 = undefined;
         var length = @min(base.len, 3900);
         while (!std.unicode.utf8ValidateSlice(base[0..length])) length -= 1;
@@ -4159,22 +4220,28 @@ fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
         message.time.set(a.allocator, rendered);
     } else |_| {}
     message.send_state = .failed;
+    if (failed.unified) message.timestamp.set(&failed.id);
     a.messages[a.message_count] = message;
     a.message_count += 1;
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn rememberFailedSend(a: *App, pending: *const PendingSend) void {
+    if (unifiedHub(a)) return;
     for (a.failed_sends[0..a.failed_send_count]) |*entry| {
         if (chat_key.Key.eql(chat_key.of(entry), chat_key.of(pending)) and
             std.mem.eql(u8, entry.text.slice(), pending.text.slice()) and
             std.mem.eql(u8, entry.file.slice(), pending.file.slice())) return;
     }
-    if (a.failed_send_count == a.failed_sends.len) {
+    if (a.failed_send_count >= max_failed_sends) {
         var index: usize = 1;
         while (index < a.failed_send_count) : (index += 1) a.failed_sends[index - 1] = a.failed_sends[index];
         a.failed_send_count -= 1;
     }
+    a.failed_sends[a.failed_send_count] = .{};
+    a.failed_sends[a.failed_send_count].id = pending.id;
+    a.failed_sends[a.failed_send_count].reply_sender = pending.reply_sender;
+    a.failed_sends[a.failed_send_count].ambiguous = pending.ambiguous;
     a.failed_sends[a.failed_send_count].provider = pending.provider;
     a.failed_sends[a.failed_send_count].account = pending.account;
     a.failed_sends[a.failed_send_count].jid.set(pending.jid.slice());
@@ -4190,6 +4257,7 @@ fn rememberFailedSend(a: *App, pending: *const PendingSend) void {
 }
 
 fn forgetFailedSend(a: *App, key: chat_key.Key, text: []const u8) void {
+    if (unifiedHub(a)) return;
     for (a.failed_sends[0..a.failed_send_count], 0..) |*entry, index| {
         if (entry.is_file or !chat_key.Key.eql(chat_key.of(entry), key) or !std.mem.eql(u8, entry.text.slice(), text)) continue;
         var shift = index;
@@ -4201,6 +4269,7 @@ fn forgetFailedSend(a: *App, key: chat_key.Key, text: []const u8) void {
 }
 
 fn pruneFailedSends(a: *App, key: chat_key.Key) void {
+    if (unifiedHub(a)) return;
     var index: usize = 0;
     while (index < a.failed_send_count) {
         const entry = &a.failed_sends[index];
@@ -4245,7 +4314,43 @@ fn restoreFailedSendText(a: *App, failed: *const PendingSend) void {
     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
 }
 
-fn resendFailedMessage(a: *App, index: usize) bool {
+fn resendFailedMessage(a: *App, index: usize, mouse_input: bool) bool {
+    if (unifiedHub(a)) {
+        if (index >= a.message_count or a.selected_chat >= a.chat_count) return false;
+        const message = &a.messages[index];
+        if (!message.from_me or message.send_state != .failed) return false;
+        retryUnifiedSend(a, message.timestamp.slice(), chat_key.of(&a.chats[a.selected_chat])) catch {
+            setStatus(a, "Could not save retry; message remains held");
+            return true;
+        };
+        if (verification_fixture and a.verification_retry_evidence and mouse_input) {
+            if (a.unified_snapshot) |snapshot| {
+                for (snapshot.records[0..snapshot.count]) |*record| {
+                    if (record.phase != .ready or !std.mem.eql(u8, record.entry.idSlice(), message.timestamp.slice()) or record.attempt_serial == std.math.maxInt(u64)) continue;
+                    const name = std.fmt.allocPrint(a.allocator, "verification-retry-{s}-{d}.json", .{ record.entry.idSlice(), record.attempt_serial + 1 }) catch break;
+                    defer a.allocator.free(name);
+                    const path = messagesDirPath(a, name) orelse break;
+                    defer a.allocator.free(path);
+                    const marker = std.json.Stringify.valueAlloc(a.allocator, .{ .id = record.entry.idSlice(), .attempt = record.attempt_serial + 1, .input = "mouse", .phase = "ready" }, .{}) catch break;
+                    defer a.allocator.free(marker);
+                    if (writeCacheFileAtomic(a, path, marker)) a.verification_mouse_retry = .{ .id = record.entry.id, .attempt = record.attempt_serial + 1 };
+                    break;
+                }
+            }
+        }
+        for (a.pending_sends[0..a.pending_send_count]) |*pending| {
+            if (!std.mem.eql(u8, &pending.id, message.timestamp.slice())) continue;
+            message.send_state = .pending;
+            var id_buffer: [32]u8 = undefined;
+            message.id.set(localSendId(&id_buffer, pending.seq));
+            var label: [48]u8 = undefined;
+            message.text.set(a.allocator, sendBaseText(&label, pending.text.slice(), pending.file.len > 0, pending.ptt, pending.voice_seconds));
+            break;
+        }
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+        setStatus(a, "Retry saved");
+        return true;
+    }
     if (index >= a.message_count) return false;
     const message = &a.messages[index];
     if (!message.from_me or message.send_state != .failed) return false;
@@ -4468,11 +4573,14 @@ fn mintSendId(a: *App, id: *[outbox.id_len]u8) void {
 }
 
 fn persistOutbox(a: *App) bool {
-    if (a.outbox_path.len == 0 or a.outbox_load_failed) return false;
+    if (unifiedHub(a) or a.outbox_path.len == 0 or a.outbox_load_failed) return false;
     var allocating = std.Io.Writer.Allocating.init(a.allocator);
     defer allocating.deinit();
+    var entry_count: usize = 0;
     for (a.pending_sends[0..a.pending_send_count]) |*pending| {
         if (pending.completed) continue;
+        entry_count += 1;
+        if (entry_count > outbox.max_entries) return false;
         var entry = outbox.Entry{ .queued_unix = pending.queued_unix };
         entry.id = pending.id;
         entry.provider = std.meta.stringToEnum(outbox.Provider, @tagName(pending.provider)) orelse return false;
@@ -4488,34 +4596,783 @@ fn persistOutbox(a: *App) bool {
     }
     for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
         if (slot.completed) continue;
+        entry_count += 1;
+        if (entry_count > outbox.max_entries) return false;
         outbox.writeLine(&allocating.writer, &slot.entry) catch return false;
     }
-    const temp_path = std.fmt.allocPrint(a.allocator, "{s}.new", .{a.outbox_path}) catch return false;
+    if (!writeOutboxAtomic(a, a.outbox_path, allocating.written(), false)) return false;
+    a.slack_outbox_dirty = false;
+    return true;
+}
+
+fn unifiedNativePath(allocator: std.mem.Allocator, path: []const u8) ![:0]u16 {
+    if (path.len < 3 or !std.ascii.isAlphabetic(path[0]) or path[1] != ':' or
+        (path[2] != '\\' and path[2] != '/') or std.mem.indexOfScalar(u8, path, 0) != null) return error.UnsafeAttachmentPath;
+    const native = try allocator.alloc(u8, path.len + 4);
+    defer allocator.free(native);
+    @memcpy(native[0..4], "\\\\?\\");
+    for (path, 0..) |byte, i| native[i + 4] = if (byte == '/') '\\' else byte;
+    return std.unicode.utf8ToUtf16LeAllocZ(allocator, native);
+}
+
+fn unifiedFaultAt(a: *App, stage: @TypeOf(a.unified_write_fault)) bool {
+    if (!verification_fixture or !a.unified_fault_active or a.unified_write_fault != stage) return false;
+    a.unified_fault_hits +|= 1;
+    return true;
+}
+
+fn captureVerificationCheckpointBefore(a: *App, path: []const u8) void {
+    if (!verification_fixture or a.unified_fault_transition != .checkpoint) return;
+    const before = (unifiedReadAttachment(a, path) catch return) orelse return;
+    defer a.allocator.free(before);
+    const evidence = messagesDirPath(a, "verification-checkpoint-before.v2") orelse return;
+    defer a.allocator.free(evidence);
+    unifiedWriteProtected(a, evidence, before) catch {};
+}
+
+fn writeOutboxAtomic(a: *App, path: []const u8, data: []const u8, unified: bool) bool {
+    const fault = unified and verification_fixture;
+    const temp_path = std.fmt.allocPrint(a.allocator, "{s}.new", .{path}) catch return false;
     defer a.allocator.free(temp_path);
-    const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, temp_path) catch return false;
+    const wide = (if (unified) unifiedNativePath(a.allocator, temp_path) else std.unicode.utf8ToUtf16LeAllocZ(a.allocator, temp_path)) catch return false;
     defer a.allocator.free(wide);
+    if (fault and unifiedFaultAt(a, .open)) return false;
     const handle = win.CreateFileW(wide.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
     if (handle == win.INVALID_HANDLE_VALUE or handle == null) return false;
     defer _ = win.DeleteFileW(wide.ptr);
-    const data = allocating.written();
     var written_total: usize = 0;
-    var ok = true;
+    var ok = !(fault and unifiedFaultAt(a, .write));
     while (ok and written_total < data.len) {
         var written: win.DWORD = 0;
         if (win.WriteFile(handle, data[written_total..].ptr, @intCast(data.len - written_total), &written, null) == 0 or written == 0) ok = false;
         written_total += written;
     }
-    const flushed = ok and written_total == data.len and win.FlushFileBuffers(handle) != 0;
+    const flushed = ok and written_total == data.len and !(fault and unifiedFaultAt(a, .flush)) and win.FlushFileBuffers(handle) != 0;
     const closed = win.CloseHandle(handle) != 0;
-    if (!flushed or !closed) return false;
-    const target = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, a.outbox_path) catch return false;
+    if (!flushed or !closed or (fault and unifiedFaultAt(a, .close))) return false;
+    const target = (if (unified) unifiedNativePath(a.allocator, path) else std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path)) catch return false;
     defer a.allocator.free(target);
-    if (win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) == 0) return false;
-    a.slack_outbox_dirty = false;
+    if (fault and unifiedFaultAt(a, .replace)) {
+        captureVerificationCheckpointBefore(a, path);
+        return false;
+    }
+    return win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) != 0;
+}
+
+fn saveUnifiedCandidate(a: *App, transition: UnifiedFaultTransition, attempt: u64) bool {
+    const candidate = a.unified_candidate orelse return false;
+    const live = a.unified_snapshot orelse return false;
+    if (a.unified_snapshot_path.len == 0 or !std.mem.eql(u8, candidate.backend.slice(), live.backend.slice())) return false;
+    const encoded = unified_snapshot.encode(a.allocator, candidate) catch return false;
+    defer a.allocator.free(encoded);
+    a.unified_fault_active = verification_fixture and
+        (a.unified_fault_transition == .any or a.unified_fault_transition == transition) and
+        (a.unified_fault_attempt == 0 or a.unified_fault_attempt == attempt);
+    defer a.unified_fault_active = false;
+    if (!writeOutboxAtomic(a, a.unified_snapshot_path, encoded, true)) return false;
+    a.unified_snapshot = candidate;
+    a.unified_candidate = live;
     return true;
 }
 
+fn prepareUnifiedOutbox(a: *App) void {
+    a.outbox_load_failed = true;
+    a.unified_storage_blocked = true;
+    const endpoint = wa_hub.Endpoint.parse(a.wa_bridge_url, verification_fixture) catch return;
+    const backend = std.fmt.allocPrint(a.allocator, "{s}://{s}:{d}", .{ if (endpoint.secure) "https" else "http", endpoint.host, endpoint.port }) catch return;
+    defer a.allocator.free(backend);
+    if (backend.len > unified_snapshot.max_backend_len or std.mem.indexOfScalar(u8, backend, 0) != null or !std.unicode.utf8ValidateSlice(backend)) return;
+    const live = a.allocator.create(unified_snapshot.Snapshot) catch return;
+    const candidate = a.allocator.create(unified_snapshot.Snapshot) catch {
+        a.allocator.destroy(live);
+        return;
+    };
+    live.* = .{};
+    candidate.* = .{};
+    live.backend.set(backend);
+    candidate.backend.set(backend);
+    const name = std.fmt.allocPrint(a.allocator, "unified-journal-v2/{x:0>16}", .{std.hash.Wyhash.hash(0, backend)}) catch {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    };
+    defer a.allocator.free(name);
+    const folder = messagesDirPath(a, name) orelse {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    };
+    defer a.allocator.free(folder);
+    _ = unifiedNoReparse(a, folder) catch {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    };
+    std.Io.Dir.cwd().createDirPath(a.io, folder) catch {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    };
+    if (!(unifiedNoReparse(a, folder) catch false)) {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    }
+    const path = std.fs.path.join(a.allocator, &.{ folder, "snapshot.v2" }) catch {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    };
+    a.unified_snapshot = live;
+    a.unified_candidate = candidate;
+    a.unified_snapshot_path = path;
+}
+
+fn unifiedNoReparse(a: *App, path: []const u8) !bool {
+    if (path.len < 3 or !std.ascii.isAlphabetic(path[0]) or path[1] != ':' or (path[2] != '\\' and path[2] != '/')) return error.UnsafeAttachmentPath;
+    var offset: usize = 3;
+    while (offset <= path.len) : (offset += 1) {
+        if (offset != path.len and path[offset] != '\\' and path[offset] != '/') continue;
+        const component = try unifiedNativePath(a.allocator, path[0..offset]);
+        defer a.allocator.free(component);
+        const attributes = win.GetFileAttributesW(component.ptr);
+        if (attributes == win.INVALID_FILE_ATTRIBUTES) {
+            const code = win.GetLastError();
+            if (code == win.ERROR_FILE_NOT_FOUND or code == win.ERROR_PATH_NOT_FOUND) return false;
+            return error.AttachmentInspectionFailed;
+        }
+        if ((attributes & win.FILE_ATTRIBUTE_REPARSE_POINT) != 0) return error.UnsafeAttachmentPath;
+        if (offset != path.len and (attributes & win.FILE_ATTRIBUTE_DIRECTORY) == 0) return error.UnsafeAttachmentPath;
+    }
+    return true;
+}
+
+fn unifiedOwnedFileAvailable(a: *App, record: *const unified_snapshot.Record) !bool {
+    const path = record.owned_file.slice();
+    const backend_dir = std.fs.path.dirname(a.unified_snapshot_path) orelse return error.InvalidSnapshotPath;
+    const root = try std.fs.path.join(a.allocator, &.{ backend_dir, "files" });
+    defer a.allocator.free(root);
+    if (!unified_snapshot.privateFilePath(root, path)) return error.UnsafeAttachmentPath;
+    if (!try unifiedNoReparse(a, path)) return false;
+    const wide = try unifiedNativePath(a.allocator, path);
+    defer a.allocator.free(wide);
+    const attributes = win.GetFileAttributesW(wide.ptr);
+    if (attributes == win.INVALID_FILE_ATTRIBUTES) return false;
+    if ((attributes & (win.FILE_ATTRIBUTE_DIRECTORY | win.FILE_ATTRIBUTE_REPARSE_POINT)) != 0) return error.UnsafeAttachmentPath;
+    const bytes = (unifiedReadAttachment(a, path) catch |err| switch (err) {
+        error.InvalidAttachment => return false,
+        else => return err,
+    }) orelse return false;
+    defer a.allocator.free(bytes);
+    if (bytes.len != record.file_bytes) return false;
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+    return std.mem.eql(u8, &digest, &record.file_sha256);
+}
+
+fn rebuildUnifiedViews(a: *App, available_files: *const [outbox.max_entries]bool) void {
+    const snapshot = a.unified_snapshot orelse return;
+    var previous: [max_pending_sends]struct { id: [outbox.id_len]u8, seq: u64 } = undefined;
+    const previous_count = a.pending_send_count;
+    for (a.pending_sends[0..previous_count], 0..) |*pending, i| previous[i] = .{ .id = pending.id, .seq = pending.seq };
+    a.pending_send_count = 0;
+    a.failed_send_count = 0;
+    for (snapshot.records[0..snapshot.count], 0..) |*record, index| {
+        const entry = &record.entry;
+        const available = available_files[index];
+        const active = if (a.unified_inflight) |owner| record.phase == .uncertain and owner.attempt == record.attempt_serial and std.mem.eql(u8, &owner.id, entry.idSlice()) else false;
+        if ((record.phase == .ready or active) and available) {
+            if (a.pending_send_count >= a.pending_sends.len) continue;
+            const pending = &a.pending_sends[a.pending_send_count];
+            pending.* = .{};
+            pending.id = entry.id;
+            pending.provider = std.meta.stringToEnum(transport.Provider, @tagName(entry.provider)).?;
+            pending.account.set(entry.account.slice());
+            pending.jid.set(entry.jid.slice());
+            pending.text.set(entry.text.slice());
+            pending.file.set(record.owned_file.slice());
+            pending.reply_to.set(entry.reply_to.slice());
+            pending.reply_sender.set(entry.reply_sender.slice());
+            pending.ptt = entry.ptt;
+            pending.voice_seconds = entry.voice_seconds;
+            pending.retries = entry.attempts;
+            pending.ambiguous = entry.ambiguous;
+            pending.queued_unix = entry.queued_unix;
+            pending.from_disk = true;
+            for (previous[0..previous_count]) |old| {
+                if (std.mem.eql(u8, &old.id, &entry.id)) {
+                    pending.seq = old.seq;
+                    break;
+                }
+            } else {
+                a.send_seq += 1;
+                pending.seq = a.send_seq;
+            }
+            a.pending_send_count += 1;
+        } else {
+            if (a.failed_send_count >= a.failed_sends.len) return;
+            const failed = &a.failed_sends[a.failed_send_count];
+            failed.* = .{ .unified = true, .id = entry.id, .queued_unix = entry.queued_unix, .ptt = entry.ptt, .voice_seconds = entry.voice_seconds, .is_file = entry.file.len > 0, .ambiguous = entry.ambiguous or record.phase == .uncertain };
+            failed.provider = std.meta.stringToEnum(transport.Provider, @tagName(entry.provider)).?;
+            failed.account.set(entry.account.slice());
+            failed.jid.set(entry.jid.slice());
+            failed.text.set(entry.text.slice());
+            failed.file.set(record.owned_file.slice());
+            failed.reply_to.set(entry.reply_to.slice());
+            failed.reply_sender.set(entry.reply_sender.slice());
+            failed.failure_reason.set(if (!available) "attachment unavailable" else record.failure_reason.slice());
+            a.failed_send_count += 1;
+        }
+    }
+}
+
+fn restoreUnifiedOutbox(a: *App) !void {
+    const live = a.unified_snapshot orelse return error.MissingSnapshot;
+    const candidate = a.unified_candidate orelse return error.MissingSnapshot;
+    if (!try unifiedNoReparse(a, a.unified_snapshot_path)) return;
+    const wide = try unifiedNativePath(a.allocator, a.unified_snapshot_path);
+    defer a.allocator.free(wide);
+    const handle = win.CreateFileW(wide.ptr, win.GENERIC_READ, win.FILE_SHARE_READ, null, win.OPEN_EXISTING, win.FILE_ATTRIBUTE_NORMAL, null);
+    if (handle == win.INVALID_HANDLE_VALUE or handle == null) {
+        if (win.GetLastError() == win.ERROR_FILE_NOT_FOUND) return;
+        return error.SnapshotOpenFailed;
+    }
+    defer _ = win.CloseHandle(handle);
+    var size: win.LARGE_INTEGER = undefined;
+    if (win.GetFileSizeEx(handle, &size) == 0 or size.QuadPart <= 0 or size.QuadPart > unified_snapshot.max_document_bytes) return error.InvalidSnapshot;
+    const bytes = try a.allocator.alloc(u8, @intCast(size.QuadPart));
+    defer a.allocator.free(bytes);
+    var total: usize = 0;
+    while (total < bytes.len) {
+        var got: win.DWORD = 0;
+        if (win.ReadFile(handle, bytes[total..].ptr, @intCast(bytes.len - total), &got, null) == 0 or got == 0) return error.SnapshotReadFailed;
+        total += got;
+    }
+    try unified_snapshot.decode(a.allocator, bytes, live.backend.slice(), candidate);
+    var available: [outbox.max_entries]bool = @splat(false);
+    for (candidate.records[0..candidate.count], 0..) |*record, index| {
+        available[index] = if (record.attachment_ready) try unifiedOwnedFileAvailable(a, record) else record.entry.file.len == 0;
+    }
+    a.unified_snapshot = candidate;
+    a.unified_candidate = live;
+    rebuildUnifiedViews(a, &available);
+}
+
+fn quarantineUnifiedJournals(a: *App) !void {
+    a.unified_imports_clean = false;
+    const root = messagesDirPath(a, "unified-journal-v2") orelse return error.MissingMessagesDirectory;
+    defer a.allocator.free(root);
+    const imports = try std.fs.path.join(a.allocator, &.{ root, "imports" });
+    defer a.allocator.free(imports);
+    _ = try unifiedNoReparse(a, imports);
+    try std.Io.Dir.cwd().createDirPath(a.io, imports);
+    if (!try unifiedNoReparse(a, imports)) return error.UnsafeAttachmentPath;
+    const pattern = messagesDirPath(a, "hub-*outbox.jsonl") orelse return error.MissingMessagesDirectory;
+    defer a.allocator.free(pattern);
+    const pattern_wide = try unifiedNativePath(a.allocator, pattern);
+    defer a.allocator.free(pattern_wide);
+    while (true) {
+        var found: win.WIN32_FIND_DATAW = undefined;
+        const handle = win.FindFirstFileW(pattern_wide.ptr, &found);
+        if (handle == win.INVALID_HANDLE_VALUE or handle == null) {
+            if (win.GetLastError() == win.ERROR_FILE_NOT_FOUND) break;
+            return error.JournalEnumerationFailed;
+        }
+        _ = win.FindClose(handle);
+        if ((found.dwFileAttributes & (win.FILE_ATTRIBUTE_DIRECTORY | win.FILE_ATTRIBUTE_REPARSE_POINT)) != 0) return error.UnsafeJournal;
+        const length = std.mem.indexOfScalar(u16, &found.cFileName, 0) orelse return error.InvalidJournalName;
+        const name = try std.unicode.utf16LeToUtf8Alloc(a.allocator, found.cFileName[0..length]);
+        defer a.allocator.free(name);
+        const source = messagesDirPath(a, name) orelse return error.MissingMessagesDirectory;
+        defer a.allocator.free(source);
+        const source_wide = try unifiedNativePath(a.allocator, source);
+        defer a.allocator.free(source_wide);
+        if (!try unifiedNoReparse(a, source)) return error.JournalMissing;
+        const input = win.CreateFileW(source_wide.ptr, win.GENERIC_READ | win.DELETE, win.FILE_SHARE_READ, null, win.OPEN_EXISTING, win.FILE_FLAG_OPEN_REPARSE_POINT, null);
+        if (input == win.INVALID_HANDLE_VALUE or input == null) return error.JournalOpenFailed;
+        defer _ = win.CloseHandle(input);
+        var info: win.BY_HANDLE_FILE_INFORMATION = undefined;
+        if (win.GetFileInformationByHandle(input, &info) == 0 or (info.dwFileAttributes & (win.FILE_ATTRIBUTE_DIRECTORY | win.FILE_ATTRIBUTE_REPARSE_POINT)) != 0) return error.UnsafeJournal;
+        var size: win.LARGE_INTEGER = undefined;
+        if (win.GetFileSizeEx(input, &size) == 0 or size.QuadPart < 0) return error.JournalReadFailed;
+        const bytes = try a.allocator.alloc(u8, @intCast(size.QuadPart));
+        defer a.allocator.free(bytes);
+        var offset: usize = 0;
+        while (offset < bytes.len) {
+            var got: win.DWORD = 0;
+            if (win.ReadFile(input, bytes[offset..].ptr, @intCast(@min(bytes.len - offset, 65536)), &got, null) == 0 or got == 0) return error.JournalReadFailed;
+            offset += got;
+        }
+        var digest: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+        const token = std.fmt.bytesToHex(digest[0..16].*, .lower);
+        const target_name = try std.fmt.allocPrint(a.allocator, "{s}.{s}.pending", .{ name, token });
+        defer a.allocator.free(target_name);
+        var lines = std.mem.splitScalar(u8, bytes, '\n');
+        while (lines.next()) |line| {
+            if (std.mem.trim(u8, line, " \t\r").len == 0) continue;
+            var entry: outbox.Entry = .{};
+            if (outbox.parseLineStrict(a.allocator, line, &entry)) |_| {
+                const protected = try unifiedImportRecord(a, target_name, &entry, false);
+                if (entry.file.len > 0 and protected.file_bytes == 0) return error.AttachmentMissing;
+            } else |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.InvalidEntry => {},
+            }
+        }
+        const zero: win.LARGE_INTEGER = .{ .QuadPart = 0 };
+        if (win.SetFilePointerEx(input, zero, null, win.FILE_BEGIN) == 0) return error.JournalReadFailed;
+        var verify_buffer: [65536]u8 = undefined;
+        offset = 0;
+        while (offset < bytes.len) {
+            var got: win.DWORD = 0;
+            const chunk_length = @min(bytes.len - offset, verify_buffer.len);
+            if (win.ReadFile(input, &verify_buffer, @intCast(chunk_length), &got, null) == 0 or got == 0 or !std.mem.eql(u8, verify_buffer[0..got], bytes[offset..][0..got])) return error.JournalChanged;
+            offset += got;
+        }
+        var after_size: win.LARGE_INTEGER = undefined;
+        if (win.GetFileSizeEx(input, &after_size) == 0 or after_size.QuadPart != size.QuadPart) return error.JournalChanged;
+        if (verification_fixture and a.verification_migration_stop_id.len != 0 and a.verification_migration_stop_before_rename) {
+            const marker_path = messagesDirPath(a, "verification-migration-stop.json") orelse std.process.exit(87);
+            const marker = std.json.Stringify.valueAlloc(a.allocator, .{
+                .phase = "after-protect-before-rename",
+                .id = a.verification_migration_stop_id,
+                .root = a.verification_migration_stop_root,
+                .pid = win.GetCurrentProcessId(),
+                .source = source,
+                .pending_name = target_name,
+            }, .{}) catch std.process.exit(87);
+            if (!writeCacheFileAtomic(a, marker_path, marker)) std.process.exit(87);
+            std.process.exit(85);
+        }
+        const target = try std.fs.path.join(a.allocator, &.{ imports, target_name });
+        defer a.allocator.free(target);
+        const target_wide = try unifiedNativePath(a.allocator, target);
+        defer a.allocator.free(target_wide);
+        target_wide[1] = '?';
+        target_wide[2] = '?';
+        const RenameInfo = extern struct { replace: u8, root: win.HANDLE, length: win.DWORD, filename: [1]u16 };
+        const RenameBuffer = extern union { info: RenameInfo, bytes: [65536]u8 };
+        var rename: RenameBuffer = .{ .bytes = @splat(0) };
+        rename.info.root = null;
+        rename.info.length = @intCast(target_wide.len * 2);
+        const name_bytes = std.mem.sliceAsBytes(target_wide);
+        const name_offset = @offsetOf(RenameInfo, "filename");
+        if (name_offset + name_bytes.len > rename.bytes.len) return error.InvalidJournalName;
+        @memcpy(rename.bytes[name_offset..][0..name_bytes.len], name_bytes);
+        if (win.SetFileInformationByHandle(input, win.FileRenameInfo, &rename, @intCast(name_offset + name_bytes.len)) == 0) return error.JournalQuarantineFailed;
+    }
+}
+
+fn unifiedReadAttachment(a: *App, path: []const u8) !?[]u8 {
+    const canonical = try std.fs.path.resolve(a.allocator, &.{path});
+    defer a.allocator.free(canonical);
+    if (canonical.len != path.len) return error.UnsafeAttachmentPath;
+    for (canonical, path) |left, right| {
+        if ((left == '\\' or left == '/') and (right == '\\' or right == '/')) continue;
+        if (std.ascii.toLower(left) != std.ascii.toLower(right)) return error.UnsafeAttachmentPath;
+    }
+    if (!try unifiedNoReparse(a, path)) return null;
+    const wide = try unifiedNativePath(a.allocator, path);
+    defer a.allocator.free(wide);
+    const handle = win.CreateFileW(wide.ptr, win.GENERIC_READ, win.FILE_SHARE_READ, null, win.OPEN_EXISTING, win.FILE_ATTRIBUTE_NORMAL, null);
+    if (handle == win.INVALID_HANDLE_VALUE or handle == null) {
+        const code = win.GetLastError();
+        if (code == win.ERROR_FILE_NOT_FOUND or code == win.ERROR_PATH_NOT_FOUND) return null;
+        return error.AttachmentOpenFailed;
+    }
+    defer _ = win.CloseHandle(handle);
+    var size: win.LARGE_INTEGER = undefined;
+    if (win.GetFileSizeEx(handle, &size) == 0 or size.QuadPart <= 0 or size.QuadPart > wa_hub.max_file_bytes) return error.InvalidAttachment;
+    const bytes = try a.allocator.alloc(u8, @intCast(size.QuadPart));
+    errdefer a.allocator.free(bytes);
+    var total: usize = 0;
+    while (total < bytes.len) {
+        var read: win.DWORD = 0;
+        if (win.ReadFile(handle, bytes[total..].ptr, @intCast(bytes.len - total), &read, null) == 0 or read == 0) return error.AttachmentReadFailed;
+        total += read;
+    }
+    return bytes;
+}
+
+fn unifiedPrivateDirectory(a: *App, path: []const u8) !void {
+    _ = try unifiedNoReparse(a, path);
+    try std.Io.Dir.cwd().createDirPath(a.io, path);
+    if (!try unifiedNoReparse(a, path)) return error.UnsafeAttachmentPath;
+}
+
+fn unifiedWriteProtected(a: *App, path: []const u8, bytes: []const u8) !void {
+    const existing = try unifiedReadAttachment(a, path);
+    if (existing) |old| {
+        defer a.allocator.free(old);
+        if (!std.mem.eql(u8, old, bytes)) return error.ConflictingAttachment;
+        return;
+    }
+    const folder = std.fs.path.dirname(path) orelse return error.InvalidAttachment;
+    try unifiedPrivateDirectory(a, folder);
+    var random: [16]u8 = undefined;
+    a.io.random(&random);
+    const token = std.fmt.bytesToHex(random, .lower);
+    const temporary_name = try std.fmt.allocPrint(a.allocator, "t-{s}.copy", .{token});
+    defer a.allocator.free(temporary_name);
+    const temporary = try std.fs.path.join(a.allocator, &.{ folder, temporary_name });
+    defer a.allocator.free(temporary);
+    const wide = try unifiedNativePath(a.allocator, temporary);
+    defer a.allocator.free(wide);
+    const target = try unifiedNativePath(a.allocator, path);
+    defer a.allocator.free(target);
+    const handle = win.CreateFileW(wide.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_NEW, win.FILE_ATTRIBUTE_NORMAL, null);
+    if (handle == win.INVALID_HANDLE_VALUE or handle == null) return error.AttachmentCreateFailed;
+    defer _ = win.DeleteFileW(wide.ptr);
+    var total: usize = 0;
+    var ok = true;
+    while (ok and total < bytes.len) {
+        var written: win.DWORD = 0;
+        if (win.WriteFile(handle, bytes[total..].ptr, @intCast(bytes.len - total), &written, null) == 0 or written == 0) ok = false;
+        total += written;
+    }
+    const flushed = ok and total == bytes.len and win.FlushFileBuffers(handle) != 0;
+    const closed = win.CloseHandle(handle) != 0;
+    if (!flushed or !closed) return error.AttachmentWriteFailed;
+    if (win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_WRITE_THROUGH) == 0) return error.AttachmentPublishFailed;
+}
+
+fn unifiedImportRecord(a: *App, source_name: []const u8, source_entry: *const outbox.Entry, active: bool) !unified_snapshot.Record {
+    var record = unified_snapshot.Record{};
+    record.entry = source_entry.*;
+    record.entry.state = .queued;
+    record.entry.ambiguous = source_entry.ambiguous or source_entry.state != .failed;
+    record.phase = .held;
+    record.failure_reason.set(if (source_entry.state == .failed and !source_entry.ambiguous) "send failed" else "delivery unconfirmed");
+    if (source_entry.file.len == 0) return record;
+    const original = source_entry.file.slice();
+    const basename = std.fs.path.basename(original);
+    if (basename.len == 0 or basename.len > outbox.max_file_len) return error.InvalidAttachment;
+    const root = messagesDirPath(a, "unified-journal-v2") orelse return error.MissingMessagesDirectory;
+    defer a.allocator.free(root);
+    var source_hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    source_hasher.update(source_name);
+    source_hasher.update(&.{0});
+    source_hasher.update(source_entry.idSlice());
+    source_hasher.update(&.{0});
+    source_hasher.update(original);
+    var source_hash: [32]u8 = undefined;
+    source_hasher.final(&source_hash);
+    const source_token = std.fmt.bytesToHex(source_hash, .lower);
+    const shared_root = try std.fs.path.join(a.allocator, &.{ root, "imports-files" });
+    defer a.allocator.free(shared_root);
+    const shared = try std.fs.path.join(a.allocator, &.{ shared_root, &source_token, "payload" });
+    defer a.allocator.free(shared);
+    if (!unified_snapshot.privateFilePath(shared_root, shared)) return error.UnsafeAttachmentPath;
+    const original_bytes = try unifiedReadAttachment(a, original);
+    defer if (original_bytes) |bytes| a.allocator.free(bytes);
+    if (original_bytes) |bytes| try unifiedWriteProtected(a, shared, bytes);
+    const protected = try unifiedReadAttachment(a, shared);
+    defer if (protected) |bytes| a.allocator.free(bytes);
+    const bytes = protected orelse {
+        record.wire_filename.set(basename);
+        return record;
+    };
+    record.wire_filename.set(basename);
+    record.file_bytes = bytes.len;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &record.file_sha256, .{});
+    if (!active) return record;
+    const backend = std.fs.path.dirname(a.unified_snapshot_path) orelse return error.InvalidSnapshotPath;
+    const owned_root = try std.fs.path.join(a.allocator, &.{ backend, "files" });
+    defer a.allocator.free(owned_root);
+    const owned = try std.fs.path.join(a.allocator, &.{ owned_root, "import", &source_token, "payload" });
+    defer a.allocator.free(owned);
+    if (!unified_snapshot.privateFilePath(owned_root, owned)) return error.UnsafeAttachmentPath;
+    try unifiedWriteProtected(a, owned, bytes);
+    record.owned_file.set(owned);
+    record.attachment_ready = true;
+    return record;
+}
+
+const UnifiedImportPass = enum { protect, admit, validate, clean };
+
+fn unifiedSourceMatches(a: *App, name: []const u8) bool {
+    var prefix: [96]u8 = undefined;
+    const tag = std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, a.wa_bridge_url), "hub");
+    const expected = std.fmt.bufPrint(&prefix, "hub-{x:0>16}-outbox.jsonl.", .{tag}) catch return false;
+    return std.mem.startsWith(u8, name, expected) and std.mem.endsWith(u8, name, ".pending");
+}
+
+fn unifiedSourcePass(a: *App, directory: []const u8, name: []const u8, pass: UnifiedImportPass) !void {
+    const path = try std.fs.path.join(a.allocator, &.{ directory, name });
+    defer a.allocator.free(path);
+    if (!try unifiedNoReparse(a, path)) return error.JournalMissing;
+    const matching = unifiedSourceMatches(a, name);
+    if (!matching and pass != .protect) return;
+    const input = try std.Io.Dir.openFileAbsolute(a.io, path, .{});
+    var input_open = true;
+    defer if (input_open) input.close(a.io);
+    var line_buffer: [outbox.max_line_len + 2]u8 = undefined;
+    var reader = input.readerStreaming(a.io, &line_buffer);
+    var temporary: ?[]u8 = null;
+    defer if (temporary) |value| a.allocator.free(value);
+    var temp_wide: ?[:0]u16 = null;
+    defer if (temp_wide) |value| a.allocator.free(value);
+    var output: ?win.HANDLE = null;
+    defer if (output) |handle| {
+        _ = win.CloseHandle(handle);
+    };
+    defer if (temp_wide) |value| {
+        _ = win.DeleteFileW(value.ptr);
+    };
+    if (pass == .clean) {
+        var random: [16]u8 = undefined;
+        a.io.random(&random);
+        const token = std.fmt.bytesToHex(random, .lower);
+        const temporary_name = try std.fmt.allocPrint(a.allocator, "t-{s}.rewrite", .{token});
+        defer a.allocator.free(temporary_name);
+        temporary = try std.fs.path.join(a.allocator, &.{ directory, temporary_name });
+        temp_wide = try unifiedNativePath(a.allocator, temporary.?);
+        output = win.CreateFileW(temp_wide.?.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_NEW, win.FILE_ATTRIBUTE_NORMAL, null);
+        if (output == win.INVALID_HANDLE_VALUE or output == null) {
+            output = null;
+            return error.JournalWriteFailed;
+        }
+    }
+    while (true) {
+        const raw = reader.interface.takeDelimiterInclusive('\n') catch |err| switch (err) {
+            error.EndOfStream => (reader.interface.takeDelimiter('\n') catch return error.JournalReadFailed) orelse break,
+            error.StreamTooLong => return error.JournalLineTooLong,
+            error.ReadFailed => return error.JournalReadFailed,
+        };
+        var keep = true;
+        const line = std.mem.trimEnd(u8, raw, "\n");
+        if (std.mem.trim(u8, line, " \t\r").len > 0) {
+            var entry: outbox.Entry = .{};
+            if (outbox.parseLineStrict(a.allocator, line, &entry)) |_| {
+                switch (pass) {
+                    .protect => {
+                        const protected = try unifiedImportRecord(a, name, &entry, false);
+                        if (entry.file.len > 0 and protected.file_bytes == 0) a.unified_import_unresolved += 1;
+                    },
+                    .admit => {
+                        const candidate = a.unified_candidate orelse return error.MissingSnapshot;
+                        if (candidate.count == outbox.max_entries) {
+                            var active_id = false;
+                            for (candidate.records[0..candidate.count]) |*existing| {
+                                if (std.mem.eql(u8, existing.entry.idSlice(), entry.idSlice())) active_id = true;
+                            }
+                            if (!active_id) {
+                                a.unified_import_overflow += 1;
+                                continue;
+                            }
+                        }
+                        const record = try unifiedImportRecord(a, name, &entry, true);
+                        if (entry.file.len > 0 and !record.attachment_ready) {
+                            var duplicate = false;
+                            for (candidate.records[0..candidate.count]) |*existing| {
+                                if (std.mem.eql(u8, existing.entry.idSlice(), entry.idSlice())) duplicate = true;
+                            }
+                            if (duplicate) {
+                                a.unified_import_unresolved += 1;
+                                continue;
+                            }
+                        }
+                        const result = unified_snapshot.admit(candidate, &record) catch |err| switch (err) {
+                            error.InvalidSnapshot => {
+                                a.unified_import_unresolved += 1;
+                                continue;
+                            },
+                            error.ConflictingIntent => return error.ConflictingIntent,
+                        };
+                        if (result == .overflow) a.unified_import_overflow += 1;
+                    },
+                    .validate, .clean => {
+                        const live = a.unified_snapshot orelse return error.MissingSnapshot;
+                        for (live.records[0..live.count]) |*existing| {
+                            if (!std.mem.eql(u8, existing.entry.idSlice(), entry.idSlice())) continue;
+                            const record = try unifiedImportRecord(a, name, &entry, true);
+                            if (existing.attachment_ready and !try unifiedOwnedFileAvailable(a, existing)) {
+                                if (pass == .validate) {
+                                    a.unified_import_unresolved += 1;
+                                    a.unified_import_alias_blocked = true;
+                                }
+                                break;
+                            }
+                            switch (unified_snapshot.compareAlias(existing, &record)) {
+                                .matching => keep = false,
+                                .conflict => return error.ConflictingIntent,
+                                .unresolved => if (pass == .validate) {
+                                    a.unified_import_unresolved += 1;
+                                    a.unified_import_alias_blocked = true;
+                                },
+                            }
+                            break;
+                        }
+                    },
+                }
+            } else |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.InvalidEntry => {
+                    if (pass == .protect) a.unified_import_unresolved += 1;
+                    if (matching and pass == .validate) {
+                        const live = a.unified_snapshot orelse return error.MissingSnapshot;
+                        if (try unified_snapshot.unresolvedMayAlias(a.allocator, line, live)) a.unified_import_alias_blocked = true;
+                    }
+                },
+            }
+        }
+        if (pass == .clean and keep) {
+            var total: usize = 0;
+            while (total < raw.len) {
+                var written: win.DWORD = 0;
+                if (win.WriteFile(output.?, raw[total..].ptr, @intCast(raw.len - total), &written, null) == 0 or written == 0) return error.JournalWriteFailed;
+                total += written;
+            }
+        }
+    }
+    input.close(a.io);
+    input_open = false;
+    if (pass == .clean) {
+        const flushed = win.FlushFileBuffers(output.?) != 0;
+        const closed = win.CloseHandle(output.?) != 0;
+        output = null;
+        if (!flushed or !closed) return error.JournalWriteFailed;
+        const target = try unifiedNativePath(a.allocator, path);
+        defer a.allocator.free(target);
+        if (win.MoveFileExW(temp_wide.?.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) == 0) return error.JournalWriteFailed;
+    }
+}
+
+fn unifiedSourcesPass(a: *App, pass: UnifiedImportPass) !void {
+    const root = messagesDirPath(a, "unified-journal-v2/imports") orelse return error.MissingMessagesDirectory;
+    defer a.allocator.free(root);
+    if (!try unifiedNoReparse(a, root)) return error.JournalMissing;
+    const dir = try std.Io.Dir.cwd().openDir(a.io, root, .{ .iterate = true });
+    defer dir.close(a.io);
+    var iterator = dir.iterate();
+    while (try iterator.next(a.io)) |entry| {
+        if (!std.mem.endsWith(u8, entry.name, ".pending")) continue;
+        if (entry.kind != .file) return error.UnsafeJournal;
+        try unifiedSourcePass(a, root, entry.name, pass);
+    }
+}
+
+fn importUnifiedOutbox(a: *App) !void {
+    a.unified_imports_clean = false;
+    a.unified_import_unresolved = 0;
+    a.unified_import_alias_blocked = false;
+    a.unified_import_overflow = 0;
+    try unifiedSourcesPass(a, .protect);
+    const live = a.unified_snapshot orelse return error.MissingSnapshot;
+    const candidate = a.unified_candidate orelse return error.MissingSnapshot;
+    candidate.* = live.*;
+    try unifiedSourcesPass(a, .admit);
+    if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
+    try unifiedSourcesPass(a, .validate);
+    try unifiedSourcesPass(a, .clean);
+    const published = a.unified_snapshot orelse return error.MissingSnapshot;
+    var available: [outbox.max_entries]bool = @splat(false);
+    for (published.records[0..published.count], 0..) |*record, index| {
+        available[index] = if (record.attachment_ready) try unifiedOwnedFileAvailable(a, record) else record.entry.file.len == 0;
+    }
+    rebuildUnifiedViews(a, &available);
+    a.unified_imports_clean = !a.unified_import_alias_blocked;
+    a.outbox_load_failed = false;
+    a.unified_storage_blocked = false;
+    if (a.unified_import_unresolved != 0) setStatus(a, "Some outbox records need recovery");
+    if (a.unified_import_overflow != 0 and a.unified_import_unresolved == 0) setStatus(a, "More outbox records remain protected");
+}
+
+fn refreshUnifiedViews(a: *App) void {
+    const snapshot = a.unified_snapshot orelse return;
+    var available: [outbox.max_entries]bool = @splat(false);
+    for (snapshot.records[0..snapshot.count], 0..) |*record, index| {
+        available[index] = if (record.attachment_ready) unifiedOwnedFileAvailable(a, record) catch false else record.entry.file.len == 0;
+    }
+    rebuildUnifiedViews(a, &available);
+}
+
+fn acceptUnifiedSends(a: *App, entries: []outbox.Entry, voice_bytes: ?[]const u8) !void {
+    if (a.outbox_load_failed or a.unified_storage_blocked or !a.unified_imports_clean) return error.OutboxUnavailable;
+    const live = a.unified_snapshot orelse return error.MissingSnapshot;
+    const candidate = a.unified_candidate orelse return error.MissingSnapshot;
+    if (entries.len == 0 or entries.len > outbox.max_entries - live.count or entries.len > max_pending_sends - @min(max_pending_sends, unified_snapshot.readyCount(live))) return error.OutboxFull;
+    if (voice_bytes != null and entries.len != 1) return error.InvalidAttachment;
+    candidate.* = live.*;
+    const backend = std.fs.path.dirname(a.unified_snapshot_path) orelse return error.InvalidSnapshotPath;
+    const root = try std.fs.path.join(a.allocator, &.{ backend, "files" });
+    defer a.allocator.free(root);
+    for (entries) |*entry| {
+        mintSendId(a, &entry.id);
+        var record = unified_snapshot.Record{ .entry = entry.*, .phase = .ready };
+        if (entry.file.len > 0) {
+            const filename = std.fs.path.basename(entry.file.slice());
+            if (filename.len == 0 or filename.len > outbox.max_file_len) return error.InvalidAttachment;
+            const data: []const u8 = if (voice_bytes) |bytes| bytes else ((try unifiedReadAttachment(a, entry.file.slice())) orelse return error.AttachmentMissing);
+            defer if (voice_bytes == null) a.allocator.free(data);
+            if (data.len == 0 or data.len > wa_hub.max_file_bytes) return error.InvalidAttachment;
+            const owned = try std.fs.path.join(a.allocator, &.{ root, "new", entry.idSlice(), "payload" });
+            defer a.allocator.free(owned);
+            if (!unified_snapshot.privateFilePath(root, owned)) return error.UnsafeAttachmentPath;
+            try unifiedWriteProtected(a, owned, data);
+            record.owned_file.set(owned);
+            record.wire_filename.set(filename);
+            record.file_bytes = data.len;
+            std.crypto.hash.sha2.Sha256.hash(data, &record.file_sha256, .{});
+            record.attachment_ready = true;
+        }
+        if (try unified_snapshot.admit(candidate, &record) != .added) return error.DuplicateIntent;
+    }
+    if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
+    refreshUnifiedViews(a);
+}
+
+fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) !void {
+    if (a.outbox_load_failed or a.unified_storage_blocked or !a.unified_imports_clean) return error.OutboxUnavailable;
+    if (a.unified_inflight) |inflight| if (std.mem.eql(u8, &inflight.id, id)) return error.InFlight;
+    const live = a.unified_snapshot orelse return error.MissingSnapshot;
+    const candidate = a.unified_candidate orelse return error.MissingSnapshot;
+    if (unified_snapshot.readyCount(live) >= max_pending_sends) return error.OutboxFull;
+    for (live.records[0..live.count], 0..) |*record, index| {
+        if (!std.mem.eql(u8, record.entry.idSlice(), id) or !chat_key.Key.eql(chat_key.of(&record.entry), key)) continue;
+        if (record.phase == .ready) return error.AlreadyReady;
+        if (record.entry.file.len > 0 and (!record.attachment_ready or !try unifiedOwnedFileAvailable(a, record))) return error.AttachmentMissing;
+        candidate.* = live.*;
+        const retry = &candidate.records[index];
+        retry.phase = .ready;
+        retry.entry.attempts = 0;
+        retry.not_before_ms = 0;
+        if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
+        refreshUnifiedViews(a);
+        return;
+    }
+    return error.IntentNotFound;
+}
+
 fn restoreOutbox(a: *App) void {
+    if (unifiedHub(a)) {
+        prepareUnifiedOutbox(a);
+        restoreUnifiedOutbox(a) catch {
+            setStatus(a, "Unified outbox unavailable; sends paused");
+            return;
+        };
+        quarantineUnifiedJournals(a) catch {
+            setStatus(a, "Unified outbox quarantine incomplete; sends paused");
+            return;
+        };
+        if (verification_fixture and a.verification_migration_stop_id.len != 0 and !a.verification_migration_stop_before_rename) {
+            const path = messagesDirPath(a, "verification-migration-stop.json") orelse std.process.exit(87);
+            const marker = std.json.Stringify.valueAlloc(a.allocator, .{
+                .phase = "after-quarantine-before-import",
+                .id = a.verification_migration_stop_id,
+                .root = a.verification_migration_stop_root,
+                .pid = win.GetCurrentProcessId(),
+            }, .{}) catch std.process.exit(87);
+            if (!writeCacheFileAtomic(a, path, marker)) std.process.exit(87);
+            std.process.exit(86);
+        }
+        importUnifiedOutbox(a) catch {
+            setStatus(a, "Unified outbox recovery incomplete; sends paused");
+            return;
+        };
+        return;
+    }
     a.outbox_load_failed = true;
     if (a.outbox_path.len == 0) return;
     const folder = std.fs.path.dirname(a.outbox_path) orelse return;
@@ -4523,7 +5380,7 @@ fn restoreOutbox(a: *App) void {
     defer dir.close(a.io);
     outbox.adopt(a.allocator, a.io, dir, std.fs.path.basename(a.outbox_path), .{
         .account = a.cache_tag.slice(),
-        .unified = unifiedHub(a),
+        .unified = false,
         .slack_accounts = &.{},
     }) catch {
         appendLaunchLog(a, "startup: outbox adoption failed");
@@ -4532,6 +5389,7 @@ fn restoreOutbox(a: *App) void {
 }
 
 fn loadOutbox(a: *App) void {
+    if (unifiedHub(a)) return;
     a.outbox_load_failed = true;
     if (a.outbox_path.len == 0) return;
     const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, a.outbox_path) catch return;
@@ -4559,7 +5417,7 @@ fn loadOutbox(a: *App) void {
     }
     var scanner = outbox.Scanner.init(a.allocator, buffer[0..total]);
     while (scanner.next()) |entry| {
-        if (entry.provider == .whatsapp or unifiedHub(a)) {
+        if (entry.provider == .whatsapp) {
             if (a.pending_send_count >= a.pending_sends.len) return;
             const pending = &a.pending_sends[a.pending_send_count];
             pending.* = .{};
@@ -8293,6 +9151,7 @@ fn logSendTiming(a: *App, outcome: []const u8, pending: PendingSend) void {
 }
 
 fn completePendingSend(a: *App, delivered: bool) bool {
+    if (unifiedHub(a)) return false;
     const head = &a.pending_sends[0];
     if (!head.completed) head.delivered = delivered;
     head.completed = true;
@@ -8304,10 +9163,11 @@ fn completePendingSend(a: *App, delivered: bool) bool {
 }
 
 fn removeFirstPendingSend(a: *App, delivered: bool) void {
+    if (unifiedHub(a)) return;
     if (a.pending_send_count == 0) return;
     if (!completePendingSend(a, delivered)) return;
     const head = &a.pending_sends[0];
-    if (delivered and head.provider != .slack and !(unifiedHub(a) and (head.provider == .whatsapp or head.provider == .telegram or head.provider == .signal))) unarchiveSentChat(a, head.jid.slice());
+    if (delivered and head.provider != .slack) unarchiveSentChat(a, head.jid.slice());
     if (delivered and head.file.len > 0 and head.jid.len <= 191 and head.file.len <= 520) {
         var entry = voice_sent.Entry{ .queued_unix = head.queued_unix, .seconds = head.voice_seconds, .seq = head.seq, .voice = head.ptt };
         @memcpy(entry.jid[0..head.jid.len], head.jid.slice());
@@ -8414,8 +9274,9 @@ fn loadFileOutbox(a: *App) void {
 }
 
 fn failHeadPendingSend(a: *App, code: u32, ambiguous: bool, detail: []const u8, auth_failed: bool) void {
+    if (unifiedHub(a)) return;
     a.pending_sends[0].retries +|= 1;
-    a.pending_sends[0].ambiguous = ambiguous;
+    a.pending_sends[0].ambiguous = a.pending_sends[0].ambiguous or ambiguous;
     const retries = a.pending_sends[0].retries;
     var log_buffer: [320]u8 = undefined;
     const head = &a.pending_sends[0];
@@ -8582,6 +9443,7 @@ fn readChildOutput(a: *App, file: ?std.Io.File) ?[]u8 {
 }
 
 fn startNextSend(a: *App) void {
+    if (unifiedHub(a)) return beginUnifiedSend(a, win.GetTickCount64());
     if (a.outbox_load_failed) {
         setStatus(a, "Outbox could not be loaded; sends paused");
         return;
@@ -8596,7 +9458,7 @@ fn startNextSend(a: *App) void {
     bindOutboxAccount(a);
     const head = &a.pending_sends[0];
     if (a.slack_outbox_dirty or head.account.len == 0 or (!unifiedHub(a) and !std.mem.eql(u8, head.account.slice(), a.cache_tag.slice()))) return;
-    if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and
+    if (!unifiedHub(a) and (head.from_disk or (head.retries > 0 and head.ambiguous)) and
         sentMessageExists(a, chat_key.of(head), head.text.slice(), head.queued_unix))
     {
         appendLaunchLog(a, "send: matched an already-delivered message, not resending");
@@ -8620,6 +9482,7 @@ fn startNextSend(a: *App) void {
 }
 
 fn checkSend(a: *App) void {
+    if (unifiedHub(a)) return tickUnifiedOutbox(a);
     if (a.send_child) |*child| {
         const handle = child.id orelse return;
         var code: win.DWORD = 0;
@@ -9091,7 +9954,7 @@ fn voiceChatAllowed(a: *const App) bool {
 fn updateVoiceButton(a: *App) void {
     const button = a.voice_btn orelse return;
     const allowed = voiceChatAllowed(a);
-    if (a.voice_active and !allowed) cancelVoice(a, "Voice note cancelled");
+    if (a.voice_active and !allowed and !(unifiedHub(a) and a.voice_session != null and a.voice_session.?.state() == .ready)) cancelVoice(a, "Voice note cancelled");
     if (allowed == a.voice_visible) return;
     a.voice_visible = allowed;
     _ = win.ShowWindow(button, if (allowed) win.SW_SHOW else win.SW_HIDE);
@@ -9168,13 +10031,25 @@ fn invalidateRecordingTick(a: *App) void {
 fn tickVoice(a: *App) void {
     if (!a.voice_active) return;
     const session = a.voice_session orelse return;
-    if (!a.voice_finishing and (!voiceChatAllowed(a) or !chat_key.Key.eql(a.voice_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) {
+    if (!a.voice_finishing and !(unifiedHub(a) and session.state() == .ready) and (!voiceChatAllowed(a) or !chat_key.Key.eql(a.voice_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) {
         cancelVoice(a, "Voice note cancelled: you switched chats");
         return;
     }
     switch (session.state()) {
         .recording, .encoding => invalidateRecordingTick(a),
         .ready => {
+            if (unifiedHub(a)) {
+                if (!a.voice_finishing) return;
+                const note = session.result orelse return;
+                if (!queueVoiceNote(a, a.voice_jid.slice(), note.ogg, note.seconds, &note.waveform)) {
+                    a.voice_finishing = false;
+                    setStatus(a, "Voice note retained; Enter retries");
+                    return;
+                }
+                if (session.take()) |saved| a.allocator.free(saved.ogg);
+                endVoiceUi(a);
+                return;
+            }
             const result = session.take();
             endVoiceUi(a);
             if (result) |note| {
@@ -9194,6 +10069,32 @@ fn tickVoice(a: *App) void {
 
 fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, waveform: *const [64]u8) bool {
     _ = waveform;
+    if (unifiedHub(a)) {
+        const key = a.voice_origin.key();
+        var entries = [_]outbox.Entry{.{}};
+        const entry = &entries[0];
+        entry.provider = std.meta.stringToEnum(outbox.Provider, @tagName(key.provider)).?;
+        entry.account.set(key.account);
+        entry.jid.set(jid);
+        entry.file.set("voice.ogg");
+        entry.reply_to.set(a.voice_reply_to.slice());
+        entry.reply_sender.set(a.voice_reply_sender.slice());
+        entry.ptt = true;
+        entry.voice_seconds = seconds;
+        entry.queued_unix = nowUnixSeconds();
+        acceptUnifiedSends(a, &entries, ogg) catch return false;
+        if (a.draft_store.isOpen(key)) clearReply(a);
+        a.user_viewed = true;
+        a.scroll_y = 0;
+        for (a.pending_sends[0..a.pending_send_count]) |*pending| {
+            if (std.mem.eql(u8, &pending.id, entry.idSlice())) {
+                appendWhatsAppPending(a, pending, false);
+                break;
+            }
+        }
+        setStatus(a, "Voice note saved");
+        return true;
+    }
     if (a.outbox_load_failed or a.pending_send_count >= max_pending_sends) return false;
     var path_buffer: [520]u8 = undefined;
     const path_len = stageNewPath(a, &path_buffer, "ogg") orelse return false;
@@ -9237,7 +10138,80 @@ fn sendMessage(a: *App) void {
     sendMessageFrom(a, false);
 }
 
+fn sendUnifiedMessage(a: *App, thread: bool) void {
+    const compose = (if (thread) a.thread_compose else a.compose) orelse return;
+    if (a.selected_chat >= a.chat_count) return;
+    const key = chat_key.of(&a.chats[a.selected_chat]);
+    const origin_view = a.chat_view;
+    const origin_account = a.view_account;
+    const origin_archived = a.show_archived;
+    if (thread and (a.thread_parent.len == 0 or !chat_key.Key.eql(a.thread_origin.key(), key))) return;
+    const count = if (thread) 0 else a.staged_images.count;
+    for (a.staged_images.items[0..count]) |*image| {
+        if (!chat_key.Key.eql(chat_key.of(image), key)) {
+            setStatus(a, "Attachments belong to another chat");
+            return;
+        }
+    }
+    var wide: [drafts.max_text + 1]u16 = undefined;
+    const length: usize = @intCast(win.GetWindowTextW(compose, &wide, wide.len));
+    if (length == 0 and count == 0) return;
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length]) catch return;
+    defer a.allocator.free(text);
+    if (text.len > outbox.max_text_len) {
+        setStatus(a, "Message exceeds 4095 UTF-8 bytes; shorten it first");
+        return;
+    }
+    const entries = a.allocator.alloc(outbox.Entry, @max(count, 1)) catch return;
+    defer a.allocator.free(entries);
+    for (entries, 0..) |*entry, index| {
+        entry.* = .{};
+        entry.provider = std.meta.stringToEnum(outbox.Provider, @tagName(key.provider)).?;
+        entry.account.set(key.account);
+        entry.jid.set(key.id);
+        entry.text.set(if (index == 0) text else "");
+        entry.reply_to.set(if (thread) a.thread_parent.slice() else a.reply_to.slice());
+        entry.reply_sender.set(if (thread) "" else a.reply_sender.slice());
+        entry.queued_unix = nowUnixSeconds();
+        if (count > 0) entry.file.set(a.staged_images.items[index].path.slice());
+    }
+    acceptUnifiedSends(a, entries, null) catch {
+        setStatus(a, "Could not save outbox; input retained");
+        return;
+    };
+    for (entries) |*entry| {
+        for (a.pending_sends[0..a.pending_send_count]) |*pending| {
+            if (std.mem.eql(u8, &pending.id, entry.idSlice())) {
+                appendWhatsAppPending(a, pending, false);
+                break;
+            }
+        }
+    }
+    if (count > 0) discardStagedImage(a);
+    if (!thread) clearReply(a);
+    a.user_viewed = true;
+    a.scroll_y = 0;
+    _ = win.SetWindowTextW(compose, lit(""));
+    if (!thread) saveComposerDraft(a);
+    layout(a, a.compose_client_width, a.compose_client_height);
+    if (a.chat_view == origin_view and a.show_archived == origin_archived and
+        std.mem.eql(u8, a.view_account.slice(), origin_account.slice()) and a.selected_chat < a.chat_count and
+        chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(&entries[0])))
+    {
+        if (thread) {
+            if (a.thread_compose) |current| {
+                if (current == compose and std.mem.eql(u8, a.thread_parent.slice(), entries[0].reply_to.slice())) _ = win.SetFocus(compose);
+            }
+        } else if (a.compose) |current| {
+            if (current == compose) focusCompose(a);
+        }
+    }
+    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
+    setStatus(a, "Message saved");
+}
+
 fn sendMessageFrom(a: *App, thread: bool) void {
+    if (unifiedHub(a)) return sendUnifiedMessage(a, thread);
     const compose = (if (thread) a.thread_compose else a.compose) orelse return;
     if (thread and (a.thread_parent.len == 0 or a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) return;
     const reply_to = if (thread) a.thread_parent.slice() else a.reply_to.slice();
@@ -10298,7 +11272,7 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
         const media = item.media_hit;
         const bubble = item.bubble_hit;
         if (item.send_state == .failed and x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom and
-            resendFailedMessage(a, index))
+            resendFailedMessage(a, index, true))
         {
             _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return;
@@ -11965,6 +12939,24 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.staged_images.count });
+    if (verification_fixture) {
+        var ready: usize = 0;
+        var uncertain: usize = 0;
+        var held: usize = 0;
+        if (a.unified_snapshot) |snapshot| {
+            for (snapshot.records[0..snapshot.count]) |*record| switch (record.phase) {
+                .ready => ready += 1,
+                .uncertain => uncertain += 1,
+                .held => held += 1,
+            };
+        }
+        try w.print(",\"legacy_hub_tag\":\"{x:0>16}\"", .{std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, a.wa_bridge_url), "hub")});
+        try w.print(",\"unified_snapshot\":{{\"loaded\":{},\"ready\":{d},\"uncertain\":{d},\"held\":{d},\"inflight\":{d},\"hub_jobs\":{d},\"storage_blocked\":{},\"unsaved_outcomes\":{d},\"fault_hits\":{d},\"imports_clean\":{},\"import_unresolved\":{d},\"import_overflow\":{d}}}", .{
+            unifiedHub(a) and a.unified_snapshot != null and !a.outbox_load_failed, ready,                     uncertain,                                               held,                 @as(u8, if (a.unified_inflight != null) 1 else 0),
+            wacliPendingGet(a, .hub_send),                                          a.unified_storage_blocked, @as(u8, if (a.unified_unsaved_result != null) 1 else 0), a.unified_fault_hits, a.unified_imports_clean,
+            a.unified_import_unresolved,                                            a.unified_import_overflow,
+        });
+    }
     const card = updateCardRect(a);
     try w.print(",\"update_card\":{{\"visible\":{},\"span\":{d},\"rect\":[{d},{d},{d},{d}],\"error\":", .{ updateCardVisible(a), updateCardSpan(a), card.left, card.top, card.right, card.bottom });
     try control_api.writeString(w, a.update_card_error[0..a.update_card_error_len]);
@@ -13494,7 +14486,7 @@ fn runCommand(a: *App, command: u16) void {
                 setStatus(a, "Select a failed message first");
                 return;
             }
-            if (!resendFailedMessage(a, selected)) setStatus(a, "Only a failed WhatsApp message can be resent");
+            if (!resendFailedMessage(a, selected, false)) setStatus(a, "Only a failed WhatsApp message can be resent");
         },
         command_sort_views => openSortViews(a),
         command_show_all => switchChatView(a, .all),
@@ -17265,7 +18257,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         if (a.selected_message) |selected| {
             if (selected < a.message_count and a.messages[selected].from_me and a.messages[selected].send_state == .failed) {
                 const compose_empty = if (a.compose) |compose| win.GetWindowTextLengthW(compose) == 0 else true;
-                if (compose_empty and resendFailedMessage(a, selected)) return true;
+                if (compose_empty and resendFailedMessage(a, selected, false)) return true;
             }
         }
     }
@@ -18193,6 +19185,39 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     defer app.read_state.deinit(init.gpa);
+    if (verification_fixture) {
+        const migration_id = init.environ_map.get("WAZIG_VERIFY_ID") orelse "";
+        const migration_case = init.environ_map.get("WAZIG_VERIFY_MIGRATION_CASE") orelse "";
+        if (migration_id.len == 36 and
+            (std.mem.eql(u8, migration_case, "hub-migration-crash") or std.mem.eql(u8, migration_case, "hub-migration-before-rename")) and
+            std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_MIGRATION_STOP") orelse "", migration_id) and
+            std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_RESTART") orelse "", migration_id))
+        {
+            app.verification_migration_stop_id = migration_id;
+            app.verification_migration_stop_root = init.environ_map.get("WAZIG_VERIFY_ROOT") orelse "";
+            app.verification_migration_stop_before_rename = std.mem.eql(u8, migration_case, "hub-migration-before-rename");
+        }
+        app.verification_retry_evidence = std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_RETRY_EVIDENCE") orelse "", "1");
+        if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_FAULT")) |fault| {
+            app.unified_write_fault = std.meta.stringToEnum(@TypeOf(app.unified_write_fault), fault) orelse .none;
+            if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_TRANSITION")) |transition| {
+                app.unified_fault_transition = std.meta.stringToEnum(UnifiedFaultTransition, transition) orelse blk: {
+                    app.unified_write_fault = .none;
+                    break :blk .any;
+                };
+            }
+            if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_ATTEMPT")) |attempt| {
+                app.unified_fault_attempt = std.fmt.parseInt(u64, attempt, 10) catch blk: {
+                    app.unified_write_fault = .none;
+                    break :blk 0;
+                };
+                if (app.unified_fault_attempt == 0) app.unified_write_fault = .none;
+            }
+        }
+    }
+    defer if (app.unified_snapshot) |snapshot| app.allocator.destroy(snapshot);
+    defer if (app.unified_candidate) |candidate| app.allocator.destroy(candidate);
+    defer if (app.unified_snapshot_path.len > 0) app.allocator.free(app.unified_snapshot_path);
     app.outbox_path = providerStatePath(app, "outbox.jsonl") orelse &.{};
     defer if (app.outbox_path.len > 0) init.gpa.free(app.outbox_path);
     restoreOutbox(app);
@@ -19921,7 +20946,82 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
     showProblem(a, "No linked WhatsApp hub account");
 }
 
+fn beginUnifiedSend(a: *App, now_ms: u64) void {
+    if (!unifiedHub(a) or !hubConfigured(a) or a.hub_account.len == 0 or a.outbox_load_failed or a.unified_storage_blocked or
+        !a.unified_imports_clean or a.unified_inflight != null or wacliPendingGet(a, .hub_send) != 0) return;
+    const live = a.unified_snapshot orelse return;
+    const candidate = a.unified_candidate orelse return;
+    for (live.records[0..live.count], 0..) |*record, index| {
+        if (record.phase != .ready or record.not_before_ms > now_ms) continue;
+        if (record.attempt_serial == std.math.maxInt(u64)) {
+            a.unified_storage_blocked = true;
+            setStatus(a, "Send attempt limit reached; outbox paused");
+            return;
+        }
+        if (record.entry.file.len > 0) {
+            const available = if (record.attachment_ready) unifiedOwnedFileAvailable(a, record) catch {
+                a.unified_storage_blocked = true;
+                setStatus(a, "Could not inspect attachment; outbox paused");
+                return;
+            } else false;
+            if (!available) {
+                candidate.* = live.*;
+                candidate.records[index].phase = .held;
+                candidate.records[index].failure_reason.set("attachment unavailable");
+                candidate.records[index].not_before_ms = 0;
+                if (!saveUnifiedCandidate(a, .any, 0)) {
+                    a.unified_storage_blocked = true;
+                    setStatus(a, "Could not save held attachment");
+                    return;
+                }
+                refreshUnifiedViews(a);
+                refreshMessages(a);
+                setStatus(a, "Attachment unavailable; message held");
+                return;
+            }
+        }
+        var job = WacliJob{ .kind = .hub_send, .provider = std.meta.stringToEnum(transport.Provider, @tagName(record.entry.provider)).?, .gen = record.attempt_serial + 1 };
+        job.account.set(record.entry.account.slice());
+        job.jid.set(record.entry.jid.slice());
+        job.msg_id.set(record.entry.idSlice());
+        job.unified_filename.set(record.wire_filename.slice());
+        job.unified_file_sha256 = record.file_sha256;
+        job.unified_file_bytes = record.file_bytes;
+        wacliJobArgs(&job, &.{ record.entry.text.slice(), record.owned_file.slice(), record.entry.reply_to.slice(), if (record.entry.ptt) "true" else "false" });
+        const id = record.entry.id;
+        candidate.* = live.*;
+        candidate.records[index].phase = .uncertain;
+        candidate.records[index].attempt_serial = job.gen;
+        if (!saveUnifiedCandidate(a, .checkpoint, job.gen)) {
+            a.unified_storage_blocked = true;
+            setStatus(a, "Could not save send checkpoint; outbox paused");
+            return;
+        }
+        a.unified_inflight = .{ .id = id, .attempt = job.gen };
+        if (!wacliEnqueue(a, job, true)) {
+            a.unified_inflight = null;
+            const published = a.unified_snapshot orelse {
+                a.unified_storage_blocked = true;
+                return;
+            };
+            const spare = a.unified_candidate orelse {
+                a.unified_storage_blocked = true;
+                return;
+            };
+            spare.* = published.*;
+            spare.records[index].phase = .ready;
+            spare.records[index].not_before_ms = now_ms +| 3_000;
+            if (!saveUnifiedCandidate(a, .any, 0)) {
+                a.unified_storage_blocked = true;
+                setStatus(a, "Could not save enqueue failure; outbox paused");
+            }
+        }
+        return;
+    }
+}
+
 fn startHubSend(a: *App, pending: *const PendingSend) void {
+    if (unifiedHub(a)) return;
     if (wacliPendingGet(a, .hub_send) > 0) return;
     var job = WacliJob{ .kind = .hub_send, .provider = pending.provider, .account = pending.account, .jid = pending.jid };
     job.msg_id.set(&pending.id);
@@ -20000,11 +21100,129 @@ fn startHubAvatar(a: *App, target: AvatarTarget) bool {
     return true;
 }
 
+fn retryUnifiedRefill(a: *App, now_ms: u64) void {
+    if (!a.unified_refill_pending or now_ms < a.unified_refill_retry_at_ms) return;
+    importUnifiedOutbox(a) catch {
+        a.unified_storage_blocked = true;
+        a.unified_imports_clean = false;
+        a.unified_refill_retry_at_ms = now_ms +| 10_000;
+        setStatus(a, "Outbox recovery incomplete; sends paused");
+        return;
+    };
+    a.unified_refill_pending = false;
+    a.unified_refill_retry_at_ms = 0;
+}
+
+fn commitUnifiedOutcome(a: *App) void {
+    const outcome = a.unified_unsaved_result orelse return;
+    const live = a.unified_snapshot orelse return;
+    const candidate = a.unified_candidate orelse return;
+    for (live.records[0..live.count], 0..) |*record, index| {
+        if (!std.mem.eql(u8, record.entry.idSlice(), &outcome.id) or record.attempt_serial != outcome.attempt or record.phase != .uncertain) continue;
+        candidate.* = live.*;
+        switch (outcome.kind) {
+            .acknowledged => {
+                var i = index;
+                while (i + 1 < candidate.count) : (i += 1) candidate.records[i] = candidate.records[i + 1];
+                candidate.count -= 1;
+                candidate.records[candidate.count] = .{};
+            },
+            .held, .retryable => {
+                const updated = &candidate.records[index];
+                updated.entry.attempts +|= 1;
+                updated.entry.ambiguous = updated.entry.ambiguous or outcome.ambiguous;
+                updated.failure_reason = outcome.reason;
+                if (outcome.kind == .retryable) {
+                    if (sendRetryDelayMs(updated.entry.attempts)) |delay| {
+                        updated.phase = .ready;
+                        updated.not_before_ms = outcome.received_ms +| delay;
+                    } else {
+                        updated.phase = .held;
+                        if (updated.entry.ambiguous) updated.failure_reason.set("delivery unconfirmed");
+                    }
+                } else updated.phase = .held;
+            },
+        }
+        const transition: UnifiedFaultTransition = if (outcome.kind == .acknowledged) .acknowledged else if (candidate.records[index].phase == .held) .held else .any;
+        if (!saveUnifiedCandidate(a, transition, outcome.attempt)) {
+            a.unified_storage_blocked = true;
+            setStatus(a, "Could not save result; outbox paused");
+            return;
+        }
+        a.unified_unsaved_result = null;
+        a.unified_storage_blocked = true;
+        a.unified_imports_clean = false;
+        a.unified_refill_pending = true;
+        a.unified_refill_retry_at_ms = 0;
+        refreshUnifiedViews(a);
+        refreshMessages(a);
+        if (outcome.kind == .acknowledged) refreshChats(a);
+        retryUnifiedRefill(a, win.GetTickCount64());
+        return;
+    }
+    a.unified_storage_blocked = true;
+    setStatus(a, "Result mismatch; outbox paused");
+}
+
+fn finishUnifiedSend(a: *App, result: *const WacliResult) void {
+    const owner = a.unified_inflight orelse return;
+    if (owner.attempt != result.gen or !std.mem.eql(u8, &owner.id, result.msg_id.slice())) return;
+    const live = a.unified_snapshot orelse return;
+    var matched = false;
+    for (live.records[0..live.count]) |*record| {
+        if (record.phase == .uncertain and record.attempt_serial == owner.attempt and std.mem.eql(u8, record.entry.idSlice(), &owner.id)) matched = true;
+    }
+    if (!matched or a.unified_unsaved_result != null) {
+        a.unified_storage_blocked = true;
+        setStatus(a, "Result mismatch; outbox paused");
+        return;
+    }
+    const attachment_error = std.mem.eql(u8, result.extra.slice(), "AttachmentChanged") or std.mem.eql(u8, result.extra.slice(), "FileReadFailed");
+    const terminal = attachment_error or result.http_status == 401 or result.http_status == 403 or
+        (result.http_status == 429 and (result.provider == .signal or result.provider == .telegram));
+    var outcome = unified_snapshot.UnifiedOutcome{
+        .id = owner.id,
+        .attempt = owner.attempt,
+        .kind = if (result.ok) .acknowledged else if (terminal) .held else .retryable,
+        .ambiguous = !result.ok and !attachment_error and (result.http_status == 0 or result.http_status == 409 or result.http_status >= 500 or (result.http_status >= 200 and result.http_status < 300)),
+        .received_ms = win.GetTickCount64(),
+    };
+    if (!result.ok) outcome.reason.set(if (attachment_error) "attachment unavailable" else if (result.extra.len > 0) result.extra.slice() else "send failed");
+    a.unified_storage_blocked = true;
+    a.unified_unsaved_result = outcome;
+    a.unified_inflight = null;
+    commitUnifiedOutcome(a);
+}
+
+fn tickUnifiedOutbox(a: *App) void {
+    if (a.unified_result_lost.swap(false, .acq_rel)) {
+        if (a.unified_inflight) |owner| {
+            if (a.unified_unsaved_result == null) {
+                var outcome = unified_snapshot.UnifiedOutcome{ .id = owner.id, .attempt = owner.attempt, .kind = .held, .ambiguous = true, .received_ms = win.GetTickCount64() };
+                outcome.reason.set("delivery unconfirmed");
+                a.unified_storage_blocked = true;
+                a.unified_unsaved_result = outcome;
+                a.unified_inflight = null;
+            }
+        }
+    }
+    if (a.unified_unsaved_result != null) {
+        commitUnifiedOutcome(a);
+        return;
+    }
+    if (a.unified_refill_pending) {
+        retryUnifiedRefill(a, win.GetTickCount64());
+        return;
+    }
+    beginUnifiedSend(a, win.GetTickCount64());
+}
+
 fn applyHubResult(a: *App, result: *const WacliResult) void {
     switch (result.kind) {
         .hub_thread => applyHubThreadPage(a, result),
         .hub_older => applyHubOlderPage(a, result),
         .hub_send => {
+            if (unifiedHub(a)) return finishUnifiedSend(a, result);
             if (a.pending_send_count == 0 or !std.mem.eql(u8, &a.pending_sends[0].id, result.msg_id.slice())) return;
             if (result.ok) {
                 removeFirstPendingSend(a, true);
@@ -20271,12 +21489,13 @@ fn unifiedHubRequest(a: *App, allocator: std.mem.Allocator, job: *const WacliJob
         .hub_avatar => if (std.mem.eql(u8, job.extra.slice(), "workspace-icon")) hub.workspaceIcon(allocator, jid[6 .. jid.len - 1]) else hub.binary(allocator, jid, null),
         .hub_send => blk: {
             if (job.args[1].len == 0) break :blk hub.send(allocator, jid, job.args[0].slice(), job.args[2].slice(), job.msg_id.slice());
-            const bytes = readFileWin(allocator, job.args[1].slice(), wa_hub.max_file_bytes) orelse return error.FileReadFailed;
-            defer allocator.free(bytes);
+            const bytes = (unifiedReadAttachment(a, job.args[1].slice()) catch return error.FileReadFailed) orelse return error.FileReadFailed;
+            defer a.allocator.free(bytes);
+            if (job.unified_filename.len == 0 or !unified_snapshot.attachmentMatches(bytes, job.unified_file_bytes, &job.unified_file_sha256)) return error.AttachmentChanged;
             var random: [16]u8 = undefined;
             a.io.random(&random);
             const boundary = std.fmt.bytesToHex(random, .lower);
-            break :blk hub.sendFile(allocator, jid, job.args[0].slice(), job.args[2].slice(), job.msg_id.slice(), std.fs.path.basename(job.args[1].slice()), bytes, std.mem.eql(u8, job.args[3].slice(), "true"), &boundary);
+            break :blk hub.sendFile(allocator, jid, job.args[0].slice(), job.args[2].slice(), job.msg_id.slice(), job.unified_filename.slice(), bytes, std.mem.eql(u8, job.args[3].slice(), "true"), &boundary);
         },
         else => error.UnsupportedHubAction,
     };
@@ -20522,7 +21741,7 @@ fn toggleSlackThreads(a: *App) void {
 }
 
 fn channelMessageVisible(a: *App, message: *const Message) bool {
-    return !slackThreadsEnabled(a) or !slack.isThreadReply(message.id.slice(), message.thread_ts.slice());
+    return (message.from_me and message.send_state != .none) or !slackThreadsEnabled(a) or !slack.isThreadReply(message.id.slice(), message.thread_ts.slice());
 }
 
 fn threadReplyCount(a: *const App, parent: *const Message) usize {

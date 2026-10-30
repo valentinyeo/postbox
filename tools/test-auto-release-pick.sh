@@ -7,7 +7,7 @@ temp=$(mktemp -d)
 workflow="$temp/historical-auto-release.yml"
 trap 'rm -rf -- "$temp"' EXIT
 mkdir "$temp/bin" "$temp/repo"
-git -C "$script_dir/.." show e383ae2^:.github/workflows/auto-release.yml > "$workflow"
+git -C "$script_dir/.." show v0.9.232:.github/workflows/auto-release.yml > "$workflow"
 
 cat > "$temp/bin/gh" <<'GH'
 #!/usr/bin/env bash

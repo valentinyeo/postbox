@@ -3,6 +3,66 @@ function Save-TelegramMessages($Session, [string]$Name) {
     Save-Screen $Session $Name
 }
 
+function Save-TelegramArchiveObservation($Session, [string]$Phase) {
+    $window = Get-Window $Session
+    $compose = Get-Edit $window '1032'
+    $composeHandle = [IntPtr]$compose.Current.NativeWindowHandle
+    $text = Read-Edit $compose
+    $state = Read-Control $Session status
+    $foregroundHandle = [VerifyWindow]::GetForegroundWindow()
+    $foregroundPid = [uint32]0
+    if ($foregroundHandle -ne [IntPtr]::Zero) {
+        $null = [VerifyWindow]::GetWindowThreadProcessId($foregroundHandle, [ref]$foregroundPid)
+    }
+    $windowPid = [uint32]0
+    $thread = [VerifyWindow]::GetWindowThreadProcessId([IntPtr]$window.Current.NativeWindowHandle, [ref]$windowPid)
+    $info = [VerifyWindow+GuiThreadInfo]::new()
+    $info.Size = [Runtime.InteropServices.Marshal]::SizeOf([type][VerifyWindow+GuiThreadInfo])
+    $threadOk = [VerifyWindow]::GetGUIThreadInfo($thread, [ref]$info)
+    $focusedHandle = if ($threadOk) { $info.Focus } else { [IntPtr]::Zero }
+    $focused = if ($focusedHandle -ne [IntPtr]::Zero) { [Windows.Automation.AutomationElement]::FromHandle($focusedHandle) } else { $null }
+    $focusedPid = 0
+    $nativePid = [uint32]0
+    $focusedClass = ''
+    $focusedId = ''
+    $focusedText = $null
+    if ($focusedHandle -ne [IntPtr]::Zero) {
+        $null = [VerifyWindow]::GetWindowThreadProcessId($focusedHandle, [ref]$nativePid)
+    }
+    if ($null -ne $focused) {
+        $focusedPid = $focused.Current.ProcessId
+        $focusedClass = $focused.Current.ClassName
+        $focusedId = $focused.Current.AutomationId
+        if ($nativePid -eq $Session.pid -and $focusedClass -in @('RICHEDIT50W', 'Edit')) {
+            $focusedText = Read-EditText $focusedHandle
+        }
+    }
+    $observation = [ordered]@{
+        phase = $Phase
+        foreground_hwnd = $foregroundHandle.ToInt64()
+        foreground_process_id = $foregroundPid
+        gui_thread_ok = $threadOk
+        gui_thread_id = $thread
+        focused_hwnd = $focusedHandle.ToInt64()
+        focused_process_id = $focusedPid
+        focused_native_process_id = $nativePid
+        focused_class = $focusedClass
+        focused_automation_id = $focusedId
+        focused_text = $focusedText
+        composer_hwnd = $composeHandle.ToInt64()
+        composer_process_id = $compose.Current.ProcessId
+        composer_class = $compose.Current.ClassName
+        composer_automation_id = $compose.Current.AutomationId
+        composer_text = $text
+        selected = $state.selected
+        bulk_selected_count = $state.bulk_selected_count
+    }
+    $observation | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "telegram-archive-$Phase.json")
+    Assert-That ($foregroundHandle -ne [IntPtr]::Zero -and $foregroundPid -eq $Session.pid -and $threadOk -and $thread -ne 0 -and $windowPid -eq $Session.pid -and $focusedHandle -ne [IntPtr]::Zero -and $focusedPid -eq $Session.pid -and $nativePid -eq $Session.pid) "Telegram $Phase focus is not owned by Postbox"
+    Assert-That ($composeHandle -ne [IntPtr]::Zero -and $compose.Current.ProcessId -eq $Session.pid -and $compose.Current.ClassName -eq 'RICHEDIT50W' -and $compose.Current.AutomationId -eq '1032') "Telegram $Phase composer identity changed"
+    return $observation
+}
+
 function Save-TelegramAvatars($Session) {
     $window = Get-Window $Session
     $list = Get-Edit $window '1016'
@@ -171,9 +231,21 @@ function Invoke-TelegramJourney($Session, [string]$Messages) {
     Save-TelegramMessages $Session $failure.name
     Assert-That (@(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/send' -and $_.body.chat -eq $failure.id -and $_.status -eq $failure.code }).Count -eq 1) 'Telegram rejection was retried or hidden'
     Hub-Pass $Session limited
-    Send-Keys $Session '^a{BACKSPACE}'
+    $beforeClear = Save-TelegramArchiveObservation $Session 'before-clear'
+    Assert-That ($beforeClear.focused_hwnd -eq $beforeClear.composer_hwnd -and $beforeClear.focused_automation_id -eq '1032' -and $beforeClear.focused_class -eq 'RICHEDIT50W') 'Telegram composer does not own focus before clear'
+    Assert-That ($beforeClear.selected.id -eq 'telegram:user:1002' -and $beforeClear.bulk_selected_count -eq 0) 'Telegram clear started in the wrong selection'
+    Add-Content (Join-Path $Session.evidence 'actions.log') 'telegram-clear: begin'
+    if ($beforeClear.composer_text.Length -gt 0) { Send-Keys $Session '^a{BACKSPACE}' }
+    Add-Content (Join-Path $Session.evidence 'actions.log') 'telegram-clear: end'
+    $afterClear = Save-TelegramArchiveObservation $Session 'after-clear'
+    Assert-That ($afterClear.focused_hwnd -eq $afterClear.composer_hwnd -and $afterClear.focused_automation_id -eq '1032' -and $afterClear.focused_class -eq 'RICHEDIT50W') 'Telegram composer lost focus during clear'
+    Assert-That ($afterClear.composer_text -ceq '' -and $afterClear.selected.id -eq 'telegram:user:1002' -and $afterClear.bulk_selected_count -eq 0) 'Telegram clear changed the chat selection'
     Invoke-PaletteCommand $Session 'Verification Telegram'
     $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'telegram:user:1001' } 'Telegram chat restored'
+    $afterPalette = Save-TelegramArchiveObservation $Session 'after-palette'
+    Assert-That ($afterPalette.selected.id -eq 'telegram:user:1001' -and $afterPalette.bulk_selected_count -eq 0) 'Telegram palette left a bulk selection'
+    $beforeArchive = Save-TelegramArchiveObservation $Session 'before-archive'
+    Assert-That ($beforeArchive.selected.id -eq 'telegram:user:1001' -and $beforeArchive.bulk_selected_count -eq 0) 'Telegram one-chat archive has a bulk selection'
     Send-Keys $Session '^e'
     $null = Wait-Until {
         $state = Read-Control $Session status

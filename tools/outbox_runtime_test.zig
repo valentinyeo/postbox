@@ -107,12 +107,36 @@ const TelegramClient = struct {
         return false;
     }
 };
+const FailedSend = struct {
+    unified: bool = false,
+    id: [outbox.id_len]u8 = @splat('0'),
+    provider: transport.Provider = .whatsapp,
+    account: Utf8Text(32) = .{},
+    jid: Utf8Text(191) = .{},
+    text: Utf8Text(4095) = .{},
+    file: Utf8Text(519) = .{},
+    reply_to: Utf8Text(191) = .{},
+    reply_sender: Utf8Text(191) = .{},
+    queued_unix: i64 = 0,
+    ptt: bool = false,
+    voice_seconds: u32 = 0,
+    ambiguous: bool = false,
+};
+fn recordVerificationDispatch(_: *App, _: *const WacliJob) void {}
+
+fn captureVerificationCheckpointBefore(_: *App, _: []const u8) void {}
+
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     io: std.Io = std.testing.io,
     cache_tag: Utf8Text(32) = .{},
     outbox_path: []const u8 = "outbox.jsonl",
     outbox_load_failed: bool = false,
+    unified_write_fault: enum { none, open, write, flush, close, replace } = .none,
+    unified_fault_active: bool = false,
+    unified_fault_hits: u64 = 0,
+    failed_sends: [outbox.max_entries]FailedSend = @splat(.{}),
+    failed_send_count: usize = 0,
     pending_sends: [max_pending_sends]PendingSend = @splat(.{}),
     pending_send_count: usize = 0,
     activity_key: chat_key.Stored = .{},
@@ -136,6 +160,8 @@ const App = struct {
     hub_media_thread: ?bool = null,
     hub_account: Utf8Text(32) = .{},
     unified_hub: bool = false,
+    unified_inflight: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
+    verification_retry_evidence: bool = false,
     wacli_queue: [wacli_queue_size]WacliJob = @splat(.{}),
     wacli_queue_len: usize = 0,
     wacli_refresh_again: bool = false,
@@ -201,7 +227,7 @@ const win = struct {
     const TRUE = 1;
     const FALSE = 0;
     fn CreateFileW(_: [*:0]const u16, access: u32, _: u32, _: ?usize, _: u32, _: u32, _: ?usize) ?usize {
-        if (fault == .open) return INVALID_HANDLE_VALUE;
+        if (io_fault == .open) return INVALID_HANDLE_VALUE;
         if (access == GENERIC_READ) {
             read_position = 0;
             return if (exists) 2 else INVALID_HANDLE_VALUE;
@@ -217,7 +243,7 @@ const win = struct {
         return 1;
     }
     fn WriteFile(_: ?usize, bytes: [*]const u8, len: u32, written: *u32, _: ?usize) u32 {
-        if (fault == .write) {
+        if (io_fault == .write) {
             written.* = 0;
             return 0;
         }
@@ -228,7 +254,7 @@ const win = struct {
         return 1;
     }
     fn ReadFile(_: ?usize, bytes: [*]u8, len: u32, got: *u32, _: ?usize) u32 {
-        if (fault == .read and read_position > 0) {
+        if (io_fault == .read and read_position > 0) {
             got.* = 0;
             return 0;
         }
@@ -240,7 +266,7 @@ const win = struct {
     }
     fn FlushFileBuffers(_: ?usize) u32 {
         flushes += 1;
-        return if (fault == .flush) 0 else 1;
+        return if (io_fault == .flush) 0 else 1;
     }
     fn CloseHandle(_: ?usize) u32 {
         closes += 1;
@@ -250,7 +276,7 @@ const win = struct {
         return 1;
     }
     fn MoveFileExW(_: [*:0]const u16, _: [*:0]const u16, flags: u32) u32 {
-        if (fault == .rename) return 0;
+        if (io_fault == .rename) return 0;
         try_write_through = flags & MOVEFILE_WRITE_THROUGH != 0;
         @memcpy(disk[0..temp_len], temp[0..temp_len]);
         disk_len = temp_len;
@@ -276,7 +302,7 @@ const win = struct {
         return 1;
     }
 };
-var fault: enum { none, open, write, flush, rename, read } = .none;
+var io_fault: enum { none, open, write, flush, rename, read } = .none;
 var disk: [outbox.max_entries * outbox.max_line_len]u8 = undefined;
 var temp: [outbox.max_entries * outbox.max_line_len]u8 = undefined;
 var disk_len: usize = 0;
@@ -292,7 +318,7 @@ var refreshed: usize = 0;
 var compose_text: [4096]u16 = @splat(0);
 var compose_len: usize = 0;
 fn reset() void {
-    fault = .none;
+    io_fault = .none;
     disk_len = 0;
     temp_len = 0;
     exists = false;
@@ -308,7 +334,9 @@ fn lit(comptime text: []const u8) [*:0]const u16 {
     return std.unicode.utf8ToUtf16LeStringLiteral(text);
 }
 fn setStatus(_: *App, _: []const u8) void {}
-fn rememberFailedSend(a: *App, _: *const PendingSend) void { a.failed_count += 1; }
+fn rememberFailedSend(a: *App, _: *const PendingSend) void {
+    a.failed_count += 1;
+}
 fn restoreFailedSendText(_: *App, _: *const PendingSend) void {}
 fn cancelSlackMark(_: *App) void {}
 fn logSlackFailure(_: *App, _: WacliJobKind, _: []const u8, _: u32) void {}
@@ -383,6 +411,16 @@ fn unifiedHub(a: *const App) bool {
     return a.unified_hub;
 }
 
+fn sendUnifiedMessage(_: *App, _: bool) void {
+    @panic("unified admission belongs to the unified harness");
+}
+fn beginUnifiedSend(_: *App, _: u64) void {
+    @panic("unified dispatch belongs to the unified harness");
+}
+fn finishUnifiedSend(_: *App, _: *const WacliResult) void {
+    @panic("unified outcomes belong to the unified harness");
+}
+
 fn hubConfigured(_: *const App) bool {
     return false;
 }
@@ -427,7 +465,7 @@ fn setCompose(text: []const u8) void {
 }
 
 test "failed atomic journal stages do not acknowledge persistence" {
-    for ([_]@TypeOf(fault){ .open, .write, .flush, .rename }) |failure| {
+    for ([_]@TypeOf(io_fault){ .open, .write, .flush, .rename }) |failure| {
         reset();
         var app = fixture();
         app.slack_outbox_count = 1;
@@ -436,7 +474,7 @@ test "failed atomic journal stages do not acknowledge persistence" {
         const old_len = disk_len;
         const old_hash = std.hash.Wyhash.hash(0, disk[0..disk_len]);
         app.slack_outbox[0].entry.text.set("replacement");
-        fault = failure;
+        io_fault = failure;
         try std.testing.expect(!persistOutbox(&app));
         try std.testing.expectEqual(old_len, disk_len);
         try std.testing.expectEqual(old_hash, std.hash.Wyhash.hash(0, disk[0..disk_len]));
@@ -453,7 +491,7 @@ test "failed journal admission preserves composer reply and staged image" {
     app.chats[0].jid.set("synthetic-chat");
     app.reply_to.set("synthetic-reply");
     setCompose("draft");
-    fault = .rename;
+    io_fault = .rename;
     sendMessage(&app);
     try std.testing.expectEqual(@as(usize, 0), app.pending_send_count);
     try std.testing.expect(compose_len > 0 and app.reply_to.len > 0);
@@ -480,44 +518,19 @@ test "completed file stays alive until journal retirement succeeds" {
     app.pending_send_count = 1;
     app.pending_sends[0].file.set("synthetic.png");
     try std.testing.expect(persistOutbox(&app));
-    fault = .rename;
+    io_fault = .rename;
     removeFirstPendingSend(&app, true);
     try std.testing.expectEqual(@as(usize, 1), app.pending_send_count);
     try std.testing.expect(app.pending_sends[0].completed);
     try std.testing.expectEqual(@as(usize, 0), deleted);
     startNextSend(&app);
     try std.testing.expectEqual(@as(usize, 0), spawned);
-    fault = .none;
+    io_fault = .none;
     startNextSend(&app);
     try std.testing.expectEqual(@as(usize, 0), app.pending_send_count);
     try std.testing.expectEqual(@as(usize, 0), deleted);
     try std.testing.expectEqual(@as(usize, 1), app.sent_voice_count);
     try std.testing.expectEqual(@as(usize, 0), disk_len);
-}
-
-test "IGSH-531 hub outbox preserves every transport provider through restart" {
-    for ([_]transport.Provider{ .whatsapp, .slack, .telegram }) |provider| {
-        reset();
-        var app = fixture();
-        app.unified_hub = true;
-        app.pending_send_count = 1;
-        const pending = &app.pending_sends[0];
-        pending.id = sampleEntry(1).id;
-        pending.provider = provider;
-        pending.account = app.cache_tag;
-        pending.jid.set("synthetic-chat");
-        pending.text.set("synthetic text");
-        try std.testing.expect(persistOutbox(&app));
-        var scanner = outbox.Scanner.init(std.testing.allocator, disk[0..disk_len]);
-        try std.testing.expectEqualStrings(@tagName(provider), @tagName(scanner.next().?.provider));
-        var restored = fixture();
-        restored.unified_hub = true;
-        loadOutbox(&restored);
-        try std.testing.expect(!restored.outbox_load_failed);
-        try std.testing.expectEqual(@as(usize, 1), restored.pending_send_count);
-        try std.testing.expectEqual(@as(usize, 0), restored.slack_outbox_count);
-        try std.testing.expectEqual(provider, restored.pending_sends[0].provider);
-    }
 }
 
 test "restored WhatsApp sends have unique bubble sequences" {
@@ -593,11 +606,11 @@ test "partial journal read fails closed and cannot overwrite disk" {
     app.slack_outbox[0].entry = sampleEntry(1);
     try std.testing.expect(persistOutbox(&app));
     const saved_len = disk_len;
-    fault = .read;
+    io_fault = .read;
     var restored = fixture();
     loadOutbox(&restored);
     try std.testing.expect(restored.outbox_load_failed);
-    fault = .none;
+    io_fault = .none;
     try std.testing.expect(!persistOutbox(&restored));
     try std.testing.expectEqual(saved_len, disk_len);
     startNextSend(&restored);
@@ -652,13 +665,13 @@ test "Slack results retire exact ids even after echo and out-of-order admission"
     try std.testing.expectEqualStrings("client-one", app.slack_outbox[0].entry.client_msg_id.slice());
     retireSlackOutbox(&app, &second_id);
     try std.testing.expectEqual(@as(usize, 1), app.slack_outbox_count);
-    fault = .rename;
+    io_fault = .rename;
     const first_id = app.slack_outbox[0].entry.id;
     retireSlackOutbox(&app, &first_id);
     retrySlackOutbox(&app);
     try std.testing.expect(app.slack_outbox[0].completed);
     try std.testing.expectEqual(@as(usize, 0), app.wacli_queue_len);
-    fault = .none;
+    io_fault = .none;
     retrySlackOutbox(&app);
     try std.testing.expectEqual(@as(usize, 0), app.slack_outbox_count);
 }
@@ -854,13 +867,13 @@ test "legacy outbox migration retains every send with immediate or delayed accou
             startNextSend(&app);
             try std.testing.expectEqual(@as(usize, 0), spawned);
             app.cache_tag.set("aaaaaaaaaaaaaaaa");
-            fault = .rename;
+            io_fault = .rename;
             bindOutboxAccount(&app);
             try std.testing.expect(app.slack_outbox_dirty);
             try std.testing.expectEqual(old_hash, std.hash.Wyhash.hash(0, disk[0..disk_len]));
             startNextSend(&app);
             try std.testing.expectEqual(@as(usize, 0), spawned);
-            fault = .none;
+            io_fault = .none;
             bindOutboxAccount(&app);
         }
         try std.testing.expect(!app.slack_outbox_dirty);
@@ -943,47 +956,6 @@ test "Slack jobs never fall back to UI-thread networking when the worker is unav
     try std.testing.expectEqual(@as(usize, 0), app.wacli_queue_len);
 }
 
-test "staged hub images keep order first caption and independent durable ids on every provider" {
-    for ([_]transport.Provider{ .whatsapp, .slack, .signal, .telegram }) |provider| {
-        reset();
-        var app = fixture();
-        app.unified_hub = true;
-        app.chats[0].provider = provider;
-        app.chats[0].account.set("synthetic-account");
-        app.chats[0].jid.set("synthetic-chat");
-        for ([_][]const u8{ "first.png", "second.png", "third.png" }) |path| {
-            var image = app.staged_images.items[0];
-            image.provider = provider;
-            image.account = app.chats[0].account;
-            image.jid = app.chats[0].jid;
-            image.path.set(path);
-            try std.testing.expect(app.staged_images.add(image));
-        }
-        setCompose("caption");
-        sendMessage(&app);
-        try std.testing.expectEqual(@as(usize, 3), app.pending_send_count);
-        try std.testing.expectEqual(@as(usize, 0), app.staged_images.count);
-        try std.testing.expectEqual(@as(usize, 0), compose_len);
-        for (app.pending_sends[0..3], [_][]const u8{ "first.png", "second.png", "third.png" }, 0..) |pending, path, index| {
-            try std.testing.expectEqual(provider, pending.provider);
-            try std.testing.expectEqualStrings("synthetic-account", pending.account.slice());
-            try std.testing.expectEqualStrings(path, pending.file.slice());
-            try std.testing.expectEqualStrings(if (index == 0) "caption" else "", pending.text.slice());
-            try std.testing.expectEqual(index + 1, pending.seq);
-            for (app.pending_sends[0..index]) |earlier| try std.testing.expect(!std.mem.eql(u8, &earlier.id, &pending.id));
-        }
-        var restored = fixture();
-        restored.unified_hub = true;
-        loadOutbox(&restored);
-        try std.testing.expectEqual(@as(usize, 3), restored.pending_send_count);
-        for (app.pending_sends[0..3], restored.pending_sends[0..3]) |before, after| {
-            try std.testing.expectEqualSlices(u8, &before.id, &after.id);
-            try std.testing.expectEqualStrings(before.file.slice(), after.file.slice());
-            try std.testing.expectEqualStrings(before.text.slice(), after.text.slice());
-        }
-    }
-}
-
 test "staged batch journal failure retains all images and caption" {
     reset();
     var app = fixture();
@@ -996,7 +968,7 @@ test "staged batch journal failure retains all images and caption" {
         try std.testing.expect(app.staged_images.add(image));
     }
     setCompose("caption");
-    fault = .rename;
+    io_fault = .rename;
     sendMessage(&app);
     try std.testing.expectEqual(@as(usize, 0), app.pending_send_count);
     try std.testing.expectEqual(@as(usize, 2), app.staged_images.count);
@@ -1115,36 +1087,6 @@ test "pending replies retain original id sender and snippet without overwriting 
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Server-provided excerpt"), reply.quote.slice());
 }
 
-
-test "IGSH-1213 a failing Slack head becomes retryable failure and releases the WhatsApp group send" {
-    for ([_]u32{ 0, 200, 500, 502, 503 }) |status| {
-        reset();
-        var a = fixture();
-        a.unified_hub = true;
-        a.pending_send_count = 2;
-        a.pending_sends[0].account = a.cache_tag;
-        a.pending_sends[0].provider = .slack;
-        a.pending_sends[0].jid.set("slack:fixture:channel");
-        a.pending_sends[0].text.set("Synthetic failed send");
-        a.pending_sends[0].seq = 1;
-        a.pending_sends[1].account = a.cache_tag;
-        a.pending_sends[1].jid.set("personal:fixture-group@g.us");
-        a.pending_sends[1].seq = 2;
-        a.pending_sends[1].id = @splat('1');
-        a.message_count = 1;
-        a.messages[0].id.set("local-1");
-        var result = WacliResult{ .kind = .hub_send, .http_status = status };
-        result.msg_id.set(&a.pending_sends[0].id);
-        result.extra.set("NetworkFailed");
-        for (0..max_send_retries) |_| applyHubResult(&a, &result);
-        try std.testing.expectEqual(@as(usize, 1), a.pending_send_count);
-        try std.testing.expectEqualStrings("personal:fixture-group@g.us", a.pending_sends[0].jid.slice());
-        try std.testing.expectEqual(@as(usize, 1), a.failed_count);
-        try std.testing.expectEqual(.failed, a.messages[0].send_state);
-        try std.testing.expectEqual(@as(usize, 1), spawned);
-    }
-}
-
 test "IGSH-1213 queued group text is visibly sending before any confirmation" {
     reset();
     var a = fixture();
@@ -1156,4 +1098,12 @@ test "IGSH-1213 queued group text is visibly sending before any confirmation" {
     try std.testing.expectEqual(@as(usize, 1), a.message_count);
     try std.testing.expectEqual(.pending, a.messages[0].send_state);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Synthetic group message (sending)"), a.messages[0].text.slice());
+}
+
+test "intermediate unified outbox refuses send jobs" {
+    var app = App{};
+    app.unified_hub = true;
+    const before = app.wacli_queue_len;
+    try std.testing.expect(!wacliEnqueue(&app, .{ .kind = .hub_send }, true));
+    try std.testing.expectEqual(before, app.wacli_queue_len);
 }

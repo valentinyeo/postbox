@@ -14,6 +14,12 @@ public static class VerifyWindow {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo {
+        public int Size, Flags;
+        public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
+        public Rect CaretRect;
+    }
+    [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window, ref Point point);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
@@ -73,6 +79,8 @@ function Read-Control($Session, [string]$Command, [string[]]$Arguments = @(), [i
     $start.ArgumentList.Add($Command)
     foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
     $start.Environment['USERNAME'] = $Session.username
+    $null = $start.Environment.Remove('WAZIG_VERIFY_MIGRATION_CASE')
+    $null = $start.Environment.Remove('WAZIG_VERIFY_MIGRATION_STOP')
     $child = [Diagnostics.Process]::Start($start)
     try {
         $output = $child.StandardOutput.ReadToEndAsync()
@@ -281,6 +289,10 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [string]$Mode) {
     $script = if ($Mode -eq 'legacy') { 'fake-wa-bridge.py' } else { 'fake-hub.py' }
     $start.ArgumentList.Add((Join-Path $PSScriptRoot $script))
     if ($Mode -ne 'legacy') { $start.ArgumentList.Add("--$Mode") }
+    if ($Mode -in @('mixed-lid', 'hub-fault')) {
+        $start.ArgumentList.Add('--snapshot-root')
+        $start.ArgumentList.Add((Join-Path $Root 'local/Messages/unified-journal-v2'))
+    }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')

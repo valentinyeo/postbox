@@ -29,6 +29,8 @@ if [ "${WAZIG_WINE_TESTS:-0}" = "1" ]; then
     run xvfb-run -a wine "$raster_temp/text-test.exe"
 fi
 run python3 tools/test_outbox_runtime.py --zig "$ZIG" --negative-controls
+run python3 tools/test_unified_snapshot_atomic.py --zig "$ZIG"
+run python3 tools/test_unified_checkpoint.py --zig "$ZIG" --negative-controls
 run "$ZIG" test src/stretch.zig
 run "$ZIG" build -Dtarget=x86_64-windows-gnu --release=small
 run du -h zig-out/bin/Messages.exe

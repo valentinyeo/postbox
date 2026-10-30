@@ -1,4 +1,5 @@
 const std = @import("std");
+const outbox = @import("outbox.zig");
 const transport = @import("transport.zig");
 const chat_key = @import("chat_key.zig");
 const media_drain = @import("media_drain.zig");

@@ -186,7 +186,7 @@ else:
                 self.assertTrue('could not' in result.stdout or 'invalid PR head' in result.stdout, result.stdout)
 
     def test_IGSH_504_notification_is_a_successful_noop_on_prs(self):
-        historical = subprocess.run(['git', 'show', 'e383ae2^:.github/workflows/ci.yml'],
+        historical = subprocess.run(['git', 'show', 'v0.9.232:.github/workflows/ci.yml'],
                                     cwd=ROOT, capture_output=True, text=True, check=True).stdout
         job = historical.split('  notify-release:', 1)[1]
         before_steps, steps = job.split('    steps:', 1)

@@ -185,6 +185,75 @@
       "maximize": true
     },
     {
+      "name": "hub-fault",
+      "pr": false,
+      "hub": "hub-fault",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-hub-fault.ps1",
+      "validator": {
+        "file": "check-hub-fault-evidence.py",
+        "function": "check_hub_fault"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "FaultJourneyHandler"
+      },
+      "maximize": true,
+      "prepare": "prepare-hub-fault.ps1"
+    },
+    {
+      "name": "hub-migration-before-rename",
+      "pr": false,
+      "hub": "hub-migration-before-rename",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-hub-migration-crash.ps1",
+      "validator": {
+        "file": "check-hub-migration-crash-evidence.py",
+        "function": "check_hub_migration_crash"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "MigrationCrashHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "hub-migration-crash",
+      "pr": false,
+      "hub": "hub-migration-crash",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-hub-migration-crash.ps1",
+      "validator": {
+        "file": "check-hub-migration-crash-evidence.py",
+        "function": "check_hub_migration_crash"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "MigrationCrashHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "hub-rollback",
+      "pr": false,
+      "hub": "hub-rollback",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-hub-rollback.ps1",
+      "validator": {
+        "file": "check-hub-rollback-evidence.py",
+        "function": "check_hub_rollback"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "Handler"
+      },
+      "maximize": true
+    },
+    {
       "name": "hub-archive",
       "pr": true,
       "hub": "hub-archive",

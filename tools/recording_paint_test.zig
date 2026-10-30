@@ -12,6 +12,7 @@ const Session = struct {
     current: State = .recording,
     duration: u64 = 10000,
     reaped: bool = false,
+    result: ?Note = null,
     fn state(self: *Session) State {
         return self.current;
     }
@@ -21,7 +22,11 @@ const Session = struct {
     fn reap(self: *Session) void {
         self.reaped = true;
     }
-    fn take(_: *Session) ?Note {
+    fn take(self: *Session) ?Note {
+        if (self.result) |note| {
+            self.result = null;
+            return note;
+        }
         return .{ .ogg = std.testing.allocator.dupe(u8, "encoded voice") catch unreachable, .seconds = 10, .waveform = @splat(17) };
     }
 };
@@ -31,6 +36,7 @@ const App = struct {
     voice_btn: ?usize = 2,
     voice_active: bool = true,
     voice_finishing: bool = false,
+    unified_hub: bool = false,
     voice_session: ?*Session = null,
     voice_jid: Text = .{},
     voice_origin: chat_key.Stored = blk: {
@@ -44,6 +50,7 @@ const App = struct {
     ended: usize = 0,
     cancelled: usize = 0,
     queued: usize = 0,
+    queue_ok: bool = true,
     status: []const u8 = "",
 };
 const win = struct {
@@ -146,6 +153,7 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
     std.testing.expectEqualStrings("encoded voice", ogg) catch unreachable;
     std.testing.expectEqual(@as(u32, 10), seconds) catch unreachable;
     std.testing.expectEqual(@as(u8, 17), waveform[0]) catch unreachable;
+    if (!a.queue_ok) return false;
     a.queued += 1;
     return true;
 }
@@ -183,6 +191,32 @@ test "IGSH-482 encoding remains on the recording tick path and ready sends once"
     tickVoice(&app);
     try std.testing.expectEqual(@as(usize, 1), app.ended);
     try std.testing.expectEqual(@as(usize, 1), app.queued);
+}
+
+test "unified ready voice survives chat changes and queue failure until retry" {
+    var session = Session{ .current = .ready, .result = .{
+        .ogg = try std.testing.allocator.dupe(u8, "encoded voice"),
+        .seconds = 10,
+        .waveform = @splat(17),
+    } };
+    defer if (session.result) |note| std.testing.allocator.free(note.ogg);
+    var app = App{ .voice_session = &session, .unified_hub = true, .allowed = false, .queue_ok = false };
+    tickVoice(&app);
+    try std.testing.expectEqual(@as(usize, 0), app.cancelled);
+    try std.testing.expect(session.result != null);
+    try std.testing.expectEqual(@as(usize, 0), app.queued);
+    app.voice_finishing = true;
+    tickVoice(&app);
+    try std.testing.expect(!app.voice_finishing);
+    try std.testing.expect(session.result != null);
+    try std.testing.expectEqualStrings("Voice note retained; Enter retries", app.status);
+    app.queue_ok = true;
+    app.voice_finishing = true;
+    tickVoice(&app);
+    tickVoice(&app);
+    try std.testing.expect(session.result == null);
+    try std.testing.expectEqual(@as(usize, 1), app.queued);
+    try std.testing.expectEqual(@as(usize, 1), app.ended);
 }
 
 test "IGSH-482 switched chat cancels and failed short recording still reports its error" {

@@ -1,0 +1,27 @@
+import argparse
+from pathlib import Path
+import subprocess
+import tempfile
+
+def main():
+    root = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--zig', required=True)
+    args = parser.parse_args()
+    source = (root / 'src/main.zig').read_text(encoding='utf-8')
+    parts = [next(line for line in source.splitlines() if line.startswith('const UnifiedFaultTransition = '))]
+    for name in ('unifiedNativePath', 'unifiedFaultAt', 'writeOutboxAtomic', 'saveUnifiedCandidate'):
+        start = source.index(f'fn {name}(')
+        end = source.index('\n}\n', start) + 3
+        parts.append(source[start:end])
+    with tempfile.TemporaryDirectory(prefix='snapshot-writer-') as directory:
+        target = Path(directory)
+        for name in ('outbox.zig', 'unified_snapshot.zig'):
+            (target / name).write_text((root / 'src' / name).read_text(encoding='utf-8'), encoding='utf-8')
+        fixture = (root / 'tools/unified_snapshot_writer_test.zig').read_text(encoding='utf-8')
+        (target / 'test.zig').write_text(fixture + '\n' + '\n'.join(parts), encoding='utf-8')
+        subprocess.run([args.zig, 'test', str(target / 'test.zig')], check=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -21,6 +21,16 @@ Start-Transcript (Join-Path $Evidence 'run.log') | Out-Null
 Assert-That (-not (Test-Path 'HKCU:\Software\Messages')) 'Hosted runner already has production app preferences'
 $id = [Guid]::NewGuid().ToString()
 $root = Join-Path $env:RUNNER_TEMP "wazig-verify-$id"
+if ($Feature -ceq 'hub-rollback') {
+    $root = Join-Path $env:RUNNER_TEMP ('r' + [Guid]::NewGuid().ToString('N').Substring(0, 16))
+    Assert-That (-not (Test-Path -LiteralPath $root)) 'Rollback root already exists'
+    New-Item -Path $root -ItemType Directory -ErrorAction Stop | Out-Null
+}
+if ($Feature -cin @('hub-migration-crash', 'hub-migration-before-rename')) {
+    $root = Join-Path $env:RUNNER_TEMP ('r' + [Guid]::NewGuid().ToString('N').Substring(0, 16))
+    Assert-That (-not (Test-Path -LiteralPath $root)) 'Migration crash root already exists'
+    New-Item -Path $root -ItemType Directory -ErrorAction Stop | Out-Null
+}
 $local = Join-Path $root 'local'
 $profile = Join-Path $root 'profile'
 $messages = Join-Path $local 'Messages'
@@ -41,6 +51,8 @@ foreach ($case in @('not-actions', 'not-isolated')) {
     $rejected = [Diagnostics.ProcessStartInfo]::new($exe)
     $rejected.UseShellExecute = $false
     $rejected.ArgumentList.Add('--verify-fixture')
+    $null = $rejected.Environment.Remove('WAZIG_VERIFY_MIGRATION_CASE')
+    $null = $rejected.Environment.Remove('WAZIG_VERIFY_MIGRATION_STOP')
     if ($case -eq 'not-actions') { $rejected.Environment['GITHUB_ACTIONS'] = 'false' }
     $null = $rejected.Environment.Remove('WAZIG_VERIFY_ROOT')
     $child = [Diagnostics.Process]::Start($rejected)
@@ -64,7 +76,8 @@ $start.Environment['LOCALAPPDATA'] = $local
 $start.Environment['APPDATA'] = $local
 $start.Environment['USERPROFILE'] = $profile
 $start.Environment['USERNAME'] = "verify-$id"
-foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN', 'WAZIG_VERIFY_RESTART')) { $null = $start.Environment.Remove($name) }
+foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN', 'WAZIG_VERIFY_RESTART', 'WAZIG_VERIFY_RETRY_EVIDENCE', 'WAZIG_VERIFY_OUTBOX_FAULT', 'WAZIG_VERIFY_OUTBOX_TRANSITION', 'WAZIG_VERIFY_OUTBOX_ATTEMPT', 'WAZIG_VERIFY_MIGRATION_CASE', 'WAZIG_VERIFY_MIGRATION_STOP')) { $null = $start.Environment.Remove($name) }
+if ($Feature -cin @('hub', 'hub-fault', 'hub-migration-crash', 'hub-migration-before-rename')) { $start.Environment['WAZIG_VERIFY_RETRY_EVIDENCE'] = '1' }
 $bridge = $null
 if ($journey.prepare) { . (Join-Path $PSScriptRoot $journey.prepare) }
 if ($journey.hub) {
@@ -122,13 +135,26 @@ try {
     $final | Add-Member -NotePropertyName telegram_store_absent -NotePropertyValue (-not (Test-Path (Join-Path $messages 'telegram')))
     Assert-That $final.production_preferences_absent 'Production app preferences were touched'
     $final | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'side-effects.json')
+    if ($Feature -ceq 'hub-rollback') {
+        Stop-RollbackApp $session
+        . "$PSScriptRoot/rollback-offline-cleanup.ps1"
+    }
     "JOURNEY PASSED: $Feature" | Set-Content (Join-Path $Evidence 'result.txt')
 } catch {
     "${Feature}: $($_.Exception.Message)" | Set-Content (Join-Path $Evidence 'failure.txt')
     try { Save-Screen $session failure } catch { $_ | Out-String | Add-Content (Join-Path $Evidence 'failure.txt') }
     throw
 } finally {
-    & "$PSScriptRoot/cleanup.ps1" -Evidence $Evidence
+    if ($offlineCleanupUnsafe) {
+        $ownedBridge = Get-Process -Id $session.bridge_pid -ErrorAction SilentlyContinue
+        if ($ownedBridge) {
+            Assert-That ($ownedBridge.StartTime.ToUniversalTime().Ticks.ToString() -ceq $session.bridge_start_ticks -and $ownedBridge.Path -ceq $session.bridge_exe) 'Fake bridge PID reused'
+            Stop-Process -Id $ownedBridge.Id -Force
+        }
+        'CLEANUP FAILED: disposable process may be running; root and firewall retained' | Set-Content (Join-Path $Evidence 'cleanup.txt')
+    } else {
+        & "$PSScriptRoot/cleanup.ps1" -Evidence $Evidence
+    }
     $app.StandardError.ReadToEnd() | Set-Content (Join-Path $Evidence 'app.stderr.log')
     Stop-Transcript | Out-Null
 }

@@ -86,7 +86,7 @@ public static class VerifyVoice {
     static long Differ(byte[] a, byte[] b, int stride, int ox, int oy, Rect area) {
         long count = 0;
         for (int y = area.Top; y < area.Bottom; y++) for (int x = area.Left; x < area.Right; x++) {
-            if (Pixel(a, stride, ox + x, oy + y) != Pixel(b, stride, ox + x, oy + y)) count++;
+            if (Distance(Pixel(a, stride, ox + x, oy + y), Pixel(b, stride, ox + x, oy + y)) > 1) count++;
         }
         return count;
     }

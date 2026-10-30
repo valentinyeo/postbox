@@ -66,6 +66,10 @@ class Handler(bridge.Handler):
         super().record(status, wire_path=self.wire_path, **extra)
 
     def respond(self, status, data, content_type='application/json', **extra):
+        if content_type == 'application/json' and isinstance(data, list) and urlsplit(self.path).path == '/v1/messages' and parse_qs(urlsplit(self.path).query).get('chat') == [bridge.ALPHA] and getattr(self.state, 'identity_collision', False):
+            collision = self.state.message(bridge.ALPHA, 'identity-collision', 'Identity file')
+            collision['FromMe'] = True
+            data = data + [collision]
         if content_type == 'application/json' and isinstance(data, list):
             data = json.loads(json.dumps(data).replace(bridge.ACCOUNT + ':', '').replace(bridge.ALPHA, ALPHA).replace(bridge.BETA, BETA))
             for row in data:
@@ -119,8 +123,54 @@ class Handler(bridge.Handler):
         self.wfile.flush()
         self.state.record(dict(method='SSE', path='/v1/events', wire_path=self.wire_path, id=event_id, kind=kind))
 
+    def capture_identity_snapshot(self, body):
+        root = getattr(self.state, 'snapshot_root', None)
+        if root is None:
+            return
+        client_id = body.get('client_id', '')
+        if not re.fullmatch(r'[0-9a-f]{32}', client_id):
+            raise ValueError('invalid identity client id')
+        paths = list(root.glob('*/snapshot.v2'))
+        if len(paths) != 1:
+            raise ValueError('expected one authoritative snapshot')
+        raw = paths[0].read_bytes()
+        snapshot = json.loads(raw)
+        records = [row for row in snapshot['records'] if row['id'] == client_id]
+        if len(records) != 1 or records[0]['phase'] != 'uncertain':
+            raise ValueError('request without uncertain checkpoint')
+        record = records[0]
+        stem = f"{client_id}-{record['attempt_serial']}"
+        target = self.state.log.parent / 'identity-attempts'
+        target.mkdir(exist_ok=True)
+        with (target / (stem + '.snapshot.json')).open('xb') as stream:
+            stream.write(raw)
+        payload = ''
+        if record['attachment_ready']:
+            owned = Path(record['owned_file']).resolve()
+            if not owned.is_relative_to((paths[0].parent / 'files').resolve()):
+                raise ValueError('attachment outside private backend')
+            payload = stem + '.payload'
+            with (target / payload).open('xb') as stream:
+                stream.write(owned.read_bytes())
+        with (target / 'index.jsonl').open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps(dict(id=client_id, attempt=record['attempt_serial'], snapshot=stem + '.snapshot.json', snapshot_sha256=hashlib.sha256(raw).hexdigest(), payload=payload,
+                                         retry_marker=self.identity_ingress_markers.get(stem),
+                                         dispatch_marker=self.identity_ingress_dispatches.get(stem))) + '\n')
+
+    def capture_identity_ingress(self):
+        self.identity_ingress_markers = {}
+        self.identity_ingress_dispatches = {}
+        root = getattr(self.state, 'snapshot_root', None)
+        if root is not None and self.path == '/v1/wazig/send':
+            for prefix, target in (('verification-retry-', self.identity_ingress_markers),
+                                   ('verification-dispatch-', self.identity_ingress_dispatches)):
+                for marker in root.parent.glob(prefix + '*.json'):
+                    stem = marker.name.removeprefix(prefix).removesuffix('.json')
+                    target[stem] = json.loads(marker.read_text(encoding='utf-8'))
+
     def do_POST(self):
         self.wire_path = self.path
+        self.capture_identity_ingress()
         if self.path == '/fixture/live':
             super().do_POST()
             return
@@ -130,10 +180,64 @@ class Handler(bridge.Handler):
         if not self.authorized():
             return
         data = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        if self.path == '/v1/wazig/send' and self.headers.get('Content-Type', '').startswith('multipart/form-data'):
+            envelope = bridge.BytesParser(policy=bridge.policy.default).parsebytes(
+                f'Content-Type: {self.headers["Content-Type"]}\r\nMIME-Version: 1.0\r\n\r\n'.encode() + data)
+            body, image = {}, b''
+            for part in envelope.iter_parts():
+                name = part.get_param('name', header='content-disposition')
+                if part.get_filename() is None:
+                    body[name] = part.get_content()
+                else:
+                    body[name] = part.get_filename()
+                    image = part.get_payload(decode=True)
+            self.wire_body = dict(body)
+            if body.get('text') == 'Identity file':
+                self.capture_identity_snapshot(body)
+            digest = hashlib.sha256(image).hexdigest()
+            with self.state.lock:
+                if not hasattr(self.state, 'identity_file_payloads'):
+                    self.state.identity_file_payloads = {}
+                prior = self.state.identity_file_payloads.get(body.get('client_id'))
+                payload = (dict(body), digest)
+                mismatch = (prior is not None and prior != payload) or body.get('client_id') in getattr(self.state, 'identity_payloads', {})
+            if mismatch:
+                self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False, duplicate=True, file_sha256=digest, file_size=len(image))
+                return
+            if body.get('chat') != ALPHA or body.get('text') != 'Identity file' or not image.startswith(b'\x89PNG\r\n\x1a\n'):
+                self.respond(400, {'error': 'invalid identity file'}, body=body)
+                return
+            with self.state.lock:
+                if not hasattr(self.state, 'identity_file_attempts'):
+                    self.state.identity_file_attempts = {}
+                client_id = body['client_id']
+                prior = self.state.identity_file_payloads.get(client_id)
+                mismatch = (prior is not None and prior != payload) or client_id in getattr(self.state, 'identity_payloads', {})
+                if not mismatch:
+                    self.state.identity_file_payloads.setdefault(client_id, payload)
+                    count = self.state.identity_file_attempts.get(client_id, 0) + 1
+                    self.state.identity_file_attempts[client_id] = count
+                    self.state.identity_collision = True
+            if mismatch:
+                self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False, duplicate=True, file_sha256=digest, file_size=len(image))
+                return
+            if count <= 4:
+                self.respond(409, {'client_id': client_id, 'status': 'unknown'}, body=body, accepted=count == 1, duplicate=count > 1, file_sha256=digest, file_size=len(image))
+            else:
+                self.respond(200, {'client_id': client_id, 'msg_id': 'identity-file', 'ts': self.state.stamp, 'status': 'sent'}, body=body, accepted=False, duplicate=True, file_sha256=digest, file_size=len(image))
+            return
         body = json.loads(data)
         if self.path == '/v1/wazig/archive-batch':
             self.archive_batch(body, {BETA: bridge.BETA})
             return
+        if self.path == '/v1/wazig/send':
+            with self.state.lock:
+                prior = getattr(self.state, 'identity_payloads', {}).get(body.get('client_id'))
+                mismatch = (prior is not None and prior != body) or body.get('client_id') in getattr(self.state, 'identity_file_payloads', {})
+            if mismatch:
+                self.wire_body = dict(body)
+                self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False, duplicate=True)
+                return
         fields = {
             '/v1/wazig/send': {'chat', 'text', 'reply_to', 'client_id'},
             '/v1/wazig/mark-read': {'chat', 'message_id'},
@@ -144,6 +248,33 @@ class Handler(bridge.Handler):
             self.respond(400, {'error': 'invalid unified payload'}, body=body)
             return
         self.wire_body = dict(body)
+        if self.path == '/v1/wazig/send' and body.get('text') == 'Identity fixture':
+            self.capture_identity_snapshot(body)
+            with self.state.lock:
+                if not hasattr(self.state, 'identity_attempts'):
+                    self.state.identity_attempts = {}
+                    self.state.identity_sends = {}
+                    self.state.identity_payloads = {}
+                client_id = body['client_id']
+                prior = self.state.identity_payloads.get(client_id)
+                mismatch = (prior is not None and prior != body) or client_id in getattr(self.state, 'identity_file_payloads', {})
+                if not mismatch:
+                    self.state.identity_payloads.setdefault(client_id, dict(body))
+                    count = self.state.identity_attempts.get(client_id, 0) + 1
+                    self.state.identity_attempts[client_id] = count
+                    first_intent = not self.state.identity_sends or client_id == next(iter(self.state.identity_sends))
+                    new_intent = client_id not in self.state.identity_sends
+                    if new_intent:
+                        self.state.identity_sends[client_id] = dict(client_id=client_id, msg_id='identity-message', ts=self.state.stamp, status='sent')
+                    reply = dict(self.state.identity_sends[client_id])
+            if mismatch:
+                self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False, duplicate=True)
+                return
+            if first_intent and count <= 4:
+                self.respond(409, {'client_id': client_id, 'status': 'unknown'}, body=body, accepted=count == 1, duplicate=count > 1)
+            else:
+                self.respond(200, reply, body=body, accepted=new_intent, duplicate=not new_intent)
+            return
         body['chat'] = {ALPHA: bridge.ALPHA, BETA: bridge.BETA}[body['chat']]
         body['account'] = bridge.ACCOUNT
         encoded = json.dumps(body).encode()
@@ -152,6 +283,95 @@ class Handler(bridge.Handler):
         self.path = self.path.replace('/v1/wazig/', '/v1/', 1)
         super().do_POST()
 
+
+
+class MigrationCrashHandler(Handler):
+    def do_POST(self):
+        if self.path != '/v1/wazig/send':
+            return super().do_POST()
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        data = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        if not self.headers.get('Content-Type', '').startswith('multipart/form-data'):
+            self.respond(400, {'error': 'expected attachment'})
+            return
+        envelope = bridge.BytesParser(policy=bridge.policy.default).parsebytes(
+            f'Content-Type: {self.headers["Content-Type"]}\r\nMIME-Version: 1.0\r\n\r\n'.encode() + data)
+        body, payload = {}, b''
+        for part in envelope.iter_parts():
+            name = part.get_param('name', header='content-disposition')
+            if part.get_filename() is None:
+                body[name] = part.get_content()
+            else:
+                body[name] = part.get_filename()
+                payload = part.get_payload(decode=True)
+        self.wire_body = dict(body)
+        if body.get('chat') != ALPHA or body.get('text') != 'Interrupted image' or not payload.startswith(b'\x89PNG\r\n\x1a\n'):
+            self.respond(400, {'error': 'invalid migration attachment'}, body=body, accepted=False)
+            return
+        with self.state.lock:
+            if not hasattr(self.state, 'migration_ids'):
+                self.state.migration_ids = set()
+            duplicate = body.get('client_id') in self.state.migration_ids
+            self.state.migration_ids.add(body.get('client_id'))
+        self.respond(200, {'client_id': body.get('client_id'), 'status': 'sent', 'msg_id': 'migration-image', 'ts': self.state.stamp},
+                     body=body, accepted=not duplicate, duplicate=duplicate, multipart=True,
+                     file_size=len(payload), file_sha256=hashlib.sha256(payload).hexdigest())
+
+
+class FaultJourneyHandler(Handler):
+    def do_POST(self):
+        if self.path != '/v1/wazig/send':
+            return super().do_POST()
+        self.wire_path = self.path
+        self.capture_identity_ingress()
+        if not self.authorized():
+            return
+        data = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        multipart = self.headers.get('Content-Type', '').startswith('multipart/form-data')
+        body, payload = {}, b''
+        if multipart:
+            envelope = bridge.BytesParser(policy=bridge.policy.default).parsebytes(
+                f'Content-Type: {self.headers["Content-Type"]}\r\nMIME-Version: 1.0\r\n\r\n'.encode() + data)
+            for part in envelope.iter_parts():
+                name = part.get_param('name', header='content-disposition')
+                if part.get_filename() is None:
+                    body[name] = part.get_content()
+                else:
+                    body[name] = part.get_filename()
+                    payload = part.get_payload(decode=True)
+        else:
+            body = json.loads(data)
+        self.wire_body = dict(body)
+        label = body.get('text')
+        if label not in ('Fault checkpoint', 'Fault terminal file', 'Fault ack file') or body.get('chat') != ALPHA:
+            self.respond(400, {'error': 'unexpected fault fixture payload'}, body=body)
+            return
+        if multipart != (label != 'Fault checkpoint') or (multipart and not payload.startswith(b'\x89PNG\r\n\x1a\n')):
+            self.respond(400, {'error': 'unexpected fault fixture attachment'}, body=body)
+            return
+        self.capture_identity_snapshot(body)
+        client_id = body['client_id']
+        fingerprint = (dict(body), hashlib.sha256(payload).hexdigest())
+        with self.state.lock:
+            if not hasattr(self.state, 'fault_intents'):
+                self.state.fault_intents = {}
+            prior = self.state.fault_intents.get(client_id)
+            if prior is None:
+                prior = dict(fingerprint=fingerprint, attempts=0)
+                self.state.fault_intents[client_id] = prior
+            if prior['fingerprint'] != fingerprint:
+                self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False)
+                return
+            prior['attempts'] += 1
+            attempt = prior['attempts']
+        accepted = attempt == 1
+        status = 409 if label == 'Fault terminal file' and attempt <= 4 else 200
+        result = {'client_id': client_id, 'status': 'unknown'} if status == 409 else {
+            'client_id': client_id, 'status': 'sent', 'msg_id': 'fault-' + client_id, 'ts': self.state.stamp}
+        self.respond(status, result, body=body, accepted=accepted, duplicate=not accepted,
+                     multipart=multipart, file_size=len(payload), file_sha256=hashlib.sha256(payload).hexdigest())
 
 
 ARCHIVE_GROUP = 'personal:120363000000000001@g.us'
@@ -1994,6 +2214,7 @@ def journey_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--port-file', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
+    parser.add_argument('--snapshot-root', type=Path)
     modes = parser.add_mutually_exclusive_group()
     registry = json.loads(Path(__file__).with_name('journeys.json').read_text(encoding='utf-8'))
     journeys = {row['hub']: row for row in registry['journeys'] if row['hub'] and row['hub'] != 'legacy'}
@@ -2017,6 +2238,7 @@ def main():
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
+    server.state.snapshot_root = args.snapshot_root if args.mode in ('mixed-lid', 'hub-fault') else None
     server.state.archive_incoming = 0
     server.state.plain_dms = {}
     server.state.view_rows = view_rows()

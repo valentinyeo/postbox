@@ -293,7 +293,7 @@ pub fn build(b: *std.Build) void {
     b.step("test-edit", "Run native DirectWrite editing tests on Windows").dependOn(&b.addRunArtifact(edit_tests).step);
 
     const test_step = b.step("test", "Run unit tests");
-    for ([_][]const u8{ "src/design_tokens.zig", "src/dictation_meter.zig", "src/attachments.zig", "src/staged_images.zig", "src/hub_test.zig", "src/wa_hub_test.zig", "src/pin_icon_test.zig", "src/message_double_click.zig", "src/reaction_chip.zig", "src/passage.zig", "src/recording_paint.zig", "src/font_config.zig", "src/chat_list_layout.zig", "src/message_format.zig", "src/edit_contract.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/chat_rows.zig", "src/people_index.zig", "src/search_rank.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/media_layout.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/slack_emoji.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/message_notifications.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/update_card_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/environment_keys.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
+    for ([_][]const u8{ "src/design_tokens.zig", "src/dictation_meter.zig", "src/attachments.zig", "src/staged_images.zig", "src/unified_snapshot.zig", "src/hub_test.zig", "src/wa_hub_test.zig", "src/pin_icon_test.zig", "src/message_double_click.zig", "src/reaction_chip.zig", "src/passage.zig", "src/recording_paint.zig", "src/font_config.zig", "src/chat_list_layout.zig", "src/message_format.zig", "src/edit_contract.zig", "src/drafts.zig", "src/theme.zig", "src/menu_theme.zig", "src/chat_key.zig", "src/chat_order.zig", "src/chat_rows.zig", "src/people_index.zig", "src/search_rank.zig", "src/chat_reconcile.zig", "src/archive_rules.zig", "src/media_layout.zig", "src/chat_menu.zig", "src/emoji_picker.zig", "src/slack_emoji.zig", "src/shortcodes.zig", "src/played.zig", "src/pending_reads.zig", "src/read_state.zig", "src/message_notifications.zig", "src/update.zig", "src/avatar_mask.zig", "src/text_draw.zig", "src/smooth_geometry.zig", "src/smooth_coverage.zig", "src/compose_layout.zig", "src/update_card_layout.zig", "src/field_pill.zig", "src/scrollbar.zig", "src/message_scroll.zig", "src/media_age.zig", "src/media_drain.zig", "src/paste_image.zig", "src/telegram_json.zig", "src/accounts.zig", "src/slack.zig", "src/message_filter.zig", "src/chat_cache.zig", "src/outbox.zig", "src/unified_snapshot.zig", "src/slack_send.zig", "src/unfurl.zig", "src/auth_status.zig", "src/messenger_view.zig", "src/shortcuts.zig", "src/sidebar_nav.zig", "src/sync_gate.zig", "src/control.zig", "src/colr.zig", "src/bitmap_lru.zig", "src/format_request.zig", "src/voice_sent.zig", "src/send_args.zig", "src/voice_pos.zig", "src/mic_choice.zig", "src/dictation_policy.zig", "src/deepgram_key.zig", "src/environment_keys.zig", "src/format_cache.zig", "src/image_gallery.zig", "src/video_alias.zig" }) |test_root| {
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(test_root),
@@ -402,6 +402,7 @@ pub fn build(b: *std.Build) void {
     const recording_source = std.mem.concat(b.allocator, u8, &.{
         "const recording_paint = @import(\"recording_paint.zig\");\n",
         @embedFile("tools/recording_paint_test.zig"),
+        sourceSection("fn unifiedHub(", "fn hubConfigured("),
         sourceSection("fn drawVoiceButton(", "fn paintVoiceButton("),
         sourceSection("fn invalidateRecordingTick(", "fn queueVoiceNote("),
     }) catch @panic("Out of memory building recording paint harness");
@@ -459,7 +460,7 @@ pub fn build(b: *std.Build) void {
     const read_harness_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/chat_reconcile_test.zig"),
         sourceSection("fn unifiedHub(", "fn hubConfigured("),
-        sourceSection("fn applyHubAccounts(", "fn startHubSend("),
+        sourceSection("fn applyHubAccounts(", "fn beginUnifiedSend("),
         sourceSection("fn hubRefreshMessages(", "fn hubSendText("),
         sourceSection("fn beginTranscriptionOpen(", "fn appendDebugLog("),
         sourceSection("fn refreshMessages(", "fn reconcileOpenChat(a: *App) void {"),
@@ -647,7 +648,7 @@ pub fn build(b: *std.Build) void {
         "else => unreachable, } }\n",
     }) catch @panic("Out of memory building background media harness");
     const background_media_files = b.addWriteFiles();
-    for ([_][]const u8{ "media_drain.zig", "media_age.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {
+    for ([_][]const u8{ "media_drain.zig", "media_age.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig", "outbox.zig" }) |name| {
         _ = background_media_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
     }
     const background_media_harness = background_media_files.add("background_media_test.zig", background_media_source);

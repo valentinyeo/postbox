@@ -6,7 +6,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FUNCTIONS = (
-    "stagedFileGoesToWacli", "persistOutbox", "loadOutbox", "bindOutboxAccount", "enqueueSlackOutbox", "retrySlackOutbox",
+    "stagedFileGoesToWacli", "persistOutbox", "unifiedNativePath", "unifiedFaultAt", "writeOutboxAtomic", "loadOutbox", "bindOutboxAccount", "enqueueSlackOutbox", "retrySlackOutbox",
     "retireSlackOutbox", "evictOldestFailedSlackOutbox", "completePendingSend", "removeFirstPendingSend", "sendMessage", "sendMessageFrom",
     "resolveSlackSend", "pendingByClientMsgId", "jobIsWrite", "jobIsSlack",
     "wacliEnqueue", "wacliTakeJob", "wacliJobArgs", "storedAfterQueued", "sentMessageExists", "startNextSend", "retryWacliRefreshes", "appendWhatsAppPending", "retryingBubbleText", "localSendId", "replySnippet", "setReplyQuote", "failHeadPendingSend", "sendRetryDelayMs", "markPendingSendFailed", "markPendingSendRetrying", "sendBaseText", "sendKindName", "applyHubResult",
@@ -30,19 +30,19 @@ def mutate(source, name):
     if name in ("short-job-args", "nul-field", "negative-time", "evict-write"):
         return source
     replacements = {
-        "ignored-swap": ("if (win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) == 0) return false;", "_ = win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH);"),
+        "ignored-swap": ("return win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) != 0;", "_ = win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH); return true;"),
         "unflushed-write": ("win.FlushFileBuffers(handle) != 0", "true"),
         "local-zero": ("a.send_seq += 1;\n            pending.seq = a.send_seq;", "pending.seq = 0;"),
         "no-credentials": ("or !slackConfigured(a) ", ""),
         "wrong-retirement": ("if (!std.mem.eql(u8, slot.entry.idSlice(), id)) continue;", "_ = id;"),
         "wrong-failed-bubble": ("const index = pendingByClientMsgId(a, client_msg_id) orelse return;", "const index = if (!result.ok) oldestPendingSend(a) orelse return else pendingByClientMsgId(a, client_msg_id) orelse return;"),
         "slack-paste-to-whatsapp": ("staged_file.len > 0 and (unifiedHub(a) or stagedFileGoesToWacli(a.chats[a.selected_chat].provider))", "staged_file.len > 0"),
-        "same-text-reload": ("if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if ((head.from_disk or head.retries == 0 or (head.retries > 0 and head.ambiguous)) and"),
-        "restored-resend": ("if ((head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if (head.retries > 0 and head.ambiguous and"),
+        "same-text-reload": ("if (!unifiedHub(a) and (head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if (!unifiedHub(a) and (head.from_disk or head.retries == 0 or (head.retries > 0 and head.ambiguous)) and"),
+        "restored-resend": ("if (!unifiedHub(a) and (head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if (!unifiedHub(a) and head.retries > 0 and head.ambiguous and"),
         "delete-before-retirement": ("if (!persistOutbox(a)) {\n        setStatus(a, \"Could not save send completion; retrying journal\");\n        return false;\n    }", "_ = persistOutbox(a);"),
         "silent-admission": ("if (!persistOutbox(a)) {\n        a.pending_send_count -= 1;\n        pending.* = .{};\n        setStatus(a, \"Could not save outbox; message not queued\");\n        return;\n    }", "_ = persistOutbox(a);"),
         "utf8-truncation": ("if (text.len > outbox.max_text_len)", "if (false)"),
-        "hidden-restored-bubble": ("if (from_reload and !pending.from_disk)", "if (from_reload)"),
+        "hidden-restored-bubble": ("if (!unifiedHub(a) and from_reload and !pending.from_disk)", "if (!unifiedHub(a) and from_reload)"),
         "voice-metadata": ("entry.ptt = pending.ptt;", "entry.ptt = false;"),
         "reaction-eviction": (".reaction, .slack_send, .slack_attach, .slack_share => true,", ".slack_send, .slack_attach, .slack_share => true,"),
         "lost-refresh": ("if (!jobIsWrite(job.kind)) a.wacli_refresh_again = true;", ""),
@@ -98,11 +98,11 @@ def main():
         for mutant in mutants:
             effective_format = format_source
             if mutant == "nul-field":
-                effective_format = effective_format.replace("if (std.mem.indexOfScalar(u8, field, 0) != null) return false;", "_ = field;")
+                effective_format = effective_format.replace("if (std.mem.indexOfScalar(u8, field, 0) != null) return error.InvalidEntry;", "_ = field;")
             if mutant == "evict-write":
                 effective_format = effective_format.replace("if (!keep[index]) return index;", "_ = keep[index]; return index;")
             if mutant == "negative-time":
-                effective_format = effective_format.replace("if (value.queued_unix < 0) return false;", "")
+                effective_format = effective_format.replace("if (value.queued_unix < 0) return error.InvalidEntry;", "")
             (directory / "outbox.zig").write_text(effective_format)
             production = bodies if mutant is None else mutate(bodies, mutant)
             effective_fixture = fixture.replace("const wacli_arg_cap = 4095;", "const wacli_arg_cap = 512;") if mutant == "short-job-args" else fixture

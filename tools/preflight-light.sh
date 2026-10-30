@@ -13,6 +13,7 @@ PYTHON_LIGHT_TESTS=(
     test_check_hub_only
     test_check_private_markers
     test_fake_wa_bridge
+    test_identity_fixture
     test_link_previews
     test_media_layout
     test_no_comments
@@ -41,6 +42,9 @@ PYTHON_LIGHT_TESTS=(
 PYTHON_HEAVY_TESTS=(
     'test_theme_runtime: unittest cases invoke Zig compiler and runtime harnesses'
     'test_outbox_runtime: standalone Zig runtime harness; no unittest cases'
+    'test_unified_snapshot_atomic: standalone Zig runtime harness; no unittest cases'
+    'test_unified_checkpoint: standalone Zig runtime and negative-control harness; no unittest cases'
+    'test_unified_windows_paths: standalone Windows Zig and kernel32 harness; no unittest cases'
     'test_slack_integration: standalone Zig and optional Windows/Wine harness; no unittest cases'
 )
 run bash tools/test-preflight-guard.sh --check-light

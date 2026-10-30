@@ -47,7 +47,7 @@ expect "failed query refuses" 1 60 FAIL
 expect "green beside a red rerun tags" 0 60 "[{\"status\":\"completed\",\"conclusion\":\"failure\"},{\"status\":\"completed\",\"conclusion\":\"success\"}]"
 
 workflow="$temp/historical-auto-release.yml"
-git -C "$script_dir/.." show e383ae2^:.github/workflows/auto-release.yml > "$workflow"
+git -C "$script_dir/.." show v0.9.232:.github/workflows/auto-release.yml > "$workflow"
 picker="$script_dir/auto-release-pick.sh"
 if ! grep -Fq 'bash tools/auto-release-pick.sh "${GITHUB_REPOSITORY}" origin/main' "$workflow" \
     || ! grep -Fq 'bash "$script_dir/ci-green.sh" "$sha"' "$picker"; then
