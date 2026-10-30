@@ -12,6 +12,10 @@ on:
         description: Published release to verify instead of building
         type: string
         default: ''
+      voice_font_proof:
+        description: Capture cached voice labels at larger text sizes
+        type: boolean
+        default: false
   schedule:
     - cron: "40 2 * * *"
 
@@ -331,11 +335,11 @@ jobs:
           'GROUP_ORIGINAL_RED_OK: original incoming messages have no avatar gutter' | Set-Content verification-evidence/group-senders-red-control.txt
           exit 0
       - name: Voice repaint pixel controls
-        if: matrix.feature == 'voice'
+        if: matrix.feature == 'voice' && !inputs.voice_font_proof
         shell: pwsh
         run: tools/verify-wazig/test-voice-pixels.ps1
       - name: Real playback rejects the original missing output device
-        if: matrix.feature == 'voice' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
+        if: matrix.feature == 'voice' && !inputs.voice_font_proof && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
         shell: pwsh
         run: |
           Stop-Service Audiosrv -Force -ErrorAction SilentlyContinue
@@ -346,11 +350,11 @@ jobs:
           'VOICE_NO_OUTPUT_RED_OK' | Set-Content verification-evidence/audio-red-control.txt
           exit 0
       - name: Install isolated signed audio output
-        if: matrix.feature == 'voice'
+        if: matrix.feature == 'voice' && !inputs.voice_font_proof
         shell: pwsh
         run: tools/verify-wazig/install-audio.ps1
       - name: Queued-send voice download historical red control
-        if: matrix.feature == 'voice' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
+        if: matrix.feature == 'voice' && !inputs.voice_font_proof && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
         shell: pwsh
         run: |
           $original = [IO.File]::ReadAllText('src/main.zig')
@@ -371,7 +375,7 @@ jobs:
           Copy-Item voice-red-evidence/failure.txt verification-evidence/voice-download-red.txt
           'HISTORICAL_VOICE_STARVATION_CAUGHT' | Add-Content verification-evidence/voice-download-red.txt
       - name: Real playback rejects the original invalid voice fixture
-        if: matrix.feature == 'voice' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
+        if: matrix.feature == 'voice' && !inputs.voice_font_proof && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
         shell: pwsh
         run: |
           $fixture = 'tools/verify-wazig/voice-note.ogg'
@@ -405,9 +409,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Typing recorder installation failed' }
       - name: Launch, doctor and drive
         shell: pwsh
-        run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence -ExpectedVersion $env:VERIFY_VERSION
+        env:
+          VOICE_FONT_PROOF: ${{ inputs.voice_font_proof && '1' || '' }}
+          VOICE_FONT_FEATURE: ${{ matrix.feature }}
+          VOICE_FONT_TAG: ${{ inputs.tag }}
+        run: |
+          if ($env:VOICE_FONT_PROOF) {
+            if ($env:VOICE_FONT_FEATURE -cne 'voice' -or $env:VOICE_FONT_TAG -cne 'v0.9.241') { throw 'Voice font proof requires feature voice and tag v0.9.241' }
+            $sha = (Get-FileHash zig-out/bin/Messages.exe).Hash.ToLowerInvariant()
+            if ($sha -cne '1204ac850d743f2005af7a08fb220cef927b27cb722cd102b4c4899a9dd4d32e') { throw 'Published 241 executable hash mismatch' }
+            $base = '2dbd28f7953b153d836fe4685da135adb7091586'
+            $sourceTree = (git rev-parse "${base}:src").Trim()
+            if ((git rev-parse 'HEAD:src').Trim() -cne $sourceTree) { throw 'Production source differs from released source' }
+            @{ fixture = '--verify-fixture'; released_source = $base; source_tree = $sourceTree; proof_commit = (git rev-parse HEAD).Trim(); proof_tree = (git rev-parse 'HEAD^{tree}').Trim(); release_tag = $env:VOICE_FONT_TAG; executable_sha256 = $sha } | ConvertTo-Json | Set-Content verification-evidence/voice-font-source.json
+          }
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence -ExpectedVersion $env:VERIFY_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'Journey failed' }
       - name: Validate surviving journey evidence
-        if: matrix.evidence
+        if: matrix.evidence && !inputs.voice_font_proof
         shell: pwsh
         run: |
           python tools/verify-wazig/check-evidence.py verification-evidence

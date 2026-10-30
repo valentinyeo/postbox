@@ -146,6 +146,48 @@ function Invoke-VoicePlayback($Session) {
     Save-Screen $Session 'voice-paused'
 }
 
+function Invoke-VoiceFontProof($Session) {
+    $handle = Get-VoiceCanvas $Session
+    $dpi = [int][VerifyWindow]::GetDpiForWindow($handle)
+    $records = @()
+    foreach ($scale in @(100, 125, 150)) {
+        $changed = Read-Control $Session font -Arguments @("$scale")
+        Assert-That ($changed.font_scale -eq $scale) "font command did not apply $scale"
+        $state = Wait-Until {
+            $status = Read-Control $Session status
+            if ($status.font_scale -eq $scale -and $status.font_layout.scale -eq $scale -and $status.font_layout.preview_line_height -gt 0) { $status }
+        } "font $scale measured"
+        foreach ($expanded in @($false, $true)) {
+            [VerifyVoice]::FullRepaint($Session.pid, $handle)
+            $null = Get-VoiceLayout $Session
+            $canvas = [VerifyVoice]::Bounds($Session.pid, $handle)
+            $height = $canvas.Bottom - $canvas.Top
+            $target = Wait-Until {
+                @(Read-VoiceMessages $Session | Where-Object {
+                    $_.media_type -eq 'audio' -and $_.transcript_chars -gt 0 -and $_.expanded -eq $expanded -and
+                    $_.toggle[1] -ge 0 -and $_.toggle[3] -le $height -and $_.toggle[3] -gt $_.toggle[1] -and
+                    $_.toggle[0] -ge $_.bubble[0] -and $_.toggle[2] -le $_.bubble[2] -and
+                    $_.toggle[1] -ge $_.bubble[1] -and $_.toggle[3] -le $_.bubble[3]
+                } | Select-Object -Last 1)
+            } "visible voice label at $scale"
+            $target = @($target)[0]
+            Assert-That (($target.toggle[3] - $target.toggle[1]) -ge $state.font_layout.preview_line_height) "voice toggle clips measured small font at $scale"
+            $label = if ($expanded) { 'less' } else { 'more' }
+            $name = "voice-font-$scale-$label"
+            Save-Screen $Session $name
+            $renderer = if ($null -ne $state.font_preview_draw -and $state.font_preview_draw.scale -eq $scale) { $state.font_preview_draw.renderer } else { 'unavailable' }
+            $records += @{ scale = $scale; label = "Show $label"; id = $target.id; bubble = $target.bubble; toggle = $target.toggle; small_font_line_height = $state.font_layout.preview_line_height; dpi = $dpi; list_preview_renderer = $renderer; image = "$name.png" }
+            $x = $canvas.Left + $target.toggle[0] + [int][Math]::Floor((20 * $dpi + 48) / 96)
+            $y = $canvas.Top + [int](($target.toggle[1] + $target.toggle[3]) / 2)
+            [VerifyMenus]::Click($Session.pid, $x, $y, $false)
+            Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: Show $label on $($target.id) x=$x y=$y scale=$scale"
+            $id = $target.id
+            $null = Wait-Until { @(Read-VoiceMessages $Session | Where-Object { $_.id -ceq $id -and $_.expanded -ne $expanded }).Count -eq 1 } "voice label toggled at $scale"
+        }
+    }
+    $records | ConvertTo-Json -Depth 8 -AsArray | Set-Content (Join-Path $Session.evidence 'voice-font-proof.json')
+}
+
 function Invoke-VoiceJourney($Session, [string]$Messages) {
     $media = Join-Path $Messages 'hub-media'
     $null = Wait-Until {
@@ -165,7 +207,7 @@ function Invoke-VoiceJourney($Session, [string]$Messages) {
     $index = 0
     foreach ($file in @(Get-ChildItem $media -Filter '*.ogg' | Sort-Object Name)) {
         $index += 1
-        $text = "Voice note $index. " + (@(1..(4 + $index) | ForEach-Object { $sentence }) -join ' ')
+        $text = if ($env:VOICE_FONT_PROOF) { "1. Cached voice $index. " + (@(1..12 | ForEach-Object { 'Synthetic formatted voice notes remain stored locally.' }) -join ' ') } else { "Voice note $index. " + (@(1..(4 + $index) | ForEach-Object { $sentence }) -join ' ') }
         Set-Content -LiteralPath "$($file.FullName).txt" -Value $text -NoNewline -Encoding utf8NoBOM
         $transcripts += [ordered]@{ file = $file.Name; chars = $text.Length }
     }
@@ -174,8 +216,13 @@ function Invoke-VoiceJourney($Session, [string]$Messages) {
     $null = Wait-Until {
         Open-VoiceChatAgain $Session
         $rows = @(Read-VoiceMessages $Session | Where-Object { $_.media_type -eq 'audio' })
-        $rows.Count -eq 5 -and @($rows | Where-Object { $_.transcript_chars -lt 900 }).Count -eq 0
-    } 'five cached long transcripts shown' -Seconds 60
+        $minimum = if ($env:VOICE_FONT_PROOF) { 30 } else { 900 }
+        $rows.Count -eq 5 -and @($rows | Where-Object { $_.transcript_chars -lt $minimum }).Count -eq 0
+    } 'five cached transcripts shown' -Seconds 60
+    if ($env:VOICE_FONT_PROOF) {
+        Invoke-VoiceFontProof $Session
+        return
+    }
     Invoke-VoicePlayback $Session
     Invoke-VoiceProbe $Session 'voice-opened'
     Invoke-VoiceWheel $Session 4
