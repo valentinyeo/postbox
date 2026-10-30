@@ -358,6 +358,12 @@ test "owned paths stay within the exact backend files directory" {
     }) |path| try std.testing.expect(!privateFilePath(root, path));
 }
 
+pub fn readyCount(snapshot: *const Snapshot) usize {
+    var count: usize = 0;
+    for (snapshot.records[0..snapshot.count]) |*record| if (record.phase == .ready) { count += 1; };
+    return count;
+}
+
 pub const Admission = enum { added, duplicate, overflow };
 
 pub fn sameIntent(left: *const Record, right: *const Record) bool {
@@ -472,4 +478,30 @@ test "missing active attachment blocks alias retirement" {
     alias = snapshot.records[1];
     alias.entry.reply_to.set("different reply");
     try std.testing.expectEqual(AliasComparison.conflict, compareAlias(&snapshot.records[1], &alias));
+}
+
+
+pub fn attachmentMatches(bytes: []const u8, expected_len: u64, expected_sha256: *const [32]u8) bool {
+    if (bytes.len != expected_len) return false;
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+    return std.mem.eql(u8, &digest, expected_sha256);
+}
+
+test "attachment fingerprint covers actual serialized bytes" {
+    const bytes = "original file bytes";
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+    try std.testing.expect(attachmentMatches(bytes, bytes.len, &digest));
+    try std.testing.expect(!attachmentMatches("Original file bytes", bytes.len, &digest));
+    try std.testing.expect(!attachmentMatches(bytes, bytes.len + 1, &digest));
+}
+
+
+test "ready capacity counts snapshot records, not projections" {
+    const snapshot = try testSnapshot();
+    defer std.testing.allocator.destroy(snapshot);
+    try std.testing.expectEqual(@as(usize, 0), readyCount(snapshot));
+    snapshot.records[1].phase = .ready;
+    try std.testing.expectEqual(@as(usize, 1), readyCount(snapshot));
 }

@@ -557,6 +557,9 @@ const WacliJob = struct {
     notification: ?WacliJob.Notification = null,
     started_ms: u64 = 0,
     client_id: Utf8Text(128) = .{},
+    unified_filename: Utf8Text(outbox.max_file_len) = .{},
+    unified_file_sha256: [32]u8 = @splat(0),
+    unified_file_bytes: u64 = 0,
     arg_count: usize = 0,
     args: [max_wacli_args]Utf8Text(wacli_arg_cap) = [_]Utf8Text(wacli_arg_cap){.{}} ** max_wacli_args,
 };
@@ -4285,7 +4288,24 @@ fn restoreFailedSendText(a: *App, failed: *const PendingSend) void {
 
 fn resendFailedMessage(a: *App, index: usize) bool {
     if (unifiedHub(a)) {
-        setStatus(a, "Unified outbox migration incomplete; sends paused");
+        if (index >= a.message_count or a.selected_chat >= a.chat_count) return false;
+        const message = &a.messages[index];
+        if (!message.from_me or message.send_state != .failed) return false;
+        retryUnifiedSend(a, message.timestamp.slice(), chat_key.of(&a.chats[a.selected_chat])) catch {
+            setStatus(a, "Could not save retry; message remains held");
+            return true;
+        };
+        for (a.pending_sends[0..a.pending_send_count]) |*pending| {
+            if (!std.mem.eql(u8, &pending.id, message.timestamp.slice())) continue;
+            message.send_state = .pending;
+            var id_buffer: [32]u8 = undefined;
+            message.id.set(localSendId(&id_buffer, pending.seq));
+            var label: [48]u8 = undefined;
+            message.text.set(a.allocator, sendBaseText(&label, pending.text.slice(), pending.file.len > 0, pending.ptt, pending.voice_seconds));
+            break;
+        }
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+        setStatus(a, "Retry saved; sending remains paused");
         return true;
     }
     if (index >= a.message_count) return false;
@@ -4731,6 +4751,9 @@ fn unifiedOwnedFileAvailable(a: *App, record: *const unified_snapshot.Record) !b
 
 fn rebuildUnifiedViews(a: *App, available_files: *const [outbox.max_entries]bool) void {
     const snapshot = a.unified_snapshot orelse return;
+    var previous: [max_pending_sends]struct { id: [outbox.id_len]u8, seq: u64 } = undefined;
+    const previous_count = a.pending_send_count;
+    for (a.pending_sends[0..previous_count], 0..) |*pending, i| previous[i] = .{ .id = pending.id, .seq = pending.seq };
     a.pending_send_count = 0;
     a.failed_send_count = 0;
     for (snapshot.records[0..snapshot.count], 0..) |*record, index| {
@@ -4754,8 +4777,15 @@ fn rebuildUnifiedViews(a: *App, available_files: *const [outbox.max_entries]bool
             pending.ambiguous = entry.ambiguous;
             pending.queued_unix = entry.queued_unix;
             pending.from_disk = true;
-            a.send_seq += 1;
-            pending.seq = a.send_seq;
+            for (previous[0..previous_count]) |old| {
+                if (std.mem.eql(u8, &old.id, &entry.id)) {
+                    pending.seq = old.seq;
+                    break;
+                }
+            } else {
+                a.send_seq += 1;
+                pending.seq = a.send_seq;
+            }
             a.pending_send_count += 1;
         } else {
             if (a.failed_send_count >= a.failed_sends.len) return;
@@ -5144,8 +5174,74 @@ fn importUnifiedOutbox(a: *App) !void {
     rebuildUnifiedViews(a, &available);
     a.unified_imports_clean = !a.unified_import_alias_blocked;
     a.outbox_load_failed = false;
+    a.unified_storage_blocked = false;
     if (a.unified_import_unresolved != 0) setStatus(a, "Some outbox records need recovery");
     if (a.unified_import_overflow != 0 and a.unified_import_unresolved == 0) setStatus(a, "More outbox records remain protected");
+}
+
+fn refreshUnifiedViews(a: *App) void {
+    const snapshot = a.unified_snapshot orelse return;
+    var available: [outbox.max_entries]bool = @splat(false);
+    for (snapshot.records[0..snapshot.count], 0..) |*record, index| {
+        available[index] = if (record.attachment_ready) unifiedOwnedFileAvailable(a, record) catch false else record.entry.file.len == 0;
+    }
+    rebuildUnifiedViews(a, &available);
+}
+
+fn acceptUnifiedSends(a: *App, entries: []outbox.Entry, voice_bytes: ?[]const u8) !void {
+    if (a.outbox_load_failed or a.unified_storage_blocked or !a.unified_imports_clean) return error.OutboxUnavailable;
+    const live = a.unified_snapshot orelse return error.MissingSnapshot;
+    const candidate = a.unified_candidate orelse return error.MissingSnapshot;
+    if (entries.len == 0 or entries.len > outbox.max_entries - live.count or entries.len > max_pending_sends - @min(max_pending_sends, unified_snapshot.readyCount(live))) return error.OutboxFull;
+    if (voice_bytes != null and entries.len != 1) return error.InvalidAttachment;
+    candidate.* = live.*;
+    const backend = std.fs.path.dirname(a.unified_snapshot_path) orelse return error.InvalidSnapshotPath;
+    const root = try std.fs.path.join(a.allocator, &.{ backend, "files" });
+    defer a.allocator.free(root);
+    for (entries) |*entry| {
+        mintSendId(a, &entry.id);
+        var record = unified_snapshot.Record{ .entry = entry.*, .phase = .ready };
+        if (entry.file.len > 0) {
+            const filename = std.fs.path.basename(entry.file.slice());
+            if (filename.len == 0 or filename.len > outbox.max_file_len) return error.InvalidAttachment;
+            const data: []const u8 = if (voice_bytes) |bytes| bytes else ((try unifiedReadAttachment(a, entry.file.slice())) orelse return error.AttachmentMissing);
+            defer if (voice_bytes == null) a.allocator.free(data);
+            if (data.len == 0 or data.len > wa_hub.max_file_bytes) return error.InvalidAttachment;
+            const owned = try std.fs.path.join(a.allocator, &.{ root, "new", entry.idSlice(), filename });
+            defer a.allocator.free(owned);
+            if (!unified_snapshot.privateFilePath(root, owned)) return error.UnsafeAttachmentPath;
+            try unifiedWriteProtected(a, owned, data);
+            record.owned_file.set(owned);
+            record.wire_filename.set(filename);
+            record.file_bytes = data.len;
+            std.crypto.hash.sha2.Sha256.hash(data, &record.file_sha256, .{});
+            record.attachment_ready = true;
+        }
+        if (try unified_snapshot.admit(candidate, &record) != .added) return error.DuplicateIntent;
+    }
+    if (!saveUnifiedCandidate(a)) return error.SnapshotWriteFailed;
+    refreshUnifiedViews(a);
+}
+
+fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) !void {
+    if (a.outbox_load_failed or a.unified_storage_blocked or !a.unified_imports_clean) return error.OutboxUnavailable;
+    const live = a.unified_snapshot orelse return error.MissingSnapshot;
+    const candidate = a.unified_candidate orelse return error.MissingSnapshot;
+    if (unified_snapshot.readyCount(live) >= max_pending_sends) return error.OutboxFull;
+    for (live.records[0..live.count], 0..) |*record, index| {
+        if (!std.mem.eql(u8, record.entry.idSlice(), id) or !chat_key.Key.eql(chat_key.of(&record.entry), key)) continue;
+        if (record.phase == .ready) return error.AlreadyReady;
+        if (record.entry.file.len > 0 and (!record.attachment_ready or !try unifiedOwnedFileAvailable(a, record))) return error.AttachmentMissing;
+        candidate.* = live.*;
+        const retry = &candidate.records[index];
+        retry.phase = .ready;
+        retry.entry.attempts = 0;
+        retry.not_before_ms = 0;
+        if (!saveUnifiedCandidate(a)) return error.SnapshotWriteFailed;
+        refreshUnifiedViews(a);
+        return;
+    }
+    return error.IntentNotFound;
 }
 
 fn restoreOutbox(a: *App) void {
@@ -9782,7 +9878,7 @@ fn voiceChatAllowed(a: *const App) bool {
 fn updateVoiceButton(a: *App) void {
     const button = a.voice_btn orelse return;
     const allowed = voiceChatAllowed(a);
-    if (a.voice_active and !allowed) cancelVoice(a, "Voice note cancelled");
+    if (a.voice_active and !allowed and !(unifiedHub(a) and a.voice_session != null and a.voice_session.?.state() == .ready)) cancelVoice(a, "Voice note cancelled");
     if (allowed == a.voice_visible) return;
     a.voice_visible = allowed;
     _ = win.ShowWindow(button, if (allowed) win.SW_SHOW else win.SW_HIDE);
@@ -9859,13 +9955,25 @@ fn invalidateRecordingTick(a: *App) void {
 fn tickVoice(a: *App) void {
     if (!a.voice_active) return;
     const session = a.voice_session orelse return;
-    if (!a.voice_finishing and (!voiceChatAllowed(a) or !chat_key.Key.eql(a.voice_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) {
+    if (!a.voice_finishing and !(unifiedHub(a) and session.state() == .ready) and (!voiceChatAllowed(a) or !chat_key.Key.eql(a.voice_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) {
         cancelVoice(a, "Voice note cancelled: you switched chats");
         return;
     }
     switch (session.state()) {
         .recording, .encoding => invalidateRecordingTick(a),
         .ready => {
+            if (unifiedHub(a)) {
+                if (!a.voice_finishing) return;
+                const note = session.result orelse return;
+                if (!queueVoiceNote(a, a.voice_jid.slice(), note.ogg, note.seconds, &note.waveform)) {
+                    a.voice_finishing = false;
+                    setStatus(a, "Voice note retained; Enter retries");
+                    return;
+                }
+                if (session.take()) |saved| a.allocator.free(saved.ogg);
+                endVoiceUi(a);
+                return;
+            }
             const result = session.take();
             endVoiceUi(a);
             if (result) |note| {
@@ -9885,7 +9993,32 @@ fn tickVoice(a: *App) void {
 
 fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, waveform: *const [64]u8) bool {
     _ = waveform;
-    if (unifiedHub(a)) return false;
+    if (unifiedHub(a)) {
+        const key = a.voice_origin.key();
+        var entries = [_]outbox.Entry{.{}};
+        const entry = &entries[0];
+        entry.provider = std.meta.stringToEnum(outbox.Provider, @tagName(key.provider)).?;
+        entry.account.set(key.account);
+        entry.jid.set(jid);
+        entry.file.set("voice.ogg");
+        entry.reply_to.set(a.voice_reply_to.slice());
+        entry.reply_sender.set(a.voice_reply_sender.slice());
+        entry.ptt = true;
+        entry.voice_seconds = seconds;
+        entry.queued_unix = nowUnixSeconds();
+        acceptUnifiedSends(a, &entries, ogg) catch return false;
+        if (a.draft_store.isOpen(key)) clearReply(a);
+        a.user_viewed = true;
+        a.scroll_y = 0;
+        for (a.pending_sends[0..a.pending_send_count]) |*pending| {
+            if (std.mem.eql(u8, &pending.id, entry.idSlice())) {
+                appendWhatsAppPending(a, pending, false);
+                break;
+            }
+        }
+        setStatus(a, "Voice saved; sending remains paused");
+        return true;
+    }
     if (a.outbox_load_failed or a.pending_send_count >= max_pending_sends) return false;
     var path_buffer: [520]u8 = undefined;
     const path_len = stageNewPath(a, &path_buffer, "ogg") orelse return false;
@@ -9929,11 +10062,65 @@ fn sendMessage(a: *App) void {
     sendMessageFrom(a, false);
 }
 
-fn sendMessageFrom(a: *App, thread: bool) void {
-    if (unifiedHub(a)) {
-        setStatus(a, "Unified outbox migration incomplete; sends paused");
+fn sendUnifiedMessage(a: *App, thread: bool) void {
+    const compose = (if (thread) a.thread_compose else a.compose) orelse return;
+    if (a.selected_chat >= a.chat_count) return;
+    const key = chat_key.of(&a.chats[a.selected_chat]);
+    if (thread and (a.thread_parent.len == 0 or !chat_key.Key.eql(a.thread_origin.key(), key))) return;
+    const count = if (thread) 0 else a.staged_images.count;
+    for (a.staged_images.items[0..count]) |*image| {
+        if (!chat_key.Key.eql(chat_key.of(image), key)) {
+            setStatus(a, "Attachments belong to another chat");
+            return;
+        }
+    }
+    var wide: [drafts.max_text + 1]u16 = undefined;
+    const length: usize = @intCast(win.GetWindowTextW(compose, &wide, wide.len));
+    if (length == 0 and count == 0) return;
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length]) catch return;
+    defer a.allocator.free(text);
+    if (text.len > outbox.max_text_len) {
+        setStatus(a, "Message exceeds 4095 UTF-8 bytes; shorten it first");
         return;
     }
+    const entries = a.allocator.alloc(outbox.Entry, @max(count, 1)) catch return;
+    defer a.allocator.free(entries);
+    for (entries, 0..) |*entry, index| {
+        entry.* = .{};
+        entry.provider = std.meta.stringToEnum(outbox.Provider, @tagName(key.provider)).?;
+        entry.account.set(key.account);
+        entry.jid.set(key.id);
+        entry.text.set(if (index == 0) text else "");
+        entry.reply_to.set(if (thread) a.thread_parent.slice() else a.reply_to.slice());
+        entry.reply_sender.set(if (thread) "" else a.reply_sender.slice());
+        entry.queued_unix = nowUnixSeconds();
+        if (count > 0) entry.file.set(a.staged_images.items[index].path.slice());
+    }
+    acceptUnifiedSends(a, entries, null) catch {
+        setStatus(a, "Could not save outbox; input retained");
+        return;
+    };
+    for (entries) |*entry| {
+        for (a.pending_sends[0..a.pending_send_count]) |*pending| {
+            if (std.mem.eql(u8, &pending.id, entry.idSlice())) {
+                appendWhatsAppPending(a, pending, false);
+                break;
+            }
+        }
+    }
+    if (count > 0) discardStagedImage(a);
+    if (!thread) clearReply(a);
+    a.user_viewed = true;
+    a.scroll_y = 0;
+    _ = win.SetWindowTextW(compose, lit(""));
+    if (!thread) saveComposerDraft(a);
+    layout(a, a.compose_client_width, a.compose_client_height);
+    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
+    setStatus(a, "Saved; sending remains paused");
+}
+
+fn sendMessageFrom(a: *App, thread: bool) void {
+    if (unifiedHub(a)) return sendUnifiedMessage(a, thread);
     const compose = (if (thread) a.thread_compose else a.compose) orelse return;
     if (thread and (a.thread_parent.len == 0 or a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) return;
     const reply_to = if (thread) a.thread_parent.slice() else a.reply_to.slice();
@@ -20982,10 +21169,11 @@ fn unifiedHubRequest(a: *App, allocator: std.mem.Allocator, job: *const WacliJob
             if (job.args[1].len == 0) break :blk hub.send(allocator, jid, job.args[0].slice(), job.args[2].slice(), job.msg_id.slice());
             const bytes = readFileWin(allocator, job.args[1].slice(), wa_hub.max_file_bytes) orelse return error.FileReadFailed;
             defer allocator.free(bytes);
+            if (job.unified_filename.len == 0 or !unified_snapshot.attachmentMatches(bytes, job.unified_file_bytes, &job.unified_file_sha256)) return error.AttachmentChanged;
             var random: [16]u8 = undefined;
             a.io.random(&random);
             const boundary = std.fmt.bytesToHex(random, .lower);
-            break :blk hub.sendFile(allocator, jid, job.args[0].slice(), job.args[2].slice(), job.msg_id.slice(), std.fs.path.basename(job.args[1].slice()), bytes, std.mem.eql(u8, job.args[3].slice(), "true"), &boundary);
+            break :blk hub.sendFile(allocator, jid, job.args[0].slice(), job.args[2].slice(), job.msg_id.slice(), job.unified_filename.slice(), bytes, std.mem.eql(u8, job.args[3].slice(), "true"), &boundary);
         },
         else => error.UnsupportedHubAction,
     };
