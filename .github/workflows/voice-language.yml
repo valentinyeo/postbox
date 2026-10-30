@@ -6,8 +6,8 @@ on:
         description: Published release tag, or empty for candidate
         type: string
         default: ''
-  push:
-    branches: ['verify-voice-language/**']
+  schedule:
+    - cron: "45 2 * * *"
 permissions:
   contents: read
 jobs:
@@ -23,6 +23,7 @@ jobs:
           version: 0.16.0
       - run: python3 tools/verify-wazig/check-voice-language-regression.py --zig zig
   voice-language:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:

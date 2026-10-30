@@ -1,9 +1,8 @@
 name: ci
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  schedule:
+    - cron: "20 2 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -203,27 +202,3 @@ jobs:
         with:
           name: unfurl-verification-evidence
           path: smoke-out/
-
-  notify-release:
-    name: notify-release
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [ci, tdlib, windows-smoke]
-    permissions:
-      actions: write
-    steps:
-      - name: Hand off to auto-release
-        if: >-
-          success() &&
-          github.event_name == 'workflow_dispatch' &&
-          github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for _ in 1 2 3; do
-            if gh workflow run auto-release.yml -R "${GITHUB_REPOSITORY}" --ref main; then
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1
