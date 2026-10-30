@@ -13,8 +13,17 @@ foreach ($trial in @('text', 'file')) {
     $filename = Join-Path (Join-Path $session.root 'profile') 'independence-image.png'
     if ($trial -eq 'file') {
         [VerifyPasteImage]::Fixture($filename)
+        $pasteDir = Join-Path $messages 'paste'
+        $beforeFiles = @(Get-ChildItem -LiteralPath $pasteDir -File -ErrorAction SilentlyContinue | ForEach-Object FullName)
         Add-PickerImage $session $filename
         $null = Wait-Until { (Read-Control $session status).staged_attachment_count -eq 1 } 'fixture file staged'
+        $staged = @(Get-ChildItem -LiteralPath $pasteDir -File | Where-Object { $beforeFiles -cnotcontains $_.FullName })
+        Assert-That ($staged.Count -eq 1) 'Fixture staged file is ambiguous'
+        $stagedPath = $staged[0].FullName
+        $stagedName = $staged[0].Name
+        $sourceHash = (Get-FileHash $filename).Hash.ToLowerInvariant()
+        Assert-That ((Get-FileHash $stagedPath).Hash.ToLowerInvariant() -ceq $sourceHash -and $staged[0].Length -eq (Get-Item $filename).Length) 'Staged file differs from picker source'
+        @{ name = $stagedName; sha256 = $sourceHash; bytes = $staged[0].Length } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'send-independence-staged.json')
     }
     $body = @{ trial = $trial } | ConvertTo-Json -Compress
     $null = Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/arm-send-independence" -Headers $headers -ContentType 'application/json' -Body $body
@@ -41,7 +50,9 @@ foreach ($trial in @('text', 'file')) {
         Assert-That ($captured.Count -eq 1 -and $captured[0].payload) 'Protected payload capture missing'
         $snap = Get-Content (Join-Path (Split-Path -Parent $indexPath) $captured[0].snapshot) -Raw | ConvertFrom-Json
         $record = @($snap.records | Where-Object { $_.id -ceq $arrived[0].client_id })
-        Assert-That ($record.Count -eq 1 -and (Test-Path -LiteralPath $record[0].owned_file) -and (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $indexPath) $captured[0].payload))) 'Pending protected file missing'
+        $payloadPath = Join-Path (Split-Path -Parent $indexPath) $captured[0].payload
+        Assert-That ($record.Count -eq 1 -and (Test-Path -LiteralPath $record[0].owned_file) -and (Test-Path -LiteralPath $payloadPath)) 'Pending protected file missing'
+        Assert-That ((Get-FileHash $payloadPath).Hash.ToLowerInvariant() -ceq $sourceHash -and (Get-Item $payloadPath).Length -eq $staged[0].Length) 'Protected payload differs from staged source'
     }
     Select-FixtureChat $session 'fixture-beta'
     $null = Wait-Until { (Read-Control $session status).selected.id -ceq 'fixture-beta' } 'fixture destination switched'
@@ -69,12 +80,12 @@ foreach ($trial in @('text', 'file')) {
     $records = @($snapshot.records | Where-Object { $_.id -ceq $accept[0].client_id })
     Assert-That ($records.Count -eq 1 -and $records[0].phase -ceq 'uncertain' -and $records[0].attempt_serial -eq 1 -and $records[0].attempts -eq 0 -and $records[0].provider -ceq $alpha[0].provider -and $records[0].account -ceq $alpha[0].account -and $records[0].jid -ceq $alpha[0].id -and $records[0].text -ceq $label) 'Checkpoint identity mismatch'
     if ($trial -eq 'file') {
-        Assert-That ($records[0].attachment_ready -and $records[0].wire_filename -ceq 'independence-image.png' -and $records[0].file_sha256 -ceq (Get-FileHash $filename).Hash.ToLowerInvariant() -and $records[0].file_bytes -eq (Get-Item $filename).Length) 'Checkpoint attachment mismatch'
+        Assert-That ($records[0].attachment_ready -and $records[0].file -ceq $stagedPath -and $records[0].wire_filename -ceq $stagedName -and $records[0].file_sha256 -ceq (Get-FileHash $filename).Hash.ToLowerInvariant() -and $records[0].file_bytes -eq (Get-Item $filename).Length) 'Checkpoint attachment mismatch'
     }
     $canonical = if ($trial -eq 'text') { 'INDEPENDENCE-SENT' } else { 'INDEPENDENCE-FILE' }
     Assert-That ($accept[0].canonical_id -ceq $canonical) 'Canonical acknowledgement mismatch'
     if ($trial -eq 'file') {
-        Assert-That ($accept[0].filename -ceq 'independence-image.png' -and $accept[0].file_sha256 -ceq (Get-FileHash $filename).Hash.ToLowerInvariant() -and $accept[0].file_bytes -eq (Get-Item $filename).Length) 'Protected file changed'
+        Assert-That ($accept[0].filename -ceq $stagedName -and $accept[0].filename -ceq $records[0].wire_filename -and $accept[0].file_sha256 -ceq (Get-FileHash $filename).Hash.ToLowerInvariant() -and $accept[0].file_bytes -eq (Get-Item $filename).Length) 'Protected file changed'
     }
     $null = Wait-Until {
         $state = Read-Control $session status
