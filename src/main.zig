@@ -16047,6 +16047,14 @@ fn reactionChipSize(hdc: win.HDC, a: *App, message: *const Message, width: i32) 
     return .{ .cx = text_width + px(a, 12), .cy = text_height + px(a, 8) };
 }
 
+fn voiceFooterLineHeight(hdc: win.HDC, a: *App) i32 {
+    const previous = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+    defer _ = win.SelectObject(hdc, previous);
+    var rect = win.RECT{ .left = 0, .top = 0, .right = 10000, .bottom = 0 };
+    _ = text_draw.drawText(hdc, lit("Show more"), -1, &rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_CALCRECT);
+    return @max(a.font_small_height, rect.bottom - rect.top);
+}
+
 fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, show_sender: bool) i32 {
     const width = messageWidth(hdc, a, message, limit);
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
@@ -16063,11 +16071,11 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, sh
         const display = media_layout.fit(message.bitmap_width, message.bitmap_height, text_width, px(a, 250));
         height += display.height + px(a, 8);
     } else if (message.media_type.len > 0) height += px(a, 54);
-    if (message.transcript_state == .loading or message.transcript_state == .failed) height += px(a, 24);
+    if (message.transcript_state == .loading or message.transcript_state == .failed) height += @max(px(a, 24), @max(px(a, 20), voiceFooterLineHeight(hdc, a)) + px(a, 4));
     if (message.transcript.len > 0) {
         _ = win.SelectObject(hdc, @ptrCast(a.font.?));
         const shown: c_int = if (message.transcript_expanded) @intCast(message.transcript.len) else @intCast(@min(message.transcript.len, 400));
-        height += transcriptRender(hdc, a, message, shown, width - px(a, 24), false, 0, 0) + px(a, 22);
+        height += transcriptRender(hdc, a, message, shown, width - px(a, 24), false, 0, 0) + px(a, 2) + @max(px(a, 20), @max(px(a, 18), voiceFooterLineHeight(hdc, a)) + px(a, 2));
     }
     height += px(a, 10);
     const min_height: i32 = header_height + px(a, 20);
@@ -16725,25 +16733,28 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             if (message.transcript_state == .loading) {
                 _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                 _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-                var loading_rect = win.RECT{ .left = left + px(a, 12), .top = text_top, .right = right - px(a, 12), .bottom = text_top + px(a, 20) };
+                const line_height = @max(px(a, 20), voiceFooterLineHeight(hdc, a));
+                var loading_rect = win.RECT{ .left = left + px(a, 12), .top = text_top, .right = right - px(a, 12), .bottom = text_top + line_height };
                 _ = text_draw.drawText(hdc, lit("Transcribing…"), -1, &loading_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
-                text_top += px(a, 24);
+                text_top += @max(px(a, 24), line_height + px(a, 4));
             } else if (message.transcript_state == .failed) {
                 _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                 _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-                var error_rect = win.RECT{ .left = left + px(a, 12), .top = text_top, .right = right - px(a, 12), .bottom = text_top + px(a, 20) };
+                const line_height = @max(px(a, 20), voiceFooterLineHeight(hdc, a));
+                var error_rect = win.RECT{ .left = left + px(a, 12), .top = text_top, .right = right - px(a, 12), .bottom = text_top + line_height };
                 _ = text_draw.drawText(hdc, if (message.transcript_error.len > 0) message.transcript_error.ptr() else lit("Transcription failed"), -1, &error_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
-                text_top += px(a, 24);
+                text_top += @max(px(a, 24), line_height + px(a, 4));
             } else if (message.transcript.len > 0) {
                 const shown: c_int = if (message.transcript_expanded) @intCast(message.transcript.len) else @intCast(@min(message.transcript.len, 400));
                 const transcript_height = transcriptRender(hdc, a, message, shown, right - left - px(a, 24), true, left + px(a, 12), text_top);
                 text_top += transcript_height + px(a, 2);
                 _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                 _ = win.SetTextColor(hdc, theme.current.primary);
-                var toggle_rect = win.RECT{ .left = left + px(a, 12), .top = text_top, .right = right - px(a, 12), .bottom = text_top + px(a, 18) };
+                const line_height = @max(px(a, 18), voiceFooterLineHeight(hdc, a));
+                var toggle_rect = win.RECT{ .left = left + px(a, 12), .top = text_top, .right = right - px(a, 12), .bottom = text_top + line_height };
                 _ = text_draw.drawText(hdc, if (message.transcript_expanded) lit("Show less") else lit("Show more"), -1, &toggle_rect, win.DT_LEFT | win.DT_SINGLELINE);
                 message.toggle_hit = toggle_rect;
-                text_top += px(a, 20);
+                text_top += @max(px(a, 20), line_height + px(a, 2));
             }
         } else if (message.media_type.len > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
