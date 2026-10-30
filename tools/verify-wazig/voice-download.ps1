@@ -9,7 +9,7 @@ function Invoke-VoiceDownloadJourney($Session) {
     Invoke-PaletteCommand $Session 'Refresh'
     $null = Wait-Until {
         $rows = @(Read-VoiceMessages $Session | Where-Object { $_.id -like 'NEW-VOICE-*' })
-        @($rows | Where-Object { $_.id -ne 'NEW-VOICE-4' -and $_.local }).Count -eq 3
+        @($rows | Where-Object { $_.id -ne 'NEW-VOICE-4' -and $_.local }).Count -eq 3 -and`n            @($rows | Where-Object { $_.id -eq 'NEW-VOICE-4' -and $_.download_state -eq 'retry' }).Count -eq 1
     } 'new voice downloads despite queued send' -Seconds 10
     $elapsed = $clock.ElapsedMilliseconds
     $rows = @(Read-VoiceMessages $Session | Where-Object { $_.id -like 'NEW-VOICE-*' })
