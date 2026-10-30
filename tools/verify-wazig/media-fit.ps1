@@ -41,11 +41,11 @@ function Get-MediaFitTarget($Session, [string]$Id) {
 function Invoke-MediaFitJourney($Session) {
     $null = Invoke-PaletteCommand $Session 'Verification Media'
     $fixture = Get-Content (Join-Path $Session.evidence 'media-fit-fixture.json') -Raw | ConvertFrom-Json
-    $ids = @('landscape', 'portrait')
-    if ($fixture.video) { $ids += 'video' }
+    $null = Assert-That $fixture.video 'Captioned video fixture missing'
+    $ids = @('landscape', 'portrait', 'video')
     $null = Wait-Until {
         $shown = Read-Control $Session messages
-        return ($shown.chat.id -eq 'fixture-media@g.us' -and @($shown.messages | Where-Object { $_.media_type -and $_.local }).Count -eq $ids.Count)
+        return ($shown.chat.id -eq 'fixture-media@g.us' -and @($shown.messages | Where-Object { $_.media_type -and $_.local }).Count -eq ($ids.Count + 1))
     } 'media-fit automatic hub downloads'
     $caption = "*Synthetic heading*`n• Grüner Punkt`n• _Second line_"
     $rows = (Read-Control $Session messages).messages
@@ -53,6 +53,12 @@ function Invoke-MediaFitJourney($Session) {
     $plain = @($rows | Where-Object { $_.id -ceq 'portrait' })
     Assert-That ($photo.Count -eq 1 -and $photo[0].text -ceq $caption -and $photo[0].forwarded) 'Forwarded image caption missing or duplicated'
     Assert-That ($plain.Count -eq 1 -and $plain[0].text -ceq '' -and -not $plain[0].forwarded) 'Uncaptioned image changed'
+    $video = @($rows | Where-Object { $_.id -ceq 'video' })
+    $document = @($rows | Where-Object { $_.id -ceq 'document' })
+    $short = @($rows | Where-Object { $_.id -ceq 'fit-short' })
+    Assert-That ($video.Count -eq 1 -and $video[0].text -ceq $caption -and $video[0].forwarded) 'Forwarded video caption missing or duplicated'
+    Assert-That ($document.Count -eq 1 -and $document[0].text -ceq $fixture.long_caption -and $document[0].forwarded) 'Document caption fallback missing or duplicated'
+    Assert-That ($short.Count -eq 1 -and $short[0].text -ceq 'Hi' -and $short[0].forwarded) 'Short forwarded message missing'
     $checks = [Collections.Generic.List[object]]::new()
     $problems = [Collections.Generic.List[string]]::new()
     foreach ($size in @('wide', 'narrow')) {
@@ -101,6 +107,14 @@ function Invoke-MediaFitJourney($Session) {
         $mediaRow = Get-MediaFitTarget $Session 'landscape'
         $count = [int][Math]::Floor(($mediaRow.bubble[2] - $mediaRow.bubble[0] - $padding - 4 * $dpi / 96) / $step) - 1
         $null = Set-MediaFitText $Session ((@(1..$count | ForEach-Object { 'M' })) -join ' ')
+        $short = Get-MediaFitTarget $Session 'fit-short'
+        $null = Save-Screen $Session "$size-forwarded-short"
+        [ordered]@{ message = $short; dpi = $dpi; canvas = @($ox, $oy, $canvasWidth, $canvasHeight) } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$size-forwarded-short.json")
+        if ($size -eq 'wide') {
+            $document = Get-MediaFitTarget $Session 'document'
+            $null = Save-Screen $Session 'wide-document'
+            [ordered]@{ message = $document; dpi = $dpi; canvas = @($ox, $oy, $canvasWidth, $canvasHeight) } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'wide-document.json')
+        }
         foreach ($id in @('fit-own') + $ids) {
             $row = Get-MediaFitTarget $Session $id
             $name = "$size-$id"
@@ -129,9 +143,9 @@ function Invoke-MediaFitJourney($Session) {
         $row = @((Read-Control $Session messages).messages | Where-Object { $_.id -ceq 'fit-live' -and $_.text -ceq '*Live* caption • Grüße' -and $_.forwarded -and $_.local })
         if ($row.Count -eq 1) { return $row[0] }
     } 'live forwarded photo and caption'
+    $live = Get-MediaFitTarget $Session 'fit-live'
     $timer.Stop()
     Assert-That ($timer.Elapsed.TotalSeconds -lt 10) 'Live photo caption exceeded ten seconds'
-    $live = Get-MediaFitTarget $Session 'fit-live'
-    $live | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'caption-live.json')
+    [ordered]@{ message = $live; elapsed_seconds = $timer.Elapsed.TotalSeconds; dpi = $dpi; canvas = @($ox, $oy, $canvasWidth, $canvasHeight) } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'caption-live.json')
     Save-Screen $Session caption-live
 }

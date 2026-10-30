@@ -1701,6 +1701,7 @@ class RepaintHandler(Handler):
 
 MEDIA_GROUP = 'fixture-media@g.us'
 MEDIA_COLOURS = {'landscape': (32, 176, 208), 'portrait': (176, 64, 208)}
+MEDIA_LONG_CAPTION = '*Synthetic heading*\n' + '\n'.join(f'• Grüner Punkt {i}: synthetic words and _formatted text_ for this fixture. More synthetic words and formatted text complete this long example.' for i in range(5))
 
 
 def media_fit_png(width, height, colour):
@@ -1728,9 +1729,14 @@ class MediaFitHandler(Handler):
                          MimeType=mime, Filename=key + extension)
                     for key, (data, mime, extension, kind) in self.state.fit_media.items()]
             for row in rows:
-                if row['MsgID'] == 'landscape':
+                if row['MsgID'] in ('landscape', 'video'):
                     caption = '*Synthetic heading*\n• Grüner Punkt\n• _Second line_'
-                    row.update(Text=caption, MediaCaption=caption, DisplayText='Sent image', IsForwarded=True)
+                    row.update(Text=caption, MediaCaption=caption, DisplayText='Sent ' + row['MediaType'], IsForwarded=True)
+                elif row['MsgID'] == 'document':
+                    row.update(Text='', MediaCaption=MEDIA_LONG_CAPTION, DisplayText='Sent document', IsForwarded=True)
+            rows.append(dict(MsgID='fit-short', ChatJID=MEDIA_GROUP, Timestamp=self.state.stamp,
+                             Text='Hi', IsForwarded=True, FromMe=False,
+                             SenderJID='fixture-media-sender', SenderName='Fixture Sender'))
             rows.append(dict(MsgID='fit-own', ChatJID=MEDIA_GROUP, Timestamp=self.state.stamp,
                              Text=self.state.fit_text, FromMe=True, SenderName='', SenderJID='fixture-own'))
             if getattr(self.state, 'fit_live', False):
@@ -2307,14 +2313,16 @@ def main():
             key: (media_fit_png(w, h, MEDIA_COLOURS[key]), 'image/png', '.png', 'image')
             for key, w, h in [('landscape', 1600, 1000), ('portrait', 700, 1400)]
         }
+        server.state.fit_media['document'] = (b'Synthetic document', 'text/plain', '.txt', 'document')
         ffmpeg = shutil.which('ffmpeg')
-        if ffmpeg:
-            video = args.log.with_name('media-fit.mp4')
-            subprocess.run([ffmpeg, '-y', '-f', 'lavfi', '-i', 'color=c=orange:s=1512x1100:r=1',
-                            '-frames:v', '1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(video)], check=True)
-            server.state.fit_media['video'] = (video.read_bytes(), 'video/mp4', '.mp4', 'video')
+        if not ffmpeg:
+            raise RuntimeError('media-fit requires ffmpeg for captioned video')
+        video = args.log.with_name('media-fit.mp4')
+        subprocess.run([ffmpeg, '-y', '-f', 'lavfi', '-i', 'color=c=orange:s=1512x1100:r=1',
+                        '-frames:v', '1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(video)], check=True)
+        server.state.fit_media['video'] = (video.read_bytes(), 'video/mp4', '.mp4', 'video')
         args.log.with_name('media-fit-fixture.json').write_text(json.dumps(dict(
-            landscape=[1600, 1000], portrait=[700, 1400], video=bool(ffmpeg))), encoding='utf-8')
+            landscape=[1600, 1000], portrait=[700, 1400], video=True, long_caption=MEDIA_LONG_CAPTION)), encoding='utf-8')
     if args.mode == 'slack-sort':
         stamp = datetime.fromisoformat(server.state.stamp)
         server.state.sort_times = {

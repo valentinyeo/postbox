@@ -15625,7 +15625,16 @@ fn messageWidth(hdc: win.HDC, a: *App, message: *const Message, limit: i32) i32 
     var extent: i32 = 0;
     _ = formattedMessage(hdc, a, message, @max(1, limit - px(a, 28)), false, 0, 0, &extent);
     const reaction_width = reactionChipSize(hdc, a, message, limit).cx;
-    return @min(limit, @max(extent + px(a, 28), reaction_width + px(a, 24)));
+    var label_width: i32 = 0;
+    if (message.forwarded) {
+        const saved = win.SaveDC(hdc);
+        defer _ = win.RestoreDC(hdc, saved);
+        _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+        var rect = win.RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+        _ = text_draw.drawText(hdc, lit("↪ Forwarded"), -1, &rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_CALCRECT);
+        label_width = rect.right + px(a, 28);
+    }
+    return @min(limit, @max(@max(extent + px(a, 28), reaction_width + px(a, 24)), label_width));
 }
 
 fn cachedChatPreview(a: *App, chat: *Chat) void {
