@@ -4936,9 +4936,12 @@ fn quarantineUnifiedJournals(a: *App) !void {
         if (verification_fixture and a.verification_migration_stop_id.len != 0 and a.verification_migration_stop_before_rename) {
             const marker_path = messagesDirPath(a, "verification-migration-stop.json") orelse std.process.exit(87);
             const marker = std.json.Stringify.valueAlloc(a.allocator, .{
-                .phase = "after-protect-before-rename", .id = a.verification_migration_stop_id,
-                .root = a.verification_migration_stop_root, .pid = win.GetCurrentProcessId(),
-                .source = source, .pending_name = target_name,
+                .phase = "after-protect-before-rename",
+                .id = a.verification_migration_stop_id,
+                .root = a.verification_migration_stop_root,
+                .pid = win.GetCurrentProcessId(),
+                .source = source,
+                .pending_name = target_name,
             }, .{}) catch std.process.exit(87);
             if (!writeCacheFileAtomic(a, marker_path, marker)) std.process.exit(87);
             std.process.exit(85);
@@ -4947,7 +4950,6 @@ fn quarantineUnifiedJournals(a: *App) !void {
         defer a.allocator.free(target);
         const target_wide = try unifiedNativePath(a.allocator, target);
         defer a.allocator.free(target_wide);
-        // Rename-by-handle expects an NT path, not the Win32 extended prefix.
         target_wide[1] = '?';
         target_wide[2] = '?';
         const RenameInfo = extern struct { replace: u8, root: win.HANDLE, length: win.DWORD, filename: [1]u16 };
@@ -5113,8 +5115,12 @@ fn unifiedSourcePass(a: *App, directory: []const u8, name: []const u8, pass: Uni
     var temp_wide: ?[:0]u16 = null;
     defer if (temp_wide) |value| a.allocator.free(value);
     var output: ?win.HANDLE = null;
-    defer if (output) |handle| { _ = win.CloseHandle(handle); };
-    defer if (temp_wide) |value| { _ = win.DeleteFileW(value.ptr); };
+    defer if (output) |handle| {
+        _ = win.CloseHandle(handle);
+    };
+    defer if (temp_wide) |value| {
+        _ = win.DeleteFileW(value.ptr);
+    };
     if (pass == .clean) {
         var random: [16]u8 = undefined;
         a.io.random(&random);
@@ -5124,7 +5130,10 @@ fn unifiedSourcePass(a: *App, directory: []const u8, name: []const u8, pass: Uni
         temporary = try std.fs.path.join(a.allocator, &.{ directory, temporary_name });
         temp_wide = try unifiedNativePath(a.allocator, temporary.?);
         output = win.CreateFileW(temp_wide.?.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_NEW, win.FILE_ATTRIBUTE_NORMAL, null);
-        if (output == win.INVALID_HANDLE_VALUE or output == null) { output = null; return error.JournalWriteFailed; }
+        if (output == win.INVALID_HANDLE_VALUE or output == null) {
+            output = null;
+            return error.JournalWriteFailed;
+        }
     }
     while (true) {
         const raw = reader.interface.takeDelimiterInclusive('\n') catch |err| switch (err) {
@@ -5160,10 +5169,16 @@ fn unifiedSourcePass(a: *App, directory: []const u8, name: []const u8, pass: Uni
                             for (candidate.records[0..candidate.count]) |*existing| {
                                 if (std.mem.eql(u8, existing.entry.idSlice(), entry.idSlice())) duplicate = true;
                             }
-                            if (duplicate) { a.unified_import_unresolved += 1; continue; }
+                            if (duplicate) {
+                                a.unified_import_unresolved += 1;
+                                continue;
+                            }
                         }
                         const result = unified_snapshot.admit(candidate, &record) catch |err| switch (err) {
-                            error.InvalidSnapshot => { a.unified_import_unresolved += 1; continue; },
+                            error.InvalidSnapshot => {
+                                a.unified_import_unresolved += 1;
+                                continue;
+                            },
                             error.ConflictingIntent => return error.ConflictingIntent,
                         };
                         if (result == .overflow) a.unified_import_overflow += 1;
@@ -5345,8 +5360,10 @@ fn restoreOutbox(a: *App) void {
         if (verification_fixture and a.verification_migration_stop_id.len != 0 and !a.verification_migration_stop_before_rename) {
             const path = messagesDirPath(a, "verification-migration-stop.json") orelse std.process.exit(87);
             const marker = std.json.Stringify.valueAlloc(a.allocator, .{
-                .phase = "after-quarantine-before-import", .id = a.verification_migration_stop_id,
-                .root = a.verification_migration_stop_root, .pid = win.GetCurrentProcessId(),
+                .phase = "after-quarantine-before-import",
+                .id = a.verification_migration_stop_id,
+                .root = a.verification_migration_stop_root,
+                .pid = win.GetCurrentProcessId(),
             }, .{}) catch std.process.exit(87);
             if (!writeCacheFileAtomic(a, path, marker)) std.process.exit(87);
             std.process.exit(86);
@@ -10180,7 +10197,8 @@ fn sendUnifiedMessage(a: *App, thread: bool) void {
     layout(a, a.compose_client_width, a.compose_client_height);
     if (a.chat_view == origin_view and a.show_archived == origin_archived and
         std.mem.eql(u8, a.view_account.slice(), origin_account.slice()) and a.selected_chat < a.chat_count and
-        chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(&entries[0]))) {
+        chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(&entries[0])))
+    {
         if (thread) {
             if (a.thread_compose) |current| {
                 if (current == compose and std.mem.eql(u8, a.thread_parent.slice(), entries[0].reply_to.slice())) _ = win.SetFocus(compose);
@@ -12935,9 +12953,9 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         }
         try w.print(",\"legacy_hub_tag\":\"{x:0>16}\"", .{std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, a.wa_bridge_url), "hub")});
         try w.print(",\"unified_snapshot\":{{\"loaded\":{},\"ready\":{d},\"uncertain\":{d},\"held\":{d},\"inflight\":{d},\"hub_jobs\":{d},\"storage_blocked\":{},\"unsaved_outcomes\":{d},\"fault_hits\":{d},\"imports_clean\":{},\"import_unresolved\":{d},\"import_overflow\":{d}}}", .{
-            unifiedHub(a) and a.unified_snapshot != null and !a.outbox_load_failed, ready, uncertain, held, @as(u8, if (a.unified_inflight != null) 1 else 0),
-            wacliPendingGet(a, .hub_send), a.unified_storage_blocked, @as(u8, if (a.unified_unsaved_result != null) 1 else 0), a.unified_fault_hits,
-            a.unified_imports_clean, a.unified_import_unresolved, a.unified_import_overflow,
+            unifiedHub(a) and a.unified_snapshot != null and !a.outbox_load_failed, ready,                     uncertain,                                               held,                 @as(u8, if (a.unified_inflight != null) 1 else 0),
+            wacliPendingGet(a, .hub_send),                                          a.unified_storage_blocked, @as(u8, if (a.unified_unsaved_result != null) 1 else 0), a.unified_fault_hits, a.unified_imports_clean,
+            a.unified_import_unresolved,                                            a.unified_import_overflow,
         });
     }
     const card = updateCardRect(a);
@@ -20983,8 +21001,14 @@ fn beginUnifiedSend(a: *App, now_ms: u64) void {
         a.unified_inflight = .{ .id = id, .attempt = job.gen };
         if (!wacliEnqueue(a, job, true)) {
             a.unified_inflight = null;
-            const published = a.unified_snapshot orelse { a.unified_storage_blocked = true; return; };
-            const spare = a.unified_candidate orelse { a.unified_storage_blocked = true; return; };
+            const published = a.unified_snapshot orelse {
+                a.unified_storage_blocked = true;
+                return;
+            };
+            const spare = a.unified_candidate orelse {
+                a.unified_storage_blocked = true;
+                return;
+            };
             spare.* = published.*;
             spare.records[index].phase = .ready;
             spare.records[index].not_before_ms = now_ms +| 3_000;
@@ -21158,7 +21182,8 @@ fn finishUnifiedSend(a: *App, result: *const WacliResult) void {
     const terminal = attachment_error or result.http_status == 401 or result.http_status == 403 or
         (result.http_status == 429 and (result.provider == .signal or result.provider == .telegram));
     var outcome = unified_snapshot.UnifiedOutcome{
-        .id = owner.id, .attempt = owner.attempt,
+        .id = owner.id,
+        .attempt = owner.attempt,
         .kind = if (result.ok) .acknowledged else if (terminal) .held else .retryable,
         .ambiguous = !result.ok and !attachment_error and (result.http_status == 0 or result.http_status == 409 or result.http_status >= 500 or (result.http_status >= 200 and result.http_status < 300)),
         .received_ms = win.GetTickCount64(),
