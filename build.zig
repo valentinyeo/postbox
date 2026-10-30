@@ -402,6 +402,7 @@ pub fn build(b: *std.Build) void {
     const recording_source = std.mem.concat(b.allocator, u8, &.{
         "const recording_paint = @import(\"recording_paint.zig\");\n",
         @embedFile("tools/recording_paint_test.zig"),
+        sourceSection("fn unifiedHub(", "fn hubConfigured("),
         sourceSection("fn drawVoiceButton(", "fn paintVoiceButton("),
         sourceSection("fn invalidateRecordingTick(", "fn queueVoiceNote("),
     }) catch @panic("Out of memory building recording paint harness");
@@ -647,7 +648,7 @@ pub fn build(b: *std.Build) void {
         "else => unreachable, } }\n",
     }) catch @panic("Out of memory building background media harness");
     const background_media_files = b.addWriteFiles();
-    for ([_][]const u8{ "media_drain.zig", "media_age.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig" }) |name| {
+    for ([_][]const u8{ "media_drain.zig", "media_age.zig", "sync_gate.zig", "played.zig", "chat_cache.zig", "chat_key.zig", "transport.zig", "outbox.zig" }) |name| {
         _ = background_media_files.addCopyFile(b.path(b.fmt("src/{s}", .{name})), name);
     }
     const background_media_harness = background_media_files.add("background_media_test.zig", background_media_source);
