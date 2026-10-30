@@ -10,8 +10,8 @@ def main():
     parser.add_argument('--zig', required=True)
     args = parser.parse_args()
     source = (root / 'src/main.zig').read_text(encoding='utf-8')
-    parts = []
-    for name in ('messagesDirPath', 'unifiedNativePath', 'writeOutboxAtomic', 'saveUnifiedCandidate',
+    parts = [next(line for line in source.splitlines() if line.startswith('const UnifiedFaultTransition = '))]
+    for name in ('messagesDirPath', 'unifiedNativePath', 'unifiedFaultAt', 'writeOutboxAtomic', 'saveUnifiedCandidate',
                  'unifiedNoReparse', 'unifiedReadAttachment', 'unifiedPrivateDirectory',
                  'unifiedWriteProtected', 'unifiedImportRecord', 'unifiedSourceMatches',
                  'mintSendId', 'acceptUnifiedSends'):

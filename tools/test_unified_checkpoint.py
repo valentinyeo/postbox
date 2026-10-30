@@ -11,7 +11,7 @@ def main():
     parser.add_argument('--negative-controls', action='store_true')
     args = parser.parse_args()
     source = (root / 'src/main.zig').read_text(encoding='utf-8')
-    parts = []
+    parts = [next(line for line in source.splitlines() if line.startswith('const UnifiedFaultTransition = '))]
     for name in ('wacliJobArgs', 'beginUnifiedSend', 'retryUnifiedSend', 'sendRetryDelayMs', 'retryUnifiedRefill', 'commitUnifiedOutcome', 'finishUnifiedSend', 'tickUnifiedOutbox'):
         start = source.index(f'fn {name}(')
         end = source.index('\n}\n', start) + 3
@@ -45,6 +45,14 @@ def main():
                 raise SystemExit(f'Negative control {name} did not fail a test assertion')
             else:
                 print(f'NEGATIVE CONTROL {name}: ' + '; '.join(line for line in result.stdout.splitlines() if 'FAIL (Test' in line))
+        writer = []
+        for name in ('unifiedNativePath', 'unifiedFaultAt', 'writeOutboxAtomic', 'saveUnifiedCandidate'):
+            start = source.index(f'fn {name}(')
+            end = source.index('\n}\n', start) + 3
+            writer.append(source[start:end])
+        targeted = (root / 'tools/unified_targeted_fault_test.zig').read_text(encoding='utf-8')
+        (target / 'test.zig').write_text(targeted + '\n' + '\n'.join(writer) + '\n' + original, encoding='utf-8')
+        subprocess.run([args.zig, 'test', str(target / 'test.zig')], check=True)
 
 
 if __name__ == "__main__":

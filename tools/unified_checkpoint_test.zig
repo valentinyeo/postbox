@@ -45,7 +45,7 @@ fn importUnifiedOutbox(a: *App) !void {
 }
 fn setStatus(_: *App, _: []const u8) void {}
 fn refreshUnifiedViews(_: *App) void {}
-fn saveUnifiedCandidate(a: *App) bool {
+fn saveUnifiedCandidate(a: *App, _: UnifiedFaultTransition, _: u64) bool {
     a.save_calls += 1;
     if (a.save_calls == a.fail_save_at) return false;
     const old = a.unified_snapshot;

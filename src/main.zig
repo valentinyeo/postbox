@@ -674,6 +674,8 @@ const SlackInstallation = struct {
     user_pages: u32 = 0,
 };
 
+const UnifiedFaultTransition = enum { any, checkpoint, held, acknowledged };
+
 const App = struct {
     allocator: std.mem.Allocator,
     people: people_index.Index,
@@ -926,6 +928,10 @@ const App = struct {
     unified_refill_pending: bool = false,
     unified_refill_retry_at_ms: u64 = 0,
     unified_write_fault: enum { none, open, write, flush, close, replace } = .none,
+    unified_fault_transition: UnifiedFaultTransition = .any,
+    unified_fault_attempt: u64 = 0,
+    unified_fault_active: bool = false,
+    unified_fault_hits: u64 = 0,
     send_seq: u64 = 0,
     failed_sends: [max_unified_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_unified_failed_sends,
     failed_send_count: usize = 0,
@@ -4577,38 +4583,48 @@ fn unifiedNativePath(allocator: std.mem.Allocator, path: []const u8) ![:0]u16 {
     return std.unicode.utf8ToUtf16LeAllocZ(allocator, native);
 }
 
+fn unifiedFaultAt(a: *App, stage: @TypeOf(a.unified_write_fault)) bool {
+    if (!verification_fixture or !a.unified_fault_active or a.unified_write_fault != stage) return false;
+    a.unified_fault_hits +|= 1;
+    return true;
+}
+
 fn writeOutboxAtomic(a: *App, path: []const u8, data: []const u8, unified: bool) bool {
     const fault = unified and verification_fixture;
     const temp_path = std.fmt.allocPrint(a.allocator, "{s}.new", .{path}) catch return false;
     defer a.allocator.free(temp_path);
     const wide = (if (unified) unifiedNativePath(a.allocator, temp_path) else std.unicode.utf8ToUtf16LeAllocZ(a.allocator, temp_path)) catch return false;
     defer a.allocator.free(wide);
-    if (fault and a.unified_write_fault == .open) return false;
+    if (fault and unifiedFaultAt(a, .open)) return false;
     const handle = win.CreateFileW(wide.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
     if (handle == win.INVALID_HANDLE_VALUE or handle == null) return false;
     defer _ = win.DeleteFileW(wide.ptr);
     var written_total: usize = 0;
-    var ok = !(fault and a.unified_write_fault == .write);
+    var ok = !(fault and unifiedFaultAt(a, .write));
     while (ok and written_total < data.len) {
         var written: win.DWORD = 0;
         if (win.WriteFile(handle, data[written_total..].ptr, @intCast(data.len - written_total), &written, null) == 0 or written == 0) ok = false;
         written_total += written;
     }
-    const flushed = ok and written_total == data.len and !(fault and a.unified_write_fault == .flush) and win.FlushFileBuffers(handle) != 0;
+    const flushed = ok and written_total == data.len and !(fault and unifiedFaultAt(a, .flush)) and win.FlushFileBuffers(handle) != 0;
     const closed = win.CloseHandle(handle) != 0;
-    if (!flushed or !closed or (fault and a.unified_write_fault == .close)) return false;
+    if (!flushed or !closed or (fault and unifiedFaultAt(a, .close))) return false;
     const target = (if (unified) unifiedNativePath(a.allocator, path) else std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path)) catch return false;
     defer a.allocator.free(target);
-    if (fault and a.unified_write_fault == .replace) return false;
+    if (fault and unifiedFaultAt(a, .replace)) return false;
     return win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) != 0;
 }
 
-fn saveUnifiedCandidate(a: *App) bool {
+fn saveUnifiedCandidate(a: *App, transition: UnifiedFaultTransition, attempt: u64) bool {
     const candidate = a.unified_candidate orelse return false;
     const live = a.unified_snapshot orelse return false;
     if (a.unified_snapshot_path.len == 0 or !std.mem.eql(u8, candidate.backend.slice(), live.backend.slice())) return false;
     const encoded = unified_snapshot.encode(a.allocator, candidate) catch return false;
     defer a.allocator.free(encoded);
+    a.unified_fault_active = verification_fixture and
+        (a.unified_fault_transition == .any or a.unified_fault_transition == transition) and
+        (a.unified_fault_attempt == 0 or a.unified_fault_attempt == attempt);
+    defer a.unified_fault_active = false;
     if (!writeOutboxAtomic(a, a.unified_snapshot_path, encoded, true)) return false;
     a.unified_snapshot = candidate;
     a.unified_candidate = live;
@@ -5135,7 +5151,7 @@ fn importUnifiedOutbox(a: *App) !void {
     const candidate = a.unified_candidate orelse return error.MissingSnapshot;
     candidate.* = live.*;
     try unifiedSourcesPass(a, .admit);
-    if (!saveUnifiedCandidate(a)) return error.SnapshotWriteFailed;
+    if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
     try unifiedSourcesPass(a, .validate);
     try unifiedSourcesPass(a, .clean);
     const published = a.unified_snapshot orelse return error.MissingSnapshot;
@@ -5191,7 +5207,7 @@ fn acceptUnifiedSends(a: *App, entries: []outbox.Entry, voice_bytes: ?[]const u8
         }
         if (try unified_snapshot.admit(candidate, &record) != .added) return error.DuplicateIntent;
     }
-    if (!saveUnifiedCandidate(a)) return error.SnapshotWriteFailed;
+    if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
     refreshUnifiedViews(a);
 }
 
@@ -5210,7 +5226,7 @@ fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) !void {
         retry.phase = .ready;
         retry.entry.attempts = 0;
         retry.not_before_ms = 0;
-        if (!saveUnifiedCandidate(a)) return error.SnapshotWriteFailed;
+        if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
         refreshUnifiedViews(a);
         return;
     }
@@ -12810,8 +12826,9 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
                 .held => held += 1,
             };
         }
-        try w.print(",\"unified_snapshot\":{{\"loaded\":{},\"ready\":{d},\"uncertain\":{d},\"held\":{d},\"inflight\":{d}}}", .{
+        try w.print(",\"unified_snapshot\":{{\"loaded\":{},\"ready\":{d},\"uncertain\":{d},\"held\":{d},\"inflight\":{d},\"storage_blocked\":{},\"unsaved_outcomes\":{d},\"fault_hits\":{d}}}", .{
             unifiedHub(a) and a.unified_snapshot != null and !a.outbox_load_failed, ready, uncertain, held, @as(u8, if (a.unified_inflight != null) 1 else 0),
+            a.unified_storage_blocked, @as(u8, if (a.unified_unsaved_result != null) 1 else 0), a.unified_fault_hits,
         });
     }
     const card = updateCardRect(a);
@@ -19045,6 +19062,19 @@ pub fn main(init: std.process.Init) !void {
     if (verification_fixture) {
         if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_FAULT")) |fault| {
             app.unified_write_fault = std.meta.stringToEnum(@TypeOf(app.unified_write_fault), fault) orelse .none;
+            if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_TRANSITION")) |transition| {
+                app.unified_fault_transition = std.meta.stringToEnum(UnifiedFaultTransition, transition) orelse blk: {
+                    app.unified_write_fault = .none;
+                    break :blk .any;
+                };
+            }
+            if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_ATTEMPT")) |attempt| {
+                app.unified_fault_attempt = std.fmt.parseInt(u64, attempt, 10) catch blk: {
+                    app.unified_write_fault = .none;
+                    break :blk 0;
+                };
+                if (app.unified_fault_attempt == 0) app.unified_write_fault = .none;
+            }
         }
     }
     defer if (app.unified_snapshot) |snapshot| app.allocator.destroy(snapshot);
@@ -20801,7 +20831,7 @@ fn beginUnifiedSend(a: *App, now_ms: u64) void {
                 candidate.records[index].phase = .held;
                 candidate.records[index].failure_reason.set("attachment unavailable");
                 candidate.records[index].not_before_ms = 0;
-                if (!saveUnifiedCandidate(a)) {
+                if (!saveUnifiedCandidate(a, .any, 0)) {
                     a.unified_storage_blocked = true;
                     setStatus(a, "Could not save held attachment");
                     return;
@@ -20824,7 +20854,7 @@ fn beginUnifiedSend(a: *App, now_ms: u64) void {
         candidate.* = live.*;
         candidate.records[index].phase = .uncertain;
         candidate.records[index].attempt_serial = job.gen;
-        if (!saveUnifiedCandidate(a)) {
+        if (!saveUnifiedCandidate(a, .checkpoint, job.gen)) {
             a.unified_storage_blocked = true;
             setStatus(a, "Could not save send checkpoint; outbox paused");
             return;
@@ -20837,7 +20867,7 @@ fn beginUnifiedSend(a: *App, now_ms: u64) void {
             spare.* = published.*;
             spare.records[index].phase = .ready;
             spare.records[index].not_before_ms = now_ms +| 3_000;
-            if (!saveUnifiedCandidate(a)) {
+            if (!saveUnifiedCandidate(a, .any, 0)) {
                 a.unified_storage_blocked = true;
                 setStatus(a, "Could not save enqueue failure; outbox paused");
             }
@@ -20969,7 +20999,8 @@ fn commitUnifiedOutcome(a: *App) void {
                 } else updated.phase = .held;
             },
         }
-        if (!saveUnifiedCandidate(a)) {
+        const transition: UnifiedFaultTransition = if (outcome.kind == .acknowledged) .acknowledged else if (candidate.records[index].phase == .held) .held else .any;
+        if (!saveUnifiedCandidate(a, transition, outcome.attempt)) {
             a.unified_storage_blocked = true;
             setStatus(a, "Could not save result; outbox paused");
             return;

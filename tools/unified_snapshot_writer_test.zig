@@ -12,6 +12,10 @@ const App = struct {
     unified_candidate: ?*unified_snapshot.Snapshot = null,
     unified_snapshot_path: []const u8 = "C:\\profile\\snapshot.v2",
     unified_write_fault: enum { none, open, write, flush, close, replace } = .none,
+    unified_fault_transition: UnifiedFaultTransition = .any,
+    unified_fault_attempt: u64 = 0,
+    unified_fault_active: bool = false,
+    unified_fault_hits: u64 = 0,
 };
 
 const win = struct {
@@ -65,7 +69,7 @@ test "candidate becomes live only after checked replacement" {
     disk_len = original.len;
     inline for (.{ .open, .write, .flush, .close, .replace }) |stage| {
         app.unified_write_fault = stage;
-        try std.testing.expect(!saveUnifiedCandidate(&app));
+        try std.testing.expect(!saveUnifiedCandidate(&app, .any, 0));
         try std.testing.expect(app.unified_snapshot.? == live);
         try std.testing.expect(app.unified_candidate.? == candidate);
         try std.testing.expectEqualStrings(original, disk[0..disk_len]);
@@ -73,7 +77,7 @@ test "candidate becomes live only after checked replacement" {
     verification_fixture = false;
     app.unified_write_fault = .open;
     defer verification_fixture = true;
-    try std.testing.expect(saveUnifiedCandidate(&app));
+    try std.testing.expect(saveUnifiedCandidate(&app, .any, 0));
     try std.testing.expect(app.unified_snapshot.? == candidate);
     try std.testing.expect(app.unified_candidate.? == live);
     const decoded = try std.testing.allocator.create(unified_snapshot.Snapshot);
