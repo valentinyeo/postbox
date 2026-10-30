@@ -17288,8 +17288,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             const reset = a.hub_reset_pending.swap(false, .acq_rel);
             if (reset) refreshGroups(a);
             const backend = hubTransport(a);
-            backend.refreshChats();
             if (a.selected_chat < a.chat_count and (unifiedHub(a) or a.chats[a.selected_chat].provider == .whatsapp)) backend.refreshMessages(a.chats[a.selected_chat].jid.slice());
+            backend.refreshChats();
             drainMediaDownloads(a);
             appendLaunchLog(a, if (reset) "hub: baseline refreshed" else "hub: live event refreshed");
             return 0;

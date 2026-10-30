@@ -162,3 +162,38 @@ Assert-That (-not $launchLog.Contains('update: card clicked')) 'Chat Retry launc
 Save-Screen $session chat-read-auto-recovered
 @{ pid = $session.pid; manual_start = $manualStart; auto_start = $autoStart; requests = @(& $chatRequests); initial = $originalState; manual = $manual; automatic_problem = $automaticProblem; automatic = $automatic; original_messages = $originalMessages; manual_messages = $manualMessages; automatic_messages = $automaticMessages; draft = Read-Edit $compose; retry = @($retryX, $retryY) } | ConvertTo-Json -Depth 16 | Set-Content (Join-Path $Evidence 'chat-read-recovery.json')
 Copy-Item $draftPath (Join-Path $Evidence 'chat-read-draft.json')
+$null = Wait-Until { @(Read-BridgeRequests $session | Where-Object { $_.path -eq '/v1/events' -and $_.last_event_id -eq '1' }).Count -gt 0 } 'event stream resumed'
+$orderBefore = Read-Control $session messages
+$beforeIds = @($orderBefore.messages | ForEach-Object { $_.id })
+Assert-That ($beforeIds.Count -gt 0 -and 'LIVE' -cnotin $beforeIds) 'Ordering baseline is not clean'
+$chatsReadBefore = @((Get-Content (Join-Path $messages 'launch-log.txt')) | Where-Object { $_ -match 'chats-read: ok' }).Count
+$null = Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/order-arm" -Headers $headers -Body '{}' -ContentType 'application/json'
+try {
+    $null = Wait-Until { @(Read-BridgeRequests $session | Where-Object phase -CEQ 'order-chat-held').Count -eq 1 } 'chat response held'
+    $orderVisible = Wait-Until {
+        $shown = Read-Control $session messages
+        if (@($shown.messages | Where-Object id -CEQ 'LIVE').Count -eq 1) { $shown }
+    } 'new selected message visible while chats held'
+    $visibleIds = @($orderVisible.messages | ForEach-Object { $_.id })
+    Assert-That (($visibleIds | ConvertTo-Json -Compress) -ceq (@($beforeIds + 'LIVE') | ConvertTo-Json -Compress)) 'Full ordered history changed'
+    Assert-That (@($orderVisible.messages | Where-Object { $_.id -ceq 'LIVE' -and $_.text -ceq 'Fixture live event' }).Count -eq 1) 'Canonical message missing'
+    Assert-That ((Read-Control $session status).selected.id -ceq $originalState.selected.id -and (Read-Edit $compose) -ceq 'Recovery draft' -and (Get-Content $draftPath -Raw).Contains('Recovery draft')) 'Selection or saved draft changed'
+    $null = Get-App $session
+    Save-Screen $session message-before-chat-release
+    $mark = Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/order-visible" -Headers $headers -Body '{}' -ContentType 'application/json'
+    Assert-That $mark.held 'Chat response released before visibility'
+    $orderVisible | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'order-visible.messages.json')
+} finally {
+    $null = Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/order-release" -Headers $headers -Body '{}' -ContentType 'application/json'
+}
+$null = Wait-Until { @(Read-BridgeRequests $session | Where-Object { $_.phase -ceq 'order-chat-released' -and $_.manual }).Count -eq 1 } 'chat barrier released'
+$null = Wait-Until { @((Get-Content (Join-Path $messages 'launch-log.txt')) | Where-Object { $_ -match 'chats-read: ok' }).Count -gt $chatsReadBefore -and (Read-Control $session status).chat_count -eq 2 -and (Read-Control $session status).selected.id -ceq $originalState.selected.id } 'fresh sidebar and selection preserved'
+$orderTrace = @(Read-BridgeRequests $session | Where-Object { $_.phase -in @('order-armed', 'order-history-response', 'order-chat-held', 'order-visible', 'order-chat-released') })
+$phases = @($orderTrace | ForEach-Object { $_.phase })
+$history = [array]::IndexOf($phases, 'order-history-response')
+$held = [array]::IndexOf($phases, 'order-chat-held')
+$visible = [array]::IndexOf($phases, 'order-visible')
+$released = [array]::IndexOf($phases, 'order-chat-released')
+Assert-That ($history -ge 0 -and $history -lt $held -and $held -lt $visible -and $visible -lt $released -and $orderTrace[$history].chat -ceq $originalState.selected.id) 'Provider chronology differs'
+@{ pid = $session.pid; before_ids = $beforeIds; visible_ids = $visibleIds; draft = Read-Edit $compose; trace = $orderTrace; selected = (Read-Control $session status).selected.id } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'event-order.json')
+Save-Screen $session event-order-after
