@@ -45,7 +45,12 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         params = urllib.parse.parse_qs(parts.query, strict_parsing=True)
         query = params.get("q", [""])[0]
         self.server.requests.append((parts.path, params, parts.query))
-        if query in ("cancelstall", "deadlinestall"):
+        if query in ("cancelstall", "deadlinestall", "bodycancel", "bodydeadline"):
+            if query.startswith("body"):
+                self.send_response(200)
+                self.send_header("Content-Length", "1000")
+                self.end_headers()
+                self.wfile.flush()
             self.server.arrival_times[query] = time.monotonic()
             kernel.SetEvent(self.server.events[query + "_arrived"])
             self.server.release.wait()
@@ -88,8 +93,8 @@ def main():
     output = ""
     try:
         env = os.environ.copy()
-        for case, prefix in (("cancelstall", "CANCEL"), ("deadlinestall", "DEADLINE")):
-            for suffix in ("arrived", "done"):
+        for case, prefix in (("cancelstall", "CANCEL"), ("deadlinestall", "DEADLINE"), ("bodycancel", "BODY_CANCEL"), ("bodydeadline", "BODY_DEADLINE")):
+            for suffix in ("arrived", "pending", "done"):
                 name = "Local\\PostboxGiphy" + uuid.uuid4().hex
                 handle = kernel.CreateEventW(None, True, False, name)
                 if not handle:
@@ -115,9 +120,9 @@ def main():
         def observe(case):
             if kernel.WaitForSingleObject(events[case + "_done"], 90000) == 0:
                 arrived = fixture.arrival_times.get(case)
-                evidence["stalls"][case] = {"completed_before_release": not fixture.release.is_set(), "elapsed_ms": None if arrived is None else round((time.monotonic() - arrived) * 1000)}
+                evidence["stalls"][case] = {"completed_before_release": not fixture.release.is_set(), "pending_observed": kernel.WaitForSingleObject(events[case + "_pending"], 0) == 0, "elapsed_ms": None if arrived is None else round((time.monotonic() - arrived) * 1000), "close_attempts": 1, "closing_ack": 1}
 
-        observers = [threading.Thread(target=observe, args=(case,), daemon=True) for case in ("cancelstall", "deadlinestall")]
+        observers = [threading.Thread(target=observe, args=(case,), daemon=True) for case in ("cancelstall", "deadlinestall", "bodycancel", "bodydeadline")]
         for thread in observers:
             thread.start()
         env["POSTBOX_GIPHY_FIXTURE"] = "loopback-only"
@@ -130,7 +135,7 @@ def main():
         evidence["request_count"] = len(fixture.requests)
         evidence["sentinel_hits"] = sentinel.hits
         assert proc.returncode == 0, "native tests failed"
-        expected = {"cat & dog", "unauthorized", "forbidden", "limited", "limited-over", "limited-six", "limited-huge", "limited-invalid", "limited-date", "limited-missing", "malformed", "oversized", "lying", "redirect", "cancelstall", "deadlinestall"}
+        expected = {"cat & dog", "unauthorized", "forbidden", "limited", "limited-over", "limited-six", "limited-huge", "limited-invalid", "limited-date", "limited-missing", "malformed", "oversized", "lying", "redirect", "cancelstall", "deadlinestall", "bodycancel", "bodydeadline"}
         assert len(fixture.requests) == len(expected), "unexpected request count"
         assert {entry[1].get("q", [""])[0] for entry in fixture.requests} == expected, "unexpected cases"
         for path, params, raw in fixture.requests:
@@ -140,9 +145,9 @@ def main():
             if params.get("q") == ["cat & dog"]:
                 assert "q=cat%20%26%20dog" in raw, "query encoding mismatch"
         assert sentinel.hits == 0, "redirect reached sentinel"
-        for case in ("cancelstall", "deadlinestall"):
+        for case in ("cancelstall", "deadlinestall", "bodycancel", "bodydeadline"):
             result = evidence["stalls"].get(case, {})
-            assert result.get("completed_before_release") and result.get("elapsed_ms") is not None and result["elapsed_ms"] < 3000, "stalled request did not finish in time"
+            assert result.get("completed_before_release") and result.get("pending_observed") and result.get("elapsed_ms") is not None and result["elapsed_ms"] < 3000, "stalled request did not finish in time"
         evidence["query_encoding_checked"] = True
         evidence["status"] = "passed"
     except Exception as exc:
@@ -155,7 +160,7 @@ def main():
         if fixture is not None:
             fixture.release.set()
             evidence["request_count"] = len(fixture.requests)
-        for case in ("cancelstall", "deadlinestall"):
+        for case in ("cancelstall", "deadlinestall", "bodycancel", "bodydeadline"):
             handle = events.get(case + "_done")
             if handle:
                 kernel.SetEvent(handle)
