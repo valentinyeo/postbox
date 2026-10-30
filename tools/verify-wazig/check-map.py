@@ -163,7 +163,7 @@ for required in ['journeys.json', "row['name'] == session['feature']", "journey[
 validator += '\n' + '\n'.join((registry_path.parent / row['validator']['file']).read_text(encoding='utf-8') for row in journeys if row['validator'])
 for artifact in ['removed-status.json', 'text-scale.json']:
     assert artifact in runner and artifact in validator, artifact
-assert 'a.font_scale = @import("font_config.zig").default_scale;' in source and 'command_font_larger => changeFontScale(a, 10)' in source
+assert 'command_font_reset, command_font_default => setFontScale(a, @import("font_config.zig").default_scale)' in source and 'command_font_larger => setFontScale(a, a.font_scale + 10)' in source
 for artifact in ['before-beta.requests.json', 'beta-switch.json', 'beta-empty.messages.json']:
     assert artifact in harness and artifact in validator, artifact
 assert "0 <= switch['elapsed_ms'] <= 1000" in validator
@@ -467,6 +467,25 @@ assert 'link-previews' in options and entries['link-previews']['evidence']
 assert 'link-previews' in {row['hub'] for row in journeys}
 assert entries['link-previews']['validator']['file'] == 'check-link-previews-evidence.py'
 print('LINK PREVIEWS MAP VERIFIED: dispatch, PR matrix, hub mode and surviving evidence')
+
+font_baseline = (root / 'tools/verify-wazig/font-baseline.ps1').read_text(encoding='utf-8')
+font_comparison = (root / 'tools/verify-wazig/check-font-baseline.py').read_text(encoding='utf-8')
+for fragment in ['-FontBaseline', 'v0.9.224', 'SHA256SUMS.txt', 'published-font-package.json', 'check-font-baseline.py']:
+    assert fragment in workflow, fragment
+for fragment in ['[switch]$FontBaseline', 'baseline-captured', 'font-baseline.ps1']:
+    assert fragment in runner, fragment
+for fragment in ['FontScale', 'FontSizeAttribute', 'GetDpiForWindow', 'font-baseline.json', '1920, 1032']:
+    assert fragment in font_baseline, fragment
+for fragment in ['baseline-captured', 'Postbox-v0.9.224.zip', 'Messages.exe', 'text-fresh-default.state.json']:
+    assert fragment in font_comparison, fragment
+appearance = (root / 'tools/verify-wazig/journey-appearance.ps1').read_text(encoding='utf-8')
+appearance_validator = (root / 'tools/verify-wazig/evidence-palette.py').read_text(encoding='utf-8')
+assert entries['appearance']['script'] == 'journey-appearance.ps1'
+assert entries['appearance']['validator']['file'] == 'evidence-palette.py'
+for fragment in ['Text size: Small', 'Text size: Default', 'Text size: Large', 'Text size: Larger', 'font-restart.json', 'font-viewport.json', 'text-presets.json', 'ReadListMetric', 'font_layout', 'FontSizeAttribute', 'GetBoundingRectangles', 'font_preview_draw', 'font_palette_group_draw', 'Font-ItemRect']:
+    assert fragment in appearance, fragment
+for fragment in ['text-presets.json', 'font-restart.json', 'font-viewport.json', 'list_font_height', 'chat_font_height', "row['composer']['formatting']", "row['preview_draw']", "row['chat']", "palette['group_draw']"]:
+    assert fragment in appearance_validator, fragment
 
 composer_border = (root / 'tools/verify-wazig/composer-border.ps1').read_text(encoding='utf-8')
 assert entries['composer-border']['library'] == 'composer-border.ps1'
