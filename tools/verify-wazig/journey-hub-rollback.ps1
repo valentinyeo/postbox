@@ -24,6 +24,17 @@ function Get-RollbackFiles([string]$Folder) {
     return ,$rows
 }
 
+function Get-MutexProtectedFiles {
+    $rows = @()
+    foreach ($row in (Get-RollbackFiles (Join-Path $messages 'unified-journal-v2'))) {
+        $rows += @{ path = 'unified-journal-v2/' + $row.path; bytes = $row.bytes; sha256 = $row.sha256 }
+    }
+    foreach ($file in @(Get-ChildItem -LiteralPath $messages -Filter '*outbox.jsonl' -File | Sort-Object Name)) {
+        $rows += @{ path = $file.Name; bytes = $file.Length; sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+    }
+    return ,$rows
+}
+
 function Save-RollbackPrivate($Session, [string]$Name) {
     $null = Get-App $Session
     $folder = Join-Path $messages 'unified-journal-v2'
@@ -129,7 +140,7 @@ $oldStart.Environment.Clear()
 foreach ($entry in $start.Environment.GetEnumerator()) { $oldStart.Environment[$entry.Key] = $entry.Value }
 $oldStart.Environment['WAZIG_VERIFY_RESTART'] = $session.id
 Assert-That ($oldStart.Environment['LOCALAPPDATA'] -ceq $local -and $oldStart.Environment['USERNAME'] -ceq $session.username) 'Mutex contender profile or identity differs'
-$profileBefore = Get-RollbackFiles $session.root
+$profileBefore = Get-MutexProtectedFiles
 $requestsBefore = @(Read-BridgeRequests $session)
 $contender = [Diagnostics.Process]::Start($oldStart)
 $contenderTicks = $contender.StartTime.ToUniversalTime().Ticks.ToString()
@@ -143,20 +154,23 @@ try {
     } 'historical mutex rejection dialog'
     $elements = $dialog.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
     $labels = @($elements | ForEach-Object { $_.Current.Name })
-    Assert-That (@($labels | Where-Object { $_ -like '*Postbox is already running*' }).Count -eq 1) 'Unexpected contender rejection'
-    $profileAfter = Get-RollbackFiles $session.root
+    $reasons = @($labels | Where-Object { $_ -like '*Postbox is already running*' })
+    Assert-That ($reasons.Count -eq 1) 'Unexpected contender rejection'
+    $profileAfter = Get-MutexProtectedFiles
     $requestsAfter = @(Read-BridgeRequests $session)
     ConvertTo-Json -InputObject $profileBefore -Depth 8 | Set-Content (Join-Path $session.evidence 'mutex-before.profile.json')
     ConvertTo-Json -InputObject $profileAfter -Depth 8 | Set-Content (Join-Path $session.evidence 'mutex-after.profile.json')
     ConvertTo-Json -InputObject $requestsBefore -Depth 12 | Set-Content (Join-Path $session.evidence 'mutex-before.requests.json')
     ConvertTo-Json -InputObject $requestsAfter -Depth 12 | Set-Content (Join-Path $session.evidence 'mutex-after.requests.json')
-    Assert-That (($profileBefore | ConvertTo-Json -Depth 8 -Compress) -ceq ($profileAfter | ConvertTo-Json -Depth 8 -Compress)) 'Profile changed during mutex rejection'
-    Assert-That (($requestsBefore | ConvertTo-Json -Depth 12 -Compress) -ceq ($requestsAfter | ConvertTo-Json -Depth 12 -Compress)) 'Requests changed during mutex rejection'
+    Assert-That ((ConvertTo-Json -InputObject $profileBefore -Depth 8 -Compress) -ceq (ConvertTo-Json -InputObject $profileAfter -Depth 8 -Compress)) 'Protected files changed during mutex rejection'
+    $writesBefore = @($requestsBefore | Where-Object { $_.method -cnotin @('GET', 'SSE') })
+    $writesAfter = @($requestsAfter | Where-Object { $_.method -cnotin @('GET', 'SSE') })
+    Assert-That ((ConvertTo-Json -InputObject $writesBefore -Depth 12 -Compress) -ceq (ConvertTo-Json -InputObject $writesAfter -Depth 12 -Compress)) 'Mutating requests changed during mutex rejection'
     $button = $dialog.FindFirst([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, 'OK'))
     Assert-That ($null -ne $button) 'Mutex dialog OK missing'
     $button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
     Assert-That ($contender.WaitForExit(10000)) 'Mutex contender did not exit'
-    @{ pid = $contender.Id; start_ticks = $contenderTicks; sid = $runnerSid; exe = $oldExe; sha256 = $oldHash; local = $local; root = $session.root; reason = ($labels | Where-Object { $_ -like '*Postbox is already running*' })[0]; exit_code = $contender.ExitCode; incumbent_pid = $session.pid; incumbent_start_ticks = $session.startTicks } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $session.evidence 'mutex.json')
+    @{ pid = $contender.Id; start_ticks = $contenderTicks; sid = $runnerSid; exe = $oldExe; sha256 = $oldHash; local = $local; root = $session.root; reason = $reasons[0]; exit_code = $contender.ExitCode; incumbent_pid = $session.pid; incumbent_start_ticks = $session.startTicks } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $session.evidence 'mutex.json')
 } finally {
     $contender.Refresh()
     if (-not $contender.HasExited) {

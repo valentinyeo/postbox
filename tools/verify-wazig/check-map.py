@@ -431,6 +431,13 @@ for required in ["foreach ($folder in @('Desktop', 'Documents', 'Pictures'))", '
                  "$profile = Join-Path $root 'profile'", '$root = Join-Path $env:RUNNER_TEMP "wazig-verify-$id"']:
     assert required in runner, required
 assert runner.index('New-Item (Join-Path $profile $folder)') < runner.index('$app = [Diagnostics.Process]::Start($start)')
+assert '''$root = Join-Path $env:RUNNER_TEMP "wazig-verify-$id"
+if ($Feature -ceq 'hub-rollback') {
+    $root = Join-Path $env:RUNNER_TEMP ('r' + [Guid]::NewGuid().ToString('N').Substring(0, 16))
+    Assert-That (-not (Test-Path -LiteralPath $root)) 'Rollback root already exists'
+    New-Item -Path $root -ItemType Directory -ErrorAction Stop | Out-Null
+}''' in runner
+assert entries['hub-rollback']['script'] == 'journey-hub-rollback.ps1'
 for required in ['owner == pid && IsWindowVisible(window)', 'name.ToString() == "#32770"',
                  'unexpected #32770 dialog: $text', "AutomationIdProperty, '1148'", 'ControlType]::ComboBox', 'ComboBoxEx32',
                  "$labels -ccontains 'File name:'", '$filename.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)',

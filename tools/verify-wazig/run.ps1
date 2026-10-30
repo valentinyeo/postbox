@@ -20,8 +20,9 @@ $Evidence = (Resolve-Path $Evidence).Path
 Start-Transcript (Join-Path $Evidence 'run.log') | Out-Null
 Assert-That (-not (Test-Path 'HKCU:\Software\Messages')) 'Hosted runner already has production app preferences'
 $id = [Guid]::NewGuid().ToString()
-$root = if ($Feature -ceq 'hub-rollback') { Join-Path $env:RUNNER_TEMP ('r' + [Guid]::NewGuid().ToString('N').Substring(0, 16)) } else { Join-Path $env:RUNNER_TEMP "wazig-verify-$id" }
+$root = Join-Path $env:RUNNER_TEMP "wazig-verify-$id"
 if ($Feature -ceq 'hub-rollback') {
+    $root = Join-Path $env:RUNNER_TEMP ('r' + [Guid]::NewGuid().ToString('N').Substring(0, 16))
     Assert-That (-not (Test-Path -LiteralPath $root)) 'Rollback root already exists'
     New-Item -Path $root -ItemType Directory -ErrorAction Stop | Out-Null
 }

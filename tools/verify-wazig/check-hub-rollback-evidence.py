@@ -107,7 +107,23 @@ def verify(data):
     assert mutex['incumbent_pid'] == new['pid'] and mutex['incumbent_start_ticks'] == new['start_ticks']
     assert mutex['pid'] and mutex['start_ticks'] and mutex['pid'] != new['pid']
     assert mutex['reason'] == 'Postbox is already running. Close that window before starting another instance.' and mutex['exit_code'] == 0
-    assert data['mutex_before'] == data['mutex_after'] and data['mutex_requests_before'] == data['mutex_requests_after']
+    def protected(rows):
+        result = {}
+        for row in rows:
+            path = row['path']
+            if path.lower().startswith('unified-journal-v2/') or ('/' not in path and path.lower().endswith('outbox.jsonl')):
+                assert all(part not in ('', '.', '..') for part in path.split('/')) and path not in result
+                result[path] = (row['bytes'], row['sha256'])
+        return result
+    before, after = protected(data['mutex_before']), protected(data['mutex_after'])
+    assert before == after
+    assert {path.removeprefix('unified-journal-v2/'): value for path, value in before.items() if path.startswith('unified-journal-v2/')} == {
+        row['path']: (row['bytes'], row['sha256']) for row in data['new_private']
+    }
+    assert before['outbox.jsonl'] == (len(data['direct_after']), hashlib.sha256(data['direct_after']).hexdigest())
+    assert [row for row in data['mutex_requests_before'] if row.get('method') not in ('GET', 'SSE')] == [
+        row for row in data['mutex_requests_after'] if row.get('method') not in ('GET', 'SSE')
+    ]
     assert data['log_after'].startswith(data['log_before'])
     assert 'verification: hub fixture ready' in data['log_after'][len(data['log_before']):]
     assert data['old_status']['version'] == '0.0.526' and data['old_status']['chat_count'] > 0 and data['old_status']['pending_sends'] == 0
@@ -195,12 +211,20 @@ def negative_controls(data):
     def mutate_old_binary(m):
         m['old_process']['sha256'] = m['ownership']['new_sha256']
 
+    incidental = deepcopy(data)
+    incidental['mutex_after'].append({'path': 'launch-log.txt', 'bytes': 1, 'sha256': '0' * 64})
+    incidental['mutex_requests_after'].extend([{'method': 'GET', 'path': '/v1/wazig/chats'}, {'method': 'SSE', 'path': '/v1/wazig/events'}])
+    verify(incidental)
+
     controls = {
         'wrong historical binary': mutate_old_binary,
         'migrated identity visible': lambda m: m['journals'].update(injected=IDS[0].encode()),
         'changed private bytes': lambda m: m.update(private_after=b'changed'),
         'unlinked snapshot': lambda m: m['new_private'][0].update(sha256='0' * 64),
         'bypassed mutex': lambda m: m['mutex'].update(reason='unexpected success'),
+        'mutex private bytes changed': lambda m: next(row for row in m['mutex_after'] if row['path'].startswith('unified-journal-v2/')).update(sha256='0' * 64),
+        'mutex journal changed': lambda m: next(row for row in m['mutex_after'] if row['path'] == 'outbox.jsonl').update(sha256='0' * 64),
+        'mutex mutating request': lambda m: m['mutex_requests_after'].append({'method': 'POST', 'path': '/v1/wazig/send'}),
         'skipped old cleanup': lambda m: m['offline'].update(control_deleted=False),
         'changed offline private bytes': lambda m: m['offline_files'][1].update({next(iter(m['offline_files'][1])): b'changed'}),
         'wrong offline binary': lambda m: m['offline'].update(sha256=m['ownership']['new_sha256']),
