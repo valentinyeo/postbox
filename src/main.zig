@@ -5040,7 +5040,7 @@ fn checkMarkRead(a: *App) void {
 }
 
 fn retryPendingDownload(a: *App) void {
-    if (a.pending_download_id.len == 0 or freeMediaSlot(a) == null or a.send_child != null) return;
+    if (a.pending_download_id.len == 0 or freeMediaSlot(a) == null or (!hubConfigured(a) and a.send_child != null)) return;
     if (a.selected_chat >= a.chat_count) return;
     if (!std.mem.eql(u8, a.pending_download_jid.slice(), a.chats[a.selected_chat].jid.slice())) {
         a.pending_download_jid.set("");
