@@ -4,6 +4,7 @@ const chat_key = @import("chat_key.zig");
 pub const max_results = 25;
 pub const max_response_bytes = 256 * 1024;
 pub const max_query_bytes = 200;
+pub const max_query_codepoints = 50;
 pub const max_key_bytes = 256;
 pub const max_offset = 4999;
 
@@ -55,6 +56,7 @@ pub fn request(key: []const u8, query: []const u8, offset: usize, limit: usize) 
     if (key.len > max_key_bytes or query.len > max_query_bytes) return error.TooLong;
     if (limit == 0 or limit > max_results or offset > max_offset or limit > max_offset + 1 - offset) return error.InvalidPage;
     if (!std.unicode.utf8ValidateSlice(query)) return error.InvalidQuery;
+    if ((std.unicode.utf8CountCodepoints(query) catch return error.InvalidQuery) > max_query_codepoints) return error.TooLong;
     var result = Request{};
     try result.append(if (query.len == 0) "https://api.giphy.com/v1/gifs/trending?api_key=" else "https://api.giphy.com/v1/gifs/search?api_key=");
     try result.encoded(key);
@@ -87,6 +89,30 @@ pub const Page = struct {
     total_count: usize = 0,
 };
 
+fn decimalDigits(text: []const u8) bool {
+    if (text.len == 0) return false;
+    for (text) |c| if (!std.ascii.isDigit(c)) return false;
+    return true;
+}
+
+const JsonUnsigned = struct {
+    value: usize,
+
+    pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !JsonUnsigned {
+        const token = try source.nextAllocMax(allocator, .alloc_if_needed, options.max_value_len.?);
+        defer switch (token) {
+            .allocated_number, .allocated_string => |text| allocator.free(text),
+            else => {},
+        };
+        const text = switch (token) {
+            .number, .allocated_number => |number| number,
+            else => return error.UnexpectedToken,
+        };
+        if (!decimalDigits(text)) return error.UnexpectedToken;
+        return .{ .value = std.fmt.parseUnsigned(usize, text, 10) catch return error.UnexpectedToken };
+    }
+};
+
 const RawRendition = struct { url: []const u8, width: []const u8, height: []const u8, size: []const u8 };
 const RawGif = struct {
     @"type": []const u8,
@@ -95,8 +121,8 @@ const RawGif = struct {
 };
 const RawPage = struct {
     data: []const RawGif,
-    pagination: struct { total_count: usize, count: usize, offset: usize },
-    meta: struct { status: u16 },
+    pagination: struct { total_count: JsonUnsigned, count: JsonUnsigned, offset: JsonUnsigned },
+    meta: struct { status: JsonUnsigned },
 };
 
 fn validId(id: []const u8) bool {
@@ -112,7 +138,7 @@ fn validMediaUrl(url: []const u8, id: []const u8) bool {
     const host = (uri.host orelse return false).percent_encoded;
     if (!std.mem.startsWith(u8, host, "media") or !std.mem.endsWith(u8, host, ".giphy.com")) return false;
     const suffix = host[5 .. host.len - ".giphy.com".len];
-    for (suffix) |c| if (!std.ascii.isDigit(c)) return false;
+    if (suffix.len > 1 or (suffix.len == 1 and (suffix[0] < '0' or suffix[0] > '4'))) return false;
     const path = uri.path.percent_encoded;
     if (!std.mem.startsWith(u8, path, "/media/") or !std.mem.endsWith(u8, path, ".gif")) return false;
     var segments = std.mem.splitScalar(u8, path[7..], '/');
@@ -145,6 +171,7 @@ fn validMediaUrl(url: []const u8, id: []const u8) bool {
 
 fn rendition(raw: RawRendition, id: []const u8) !Rendition {
     if (!validMediaUrl(raw.url, id)) return error.InvalidMedia;
+    if (!decimalDigits(raw.width) or !decimalDigits(raw.height) or !decimalDigits(raw.size)) return error.InvalidMedia;
     const width = std.fmt.parseUnsigned(u32, raw.width, 10) catch return error.InvalidMedia;
     const height = std.fmt.parseUnsigned(u32, raw.height, 10) catch return error.InvalidMedia;
     const size = std.fmt.parseUnsigned(u32, raw.size, 10) catch return error.InvalidMedia;
@@ -160,9 +187,9 @@ pub fn parse(allocator: std.mem.Allocator, json: []const u8, expected_offset: us
     var parsed = try std.json.parseFromSlice(RawPage, allocator, json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
     const raw = parsed.value;
-    if (raw.meta.status != 200) return error.ApiFailed;
-    if (raw.data.len > requested_limit or raw.pagination.count != raw.data.len or raw.pagination.offset != expected_offset) return error.InvalidPage;
-    var page = Page{ .offset = expected_offset, .total_count = raw.pagination.total_count };
+    if (raw.meta.status.value != 200) return error.ApiFailed;
+    if (raw.data.len > requested_limit or raw.pagination.count.value != raw.data.len or raw.pagination.offset.value != expected_offset) return error.InvalidPage;
+    var page = Page{ .offset = expected_offset, .total_count = raw.pagination.total_count.value };
     for (raw.data) |item| {
         if (!std.mem.eql(u8, item.@"type", "gif") or !validId(item.id)) return error.InvalidMedia;
         for (page.items[0..page.count]) |*existing| if (std.mem.eql(u8, existing.id.slice(), item.id)) return error.DuplicateId;
@@ -286,7 +313,7 @@ test "only matching giphy GIF media is accepted" {
     try std.testing.expectError(error.InvalidMedia, rendition(.{ .url = "https://media.giphy.com/media/abc123/giphy.gif", .width = "0", .height = "5", .size = "1" }, "abc123"));
 }
 
-test "selection belongs to the request and complete target, cancellation sends nothing" {
+test "selection belongs to the request and complete target and cancellation clears it" {
     const first = try Target.init(.{ .provider = .whatsapp, .account = "one", .id = "chat" }, "reply", "sender");
     const other_account = try Target.init(.{ .provider = .whatsapp, .account = "two", .id = "chat" }, "reply", "sender");
     const other_reply = try Target.init(.{ .provider = .whatsapp, .account = "one", .id = "chat" }, "other", "sender");
@@ -317,7 +344,6 @@ test "duplicate IDs and malformed responses are rejected" {
     if (parse(std.testing.allocator, "{", 0, 1)) |_| return error.TestUnexpectedResult else |_| {}
 }
 
-
 test "tracked CDN URLs survive catalogue JSON parsing unchanged" {
     const tracked =
         \\{"data":[{"type":"gif","id":"abc123","images":{"fixed_width":{"url":"https://media1.giphy.com/media/v1.dG9rZW4/abc123/200.gif?cid=example&rid=200.gif&ct=g","width":"200","height":"112","size":"4117","mp4_size":"3210"},"original":{"url":"https://media.giphy.com/media/abc123/giphy.gif?cid=example&rid=giphy.gif&ct=g","width":"480","height":"270","size":"20000","frames":"20"}}}],"pagination":{"total_count":100,"count":1,"offset":0},"meta":{"status":200,"msg":"OK"}}
@@ -327,4 +353,78 @@ test "tracked CDN URLs survive catalogue JSON parsing unchanged" {
     try std.testing.expectEqualStrings("https://media.giphy.com/media/abc123/giphy.gif?cid=example&rid=giphy.gif&ct=g", page.items[0].original.url.slice());
     try std.testing.expectEqual(@as(u32, 4117), page.items[0].preview.size);
     try std.testing.expectEqual(@as(u32, 270), page.items[0].original.height);
+}
+
+test "search limits Unicode codepoints without truncation" {
+    const ascii = try request("key", "x" ** 50, 0, 1);
+    try std.testing.expect(std.mem.indexOf(u8, ascii.url(), "q=" ++ "x" ** 50 ++ "&limit=1") != null);
+    try std.testing.expectError(error.TooLong, request("key", "x" ** 51, 0, 1));
+    const unicode = try request("key", "é" ** 50, 0, 1);
+    try std.testing.expect(std.mem.indexOf(u8, unicode.url(), "q=" ++ "%C3%A9" ** 50 ++ "&limit=1") != null);
+    try std.testing.expectError(error.TooLong, request("key", "é" ** 51, 0, 1));
+    try std.testing.expectError(error.InvalidQuery, request("key", "\xff", 0, 1));
+}
+
+test "public parser only accepts known CDN hosts" {
+    for ([_][]const u8{ "media.giphy.com", "media0.giphy.com", "media1.giphy.com", "media2.giphy.com", "media3.giphy.com", "media4.giphy.com" }) |host| {
+        const json = try std.mem.replaceOwned(u8, std.testing.allocator, fixture, "media1.giphy.com", host);
+        defer std.testing.allocator.free(json);
+        const page = try parse(std.testing.allocator, json, 0, 25);
+        try std.testing.expectEqual(@as(usize, 1), page.count);
+    }
+    for ([_][]const u8{ "media5.giphy.com", "media123456.giphy.com", "media00.giphy.com", "media4.giphy.com.evil.test" }) |host| {
+        const json = try std.mem.replaceOwned(u8, std.testing.allocator, fixture, "media1.giphy.com", host);
+        defer std.testing.allocator.free(json);
+        try std.testing.expectError(error.InvalidMedia, parse(std.testing.allocator, json, 0, 25));
+    }
+}
+
+test "public parser enforces rendition strings and integer metadata" {
+    for ([_]struct { old: []const u8, new: []const u8 }{
+        .{ .old = "\"width\":\"200\"", .new = "\"width\":\"2_00\"" },
+        .{ .old = "\"height\":\"100\"", .new = "\"height\":\"1_00\"" },
+        .{ .old = "\"size\":\"2000\"", .new = "\"size\":\"2_000\"" },
+        .{ .old = "\"width\":\"200\"", .new = "\"width\":\"\"" },
+        .{ .old = "\"width\":\"200\"", .new = "\"width\":\"4097\"" },
+        .{ .old = "\"height\":\"100\"", .new = "\"height\":\"4097\"" },
+        .{ .old = "\"size\":\"2000\"", .new = "\"size\":\"26214401\"" },
+        .{ .old = "\"width\":\"200\"", .new = "\"width\":200" },
+        .{ .old = "\"size\":\"2000\"", .new = "\"size\":null" },
+        .{ .old = "\"status\":200", .new = "\"status\":\"200\"" },
+        .{ .old = "\"status\":200", .new = "\"status\":200.0" },
+        .{ .old = "\"count\":1", .new = "\"count\":\"1\"" },
+        .{ .old = "\"count\":1", .new = "\"count\":1e0" },
+        .{ .old = "\"offset\":0", .new = "\"offset\":-0" },
+        .{ .old = "\"total_count\":1", .new = "\"total_count\":\"1\"" },
+    }) |change| {
+        const json = try std.mem.replaceOwned(u8, std.testing.allocator, fixture, change.old, change.new);
+        defer std.testing.allocator.free(json);
+        if (parse(std.testing.allocator, json, 0, 25)) |_| return error.TestUnexpectedResult else |_| {}
+    }
+}
+
+test "late failures, cancellation and target changes cannot revive old results" {
+    const first = try Target.init(.{ .provider = .whatsapp, .account = "one", .id = "chat" }, "reply", "sender");
+    const other_provider = try Target.init(.{ .provider = .slack, .account = "one", .id = "chat" }, "reply", "sender");
+    const other_chat = try Target.init(.{ .provider = .whatsapp, .account = "one", .id = "other" }, "reply", "sender");
+    const other_sender = try Target.init(.{ .provider = .whatsapp, .account = "one", .id = "chat" }, "reply", "other");
+    const page = try parse(std.testing.allocator, fixture, 0, 25);
+    var state = State{};
+    const cancelled = try state.begin(first, true);
+    state.cancel();
+    try std.testing.expect(!state.accept(cancelled, &first, page));
+    const failed = try state.begin(first, true);
+    state.fail(failed, &first);
+    try std.testing.expectEqual(.failed, state.status);
+    const retry = try state.begin(first, true);
+    state.fail(failed, &first);
+    try std.testing.expectEqual(.loading, state.status);
+    try std.testing.expect(!state.accept(retry, &other_provider, page));
+    try std.testing.expect(!state.accept(retry, &other_chat, page));
+    try std.testing.expect(!state.accept(retry, &other_sender, page));
+    try std.testing.expect(state.accept(retry, &first, page));
+    state.fail(failed, &first);
+    try std.testing.expectEqual(.ready, state.status);
+    try std.testing.expect(!state.select(retry, &other_sender, 0));
+    try std.testing.expect(state.select(retry, &first, 0));
 }
