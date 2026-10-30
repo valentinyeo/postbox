@@ -203,6 +203,23 @@
       "prepare": "prepare-hub-fault.ps1"
     },
     {
+      "name": "hub-migration-before-rename",
+      "pr": false,
+      "hub": "hub-migration-before-rename",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-hub-migration-crash.ps1",
+      "validator": {
+        "file": "check-hub-migration-crash-evidence.py",
+        "function": "check_hub_migration_crash"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "MigrationCrashHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "hub-migration-crash",
       "pr": false,
       "hub": "hub-migration-crash",

@@ -1,5 +1,6 @@
 . "$PSScriptRoot/rollback-common.ps1"
 
+$beforeRename = $session.feature -ceq 'hub-migration-before-rename'
 $oldProof = Get-Content (Join-Path $session.evidence 'historical-847/provenance.json') -Raw | ConvertFrom-Json
 Assert-That ($oldProof.old_commit -ceq '84769d3edc2a927eab428bfdbc5e98a31fa0bfc0' -and $oldProof.checked_out_commit -ceq $oldProof.old_commit -and $oldProof.clean_before -and $oldProof.clean_after -and $oldProof.build_exit -eq 0) 'Historical provenance invalid'
 $oldExe = (Resolve-Path (Join-Path $session.evidence 'historical-847/old-bin/bin/Messages.exe')).Path
@@ -38,7 +39,7 @@ Assert-That (-not (Test-Path $legacy)) 'Migration source journal already exists'
 [IO.File]::WriteAllText($legacy, (($row | ConvertTo-Json -Compress -Depth 8) + "`n"), [Text.UTF8Encoding]::new($false))
 Copy-Item $legacy (Join-Path $session.evidence 'crash-seed.jsonl')
 $start.Environment['WAZIG_VERIFY_RESTART'] = $session.id
-$start.Environment['WAZIG_VERIFY_MIGRATION_CASE'] = 'hub-migration-crash'
+$start.Environment['WAZIG_VERIFY_MIGRATION_CASE'] = $session.feature
 $start.Environment['WAZIG_VERIFY_MIGRATION_STOP'] = $session.id
 Assert-That ((Get-FileHash $newExe).Hash -ceq $newHash -and $start.Environment['LOCALAPPDATA'] -ceq $local) 'Crash launch ownership differs'
 $crashed = [Diagnostics.Process]::Start($start)
@@ -49,7 +50,7 @@ $session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence '
 try {
     Assert-That ($crashed.WaitForExit(30000)) 'Migration stop did not exit'
     @{ pid = $crashed.Id; start_ticks = $crashedTicks; sid = $runnerSid; exe = $newExe; sha256 = $newHash; exit_code = $crashed.ExitCode; root = $session.root; local = $local } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'crash-process.json')
-    Assert-That ($crashed.ExitCode -eq 86) 'Migration stop exited at unexpected phase'
+    Assert-That ($crashed.ExitCode -eq $(if ($beforeRename) { 85 } else { 86 })) 'Migration stop exited at unexpected phase'
 } finally {
     $null = $start.Environment.Remove('WAZIG_VERIFY_MIGRATION_STOP')
     $null = $start.Environment.Remove('WAZIG_VERIFY_MIGRATION_CASE')
@@ -62,16 +63,25 @@ try {
 $markerPath = Join-Path $messages 'verification-migration-stop.json'
 Copy-Item $markerPath (Join-Path $session.evidence 'crash-marker.json')
 $marker = Get-Content $markerPath -Raw | ConvertFrom-Json
-Assert-That ($marker.phase -ceq 'after-quarantine-before-import' -and $marker.id -ceq $session.id -and $marker.root -ceq $session.root -and $marker.pid -eq $crashed.Id) 'Migration stop marker differs'
+$expectedPhase = if ($beforeRename) { 'after-protect-before-rename' } else { 'after-quarantine-before-import' }
+Assert-That ($marker.phase -ceq $expectedPhase -and $marker.id -ceq $session.id -and $marker.root -ceq $session.root -and $marker.pid -eq $crashed.Id) 'Migration stop marker differs'
 $private = Join-Path $messages 'unified-journal-v2'
 $pending = @(Get-ChildItem (Join-Path $private 'imports') -Filter '*.pending' -File)
-Assert-That ($pending.Count -eq 1 -and -not (Test-Path $legacy) -and (Get-FileHash $pending[0].FullName).Hash -ceq (Get-FileHash (Join-Path $session.evidence 'crash-seed.jsonl')).Hash) 'Quarantined journal differs'
+if ($beforeRename) {
+    Assert-That ($pending.Count -eq 0 -and (Test-Path $legacy) -and $marker.source -ceq $legacy -and (Get-FileHash $legacy).Hash -ceq (Get-FileHash (Join-Path $session.evidence 'crash-seed.jsonl')).Hash) 'Pre-rename journal differs'
+} else {
+    Assert-That ($pending.Count -eq 1 -and -not (Test-Path $legacy) -and (Get-FileHash $pending[0].FullName).Hash -ceq (Get-FileHash (Join-Path $session.evidence 'crash-seed.jsonl')).Hash) 'Quarantined journal differs'
+}
 $boundary = Get-RollbackFiles $private
 ConvertTo-Json -InputObject $boundary -Depth 8 | Set-Content (Join-Path $session.evidence 'crash-boundary.private.json')
 Copy-Item $private (Join-Path $session.evidence 'crash-boundary-private') -Recurse
 $null = Save-RollbackRequests $session 'crash-boundary'
 . "$PSScriptRoot/rollback-offline-cleanup.ps1"
 Assert-That (-not (Test-Path $original)) 'Historical cleanup did not delete original'
+if ($beforeRename) {
+    Assert-That ((Test-Path $legacy) -and (Get-FileHash $legacy).Hash -ceq (Get-FileHash (Join-Path $session.evidence 'crash-seed.jsonl')).Hash) 'Old app changed pre-rename journal'
+    Copy-Item $legacy (Join-Path $session.evidence 'crash-source-after-old.jsonl')
+}
 $null = Start-RollbackApp $session $start $newExe $newCtl $newHash
 $null = Read-Control $session select -Arguments @('fixture-alpha', '--provider', 'slack')
 $null = Wait-Until { (Read-Control $session status).selected.id -ceq 'fixture-alpha' } 'migration recovery chat'

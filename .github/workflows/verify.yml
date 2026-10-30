@@ -100,7 +100,7 @@ jobs:
           use-cache: false
       # Enabled when the rollback journey is registered.
       - name: Build pinned historical rollback input
-        if: matrix.feature == 'hub-rollback' || matrix.feature == 'hub-migration-crash'
+        if: matrix.feature == 'hub-rollback' || matrix.feature == 'hub-migration-crash' || matrix.feature == 'hub-migration-before-rename'
         shell: pwsh
         run: |
           & tools/verify-wazig/build-historical-847.ps1 -Evidence verification-evidence/historical-847

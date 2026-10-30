@@ -30,6 +30,7 @@ def load(folder):
                 control_remaining=(folder / 'final-data/msg-cache-r/rollback-aged-control.msg').exists(),
                 original_remaining=(folder / 'final-data/msg-cache-r/interrupted-image.png').exists(),
                 seed_bytes=(folder / 'crash-seed.jsonl').read_bytes(),
+                source_after_old=(folder / 'crash-source-after-old.jsonl').read_bytes() if (folder / 'crash-source-after-old.jsonl').exists() else None,
                 boundary=read(folder / 'crash-boundary.private.json'), boundary_files=tree(folder / 'crash-boundary-private'),
                 offline_before=read(folder / 'offline-private-before.json'), offline_after=read(folder / 'offline-private-after.json'),
                 offline_files_before=tree(folder / 'offline-private-before'), offline_files_after=tree(folder / 'offline-private-after'),
@@ -49,7 +50,8 @@ def load(folder):
 def verify(data):
     session, own, prov = data['session'], data['ownership'], data['provenance']
     root = PureWindowsPath(own['root'])
-    assert session['feature'] == 'hub-migration-crash' and re.fullmatch(r'r[0-9a-f]{16}', root.name)
+    assert session['feature'] in ('hub-migration-crash', 'hub-migration-before-rename') and re.fullmatch(r'r[0-9a-f]{16}', root.name)
+    before_rename = session['feature'] == 'hub-migration-before-rename'
     assert own['id'] == session['id'] and re.fullmatch(r'[0-9a-fA-F-]{36}', own['id'])
     assert PureWindowsPath(own['local']) == root / 'local' and PureWindowsPath(own['profile']) == root / 'profile'
     assert own['backend'] == session['bridge_url'] and own['runner_sid']
@@ -63,8 +65,9 @@ def verify(data):
         assert info['sha256'] == hashlib.sha256(content).hexdigest()
     assert own['old_sha256'].lower() == prov['files']['Messages.exe']['sha256'] != own['new_sha256'].lower()
     marker, process = data['marker'], data['process']
-    assert marker == dict(phase='after-quarantine-before-import', id=own['id'], root=own['root'], pid=process['pid'])
-    assert process['start_ticks'] and process['exit_code'] == 86 and process['sid'] == own['runner_sid']
+    assert marker['phase'] == ('after-protect-before-rename' if before_rename else 'after-quarantine-before-import')
+    assert marker['id'] == own['id'] and marker['root'] == own['root'] and marker['pid'] == process['pid']
+    assert process['start_ticks'] and process['exit_code'] == (85 if before_rename else 86) and process['sid'] == own['runner_sid']
     assert (process['exe'], process['sha256'], process['root'], process['local']) == (own['new_exe'], own['new_sha256'], own['root'], own['local'])
     original = data['original']
     assert PureWindowsPath(original['path']) == root / 'local' / 'Messages' / 'msg-cache-r' / 'interrupted-image.png'
@@ -86,7 +89,16 @@ def verify(data):
             assert rows[path]['bytes'] == len(content) and rows[path]['sha256'] == hashlib.sha256(content).hexdigest()
     check_manifest(data['boundary'], data['boundary_files'])
     pending = [path for path in data['boundary_files'] if path.startswith('imports/hub-' + own['source_tag'] + '-outbox.jsonl.') and path.endswith('.pending')]
-    assert len(pending) == 1 and data['boundary_files'][pending[0]] == data['seed_bytes']
+    source_name = 'hub-' + own['source_tag'] + '-outbox.jsonl'
+    pending_name = source_name + '.' + hashlib.sha256(data['seed_bytes']).hexdigest()[:32] + '.pending'
+    if before_rename:
+        assert not pending and marker['pending_name'] == pending_name
+        assert PureWindowsPath(marker['source']) == root / 'local' / 'Messages' / source_name
+        assert data['source_after_old'] == data['seed_bytes']
+    else:
+        assert len(pending) == 1 and pending[0] == 'imports/' + pending_name and data['boundary_files'][pending[0]] == data['seed_bytes']
+    token = hashlib.sha256((pending_name + '\0' + IDENTITY + '\0' + original['path']).encode('utf-8')).hexdigest()
+    assert data['boundary_files']['imports-files/' + token + '/payload'] == data['original_bytes']
     offline, acl = data['offline'], data['acl']
     assert offline['sid'] != own['runner_sid'] == offline['runner_sid'] and offline['sid'] == acl['sid']
     assert acl['registry_absent'] and acl['files_opened_readwrite'] == len(data['boundary_files'])
@@ -120,6 +132,7 @@ def verify(data):
     assert record['wire_filename'] == PureWindowsPath(original['path']).name
     assert data['payload'] == data['original_bytes'] and record['file_bytes'] == len(data['payload']) and record['file_sha256'] == original['sha256']
     check_manifest(data['recovery_manifest'], data['recovery_files'])
+    assert data['recovery_files']['imports-files/' + token + '/payload'] == data['original_bytes']
     private_root = root / 'local' / 'Messages' / 'unified-journal-v2'
     owned = PureWindowsPath(record['owned_file']).relative_to(private_root).as_posix()
     assert data['recovery_files'][owned] == data['payload']
@@ -155,6 +168,9 @@ def negative_controls(data):
         'wrong historical binary': lambda m: m['offline'].update(sha256=m['ownership']['new_sha256']),
         'missing aged control': lambda m: m['offline'].update(control_deleted=False),
     }
+    if data['session']['feature'] == 'hub-migration-before-rename':
+        controls['changed planned name'] = lambda m: m['marker'].update(pending_name='different.pending')
+        controls['changed source'] = lambda m: m.update(source_after_old=b'changed')
     for name, mutation in controls.items():
         mutant = deepcopy(data)
         mutation(mutant)
@@ -170,12 +186,13 @@ def check_hub_migration_crash(folder):
     verify(data)
     negative_controls(data)
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
-    assert 'hub-migration-crash old-offline-cache-cleanup PASS' in proof
-    assert 'hub-migration-crash interrupted-migration-recovered PASS' in proof
+    feature = data['session']['feature']
+    assert feature + ' old-offline-cache-cleanup PASS' in proof
+    assert feature + ' interrupted-migration-recovered PASS' in proof
     final = read(folder / 'side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
     assert all(final[key] for key in ('production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'))
-    assert 'JOURNEY PASSED: hub-migration-crash' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
+    assert 'JOURNEY PASSED: ' + feature in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
     assert not (folder / 'failure.txt').exists()
     print('HUB INTERRUPTED MIGRATION EVIDENCE VERIFIED')

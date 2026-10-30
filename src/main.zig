@@ -935,6 +935,7 @@ const App = struct {
     verification_retry_evidence: bool = false,
     verification_migration_stop_id: []const u8 = "",
     verification_migration_stop_root: []const u8 = "",
+    verification_migration_stop_before_rename: bool = false,
     verification_mouse_retry: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
     send_seq: u64 = 0,
     failed_sends: [max_unified_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_unified_failed_sends,
@@ -4887,25 +4888,78 @@ fn quarantineUnifiedJournals(a: *App) !void {
         defer a.allocator.free(source);
         const source_wide = try unifiedNativePath(a.allocator, source);
         defer a.allocator.free(source_wide);
-        var moved = false;
-        for (0..16) |_| {
-            var random: [16]u8 = undefined;
-            a.io.random(&random);
-            const token = std.fmt.bytesToHex(random, .lower);
-            const target_name = try std.fmt.allocPrint(a.allocator, "{s}.{s}.pending", .{ name, token });
-            defer a.allocator.free(target_name);
-            const target = try std.fs.path.join(a.allocator, &.{ imports, target_name });
-            defer a.allocator.free(target);
-            const target_wide = try unifiedNativePath(a.allocator, target);
-            defer a.allocator.free(target_wide);
-            if (win.MoveFileExW(source_wide.ptr, target_wide.ptr, win.MOVEFILE_WRITE_THROUGH) != 0) {
-                moved = true;
-                break;
-            }
-            const code = win.GetLastError();
-            if (code != win.ERROR_ALREADY_EXISTS and code != win.ERROR_FILE_EXISTS) return error.JournalQuarantineFailed;
+        if (!try unifiedNoReparse(a, source)) return error.JournalMissing;
+        const input = win.CreateFileW(source_wide.ptr, win.GENERIC_READ | win.DELETE, win.FILE_SHARE_READ, null, win.OPEN_EXISTING, win.FILE_FLAG_OPEN_REPARSE_POINT, null);
+        if (input == win.INVALID_HANDLE_VALUE or input == null) return error.JournalOpenFailed;
+        defer _ = win.CloseHandle(input);
+        var info: win.BY_HANDLE_FILE_INFORMATION = undefined;
+        if (win.GetFileInformationByHandle(input, &info) == 0 or (info.dwFileAttributes & (win.FILE_ATTRIBUTE_DIRECTORY | win.FILE_ATTRIBUTE_REPARSE_POINT)) != 0) return error.UnsafeJournal;
+        var size: win.LARGE_INTEGER = undefined;
+        if (win.GetFileSizeEx(input, &size) == 0 or size.QuadPart < 0) return error.JournalReadFailed;
+        const bytes = try a.allocator.alloc(u8, @intCast(size.QuadPart));
+        defer a.allocator.free(bytes);
+        var offset: usize = 0;
+        while (offset < bytes.len) {
+            var got: win.DWORD = 0;
+            if (win.ReadFile(input, bytes[offset..].ptr, @intCast(@min(bytes.len - offset, 65536)), &got, null) == 0 or got == 0) return error.JournalReadFailed;
+            offset += got;
         }
-        if (!moved) return error.JournalQuarantineFailed;
+        var digest: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+        const token = std.fmt.bytesToHex(digest[0..16].*, .lower);
+        const target_name = try std.fmt.allocPrint(a.allocator, "{s}.{s}.pending", .{ name, token });
+        defer a.allocator.free(target_name);
+        var lines = std.mem.splitScalar(u8, bytes, '\n');
+        while (lines.next()) |line| {
+            if (std.mem.trim(u8, line, " \t\r").len == 0) continue;
+            var entry: outbox.Entry = .{};
+            if (outbox.parseLineStrict(a.allocator, line, &entry)) |_| {
+                const protected = try unifiedImportRecord(a, target_name, &entry, false);
+                if (entry.file.len > 0 and protected.file_bytes == 0) return error.AttachmentMissing;
+            } else |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.InvalidEntry => {},
+            }
+        }
+        const zero: win.LARGE_INTEGER = .{ .QuadPart = 0 };
+        if (win.SetFilePointerEx(input, zero, null, win.FILE_BEGIN) == 0) return error.JournalReadFailed;
+        var verify_buffer: [65536]u8 = undefined;
+        offset = 0;
+        while (offset < bytes.len) {
+            var got: win.DWORD = 0;
+            const length = @min(bytes.len - offset, verify_buffer.len);
+            if (win.ReadFile(input, &verify_buffer, @intCast(length), &got, null) == 0 or got == 0 or !std.mem.eql(u8, verify_buffer[0..got], bytes[offset..][0..got])) return error.JournalChanged;
+            offset += got;
+        }
+        var after_size: win.LARGE_INTEGER = undefined;
+        if (win.GetFileSizeEx(input, &after_size) == 0 or after_size.QuadPart != size.QuadPart) return error.JournalChanged;
+        if (verification_fixture and a.verification_migration_stop_id.len != 0 and a.verification_migration_stop_before_rename) {
+            const marker_path = messagesDirPath(a, "verification-migration-stop.json") orelse std.process.exit(87);
+            const marker = std.json.Stringify.valueAlloc(a.allocator, .{
+                .phase = "after-protect-before-rename", .id = a.verification_migration_stop_id,
+                .root = a.verification_migration_stop_root, .pid = win.GetCurrentProcessId(),
+                .source = source, .pending_name = target_name,
+            }, .{}) catch std.process.exit(87);
+            if (!writeCacheFileAtomic(a, marker_path, marker)) std.process.exit(87);
+            std.process.exit(85);
+        }
+        const target = try std.fs.path.join(a.allocator, &.{ imports, target_name });
+        defer a.allocator.free(target);
+        const target_wide = try unifiedNativePath(a.allocator, target);
+        defer a.allocator.free(target_wide);
+        // Rename-by-handle expects an NT path, not the Win32 extended prefix.
+        target_wide[1] = '?';
+        target_wide[2] = '?';
+        const RenameInfo = extern struct { replace: u8, root: win.HANDLE, length: win.DWORD, filename: [1]u16 };
+        const RenameBuffer = extern union { info: RenameInfo, bytes: [65536]u8 };
+        var rename: RenameBuffer = .{ .bytes = @splat(0) };
+        rename.info.root = null;
+        rename.info.length = @intCast(target_wide.len * 2);
+        const name_bytes = std.mem.sliceAsBytes(target_wide);
+        const name_offset = @offsetOf(RenameInfo, "filename");
+        if (name_offset + name_bytes.len > rename.bytes.len) return error.InvalidJournalName;
+        @memcpy(rename.bytes[name_offset..][0..name_bytes.len], name_bytes);
+        if (win.SetFileInformationByHandle(input, win.FileRenameInfo, &rename, @intCast(name_offset + name_bytes.len)) == 0) return error.JournalQuarantineFailed;
     }
 }
 
@@ -5288,7 +5342,7 @@ fn restoreOutbox(a: *App) void {
             setStatus(a, "Unified outbox quarantine incomplete; sends paused");
             return;
         };
-        if (verification_fixture and a.verification_migration_stop_id.len != 0) {
+        if (verification_fixture and a.verification_migration_stop_id.len != 0 and !a.verification_migration_stop_before_rename) {
             const path = messagesDirPath(a, "verification-migration-stop.json") orelse std.process.exit(87);
             const marker = std.json.Stringify.valueAlloc(a.allocator, .{
                 .phase = "after-quarantine-before-import", .id = a.verification_migration_stop_id,
@@ -19116,13 +19170,15 @@ pub fn main(init: std.process.Init) !void {
     defer app.read_state.deinit(init.gpa);
     if (verification_fixture) {
         const migration_id = init.environ_map.get("WAZIG_VERIFY_ID") orelse "";
+        const migration_case = init.environ_map.get("WAZIG_VERIFY_MIGRATION_CASE") orelse "";
         if (migration_id.len == 36 and
-            std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_MIGRATION_CASE") orelse "", "hub-migration-crash") and
+            (std.mem.eql(u8, migration_case, "hub-migration-crash") or std.mem.eql(u8, migration_case, "hub-migration-before-rename")) and
             std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_MIGRATION_STOP") orelse "", migration_id) and
             std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_RESTART") orelse "", migration_id))
         {
             app.verification_migration_stop_id = migration_id;
             app.verification_migration_stop_root = init.environ_map.get("WAZIG_VERIFY_ROOT") orelse "";
+            app.verification_migration_stop_before_rename = std.mem.eql(u8, migration_case, "hub-migration-before-rename");
         }
         app.verification_retry_evidence = std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_RETRY_EVIDENCE") orelse "", "1");
         if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_FAULT")) |fault| {

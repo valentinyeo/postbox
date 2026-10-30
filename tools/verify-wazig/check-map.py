@@ -438,7 +438,7 @@ if ($Feature -ceq 'hub-rollback') {
     New-Item -Path $root -ItemType Directory -ErrorAction Stop | Out-Null
 }''' in runner
 assert entries['hub-rollback']['script'] == 'journey-hub-rollback.ps1'
-assert '''if ($Feature -ceq 'hub-migration-crash') {
+assert '''if ($Feature -cin @('hub-migration-crash', 'hub-migration-before-rename')) {
     $root = Join-Path $env:RUNNER_TEMP ('r' + [Guid]::NewGuid().ToString('N').Substring(0, 16))
     Assert-That (-not (Test-Path -LiteralPath $root)) 'Migration crash root already exists'
     New-Item -Path $root -ItemType Directory -ErrorAction Stop | Out-Null

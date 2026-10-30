@@ -132,8 +132,8 @@ while (-not (Test-Path $env:PROBE_RELEASE)) {
     $offline = [Diagnostics.Process]::Start($base)
     $offlineTicks = $offline.StartTime.ToUniversalTime().Ticks.ToString()
     Assert-That ((Process-Sid $offline.Id) -ceq $sid -and $offline.Path -ceq $copy -and (Get-FileHash $offline.Path).Hash -ceq $oldHash) 'Offline process identity differs'
-    $null = Wait-Until { $offline.Refresh(); if ($offline.HasExited) { throw "Offline historical app exited: $($offline.ExitCode)" }; -not (Test-Path $control) -and ($session.feature -cne 'hub-migration-crash' -or -not (Test-Path $original)) } 'historical aged cache deleted' -Seconds 60
-    if ($session.feature -ceq 'hub-migration-crash') {
+    $null = Wait-Until { $offline.Refresh(); if ($offline.HasExited) { throw "Offline historical app exited: $($offline.ExitCode)" }; -not (Test-Path $control) -and ($session.feature -cnotin @('hub-migration-crash', 'hub-migration-before-rename') -or -not (Test-Path $original)) } 'historical aged cache deleted' -Seconds 60
+    if ($session.feature -cin @('hub-migration-crash', 'hub-migration-before-rename')) {
         @{ path = $original; absent = (-not (Test-Path $original)); pid = $offline.Id; start_ticks = $offlineTicks } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'crash-original-after-old.json')
     }
     Assert-That ((Process-Sid $offline.Id) -ceq $sid) 'Offline process owner changed'
