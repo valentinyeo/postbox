@@ -603,6 +603,39 @@ fn render(dc: win.HDC, text_ptr: [*c]const u16, len: i32, rect: *win.RECT, flags
     mark(.blit_back, &stamp);
     return height;
 }
+pub const TextHit = struct { index: usize, x: i32 };
+
+pub fn hitText(dc: win.HDC, input: []const u16, rect: win.RECT, index: ?usize, x: i32) ?TextHit {
+    if (input.len == 0) return .{ .index = 0, .x = rect.left };
+    ensure() catch return null;
+    var text = input;
+    var replacement: ?[]u16 = null;
+    defer if (replacement) |buffer| std.heap.page_allocator.free(buffer);
+    if (std.mem.indexOfScalar(u16, text, '\r') != null or std.mem.indexOfScalar(u16, text, '\n') != null) {
+        const buffer = std.heap.page_allocator.dupe(u16, text) catch return null;
+        replacement = buffer;
+        for (buffer) |*unit| if (unit.* == '\r' or unit.* == '\n') {
+            unit.* = ' ';
+        };
+        text = buffer;
+    }
+    const key = keyForDC(dc) catch return null;
+    const shaped = layoutFor(text, key, rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_NOCLIP) catch return null;
+    const layout = shaped.object;
+    defer release(layout);
+    var metrics: c.DWRITE_HIT_TEST_METRICS = undefined;
+    if (index) |position| {
+        var px: f32 = 0;
+        var py: f32 = 0;
+        check(layout.lpVtbl.*.HitTestTextPosition.?(layout, @intCast(@min(position, text.len)), 0, &px, &py, &metrics)) catch return null;
+        return .{ .index = position, .x = rect.left + @as(i32, @intFromFloat(@round(px))) };
+    }
+    var trailing: c.BOOL = 0;
+    var inside: c.BOOL = 0;
+    check(layout.lpVtbl.*.HitTestPoint.?(layout, @floatFromInt(x - rect.left), 0, &trailing, &inside, &metrics)) catch return null;
+    return .{ .index = @min(text.len, @as(usize, metrics.textPosition) + if (trailing != 0) @as(usize, metrics.length) else 0), .x = x };
+}
+
 pub fn drawText(dc: win.HDC, text: [*c]const u16, len: i32, rect: *win.RECT, flags: u32) i32 {
     if (!failed) {
         return render(dc, text, len, rect, flags) catch |err| {
