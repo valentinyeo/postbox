@@ -4927,8 +4927,8 @@ fn quarantineUnifiedJournals(a: *App) !void {
         offset = 0;
         while (offset < bytes.len) {
             var got: win.DWORD = 0;
-            const length = @min(bytes.len - offset, verify_buffer.len);
-            if (win.ReadFile(input, &verify_buffer, @intCast(length), &got, null) == 0 or got == 0 or !std.mem.eql(u8, verify_buffer[0..got], bytes[offset..][0..got])) return error.JournalChanged;
+            const chunk_length = @min(bytes.len - offset, verify_buffer.len);
+            if (win.ReadFile(input, &verify_buffer, @intCast(chunk_length), &got, null) == 0 or got == 0 or !std.mem.eql(u8, verify_buffer[0..got], bytes[offset..][0..got])) return error.JournalChanged;
             offset += got;
         }
         var after_size: win.LARGE_INTEGER = undefined;
