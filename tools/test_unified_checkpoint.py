@@ -53,6 +53,25 @@ def main():
         targeted = (root / 'tools/unified_targeted_fault_test.zig').read_text(encoding='utf-8')
         (target / 'test.zig').write_text(targeted + '\n' + '\n'.join(writer) + '\n' + original, encoding='utf-8')
         subprocess.run([args.zig, 'test', str(target / 'test.zig')], check=True)
+        start = source.index('fn channelMessageVisible(')
+        end = source.index('\n}\n', start) + 3
+        predicate = source[start:end]
+        slack = (root / 'src/slack.zig').read_text(encoding='utf-8')
+        start = slack.index('pub fn isThreadReply(')
+        end = slack.index('\n}\n', start) + 3
+        fixture = (root / 'tools/channel_outbox_visibility_test.zig').read_text(encoding='utf-8')
+        prefix = fixture + '\nconst slack = struct {\n' + slack[start:end] + '\n};\n'
+        (target / 'test.zig').write_text(prefix + predicate, encoding='utf-8')
+        subprocess.run([args.zig, 'test', str(target / 'test.zig')], check=True)
+        if args.negative_controls:
+            visibility = '(message.from_me and message.send_state != .none) or '
+            assert predicate.count(visibility) == 1
+            (target / 'test.zig').write_text(prefix + predicate.replace(visibility, '', 1), encoding='utf-8')
+            result = subprocess.run([args.zig, 'test', str(target / 'test.zig')], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            if result.returncode == 0 or 'FAIL (Test' not in result.stdout:
+                print(result.stdout, end='')
+                raise SystemExit('Negative control hidden local replies did not fail a test assertion')
+            print('NEGATIVE CONTROL hidden local replies: ' + '; '.join(line for line in result.stdout.splitlines() if 'FAIL (Test' in line))
 
 
 if __name__ == "__main__":

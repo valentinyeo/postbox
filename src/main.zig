@@ -21627,7 +21627,7 @@ fn toggleSlackThreads(a: *App) void {
 }
 
 fn channelMessageVisible(a: *App, message: *const Message) bool {
-    return !slackThreadsEnabled(a) or !slack.isThreadReply(message.id.slice(), message.thread_ts.slice());
+    return (message.from_me and message.send_state != .none) or !slackThreadsEnabled(a) or !slack.isThreadReply(message.id.slice(), message.thread_ts.slice());
 }
 
 fn threadReplyCount(a: *const App, parent: *const Message) usize {
