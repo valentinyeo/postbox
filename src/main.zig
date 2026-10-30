@@ -167,6 +167,10 @@ const command_dictate = 2009;
 const command_font_smaller = 2010;
 const command_font_larger = 2011;
 const command_font_reset = 2012;
+const command_font_small = 2071;
+const command_font_default = 2072;
+const command_font_large = 2073;
+const command_font_larger_preset = 2074;
 const command_dictation_auto = 2013;
 const command_dictation_english = 2014;
 const command_dictation_german = 2015;
@@ -1804,12 +1808,12 @@ fn recreateFonts(a: *App) void {
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
-fn changeFontScale(a: *App, delta: i32) void {
-    const next = std.math.clamp(a.font_scale + delta, 60, 160);
-    if (next == a.font_scale) return;
+fn setFontScale(a: *App, scale: i32) void {
+    const next = std.math.clamp(scale, 60, 160);
     a.font_scale = next;
     text_draw.reset();
     recreateFonts(a);
+    layout(a, a.compose_client_width, a.compose_client_height);
     saveFontScale(next);
     var buffer: [48]u8 = undefined;
     setStatus(a, std.fmt.bufPrint(&buffer, "Font size {d}%", .{next}) catch "Font size changed");
@@ -12436,6 +12440,10 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Make text smaller", "Ctrl+-", command_font_smaller);
     appendPalette(a, "Make text larger", "Ctrl++", command_font_larger);
     appendPalette(a, "Reset text size", "Ctrl+0", command_font_reset);
+    appendPalette(a, "Text size: Small", "80%", command_font_small);
+    appendPalette(a, "Text size: Default", "100%", command_font_default);
+    appendPalette(a, "Text size: Large", "125%", command_font_large);
+    appendPalette(a, "Text size: Larger", "150%", command_font_larger_preset);
     appendPalette(a, "Theme: Graphite", "", command_theme_amoled);
     appendPalette(a, "Toggle unread chats", "U", command_unread);
     appendPalette(a, "Show combined inbox", "Ctrl+1 / Alt+I", command_show_all);
@@ -13536,7 +13544,7 @@ fn runCommand(a: *App, command: u16) void {
         command_theme_amoled => {
             _ = changeTheme(a, .amoled);
         },
-        command_font_smaller => changeFontScale(a, -10),
+        command_font_smaller => setFontScale(a, a.font_scale - 10),
         command_speed_1, command_speed_150, command_speed_200 => {
             const player = ensureAudioPlayer(a) orelse return;
             player.setSpeed(switch (command) {
@@ -13551,14 +13559,11 @@ fn runCommand(a: *App, command: u16) void {
             });
             if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
         },
-        command_font_larger => changeFontScale(a, 10),
-        command_font_reset => {
-            a.font_scale = @import("font_config.zig").default_scale;
-            text_draw.reset();
-            recreateFonts(a);
-            saveFontScale(a.font_scale);
-            setStatus(a, "Font size 82%");
-        },
+        command_font_larger => setFontScale(a, a.font_scale + 10),
+        command_font_reset, command_font_default => setFontScale(a, @import("font_config.zig").default_scale),
+        command_font_small => setFontScale(a, @import("font_config.zig").small_scale),
+        command_font_large => setFontScale(a, @import("font_config.zig").large_scale),
+        command_font_larger_preset => setFontScale(a, @import("font_config.zig").larger_scale),
         command_refresh => {
             refreshGroups(a);
             refreshChats(a);

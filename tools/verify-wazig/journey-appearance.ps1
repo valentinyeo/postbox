@@ -23,6 +23,23 @@ $null = Wait-Until { (Get-ItemProperty $preferences).FontScale -eq 100 } 'defaul
 $resetPoints = [double]$textPattern.DocumentRange.GetAttributeValue([Windows.Automation.TextPattern]::FontSizeAttribute)
 Assert-That ($resetPoints -eq $baselinePoints) 'Reset did not restore the UI Automation font size'
 @{ initial_saved = $false; larger = $larger; reset = (Get-ItemProperty $preferences).FontScale; baseline_points = $baselinePoints; larger_points = $largerPoints; reset_points = $resetPoints } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'text-scale.json')
+$presetPoints = @()
+foreach ($preset in @(
+    @{ label = 'Text size: Small'; scale = 80 },
+    @{ label = 'Text size: Default'; scale = 100 },
+    @{ label = 'Text size: Large'; scale = 125 },
+    @{ label = 'Text size: Larger'; scale = 150 }
+)) {
+    Invoke-PaletteCommand $session $preset.label
+    $null = Wait-Until { (Get-ItemProperty $preferences).FontScale -eq $preset.scale } "saved $($preset.label)"
+    $points = [double]$textPattern.DocumentRange.GetAttributeValue([Windows.Automation.TextPattern]::FontSizeAttribute)
+    Assert-That ($points -gt 0 -and ($presetPoints.Count -eq 0 -or $points -gt $presetPoints[-1].points)) 'Preset did not increase composer font size'
+    Save-Screen $session "text-preset-$($preset.scale)"
+    $presetPoints += @{ scale = $preset.scale; points = $points }
+}
+$presetPoints | ConvertTo-Json -AsArray | Set-Content (Join-Path $Evidence 'text-presets.json')
+Send-Keys $session '^0'
+$null = Wait-Until { (Get-ItemProperty $preferences).FontScale -eq 100 } 'preset reset'
 Send-Keys $session '^a{BACKSPACE}'
 $null = Wait-Until { (Read-Edit $compose) -eq '' } 'scale probe cleared'
 Save-Screen $session after
