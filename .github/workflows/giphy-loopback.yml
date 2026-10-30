@@ -16,3 +16,10 @@ jobs:
           version: 0.16.0
       - name: Exercise native catalogue HTTP against loopback
         run: python tools/verify-wazig/giphy-loopback.py
+      - name: Upload sanitized loopback evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: giphy-loopback-evidence
+          path: giphy-loopback-evidence/
+          if-no-files-found: warn
