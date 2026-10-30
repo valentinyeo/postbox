@@ -192,6 +192,11 @@ jobs:
         with:
           name: Messages-windows-x86_64-telegram
           path: bin/
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
       - name: Verify forwarded image caption
         shell: pwsh
         run: tools/verify-wazig/run.ps1 -Feature media-fit -Bin bin -Evidence caption-evidence
