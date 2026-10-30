@@ -115,7 +115,7 @@ const JsonUnsigned = struct {
 
 const RawRendition = struct { url: []const u8, width: []const u8, height: []const u8, size: []const u8 };
 const RawGif = struct {
-    @"type": []const u8,
+    type: []const u8,
     id: []const u8,
     images: struct { fixed_width: RawRendition, original: RawRendition },
 };
@@ -191,7 +191,7 @@ pub fn parse(allocator: std.mem.Allocator, json: []const u8, expected_offset: us
     if (raw.data.len > requested_limit or raw.pagination.count.value != raw.data.len or raw.pagination.offset.value != expected_offset) return error.InvalidPage;
     var page = Page{ .offset = expected_offset, .total_count = raw.pagination.total_count.value };
     for (raw.data) |item| {
-        if (!std.mem.eql(u8, item.@"type", "gif") or !validId(item.id)) return error.InvalidMedia;
+        if (!std.mem.eql(u8, item.type, "gif") or !validId(item.id)) return error.InvalidMedia;
         for (page.items[0..page.count]) |*existing| if (std.mem.eql(u8, existing.id.slice(), item.id)) return error.DuplicateId;
         var gif = Gif{};
         try gif.id.set(item.id);
