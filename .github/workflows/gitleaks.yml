@@ -1,6 +1,7 @@
 name: Gitleaks
 
 on:
+  pull_request:
   schedule:
     - cron: "23 4 * * *"
   workflow_dispatch:

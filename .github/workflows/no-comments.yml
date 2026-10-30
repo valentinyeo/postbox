@@ -1,6 +1,7 @@
 name: No code comments
 
 on:
+  pull_request:
   schedule:
     - cron: "25 2 * * *"
   workflow_dispatch:

@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / '.github/workflows'
 REPORTS = ('ci', 'verify', 'release-proof', 'postbox-upgrade', 'voice-language',
            'no-comments', 'gitleaks', 'private-markers', 'run-log-markers')
+PR_ADMISSION = {'ci', 'gitleaks', 'private-markers', 'no-comments'}
 
 
 def load(name):
@@ -20,7 +21,12 @@ def load(name):
 def check_reports(workflows):
     for name, workflow in workflows.items():
         triggers = workflow[True]
-        assert set(triggers) == {'schedule', 'workflow_dispatch'}, name
+        expected = {'schedule', 'workflow_dispatch'}
+        if name in PR_ADMISSION:
+            expected.add('pull_request')
+        assert set(triggers) == expected, name
+        if name == 'private-markers':
+            assert triggers['pull_request']['types'] == ['opened', 'edited', 'synchronize', 'reopened'], name
         assert triggers['schedule'] and all(row.get('cron') for row in triggers['schedule']), name
         assert workflow['permissions']['contents'] == 'read', name
         assert all(value == 'read' for value in workflow['permissions'].values()), name
@@ -76,15 +82,25 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_report_trigger_and_permissions_mutations_fail(self):
         for name in REPORTS:
-            for mutation in ('push', 'schedule', 'permissions'):
+            mutations = ['push', 'schedule', 'permissions']
+            mutations.append('missing-pr' if name in PR_ADMISSION else 'unexpected-pr')
+            if name == 'private-markers':
+                mutations.append('edited')
+            for mutation in mutations:
                 with self.subTest(name=name, mutation=mutation):
                     workflow = copy.deepcopy(load(name))
                     if mutation == 'push':
                         workflow[True]['push'] = None
                     elif mutation == 'schedule':
                         del workflow[True]['schedule']
-                    else:
+                    elif mutation == 'permissions':
                         workflow['permissions']['contents'] = 'write'
+                    elif mutation == 'missing-pr':
+                        del workflow[True]['pull_request']
+                    elif mutation == 'unexpected-pr':
+                        workflow[True]['pull_request'] = None
+                    else:
+                        workflow[True]['pull_request']['types'].remove('edited')
                     with self.assertRaises(AssertionError):
                         check_reports({name: workflow})
 
