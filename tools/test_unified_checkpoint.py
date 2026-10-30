@@ -23,7 +23,7 @@ def main():
         parts.insert(0, re.search(rf'^const {name} = .*?;', source, re.M).group())
     with tempfile.TemporaryDirectory(prefix='unified-checkpoint-') as directory:
         target = Path(directory)
-        for name in ('outbox.zig', 'unified_snapshot.zig', 'transport.zig', 'chat_key.zig'):
+        for name in ('outbox.zig', 'unified_snapshot.zig', 'transport.zig', 'chat_key.zig', 'staged_images.zig'):
             (target / name).write_text((root / 'src' / name).read_text(encoding='utf-8'), encoding='utf-8')
         fixture = (root / 'tools/unified_checkpoint_test.zig').read_text(encoding='utf-8')
         original = '\n'.join(parts)
@@ -47,6 +47,10 @@ def main():
                 print(f'NEGATIVE CONTROL {name}: ' + '; '.join(line for line in result.stdout.splitlines() if 'FAIL (Test' in line))
         writer = []
         for name in ('unifiedNativePath', 'unifiedFaultAt', 'writeOutboxAtomic', 'saveUnifiedCandidate'):
+            start = source.index(f'fn {name}(')
+            end = source.index('\n}\n', start) + 3
+            writer.append(source[start:end])
+        for name in ('acceptUnifiedSends', 'sendUnifiedMessage', 'restoreUnifiedOutbox'):
             start = source.index(f'fn {name}(')
             end = source.index('\n}\n', start) + 3
             writer.append(source[start:end])
