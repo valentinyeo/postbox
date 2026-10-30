@@ -10,7 +10,7 @@ const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     unified_snapshot: ?*unified_snapshot.Snapshot = null,
     unified_candidate: ?*unified_snapshot.Snapshot = null,
-    unified_snapshot_path: []const u8 = "snapshot.v2",
+    unified_snapshot_path: []const u8 = "C:\\profile\\snapshot.v2",
     unified_write_fault: enum { none, open, write, flush, close, replace } = .none,
 };
 
@@ -80,4 +80,13 @@ test "candidate becomes live only after checked replacement" {
     defer std.testing.allocator.destroy(decoded);
     try unified_snapshot.decode(std.testing.allocator, disk[0..disk_len], live.backend.slice(), decoded);
     try std.testing.expectEqual(@as(usize, 1), decoded.count);
+}
+
+test "private Win32 paths are extended and normalize separators" {
+    const path = try unifiedNativePath(std.testing.allocator, "C:/Users/Valentin/AppData/Local/Messages/unified-journal-v2/a/files/payload");
+    defer std.testing.allocator.free(path);
+    const decoded = try std.unicode.utf16LeToUtf8Alloc(std.testing.allocator, path);
+    defer std.testing.allocator.free(decoded);
+    try std.testing.expectEqualStrings("\\\\?\\C:\\Users\\Valentin\\AppData\\Local\\Messages\\unified-journal-v2\\a\\files\\payload", decoded);
+    try std.testing.expectError(error.UnsafeAttachmentPath, unifiedNativePath(std.testing.allocator, "relative/payload"));
 }

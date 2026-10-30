@@ -10,7 +10,7 @@ def main():
     args = parser.parse_args()
     source = (root / 'src/main.zig').read_text()
     parts = []
-    for name in ('writeOutboxAtomic', 'saveUnifiedCandidate'):
+    for name in ('unifiedNativePath', 'writeOutboxAtomic', 'saveUnifiedCandidate'):
         start = source.index(f'fn {name}(')
         end = source.index('\n}\n', start) + 3
         parts.append(source[start:end])

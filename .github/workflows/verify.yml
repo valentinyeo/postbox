@@ -98,6 +98,12 @@ jobs:
         with:
           version: 0.16.0
           use-cache: false
+      - name: Unified private Windows path operations
+        if: matrix.feature == 'hub' || matrix.feature == 'whatsapp-hub'
+        shell: pwsh
+        run: |
+          python tools/test_unified_windows_paths.py --zig zig
+          if ($LASTEXITCODE -ne 0) { throw 'Unified private path operations failed' }
       - name: ISSUE-462 row-sized DirectWrite regression
         shell: pwsh
         run: |
