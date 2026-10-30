@@ -10003,6 +10003,9 @@ fn sendUnifiedMessage(a: *App, thread: bool) void {
     const compose = (if (thread) a.thread_compose else a.compose) orelse return;
     if (a.selected_chat >= a.chat_count) return;
     const key = chat_key.of(&a.chats[a.selected_chat]);
+    const origin_view = a.chat_view;
+    const origin_account = a.view_account;
+    const origin_archived = a.show_archived;
     if (thread and (a.thread_parent.len == 0 or !chat_key.Key.eql(a.thread_origin.key(), key))) return;
     const count = if (thread) 0 else a.staged_images.count;
     for (a.staged_images.items[0..count]) |*image| {
@@ -10052,6 +10055,17 @@ fn sendUnifiedMessage(a: *App, thread: bool) void {
     _ = win.SetWindowTextW(compose, lit(""));
     if (!thread) saveComposerDraft(a);
     layout(a, a.compose_client_width, a.compose_client_height);
+    if (a.chat_view == origin_view and a.show_archived == origin_archived and
+        std.mem.eql(u8, a.view_account.slice(), origin_account.slice()) and a.selected_chat < a.chat_count and
+        chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(&entries[0]))) {
+        if (thread) {
+            if (a.thread_compose) |current| {
+                if (current == compose and std.mem.eql(u8, a.thread_parent.slice(), entries[0].reply_to.slice())) _ = win.SetFocus(compose);
+            }
+        } else if (a.compose) |current| {
+            if (current == compose) focusCompose(a);
+        }
+    }
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
     setStatus(a, "Message saved");
 }

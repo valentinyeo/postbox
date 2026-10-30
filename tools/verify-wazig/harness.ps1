@@ -14,6 +14,12 @@ public static class VerifyWindow {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo {
+        public int Size, Flags;
+        public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
+        public Rect CaretRect;
+    }
+    [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window, ref Point point);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);

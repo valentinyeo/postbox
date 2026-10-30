@@ -347,7 +347,7 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
         else:
             gates += ['captcha', 'inbox']
         data = {
-            'session.json': dict(feature=provider, sha256='fixture', commit='fixture', expected_version=version),
+            'session.json': dict(feature=provider, sha256='fixture', commit='fixture', expected_version=version, pid=1234),
             'doctor.json': dict(version=version),
             'result.json': dict(feature=provider, status='passed'),
             'marks.json': dict(brand_blue_pixels=21),
@@ -357,6 +357,15 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
             'side-effects.json': dict(pending_sends=0, pending_archives=0, sync='stopped', slack_connected=False,
                                       production_preferences_absent=True, whatsapp_store_absent=True, telegram_store_absent=True),
         }
+        if provider == 'telegram':
+            for phase in ('before-clear', 'after-clear', 'after-palette', 'before-archive'):
+                selected = limited if phase in ('before-clear', 'after-clear') else chat
+                data[f'telegram-archive-{phase}.json'] = dict(
+                    phase=phase, foreground_hwnd=100, foreground_process_id=1234, gui_thread_ok=True, gui_thread_id=12,
+                    focused_hwnd=101, focused_process_id=1234, focused_native_process_id=1234,
+                    focused_class='RICHEDIT50W', focused_automation_id='1032', focused_text='',
+                    composer_hwnd=101, composer_process_id=1234, composer_class='RICHEDIT50W',
+                    composer_automation_id='1032', composer_text='', selected=dict(id=selected), bulk_selected_count=0)
         names = ['linked', 'history', 'read', 'reacted', 'text', 'file', 'live', 'limited', 'after', 'archived-inbox', 'archived', 'unarchived-archive']
         names += ['reply'] if provider == 'telegram' else ['captcha']
         for name in names:
@@ -406,8 +415,10 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
         self.provider = provider
         self.checker = runpy.run_path(str(ROOT / f'tools/verify-wazig/check-{provider}-evidence.py'))
         keys = ['^2' if provider == 'telegram' else '^3', '%k', 'Compose message', 'Attach photo or file',
-                f'Synthetic {title} outgoing', f'Synthetic {title} file', 'Synthetic rejected send', 'Like', '{ENTER}',
-                '^e', 'Show archived chats', '^e', 'Show inbox chats']
+                f'Synthetic {title} outgoing', f'Synthetic {title} file', 'Synthetic rejected send', 'Like', '{ENTER}']
+        if provider == 'telegram':
+            keys += ['^a{BACKSPACE}', 'Verification Telegram']
+        keys += ['^e', 'Show archived chats', '^e', 'Show inbox chats']
         if provider == 'telegram':
             keys += ['Reply to selected message', 'Synthetic Telegram reply']
         else:
@@ -430,6 +441,24 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
             with self.subTest(provider=provider):
                 self.fixture(provider)
                 self.check()
+
+    def test_telegram_focus_and_bulk_observations_reject_wrong_input(self):
+        for phase, field, value in [
+            ('before-clear', 'focused_hwnd', 102),
+            ('before-clear', 'focused_native_process_id', 9999),
+            ('before-clear', 'foreground_process_id', 9999),
+            ('before-clear', 'gui_thread_ok', False),
+            ('before-clear', 'focused_automation_id', '1016'),
+            ('after-clear', 'composer_text', 'not cleared'),
+            ('after-clear', 'bulk_selected_count', 5),
+            ('after-palette', 'selected', dict(id='telegram:user:1002')),
+            ('before-archive', 'bulk_selected_count', 5),
+        ]:
+            with self.subTest(phase=phase, field=field):
+                self.fixture('telegram')
+                self.data[f'telegram-archive-{phase}.json'][field] = value
+                with self.assertRaises(AssertionError):
+                    self.check()
 
     def test_signal_chats_missing_from_combined_inbox_fail(self):
         for defect in ('empty', 'other-provider'):

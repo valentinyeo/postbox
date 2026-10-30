@@ -75,6 +75,28 @@ def check_avatar_requests(folder, requests):
     assert not list(cache.glob('*.fail')), 'avatar requests failed'
 
 
+def check_archive_observations(folder, session):
+    observations = {}
+    for phase in ('before-clear', 'after-clear', 'after-palette', 'before-archive'):
+        row = json.loads((folder / f'telegram-archive-{phase}.json').read_text(encoding='utf-8-sig'))
+        assert row['phase'] == phase
+        assert row['foreground_hwnd'] and row['foreground_process_id'] == session['pid'], phase
+        assert row['gui_thread_ok'] is True and row['gui_thread_id'], phase
+        assert row['focused_hwnd'] and row['focused_process_id'] == row['focused_native_process_id'] == session['pid'], phase
+        assert isinstance(row['focused_class'], str) and isinstance(row['focused_automation_id'], str), phase
+        assert row['composer_hwnd'] and row['composer_process_id'] == session['pid'], phase
+        assert row['composer_class'] == 'RICHEDIT50W' and row['composer_automation_id'] == '1032', phase
+        assert isinstance(row['composer_text'], str) and row['bulk_selected_count'] == 0, phase
+        expected = 'telegram:user:1002' if phase in ('before-clear', 'after-clear') else 'telegram:user:1001'
+        assert row['selected']['id'] == expected, phase
+        observations[phase] = row
+    before = observations['before-clear']
+    assert before['focused_hwnd'] == before['composer_hwnd'], 'composer must own focus before clear'
+    assert before['focused_class'] == 'RICHEDIT50W' and before['focused_automation_id'] == '1032'
+    assert before['focused_text'] == before['composer_text']
+    assert observations['after-clear']['composer_text'] == ''
+
+
 def check_telegram(folder):
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))
@@ -150,6 +172,7 @@ def check_telegram(folder):
         assert shown['chat']['id'] == 'telegram:user:1002'
         assert sum(row['send_state'] == 'failed' and reason in row['text'] for row in shown['messages']) == 1
         assert capture(name)['pending_sends'] == 0
+    check_archive_observations(folder, session)
     archives = [row for row in requests if row['method'] == 'POST' and row['path'] == '/v1/wazig/archive' and row['body']['chat'] == 'telegram:user:1001']
     assert not archives, 'Telegram archive must stay local'
     for name, archived, count in [('archived-inbox', False, 4), ('archived', True, 1), ('unarchived-archive', True, 0), ('after', False, 5)]:
@@ -176,6 +199,10 @@ def check_telegram(folder):
     for keys in ['^2', 'Reply to selected message', 'Synthetic Telegram reply', '%k', 'Compose message', 'Attach photo or file', 'Synthetic Telegram outgoing', 'Synthetic Telegram file', 'Synthetic rejected send', 'Like', '^e', 'Show archived chats', 'Show inbox chats', '{ENTER}']:
         assert f'keys: {keys}' in actions, keys
     assert actions.count('keys: ^e\n') == 2
+    assert 'keys: ^a{BACKSPACE}\n' in actions
+    tail = actions[actions.index('keys: ^a{BACKSPACE}\n'):]
+    assert 'keys: Verification Telegram\n' in tail and 'keys: ^e\n' in tail
+    assert tail.index('keys: Verification Telegram\n') < tail.index('keys: ^e\n')
     assert 'JOURNEY PASSED: telegram' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
     print('TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections')
