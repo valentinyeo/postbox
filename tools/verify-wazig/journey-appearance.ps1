@@ -36,7 +36,7 @@ function Font-EditGeometry($Edit, $Pattern) {
     Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$origin)) 'Edit client origin unavailable'
     $bounds = @($Pattern.DocumentRange.GetBoundingRectangles())
     Assert-That ($bounds.Count -eq 1 -and $bounds[0].Width -gt 0 -and $bounds[0].Height -gt 0) 'Composer UIA line bounds unavailable'
-    return @{ formatting = @($format.Left + $origin.X, $format.Top + $origin.Y, $format.Right + $origin.X, $format.Bottom + $origin.Y); line = (Font-Rect $bounds[0]) }
+    return @{ formatting = @(($format.Left + $origin.X), ($format.Top + $origin.Y), ($format.Right + $origin.X), ($format.Bottom + $origin.Y)); line = (Font-Rect $bounds[0]) }
 }
 function Font-ItemRect($Element) {
     $rect = [LayoutCapture]::GetRect([IntPtr]$Element.Current.NativeWindowHandle, 0x198, 0)

@@ -654,6 +654,60 @@ function Get-AttachmentPicker($Session) {
 
 
 
+class FontEditGeometryTests(unittest.TestCase):
+    def test_screen_rect_uses_each_native_coordinate(self):
+        source = (ROOT / 'tools/verify-wazig/journey-appearance.ps1').read_text()
+        rect = re.search(r'function Font-Rect\(\$Rect\) \{[^\n]+\}', source)
+        helper = re.search(r'function Font-EditGeometry\(\$Edit, \$Pattern\) \{[\s\S]*?\n\}', source)
+        self.assertIsNotNone(rect)
+        self.assertIsNotNone(helper)
+        if not shutil.which('pwsh'):
+            self.skipTest('PowerShell runtime is exercised by hosted CI')
+        fixture = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type @'
+using System;
+public static class LayoutCapture {
+    public struct Rect { public int Left, Top, Right, Bottom; }
+    public static Rect GetRect(IntPtr handle, uint message, uint index) {
+        if (handle != (IntPtr)17 || message != 0xB2 || index != 0) throw new Exception("Wrong native request");
+        return new Rect { Left = 2, Top = 8, Right = 102, Bottom = 42 };
+    }
+}
+public static class VerifyWindow {
+    public struct Point { public int X, Y; }
+    public static bool ClientToScreen(IntPtr handle, ref Point point) {
+        if (handle != (IntPtr)17) return false;
+        point.X = 300; point.Y = 200; return true;
+    }
+}
+'@
+function Assert-That($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
+$edit = @{ Current = @{ NativeWindowHandle = 17 } }
+$range = [pscustomobject]@{}
+$range | Add-Member -MemberType ScriptMethod -Name GetBoundingRectangles -Value {
+    return @([pscustomobject]@{ Left = 303; Top = 209; Right = 390; Bottom = 230; Width = 87; Height = 21 })
+}
+$pattern = @{ DocumentRange = $range }
+"""
+        assertions = r"""
+$geometry = Font-EditGeometry $edit $pattern
+if (($geometry.formatting -join ',') -cne '302,208,402,242') { throw 'Wrong formatting coordinates' }
+if (($geometry.line -join ',') -cne '303,209,390,230') { throw 'Wrong UIA line coordinates' }
+Write-Output 'FONT_GEOMETRY_OK'
+"""
+        broken = helper.group().replace(
+            '@(($format.Left + $origin.X), ($format.Top + $origin.Y), ($format.Right + $origin.X), ($format.Bottom + $origin.Y))',
+            '@($format.Left + $origin.X, $format.Top + $origin.Y, $format.Right + $origin.X, $format.Bottom + $origin.Y)')
+        self.assertNotEqual(broken, helper.group(), 'The historical arithmetic regression must be reproducible')
+        command = ['pwsh', '-NoProfile', '-NonInteractive', '-Command']
+        rejected = subprocess.run(command + [fixture + rect.group() + '\n' + broken + assertions], capture_output=True, text=True)
+        self.assertNotEqual(rejected.returncode, 0, rejected.stdout + rejected.stderr)
+        result = subprocess.run(command + [fixture + rect.group() + '\n' + helper.group() + assertions], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('FONT_GEOMETRY_OK', result.stdout)
+
+
 class AppearanceVersionTests(unittest.TestCase):
     def fixture(self, folder, version):
         session = dict(feature='appearance', sha256='fixture-binary', commit='fixture-commit',
