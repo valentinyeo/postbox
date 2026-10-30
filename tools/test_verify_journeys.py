@@ -48,7 +48,7 @@ class JourneyRegistryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('JOURNEY REGISTRY VERIFIED', result.stdout)
 
-    def plan(self, event='pull_request', feature='search'):
+    def plan(self, event='schedule', feature='search'):
         step = next(step for step in self.workflow['jobs']['plan']['steps'] if step.get('id') == 'matrix')
         output = self.root / 'plan-output'
         output.write_text('')
@@ -181,7 +181,7 @@ class JourneyRegistryTests(unittest.TestCase):
                 self.assertIn('hand-maintained journey table', self.check_map().stderr)
                 path.write_text(original)
 
-    def test_plan_yaml_and_pr_matrix(self):
+    def test_plan_yaml_and_nightly_matrix(self):
         verify = self.workflow['jobs']['verify']
         self.assertEqual(verify['needs'], 'plan')
         self.assertEqual(verify['strategy']['matrix'], '${{ fromJSON(needs.plan.outputs.matrix) }}')
@@ -191,7 +191,7 @@ class JourneyRegistryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         matrix = json.loads(output.removeprefix('matrix='))
         self.assertEqual(matrix['include'], [dict(feature=row['name'], evidence=row['evidence'])
-                                            for row in self.registry['journeys'] if row['pr']])
+                                            for row in self.registry['journeys']])
         self.assertEqual(json.loads(result.stdout), matrix)
 
     def test_plan_dispatch_accepts_every_registered_name_and_rejects_unknown(self):
@@ -206,6 +206,18 @@ class JourneyRegistryTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Unknown verification journey:', result.stderr)
             self.assertEqual(output, '')
+
+    def test_wrong_verification_triggers_fail_map(self):
+        path = self.root / '.github/workflows/verify.yml'
+        original = path.read_text()
+        for changed in [original.replace('  schedule:', '  push:'),
+                        original.replace('  schedule:', '  pull_request:\n  schedule:'),
+                        original.replace('selected = journeys', "selected = [row for row in journeys if row['pr']]")]:
+            with self.subTest(changed=changed != original):
+                self.assertNotEqual(changed, original)
+                path.write_text(changed)
+                self.assertNotEqual(self.check_map().returncode, 0)
+        path.write_text(original)
 
     def test_plan_without_plan_matrix_fails_map(self):
         path = self.root / '.github/workflows/verify.yml'

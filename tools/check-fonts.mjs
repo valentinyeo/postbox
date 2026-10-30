@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const expectedFonts = [...['Regular', 'Medium', 'SemiBold', 'Bold', 'Italic'].map(weight => `IBMPlexSans-${weight}.ttf`), 'IBMPlexMono-Regular.ttf'].sort();
-export const sourcePaths = ['build.zig', 'assets/installer.wxs', '.github/workflows/release.yml', 'src/main.zig', 'src/font_config.zig', 'src/design_tokens.zig'];
+export const sourcePaths = ['build.zig', 'assets/installer.wxs', '.github/workflows/release.yml', '.github/workflows/release-proof.yml', 'src/main.zig', 'src/font_config.zig', 'src/design_tokens.zig'];
 const names = source => [...new Set(source.match(/IBMPlex(?:Sans|Mono)-[A-Za-z]+\.ttf/g) ?? [])].sort();
 const section = (source, start, end) => {
   const first = source.indexOf(start);
@@ -35,7 +35,7 @@ export function verifySources(sources, exists) {
   const packages = workflow.split('\n').filter(line => /zip -r .*Messages.*\.zip/.test(line));
   assert.equal(packages.length, 2, 'both CPU release zips must include fonts');
   packages.forEach((line, index) => same(`release zip ${index}`, names(line)));
-  const smoke = section(workflow, '- name: Verify install', '- name: Headless Telegram smoke');
+  const smoke = section(sources['.github/workflows/release-proof.yml'], '- name: Verify install', '- name: Headless Telegram smoke');
   same('install smoke', names(smoke));
   assert.match(smoke, /foreach \(\$font in @\(/);
   assert.match(smoke, /Test-Path "\$env:LOCALAPPDATA\\Programs\\Messages\\\$font"/);

@@ -18,7 +18,7 @@ for (const [label, file, change] of [
   ['MSI reference', 'assets/installer.wxs', source => source.replace('      <ComponentRef Id="PlexMedium" />', '')],
   ['x64 release zip', '.github/workflows/release.yml', source => source.replace(' IBMPlexSans-Medium.ttf', '')],
   ['ARM64 release zip', '.github/workflows/release.yml', source => source.replace(/(Messages_arm64[^\n]+) IBMPlexSans-Medium\.ttf/, '$1')],
-  ['install smoke', '.github/workflows/release.yml', source => source.replace(", 'IBMPlexSans-Medium.ttf'", '')],
+  ['install smoke', '.github/workflows/release-proof.yml', source => source.replace(", 'IBMPlexSans-Medium.ttf'", '')],
   ['private load list', 'src/font_config.zig', source => source.replace('    "IBMPlexSans-Medium.ttf",\n', '')],
   ['smoke private load', 'src/main.zig', source => source.replace('const font_files = @import("font_config.zig").files;', 'const font_files = .{"IBMPlexSans-Regular.ttf", "IBMPlexSans-SemiBold.ttf", "IBMPlexSans-Bold.ttf"};')],
   ['startup private load', 'src/main.zig', source => source.replace(/(pub fn main[\s\S]*?)const font_files = @import\("font_config\.zig"\)\.files;/, '$1const font_files = .{"IBMPlexSans-Regular.ttf", "IBMPlexSans-SemiBold.ttf", "IBMPlexSans-Bold.ttf"};')],

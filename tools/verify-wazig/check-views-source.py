@@ -213,8 +213,9 @@ def check_journey():
     require(read('tools/verify-wazig/check-evidence.py'), ["row['name'] == session['feature']", "journey['validator']"])
     require(read('tools/verify-wazig/' + entry['validator']['file']), ['check-views-evidence.py'])
     workflow = read('.github/workflows/verify.yml')
-    require(workflow, ['fromJSON(needs.plan.outputs.matrix)', 'if: matrix.evidence',
-                       'src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig'])
+    require(workflow, ['fromJSON(needs.plan.outputs.matrix)', 'if: matrix.evidence', 'selected = journeys'])
+    for path in ['src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig']:
+        assert (root / path).is_file(), path
     for path in (root / 'tools/verify-wazig').glob('*.py'):
         ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
     require(read('.claude/skills/verify-wazig/features/views.md'), [
