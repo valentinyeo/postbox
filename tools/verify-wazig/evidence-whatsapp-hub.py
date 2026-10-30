@@ -33,6 +33,7 @@ assert sum(row['accepted'] for row in sends) == 1
 assert any(row.get('duplicate') and row['status'] == 200 for row in sends)
 if unified:
     assert f"{session['feature']} terminal-identity-restart PASS" in proof
+    runpy.run_path(str(Path(__file__).with_name('check-identity-evidence.py')))['check_identity'](folder, requests, session['bridge_url'])
     identity = [row for row in requests if row.get('wire_path') == '/v1/wazig/send' and row.get('body', {}).get('text') == 'Identity fixture']
     assert len(identity) == 6 and len({row['body']['client_id'] for row in identity[:5]}) == 1
     assert identity[-1]['body']['client_id'] != identity[0]['body']['client_id']

@@ -12799,6 +12799,21 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.staged_images.count });
+    if (verification_fixture) {
+        var ready: usize = 0;
+        var uncertain: usize = 0;
+        var held: usize = 0;
+        if (a.unified_snapshot) |snapshot| {
+            for (snapshot.records[0..snapshot.count]) |*record| switch (record.phase) {
+                .ready => ready += 1,
+                .uncertain => uncertain += 1,
+                .held => held += 1,
+            };
+        }
+        try w.print(",\"unified_snapshot\":{{\"loaded\":{},\"ready\":{d},\"uncertain\":{d},\"held\":{d},\"inflight\":{d}}}", .{
+            unifiedHub(a) and a.unified_snapshot != null and !a.outbox_load_failed, ready, uncertain, held, @as(u8, if (a.unified_inflight != null) 1 else 0),
+        });
+    }
     const card = updateCardRect(a);
     try w.print(",\"update_card\":{{\"visible\":{},\"span\":{d},\"rect\":[{d},{d},{d},{d}],\"error\":", .{ updateCardVisible(a), updateCardSpan(a), card.left, card.top, card.right, card.bottom });
     try control_api.writeString(w, a.update_card_error[0..a.update_card_error_len]);

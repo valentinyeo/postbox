@@ -287,6 +287,10 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [string]$Mode) {
     $script = if ($Mode -eq 'legacy') { 'fake-wa-bridge.py' } else { 'fake-hub.py' }
     $start.ArgumentList.Add((Join-Path $PSScriptRoot $script))
     if ($Mode -ne 'legacy') { $start.ArgumentList.Add("--$Mode") }
+    if ($Mode -eq 'mixed-lid') {
+        $start.ArgumentList.Add('--snapshot-root')
+        $start.ArgumentList.Add((Join-Path $Root 'local/Messages/unified-journal-v2'))
+    }
     $start.ArgumentList.Add('--port-file')
     $start.ArgumentList.Add($portFile)
     $start.ArgumentList.Add('--log')
