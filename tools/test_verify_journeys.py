@@ -731,16 +731,92 @@ function Get-AttachmentPicker($Session) {
 
 
 
+class FontEditGeometryTests(unittest.TestCase):
+    def test_screen_rect_uses_each_native_coordinate(self):
+        source = (ROOT / 'tools/verify-wazig/journey-appearance.ps1').read_text()
+        rect = re.search(r'function Font-Rect\(\$Rect\) \{[^\n]+\}', source)
+        helper = re.search(r'function Font-EditGeometry\(\$Edit, \$Pattern\) \{[\s\S]*?\n\}', source)
+        self.assertIsNotNone(rect)
+        self.assertIsNotNone(helper)
+        if not shutil.which('pwsh'):
+            self.skipTest('PowerShell runtime is exercised by hosted CI')
+        fixture = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type @'
+using System;
+public static class LayoutCapture {
+    public struct Rect { public int Left, Top, Right, Bottom; }
+    public static Rect GetRect(IntPtr handle, uint message, uint index) {
+        if (handle != (IntPtr)17 || message != 0xB2 || index != 0) throw new Exception("Wrong native request");
+        return new Rect { Left = 2, Top = 8, Right = 102, Bottom = 42 };
+    }
+}
+public static class VerifyWindow {
+    public struct Point { public int X, Y; }
+    public static bool ClientToScreen(IntPtr handle, ref Point point) {
+        if (handle != (IntPtr)17) return false;
+        point.X = 300; point.Y = 200; return true;
+    }
+}
+'@
+function Assert-That($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
+$edit = @{ Current = @{ NativeWindowHandle = 17 } }
+$range = [pscustomobject]@{}
+$range | Add-Member -MemberType ScriptMethod -Name GetBoundingRectangles -Value {
+    return @([pscustomobject]@{ Left = 303; Top = 209; Right = 390; Bottom = 230; Width = 87; Height = 21 })
+}
+$pattern = @{ DocumentRange = $range }
+"""
+        assertions = r"""
+$geometry = Font-EditGeometry $edit $pattern
+if (($geometry.formatting -join ',') -cne '302,208,402,242') { throw 'Wrong formatting coordinates' }
+if (($geometry.line -join ',') -cne '303,209,390,230') { throw 'Wrong UIA line coordinates' }
+Write-Output 'FONT_GEOMETRY_OK'
+"""
+        broken = helper.group().replace(
+            '@(($format.Left + $origin.X), ($format.Top + $origin.Y), ($format.Right + $origin.X), ($format.Bottom + $origin.Y))',
+            '@($format.Left + $origin.X, $format.Top + $origin.Y, $format.Right + $origin.X, $format.Bottom + $origin.Y)')
+        self.assertNotEqual(broken, helper.group(), 'The historical arithmetic regression must be reproducible')
+        command = ['pwsh', '-NoProfile', '-NonInteractive', '-Command']
+        rejected = subprocess.run(command + [fixture + rect.group() + '\n' + broken + assertions], capture_output=True, text=True)
+        self.assertNotEqual(rejected.returncode, 0, rejected.stdout + rejected.stderr)
+        result = subprocess.run(command + [fixture + rect.group() + '\n' + helper.group() + assertions], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('FONT_GEOMETRY_OK', result.stdout)
+
+
 class AppearanceVersionTests(unittest.TestCase):
     def fixture(self, folder, version):
         session = dict(feature='appearance', sha256='fixture-binary', commit='fixture-commit',
-                       expected_version=version, expected_product='Postbox')
+                       expected_version=version, expected_product='Postbox', pid=2, startTicks='new', id='fixture-id', root='fixture-root')
         state = dict(version=version, chat_count=3, pending_sends=0, pending_archives=0,
                      sync='stopped', search='', theme='amoled', production_preferences_absent=True,
                      whatsapp_store_absent=True, telegram_store_absent=True)
         files = {'session.json': session, 'side-effects.json': state,
                  'text-scale.json': dict(initial_saved=False, larger=110, reset=100,
                                         baseline_points=10, larger_points=12, reset_points=10)}
+        files['font-viewport.json'] = dict(width=1920, height=1032, hosted_only=True)
+        files['font-palette.json'] = dict(edit_height=36, row_height=44, body_line_height=20, small_line_height=20, item=[0, 0, 300, 44], group_draw=dict(scale=150, renderer='directwrite', item=[0, 0, 300, 44], draw=[200, 2, 290, 22], text_top=3, text_bottom=20), draw=dict(scale=150, renderer='directwrite', item=[0, 0, 300, 44], draw=[10, 0, 200, 44], text_top=10, text_bottom=30))
+        (folder / 'text-preset-palette.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
+        files['text-presets.json'] = [dict(scale=scale, points=scale / 10, chat_font_height=-scale,
+                                            list_font_height=-scale, list_uia_height=200, composer_uia_height=50,
+                                            composer=dict(formatting=[10, 10, 300, 40], line=[12, 12, 200, 35]),
+                                            list_item=[0, 0, 300, 56],
+                                            list_draw=dict(scale=scale, renderer='directwrite', item=[0, 0, 300, 56], draw=[66, 4, 250, 28], text_top=6, text_bottom=26),
+                                            preview_draw=dict(scale=scale, renderer='gdi', item=[0, 0, 300, 56], draw=[66, 28, 250, 52], text_top=29, text_bottom=50),
+                                            chat=dict(id='GROUP-OWN', bubble=[10, 10, 200, 70], words=[dict(rect=[20, 20, 80, 40])]),
+                                            list=dict(scale=scale, row_height=56, body_line_height=20,
+                                                      name_top=4, preview_top=28, preview_bottom=52,
+                                                      name_line_height=20, time_line_height=18, preview_line_height=20))
+                                      for scale in (80, 100, 125, 150)]
+        files['font-restart.json'] = dict(old_pid=1, old_start='old', new_pid=2, new_start='new',
+                                          id='fixture-id', root='fixture-root', sha256='fixture-binary')
+        files['text-preset-restart.state.json'] = dict(version=version, font_layout=dict(scale=150))
+        files['text-fresh-default.state.json'] = dict(version=version, font_layout=dict(scale=100))
+        (folder / 'text-fresh-default.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
+        for size in (80, 100, 125, 150):
+            (folder / f'text-preset-{size}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + str(size).encode() * 11000)
+        (folder / 'text-preset-restart.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
         files['shared-design.json'] = dict(width=1920, height=1032, draft='Shared design check',
                                            foreground_pixels=100, raised_pixels=3000,
                                            pill=dict(width=116, height=32))
@@ -757,7 +833,7 @@ class AppearanceVersionTests(unittest.TestCase):
         (folder / 'result.txt').write_text('JOURNEY PASSED: appearance')
         (folder / 'cleanup.txt').write_text('CLEANUP PASSED: fixture removed')
         (folder / 'preferences.txt').write_text('FontScale 100')
-        keys = ('^k', 'Theme: Graphite', 'Make text larger', '{ENTER}', '^0')
+        keys = ('^k', 'Theme: Graphite', 'Make text larger', 'Text size: Small', 'Text size: Default', 'Text size: Large', 'Text size: Larger', 'Quit Postbox', '{ENTER}', '^0')
         (folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in keys))
 
     def run_oracle(self, folder, source=None):
@@ -786,6 +862,45 @@ class AppearanceVersionTests(unittest.TestCase):
                 expected='Shared design check Go forward ten meters.', actual='Shared design check')))
             (folder / 'run.log').write_text('recorded PCM reaches the production composer')
             self.assertNotEqual(self.run_oracle(folder).returncode, 0)
+
+    def test_clipped_preset_and_wrong_restart_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            self.fixture(folder, '1.2.345')
+            presets = json.loads((folder / 'text-presets.json').read_text())
+            presets[-1]['list']['name_line_height'] = 30
+            (folder / 'text-presets.json').write_text(json.dumps(presets))
+            self.assertNotEqual(self.run_oracle(folder).returncode, 0)
+            self.fixture(folder, '1.2.345')
+            restart = json.loads((folder / 'font-restart.json').read_text())
+            restart['sha256'] = 'different-binary'
+            (folder / 'font-restart.json').write_text(json.dumps(restart))
+            self.assertNotEqual(self.run_oracle(folder).returncode, 0)
+
+    def test_rendered_overflow_and_missing_measurements_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            self.fixture(folder, '1.2.345')
+            cases = [
+                ('text-presets.json', lambda rows: rows[-1]['composer'].update(formatting=[10, 10, 300, 25])),
+                ('text-presets.json', lambda rows: rows[-1]['list_draw'].update(text_bottom=29)),
+                ('text-presets.json', lambda rows: rows[-1]['preview_draw'].update(text_bottom=53)),
+                ('text-presets.json', lambda rows: rows[-1]['chat']['words'][0].update(rect=[20, 20, 201, 40])),
+                ('text-presets.json', lambda rows: rows[-1].pop('chat')),
+                ('text-presets.json', lambda rows: rows[-1].pop('list_draw')),
+                ('font-palette.json', lambda row: row['draw'].update(text_bottom=45)),
+                ('font-palette.json', lambda row: row['group_draw'].update(text_bottom=23)),
+                ('font-palette.json', lambda row: row.pop('draw')),
+            ]
+            for filename, mutate in cases:
+                path = folder / filename
+                original = path.read_text()
+                data = json.loads(original)
+                mutate(data)
+                path.write_text(json.dumps(data))
+                with self.subTest(filename=filename, mutation=str(mutate)):
+                    self.assertNotEqual(self.run_oracle(folder).returncode, 0)
+                path.write_text(original)
 
     def test_wrong_installed_version_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

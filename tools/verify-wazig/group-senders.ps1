@@ -16,7 +16,7 @@ foreach ($messageId in @('GROUP-SAME', 'GROUP-QUOTE', 'GROUP-OWN')) {
 $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'WacliMessageCanvas')
 $canvas = (Get-Window $session).FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
 $bounds = $canvas.Current.BoundingRectangle
-$columnWidth = [Math]::Min(760, $bounds.Width - 32)
+$columnWidth = [Math]::Min(920, $bounds.Width - 32)
 $columnLeft = [Math]::Floor(($bounds.Width - $columnWidth) / 2)
 foreach ($messageId in @('GROUP-FIRST', 'GROUP-SAME', 'GROUP-DAY', 'GROUP-OTHER', 'GROUP-QUOTE')) {
     $row = $rows[$messageId]

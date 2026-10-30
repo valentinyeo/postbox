@@ -4,10 +4,12 @@ param(
     [string]$Evidence = 'verification-evidence',
     [ValidatePattern('^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')]
     [string]$ExpectedVersion = '0.0.526',
-    [string]$ExpectedProduct = 'Postbox'
+    [string]$ExpectedProduct = 'Postbox',
+    [switch]$FontBaseline
 )
 . "$PSScriptRoot/harness.ps1"
 Assert-That ($ExpectedProduct -in @('Postbox', 'Wazig')) 'Unknown product identity'
+if ($FontBaseline) { Assert-That ($Feature -ceq 'appearance' -and $ExpectedVersion -ceq '0.9.224' -and $ExpectedProduct -ceq 'Postbox') 'Font baseline requires the published 0.9.224 appearance fixture' }
 $registry = Get-Content (Join-Path $PSScriptRoot 'journeys.json') -Raw | ConvertFrom-Json
 $journey = @($registry.journeys | Where-Object name -CEQ $Feature)
 Assert-That ($journey.Count -eq 1) "Unknown verification journey: $Feature"
@@ -120,7 +122,11 @@ try {
     $window = Get-Window $session
     $compose = Get-Edit $window '1032'
     Save-Screen $session before
-    . (Join-Path $PSScriptRoot $journey.script)
+    if ($FontBaseline) {
+        . (Join-Path $PSScriptRoot 'font-baseline.ps1')
+    } else {
+        . (Join-Path $PSScriptRoot $journey.script)
+    }
     $final = Read-Control $session status
     Assert-That ($final.pending_sends -eq 0 -and $final.pending_archives -eq 0 -and $final.sync -eq 'stopped') 'Unexpected transport side effect'
     Assert-That (-not (Test-Path (Join-Path $profile '.wacli'))) 'Provider store was created'
@@ -139,7 +145,11 @@ try {
         Stop-RollbackApp $session
         . "$PSScriptRoot/rollback-offline-cleanup.ps1"
     }
-    "JOURNEY PASSED: $Feature" | Set-Content (Join-Path $Evidence 'result.txt')
+    if ($FontBaseline) {
+        'FONT BASELINE CAPTURED: v0.9.224' | Set-Content (Join-Path $Evidence 'result.txt')
+    } else {
+        "JOURNEY PASSED: $Feature" | Set-Content (Join-Path $Evidence 'result.txt')
+    }
 } catch {
     "${Feature}: $($_.Exception.Message)" | Set-Content (Join-Path $Evidence 'failure.txt')
     try { Save-Screen $session failure } catch { $_ | Out-String | Add-Content (Join-Path $Evidence 'failure.txt') }
@@ -159,7 +169,8 @@ try {
     Stop-Transcript | Out-Null
 }
 $result = @{ feature = $Feature; status = 'passed' }
-if ($journey.result_checks) {
+if ($FontBaseline) { $result.status = 'baseline-captured' }
+if (-not $FontBaseline -and $journey.result_checks) {
     $result.checks = Get-Content (Join-Path $Evidence $journey.result_checks) -Raw | ConvertFrom-Json -AsHashtable
 }
 $result | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'result.json')

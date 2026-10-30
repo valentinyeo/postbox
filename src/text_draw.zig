@@ -67,6 +67,15 @@ const FormatKey = struct {
     }
 };
 
+pub const DrawMeasurement = struct {
+    rect: win.RECT,
+    top: i32,
+    bottom: i32,
+    renderer: enum { directwrite, gdi },
+};
+var measuring = false;
+var last_measurement: ?DrawMeasurement = null;
+
 pub var directwrite = false;
 var failed = false;
 var initialized = false;
@@ -552,6 +561,12 @@ fn render(dc: win.HDC, text_ptr: [*c]const u16, len: i32, rect: *win.RECT, flags
         .center => @divTrunc(rect.bottom - rect.top - height, 2),
         .bottom => rect.bottom - rect.top - height,
     };
+    if (measuring) last_measurement = .{
+        .rect = rect.*,
+        .top = rect.top + offset + @as(i32, @intFromFloat(@floor(metrics.top))),
+        .bottom = rect.top + offset + @as(i32, @intFromFloat(@ceil(metrics.top + metrics.height))),
+        .renderer = .directwrite,
+    };
     var clip: win.RECT = undefined;
     const clip_kind = win.GetClipBox(dc, &clip);
     if (clip_kind == win.ERROR) return error.ClipFailed;
@@ -646,6 +661,19 @@ pub fn drawText(dc: win.HDC, text: [*c]const u16, len: i32, rect: *win.RECT, fla
         };
     }
     return win.DrawTextW(dc, text, len, rect, flags);
+}
+
+pub fn drawTextMeasured(dc: win.HDC, text: [*c]const u16, len: i32, rect: *win.RECT, flags: u32) ?DrawMeasurement {
+    measuring = true;
+    last_measurement = null;
+    defer measuring = false;
+    const height = drawText(dc, text, len, rect, flags);
+    if (last_measurement) |measurement| {
+        if (directwrite) return measurement;
+    }
+    if (height <= 0) return null;
+    const offset = if (flags & Flags.vcenter != 0) @divTrunc(rect.bottom - rect.top - height, 2) else if (flags & Flags.bottom != 0) rect.bottom - rect.top - height else 0;
+    return .{ .rect = rect.*, .top = rect.top + offset, .bottom = rect.top + offset + height, .renderer = .gdi };
 }
 
 pub fn drawRun(dc: win.HDC, x: i32, y: i32, text: [*c]const u16, len: i32) i32 {
