@@ -66,7 +66,7 @@ const App = struct {
     update_offer_visible: bool = false,
     update_card_error: [96]u8 = undefined,
     update_card_error_len: usize = 0,
-    update_card_error_source: enum { update, general, message_read } = .update,
+    update_card_error_source: enum { update, general, message_read, chats_read } = .update,
     last_log: Utf8Text(191) = .{},
     allocator: std.mem.Allocator = std.testing.allocator,
     chats: [2]Chat = .{ .{}, .{} },
@@ -142,6 +142,7 @@ fn msgCacheStore(a: *App, _: chat_key.Key, _: []const u8) void {
     a.cached += 1;
 }
 fn applyChats(a: *App, raw: []const u8, _: bool) bool {
+    if (std.mem.eql(u8, raw, "malformed")) return false;
     a.chats[0].timestamp.set(raw);
     return true;
 }
@@ -830,5 +831,38 @@ test "IGSH-1080 an empty selection clears only its message read error" {
         @memcpy(a.update_card_error[0..7], "install");
         refreshMessages(&a);
         try std.testing.expectEqual(@as(usize, if (read_error) 0 else 7), a.update_card_error_len);
+    }
+}
+
+test "IGSH-1169 chat read recovery clears only current valid results" {
+    var a = fixture();
+    var failure = WacliResult{ .kind = .chats, .gen = a.chats_gen, .ok = false };
+    deliverChats(&a, &failure);
+    try std.testing.expect(a.update_card_error_source == .chats_read);
+    var stale = WacliResult{ .kind = .chats, .gen = a.chats_gen - 1 };
+    deliverChats(&a, &stale);
+    try std.testing.expect(a.update_card_error_source == .chats_read);
+    var malformed = WacliResult{ .kind = .chats, .gen = a.chats_gen, .data = "malformed" };
+    deliverChats(&a, &malformed);
+    try std.testing.expect(a.update_card_error_source == .chats_read);
+    var fresh = WacliResult{ .kind = .chats, .gen = a.chats_gen };
+    deliverChats(&a, &fresh);
+    try std.testing.expectEqual(@as(usize, 0), a.update_card_error_len);
+    try std.testing.expectEqual(@as(u32, 0), a.chats_read_attempts);
+    try std.testing.expectEqual(@as(u32, 0), a.chats_read_retry_ticks);
+}
+
+test "IGSH-1169 chat results preserve unrelated cards" {
+    for ([_]@TypeOf((App{}).update_card_error_source){ .update, .general, .message_read }) |source| {
+        var a = fixture();
+        a.update_card_error_source = source;
+        a.update_card_error_len = 7;
+        @memcpy(a.update_card_error[0..7], "problem");
+        var failure = WacliResult{ .kind = .chats, .gen = a.chats_gen, .ok = false };
+        deliverChats(&a, &failure);
+        var success = WacliResult{ .kind = .chats, .gen = a.chats_gen };
+        deliverChats(&a, &success);
+        try std.testing.expectEqual(source, a.update_card_error_source);
+        try std.testing.expectEqualStrings("problem", a.update_card_error[0..a.update_card_error_len]);
     }
 }

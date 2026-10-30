@@ -854,7 +854,7 @@ const App = struct {
     update_click_wait: bool = false,
     update_card_error: [96]u8 = undefined,
     update_card_error_len: usize = 0,
-    update_card_error_source: enum { update, general, message_read } = .update,
+    update_card_error_source: enum { update, general, message_read, chats_read } = .update,
     update_dismissed: [32]u8 = undefined,
     update_dismissed_len: usize = 0,
     chats: []Chat = &.{},
@@ -2381,7 +2381,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     defer if (query_utf8) |query| a.allocator.free(query);
 
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch {
-        showProblem(a, "Unable to read chats from wacli");
+        showChatsReadProblem(a);
         return false;
     };
     defer parsed.deinit();
@@ -8672,6 +8672,20 @@ fn reconcileOpenChat(a: *App) void {
     if (wacliPendingGet(a, .messages) > 0) return;
     if (!chat_reconcile.openChatStale(chat.jid.slice(), chat.timestamp.slice(), a.displayed_jid.slice(), a.displayed_timestamp.slice())) return;
     refreshMessages(a);
+}
+
+fn showChatsReadProblem(a: *App) void {
+    if (updateCardVisible(a) and a.update_card_error_source != .chats_read) return;
+    showProblem(a, "Unable to read chats from wacli");
+    a.update_card_error_source = .chats_read;
+    updateCardRefresh(a);
+}
+
+fn clearChatsReadProblem(a: *App) void {
+    if (a.update_card_error_source != .chats_read) return;
+    a.update_card_error_len = 0;
+    a.update_card_error_source = .update;
+    updateCardRefresh(a);
 }
 
 fn scheduleMessageReadRetry(a: *App) void {
@@ -17312,7 +17326,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 },
                 .chats => {
                     if (!result.ok and result.gen == a.chats_gen) {
-                        showProblem(a, "Unable to read chats from wacli");
+                        showChatsReadProblem(a);
                         if (a.chats_read_attempts < 3) {
                             a.chats_read_attempts += 1;
                             a.chats_read_retry_ticks = 2;
@@ -17322,6 +17336,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         }
                     } else if (result.ok and result.gen == a.chats_gen) {
                         if (applyChats(a, result.data, true)) {
+                            clearChatsReadProblem(a);
                             a.chats_read_retry_ticks = 0;
                             a.chats_read_attempts = 0;
                             saveChatsCache(a, result.data);
@@ -19638,7 +19653,7 @@ fn updateCardVisible(a: *const App) bool {
 }
 
 fn updateCardNotesHeight(a: *const App) i32 {
-    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) return 0;
+    if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read) and a.update_card_error_len > 0) return 0;
     const pending = a.update_pending orelse return 0;
     const hwnd = a.hwnd orelse return 0;
     const hdc = win.GetDC(hwnd) orelse return 0;
@@ -19721,6 +19736,12 @@ fn updateCardFail(a: *App, text: []const u8) void {
 }
 
 fn updateCardClick(a: *App) void {
+    if (a.update_card_error_source == .chats_read and a.update_card_error_len > 0) {
+        a.chats_read_attempts = 0;
+        a.chats_read_retry_ticks = 0;
+        refreshChats(a);
+        return;
+    }
     if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) {
         clearMessageReadProblem(a);
         a.msg_read_attempts = 0;
@@ -19745,6 +19766,10 @@ fn updateCardClick(a: *App) void {
 }
 
 fn updateCardDismiss(a: *App) void {
+    if (a.update_card_error_source == .chats_read and a.update_card_error_len > 0) {
+        clearChatsReadProblem(a);
+        return;
+    }
     if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) {
         clearMessageReadProblem(a);
         return;
@@ -19819,7 +19844,7 @@ fn removeLeftoverOldExe() void {
 fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     if (!updateCardVisible(a)) return;
     const pending_tag = if (a.update_pending) |pending| pending.tag else "";
-    const pending_notes = if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) "" else if (a.update_pending) |pending| pending.notes else "";
+    const pending_notes = if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read) and a.update_card_error_len > 0) "" else if (a.update_pending) |pending| pending.notes else "";
     const card = updateCardRect(a);
     smooth.fillRoundRect(shapes, card, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container_low);
     smooth.strokeRoundRect(shapes, card, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline, 1);
@@ -19830,6 +19855,8 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     const failed = a.update_card_error_len > 0;
     const title: []const u8 = if (a.update_installed)
         "Restarting..."
+    else if (failed and a.update_card_error_source == .chats_read)
+        "Chats unavailable"
     else if (failed and a.update_card_error_source == .message_read)
         "Messages unavailable"
     else if (failed)

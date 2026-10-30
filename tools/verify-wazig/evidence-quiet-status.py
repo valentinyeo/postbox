@@ -56,6 +56,27 @@ def check_quiet_status(folder):
         assert (folder / (stage + '.png')).read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     failures = [row for row in requests if row.get('wire_path', '').startswith('/v1/wazig/chats') and row['status'] == 503]
     assert failures and all(row in failures for row in problem['failures']) and problem['failures']
+    chat_recovery = read('chat-read-recovery.json')
+    chat_reads = [row for row in requests if row.get('wire_path', '').startswith('/v1/wazig/chats')]
+    chat_reads = chat_reads[:len(chat_recovery['requests'])]
+    assert chat_reads == chat_recovery['requests']
+    manual, automatic = chat_recovery['manual_start'], chat_recovery['auto_start']
+    assert chat_recovery['pid'] == session['pid'] and 0 < manual < automatic < len(chat_reads)
+    assert any(row['status'] == 503 for row in chat_reads[:manual])
+    assert any(row['status'] == 200 for row in chat_reads[manual:automatic])
+    assert any(row['status'] == 503 for row in chat_reads[manual:automatic])
+    assert any(row['status'] == 200 for row in chat_reads[automatic:])
+    assert chat_recovery['automatic_problem']['error'] == problem['expected']
+    for key in ('manual', 'automatic'):
+        state = chat_recovery[key]
+        assert not state['update_card']['visible'] and state['update_card']['error'] == ''
+        assert state['chat_count'] == 2 and state['selected']['id'] == chat_recovery['initial']['selected']['id']
+        assert [(row['id'], row['text']) for row in chat_recovery[key + '_messages']['messages']] == [(row['id'], row['text']) for row in chat_recovery['original_messages']['messages']]
+    assert chat_recovery['draft'] == 'Recovery draft'
+    assert 'Recovery draft' in (folder / 'chat-read-draft.json').read_text(encoding='utf-8-sig')
+    assert len(chat_recovery['retry']) == 2
+    for stage in ('chat-read-recovered', 'chat-read-auto-recovered'):
+        assert (folder / (stage + '.png')).read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     for stage in ('before', 'quiet-status', 'version', 'sync-problem', 'after'):
         image = (folder / f'{stage}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
