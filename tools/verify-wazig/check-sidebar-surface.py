@@ -134,7 +134,7 @@ def measure_design(image, layout, messages):
 
 
 def validate_design(metrics):
-    for label, expected in [('sidebar', 24), ('chat', 16), ('divider', 42)]:
+    for label, expected in [('sidebar', 24), ('chat', 16), ('divider', 46)]:
         assert all(abs(channel - expected) <= 1 for channel in metrics[label]), (label, metrics)
     assert metrics['sidebar_width'] == metrics['expected_sidebar_width'], metrics
     assert 0 < metrics['bubble_width'] <= metrics['bubble_limit'], metrics

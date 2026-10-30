@@ -5,11 +5,14 @@ $original = [IO.File]::ReadAllText($path)
 $pattern = '(?s)(pub const amoled: Palette = \.\{)(.*?)(\n\};)'
 $match = [regex]::Match($original, $pattern)
 if (-not $match.Success) { throw 'AMOLED palette declaration missing' }
-$colours = [regex]::Matches($match.Groups[2].Value, 'hex\(0x([0-9a-f]{6})\)')
+$tokens = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../src/design_tokens.zig'))
+$colours = [regex]::Matches($match.Groups[2].Value, 'design\.(Reader\w+)')
 if ($colours.Count -ne 18) { throw 'Unexpected AMOLED colour token count' }
-$inverted = [regex]::Replace($match.Groups[2].Value, 'hex\(0x([0-9a-f]{6})\)', {
+$inverted = [regex]::Replace($match.Groups[2].Value, 'design\.(Reader\w+)', {
     param($colour)
-    'hex(0x{0:x6})' -f (0xffffff - [Convert]::ToInt32($colour.Groups[1].Value, 16))
+    $token = [regex]::Match($tokens, 'pub const ' + [regex]::Escape($colour.Groups[1].Value) + ': u32 = 0x([0-9a-fA-F]{6});')
+    if (-not $token.Success) { throw "Missing shared colour token $($colour.Groups[1].Value)" }
+    'hex(0x{0:x6})' -f (0xffffff - [Convert]::ToInt32($token.Groups[1].Value, 16))
 })
 $replacement = $match.Groups[1].Value + $inverted + $match.Groups[3].Value
 try {
