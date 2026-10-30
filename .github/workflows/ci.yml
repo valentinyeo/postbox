@@ -181,6 +181,38 @@ jobs:
           name: telegram-hub-smoke
           path: verification-evidence/
 
+  caption-verification:
+    name: caption-verification
+    runs-on: windows-latest
+    needs: tdlib
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Messages-windows-x86_64-telegram
+          path: bin/
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+      - name: Verify forwarded image caption
+        shell: pwsh
+        run: tools/verify-wazig/run.ps1 -Feature media-fit -Bin bin -Evidence caption-evidence
+      - name: Validate caption evidence
+        shell: pwsh
+        run: python tools/verify-wazig/check-evidence.py caption-evidence
+      - name: Cleanup
+        if: always()
+        shell: pwsh
+        run: tools/verify-wazig/cleanup.ps1 -Evidence caption-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: caption-verification-evidence
+          path: caption-evidence/
+
   unfurl-verification:
     name: unfurl-verification
     runs-on: windows-latest

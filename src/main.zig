@@ -479,6 +479,7 @@ const Message = struct {
     my_reaction: Utf8Text(63) = .{},
     from_me: bool = false,
     revoked: bool = false,
+    forwarded: bool = false,
     send_state: enum { none, pending, failed } = .none,
     reaction_pending: bool = false,
     bitmap: ?win.HBITMAP = null,
@@ -8807,11 +8808,11 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
             else => continue,
         };
         const id = getString(object, "MsgID");
-        var text = getString(object, "DisplayText");
-        if (text.len == 0) text = getString(object, "Text");
-        text = message_filter.stripPlaceholder(text);
-        const revoked = getBool(object, "Revoked");
         const media_type = getString(object, "MediaType");
+        var text = message_filter.stripPlaceholder(getString(object, "DisplayText"));
+        if (text.len == 0 or media_drain.isPlaceholder(media_type, text)) text = message_filter.stripPlaceholder(getString(object, "Text"));
+        if (text.len == 0 or media_drain.isPlaceholder(media_type, text)) text = message_filter.stripPlaceholder(getString(object, "MediaCaption"));
+        const revoked = getBool(object, "Revoked");
         const filename = getString(object, "Filename");
         const local_path = getString(object, "LocalPath");
         const reaction_to = getString(object, "ReactionToID");
@@ -8859,6 +8860,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
             message.text.set(a.allocator, if (media_drain.isPlaceholder(media_type, text)) "" else text);
         }
         message.from_me = getBool(object, "FromMe");
+        message.forwarded = !revoked and chat.provider == .whatsapp and getBool(object, "IsForwarded");
         message.media_type.set(media_type);
         message.mime_type.set(getString(object, "MimeType"));
         message.local_path.set(a.allocator, local_path);
@@ -13346,7 +13348,7 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try w.print(",\"gif_frames\":{d},\"gif_frame\":{d}", .{ message.gif_frame_count, message.gif_frame_index });
         try w.writeAll(",\"media_type\":");
         try control_api.writeString(w, message.media_type.slice());
-        try w.print(",\"local\":{},\"transcript_chars\":{d},\"expanded\":{}", .{ message.local_path.len > 0, message.transcript.len, message.transcript_expanded });
+        try w.print(",\"local\":{},\"transcript_chars\":{d},\"expanded\":{},\"forwarded\":{}", .{ message.local_path.len > 0, message.transcript.len, message.transcript_expanded, message.forwarded });
         for ([_]struct { name: []const u8, rect: win.RECT }{
             .{ .name = "bubble", .rect = message.bubble_hit },
             .{ .name = "sender_header", .rect = message.sender_hit },
@@ -15623,7 +15625,16 @@ fn messageWidth(hdc: win.HDC, a: *App, message: *const Message, limit: i32) i32 
     var extent: i32 = 0;
     _ = formattedMessage(hdc, a, message, @max(1, limit - px(a, 28)), false, 0, 0, &extent);
     const reaction_width = reactionChipSize(hdc, a, message, limit).cx;
-    return @min(limit, @max(extent + px(a, 28), reaction_width + px(a, 24)));
+    var label_width: i32 = 0;
+    if (message.forwarded) {
+        const saved = win.SaveDC(hdc);
+        defer _ = win.RestoreDC(hdc, saved);
+        _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+        var rect = win.RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+        _ = text_draw.drawText(hdc, lit("↪ Forwarded"), -1, &rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_CALCRECT);
+        label_width = rect.right + px(a, 28);
+    }
+    return @min(limit, @max(@max(extent + px(a, 28), reaction_width + px(a, 24)), label_width));
 }
 
 fn cachedChatPreview(a: *App, chat: *Chat) void {
@@ -15996,6 +16007,7 @@ fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: b
         @intCast(message.bitmap_width),
         @intCast(message.bitmap_height),
         message.media_type.len,
+        @intFromBool(message.forwarded),
         message.reaction.len,
         @intFromEnum(message.unfurl_provider),
         @intCast(threadSummaryHeight(@constCast(a), message)),
@@ -16032,6 +16044,7 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, sh
     const header_height = messageHeaderHeight(hdc, a, show_sender);
     const skip_body_line = message.text.len == 0 and message.quote.len > 0;
     var height = quoteBlockHeight(hdc, a, message, width) + header_height;
+    if (message.forwarded) height += textLineHeight(hdc, a.font_small.?) + px(a, 4);
     const text_width = width - px(a, 28);
     if (!skip_body_line) {
         height += wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), if (message.text.len > 0) @intCast(message.text.len) else 1, text_width, false, 0, 0, message);
@@ -16749,6 +16762,14 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);
             message.media_hit = media_rect;
             text_top += px(a, 54);
+        }
+        if (message.forwarded) {
+            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+            _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+            const label_height = textLineHeight(hdc, a.font_small.?);
+            var label = win.RECT{ .left = left + px(a, 14), .top = text_top, .right = right - px(a, 14), .bottom = text_top + label_height };
+            _ = text_draw.drawText(hdc, lit("↪ Forwarded"), -1, &label, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
+            text_top += label_height + px(a, 4);
         }
         _ = win.SelectObject(hdc, @ptrCast(a.font.?));
         _ = win.SetTextColor(hdc, if (message.from_me) theme.current.on_primary_container else theme.current.on_surface);
