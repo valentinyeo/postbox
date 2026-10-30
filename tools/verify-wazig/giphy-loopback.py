@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import threading
+import tempfile
 import time
 import urllib.parse
 import uuid
@@ -91,7 +92,20 @@ def main():
     observers = []
     events = {}
     output = ""
+    compile_output = ""
+    phase = "compile"
+    evidence["compile"] = {"status": "pending"}
+    evidence["execution"] = {"status": "not_started"}
+    temp = tempfile.TemporaryDirectory(prefix="postbox-giphy-")
     try:
+        executable = Path(temp.name) / "giphy-loopback-test.exe"
+        compiled = subprocess.run(["zig", "test", "src/giphy_http_win.zig", "-lc", "-lwinhttp", "-lkernel32", "--test-filter", "GIPHY_LOOPBACK", "--test-no-exec", "-femit-bin=" + str(executable)], capture_output=True, text=True, timeout=360)
+        compile_output = compiled.stdout + compiled.stderr
+        evidence["compile"] = {"status": "passed" if compiled.returncode == 0 else "failed", "exit_code": compiled.returncode}
+        if compiled.returncode != 0:
+            raise RuntimeError("native compilation failed")
+        phase = "execution"
+        evidence["execution"]["status"] = "setup"
         env = os.environ.copy()
         for case, prefix in (("cancelstall", "CANCEL"), ("deadlinestall", "DEADLINE"), ("bodycancel", "BODY_CANCEL"), ("bodydeadline", "BODY_DEADLINE")):
             for suffix in ("arrived", "pending", "done"):
@@ -127,11 +141,12 @@ def main():
             thread.start()
         env["POSTBOX_GIPHY_FIXTURE"] = "loopback-only"
         env["POSTBOX_GIPHY_PORT"] = str(fixture.server_port)
-        proc = subprocess.run(["zig", "test", "src/giphy_http_win.zig", "-lc", "-lwinhttp", "-lkernel32", "--test-filter", "GIPHY_LOOPBACK"], env=env, capture_output=True, text=True, timeout=90)
+        evidence["execution"]["status"] = "running"
+        proc = subprocess.run([str(executable)], env=env, capture_output=True, text=True, timeout=90)
         output = proc.stdout + proc.stderr
         for thread in observers:
             thread.join(timeout=2)
-        evidence["native_exit_code"] = proc.returncode
+        evidence["execution"] = {"status": "passed" if proc.returncode == 0 else "failed", "exit_code": proc.returncode}
         evidence["request_count"] = len(fixture.requests)
         evidence["sentinel_hits"] = sentinel.hits
         assert proc.returncode == 0, "native tests failed"
@@ -152,8 +167,14 @@ def main():
         evidence["status"] = "passed"
     except Exception as exc:
         if isinstance(exc, subprocess.TimeoutExpired):
-            output = (exc.stdout or b"").decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-            output += (exc.stderr or b"").decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            partial = (exc.stdout or b"").decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            partial += (exc.stderr or b"").decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            if phase == "compile":
+                compile_output = partial
+            else:
+                output = partial
+            evidence[phase]["status"] = "timeout"
+        evidence["failure_phase"] = phase
         evidence["failure_type"] = type(exc).__name__
         raise
     finally:
@@ -173,9 +194,13 @@ def main():
             thread.join()
         for handle in handles:
             kernel.CloseHandle(handle)
-        safe_lines = [line if not any(term in line.lower() for term in ("api_key", "fixture-key", "authorization", "http://", "https://")) else "[redacted]" for line in output.splitlines()]
-        (evidence_dir / "native.log").write_text("\n".join(safe_lines), encoding="utf-8")
+        def sanitized(text):
+            return "\n".join(line if not any(term in line.lower() for term in ("api_key", "fixture-key", "authorization", "http://", "https://")) else "[redacted]" for line in text.splitlines())
+
+        (evidence_dir / "compile.log").write_text(sanitized(compile_output), encoding="utf-8")
+        (evidence_dir / "native.log").write_text(sanitized(output), encoding="utf-8")
         (evidence_dir / "results.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+        temp.cleanup()
 
 
 if __name__ == "__main__":
