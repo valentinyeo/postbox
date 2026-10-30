@@ -669,6 +669,12 @@ const SlackInstallation = struct {
     user_pages: u32 = 0,
 };
 
+const FontDrawProof = struct {
+    scale: i32,
+    item: win.RECT,
+    text: text_draw.DrawMeasurement,
+};
+
 const App = struct {
     allocator: std.mem.Allocator,
     people: people_index.Index,
@@ -781,6 +787,10 @@ const App = struct {
     last_chat_count: usize = std.math.maxInt(usize),
     font: ?win.HFONT = null,
     font_small: ?win.HFONT = null,
+    font_list_proof: ?FontDrawProof = null,
+    font_preview_proof: ?FontDrawProof = null,
+    font_palette_proof: ?FontDrawProof = null,
+    font_palette_group_proof: ?FontDrawProof = null,
     font_body_height: i32 = 0,
     font_small_height: i32 = 0,
     font_row_height: i32 = 0,
@@ -11964,6 +11974,13 @@ fn controlSearchText(a: *App, buffer: *[1024]u8) []const u8 {
     return buffer[0..bytes];
 }
 
+fn controlFontDraw(w: *std.Io.Writer, proof: ?FontDrawProof) !void {
+    const value = proof orelse return w.writeAll("null");
+    const item = value.item;
+    const rect = value.text.rect;
+    try w.print("{{\"scale\":{d},\"renderer\":\"{s}\",\"item\":[{d},{d},{d},{d}],\"draw\":[{d},{d},{d},{d}],\"text_top\":{d},\"text_bottom\":{d}}}", .{ value.scale, @tagName(value.text.renderer), item.left, item.top, item.right, item.bottom, rect.left, rect.top, rect.right, rect.bottom, value.text.top, value.text.bottom });
+}
+
 fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     const sync = if (a.accounts_maintenance) "maintenance" else if (a.sync_logged_out) "logged_out" else if (a.sync_child != null) "running" else "stopped";
     const pending_sends = a.pending_send_count + wacliPendingGet(a, .slack_send) + wacliPendingGet(a, .slack_attach) + wacliPendingGet(a, .slack_share);
@@ -11990,6 +12007,14 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         var preview_font = std.mem.zeroes(win.LOGFONTW);
         if (a.font_row) |font| _ = win.GetObjectW(font, @sizeOf(win.LOGFONTW), &row_font);
         if (a.font_small) |font| _ = win.GetObjectW(font, @sizeOf(win.LOGFONTW), &preview_font);
+        try w.writeAll(",\"font_list_draw\":");
+        try controlFontDraw(w, a.font_list_proof);
+        try w.writeAll(",\"font_preview_draw\":");
+        try controlFontDraw(w, a.font_preview_proof);
+        try w.writeAll(",\"font_palette_group_draw\":");
+        try controlFontDraw(w, a.font_palette_group_proof);
+        try w.writeAll(",\"font_palette_draw\":");
+        try controlFontDraw(w, a.font_palette_proof);
         const row = a.chat_row_geometry;
         try w.print(",\"font_layout\":{{\"scale\":{d},\"row_font_height\":{d},\"preview_font_height\":{d},\"body_line_height\":{d},\"preview_line_height\":{d},\"name_line_height\":{d},\"time_line_height\":{d},\"name_top\":{d},\"preview_top\":{d},\"preview_bottom\":{d},\"row_height\":{d}}}", .{ a.font_scale, row_font.lfHeight, preview_font.lfHeight, a.font_body_height, a.font_small_height, a.font_row_height, a.font_time_height, row.name_top, row.preview_top, row.preview_bottom, row.height });
     }
@@ -13193,7 +13218,11 @@ fn drawPaletteItem(a: *App, item: *win.DRAWITEMSTRUCT) void {
     }
     const label_right = if (palette_item.shortcut.len > 0 or group_start) item.rcItem.right - 130 else item.rcItem.right - 20;
     var label_rect = win.RECT{ .left = item.rcItem.left + (if (chat_result) @as(i32, 46) else 20), .top = item.rcItem.top, .right = label_right, .bottom = item.rcItem.bottom };
-    _ = text_draw.drawText(item.hDC, palette_item.label.ptr(), @intCast(palette_item.label.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
+    if (verification_fixture and index == 0) {
+        if (text_draw.drawTextMeasured(item.hDC, palette_item.label.ptr(), @intCast(palette_item.label.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER)) |measurement| {
+            a.font_palette_proof = .{ .scale = a.font_scale, .item = item.rcItem, .text = measurement };
+        }
+    } else _ = text_draw.drawText(item.hDC, palette_item.label.ptr(), @intCast(palette_item.label.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     if (palette_item.shortcut.len > 0) {
         _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
         _ = win.SetTextColor(item.hDC, if (selected and theme.choice == .amoled) theme.current.on_secondary_container else theme.current.on_surface_variant);
@@ -13205,7 +13234,11 @@ fn drawPaletteItem(a: *App, item: *win.DRAWITEMSTRUCT) void {
         _ = win.SetTextColor(item.hDC, theme.current.on_surface_variant);
         var group_rect = win.RECT{ .left = item.rcItem.right - 120, .top = item.rcItem.top + 2, .right = item.rcItem.right - 16, .bottom = item.rcItem.top + @max(20, a.font_small_height + 2) };
         const label = if (chat_result) lit("Chats") else lit("Commands");
-        _ = text_draw.drawText(item.hDC, label, -1, &group_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
+        if (verification_fixture and index == 0) {
+            if (text_draw.drawTextMeasured(item.hDC, label, -1, &group_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER)) |measurement| {
+                a.font_palette_group_proof = .{ .scale = a.font_scale, .item = item.rcItem, .text = measurement };
+            }
+        } else _ = text_draw.drawText(item.hDC, label, -1, &group_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
         if (index > 0) {
             const brush = win.CreateSolidBrush(theme.current.outline) orelse return;
             defer _ = win.DeleteObject(brush);
@@ -14750,7 +14783,11 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_row.?));
     _ = win.SetTextColor(item.hDC, row_text);
     var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + row.name_top, .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + row.preview_top };
-    _ = text_draw.drawText(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
+    if (verification_fixture and index == 0) {
+        if (text_draw.drawTextMeasured(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER)) |measurement| {
+            a.font_list_proof = .{ .scale = a.font_scale, .item = item.rcItem, .text = measurement };
+        }
+    } else _ = text_draw.drawText(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, row_muted);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_time.?));
@@ -14772,7 +14809,11 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
             _ = win.SetTextColor(item.hDC, if (dimmed) theme.archivedRowColor(draft_color) else draft_color);
             var prefix_rect = kind_rect;
             _ = text_draw.drawText(item.hDC, wide_label.ptr(), 7, &prefix_rect, win.DT_CALCRECT | win.DT_SINGLELINE | win.DT_NOPREFIX);
-            _ = text_draw.drawText(item.hDC, wide_label.ptr(), 7, &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
+            if (verification_fixture and index == 0) {
+                if (text_draw.drawTextMeasured(item.hDC, wide_label.ptr(), 7, &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX)) |measurement| {
+                    a.font_preview_proof = .{ .scale = a.font_scale, .item = item.rcItem, .text = measurement };
+                }
+            } else _ = text_draw.drawText(item.hDC, wide_label.ptr(), 7, &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
             var preview_rect = kind_rect;
             preview_rect.left = @min(kind_rect.right, kind_rect.left + prefix_rect.right - prefix_rect.left);
             _ = win.SetTextColor(item.hDC, row_muted);
@@ -14793,7 +14834,11 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
             @memcpy(kind.buf[0..chat.kind.len], chat.kind.slice());
             kind.len = chat.kind.len;
         }
-        _ = text_draw.drawText(item.hDC, kind.ptr(), @intCast(kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+        if (verification_fixture and index == 0) {
+            if (text_draw.drawTextMeasured(item.hDC, kind.ptr(), @intCast(kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS)) |measurement| {
+                a.font_preview_proof = .{ .scale = a.font_scale, .item = item.rcItem, .text = measurement };
+            }
+        } else _ = text_draw.drawText(item.hDC, kind.ptr(), @intCast(kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
     }
     if (marker) |text| {
         _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else row_primary);

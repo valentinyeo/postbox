@@ -665,10 +665,15 @@ class AppearanceVersionTests(unittest.TestCase):
                  'text-scale.json': dict(initial_saved=False, larger=110, reset=100,
                                         baseline_points=10, larger_points=12, reset_points=10)}
         files['font-viewport.json'] = dict(width=1920, height=1032, hosted_only=True)
-        files['font-palette.json'] = dict(edit_height=36, row_height=44, body_line_height=20, small_line_height=20)
+        files['font-palette.json'] = dict(edit_height=36, row_height=44, body_line_height=20, small_line_height=20, item=[0, 0, 300, 44], group_draw=dict(scale=150, renderer='directwrite', item=[0, 0, 300, 44], draw=[200, 2, 290, 22], text_top=3, text_bottom=20), draw=dict(scale=150, renderer='directwrite', item=[0, 0, 300, 44], draw=[10, 0, 200, 44], text_top=10, text_bottom=30))
         (folder / 'text-preset-palette.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
         files['text-presets.json'] = [dict(scale=scale, points=scale / 10, chat_font_height=-scale,
                                             list_font_height=-scale, list_uia_height=200, composer_uia_height=50,
+                                            composer=dict(formatting=[10, 10, 300, 40], line=[12, 12, 200, 35]),
+                                            list_item=[0, 0, 300, 56],
+                                            list_draw=dict(scale=scale, renderer='directwrite', item=[0, 0, 300, 56], draw=[66, 4, 250, 28], text_top=6, text_bottom=26),
+                                            preview_draw=dict(scale=scale, renderer='gdi', item=[0, 0, 300, 56], draw=[66, 28, 250, 52], text_top=29, text_bottom=50),
+                                            chat=dict(id='GROUP-OWN', bubble=[10, 10, 200, 70], words=[dict(rect=[20, 20, 80, 40])]),
                                             list=dict(scale=scale, row_height=56, body_line_height=20,
                                                       name_top=4, preview_top=28, preview_bottom=52,
                                                       name_line_height=20, time_line_height=18, preview_line_height=20))
@@ -679,7 +684,7 @@ class AppearanceVersionTests(unittest.TestCase):
         files['text-fresh-default.state.json'] = dict(version=version, font_layout=dict(scale=100))
         (folder / 'text-fresh-default.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
         for size in (80, 100, 125, 150):
-            (folder / f'text-preset-{size}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
+            (folder / f'text-preset-{size}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + str(size).encode() * 11000)
         (folder / 'text-preset-restart.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
         files['shared-design.json'] = dict(width=1920, height=1032, draft='Shared design check',
                                            foreground_pixels=100, raised_pixels=3000,
@@ -740,6 +745,31 @@ class AppearanceVersionTests(unittest.TestCase):
             restart['sha256'] = 'different-binary'
             (folder / 'font-restart.json').write_text(json.dumps(restart))
             self.assertNotEqual(self.run_oracle(folder).returncode, 0)
+
+    def test_rendered_overflow_and_missing_measurements_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            self.fixture(folder, '1.2.345')
+            cases = [
+                ('text-presets.json', lambda rows: rows[-1]['composer'].update(formatting=[10, 10, 300, 25])),
+                ('text-presets.json', lambda rows: rows[-1]['list_draw'].update(text_bottom=29)),
+                ('text-presets.json', lambda rows: rows[-1]['preview_draw'].update(text_bottom=53)),
+                ('text-presets.json', lambda rows: rows[-1]['chat']['words'][0].update(rect=[20, 20, 201, 40])),
+                ('text-presets.json', lambda rows: rows[-1].pop('chat')),
+                ('text-presets.json', lambda rows: rows[-1].pop('list_draw')),
+                ('font-palette.json', lambda row: row['draw'].update(text_bottom=45)),
+                ('font-palette.json', lambda row: row['group_draw'].update(text_bottom=23)),
+                ('font-palette.json', lambda row: row.pop('draw')),
+            ]
+            for filename, mutate in cases:
+                path = folder / filename
+                original = path.read_text()
+                data = json.loads(original)
+                mutate(data)
+                path.write_text(json.dumps(data))
+                with self.subTest(filename=filename, mutation=str(mutate)):
+                    self.assertNotEqual(self.run_oracle(folder).returncode, 0)
+                path.write_text(original)
 
     def test_wrong_installed_version_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

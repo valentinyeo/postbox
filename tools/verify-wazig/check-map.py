@@ -461,9 +461,9 @@ appearance = (root / 'tools/verify-wazig/journey-appearance.ps1').read_text(enco
 appearance_validator = (root / 'tools/verify-wazig/evidence-palette.py').read_text(encoding='utf-8')
 assert entries['appearance']['script'] == 'journey-appearance.ps1'
 assert entries['appearance']['validator']['file'] == 'evidence-palette.py'
-for fragment in ['Text size: Small', 'Text size: Default', 'Text size: Large', 'Text size: Larger', 'font-restart.json', 'font-viewport.json', 'text-presets.json', 'ReadListMetric', 'font_layout', 'FontSizeAttribute']:
+for fragment in ['Text size: Small', 'Text size: Default', 'Text size: Large', 'Text size: Larger', 'font-restart.json', 'font-viewport.json', 'text-presets.json', 'ReadListMetric', 'font_layout', 'FontSizeAttribute', 'GetBoundingRectangles', 'font_preview_draw', 'font_palette_group_draw', 'Font-ItemRect']:
     assert fragment in appearance, fragment
-for fragment in ['text-presets.json', 'font-restart.json', 'font-viewport.json', 'list_font_height', 'chat_font_height']:
+for fragment in ['text-presets.json', 'font-restart.json', 'font-viewport.json', 'list_font_height', 'chat_font_height', "row['composer']['formatting']", "row['preview_draw']", "row['chat']", "palette['group_draw']"]:
     assert fragment in appearance_validator, fragment
 
 composer_border = (root / 'tools/verify-wazig/composer-border.ps1').read_text(encoding='utf-8')

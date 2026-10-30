@@ -35,6 +35,15 @@ if feature == 'palette':
     stages = ['before', 'removed-status', 'action', 'after']
     keys = ['^k', 'Keyboard shortcuts', '^a', 'Status', '{ENTER}', '{ESC}']
 else:
+    def contained(inner, outer):
+        return (len(inner) == len(outer) == 4 and outer[0] <= inner[0] < inner[2] <= outer[2]
+                and outer[1] <= inner[1] < inner[3] <= outer[3])
+
+    def check_draw(draw, item, expected_scale):
+        assert draw['renderer'] in ('directwrite', 'gdi') and draw['scale'] == expected_scale
+        assert draw['item'] == item and contained(draw['draw'], item)
+        assert draw['draw'][1] <= draw['text_top'] < draw['text_bottom'] <= draw['draw'][3]
+
     scale = json.loads((folder / 'text-scale.json').read_text(encoding='utf-8-sig'))
     assert scale['initial_saved'] is False and scale['larger'] == 110 and scale['reset'] == 100
     assert 0 < scale['baseline_points'] < scale['larger_points']
@@ -46,12 +55,19 @@ else:
     assert viewport['width'] == 1920 and viewport['height'] == 1032 and viewport['hosted_only'] is True
     presets = json.loads((folder / 'text-presets.json').read_text(encoding='utf-8-sig'))
     assert [row['scale'] for row in presets] == [80, 100, 125, 150]
+    preset_images = []
     for index, row in enumerate(presets):
         layout = row['list']
         assert layout['scale'] == row['scale']
         assert row['points'] > 0 and row['list_font_height'] < 0 and row['chat_font_height'] < 0
         assert row['list_uia_height'] >= layout['row_height'] > 0
         assert row['composer_uia_height'] >= layout['body_line_height'] > 0
+        assert contained(row['composer']['line'], row['composer']['formatting'])
+        check_draw(row['list_draw'], row['list_item'], row['scale'])
+        check_draw(row['preview_draw'], row['list_item'], row['scale'])
+        chat = row['chat']
+        assert chat['id'] == 'GROUP-OWN' and chat['words']
+        assert all(contained(word['rect'], chat['bubble']) for word in chat['words'])
         assert layout['preview_top'] - layout['name_top'] >= max(layout['name_line_height'], layout['time_line_height'])
         assert layout['preview_bottom'] - layout['preview_top'] >= layout['preview_line_height'] > 0
         if index:
@@ -61,7 +77,11 @@ else:
             assert row['chat_font_height'] < previous['chat_font_height']
         image = (folder / f"text-preset-{row['scale']}.png").read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
+        preset_images.append(hashlib.sha256(image).digest())
+    assert len(set(preset_images)) == 4
     palette = json.loads((folder / 'font-palette.json').read_text(encoding='utf-8-sig'))
+    check_draw(palette['draw'], palette['item'], 150)
+    check_draw(palette['group_draw'], palette['item'], 150)
     assert palette['edit_height'] >= palette['body_line_height'] > 0
     assert palette['row_height'] >= max(palette['body_line_height'], 2 * palette['small_line_height'] + 4)
     assert (folder / 'text-preset-palette.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')

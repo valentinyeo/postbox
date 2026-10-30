@@ -28,6 +28,25 @@ $null = Wait-Until { (Get-ItemProperty $preferences).FontScale -eq 100 } 'defaul
 $resetPoints = [double]$textPattern.DocumentRange.GetAttributeValue([Windows.Automation.TextPattern]::FontSizeAttribute)
 Assert-That ($resetPoints -eq $baselinePoints) 'Reset did not restore the UI Automation font size'
 @{ initial_saved = $false; larger = $larger; reset = (Get-ItemProperty $preferences).FontScale; baseline_points = $baselinePoints; larger_points = $largerPoints; reset_points = $resetPoints } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'text-scale.json')
+function Font-Rect($Rect) { return @([double]$Rect.Left, [double]$Rect.Top, [double]$Rect.Right, [double]$Rect.Bottom) }
+function Font-EditGeometry($Edit, $Pattern) {
+    $handle = [IntPtr]$Edit.Current.NativeWindowHandle
+    $format = [LayoutCapture]::GetRect($handle, 0xB2, 0)
+    $origin = [VerifyWindow+Point]::new()
+    Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$origin)) 'Edit client origin unavailable'
+    $bounds = @($Pattern.DocumentRange.GetBoundingRectangles())
+    Assert-That ($bounds.Count -eq 1 -and $bounds[0].Width -gt 0 -and $bounds[0].Height -gt 0) 'Composer UIA line bounds unavailable'
+    return @{ formatting = @($format.Left + $origin.X, $format.Top + $origin.Y, $format.Right + $origin.X, $format.Bottom + $origin.Y); line = (Font-Rect $bounds[0]) }
+}
+function Font-ItemRect($Element) {
+    $rect = [LayoutCapture]::GetRect([IntPtr]$Element.Current.NativeWindowHandle, 0x198, 0)
+    return (Font-Rect $rect)
+}
+function Assert-FontDraw($Draw, $Installed, [int]$Scale) {
+    Assert-That ($null -ne $Draw -and $Draw.scale -eq $Scale -and $Draw.renderer -in @('directwrite', 'gdi')) 'Actual renderer measurement missing'
+    Assert-That (($Draw.item -join ',') -eq ($Installed -join ',')) 'Painted item differs from installed item'
+    Assert-That ($Draw.draw[1] -ge $Installed[1] -and $Draw.draw[3] -le $Installed[3] -and $Draw.text_top -ge $Draw.draw[1] -and $Draw.text_bottom -le $Draw.draw[3] -and $Draw.text_bottom -gt $Draw.text_top) 'Rendered text exceeds its drawing rectangle'
+}
 $presetPoints = @()
 foreach ($preset in @(
     @{ label = 'Text size: Small'; scale = 80 },
@@ -38,7 +57,7 @@ foreach ($preset in @(
     Invoke-PaletteCommand $session $preset.label
     $null = Wait-Until { (Get-ItemProperty $preferences).FontScale -eq $preset.scale -and (Read-Control $session status).font_layout.scale -eq $preset.scale } "saved $($preset.label)"
     $points = [double]$textPattern.DocumentRange.GetAttributeValue([Windows.Automation.TextPattern]::FontSizeAttribute)
-    $state = Read-Control $session status
+    $state = Wait-Until { $state = Read-Control $session status; if ($null -ne $state.font_list_draw -and $null -ne $state.font_preview_draw -and $state.font_list_draw.scale -eq $preset.scale -and $state.font_preview_draw.scale -eq $preset.scale) { $state } } 'list renderer measurement'
     $layout = $state.font_layout
     $shown = Read-Control $session messages
     $message = @($shown.messages | Where-Object id -eq 'GROUP-OWN')[0]
@@ -49,6 +68,11 @@ foreach ($preset in @(
     Assert-That ($ok -ne [IntPtr]::Zero -and [int]$height.ToUInt64() -eq $layout.row_height) 'Listbox row height differs from painted geometry'
     Assert-That ($layout.preview_top - $layout.name_top -ge [Math]::Max($layout.name_line_height, $layout.time_line_height)) 'List name or time clips vertically'
     Assert-That ($layout.preview_bottom - $layout.preview_top -ge $layout.preview_line_height) 'List preview clips vertically'
+    $listItem = Font-ItemRect $list
+    Assert-FontDraw $state.font_list_draw $listItem $preset.scale
+    Assert-FontDraw $state.font_preview_draw $listItem $preset.scale
+    $editGeometry = Font-EditGeometry $compose $textPattern
+    Assert-That ($editGeometry.line[1] -ge $editGeometry.formatting[1] -and $editGeometry.line[3] -le $editGeometry.formatting[3]) 'Composer UIA line exceeds formatting rectangle'
     $editBounds = $compose.Current.BoundingRectangle
     Assert-That ($editBounds.Height -ge $layout.body_line_height) 'Composer clips its font vertically'
     foreach ($word in $message.words) {
@@ -60,7 +84,7 @@ foreach ($preset in @(
     }
     Assert-That ($points -gt 0 -and $layout.row_font_height -lt 0) 'Preset font measurements unavailable'
     Save-Screen $session "text-preset-$($preset.scale)"
-    $presetPoints += @{ scale = $preset.scale; points = $points; chat_font_height = $message.font_height; list_font_height = $layout.row_font_height; list = $layout; list_uia_height = $list.Current.BoundingRectangle.Height; composer_uia_height = $editBounds.Height }
+    $presetPoints += @{ scale = $preset.scale; points = $points; chat_font_height = $message.font_height; list_font_height = $layout.row_font_height; list = $layout; list_uia_height = $list.Current.BoundingRectangle.Height; composer_uia_height = $editBounds.Height; composer = $editGeometry; list_draw = $state.font_list_draw; preview_draw = $state.font_preview_draw; list_item = $listItem; chat = @{ id = $message.id; bubble = $message.bubble; words = @($message.words) } }
 }
 $presetPoints | ConvertTo-Json -Depth 12 -AsArray | Set-Content (Join-Path $Evidence 'text-presets.json')
 Send-Keys $session '^k'
@@ -70,9 +94,13 @@ $paletteList = Get-Edit $palette '1072'
 $paletteHeight = [UIntPtr]::Zero
 $ok = [VerifyWindow]::ReadListMetric([IntPtr]$paletteList.Current.NativeWindowHandle, 0x01A1, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$paletteHeight)
 $largestLayout = $presetPoints[-1].list
+$paletteState = Wait-Until { $state = Read-Control $session status; if ($null -ne $state.font_palette_draw -and $null -ne $state.font_palette_group_draw -and $state.font_palette_draw.scale -eq 150 -and $state.font_palette_group_draw.scale -eq 150) { $state } } 'palette renderer measurement'
+$paletteItem = Font-ItemRect $paletteList
+Assert-FontDraw $paletteState.font_palette_draw $paletteItem 150
+Assert-FontDraw $paletteState.font_palette_group_draw $paletteItem 150
 Assert-That ($ok -ne [IntPtr]::Zero -and [int]$paletteHeight.ToUInt64() -ge $largestLayout.body_line_height -and [int]$paletteHeight.ToUInt64() -ge 2 * $largestLayout.preview_line_height + 4) 'Palette rows clip larger text'
 Assert-That ($paletteEdit.Current.BoundingRectangle.Height -ge $largestLayout.body_line_height) 'Palette query clips larger text'
-@{ row_height = $paletteHeight.ToUInt64(); edit_height = $paletteEdit.Current.BoundingRectangle.Height; body_line_height = $largestLayout.body_line_height; small_line_height = $largestLayout.preview_line_height } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'font-palette.json')
+@{ row_height = $paletteHeight.ToUInt64(); edit_height = $paletteEdit.Current.BoundingRectangle.Height; body_line_height = $largestLayout.body_line_height; small_line_height = $largestLayout.preview_line_height; draw = $paletteState.font_palette_draw; group_draw = $paletteState.font_palette_group_draw; item = $paletteItem } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'font-palette.json')
 Save-Screen $session text-preset-palette
 Send-Keys $session '{ESC}'
 $old = Get-App $session

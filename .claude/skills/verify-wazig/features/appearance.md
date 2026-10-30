@@ -36,6 +36,8 @@ Preconditions: doctor passes, baseline Graphite and IBM Plex Sans loaded from fi
 
 - **Presets:** choose all four palette rows. Capture each hosted viewport. Require scales 80, 100, 125, and 150. Measure composer text through UI Automation. Measure painted chat and list fonts. Check list geometry and chat bubble bounds. Restart the owned fixture at 150%. Verify its saved size and binary identity. Reset with Ctrl+0.
 
+- **Rendered bounds:** retain each preset’s chat geometry. Compare UI Automation lines against RichEdit formatting. Compare renderer lines against installed list items. Record DirectWrite or GDI fallback. Check palette label and heading similarly. Screenshot inspection remains necessary.
+
 - **Published baseline:** appearance downloads v0.9.224. Verify the published package digest and checksum. Capture its fresh isolated default at 82%. Compare its composer against fresh candidate 100%. Keep both screenshots and process identities. `font-comparison.json` records measured points and hashes. No laptop application is opened.
 
 ## Gotchas
