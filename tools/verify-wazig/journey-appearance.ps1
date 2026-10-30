@@ -5,7 +5,7 @@ Add-Type -Path (Join-Path $PSScriptRoot 'layout-capture.cs')
 [LayoutCapture]::MoveWindow($app.MainWindowHandle, 0, 0, 1920, 1032, $true) | Out-Null
 $viewport = (Get-Window $session).Current.BoundingRectangle
 Assert-That ($viewport.Width -eq 1920 -and $viewport.Height -eq 1032) 'Hosted viewport differs from reported working area'
-@{ width = $viewport.Width; height = $viewport.Height; source = 'reported working area'; hosted_only = $true } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'font-viewport.json')
+@{ width = $viewport.Width; height = $viewport.Height; dpi = [int][VerifyWindow]::GetDpiForWindow($app.MainWindowHandle); source = 'reported working area'; hosted_only = $true } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'font-viewport.json')
 Invoke-PaletteCommand $session 'Theme: Graphite' action
 $null = Wait-Until { (Read-Control $session status).theme -eq 'amoled' } 'green theme'
 $preferences = "HKCU:\Software\MessagesVerification\$id\Software\Messages"

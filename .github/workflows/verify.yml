@@ -140,6 +140,31 @@ jobs:
           New-Item verification-evidence -ItemType Directory -Force | Out-Null
           'SENT_ORDER_ORIGINAL_RED_OK: WhatsApp wa-sent last message order' | Set-Content verification-evidence/sent-order-red-control.txt
           exit 0
+      - name: Capture published font baseline
+        if: matrix.feature == 'appearance'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'v0.9.224'
+          $name = "Postbox-$tag.zip"
+          $evidence = 'verification-evidence/font-baseline'
+          New-Item $evidence -ItemType Directory -Force | Out-Null
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern $name --pattern 'SHA256SUMS.txt' --dir $evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Published baseline download failed' }
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $release.tag_name -cne $tag) { throw 'Published baseline metadata unavailable' }
+          $asset = @($release.assets | Where-Object name -CEQ $name)
+          $package = Join-Path $evidence $name
+          $hash = (Get-FileHash $package -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($asset.Count -ne 1 -or $asset[0].digest -cne "sha256:$hash") { throw 'Published baseline package digest mismatch' }
+          $lines = @(Get-Content (Join-Path $evidence 'SHA256SUMS.txt') | Where-Object { $_ -cmatch ("^[0-9a-fA-F]{64} [ *]" + [regex]::Escape($name) + '$') })
+          if ($lines.Count -ne 1 -or $lines[0].Substring(0, 64).ToLowerInvariant() -cne $hash) { throw 'Published baseline checksum mismatch' }
+          @{ tag = $tag; asset_name = $name; asset_digest = $asset[0].digest; package_sha256 = $hash } | ConvertTo-Json | Set-Content (Join-Path $evidence 'published-font-package.json')
+          $release | ConvertTo-Json -Depth 20 | Set-Content (Join-Path $evidence 'published-font-release.json')
+          Expand-Archive $package font-baseline-bin/bin
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature appearance -FontBaseline -ExpectedVersion 0.9.224 -Bin font-baseline-bin/bin -Evidence $evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Published font baseline capture failed' }
       - name: Build real desktop or download published release
         shell: pwsh
         env:
@@ -370,6 +395,12 @@ jobs:
         run: |
           python tools/verify-wazig/check-evidence.py verification-evidence
           if ($LASTEXITCODE -ne 0) { throw 'Invalid journey evidence' }
+      - name: Compare published and candidate font evidence
+        if: matrix.feature == 'appearance'
+        shell: pwsh
+        run: |
+          python tools/verify-wazig/check-font-baseline.py verification-evidence/font-baseline verification-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Font baseline comparison failed' }
       - name: Archive rows through the production renderer with a light fixture palette
         if: matrix.feature == 'show-archived'
         shell: pwsh

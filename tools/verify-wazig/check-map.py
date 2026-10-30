@@ -447,6 +447,16 @@ assert 'link-previews' in {row['hub'] for row in journeys}
 assert entries['link-previews']['validator']['file'] == 'check-link-previews-evidence.py'
 print('LINK PREVIEWS MAP VERIFIED: dispatch, PR matrix, hub mode and surviving evidence')
 
+font_baseline = (root / 'tools/verify-wazig/font-baseline.ps1').read_text(encoding='utf-8')
+font_comparison = (root / 'tools/verify-wazig/check-font-baseline.py').read_text(encoding='utf-8')
+for fragment in ['-FontBaseline', 'v0.9.224', 'SHA256SUMS.txt', 'published-font-package.json', 'check-font-baseline.py']:
+    assert fragment in workflow, fragment
+for fragment in ['[switch]$FontBaseline', 'baseline-captured', 'font-baseline.ps1']:
+    assert fragment in runner, fragment
+for fragment in ['FontScale', 'FontSizeAttribute', 'GetDpiForWindow', 'font-baseline.json', '1920, 1032']:
+    assert fragment in font_baseline, fragment
+for fragment in ['baseline-captured', 'Postbox-v0.9.224.zip', 'Messages.exe', 'text-fresh-default.state.json']:
+    assert fragment in font_comparison, fragment
 appearance = (root / 'tools/verify-wazig/journey-appearance.ps1').read_text(encoding='utf-8')
 appearance_validator = (root / 'tools/verify-wazig/evidence-palette.py').read_text(encoding='utf-8')
 assert entries['appearance']['script'] == 'journey-appearance.ps1'
