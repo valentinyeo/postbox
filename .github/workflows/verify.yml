@@ -98,6 +98,13 @@ jobs:
         with:
           version: 0.16.0
           use-cache: false
+      # Enabled when the rollback journey is registered.
+      - name: Build pinned historical rollback input
+        if: matrix.feature == 'hub-rollback'
+        shell: pwsh
+        run: |
+          & tools/verify-wazig/build-historical-847.ps1 -Evidence verification-evidence/historical-847
+          if ($LASTEXITCODE -ne 0) { throw 'Historical rollback build failed' }
       - name: Unified private Windows path operations
         if: matrix.feature == 'hub' || matrix.feature == 'whatsapp-hub'
         shell: pwsh
