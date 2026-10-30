@@ -920,6 +920,7 @@ const App = struct {
     unified_import_alias_blocked: bool = false,
     unified_import_overflow: usize = 0,
     unified_storage_blocked: bool = false,
+    unified_inflight: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
     unified_write_fault: enum { none, open, write, flush, close, replace } = .none,
     send_seq: u64 = 0,
     failed_sends: [max_unified_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_unified_failed_sends,
@@ -1924,7 +1925,10 @@ fn jobIsWrite(kind: WacliJobKind) bool {
 }
 
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
-    if (unifiedHub(a) and job.kind == .hub_send) return false;
+    if (unifiedHub(a) and job.kind == .hub_send) {
+        const inflight = a.unified_inflight orelse return false;
+        if (job.gen != inflight.attempt or !std.mem.eql(u8, job.msg_id.slice(), &inflight.id)) return false;
+    }
     if (verification_fixture and !hubConfigured(a)) return verificationEnqueue(a, job);
     if (hubConfigured(a) and !hubJobReady(a, job)) return false;
     if (job.kind == .hub_media or job.kind == .hub_avatar) {
@@ -5225,6 +5229,7 @@ fn acceptUnifiedSends(a: *App, entries: []outbox.Entry, voice_bytes: ?[]const u8
 
 fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) !void {
     if (a.outbox_load_failed or a.unified_storage_blocked or !a.unified_imports_clean) return error.OutboxUnavailable;
+    if (a.unified_inflight) |inflight| if (std.mem.eql(u8, &inflight.id, id)) return error.InFlight;
     const live = a.unified_snapshot orelse return error.MissingSnapshot;
     const candidate = a.unified_candidate orelse return error.MissingSnapshot;
     if (unified_snapshot.readyCount(live) >= max_pending_sends) return error.OutboxFull;
@@ -20810,6 +20815,55 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
         return;
     }
     showProblem(a, "No linked WhatsApp hub account");
+}
+
+fn beginUnifiedSend(a: *App, now_ms: u64) void {
+    if (!unifiedHub(a) or !hubConfigured(a) or a.hub_account.len == 0 or a.outbox_load_failed or a.unified_storage_blocked or
+        !a.unified_imports_clean or a.unified_inflight != null or wacliPendingGet(a, .hub_send) != 0) return;
+    const live = a.unified_snapshot orelse return;
+    const candidate = a.unified_candidate orelse return;
+    for (live.records[0..live.count], 0..) |*record, index| {
+        if (record.phase != .ready or record.not_before_ms > now_ms) continue;
+        if (record.attempt_serial == std.math.maxInt(u64)) {
+            a.unified_storage_blocked = true;
+            setStatus(a, "Send attempt limit reached; outbox paused");
+            return;
+        }
+        if (record.entry.file.len > 0 and (!record.attachment_ready or !(unifiedOwnedFileAvailable(a, record) catch false))) {
+            setStatus(a, "Attachment unavailable; outbox paused");
+            return;
+        }
+        var job = WacliJob{ .kind = .hub_send, .provider = std.meta.stringToEnum(transport.Provider, @tagName(record.entry.provider)).?, .gen = record.attempt_serial + 1 };
+        job.account.set(record.entry.account.slice());
+        job.jid.set(record.entry.jid.slice());
+        job.msg_id.set(record.entry.idSlice());
+        job.unified_filename.set(record.wire_filename.slice());
+        job.unified_file_sha256 = record.file_sha256;
+        job.unified_file_bytes = record.file_bytes;
+        wacliJobArgs(&job, &.{ record.entry.text.slice(), record.owned_file.slice(), record.entry.reply_to.slice(), if (record.entry.ptt) "true" else "false" });
+        const id = record.entry.id;
+        candidate.* = live.*;
+        candidate.records[index].phase = .uncertain;
+        candidate.records[index].attempt_serial = job.gen;
+        if (!saveUnifiedCandidate(a)) {
+            a.unified_storage_blocked = true;
+            setStatus(a, "Could not save send checkpoint; outbox paused");
+            return;
+        }
+        a.unified_inflight = .{ .id = id, .attempt = job.gen };
+        if (!wacliEnqueue(a, job, true)) {
+            a.unified_inflight = null;
+            const published = a.unified_snapshot orelse { a.unified_storage_blocked = true; return; };
+            const spare = a.unified_candidate orelse { a.unified_storage_blocked = true; return; };
+            spare.* = published.*;
+            spare.records[index].phase = .ready;
+            if (!saveUnifiedCandidate(a)) {
+                a.unified_storage_blocked = true;
+                setStatus(a, "Could not save enqueue failure; outbox paused");
+            }
+        }
+        return;
+    }
 }
 
 fn startHubSend(a: *App, pending: *const PendingSend) void {

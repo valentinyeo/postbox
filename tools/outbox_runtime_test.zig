@@ -154,6 +154,7 @@ const App = struct {
     hub_media_thread: ?bool = null,
     hub_account: Utf8Text(32) = .{},
     unified_hub: bool = false,
+    unified_inflight: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
     wacli_queue: [wacli_queue_size]WacliJob = @splat(.{}),
     wacli_queue_len: usize = 0,
     wacli_refresh_again: bool = false,
