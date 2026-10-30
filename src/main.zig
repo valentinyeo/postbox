@@ -933,6 +933,8 @@ const App = struct {
     unified_fault_active: bool = false,
     unified_fault_hits: u64 = 0,
     verification_retry_evidence: bool = false,
+    verification_migration_stop_id: []const u8 = "",
+    verification_migration_stop_root: []const u8 = "",
     verification_mouse_retry: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
     send_seq: u64 = 0,
     failed_sends: [max_unified_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_unified_failed_sends,
@@ -5286,6 +5288,15 @@ fn restoreOutbox(a: *App) void {
             setStatus(a, "Unified outbox quarantine incomplete; sends paused");
             return;
         };
+        if (verification_fixture and a.verification_migration_stop_id.len != 0) {
+            const path = messagesDirPath(a, "verification-migration-stop.json") orelse std.process.exit(87);
+            const marker = std.json.Stringify.valueAlloc(a.allocator, .{
+                .phase = "after-quarantine-before-import", .id = a.verification_migration_stop_id,
+                .root = a.verification_migration_stop_root, .pid = win.GetCurrentProcessId(),
+            }, .{}) catch std.process.exit(87);
+            if (!writeCacheFileAtomic(a, path, marker)) std.process.exit(87);
+            std.process.exit(86);
+        }
         importUnifiedOutbox(a) catch {
             setStatus(a, "Unified outbox recovery incomplete; sends paused");
             return;
@@ -19104,6 +19115,15 @@ pub fn main(init: std.process.Init) !void {
     }
     defer app.read_state.deinit(init.gpa);
     if (verification_fixture) {
+        const migration_id = init.environ_map.get("WAZIG_VERIFY_ID") orelse "";
+        if (migration_id.len == 36 and
+            std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_MIGRATION_CASE") orelse "", "hub-migration-crash") and
+            std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_MIGRATION_STOP") orelse "", migration_id) and
+            std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_RESTART") orelse "", migration_id))
+        {
+            app.verification_migration_stop_id = migration_id;
+            app.verification_migration_stop_root = init.environ_map.get("WAZIG_VERIFY_ROOT") orelse "";
+        }
         app.verification_retry_evidence = std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_RETRY_EVIDENCE") orelse "", "1");
         if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_FAULT")) |fault| {
             app.unified_write_fault = std.meta.stringToEnum(@TypeOf(app.unified_write_fault), fault) orelse .none;

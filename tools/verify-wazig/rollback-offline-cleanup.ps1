@@ -132,7 +132,10 @@ while (-not (Test-Path $env:PROBE_RELEASE)) {
     $offline = [Diagnostics.Process]::Start($base)
     $offlineTicks = $offline.StartTime.ToUniversalTime().Ticks.ToString()
     Assert-That ((Process-Sid $offline.Id) -ceq $sid -and $offline.Path -ceq $copy -and (Get-FileHash $offline.Path).Hash -ceq $oldHash) 'Offline process identity differs'
-    $null = Wait-Until { $offline.Refresh(); if ($offline.HasExited) { throw "Offline historical app exited: $($offline.ExitCode)" }; -not (Test-Path $control) } 'historical aged cache deleted' -Seconds 60
+    $null = Wait-Until { $offline.Refresh(); if ($offline.HasExited) { throw "Offline historical app exited: $($offline.ExitCode)" }; -not (Test-Path $control) -and ($session.feature -cne 'hub-migration-crash' -or -not (Test-Path $original)) } 'historical aged cache deleted' -Seconds 60
+    if ($session.feature -ceq 'hub-migration-crash') {
+        @{ path = $original; absent = (-not (Test-Path $original)); pid = $offline.Id; start_ticks = $offlineTicks } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'crash-original-after-old.json')
+    }
     Assert-That ((Process-Sid $offline.Id) -ceq $sid) 'Offline process owner changed'
     $proof = @{ username = $userName; sid = $sid; user_profile_path = $createdProfilePath; runner_sid = $runnerSid; pid = $offline.Id; start_ticks = $offlineTicks; exe = $copy; sha256 = $oldHash; root = $session.root; local = $local; profile = $profile; fixture = $false; hub_disabled = $true; firewall_rule = $ruleName; firewall_program = $filter.Program; firewall_direction = 'Outbound'; firewall_action = 'Block'; firewall_profiles_enabled = $true; control_path = $control; control_written_utc = $controlWritten; observed_utc = [DateTime]::UtcNow.ToString('o'); control_deleted = $true; probe_pid = $probe.Id; probe_start_ticks = $probeTicks }
     Assert-That ($offline.StartTime.ToUniversalTime().Ticks.ToString() -ceq $offlineTicks -and $offline.Path -ceq $copy -and (Get-FileHash $offline.Path).Hash -ceq $oldHash -and (Process-Sid $offline.Id) -ceq $sid) 'Offline PID reused'

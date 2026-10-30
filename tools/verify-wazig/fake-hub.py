@@ -285,6 +285,41 @@ class Handler(bridge.Handler):
 
 
 
+class MigrationCrashHandler(Handler):
+    def do_POST(self):
+        if self.path != '/v1/wazig/send':
+            return super().do_POST()
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        data = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        if not self.headers.get('Content-Type', '').startswith('multipart/form-data'):
+            self.respond(400, {'error': 'expected attachment'})
+            return
+        envelope = bridge.BytesParser(policy=bridge.policy.default).parsebytes(
+            f'Content-Type: {self.headers["Content-Type"]}\r\nMIME-Version: 1.0\r\n\r\n'.encode() + data)
+        body, payload = {}, b''
+        for part in envelope.iter_parts():
+            name = part.get_param('name', header='content-disposition')
+            if part.get_filename() is None:
+                body[name] = part.get_content()
+            else:
+                body[name] = part.get_filename()
+                payload = part.get_payload(decode=True)
+        self.wire_body = dict(body)
+        if body.get('chat') != ALPHA or body.get('text') != 'Interrupted image' or not payload.startswith(b'\x89PNG\r\n\x1a\n'):
+            self.respond(400, {'error': 'invalid migration attachment'}, body=body, accepted=False)
+            return
+        with self.state.lock:
+            if not hasattr(self.state, 'migration_ids'):
+                self.state.migration_ids = set()
+            duplicate = body.get('client_id') in self.state.migration_ids
+            self.state.migration_ids.add(body.get('client_id'))
+        self.respond(200, {'client_id': body.get('client_id'), 'status': 'sent', 'msg_id': 'migration-image', 'ts': self.state.stamp},
+                     body=body, accepted=not duplicate, duplicate=duplicate, multipart=True,
+                     file_size=len(payload), file_sha256=hashlib.sha256(payload).hexdigest())
+
+
 class FaultJourneyHandler(Handler):
     def do_POST(self):
         if self.path != '/v1/wazig/send':

@@ -79,6 +79,8 @@ function Read-Control($Session, [string]$Command, [string[]]$Arguments = @(), [i
     $start.ArgumentList.Add($Command)
     foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
     $start.Environment['USERNAME'] = $Session.username
+    $null = $start.Environment.Remove('WAZIG_VERIFY_MIGRATION_CASE')
+    $null = $start.Environment.Remove('WAZIG_VERIFY_MIGRATION_STOP')
     $child = [Diagnostics.Process]::Start($start)
     try {
         $output = $child.StandardOutput.ReadToEndAsync()

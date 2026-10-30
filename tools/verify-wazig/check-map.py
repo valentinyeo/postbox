@@ -438,6 +438,12 @@ if ($Feature -ceq 'hub-rollback') {
     New-Item -Path $root -ItemType Directory -ErrorAction Stop | Out-Null
 }''' in runner
 assert entries['hub-rollback']['script'] == 'journey-hub-rollback.ps1'
+assert '''if ($Feature -ceq 'hub-migration-crash') {
+    $root = Join-Path $env:RUNNER_TEMP ('r' + [Guid]::NewGuid().ToString('N').Substring(0, 16))
+    Assert-That (-not (Test-Path -LiteralPath $root)) 'Migration crash root already exists'
+    New-Item -Path $root -ItemType Directory -ErrorAction Stop | Out-Null
+}''' in runner
+assert entries['hub-migration-crash']['script'] == 'journey-hub-migration-crash.ps1'
 for required in ['owner == pid && IsWindowVisible(window)', 'name.ToString() == "#32770"',
                  'unexpected #32770 dialog: $text', "AutomationIdProperty, '1148'", 'ControlType]::ComboBox', 'ComboBoxEx32',
                  "$labels -ccontains 'File name:'", '$filename.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)',
