@@ -11,6 +11,13 @@ const App = struct {
     hub_account: Utf8Text(32) = .{},
     unified_imports_clean: bool = true,
     unified_inflight: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
+    unified_unsaved_result: ?unified_snapshot.UnifiedOutcome = null,
+    unified_result_lost: std.atomic.Value(bool) = .init(false),
+    unified_refill_pending: bool = false,
+    unified_refill_retry_at_ms: u64 = 0,
+    attachment_available: bool = true,
+    refill_calls: usize = 0,
+    refill_fail: bool = false,
     unified_snapshot: ?*unified_snapshot.Snapshot = null,
     unified_candidate: ?*unified_snapshot.Snapshot = null,
     save_calls: usize = 0,
@@ -24,7 +31,16 @@ const App = struct {
 fn unifiedHub(_: *const App) bool { return true; }
 fn hubConfigured(_: *const App) bool { return true; }
 fn wacliPendingGet(_: *App, _: WacliJobKind) u32 { return 0; }
-fn unifiedOwnedFileAvailable(_: *App, _: *const unified_snapshot.Record) !bool { return true; }
+const win = struct { fn GetTickCount64() u64 { return 1_000; } };
+fn unifiedOwnedFileAvailable(a: *App, _: *const unified_snapshot.Record) !bool { return a.attachment_available; }
+fn refreshMessages(_: *App) void {}
+fn refreshChats(_: *App) void {}
+fn importUnifiedOutbox(a: *App) !void {
+    a.refill_calls += 1;
+    if (a.refill_fail) return error.RefillFailed;
+    a.unified_imports_clean = true;
+    a.unified_storage_blocked = false;
+}
 fn setStatus(_: *App, _: []const u8) void {}
 fn refreshUnifiedViews(_: *App) void {}
 fn saveUnifiedCandidate(a: *App) bool {
@@ -38,10 +54,12 @@ fn saveUnifiedCandidate(a: *App) bool {
 fn wacliEnqueue(a: *App, job: WacliJob, _: bool) bool {
     a.enqueue_calls += 1;
     a.observed_job = job;
-    const record = &a.unified_snapshot.?.records[0];
     const owner = a.unified_inflight orelse return false;
-    a.checkpoint_seen = record.phase == .uncertain and record.attempt_serial == job.gen and
-        owner.attempt == job.gen and std.mem.eql(u8, &owner.id, job.msg_id.slice());
+    for (a.unified_snapshot.?.records[0..a.unified_snapshot.?.count]) |*record| {
+        if (!std.mem.eql(u8, record.entry.idSlice(), job.msg_id.slice())) continue;
+        a.checkpoint_seen = record.phase == .uncertain and record.attempt_serial == job.gen and
+            owner.attempt == job.gen and std.mem.eql(u8, &owner.id, job.msg_id.slice());
+    }
     return a.enqueue_allowed;
 }
 
@@ -184,4 +202,154 @@ test "only unowned uncertainty permits explicit retry" {
     try retryUnifiedSend(f.a, f.first.records[0].entry.idSlice(), key);
     try std.testing.expectEqual(unified_snapshot.Phase.ready, f.a.unified_snapshot.?.records[0].phase);
     try std.testing.expectEqual(@as(u64, 41), f.a.unified_snapshot.?.records[0].attempt_serial);
+}
+
+
+fn completedResult(_: Fixture, ok: bool, status: u32) WacliResult {
+    var result = WacliResult{ .kind = .hub_send, .provider = .slack, .gen = 42, .ok = ok, .http_status = status };
+    result.msg_id.set("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    return result;
+}
+
+test "failed acknowledgement save keeps one blocked outcome" {
+    const f = try Fixture.init();
+    defer f.deinit();
+    beginUnifiedSend(f.a, 100);
+    f.a.fail_save_at = 2;
+    const result = completedResult(f, true, 200);
+    finishUnifiedSend(f.a, &result);
+    try std.testing.expectEqual(@as(usize, 1), f.a.unified_snapshot.?.count);
+    try std.testing.expectEqual(unified_snapshot.Phase.uncertain, f.a.unified_snapshot.?.records[0].phase);
+    try std.testing.expect(f.a.unified_unsaved_result != null and f.a.unified_storage_blocked);
+    try std.testing.expect(f.a.unified_inflight == null);
+    const key = chat_key.Key{ .provider = .slack, .account = "workspace-a", .id = "slack:workspace-a:channel" };
+    try std.testing.expectError(error.OutboxUnavailable, retryUnifiedSend(f.a, f.a.unified_snapshot.?.records[0].entry.idSlice(), key));
+    beginUnifiedSend(f.a, 101);
+    try std.testing.expectEqual(@as(usize, 1), f.a.enqueue_calls);
+    tickUnifiedOutbox(f.a);
+    try std.testing.expectEqual(@as(usize, 0), f.a.unified_snapshot.?.count);
+    try std.testing.expect(f.a.unified_unsaved_result == null);
+    try std.testing.expectEqual(@as(usize, 1), f.a.refill_calls);
+    try std.testing.expectEqual(@as(usize, 1), f.a.enqueue_calls);
+}
+
+test "failed terminal save preserves uncertainty until retry" {
+    const f = try Fixture.init();
+    defer f.deinit();
+    beginUnifiedSend(f.a, 100);
+    f.a.fail_save_at = 2;
+    const result = completedResult(f, false, 403);
+    finishUnifiedSend(f.a, &result);
+    try std.testing.expectEqual(unified_snapshot.Phase.uncertain, f.a.unified_snapshot.?.records[0].phase);
+    try std.testing.expect(f.a.unified_unsaved_result != null and f.a.unified_storage_blocked);
+    tickUnifiedOutbox(f.a);
+    try std.testing.expectEqual(unified_snapshot.Phase.held, f.a.unified_snapshot.?.records[0].phase);
+    try std.testing.expectEqual(@as(usize, 1), f.a.enqueue_calls);
+}
+
+test "stale result never retires active intent" {
+    const f = try Fixture.init();
+    defer f.deinit();
+    beginUnifiedSend(f.a, 100);
+    var result = completedResult(f, true, 200);
+    result.gen = 41;
+    finishUnifiedSend(f.a, &result);
+    result.gen = 42;
+    result.msg_id.set("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    finishUnifiedSend(f.a, &result);
+    try std.testing.expectEqual(@as(usize, 1), f.a.unified_snapshot.?.count);
+    try std.testing.expect(f.a.unified_inflight != null);
+    try std.testing.expectEqual(@as(usize, 1), f.a.save_calls);
+}
+
+test "retryable result commits ambiguity and bounded backoff" {
+    const f = try Fixture.init();
+    defer f.deinit();
+    beginUnifiedSend(f.a, 100);
+    const result = completedResult(f, false, 409);
+    finishUnifiedSend(f.a, &result);
+    const record = &f.a.unified_snapshot.?.records[0];
+    try std.testing.expectEqual(unified_snapshot.Phase.ready, record.phase);
+    try std.testing.expect(record.entry.ambiguous);
+    try std.testing.expectEqual(@as(u8, 1), record.entry.attempts);
+    try std.testing.expectEqual(@as(u64, 4_000), record.not_before_ms);
+}
+
+test "missing file is held before later text dispatch" {
+    const f = try Fixture.init();
+    defer f.deinit();
+    f.a.attachment_available = false;
+    const text = &f.first.records[1];
+    text.* = .{};
+    text.entry.id = [_]u8{'b'} ** outbox.id_len;
+    text.entry.provider = .slack;
+    text.entry.account.set("workspace-a");
+    text.entry.jid.set("slack:workspace-a:channel");
+    text.entry.text.set("later text");
+    text.phase = .ready;
+    f.first.count = 2;
+    beginUnifiedSend(f.a, 100);
+    try std.testing.expectEqual(unified_snapshot.Phase.held, f.a.unified_snapshot.?.records[0].phase);
+    try std.testing.expectEqual(@as(usize, 0), f.a.enqueue_calls);
+    beginUnifiedSend(f.a, 101);
+    try std.testing.expect(f.a.checkpoint_seen);
+    try std.testing.expectEqual(@as(usize, 1), f.a.enqueue_calls);
+    try std.testing.expectEqualStrings("later text", f.a.observed_job.?.args[0].slice());
+}
+
+test "lost worker result becomes durable held uncertainty" {
+    const f = try Fixture.init();
+    defer f.deinit();
+    beginUnifiedSend(f.a, 100);
+    f.a.unified_result_lost.store(true, .release);
+    tickUnifiedOutbox(f.a);
+    try std.testing.expectEqual(unified_snapshot.Phase.held, f.a.unified_snapshot.?.records[0].phase);
+    try std.testing.expect(f.a.unified_snapshot.?.records[0].entry.ambiguous);
+    try std.testing.expect(f.a.unified_inflight == null);
+    try std.testing.expectEqual(@as(usize, 1), f.a.enqueue_calls);
+}
+
+test "failed fourth-attempt save keeps full uncertain intent" {
+    const f = try Fixture.init();
+    defer f.deinit();
+    f.first.records[0].entry.attempts = 3;
+    beginUnifiedSend(f.a, 100);
+    f.a.fail_save_at = 2;
+    const result = completedResult(f, false, 503);
+    finishUnifiedSend(f.a, &result);
+    try std.testing.expectEqual(unified_snapshot.Phase.uncertain, f.a.unified_snapshot.?.records[0].phase);
+    try std.testing.expectEqualStrings("reply-id", f.a.unified_snapshot.?.records[0].entry.reply_to.slice());
+    try std.testing.expectEqualStrings("saved-name.ogg", f.a.unified_snapshot.?.records[0].wire_filename.slice());
+    try std.testing.expect(f.a.unified_unsaved_result != null and f.a.unified_storage_blocked);
+    tickUnifiedOutbox(f.a);
+    try std.testing.expectEqual(unified_snapshot.Phase.held, f.a.unified_snapshot.?.records[0].phase);
+    try std.testing.expectEqual(@as(u8, 4), f.a.unified_snapshot.?.records[0].entry.attempts);
+    try std.testing.expectEqual(@as(usize, 1), f.a.enqueue_calls);
+}
+
+test "failed missing-attachment hold blocks later sends" {
+    const f = try Fixture.init();
+    defer f.deinit();
+    f.a.attachment_available = false;
+    f.a.fail_save_at = 1;
+    beginUnifiedSend(f.a, 100);
+    try std.testing.expect(f.a.unified_storage_blocked);
+    try std.testing.expectEqual(unified_snapshot.Phase.ready, f.a.unified_snapshot.?.records[0].phase);
+    beginUnifiedSend(f.a, 101);
+    try std.testing.expectEqual(@as(usize, 0), f.a.enqueue_calls);
+}
+
+
+test "failed source refill blocks later dispatch" {
+    const f = try Fixture.init();
+    defer f.deinit();
+    beginUnifiedSend(f.a, 100);
+    f.a.refill_fail = true;
+    const result = completedResult(f, true, 200);
+    finishUnifiedSend(f.a, &result);
+    try std.testing.expectEqual(@as(usize, 0), f.a.unified_snapshot.?.count);
+    try std.testing.expect(f.a.unified_refill_pending and f.a.unified_storage_blocked);
+    try std.testing.expect(!f.a.unified_imports_clean);
+    beginUnifiedSend(f.a, 20_000);
+    try std.testing.expectEqual(@as(usize, 1), f.a.enqueue_calls);
 }

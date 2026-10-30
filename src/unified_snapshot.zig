@@ -18,6 +18,15 @@ pub const Record = struct {
     not_before_ms: u64 = 0,
 };
 
+pub const UnifiedOutcome = struct {
+    id: [outbox.id_len]u8,
+    attempt: u64,
+    kind: enum { acknowledged, retryable, held },
+    ambiguous: bool = false,
+    reason: outbox.Str(95) = .{},
+    received_ms: u64 = 0,
+};
+
 pub const Snapshot = struct {
     version: u32 = 2,
     backend: outbox.Str(max_backend_len) = .{},

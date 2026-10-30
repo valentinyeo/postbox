@@ -10,12 +10,13 @@ parser.add_argument('--zig', required=True)
 args = parser.parse_args()
 source = (root / 'src/main.zig').read_text()
 parts = []
-for name in ('wacliJobArgs', 'beginUnifiedSend', 'retryUnifiedSend'):
+for name in ('wacliJobArgs', 'beginUnifiedSend', 'retryUnifiedSend', 'sendRetryDelayMs', 'retryUnifiedRefill', 'commitUnifiedOutcome', 'finishUnifiedSend', 'tickUnifiedOutbox'):
     start = source.index(f'fn {name}(')
     end = source.index('\n}\n', start) + 3
     parts.append(source[start:end])
 parts.insert(0, re.search(r'^const WacliJobKind = enum\(u8\) \{[^\n]+\};', source, re.M).group())
 parts.insert(0, re.search(r'^const WacliJob = struct \{.*?^};', source, re.M | re.S).group())
+parts.insert(0, re.search(r'^const WacliResult = struct \{.*?^};', source, re.M | re.S).group())
 for name in ('max_wacli_args', 'wacli_arg_cap', 'max_pending_sends'):
     parts.insert(0, re.search(rf'^const {name} = .*?;', source, re.M).group())
 with tempfile.TemporaryDirectory(prefix='unified-checkpoint-') as directory:
