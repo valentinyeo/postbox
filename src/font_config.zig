@@ -1,5 +1,8 @@
 const std = @import("std");
 
+pub const min_scale: i32 = 60;
+pub const max_scale: i32 = 160;
+
 pub const small_scale: i32 = 80;
 pub const default_scale: i32 = 100;
 pub const large_scale: i32 = 125;
@@ -7,7 +10,7 @@ pub const larger_scale: i32 = 150;
 
 pub fn savedScale(value: u32) i32 {
     if (value == 82) return default_scale;
-    return @intCast(std.math.clamp(value, 60, 160));
+    return @intCast(std.math.clamp(value, min_scale, max_scale));
 }
 
 pub const body_weight: i32 = @import("design_tokens.zig").body_weight;

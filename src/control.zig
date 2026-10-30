@@ -1,5 +1,6 @@
 const std = @import("std");
 const theme = @import("theme.zig");
+const font_config = @import("font_config.zig");
 const transport = @import("transport.zig");
 
 pub const client_open_flags: u32 = 0x00100000 | 0x00010000;
@@ -26,12 +27,13 @@ test "paint status contract exposes all cumulative surface counters" {
     try std.testing.expectEqualStrings("{\"window\":9,\"window_full\":2,\"canvas\":8,\"canvas_full\":3,\"list\":7,\"list_full\":4}", out.written());
 }
 
-pub const Command = enum { theme, status, chats, search, view, select, messages, archive, unarchive, @"archive-many" };
+pub const Command = enum { theme, font, status, chats, search, view, select, messages, archive, unarchive, @"archive-many" };
 pub const Messenger = enum { whatsapp, slack, telegram, all, signal };
 
 pub const Request = struct {
     cmd: Command,
     theme: ?theme.Choice = null,
+    font_scale: ?i32 = null,
     id: []const u8 = "",
     ids: []const []const u8 = &.{},
     text: []const u8 = "",
@@ -48,7 +50,8 @@ pub const CommandInfo = struct { cmd: Command, usage: []const u8, summary: []con
 
 pub const commands = [_]CommandInfo{
     .{ .cmd = .theme, .usage = "theme <amoled>", .summary = "switch and save the app theme without focusing it" },
-    .{ .cmd = .status, .usage = "status", .summary = "version, theme, current account view and order, selected chat, sync state, pending sends, search text, cumulative surface paint counters" },
+    .{ .cmd = .font, .usage = "font <percent>", .summary = "switch and save the font scale (60 to 160) without focusing the app" },
+    .{ .cmd = .status, .usage = "status", .summary = "version, theme, font scale, current account view and order, selected chat, sync state, pending sends, search text, cumulative surface paint counters" },
     .{ .cmd = .chats, .usage = "chats [--json] [--messenger all|whatsapp|slack|telegram|signal] [--archived] [--all] [--limit N]", .summary = "list chats; default is what the sidebar shows, --all ignores the search filter" },
     .{ .cmd = .search, .usage = "search <text>", .summary = "set the sidebar search text (\"\" clears it)" },
     .{ .cmd = .view, .usage = "view <N|inbox|all|whatsapp|slack|telegram|signal>", .summary = "switch to an account view or the combined inbox" },
@@ -133,6 +136,12 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
             if (items.len != 1) return usage(message, "theme needs amoled");
             request.theme = std.meta.stringToEnum(theme.Choice, items[0]) orelse return usage(message, "theme needs amoled");
         },
+        .font => {
+            if (items.len != 1) return usage(message, "font needs a whole number from 60 to 160");
+            const scale = std.fmt.parseInt(i32, items[0], 10) catch return usage(message, "font needs a whole number from 60 to 160");
+            if (!validFontScale(scale)) return usage(message, "font needs a whole number from 60 to 160");
+            request.font_scale = scale;
+        },
         .status, .chats => if (items.len != 0) return usage(message, "unexpected argument"),
         .search => {
             if (items.len == 0) return usage(message, "search needs text (\"\" clears it)");
@@ -165,6 +174,11 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const []const u8, message
         },
     }
     return request;
+}
+
+pub fn validFontScale(scale: ?i32) bool {
+    const value = scale orelse return false;
+    return value >= font_config.min_scale and value <= font_config.max_scale;
 }
 
 fn usage(message: *[]const u8, text: []const u8) ParseError {
@@ -466,4 +480,53 @@ test "view accepts an account position and combined inbox while retaining provid
 
 test "pipe open flags select identification only" {
     try std.testing.expectEqual(@as(u32, 0x00110000), client_open_flags & 0x00130000);
+}
+
+test "font command accepts presets, custom values and bounds" {
+    const cases = [_]struct { text: []const u8, scale: i32 }{
+        .{ .text = "60", .scale = font_config.min_scale },
+        .{ .text = "80", .scale = font_config.small_scale },
+        .{ .text = "100", .scale = font_config.default_scale },
+        .{ .text = "125", .scale = font_config.large_scale },
+        .{ .text = "150", .scale = font_config.larger_scale },
+        .{ .text = "137", .scale = 137 },
+        .{ .text = "160", .scale = font_config.max_scale },
+    };
+    for (cases) |case| {
+        const request = try parseForTest(&.{ "font", case.text });
+        try std.testing.expectEqual(Command.font, request.cmd);
+        try std.testing.expectEqual(@as(?i32, case.scale), request.font_scale);
+        var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer out.deinit();
+        try writeRequest(&out.writer, request);
+        const parsed = try parseRequest(std.testing.allocator, out.written());
+        defer parsed.deinit();
+        try std.testing.expect(validFontScale(parsed.value.font_scale));
+        try std.testing.expectEqual(request.font_scale, parsed.value.font_scale);
+    }
+}
+
+test "font command rejects wrong counts and invalid scales" {
+    var message: []const u8 = "";
+    const allocator = std.testing.allocator;
+    try std.testing.expectError(error.Usage, parseArgs(allocator, &.{"font"}, &message));
+    try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "font", "100", "125" }, &message));
+    for ([_][]const u8{ "", "abc", "1.5", "2147483648", "-1", "59", "161" }) |value| {
+        try std.testing.expectError(error.Usage, parseArgs(allocator, &.{ "font", value }, &message));
+    }
+}
+
+test "font pipe requests reject missing and out of range scales" {
+    for ([_][]const u8{
+        "{\"cmd\":\"font\"}",
+        "{\"cmd\":\"font\",\"font_scale\":null}",
+        "{\"cmd\":\"font\",\"font_scale\":-1}",
+        "{\"cmd\":\"font\",\"font_scale\":59}",
+        "{\"cmd\":\"font\",\"font_scale\":161}",
+    }) |line| {
+        const parsed = try parseRequest(std.testing.allocator, line);
+        defer parsed.deinit();
+        try std.testing.expect(!validFontScale(parsed.value.font_scale));
+    }
+    try std.testing.expectError(error.Overflow, parseRequest(std.testing.allocator, "{\"cmd\":\"font\",\"font_scale\":2147483648}"));
 }

@@ -1870,7 +1870,7 @@ fn recreateFonts(a: *App) void {
 }
 
 fn setFontScale(a: *App, scale: i32) void {
-    const next = std.math.clamp(scale, 60, 160);
+    const next = std.math.clamp(scale, @import("font_config.zig").min_scale, @import("font_config.zig").max_scale);
     a.font_scale = next;
     text_draw.reset();
     recreateFonts(a);
@@ -12805,6 +12805,11 @@ fn controlHandle(context: *anyopaque, line: []const u8, out: *std.Io.Writer.Allo
         control_api.writeError(w, "bad request; run postboxctl --help") catch {};
         return;
     };
+    if (parsed.value.cmd == .font and !control_api.validFontScale(parsed.value.font_scale)) {
+        parsed.deinit();
+        control_api.writeError(w, "font needs a whole number from 60 to 160") catch {};
+        return;
+    }
     const event = win.CreateEventW(null, win.FALSE, win.FALSE, null) orelse {
         parsed.deinit();
         control_api.writeError(w, "could not create an event") catch {};
@@ -12902,6 +12907,10 @@ fn controlDispatch(a: *App, call: *ControlCall) !void {
             if (!changeTheme(a, choice)) return control_api.writeError(w, "could not change theme");
             try w.print("{{\"ok\":true,\"result\":{{\"theme\":\"{s}\"}}}}\n", .{@tagName(theme.choice)});
         },
+        .font => {
+            setFontScale(a, request.font_scale.?);
+            try w.print("{{\"ok\":true,\"result\":{{\"font_scale\":{d}}}}}\n", .{a.font_scale});
+        },
         .status => try controlStatus(a, w),
         .chats => try controlChats(a, call),
         .search => try controlSearch(a, call),
@@ -12983,7 +12992,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         slackChatCount(a), a.chat_count,                     a.show_archived, a.unread_only,
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
-    try w.print(",\"theme\":\"{s}\",\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.staged_images.count });
+    try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
     if (verification_fixture) {
         var ready: usize = 0;
         var uncertain: usize = 0;
