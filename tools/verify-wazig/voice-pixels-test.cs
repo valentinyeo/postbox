@@ -24,7 +24,7 @@ public static class VoicePixelsTest {
         var full = new byte[Stride * Height];
         Fill(full, canvas, 20, 20, 20);
         Fill(full, bubble, 100, 100, 100);
-        Fill(full, Rect(46, 93, 47, 94), 150, 150, 150);
+        Fill(full, Rect(32, 89, 60, 117), 150, 150, 150);
         Fill(full, Rect(42, 97, 48, 99), 240, 240, 240);
         var partial = (byte[])full.Clone();
         Require(Check(partial, full, bubble).problems.Count == 0, "baseline rejected");
