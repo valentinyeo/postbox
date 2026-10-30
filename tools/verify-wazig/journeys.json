@@ -185,6 +185,24 @@
       "maximize": true
     },
     {
+      "name": "hub-fault",
+      "pr": false,
+      "hub": "hub-fault",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-hub-fault.ps1",
+      "validator": {
+        "file": "check-hub-fault-evidence.py",
+        "function": "check_hub_fault"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "FaultJourneyHandler"
+      },
+      "maximize": true,
+      "prepare": "prepare-hub-fault.ps1"
+    },
+    {
       "name": "hub-archive",
       "pr": true,
       "hub": "hub-archive",

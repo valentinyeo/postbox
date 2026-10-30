@@ -157,8 +157,7 @@ class Handler(bridge.Handler):
                                          retry_marker=self.identity_ingress_markers.get(stem),
                                          dispatch_marker=self.identity_ingress_dispatches.get(stem))) + '\n')
 
-    def do_POST(self):
-        self.wire_path = self.path
+    def capture_identity_ingress(self):
         self.identity_ingress_markers = {}
         self.identity_ingress_dispatches = {}
         root = getattr(self.state, 'snapshot_root', None)
@@ -168,6 +167,10 @@ class Handler(bridge.Handler):
                 for marker in root.parent.glob(prefix + '*.json'):
                     stem = marker.name.removeprefix(prefix).removesuffix('.json')
                     target[stem] = json.loads(marker.read_text(encoding='utf-8'))
+
+    def do_POST(self):
+        self.wire_path = self.path
+        self.capture_identity_ingress()
         if self.path == '/fixture/live':
             super().do_POST()
             return
@@ -280,6 +283,60 @@ class Handler(bridge.Handler):
         self.path = self.path.replace('/v1/wazig/', '/v1/', 1)
         super().do_POST()
 
+
+
+class FaultJourneyHandler(Handler):
+    def do_POST(self):
+        if self.path != '/v1/wazig/send':
+            return super().do_POST()
+        self.wire_path = self.path
+        self.capture_identity_ingress()
+        if not self.authorized():
+            return
+        data = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        multipart = self.headers.get('Content-Type', '').startswith('multipart/form-data')
+        body, payload = {}, b''
+        if multipart:
+            envelope = bridge.BytesParser(policy=bridge.policy.default).parsebytes(
+                f'Content-Type: {self.headers["Content-Type"]}\r\nMIME-Version: 1.0\r\n\r\n'.encode() + data)
+            for part in envelope.iter_parts():
+                name = part.get_param('name', header='content-disposition')
+                if part.get_filename() is None:
+                    body[name] = part.get_content()
+                else:
+                    body[name] = part.get_filename()
+                    payload = part.get_payload(decode=True)
+        else:
+            body = json.loads(data)
+        self.wire_body = dict(body)
+        label = body.get('text')
+        if label not in ('Fault checkpoint', 'Fault terminal file', 'Fault ack file') or body.get('chat') != ALPHA:
+            self.respond(400, {'error': 'unexpected fault fixture payload'}, body=body)
+            return
+        if multipart != (label != 'Fault checkpoint') or (multipart and not payload.startswith(b'\x89PNG\r\n\x1a\n')):
+            self.respond(400, {'error': 'unexpected fault fixture attachment'}, body=body)
+            return
+        self.capture_identity_snapshot(body)
+        client_id = body['client_id']
+        fingerprint = (dict(body), hashlib.sha256(payload).hexdigest())
+        with self.state.lock:
+            if not hasattr(self.state, 'fault_intents'):
+                self.state.fault_intents = {}
+            prior = self.state.fault_intents.get(client_id)
+            if prior is None:
+                prior = dict(fingerprint=fingerprint, attempts=0)
+                self.state.fault_intents[client_id] = prior
+            if prior['fingerprint'] != fingerprint:
+                self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False)
+                return
+            prior['attempts'] += 1
+            attempt = prior['attempts']
+        accepted = attempt == 1
+        status = 409 if label == 'Fault terminal file' and attempt <= 4 else 200
+        result = {'client_id': client_id, 'status': 'unknown'} if status == 409 else {
+            'client_id': client_id, 'status': 'sent', 'msg_id': 'fault-' + client_id, 'ts': self.state.stamp}
+        self.respond(status, result, body=body, accepted=accepted, duplicate=not accepted,
+                     multipart=multipart, file_size=len(payload), file_sha256=hashlib.sha256(payload).hexdigest())
 
 
 ARCHIVE_GROUP = 'personal:120363000000000001@g.us'
@@ -2146,7 +2203,7 @@ def main():
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
-    server.state.snapshot_root = args.snapshot_root if args.mode == 'mixed-lid' else None
+    server.state.snapshot_root = args.snapshot_root if args.mode in ('mixed-lid', 'hub-fault') else None
     server.state.archive_incoming = 0
     server.state.plain_dms = {}
     server.state.view_rows = view_rows()
