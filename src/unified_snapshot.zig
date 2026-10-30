@@ -120,13 +120,29 @@ pub fn encode(allocator: std.mem.Allocator, snapshot: *const Snapshot) EncodeErr
         const e = &r.entry;
         digests[i] = std.fmt.bytesToHex(r.file_sha256, .lower);
         rows[i] = .{
-            .id = e.idSlice(), .provider = @tagName(e.provider), .account = e.account.slice(), .jid = e.jid.slice(),
-            .text = e.text.slice(), .file = e.file.slice(), .reply_to = e.reply_to.slice(), .reply_sender = e.reply_sender.slice(),
-            .client_msg_id = e.client_msg_id.slice(), .attempts = e.attempts, .ambiguous = e.ambiguous,
-            .upload_file_id = e.upload_file_id.slice(), .queued_unix = e.queued_unix, .ptt = e.ptt, .voice_seconds = e.voice_seconds,
-            .phase = @tagName(r.phase), .attempt_serial = r.attempt_serial, .owned_file = r.owned_file.slice(),
-            .wire_filename = r.wire_filename.slice(), .file_sha256 = &digests[i], .file_bytes = r.file_bytes,
-            .attachment_ready = r.attachment_ready, .failure_reason = r.failure_reason.slice(),
+            .id = e.idSlice(),
+            .provider = @tagName(e.provider),
+            .account = e.account.slice(),
+            .jid = e.jid.slice(),
+            .text = e.text.slice(),
+            .file = e.file.slice(),
+            .reply_to = e.reply_to.slice(),
+            .reply_sender = e.reply_sender.slice(),
+            .client_msg_id = e.client_msg_id.slice(),
+            .attempts = e.attempts,
+            .ambiguous = e.ambiguous,
+            .upload_file_id = e.upload_file_id.slice(),
+            .queued_unix = e.queued_unix,
+            .ptt = e.ptt,
+            .voice_seconds = e.voice_seconds,
+            .phase = @tagName(r.phase),
+            .attempt_serial = r.attempt_serial,
+            .owned_file = r.owned_file.slice(),
+            .wire_filename = r.wire_filename.slice(),
+            .file_sha256 = &digests[i],
+            .file_bytes = r.file_bytes,
+            .attachment_ready = r.attachment_ready,
+            .failure_reason = r.failure_reason.slice(),
         };
     }
     const encoded = std.json.Stringify.valueAlloc(allocator, WireSnapshot{ .version = 2, .backend = snapshot.backend.slice(), .records = rows }, .{}) catch return error.OutOfMemory;
@@ -369,7 +385,9 @@ test "owned paths stay within the exact backend files directory" {
 
 pub fn readyCount(snapshot: *const Snapshot) usize {
     var count: usize = 0;
-    for (snapshot.records[0..snapshot.count]) |*record| if (record.phase == .ready) { count += 1; };
+    for (snapshot.records[0..snapshot.count]) |*record| if (record.phase == .ready) {
+        count += 1;
+    };
     return count;
 }
 
@@ -457,9 +475,15 @@ pub fn unresolvedMayAlias(allocator: std.mem.Allocator, line: []const u8, snapsh
         },
     };
     defer parsed.deinit();
-    const object = switch (parsed.value) { .object => |object| object, else => return false };
+    const object = switch (parsed.value) {
+        .object => |object| object,
+        else => return false,
+    };
     const value = object.get("id") orelse return false;
-    const id = switch (value) { .string => |id| id, else => return false };
+    const id = switch (value) {
+        .string => |id| id,
+        else => return false,
+    };
     for (snapshot.records[0..snapshot.count]) |*record| {
         if (std.mem.eql(u8, id, record.entry.idSlice())) return true;
     }
@@ -489,7 +513,6 @@ test "missing active attachment blocks alias retirement" {
     try std.testing.expectEqual(AliasComparison.conflict, compareAlias(&snapshot.records[1], &alias));
 }
 
-
 pub fn attachmentMatches(bytes: []const u8, expected_len: u64, expected_sha256: *const [32]u8) bool {
     if (bytes.len != expected_len) return false;
     var digest: [32]u8 = undefined;
@@ -505,7 +528,6 @@ test "attachment fingerprint covers actual serialized bytes" {
     try std.testing.expect(!attachmentMatches("Original file bytes", bytes.len, &digest));
     try std.testing.expect(!attachmentMatches(bytes, bytes.len + 1, &digest));
 }
-
 
 test "ready capacity counts snapshot records, not projections" {
     const snapshot = try testSnapshot();
