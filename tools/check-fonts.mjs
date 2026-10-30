@@ -49,7 +49,7 @@ export function verifySources(sources, exists) {
     assert.match(load[1], /win\.AddFontResourceExW\(font_path\.ptr\(\), win\.FR_PRIVATE, null\)/);
   }
   assert.match(loads[0][1], /plex_loaded == font_files\.len, plex_loaded, font_files\.len/);
-  const recreate = section(main, 'fn recreateFonts(', '\nfn changeFontScale');
+  const recreate = section(main, 'fn recreateFonts(', '\nfn setFontScale');
   assert.match(recreate, /body_weight = @import\("font_config\.zig"\)\.body_weight/);
   assert.match(recreate, /comptime std\.debug\.assert\(body_weight == win\.FW_NORMAL\)/);
   assert.match(sources['src/font_config.zig'], /pub const body_weight: i32 = @import\("design_tokens.zig"\)\.body_weight;/);

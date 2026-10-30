@@ -12,9 +12,10 @@ def verify_defaults(main, config):
     load = main.split('fn loadFontScale() i32 {', 1)[1].split('\n}', 1)[0]
     assert 'if (result != win.ERROR_SUCCESS) return @import("font_config.zig").default_scale;' in load
     assert 'return @import("font_config.zig").savedScale(value);' in load
-    reset = main.split('command_font_reset => {', 1)[1].split('\n        }', 1)[0]
-    assert 'a.font_scale = @import("font_config.zig").default_scale;' in reset
-    assert 'saveFontScale(a.font_scale);' in reset
+    assert 'command_font_reset, command_font_default => setFontScale(a, @import("font_config.zig").default_scale)' in main
+    setter = main.split('fn setFontScale(a: *App, scale: i32) void {', 1)[1].split('\n}', 1)[0]
+    assert 'a.font_scale = next;' in setter
+    assert 'saveFontScale(next);' in setter
 
 
 class FontScaleTests(unittest.TestCase):

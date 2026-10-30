@@ -657,13 +657,30 @@ function Get-AttachmentPicker($Session) {
 class AppearanceVersionTests(unittest.TestCase):
     def fixture(self, folder, version):
         session = dict(feature='appearance', sha256='fixture-binary', commit='fixture-commit',
-                       expected_version=version, expected_product='Postbox')
+                       expected_version=version, expected_product='Postbox', pid=2, startTicks='new', id='fixture-id', root='fixture-root')
         state = dict(version=version, chat_count=3, pending_sends=0, pending_archives=0,
                      sync='stopped', search='', theme='amoled', production_preferences_absent=True,
                      whatsapp_store_absent=True, telegram_store_absent=True)
         files = {'session.json': session, 'side-effects.json': state,
                  'text-scale.json': dict(initial_saved=False, larger=110, reset=100,
                                         baseline_points=10, larger_points=12, reset_points=10)}
+        files['font-viewport.json'] = dict(width=1920, height=1032, hosted_only=True)
+        files['font-palette.json'] = dict(edit_height=36, row_height=44, body_line_height=20, small_line_height=20)
+        (folder / 'text-preset-palette.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
+        files['text-presets.json'] = [dict(scale=scale, points=scale / 10, chat_font_height=-scale,
+                                            list_font_height=-scale, list_uia_height=200, composer_uia_height=50,
+                                            list=dict(scale=scale, row_height=56, body_line_height=20,
+                                                      name_top=4, preview_top=28, preview_bottom=52,
+                                                      name_line_height=20, time_line_height=18, preview_line_height=20))
+                                      for scale in (80, 100, 125, 150)]
+        files['font-restart.json'] = dict(old_pid=1, old_start='old', new_pid=2, new_start='new',
+                                          id='fixture-id', root='fixture-root', sha256='fixture-binary')
+        files['text-preset-restart.state.json'] = dict(version=version, font_layout=dict(scale=150))
+        files['text-fresh-default.state.json'] = dict(version=version, font_layout=dict(scale=100))
+        (folder / 'text-fresh-default.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
+        for size in (80, 100, 125, 150):
+            (folder / f'text-preset-{size}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
+        (folder / 'text-preset-restart.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
         files['shared-design.json'] = dict(width=1920, height=1032, draft='Shared design check',
                                            foreground_pixels=100, raised_pixels=3000,
                                            pill=dict(width=116, height=32))
@@ -680,7 +697,7 @@ class AppearanceVersionTests(unittest.TestCase):
         (folder / 'result.txt').write_text('JOURNEY PASSED: appearance')
         (folder / 'cleanup.txt').write_text('CLEANUP PASSED: fixture removed')
         (folder / 'preferences.txt').write_text('FontScale 100')
-        keys = ('^k', 'Theme: Graphite', 'Make text larger', '{ENTER}', '^0')
+        keys = ('^k', 'Theme: Graphite', 'Make text larger', 'Text size: Small', 'Text size: Default', 'Text size: Large', 'Text size: Larger', 'Quit Postbox', '{ENTER}', '^0')
         (folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in keys))
 
     def run_oracle(self, folder, source=None):
@@ -708,6 +725,20 @@ class AppearanceVersionTests(unittest.TestCase):
             (folder / 'dictation-transcript.json').write_text(json.dumps(dict(
                 expected='Shared design check Go forward ten meters.', actual='Shared design check')))
             (folder / 'run.log').write_text('recorded PCM reaches the production composer')
+            self.assertNotEqual(self.run_oracle(folder).returncode, 0)
+
+    def test_clipped_preset_and_wrong_restart_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            self.fixture(folder, '1.2.345')
+            presets = json.loads((folder / 'text-presets.json').read_text())
+            presets[-1]['list']['name_line_height'] = 30
+            (folder / 'text-presets.json').write_text(json.dumps(presets))
+            self.assertNotEqual(self.run_oracle(folder).returncode, 0)
+            self.fixture(folder, '1.2.345')
+            restart = json.loads((folder / 'font-restart.json').read_text())
+            restart['sha256'] = 'different-binary'
+            (folder / 'font-restart.json').write_text(json.dumps(restart))
             self.assertNotEqual(self.run_oracle(folder).returncode, 0)
 
     def test_wrong_installed_version_is_rejected(self):

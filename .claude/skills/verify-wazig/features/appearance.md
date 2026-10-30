@@ -34,14 +34,14 @@ Preconditions: doctor passes, baseline Graphite and IBM Plex Sans loaded from fi
 
 - **Shared dictation:** the appearance journey replays checked-in recorded PCM in the isolated GitHub fixture. Real Ctrl+D expands the production pill to 116 logical pixels; screenshots require white foreground ink and raised grey fill. The production response parser must deliver the exact recorded transcript into the native composer. No paid request, microphone hardware, or acoustic recognition is claimed. `shared-design.png` is the actual 1920×1032 app region; `shared-design-mic.png` crops its active pill.
 
-- **Presets:** choose all four palette rows. Capture each screen. Read composer font size through UI Automation. Require saved scales 80, 100, 125, and 150. Reset with Ctrl+0.
+- **Presets:** choose all four palette rows. Capture each hosted viewport. Require scales 80, 100, 125, and 150. Measure composer text through UI Automation. Measure painted chat and list fonts. Check list geometry and chat bubble bounds. Restart the owned fixture at 150%. Verify its saved size and binary identity. Reset with Ctrl+0.
 
 ## Gotchas
 
 - Graphite is enum value 1. Legacy choices migrate to Graphite.
 - Composer `1032` and palette edit `1064` are native `RICHEDIT50W` DirectWrite hosts, not standard `EDIT` controls. Composer UIA TextPattern reads the real character font size; `recreateFonts` updates it through `WM_SETFONT`, and the host applies `EM_SETCHARFORMAT` to all existing text. Both theme and larger-text commands use the shared owner-descendant palette lookup, not desktop root children.
 - Do not alter default font, default scale or production preferences for screenshots.
-- Status plus persisted preference proves the selected setting; inspect the screenshot to prove repainting. The fixture run does not claim restart persistence, pixel-level font-size measurement or every DPI combination.
+- Status plus persisted preference proves the selected setting; inspect the screenshot to prove repainting. The fixture does not prove every DPI. Screenshots require visual inspection. The actual laptop remains untested.
 
 - Comparison screenshots require visual inspection; the validator does not assert Chrome/DirectWrite pixel equality, every glyph or every DPI. The workflow pins `0.0.526`, not the current product release, and the screenshot driver is runner-only infrastructure.
 - Comparison source: `src/main.zig:15122` writes paragraph metrics and `src/main.zig:15874` loads the guarded fixture; `tools/verify-wazig/chrome-text.cjs:27` validates metrics.

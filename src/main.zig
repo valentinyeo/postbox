@@ -781,6 +781,11 @@ const App = struct {
     last_chat_count: usize = std.math.maxInt(usize),
     font: ?win.HFONT = null,
     font_small: ?win.HFONT = null,
+    font_body_height: i32 = 0,
+    font_small_height: i32 = 0,
+    font_row_height: i32 = 0,
+    font_time_height: i32 = 0,
+    chat_row_geometry: @import("font_config.zig").RowGeometry = @import("font_config.zig").rowGeometry(96, 0, 0, 0),
     message_fonts: [8]?win.HFONT = @splat(null),
     message_hover: ?usize = null,
     font_reply_label: ?win.HFONT = null,
@@ -1782,6 +1787,17 @@ fn recreateFonts(a: *App) void {
     a.font_time = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
     a.font_reply_label = win.CreateFontW(scaledFontHeight(theme.type_time, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
     a.font_reply_icon = win.CreateFontW(scaledFontHeight(theme.icon_size, 100, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
+    if (a.hwnd) |hwnd| {
+        if (win.GetDC(hwnd)) |dc| {
+            defer _ = win.ReleaseDC(hwnd, dc);
+            a.font_body_height = if (a.font) |font| textLineHeight(dc, font) else 0;
+            a.font_small_height = if (a.font_small) |font| textLineHeight(dc, font) else 0;
+            a.font_row_height = @max(if (a.font_row) |font| textLineHeight(dc, font) else 0, if (a.font_emoji) |font| textLineHeight(dc, font) else 0);
+            a.font_time_height = if (a.font_time) |font| textLineHeight(dc, font) else 0;
+            a.chat_row_geometry = @import("font_config.zig").rowGeometry(dpi, a.font_row_height, a.font_small_height, a.font_time_height);
+            if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, @intCast(a.chat_row_geometry.height));
+        }
+    }
     setFont(a.chats_hwnd, a.font);
     setFont(a.compose, a.font);
     setFont(a.thread_list, a.font);
@@ -2533,7 +2549,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
                     var tail: win.RECT = undefined;
                     _ = win.GetClientRect(list, &tail);
                     const top = win.SendMessageW(list, win.LB_GETTOPINDEX, 0, 0);
-                    tail.top = @max(0, (@as(i32, @intCast(@min(previous_rows.len, a.chat_count))) - @as(i32, @intCast(top))) * px(a, theme.chat_row_height));
+                    tail.top = @max(0, (@as(i32, @intCast(@min(previous_rows.len, a.chat_count))) - @as(i32, @intCast(top))) * a.chat_row_geometry.height);
                     if (tail.top < tail.bottom) _ = win.InvalidateRect(list, &tail, win.FALSE);
                 }
             }
@@ -11969,6 +11985,15 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.staged_images.count });
+    if (verification_fixture) {
+        var row_font = std.mem.zeroes(win.LOGFONTW);
+        var preview_font = std.mem.zeroes(win.LOGFONTW);
+        if (a.font_row) |font| _ = win.GetObjectW(font, @sizeOf(win.LOGFONTW), &row_font);
+        if (a.font_small) |font| _ = win.GetObjectW(font, @sizeOf(win.LOGFONTW), &preview_font);
+        const row = a.chat_row_geometry;
+        try w.print(",\"font_layout\":{{\"scale\":{d},\"row_font_height\":{d},\"preview_font_height\":{d},\"body_line_height\":{d},\"preview_line_height\":{d},\"name_line_height\":{d},\"time_line_height\":{d},\"name_top\":{d},\"preview_top\":{d},\"preview_bottom\":{d},\"row_height\":{d}}}", .{ a.font_scale, row_font.lfHeight, preview_font.lfHeight, a.font_body_height, a.font_small_height, a.font_row_height, a.font_time_height, row.name_top, row.preview_top, row.preview_bottom, row.height });
+    }
+
     const card = updateCardRect(a);
     try w.print(",\"update_card\":{{\"visible\":{},\"span\":{d},\"rect\":[{d},{d},{d},{d}],\"error\":", .{ updateCardVisible(a), updateCardSpan(a), card.left, card.top, card.right, card.bottom });
     try control_api.writeString(w, a.update_card_error[0..a.update_card_error_len]);
@@ -12551,13 +12576,22 @@ fn paletteScore(label: []const u16, query: []const u16) ?i32 {
     return score;
 }
 
+fn paletteRowHeight(a: *const App) i32 {
+    return @max(palette_row_height, @max(a.font_body_height + 8, a.font_small_height * 2 + 4));
+}
+
+fn paletteEditZone(a: *const App) i32 {
+    return @max(palette_edit_zone, a.font_body_height + 28);
+}
+
 fn paletteLayout(a: *App) void {
     const palette = a.palette orelse return;
     const rows: i32 = @intCast(@max(1, @min(a.palette_match_count, palette_max_rows)));
-    const height = palette_edit_zone + rows * palette_row_height + 12;
+    const edit_zone = paletteEditZone(a);
+    const height = edit_zone + rows * paletteRowHeight(a) + 12;
     _ = win.SetWindowPos(palette, null, 0, 0, palette_width, height, win.SWP_NOMOVE | win.SWP_NOZORDER | win.SWP_NOACTIVATE);
     if (a.palette_list) |list| {
-        _ = win.MoveWindow(list, 1, palette_edit_zone, palette_width - 2 - scrollbar_width, height - palette_edit_zone - 1, win.TRUE);
+        _ = win.MoveWindow(list, 1, edit_zone, palette_width - 2 - scrollbar_width, height - edit_zone - 1, win.TRUE);
     }
 }
 
@@ -13055,6 +13089,8 @@ fn showPaletteWindow(a: *App) void {
     _ = win.GetWindowRect(owner, &owner_rect);
     const x = @max(owner_rect.left + 8, owner_rect.left + @divTrunc((owner_rect.right - owner_rect.left) - palette_width, 2));
     const y = owner_rect.top + 110;
+    const edit_zone = paletteEditZone(a);
+    const row_height = paletteRowHeight(a);
     const palette = win.CreateWindowExW(
         win.WS_EX_TOOLWINDOW,
         lit("MessagesPalette"),
@@ -13063,7 +13099,7 @@ fn showPaletteWindow(a: *App) void {
         x,
         y,
         palette_width,
-        palette_edit_zone + palette_max_rows * palette_row_height + 12,
+        edit_zone + palette_max_rows * row_height + 12,
         owner,
         null,
         a.instance,
@@ -13075,7 +13111,7 @@ fn showPaletteWindow(a: *App) void {
     _ = win.DwmSetWindowAttribute(palette, 33, &corner, @sizeOf(win.DWORD));
     var margins = win.MARGINS{ .cxLeftWidth = 0, .cxRightWidth = 0, .cyTopHeight = 0, .cyBottomHeight = 1 };
     _ = win.DwmExtendFrameIntoClientArea(palette, &margins);
-    a.palette_edit = directwrite_edit.create(a.instance, palette, controlId(id_palette_edit), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 16, 13, palette_width - 32, 36);
+    a.palette_edit = directwrite_edit.create(a.instance, palette, controlId(id_palette_edit), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_AUTOHSCROLL, 16, 13, palette_width - 32, edit_zone - 28);
     if (a.palette_edit == null) {
         _ = win.DestroyWindow(palette);
         return;
@@ -13083,11 +13119,11 @@ fn showPaletteWindow(a: *App) void {
     if (a.palette_search_mode) {
         _ = win.SetWindowTextW(a.palette_edit.?, a.search_query.ptr());
     }
-    a.palette_list = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_HASSTRINGS | win.LBS_NOINTEGRALHEIGHT, 1, palette_edit_zone, palette_width - 2 - scrollbar_width, palette_max_rows * palette_row_height + 12, palette, controlId(id_palette_list), a.instance, null);
+    a.palette_list = win.CreateWindowExW(0, lit("LISTBOX"), null, win.WS_CHILD | win.WS_VISIBLE | win.LBS_NOTIFY | win.LBS_OWNERDRAWFIXED | win.LBS_HASSTRINGS | win.LBS_NOINTEGRALHEIGHT, 1, edit_zone, palette_width - 2 - scrollbar_width, palette_max_rows * row_height + 12, palette, controlId(id_palette_list), a.instance, null);
     setFont(a.palette_edit, a.font);
     setFont(a.palette_list, a.font);
     setPaletteCue(a);
-    if (a.palette_list) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, palette_row_height);
+    if (a.palette_list) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, @intCast(row_height));
     paletteFilter(a);
     _ = win.ShowWindow(palette, win.SW_SHOW);
     if (a.palette_edit) |edit| _ = win.SetFocus(edit);
@@ -13161,13 +13197,13 @@ fn drawPaletteItem(a: *App, item: *win.DRAWITEMSTRUCT) void {
     if (palette_item.shortcut.len > 0) {
         _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
         _ = win.SetTextColor(item.hDC, if (selected and theme.choice == .amoled) theme.current.on_secondary_container else theme.current.on_surface_variant);
-        var shortcut_rect = win.RECT{ .left = item.rcItem.right - 120, .top = item.rcItem.top + (if (group_start) @as(i32, 16) else 0), .right = item.rcItem.right - 16, .bottom = item.rcItem.bottom };
+        var shortcut_rect = win.RECT{ .left = item.rcItem.right - 120, .top = item.rcItem.top + (if (group_start) @max(16, a.font_small_height + 2) else 0), .right = item.rcItem.right - 16, .bottom = item.rcItem.bottom };
         _ = text_draw.drawText(item.hDC, palette_item.shortcut.ptr(), @intCast(palette_item.shortcut.len), &shortcut_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
     }
     if (group_start) {
         _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
         _ = win.SetTextColor(item.hDC, theme.current.on_surface_variant);
-        var group_rect = win.RECT{ .left = item.rcItem.right - 120, .top = item.rcItem.top + 2, .right = item.rcItem.right - 16, .bottom = item.rcItem.top + 20 };
+        var group_rect = win.RECT{ .left = item.rcItem.right - 120, .top = item.rcItem.top + 2, .right = item.rcItem.right - 16, .bottom = item.rcItem.top + @max(20, a.font_small_height + 2) };
         const label = if (chat_result) lit("Chats") else lit("Commands");
         _ = text_draw.drawText(item.hDC, label, -1, &group_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
         if (index > 0) {
@@ -13225,13 +13261,14 @@ fn paletteProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: wi
             var client: win.RECT = undefined;
             _ = win.GetClientRect(hwnd, &client);
             _ = win.FillRect(hdc, &client, a.brush_panel.?);
-            var separator = win.RECT{ .left = 0, .top = palette_edit_zone - 2, .right = client.right, .bottom = palette_edit_zone - 1 };
+            const edit_zone = paletteEditZone(a);
+            var separator = win.RECT{ .left = 0, .top = edit_zone - 2, .right = client.right, .bottom = edit_zone - 1 };
             _ = win.FillRect(hdc, &separator, a.brush_raised.?);
             if (a.palette_match_count == 0) {
                 _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
                 _ = win.SelectObject(hdc, @ptrCast(a.font.?));
                 const empty_text = lit("No matching commands");
-                var empty_rect = win.RECT{ .left = 20, .top = palette_edit_zone + 4, .right = client.right - 20, .bottom = palette_edit_zone + 36 };
+                var empty_rect = win.RECT{ .left = 20, .top = edit_zone + 4, .right = client.right - 20, .bottom = edit_zone + paletteRowHeight(a) };
                 _ = text_draw.drawText(hdc, empty_text, -1, &empty_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
             }
             var shapes = smooth.Context.init(hdc);
@@ -14635,7 +14672,8 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     }
 
     const avatar_left = item.rcItem.left + px(a, 12);
-    const avatar_top = item.rcItem.top + @divTrunc(px(a, theme.chat_row_height - theme.avatar_size), 2);
+    const row = a.chat_row_geometry;
+    const avatar_top = item.rcItem.top + @divTrunc(row.height - px(a, theme.avatar_size), 2);
     const avatar_entry = if (hub.chatAvatarEnabled(chat.provider, unifiedHub(a), hub.igsh_696_telegram_avatars)) avatarForChat(a, chat.jid.slice()) else null;
     if (avatar_entry == null or avatar_entry.?.bitmap == null) {
         smooth.fillEllipse(&shapes, .{ .left = avatar_left, .top = avatar_top, .right = avatar_left + px(a, theme.avatar_size), .bottom = avatar_top + px(a, theme.avatar_size) }, theme.current.surface_container_highest);
@@ -14675,7 +14713,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     if (chat.unread or chat.unread_count > 0) {
         const diameter = px(a, theme.unread_dot_px);
         const dot_right = item.rcItem.right - px(a, 12);
-        const dot_top = item.rcItem.top + @divTrunc(px(a, 28) + px(a, theme.chat_row_height - 4) - diameter, 2);
+        const dot_top = item.rcItem.top + @divTrunc(row.preview_top + row.preview_bottom - diameter, 2);
         smooth.fillEllipse(&shapes, .{ .left = dot_right - diameter, .top = dot_top, .right = dot_right, .bottom = dot_top + diameter }, row_primary);
     }
     shapes.deinit();
@@ -14693,8 +14731,8 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     if (containsEmoji(name_text)) {
         _ = win.SelectObject(item.hDC, @ptrCast(a.font_row.?));
         _ = win.SetTextColor(item.hDC, row_text);
-        const line_h = textLineHeight(item.hDC, a.font_row.?);
-        const name_y = item.rcItem.top + px(a, 4) + @divTrunc(px(a, 24) - line_h, 2);
+        const line_h = a.font_row_height;
+        const name_y = item.rcItem.top + row.name_top + @divTrunc(row.preview_top - row.name_top - line_h, 2);
         _ = drawMixedLine(item.hDC, a.font_row.?, a.font_emoji orelse a.font_row.?, name_text, item.rcItem.left + px(a, 66), name_y);
     }
 
@@ -14711,18 +14749,18 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     }
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_row.?));
     _ = win.SetTextColor(item.hDC, row_text);
-    var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 4), .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + px(a, 28) };
+    var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + row.name_top, .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + row.preview_top };
     _ = text_draw.drawText(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, row_muted);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_time.?));
     if (chat.unread or chat.unread_count > 0) _ = win.SetTextColor(item.hDC, row_primary);
-    var time_rect = win.RECT{ .left = item.rcItem.right - px(a, 52), .top = item.rcItem.top + px(a, 4), .right = item.rcItem.right - px(a, 4), .bottom = item.rcItem.top + px(a, 32) };
+    var time_rect = win.RECT{ .left = item.rcItem.right - px(a, 52), .top = item.rcItem.top + row.name_top, .right = item.rcItem.right - px(a, 4), .bottom = item.rcItem.top + row.preview_top };
     _ = text_draw.drawText(item.hDC, chat.time.ptr(), @intCast(chat.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, row_muted);
     const marker = archiveMarker(a, chat);
-    var kind_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + px(a, 28), .right = item.rcItem.right - px(a, if (marker != null) @as(i32, 130) else 42), .bottom = item.rcItem.top + px(a, theme.chat_row_height - 4) };
+    var kind_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + row.preview_top, .right = item.rcItem.right - px(a, if (marker != null) @as(i32, 130) else 42), .bottom = item.rcItem.top + row.preview_bottom };
     const draft_text = a.draft_store.get(chat_key.of(chat));
     if (draft_text.len > 0) {
         if (drafts.label(a.allocator, draft_text)) |label| {
@@ -14759,7 +14797,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     }
     if (marker) |text| {
         _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else row_primary);
-        var marker_rect = win.RECT{ .left = item.rcItem.right - px(a, 128), .top = item.rcItem.top + px(a, 28), .right = item.rcItem.right - px(a, 40), .bottom = item.rcItem.top + px(a, theme.chat_row_height - 4) };
+        var marker_rect = win.RECT{ .left = item.rcItem.right - px(a, 128), .top = item.rcItem.top + row.preview_top, .right = item.rcItem.right - px(a, 40), .bottom = item.rcItem.top + row.preview_bottom };
         _ = text_draw.drawText(item.hDC, text, -1, &marker_rect, win.DT_RIGHT | win.DT_SINGLELINE);
         _ = win.SetTextColor(item.hDC, row_muted);
     }
@@ -16431,7 +16469,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             text_draw.reset();
             recreateFonts(a);
             createTooltips(a, hwnd);
-            if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, px(a, theme.chat_row_height));
             var rc_create: win.RECT = undefined;
             _ = win.GetClientRect(hwnd, &rc_create);
             layout(a, rc_create.right, rc_create.bottom);
@@ -16509,7 +16546,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             text_draw.reset();
             recreateFonts(a);
-            if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, px(a, theme.chat_row_height));
             const suggested: *const win.RECT = @ptrFromInt(@as(usize, @bitCast(lparam)));
             _ = win.SetWindowPos(hwnd, null, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top, win.SWP_NOZORDER | win.SWP_NOACTIVATE);
             var rc_dpi: win.RECT = undefined;

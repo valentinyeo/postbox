@@ -39,11 +39,44 @@ else:
     assert scale['initial_saved'] is False and scale['larger'] == 110 and scale['reset'] == 100
     assert 0 < scale['baseline_points'] < scale['larger_points']
     assert scale['reset_points'] == scale['baseline_points']
+    fresh = json.loads((folder / 'text-fresh-default.state.json').read_text(encoding='utf-8-sig'))
+    assert fresh['font_layout']['scale'] == 100 and fresh['version'] == version
+    assert (folder / 'text-fresh-default.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+    viewport = json.loads((folder / 'font-viewport.json').read_text(encoding='utf-8-sig'))
+    assert viewport['width'] == 1920 and viewport['height'] == 1032 and viewport['hosted_only'] is True
+    presets = json.loads((folder / 'text-presets.json').read_text(encoding='utf-8-sig'))
+    assert [row['scale'] for row in presets] == [80, 100, 125, 150]
+    for index, row in enumerate(presets):
+        layout = row['list']
+        assert layout['scale'] == row['scale']
+        assert row['points'] > 0 and row['list_font_height'] < 0 and row['chat_font_height'] < 0
+        assert row['list_uia_height'] >= layout['row_height'] > 0
+        assert row['composer_uia_height'] >= layout['body_line_height'] > 0
+        assert layout['preview_top'] - layout['name_top'] >= max(layout['name_line_height'], layout['time_line_height'])
+        assert layout['preview_bottom'] - layout['preview_top'] >= layout['preview_line_height'] > 0
+        if index:
+            previous = presets[index - 1]
+            assert row['points'] > previous['points']
+            assert row['list_font_height'] < previous['list_font_height']
+            assert row['chat_font_height'] < previous['chat_font_height']
+        image = (folder / f"text-preset-{row['scale']}.png").read_bytes()
+        assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
+    palette = json.loads((folder / 'font-palette.json').read_text(encoding='utf-8-sig'))
+    assert palette['edit_height'] >= palette['body_line_height'] > 0
+    assert palette['row_height'] >= max(palette['body_line_height'], 2 * palette['small_line_height'] + 4)
+    assert (folder / 'text-preset-palette.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+    restart = json.loads((folder / 'font-restart.json').read_text(encoding='utf-8-sig'))
+    assert restart['old_pid'] != restart['new_pid'] and restart['sha256'] == session['sha256']
+    assert restart['new_pid'] == session['pid'] and restart['new_start'] == session['startTicks']
+    assert restart['id'] == session['id'] and restart['root'] == session['root']
+    restarted = json.loads((folder / 'text-preset-restart.state.json').read_text(encoding='utf-8-sig'))
+    assert restarted['font_layout']['scale'] == 150 and restarted['version'] == version
+    assert (folder / 'text-preset-restart.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     assert (folder / 'group-layout.txt').read_text(encoding='utf-8-sig').startswith('GROUP_LAYOUT_OK:')
     groups = json.loads((folder / 'group-senders.messages.json').read_text(encoding='utf-8-sig'))
     assert {row['id'] for row in groups['messages']} == {'GROUP-FIRST', 'GROUP-SAME', 'GROUP-DAY', 'GROUP-OTHER', 'GROUP-QUOTE', 'GROUP-OWN'}
     stages = ['before', 'action', 'text-larger', 'after', 'group-senders']
-    keys = ['^k', 'Theme: Graphite', 'Make text larger', '{ENTER}', '^0']
+    keys = ['^k', 'Theme: Graphite', 'Make text larger', 'Text size: Small', 'Text size: Default', 'Text size: Large', 'Text size: Larger', 'Quit Postbox', '{ENTER}', '^0']
     shared = json.loads((folder / 'shared-design.json').read_text(encoding='utf-8-sig'))
     assert shared['width'] == 1920 and shared['height'] == 1032
     assert shared['draft'] == 'Shared design check'
