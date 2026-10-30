@@ -130,24 +130,27 @@ const parsed_line = struct {
     voice_seconds: u32 = 0,
 };
 
-pub fn parseLine(allocator: std.mem.Allocator, line: []const u8, out: *Entry) bool {
+fn parseLineWithOptions(allocator: std.mem.Allocator, line: []const u8, out: *Entry, ignore_unknown_fields: bool) error{ OutOfMemory, InvalidEntry }!void {
     const trimmed = std.mem.trim(u8, line, " \t\r");
-    if (trimmed.len == 0 or trimmed.len > max_line_len) return false;
-    var parsed = std.json.parseFromSlice(parsed_line, allocator, trimmed, .{ .ignore_unknown_fields = true }) catch return false;
+    if (trimmed.len == 0 or trimmed.len > max_line_len) return error.InvalidEntry;
+    var parsed = std.json.parseFromSlice(parsed_line, allocator, trimmed, .{ .ignore_unknown_fields = ignore_unknown_fields }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidEntry,
+    };
     defer parsed.deinit();
     const value = parsed.value;
-    if (!validId(value.id)) return false;
-    const provider = std.meta.stringToEnum(Provider, value.provider) orelse return false;
-    const state = std.meta.stringToEnum(SendState, value.state) orelse return false;
-    if (value.account.len > max_account_len) return false;
-    if (value.jid.len == 0 or value.jid.len > max_jid_len) return false;
-    if (value.text.len == 0 and value.file.len == 0) return false;
+    if (!validId(value.id)) return error.InvalidEntry;
+    const provider = std.meta.stringToEnum(Provider, value.provider) orelse return error.InvalidEntry;
+    const state = std.meta.stringToEnum(SendState, value.state) orelse return error.InvalidEntry;
+    if (value.account.len > max_account_len) return error.InvalidEntry;
+    if (value.jid.len == 0 or value.jid.len > max_jid_len) return error.InvalidEntry;
+    if (value.text.len == 0 and value.file.len == 0) return error.InvalidEntry;
     if (value.text.len > max_text_len or value.file.len > max_file_len or
         value.reply_to.len > max_jid_len or value.reply_sender.len > max_jid_len or
-        value.client_msg_id.len > max_client_msg_id_len or value.upload_file_id.len > max_file_id_len) return false;
-    if (value.queued_unix < 0) return false;
+        value.client_msg_id.len > max_client_msg_id_len or value.upload_file_id.len > max_file_id_len) return error.InvalidEntry;
+    if (value.queued_unix < 0) return error.InvalidEntry;
     for ([_][]const u8{ value.account, value.jid, value.text, value.file, value.reply_to, value.reply_sender, value.client_msg_id, value.upload_file_id }) |field| {
-        if (std.mem.indexOfScalar(u8, field, 0) != null) return false;
+        if (std.mem.indexOfScalar(u8, field, 0) != null) return error.InvalidEntry;
     }
     out.* = .{ .provider = provider, .queued_unix = value.queued_unix, .ptt = value.ptt, .voice_seconds = value.voice_seconds, .attempts = value.attempts, .ambiguous = value.ambiguous, .state = state };
     @memcpy(&out.id, value.id);
@@ -159,6 +162,14 @@ pub fn parseLine(allocator: std.mem.Allocator, line: []const u8, out: *Entry) bo
     out.reply_sender.set(value.reply_sender);
     out.client_msg_id.set(value.client_msg_id);
     out.upload_file_id.set(value.upload_file_id);
+}
+
+pub fn parseLineStrict(allocator: std.mem.Allocator, line: []const u8, out: *Entry) error{ OutOfMemory, InvalidEntry }!void {
+    return parseLineWithOptions(allocator, line, out, false);
+}
+
+pub fn parseLine(allocator: std.mem.Allocator, line: []const u8, out: *Entry) bool {
+    parseLineWithOptions(allocator, line, out, true) catch return false;
     return true;
 }
 
@@ -814,4 +825,20 @@ test "unified failed adoption retains terminal identity" {
     try std.testing.expectEqualStrings("1700000000.000001", entry.reply_to.slice());
     try std.testing.expect(entry.ambiguous);
     try std.testing.expectEqualSlices(u8, &([_]u8{'c'} ** id_len), &entry.id);
+}
+
+test "strict legacy parsing distinguishes invalid input from allocation failure" {
+    const valid = "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"provider\":\"slack\",\"account\":\"team\",\"jid\":\"channel\",\"text\":\"message\"}";
+    var entry: Entry = .{};
+    try std.testing.expectError(error.InvalidEntry, parseLineStrict(std.testing.allocator, "{", &entry));
+    try std.testing.expectError(error.OutOfMemory, parseLineStrict(std.testing.failing_allocator, valid, &entry));
+    try parseLineStrict(std.testing.allocator, valid, &entry);
+    try std.testing.expectEqualStrings("team", entry.account.slice());
+}
+
+test "legacy boolean parser retains unknown field compatibility" {
+    const line = "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"provider\":\"slack\",\"jid\":\"channel\",\"text\":\"message\",\"future\":true}";
+    var entry: Entry = .{};
+    try std.testing.expect(parseLine(std.testing.allocator, line, &entry));
+    try std.testing.expectError(error.InvalidEntry, parseLineStrict(std.testing.allocator, line, &entry));
 }

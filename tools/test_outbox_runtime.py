@@ -98,11 +98,11 @@ def main():
         for mutant in mutants:
             effective_format = format_source
             if mutant == "nul-field":
-                effective_format = effective_format.replace("if (std.mem.indexOfScalar(u8, field, 0) != null) return false;", "_ = field;")
+                effective_format = effective_format.replace("if (std.mem.indexOfScalar(u8, field, 0) != null) return error.InvalidEntry;", "_ = field;")
             if mutant == "evict-write":
                 effective_format = effective_format.replace("if (!keep[index]) return index;", "_ = keep[index]; return index;")
             if mutant == "negative-time":
-                effective_format = effective_format.replace("if (value.queued_unix < 0) return false;", "")
+                effective_format = effective_format.replace("if (value.queued_unix < 0) return error.InvalidEntry;", "")
             (directory / "outbox.zig").write_text(effective_format)
             production = bodies if mutant is None else mutate(bodies, mutant)
             effective_fixture = fixture.replace("const wacli_arg_cap = 4095;", "const wacli_arg_cap = 512;") if mutant == "short-job-args" else fixture

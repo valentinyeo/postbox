@@ -319,3 +319,157 @@ test "allocation failure never publishes a partial snapshot" {
     defer std.testing.allocator.destroy(candidate);
     try std.testing.checkAllAllocationFailures(std.testing.allocator, decodeWithFailure, .{ bytes, candidate });
 }
+
+pub fn privateFilePath(root: []const u8, path: []const u8) bool {
+    const base = std.mem.trimEnd(u8, root, "\\/");
+    if (base.len < 3 or path.len <= base.len + 1 or !std.ascii.isAlphabetic(base[0]) or base[1] != ':' or
+        (base[2] != '\\' and base[2] != '/') or !validText(base, outbox.max_file_len) or !validText(path, outbox.max_file_len)) return false;
+    for (base, 0..) |ch, i| {
+        const actual = path[i];
+        if (ch == '\\' or ch == '/') {
+            if (actual != '\\' and actual != '/') return false;
+        } else if (std.ascii.toLower(ch) != std.ascii.toLower(actual)) return false;
+    }
+    if (path[base.len] != '\\' and path[base.len] != '/') return false;
+    var parts = std.mem.splitAny(u8, path[base.len + 1 ..], "\\/");
+    var count: usize = 0;
+    while (parts.next()) |part| {
+        if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..") or
+            part[part.len - 1] == '.' or part[part.len - 1] == ' ' or
+            std.mem.indexOfAny(u8, part, ":*?\"<>|\r\n") != null) return false;
+        for (part) |byte| if (byte < 0x20) return false;
+        count += 1;
+    }
+    return count > 0;
+}
+
+test "owned paths stay within the exact backend files directory" {
+    const root = "C:\\local\\unified-journal-v2\\backend-a\\files";
+    try std.testing.expect(privateFilePath(root, "c:\\local\\unified-journal-v2\\backend-a\\files\\new\\id\\photo.png"));
+    for ([_][]const u8{
+        "C:\\local\\unified-journal-v2\\backend-b\\files\\photo.png",
+        "C:\\local\\unified-journal-v2\\backend-a\\files-extra\\photo.png",
+        "C:\\local\\unified-journal-v2\\backend-a\\files\\..\\secret",
+        "C:\\local\\unified-journal-v2\\backend-a\\files\\dir.\\secret",
+        "C:\\local\\unified-journal-v2\\backend-a\\files\\file.png:stream",
+        "C:\\local\\unified-journal-v2\\backend-a\\files\\\\file.png",
+        "C:\\outside\\secret",
+        "relative\\secret",
+    }) |path| try std.testing.expect(!privateFilePath(root, path));
+}
+
+pub const Admission = enum { added, duplicate, overflow };
+
+pub fn sameIntent(left: *const Record, right: *const Record) bool {
+    const a = &left.entry;
+    const b = &right.entry;
+    if (!std.mem.eql(u8, a.idSlice(), b.idSlice()) or a.provider != b.provider or
+        !std.mem.eql(u8, a.account.slice(), b.account.slice()) or !std.mem.eql(u8, a.jid.slice(), b.jid.slice()) or
+        !std.mem.eql(u8, a.text.slice(), b.text.slice()) or !std.mem.eql(u8, a.reply_to.slice(), b.reply_to.slice()) or
+        !std.mem.eql(u8, a.reply_sender.slice(), b.reply_sender.slice()) or
+        !std.mem.eql(u8, a.client_msg_id.slice(), b.client_msg_id.slice()) or
+        !std.mem.eql(u8, a.upload_file_id.slice(), b.upload_file_id.slice()) or
+        a.queued_unix != b.queued_unix or a.ptt != b.ptt or a.voice_seconds != b.voice_seconds or
+        (a.file.len == 0) != (b.file.len == 0)) return false;
+    if (a.file.len == 0) return true;
+    return left.attachment_ready and right.attachment_ready and
+        left.file_bytes == right.file_bytes and std.mem.eql(u8, &left.file_sha256, &right.file_sha256) and
+        std.mem.eql(u8, left.wire_filename.slice(), right.wire_filename.slice());
+}
+
+pub const AliasComparison = enum { matching, unresolved, conflict };
+
+pub fn compareAlias(existing: *const Record, incoming: *const Record) AliasComparison {
+    if ((existing.entry.file.len == 0) != (incoming.entry.file.len == 0)) return .conflict;
+    if (existing.entry.file.len > 0 and (!existing.attachment_ready or !incoming.attachment_ready)) return .unresolved;
+    return if (sameIntent(existing, incoming)) .matching else .conflict;
+}
+
+pub fn admit(snapshot: *Snapshot, record: *const Record) error{ InvalidSnapshot, ConflictingIntent }!Admission {
+    if (snapshot.count > outbox.max_entries or !validRecord(record)) return error.InvalidSnapshot;
+    for (snapshot.records[0..snapshot.count]) |*existing| {
+        if (!std.mem.eql(u8, existing.entry.idSlice(), record.entry.idSlice())) continue;
+        if (!sameIntent(existing, record)) return error.ConflictingIntent;
+        return .duplicate;
+    }
+    if (snapshot.count == outbox.max_entries) return .overflow;
+    snapshot.records[snapshot.count] = record.*;
+    snapshot.count += 1;
+    return .added;
+}
+
+test "full snapshot keeps overflow and detects aliases in the tail" {
+    const snapshot = try testSnapshot();
+    defer std.testing.allocator.destroy(snapshot);
+    for (2..outbox.max_entries) |i| {
+        snapshot.records[i] = snapshot.records[0];
+        snapshot.records[i].entry.id = std.fmt.bytesToHex([_]u8{@intCast(i)} ** 16, .lower);
+    }
+    snapshot.count = outbox.max_entries;
+    var overflow = snapshot.records[0];
+    overflow.entry.id = [_]u8{'f'} ** outbox.id_len;
+    try std.testing.expectEqual(Admission.overflow, try admit(snapshot, &overflow));
+    try std.testing.expectEqual(Admission.duplicate, try admit(snapshot, &snapshot.records[0]));
+    var conflict = snapshot.records[0];
+    conflict.entry.reply_to.set("different reply");
+    try std.testing.expectError(error.ConflictingIntent, admit(snapshot, &conflict));
+    try std.testing.expectEqual(@as(usize, outbox.max_entries), snapshot.count);
+}
+
+test "attachment aliases require matching immutable bytes and filename" {
+    const snapshot = try testSnapshot();
+    defer std.testing.allocator.destroy(snapshot);
+    var alias = snapshot.records[1];
+    alias.owned_file.set("C:\\private\\other\\voice.ogg");
+    try std.testing.expect(sameIntent(&snapshot.records[1], &alias));
+    alias.file_sha256[0] ^= 1;
+    try std.testing.expect(!sameIntent(&snapshot.records[1], &alias));
+    alias = snapshot.records[1];
+    alias.attachment_ready = false;
+    try std.testing.expect(!sameIntent(&snapshot.records[1], &alias));
+}
+
+pub fn unresolvedMayAlias(allocator: std.mem.Allocator, line: []const u8, snapshot: *const Snapshot) error{OutOfMemory}!bool {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, line, .{}) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => {
+            if (snapshot.count == 0) return false;
+            if (std.mem.indexOfScalar(u8, line, '\\') != null) return true;
+            for (snapshot.records[0..snapshot.count]) |*record| {
+                if (std.mem.indexOf(u8, line, record.entry.idSlice()) != null) return true;
+            }
+            return false;
+        },
+    };
+    defer parsed.deinit();
+    const object = switch (parsed.value) { .object => |object| object, else => return false };
+    const value = object.get("id") orelse return false;
+    const id = switch (value) { .string => |id| id, else => return false };
+    for (snapshot.records[0..snapshot.count]) |*record| {
+        if (std.mem.eql(u8, id, record.entry.idSlice())) return true;
+    }
+    return false;
+}
+
+test "unrelated recovery rows do not mask active aliases" {
+    const snapshot = try testSnapshot();
+    defer std.testing.allocator.destroy(snapshot);
+    try std.testing.expect(!try unresolvedMayAlias(std.testing.allocator, "{broken", snapshot));
+    try std.testing.expect(!try unresolvedMayAlias(std.testing.allocator, "{\"id\":\"cccccccccccccccccccccccccccccccc\",\"provider\":\"unknown\"}", snapshot));
+    try std.testing.expect(try unresolvedMayAlias(std.testing.allocator, "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"provider\":\"unknown\"}", snapshot));
+    try std.testing.expect(try unresolvedMayAlias(std.testing.allocator, "{\"id\":\"\\u0061aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}", snapshot));
+    try std.testing.expect(try unresolvedMayAlias(std.testing.allocator, "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"", snapshot));
+    try std.testing.expectError(error.OutOfMemory, unresolvedMayAlias(std.testing.failing_allocator, "{\"id\":\"a\"}", snapshot));
+}
+
+test "missing active attachment blocks alias retirement" {
+    const snapshot = try testSnapshot();
+    defer std.testing.allocator.destroy(snapshot);
+    var alias = snapshot.records[1];
+    try std.testing.expectEqual(AliasComparison.matching, compareAlias(&snapshot.records[1], &alias));
+    alias.attachment_ready = false;
+    try std.testing.expectEqual(AliasComparison.unresolved, compareAlias(&snapshot.records[1], &alias));
+    alias = snapshot.records[1];
+    alias.entry.reply_to.set("different reply");
+    try std.testing.expectEqual(AliasComparison.conflict, compareAlias(&snapshot.records[1], &alias));
+}

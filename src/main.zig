@@ -913,6 +913,9 @@ const App = struct {
     unified_candidate: ?*unified_snapshot.Snapshot = null,
     unified_snapshot_path: []u8 = &.{},
     unified_imports_clean: bool = false,
+    unified_import_unresolved: usize = 0,
+    unified_import_alias_blocked: bool = false,
+    unified_import_overflow: usize = 0,
     unified_storage_blocked: bool = false,
     unified_write_fault: enum { none, open, write, flush, close, replace } = .none,
     send_seq: u64 = 0,
@@ -4281,6 +4284,10 @@ fn restoreFailedSendText(a: *App, failed: *const PendingSend) void {
 }
 
 fn resendFailedMessage(a: *App, index: usize) bool {
+    if (unifiedHub(a)) {
+        setStatus(a, "Unified outbox migration incomplete; sends paused");
+        return true;
+    }
     if (index >= a.message_count) return false;
     const message = &a.messages[index];
     if (!message.from_me or message.send_state != .failed) return false;
@@ -4655,11 +4662,21 @@ fn prepareUnifiedOutbox(a: *App) void {
         return;
     };
     defer a.allocator.free(folder);
+    _ = unifiedNoReparse(a, folder) catch {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    };
     std.Io.Dir.cwd().createDirPath(a.io, folder) catch {
         a.allocator.destroy(candidate);
         a.allocator.destroy(live);
         return;
     };
+    if (!(unifiedNoReparse(a, folder) catch false)) {
+        a.allocator.destroy(candidate);
+        a.allocator.destroy(live);
+        return;
+    }
     const path = std.fs.path.join(a.allocator, &.{ folder, "snapshot.v2" }) catch {
         a.allocator.destroy(candidate);
         a.allocator.destroy(live);
@@ -4670,10 +4687,483 @@ fn prepareUnifiedOutbox(a: *App) void {
     a.unified_snapshot_path = path;
 }
 
+fn unifiedNoReparse(a: *App, path: []const u8) !bool {
+    if (path.len < 3 or !std.ascii.isAlphabetic(path[0]) or path[1] != ':' or (path[2] != '\\' and path[2] != '/')) return error.UnsafeAttachmentPath;
+    var offset: usize = 3;
+    while (offset <= path.len) : (offset += 1) {
+        if (offset != path.len and path[offset] != '\\' and path[offset] != '/') continue;
+        const component = try std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path[0..offset]);
+        defer a.allocator.free(component);
+        const attributes = win.GetFileAttributesW(component.ptr);
+        if (attributes == win.INVALID_FILE_ATTRIBUTES) {
+            const code = win.GetLastError();
+            if (code == win.ERROR_FILE_NOT_FOUND or code == win.ERROR_PATH_NOT_FOUND) return false;
+            return error.AttachmentInspectionFailed;
+        }
+        if ((attributes & win.FILE_ATTRIBUTE_REPARSE_POINT) != 0) return error.UnsafeAttachmentPath;
+        if (offset != path.len and (attributes & win.FILE_ATTRIBUTE_DIRECTORY) == 0) return error.UnsafeAttachmentPath;
+    }
+    return true;
+}
+
+fn unifiedOwnedFileAvailable(a: *App, record: *const unified_snapshot.Record) !bool {
+    const path = record.owned_file.slice();
+    const backend_dir = std.fs.path.dirname(a.unified_snapshot_path) orelse return error.InvalidSnapshotPath;
+    const root = try std.fs.path.join(a.allocator, &.{ backend_dir, "files" });
+    defer a.allocator.free(root);
+    if (!unified_snapshot.privateFilePath(root, path)) return error.UnsafeAttachmentPath;
+    if (!try unifiedNoReparse(a, path)) return false;
+    const wide = try std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path);
+    defer a.allocator.free(wide);
+    const attributes = win.GetFileAttributesW(wide.ptr);
+    if (attributes == win.INVALID_FILE_ATTRIBUTES) return false;
+    if ((attributes & (win.FILE_ATTRIBUTE_DIRECTORY | win.FILE_ATTRIBUTE_REPARSE_POINT)) != 0) return error.UnsafeAttachmentPath;
+    const bytes = (unifiedReadAttachment(a, path) catch |err| switch (err) {
+        error.InvalidAttachment => return false,
+        else => return err,
+    }) orelse return false;
+    defer a.allocator.free(bytes);
+    if (bytes.len != record.file_bytes) return false;
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+    return std.mem.eql(u8, &digest, &record.file_sha256);
+}
+
+fn rebuildUnifiedViews(a: *App, available_files: *const [outbox.max_entries]bool) void {
+    const snapshot = a.unified_snapshot orelse return;
+    a.pending_send_count = 0;
+    a.failed_send_count = 0;
+    for (snapshot.records[0..snapshot.count], 0..) |*record, index| {
+        const entry = &record.entry;
+        const available = available_files[index];
+        if (record.phase == .ready and available) {
+            if (a.pending_send_count >= a.pending_sends.len) continue;
+            const pending = &a.pending_sends[a.pending_send_count];
+            pending.* = .{};
+            pending.id = entry.id;
+            pending.provider = std.meta.stringToEnum(transport.Provider, @tagName(entry.provider)).?;
+            pending.account.set(entry.account.slice());
+            pending.jid.set(entry.jid.slice());
+            pending.text.set(entry.text.slice());
+            pending.file.set(record.owned_file.slice());
+            pending.reply_to.set(entry.reply_to.slice());
+            pending.reply_sender.set(entry.reply_sender.slice());
+            pending.ptt = entry.ptt;
+            pending.voice_seconds = entry.voice_seconds;
+            pending.retries = entry.attempts;
+            pending.ambiguous = entry.ambiguous;
+            pending.queued_unix = entry.queued_unix;
+            pending.from_disk = true;
+            a.send_seq += 1;
+            pending.seq = a.send_seq;
+            a.pending_send_count += 1;
+        } else {
+            if (a.failed_send_count >= a.failed_sends.len) return;
+            const failed = &a.failed_sends[a.failed_send_count];
+            failed.* = .{ .unified = true, .id = entry.id, .queued_unix = entry.queued_unix, .ptt = entry.ptt, .voice_seconds = entry.voice_seconds, .is_file = entry.file.len > 0, .ambiguous = entry.ambiguous or record.phase == .uncertain };
+            failed.provider = std.meta.stringToEnum(transport.Provider, @tagName(entry.provider)).?;
+            failed.account.set(entry.account.slice());
+            failed.jid.set(entry.jid.slice());
+            failed.text.set(entry.text.slice());
+            failed.file.set(record.owned_file.slice());
+            failed.reply_to.set(entry.reply_to.slice());
+            failed.reply_sender.set(entry.reply_sender.slice());
+            failed.failure_reason.set(if (!available) "attachment unavailable" else record.failure_reason.slice());
+            a.failed_send_count += 1;
+        }
+    }
+}
+
+fn restoreUnifiedOutbox(a: *App) !void {
+    const live = a.unified_snapshot orelse return error.MissingSnapshot;
+    const candidate = a.unified_candidate orelse return error.MissingSnapshot;
+    if (!try unifiedNoReparse(a, a.unified_snapshot_path)) return;
+    const wide = try std.unicode.utf8ToUtf16LeAllocZ(a.allocator, a.unified_snapshot_path);
+    defer a.allocator.free(wide);
+    const handle = win.CreateFileW(wide.ptr, win.GENERIC_READ, win.FILE_SHARE_READ, null, win.OPEN_EXISTING, win.FILE_ATTRIBUTE_NORMAL, null);
+    if (handle == win.INVALID_HANDLE_VALUE or handle == null) {
+        if (win.GetLastError() == win.ERROR_FILE_NOT_FOUND) return;
+        return error.SnapshotOpenFailed;
+    }
+    defer _ = win.CloseHandle(handle);
+    var size: win.LARGE_INTEGER = undefined;
+    if (win.GetFileSizeEx(handle, &size) == 0 or size.QuadPart <= 0 or size.QuadPart > unified_snapshot.max_document_bytes) return error.InvalidSnapshot;
+    const bytes = try a.allocator.alloc(u8, @intCast(size.QuadPart));
+    defer a.allocator.free(bytes);
+    var total: usize = 0;
+    while (total < bytes.len) {
+        var got: win.DWORD = 0;
+        if (win.ReadFile(handle, bytes[total..].ptr, @intCast(bytes.len - total), &got, null) == 0 or got == 0) return error.SnapshotReadFailed;
+        total += got;
+    }
+    try unified_snapshot.decode(a.allocator, bytes, live.backend.slice(), candidate);
+    var available: [outbox.max_entries]bool = @splat(false);
+    for (candidate.records[0..candidate.count], 0..) |*record, index| {
+        available[index] = if (record.attachment_ready) try unifiedOwnedFileAvailable(a, record) else record.entry.file.len == 0;
+    }
+    a.unified_snapshot = candidate;
+    a.unified_candidate = live;
+    rebuildUnifiedViews(a, &available);
+}
+
+fn quarantineUnifiedJournals(a: *App) !void {
+    a.unified_imports_clean = false;
+    const root = messagesDirPath(a, "unified-journal-v2") orelse return error.MissingMessagesDirectory;
+    defer a.allocator.free(root);
+    const imports = try std.fs.path.join(a.allocator, &.{ root, "imports" });
+    defer a.allocator.free(imports);
+    _ = try unifiedNoReparse(a, imports);
+    try std.Io.Dir.cwd().createDirPath(a.io, imports);
+    if (!try unifiedNoReparse(a, imports)) return error.UnsafeAttachmentPath;
+    const pattern = messagesDirPath(a, "hub-*outbox.jsonl") orelse return error.MissingMessagesDirectory;
+    defer a.allocator.free(pattern);
+    const pattern_wide = try std.unicode.utf8ToUtf16LeAllocZ(a.allocator, pattern);
+    defer a.allocator.free(pattern_wide);
+    while (true) {
+        var found: win.WIN32_FIND_DATAW = undefined;
+        const handle = win.FindFirstFileW(pattern_wide.ptr, &found);
+        if (handle == win.INVALID_HANDLE_VALUE or handle == null) {
+            if (win.GetLastError() == win.ERROR_FILE_NOT_FOUND) break;
+            return error.JournalEnumerationFailed;
+        }
+        _ = win.FindClose(handle);
+        if ((found.dwFileAttributes & (win.FILE_ATTRIBUTE_DIRECTORY | win.FILE_ATTRIBUTE_REPARSE_POINT)) != 0) return error.UnsafeJournal;
+        const length = std.mem.indexOfScalar(u16, &found.cFileName, 0) orelse return error.InvalidJournalName;
+        const name = try std.unicode.utf16LeToUtf8Alloc(a.allocator, found.cFileName[0..length]);
+        defer a.allocator.free(name);
+        const source = messagesDirPath(a, name) orelse return error.MissingMessagesDirectory;
+        defer a.allocator.free(source);
+        const source_wide = try std.unicode.utf8ToUtf16LeAllocZ(a.allocator, source);
+        defer a.allocator.free(source_wide);
+        var moved = false;
+        for (0..16) |_| {
+            var random: [16]u8 = undefined;
+            a.io.random(&random);
+            const token = std.fmt.bytesToHex(random, .lower);
+            const target_name = try std.fmt.allocPrint(a.allocator, "{s}.{s}.pending", .{ name, token });
+            defer a.allocator.free(target_name);
+            const target = try std.fs.path.join(a.allocator, &.{ imports, target_name });
+            defer a.allocator.free(target);
+            const target_wide = try std.unicode.utf8ToUtf16LeAllocZ(a.allocator, target);
+            defer a.allocator.free(target_wide);
+            if (win.MoveFileExW(source_wide.ptr, target_wide.ptr, win.MOVEFILE_WRITE_THROUGH) != 0) {
+                moved = true;
+                break;
+            }
+            const code = win.GetLastError();
+            if (code != win.ERROR_ALREADY_EXISTS and code != win.ERROR_FILE_EXISTS) return error.JournalQuarantineFailed;
+        }
+        if (!moved) return error.JournalQuarantineFailed;
+    }
+}
+
+fn unifiedReadAttachment(a: *App, path: []const u8) !?[]u8 {
+    const canonical = try std.fs.path.resolve(a.allocator, &.{path});
+    defer a.allocator.free(canonical);
+    if (canonical.len != path.len) return error.UnsafeAttachmentPath;
+    for (canonical, path) |left, right| {
+        if ((left == '\\' or left == '/') and (right == '\\' or right == '/')) continue;
+        if (std.ascii.toLower(left) != std.ascii.toLower(right)) return error.UnsafeAttachmentPath;
+    }
+    if (!try unifiedNoReparse(a, path)) return null;
+    const wide = try std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path);
+    defer a.allocator.free(wide);
+    const handle = win.CreateFileW(wide.ptr, win.GENERIC_READ, win.FILE_SHARE_READ, null, win.OPEN_EXISTING, win.FILE_ATTRIBUTE_NORMAL, null);
+    if (handle == win.INVALID_HANDLE_VALUE or handle == null) {
+        const code = win.GetLastError();
+        if (code == win.ERROR_FILE_NOT_FOUND or code == win.ERROR_PATH_NOT_FOUND) return null;
+        return error.AttachmentOpenFailed;
+    }
+    defer _ = win.CloseHandle(handle);
+    var size: win.LARGE_INTEGER = undefined;
+    if (win.GetFileSizeEx(handle, &size) == 0 or size.QuadPart <= 0 or size.QuadPart > wa_hub.max_file_bytes) return error.InvalidAttachment;
+    const bytes = try a.allocator.alloc(u8, @intCast(size.QuadPart));
+    errdefer a.allocator.free(bytes);
+    var total: usize = 0;
+    while (total < bytes.len) {
+        var read: win.DWORD = 0;
+        if (win.ReadFile(handle, bytes[total..].ptr, @intCast(bytes.len - total), &read, null) == 0 or read == 0) return error.AttachmentReadFailed;
+        total += read;
+    }
+    return bytes;
+}
+
+fn unifiedPrivateDirectory(a: *App, path: []const u8) !void {
+    _ = try unifiedNoReparse(a, path);
+    try std.Io.Dir.cwd().createDirPath(a.io, path);
+    if (!try unifiedNoReparse(a, path)) return error.UnsafeAttachmentPath;
+}
+
+fn unifiedWriteProtected(a: *App, path: []const u8, bytes: []const u8) !void {
+    const existing = try unifiedReadAttachment(a, path);
+    if (existing) |old| {
+        defer a.allocator.free(old);
+        if (!std.mem.eql(u8, old, bytes)) return error.ConflictingAttachment;
+        return;
+    }
+    const folder = std.fs.path.dirname(path) orelse return error.InvalidAttachment;
+    try unifiedPrivateDirectory(a, folder);
+    var random: [16]u8 = undefined;
+    a.io.random(&random);
+    const token = std.fmt.bytesToHex(random, .lower);
+    const temporary = try std.fmt.allocPrint(a.allocator, "{s}.{s}.copy", .{ path, token });
+    defer a.allocator.free(temporary);
+    const wide = try std.unicode.utf8ToUtf16LeAllocZ(a.allocator, temporary);
+    defer a.allocator.free(wide);
+    const target = try std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path);
+    defer a.allocator.free(target);
+    const handle = win.CreateFileW(wide.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_NEW, win.FILE_ATTRIBUTE_NORMAL, null);
+    if (handle == win.INVALID_HANDLE_VALUE or handle == null) return error.AttachmentCreateFailed;
+    defer _ = win.DeleteFileW(wide.ptr);
+    var total: usize = 0;
+    var ok = true;
+    while (ok and total < bytes.len) {
+        var written: win.DWORD = 0;
+        if (win.WriteFile(handle, bytes[total..].ptr, @intCast(bytes.len - total), &written, null) == 0 or written == 0) ok = false;
+        total += written;
+    }
+    const flushed = ok and total == bytes.len and win.FlushFileBuffers(handle) != 0;
+    const closed = win.CloseHandle(handle) != 0;
+    if (!flushed or !closed) return error.AttachmentWriteFailed;
+    if (win.MoveFileExW(wide.ptr, target.ptr, win.MOVEFILE_WRITE_THROUGH) == 0) return error.AttachmentPublishFailed;
+}
+
+fn unifiedImportRecord(a: *App, source_name: []const u8, source_entry: *const outbox.Entry, active: bool) !unified_snapshot.Record {
+    var record = unified_snapshot.Record{};
+    record.entry = source_entry.*;
+    record.entry.state = .queued;
+    record.entry.ambiguous = source_entry.ambiguous or source_entry.state != .failed;
+    record.phase = .held;
+    record.failure_reason.set(if (source_entry.state == .failed and !source_entry.ambiguous) "send failed" else "delivery unconfirmed");
+    if (source_entry.file.len == 0) return record;
+    const original = source_entry.file.slice();
+    const basename = std.fs.path.basename(original);
+    if (basename.len == 0 or basename.len > outbox.max_file_len) return error.InvalidAttachment;
+    const root = messagesDirPath(a, "unified-journal-v2") orelse return error.MissingMessagesDirectory;
+    defer a.allocator.free(root);
+    var source_hash: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(original, &source_hash, .{});
+    const source_token = std.fmt.bytesToHex(source_hash, .lower);
+    const shared_root = try std.fs.path.join(a.allocator, &.{ root, "imports-files" });
+    defer a.allocator.free(shared_root);
+    const shared = try std.fs.path.join(a.allocator, &.{ shared_root, source_name, source_entry.idSlice(), &source_token, basename });
+    defer a.allocator.free(shared);
+    if (!unified_snapshot.privateFilePath(shared_root, shared)) return error.UnsafeAttachmentPath;
+    const original_bytes = try unifiedReadAttachment(a, original);
+    defer if (original_bytes) |bytes| a.allocator.free(bytes);
+    if (original_bytes) |bytes| try unifiedWriteProtected(a, shared, bytes);
+    const protected = try unifiedReadAttachment(a, shared);
+    defer if (protected) |bytes| a.allocator.free(bytes);
+    const bytes = protected orelse {
+        record.wire_filename.set(basename);
+        return record;
+    };
+    record.wire_filename.set(basename);
+    record.file_bytes = bytes.len;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &record.file_sha256, .{});
+    if (!active) return record;
+    const backend = std.fs.path.dirname(a.unified_snapshot_path) orelse return error.InvalidSnapshotPath;
+    const owned_root = try std.fs.path.join(a.allocator, &.{ backend, "files" });
+    defer a.allocator.free(owned_root);
+    const owned = try std.fs.path.join(a.allocator, &.{ owned_root, source_name, source_entry.idSlice(), &source_token, basename });
+    defer a.allocator.free(owned);
+    if (!unified_snapshot.privateFilePath(owned_root, owned)) return error.UnsafeAttachmentPath;
+    try unifiedWriteProtected(a, owned, bytes);
+    record.owned_file.set(owned);
+    record.attachment_ready = true;
+    return record;
+}
+
+const UnifiedImportPass = enum { protect, admit, validate, clean };
+
+fn unifiedSourceMatches(a: *App, name: []const u8) bool {
+    var prefix: [96]u8 = undefined;
+    const tag = std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, a.wa_bridge_url), "hub");
+    const expected = std.fmt.bufPrint(&prefix, "hub-{x:0>16}-outbox.jsonl.", .{tag}) catch return false;
+    return std.mem.startsWith(u8, name, expected) and std.mem.endsWith(u8, name, ".pending");
+}
+
+fn unifiedSourcePass(a: *App, directory: []const u8, name: []const u8, pass: UnifiedImportPass) !void {
+    const path = try std.fs.path.join(a.allocator, &.{ directory, name });
+    defer a.allocator.free(path);
+    if (!try unifiedNoReparse(a, path)) return error.JournalMissing;
+    const matching = unifiedSourceMatches(a, name);
+    if (!matching and pass != .protect) return;
+    const input = try std.Io.Dir.openFileAbsolute(a.io, path, .{});
+    var input_open = true;
+    defer if (input_open) input.close(a.io);
+    var line_buffer: [outbox.max_line_len + 2]u8 = undefined;
+    var reader = input.readerStreaming(a.io, &line_buffer);
+    var temporary: ?[]u8 = null;
+    defer if (temporary) |value| a.allocator.free(value);
+    var temp_wide: ?[:0]u16 = null;
+    defer if (temp_wide) |value| a.allocator.free(value);
+    var output: ?win.HANDLE = null;
+    defer if (output) |handle| { _ = win.CloseHandle(handle); };
+    defer if (temp_wide) |value| { _ = win.DeleteFileW(value.ptr); };
+    if (pass == .clean) {
+        var random: [16]u8 = undefined;
+        a.io.random(&random);
+        const token = std.fmt.bytesToHex(random, .lower);
+        temporary = try std.fmt.allocPrint(a.allocator, "{s}.{s}.rewrite", .{ path, token });
+        temp_wide = try std.unicode.utf8ToUtf16LeAllocZ(a.allocator, temporary.?);
+        output = win.CreateFileW(temp_wide.?.ptr, win.GENERIC_WRITE, 0, null, win.CREATE_NEW, win.FILE_ATTRIBUTE_NORMAL, null);
+        if (output == win.INVALID_HANDLE_VALUE or output == null) { output = null; return error.JournalWriteFailed; }
+    }
+    while (true) {
+        const raw = reader.interface.takeDelimiterInclusive('\n') catch |err| switch (err) {
+            error.EndOfStream => (reader.interface.takeDelimiter('\n') catch return error.JournalReadFailed) orelse break,
+            error.StreamTooLong => return error.JournalLineTooLong,
+            error.ReadFailed => return error.JournalReadFailed,
+        };
+        var keep = true;
+        const line = std.mem.trimEnd(u8, raw, "\n");
+        if (std.mem.trim(u8, line, " \t\r").len > 0) {
+            var entry: outbox.Entry = .{};
+            if (outbox.parseLineStrict(a.allocator, line, &entry)) |_| {
+                switch (pass) {
+                    .protect => {
+                        const protected = try unifiedImportRecord(a, name, &entry, false);
+                        if (entry.file.len > 0 and protected.file_bytes == 0) a.unified_import_unresolved += 1;
+                    },
+                    .admit => {
+                        const candidate = a.unified_candidate orelse return error.MissingSnapshot;
+                        if (candidate.count == outbox.max_entries) {
+                            var active_id = false;
+                            for (candidate.records[0..candidate.count]) |*existing| {
+                                if (std.mem.eql(u8, existing.entry.idSlice(), entry.idSlice())) active_id = true;
+                            }
+                            if (!active_id) {
+                                a.unified_import_overflow += 1;
+                                continue;
+                            }
+                        }
+                        const record = try unifiedImportRecord(a, name, &entry, true);
+                        if (entry.file.len > 0 and !record.attachment_ready) {
+                            var duplicate = false;
+                            for (candidate.records[0..candidate.count]) |*existing| {
+                                if (std.mem.eql(u8, existing.entry.idSlice(), entry.idSlice())) duplicate = true;
+                            }
+                            if (duplicate) { a.unified_import_unresolved += 1; continue; }
+                        }
+                        const result = unified_snapshot.admit(candidate, &record) catch |err| switch (err) {
+                            error.InvalidSnapshot => { a.unified_import_unresolved += 1; continue; },
+                            error.ConflictingIntent => return error.ConflictingIntent,
+                        };
+                        if (result == .overflow) a.unified_import_overflow += 1;
+                    },
+                    .validate, .clean => {
+                        const live = a.unified_snapshot orelse return error.MissingSnapshot;
+                        for (live.records[0..live.count]) |*existing| {
+                            if (!std.mem.eql(u8, existing.entry.idSlice(), entry.idSlice())) continue;
+                            const record = try unifiedImportRecord(a, name, &entry, true);
+                            if (existing.attachment_ready and !try unifiedOwnedFileAvailable(a, existing)) {
+                                if (pass == .validate) {
+                                    a.unified_import_unresolved += 1;
+                                    a.unified_import_alias_blocked = true;
+                                }
+                                break;
+                            }
+                            switch (unified_snapshot.compareAlias(existing, &record)) {
+                                .matching => keep = false,
+                                .conflict => return error.ConflictingIntent,
+                                .unresolved => if (pass == .validate) {
+                                    a.unified_import_unresolved += 1;
+                                    a.unified_import_alias_blocked = true;
+                                },
+                            }
+                            break;
+                        }
+                    },
+                }
+            } else |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.InvalidEntry => {
+                    if (pass == .protect) a.unified_import_unresolved += 1;
+                    if (matching and pass == .validate) {
+                        const live = a.unified_snapshot orelse return error.MissingSnapshot;
+                        if (try unified_snapshot.unresolvedMayAlias(a.allocator, line, live)) a.unified_import_alias_blocked = true;
+                    }
+                },
+            }
+        }
+        if (pass == .clean and keep) {
+            var total: usize = 0;
+            while (total < raw.len) {
+                var written: win.DWORD = 0;
+                if (win.WriteFile(output.?, raw[total..].ptr, @intCast(raw.len - total), &written, null) == 0 or written == 0) return error.JournalWriteFailed;
+                total += written;
+            }
+        }
+    }
+    input.close(a.io);
+    input_open = false;
+    if (pass == .clean) {
+        const flushed = win.FlushFileBuffers(output.?) != 0;
+        const closed = win.CloseHandle(output.?) != 0;
+        output = null;
+        if (!flushed or !closed) return error.JournalWriteFailed;
+        const target = try std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path);
+        defer a.allocator.free(target);
+        if (win.MoveFileExW(temp_wide.?.ptr, target.ptr, win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH) == 0) return error.JournalWriteFailed;
+    }
+}
+
+fn unifiedSourcesPass(a: *App, pass: UnifiedImportPass) !void {
+    const root = messagesDirPath(a, "unified-journal-v2/imports") orelse return error.MissingMessagesDirectory;
+    defer a.allocator.free(root);
+    if (!try unifiedNoReparse(a, root)) return error.JournalMissing;
+    const dir = try std.Io.Dir.cwd().openDir(a.io, root, .{ .iterate = true });
+    defer dir.close(a.io);
+    var iterator = dir.iterate();
+    while (try iterator.next(a.io)) |entry| {
+        if (!std.mem.endsWith(u8, entry.name, ".pending")) continue;
+        if (entry.kind != .file) return error.UnsafeJournal;
+        try unifiedSourcePass(a, root, entry.name, pass);
+    }
+}
+
+fn importUnifiedOutbox(a: *App) !void {
+    a.unified_imports_clean = false;
+    a.unified_import_unresolved = 0;
+    a.unified_import_alias_blocked = false;
+    a.unified_import_overflow = 0;
+    try unifiedSourcesPass(a, .protect);
+    const live = a.unified_snapshot orelse return error.MissingSnapshot;
+    const candidate = a.unified_candidate orelse return error.MissingSnapshot;
+    candidate.* = live.*;
+    try unifiedSourcesPass(a, .admit);
+    if (!saveUnifiedCandidate(a)) return error.SnapshotWriteFailed;
+    try unifiedSourcesPass(a, .validate);
+    try unifiedSourcesPass(a, .clean);
+    const published = a.unified_snapshot orelse return error.MissingSnapshot;
+    var available: [outbox.max_entries]bool = @splat(false);
+    for (published.records[0..published.count], 0..) |*record, index| {
+        available[index] = if (record.attachment_ready) try unifiedOwnedFileAvailable(a, record) else record.entry.file.len == 0;
+    }
+    rebuildUnifiedViews(a, &available);
+    a.unified_imports_clean = !a.unified_import_alias_blocked;
+    a.outbox_load_failed = false;
+    if (a.unified_import_unresolved != 0) setStatus(a, "Some outbox records need recovery");
+    if (a.unified_import_overflow != 0 and a.unified_import_unresolved == 0) setStatus(a, "More outbox records remain protected");
+}
+
 fn restoreOutbox(a: *App) void {
     if (unifiedHub(a)) {
         setStatus(a, "Unified outbox migration incomplete; sends paused");
         prepareUnifiedOutbox(a);
+        restoreUnifiedOutbox(a) catch {
+            setStatus(a, "Unified outbox unavailable; sends paused");
+            return;
+        };
+        quarantineUnifiedJournals(a) catch {
+            setStatus(a, "Unified outbox quarantine incomplete; sends paused");
+            return;
+        };
+        importUnifiedOutbox(a) catch {
+            setStatus(a, "Unified outbox recovery incomplete; sends paused");
+            return;
+        };
         return;
     }
     a.outbox_load_failed = true;
@@ -9395,6 +9885,7 @@ fn tickVoice(a: *App) void {
 
 fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, waveform: *const [64]u8) bool {
     _ = waveform;
+    if (unifiedHub(a)) return false;
     if (a.outbox_load_failed or a.pending_send_count >= max_pending_sends) return false;
     var path_buffer: [520]u8 = undefined;
     const path_len = stageNewPath(a, &path_buffer, "ogg") orelse return false;
@@ -9439,6 +9930,10 @@ fn sendMessage(a: *App) void {
 }
 
 fn sendMessageFrom(a: *App, thread: bool) void {
+    if (unifiedHub(a)) {
+        setStatus(a, "Unified outbox migration incomplete; sends paused");
+        return;
+    }
     const compose = (if (thread) a.thread_compose else a.compose) orelse return;
     if (thread and (a.thread_parent.len == 0 or a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) return;
     const reply_to = if (thread) a.thread_parent.slice() else a.reply_to.slice();
