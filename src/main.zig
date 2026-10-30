@@ -1947,7 +1947,6 @@ fn recordVerificationDispatch(a: *App, job: *const WacliJob) void {
     defer a.allocator.free(path);
     const marker = std.json.Stringify.valueAlloc(a.allocator, .{ .id = job.msg_id.slice(), .attempt = job.gen, .mouse = mouse }, .{}) catch return;
     defer a.allocator.free(marker);
-    // Never let a later click rewrite an earlier dispatch.
     unifiedWriteProtected(a, path, marker) catch {};
 }
 

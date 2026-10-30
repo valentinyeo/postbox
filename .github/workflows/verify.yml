@@ -98,7 +98,6 @@ jobs:
         with:
           version: 0.16.0
           use-cache: false
-      # Enabled when the rollback journey is registered.
       - name: Build pinned historical rollback input
         if: matrix.feature == 'hub-rollback' || matrix.feature == 'hub-migration-crash' || matrix.feature == 'hub-migration-before-rename'
         shell: pwsh
