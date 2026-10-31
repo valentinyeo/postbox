@@ -10875,16 +10875,27 @@ fn prepareDictation(allocator: std.mem.Allocator, original: []const u16, start: 
         error.InvalidUtf8 => return error.InvalidTranscript,
     };
     defer allocator.free(spoken);
+    var source: usize = 0;
+    var spoken_len: usize = 0;
+    while (source < spoken.len) {
+        const unit = spoken[source];
+        source += 1;
+        if (unit == '\r') {
+            if (source < spoken.len and spoken[source] == '\n') source += 1;
+            spoken[spoken_len] = '\n';
+        } else spoken[spoken_len] = unit;
+        spoken_len += 1;
+    }
     const padding = edit_contract.dictationPadding(original, start, end);
     const before: usize = @intFromBool(padding.before);
     const after: usize = @intFromBool(padding.after);
-    const insertion_len = before + spoken.len + after;
+    const insertion_len = before + spoken_len + after;
     const whole_len = start + insertion_len + original.len - end;
     if (whole_len > drafts.max_text) return error.DraftTooLong;
     const insertion = try allocator.allocSentinel(u16, insertion_len, 0);
     errdefer allocator.free(insertion);
     if (padding.before) insertion[0] = ' ';
-    @memcpy(insertion[before..][0..spoken.len], spoken);
+    @memcpy(insertion[before..][0..spoken_len], spoken[0..spoken_len]);
     if (padding.after) insertion[insertion_len - 1] = ' ';
     const whole = try allocator.allocSentinel(u16, whole_len, 0);
     errdefer allocator.free(whole);

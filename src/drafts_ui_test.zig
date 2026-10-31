@@ -381,6 +381,18 @@ test "IGSH-1267 preparation preserves Unicode, selection and line endings" {
     try std.testing.expectEqualSlices(u16, std.mem.span(lit(" spoken ")), prepared.insertion);
 }
 
+fn prepareNewlineCase(a: std.mem.Allocator) !void {
+    const value = try prepareDictation(a, std.mem.span(lit("Grüße old\r\nEnde")), 6, 9, "一\r\nZwei\rDrei\n😀");
+    defer value.deinit(a);
+    try std.testing.expectEqualStrings("Grüße 一\nZwei\nDrei\n😀\r\nEnde", value.utf8);
+    try std.testing.expectEqualSlices(u16, std.mem.span(lit("一\nZwei\nDrei\n😀")), value.insertion);
+}
+
+test "IGSH-1267 transcription line endings match native editor paragraphs" {
+    try prepareNewlineCase(test_allocator);
+    try std.testing.checkAllAllocationFailures(test_allocator, prepareNewlineCase, .{});
+}
+
 test "IGSH-1267 preparation rejects invalid, empty and oversized input" {
     try std.testing.expectError(error.EmptyTranscript, prepareDictation(test_allocator, std.mem.span(lit("draft")), 0, 0, " \t\xc2\xa0\xe3\x80\x80"));
     try std.testing.expectError(error.InvalidTranscript, prepareDictation(test_allocator, std.mem.span(lit("draft")), 0, 0, "\xff"));
