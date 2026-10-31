@@ -17,7 +17,7 @@ pub fn compute(dragged: i32, content_height: i32, client_height: i32, preview: b
 pub fn computeScaled(dragged: i32, content_height: i32, client_height: i32, preview: bool, dpi: i32) Composer {
     const band: i32 = if (preview) scale(preview_band, dpi) else 0;
     const min_height = scale(edit_min_height, dpi);
-    const cap: i32 = @max(scale(default_max_height, dpi), dragged);
+    const cap: i32 = if (dragged > 0) dragged else @max(scale(default_max_height, dpi), @divTrunc(@max(0, client_height), 2));
     var edit: i32 = @max(@max(min_height, dragged), content_height);
     edit = @min(edit, cap);
     const room_for_edit: i32 = client_height - scale(canvas_min_height, dpi) - scale(strip_padding, dpi) - band;
@@ -77,7 +77,10 @@ pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool, dictatin
     const text_left = attach.right + gap;
     const voice_width = if (recording) @max(icon, @min(scale(200, dpi), dictate.left - text_left - 3 * gap - text_min - scale(8, dpi))) else icon;
     const voice = Rect{ .left = dictate.left - gap - voice_width, .top = icon_top, .right = dictate.left - gap, .bottom = icon_bottom };
-    const text = Rect{ .left = text_left, .top = box.top + @min(1, height), .right = @max(text_left, voice.left - gap - @min(scale(8, dpi), icon)), .bottom = @max(box.top + @min(1, height), box.bottom - 1) };
+    const multiline = height > scale(edit_min_height, dpi);
+    const text_top = box.top + @min(1, height) + (if (multiline) vertical else @as(i32, 0));
+    const text_bottom = box.bottom - (if (multiline) icon + 2 * vertical else @as(i32, 1));
+    const text = Rect{ .left = text_left, .top = text_top, .right = @max(text_left, voice.left - gap - @min(scale(8, dpi), icon)), .bottom = @max(text_top, text_bottom) };
     return .{ .box = box, .attach = attach, .text = text, .voice = voice, .dictate = dictate, .emoji = emoji, .send = send };
 }
 
@@ -89,9 +92,9 @@ fn scale(v: i32, dpi: i32) i32 {
     return @divTrunc(v * dpi + 48, 96);
 }
 
-test "grows with content up to the default cap" {
+test "grows with content up to half the chat" {
     const c = compute(0, 600, 900, false);
-    try @import("std").testing.expectEqual(@as(i32, 240), c.edit_height);
+    try @import("std").testing.expectEqual(@as(i32, 450), c.edit_height);
     const mid = compute(0, 80, 900, false);
     try @import("std").testing.expectEqual(@as(i32, 80), mid.edit_height);
     const one = compute(0, 30, 900, false);
@@ -217,5 +220,19 @@ test "message column and composer box share both edges at every width and dpi" {
             try testing.expectEqual(pane.left + column.right, layout.box.right);
             try testing.expect(column.right > column.left);
         }
+    }
+}
+
+test "a long paste grows the box and keeps its text above the icons" {
+    const testing = @import("std").testing;
+    for ([_]i32{ 96, 144 }) |dpi| {
+        const pane = Rect{ .left = scale(300, dpi), .top = 0, .right = scale(300 + 900, dpi), .bottom = scale(900, dpi) };
+        const fifteen = scale(15 * 20 + 16, dpi);
+        const size = computeScaled(0, fifteen, pane.bottom, false, dpi);
+        try testing.expect(size.edit_height >= fifteen - scale(20, dpi));
+        try testing.expect(size.edit_height <= @divTrunc(pane.bottom, 2));
+        const slots = arrange(pane, size.edit_height, dpi, false, false);
+        try testing.expect(slots.text.bottom <= slots.attach.top);
+        try testing.expect(slots.text.bottom > slots.text.top);
     }
 }
