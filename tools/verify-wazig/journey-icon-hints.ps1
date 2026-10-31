@@ -95,7 +95,7 @@ function Icon-FreshHover([string]$Id, [int]$AnchorX = 0, [int]$AnchorY = 0) {
         $client = [VerifyWindow+Point]::new()
         Assert-That ([VerifyWindow]::ClientToScreen([IntPtr][long]$tool.owner, [ref]$client)) 'Tool owner origin unavailable'
         $clientOrigin = @($client.X, $client.Y)
-        $screen = @($client.X + $tool.rect[0], $client.Y + $tool.rect[1], $client.X + $tool.rect[2], $client.Y + $tool.rect[3])
+        $screen = @(($client.X + $tool.rect[0]), ($client.Y + $tool.rect[1]), ($client.X + $tool.rect[2]), ($client.Y + $tool.rect[3]))
     }
     $neutral = [VerifyWindow+Point]::new()
     $neutral.X = 4; $neutral.Y = 4
