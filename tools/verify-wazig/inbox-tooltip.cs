@@ -111,6 +111,70 @@ public static class VerifyInboxTooltip {
             CloseHandle(process);
         }
     }
+    public sealed class ToolInfo {
+        public ulong owner, id;
+        public uint flags;
+        public int[] rect;
+    }
+    public sealed class TooltipInfo {
+        public long hwnd;
+        public bool visible;
+        public ulong autopop_ms;
+        public ToolInfo current;
+        public ToolInfo[] tools;
+    }
+    static ToolInfo ReadTool(IntPtr process, IntPtr window, IntPtr memory, int size, uint message, uint index, ref bool safeToFree) {
+        var bytes = new byte[size];
+        Array.Copy(BitConverter.GetBytes(size), bytes, 4);
+        WriteMemory(process, memory, bytes);
+        if (Message(window, message, index, memory, ref safeToFree) == 0) return null;
+        bytes = ReadMemory(process, memory, size);
+        int offset = size == 72 ? 24 : 16;
+        return new ToolInfo {
+            owner = size == 72 ? BitConverter.ToUInt64(bytes, 8) : BitConverter.ToUInt32(bytes, 8),
+            id = size == 72 ? BitConverter.ToUInt64(bytes, 16) : BitConverter.ToUInt32(bytes, 12),
+            flags = BitConverter.ToUInt32(bytes, 4),
+            rect = new int[] { BitConverter.ToInt32(bytes, offset), BitConverter.ToInt32(bytes, offset + 4), BitConverter.ToInt32(bytes, offset + 8), BitConverter.ToInt32(bytes, offset + 12) }
+        };
+    }
+    public static TooltipInfo[] Tools(int targetPid) {
+        var windows = new System.Collections.Generic.List<IntPtr>();
+        if (!EnumWindows((window, data) => {
+            uint owner; GetWindowThreadProcessId(window, out owner);
+            if (owner == targetPid && ClassName(window) == "tooltips_class32") windows.Add(window);
+            return true;
+        }, IntPtr.Zero)) throw new Exception("EnumWindows failed");
+        var result = new System.Collections.Generic.List<TooltipInfo>();
+        foreach (IntPtr window in windows) {
+            IntPtr process = OpenProcess(0x1038, false, (uint)targetPid);
+            if (process == IntPtr.Zero) throw new Exception("OpenProcess failed");
+            IntPtr memory = IntPtr.Zero;
+            bool safe = true;
+            try {
+                bool wow64;
+                if (!IsWow64Process(process, out wow64)) throw new Exception("IsWow64Process failed");
+                int size = Environment.Is64BitOperatingSystem && !wow64 ? 72 : 48;
+                if (IntPtr.Size == 4 && size == 72) throw new Exception("64-bit harness required");
+                memory = VirtualAllocEx(process, IntPtr.Zero, new UIntPtr((uint)size), 0x3000, 4);
+                if (memory == IntPtr.Zero) throw new Exception("VirtualAllocEx failed");
+                ToolInfo current = ReadTool(process, window, memory, size, 0x043B, 0, ref safe);
+                ulong count = Message(window, 0x040D, 0, IntPtr.Zero, ref safe);
+                if (count > 256) throw new Exception("Too many tooltip tools");
+                var tools = new System.Collections.Generic.List<ToolInfo>();
+                for (uint index = 0; index < count; index++) {
+                    ToolInfo tool = ReadTool(process, window, memory, size, 0x043A, index, ref safe);
+                    if (tool == null) throw new Exception("Tooltip enumeration failed");
+                    tools.Add(tool);
+                }
+                ulong autopop = Message(window, 0x0415, 2, IntPtr.Zero, ref safe);
+                result.Add(new TooltipInfo { hwnd = window.ToInt64(), visible = IsWindowVisible(window), autopop_ms = autopop, current = current, tools = tools.ToArray() });
+            } finally {
+                if (memory != IntPtr.Zero && safe) VirtualFreeEx(process, memory, UIntPtr.Zero, 0x8000);
+                CloseHandle(process);
+            }
+        }
+        return result.ToArray();
+    }
     public static string Capture(IntPtr list, int x, int y) {
         var output = new StringBuilder();
         output.AppendLine("utc=" + DateTime.UtcNow.ToString("O"));

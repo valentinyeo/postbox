@@ -13,10 +13,9 @@ LABELS = {
     'dictate': 'Dictate  Ctrl+D',
     'emoji': 'Emoji menu',
     'send': 'Send message  Enter',
-    'reply-close': 'Cancel reply',
-    'staged-0': 'Remove attachment',
-    'staged-1': 'Remove attachment',
+    'reply-close': 'Cancel reply  Esc in message box',
     'staged-compacted': 'Remove attachment',
+    'staged-sole': 'Remove attachment  Esc in message box',
     'react-selected': 'React  Ctrl+R',
     'reply-selected': 'Reply  Ctrl+Shift+R',
     'more-selected': 'Message actions',
@@ -28,6 +27,22 @@ LABELS = {
 
 def load(folder, name):
     return json.loads((folder / name).read_text(encoding='utf-8-sig'))
+
+
+def check_transition(item):
+    before, after = item['before'], item['after']
+    assert before['visible'] and before['hwnd'] > 0 and before['text']
+    assert len(before['tooltips']) == len(after['tooltips']) == 1
+    old = before['tooltips'][0]['current']
+    assert old is not None and old in before['tooltips'][0]['tools']
+    current = after['tooltips'][0]['current']
+    if current is not None:
+        assert current in after['tooltips'][0]['tools']
+    assert not after['visible'] or (after['text'] != before['text'] and current != old)
+    assert before['frequency'] == after['frequency'] > 0
+    elapsed = 1000 * (after['ticks'] - before['ticks']) / before['frequency']
+    assert 0 <= elapsed < min(1500, before['tooltips'][0]['autopop_ms'] / 2)
+    assert abs(item['elapsed_ms'] - elapsed) < 0.01
 
 
 def check_evidence(folder):
@@ -42,12 +57,57 @@ def check_evidence(folder):
     assert load(folder, 'result.json') == {'feature': 'icon-hints', 'status': 'passed'}
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
     assert not (folder / 'failure.txt').exists()
-    for name, expected in LABELS.items():
+    source = (Path(__file__).resolve().parents[2] / 'src/staged_images.zig').read_text(encoding='utf-8')
+    match = re.search(r'pub const capacity\s*=\s*(\d+)\s*;', source)
+    assert match
+    capacity = int(match.group(1))
+    labels = dict(LABELS)
+    labels.update({f'staged-{index}': 'Remove attachment' for index in range(capacity)})
+    staged_state = load(folder, 'hover-staged-0.state.json')
+    assert staged_state['staged_capacity'] == staged_state['staged_attachment_count'] == capacity
+    assert len({rect[1] for rect in staged_state['staged_remove_rects']}) > 1
+    for name, expected in labels.items():
         observation = load(folder, f'hover-{name}.json')
         assert observation['id'] == name and observation['expected'] == observation['actual'] == expected
         hover_session = load(folder, 'voice-no-chat.session.json') if name == 'attach-disabled' else session
         assert observation['pid'] == hover_session['pid'] and observation['popup'] > 0
         assert observation['owner'] > 0 and observation['owner_pid'] == hover_session['pid']
+        assert len(observation['tooltips']) == 1
+        tooltip = observation['tooltips'][0]
+        assert tooltip['hwnd'] == observation['popup'] and tooltip['visible']
+        current = tooltip['current']
+        assert current is not None and current['flags'] & 0x10
+        matching_tools = [tool for tool in tooltip['tools'] if tool['owner'] == current['owner'] and tool['id'] == current['id']]
+        assert len(matching_tools) == 1 and matching_tools[0]['rect'] == current['rect']
+        if name in ('attach', 'mic', 'mic-recording', 'dictate', 'emoji', 'send'):
+            assert current['flags'] & 1 and current['id'] == observation['owner']
+            assert current['owner'] == observation['parent']
+        else:
+            assert not current['flags'] & 1 and current['owner'] == observation['owner']
+            if name.startswith('staged-') and name[7:].isdigit():
+                slot = int(name[7:])
+                assert current['id'] == 3001 + slot
+                assert current['rect'] == staged_state['staged_remove_rects'][slot]
+            elif name == 'attach-disabled':
+                assert current['id'] == 1136
+                state = load(folder / 'voice-no-chat', 'hover-attach-disabled.state.json')
+                attach = next(control for control in state['composer']['controls'] if control['name'] == 'attach')
+                assert current['rect'] == [attach['left'], attach['top'], attach['right'], attach['bottom']]
+            elif name == 'reply-close':
+                assert current['id'] == 3000
+                assert current['rect'] == load(folder, 'hover-reply-close.state.json')['reply']['close']
+            elif name in ('staged-compacted', 'staged-sole'):
+                assert current['id'] == 3001
+                state = load(folder, f'hover-{name}.state.json')
+                assert current['rect'] == state['staged_remove_rects'][0]
+                assert state['staged_attachment_count'] == (1 if name == 'staged-sole' else capacity - 1)
+                if name == 'staged-sole':
+                    assert not state['reply']['id']
+            elif name == 'header-avatar':
+                assert current['id'] == 3103
+                assert current['rect'] == load(folder, 'hover-header-avatar.state.json')['header_avatar']
+            else:
+                assert current['id'] == {'react': 3100, 'reply': 3101, 'more': 3102}[name.split('-')[0]]
         left, top, right, bottom = observation['owner_rect']
         assert left <= observation['x'] < right and top <= observation['y'] < bottom
         left, top, right, bottom = observation['bounds']
@@ -70,12 +130,20 @@ def check_evidence(folder):
                         row['action_cells'][index][1] <= y < row['action_cells'][index][3] and
                         row['bubble'][2] > row['bubble'][0]]
             assert len(matching) == 1
+            hit = matching[0]['action_cells'][index]
+            rect = current['rect']
+            assert hit[0] <= rect[0] < rect[2] <= hit[2]
+            assert hit[1] <= rect[1] < rect[3] <= hit[3]
+            assert rect[0] <= x < rect[2] and rect[1] <= y < rect[3]
     transitions = load(folder, 'icon-transitions.json')
     for name in ('leave', 'adjacent', 'resize', 'scroll', 'chat', 'reply-close', 'staged-compaction'):
         item = transitions[name]
-        before, after = item['before'], item['after']
-        assert before['visible'] and before['hwnd'] > 0 and before['text']
-        assert not after['visible'] or after['text'] != before['text']
+        check_transition(item)
+        old = item['before']['tooltips'][0]['current']
+        remaining = [tool for tool in item['after']['tooltips'][0]['tools'] if tool['owner'] == old['owner'] and tool['id'] == old['id']]
+        assert len(remaining) <= 1
+        if name in ('scroll', 'reply-close') and remaining:
+            assert remaining[0]['rect'] != old['rect']
         assert (folder / item['screenshot']).read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     assert transitions['resize']['before_window'] != transitions['resize']['after_window']
     assert transitions['chat']['before_selected']['id'] != transitions['chat']['after_selected']['id']
@@ -116,6 +184,9 @@ def check_evidence(folder):
     assert before['selection'] == held['selection'] == cancelled['selection']
     for name in ('voice-before', 'voice-held', 'voice-cancelled'):
         requests = load(folder, f'{name}.requests.json')
+        assert not [row for row in requests if row.get('wire_path') == '/v1/wazig/send']
+    for path in [folder / 'bridge-requests.jsonl'] + [folder / case / f'bridge-{boundary}.jsonl' for case in ('voice-no-chat', 'voice-bad-fixture', 'voice-invalid-fixture') for boundary in ('before', 'after')]:
+        requests = [json.loads(line) for line in path.read_text(encoding='utf-8-sig').splitlines() if line.strip()]
         assert not [row for row in requests if row.get('wire_path') == '/v1/wazig/send']
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
     assert actions.count('icon-key: 77 up=False') >= 5

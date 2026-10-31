@@ -793,6 +793,7 @@ const App = struct {
     btn_prev_proc: [10]usize = @splat(0),
     tooltips: ?win.HWND = null,
     main_icon_tip_rects: [1 + staged_images.capacity]win.RECT = @splat(std.mem.zeroes(win.RECT)),
+    sole_attachment_tip: bool = false,
     canvas_icon_tip_rects: [3]win.RECT = @splat(std.mem.zeroes(win.RECT)),
     header_icon_tip_rect: win.RECT = std.mem.zeroes(win.RECT),
     canvas_tip_selected: bool = false,
@@ -1445,6 +1446,20 @@ fn setIconTooltipRect(a: *App, owner: win.HWND, id: usize, current: *win.RECT, r
 fn syncMainIconTooltips(a: *App) void {
     const owner = a.hwnd orelse return;
     const empty = std.mem.zeroes(win.RECT);
+    const sole = a.staged_images.count == 1 and a.reply_to.len == 0;
+    if (sole != a.sole_attachment_tip) {
+        a.sole_attachment_tip = sole;
+        if (a.tooltips) |tt| {
+            popIconTooltip(a, owner, @intFromEnum(IconTip.staged_first));
+            var info = win.TOOLINFOW{
+                .cbSize = tooltip_info_size,
+                .hwnd = owner,
+                .uId = @intFromEnum(IconTip.staged_first),
+                .lpszText = @constCast(if (sole) lit("Remove attachment  Esc in message box") else lit("Remove attachment")),
+            };
+            _ = win.SendMessageW(tt, win.TTM_UPDATETIPTEXTW, 0, @bitCast(@intFromPtr(&info)));
+        }
+    }
     setIconTooltipRect(a, owner, @intFromEnum(IconTip.reply_close), &a.main_icon_tip_rects[0], if (a.reply_to.len > 0) replyCloseRect(a) else empty);
     for (0..staged_images.capacity) |index| {
         setIconTooltipRect(a, owner, @intFromEnum(IconTip.staged_first) + index, &a.main_icon_tip_rects[index + 1], if (index < a.staged_images.count) stagedRemoveRect(a, index) else empty);
@@ -1559,7 +1574,7 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
     addTooltip(a, tt, a.send, lit("Send message  Enter"));
     addTooltip(a, tt, a.emoji_btn, lit("Emoji menu"));
     addTooltip(a, tt, a.voice_btn, lit("Record a voice note  Ctrl+Shift+M"));
-    addIconTooltip(a, hwnd, @intFromEnum(IconTip.reply_close), lit("Cancel reply"));
+    addIconTooltip(a, hwnd, @intFromEnum(IconTip.reply_close), lit("Cancel reply  Esc in message box"));
     for (0..staged_images.capacity) |index| addIconTooltip(a, hwnd, @intFromEnum(IconTip.staged_first) + index, lit("Remove attachment"));
     if (a.canvas) |canvas| {
         addIconTooltip(a, canvas, @intFromEnum(IconTip.react), lit("React"));
@@ -13614,6 +13629,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
     if (verification_fixture) {
+        try w.print(",\"staged_capacity\":{d}", .{staged_images.capacity});
         const avatar = a.header_icon_tip_rect;
         try w.print(",\"header_avatar\":[{d},{d},{d},{d}]", .{ avatar.left, avatar.top, avatar.right, avatar.bottom });
         try w.writeAll(",\"staged_remove_rects\":[");

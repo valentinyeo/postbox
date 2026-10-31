@@ -1,4 +1,5 @@
 . "$PSScriptRoot/paste-image.ps1"
+Add-Type -Path "$PSScriptRoot/inbox-tooltip.cs"
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -14,6 +15,7 @@ public static class IconHintKeys {
     [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public INPUTUNION data; }
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int x, y; }
     [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
+    [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr window);
     [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", SetLastError=true)]
     public static extern IntPtr Selection(IntPtr window, uint message, ref uint start, ref uint end, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, INPUT[] inputs, int size);
@@ -61,10 +63,13 @@ function Icon-Snapshot([string]$Name) {
 }
 
 function Icon-Popup {
+    $tools = @([VerifyInboxTooltip]::Tools($session.pid))
+    Assert-That ($tools.Count -eq 1) 'Tooltip window count changed'
     $tip = [VerifyMenus]::Find($session.pid, 'tooltips_class32')
-    if ($tip -eq [IntPtr]::Zero) { return @{ visible = $false; hwnd = 0; text = '' } }
+    if ($tip -eq [IntPtr]::Zero) { return @{ visible = $false; hwnd = 0; text = ''; ticks = [Diagnostics.Stopwatch]::GetTimestamp(); frequency = [Diagnostics.Stopwatch]::Frequency; tooltips = $tools } }
     $bounds = [VerifyMenus]::Bounds($tip)
-    return @{ visible = $true; hwnd = $tip.ToInt64(); text = (Read-EditText $tip); bounds = @($bounds.Left, $bounds.Top, $bounds.Right, $bounds.Bottom) }
+    $text = Read-EditText $tip
+    return @{ visible = $true; hwnd = $tip.ToInt64(); text = $text; bounds = @($bounds.Left, $bounds.Top, $bounds.Right, $bounds.Bottom); ticks = [Diagnostics.Stopwatch]::GetTimestamp(); frequency = [Diagnostics.Stopwatch]::Frequency; tooltips = $tools }
 }
 
 function Icon-Transition([string]$Name, $Before, [string]$OldText) {
@@ -72,9 +77,12 @@ function Icon-Transition([string]$Name, $Before, [string]$OldText) {
         $value = Icon-Popup
         if (-not $value.visible -or $value.text -cne $OldText) { return ,$value }
     } "$Name old tooltip disappears"
+    $elapsed = 1000.0 * ($after.ticks - $Before.ticks) / $Before.frequency
+    $autopop = $Before.tooltips[0].autopop_ms
+    Assert-That ($autopop -gt 0 -and $elapsed -ge 0 -and $elapsed -lt [Math]::Min(1500, $autopop / 2)) "$Name tooltip stayed visible too long"
     $screenshot = "transition-$Name"
     Save-Screen $session $screenshot
-    $script:iconTransitions[$Name] = @{ before = $Before; after = $after; screenshot = "$screenshot.png" }
+    $script:iconTransitions[$Name] = @{ before = $Before; after = $after; elapsed_ms = $elapsed; screenshot = "$screenshot.png" }
 }
 
 function Icon-Hover([string]$Id, [string]$Expected, [int]$X, [int]$Y, [int]$AnchorX = 0, [int]$AnchorY = 0) {
@@ -101,12 +109,12 @@ function Icon-Hover([string]$Id, [string]$Expected, [int]$X, [int]$Y, [int]$Anch
     } "native tooltip $Id"
     $bounds = [VerifyMenus]::Bounds($popup)
     $actual = Read-EditText $popup
-    @{ id = $Id; expected = $Expected; actual = $actual; popup = $popup.ToInt64(); pid = $session.pid; owner = $owner.ToInt64(); owner_pid = $ownerPid; owner_rect = @($ownerBounds.Left, $ownerBounds.Top, $ownerBounds.Right, $ownerBounds.Bottom); x = $X; y = $Y; bounds = @($bounds.Left, $bounds.Top, $bounds.Right, $bounds.Bottom) } |
-        ConvertTo-Json | Set-Content (Join-Path $session.evidence "hover-$Id.json")
+    $tooltips = @([VerifyInboxTooltip]::Tools($session.pid))
+    Assert-That ($tooltips.Count -eq 1 -and $tooltips[0].hwnd -eq $popup.ToInt64() -and $null -ne $tooltips[0].current) 'Native tooltip identity unavailable or duplicated'
+    @{ id = $Id; expected = $Expected; actual = $actual; popup = $popup.ToInt64(); pid = $session.pid; owner = $owner.ToInt64(); parent = ([IconHintKeys]::GetParent($owner)).ToInt64(); owner_pid = $ownerPid; owner_rect = @($ownerBounds.Left, $ownerBounds.Top, $ownerBounds.Right, $ownerBounds.Bottom); x = $X; y = $Y; bounds = @($bounds.Left, $bounds.Top, $bounds.Right, $bounds.Bottom); tooltips = $tooltips } |
+        ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence "hover-$Id.json")
     Save-Screen $session "hover-$Id"
-    $hoverState = Read-Control $session status
-    $hoverState | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence "hover-$Id.state.json")
-    if ($null -ne $hoverState.selected) {
+    if ($null -ne (Read-Control $session status).selected) {
         Read-Control $session messages | ConvertTo-Json -Depth 16 | Set-Content (Join-Path $session.evidence "hover-$Id.messages.json")
     }
 }
@@ -118,7 +126,9 @@ function Invoke-IconIsolated([string]$Name, [bool]$UseHub) {
     $caseProfile = Join-Path $caseRoot 'profile'
     $caseMessages = Join-Path $caseLocal 'Messages'
     $caseEvidence = Join-Path $session.evidence $Name
+    $bridgeLog = Join-Path $session.evidence 'bridge-requests.jsonl'
     New-Item $caseMessages, $caseProfile, $caseEvidence -ItemType Directory -Force | Out-Null
+    if (Test-Path $bridgeLog) { Copy-Item $bridgeLog (Join-Path $caseEvidence 'bridge-before.jsonl') }
     if ($Name -ceq 'voice-invalid-fixture') { [IO.File]::WriteAllBytes((Join-Path $caseMessages 'voice.pcm'), [byte[]](1, 2, 3)) }
     if (-not $UseHub) {
         Set-Content (Join-Path $caseMessages 'account-tag.txt') '0000000000000526' -NoNewline
@@ -181,6 +191,7 @@ function Invoke-IconIsolated([string]$Name, [bool]$UseHub) {
         Assert-That ($after.pending_sends -eq $before.pending_sends) 'Isolated voice gate sent a message'
     } finally {
         & "$PSScriptRoot/cleanup.ps1" -Evidence $caseEvidence
+        if (Test-Path $bridgeLog) { Copy-Item $bridgeLog (Join-Path $caseEvidence 'bridge-after.jsonl') }
         foreach ($file in @("$Name-before.icon.json", "$Name-before.png", "$Name.icon.json", "$Name.png", 'session.json', 'cleanup.txt', 'actions.log')) {
             $destination = if ($file -eq 'session.json') { "$Name.session.json" } elseif ($file -eq 'cleanup.txt') { "$Name.cleanup.txt" } elseif ($file -eq 'actions.log') { "$Name.actions.log" } else { $file }
             if (Test-Path (Join-Path $caseEvidence $file)) { Copy-Item (Join-Path $caseEvidence $file) (Join-Path $caseEvidence '..' $destination) }
@@ -314,8 +325,10 @@ foreach ($case in @(@{ name = 'selected'; message = $selected }, @{ name = 'unse
             $nextY = $canvasOrigin.Y + [int](($next[1] + $next[3]) / 2)
             [VerifyMenus]::Hover($session.pid, $nextX, $nextY)
             $afterPopup = Wait-Until { $value = Icon-Popup; if ($value.visible -and $value.text -ceq 'Reply  Ctrl+Shift+R') { return ,$value } } 'adjacent action tooltip'
+            $elapsed = 1000.0 * ($afterPopup.ticks - $beforePopup.ticks) / $beforePopup.frequency
+            Assert-That ($elapsed -ge 0 -and $elapsed -lt [Math]::Min(1500, $beforePopup.tooltips[0].autopop_ms / 2)) 'Adjacent tooltip update was too slow'
             Save-Screen $session 'transition-adjacent'
-            $script:iconTransitions['adjacent'] = @{ before = $beforePopup; after = $afterPopup; screenshot = 'transition-adjacent.png' }
+            $script:iconTransitions['adjacent'] = @{ before = $beforePopup; after = $afterPopup; elapsed_ms = $elapsed; screenshot = 'transition-adjacent.png' }
         }
     }
 }
@@ -329,17 +342,23 @@ $reply = Wait-Until { $value = Read-Control $session status; if ($value.reply.id
 $rect = $reply.close
 $x = $origin.X + [int](($rect[0] + $rect[2]) / 2)
 $y = $origin.Y + [int](($rect[1] + $rect[3]) / 2)
-Icon-Hover 'reply-close' 'Cancel reply' $x $y
+Icon-Hover 'reply-close' 'Cancel reply  Esc in message box' $x $y
 $oldPopup = Icon-Popup
 [VerifyMenus]::Click($session.pid, $x, $y, $false)
 $null = Wait-Until { (Read-Control $session status).reply.id -ceq '' } 'reply closed'
-Icon-Transition 'reply-close' $oldPopup 'Cancel reply'
+Icon-Transition 'reply-close' $oldPopup 'Cancel reply  Esc in message box'
 $fixture = Join-Path (Join-Path $session.root 'profile') 'icon-fixture.png'
 [VerifyPasteImage]::Fixture($fixture)
-Add-PickerImage $session $fixture
-Add-PickerImage $session $fixture
-$staged = Wait-Until { $value = Read-Control $session status; if ($value.staged_attachment_count -eq 2) { $value } } 'two attachments staged'
-for ($index = 0; $index -lt 2; $index++) {
+$capacity = (Read-Control $session status).staged_capacity
+Assert-That ($capacity -gt 1) 'Staged attachment capacity unavailable'
+for ($index = 0; $index -lt $capacity; $index++) {
+    Add-PickerImage $session $fixture
+    $wanted = $index + 1
+    $null = Wait-Until { (Read-Control $session status).staged_attachment_count -eq $wanted } "attachment $wanted staged"
+}
+$staged = Read-Control $session status
+Assert-That (@($staged.staged_remove_rects | ForEach-Object { $_[1] } | Sort-Object -Unique).Count -gt 1) 'Staged attachments did not wrap'
+for ($index = 0; $index -lt $capacity; $index++) {
     $rect = $staged.staged_remove_rects[$index]
     $x = $origin.X + [int](($rect[0] + $rect[2]) / 2)
     $y = $origin.Y + [int](($rect[1] + $rect[3]) / 2)
@@ -351,12 +370,24 @@ $y = $origin.Y + [int](($rect[1] + $rect[3]) / 2)
 Icon-Hover 'staged-before-compaction' 'Remove attachment' $x $y
 $oldPopup = Icon-Popup
 [VerifyMenus]::Click($session.pid, $x, $y, $false)
-$staged = Wait-Until { $value = Read-Control $session status; if ($value.staged_attachment_count -eq 1) { $value } } 'attachment compacted'
+$staged = Wait-Until { $value = Read-Control $session status; if ($value.staged_attachment_count -eq ($capacity - 1)) { $value } } 'attachment compacted'
 Icon-Transition 'staged-compaction' $oldPopup 'Remove attachment'
 $rect = $staged.staged_remove_rects[0]
 $x = $origin.X + [int](($rect[0] + $rect[2]) / 2)
 $y = $origin.Y + [int](($rect[1] + $rect[3]) / 2)
 Icon-Hover 'staged-compacted' 'Remove attachment' $x $y
+while ($staged.staged_attachment_count -gt 1) {
+    $rect = $staged.staged_remove_rects[0]
+    $x = $origin.X + [int](($rect[0] + $rect[2]) / 2)
+    $y = $origin.Y + [int](($rect[1] + $rect[3]) / 2)
+    $wanted = $staged.staged_attachment_count - 1
+    [VerifyMenus]::Click($session.pid, $x, $y, $false)
+    $staged = Wait-Until { $value = Read-Control $session status; if ($value.staged_attachment_count -eq $wanted) { $value } } 'attachment removed'
+}
+$rect = $staged.staged_remove_rects[0]
+$x = $origin.X + [int](($rect[0] + $rect[2]) / 2)
+$y = $origin.Y + [int](($rect[1] + $rect[3]) / 2)
+Icon-Hover 'staged-sole' 'Remove attachment  Esc in message box' $x $y
 [VerifyMenus]::Click($session.pid, $x, $y, $false)
 $null = Wait-Until { (Read-Control $session status).staged_attachment_count -eq 0 } 'attachments cleared'
 $canvasOrigin = [VerifyWindow+Point]::new()

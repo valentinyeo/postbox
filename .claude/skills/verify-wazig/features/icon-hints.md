@@ -18,8 +18,10 @@
 
 - Dispatch `feature=icon-hints` on hosted Windows.
 - The synthetic hub supplies WhatsApp and Slack chats and scrollable messages.
-- Real mouse input observes process-owned native tooltip text and captures screenshots.
+- Real mouse input observes process-owned native tooltip text, tool identities and rectangles, and captures screenshots.
+- Check every staged attachment slot, including wrapped rows, compaction and the sole attachment.
 - Check selected and unselected actions, adjacent movement, leave, resize, scroll, chat changes, reply close and attachment compaction.
+- Require prompt transitions before native auto-pop; retain current and registered tools before and after.
 - Real keyboard input reaches the voice worker with synthetic PCM. Check held repeats, cancellation, draft, selection and zero microphone entries.
 - Separate isolated processes check no chat, missing PCM and malformed PCM. Capture each executable, PID, start time and cleanup.
 - Check unsupported provider, extra modifiers and fixture-backed Ctrl+D without sending or calling a service.
