@@ -19497,6 +19497,11 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         switchChatView(a, .all);
         return true;
     }
+    if (control and !alt and !shift and key >= '1' and key <= '9') {
+        const row: usize = @intCast(key - '1');
+        if (row < a.chat_count) selectChatRow(a, row);
+        return true;
+    }
     if (alt and !control and !shift and key >= '1' and key <= '9') {
         if (key == '1') switchChatView(a, .all) else if (messenger_view.forNumber(key - '1', a.views.items)) |index| switchAccountView(a, a.views.items[index].key.key());
         return true;

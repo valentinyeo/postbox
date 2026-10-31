@@ -50,6 +50,7 @@ pub const Group = struct {
 
 pub const groups = [_]Group{
     .{ .name = "Chats", .items = &[_]Shortcut{
+        .{ .key = "Ctrl+1 to Ctrl+9", .desc = "Open one of the top nine chats" },
         .{ .key = "Ctrl+Tab / Ctrl+Shift+Tab", .desc = "Next / previous chat" },
         .{ .key = "Ctrl+Shift+Home", .desc = "Jump to the first chat" },
         .{ .key = "Ctrl+Shift+End", .desc = "Jump to the last chat" },

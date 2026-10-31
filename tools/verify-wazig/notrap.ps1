@@ -75,6 +75,16 @@ function Invoke-NotrapJourney($Session) {
     $state = Read-Control $Session status
     Assert-That ($state.current_view.account -eq $order[0].account -and -not $state.current_view.inbox) 'Ctrl+1 must not switch views'
     Save-Screen $Session 'ctrl-one'
+    $rows = (Read-Control $Session chats).chats
+    Assert-That ($rows.Count -ge 3) 'Too few chats for the Ctrl number jump'
+    Send-Keys $Session '^3'
+    $null = Wait-Until { (Read-Control $Session status).selected.id -ceq $rows[2].id } 'Ctrl+3 opens the third top chat'
+    $jumped = Read-Control $Session status
+    Assert-That ($jumped.current_view.account -eq $order[0].account -and -not $jumped.current_view.inbox) 'Ctrl+3 must not switch views'
+    Send-Keys $Session '^1'
+    $null = Wait-Until { (Read-Control $Session status).selected.id -ceq $rows[0].id } 'Ctrl+1 opens the first top chat'
+    @{ first = $rows[0].id; third = $rows[2].id; selected = (Read-Control $Session status).selected.id; view = $jumped.current_view } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Session.evidence 'ctrl-chat-jump.json')
+    Save-Screen $Session 'ctrl-number-jump'
     Send-Keys $Session '^f'
     Send-Keys $Session 'gi'
     $null = Wait-Until { (Read-Control $Session status).search -eq 'gi' } 'search preserves typed gi'

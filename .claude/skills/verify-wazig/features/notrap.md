@@ -5,6 +5,7 @@
 - `startup-fallback`: saved Signal or Telegram with no hub chats falls back to the combined inbox after the first successful chat response. Linking belongs to the triage CLI on the hub, never an in-app login, QR or password screen.
 - `every-view-escape-alt`: empty providers use the ordinary chat list and keyboard path. Esc clears search, then leaves an empty account view. Alt+2..9 selects saved positions; Alt+1, Alt+I and G then I reach the combined inbox.
 - `retained-evidence`: save a screenshot, UI Automation tree and control state/chats for every registered view, plus the full source-to-target shortcut matrix.
+- `ctrl-number-jump`: Ctrl+1 to Ctrl+9 open the first to ninth chat at the top of the list without touching the saved view. ctrl-chat-jump.json and the ctrl-number-jump capture prove it.
 
 ## How to get to it (user POV)
 

@@ -64,6 +64,10 @@ def check_notrap(folder):
                          ('shortcut-g-i', startup['current_view'])]:
         state, _ = capture(name)
         assert state['current_view'] == wanted, name
+    jump = read('ctrl-chat-jump.json')
+    assert jump['first'] != jump['third'] and jump['selected'] == jump['first'] and jump['view'] == identity(order[0])
+    jumped, _ = capture('ctrl-number-jump')
+    assert jumped['selected']['id'] == jump['first'] and jumped['current_view'] == identity(order[0])
     menu_open, _ = capture('prefix-menu-open')
     menu_closed, _ = capture('prefix-menu-closed')
     menu = read('prefix-menu.json')
