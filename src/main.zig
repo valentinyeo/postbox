@@ -17858,7 +17858,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                 a.verification_cursor_point = point;
             };
             if (check_link and point_valid and visibleLinkAt(a, point.x, point.y) != null) {
-                _ = win.SetCursor(win.LoadCursorW(null, @ptrFromInt(32649)));
+                _ = win.SetCursor(win.LoadCursorA(null, @ptrFromInt(32649)));
                 return 1;
             }
             return win.DefWindowProcW(hwnd, message, wparam, lparam);
