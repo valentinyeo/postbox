@@ -63,7 +63,9 @@ function Add-HubPickerImage($Session, [string]$Path) {
     $tree = @{ main = $main; dialog = $dialog; top = $top; combo = $combo; edit = $edit; open = $open }
     foreach ($name in @('main', 'dialog', 'top', 'combo', 'edit', 'open')) {
         $h = $tree[$name]
-        @{ phase = 'hierarchy'; name = $name; hwnd = $h.ToInt64(); class = [HubPickerNative]::Class($h); id = [HubPickerNative]::GetDlgCtrlID($h); parent = [HubPickerNative]::GetParent($h).ToInt64(); owner = [HubPickerNative]::GetWindow($h, 4).ToInt64() } | ConvertTo-Json -Compress | Add-Content (Join-Path $Session.evidence 'picker-native.jsonl')
+        $ownerPid = [uint32]0
+        $null = [VerifyWindow]::GetWindowThreadProcessId($h, [ref]$ownerPid)
+        @{ phase = 'hierarchy'; name = $name; hwnd = $h.ToInt64(); class = [HubPickerNative]::Class($h); id = [HubPickerNative]::GetDlgCtrlID($h); parent = [HubPickerNative]::GetParent($h).ToInt64(); owner = [HubPickerNative]::GetWindow($h, 4).ToInt64(); pid = $ownerPid } | ConvertTo-Json -Compress | Add-Content (Join-Path $Session.evidence 'picker-native.jsonl')
     }
     Assert-PickerTree $Session $tree
     $null = Save-PickerRead $Session $tree 'before'

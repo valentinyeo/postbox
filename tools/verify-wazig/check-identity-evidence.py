@@ -195,9 +195,71 @@ def verify_negative_controls(data):
         raise AssertionError('accepted identity evidence mutation: ' + name)
 
 
+def check_native_picker(folder, requests):
+    session = read_json(folder / 'session.json')
+    picker_session = read_json(folder / 'picker-session.json')
+    assert all(picker_session[key] == session[key] for key in ('id', 'root', 'exe', 'sha256', 'commit', 'feature', 'expected_version'))
+    assert picker_session['pid'] and picker_session['startTicks']
+    release = read_json(folder / 'published-package.json')
+    exe_hash = (folder / 'published-executable.sha256').read_text(encoding='utf-8-sig').strip().lower()
+    assert session['expected_version'] == '0.9.242' and release['tag_name'] == 'v0.9.242'
+    assert exe_hash == session['sha256'].lower() == 'c4b934c7050f3d4bfcc0be5f5d7c55e5667ef5e670f93d8b7e1eb641e8d235ca'
+    assets = [a for a in release['assets'] if a['name'] == 'Postbox-v0.9.242.zip']
+    assert len(assets) == 1 and assets[0]['digest'] == 'sha256:cab3363cd07c58a5b19c553f5d51b9d130ef7327e394fe43bd8023b32de70a30'
+    fixture = read_json(folder / 'picker-fixture.json')
+    assert fixture['filename'] == 'identity-image.png'
+    assert fixture['sha256'] == hashlib.sha256((folder / 'identity-original.png').read_bytes()).hexdigest()
+    path = str(PureWindowsPath(session['root']) / 'profile' / fixture['filename'])
+    rows = [json.loads(line) for line in (folder / 'picker-native.jsonl').read_text(encoding='utf-8-sig').splitlines()]
+    names = ('main', 'dialog', 'top', 'combo', 'edit', 'open')
+    hierarchy = rows[:6]
+    assert [row['name'] for row in hierarchy] == list(names)
+    assert all(row['phase'] == 'hierarchy' and row['pid'] == picker_session['pid'] and row['hwnd'] for row in hierarchy)
+    nodes = {row['name']: row for row in hierarchy}
+    assert len({row['hwnd'] for row in hierarchy}) == len(names)
+    assert [nodes[name]['class'] for name in names] == ['MessagesZig', '#32770', 'ComboBoxEx32', 'ComboBox', 'Edit', 'Button']
+    assert nodes['dialog']['owner'] == nodes['main']['hwnd']
+    for name, parent, control_id in (('top', 'dialog', 1148), ('combo', 'top', 1148), ('edit', 'combo', 1148), ('open', 'dialog', 1)):
+        assert nodes[name]['parent'] == nodes[parent]['hwnd'] and nodes[name]['id'] == control_id
+    def read_phase(phase):
+        matches = [row for row in rows if row['phase'] == phase]
+        assert [row['name'] for row in matches] == ['top', 'combo', 'edit']
+        for row in matches:
+            node = nodes[row['name']]
+            assert all(row[key] == node[key] for key in ('hwnd', 'class', 'id', 'parent'))
+        assert matches[-1]['ok'] and matches[-1]['result'] == len(matches[-1]['text'])
+        return matches[-1]['text']
+    read_phase('before')
+    after_edit = read_phase('after-edit')
+    setting = [row for row in rows if row['phase'] == 'set-edit']
+    assert len(setting) == 1 and setting[0]['ok'] and setting[0]['result'] and setting[0]['input'] == path
+    fallback = [row for row in rows if row['phase'] == 'set-combo']
+    if fallback:
+        assert after_edit != path and len(fallback) == 1 and fallback[0]['ok'] and fallback[0]['result'] and fallback[0]['input'] == path
+        assert read_phase('after-combo') == path
+    else:
+        assert after_edit == path and not any(row['phase'] == 'after-combo' for row in rows)
+    expected = ['hierarchy'] * 6 + ['before'] * 3 + ['set-edit'] + ['after-edit'] * 3
+    if fallback:
+        expected += ['set-combo'] + ['after-combo'] * 3
+    assert [row['phase'] for row in rows] == expected + ['open-caption', 'open-posted']
+    caption = rows[-2]
+    assert caption['ok'] and caption['result'] == 5 and caption['text'] == '&Open'
+    staged = read_json(folder / 'picker-staged.json')
+    state = read_json(folder / 'picker-staged.state.json')
+    assert staged['draft_before'] == staged['draft_after'] == 'Identity file'
+    assert state['staged_attachment_count'] == 1 and state['selected']['id'] == 'fixture-alpha' and state['selected']['provider'] == 'slack'
+    x1, y1, x2, y2, count = staged['preview']
+    assert x2 - x1 >= 16 and y2 - y1 >= 16 and count >= 100
+    assert (folder / 'picker-staged.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+    files = [row for row in requests if row.get('wire_path') == '/v1/wazig/send' and row.get('body', {}).get('text') == 'Identity file']
+    assert len(files) == 5 and re.fullmatch(r'paste-[0-9]+-[0-9]\.png', files[0]['body']['file'])
+    assert all(row['file_sha256'] == fixture['sha256'] and row['body']['chat'] == 'fixture-alpha' and row['body']['file'] == files[0]['body']['file'] for row in files)
+
+
 def check_identity(folder, requests, backend):
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    assert 'picker: UIA filename, keyboard path and Enter' in actions
+    check_native_picker(folder, requests)
     assert actions.count('SendInput: explicit identity retry') == 2
     assert actions.count('SendInput: choose measured identity Reply menu row') == 2
     for name in ('identity-restart.png', 'file-identity-restart.png'):

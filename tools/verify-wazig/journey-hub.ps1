@@ -138,6 +138,7 @@ $fixtureHash = (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant()
 Send-Keys $session 'Identity file'
 $draft = Read-Edit (Get-Edit (Get-Window $session) '1032')
 Assert-That ($draft -ceq 'Identity file') 'picker: synthetic draft missing'
+$session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'picker-session.json')
 Add-HubPickerImage $session $fixture
 $null = Wait-Until { (Read-Control $session status).staged_attachment_count -eq 1 } 'identity picker staged image'
 Assert-That ((Read-Edit (Get-Edit (Get-Window $session) '1032')) -ceq $draft) 'picker: synthetic draft changed'
