@@ -60,7 +60,14 @@ function Close-Emoji($Session, $Picker) {
 $font = Get-Item (Join-Path $env:WINDIR 'Fonts/seguiemj.ttf')
 @{ commit=$session.commit; sha256=$session.sha256; os=[Environment]::OSVersion.VersionString; font_file=$font.Name; font_version=$font.VersionInfo.FileVersion; font_sha256=(Get-FileHash $font.FullName).Hash; dpi=[VerifyWindow]::GetDpiForWindow((Get-App $session).MainWindowHandle) } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'emoji-environment.json')
 $emojiOwnedApp = Get-App $session
+$emojiState = Read-Control $session status
+$emojiPoint = [VerifyWindow+Point]::new()
+$emojiPoint.X = [int](($emojiState.composer.box.left + $emojiState.composer.box.right) / 2)
+$emojiPoint.Y = [int](($emojiState.composer.box.top + $emojiState.composer.box.bottom) / 2)
+$null = [VerifyWindow]::ClientToScreen($emojiOwnedApp.MainWindowHandle, [ref]$emojiPoint)
 $null = Wait-Until {
+    [VerifyWindow]::ShowWindow($emojiOwnedApp.MainWindowHandle, 3) | Out-Null
+    [InlineLinksNative]::Click($session.pid, $emojiPoint.X, $emojiPoint.Y)
     [VerifyWindow]::SetForegroundWindow($emojiOwnedApp.MainWindowHandle) | Out-Null
     [VerifyWindow]::GetForegroundWindow() -eq $emojiOwnedApp.MainWindowHandle
 } 'owned app foreground'
