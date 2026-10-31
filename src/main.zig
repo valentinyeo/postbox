@@ -4337,16 +4337,14 @@ fn retryingBubbleText(buffer: []u8, text: []const u8, retries: u8) []const u8 {
 
 const SentMedia = struct {
     id: Utf8Text(191) = .{},
-    path: WideText(519) = .{},
+    path: Utf8Text(519) = .{},
 };
 
-fn noteSentMedia(a: *App, id: []const u8, path: []const u16) void {
+fn noteSentMedia(a: *App, id: []const u8, path: []const u8) void {
     if (id.len == 0 or path.len == 0) return;
     var entry = &a.sent_media[a.sent_media_count % a.sent_media.len];
     entry.id.set(id);
-    entry.path.len = @min(path.len, entry.path.buf.len - 1);
-    @memcpy(entry.path.buf[0..entry.path.len], path[0..entry.path.len]);
-    entry.path.buf[entry.path.len] = 0;
+    entry.path.set(path);
     if (a.sent_media_count < a.sent_media.len) a.sent_media_count += 1;
 }
 
@@ -4356,10 +4354,7 @@ fn adoptSentMedia(a: *App) void {
         if (message.local_path.len > 0 or !message.from_me or message.id.len == 0) continue;
         for (a.sent_media[0..a.sent_media_count]) |*entry| {
             if (!std.mem.eql(u8, entry.id.slice(), message.id.slice())) continue;
-            const length = @min(entry.path.len, message.local_path.buf.len - 1);
-            @memcpy(message.local_path.buf[0..length], entry.path.slice()[0..length]);
-            message.local_path.len = length;
-            message.local_path.buf[length] = 0;
+            message.local_path.set(a.allocator, entry.path.slice());
             break;
         }
     }
@@ -4393,10 +4388,7 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
         message.local_path.set(a.allocator, pending.file.slice());
     } else if (pending.file.len > 0 and pending.text.len == 0) {
         message.media_type.set("image");
-        const local_length = @min(pending.file.len, message.local_path.buf.len - 1);
-        @memcpy(message.local_path.buf[0..local_length], pending.file.slice()[0..local_length]);
-        message.local_path.len = local_length;
-        message.local_path.buf[local_length] = 0;
+        message.local_path.set(a.allocator, pending.file.slice());
         message.text.set(a.allocator, file_send_placeholder);
         noteSentMedia(a, &pending.id, pending.file.slice());
     } else {
