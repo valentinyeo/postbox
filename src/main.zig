@@ -12716,6 +12716,29 @@ fn openUrlWide(a: *App, url: [*:0]const u16) void {
         return;
     }
     const result = shell_lazy.shellExecuteW.?(a.hwnd.?, lit("open"), url, null, null, win.SW_SHOWNORMAL);
+    if (verification_fixture) receipt: {
+        const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, std.mem.span(url)) catch break :receipt;
+        defer a.allocator.free(text);
+        var session_buf: [128]u16 = undefined;
+        const session_len = win.GetEnvironmentVariableW(lit("WAZIG_VERIFY_ID"), &session_buf, session_buf.len);
+        if (session_len > 0 and session_len < session_buf.len) {
+            const session = std.unicode.utf16LeToUtf8Alloc(a.allocator, session_buf[0..session_len]) catch break :receipt;
+            defer a.allocator.free(session);
+            const data = std.json.Stringify.valueAlloc(a.allocator, .{ .url = text, .result = @intFromPtr(result), .pid = win.GetCurrentProcessId(), .session = session }, .{}) catch break :receipt;
+            defer a.allocator.free(data);
+            const path = messagesDirPath(a, "verification-url-launches.jsonl") orelse break :receipt;
+            defer a.allocator.free(path);
+            const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch break :receipt;
+            defer a.allocator.free(wide);
+            const handle = win.CreateFileW(wide.ptr, win.FILE_APPEND_DATA, win.FILE_SHARE_READ | win.FILE_SHARE_WRITE, null, win.OPEN_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
+            if (handle != win.INVALID_HANDLE_VALUE and handle != null) {
+                defer _ = win.CloseHandle(handle);
+                var written: win.DWORD = 0;
+                _ = win.WriteFile(handle, data.ptr, @intCast(data.len), &written, null);
+                _ = win.WriteFile(handle, "\n", 1, &written, null);
+            }
+        }
+    }
     if (@intFromPtr(result) <= 32) setStatus(a, "Windows could not open the link");
 }
 
@@ -14032,6 +14055,18 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             .{ .name = "toggle", .rect = message.toggle_hit },
         }) |entry| try w.print(",\"{s}\":[{d},{d},{d},{d}]", .{ entry.name, entry.rect.left, entry.rect.top, entry.rect.right, entry.rect.bottom });
         if (verification_fixture) {
+            try w.writeAll(",\"link_rects\":[");
+            for (message.links[0..message.link_count], 0..) |*link, link_index| {
+                if (link_index > 0) try w.writeByte(',');
+                try w.writeByte('[');
+                const rect = link.rect;
+                try w.print("[{d},{d},{d},{d}]", .{ rect.left, rect.top, rect.right, rect.bottom });
+                for (link.chunk_rects[0..link.chunk_count]) |chunk| {
+                    try w.print(",[{d},{d},{d},{d}]", .{ chunk.left, chunk.top, chunk.right, chunk.bottom });
+                }
+                try w.writeByte(']');
+            }
+            try w.writeByte(']');
             const actions = messageActionsRect(a, message);
             try w.print(",\"selected\":{}", .{if (a.selected_message) |selected| selected == a.message_count - count + index else false});
             try w.writeAll(",\"action_cells\":[");
