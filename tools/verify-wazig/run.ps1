@@ -3,7 +3,7 @@ param(
     [string]$Bin = 'zig-out/bin',
     [string]$Evidence = 'verification-evidence',
     [ValidatePattern('^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')]
-    [string]$ExpectedVersion = '0.0.526',
+    [string]$ExpectedVersion = $(if ($env:VERIFY_VERSION) { $env:VERIFY_VERSION } else { '0.0.526' }),
     [string]$ExpectedProduct = 'Postbox',
     [switch]$FontBaseline
 )
