@@ -18064,9 +18064,9 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                         if (link == .quote) {
                             const hit = link.quote;
                             if (hit.message_index == down.message_index and hit.start == down.start and hit.end == down.end and hit.fingerprint == down.fingerprint and hit.message_index < a.message_count) {
-                                const message = &a.messages[hit.message_index];
-                                const quote = message.quote.slice();
-                                if (hit.end <= quote.len and quoteFingerprint(message, hit.start, hit.end) == down.fingerprint and wordIsUrl(quote[hit.start..hit.end])) {
+                                const quoted_message = &a.messages[hit.message_index];
+                                const quote = quoted_message.quote.slice();
+                                if (hit.end <= quote.len and quoteFingerprint(quoted_message, hit.start, hit.end) == down.fingerprint and wordIsUrl(quote[hit.start..hit.end])) {
                                     var target: [4096]u16 = undefined;
                                     const token = quote[hit.start..hit.end];
                                     @memcpy(target[0..token.len], token);

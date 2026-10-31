@@ -1,6 +1,6 @@
 # Inline links
 
-## Coverage
+## Sub-features
 
 - Body URLs open from wrapped fragments.
 - Incoming and outgoing reply previews open URLs.
@@ -11,9 +11,14 @@
 - Cursor shape and underlines use native evidence.
 - Four synthetic providers share the journey.
 
-## Driving it
+## How to get to it (user POV)
 
-- Run `inline-links` on hosted Windows.
+- Open a synthetic inline-links chat.
+- Click body and quoted-reply URLs.
+
+## Driving it with PowerShell UI Automation
+
+- Run feature=inline-links on hosted Windows.
 - The fixture serves synthetic loopback URLs.
 - No real provider or account is used.
 - Mouse and keyboard actions use `SendInput`.
@@ -23,7 +28,7 @@
 - Screenshots and cursor handles capture appearance.
 - The checker examines receipts and screenshot pixels.
 
-## Evidence boundaries
+## Gotchas
 
 - Receipts follow the real `ShellExecuteW` call.
 - Windows acceptance does not prove page loading.
