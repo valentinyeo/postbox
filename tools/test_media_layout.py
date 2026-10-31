@@ -18,8 +18,12 @@ def verify_column(source):
     ):
         assert token in width, f'IGSH-714 message column missing {token}'
     column = section(source, 'chatColumn')
-    assert '@min(px(a, theme.chat_column_width), available_width - px(a, 32))' in column
-    assert '@divTrunc(available_width - width, 2)' in column
+    assert 'compose_layout.messageColumn(available_width' in column
+    helper = (ROOT / 'src/compose_layout.zig').read_text()
+    helper = helper[helper.index('pub fn messageColumn('):]
+    helper = helper[:helper.index('\n}\n') + 3]
+    assert 'max(0, @divTrunc(pane_width - scale(@import("theme.zig").chat_column_width, dpi), 2))' in helper
+    assert 'scale(column_margin, dpi)' in helper
     assert 'bitmap' not in width, 'IGSH-714 bitmap dimensions must not choose the message column'
     paint = section(source, 'drawCanvas')
     scroll = section(source, 'scrollToSelectedMessage')
@@ -131,17 +135,20 @@ class MediaLayoutTests(unittest.TestCase):
         column_width = int(re.search(r'pub const column_width: i32 = (\d+);', (ROOT / 'src/design_tokens.zig').read_text()).group(1))
         maximum = column_width * 6 // 10
         inset = int(re.search(r'available_width - px\(a, (\d+)\)', width).group(1))
+        margin = int(re.search(r'pub const column_margin: i32 = (\d+);', (ROOT / 'src/compose_layout.zig').read_text()).group(1))
         for dpi in (96, 144, 192):
             px = lambda value: (value * dpi + 48) // 96
-            for available in (px(317), px(682), px(1200)):
-                bubble = max(1, min(px(maximum), available - px(inset)))
-                column = min(px(column_width), available - px(32))
-                incoming_left = (available - column) // 2
-                own_left = incoming_left + column - bubble
+            for available in (px(317), px(682), px(1200), px(1600), px(2560)):
+                outer = max(0, (available - px(column_width)) // 2)
+                incoming_left = outer + min(px(margin), available // 2)
+                incoming_right = max(incoming_left, available - outer - min(px(margin), available // 2))
+                column = incoming_right - incoming_left
+                bubble = max(1, min(px(maximum), available - px(inset), column))
+                own_left = incoming_right - bubble
                 with self.subTest(dpi=dpi, available=available):
                     self.assertGreater(bubble - px(28), 0)
                     self.assertGreaterEqual(own_left, incoming_left)
-                    self.assertLessEqual(incoming_left + bubble, incoming_left + column)
+                    self.assertLessEqual(incoming_left + bubble, incoming_right)
                     self.assertLessEqual(own_left + bubble, available)
 
     def test_IGSH_714_rejects_uncapped_or_inconsistent_columns(self):

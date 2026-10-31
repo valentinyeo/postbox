@@ -47,7 +47,7 @@ pub const Layout = struct {
     send: Rect = .{},
 };
 
-pub const column_margin = 14;
+pub const column_margin: i32 = 14;
 
 pub fn messageColumn(pane_width: i32, dpi: i32) Rect {
     const inset = @max(0, @divTrunc(pane_width - scale(@import("theme.zig").chat_column_width, dpi), 2));
