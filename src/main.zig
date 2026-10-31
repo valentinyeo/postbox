@@ -7842,8 +7842,26 @@ fn speedLabel(player: ?*audio.Player) [*:0]const u16 {
 
 fn checkMediaDownload(a: *App) void {
     if (hubConfigured(a)) {
+        var stalled_jid = Utf8Text(191){};
+        var stalled_id = Utf8Text(191){};
+        var stalled = false;
         for (&a.media_downloads) |*slot| {
             if (slot.hub_pending and slot.hub_retry_ms > 0 and win.GetTickCount64() >= slot.hub_retry_ms) _ = enqueueHubMedia(a, slot);
+            if (!slot.hub_pending or !media_drain.hubStalled(slot.started_ms, win.GetTickCount64())) continue;
+            appendLaunchLog(a, "media: download timed out with no answer");
+            noteMediaFailure(a, slot.jid.slice(), slot.id.slice());
+            if (!stalled) {
+                stalled_jid.set(slot.jid.slice());
+                stalled_id.set(slot.id.slice());
+                stalled = true;
+            }
+            slot.* = .{};
+        }
+        if (stalled) {
+            image_viewer.downloadFinished(a, stalled_jid.slice(), stalled_id.slice(), false);
+            if (std.mem.eql(u8, stalled_id.slice(), a.audio_chain_id.slice())) a.audio_chain_waiting = false;
+            setStatus(a, "Media download timed out, tap to retry");
+            refreshMessages(a);
         }
         if (a.audio_chain_waiting) {
             for (a.messages[0..a.message_count]) |*message| {

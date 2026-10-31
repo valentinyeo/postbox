@@ -102,6 +102,18 @@ pub fn sizeFromJson(object: std.json.ObjectMap) u64 {
 
 pub const AttachmentState = enum { local, downloading, oversized, unavailable, retry };
 
+pub const hub_media_timeout_ms: u64 = 150_000;
+
+pub fn hubStalled(started_ms: u64, now_ms: u64) bool {
+    return started_ms > 0 and now_ms -| started_ms >= hub_media_timeout_ms;
+}
+
+test "a hub media request that never answers is treated as stalled" {
+    try std.testing.expect(!hubStalled(1_000, 1_000 + hub_media_timeout_ms - 1));
+    try std.testing.expect(hubStalled(1_000, 1_000 + hub_media_timeout_ms));
+    try std.testing.expect(!hubStalled(0, 500_000));
+}
+
 pub fn voiceState(local: bool, in_flight: bool, failed: bool, size_bytes: u64) AttachmentState {
     if (local) return .local;
     if (in_flight) return .downloading;
