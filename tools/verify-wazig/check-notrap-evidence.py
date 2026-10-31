@@ -64,6 +64,15 @@ def check_notrap(folder):
                          ('shortcut-g-i', startup['current_view'])]:
         state, _ = capture(name)
         assert state['current_view'] == wanted, name
+    menu_open, _ = capture('prefix-menu-open')
+    menu_closed, _ = capture('prefix-menu-closed')
+    menu = read('prefix-menu.json')
+    assert menu['menu_class'] == '#32768' and menu['menu_pid'] == session['pid'] and menu['menu_handle'] != 0 and menu['closed']
+    assert menu['after_count'] == menu['before_count'] + 1 and 0 <= menu['prefix_age_ms'] <= 900 and not menu['prefix_pending']
+    assert menu_open['menu_entry_count'] == menu_closed['menu_entry_count'] == menu['after_count']
+    assert menu_open['menu_prefix_age_ms'] == menu['prefix_age_ms'] and not menu_open['menu_prefix_pending']
+    assert menu['current_view'] == menu_open['current_view'] == menu_closed['current_view'] == identity(order[0])
+    assert 'SendInput: right-click synthetic message for prefix cancellation' in actions
     composer = read('composer-gi.json')
     assert composer == dict(text='gi', focus_id='1032', focus_pid=session['pid'], current_view=identity(order[0]))
     assert read('focus-cancelled-gi.json') == dict(text='i', focus_id='1032', focus_pid=session['pid'], current_view=identity(order[0]))

@@ -1046,6 +1046,8 @@ const App = struct {
     quote_link_down: ?QuoteLinkHit = null,
     verification_reply_jump_count: u64 = 0,
     verification_reply_jump_id: Utf8Text(191) = .{},
+    verification_menu_prefix_age_ms: ?u64 = null,
+    verification_menu_entry_count: u64 = 0,
     verification_canvas_up_count: u64 = 0,
     verification_canvas_up_point: win.POINT = .{ .x = 0, .y = 0 },
     verification_cursor_count: u64 = 0,
@@ -13794,6 +13796,8 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     if (verification_fixture) {
         try controlEmojiPicker(a, w);
         try w.print(",\"pending_reaction_count\":{d}", .{a.pending_reaction_count});
+        try w.print(",\"menu_entry_count\":{d},\"menu_prefix_pending\":{},\"menu_prefix_age_ms\":", .{ a.verification_menu_entry_count, a.inbox_sequence.started != null });
+        if (a.verification_menu_prefix_age_ms) |age| try w.print("{d}", .{age}) else try w.writeAll("null");
         try w.print(",\"canvas_up_count\":{d},\"canvas_up_point\":[{d},{d}],\"reply_jump_count\":{d},\"reply_jump_id\":", .{ a.verification_canvas_up_count, a.verification_canvas_up_point.x, a.verification_canvas_up_point.y, a.verification_reply_jump_count });
         try control_api.writeString(w, a.verification_reply_jump_id.slice());
         try w.print(",\"canvas_cursor_count\":{d},\"canvas_cursor_point\":[{d},{d}]", .{ a.verification_cursor_count, a.verification_cursor_point.x, a.verification_cursor_point.y });
@@ -18328,6 +18332,14 @@ fn openChatMenu(a: *App, lparam: win.LPARAM) void {
 fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
     switch (message) {
+        win.WM_ENTERMENULOOP => {
+            if (verification_fixture) {
+                a.verification_menu_entry_count +%= 1;
+                a.verification_menu_prefix_age_ms = if (a.inbox_sequence.started) |started| win.GetTickCount64() -| started else null;
+            }
+            a.inbox_sequence.started = null;
+            return win.DefWindowProcW(hwnd, message, wparam, lparam);
+        },
         wm_update_ready => {
             if (wparam >= 2 and wparam <= 5) a.update_check_running = false;
             if (wparam == 1 or wparam >= 6) a.update_install_running.store(false, .release);

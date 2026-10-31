@@ -1,3 +1,5 @@
+. "$PSScriptRoot/menus.ps1"
+
 function Select-NotrapView($Session, $Order, [int]$Number) {
     Send-Keys $Session "%$($Number + 1)"
     $wanted = $Order[$Number - 1]
@@ -77,6 +79,32 @@ function Invoke-NotrapJourney($Session) {
     $state = Read-Control $Session status
     Assert-That ($state.current_view.account -eq $order[0].account -and -not $state.current_view.inbox) 'intervening key cancels g prefix'
     Save-Screen $Session 'cancelled-gi'
+    $canvas = Get-Edit (Get-Window $Session) '1024'
+    $bubble = Wait-Until {
+        (Read-Control $Session messages).messages | Where-Object { $_.bubble[2] -gt $_.bubble[0] -and $_.bubble[3] -gt $_.bubble[1] } | Select-Object -First 1
+    } 'synthetic message bubble painted'
+    $point = [VerifyWindow+Point]::new()
+    $point.X = [int](($bubble.bubble[0] + $bubble.bubble[2]) / 2)
+    $point.Y = [int](($bubble.bubble[1] + $bubble.bubble[3]) / 2)
+    Assert-That ([VerifyWindow]::ClientToScreen([IntPtr]$canvas.Current.NativeWindowHandle, [ref]$point)) 'Canvas screen origin unavailable'
+    $beforeMenu = Read-Control $Session status
+    $canvas.SetFocus()
+    Send-Keys $Session 'g'
+    [VerifyMenus]::Click($Session.pid, $point.X, $point.Y, $true)
+    Add-Content (Join-Path $Session.evidence 'actions.log') 'SendInput: right-click synthetic message for prefix cancellation'
+    $menuHandle = Wait-Popup $Session '#32768'
+    $menuElement = [Windows.Automation.AutomationElement]::FromHandle($menuHandle)
+    Assert-That ($menuElement.Current.ProcessId -eq $Session.pid -and $menuElement.Current.ClassName -eq '#32768') 'Wrong native message menu'
+    Save-Screen $Session 'prefix-menu-open'
+    Close-Popup $Session '#32768'
+    $afterMenu = Read-Control $Session status
+    Assert-That ($afterMenu.menu_entry_count -eq $beforeMenu.menu_entry_count + 1 -and $null -ne $afterMenu.menu_prefix_age_ms -and $afterMenu.menu_prefix_age_ms -le 900 -and -not $afterMenu.menu_prefix_pending) 'Menu must clear a live G prefix'
+    $canvas.SetFocus()
+    Send-Keys $Session 'i'
+    $afterI = Read-Control $Session status
+    Assert-That ($afterI.current_view.account -eq $order[0].account -and -not $afterI.current_view.inbox) 'I after menu must not open inbox'
+    @{ menu_class = '#32768'; menu_pid = $Session.pid; menu_handle = $menuHandle.ToInt64(); closed = ((Find-Popup $Session '#32768') -eq [IntPtr]::Zero); before_count = $beforeMenu.menu_entry_count; after_count = $afterMenu.menu_entry_count; prefix_age_ms = $afterMenu.menu_prefix_age_ms; prefix_pending = $afterMenu.menu_prefix_pending; current_view = $afterI.current_view } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'prefix-menu.json')
+    Save-Screen $Session 'prefix-menu-closed'
     $compose = Get-Edit (Get-Window $Session) '1032'
     Assert-That ($compose.Current.IsEnabled -and (Read-Edit $compose) -ceq '') 'Fixture composer must start empty'
     (Get-Edit (Get-Window $Session) '1016').SetFocus()

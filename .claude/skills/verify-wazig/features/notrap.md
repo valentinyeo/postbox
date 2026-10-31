@@ -32,3 +32,5 @@
 - Verify Ctrl+1 leaves the account unchanged, typed gi remains in search, an intervening key cancels G then I, and composer gi remains typed after a focus change. Retain screenshots and exact current_view.
 
 - Capture each shortcut destination with state and screenshot. Retain a bounded, silent fixture-window recording and timestamped key ledger. Without ffmpeg.exe, retain 100 timestamped PNG frames at 5 fps for later encoding.
+
+- Open and dismiss the owned message menu after G. Require a live prefix at menu entry, its cancellation, and no inbox switch on I.
