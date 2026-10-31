@@ -49,11 +49,17 @@ pub const Layout = struct {
 
 pub const column_margin = 14;
 
+pub fn messageColumn(pane_width: i32, dpi: i32) Rect {
+    const inset = @max(0, @divTrunc(pane_width - scale(@import("theme.zig").chat_column_width, dpi), 2));
+    const margin = @min(scale(column_margin, dpi), @divTrunc(@max(0, pane_width), 2));
+    const left = inset + margin;
+    return .{ .left = left, .top = 0, .right = @max(left, pane_width - inset - margin), .bottom = 0 };
+}
+
 pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool, dictating: bool) Layout {
-    const margin = @min(scale(column_margin, dpi), @divTrunc(@max(0, pane.right - pane.left), 2));
     const bottom = @max(pane.top, pane.bottom - scale(11, dpi));
-    const column_inset = @max(0, @divTrunc(pane.right - pane.left - scale(@import("theme.zig").chat_column_width, dpi), 2));
-    const box = Rect{ .left = pane.left + column_inset + margin, .top = @max(pane.top, bottom - edit_height), .right = pane.right - column_inset - margin, .bottom = bottom };
+    const column = messageColumn(pane.right - pane.left, dpi);
+    const box = Rect{ .left = pane.left + column.left, .top = @max(pane.top, bottom - edit_height), .right = pane.left + column.right, .bottom = bottom };
     const width = @max(0, box.right - box.left);
     const height = @max(0, box.bottom - box.top);
     const padding = @min(scale(16, dpi), @divTrunc(width, 12));
@@ -196,6 +202,20 @@ test "active dictation keeps the shared pill inside the composer at narrow width
             try testing.expect(slots.text.right <= slots.voice.left and slots.voice.right < pill.left);
             try testing.expect(slots.emoji.left > pill.right);
             if (width == 900) try testing.expectEqual(scale(@import("design_tokens.zig").mic_width, dpi), pill.right - pill.left);
+        }
+    }
+}
+
+test "message column and composer box share both edges at every width and dpi" {
+    const testing = @import("std").testing;
+    for ([_]i32{ 320, 723, 1024, 1600, 2560 }) |pane_width| {
+        for ([_]i32{ 96, 120, 144, 192 }) |dpi| {
+            const pane = Rect{ .left = 301, .top = 0, .right = 301 + pane_width, .bottom = 900 };
+            const column = messageColumn(pane_width, dpi);
+            const layout = arrange(pane, scale(edit_min_height, dpi), dpi, false, false);
+            try testing.expectEqual(pane.left + column.left, layout.box.left);
+            try testing.expectEqual(pane.left + column.right, layout.box.right);
+            try testing.expect(column.right > column.left);
         }
     }
 }

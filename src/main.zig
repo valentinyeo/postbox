@@ -11563,11 +11563,7 @@ fn messageBubbleWidth(a: *const App, available_width: i32) i32 {
 }
 
 fn chatColumn(a: *const App, available_width: i32) win.RECT {
-    const inset = @max(0, @divTrunc(available_width - px(a, theme.chat_column_width), 2));
-    const margin = @min(px(a, compose_layout.column_margin), @divTrunc(available_width, 2));
-    const left = inset + margin;
-    const right = @max(left, available_width - inset - margin);
-    return .{ .left = left, .top = 0, .right = right, .bottom = 0 };
+    return @bitCast(compose_layout.messageColumn(available_width, @intCast(a.dpi)));
 }
 
 fn scrollToSelectedMessage(a: *App) void {
