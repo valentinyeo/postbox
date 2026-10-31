@@ -3,6 +3,10 @@ import json
 from urllib.parse import unquote, urlsplit
 
 
+def expected_product_version(folder):
+    return re.escape(json.loads((folder / 'session.json').read_text(encoding='utf-8-sig')).get('expected_version', '0.0.526'))
+
+
 ARCHIVED = {
     'whatsapp': ('personal:15550000031@s.whatsapp.net', 'Archived Person Alpha'),
     'telegram': ('telegram:user:7001001', 'Archived Telegram Beta'),
@@ -29,7 +33,7 @@ def check_palette_archived(folder):
     def capture(name):
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, name
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + expected_product_version(folder), (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
         return read(f'{name}.state.json')
 
     session = read('session.json')

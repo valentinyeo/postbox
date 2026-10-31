@@ -2,6 +2,10 @@ import re
 import json
 
 
+def expected_product_version(folder):
+    return re.escape(json.loads((folder / 'session.json').read_text(encoding='utf-8-sig')).get('expected_version', '0.0.526'))
+
+
 def check_threads(folder):
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))
@@ -26,7 +30,7 @@ def check_threads(folder):
     for stage in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart']:
         image = (folder / f'{stage}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + expected_product_version(folder), (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         state = read(f'{stage}.state.json')
         assert state['selected']['provider'] == 'slack' and state['selected']['id'] == 'slack:fixture-threads:channel'
         if stage != 'thread-reply':

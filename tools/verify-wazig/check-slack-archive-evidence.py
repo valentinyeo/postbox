@@ -4,6 +4,10 @@ from datetime import datetime
 from urllib.parse import urlsplit
 
 
+def expected_product_version(folder):
+    return re.escape(json.loads((folder / 'session.json').read_text(encoding='utf-8-sig')).get('expected_version', '0.0.526'))
+
+
 def check_slack_archive(folder):
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))
@@ -38,7 +42,7 @@ def check_slack_archive(folder):
                 assert target[0]['unread_count'] == unread, stage
         image = (folder / f'{stage}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, stage
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), stage
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + expected_product_version(folder), (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), stage
     restart = read('restart.json')
     assert restart['old_pid'] != restart['new_pid'] == session['pid']
     assert restart['old_start'] != restart['new_start'] == session['startTicks']

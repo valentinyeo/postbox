@@ -6,6 +6,10 @@ import runpy
 from urllib.parse import parse_qs, unquote, urlsplit
 
 
+def expected_product_version(folder):
+    return re.escape(json.loads((folder / 'session.json').read_text(encoding='utf-8-sig')).get('expected_version', '0.0.526'))
+
+
 STANDARD = '💔 ⏲️🧢 🤞 👍🏻 :unknown_fixture:'
 
 
@@ -55,7 +59,7 @@ def check_slack_emoji(folder):
     assert (proof['frames'][0]['amber'] > 500 and proof['frames'][1]['cobalt'] > 500) or (proof['frames'][1]['amber'] > 500 and proof['frames'][0]['cobalt'] > 500)
     for name in ['emoji', 'frame-a', 'frame-b', 'reopened']:
         title = (folder / (name + '.uia.txt')).read_text(encoding='utf-8-sig').splitlines()[0]
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', title)
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + expected_product_version(folder), title)
         assert read(name + '.state.json')['selected']['provider'] == 'slack'
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     api = [row for row in requests if row['wire_path'].startswith('/v1/wazig/')]

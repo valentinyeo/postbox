@@ -6,6 +6,10 @@ import runpy
 import subprocess
 import sys
 
+
+def expected_product_version(folder):
+    return re.escape(json.loads((folder / 'session.json').read_text(encoding='utf-8-sig')).get('expected_version', '0.0.526'))
+
 folder = Path(sys.argv[1])
 session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
 def read(name):
@@ -44,7 +48,7 @@ for provider, chat, message in [('whatsapp', 'fixture-beta', 'BASELINE_BETA'), (
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
         images.append(hashlib.sha256(image).hexdigest())
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + expected_product_version(folder), (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
         selected = read(f'{name}.state.json')['selected']
         assert selected['id'] == chat and selected['provider'] == provider
     assert images[0] != images[1]

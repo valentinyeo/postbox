@@ -5,6 +5,10 @@ from pathlib import Path
 import runpy
 
 
+def expected_product_version(folder):
+    return re.escape(json.loads((folder / 'session.json').read_text(encoding='utf-8-sig')).get('expected_version', '0.0.526'))
+
+
 def check_link_previews(folder):
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))
@@ -34,7 +38,7 @@ def check_link_previews(folder):
             assert query['quote'] == 'Quoted & label'
         image_bytes = (folder / f'{provider}.png').read_bytes()
         assert image_bytes.startswith(b'\x89PNG\r\n\x1a\n') and len(image_bytes) > 10000
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{provider}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), provider
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + expected_product_version(folder), (folder / f'{provider}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), provider
         assert read(f'{provider}.state.json')['selected']['provider'] == provider
     read_png = runpy.run_path(str(Path(__file__).with_name('check-workspace-icons.py')))['read_png']
     screenshots = {provider + '.png': read_png(folder / (provider + '.png')) for provider in ['slack', 'whatsapp', 'telegram', 'signal']}
