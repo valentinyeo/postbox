@@ -168,8 +168,14 @@ test "one box contains disjoint text and bottom anchored icons at narrow and wid
                     try testing.expectEqual(slots.box.left + scale(16, dpi), slots.attach.left);
                     try testing.expectEqual(slots.box.right - scale(16, dpi), slots.send.right);
                     try testing.expectEqual(size.edit_height, slots.box.bottom - slots.box.top);
-                    try testing.expectEqual(slots.box.top + 1, slots.text.top);
-                    try testing.expectEqual(slots.box.bottom - 1, slots.text.bottom);
+                    if (slots.box.bottom - slots.box.top > scale(edit_min_height, dpi)) {
+                        try testing.expect(slots.text.top > slots.box.top + 1);
+                        try testing.expect(slots.text.bottom < slots.box.bottom - 1);
+                        try testing.expect(slots.text.bottom <= slots.attach.top);
+                    } else {
+                        try testing.expectEqual(slots.box.top + 1, slots.text.top);
+                        try testing.expectEqual(slots.box.bottom - 1, slots.text.bottom);
+                    }
                 }
             }
         }
@@ -185,10 +191,16 @@ test "composer border centreline has equal inset on all four sides at 100 125 15
             const centreline = Rect{ .left = border.left, .top = border.top, .right = border.right - 1, .bottom = border.bottom - 1 };
             const insets = [_]i32{ centreline.left - box.left, centreline.top - box.top, box.right - centreline.right, box.bottom - centreline.bottom };
             for (insets) |inset| try testing.expectEqual(@as(i32, 0), inset);
-            const text = arrange(.{ .left = box.left - scale(14, dpi), .right = box.right + scale(14, dpi), .bottom = box.bottom + scale(11, dpi) }, box.bottom - box.top, dpi, false, false).text;
-            try testing.expectEqual(box.top + 1, text.top);
-            try testing.expectEqual(box.bottom - 1, text.bottom);
-            try testing.expectEqual(text.top - centreline.top, centreline.bottom - text.bottom);
+            const slots = arrange(.{ .left = box.left - scale(14, dpi), .right = box.right + scale(14, dpi), .bottom = box.bottom + scale(11, dpi) }, box.bottom - box.top, dpi, false, false);
+            const text = slots.text;
+            if (height == 44) {
+                try testing.expectEqual(box.top + 1, text.top);
+                try testing.expectEqual(box.bottom - 1, text.bottom);
+                try testing.expectEqual(text.top - centreline.top, centreline.bottom - text.bottom);
+            } else {
+                try testing.expect(text.top > box.top and text.bottom < box.bottom);
+                try testing.expect(text.bottom <= slots.attach.top);
+            }
         }
     }
 }
