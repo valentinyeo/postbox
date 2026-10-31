@@ -44,16 +44,26 @@ class UpdateCardTest(unittest.TestCase):
             with self.subTest(files=files), self.assertRaises(ValueError):
                 update_cards.validate("Card: none", files)
 
-    def test_release_newest_first_deduplicates_pulls_and_skips_none(self):
-        old = {"number": 1, "merged_at": "2026-01-01", "body": "Card: Older change"}
-        new = {"number": 2, "merged_at": "2026-01-03", "body": "Card: Newest change"}
-        hidden = {"number": 3, "merged_at": "2026-01-04", "body": "Card: none"}
-        invalid = {"number": 4, "merged_at": "2026-01-05", "body": "Card: Fix IGSH-123"}
-        self.assertEqual(update_cards.release_body([old, new, old, hidden, invalid]), "- Newest change\n- Older change\n")
+    def test_product_words_come_from_the_commit_subject(self):
+        self.assertEqual(update_cards.card_from_subject("IGSH-1341: the message box grows with the text"), "the message box grows with the text")
+        self.assertEqual(update_cards.card_from_subject("Alt+1 stays WhatsApp after you empty it"), "Alt+1 stays WhatsApp after you empty it")
 
-    def test_release_fallback(self):
-        for pulls in ([], [{"number": 1, "merged_at": "2026-01-01", "body": None}]):
-            self.assertEqual(update_cards.release_body(pulls), "- Small fixes and speed improvements\n")
+    def test_test_and_ci_commits_stay_out_of_the_notes(self):
+        for subject in ("IGSH-1: keep the journey check compiling", "IGSH-2: fix CI runner", "IGSH-3: add tests for drafts",
+                        "IGSH-4: run the workflow again", "IGSH-5: touches main.zig", "IGSH-6: Fix #123", "IGSH-7: see https://example.com",
+                        "IGSH-8: keep the menu harness compiling", "IGSH-9: fix the build order",
+                        "IGSH-1346: " + "x" * 81):
+            with self.subTest(subject=subject):
+                self.assertIsNone(update_cards.card_from_subject(subject))
+
+    @patch("update_cards.command")
+    def test_commit_fallback_needs_a_real_app_change(self, command):
+        command.side_effect = ["tools/verify-wazig/run.ps1\n.github/workflows/ci.yml\n", ]
+        self.assertIsNone(update_cards.commit_product_text("sha"))
+        command.side_effect = ["src/compose_layout.zig\ntools/update_cards.py\n", "IGSH-1341: the message box grows with the text\n"]
+        self.assertEqual(update_cards.commit_product_text("sha"), "the message box grows with the text")
+        command.side_effect = ["src/compose_layout_test.zig\n"]
+        self.assertIsNone(update_cards.commit_product_text("sha"))
 
     @patch("update_cards.command")
     def test_paginated_api(self, command):
@@ -61,9 +71,10 @@ class UpdateCardTest(unittest.TestCase):
         self.assertEqual(list(update_cards.api_pages("repos/example/app/pulls")), [{"number": 1}, {"number": 2}])
         command.assert_called_once_with("gh", "api", "--paginate", "repos/example/app/pulls")
 
+    @patch("update_cards.commit_product_text", return_value=None)
     @patch("update_cards.api_pages")
     @patch("update_cards.command")
-    def test_release_range_previous_tag_and_merged_commits_only(self, command, api):
+    def test_release_range_previous_tag_and_merged_commits_only(self, command, api, fallback):
         command.side_effect = ["v1.0.0\nv1.0.1\nv1.0.2", "new\nold"]
         api.return_value = [
             {"number": 1, "merged_at": "2026-01-01", "merge_commit_sha": "old", "body": "Card: Older change"},
@@ -74,10 +85,19 @@ class UpdateCardTest(unittest.TestCase):
         self.assertEqual(update_cards.compose_release("example/app", "v1.0.2"), "- Newest change\n- Older change\n")
         self.assertEqual(command.call_args_list[1].args, ("git", "rev-list", "v1.0.1..v1.0.2"))
 
+    @patch("update_cards.commit_product_text", return_value=None)
     @patch("update_cards.api_pages", return_value=[])
     @patch("update_cards.command", side_effect=["v1.0.0", "first"])
-    def test_first_release(self, command, api):
+    def test_first_release_falls_back_when_nothing_names_a_change(self, command, api, fallback):
         self.assertEqual(update_cards.compose_release("example/app", "v1.0.0"), "- Small fixes and speed improvements\n")
+        self.assertEqual(command.call_args_list[1].args, ("git", "rev-list", "v1.0.0"))
+
+    @patch("update_cards.commit_product_text", side_effect=["the message box grows with the text", "the message box grows with the text", None])
+    @patch("update_cards.api_pages", return_value=[])
+    @patch("update_cards.command")
+    def test_direct_pushes_become_bullets_without_duplicates(self, command, api, fallback):
+        command.side_effect = ["v1.0.0", "third\nsecond\nfirst"]
+        self.assertEqual(update_cards.compose_release("example/app", "v1.0.0"), "- the message box grows with the text\n")
         self.assertEqual(command.call_args_list[1].args, ("git", "rev-list", "v1.0.0"))
 
     def test_cli_fails_closed(self):
