@@ -13,9 +13,9 @@ public static class HubPickerNative {
 '@
 
 function Assert-PickerNode($Session, [IntPtr]$Handle, [string]$Class, [int]$Id, [IntPtr]$Parent) {
-    $pid = [uint32]0
-    $null = [VerifyWindow]::GetWindowThreadProcessId($Handle, [ref]$pid)
-    Assert-That ($Handle -ne [IntPtr]::Zero -and [VerifyPasteImage]::IsWindow($Handle) -and $pid -eq $Session.pid -and [HubPickerNative]::Class($Handle) -ceq $Class) "picker: invalid owned $Class"
+    $ownerPid = [uint32]0
+    $null = [VerifyWindow]::GetWindowThreadProcessId($Handle, [ref]$ownerPid)
+    Assert-That ($Handle -ne [IntPtr]::Zero -and [VerifyPasteImage]::IsWindow($Handle) -and $ownerPid -eq $Session.pid -and [HubPickerNative]::Class($Handle) -ceq $Class) "picker: invalid owned $Class"
     if ($Id -ge 0) { Assert-That ([HubPickerNative]::GetDlgCtrlID($Handle) -eq $Id -and [HubPickerNative]::GetParent($Handle) -eq $Parent) "picker: invalid parent or id for $Class" }
 }
 
