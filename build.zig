@@ -357,7 +357,7 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(transcription_retry_tests).step);
     const canvas_source = sourceSection("fn canvasProc(", "fn selectChatRow(");
-    const canvas_input_start = std.mem.indexOf(u8, canvas_source, "            a.click_origin =") orelse @panic("Missing canvas input start");
+    const canvas_input_start = std.mem.indexOf(u8, canvas_source, "\n            a.click_origin = .{ .x = x, .y = y };") orelse @panic("Missing canvas input start");
     const canvas_input_end = std.mem.indexOf(u8, canvas_source, "        win.WM_RBUTTONUP =>") orelse @panic("Missing canvas input end");
     const reaction_input_start = std.mem.indexOf(u8, canvas_source, "            for (a.messages[0..a.message_count]) |*item| {\n                const chip = item.reaction_hit;") orelse @panic("Missing reaction input start");
     const reaction_input = canvas_source[reaction_input_start..];
