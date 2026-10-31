@@ -6,7 +6,8 @@ function Assert-EmojiForeground($Session, $Window) {
     $foreground = [VerifyWindow]::GetForegroundWindow()
     $owner = [uint32]0
     if ($foreground -ne [IntPtr]::Zero) { [VerifyWindow]::GetWindowThreadProcessId($foreground, [ref]$owner) | Out-Null }
-    Assert-That ($foreground -eq $handle -and $owner -eq $Session.pid -and $Window.Current.ProcessId -eq $Session.pid) 'Keyboard target is not the owned window'
+    $main = (Get-App $Session).MainWindowHandle
+    Assert-That ($foreground -eq $handle -and $owner -eq $Session.pid -and $Window.Current.ProcessId -eq $Session.pid) "Keyboard target is not the owned window: foreground=$($foreground.ToInt64()) expected=$($handle.ToInt64()) main=$($main.ToInt64()) owner=$owner pid=$($Session.pid)"
 }
 
 function Get-EmojiWindow($Session) {
