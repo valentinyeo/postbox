@@ -14,6 +14,8 @@ public static class IconHintKeys {
     }
     [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public INPUTUNION data; }
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int x, y; }
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int left, top, right, bottom; }
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out RECT rect);
     [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
     [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr window);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
@@ -91,6 +93,46 @@ function Icon-Popup {
     throw 'Tooltip observation changed during native reads'
 }
 
+function Icon-EmptyPoint($Point, [IntPtr]$Canvas, $Tooltips) {
+    $hit = [IconHintKeys]::WindowFromPoint($Point)
+    $ownerPid = [uint32]0
+    [VerifyWindow]::GetWindowThreadProcessId($hit, [ref]$ownerPid) | Out-Null
+    if ($hit -ne $Canvas -or $ownerPid -ne $session.pid -or @($Tooltips).Count -ne 1) { return $false }
+    foreach ($tool in $Tooltips[0].tools) {
+        if (($tool.flags -band 1) -ne 0) {
+            $rect = [VerifyMenus+Rect]::new()
+            Assert-That ([VerifyMenus]::GetWindowRect([IntPtr][long]$tool.id, [ref]$rect)) 'Tool window rectangle unavailable'
+            $left = $rect.Left; $top = $rect.Top; $right = $rect.Right; $bottom = $rect.Bottom
+        } else {
+            $origin = [VerifyWindow+Point]::new()
+            Assert-That ([VerifyWindow]::ClientToScreen([IntPtr][long]$tool.owner, [ref]$origin)) 'Tool owner origin unavailable'
+            $left = $origin.X + $tool.rect[0]; $top = $origin.Y + $tool.rect[1]
+            $right = $origin.X + $tool.rect[2]; $bottom = $origin.Y + $tool.rect[3]
+        }
+        if ($Point.x -ge $left -and $Point.x -lt $right -and $Point.y -ge $top -and $Point.y -lt $bottom) { return $false }
+    }
+    return $true
+}
+
+function Icon-NeutralPoint {
+    $process = Get-App $session
+    Assert-That ([VerifyWindow]::GetForegroundWindow() -eq $process.MainWindowHandle) 'Neutral target is not foreground'
+    $canvas = [IntPtr](Get-Edit (Get-Window $session) '1024').Current.NativeWindowHandle
+    $client = [IconHintKeys+RECT]::new()
+    Assert-That ([IconHintKeys]::GetClientRect($canvas, [ref]$client)) 'Canvas client rectangle unavailable'
+    $origin = [VerifyWindow+Point]::new()
+    Assert-That ([VerifyWindow]::ClientToScreen($canvas, [ref]$origin)) 'Canvas origin unavailable'
+    $tooltips = @([VerifyInboxTooltip]::Tools($session.pid))
+    for ($y = $client.top + 4; $y -lt [Math]::Min($client.bottom, $client.top + 64); $y += 8) {
+        for ($x = $client.left + 4; $x -lt [Math]::Min($client.right, $client.left + 64); $x += 8) {
+            $point = [IconHintKeys+POINT]::new()
+            $point.x = $origin.X + $x; $point.y = $origin.Y + $y
+            if (Icon-EmptyPoint $point $canvas $tooltips) { return $point }
+        }
+    }
+    throw 'No empty canvas point available'
+}
+
 $script:hoverSequence = 0
 function Icon-FreshHover([string]$Id, [int]$AnchorX = 0, [int]$AnchorY = 0) {
     $evidence = Get-Content (Join-Path $session.evidence "hover-$Id.json") -Raw | ConvertFrom-Json
@@ -103,10 +145,8 @@ function Icon-FreshHover([string]$Id, [int]$AnchorX = 0, [int]$AnchorY = 0) {
         $clientOrigin = @($client.X, $client.Y)
         $screen = @(($client.X + $tool.rect[0]), ($client.Y + $tool.rect[1]), ($client.X + $tool.rect[2]), ($client.Y + $tool.rect[3]))
     }
-    $neutral = [VerifyWindow+Point]::new()
-    $neutral.X = 4; $neutral.Y = 4
-    Assert-That ([VerifyWindow]::ClientToScreen([IntPtr](Get-App $session).MainWindowHandle, [ref]$neutral)) 'Neutral origin unavailable'
-    [VerifyMenus]::Hover($session.pid, $neutral.X, $neutral.Y)
+    $neutral = Icon-NeutralPoint
+    [VerifyMenus]::Hover($session.pid, $neutral.x, $neutral.y)
     if ($AnchorX -ne 0 -or $AnchorY -ne 0) { [VerifyMenus]::Hover($session.pid, $AnchorX, $AnchorY) }
     $reset = Wait-Until { $value = Icon-Popup; if (-not $value.visible) { return ,$value } } 'hidden tooltip reset'
     $cursor = [IconHintKeys+POINT]::new()
@@ -114,7 +154,8 @@ function Icon-FreshHover([string]$Id, [int]$AnchorX = 0, [int]$AnchorY = 0) {
     $cursorWindow = [IconHintKeys]::WindowFromPoint($cursor)
     $cursorPid = [uint32]0
     [VerifyWindow]::GetWindowThreadProcessId($cursorWindow, [ref]$cursorPid) | Out-Null
-    Assert-That ($cursorPid -eq $session.pid -and -not ($cursor.x -ge $screen[0] -and $cursor.x -lt $screen[2] -and $cursor.y -ge $screen[1] -and $cursor.y -lt $screen[3])) 'Reset cursor still hits target'
+    $canvas = [IntPtr](Get-Edit (Get-Window $session) '1024').Current.NativeWindowHandle
+    Assert-That ((Icon-EmptyPoint $cursor $canvas $reset.tooltips) -and $cursorPid -eq $session.pid -and -not ($cursor.x -ge $screen[0] -and $cursor.x -lt $screen[2] -and $cursor.y -ge $screen[1] -and $cursor.y -lt $screen[3])) 'Reset cursor hits a tooltip tool or target'
     $entryBegin = [long]0; $entryEnd = [long]0
     [VerifyMenus]::Hover($session.pid, [int]$evidence.x, [int]$evidence.y, [ref]$entryBegin, [ref]$entryEnd)
     $entered = [IconHintKeys+POINT]::new()
@@ -173,11 +214,12 @@ function Icon-Transition([string]$Name, [string]$Id, [scriptblock]$Action, [stri
 function Icon-Hover([string]$Id, [string]$Expected, [int]$X, [int]$Y, [int]$AnchorX = 0, [int]$AnchorY = 0) {
     $process = Get-App $session
     Assert-That ([VerifyWindow]::GetForegroundWindow() -eq $process.MainWindowHandle) 'Hover target is not foreground'
-    $outside = [VerifyWindow+Point]::new()
-    $outside.X = 4
-    $outside.Y = 4
-    Assert-That ([VerifyWindow]::ClientToScreen([IntPtr]$process.MainWindowHandle, [ref]$outside)) 'Window origin unavailable'
-    [VerifyMenus]::Hover($session.pid, $outside.X, $outside.Y)
+    $outside = Icon-NeutralPoint
+    [VerifyMenus]::Hover($session.pid, $outside.x, $outside.y)
+    $cursor = [IconHintKeys+POINT]::new()
+    Assert-That ([IconHintKeys]::GetCursorPos([ref]$cursor)) 'Cursor position unavailable'
+    $canvas = [IntPtr](Get-Edit (Get-Window $session) '1024').Current.NativeWindowHandle
+    Assert-That (Icon-EmptyPoint $cursor $canvas @([VerifyInboxTooltip]::Tools($session.pid))) 'Neutral cursor hits a tooltip tool'
     if ($AnchorX -ne 0 -or $AnchorY -ne 0) { [VerifyMenus]::Hover($session.pid, $AnchorX, $AnchorY) }
     [VerifyMenus]::Hover($session.pid, $X, $Y)
     $point = [IconHintKeys+POINT]::new()
@@ -306,8 +348,12 @@ foreach ($control in $state.composer.controls) {
     $y = $origin.Y + [int](($control.top + $control.bottom) / 2)
     Icon-Hover $control.name $labels[$control.name] $x $y
 }
-Icon-Transition 'leave' 'send' { [VerifyMenus]::Hover($session.pid, $origin.X + 4, $origin.Y + 4) }
+$leavePoint = Icon-NeutralPoint
+Icon-Transition 'leave' 'send' { [VerifyMenus]::Hover($session.pid, $leavePoint.x, $leavePoint.y) }
 $canvas = [IntPtr](Get-Edit (Get-Window $session) '1024').Current.NativeWindowHandle
+$leaveCursor = [IconHintKeys+POINT]::new()
+Assert-That ([IconHintKeys]::GetCursorPos([ref]$leaveCursor)) 'Leave cursor position unavailable'
+Assert-That (Icon-EmptyPoint $leaveCursor $canvas @([VerifyInboxTooltip]::Tools($session.pid))) 'Leave cursor hits a tooltip tool'
 $canvasOrigin = [VerifyWindow+Point]::new()
 Assert-That ([VerifyWindow]::ClientToScreen($canvas, [ref]$canvasOrigin)) 'Canvas origin unavailable'
 $header = Wait-Until { $value = (Read-Control $session status).header_avatar; if ($value[2] -gt $value[0] -and $value[3] -gt $value[1]) { return ,$value } } 'header avatar painted'
