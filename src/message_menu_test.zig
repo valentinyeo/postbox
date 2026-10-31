@@ -7,8 +7,13 @@ const command_reply = 2020;
 const command_copy_text = 2021;
 const command_copy_link = 2022;
 const quick_reactions = [_]u16{ 3000, 3001, 3002, 3003, 3004, 3005, 3006 };
+var verification_fixture = false;
+const InboxSequenceStub = struct { started: ?u64 = null };
 const App = struct {
     hwnd: ?usize = 1,
+    verification_menu_entry_count: u64 = 0,
+    verification_menu_prefix_age_ms: ?u64 = null,
+    inbox_sequence: InboxSequenceStub = .{},
     brush_panel: ?usize = 10,
     brush_raised: ?usize = 11,
     brush_muted: ?usize = 12,
@@ -42,7 +47,7 @@ var menu_info: ?win.MENUINFO = null;
 var destroyed = false;
 var tracking_app: ?*App = null;
 var tracking_rect: ?win.RECT = null;
-var tracking_choice: u32 = 0;
+var tracking_choice: i32 = 0;
 var mouse_position: u32 = 0;
 var row_was_reset = false;
 var reacted: ?u16 = null;
@@ -91,12 +96,15 @@ const win = struct {
         menu_info = info.*;
         return 1;
     }
-    fn TrackPopupMenu(_: usize, _: u32, _: i32, _: i32, _: i32, _: usize, _: ?*const RECT) u32 {
+    fn TrackPopupMenu(_: usize, _: u32, _: i32, _: i32, _: i32, _: usize, _: ?*const RECT) i32 {
         if (tracking_app) |app| {
             row_was_reset = app.reaction_row_rect == null;
             app.reaction_row_rect = tracking_rect;
         }
         return tracking_choice;
+    }
+    fn GetTickCount64() u64 {
+        return 0;
     }
     fn GetMessagePos() u32 {
         return mouse_position;

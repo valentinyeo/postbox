@@ -12823,7 +12823,7 @@ fn openUrlWide(a: *App, url: [*:0]const u16) void {
     if (@intFromPtr(result) <= 32) setStatus(a, "Windows could not open the link");
 }
 
-fn trackPopupMenu(a: *App, menu: win.HMENU, x: i32, y: i32, flags: win.UINT) win.BOOL {
+fn trackPopupMenu(a: *App, menu: win.HMENU, x: i32, y: i32, flags: win.UINT) i32 {
     if (verification_fixture) {
         a.verification_menu_entry_count +%= 1;
         a.verification_menu_prefix_age_ms = if (a.inbox_sequence.started) |started| win.GetTickCount64() -| started else null;
