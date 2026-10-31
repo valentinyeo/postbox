@@ -77,6 +77,21 @@ def check_quiet_status(folder):
     assert len(chat_recovery['retry']) == 2
     for stage in ('chat-read-recovered', 'chat-read-auto-recovered'):
         assert (folder / (stage + '.png')).read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+    ordering = read('event-order.json')
+    assert ordering['pid'] == session['pid'] and ordering['draft'] == 'Recovery draft'
+    assert ordering['selected'] == chat_recovery['initial']['selected']['id']
+    assert ordering['visible_ids'] == ordering['before_ids'] + ['LIVE']
+    phases = [row for row in requests if row.get('phase') in ('order-armed', 'order-history-response', 'order-chat-held', 'order-visible', 'order-chat-released')]
+    assert ordering['trace'] == phases[:len(ordering['trace'])]
+    names = [row['phase'] for row in ordering['trace']]
+    history, held, visible, released = (names.index(name) for name in ('order-history-response', 'order-chat-held', 'order-visible', 'order-chat-released'))
+    assert names.index('order-armed') < history < held < visible < released
+    assert ordering['trace'][history]['chat'] == ordering['selected']
+    assert ordering['trace'][visible]['held'] and ordering['trace'][released]['manual']
+    shown = read('order-visible.messages.json')
+    assert [row['id'] for row in shown['messages']] == ordering['visible_ids']
+    assert (folder / 'message-before-chat-release.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+    assert (folder / 'event-order-after.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     for stage in ('before', 'quiet-status', 'version', 'sync-problem', 'after'):
         image = (folder / f'{stage}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000

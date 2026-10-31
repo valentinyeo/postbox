@@ -2215,9 +2215,29 @@ class SlackEmojiHandler(VoiceHandler):
 
 
 class QuietStatusHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        url = urlsplit(getattr(self, 'wire_path', ''))
+        if status == 200 and url.path == '/v1/wazig/messages' and getattr(self.state, 'order_enabled', False):
+            self.state.record({'phase': 'order-history-response', 'chat': parse_qs(url.query).get('chat', [''])[0]})
+        super().respond(status, data, content_type, **extra)
+
     def do_GET(self):
         self.wire_path = self.path
         url = urlsplit(self.path)
+        if url.path == '/v1/wazig/chats':
+            if not self.authorized():
+                return
+            with self.state.lock:
+                armed = getattr(self.state, 'order_armed', False)
+                self.state.order_armed = False
+                if armed:
+                    self.state.order_held = True
+                    self.state.record({'phase': 'order-chat-held'})
+            if armed:
+                released = self.state.order_gate.wait(timeout=45)
+                with self.state.lock:
+                    self.state.order_held = False
+                    self.state.record({'phase': 'order-chat-released', 'manual': released})
         if url.path == '/v1/wazig/messages' and parse_qs(url.query).get('limit') == ['80']:
             if not self.authorized():
                 return
@@ -2236,6 +2256,27 @@ class QuietStatusHandler(Handler):
         super().do_GET()
 
     def do_POST(self):
+        if self.path in ('/fixture/order-arm', '/fixture/order-visible', '/fixture/order-release'):
+            self.wire_path = self.path
+            if not self.authorized():
+                return
+            self.rfile.read(int(self.headers.get('Content-Length', '0')))
+            with self.state.lock:
+                if self.path.endswith('order-arm'):
+                    self.state.order_gate = bridge.threading.Event()
+                    self.state.order_armed = True
+                    self.state.order_enabled = True
+                    self.state.order_held = False
+                    self.state.record({'phase': 'order-armed'})
+                    self.state.live = True
+                    self.state.lock.notify_all()
+                elif self.path.endswith('order-visible'):
+                    self.state.record({'phase': 'order-visible', 'held': self.state.order_held})
+                else:
+                    self.state.order_gate.set()
+                held = self.state.order_held
+            self.respond(200, {'held': held})
+            return
         if self.path == '/fixture/message-failures':
             self.wire_path = self.path
             if not self.authorized():

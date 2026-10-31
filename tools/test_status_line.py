@@ -122,7 +122,15 @@ def fixture(folder):
     (folder / 'chat-read-draft.json').write_text('Recovery draft')
     for stage in ('chat-read-recovered', 'chat-read-auto-recovered'):
         (folder / (stage + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(11000))
-    (folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in [*chat_reads, *reads]) + '\n')
+    phases = [dict(phase='order-armed'), dict(phase='order-history-response', chat='fixture-alpha'),
+              dict(phase='order-chat-held'), dict(phase='order-visible', held=True), dict(phase='order-chat-released', manual=True)]
+    ordering = dict(pid=123, draft='Recovery draft', selected='fixture-alpha', before_ids=['fixture-message'],
+                    visible_ids=['fixture-message', 'LIVE'], trace=phases)
+    (folder / 'event-order.json').write_text(json.dumps(ordering))
+    (folder / 'order-visible.messages.json').write_text(json.dumps(dict(messages=[dict(id='fixture-message'), dict(id='LIVE')])))
+    for stage in ('message-before-chat-release', 'event-order-after'):
+        (folder / (stage + '.png')).write_bytes(b'\x89PNG\r\n\x1a\n' + bytes(11000))
+    (folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in [*chat_reads, *reads, *phases]) + '\n')
     for stage in ('before', 'quiet-status', 'version', 'sync-problem', 'after'):
         (folder / f'{stage}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'x' * 11000)
         (folder / f'{stage}.uia.txt').write_text('MessagesZig | Combined inbox - Postbox v0.0.526\n1016 | LISTBOX | Chats\n')
@@ -357,7 +365,9 @@ class StatusLineTests(unittest.TestCase):
             value['requests'][0]['status'], value['requests'][1]['status'] = 200, 503
             (folder / 'message-read-recovery.json').write_text(json.dumps(value))
             rows = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text().splitlines()]
-            rows[-len(value['requests']):] = value['requests']
+            indexes = [i for i, row in enumerate(rows) if row.get('wire_path', '').startswith('/v1/wazig/messages')]
+            for index, item in zip(indexes, value['requests']):
+                rows[index] = item
             (folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in rows))
             with self.assertRaises(AssertionError):
                 validator.check_quiet_status(folder)
@@ -416,6 +426,23 @@ class StatusLineTests(unittest.TestCase):
                 else:
                     value['manual']['selected']['id'] = 'different'
                 (folder / 'chat-read-recovery.json').write_text(json.dumps(value))
+                with self.assertRaises(AssertionError):
+                    validator.check_quiet_status(folder)
+
+    def test_event_order_evidence_rejects_early_chat_and_released_barrier(self):
+        for mutation in ('early_chat', 'released'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp:
+                folder = Path(temp)
+                fixture(folder)
+                evidence = json.loads((folder / 'event-order.json').read_text())
+                if mutation == 'early_chat':
+                    evidence['trace'][1], evidence['trace'][2] = evidence['trace'][2], evidence['trace'][1]
+                else:
+                    evidence['trace'][3]['held'] = False
+                (folder / 'event-order.json').write_text(json.dumps(evidence))
+                rows = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text().splitlines()]
+                rows[-len(evidence['trace']):] = evidence['trace']
+                (folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in rows))
                 with self.assertRaises(AssertionError):
                     validator.check_quiet_status(folder)
 
