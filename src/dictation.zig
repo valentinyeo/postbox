@@ -18,6 +18,8 @@ const win = @cImport({
 pub const State = enum(u8) { idle, recording, transcribing, ready, failed };
 pub const Language = dictation_policy.Language;
 
+const SessionState = enum(u8) { idle, recording, transcribing, ready, failed, cancelled, request_in_flight };
+
 const guid_mmdevice_enumerator = win.GUID{ .Data1 = 0xbcde0395, .Data2 = 0xe52f, .Data3 = 0x467c, .Data4 = .{ 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e } };
 const guid_immdevice_enumerator = win.GUID{ .Data1 = 0xa95664d2, .Data2 = 0x9614, .Data3 = 0x4f35, .Data4 = .{ 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6 } };
 const guid_iaudioclient = win.GUID{ .Data1 = 0x1cb9ad4c, .Data2 = 0xdbfa, .Data3 = 0x4c32, .Data4 = .{ 0xb1, 0x78, 0xc2, 0xf5, 0x68, 0xa7, 0x03, 0xb2 } };
@@ -27,7 +29,7 @@ pub const Session = struct {
     allocator: std.mem.Allocator,
     thread: ?std.Thread = null,
     stop_requested: std.atomic.Value(bool) = .init(false),
-    state_value: std.atomic.Value(u8) = .init(@intFromEnum(State.idle)),
+    state_value: std.atomic.Value(u8) = .init(@intFromEnum(SessionState.idle)),
     result: [8192]u8 = [_]u8{0} ** 8192,
     result_len: usize = 0,
     origin: drafts.Identity = .{},
@@ -42,7 +44,7 @@ pub const Session = struct {
     }
 
     pub fn destroy(self: *Session) void {
-        self.requestStop();
+        self.cancel();
         if (self.thread) |thread| thread.join();
         if (self.fixture) |fixture| {
             self.allocator.free(fixture.pcm);
@@ -52,7 +54,18 @@ pub const Session = struct {
     }
 
     pub fn state(self: *const Session) State {
-        return @enumFromInt(self.state_value.load(.acquire));
+        const current: SessionState = @enumFromInt(self.state_value.load(.acquire));
+        return switch (current) {
+            .idle, .cancelled => .idle,
+            .recording => .recording,
+            .transcribing, .request_in_flight => .transcribing,
+            .ready => .ready,
+            .failed => .failed,
+        };
+    }
+
+    fn transition(self: *Session, from: SessionState, to: SessionState) bool {
+        return self.state_value.cmpxchgStrong(@intFromEnum(from), @intFromEnum(to), .acq_rel, .acquire) == null;
     }
 
     pub fn elapsedMs(self: *const Session) u64 {
@@ -63,22 +76,28 @@ pub const Session = struct {
         return self.meter_level.load(.acquire);
     }
 
-    pub fn start(self: *Session, api_key: []const u8, language: Language, origin: chat_key.Key) bool {
-        if (self.state() != .idle and self.state() != .failed) return false;
+    pub fn reapFinished(self: *Session) bool {
         if (self.thread) |thread| {
+            if (win.WaitForSingleObject(@ptrCast(thread.getHandle()), 0) != win.WAIT_OBJECT_0) return false;
             thread.join();
             self.thread = null;
         }
+        return true;
+    }
+
+    pub fn start(self: *Session, api_key: []const u8, language: Language, origin: chat_key.Key) bool {
+        if (self.state() != .idle and self.state() != .failed) return false;
+        if (!self.reapFinished()) return false;
         const key = self.allocator.dupe(u8, api_key) catch return false;
         self.origin = drafts.Identity.init(origin);
         self.result_len = 0;
         self.elapsed_ms.store(0, .release);
         self.meter_level.store(0, .release);
         self.stop_requested.store(false, .release);
-        self.state_value.store(@intFromEnum(State.recording), .release);
+        self.state_value.store(@intFromEnum(SessionState.recording), .release);
         self.thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, workerMain, .{ self, key, language }) catch {
             self.allocator.free(key);
-            self.state_value.store(@intFromEnum(State.failed), .release);
+            self.state_value.store(@intFromEnum(SessionState.failed), .release);
             return false;
         };
         return true;
@@ -88,39 +107,52 @@ pub const Session = struct {
         if (self.state() == .recording) self.stop_requested.store(true, .release);
     }
 
-    pub fn takeTranscript(self: *Session, destination: []u8) ?[]const u8 {
-        if (self.state() != .ready) return null;
-        const length = @min(destination.len, self.result_len);
-        @memcpy(destination[0..length], self.result[0..length]);
-        self.state_value.store(@intFromEnum(State.idle), .release);
-        if (self.thread) |thread| {
-            thread.join();
-            self.thread = null;
+    pub fn cancel(self: *Session) void {
+        self.stop_requested.store(true, .release);
+        var current = self.state_value.load(.acquire);
+        while (current != @intFromEnum(SessionState.idle) and current != @intFromEnum(SessionState.cancelled)) {
+            current = self.state_value.cmpxchgWeak(current, @intFromEnum(SessionState.cancelled), .acq_rel, .acquire) orelse break;
         }
-        return destination[0..length];
     }
+
+    pub fn peekTranscript(self: *Session, destination: []u8) ?[]const u8 {
+        if (self.state() != .ready or destination.len < self.result_len) return null;
+        @memcpy(destination[0..self.result_len], self.result[0..self.result_len]);
+        return destination[0..self.result_len];
+    }
+
+    pub fn consumeTranscript(self: *Session) bool {
+        return self.transition(.ready, .idle);
+    }
+
 };
 
 fn workerMain(self: *Session, api_key: []u8, language: Language) void {
     defer self.allocator.free(api_key);
     const wav = (if (self.fixture) |fixture| captureFixture(self, fixture.pcm) else captureMicrophone(self)) catch {
-        self.state_value.store(@intFromEnum(State.failed), .release);
+        _ = self.transition(.recording, .failed);
         return;
     };
     defer self.allocator.free(wav);
     if (wav.len <= 44) {
-        self.state_value.store(@intFromEnum(State.failed), .release);
+        _ = self.transition(.recording, .failed);
         return;
     }
-    self.state_value.store(@intFromEnum(State.transcribing), .release);
-    const transcript = (if (self.fixture) |fixture| parseResponse(self.allocator, fixture.response) else transcribe(self.allocator, api_key, language, "audio/wav", wav)) catch {
-        self.state_value.store(@intFromEnum(State.failed), .release);
+    if (!self.transition(.recording, .transcribing)) return;
+    var transport = Transport{ .allocator = self.allocator, .api_key = api_key, .session = self };
+    defer if (transport.refreshed_key) |key| self.allocator.free(key);
+    const transcript = (if (self.fixture) |fixture| parseResponse(self.allocator, fixture.response) else dictation_policy.transcribe(&transport, language, "audio/wav", wav)) catch {
+        _ = self.transition(.transcribing, .failed);
         return;
     };
     defer self.allocator.free(transcript);
-    self.result_len = @min(self.result.len, transcript.len);
-    @memcpy(self.result[0..self.result_len], transcript[0..self.result_len]);
-    self.state_value.store(@intFromEnum(State.ready), .release);
+    if (transcript.len > self.result.len) {
+        _ = self.transition(.transcribing, .failed);
+        return;
+    }
+    self.result_len = transcript.len;
+    @memcpy(self.result[0..self.result_len], transcript);
+    _ = self.transition(.transcribing, .ready);
 }
 
 fn captureFixture(self: *Session, pcm: []const u8) ![]u8 {
@@ -222,20 +254,28 @@ fn captureMicrophone(self: *Session) ![]u8 {
     return wav;
 }
 
-fn transcribe(allocator: std.mem.Allocator, api_key: []const u8, language: Language, content_type: []const u8, body: []const u8) ![]u8 {
-    var transport = Transport{ .allocator = allocator, .api_key = api_key };
-    defer if (transport.refreshed_key) |key| allocator.free(key);
-    return dictation_policy.transcribe(&transport, language, content_type, body);
-}
-
 const Transport = struct {
     allocator: std.mem.Allocator,
     api_key: []const u8,
     refreshed_key: ?[]u8 = null,
+    session: ?*Session = null,
+
+    fn request(self: *@This(), request_path: [*:0]const u16, mime: []const u8, audio: []const u8) ![]u8 {
+        if (self.session) |session| {
+            if (!session.transition(.transcribing, .request_in_flight)) return error.Cancelled;
+        }
+        defer if (self.session) |session| {
+            _ = session.transition(.request_in_flight, .transcribing);
+        };
+        return transcribeAt(self.allocator, self.api_key, request_path, mime, audio);
+    }
 
     fn sendAt(self: *@This(), request_path: [*:0]const u16, mime: []const u8, audio: []const u8) ![]u8 {
-        return transcribeAt(self.allocator, self.api_key, request_path, mime, audio) catch |err| {
+        return self.request(request_path, mime, audio) catch |err| {
             if (err != error.Unauthorized or self.refreshed_key != null) return err;
+            if (self.session) |session| {
+                if (session.state() != .transcribing) return error.Cancelled;
+            }
             const refreshed = slack_win.loadDeepgramKey(self.allocator) catch return err;
             const saved = refreshed.key;
             if (saved.len == 0 or std.mem.eql(u8, self.api_key, saved)) {
@@ -244,7 +284,7 @@ const Transport = struct {
             }
             self.refreshed_key = saved;
             self.api_key = saved;
-            return transcribeAt(self.allocator, saved, request_path, mime, audio);
+            return self.request(request_path, mime, audio);
         };
     }
 

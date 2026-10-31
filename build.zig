@@ -688,6 +688,7 @@ pub fn build(b: *std.Build) void {
         @embedFile("src/drafts_ui_test.zig"),
         sourceSection("fn visibleChatIndex(", "fn chatProvider("),
         sourceSection("fn composerText(", "fn ensureDictation("),
+        sourceSection("const PreparedDictation =", "fn captureDictationContext("),
         sourceSection("fn updateDictation(", "fn selectChat("),
     }) catch @panic("Out of memory building drafts UI harness");
     const drafts_ui_files = b.addWriteFiles();

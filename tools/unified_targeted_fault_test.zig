@@ -468,7 +468,7 @@ test "IGSH-531 hub outbox preserves every transport provider through restart" {
         defer f.deinit();
         prepareAdmission(f, provider);
         setCompose("synthetic text");
-        sendUnifiedMessage(f.a, false);
+        _ = sendUnifiedMessage(f.a, false);
         try std.testing.expectEqual(@as(usize, 0), compose_len);
         try std.testing.expectEqual(@as(usize, 1), f.a.pending_send_count);
         const restored = try decodedSnapshot(f);
@@ -496,7 +496,7 @@ test "staged hub images keep order first caption and independent durable ids on 
             try std.testing.expect(f.a.staged_images.add(image));
         }
         setCompose("caption");
-        sendUnifiedMessage(f.a, false);
+        _ = sendUnifiedMessage(f.a, false);
         try std.testing.expectEqual(@as(usize, 3), f.a.pending_send_count);
         try std.testing.expectEqual(@as(usize, 3), protected_writes);
         try std.testing.expectEqual(@as(usize, 0), f.a.staged_images.count);
@@ -526,11 +526,11 @@ test "IGSH-1213 a failing Slack head becomes held and releases the WhatsApp grou
         prepareAdmission(f, .slack);
         f.a.chats[0].jid.set("slack:fixture:channel");
         setCompose("Synthetic failed send");
-        sendUnifiedMessage(f.a, false);
+        _ = sendUnifiedMessage(f.a, false);
         f.a.chats[0].provider = .whatsapp;
         f.a.chats[0].jid.set("personal:fixture-group@g.us");
         setCompose("group text");
-        sendUnifiedMessage(f.a, false);
+        _ = sendUnifiedMessage(f.a, false);
         try std.testing.expectEqual(@as(usize, 2), f.a.unified_snapshot.?.count);
         const first_id = f.a.unified_snapshot.?.records[0].entry.id;
         const group_id = f.a.unified_snapshot.?.records[1].entry.id;
@@ -577,7 +577,7 @@ test "unified attachment staging failure retains draft and all staged images" {
     f.a.reply_to.set("reply-id");
     setCompose("caption");
     fail_protected_write = true;
-    sendUnifiedMessage(f.a, false);
+    _ = sendUnifiedMessage(f.a, false);
     try std.testing.expectEqual(@as(usize, 0), f.a.unified_snapshot.?.count);
     try std.testing.expectEqual(@as(usize, 2), f.a.staged_images.count);
     try std.testing.expectEqual(@as(usize, 7), compose_len);

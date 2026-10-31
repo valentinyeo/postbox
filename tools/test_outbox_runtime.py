@@ -40,7 +40,7 @@ def mutate(source, name):
         "same-text-reload": ("if (!unifiedHub(a) and (head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if (!unifiedHub(a) and (head.from_disk or head.retries == 0 or (head.retries > 0 and head.ambiguous)) and"),
         "restored-resend": ("if (!unifiedHub(a) and (head.from_disk or (head.retries > 0 and head.ambiguous)) and", "if (!unifiedHub(a) and head.retries > 0 and head.ambiguous and"),
         "delete-before-retirement": ("if (!persistOutbox(a)) {\n        setStatus(a, \"Could not save send completion; retrying journal\");\n        return false;\n    }", "_ = persistOutbox(a);"),
-        "silent-admission": ("if (!persistOutbox(a)) {\n        a.pending_send_count -= 1;\n        pending.* = .{};\n        setStatus(a, \"Could not save outbox; message not queued\");\n        return;\n    }", "_ = persistOutbox(a);"),
+        "silent-admission": ("if (!persistOutbox(a)) {\n        a.pending_send_count -= 1;\n        pending.* = .{};\n        setStatus(a, \"Could not save outbox; message not queued\");\n        return false;\n    }", "_ = persistOutbox(a);"),
         "utf8-truncation": ("if (text.len > outbox.max_text_len)", "if (false)"),
         "hidden-restored-bubble": ("if (!unifiedHub(a) and from_reload and !pending.from_disk)", "if (!unifiedHub(a) and from_reload)"),
         "voice-metadata": ("entry.ptt = pending.ptt;", "entry.ptt = false;"),
