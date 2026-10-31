@@ -4203,11 +4203,25 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
     }
     for (a.slack_outbox[0..a.slack_outbox_count]) |*slot| {
         if (a.message_count >= max_messages) break;
-        if (slot.completed) continue;
         const entry = &slot.entry;
+        if (slot.completed) {
+            if (entry.file.len > 0) {
+                if (pendingByClientMsgId(a, entry.idSlice())) |victim| removeMessageAt(a, victim);
+            }
+            continue;
+        }
         if (!chat_key.Key.eql(chat_key.of(entry), chat_key.of(chat))) continue;
         if (entry.file.len > 0) {
-            if (entry.state == .failed) setStatus(a, "Slack image send failed");
+            const entry_id = entry.idSlice();
+            const index = pendingByClientMsgId(a, entry_id);
+            if (entry.state == .failed) {
+                if (index) |victim| a.messages[victim].send_state = .failed;
+                setStatus(a, "Slack image send failed");
+                continue;
+            }
+            if (index == null) {
+                appendSlackPendingFile(a, entry_id, entry.file.slice(), entry.text.slice(), entry.reply_to.slice());
+            }
             continue;
         }
         if (entry.client_msg_id.len == 0) continue;
@@ -4284,6 +4298,25 @@ fn insertMessageSorted(a: *App, message: Message) void {
     a.message_count += 1;
     if (a.selected_message) |selected| {
         if (selected >= index) a.selected_message = selected + 1;
+    }
+}
+
+fn slackImageFile(path: []const u8) bool {
+    for ([_][]const u8{ ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" }) |extension| {
+        if (std.ascii.endsWithIgnoreCase(path, extension)) return true;
+    }
+    return false;
+}
+
+fn appendSlackPendingFile(a: *App, entry_id: []const u8, file_path: []const u8, text: []const u8, thread_ts: []const u8) void {
+    if (a.message_count >= max_messages or entry_id.len == 0) return;
+    appendSlackPending(a, text, entry_id, thread_ts);
+    const message = &a.messages[a.message_count - 1];
+    if (slackImageFile(file_path)) {
+        message.media_type.set("image");
+        message.local_path.set(a.allocator, file_path);
+    } else {
+        message.filename.set(a.allocator, std.fs.path.basename(file_path));
     }
 }
 
