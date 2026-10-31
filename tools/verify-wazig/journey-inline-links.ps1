@@ -11,14 +11,8 @@ function Record-InlineStage($Session, $Record) {
 
 function Focus-InlineApp($Session) {
     $app = Get-App $Session
-    $state = Read-Control $Session status
-    $point = [VerifyWindow+Point]::new()
-    $point.X = [int](($state.composer.box.left + $state.composer.box.right) / 2)
-    $point.Y = [int](($state.composer.box.top + $state.composer.box.bottom) / 2)
-    $null = [VerifyWindow]::ClientToScreen($app.MainWindowHandle, [ref]$point)
     $null = Wait-Until {
-        [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
-        [InlineLinksNative]::Click($Session.pid, $point.X, $point.Y)
+        [VerifyWindow]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
         $foreground = [VerifyWindow]::GetForegroundWindow()
         $owner = [uint32]0
         if ($foreground -ne [IntPtr]::Zero) { [VerifyWindow]::GetWindowThreadProcessId($foreground, [ref]$owner) | Out-Null }
