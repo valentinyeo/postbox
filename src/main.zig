@@ -11563,7 +11563,8 @@ fn messageBubbleWidth(a: *const App, available_width: i32) i32 {
 }
 
 fn chatColumn(a: *const App, available_width: i32) win.RECT {
-    const width = @max(1, @min(px(a, theme.chat_column_width), available_width - px(a, 32)));
+    const margin = px(a, compose_layout.column_margin);
+    const width = @max(1, @min(px(a, theme.chat_column_width) - 2 * margin, available_width - 2 * margin));
     const left = @divTrunc(available_width - width, 2);
     return .{ .left = left, .top = 0, .right = left + width, .bottom = 0 };
 }

@@ -47,8 +47,10 @@ pub const Layout = struct {
     send: Rect = .{},
 };
 
+pub const column_margin = 14;
+
 pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool, dictating: bool) Layout {
-    const margin = @min(scale(14, dpi), @divTrunc(@max(0, pane.right - pane.left), 2));
+    const margin = @min(scale(column_margin, dpi), @divTrunc(@max(0, pane.right - pane.left), 2));
     const bottom = @max(pane.top, pane.bottom - scale(11, dpi));
     const column_inset = @max(0, @divTrunc(pane.right - pane.left - scale(@import("theme.zig").chat_column_width, dpi), 2));
     const box = Rect{ .left = pane.left + column_inset + margin, .top = @max(pane.top, bottom - edit_height), .right = pane.right - column_inset - margin, .bottom = bottom };
