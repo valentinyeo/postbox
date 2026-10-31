@@ -12823,6 +12823,15 @@ fn openUrlWide(a: *App, url: [*:0]const u16) void {
     if (@intFromPtr(result) <= 32) setStatus(a, "Windows could not open the link");
 }
 
+fn trackPopupMenu(a: *App, menu: win.HMENU, x: i32, y: i32, flags: win.UINT) win.BOOL {
+    if (verification_fixture) {
+        a.verification_menu_entry_count +%= 1;
+        a.verification_menu_prefix_age_ms = if (a.inbox_sequence.started) |started| win.GetTickCount64() -| started else null;
+    }
+    a.inbox_sequence.started = null;
+    return win.TrackPopupMenu(menu, flags, x, y, 0, a.hwnd.?, null);
+}
+
 fn openReactionMenu(a: *App, x: i32, y: i32) void {
     const menu = win.CreatePopupMenu() orelse return;
     defer _ = win.DestroyMenu(menu);
@@ -12837,7 +12846,7 @@ fn openReactionMenu(a: *App, x: i32, y: i32) void {
     appendMessageMenuItem(menu, 0, null);
     addReactionItems(menu);
     a.reaction_row_rect = null;
-    const choice = win.TrackPopupMenu(menu, win.TPM_RETURNCMD | win.TPM_NONOTIFY, x, y, 0, a.hwnd.?, null);
+    const choice = trackPopupMenu(a, menu, x, y, win.TPM_RETURNCMD | win.TPM_NONOTIFY);
     if (choice == command_reply) {
         startReply(a);
     } else if (choice == reaction_row) {
@@ -18244,7 +18253,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                         _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_text, lit("Copy message text"));
                         if (item.transcript.len > 0) _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_transcript, lit("Copy transcript"));
                         if (item.link_count > 0) _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_link, lit("Copy link address"));
-                        const choice = win.TrackPopupMenu(menu, win.TPM_RETURNCMD | win.TPM_NONOTIFY, point.x, point.y, 0, a.hwnd.?, null);
+                        const choice = trackPopupMenu(a, menu, point.x, point.y, win.TPM_RETURNCMD | win.TPM_NONOTIFY);
                         if (choice == command_reply) startReply(a) else reactToSelected(a, @intCast(choice));
                         return 0;
                     }
@@ -18324,7 +18333,7 @@ fn openChatMenu(a: *App, lparam: win.LPARAM) void {
             .show_archived = a.show_archived,
         }, .{ .archive = command_archive, .pin = command_pin }, &out);
         for (rows) |item| _ = win.AppendMenuW(popup, win.MF_STRING, item.command, item.label.ptr);
-        break :menu win.TrackPopupMenu(popup, win.TPM_RETURNCMD | win.TPM_NONOTIFY | win.TPM_RIGHTBUTTON, point.x, point.y, 0, a.hwnd.?, null);
+        break :menu trackPopupMenu(a, popup, point.x, point.y, win.TPM_RETURNCMD | win.TPM_NONOTIFY | win.TPM_RIGHTBUTTON);
     };
     if (choice != 0) runCommand(a, @intCast(choice));
 }
@@ -18332,14 +18341,6 @@ fn openChatMenu(a: *App, lparam: win.LPARAM) void {
 fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
     switch (message) {
-        win.WM_ENTERMENULOOP => {
-            if (verification_fixture) {
-                a.verification_menu_entry_count +%= 1;
-                a.verification_menu_prefix_age_ms = if (a.inbox_sequence.started) |started| win.GetTickCount64() -| started else null;
-            }
-            a.inbox_sequence.started = null;
-            return win.DefWindowProcW(hwnd, message, wparam, lparam);
-        },
         wm_update_ready => {
             if (wparam >= 2 and wparam <= 5) a.update_check_running = false;
             if (wparam == 1 or wparam >= 6) a.update_install_running.store(false, .release);
