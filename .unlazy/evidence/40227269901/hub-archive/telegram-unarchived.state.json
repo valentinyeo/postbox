@@ -1,0 +1,125 @@
+{
+  "version": "0.0.526",
+  "view": "all",
+  "selected": {
+    "id": "telegram:user:7001",
+    "provider": "telegram",
+    "account": "telegram",
+    "view_account": "telegram",
+    "saved": false,
+    "name": "Fixture Contact Two",
+    "kind": "direct",
+    "messenger": "telegram",
+    "unread": false,
+    "unread_count": 0,
+    "pinned": false,
+    "archived": false,
+    "last_message_time": "2026-10-10T10:00:00Z",
+    "archive_label": ""
+  },
+  "current_view": {
+    "provider": null,
+    "account": null,
+    "label": "combined inbox",
+    "inbox": true
+  },
+  "view_order": [
+    {
+      "provider": "whatsapp",
+      "account": "personal",
+      "label": "WhatsApp personal",
+      "inbox": false
+    },
+    {
+      "provider": "telegram",
+      "account": "telegram",
+      "label": "Telegram",
+      "inbox": false
+    },
+    {
+      "provider": "signal",
+      "account": "signal",
+      "label": "Signal",
+      "inbox": false
+    }
+  ],
+  "include_archived": false,
+  "sync": "stopped",
+  "slack_connected": false,
+  "pending_sends": 0,
+  "pending_archives": 0,
+  "slack_chat_count": 0,
+  "chat_count": 1,
+  "show_archived": false,
+  "unread_only": false,
+  "search": "",
+  "theme": "amoled",
+  "staged_attachment_count": 0,
+  "paints": {
+    "window": 46,
+    "window_full": 16,
+    "canvas": 17,
+    "canvas_full": 17,
+    "list": 22,
+    "list_full": 22
+  },
+  "composer": {
+    "box": {
+      "left": 356,
+      "top": 642,
+      "right": 1010,
+      "bottom": 686
+    },
+    "lines": 1,
+    "controls": [
+      {
+        "name": "attach",
+        "left": 372,
+        "top": 646,
+        "right": 408,
+        "bottom": 682
+      },
+      {
+        "name": "text",
+        "left": 412,
+        "top": 643,
+        "right": 826,
+        "bottom": 685
+      },
+      {
+        "name": "mic",
+        "left": 838,
+        "top": 646,
+        "right": 874,
+        "bottom": 682
+      },
+      {
+        "name": "dictate",
+        "left": 878,
+        "top": 646,
+        "right": 914,
+        "bottom": 682
+      },
+      {
+        "name": "emoji",
+        "left": 918,
+        "top": 646,
+        "right": 954,
+        "bottom": 682
+      },
+      {
+        "name": "send",
+        "left": 958,
+        "top": 646,
+        "right": 994,
+        "bottom": 682
+      }
+    ]
+  },
+  "memory": {
+    "working_set_kb": 27992,
+    "private_kb": 65796,
+    "module_count": 61,
+    "media_foundation_loaded": false
+  }
+}

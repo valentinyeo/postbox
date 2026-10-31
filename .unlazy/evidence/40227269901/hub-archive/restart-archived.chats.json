@@ -1,0 +1,24 @@
+{
+  "messenger": "all",
+  "archived": true,
+  "filtered": false,
+  "total": 1,
+  "chats": [
+    {
+      "id": "personal:120363000000000001@g.us",
+      "provider": "whatsapp",
+      "account": "86adf9b4d9a6403d",
+      "view_account": "personal",
+      "saved": false,
+      "name": "Verification Group",
+      "kind": "Group",
+      "messenger": "whatsapp",
+      "unread": true,
+      "unread_count": 1,
+      "pinned": false,
+      "archived": true,
+      "last_message_time": "2026-10-10T13:00:00Z",
+      "archive_label": "Kept archived"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "chats": [
+    "personal:15550000005@s.whatsapp.net",
+    "personal:15550000006@s.whatsapp.net"
+  ],
+  "last_message_ts": {
+    "personal:15550000005@s.whatsapp.net": "2026-10-10T11:30:00Z",
+    "personal:15550000006@s.whatsapp.net": "2026-10-10T11:00:00Z"
+  }
+}

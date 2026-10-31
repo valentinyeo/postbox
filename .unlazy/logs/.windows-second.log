@@ -1,0 +1,254 @@
+﻿2026-10-25T18:59:19.6805827Z Current runner version: '2.338.0'
+2026-10-25T18:59:19.6832566Z ##[group]Runner Image Provisioner
+2026-10-25T18:59:19.6833537Z Hosted Compute Agent
+2026-10-25T18:59:19.6834055Z Version: 20261021.618
+2026-10-25T18:59:19.6834719Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+2026-10-25T18:59:19.6835359Z Build Date: 2026-10-21T00:45:21Z
+2026-10-25T18:59:19.6835958Z Worker ID: {5a7c2a07-62ec-4940-a949-db8a98f03817}
+2026-10-25T18:59:19.6836595Z Region: westus3
+2026-10-25T18:59:19.6837076Z Cloud: Azure
+2026-10-25T18:59:19.6837622Z ##[endgroup]
+2026-10-25T18:59:19.6840326Z ##[group]Operating System
+2026-10-25T18:59:19.6841077Z Microsoft Windows Server 2025
+2026-10-25T18:59:19.6841733Z 10.0.26100
+2026-10-25T18:59:19.6842195Z Datacenter
+2026-10-25T18:59:19.6842707Z ##[endgroup]
+2026-10-25T18:59:19.6843191Z ##[group]Runner Image
+2026-10-25T18:59:19.6843699Z Image: windows-2025-vs2026
+2026-10-25T18:59:19.6844262Z Version: 20261021.278.1
+2026-10-25T18:59:19.6845730Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261021.278/images/windows/Windows2025-VS2026-Readme.md
+2026-10-25T18:59:19.6847226Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20261021.278
+2026-10-25T18:59:19.6848074Z ##[endgroup]
+2026-10-25T18:59:19.6849089Z ##[group]GITHUB_TOKEN Permissions
+2026-10-25T18:59:19.6851028Z Contents: read
+2026-10-25T18:59:19.6851585Z Metadata: read
+2026-10-25T18:59:19.6852060Z ##[endgroup]
+2026-10-25T18:59:19.6854661Z Secret source: Actions
+2026-10-25T18:59:19.6855519Z Cache mode: write
+2026-10-25T18:59:19.6856159Z Prepare workflow directory
+2026-10-25T18:59:19.7245267Z Prepare all required actions
+2026-10-25T18:59:19.7295188Z Getting action download info
+2026-10-25T18:59:20.0284712Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-25T18:59:20.1510621Z Download action repository 'mlugg/setup-zig@v2' (SHA:d1434d08867e3ee9daa34448df10607b98908d29)
+2026-10-25T18:59:24.9618387Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-10-25T18:59:25.2650873Z Complete job name: unfurl-verification
+2026-10-25T18:59:25.4989392Z ##[group]Run actions/checkout@v4
+2026-10-25T18:59:25.4990321Z with:
+2026-10-25T18:59:25.4990597Z   repository: valentinyeo/wazig
+2026-10-25T18:59:25.4993682Z   token: ***
+2026-10-25T18:59:25.4993919Z   ssh-strict: true
+2026-10-25T18:59:25.4994163Z   ssh-user: git
+2026-10-25T18:59:25.4994407Z   persist-credentials: true
+2026-10-25T18:59:25.4994670Z   clean: true
+2026-10-25T18:59:25.4994905Z   sparse-checkout-cone-mode: true
+2026-10-25T18:59:25.4995177Z   fetch-depth: 1
+2026-10-25T18:59:25.4995405Z   fetch-tags: false
+2026-10-25T18:59:25.4995628Z   show-progress: true
+2026-10-25T18:59:25.4995871Z   lfs: false
+2026-10-25T18:59:25.4996080Z   submodules: false
+2026-10-25T18:59:25.4996312Z   set-safe-directory: true
+2026-10-25T18:59:25.4996583Z   allow-unsafe-pr-checkout: false
+2026-10-25T18:59:25.4997197Z ##[endgroup]
+2026-10-25T18:59:25.6420892Z Syncing repository: valentinyeo/wazig
+2026-10-25T18:59:25.6422264Z ##[group]Getting Git version info
+2026-10-25T18:59:25.6422703Z Working directory is 'D:\a\wazig\wazig'
+2026-10-25T18:59:25.7285999Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-10-25T18:59:26.1130208Z git version 2.56.0.windows.2
+2026-10-25T18:59:26.1184899Z ##[endgroup]
+2026-10-25T18:59:26.1202534Z Temporarily overriding HOME='D:\a\_temp\c6e88b00-607d-4a12-9fde-493db4a9881c' before making global git config changes
+2026-10-25T18:59:26.1203280Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-25T18:59:26.1212816Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\wazig\wazig
+2026-10-25T18:59:26.1875459Z Deleting the contents of 'D:\a\wazig\wazig'
+2026-10-25T18:59:26.1881766Z ##[group]Initializing the repository
+2026-10-25T18:59:26.1890136Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\wazig\wazig
+2026-10-25T18:59:26.2887599Z Initialized empty Git repository in D:/a/wazig/wazig/.git/
+2026-10-25T18:59:26.2935321Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/valentinyeo/wazig
+2026-10-25T18:59:26.3640502Z ##[endgroup]
+2026-10-25T18:59:26.3692415Z ##[group]Disabling automatic garbage collection
+2026-10-25T18:59:26.3693229Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-10-25T18:59:26.4050634Z ##[endgroup]
+2026-10-25T18:59:26.4051374Z ##[group]Setting up auth
+2026-10-25T18:59:26.4063329Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-10-25T18:59:26.4484128Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-10-25T18:59:27.9031091Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-25T18:59:27.9416302Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-10-25T18:59:28.4513154Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-25T18:59:28.4882509Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-10-25T18:59:29.0204660Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-10-25T18:59:29.0586830Z ##[endgroup]
+2026-10-25T18:59:29.0587381Z ##[group]Fetching the repository
+2026-10-25T18:59:29.0600998Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +1f1a57d53ea7b7a76c10eab5fcb842ecfebd3add:refs/remotes/pull/387/merge
+2026-10-25T18:59:30.6383618Z From https://github.com/valentinyeo/wazig
+2026-10-25T18:59:30.6385206Z  * [new ref]         1f1a57d53ea7b7a76c10eab5fcb842ecfebd3add -> pull/387/merge
+2026-10-25T18:59:30.6426928Z ##[endgroup]
+2026-10-25T18:59:30.6427765Z ##[group]Determining the checkout info
+2026-10-25T18:59:30.6429400Z ##[endgroup]
+2026-10-25T18:59:30.6440104Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-10-25T18:59:30.7056270Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-10-25T18:59:30.7424755Z ##[group]Checking out the ref
+2026-10-25T18:59:30.7437577Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force refs/remotes/pull/387/merge
+2026-10-25T18:59:30.9603519Z Note: switching to 'refs/remotes/pull/387/merge'.
+2026-10-25T18:59:30.9603983Z 
+2026-10-25T18:59:30.9604269Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-10-25T18:59:30.9605100Z changes and commit them, and you can discard any commits you make in this
+2026-10-25T18:59:30.9605849Z state without impacting any branches by switching back to a branch.
+2026-10-25T18:59:30.9606292Z 
+2026-10-25T18:59:30.9606587Z If you want to create a new branch to retain commits you create, you may
+2026-10-25T18:59:30.9607351Z do so (now or later) by using -c with the switch command. Example:
+2026-10-25T18:59:30.9607777Z 
+2026-10-25T18:59:30.9607971Z   git switch -c <new-branch-name>
+2026-10-25T18:59:30.9608267Z 
+2026-10-25T18:59:30.9608419Z Or undo this operation with:
+2026-10-25T18:59:30.9608714Z 
+2026-10-25T18:59:30.9608884Z   git switch -
+2026-10-25T18:59:30.9609109Z 
+2026-10-25T18:59:30.9609514Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-10-25T18:59:30.9610096Z 
+2026-10-25T18:59:30.9610651Z HEAD is now at 1f1a57d Merge d53b3310194ec80ea80b772aa484b31632012b24 into ef54fd8347ab436d94e2aa8683ae884ad32c23c6
+2026-10-25T18:59:30.9696195Z ##[endgroup]
+2026-10-25T18:59:31.0260786Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-10-25T18:59:31.0618659Z 1f1a57d53ea7b7a76c10eab5fcb842ecfebd3add
+2026-10-25T18:59:31.1131266Z ##[group]Run mlugg/setup-zig@v2
+2026-10-25T18:59:31.1131610Z with:
+2026-10-25T18:59:31.1131799Z   version: 0.16.0
+2026-10-25T18:59:31.1131996Z   use-cache: true
+2026-10-25T18:59:31.1132180Z   cache-size-limit: 2048
+2026-10-25T18:59:31.1132393Z ##[endgroup]
+2026-10-25T18:59:31.4406932Z Using tool-cache: false
+2026-10-25T18:59:31.4412707Z Fetching zig-x86_64-windows-0.16.0.zip
+2026-10-25T18:59:31.8018974Z Cache hit for: setup-zig-tarball-zig-x86_64-windows-0.16.0
+2026-10-25T18:59:33.0422597Z Received 67108864 of 91486638 (73.4%), 63.6 MBs/sec
+2026-10-25T18:59:33.2053843Z Received 91486638 of 91486638 (100.0%), 74.6 MBs/sec
+2026-10-25T18:59:33.2057970Z Cache Size: ~87 MB (91486638 B)
+2026-10-25T18:59:33.2152928Z [command]"C:\Program Files\Git\usr\bin\tar.exe" -xf D:/a/_temp/33c678c8-6287-4ae2-96df-cfa8a48d866f/cache.tzst -P -C D:/a/wazig/wazig --force-local --use-compress-program "zstd -d"
+2026-10-25T18:59:33.5128602Z Cache restored successfully
+2026-10-25T18:59:33.5201754Z Fetch took 2079 ms
+2026-10-25T18:59:33.5202076Z Extracting tarball zig-x86_64-windows-0.16.0.zip
+2026-10-25T18:59:33.6342040Z [command]"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Unrestricted -Command "$ErrorActionPreference = 'Stop' ; try { Add-Type -AssemblyName System.IO.Compression.ZipFile } catch { } ; try { [System.IO.Compression.ZipFile]::ExtractToDirectory('D:\a\_temp\zig-x86_64-windows-0.16.0.zip', 'D:\a\_temp\ff323b9f-44c0-43ce-a053-076f6aab0c09', $true) } catch { if (($_.Exception.GetType().FullName -eq 'System.Management.Automation.MethodException') -or ($_.Exception.GetType().FullName -eq 'System.Management.Automation.RuntimeException') ){ Expand-Archive -LiteralPath 'D:\a\_temp\zig-x86_64-windows-0.16.0.zip' -DestinationPath 'D:\a\_temp\ff323b9f-44c0-43ce-a053-076f6aab0c09' -Force } else { throw $_ } } ;"
+2026-10-25T18:59:39.0896996Z Extract took 5570 ms
+2026-10-25T18:59:39.1498361Z [command]D:\a\_temp\ff323b9f-44c0-43ce-a053-076f6aab0c09\zig-x86_64-windows-0.16.0\zig.exe version
+2026-10-25T18:59:39.4707538Z 0.16.0
+2026-10-25T18:59:39.4760432Z Resolved Zig version 0.16.0
+2026-10-25T18:59:39.4771088Z Attempting restore of Zig cache with prefix 'setup-zig-cache-v2-unfurl_verification-zig-x86_64-windows-0.16.0--'
+2026-10-25T18:59:39.7578074Z Cache hit for restore-key: setup-zig-cache-v2-unfurl_verification-zig-x86_64-windows-0.16.0--40223512379-1
+2026-10-25T18:59:40.9598264Z Received 88080384 of 319984993 (27.5%), 83.7 MBs/sec
+2026-10-25T18:59:41.9670467Z Received 247463936 of 319984993 (77.3%), 117.4 MBs/sec
+2026-10-25T18:59:42.6523373Z Received 319984993 of 319984993 (100.0%), 113.5 MBs/sec
+2026-10-25T18:59:42.6523951Z Cache Size: ~305 MB (319984993 B)
+2026-10-25T18:59:42.6524810Z [command]"C:\Program Files\Git\usr\bin\tar.exe" -xf D:/a/_temp/02e5e2ef-07f4-4636-9246-fa7b54297267/cache.tzst -P -C D:/a/wazig/wazig --force-local --use-compress-program "zstd -d"
+2026-10-25T18:59:48.4543254Z Cache restored successfully
+2026-10-25T18:59:48.4800237Z Cache hit (key 'setup-zig-cache-v2-unfurl_verification-zig-x86_64-windows-0.16.0--40223512379-1'): populating Zig cache directory at D:\a\wazig\wazig\.zig-cache
+2026-10-25T18:59:48.5188504Z ##[group]Run zig test src/environment_keys.zig -lc -ladvapi32 -lkernel32 -lcrypt32 --test-filter ISSUE-517
+2026-10-25T18:59:48.5189554Z [36;1mzig test src/environment_keys.zig -lc -ladvapi32 -lkernel32 -lcrypt32 --test-filter ISSUE-517[0m
+2026-10-25T18:59:48.5656567Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-25T18:59:48.5656935Z env:
+2026-10-25T18:59:48.5657182Z   ZIG_GLOBAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T18:59:48.5657494Z   ZIG_LOCAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T18:59:48.5657775Z ##[endgroup]
+2026-10-25T19:01:51.0753159Z 1/3 environment_keys.test.ISSUE-517 saved user key wins over a stale inherited key...OK
+2026-10-25T19:01:51.0754753Z 2/3 environment_keys.test.ISSUE-517 empty and missing user keys fall back to the process...OK
+2026-10-25T19:01:51.0786520Z 3/3 environment_keys.test.ISSUE-517 saved user keys expand inside the overridden fixture registry...OK
+2026-10-25T19:01:51.0787138Z All 3 tests passed.
+2026-10-25T19:01:51.2107880Z ##[group]Run zig test src/smooth_shapes.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-545
+2026-10-25T19:01:51.2108638Z [36;1mzig test src/smooth_shapes.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-545[0m
+2026-10-25T19:01:51.2182535Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-25T19:01:51.2182886Z env:
+2026-10-25T19:01:51.2183136Z   ZIG_GLOBAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:01:51.2183472Z   ZIG_LOCAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:01:51.2183762Z ##[endgroup]
+2026-10-25T19:01:55.0563680Z 1/1 smooth_shapes.test.ISSUE-545 row-sized buffer places GDI and GDI+ pixels where unbuffered painting does...OK
+2026-10-25T19:01:55.0564503Z All 1 tests passed.
+2026-10-25T19:01:55.2063321Z ##[group]Run zig build -Dtarget=x86_64-windows-gnu --release=small
+2026-10-25T19:01:55.2063859Z [36;1mzig build -Dtarget=x86_64-windows-gnu --release=small[0m
+2026-10-25T19:01:55.2138556Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-25T19:01:55.2138891Z env:
+2026-10-25T19:01:55.2139119Z   ZIG_GLOBAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:01:55.2139440Z   ZIG_LOCAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:01:55.2139721Z ##[endgroup]
+2026-10-25T19:04:08.9813611Z ##[group]Run $p = Start-Process -FilePath "zig-out\bin\Messages.exe" -ArgumentList "--unfurl-smoke" -Wait -PassThru
+2026-10-25T19:04:08.9814545Z [36;1m$p = Start-Process -FilePath "zig-out\bin\Messages.exe" -ArgumentList "--unfurl-smoke" -Wait -PassThru[0m
+2026-10-25T19:04:08.9815285Z [36;1mif (Test-Path "smoke-out\results.txt") { Get-Content "smoke-out\results.txt" | Write-Host }[0m
+2026-10-25T19:04:08.9815875Z [36;1mexit $p.ExitCode[0m
+2026-10-25T19:04:08.9888018Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-25T19:04:08.9888444Z env:
+2026-10-25T19:04:08.9888823Z   ZIG_GLOBAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:04:08.9889233Z   ZIG_LOCAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:04:08.9889608Z   UNFURL_SMOKE_DIR: smoke-out
+2026-10-25T19:04:08.9890215Z   UNFURL_SMOKE_VIDEO: D:\a\wazig\wazig\tools\fixtures\smoke-clip.mp4
+2026-10-25T19:04:08.9890626Z ##[endgroup]
+2026-10-25T19:04:19.4179721Z classify https://www.youtube.com/watch?v=dQw4w9WgXcQ: PASS (got youtube/dQw4w9WgXcQ)
+2026-10-25T19:04:19.4185874Z classify https://youtu.be/dQw4w9WgXcQ?t=42: PASS (got youtube/dQw4w9WgXcQ)
+2026-10-25T19:04:19.4194684Z classify https://www.youtube.com/shorts/dQw4w9WgXcQ?feature=share: PASS (got youtube/dQw4w9WgXcQ)
+2026-10-25T19:04:19.4199235Z classify https://www.instagram.com/reel/Cabcdefghij/: PASS (got instagram/Cabcdefghij)
+2026-10-25T19:04:19.4203947Z classify https://www.instagram.com/p/Cabcdefghij/?img_index=1: PASS (got instagram/Cabcdefghij)
+2026-10-25T19:04:19.4208568Z classify https://www.facebook.com/watch?v=1234567890: PASS (got facebook/1234567890)
+2026-10-25T19:04:19.4213117Z classify https://www.facebook.com/nike/videos/9876543210/: PASS (got facebook/9876543210)
+2026-10-25T19:04:19.4217610Z classify https://fb.watch/AbCdEf123/: PASS (got facebook/AbCdEf123)
+2026-10-25T19:04:19.4222790Z classify https://example.com/watch?v=dQw4w9WgXcQ: PASS (got page/44fc5c8e9edb1d8)
+2026-10-25T19:04:19.4229367Z classify https://youtube.com.evil.com/watch?v=dQw4w9WgXcQ: PASS (got page/871477db4aa7ab4a)
+2026-10-25T19:04:19.4233723Z classify https://www.facebook.com/photo/?fbid=123: PASS (got page/f0d7dffdd654a811)
+2026-10-25T19:04:19.4237721Z fonts: private IBM Plex loaded = true (4/4)
+2026-10-25T19:04:19.4242225Z text: directwrite = true
+2026-10-25T19:04:19.4247305Z card youtube/dQw4w9WgXcQ: status=ready title_bytes=68 author_bytes=11 thumbnail=true decision=open externally (ticket fallback)
+2026-10-25T19:04:19.4252314Z card instagram/Cabcdefghij: status=failed title_bytes=0 author_bytes=0 thumbnail=false decision=open externally (ticket fallback)
+2026-10-25T19:04:19.4256917Z card facebook/1234567890: status=failed title_bytes=0 author_bytes=0 thumbnail=false decision=open externally (ticket fallback)
+2026-10-25T19:04:19.4260572Z render card-youtube.bmp: PASS
+2026-10-25T19:04:19.4264653Z render card-instagram.bmp: PASS
+2026-10-25T19:04:19.4269042Z render card-facebook.bmp: PASS
+2026-10-25T19:04:19.4273711Z media: test clip D:\a\wazig\wazig\tools\fixtures\smoke-clip.mp4 state=PLAYING video=160x90: PASS
+2026-10-25T19:04:19.4278249Z capture player-windowed.bmp: true
+2026-10-25T19:04:19.4282825Z fullscreen enter: had caption before = true, borderless and covering monitor after = true: PASS
+2026-10-25T19:04:19.4287092Z capture player-fullscreen.bmp: true
+2026-10-25T19:04:19.4291139Z fullscreen exit: caption and placement restored = true: PASS
+2026-10-25T19:04:19.4295393Z player close on ESC: PASS
+2026-10-25T19:04:19.4299677Z SMOKE RESULT: PASS (0 checks failed)
+2026-10-25T19:04:19.4974300Z ##[group]Run actions/upload-artifact@v4
+2026-10-25T19:04:19.4974692Z with:
+2026-10-25T19:04:19.4974953Z   name: unfurl-verification-evidence
+2026-10-25T19:04:19.4975284Z   path: smoke-out/
+2026-10-25T19:04:19.4975524Z   if-no-files-found: warn
+2026-10-25T19:04:19.4975828Z   compression-level: 6
+2026-10-25T19:04:19.4976087Z   overwrite: false
+2026-10-25T19:04:19.4976339Z   include-hidden-files: false
+2026-10-25T19:04:19.4976637Z env:
+2026-10-25T19:04:19.4976894Z   ZIG_GLOBAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:04:19.4977249Z   ZIG_LOCAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:04:19.4977611Z ##[endgroup]
+2026-10-25T19:04:19.6860238Z (node:6876) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-25T19:04:19.6861702Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-25T19:04:19.6954057Z With the provided path, there will be 6 files uploaded
+2026-10-25T19:04:19.6960050Z Artifact name is valid!
+2026-10-25T19:04:19.6961552Z Root directory input is valid!
+2026-10-25T19:04:20.0359179Z Beginning upload of artifact content to blob storage
+2026-10-25T19:04:20.1084503Z (node:6876) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-10-25T19:04:20.4016309Z Uploaded bytes 57490
+2026-10-25T19:04:20.4616537Z Finished uploading artifact content to blob storage!
+2026-10-25T19:04:20.4617778Z SHA256 digest of uploaded artifact zip is 8312e838e69a3253a5a42aae7364c2b076a73b8dc685f94de4fd8ffddfaf44b2
+2026-10-25T19:04:20.4621384Z Finalizing artifact upload
+2026-10-25T19:04:20.9117151Z Artifact unfurl-verification-evidence.zip successfully finalized. Artifact ID 12610825926
+2026-10-25T19:04:20.9118474Z Artifact unfurl-verification-evidence has been successfully uploaded! Final size is 57490 bytes. Artifact ID is 12610825926
+2026-10-25T19:04:20.9130794Z Artifact download URL: https://github.com/valentinyeo/wazig/actions/runs/40223754056/artifacts/12610825926
+2026-10-25T19:04:20.9481135Z Post job cleanup.
+2026-10-25T19:04:21.2639613Z Checking size of cache directory at D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:04:22.6453613Z Cache directory is 1422259021 bytes, below limit of 2147483648 bytes; keeping intact
+2026-10-25T19:04:22.6459296Z Saving Zig cache with key 'setup-zig-cache-v2-unfurl_verification-zig-x86_64-windows-0.16.0--40223754056-1'
+2026-10-25T19:04:22.7278671Z [command]"C:\Program Files\Git\usr\bin\tar.exe" --posix -cf cache.tzst --exclude cache.tzst -P -C D:/a/wazig/wazig --files-from manifest.txt --force-local --use-compress-program "zstd -T0"
+2026-10-25T19:04:30.3574988Z Sent 0 of 358742312 (0.0%), 0.0 MBs/sec
+2026-10-25T19:04:31.3624260Z Sent 291633448 of 358742312 (81.3%), 138.7 MBs/sec
+2026-10-25T19:04:31.4385196Z Sent 358742312 of 358742312 (100.0%), 164.4 MBs/sec
+2026-10-25T19:04:31.7233977Z Post job cleanup.
+2026-10-25T19:04:31.9089278Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-10-25T19:04:31.9444921Z git version 2.56.0.windows.2
+2026-10-25T19:04:31.9508836Z Temporarily overriding HOME='D:\a\_temp\f9f7af8b-83b7-48b8-924d-db6b77b53059' before making global git config changes
+2026-10-25T19:04:31.9510110Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-25T19:04:31.9519761Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\wazig\wazig
+2026-10-25T19:04:31.9927072Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-10-25T19:04:32.0313487Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-10-25T19:04:32.5727214Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-25T19:04:32.6058261Z http.https://github.com/.extraheader
+2026-10-25T19:04:32.6108637Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+2026-10-25T19:04:32.6489202Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-10-25T19:04:33.2349841Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-25T19:04:33.2744361Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-10-25T19:04:33.8403104Z Cleaning up orphan processes
+2026-10-25T19:04:33.8718999Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/upload-artifact@v4, mlugg/setup-zig@v2. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

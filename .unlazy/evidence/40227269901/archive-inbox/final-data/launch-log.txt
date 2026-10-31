@@ -1,0 +1,45 @@
+1792957943 message backend: hub
+1792957943 startup: no saved account tag, caches wait for auth status
+1792957943 startup: no deepgram key
+1792957943 startup-timing: pre-window work done 31 ms
+1792957943 verification: hub fixture ready
+1792957943 startup: window zoomed=true
+1792957943 startup-timing: window shown 109 ms
+1792957943 cache-load: chats snapshot missing
+1792957943 hub: baseline refreshed
+1792957943 chats-read: ok 54884 bytes, 264 chats
+1792957943 startup-timing: first messages shown (fresh) 140 ms
+1792957944 hub: baseline refreshed
+1792957944 chats-read: ok 54884 bytes, 264 chats
+1792957948 chats-read: ok 54884 bytes, 0 chats
+1792957949 chats-read: ok 54884 bytes, 0 chats
+1792957949 chats-read: ok 54899 bytes, 264 chats
+1792957950 chats-read: ok 54884 bytes, 0 chats
+1792957950 messages-read: dropped reply, selection changed
+1792957950 chats-read: ok 54884 bytes, 0 chats
+1792957951 message backend: hub
+1792957951 startup: saved account tag loaded
+1792957951 startup: no deepgram key
+1792957951 startup-timing: pre-window work done 16 ms
+1792957951 verification: hub fixture ready
+1792957951 startup: window zoomed=true
+1792957951 startup-timing: window shown 94 ms
+1792957951 startup-timing: chat list from cache 110 ms
+1792957951 cache-load: 54884 bytes, applied=true
+1792957951 hub: baseline refreshed
+1792957951 chats-read: ok 54884 bytes, 0 chats
+1792957951 chats-read: ok 54884 bytes, 0 chats
+1792957952 chats-read: ok 54899 bytes, 264 chats
+1792957952 startup-timing: first messages shown (cache) 891 ms
+1792957952 hub: baseline refreshed
+1792957952 chats-read: ok 54899 bytes, 264 chats
+1792957953 chats-read: ok 54884 bytes, 0 chats
+1792957953 messages-read: dropped reply, selection changed
+1792957953 chats-read: ok 54881 bytes, 0 chats
+1792957953 chats-read: ok 54881 bytes, 1 chats
+1792957953 chats-read: ok 54881 bytes, 2 chats
+1792957953 chats-read: ok 54881 bytes, 3 chats
+1792957954 chats-read: ok 54896 bytes, 261 chats
+1792957954 messages-read: dropped reply, identity changed
+1792957955 chats-read: ok 54881 bytes, 3 chats
+1792957955 messages-read: dropped reply, identity changed

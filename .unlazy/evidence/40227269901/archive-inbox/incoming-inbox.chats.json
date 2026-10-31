@@ -1,0 +1,56 @@
+{
+  "messenger": "all",
+  "archived": false,
+  "filtered": false,
+  "total": 3,
+  "chats": [
+    {
+      "id": "personal:120363000000000002@g.us",
+      "provider": "whatsapp",
+      "account": "personal",
+      "view_account": "personal",
+      "saved": false,
+      "name": "Archive workload 000",
+      "kind": "Group",
+      "messenger": "whatsapp",
+      "unread": true,
+      "unread_count": 1,
+      "pinned": false,
+      "archived": false,
+      "last_message_time": "2026-10-25T19:52:43Z",
+      "archive_label": ""
+    },
+    {
+      "id": "personal:15550000001@s.whatsapp.net",
+      "provider": "whatsapp",
+      "account": "personal",
+      "view_account": "personal",
+      "saved": false,
+      "name": "Archive workload 001",
+      "kind": "direct",
+      "messenger": "whatsapp",
+      "unread": true,
+      "unread_count": 1,
+      "pinned": false,
+      "archived": false,
+      "last_message_time": "2026-10-25T19:52:43Z",
+      "archive_label": ""
+    },
+    {
+      "id": "slack:T0ARCHIVE:C0000000001",
+      "provider": "slack",
+      "account": "T0ARCHIVE",
+      "view_account": "T0ARCHIVE",
+      "saved": false,
+      "name": "Archive workload slack",
+      "kind": "direct",
+      "messenger": "slack",
+      "unread": true,
+      "unread_count": 1,
+      "pinned": false,
+      "archived": false,
+      "last_message_time": "2026-10-25T19:52:43Z",
+      "archive_label": ""
+    }
+  ]
+}

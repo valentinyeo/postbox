@@ -1,0 +1,275 @@
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 ci valentinyeo/wazig#387 · 40226708981
+Triggered via pull_request about 1 minute ago
+
+JOBS
+* unfurl-verification (ID 121269504449)
+* tdlib-cache / cache (ID 121269504690)
+* ci (ID 121269504705)
+* pin-icon-tests (ID 121269504863)
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 ci valentinyeo/wazig#387 · 40226708981
+Triggered via pull_request about 2 minutes ago
+
+JOBS
+* unfurl-verification (ID 121269504449)
+* tdlib-cache / cache (ID 121269504690)
+* ci (ID 121269504705)
+* pin-icon-tests (ID 121269504863)
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 ci valentinyeo/wazig#387 · 40226708981
+Triggered via pull_request about 3 minutes ago
+
+JOBS
+* unfurl-verification (ID 121269504449)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ ISSUE-517 isolated Windows user key loading
+  ✓ ISSUE-545 row-sized paint buffer pixel placement
+  * Build Messages.exe
+  * Run unfurl smoke on this Windows machine
+  * Upload unfurl evidence
+  * Post Run mlugg/setup-zig@v2
+  * Post Run actions/checkout@v4
+✓ tdlib-cache / cache in 6s (ID 121269504690)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Reject retired desktop dependencies
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* ci (ID 121269504705)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ No new code comments
+  * Python tooling tests
+  * Cache keys skip workflow files
+  * Run mlugg/setup-zig@v2
+  * Zig version
+  * ISSUE-517 voice transcription and historical negative control
+  * Preflight
+  * IGSH-833 bulk incoming regression on original main
+  * IGSH-767 archive intent and historical negative control
+  * Compile ARM64 release
+  * Agent guard tests
+  * Outbox lifecycle and regression controls
+  * Upload artifact
+  * Post Run actions/checkout@v4
+* pin-icon-tests (ID 121269504863)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  * Run mlugg/setup-zig@v2
+  * IGSH-494 pin geometry
+  * IGSH-494 pin source regression and negative controls
+  * Post Run mlugg/setup-zig@v2
+  * Post Run actions/checkout@v4
+* tdlib (ID 121270084462)
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 ci valentinyeo/wazig#387 · 40226708981
+Triggered via pull_request about 4 minutes ago
+
+JOBS
+* unfurl-verification (ID 121269504449)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ ISSUE-517 isolated Windows user key loading
+  ✓ ISSUE-545 row-sized paint buffer pixel placement
+  * Build Messages.exe
+  * Run unfurl smoke on this Windows machine
+  * Upload unfurl evidence
+  * Post Run mlugg/setup-zig@v2
+  * Post Run actions/checkout@v4
+✓ tdlib-cache / cache in 6s (ID 121269504690)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Reject retired desktop dependencies
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* ci (ID 121269504705)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ No new code comments
+  * Python tooling tests
+  * Cache keys skip workflow files
+  * Run mlugg/setup-zig@v2
+  * Zig version
+  * ISSUE-517 voice transcription and historical negative control
+  * Preflight
+  * IGSH-833 bulk incoming regression on original main
+  * IGSH-767 archive intent and historical negative control
+  * Compile ARM64 release
+  * Agent guard tests
+  * Outbox lifecycle and regression controls
+  * Upload artifact
+  * Post Run actions/checkout@v4
+✓ pin-icon-tests in 17s (ID 121269504863)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ IGSH-494 pin geometry
+  ✓ IGSH-494 pin source regression and negative controls
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* tdlib (ID 121270084462)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  * Build hub-only desktop
+  * Verify hub-only binary
+  * Exe size report
+  * Upload Telegram build artifact
+  * Post Run mlugg/setup-zig@v2
+  * Post Run actions/checkout@v4
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 ci valentinyeo/wazig#387 · 40226708981
+Triggered via pull_request about 5 minutes ago
+
+JOBS
+* unfurl-verification (ID 121269504449)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ ISSUE-517 isolated Windows user key loading
+  ✓ ISSUE-545 row-sized paint buffer pixel placement
+  * Build Messages.exe
+  * Run unfurl smoke on this Windows machine
+  * Upload unfurl evidence
+  * Post Run mlugg/setup-zig@v2
+  * Post Run actions/checkout@v4
+✓ tdlib-cache / cache in 6s (ID 121269504690)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Reject retired desktop dependencies
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* ci (ID 121269504705)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ No new code comments
+  ✓ Python tooling tests
+  ✓ Cache keys skip workflow files
+  ✓ Run mlugg/setup-zig@v2
+  ✓ Zig version
+  ✓ ISSUE-517 voice transcription and historical negative control
+  * Preflight
+  * IGSH-833 bulk incoming regression on original main
+  * IGSH-767 archive intent and historical negative control
+  * Compile ARM64 release
+  * Agent guard tests
+  * Outbox lifecycle and regression controls
+  * Upload artifact
+  * Post Run mlugg/setup-zig@v2
+  * Post Run actions/checkout@v4
+✓ pin-icon-tests in 17s (ID 121269504863)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ IGSH-494 pin geometry
+  ✓ IGSH-494 pin source regression and negative controls
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ tdlib in 22s (ID 121270084462)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ Build hub-only desktop
+  ✓ Verify hub-only binary
+  ✓ Exe size report
+  ✓ Upload Telegram build artifact
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* windows-smoke (ID 121270549801)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Download build
+  * Run hub smoke
+  * Validate hub smoke evidence
+  * Cleanup hub smoke
+  * Upload hub smoke evidence
+  * Post Run actions/checkout@v4
+X ceo/IGSH-833 ci valentinyeo/wazig#387 · 40226708981
+Triggered via pull_request about 6 minutes ago
+
+JOBS
+✓ unfurl-verification in 3m35s (ID 121269504449)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ ISSUE-517 isolated Windows user key loading
+  ✓ ISSUE-545 row-sized paint buffer pixel placement
+  ✓ Build Messages.exe
+  ✓ Run unfurl smoke on this Windows machine
+  ✓ Upload unfurl evidence
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ tdlib-cache / cache in 6s (ID 121269504690)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Reject retired desktop dependencies
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+X ci in 3m33s (ID 121269504705)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ No new code comments
+  ✓ Python tooling tests
+  ✓ Cache keys skip workflow files
+  ✓ Run mlugg/setup-zig@v2
+  ✓ Zig version
+  ✓ ISSUE-517 voice transcription and historical negative control
+  X Preflight
+  - IGSH-833 bulk incoming regression on original main
+  - IGSH-767 archive intent and historical negative control
+  - Compile ARM64 release
+  - Agent guard tests
+  - Outbox lifecycle and regression controls
+  - Upload artifact
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ pin-icon-tests in 17s (ID 121269504863)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ IGSH-494 pin geometry
+  ✓ IGSH-494 pin source regression and negative controls
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ tdlib in 22s (ID 121270084462)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ Build hub-only desktop
+  ✓ Verify hub-only binary
+  ✓ Exe size report
+  ✓ Upload Telegram build artifact
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ windows-smoke in 39s (ID 121270549801)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Download build
+  ✓ Run hub smoke
+  ✓ Validate hub smoke evidence
+  ✓ Cleanup hub smoke
+  ✓ Upload hub smoke evidence
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+- notify-release in 0s (ID 121270951613)
+
+ANNOTATIONS
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/download-artifact@v4, actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+windows-smoke: .github#2
+

@@ -1,0 +1,773 @@
+﻿2026-10-25T19:17:38.0935100Z Current runner version: '2.338.0'
+2026-10-25T19:17:38.0959493Z ##[group]Runner Image Provisioner
+2026-10-25T19:17:38.0960321Z Hosted Compute Agent
+2026-10-25T19:17:38.0960931Z Version: 20261021.618
+2026-10-25T19:17:38.0961559Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+2026-10-25T19:17:38.0962244Z Build Date: 2026-10-21T00:45:21Z
+2026-10-25T19:17:38.0962885Z Worker ID: {551a79e3-5766-4aee-a5d0-232fa849d384}
+2026-10-25T19:17:38.0963575Z Region: westus
+2026-10-25T19:17:38.0964081Z Cloud: Azure
+2026-10-25T19:17:38.0964585Z ##[endgroup]
+2026-10-25T19:17:38.0965870Z ##[group]Operating System
+2026-10-25T19:17:38.0966526Z Microsoft Windows Server 2025
+2026-10-25T19:17:38.0967152Z 10.0.26100
+2026-10-25T19:17:38.0967689Z Datacenter
+2026-10-25T19:17:38.0968180Z ##[endgroup]
+2026-10-25T19:17:38.0968677Z ##[group]Runner Image
+2026-10-25T19:17:38.0969225Z Image: windows-2025-vs2026
+2026-10-25T19:17:38.0969840Z Version: 20261021.278.1
+2026-10-25T19:17:38.0971316Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261021.278/images/windows/Windows2025-VS2026-Readme.md
+2026-10-25T19:17:38.0973336Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20261021.278
+2026-10-25T19:17:38.0974567Z ##[endgroup]
+2026-10-25T19:17:38.0975724Z ##[group]GITHUB_TOKEN Permissions
+2026-10-25T19:17:38.0977502Z Contents: read
+2026-10-25T19:17:38.0978198Z Metadata: read
+2026-10-25T19:17:38.0978795Z ##[endgroup]
+2026-10-25T19:17:38.0980769Z Secret source: Actions
+2026-10-25T19:17:38.0981719Z Cache mode: write
+2026-10-25T19:17:38.0982386Z Prepare workflow directory
+2026-10-25T19:17:38.1318373Z Prepare all required actions
+2026-10-25T19:17:38.1385783Z Getting action download info
+2026-10-25T19:17:38.4758246Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-25T19:17:38.6205786Z Download action repository 'mlugg/setup-zig@v2' (SHA:d1434d08867e3ee9daa34448df10607b98908d29)
+2026-10-25T19:17:43.7083885Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-10-25T19:17:44.1401910Z Complete job name: verify (slack-archive, true)
+2026-10-25T19:17:44.3164703Z ##[group]Run actions/checkout@v4
+2026-10-25T19:17:44.3165449Z with:
+2026-10-25T19:17:44.3165682Z   fetch-depth: 0
+2026-10-25T19:17:44.3166005Z   repository: valentinyeo/wazig
+2026-10-25T19:17:44.3168525Z   token: ***
+2026-10-25T19:17:44.3168761Z   ssh-strict: true
+2026-10-25T19:17:44.3168996Z   ssh-user: git
+2026-10-25T19:17:44.3169226Z   persist-credentials: true
+2026-10-25T19:17:44.3169491Z   clean: true
+2026-10-25T19:17:44.3169724Z   sparse-checkout-cone-mode: true
+2026-10-25T19:17:44.3170008Z   fetch-tags: false
+2026-10-25T19:17:44.3170248Z   show-progress: true
+2026-10-25T19:17:44.3170475Z   lfs: false
+2026-10-25T19:17:44.3170686Z   submodules: false
+2026-10-25T19:17:44.3170915Z   set-safe-directory: true
+2026-10-25T19:17:44.3171179Z   allow-unsafe-pr-checkout: false
+2026-10-25T19:17:44.3171679Z ##[endgroup]
+2026-10-25T19:17:44.4556500Z Syncing repository: valentinyeo/wazig
+2026-10-25T19:17:44.4558616Z ##[group]Getting Git version info
+2026-10-25T19:17:44.4559329Z Working directory is 'D:\a\wazig\wazig'
+2026-10-25T19:17:44.5477854Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-10-25T19:17:44.8615597Z git version 2.56.0.windows.2
+2026-10-25T19:17:44.8679586Z ##[endgroup]
+2026-10-25T19:17:44.8700819Z Temporarily overriding HOME='D:\a\_temp\9527a527-a383-4cdc-97d0-400edec2cf51' before making global git config changes
+2026-10-25T19:17:44.8702281Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-25T19:17:44.8711547Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\wazig\wazig
+2026-10-25T19:17:44.9362949Z Deleting the contents of 'D:\a\wazig\wazig'
+2026-10-25T19:17:44.9369851Z ##[group]Initializing the repository
+2026-10-25T19:17:44.9378734Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\wazig\wazig
+2026-10-25T19:17:45.0281771Z Initialized empty Git repository in D:/a/wazig/wazig/.git/
+2026-10-25T19:17:45.0333460Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/valentinyeo/wazig
+2026-10-25T19:17:45.0986921Z ##[endgroup]
+2026-10-25T19:17:45.0987981Z ##[group]Disabling automatic garbage collection
+2026-10-25T19:17:45.0995089Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-10-25T19:17:45.1362879Z ##[endgroup]
+2026-10-25T19:17:45.1363320Z ##[group]Setting up auth
+2026-10-25T19:17:45.1375786Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-10-25T19:17:45.1745833Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-10-25T19:17:46.5609342Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-25T19:17:46.5983395Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-10-25T19:17:47.1827056Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-25T19:17:47.2196892Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-10-25T19:17:47.7868483Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-10-25T19:17:47.8261178Z ##[endgroup]
+2026-10-25T19:17:47.8261651Z ##[group]Fetching the repository
+2026-10-25T19:17:47.8274452Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/* +abb740b19e068cbfeba735e620e83392214dd267:refs/remotes/pull/387/merge
+2026-10-25T19:17:50.4639250Z From https://github.com/valentinyeo/wazig
+2026-10-25T19:17:50.4640257Z  * [new branch]      WAZI-77-release-trigger                  -> origin/WAZI-77-release-trigger
+2026-10-25T19:17:50.4648563Z  * [new branch]      agent/wazi-14-crackle-fix                -> origin/agent/wazi-14-crackle-fix
+2026-10-25T19:17:50.4650585Z  * [new branch]      agent/wazi-14-pitch-speed                -> origin/agent/wazi-14-pitch-speed
+2026-10-25T19:17:50.4653632Z  * [new branch]      agent/wazi-18-played-097                 -> origin/agent/wazi-18-played-097
+2026-10-25T19:17:50.4654837Z  * [new branch]      agent/wazi-19-caret-blink                -> origin/agent/wazi-19-caret-blink
+2026-10-25T19:17:50.4657036Z  * [new branch]      agent/wazi-20-luna-model                 -> origin/agent/wazi-20-luna-model
+2026-10-25T19:17:50.4658616Z  * [new branch]      agent/wazi-24-inline-video               -> origin/agent/wazi-24-inline-video
+2026-10-25T19:17:50.4659836Z  * [new branch]      agent/wazi-26-version-from-tag           -> origin/agent/wazi-26-version-from-tag
+2026-10-25T19:17:50.4661049Z  * [new branch]      agent/wazi-31-msi-smoke-fix              -> origin/agent/wazi-31-msi-smoke-fix
+2026-10-25T19:17:50.4662154Z  * [new branch]      agent/wazi-37-paste-send                 -> origin/agent/wazi-37-paste-send
+2026-10-25T19:17:50.4663596Z  * [new branch]      agent/wazi-40-pin-chats                  -> origin/agent/wazi-40-pin-chats
+2026-10-25T19:17:50.4664789Z  * [new branch]      agent/wazi-42-palette-chats              -> origin/agent/wazi-42-palette-chats
+2026-10-25T19:17:50.4666026Z  * [new branch]      agent/wazi-65-color-emoji-begin-draw     -> origin/agent/wazi-65-color-emoji-begin-draw
+2026-10-25T19:17:50.4667767Z  * [new branch]      agent/wazi-66-ocr-fixes                  -> origin/agent/wazi-66-ocr-fixes
+2026-10-25T19:17:50.4670172Z  * [new branch]      agent/wazi-66-update-mutex               -> origin/agent/wazi-66-update-mutex
+2026-10-25T19:17:50.4671257Z  * [new branch]      agent/wazi-74-read-state                 -> origin/agent/wazi-74-read-state
+2026-10-25T19:17:50.4672367Z  * [new branch]      agent/wazi-77-release-chain              -> origin/agent/wazi-77-release-chain
+2026-10-25T19:17:50.4673510Z  * [new branch]      agent/wazi-81-update-reoffer             -> origin/agent/wazi-81-update-reoffer
+2026-10-25T19:17:50.4674640Z  * [new branch]      agent/wazi-86-auth-shape                 -> origin/agent/wazi-86-auth-shape
+2026-10-25T19:17:50.4675747Z  * [new branch]      agent/wazig-26-version-embed             -> origin/agent/wazig-26-version-embed
+2026-10-25T19:17:50.4676970Z  * [new branch]      agent/wazig-27-097-selfupdate            -> origin/agent/wazig-27-097-selfupdate
+2026-10-25T19:17:50.4680754Z  * [new branch]      agent/wazig-70-placeholder               -> origin/agent/wazig-70-placeholder
+2026-10-25T19:17:50.4681890Z  * [new branch]      agent/wazig-dev-1-wazi-100               -> origin/agent/wazig-dev-1-wazi-100
+2026-10-25T19:17:50.4682981Z  * [new branch]      agent/wazig-dev-1-wazi-36                -> origin/agent/wazig-dev-1-wazi-36
+2026-10-25T19:17:50.4684404Z  * [new branch]      agent/wazig-dev-1-wazi-82                -> origin/agent/wazig-dev-1-wazi-82
+2026-10-25T19:17:50.4685479Z  * [new branch]      agent/wazig-dev-1-wazi-88                -> origin/agent/wazig-dev-1-wazi-88
+2026-10-25T19:17:50.4686669Z  * [new branch]      agent/wazig-dev-2-ci-tdlib-fix           -> origin/agent/wazig-dev-2-ci-tdlib-fix
+2026-10-25T19:17:50.4687859Z  * [new branch]      agent/wazig-dev-2-ocr-timeout            -> origin/agent/wazig-dev-2-ocr-timeout
+2026-10-25T19:17:50.4688949Z  * [new branch]      agent/wazig-dev-2-wazi-103               -> origin/agent/wazig-dev-2-wazi-103
+2026-10-25T19:17:50.4689965Z  * [new branch]      agent/wazig-dev-2-wazi-17                -> origin/agent/wazig-dev-2-wazi-17
+2026-10-25T19:17:50.4691022Z  * [new branch]      agent/wazig-dev-2-wazi-48                -> origin/agent/wazig-dev-2-wazi-48
+2026-10-25T19:17:50.4692997Z  * [new branch]      agent/wazig-dev-2-wazi-83                -> origin/agent/wazig-dev-2-wazi-83
+2026-10-25T19:17:50.4694184Z  * [new branch]      agent/wazig-dev-3-wazi-104               -> origin/agent/wazig-dev-3-wazi-104
+2026-10-25T19:17:50.4695287Z  * [new branch]      agent/wazig-dev-3-wazi-54                -> origin/agent/wazig-dev-3-wazi-54
+2026-10-25T19:17:50.4696467Z  * [new branch]      agent/wazig-dev-3-wazi-54-pipeline       -> origin/agent/wazig-dev-3-wazi-54-pipeline
+2026-10-25T19:17:50.4697649Z  * [new branch]      agent/wazig-dev-3-wazi-8                 -> origin/agent/wazig-dev-3-wazi-8
+2026-10-25T19:17:50.4698719Z  * [new branch]      agent/wazig-dev-4-wazi-23                -> origin/agent/wazig-dev-4-wazi-23
+2026-10-25T19:17:50.4699815Z  * [new branch]      agent/wazig-dev-4-wazi-35                -> origin/agent/wazig-dev-4-wazi-35
+2026-10-25T19:17:50.4700842Z  * [new branch]      agent/wazig-dev-4-wazi-39                -> origin/agent/wazig-dev-4-wazi-39
+2026-10-25T19:17:50.4701848Z  * [new branch]      agent/wazig-dev-4-wazi-73                -> origin/agent/wazig-dev-4-wazi-73
+2026-10-25T19:17:50.4702897Z  * [new branch]      agent/wazig-dev-4-wazi-79                -> origin/agent/wazig-dev-4-wazi-79
+2026-10-25T19:17:50.4704389Z  * [new branch]      agent/wazig-dev-5-wazi-18-v2             -> origin/agent/wazig-dev-5-wazi-18-v2
+2026-10-25T19:17:50.4705618Z  * [new branch]      agent/wazig-dev-5-wazi-67-logrotate      -> origin/agent/wazig-dev-5-wazi-67-logrotate
+2026-10-25T19:17:50.4706797Z  * [new branch]      agent/wazig-dev-5-wazi-84                -> origin/agent/wazig-dev-5-wazi-84
+2026-10-25T19:17:50.4707891Z  * [new branch]      agent/wazig-dev-5-wazi-85                -> origin/agent/wazig-dev-5-wazi-85
+2026-10-25T19:17:50.4708908Z  * [new branch]      agent/wazig-dev-5-wazi-86                -> origin/agent/wazig-dev-5-wazi-86
+2026-10-25T19:17:50.4710155Z  * [new branch]      agent/wazig-dev-5-wazi-87                -> origin/agent/wazig-dev-5-wazi-87
+2026-10-25T19:17:50.4711235Z  * [new branch]      agent/wazig-dev-wazi-115                 -> origin/agent/wazig-dev-wazi-115
+2026-10-25T19:17:50.4712259Z  * [new branch]      agent/wazig-dev-wazi-116                 -> origin/agent/wazig-dev-wazi-116
+2026-10-25T19:17:50.4713363Z  * [new branch]      agent/wazig-dev-wazi-117                 -> origin/agent/wazig-dev-wazi-117
+2026-10-25T19:17:50.4714422Z  * [new branch]      agent/wazig-dev-wazi-118                 -> origin/agent/wazig-dev-wazi-118
+2026-10-25T19:17:50.4715465Z  * [new branch]      agent/wazig-dev-wazi-119                 -> origin/agent/wazig-dev-wazi-119
+2026-10-25T19:17:50.4716582Z  * [new branch]      anthropic-no-temperature                 -> origin/anthropic-no-temperature
+2026-10-25T19:17:50.4717640Z  * [new branch]      archive/v1-old-base                      -> origin/archive/v1-old-base
+2026-10-25T19:17:50.4718571Z  * [new branch]      arrow-select                             -> origin/arrow-select
+2026-10-25T19:17:50.4720121Z  * [new branch]      ceo/IGSH-461                             -> origin/ceo/IGSH-461
+2026-10-25T19:17:50.4721108Z  * [new branch]      ceo/IGSH-462-compare                     -> origin/ceo/IGSH-462-compare
+2026-10-25T19:17:50.4722427Z  * [new branch]      ceo/IGSH-464-session                     -> origin/ceo/IGSH-464-session
+2026-10-25T19:17:50.4723337Z  * [new branch]      ceo/IGSH-482                             -> origin/ceo/IGSH-482
+2026-10-25T19:17:50.4724531Z  * [new branch]      ceo/IGSH-494                             -> origin/ceo/IGSH-494
+2026-10-25T19:17:50.4725375Z  * [new branch]      ceo/IGSH-497                             -> origin/ceo/IGSH-497
+2026-10-25T19:17:50.4727667Z  * [new branch]      ceo/IGSH-504                             -> origin/ceo/IGSH-504
+2026-10-25T19:17:50.4728525Z  * [new branch]      ceo/IGSH-505-verify                      -> origin/ceo/IGSH-505-verify
+2026-10-25T19:17:50.4729368Z  * [new branch]      ceo/IGSH-510                             -> origin/ceo/IGSH-510
+2026-10-25T19:17:50.4730350Z  * [new branch]      ceo/IGSH-517                             -> origin/ceo/IGSH-517
+2026-10-25T19:17:50.4731135Z  * [new branch]      ceo/IGSH-517-key                         -> origin/ceo/IGSH-517-key
+2026-10-25T19:17:50.4731914Z  * [new branch]      ceo/IGSH-526                             -> origin/ceo/IGSH-526
+2026-10-25T19:17:50.4732711Z  * [new branch]      ceo/IGSH-531-nocap                       -> origin/ceo/IGSH-531-nocap
+2026-10-25T19:17:50.4733617Z  * [new branch]      ceo/IGSH-533                             -> origin/ceo/IGSH-533
+2026-10-25T19:17:50.4734425Z  * [new branch]      ceo/IGSH-538                             -> origin/ceo/IGSH-538
+2026-10-25T19:17:50.4735259Z  * [new branch]      ceo/IGSH-659-red                         -> origin/ceo/IGSH-659-red
+2026-10-25T19:17:50.4736164Z  * [new branch]      ceo/IGSH-669-red                         -> origin/ceo/IGSH-669-red
+2026-10-25T19:17:50.4737094Z  * [new branch]      ceo/IGSH-670-red                         -> origin/ceo/IGSH-670-red
+2026-10-25T19:17:50.4738530Z  * [new branch]      ceo/IGSH-671                             -> origin/ceo/IGSH-671
+2026-10-25T19:17:50.4739462Z  * [new branch]      ceo/IGSH-681-client                      -> origin/ceo/IGSH-681-client
+2026-10-25T19:17:50.4740379Z  * [new branch]      ceo/IGSH-681-red                         -> origin/ceo/IGSH-681-red
+2026-10-25T19:17:50.4741252Z  * [new branch]      ceo/IGSH-683                             -> origin/ceo/IGSH-683
+2026-10-25T19:17:50.4744611Z  * [new branch]      ceo/IGSH-693                             -> origin/ceo/IGSH-693
+2026-10-25T19:17:50.4745485Z  * [new branch]      ceo/IGSH-714                             -> origin/ceo/IGSH-714
+2026-10-25T19:17:50.4746703Z  * [new branch]      ceo/IGSH-729                             -> origin/ceo/IGSH-729
+2026-10-25T19:17:50.4747799Z  * [new branch]      ceo/IGSH-729-light                       -> origin/ceo/IGSH-729-light
+2026-10-25T19:17:50.4748777Z  * [new branch]      ceo/IGSH-734-red                         -> origin/ceo/IGSH-734-red
+2026-10-25T19:17:50.4749685Z  * [new branch]      ceo/IGSH-736                             -> origin/ceo/IGSH-736
+2026-10-25T19:17:50.4750550Z  * [new branch]      ceo/IGSH-823-red                         -> origin/ceo/IGSH-823-red
+2026-10-25T19:17:50.4751434Z  * [new branch]      ceo/IGSH-828                             -> origin/ceo/IGSH-828
+2026-10-25T19:17:50.4752279Z  * [new branch]      ceo/IGSH-829                             -> origin/ceo/IGSH-829
+2026-10-25T19:17:50.4753119Z  * [new branch]      ceo/IGSH-829-red                         -> origin/ceo/IGSH-829-red
+2026-10-25T19:17:50.4753970Z  * [new branch]      ceo/IGSH-833                             -> origin/ceo/IGSH-833
+2026-10-25T19:17:50.4754808Z  * [new branch]      ceo/IGSH-840                             -> origin/ceo/IGSH-840
+2026-10-25T19:17:50.4755792Z  * [new branch]      ceo/WAZI-100                             -> origin/ceo/WAZI-100
+2026-10-25T19:17:50.4756638Z  * [new branch]      ceo/WAZI-122                             -> origin/ceo/WAZI-122
+2026-10-25T19:17:50.4757478Z  * [new branch]      ceo/WAZI-152                             -> origin/ceo/WAZI-152
+2026-10-25T19:17:50.4758981Z  * [new branch]      chat-list-gg                             -> origin/chat-list-gg
+2026-10-25T19:17:50.4759968Z  * [new branch]      chat-scroll-emoji                        -> origin/chat-scroll-emoji
+2026-10-25T19:17:50.4761456Z  * [new branch]      claude/igsh-545-row-sized-buffers-k8ctm3 -> origin/claude/igsh-545-row-sized-buffers-k8ctm3
+2026-10-25T19:17:50.4763562Z  * [new branch]      colr-gdi-emoji                           -> origin/colr-gdi-emoji
+2026-10-25T19:17:50.4764553Z  * [new branch]      composer-select-all                      -> origin/composer-select-all
+2026-10-25T19:17:50.4765643Z  * [new branch]      ctrl-arrows-walk-messages                -> origin/ctrl-arrows-walk-messages
+2026-10-25T19:17:50.4766988Z  * [new branch]      ctrl-o-image-preview                     -> origin/ctrl-o-image-preview
+2026-10-25T19:17:50.4767992Z  * [new branch]      emoji-shortcodes                         -> origin/emoji-shortcodes
+2026-10-25T19:17:50.4768880Z  * [new branch]      fast-send                                -> origin/fast-send
+2026-10-25T19:17:50.4769748Z  * [new branch]      faster-release                           -> origin/faster-release
+2026-10-25T19:17:50.4770684Z  * [new branch]      feat/voice-record                        -> origin/feat/voice-record
+2026-10-25T19:17:50.4771644Z  * [new branch]      fix-empty-slack-view                     -> origin/fix-empty-slack-view
+2026-10-25T19:17:50.4772681Z  * [new branch]      fix/automerge-file-list                  -> origin/fix/automerge-file-list
+2026-10-25T19:17:50.4773678Z  * [new branch]      fix/playback-cpu                         -> origin/fix/playback-cpu
+2026-10-25T19:17:50.4774738Z  * [new branch]      fix/wazi-112-send-visibility             -> origin/fix/wazi-112-send-visibility
+2026-10-25T19:17:50.4775834Z  * [new branch]      group-participant-avatars                -> origin/group-participant-avatars
+2026-10-25T19:17:50.4777363Z  * [new branch]      idle-cpu-refusal                         -> origin/idle-cpu-refusal
+2026-10-25T19:17:50.4778649Z  * [new branch]      image-single-click                       -> origin/image-single-click
+2026-10-25T19:17:50.4779612Z  * [new branch]      layout-dpi                               -> origin/layout-dpi
+2026-10-25T19:17:50.4780548Z  * [new branch]      lockwait-local-media                     -> origin/lockwait-local-media
+2026-10-25T19:17:50.4781454Z  * [new branch]      main                                     -> origin/main
+2026-10-25T19:17:50.4782639Z  * [new branch]      open-palette                             -> origin/open-palette
+2026-10-25T19:17:50.4783554Z  * [new branch]      own-voice-notes                          -> origin/own-voice-notes
+2026-10-25T19:17:50.4785526Z  * [new branch]      reaction-picker                          -> origin/reaction-picker
+2026-10-25T19:17:50.4786596Z  * [new branch]      release-without-telegram                 -> origin/release-without-telegram
+2026-10-25T19:17:50.4787680Z  * [new branch]      relink-loop                              -> origin/relink-loop
+2026-10-25T19:17:50.4788553Z  * [new branch]      reply-quotes                             -> origin/reply-quotes
+2026-10-25T19:17:50.4789436Z  * [new branch]      send-auth-fail                           -> origin/send-auth-fail
+2026-10-25T19:17:50.4790348Z  * [new branch]      send-auto-retry                          -> origin/send-auto-retry
+2026-10-25T19:17:50.4791322Z  * [new branch]      shortcut-help-overlay                    -> origin/shortcut-help-overlay
+2026-10-25T19:17:50.4792336Z  * [new branch]      slack-bridge-mode                        -> origin/slack-bridge-mode
+2026-10-25T19:17:50.4793337Z  * [new branch]      slack-chats-in-list                      -> origin/slack-chats-in-list
+2026-10-25T19:17:50.4794273Z  * [new branch]      slack-mrkdwn                             -> origin/slack-mrkdwn
+2026-10-25T19:17:50.4795212Z  * [new branch]      slack-no-wacli-reads                     -> origin/slack-no-wacli-reads
+2026-10-25T19:17:50.4796244Z  * [new branch]      slack-shared-messages                    -> origin/slack-shared-messages
+2026-10-25T19:17:50.4797205Z  * [new branch]      slim-memory                              -> origin/slim-memory
+2026-10-25T19:17:50.4798060Z  * [new branch]      speaker-pov                              -> origin/speaker-pov
+2026-10-25T19:17:50.4798956Z  * [new branch]      stop-sync-churn                          -> origin/stop-sync-churn
+2026-10-25T19:17:50.4799871Z  * [new branch]      tmp/IGSH-828-red                         -> origin/tmp/IGSH-828-red
+2026-10-25T19:17:50.4800759Z  * [new branch]      update-card                              -> origin/update-card
+2026-10-25T19:17:50.4801664Z  * [new branch]      update-card-fix                          -> origin/update-card-fix
+2026-10-25T19:17:50.4803905Z  * [new branch]      wazi-60-update-consent                   -> origin/wazi-60-update-consent
+2026-10-25T19:17:50.4805038Z  * [new branch]      wazi-81-update-button                    -> origin/wazi-81-update-button
+2026-10-25T19:17:50.4806042Z  * [new branch]      wazi-ocr-timeout                         -> origin/wazi-ocr-timeout
+2026-10-25T19:17:50.4807053Z  * [new branch]      wazig-anthropic-format                   -> origin/wazig-anthropic-format
+2026-10-25T19:17:50.4808005Z  * [new branch]      wazigctl2                                -> origin/wazigctl2
+2026-10-25T19:17:50.4808769Z  * [new tag]         v0.9.10                                  -> v0.9.10
+2026-10-25T19:17:50.4809441Z  * [new tag]         v0.9.100                                 -> v0.9.100
+2026-10-25T19:17:50.4810128Z  * [new tag]         v0.9.101                                 -> v0.9.101
+2026-10-25T19:17:50.4810790Z  * [new tag]         v0.9.102                                 -> v0.9.102
+2026-10-25T19:17:50.4811464Z  * [new tag]         v0.9.103                                 -> v0.9.103
+2026-10-25T19:17:50.4812125Z  * [new tag]         v0.9.104                                 -> v0.9.104
+2026-10-25T19:17:50.4812872Z  * [new tag]         v0.9.105                                 -> v0.9.105
+2026-10-25T19:17:50.4813945Z  * [new tag]         v0.9.106                                 -> v0.9.106
+2026-10-25T19:17:50.4814645Z  * [new tag]         v0.9.107                                 -> v0.9.107
+2026-10-25T19:17:50.4815323Z  * [new tag]         v0.9.108                                 -> v0.9.108
+2026-10-25T19:17:50.4816018Z  * [new tag]         v0.9.109                                 -> v0.9.109
+2026-10-25T19:17:50.4816695Z  * [new tag]         v0.9.11                                  -> v0.9.11
+2026-10-25T19:17:50.4817774Z  * [new tag]         v0.9.110                                 -> v0.9.110
+2026-10-25T19:17:50.4818706Z  * [new tag]         v0.9.111                                 -> v0.9.111
+2026-10-25T19:17:50.4819405Z  * [new tag]         v0.9.112                                 -> v0.9.112
+2026-10-25T19:17:50.4820086Z  * [new tag]         v0.9.113                                 -> v0.9.113
+2026-10-25T19:17:50.4820756Z  * [new tag]         v0.9.114                                 -> v0.9.114
+2026-10-25T19:17:50.4821400Z  * [new tag]         v0.9.115                                 -> v0.9.115
+2026-10-25T19:17:50.4822028Z  * [new tag]         v0.9.116                                 -> v0.9.116
+2026-10-25T19:17:50.4823088Z  * [new tag]         v0.9.117                                 -> v0.9.117
+2026-10-25T19:17:50.4823747Z  * [new tag]         v0.9.118                                 -> v0.9.118
+2026-10-25T19:17:50.4824421Z  * [new tag]         v0.9.119                                 -> v0.9.119
+2026-10-25T19:17:50.4825086Z  * [new tag]         v0.9.12                                  -> v0.9.12
+2026-10-25T19:17:50.4825769Z  * [new tag]         v0.9.120                                 -> v0.9.120
+2026-10-25T19:17:50.4826424Z  * [new tag]         v0.9.121                                 -> v0.9.121
+2026-10-25T19:17:50.4827109Z  * [new tag]         v0.9.122                                 -> v0.9.122
+2026-10-25T19:17:50.4827758Z  * [new tag]         v0.9.123                                 -> v0.9.123
+2026-10-25T19:17:50.4828416Z  * [new tag]         v0.9.124                                 -> v0.9.124
+2026-10-25T19:17:50.4829077Z  * [new tag]         v0.9.125                                 -> v0.9.125
+2026-10-25T19:17:50.4829718Z  * [new tag]         v0.9.126                                 -> v0.9.126
+2026-10-25T19:17:50.4830366Z  * [new tag]         v0.9.127                                 -> v0.9.127
+2026-10-25T19:17:50.4831035Z  * [new tag]         v0.9.128                                 -> v0.9.128
+2026-10-25T19:17:50.4831699Z  * [new tag]         v0.9.129                                 -> v0.9.129
+2026-10-25T19:17:50.4832571Z  * [new tag]         v0.9.13                                  -> v0.9.13
+2026-10-25T19:17:50.4833256Z  * [new tag]         v0.9.130                                 -> v0.9.130
+2026-10-25T19:17:50.4833927Z  * [new tag]         v0.9.131                                 -> v0.9.131
+2026-10-25T19:17:50.4834577Z  * [new tag]         v0.9.132                                 -> v0.9.132
+2026-10-25T19:17:50.4835238Z  * [new tag]         v0.9.133                                 -> v0.9.133
+2026-10-25T19:17:50.4835916Z  * [new tag]         v0.9.134                                 -> v0.9.134
+2026-10-25T19:17:50.4836580Z  * [new tag]         v0.9.135                                 -> v0.9.135
+2026-10-25T19:17:50.4837258Z  * [new tag]         v0.9.136                                 -> v0.9.136
+2026-10-25T19:17:50.4837945Z  * [new tag]         v0.9.137                                 -> v0.9.137
+2026-10-25T19:17:50.4838619Z  * [new tag]         v0.9.138                                 -> v0.9.138
+2026-10-25T19:17:50.4839285Z  * [new tag]         v0.9.139                                 -> v0.9.139
+2026-10-25T19:17:50.4839939Z  * [new tag]         v0.9.14                                  -> v0.9.14
+2026-10-25T19:17:50.4840560Z  * [new tag]         v0.9.140                                 -> v0.9.140
+2026-10-25T19:17:50.4841223Z  * [new tag]         v0.9.141                                 -> v0.9.141
+2026-10-25T19:17:50.4841865Z  * [new tag]         v0.9.142                                 -> v0.9.142
+2026-10-25T19:17:50.4842542Z  * [new tag]         v0.9.143                                 -> v0.9.143
+2026-10-25T19:17:50.4843601Z  * [new tag]         v0.9.144                                 -> v0.9.144
+2026-10-25T19:17:50.4844237Z  * [new tag]         v0.9.145                                 -> v0.9.145
+2026-10-25T19:17:50.4844885Z  * [new tag]         v0.9.146                                 -> v0.9.146
+2026-10-25T19:17:50.4845793Z  * [new tag]         v0.9.147                                 -> v0.9.147
+2026-10-25T19:17:50.4846460Z  * [new tag]         v0.9.148                                 -> v0.9.148
+2026-10-25T19:17:50.4847129Z  * [new tag]         v0.9.149                                 -> v0.9.149
+2026-10-25T19:17:50.4847791Z  * [new tag]         v0.9.15                                  -> v0.9.15
+2026-10-25T19:17:50.4848424Z  * [new tag]         v0.9.150                                 -> v0.9.150
+2026-10-25T19:17:50.4849098Z  * [new tag]         v0.9.151                                 -> v0.9.151
+2026-10-25T19:17:50.4849761Z  * [new tag]         v0.9.152                                 -> v0.9.152
+2026-10-25T19:17:50.4850410Z  * [new tag]         v0.9.153                                 -> v0.9.153
+2026-10-25T19:17:50.4851070Z  * [new tag]         v0.9.154                                 -> v0.9.154
+2026-10-25T19:17:50.4851713Z  * [new tag]         v0.9.155                                 -> v0.9.155
+2026-10-25T19:17:50.4852384Z  * [new tag]         v0.9.156                                 -> v0.9.156
+2026-10-25T19:17:50.4853071Z  * [new tag]         v0.9.157                                 -> v0.9.157
+2026-10-25T19:17:50.4853746Z  * [new tag]         v0.9.158                                 -> v0.9.158
+2026-10-25T19:17:50.4854418Z  * [new tag]         v0.9.159                                 -> v0.9.159
+2026-10-25T19:17:50.4855034Z  * [new tag]         v0.9.16                                  -> v0.9.16
+2026-10-25T19:17:50.4855689Z  * [new tag]         v0.9.160                                 -> v0.9.160
+2026-10-25T19:17:50.4856336Z  * [new tag]         v0.9.161                                 -> v0.9.161
+2026-10-25T19:17:50.4856986Z  * [new tag]         v0.9.162                                 -> v0.9.162
+2026-10-25T19:17:50.4857657Z  * [new tag]         v0.9.163                                 -> v0.9.163
+2026-10-25T19:17:50.4858307Z  * [new tag]         v0.9.164                                 -> v0.9.164
+2026-10-25T19:17:50.4858981Z  * [new tag]         v0.9.165                                 -> v0.9.165
+2026-10-25T19:17:50.4859891Z  * [new tag]         v0.9.166                                 -> v0.9.166
+2026-10-25T19:17:50.4860592Z  * [new tag]         v0.9.167                                 -> v0.9.167
+2026-10-25T19:17:50.4861248Z  * [new tag]         v0.9.168                                 -> v0.9.168
+2026-10-25T19:17:50.4861882Z  * [new tag]         v0.9.169                                 -> v0.9.169
+2026-10-25T19:17:50.4862454Z  * [new tag]         v0.9.17                                  -> v0.9.17
+2026-10-25T19:17:50.4863480Z  * [new tag]         v0.9.170                                 -> v0.9.170
+2026-10-25T19:17:50.4864137Z  * [new tag]         v0.9.171                                 -> v0.9.171
+2026-10-25T19:17:50.4864804Z  * [new tag]         v0.9.172                                 -> v0.9.172
+2026-10-25T19:17:50.4865501Z  * [new tag]         v0.9.173                                 -> v0.9.173
+2026-10-25T19:17:50.4866180Z  * [new tag]         v0.9.174                                 -> v0.9.174
+2026-10-25T19:17:50.4866832Z  * [new tag]         v0.9.175                                 -> v0.9.175
+2026-10-25T19:17:50.4867492Z  * [new tag]         v0.9.176                                 -> v0.9.176
+2026-10-25T19:17:50.4868157Z  * [new tag]         v0.9.177                                 -> v0.9.177
+2026-10-25T19:17:50.4868844Z  * [new tag]         v0.9.178                                 -> v0.9.178
+2026-10-25T19:17:50.4869503Z  * [new tag]         v0.9.179                                 -> v0.9.179
+2026-10-25T19:17:50.4870149Z  * [new tag]         v0.9.18                                  -> v0.9.18
+2026-10-25T19:17:50.4870814Z  * [new tag]         v0.9.180                                 -> v0.9.180
+2026-10-25T19:17:50.4871487Z  * [new tag]         v0.9.181                                 -> v0.9.181
+2026-10-25T19:17:50.4872370Z  * [new tag]         v0.9.182                                 -> v0.9.182
+2026-10-25T19:17:50.4873055Z  * [new tag]         v0.9.183                                 -> v0.9.183
+2026-10-25T19:17:50.4873705Z  * [new tag]         v0.9.184                                 -> v0.9.184
+2026-10-25T19:17:50.4874373Z  * [new tag]         v0.9.185                                 -> v0.9.185
+2026-10-25T19:17:50.4875019Z  * [new tag]         v0.9.186                                 -> v0.9.186
+2026-10-25T19:17:50.4875682Z  * [new tag]         v0.9.187                                 -> v0.9.187
+2026-10-25T19:17:50.4876333Z  * [new tag]         v0.9.188                                 -> v0.9.188
+2026-10-25T19:17:50.4877006Z  * [new tag]         v0.9.189                                 -> v0.9.189
+2026-10-25T19:17:50.4877658Z  * [new tag]         v0.9.19                                  -> v0.9.19
+2026-10-25T19:17:50.4878336Z  * [new tag]         v0.9.190                                 -> v0.9.190
+2026-10-25T19:17:50.4879019Z  * [new tag]         v0.9.191                                 -> v0.9.191
+2026-10-25T19:17:50.4879692Z  * [new tag]         v0.9.192                                 -> v0.9.192
+2026-10-25T19:17:50.4880338Z  * [new tag]         v0.9.193                                 -> v0.9.193
+2026-10-25T19:17:50.4880966Z  * [new tag]         v0.9.194                                 -> v0.9.194
+2026-10-25T19:17:50.4881618Z  * [new tag]         v0.9.195                                 -> v0.9.195
+2026-10-25T19:17:50.4882274Z  * [new tag]         v0.9.196                                 -> v0.9.196
+2026-10-25T19:17:50.4882922Z  * [new tag]         v0.9.197                                 -> v0.9.197
+2026-10-25T19:17:50.4884031Z  * [new tag]         v0.9.198                                 -> v0.9.198
+2026-10-25T19:17:50.4884704Z  * [new tag]         v0.9.199                                 -> v0.9.199
+2026-10-25T19:17:50.4885333Z  * [new tag]         v0.9.20                                  -> v0.9.20
+2026-10-25T19:17:50.4885978Z  * [new tag]         v0.9.200                                 -> v0.9.200
+2026-10-25T19:17:50.4886939Z  * [new tag]         v0.9.201                                 -> v0.9.201
+2026-10-25T19:17:50.4887648Z  * [new tag]         v0.9.202                                 -> v0.9.202
+2026-10-25T19:17:50.4888318Z  * [new tag]         v0.9.203                                 -> v0.9.203
+2026-10-25T19:17:50.4888954Z  * [new tag]         v0.9.204                                 -> v0.9.204
+2026-10-25T19:17:50.4889611Z  * [new tag]         v0.9.21                                  -> v0.9.21
+2026-10-25T19:17:50.4890270Z  * [new tag]         v0.9.22                                  -> v0.9.22
+2026-10-25T19:17:50.4890897Z  * [new tag]         v0.9.23                                  -> v0.9.23
+2026-10-25T19:17:50.4891548Z  * [new tag]         v0.9.25                                  -> v0.9.25
+2026-10-25T19:17:50.4892205Z  * [new tag]         v0.9.26                                  -> v0.9.26
+2026-10-25T19:17:50.4892866Z  * [new tag]         v0.9.27                                  -> v0.9.27
+2026-10-25T19:17:50.4893537Z  * [new tag]         v0.9.28                                  -> v0.9.28
+2026-10-25T19:17:50.4894185Z  * [new tag]         v0.9.29                                  -> v0.9.29
+2026-10-25T19:17:50.4894864Z  * [new tag]         v0.9.30                                  -> v0.9.30
+2026-10-25T19:17:50.4895532Z  * [new tag]         v0.9.31                                  -> v0.9.31
+2026-10-25T19:17:50.4896160Z  * [new tag]         v0.9.32                                  -> v0.9.32
+2026-10-25T19:17:50.4896751Z  * [new tag]         v0.9.33                                  -> v0.9.33
+2026-10-25T19:17:50.4897409Z  * [new tag]         v0.9.34                                  -> v0.9.34
+2026-10-25T19:17:50.4898062Z  * [new tag]         v0.9.35                                  -> v0.9.35
+2026-10-25T19:17:50.4898731Z  * [new tag]         v0.9.36                                  -> v0.9.36
+2026-10-25T19:17:50.4900501Z  * [new tag]         v0.9.37                                  -> v0.9.37
+2026-10-25T19:17:50.4901661Z  * [new tag]         v0.9.38                                  -> v0.9.38
+2026-10-25T19:17:50.4902355Z  * [new tag]         v0.9.39                                  -> v0.9.39
+2026-10-25T19:17:50.4903007Z  * [new tag]         v0.9.40                                  -> v0.9.40
+2026-10-25T19:17:50.4904198Z  * [new tag]         v0.9.41                                  -> v0.9.41
+2026-10-25T19:17:50.4904874Z  * [new tag]         v0.9.42                                  -> v0.9.42
+2026-10-25T19:17:50.4905548Z  * [new tag]         v0.9.43                                  -> v0.9.43
+2026-10-25T19:17:50.4906755Z  * [new tag]         v0.9.44                                  -> v0.9.44
+2026-10-25T19:17:50.4907436Z  * [new tag]         v0.9.45                                  -> v0.9.45
+2026-10-25T19:17:50.4908114Z  * [new tag]         v0.9.46                                  -> v0.9.46
+2026-10-25T19:17:50.4908782Z  * [new tag]         v0.9.47                                  -> v0.9.47
+2026-10-25T19:17:50.4909450Z  * [new tag]         v0.9.48                                  -> v0.9.48
+2026-10-25T19:17:50.4910068Z  * [new tag]         v0.9.49                                  -> v0.9.49
+2026-10-25T19:17:50.4910671Z  * [new tag]         v0.9.50                                  -> v0.9.50
+2026-10-25T19:17:50.4911273Z  * [new tag]         v0.9.51                                  -> v0.9.51
+2026-10-25T19:17:50.4911891Z  * [new tag]         v0.9.52                                  -> v0.9.52
+2026-10-25T19:17:50.4912504Z  * [new tag]         v0.9.53                                  -> v0.9.53
+2026-10-25T19:17:50.4913130Z  * [new tag]         v0.9.54                                  -> v0.9.54
+2026-10-25T19:17:50.4913745Z  * [new tag]         v0.9.55                                  -> v0.9.55
+2026-10-25T19:17:50.4914359Z  * [new tag]         v0.9.56                                  -> v0.9.56
+2026-10-25T19:17:50.4915019Z  * [new tag]         v0.9.57                                  -> v0.9.57
+2026-10-25T19:17:50.4916574Z  * [new tag]         v0.9.58                                  -> v0.9.58
+2026-10-25T19:17:50.4917324Z  * [new tag]         v0.9.59                                  -> v0.9.59
+2026-10-25T19:17:50.4918015Z  * [new tag]         v0.9.60                                  -> v0.9.60
+2026-10-25T19:17:50.4918665Z  * [new tag]         v0.9.61                                  -> v0.9.61
+2026-10-25T19:17:50.4919309Z  * [new tag]         v0.9.62                                  -> v0.9.62
+2026-10-25T19:17:50.4920386Z  * [new tag]         v0.9.63                                  -> v0.9.63
+2026-10-25T19:17:50.4921121Z  * [new tag]         v0.9.64                                  -> v0.9.64
+2026-10-25T19:17:50.4921750Z  * [new tag]         v0.9.65                                  -> v0.9.65
+2026-10-25T19:17:50.4922713Z  * [new tag]         v0.9.66                                  -> v0.9.66
+2026-10-25T19:17:50.4923375Z  * [new tag]         v0.9.67                                  -> v0.9.67
+2026-10-25T19:17:50.4924034Z  * [new tag]         v0.9.68                                  -> v0.9.68
+2026-10-25T19:17:50.4924664Z  * [new tag]         v0.9.69                                  -> v0.9.69
+2026-10-25T19:17:50.4925342Z  * [new tag]         v0.9.7                                   -> v0.9.7
+2026-10-25T19:17:50.4926005Z  * [new tag]         v0.9.70                                  -> v0.9.70
+2026-10-25T19:17:50.4927043Z  * [new tag]         v0.9.71                                  -> v0.9.71
+2026-10-25T19:17:50.4927688Z  * [new tag]         v0.9.72                                  -> v0.9.72
+2026-10-25T19:17:50.4928336Z  * [new tag]         v0.9.73                                  -> v0.9.73
+2026-10-25T19:17:50.4929002Z  * [new tag]         v0.9.74                                  -> v0.9.74
+2026-10-25T19:17:50.4929665Z  * [new tag]         v0.9.75                                  -> v0.9.75
+2026-10-25T19:17:50.4930562Z  * [new tag]         v0.9.76                                  -> v0.9.76
+2026-10-25T19:17:50.4931227Z  * [new tag]         v0.9.77                                  -> v0.9.77
+2026-10-25T19:17:50.4931856Z  * [new tag]         v0.9.78                                  -> v0.9.78
+2026-10-25T19:17:50.4932507Z  * [new tag]         v0.9.79                                  -> v0.9.79
+2026-10-25T19:17:50.4933175Z  * [new tag]         v0.9.8                                   -> v0.9.8
+2026-10-25T19:17:50.4933843Z  * [new tag]         v0.9.80                                  -> v0.9.80
+2026-10-25T19:17:50.4934501Z  * [new tag]         v0.9.81                                  -> v0.9.81
+2026-10-25T19:17:50.4935157Z  * [new tag]         v0.9.82                                  -> v0.9.82
+2026-10-25T19:17:50.4935841Z  * [new tag]         v0.9.83                                  -> v0.9.83
+2026-10-25T19:17:50.4936440Z  * [new tag]         v0.9.84                                  -> v0.9.84
+2026-10-25T19:17:50.4937106Z  * [new tag]         v0.9.85                                  -> v0.9.85
+2026-10-25T19:17:50.4937787Z  * [new tag]         v0.9.86                                  -> v0.9.86
+2026-10-25T19:17:50.4938449Z  * [new tag]         v0.9.87                                  -> v0.9.87
+2026-10-25T19:17:50.4939083Z  * [new tag]         v0.9.88                                  -> v0.9.88
+2026-10-25T19:17:50.4939746Z  * [new tag]         v0.9.89                                  -> v0.9.89
+2026-10-25T19:17:50.4940406Z  * [new tag]         v0.9.9                                   -> v0.9.9
+2026-10-25T19:17:50.4941058Z  * [new tag]         v0.9.90                                  -> v0.9.90
+2026-10-25T19:17:50.4941677Z  * [new tag]         v0.9.91                                  -> v0.9.91
+2026-10-25T19:17:50.4942280Z  * [new tag]         v0.9.92                                  -> v0.9.92
+2026-10-25T19:17:50.4942904Z  * [new tag]         v0.9.93                                  -> v0.9.93
+2026-10-25T19:17:50.4943547Z  * [new tag]         v0.9.94                                  -> v0.9.94
+2026-10-25T19:17:50.4944408Z  * [new tag]         v0.9.95                                  -> v0.9.95
+2026-10-25T19:17:50.4945116Z  * [new tag]         v0.9.96                                  -> v0.9.96
+2026-10-25T19:17:50.4945768Z  * [new tag]         v0.9.97                                  -> v0.9.97
+2026-10-25T19:17:50.4946417Z  * [new tag]         v0.9.98                                  -> v0.9.98
+2026-10-25T19:17:50.4947475Z  * [new tag]         v0.9.99                                  -> v0.9.99
+2026-10-25T19:17:50.4948245Z  * [new ref]         abb740b19e068cbfeba735e620e83392214dd267 -> pull/387/merge
+2026-10-25T19:17:50.4950088Z ##[endgroup]
+2026-10-25T19:17:50.4950661Z ##[group]Determining the checkout info
+2026-10-25T19:17:50.4951319Z ##[endgroup]
+2026-10-25T19:17:50.4952082Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-10-25T19:17:50.5498048Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-10-25T19:17:50.6020704Z ##[group]Checking out the ref
+2026-10-25T19:17:50.6030980Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force refs/remotes/pull/387/merge
+2026-10-25T19:17:50.9267203Z Note: switching to 'refs/remotes/pull/387/merge'.
+2026-10-25T19:17:50.9268026Z 
+2026-10-25T19:17:50.9268423Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-10-25T19:17:50.9269218Z changes and commit them, and you can discard any commits you make in this
+2026-10-25T19:17:50.9270815Z state without impacting any branches by switching back to a branch.
+2026-10-25T19:17:50.9271574Z 
+2026-10-25T19:17:50.9271920Z If you want to create a new branch to retain commits you create, you may
+2026-10-25T19:17:50.9272691Z do so (now or later) by using -c with the switch command. Example:
+2026-10-25T19:17:50.9273129Z 
+2026-10-25T19:17:50.9273689Z   git switch -c <new-branch-name>
+2026-10-25T19:17:50.9274421Z 
+2026-10-25T19:17:50.9274604Z Or undo this operation with:
+2026-10-25T19:17:50.9274883Z 
+2026-10-25T19:17:50.9275041Z   git switch -
+2026-10-25T19:17:50.9275241Z 
+2026-10-25T19:17:50.9275596Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-10-25T19:17:50.9276130Z 
+2026-10-25T19:17:50.9276790Z HEAD is now at abb740b Merge 43ab78ccecb1f74608ae79de42b1c59a1ad3ad0a into ef54fd8347ab436d94e2aa8683ae884ad32c23c6
+2026-10-25T19:17:50.9351635Z ##[endgroup]
+2026-10-25T19:17:50.9810852Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-10-25T19:17:51.0154366Z abb740b19e068cbfeba735e620e83392214dd267
+2026-10-25T19:17:51.0596956Z ##[group]Run python tools/verify-wazig/check-map.py
+2026-10-25T19:17:51.0597459Z [36;1mpython tools/verify-wazig/check-map.py[0m
+2026-10-25T19:17:51.0597845Z [36;1mif ($LASTEXITCODE -ne 0) { throw 'Invalid skill map' }[0m
+2026-10-25T19:17:51.0598293Z [36;1mforeach ($file in Get-ChildItem tools/verify-wazig/*.ps1) {[0m
+2026-10-25T19:17:51.0598645Z [36;1m  $tokens = $null[0m
+2026-10-25T19:17:51.0598857Z [36;1m  $errors = $null[0m
+2026-10-25T19:17:51.0599325Z [36;1m  $null = [Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)[0m
+2026-10-25T19:17:51.0599914Z [36;1m  if ($errors.Count) { throw ($errors | Out-String) }[0m
+2026-10-25T19:17:51.0600207Z [36;1m}[0m
+2026-10-25T19:17:51.1462674Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-25T19:17:51.1463120Z ##[endgroup]
+2026-10-25T19:17:55.1205859Z SLACK SORT MAP VERIFIED: dispatch, recipe, synthetic hub and passed/failed evidence
+2026-10-25T19:17:55.1207443Z MAP VERIFIED: 34 complete feature entries, workflow/index parity, 77 coverage dispositions, source labels, stable controls, bounded chat-switch journey and GitHub triggers
+2026-10-25T19:17:55.1208718Z WORKSPACE ICON MAP VERIFIED: dispatch, synthetic team icons, screenshot pixels and surviving cache evidence
+2026-10-25T19:17:55.1209604Z SIGNAL MARK MAP VERIFIED: shared provider renderer and workspace-icons screenshot evidence
+2026-10-25T19:17:55.1210379Z TELEGRAM MAP VERIFIED: prelinked hub, messaging journey, CI wiring and indexed evidence
+2026-10-25T19:17:55.1211218Z NOTRAP MAP VERIFIED: saved empty startup, every-view Escape and Alt matrix, dispatch and indexed evidence
+2026-10-25T19:17:55.1212034Z REACTIONS MAP VERIFIED: real mouse journey, exact hub emoji evidence and PR matrix
+2026-10-25T19:17:55.1212798Z SLACK THREADS MAP VERIFIED: synthetic hub, keyboard journey, read-only measurements and restart
+2026-10-25T19:17:55.1214028Z HUB ARCHIVE MAP VERIFIED: legacy seed, archive request, keep state, same-profile restart, marker, evidence and PR wiring
+2026-10-25T19:17:55.1215682Z PALETTE ARCHIVED MAP VERIFIED: synthetic hub, every-view palette queries, Enter without unarchive, evidence and PR wiring
+2026-10-25T19:17:55.1217512Z WINDOW MAP VERIFIED: unforced startup, real keyboard restore/close, same-profile relaunch and zoomed evidence
+2026-10-25T19:17:55.1219042Z VOICE MAP VERIFIED: voice notes, cached transcripts, scroll, expand and partial-repaint pixel checks
+2026-10-25T19:17:55.1220173Z REPAINT MAP VERIFIED: cumulative counters, no-input incoming workload and PR journey
+2026-10-25T19:17:55.1221369Z SLACK ARCHIVE MAP VERIFIED: unified fixture, three deliveries, restart, unarchive and no archive endpoint requests
+2026-10-25T19:17:55.1223034Z PASTE IMAGE MAP VERIFIED: native clipboard, decoded uploads, four providers, isolated folders, focused file-name picker, popup diagnostics and remove-first evidence
+2026-10-25T19:17:55.1224515Z LINK PREVIEWS MAP VERIFIED: dispatch, PR matrix, hub mode and surviving evidence
+2026-10-25T19:17:55.1225605Z COMPOSER BORDER MAP VERIFIED: four screenshot edges, exact saved text scales, negative oracle and PR wiring
+2026-10-25T19:17:55.1227496Z PASSAGE COPY MAP VERIFIED: id-based targets and evidence, chronological clipboard, newest-first wire rows, real drag and held-edge scrolling on both providers
+2026-10-25T19:17:55.1229366Z JOURNEY REGISTRY VERIFIED: 34 journeys, maps, scripts, hub switches, evidence and plan matrix
+2026-10-25T19:17:55.1230608Z MEDIA FIT MAP VERIFIED: hub downloads, wide/narrow geometry and screenshot pixels, timestamp clearance and PR wiring
+2026-10-25T19:17:55.7283509Z ##[group]Run node --test tools/verify-wazig/text-comparison.test.cjs
+2026-10-25T19:17:55.7284092Z [36;1mnode --test tools/verify-wazig/text-comparison.test.cjs[0m
+2026-10-25T19:17:55.7361126Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-25T19:17:55.7361705Z ##[endgroup]
+2026-10-25T19:17:58.1876411Z TAP version 13
+2026-10-25T19:17:58.6443456Z # Subtest: ISSUE-462 Chrome fixture text, font files, sizes, weights and line heights match src
+2026-10-25T19:17:58.6451458Z ok 1 - ISSUE-462 Chrome fixture text, font files, sizes, weights and line heights match src
+2026-10-25T19:17:58.6452376Z   ---
+2026-10-25T19:17:58.6452752Z   duration_ms: 22.2308
+2026-10-25T19:17:58.6453110Z   type: 'test'
+2026-10-25T19:17:58.6453411Z   ...
+2026-10-25T19:17:58.6461091Z # Subtest: ISSUE-462 parity check rejects fixture, source and runtime drift
+2026-10-25T19:17:58.6463644Z ok 2 - ISSUE-462 parity check rejects fixture, source and runtime drift
+2026-10-25T19:17:58.6464379Z   ---
+2026-10-25T19:17:58.6464654Z   duration_ms: 334.6211
+2026-10-25T19:17:58.6464927Z   type: 'test'
+2026-10-25T19:17:58.6465091Z   ...
+2026-10-25T19:17:58.8135578Z 1..2
+2026-10-25T19:17:58.8137105Z # tests 2
+2026-10-25T19:17:58.8139795Z # suites 0
+2026-10-25T19:17:58.8140316Z # pass 2
+2026-10-25T19:17:58.8140842Z # fail 0
+2026-10-25T19:17:58.8142199Z # cancelled 0
+2026-10-25T19:17:58.8143581Z # skipped 0
+2026-10-25T19:17:58.8144598Z # todo 0
+2026-10-25T19:17:58.8145846Z # duration_ms 695.8809
+2026-10-25T19:17:58.9438722Z ##[group]Run mlugg/setup-zig@v2
+2026-10-25T19:17:58.9439034Z with:
+2026-10-25T19:17:58.9439226Z   version: 0.16.0
+2026-10-25T19:17:58.9439425Z   use-cache: true
+2026-10-25T19:17:58.9439610Z   cache-size-limit: 2048
+2026-10-25T19:17:58.9439817Z ##[endgroup]
+2026-10-25T19:17:59.2932187Z Using tool-cache: false
+2026-10-25T19:17:59.2938125Z Fetching zig-x86_64-windows-0.16.0.zip
+2026-10-25T19:17:59.6938500Z Cache hit for: setup-zig-tarball-zig-x86_64-windows-0.16.0
+2026-10-25T19:18:00.9947198Z Received 33554432 of 91486638 (36.7%), 31.8 MBs/sec
+2026-10-25T19:18:01.3679373Z Received 91486638 of 91486638 (100.0%), 63.3 MBs/sec
+2026-10-25T19:18:01.3682164Z Cache Size: ~87 MB (91486638 B)
+2026-10-25T19:18:01.3771705Z [command]"C:\Program Files\Git\usr\bin\tar.exe" -xf D:/a/_temp/ad785511-b9d4-4103-be56-3b7d57208ad4/cache.tzst -P -C D:/a/wazig/wazig --force-local --use-compress-program "zstd -d"
+2026-10-25T19:18:01.6792799Z Cache restored successfully
+2026-10-25T19:18:01.6850530Z Fetch took 2391 ms
+2026-10-25T19:18:01.6851125Z Extracting tarball zig-x86_64-windows-0.16.0.zip
+2026-10-25T19:18:01.8073631Z [command]"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Unrestricted -Command "$ErrorActionPreference = 'Stop' ; try { Add-Type -AssemblyName System.IO.Compression.ZipFile } catch { } ; try { [System.IO.Compression.ZipFile]::ExtractToDirectory('D:\a\_temp\zig-x86_64-windows-0.16.0.zip', 'D:\a\_temp\e13eb227-007f-40ba-9883-05828dd823d1', $true) } catch { if (($_.Exception.GetType().FullName -eq 'System.Management.Automation.MethodException') -or ($_.Exception.GetType().FullName -eq 'System.Management.Automation.RuntimeException') ){ Expand-Archive -LiteralPath 'D:\a\_temp\zig-x86_64-windows-0.16.0.zip' -DestinationPath 'D:\a\_temp\e13eb227-007f-40ba-9883-05828dd823d1' -Force } else { throw $_ } } ;"
+2026-10-25T19:18:08.3234383Z Extract took 6638 ms
+2026-10-25T19:18:08.4005273Z [command]D:\a\_temp\e13eb227-007f-40ba-9883-05828dd823d1\zig-x86_64-windows-0.16.0\zig.exe version
+2026-10-25T19:18:08.5929243Z 0.16.0
+2026-10-25T19:18:08.5980095Z Resolved Zig version 0.16.0
+2026-10-25T19:18:08.5991909Z Attempting restore of Zig cache with prefix 'setup-zig-cache-v2-verify-zig-x86_64-windows-0.16.0--'
+2026-10-25T19:18:08.9263378Z Cache hit for restore-key: setup-zig-cache-v2-verify-zig-x86_64-windows-0.16.0--40224317851-1
+2026-10-25T19:18:10.2101983Z Received 33554432 of 236969022 (14.2%), 31.8 MBs/sec
+2026-10-25T19:18:11.2263228Z Received 142606336 of 236969022 (60.2%), 67.2 MBs/sec
+2026-10-25T19:18:11.9327962Z Received 236969022 of 236969022 (100.0%), 82.8 MBs/sec
+2026-10-25T19:18:11.9332561Z Cache Size: ~226 MB (236969022 B)
+2026-10-25T19:18:11.9417142Z [command]"C:\Program Files\Git\usr\bin\tar.exe" -xf D:/a/_temp/2d357391-6fa8-41fb-8a1a-f6ce0d48c035/cache.tzst -P -C D:/a/wazig/wazig --force-local --use-compress-program "zstd -d"
+2026-10-25T19:18:16.0784777Z Cache restored successfully
+2026-10-25T19:18:16.0914524Z Cache hit (key 'setup-zig-cache-v2-verify-zig-x86_64-windows-0.16.0--40224317851-1'): populating Zig cache directory at D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:18:16.1341133Z ##[group]Run & tools/verify-wazig/check-chat-rows.ps1
+2026-10-25T19:18:16.1341626Z [36;1m& tools/verify-wazig/check-chat-rows.ps1[0m
+2026-10-25T19:18:16.1415033Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-25T19:18:16.1415389Z env:
+2026-10-25T19:18:16.1415617Z   ZIG_GLOBAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:18:16.1415945Z   ZIG_LOCAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:18:16.1416249Z ##[endgroup]
+2026-10-25T19:21:06.6048006Z negative control, old renderer must fail: 1/1 text_draw.test.ISSUE-462 DirectWrite paints every row-sized chat buffer...ISSUE-462 row top=0 buffered=false clip=.{ .left = 0, .top = 0, .right = 384, .bottom = 384 }
+2026-10-25T19:21:06.6055508Z negative control, old renderer must fail: ISSUE-462 row top=0 buffered=false name_ink=682 preview_ink=234
+2026-10-25T19:21:06.6063192Z negative control, old renderer must fail: ISSUE-462 row top=0 buffered=true clip=.{ .left = 0, .top = 0, .right = 330, .bottom = 64 }
+2026-10-25T19:21:06.6069678Z negative control, old renderer must fail: ISSUE-462 row top=0 buffered=true name_ink=682 preview_ink=234
+2026-10-25T19:21:06.6076777Z negative control, old renderer must fail: ISSUE-462 row top=64 buffered=false clip=.{ .left = 0, .top = 0, .right = 384, .bottom = 384 }
+2026-10-25T19:21:06.6083194Z negative control, old renderer must fail: ISSUE-462 row top=64 buffered=false name_ink=682 preview_ink=234
+2026-10-25T19:21:06.6090195Z negative control, old renderer must fail: ISSUE-462 row top=64 buffered=true clip=.{ .left = 0, .top = 0, .right = 330, .bottom = 64 }
+2026-10-25T19:21:06.6096679Z negative control, old renderer must fail: ISSUE-462 row top=64 buffered=true name_ink=0 preview_ink=0
+2026-10-25T19:21:06.6103451Z negative control, old renderer must fail: FAIL (TestUnexpectedResult)
+2026-10-25T19:21:06.6110421Z negative control, old renderer must fail: D:\a\_temp\e13eb227-007f-40ba-9883-05828dd823d1\zig-x86_64-windows-0.16.0\lib\std\testing.zig:615:14: 0x7ff772d2e9df in expect (test_zcu.obj)
+2026-10-25T19:21:06.6116932Z negative control, old renderer must fail:     if (!ok) return error.TestUnexpectedResult;
+2026-10-25T19:21:06.6123179Z negative control, old renderer must fail:              ^
+2026-10-25T19:21:06.6129649Z negative control, old renderer must fail: D:\a\wazig\wazig\src\text_draw.zig:1306:13: 0x7ff772d3139d in test.ISSUE-462 DirectWrite paints every row-sized chat buffer (test_zcu.obj)
+2026-10-25T19:21:06.6136299Z negative control, old renderer must fail:             try std.testing.expect(name_ink > 100 and preview_ink > 20);
+2026-10-25T19:21:06.6142714Z negative control, old renderer must fail:             ^
+2026-10-25T19:21:06.6149147Z negative control, old renderer must fail: 0 passed; 0 skipped; 1 failed.
+2026-10-25T19:21:06.6156085Z negative control, old renderer must fail: error: the following test command failed with exit code 1:
+2026-10-25T19:21:06.6181268Z negative control, old renderer must fail: .zig-cache\o\a2cf58d25fe6601b788db96cd66dd261\test.exe --seed=0x1d457507
+2026-10-25T19:21:06.6228729Z ISSUE-462 OLD RENDERER REJECTED: buffered row text has zero ink
+2026-10-25T19:21:10.8271245Z 1/1 text_draw.test.ISSUE-462 DirectWrite paints every row-sized chat buffer...ISSUE-462 row top=0 buffered=false clip=.{ .left = 0, .top = 0, .right = 384, .bottom = 384 }
+2026-10-25T19:21:10.8283463Z ISSUE-462 row top=0 buffered=false name_ink=682 preview_ink=234
+2026-10-25T19:21:10.8290537Z ISSUE-462 row top=0 buffered=true clip=.{ .left = 0, .top = 0, .right = 330, .bottom = 64 }
+2026-10-25T19:21:10.8295448Z ISSUE-462 row top=0 buffered=true name_ink=682 preview_ink=234
+2026-10-25T19:21:10.8307537Z ISSUE-462 row top=64 buffered=false clip=.{ .left = 0, .top = 0, .right = 384, .bottom = 384 }
+2026-10-25T19:21:10.8312032Z ISSUE-462 row top=64 buffered=false name_ink=682 preview_ink=234
+2026-10-25T19:21:10.8317451Z ISSUE-462 row top=64 buffered=true clip=.{ .left = 0, .top = 64, .right = 330, .bottom = 128 }
+2026-10-25T19:21:10.8324600Z ISSUE-462 row top=64 buffered=true name_ink=682 preview_ink=234
+2026-10-25T19:21:10.8334012Z ISSUE-462 row top=128 buffered=false clip=.{ .left = 0, .top = 0, .right = 384, .bottom = 384 }
+2026-10-25T19:21:10.8338606Z ISSUE-462 row top=128 buffered=false name_ink=682 preview_ink=234
+2026-10-25T19:21:10.8344038Z ISSUE-462 row top=128 buffered=true clip=.{ .left = 0, .top = 128, .right = 330, .bottom = 192 }
+2026-10-25T19:21:10.8349574Z ISSUE-462 row top=128 buffered=true name_ink=682 preview_ink=234
+2026-10-25T19:21:10.8361453Z ISSUE-462 row top=256 buffered=false clip=.{ .left = 0, .top = 0, .right = 384, .bottom = 384 }
+2026-10-25T19:21:10.8366194Z ISSUE-462 row top=256 buffered=false name_ink=682 preview_ink=234
+2026-10-25T19:21:10.8371926Z ISSUE-462 row top=256 buffered=true clip=.{ .left = 0, .top = 256, .right = 330, .bottom = 320 }
+2026-10-25T19:21:10.8376769Z ISSUE-462 row top=256 buffered=true name_ink=682 preview_ink=234
+2026-10-25T19:21:10.8390710Z OK
+2026-10-25T19:21:10.8391134Z All 1 tests passed.
+2026-10-25T19:21:10.8532459Z ISSUE-462 ROW TEXT VERIFIED: old renderer fails, current renderer paints every row
+2026-10-25T19:21:10.8968592Z ##[group]Run zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
+2026-10-25T19:21:10.8969305Z [36;1mzig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'[0m
+2026-10-25T19:21:10.9041719Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-25T19:21:10.9042140Z env:
+2026-10-25T19:21:10.9042453Z   ZIG_GLOBAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:21:10.9042853Z   ZIG_LOCAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:21:10.9043245Z ##[endgroup]
+2026-10-25T19:21:24.8731437Z ##[group]Run zig build test-edit '-Dtarget=x86_64-windows-gnu' --release=small
+2026-10-25T19:21:24.8732170Z [36;1mzig build test-edit '-Dtarget=x86_64-windows-gnu' --release=small[0m
+2026-10-25T19:21:24.8801178Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-25T19:21:24.8801633Z env:
+2026-10-25T19:21:24.8802134Z   ZIG_GLOBAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:21:24.8802846Z   ZIG_LOCAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:21:24.8803731Z ##[endgroup]
+2026-10-25T19:21:26.4653162Z test-edit
+2026-10-25T19:21:26.4653670Z +- run test w
+2026-10-25T19:21:26.4655203Z IGSH-466 native font diagnostics: format size=116, weight offset=92, mask=ffffffff/ffffffff, height=255, weight=500, font bytes=92, logical height=-17, logical weight=500, face={ 73, 66, 77, 32, 80, 108, 101, 120, 32, 83, 97, 110, 115, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+2026-10-25T19:21:26.4657222Z IGSH-466 native body font contract passed
+2026-10-25T19:21:26.4658206Z IGSH-466 native text, selection, undo/redo and clipboard passed
+2026-10-25T19:21:26.4659065Z IGSH-466 native rectangle, limit and wrapping passed
+2026-10-25T19:21:26.4660122Z IGSH-466 style undo and nested change notifications passed
+2026-10-25T19:21:26.4660921Z IGSH-466 native accessible value, caret and stable paint passed
+2026-10-25T19:21:26.4662313Z IGSH-466 font pixel equality, fallback negative control and 96/144 DPI ink/content-height passed
+2026-10-25T19:21:26.4663415Z IGSH-646 overflow dpi=96 rect=[2,8,198,26]
+2026-10-25T19:21:26.4664368Z IGSH-646 overflow dpi=144 rect=[2,11,198,39]
+2026-10-25T19:21:26.4664907Z IGSH-646 search-only centered rectangle and cue/typed ink at 96/144 DPI passed
+2026-10-25T19:21:26.4665899Z bitmap target grows without shrinking; renderer COM, snapping, transform, DPI, decorations and rendering mode verified
+2026-10-25T19:21:26.4666612Z text bench repeated_before: 200 calls, 227.89 us/call, hits=0 misses=200
+2026-10-25T19:21:26.4667028Z   font: 1.54 us/call
+2026-10-25T19:21:26.4667281Z   string: 0.03 us/call
+2026-10-25T19:21:26.4667570Z   format: 0.09 us/call
+2026-10-25T19:21:26.4667822Z   layout: 1.72 us/call
+2026-10-25T19:21:26.4668075Z   metrics: 44.46 us/call
+2026-10-25T19:21:26.4668366Z   bounds: 7.86 us/call
+2026-10-25T19:21:26.4668613Z   backdrop_blit: 8.11 us/call
+2026-10-25T19:21:26.4668972Z   draw: 150.92 us/call
+2026-10-25T19:21:26.4669203Z   blit_back: 5.03 us/call
+2026-10-25T19:21:26.4669568Z text bench repeated_after: 200 calls, 160.60 us/call, hits=200 misses=0
+2026-10-25T19:21:26.4670021Z   font: 1.11 us/call
+2026-10-25T19:21:26.4670269Z   string: 0.03 us/call
+2026-10-25T19:21:26.4670524Z   format: 0.06 us/call
+2026-10-25T19:21:26.4670806Z   layout: 0.10 us/call
+2026-10-25T19:21:26.4671052Z   metrics: 0.03 us/call
+2026-10-25T19:21:26.4671336Z   bounds: 4.68 us/call
+2026-10-25T19:21:26.4671587Z   backdrop_blit: 5.09 us/call
+2026-10-25T19:21:26.4671863Z   draw: 140.99 us/call
+2026-10-25T19:21:26.4672152Z   blit_back: 4.12 us/call
+2026-10-25T19:21:26.4672461Z text: directwrite = true, collection = font_set
+2026-10-25T19:21:26.4672847Z bundled font reference key matches requested file
+2026-10-25T19:21:26.4673306Z raster: ink=3397, intermediate grey levels=207, wrapped height=67
+2026-10-25T19:21:26.4673954Z coloured backdrop preserved exactly outside glyphs: 49163 untouched pixels inside text box, 3397 ink pixels
+2026-10-25T19:21:26.4674609Z viewport/window origins and intersected DC clip verified
+2026-10-25T19:21:26.4675035Z complex DC clip preserves excluded backdrop pixels
+2026-10-25T19:21:26.4675749Z pixel-equivalent cached and tight-bound rendering: 105 style/flag/text cases, cold and warm
+2026-10-25T19:21:26.4676629Z layout cache: CALCRECT reuse, width/height/flags/font keys, owned text, hash collisions, long text, format/LRU eviction and reset verified
+2026-10-25T19:21:26.4677345Z Factory3 and legacy custom loader both render bundled text
+2026-10-25T19:21:26.4680188Z GDI failure fallback is sticky until reset, then DirectWrite recovers
+2026-10-25T19:21:26.4680822Z text bench frame_before: 500 calls, 243.86 us/call, hits=0 misses=500
+2026-10-25T19:21:26.4681226Z   font: 1.53 us/call
+2026-10-25T19:21:26.4681508Z   string: 0.03 us/call
+2026-10-25T19:21:26.4681752Z   format: 0.11 us/call
+2026-10-25T19:21:26.4682011Z   layout: 1.82 us/call
+2026-10-25T19:21:26.4682257Z   metrics: 69.04 us/call
+2026-10-25T19:21:26.4682519Z   bounds: 8.21 us/call
+2026-10-25T19:21:26.4682903Z   backdrop_blit: 8.24 us/call
+2026-10-25T19:21:26.4683424Z   draw: 138.72 us/call
+2026-10-25T19:21:26.4683772Z   blit_back: 5.06 us/call
+2026-10-25T19:21:26.4684310Z text frame before: 1200x800, 50 distinct strings (25 labels, 25 200-unit paragraphs), 10 frames, 12.19 ms/frame
+2026-10-25T19:21:26.4684934Z text bench frame_after: 500 calls, 158.19 us/call, hits=450 misses=50
+2026-10-25T19:21:26.4685553Z   font: 1.22 us/call
+2026-10-25T19:21:26.4685816Z   string: 0.03 us/call
+2026-10-25T19:21:26.4686064Z   format: 0.07 us/call
+2026-10-25T19:21:26.4686348Z   layout: 0.38 us/call
+2026-10-25T19:21:26.4686600Z   metrics: 6.84 us/call
+2026-10-25T19:21:26.4686860Z   bounds: 4.85 us/call
+2026-10-25T19:21:26.4687133Z   backdrop_blit: 5.82 us/call
+2026-10-25T19:21:26.4687413Z   draw: 129.06 us/call
+2026-10-25T19:21:26.4687699Z   blit_back: 4.01 us/call
+2026-10-25T19:21:26.4688380Z text frame after: 1200x800, 50 distinct strings (25 labels, 25 200-unit paragraphs), 10 frames, 7.91 ms/frame
+2026-10-25T19:21:26.4689065Z ISSUE-462 row top=0 buffered=false clip=.{ .left = 0, .top = 0, .right = 384, .bottom = 384 }
+2026-10-25T19:21:26.4689654Z ISSUE-462 row top=0 buffered=false name_ink=682 preview_ink=234
+2026-10-25T19:21:26.4690190Z ISSUE-462 row top=0 buffered=true clip=.{ .left = 0, .top = 0, .right = 330, .bottom = 64 }
+2026-10-25T19:21:26.4690758Z ISSUE-462 row top=0 buffered=true name_ink=682 preview_ink=234
+2026-10-25T19:21:26.4691288Z ISSUE-462 row top=64 buffered=false clip=.{ .left = 0, .top = 0, .right = 384, .bottom = 384 }
+2026-10-25T19:21:26.4691841Z ISSUE-462 row top=64 buffered=false name_ink=682 preview_ink=234
+2026-10-25T19:21:26.4692600Z ISSUE-462 row top=64 buffered=true clip=.{ .left = 0, .top = 64, .right = 330, .bottom = 128 }
+2026-10-25T19:21:26.4694122Z ISSUE-462 row top=64 buffered=true name_ink=682 preview_ink=234
+2026-10-25T19:21:26.4695086Z ISSUE-462 row top=128 buffered=false clip=.{ .left = 0, .top = 0, .right = 384, .bottom = 384 }
+2026-10-25T19:21:26.4696024Z ISSUE-462 row top=128 buffered=false name_ink=682 preview_ink=234
+2026-10-25T19:21:26.4696931Z ISSUE-462 row top=128 buffered=true clip=.{ .left = 0, .top = 128, .right = 330, .bottom = 192 }
+2026-10-25T19:21:26.4697878Z ISSUE-462 row top=128 buffered=true name_ink=682 preview_ink=234
+2026-10-25T19:21:26.4698668Z ISSUE-462 row top=256 buffered=false clip=.{ .left = 0, .top = 0, .right = 384, .bottom = 384 }
+2026-10-25T19:21:26.4699650Z ISSUE-462 row top=256 buffered=false name_ink=682 preview_ink=234
+2026-10-25T19:21:26.4700596Z ISSUE-462 row top=256 buffered=true clip=.{ .left = 0, .top = 256, .right = 330, .bottom = 320 }
+2026-10-25T19:21:26.4701599Z ISSUE-462 row top=256 buffered=true name_ink=682 preview_ink=234
+2026-10-25T19:21:26.4703045Z scale=100% kind=rounded diameter=8 stroke=null native=1220173 fallback=1220548 area_error=0.031% solid_mismatch=0 off_edge=0 different=25 min_partial=6
+2026-10-25T19:21:26.4705100Z scale=100% kind=rounded diameter=8 stroke=1 native=68235 fallback=67692 area_error=0.796% solid_mismatch=0 off_edge=0 different=535 min_partial=5
+2026-10-25T19:21:26.4706870Z scale=100% kind=rounded diameter=8 stroke=2 native=137279 fallback=137264 area_error=0.011% solid_mismatch=0 off_edge=0 different=54 min_partial=5
+2026-10-25T19:21:26.4708643Z scale=100% kind=rounded diameter=24 stroke=null native=1191805 fallback=1192700 area_error=0.075% solid_mismatch=0 off_edge=0 different=72 min_partial=17
+2026-10-25T19:21:26.4711344Z scale=100% kind=rounded diameter=24 stroke=1 native=63413 fallback=62976 area_error=0.689% solid_mismatch=0 off_edge=0 different=511 min_partial=16
+2026-10-25T19:21:26.4713092Z scale=100% kind=rounded diameter=24 stroke=2 native=129956 fallback=130324 area_error=0.283% solid_mismatch=0 off_edge=0 different=166 min_partial=19
+2026-10-25T19:21:26.4714860Z scale=100% kind=rounded diameter=42 stroke=null native=1125359 fallback=1127420 area_error=0.183% solid_mismatch=0 off_edge=0 different=139 min_partial=33
+2026-10-25T19:21:26.4716592Z scale=100% kind=rounded diameter=42 stroke=1 native=57922 fallback=57552 area_error=0.639% solid_mismatch=0 off_edge=0 different=465 min_partial=30
+2026-10-25T19:21:26.4718321Z scale=100% kind=rounded diameter=42 stroke=2 native=122257 fallback=122344 area_error=0.071% solid_mismatch=0 off_edge=0 different=281 min_partial=31
+2026-10-25T19:21:26.4720040Z scale=100% kind=ellipse diameter=24 stroke=null native=956503 fallback=961348 area_error=0.507% solid_mismatch=0 off_edge=0 different=223 min_partial=53
+2026-10-25T19:21:26.4721810Z scale=100% kind=ellipse diameter=24 stroke=1 native=50231 fallback=49936 area_error=0.587% solid_mismatch=0 off_edge=0 different=425 min_partial=51
+2026-10-25T19:21:26.4723535Z scale=100% kind=ellipse diameter=24 stroke=2 native=110266 fallback=110780 area_error=0.466% solid_mismatch=0 off_edge=0 different=478 min_partial=48
+2026-10-25T19:21:26.4725566Z scale=100% kind=arc diameter=24 stroke=1 native=26563 fallback=26298 area_error=0.998% solid_mismatch=0 off_edge=0 different=220 min_partial=55
+2026-10-25T19:21:26.4728134Z scale=100% kind=arc diameter=24 stroke=2 native=57783 fallback=58062 area_error=0.483% solid_mismatch=0 off_edge=0 different=236 min_partial=50
+2026-10-25T19:21:26.4729862Z scale=150% kind=rounded diameter=12 stroke=null native=2745231 fallback=2746204 area_error=0.035% solid_mismatch=0 off_edge=0 different=39 min_partial=9
+2026-10-25T19:21:26.4731649Z scale=150% kind=rounded diameter=12 stroke=1 native=102864 fallback=102100 area_error=0.743% solid_mismatch=0 off_edge=0 different=809 min_partial=8
+2026-10-25T19:21:26.4733372Z scale=150% kind=rounded diameter=12 stroke=3 native=310622 fallback=309956 area_error=0.214% solid_mismatch=0 off_edge=0 different=820 min_partial=7
+2026-10-25T19:21:26.4735173Z scale=150% kind=rounded diameter=36 stroke=null native=2681662 fallback=2683060 area_error=0.052% solid_mismatch=0 off_edge=0 different=112 min_partial=26
+2026-10-25T19:21:26.4736938Z scale=150% kind=rounded diameter=36 stroke=1 native=95633 fallback=94924 area_error=0.741% solid_mismatch=0 off_edge=0 different=758 min_partial=26
+2026-10-25T19:21:26.4738717Z scale=150% kind=rounded diameter=36 stroke=3 native=294963 fallback=294292 area_error=0.227% solid_mismatch=0 off_edge=0 different=800 min_partial=27
+2026-10-25T19:21:26.4740466Z scale=150% kind=rounded diameter=63 stroke=null native=2531928 fallback=2536768 area_error=0.191% solid_mismatch=0 off_edge=0 different=216 min_partial=51
+2026-10-25T19:21:26.4742242Z scale=150% kind=rounded diameter=63 stroke=1 native=87439 fallback=86876 area_error=0.644% solid_mismatch=0 off_edge=0 different=712 min_partial=46
+2026-10-25T19:21:26.4743941Z scale=150% kind=rounded diameter=63 stroke=3 native=277452 fallback=276308 area_error=0.412% solid_mismatch=0 off_edge=0 different=781 min_partial=51
+2026-10-25T19:21:26.4746007Z scale=150% kind=ellipse diameter=36 stroke=null native=2160143 fallback=2162984 area_error=0.132% solid_mismatch=0 off_edge=0 different=337 min_partial=77
+2026-10-25T19:21:26.4747710Z scale=150% kind=ellipse diameter=36 stroke=1 native=75695 fallback=75312 area_error=0.506% solid_mismatch=0 off_edge=0 different=636 min_partial=80
+2026-10-25T19:21:26.4749379Z scale=150% kind=ellipse diameter=36 stroke=3 native=250652 fallback=251060 area_error=0.163% solid_mismatch=0 off_edge=0 different=722 min_partial=75
+2026-10-25T19:21:26.4751028Z scale=150% kind=arc diameter=36 stroke=1 native=40035 fallback=39686 area_error=0.872% solid_mismatch=0 off_edge=0 different=336 min_partial=85
+2026-10-25T19:21:26.4752826Z scale=150% kind=arc diameter=36 stroke=3 native=131383 fallback=131542 area_error=0.121% solid_mismatch=0 off_edge=0 different=370 min_partial=81
+2026-10-25T19:21:26.4754482Z failed command: ".\\.zig-cache\\o\\3940f730bd7dcc7e97e64f06b2443056\\test.exe" "--cache-dir=.\\.zig-cache" --seed=0x1821a3b3 --listen=-
+2026-10-25T19:21:26.4755048Z 
+2026-10-25T19:21:26.6197203Z ##[group]Run pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature 'slack-archive' -Bin zig-out/bin -Evidence verification-evidence
+2026-10-25T19:21:26.6198659Z [36;1mpwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature 'slack-archive' -Bin zig-out/bin -Evidence verification-evidence[0m
+2026-10-25T19:21:26.6272694Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-25T19:21:26.6273122Z env:
+2026-10-25T19:21:26.6273455Z   ZIG_GLOBAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:21:26.6273872Z   ZIG_LOCAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:21:26.6274231Z ##[endgroup]
+2026-10-25T19:21:30.6205016Z error: VerificationRequiresActions
+2026-10-25T19:21:30.6357001Z error: MissingVerificationRoot
+2026-10-25T19:21:31.8466169Z DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits
+2026-10-25T19:22:01.5312201Z [31;1mException: [0mD:\a\wazig\wazig\tools\verify-wazig\harness.ps1:43[0m
+2026-10-25T19:22:01.5313488Z [31;1m[0m[36;1mLine |[0m
+2026-10-25T19:22:01.5314804Z [31;1m[0m[36;1m[36;1m  43 | [0m     [36;1mthrow "Timed out: $Description"[0m
+2026-10-25T19:22:01.5315614Z [31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+2026-10-25T19:22:01.5316448Z [31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mTimed out: Slack archive view incoming[0m
+2026-10-25T19:22:01.6706492Z ##[error]Process completed with exit code 1.
+2026-10-25T19:22:01.6919983Z ##[group]Run pwsh -NoProfile -File tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
+2026-10-25T19:22:01.6920803Z [36;1mpwsh -NoProfile -File tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence[0m
+2026-10-25T19:22:01.6989009Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-25T19:22:01.6989378Z env:
+2026-10-25T19:22:01.6989612Z   ZIG_GLOBAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:22:01.6989951Z   ZIG_LOCAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:22:01.6990254Z ##[endgroup]
+2026-10-25T19:22:03.0275661Z ##[group]Run actions/upload-artifact@v4
+2026-10-25T19:22:03.0276027Z with:
+2026-10-25T19:22:03.0276236Z   name: verify-wazig-slack-archive
+2026-10-25T19:22:03.0276506Z   path: verification-evidence/
+2026-10-25T19:22:03.0276759Z   if-no-files-found: error
+2026-10-25T19:22:03.0276978Z   compression-level: 6
+2026-10-25T19:22:03.0277176Z   overwrite: false
+2026-10-25T19:22:03.0277367Z   include-hidden-files: false
+2026-10-25T19:22:03.0277579Z env:
+2026-10-25T19:22:03.0277788Z   ZIG_GLOBAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:22:03.0278114Z   ZIG_LOCAL_CACHE_DIR: D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:22:03.0278385Z ##[endgroup]
+2026-10-25T19:22:03.2155480Z (node:7916) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-25T19:22:03.2156214Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-25T19:22:03.2436230Z With the provided path, there will be 76 files uploaded
+2026-10-25T19:22:03.2441760Z Artifact name is valid!
+2026-10-25T19:22:03.2442977Z Root directory input is valid!
+2026-10-25T19:22:03.6233070Z Beginning upload of artifact content to blob storage
+2026-10-25T19:22:03.7473476Z (node:7916) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-10-25T19:22:04.4184626Z Uploaded bytes 433635
+2026-10-25T19:22:04.4975381Z Finished uploading artifact content to blob storage!
+2026-10-25T19:22:04.4977145Z SHA256 digest of uploaded artifact zip is 6fe0819d3b94ad6a941a3fc1da828e455905d29a051a5ff992f4a4bef916ac34
+2026-10-25T19:22:04.4979283Z Finalizing artifact upload
+2026-10-25T19:22:04.9480059Z Artifact verify-wazig-slack-archive.zip successfully finalized. Artifact ID 12610648638
+2026-10-25T19:22:04.9481529Z Artifact verify-wazig-slack-archive has been successfully uploaded! Final size is 433635 bytes. Artifact ID is 12610648638
+2026-10-25T19:22:04.9492676Z Artifact download URL: https://github.com/valentinyeo/wazig/actions/runs/40224957428/artifacts/12610648638
+2026-10-25T19:22:04.9837725Z Post job cleanup.
+2026-10-25T19:22:05.3225919Z Checking size of cache directory at D:\a\wazig\wazig\.zig-cache
+2026-10-25T19:22:06.2377564Z Cache directory is 1011173139 bytes, below limit of 2147483648 bytes; keeping intact
+2026-10-25T19:22:06.2383257Z Saving Zig cache with key 'setup-zig-cache-v2-verify-zig-x86_64-windows-0.16.0--40224957428-1'
+2026-10-25T19:22:06.3369888Z [command]"C:\Program Files\Git\usr\bin\tar.exe" --posix -cf cache.tzst --exclude cache.tzst -P -C D:/a/wazig/wazig --files-from manifest.txt --force-local --use-compress-program "zstd -T0"
+2026-10-25T19:22:11.6682090Z Failed to save: Unable to reserve cache with key setup-zig-cache-v2-verify-zig-x86_64-windows-0.16.0--40224957428-1, another job may be creating this cache.
+2026-10-25T19:22:11.7259102Z Post job cleanup.
+2026-10-25T19:22:11.9149092Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-10-25T19:22:11.9494768Z git version 2.56.0.windows.2
+2026-10-25T19:22:11.9560005Z Temporarily overriding HOME='D:\a\_temp\57177a05-7c5c-424f-8815-cf97c3e3f1dc' before making global git config changes
+2026-10-25T19:22:11.9561367Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-25T19:22:11.9571554Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\wazig\wazig
+2026-10-25T19:22:11.9958528Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-10-25T19:22:12.0325764Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-10-25T19:22:12.7589035Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-25T19:22:12.8424655Z http.https://github.com/.extraheader
+2026-10-25T19:22:12.8476180Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+2026-10-25T19:22:12.9113514Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-10-25T19:22:13.5223859Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-25T19:22:13.5596036Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-10-25T19:22:14.1271020Z Cleaning up orphan processes
+2026-10-25T19:22:14.1957663Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/upload-artifact@v4, mlugg/setup-zig@v2. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

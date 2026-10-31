@@ -1,0 +1,181 @@
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 ci valentinyeo/wazig#387 · 40224317846
+Triggered via pull_request about 4 minutes ago
+
+JOBS
+✓ pin-icon-tests in 18s (ID 121262352772)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ IGSH-494 pin geometry
+  ✓ IGSH-494 pin source regression and negative controls
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ tdlib-cache / cache in 4s (ID 121262352877)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Reject retired desktop dependencies
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ unfurl-verification in 3m37s (ID 121262352878)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ ISSUE-517 isolated Windows user key loading
+  ✓ ISSUE-545 row-sized paint buffer pixel placement
+  ✓ Build Messages.exe
+  ✓ Run unfurl smoke on this Windows machine
+  ✓ Upload unfurl evidence
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* ci (ID 121262352978)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ No new code comments
+  ✓ Python tooling tests
+  ✓ Cache keys skip workflow files
+  ✓ Run mlugg/setup-zig@v2
+  ✓ Zig version
+  ✓ ISSUE-517 voice transcription and historical negative control
+  X Preflight
+  - IGSH-833 bulk incoming regression on original main
+  - IGSH-767 archive intent and historical negative control
+  - Compile ARM64 release
+  - Agent guard tests
+  - Outbox lifecycle and regression controls
+  - Upload artifact
+  * Post Run mlugg/setup-zig@v2
+  * Post Run actions/checkout@v4
+✓ tdlib in 2m21s (ID 121262671745)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ Build hub-only desktop
+  ✓ Verify hub-only binary
+  ✓ Exe size report
+  ✓ Upload Telegram build artifact
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* windows-smoke (ID 121263383539)
+
+ANNOTATIONS
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, mlugg/setup-zig@v2. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+pin-icon-tests: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+pin-icon-tests: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+tdlib-cache / cache: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+tdlib-cache / cache: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/upload-artifact@v4, mlugg/setup-zig@v2. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+unfurl-verification: .github#2
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/upload-artifact@v4, mlugg/setup-zig@v2. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+tdlib: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+tdlib: .github#1
+
+X ceo/IGSH-833 ci valentinyeo/wazig#387 · 40224317846
+Triggered via pull_request about 5 minutes ago
+
+JOBS
+✓ pin-icon-tests in 18s (ID 121262352772)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ IGSH-494 pin geometry
+  ✓ IGSH-494 pin source regression and negative controls
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ tdlib-cache / cache in 4s (ID 121262352877)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Reject retired desktop dependencies
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ unfurl-verification in 3m37s (ID 121262352878)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ ISSUE-517 isolated Windows user key loading
+  ✓ ISSUE-545 row-sized paint buffer pixel placement
+  ✓ Build Messages.exe
+  ✓ Run unfurl smoke on this Windows machine
+  ✓ Upload unfurl evidence
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+X ci in 3m31s (ID 121262352978)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ No new code comments
+  ✓ Python tooling tests
+  ✓ Cache keys skip workflow files
+  ✓ Run mlugg/setup-zig@v2
+  ✓ Zig version
+  ✓ ISSUE-517 voice transcription and historical negative control
+  X Preflight
+  - IGSH-833 bulk incoming regression on original main
+  - IGSH-767 archive intent and historical negative control
+  - Compile ARM64 release
+  - Agent guard tests
+  - Outbox lifecycle and regression controls
+  - Upload artifact
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ tdlib in 2m21s (ID 121262671745)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run mlugg/setup-zig@v2
+  ✓ Build hub-only desktop
+  ✓ Verify hub-only binary
+  ✓ Exe size report
+  ✓ Upload Telegram build artifact
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ windows-smoke in 38s (ID 121263383539)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Download build
+  ✓ Run hub smoke
+  ✓ Validate hub smoke evidence
+  ✓ Cleanup hub smoke
+  ✓ Upload hub smoke evidence
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+- notify-release in 0s (ID 121263714881)
+
+ANNOTATIONS
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, mlugg/setup-zig@v2. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+pin-icon-tests: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+pin-icon-tests: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+tdlib-cache / cache: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+tdlib-cache / cache: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/upload-artifact@v4, mlugg/setup-zig@v2. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+unfurl-verification: .github#2
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, mlugg/setup-zig@v2. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+ci: .github#2
+
+X Process completed with exit code 1.
+ci: .github#97
+

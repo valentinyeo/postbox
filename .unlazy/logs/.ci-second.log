@@ -1,0 +1,856 @@
+﻿2026-10-25T18:59:19.9387599Z Current runner version: '2.338.0'
+2026-10-25T18:59:19.9404601Z ##[group]Runner Image Provisioner
+2026-10-25T18:59:19.9405220Z Hosted Compute Agent
+2026-10-25T18:59:19.9405617Z Version: 20261021.618
+2026-10-25T18:59:19.9405995Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+2026-10-25T18:59:19.9406457Z Build Date: 2026-10-21T00:45:21Z
+2026-10-25T18:59:19.9406862Z Worker ID: {1a050f54-346b-4d0f-a912-c0c88fa47524}
+2026-10-25T18:59:19.9407443Z Region: southcentralus
+2026-10-25T18:59:19.9407887Z Cloud: Azure
+2026-10-25T18:59:19.9408245Z ##[endgroup]
+2026-10-25T18:59:19.9409289Z ##[group]Operating System
+2026-10-25T18:59:19.9409700Z Ubuntu
+2026-10-25T18:59:19.9410003Z 26.04.1
+2026-10-25T18:59:19.9410386Z LTS
+2026-10-25T18:59:19.9410697Z ##[endgroup]
+2026-10-25T18:59:19.9411045Z ##[group]Runner Image
+2026-10-25T18:59:19.9411409Z Image: ubuntu-26.04
+2026-10-25T18:59:19.9411748Z Version: 20261012.163.1
+2026-10-25T18:59:19.9412559Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261012.163/images/ubuntu/Ubuntu2604-Readme.md
+2026-10-25T18:59:19.9413455Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261012.163
+2026-10-25T18:59:19.9414024Z ##[endgroup]
+2026-10-25T18:59:19.9414705Z ##[group]GITHUB_TOKEN Permissions
+2026-10-25T18:59:19.9415908Z Contents: read
+2026-10-25T18:59:19.9416251Z Metadata: read
+2026-10-25T18:59:19.9416637Z ##[endgroup]
+2026-10-25T18:59:19.9418183Z Secret source: Actions
+2026-10-25T18:59:19.9418828Z Cache mode: write
+2026-10-25T18:59:19.9419237Z Prepare workflow directory
+2026-10-25T18:59:20.0030232Z Prepare all required actions
+2026-10-25T18:59:20.0061734Z Getting action download info
+2026-10-25T18:59:20.2539243Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-25T18:59:20.6839385Z Download action repository 'mlugg/setup-zig@v2' (SHA:d1434d08867e3ee9daa34448df10607b98908d29)
+2026-10-25T18:59:22.2032196Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-10-25T18:59:22.3892483Z Complete job name: ci
+2026-10-25T18:59:22.4542027Z ##[group]Run actions/checkout@v4
+2026-10-25T18:59:22.4542739Z with:
+2026-10-25T18:59:22.4543181Z   fetch-depth: 0
+2026-10-25T18:59:22.4543672Z   repository: valentinyeo/wazig
+2026-10-25T18:59:22.4548678Z   token: ***
+2026-10-25T18:59:22.4549145Z   ssh-strict: true
+2026-10-25T18:59:22.4549621Z   ssh-user: git
+2026-10-25T18:59:22.4550113Z   persist-credentials: true
+2026-10-25T18:59:22.4550650Z   clean: true
+2026-10-25T18:59:22.4551151Z   sparse-checkout-cone-mode: true
+2026-10-25T18:59:22.4551743Z   fetch-tags: false
+2026-10-25T18:59:22.4552233Z   show-progress: true
+2026-10-25T18:59:22.4552735Z   lfs: false
+2026-10-25T18:59:22.4553195Z   submodules: false
+2026-10-25T18:59:22.4553689Z   set-safe-directory: true
+2026-10-25T18:59:22.4554264Z   allow-unsafe-pr-checkout: false
+2026-10-25T18:59:22.4554938Z ##[endgroup]
+2026-10-25T18:59:22.5244049Z Syncing repository: valentinyeo/wazig
+2026-10-25T18:59:22.5245567Z ##[group]Getting Git version info
+2026-10-25T18:59:22.5246641Z Working directory is '/home/runner/work/wazig/wazig'
+2026-10-25T18:59:22.5248200Z [command]/usr/bin/git version
+2026-10-25T18:59:22.5248764Z git version 2.55.0
+2026-10-25T18:59:22.5251900Z ##[endgroup]
+2026-10-25T18:59:22.5261187Z Temporarily overriding HOME='/home/runner/work/_temp/5d0625db-dd55-49a5-9ca5-0f2278ae3264' before making global git config changes
+2026-10-25T18:59:22.5263027Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-25T18:59:22.5264520Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/wazig/wazig
+2026-10-25T18:59:22.5313006Z Deleting the contents of '/home/runner/work/wazig/wazig'
+2026-10-25T18:59:22.5315183Z ##[group]Initializing the repository
+2026-10-25T18:59:22.5318578Z [command]/usr/bin/git init /home/runner/work/wazig/wazig
+2026-10-25T18:59:22.5424339Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-25T18:59:22.5425842Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-25T18:59:22.5427069Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-25T18:59:22.5428471Z hint: call:
+2026-10-25T18:59:22.5429238Z hint:
+2026-10-25T18:59:22.5429978Z hint: 	git config --global init.defaultBranch <name>
+2026-10-25T18:59:22.5430656Z hint:
+2026-10-25T18:59:22.5431640Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-25T18:59:22.5433207Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-25T18:59:22.5434372Z hint:
+2026-10-25T18:59:22.5435015Z hint: 	git branch -m <name>
+2026-10-25T18:59:22.5435766Z hint:
+2026-10-25T18:59:22.5436764Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-25T18:59:22.5438126Z Initialized empty Git repository in /home/runner/work/wazig/wazig/.git/
+2026-10-25T18:59:22.5440047Z [command]/usr/bin/git remote add origin https://github.com/valentinyeo/wazig
+2026-10-25T18:59:22.5471011Z ##[endgroup]
+2026-10-25T18:59:22.5471897Z ##[group]Disabling automatic garbage collection
+2026-10-25T18:59:22.5472830Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-25T18:59:22.5497875Z ##[endgroup]
+2026-10-25T18:59:22.5501344Z ##[group]Setting up auth
+2026-10-25T18:59:22.5502175Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-25T18:59:22.5526167Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-25T18:59:22.5845292Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-25T18:59:22.5871479Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-25T18:59:22.6081106Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-25T18:59:22.6104892Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-25T18:59:22.6314267Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-25T18:59:22.6344812Z ##[endgroup]
+2026-10-25T18:59:22.6345625Z ##[group]Fetching the repository
+2026-10-25T18:59:22.6351409Z [command]/usr/bin/git -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/* +1f1a57d53ea7b7a76c10eab5fcb842ecfebd3add:refs/remotes/pull/387/merge
+2026-10-25T18:59:23.8173294Z From https://github.com/valentinyeo/wazig
+2026-10-25T18:59:23.8173996Z  * [new branch]      WAZI-77-release-trigger                  -> origin/WAZI-77-release-trigger
+2026-10-25T18:59:23.8174607Z  * [new branch]      agent/wazi-14-crackle-fix                -> origin/agent/wazi-14-crackle-fix
+2026-10-25T18:59:23.8175249Z  * [new branch]      agent/wazi-14-pitch-speed                -> origin/agent/wazi-14-pitch-speed
+2026-10-25T18:59:23.8175811Z  * [new branch]      agent/wazi-18-played-097                 -> origin/agent/wazi-18-played-097
+2026-10-25T18:59:23.8176355Z  * [new branch]      agent/wazi-19-caret-blink                -> origin/agent/wazi-19-caret-blink
+2026-10-25T18:59:23.8176896Z  * [new branch]      agent/wazi-20-luna-model                 -> origin/agent/wazi-20-luna-model
+2026-10-25T18:59:23.8177562Z  * [new branch]      agent/wazi-24-inline-video               -> origin/agent/wazi-24-inline-video
+2026-10-25T18:59:23.8178148Z  * [new branch]      agent/wazi-26-version-from-tag           -> origin/agent/wazi-26-version-from-tag
+2026-10-25T18:59:23.8178746Z  * [new branch]      agent/wazi-31-msi-smoke-fix              -> origin/agent/wazi-31-msi-smoke-fix
+2026-10-25T18:59:23.8179337Z  * [new branch]      agent/wazi-37-paste-send                 -> origin/agent/wazi-37-paste-send
+2026-10-25T18:59:23.8182313Z  * [new branch]      agent/wazi-40-pin-chats                  -> origin/agent/wazi-40-pin-chats
+2026-10-25T18:59:23.8182896Z  * [new branch]      agent/wazi-42-palette-chats              -> origin/agent/wazi-42-palette-chats
+2026-10-25T18:59:23.8183532Z  * [new branch]      agent/wazi-65-color-emoji-begin-draw     -> origin/agent/wazi-65-color-emoji-begin-draw
+2026-10-25T18:59:23.8184070Z  * [new branch]      agent/wazi-66-ocr-fixes                  -> origin/agent/wazi-66-ocr-fixes
+2026-10-25T18:59:23.8184661Z  * [new branch]      agent/wazi-66-update-mutex               -> origin/agent/wazi-66-update-mutex
+2026-10-25T18:59:23.8185224Z  * [new branch]      agent/wazi-74-read-state                 -> origin/agent/wazi-74-read-state
+2026-10-25T18:59:23.8185612Z  * [new branch]      agent/wazi-77-release-chain              -> origin/agent/wazi-77-release-chain
+2026-10-25T18:59:23.8185992Z  * [new branch]      agent/wazi-81-update-reoffer             -> origin/agent/wazi-81-update-reoffer
+2026-10-25T18:59:23.8186367Z  * [new branch]      agent/wazi-86-auth-shape                 -> origin/agent/wazi-86-auth-shape
+2026-10-25T18:59:23.8186744Z  * [new branch]      agent/wazig-26-version-embed             -> origin/agent/wazig-26-version-embed
+2026-10-25T18:59:23.8213079Z  * [new branch]      agent/wazig-27-097-selfupdate            -> origin/agent/wazig-27-097-selfupdate
+2026-10-25T18:59:23.8213800Z  * [new branch]      agent/wazig-70-placeholder               -> origin/agent/wazig-70-placeholder
+2026-10-25T18:59:23.8214389Z  * [new branch]      agent/wazig-dev-1-wazi-100               -> origin/agent/wazig-dev-1-wazi-100
+2026-10-25T18:59:23.8214971Z  * [new branch]      agent/wazig-dev-1-wazi-36                -> origin/agent/wazig-dev-1-wazi-36
+2026-10-25T18:59:23.8215533Z  * [new branch]      agent/wazig-dev-1-wazi-82                -> origin/agent/wazig-dev-1-wazi-82
+2026-10-25T18:59:23.8216053Z  * [new branch]      agent/wazig-dev-1-wazi-88                -> origin/agent/wazig-dev-1-wazi-88
+2026-10-25T18:59:23.8216783Z  * [new branch]      agent/wazig-dev-2-ci-tdlib-fix           -> origin/agent/wazig-dev-2-ci-tdlib-fix
+2026-10-25T18:59:23.8217188Z  * [new branch]      agent/wazig-dev-2-ocr-timeout            -> origin/agent/wazig-dev-2-ocr-timeout
+2026-10-25T18:59:23.8217899Z  * [new branch]      agent/wazig-dev-2-wazi-103               -> origin/agent/wazig-dev-2-wazi-103
+2026-10-25T18:59:23.8218326Z  * [new branch]      agent/wazig-dev-2-wazi-17                -> origin/agent/wazig-dev-2-wazi-17
+2026-10-25T18:59:23.8218683Z  * [new branch]      agent/wazig-dev-2-wazi-48                -> origin/agent/wazig-dev-2-wazi-48
+2026-10-25T18:59:23.8219034Z  * [new branch]      agent/wazig-dev-2-wazi-83                -> origin/agent/wazig-dev-2-wazi-83
+2026-10-25T18:59:23.8219394Z  * [new branch]      agent/wazig-dev-3-wazi-104               -> origin/agent/wazig-dev-3-wazi-104
+2026-10-25T18:59:23.8219760Z  * [new branch]      agent/wazig-dev-3-wazi-54                -> origin/agent/wazig-dev-3-wazi-54
+2026-10-25T18:59:23.8220163Z  * [new branch]      agent/wazig-dev-3-wazi-54-pipeline       -> origin/agent/wazig-dev-3-wazi-54-pipeline
+2026-10-25T18:59:23.8220580Z  * [new branch]      agent/wazig-dev-3-wazi-8                 -> origin/agent/wazig-dev-3-wazi-8
+2026-10-25T18:59:23.8220948Z  * [new branch]      agent/wazig-dev-4-wazi-23                -> origin/agent/wazig-dev-4-wazi-23
+2026-10-25T18:59:23.8221325Z  * [new branch]      agent/wazig-dev-4-wazi-35                -> origin/agent/wazig-dev-4-wazi-35
+2026-10-25T18:59:23.8221683Z  * [new branch]      agent/wazig-dev-4-wazi-39                -> origin/agent/wazig-dev-4-wazi-39
+2026-10-25T18:59:23.8222034Z  * [new branch]      agent/wazig-dev-4-wazi-73                -> origin/agent/wazig-dev-4-wazi-73
+2026-10-25T18:59:23.8222391Z  * [new branch]      agent/wazig-dev-4-wazi-79                -> origin/agent/wazig-dev-4-wazi-79
+2026-10-25T18:59:23.8222759Z  * [new branch]      agent/wazig-dev-5-wazi-18-v2             -> origin/agent/wazig-dev-5-wazi-18-v2
+2026-10-25T18:59:23.8223287Z  * [new branch]      agent/wazig-dev-5-wazi-67-logrotate      -> origin/agent/wazig-dev-5-wazi-67-logrotate
+2026-10-25T18:59:23.8223685Z  * [new branch]      agent/wazig-dev-5-wazi-84                -> origin/agent/wazig-dev-5-wazi-84
+2026-10-25T18:59:23.8224054Z  * [new branch]      agent/wazig-dev-5-wazi-85                -> origin/agent/wazig-dev-5-wazi-85
+2026-10-25T18:59:23.8224414Z  * [new branch]      agent/wazig-dev-5-wazi-86                -> origin/agent/wazig-dev-5-wazi-86
+2026-10-25T18:59:23.8224776Z  * [new branch]      agent/wazig-dev-5-wazi-87                -> origin/agent/wazig-dev-5-wazi-87
+2026-10-25T18:59:23.8225141Z  * [new branch]      agent/wazig-dev-wazi-115                 -> origin/agent/wazig-dev-wazi-115
+2026-10-25T18:59:23.8225506Z  * [new branch]      agent/wazig-dev-wazi-116                 -> origin/agent/wazig-dev-wazi-116
+2026-10-25T18:59:23.8225873Z  * [new branch]      agent/wazig-dev-wazi-117                 -> origin/agent/wazig-dev-wazi-117
+2026-10-25T18:59:23.8226238Z  * [new branch]      agent/wazig-dev-wazi-118                 -> origin/agent/wazig-dev-wazi-118
+2026-10-25T18:59:23.8226595Z  * [new branch]      agent/wazig-dev-wazi-119                 -> origin/agent/wazig-dev-wazi-119
+2026-10-25T18:59:23.8226965Z  * [new branch]      anthropic-no-temperature                 -> origin/anthropic-no-temperature
+2026-10-25T18:59:23.8227475Z  * [new branch]      archive/v1-old-base                      -> origin/archive/v1-old-base
+2026-10-25T18:59:23.8227809Z  * [new branch]      arrow-select                             -> origin/arrow-select
+2026-10-25T18:59:23.8228119Z  * [new branch]      ceo/IGSH-461                             -> origin/ceo/IGSH-461
+2026-10-25T18:59:23.8228451Z  * [new branch]      ceo/IGSH-462-compare                     -> origin/ceo/IGSH-462-compare
+2026-10-25T18:59:23.8228797Z  * [new branch]      ceo/IGSH-464-session                     -> origin/ceo/IGSH-464-session
+2026-10-25T18:59:23.8229222Z  * [new branch]      ceo/IGSH-482                             -> origin/ceo/IGSH-482
+2026-10-25T18:59:23.8229527Z  * [new branch]      ceo/IGSH-494                             -> origin/ceo/IGSH-494
+2026-10-25T18:59:23.8229826Z  * [new branch]      ceo/IGSH-497                             -> origin/ceo/IGSH-497
+2026-10-25T18:59:23.8230124Z  * [new branch]      ceo/IGSH-504                             -> origin/ceo/IGSH-504
+2026-10-25T18:59:23.8230448Z  * [new branch]      ceo/IGSH-505-verify                      -> origin/ceo/IGSH-505-verify
+2026-10-25T18:59:23.8230764Z  * [new branch]      ceo/IGSH-510                             -> origin/ceo/IGSH-510
+2026-10-25T18:59:23.8231080Z  * [new branch]      ceo/IGSH-517                             -> origin/ceo/IGSH-517
+2026-10-25T18:59:23.8231428Z  * [new branch]      ceo/IGSH-517-key                         -> origin/ceo/IGSH-517-key
+2026-10-25T18:59:23.8231742Z  * [new branch]      ceo/IGSH-526                             -> origin/ceo/IGSH-526
+2026-10-25T18:59:23.8232075Z  * [new branch]      ceo/IGSH-531-nocap                       -> origin/ceo/IGSH-531-nocap
+2026-10-25T18:59:23.8232390Z  * [new branch]      ceo/IGSH-533                             -> origin/ceo/IGSH-533
+2026-10-25T18:59:23.8232693Z  * [new branch]      ceo/IGSH-538                             -> origin/ceo/IGSH-538
+2026-10-25T18:59:23.8233004Z  * [new branch]      ceo/IGSH-659-red                         -> origin/ceo/IGSH-659-red
+2026-10-25T18:59:23.8233412Z  * [new branch]      ceo/IGSH-669-red                         -> origin/ceo/IGSH-669-red
+2026-10-25T18:59:23.8233900Z  * [new branch]      ceo/IGSH-670-red                         -> origin/ceo/IGSH-670-red
+2026-10-25T18:59:23.8234369Z  * [new branch]      ceo/IGSH-671                             -> origin/ceo/IGSH-671
+2026-10-25T18:59:23.8234770Z  * [new branch]      ceo/IGSH-681-client                      -> origin/ceo/IGSH-681-client
+2026-10-25T18:59:23.8235104Z  * [new branch]      ceo/IGSH-681-red                         -> origin/ceo/IGSH-681-red
+2026-10-25T18:59:23.8235519Z  * [new branch]      ceo/IGSH-683                             -> origin/ceo/IGSH-683
+2026-10-25T18:59:23.8235818Z  * [new branch]      ceo/IGSH-693                             -> origin/ceo/IGSH-693
+2026-10-25T18:59:23.8236125Z  * [new branch]      ceo/IGSH-714                             -> origin/ceo/IGSH-714
+2026-10-25T18:59:23.8236432Z  * [new branch]      ceo/IGSH-729                             -> origin/ceo/IGSH-729
+2026-10-25T18:59:23.8236891Z  * [new branch]      ceo/IGSH-729-light                       -> origin/ceo/IGSH-729-light
+2026-10-25T18:59:23.8237439Z  * [new branch]      ceo/IGSH-734-red                         -> origin/ceo/IGSH-734-red
+2026-10-25T18:59:23.8237923Z  * [new branch]      ceo/IGSH-736                             -> origin/ceo/IGSH-736
+2026-10-25T18:59:23.8238431Z  * [new branch]      ceo/IGSH-823-red                         -> origin/ceo/IGSH-823-red
+2026-10-25T18:59:23.8238914Z  * [new branch]      ceo/IGSH-828                             -> origin/ceo/IGSH-828
+2026-10-25T18:59:23.8239400Z  * [new branch]      ceo/IGSH-829                             -> origin/ceo/IGSH-829
+2026-10-25T18:59:23.8239894Z  * [new branch]      ceo/IGSH-829-red                         -> origin/ceo/IGSH-829-red
+2026-10-25T18:59:23.8240369Z  * [new branch]      ceo/IGSH-833                             -> origin/ceo/IGSH-833
+2026-10-25T18:59:23.8240824Z  * [new branch]      ceo/WAZI-100                             -> origin/ceo/WAZI-100
+2026-10-25T18:59:23.8241277Z  * [new branch]      ceo/WAZI-122                             -> origin/ceo/WAZI-122
+2026-10-25T18:59:23.8241726Z  * [new branch]      ceo/WAZI-152                             -> origin/ceo/WAZI-152
+2026-10-25T18:59:23.8242197Z  * [new branch]      chat-list-gg                             -> origin/chat-list-gg
+2026-10-25T18:59:23.8242697Z  * [new branch]      chat-scroll-emoji                        -> origin/chat-scroll-emoji
+2026-10-25T18:59:23.8243459Z  * [new branch]      claude/igsh-545-row-sized-buffers-k8ctm3 -> origin/claude/igsh-545-row-sized-buffers-k8ctm3
+2026-10-25T18:59:23.8244075Z  * [new branch]      colr-gdi-emoji                           -> origin/colr-gdi-emoji
+2026-10-25T18:59:23.8244789Z  * [new branch]      composer-select-all                      -> origin/composer-select-all
+2026-10-25T18:59:23.8245269Z  * [new branch]      ctrl-arrows-walk-messages                -> origin/ctrl-arrows-walk-messages
+2026-10-25T18:59:23.8245628Z  * [new branch]      ctrl-o-image-preview                     -> origin/ctrl-o-image-preview
+2026-10-25T18:59:23.8245977Z  * [new branch]      emoji-shortcodes                         -> origin/emoji-shortcodes
+2026-10-25T18:59:23.8246287Z  * [new branch]      fast-send                                -> origin/fast-send
+2026-10-25T18:59:23.8246590Z  * [new branch]      faster-release                           -> origin/faster-release
+2026-10-25T18:59:23.8246916Z  * [new branch]      feat/voice-record                        -> origin/feat/voice-record
+2026-10-25T18:59:23.8247263Z  * [new branch]      fix-empty-slack-view                     -> origin/fix-empty-slack-view
+2026-10-25T18:59:23.8247793Z  * [new branch]      fix/automerge-file-list                  -> origin/fix/automerge-file-list
+2026-10-25T18:59:23.8248138Z  * [new branch]      fix/playback-cpu                         -> origin/fix/playback-cpu
+2026-10-25T18:59:23.8248500Z  * [new branch]      fix/wazi-112-send-visibility             -> origin/fix/wazi-112-send-visibility
+2026-10-25T18:59:23.8248888Z  * [new branch]      group-participant-avatars                -> origin/group-participant-avatars
+2026-10-25T18:59:23.8249244Z  * [new branch]      idle-cpu-refusal                         -> origin/idle-cpu-refusal
+2026-10-25T18:59:23.8249582Z  * [new branch]      image-single-click                       -> origin/image-single-click
+2026-10-25T18:59:23.8249906Z  * [new branch]      layout-dpi                               -> origin/layout-dpi
+2026-10-25T18:59:23.8250237Z  * [new branch]      lockwait-local-media                     -> origin/lockwait-local-media
+2026-10-25T18:59:23.8250652Z  * [new branch]      main                                     -> origin/main
+2026-10-25T18:59:23.8251040Z  * [new branch]      open-palette                             -> origin/open-palette
+2026-10-25T18:59:23.8251525Z  * [new branch]      own-voice-notes                          -> origin/own-voice-notes
+2026-10-25T18:59:23.8252028Z  * [new branch]      reaction-picker                          -> origin/reaction-picker
+2026-10-25T18:59:23.8252587Z  * [new branch]      release-without-telegram                 -> origin/release-without-telegram
+2026-10-25T18:59:23.8252981Z  * [new branch]      relink-loop                              -> origin/relink-loop
+2026-10-25T18:59:23.8253289Z  * [new branch]      reply-quotes                             -> origin/reply-quotes
+2026-10-25T18:59:23.8253600Z  * [new branch]      send-auth-fail                           -> origin/send-auth-fail
+2026-10-25T18:59:23.8253931Z  * [new branch]      send-auto-retry                          -> origin/send-auto-retry
+2026-10-25T18:59:23.8254280Z  * [new branch]      shortcut-help-overlay                    -> origin/shortcut-help-overlay
+2026-10-25T18:59:23.8254624Z  * [new branch]      slack-bridge-mode                        -> origin/slack-bridge-mode
+2026-10-25T18:59:23.8254962Z  * [new branch]      slack-chats-in-list                      -> origin/slack-chats-in-list
+2026-10-25T18:59:23.8255285Z  * [new branch]      slack-mrkdwn                             -> origin/slack-mrkdwn
+2026-10-25T18:59:23.8255614Z  * [new branch]      slack-no-wacli-reads                     -> origin/slack-no-wacli-reads
+2026-10-25T18:59:23.8255969Z  * [new branch]      slack-shared-messages                    -> origin/slack-shared-messages
+2026-10-25T18:59:23.8256298Z  * [new branch]      slim-memory                              -> origin/slim-memory
+2026-10-25T18:59:23.8256604Z  * [new branch]      speaker-pov                              -> origin/speaker-pov
+2026-10-25T18:59:23.8257027Z  * [new branch]      stop-sync-churn                          -> origin/stop-sync-churn
+2026-10-25T18:59:23.8257489Z  * [new branch]      tmp/IGSH-828-red                         -> origin/tmp/IGSH-828-red
+2026-10-25T18:59:23.8257796Z  * [new branch]      update-card                              -> origin/update-card
+2026-10-25T18:59:23.8258106Z  * [new branch]      update-card-fix                          -> origin/update-card-fix
+2026-10-25T18:59:23.8258453Z  * [new branch]      wazi-60-update-consent                   -> origin/wazi-60-update-consent
+2026-10-25T18:59:23.8258810Z  * [new branch]      wazi-81-update-button                    -> origin/wazi-81-update-button
+2026-10-25T18:59:23.8259153Z  * [new branch]      wazi-ocr-timeout                         -> origin/wazi-ocr-timeout
+2026-10-25T18:59:23.8259501Z  * [new branch]      wazig-anthropic-format                   -> origin/wazig-anthropic-format
+2026-10-25T18:59:23.8259828Z  * [new branch]      wazigctl2                                -> origin/wazigctl2
+2026-10-25T18:59:23.8260117Z  * [new tag]         v0.9.10                                  -> v0.9.10
+2026-10-25T18:59:23.8260380Z  * [new tag]         v0.9.100                                 -> v0.9.100
+2026-10-25T18:59:23.8260640Z  * [new tag]         v0.9.101                                 -> v0.9.101
+2026-10-25T18:59:23.8260892Z  * [new tag]         v0.9.102                                 -> v0.9.102
+2026-10-25T18:59:23.8261146Z  * [new tag]         v0.9.103                                 -> v0.9.103
+2026-10-25T18:59:23.8261399Z  * [new tag]         v0.9.104                                 -> v0.9.104
+2026-10-25T18:59:23.8261647Z  * [new tag]         v0.9.105                                 -> v0.9.105
+2026-10-25T18:59:23.8261897Z  * [new tag]         v0.9.106                                 -> v0.9.106
+2026-10-25T18:59:23.8262266Z  * [new tag]         v0.9.107                                 -> v0.9.107
+2026-10-25T18:59:23.8262666Z  * [new tag]         v0.9.108                                 -> v0.9.108
+2026-10-25T18:59:23.8263191Z  * [new tag]         v0.9.109                                 -> v0.9.109
+2026-10-25T18:59:23.8263588Z  * [new tag]         v0.9.11                                  -> v0.9.11
+2026-10-25T18:59:23.8263985Z  * [new tag]         v0.9.110                                 -> v0.9.110
+2026-10-25T18:59:23.8264379Z  * [new tag]         v0.9.111                                 -> v0.9.111
+2026-10-25T18:59:23.8264764Z  * [new tag]         v0.9.112                                 -> v0.9.112
+2026-10-25T18:59:23.8265152Z  * [new tag]         v0.9.113                                 -> v0.9.113
+2026-10-25T18:59:23.8265548Z  * [new tag]         v0.9.114                                 -> v0.9.114
+2026-10-25T18:59:23.8265947Z  * [new tag]         v0.9.115                                 -> v0.9.115
+2026-10-25T18:59:23.8266346Z  * [new tag]         v0.9.116                                 -> v0.9.116
+2026-10-25T18:59:23.8266769Z  * [new tag]         v0.9.117                                 -> v0.9.117
+2026-10-25T18:59:23.8267181Z  * [new tag]         v0.9.118                                 -> v0.9.118
+2026-10-25T18:59:23.8267729Z  * [new tag]         v0.9.119                                 -> v0.9.119
+2026-10-25T18:59:23.8268129Z  * [new tag]         v0.9.12                                  -> v0.9.12
+2026-10-25T18:59:23.8268524Z  * [new tag]         v0.9.120                                 -> v0.9.120
+2026-10-25T18:59:23.8268912Z  * [new tag]         v0.9.121                                 -> v0.9.121
+2026-10-25T18:59:23.8269297Z  * [new tag]         v0.9.122                                 -> v0.9.122
+2026-10-25T18:59:23.8269682Z  * [new tag]         v0.9.123                                 -> v0.9.123
+2026-10-25T18:59:23.8270079Z  * [new tag]         v0.9.124                                 -> v0.9.124
+2026-10-25T18:59:23.8270474Z  * [new tag]         v0.9.125                                 -> v0.9.125
+2026-10-25T18:59:23.8271045Z  * [new tag]         v0.9.126                                 -> v0.9.126
+2026-10-25T18:59:23.8271431Z  * [new tag]         v0.9.127                                 -> v0.9.127
+2026-10-25T18:59:23.8271815Z  * [new tag]         v0.9.128                                 -> v0.9.128
+2026-10-25T18:59:23.8272217Z  * [new tag]         v0.9.129                                 -> v0.9.129
+2026-10-25T18:59:23.8272619Z  * [new tag]         v0.9.13                                  -> v0.9.13
+2026-10-25T18:59:23.8273016Z  * [new tag]         v0.9.130                                 -> v0.9.130
+2026-10-25T18:59:23.8273404Z  * [new tag]         v0.9.131                                 -> v0.9.131
+2026-10-25T18:59:23.8273804Z  * [new tag]         v0.9.132                                 -> v0.9.132
+2026-10-25T18:59:23.8274192Z  * [new tag]         v0.9.133                                 -> v0.9.133
+2026-10-25T18:59:23.8274544Z  * [new tag]         v0.9.134                                 -> v0.9.134
+2026-10-25T18:59:23.8274934Z  * [new tag]         v0.9.135                                 -> v0.9.135
+2026-10-25T18:59:23.8275311Z  * [new tag]         v0.9.136                                 -> v0.9.136
+2026-10-25T18:59:23.8275705Z  * [new tag]         v0.9.137                                 -> v0.9.137
+2026-10-25T18:59:23.8276101Z  * [new tag]         v0.9.138                                 -> v0.9.138
+2026-10-25T18:59:23.8276504Z  * [new tag]         v0.9.139                                 -> v0.9.139
+2026-10-25T18:59:23.8276898Z  * [new tag]         v0.9.14                                  -> v0.9.14
+2026-10-25T18:59:23.8277439Z  * [new tag]         v0.9.140                                 -> v0.9.140
+2026-10-25T18:59:23.8277825Z  * [new tag]         v0.9.141                                 -> v0.9.141
+2026-10-25T18:59:23.8278204Z  * [new tag]         v0.9.142                                 -> v0.9.142
+2026-10-25T18:59:23.8278588Z  * [new tag]         v0.9.143                                 -> v0.9.143
+2026-10-25T18:59:23.8279117Z  * [new tag]         v0.9.144                                 -> v0.9.144
+2026-10-25T18:59:23.8279512Z  * [new tag]         v0.9.145                                 -> v0.9.145
+2026-10-25T18:59:23.8279902Z  * [new tag]         v0.9.146                                 -> v0.9.146
+2026-10-25T18:59:23.8280305Z  * [new tag]         v0.9.147                                 -> v0.9.147
+2026-10-25T18:59:23.8280693Z  * [new tag]         v0.9.148                                 -> v0.9.148
+2026-10-25T18:59:23.8281077Z  * [new tag]         v0.9.149                                 -> v0.9.149
+2026-10-25T18:59:23.8281637Z  * [new tag]         v0.9.15                                  -> v0.9.15
+2026-10-25T18:59:23.8282032Z  * [new tag]         v0.9.150                                 -> v0.9.150
+2026-10-25T18:59:23.8282278Z  * [new tag]         v0.9.151                                 -> v0.9.151
+2026-10-25T18:59:23.8282522Z  * [new tag]         v0.9.152                                 -> v0.9.152
+2026-10-25T18:59:23.8282777Z  * [new tag]         v0.9.153                                 -> v0.9.153
+2026-10-25T18:59:23.8283021Z  * [new tag]         v0.9.154                                 -> v0.9.154
+2026-10-25T18:59:23.8283267Z  * [new tag]         v0.9.155                                 -> v0.9.155
+2026-10-25T18:59:23.8283513Z  * [new tag]         v0.9.156                                 -> v0.9.156
+2026-10-25T18:59:23.8283759Z  * [new tag]         v0.9.157                                 -> v0.9.157
+2026-10-25T18:59:23.8284011Z  * [new tag]         v0.9.158                                 -> v0.9.158
+2026-10-25T18:59:23.8284256Z  * [new tag]         v0.9.159                                 -> v0.9.159
+2026-10-25T18:59:23.8284498Z  * [new tag]         v0.9.16                                  -> v0.9.16
+2026-10-25T18:59:23.8284742Z  * [new tag]         v0.9.160                                 -> v0.9.160
+2026-10-25T18:59:23.8284985Z  * [new tag]         v0.9.161                                 -> v0.9.161
+2026-10-25T18:59:23.8285329Z  * [new tag]         v0.9.162                                 -> v0.9.162
+2026-10-25T18:59:23.8285573Z  * [new tag]         v0.9.163                                 -> v0.9.163
+2026-10-25T18:59:23.8285823Z  * [new tag]         v0.9.164                                 -> v0.9.164
+2026-10-25T18:59:23.8286065Z  * [new tag]         v0.9.165                                 -> v0.9.165
+2026-10-25T18:59:23.8286311Z  * [new tag]         v0.9.166                                 -> v0.9.166
+2026-10-25T18:59:23.8286553Z  * [new tag]         v0.9.167                                 -> v0.9.167
+2026-10-25T18:59:23.8286796Z  * [new tag]         v0.9.168                                 -> v0.9.168
+2026-10-25T18:59:23.8287038Z  * [new tag]         v0.9.169                                 -> v0.9.169
+2026-10-25T18:59:23.8287479Z  * [new tag]         v0.9.17                                  -> v0.9.17
+2026-10-25T18:59:23.8287849Z  * [new tag]         v0.9.170                                 -> v0.9.170
+2026-10-25T18:59:23.8288237Z  * [new tag]         v0.9.171                                 -> v0.9.171
+2026-10-25T18:59:23.8288618Z  * [new tag]         v0.9.172                                 -> v0.9.172
+2026-10-25T18:59:23.8289007Z  * [new tag]         v0.9.173                                 -> v0.9.173
+2026-10-25T18:59:23.8289398Z  * [new tag]         v0.9.174                                 -> v0.9.174
+2026-10-25T18:59:23.8289665Z  * [new tag]         v0.9.175                                 -> v0.9.175
+2026-10-25T18:59:23.8289907Z  * [new tag]         v0.9.176                                 -> v0.9.176
+2026-10-25T18:59:23.8290148Z  * [new tag]         v0.9.177                                 -> v0.9.177
+2026-10-25T18:59:23.8290391Z  * [new tag]         v0.9.178                                 -> v0.9.178
+2026-10-25T18:59:23.8290639Z  * [new tag]         v0.9.179                                 -> v0.9.179
+2026-10-25T18:59:23.8290886Z  * [new tag]         v0.9.18                                  -> v0.9.18
+2026-10-25T18:59:23.8291248Z  * [new tag]         v0.9.180                                 -> v0.9.180
+2026-10-25T18:59:23.8291494Z  * [new tag]         v0.9.181                                 -> v0.9.181
+2026-10-25T18:59:23.8291738Z  * [new tag]         v0.9.182                                 -> v0.9.182
+2026-10-25T18:59:23.8291983Z  * [new tag]         v0.9.183                                 -> v0.9.183
+2026-10-25T18:59:23.8292229Z  * [new tag]         v0.9.184                                 -> v0.9.184
+2026-10-25T18:59:23.8292472Z  * [new tag]         v0.9.185                                 -> v0.9.185
+2026-10-25T18:59:23.8292718Z  * [new tag]         v0.9.186                                 -> v0.9.186
+2026-10-25T18:59:23.8292958Z  * [new tag]         v0.9.187                                 -> v0.9.187
+2026-10-25T18:59:23.8293202Z  * [new tag]         v0.9.188                                 -> v0.9.188
+2026-10-25T18:59:23.8293447Z  * [new tag]         v0.9.189                                 -> v0.9.189
+2026-10-25T18:59:23.8293695Z  * [new tag]         v0.9.19                                  -> v0.9.19
+2026-10-25T18:59:23.8293936Z  * [new tag]         v0.9.190                                 -> v0.9.190
+2026-10-25T18:59:23.8294179Z  * [new tag]         v0.9.191                                 -> v0.9.191
+2026-10-25T18:59:23.8294423Z  * [new tag]         v0.9.192                                 -> v0.9.192
+2026-10-25T18:59:23.8294672Z  * [new tag]         v0.9.193                                 -> v0.9.193
+2026-10-25T18:59:23.8294917Z  * [new tag]         v0.9.194                                 -> v0.9.194
+2026-10-25T18:59:23.8295158Z  * [new tag]         v0.9.195                                 -> v0.9.195
+2026-10-25T18:59:23.8295400Z  * [new tag]         v0.9.196                                 -> v0.9.196
+2026-10-25T18:59:23.8295640Z  * [new tag]         v0.9.197                                 -> v0.9.197
+2026-10-25T18:59:23.8295882Z  * [new tag]         v0.9.198                                 -> v0.9.198
+2026-10-25T18:59:23.8296209Z  * [new tag]         v0.9.199                                 -> v0.9.199
+2026-10-25T18:59:23.8296453Z  * [new tag]         v0.9.20                                  -> v0.9.20
+2026-10-25T18:59:23.8296702Z  * [new tag]         v0.9.200                                 -> v0.9.200
+2026-10-25T18:59:23.8296945Z  * [new tag]         v0.9.201                                 -> v0.9.201
+2026-10-25T18:59:23.8297189Z  * [new tag]         v0.9.202                                 -> v0.9.202
+2026-10-25T18:59:23.8297624Z  * [new tag]         v0.9.203                                 -> v0.9.203
+2026-10-25T18:59:23.8297870Z  * [new tag]         v0.9.204                                 -> v0.9.204
+2026-10-25T18:59:23.8298112Z  * [new tag]         v0.9.21                                  -> v0.9.21
+2026-10-25T18:59:23.8298355Z  * [new tag]         v0.9.22                                  -> v0.9.22
+2026-10-25T18:59:23.8298600Z  * [new tag]         v0.9.23                                  -> v0.9.23
+2026-10-25T18:59:23.8298855Z  * [new tag]         v0.9.25                                  -> v0.9.25
+2026-10-25T18:59:23.8299094Z  * [new tag]         v0.9.26                                  -> v0.9.26
+2026-10-25T18:59:23.8299333Z  * [new tag]         v0.9.27                                  -> v0.9.27
+2026-10-25T18:59:23.8299575Z  * [new tag]         v0.9.28                                  -> v0.9.28
+2026-10-25T18:59:23.8299815Z  * [new tag]         v0.9.29                                  -> v0.9.29
+2026-10-25T18:59:23.8300057Z  * [new tag]         v0.9.30                                  -> v0.9.30
+2026-10-25T18:59:23.8300298Z  * [new tag]         v0.9.31                                  -> v0.9.31
+2026-10-25T18:59:23.8300538Z  * [new tag]         v0.9.32                                  -> v0.9.32
+2026-10-25T18:59:23.8300785Z  * [new tag]         v0.9.33                                  -> v0.9.33
+2026-10-25T18:59:23.8301026Z  * [new tag]         v0.9.34                                  -> v0.9.34
+2026-10-25T18:59:23.8301430Z  * [new tag]         v0.9.35                                  -> v0.9.35
+2026-10-25T18:59:23.8301670Z  * [new tag]         v0.9.36                                  -> v0.9.36
+2026-10-25T18:59:23.8301907Z  * [new tag]         v0.9.37                                  -> v0.9.37
+2026-10-25T18:59:23.8302150Z  * [new tag]         v0.9.38                                  -> v0.9.38
+2026-10-25T18:59:23.8302388Z  * [new tag]         v0.9.39                                  -> v0.9.39
+2026-10-25T18:59:23.8302628Z  * [new tag]         v0.9.40                                  -> v0.9.40
+2026-10-25T18:59:23.8302872Z  * [new tag]         v0.9.41                                  -> v0.9.41
+2026-10-25T18:59:23.8303113Z  * [new tag]         v0.9.42                                  -> v0.9.42
+2026-10-25T18:59:23.8303353Z  * [new tag]         v0.9.43                                  -> v0.9.43
+2026-10-25T18:59:23.8303596Z  * [new tag]         v0.9.44                                  -> v0.9.44
+2026-10-25T18:59:23.8303839Z  * [new tag]         v0.9.45                                  -> v0.9.45
+2026-10-25T18:59:23.8304080Z  * [new tag]         v0.9.46                                  -> v0.9.46
+2026-10-25T18:59:23.8304316Z  * [new tag]         v0.9.47                                  -> v0.9.47
+2026-10-25T18:59:23.8304554Z  * [new tag]         v0.9.48                                  -> v0.9.48
+2026-10-25T18:59:23.8304798Z  * [new tag]         v0.9.49                                  -> v0.9.49
+2026-10-25T18:59:23.8305037Z  * [new tag]         v0.9.50                                  -> v0.9.50
+2026-10-25T18:59:23.8305277Z  * [new tag]         v0.9.51                                  -> v0.9.51
+2026-10-25T18:59:23.8305515Z  * [new tag]         v0.9.52                                  -> v0.9.52
+2026-10-25T18:59:23.8305757Z  * [new tag]         v0.9.53                                  -> v0.9.53
+2026-10-25T18:59:23.8305997Z  * [new tag]         v0.9.54                                  -> v0.9.54
+2026-10-25T18:59:23.8306350Z  * [new tag]         v0.9.55                                  -> v0.9.55
+2026-10-25T18:59:23.8306666Z  * [new tag]         v0.9.56                                  -> v0.9.56
+2026-10-25T18:59:23.8306949Z  * [new tag]         v0.9.57                                  -> v0.9.57
+2026-10-25T18:59:23.8307189Z  * [new tag]         v0.9.58                                  -> v0.9.58
+2026-10-25T18:59:23.8307554Z  * [new tag]         v0.9.59                                  -> v0.9.59
+2026-10-25T18:59:23.8307792Z  * [new tag]         v0.9.60                                  -> v0.9.60
+2026-10-25T18:59:23.8308033Z  * [new tag]         v0.9.61                                  -> v0.9.61
+2026-10-25T18:59:23.8308275Z  * [new tag]         v0.9.62                                  -> v0.9.62
+2026-10-25T18:59:23.8308517Z  * [new tag]         v0.9.63                                  -> v0.9.63
+2026-10-25T18:59:23.8308759Z  * [new tag]         v0.9.64                                  -> v0.9.64
+2026-10-25T18:59:23.8309012Z  * [new tag]         v0.9.65                                  -> v0.9.65
+2026-10-25T18:59:23.8309253Z  * [new tag]         v0.9.66                                  -> v0.9.66
+2026-10-25T18:59:23.8309491Z  * [new tag]         v0.9.67                                  -> v0.9.67
+2026-10-25T18:59:23.8309730Z  * [new tag]         v0.9.68                                  -> v0.9.68
+2026-10-25T18:59:23.8309970Z  * [new tag]         v0.9.69                                  -> v0.9.69
+2026-10-25T18:59:23.8310214Z  * [new tag]         v0.9.7                                   -> v0.9.7
+2026-10-25T18:59:23.8310453Z  * [new tag]         v0.9.70                                  -> v0.9.70
+2026-10-25T18:59:23.8310697Z  * [new tag]         v0.9.71                                  -> v0.9.71
+2026-10-25T18:59:23.8310941Z  * [new tag]         v0.9.72                                  -> v0.9.72
+2026-10-25T18:59:23.8311179Z  * [new tag]         v0.9.73                                  -> v0.9.73
+2026-10-25T18:59:23.8311516Z  * [new tag]         v0.9.74                                  -> v0.9.74
+2026-10-25T18:59:23.8311757Z  * [new tag]         v0.9.75                                  -> v0.9.75
+2026-10-25T18:59:23.8311996Z  * [new tag]         v0.9.76                                  -> v0.9.76
+2026-10-25T18:59:23.8312235Z  * [new tag]         v0.9.77                                  -> v0.9.77
+2026-10-25T18:59:23.8312473Z  * [new tag]         v0.9.78                                  -> v0.9.78
+2026-10-25T18:59:23.8312711Z  * [new tag]         v0.9.79                                  -> v0.9.79
+2026-10-25T18:59:23.8312951Z  * [new tag]         v0.9.8                                   -> v0.9.8
+2026-10-25T18:59:23.8313195Z  * [new tag]         v0.9.80                                  -> v0.9.80
+2026-10-25T18:59:23.8313437Z  * [new tag]         v0.9.81                                  -> v0.9.81
+2026-10-25T18:59:23.8313677Z  * [new tag]         v0.9.82                                  -> v0.9.82
+2026-10-25T18:59:23.8313922Z  * [new tag]         v0.9.83                                  -> v0.9.83
+2026-10-25T18:59:23.8314161Z  * [new tag]         v0.9.84                                  -> v0.9.84
+2026-10-25T18:59:23.8314403Z  * [new tag]         v0.9.85                                  -> v0.9.85
+2026-10-25T18:59:23.8314640Z  * [new tag]         v0.9.86                                  -> v0.9.86
+2026-10-25T18:59:23.8314881Z  * [new tag]         v0.9.87                                  -> v0.9.87
+2026-10-25T18:59:23.8315119Z  * [new tag]         v0.9.88                                  -> v0.9.88
+2026-10-25T18:59:23.8315357Z  * [new tag]         v0.9.89                                  -> v0.9.89
+2026-10-25T18:59:23.8315602Z  * [new tag]         v0.9.9                                   -> v0.9.9
+2026-10-25T18:59:23.8315843Z  * [new tag]         v0.9.90                                  -> v0.9.90
+2026-10-25T18:59:23.8316087Z  * [new tag]         v0.9.91                                  -> v0.9.91
+2026-10-25T18:59:23.8316416Z  * [new tag]         v0.9.92                                  -> v0.9.92
+2026-10-25T18:59:23.8316658Z  * [new tag]         v0.9.93                                  -> v0.9.93
+2026-10-25T18:59:23.8316902Z  * [new tag]         v0.9.94                                  -> v0.9.94
+2026-10-25T18:59:23.8317140Z  * [new tag]         v0.9.95                                  -> v0.9.95
+2026-10-25T18:59:23.8317510Z  * [new tag]         v0.9.96                                  -> v0.9.96
+2026-10-25T18:59:23.8317743Z  * [new tag]         v0.9.97                                  -> v0.9.97
+2026-10-25T18:59:23.8317980Z  * [new tag]         v0.9.98                                  -> v0.9.98
+2026-10-25T18:59:23.8318217Z  * [new tag]         v0.9.99                                  -> v0.9.99
+2026-10-25T18:59:23.8318490Z  * [new ref]         1f1a57d53ea7b7a76c10eab5fcb842ecfebd3add -> pull/387/merge
+2026-10-25T18:59:23.8319455Z ##[endgroup]
+2026-10-25T18:59:23.8319725Z ##[group]Determining the checkout info
+2026-10-25T18:59:23.8320017Z ##[endgroup]
+2026-10-25T18:59:23.8320195Z [command]/usr/bin/git sparse-checkout disable
+2026-10-25T18:59:23.8320705Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-25T18:59:23.8321275Z ##[group]Checking out the ref
+2026-10-25T18:59:23.8321524Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/387/merge
+2026-10-25T18:59:23.8724318Z Note: switching to 'refs/remotes/pull/387/merge'.
+2026-10-25T18:59:23.8724482Z 
+2026-10-25T18:59:23.8724618Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-10-25T18:59:23.8724910Z changes and commit them, and you can discard any commits you make in this
+2026-10-25T18:59:23.8725212Z state without impacting any branches by switching back to a branch.
+2026-10-25T18:59:23.8725377Z 
+2026-10-25T18:59:23.8725510Z If you want to create a new branch to retain commits you create, you may
+2026-10-25T18:59:23.8725793Z do so (now or later) by using -c with the switch command. Example:
+2026-10-25T18:59:23.8726091Z 
+2026-10-25T18:59:23.8726183Z   git switch -c <new-branch-name>
+2026-10-25T18:59:23.8726298Z 
+2026-10-25T18:59:23.8726381Z Or undo this operation with:
+2026-10-25T18:59:23.8726490Z 
+2026-10-25T18:59:23.8726560Z   git switch -
+2026-10-25T18:59:23.8726649Z 
+2026-10-25T18:59:23.8726789Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-10-25T18:59:23.8726973Z 
+2026-10-25T18:59:23.8727193Z HEAD is now at 1f1a57d Merge d53b3310194ec80ea80b772aa484b31632012b24 into ef54fd8347ab436d94e2aa8683ae884ad32c23c6
+2026-10-25T18:59:23.8734115Z ##[endgroup]
+2026-10-25T18:59:23.8770937Z [command]/usr/bin/git log -1 --format=%H
+2026-10-25T18:59:23.8790954Z 1f1a57d53ea7b7a76c10eab5fcb842ecfebd3add
+2026-10-25T18:59:23.8958901Z ##[group]Run python3 tools/check_new_comments.py
+2026-10-25T18:59:23.8959193Z [36;1mpython3 tools/check_new_comments.py[0m
+2026-10-25T18:59:23.9087694Z shell: /usr/bin/bash -e {0}
+2026-10-25T18:59:23.9087894Z ##[endgroup]
+2026-10-25T18:59:26.1642250Z No code comments found.
+2026-10-25T18:59:26.1948803Z ##[group]Run python3 -m unittest discover -s tools -p 'test_*.py'
+2026-10-25T18:59:26.1949096Z [36;1mpython3 -m unittest discover -s tools -p 'test_*.py'[0m
+2026-10-25T18:59:26.1998031Z shell: /usr/bin/bash -e {0}
+2026-10-25T18:59:26.1998177Z ##[endgroup]
+2026-10-25T19:00:39.2754410Z TOOLTIP REGISTRATION VERIFIED: V2 size for registration and updates, failures logged; old V3 source rejected
+2026-10-25T19:00:39.2755289Z WORKSPACE NAMES VERIFIED: fixture names, parsing, cache, shared labels and four journey checks; old parser rejected
+2026-10-25T19:00:39.2755802Z views workspace-names static PASS
+2026-10-25T19:00:39.2820806Z .....................................................................................................................................s..........................................ss.ss..................................................................
+2026-10-25T19:00:39.2821251Z ----------------------------------------------------------------------
+2026-10-25T19:00:39.2821552Z Ran 247 tests in 72.889s
+2026-10-25T19:00:39.2821701Z 
+2026-10-25T19:00:39.2821966Z RED FIXTURE REJECTED: src/main.zig
+2026-10-25T19:00:39.2822220Z RED FIXTURE REJECTED: src/nested/connector.zig
+2026-10-25T19:00:39.2822626Z PRIVATE_MARKERS is empty: set the repo secret from the private companion repo. Refusing to pass.
+2026-10-25T19:00:39.2823201Z EVIDENCE VERIFIED: clean Slack labels, inline image and viewer, Open Graph cards, four providers and URL caches
+2026-10-25T19:00:39.2823850Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2824503Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2825161Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2825842Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2826493Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2827148Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2827944Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2828579Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2829224Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2829869Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2830509Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2831713Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2832361Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2833000Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2833630Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2834156Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2834800Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2835743Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2836497Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2837140Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2837926Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2838585Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2839235Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2839896Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2840543Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2841170Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2841815Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2842452Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2843092Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2843753Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2844399Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2845040Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2845690Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2846328Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2846951Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2847708Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2848355Z archive-sidebar-dim: dark live=21.000000 archived=8.831450 contrast_excess_ratio=0.391572 mix_error=12.0 text_delta=87
+2026-10-25T19:00:39.2848990Z archive-sidebar-dim: dark live=21.000000 archived=11.542303 contrast_excess_ratio=0.527115 mix_error=12.0 text_delta=63
+2026-10-25T19:00:39.2849800Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2850197Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2850598Z archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2851009Z archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2851439Z archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2851856Z archive-search-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2852363Z archive-search-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2852787Z archive-search-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2853200Z archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2853600Z archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2854025Z archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2854439Z archive-sidebar-dim: light live=21.000000 archived=10.530901 contrast_excess_ratio=0.476545 mix_error=12.0 text_delta=63
+2026-10-25T19:00:39.2854844Z archive-sidebar-dim: light live=21.000000 archived=7.226057 contrast_excess_ratio=0.311303 mix_error=12.0 text_delta=87
+2026-10-25T19:00:39.2855256Z archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2855660Z archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2856059Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2856469Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2856886Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2857431Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2857872Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2858288Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2858695Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2859092Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2859502Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2859906Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2860307Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2860721Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2861227Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2861630Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2862047Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2862454Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2862851Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2863259Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2863664Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2864155Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2864582Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2864994Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2865404Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2865817Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2866224Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2866622Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2867034Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2867572Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2867976Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2878913Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2879349Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2879755Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2880177Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2880593Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2880989Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2881391Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2881819Z archive-sidebar-dim: dark live=20.621543 archived=10.128220 contrast_excess_ratio=0.465214 mix_error=7.666666666666657 text_delta=75
+2026-10-25T19:00:39.2882259Z archive-search-dim: dark live=20.621543 archived=10.128220 contrast_excess_ratio=0.465214 mix_error=7.666666666666657 text_delta=75
+2026-10-25T19:00:39.2882698Z archive-inbox-dim: dark live=20.621543 archived=10.128220 contrast_excess_ratio=0.465214 mix_error=7.666666666666657 text_delta=75
+2026-10-25T19:00:39.2883170Z archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2883716Z archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2884139Z archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2884570Z archive-search-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2884975Z archive-search-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2885392Z archive-search-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2885801Z archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2886298Z archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2886709Z archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2887139Z archive-sidebar-dim: light live=20.570953 archived=8.723822 contrast_excess_ratio=0.394657 mix_error=7.333333333333329 text_delta=75
+2026-10-25T19:00:39.2887719Z archive-search-dim: light live=20.570953 archived=8.723822 contrast_excess_ratio=0.394657 mix_error=7.333333333333329 text_delta=75
+2026-10-25T19:00:39.2888157Z archive-inbox-dim: light live=20.570953 archived=8.723822 contrast_excess_ratio=0.394657 mix_error=7.333333333333329 text_delta=75
+2026-10-25T19:00:39.2888574Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2888984Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2889404Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2889813Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2890212Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2890619Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2891024Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2891414Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2891819Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2892220Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2892625Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2893037Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2893442Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2893842Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2894250Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2894652Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2895138Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2895541Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2895947Z archive-sidebar-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2896350Z archive-sidebar-hover: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+2026-10-25T19:00:39.2896751Z archive-sidebar-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2897159Z archive-sidebar-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2897810Z archive-sidebar-selected: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+2026-10-25T19:00:39.2898232Z archive-sidebar-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2898643Z archive-search-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2899050Z archive-search-hover: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+2026-10-25T19:00:39.2899454Z archive-search-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2899862Z archive-search-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2900275Z archive-search-selected: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+2026-10-25T19:00:39.2900705Z archive-search-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2901105Z archive-inbox-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2901507Z archive-inbox-hover: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+2026-10-25T19:00:39.2901907Z archive-inbox-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2902305Z archive-inbox-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2902711Z archive-inbox-selected: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+2026-10-25T19:00:39.2903122Z archive-inbox-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2903525Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2903924Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2904337Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2904752Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2905147Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2905555Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2905955Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2906430Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2906833Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2907235Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2907760Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2908170Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2908580Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2909059Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2909475Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2909873Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2910265Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2910665Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2911096Z archive-sidebar-hover: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+2026-10-25T19:00:39.2911550Z archive-sidebar-selected: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+2026-10-25T19:00:39.2912002Z archive-search-hover: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+2026-10-25T19:00:39.2912479Z archive-search-selected: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+2026-10-25T19:00:39.2912923Z archive-inbox-hover: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+2026-10-25T19:00:39.2913363Z archive-inbox-selected: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+2026-10-25T19:00:39.2913792Z archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2914198Z archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2914615Z archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2915024Z archive-search-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2915425Z archive-search-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2915839Z archive-search-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2916302Z archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2916703Z archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2917113Z archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2917708Z archive-sidebar-hover: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+2026-10-25T19:00:39.2918261Z archive-sidebar-selected: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+2026-10-25T19:00:39.2918719Z archive-search-hover: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+2026-10-25T19:00:39.2919175Z archive-search-selected: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+2026-10-25T19:00:39.2919638Z archive-inbox-hover: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+2026-10-25T19:00:39.2920086Z archive-inbox-selected: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+2026-10-25T19:00:39.2920590Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2920993Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2921407Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2921815Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2922221Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2922628Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2923032Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2923426Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2923831Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2924239Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2924650Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2925069Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2925478Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2925881Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2926292Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2926698Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2927088Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2927646Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2928047Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2928446Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2928862Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2929269Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2929769Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2930182Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2930581Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2930973Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2931376Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2931775Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2932256Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2932671Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2933077Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2933474Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2933886Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2934287Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2934676Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2935083Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2935492Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2935893Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2936306Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2936711Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2937109Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2937695Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2938104Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2938497Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2938898Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2939299Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2939698Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2940111Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2940517Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2941055Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2941462Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2941864Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2942256Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2942660Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2943064Z archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2943554Z archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2943976Z archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2944390Z archive-search-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2944792Z archive-search-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2945210Z archive-search-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2945618Z archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2946018Z archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2946433Z archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2946840Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2947243Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2947740Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2948144Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2948544Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2949094Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2949500Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2949893Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2950295Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2950697Z archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2951098Z archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2951515Z archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2951922Z archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2952409Z archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2952816Z archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2953217Z archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+2026-10-25T19:00:39.2953605Z archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2954012Z archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+2026-10-25T19:00:39.2954404Z EVIDENCE VERIFIED: Slack Unicode, custom message/reaction pixels, animated GIF frames and hub caches
+2026-10-25T19:00:39.2954670Z RED FIXTURE REJECTED: src/main.zig
+2026-10-25T19:00:39.2954839Z RED FIXTURE REJECTED: src/nested/connector.zig
+2026-10-25T19:00:39.2955309Z TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+2026-10-25T19:00:39.2955848Z SIGNAL EVIDENCE VERIFIED: prelinked hub, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+2026-10-25T19:00:39.2956384Z TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+2026-10-25T19:00:39.2956963Z TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+2026-10-25T19:00:39.2957609Z TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+2026-10-25T19:00:39.2958005Z OK (skipped=5)
+2026-10-25T19:00:39.3049484Z ##[group]Run python3 tools/check_cache_keys.py
+2026-10-25T19:00:39.3049709Z [36;1mpython3 tools/check_cache_keys.py[0m
+2026-10-25T19:00:39.3098869Z shell: /usr/bin/bash -e {0}
+2026-10-25T19:00:39.3099017Z ##[endgroup]
+2026-10-25T19:00:39.3360304Z ##[group]Run mlugg/setup-zig@v2
+2026-10-25T19:00:39.3360454Z with:
+2026-10-25T19:00:39.3360571Z   version: 0.16.0
+2026-10-25T19:00:39.3360688Z   use-cache: true
+2026-10-25T19:00:39.3360809Z   cache-size-limit: 2048
+2026-10-25T19:00:39.3360948Z ##[endgroup]
+2026-10-25T19:00:39.4688123Z Using tool-cache: false
+2026-10-25T19:00:39.4691585Z Fetching zig-x86_64-linux-0.16.0.tar.xz
+2026-10-25T19:00:39.6364060Z Cache hit for: setup-zig-tarball-zig-x86_64-linux-0.16.0
+2026-10-25T19:00:40.5551288Z Received 55481366 of 55481366 (100.0%), 70.3 MBs/sec
+2026-10-25T19:00:40.5551646Z Cache Size: ~53 MB (55481366 B)
+2026-10-25T19:00:40.5642868Z [command]/usr/bin/tar -xf /home/runner/work/_temp/21674f98-044c-496f-ae8a-54c5fe5cc60a/cache.tzst -P -C /home/runner/work/wazig/wazig --use-compress-program unzstd
+2026-10-25T19:00:40.6255448Z Cache restored successfully
+2026-10-25T19:00:40.6283788Z Fetch took 1159 ms
+2026-10-25T19:00:40.6284023Z Extracting tarball zig-x86_64-linux-0.16.0.tar.xz
+2026-10-25T19:00:40.6358798Z [command]/usr/bin/tar xJ --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/a9ef1826-fcf9-4803-a4e9-5d1984cc66f8 -f /home/runner/work/_temp/zig-x86_64-linux-0.16.0.tar.xz
+2026-10-25T19:00:42.7304401Z Extract took 2102 ms
+2026-10-25T19:00:42.7316925Z [command]/home/runner/work/_temp/a9ef1826-fcf9-4803-a4e9-5d1984cc66f8/zig-x86_64-linux-0.16.0/zig version
+2026-10-25T19:00:42.7391423Z 0.16.0
+2026-10-25T19:00:42.7405629Z Resolved Zig version 0.16.0
+2026-10-25T19:00:42.7410890Z Attempting restore of Zig cache with prefix 'setup-zig-cache-v2-ci-zig-x86_64-linux-0.16.0--'
+2026-10-25T19:00:42.8816910Z Cache hit for restore-key: setup-zig-cache-v2-ci-zig-x86_64-linux-0.16.0--40220199498-1
+2026-10-25T19:00:43.1498233Z Received 187 of 187 (100.0%), 0.0 MBs/sec
+2026-10-25T19:00:43.1499079Z Cache Size: ~0 MB (187 B)
+2026-10-25T19:00:43.1509394Z [command]/usr/bin/tar -xf /home/runner/work/_temp/f4fc3ee5-dd9b-451c-96eb-243550af6304/cache.tzst -P -C /home/runner/work/wazig/wazig --use-compress-program unzstd
+2026-10-25T19:00:43.1585172Z Cache restored successfully
+2026-10-25T19:00:43.1586972Z Cache hit (key 'setup-zig-cache-v2-ci-zig-x86_64-linux-0.16.0--40220199498-1'): populating Zig cache directory at /home/runner/work/wazig/wazig/.zig-cache
+2026-10-25T19:00:43.1755373Z ##[group]Run zig version
+2026-10-25T19:00:43.1755555Z [36;1mzig version[0m
+2026-10-25T19:00:43.1806956Z shell: /usr/bin/bash -e {0}
+2026-10-25T19:00:43.1807115Z env:
+2026-10-25T19:00:43.1807367Z   ZIG_GLOBAL_CACHE_DIR: /home/runner/work/wazig/wazig/.zig-cache
+2026-10-25T19:00:43.1807616Z   ZIG_LOCAL_CACHE_DIR: /home/runner/work/wazig/wazig/.zig-cache
+2026-10-25T19:00:43.1807812Z ##[endgroup]
+2026-10-25T19:00:43.1906081Z 0.16.0
+2026-10-25T19:00:43.1945748Z ##[group]Run python3 tools/check_voice_transcription_regression.py --zig "$(command -v zig)"
+2026-10-25T19:00:43.1946145Z [36;1mpython3 tools/check_voice_transcription_regression.py --zig "$(command -v zig)"[0m
+2026-10-25T19:00:43.1994366Z shell: /usr/bin/bash -e {0}
+2026-10-25T19:00:43.1994521Z env:
+2026-10-25T19:00:43.1994691Z   ZIG_GLOBAL_CACHE_DIR: /home/runner/work/wazig/wazig/.zig-cache
+2026-10-25T19:00:43.1994933Z   ZIG_LOCAL_CACHE_DIR: /home/runner/work/wazig/wazig/.zig-cache
+2026-10-25T19:00:43.1995134Z ##[endgroup]
+2026-10-25T19:00:46.1198896Z fixed:
+2026-10-25T19:00:46.1199398Z 1/2 policy.test.ISSUE-517 stored own Ogg falls back after empty automatic recognition...OK
+2026-10-25T19:00:46.1199978Z 2/2 policy.test.ISSUE-517 stored voice fallback never retries success network errors or fixed languages...OK
+2026-10-25T19:00:46.1200319Z All 2 tests passed.
+2026-10-25T19:00:46.1200409Z 
+2026-10-25T19:00:46.5304027Z historical:
+2026-10-25T19:00:46.5355280Z 1/2 policy.test.ISSUE-517 stored own Ogg falls back after empty automatic recognition...FAIL (NoSpeech)
+2026-10-25T19:00:46.5355728Z /tmp/voice-regression-cvnz5ydh/policy.zig:121:33: 0x12333a9 in send (policy.zig)
+2026-10-25T19:00:46.5355989Z         if (self.failure) |err| return err;
+2026-10-25T19:00:46.5356161Z                                 ^
+2026-10-25T19:00:46.5356430Z /tmp/voice-regression-cvnz5ydh/policy.zig:89:5: 0x12335c3 in transcribeFile__anon_43158 (policy.zig)
+2026-10-25T19:00:46.5356732Z     return transport.send(language, content_type, body);
+2026-10-25T19:00:46.5356908Z     ^
+2026-10-25T19:00:46.5357222Z /tmp/voice-regression-cvnz5ydh/policy.zig:318:48: 0x123bcdd in test.ISSUE-517 stored own Ogg falls back after empty automatic recognition (policy.zig)
+2026-10-25T19:00:46.5358143Z     try std.testing.expectEqualStrings("test", try transcribeFile(&transport, .automatic, "audio/ogg", "OggS"));
+2026-10-25T19:00:46.5358634Z                                                ^
+2026-10-25T19:00:46.5359079Z 2/2 policy.test.ISSUE-517 stored voice fallback never retries success network errors or fixed languages...expected 1, found 0
+2026-10-25T19:00:46.5359533Z FAIL (TestExpectedEqual)
+2026-10-25T19:00:46.5360056Z /home/runner/work/_temp/a9ef1826-fcf9-4803-a4e9-5d1984cc66f8/zig-x86_64-linux-0.16.0/lib/std/testing.zig:118:17: 0x1233699 in expectEqualInner__anon_43196 (std.zig)
+2026-10-25T19:00:46.5360620Z                 return error.TestExpectedEqual;
+2026-10-25T19:00:46.5360889Z                 ^
+2026-10-25T19:00:46.5361343Z /home/runner/work/_temp/a9ef1826-fcf9-4803-a4e9-5d1984cc66f8/zig-x86_64-linux-0.16.0/lib/std/testing.zig:83:5: 0x123453c in expectEqual (policy.zig)
+2026-10-25T19:00:46.5361880Z     return expectEqualInner(T, expected, actual);
+2026-10-25T19:00:46.5362136Z     ^
+2026-10-25T19:00:46.5362641Z /tmp/voice-regression-cvnz5ydh/policy.zig:343:5: 0x1234595 in test.ISSUE-517 stored voice fallback never retries success network errors or fixed languages (policy.zig)
+2026-10-25T19:00:46.5363307Z     try std.testing.expectEqual(@as(usize, 1), empty.multilingual_calls);
+2026-10-25T19:00:46.5363631Z     ^
+2026-10-25T19:00:46.5364342Z 0 passed; 0 skipped; 2 failed.
+2026-10-25T19:00:46.5364637Z error: the following test command failed with exit code 1:
+2026-10-25T19:00:46.5365026Z .zig-cache/o/a044967586f98f0f355dc8689183b228/test --seed=0xdb7f369a
+2026-10-25T19:00:46.5365274Z 
+2026-10-25T19:00:46.5365486Z ISSUE-517 fixed tests pass and historical NoSpeech regression is caught
+2026-10-25T19:00:46.5431174Z ##[group]Run ZIG=zig bash tools/preflight.sh
+2026-10-25T19:00:46.5431398Z [36;1mZIG=zig bash tools/preflight.sh[0m
+2026-10-25T19:00:46.5480709Z shell: /usr/bin/bash -e {0}
+2026-10-25T19:00:46.5480860Z env:
+2026-10-25T19:00:46.5481030Z   ZIG_GLOBAL_CACHE_DIR: /home/runner/work/wazig/wazig/.zig-cache
+2026-10-25T19:00:46.5481266Z   ZIG_LOCAL_CACHE_DIR: /home/runner/work/wazig/wazig/.zig-cache
+2026-10-25T19:00:46.5481464Z ##[endgroup]
+2026-10-25T19:00:46.5611526Z preflight: zig fmt --check src build.zig
+2026-10-25T19:00:46.6083367Z src/main.zig
+2026-10-25T19:00:46.6111213Z ##[error]Process completed with exit code 1.
+2026-10-25T19:00:46.6187773Z Post job cleanup.
+2026-10-25T19:00:46.7439278Z Checking size of cache directory at /home/runner/work/wazig/wazig/.zig-cache
+2026-10-25T19:00:46.7741154Z Cache directory is 78055968 bytes, below limit of 2147483648 bytes; keeping intact
+2026-10-25T19:00:46.7743475Z Saving Zig cache with key 'setup-zig-cache-v2-ci-zig-x86_64-linux-0.16.0--40223754056-1'
+2026-10-25T19:00:46.7853837Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/wazig/wazig --files-from manifest.txt --use-compress-program zstdmt
+2026-10-25T19:00:47.8748177Z Sent 22224980 of 22224980 (100.0%), 27.4 MBs/sec
+2026-10-25T19:00:48.0925803Z Post job cleanup.
+2026-10-25T19:00:48.1519270Z [command]/usr/bin/git version
+2026-10-25T19:00:48.1550639Z git version 2.55.0
+2026-10-25T19:00:48.1572415Z Temporarily overriding HOME='/home/runner/work/_temp/187bff25-03ed-4677-a193-86e8a9f5cb74' before making global git config changes
+2026-10-25T19:00:48.1573065Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-25T19:00:48.1575363Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/wazig/wazig
+2026-10-25T19:00:48.1606959Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-25T19:00:48.1633353Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-25T19:00:48.1852842Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-25T19:00:48.1873110Z http.https://github.com/.extraheader
+2026-10-25T19:00:48.1880646Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-10-25T19:00:48.1907519Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-25T19:00:48.2127003Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-25T19:00:48.2153018Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-25T19:00:48.2484015Z Cleaning up orphan processes
+2026-10-25T19:00:48.2733163Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, mlugg/setup-zig@v2. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

@@ -1,0 +1,19 @@
+
+HubToken     : {1, 0, 0, 0…}
+PinnedChats  : 
+ViewOrder    : whatsapp:personal
+               telegram:telegram
+               signal:signal
+               
+WindowLeft   : 0
+WindowTop    : 8
+WindowRight  : 1044
+WindowBottom : 768
+InboxView    : 3
+AccountView  : 
+PSPath       : Microsoft.PowerShell.Core\Registry::HKEY_CURRENT_USER\Software\MessagesVerification\dbabdf3e-bc25-4872-9ca7-259db61cc2cd\Software\Messages
+PSParentPath : Microsoft.PowerShell.Core\Registry::HKEY_CURRENT_USER\Software\MessagesVerification\dbabdf3e-bc25-4872-9ca7-259db61cc2cd\Software
+PSChildName  : Messages
+PSDrive      : HKCU
+PSProvider   : Microsoft.PowerShell.Core\Registry
+

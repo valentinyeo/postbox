@@ -1,0 +1,110 @@
+{
+  "version": "0.0.526",
+  "view": "slack",
+  "selected": null,
+  "current_view": {
+    "provider": "slack",
+    "account": "af5f68378628df7e",
+    "label": "Slack af5f68378628df7e",
+    "inbox": false
+  },
+  "view_order": [
+    {
+      "provider": "slack",
+      "account": "af5f68378628df7e",
+      "label": "Slack af5f68378628df7e",
+      "inbox": false
+    },
+    {
+      "provider": "telegram",
+      "account": "telegram",
+      "label": "Telegram",
+      "inbox": false
+    },
+    {
+      "provider": "signal",
+      "account": "signal",
+      "label": "Signal",
+      "inbox": false
+    }
+  ],
+  "include_archived": false,
+  "sync": "stopped",
+  "slack_connected": false,
+  "pending_sends": 0,
+  "pending_archives": 0,
+  "slack_chat_count": 0,
+  "chat_count": 0,
+  "show_archived": true,
+  "unread_only": false,
+  "search": "",
+  "theme": "amoled",
+  "staged_attachment_count": 0,
+  "paints": {
+    "window": 21,
+    "window_full": 7,
+    "canvas": 6,
+    "canvas_full": 6,
+    "list": 7,
+    "list_full": 7
+  },
+  "composer": {
+    "box": {
+      "left": 356,
+      "top": 642,
+      "right": 1010,
+      "bottom": 686
+    },
+    "lines": 1,
+    "controls": [
+      {
+        "name": "attach",
+        "left": 372,
+        "top": 646,
+        "right": 408,
+        "bottom": 682
+      },
+      {
+        "name": "text",
+        "left": 412,
+        "top": 643,
+        "right": 826,
+        "bottom": 685
+      },
+      {
+        "name": "mic",
+        "left": 838,
+        "top": 646,
+        "right": 874,
+        "bottom": 682
+      },
+      {
+        "name": "dictate",
+        "left": 878,
+        "top": 646,
+        "right": 914,
+        "bottom": 682
+      },
+      {
+        "name": "emoji",
+        "left": 918,
+        "top": 646,
+        "right": 954,
+        "bottom": 682
+      },
+      {
+        "name": "send",
+        "left": 958,
+        "top": 646,
+        "right": 994,
+        "bottom": 682
+      }
+    ]
+  },
+  "memory": {
+    "working_set_kb": 45564,
+    "private_kb": 65940,
+    "module_count": 61,
+    "media_foundation_loaded": false
+  }
+}

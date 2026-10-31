@@ -1,0 +1,1 @@
+{"success":true,"data":[{"jid":"fixture-alpha","name":"Verification Alpha","provider":"slack","kind":"group","last_message_ts":"2026-10-25T19:21:51Z","unread_count":3,"unread":true,"archived":false},{"jid":"fixture-beta","name":"Verification Beta","provider":"slack","kind":"direct","last_message_ts":"2026-10-25T19:21:29Z","unread_count":0,"unread":false,"archived":false}]}

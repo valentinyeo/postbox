@@ -1,0 +1,20 @@
+MessagesZig | Slack e99443198b139b7e - Wazig v0.0.526
+ | tooltips_class32 | Messages  Alt+J/K select · Ctrl+P play voice · Ctrl+T transcript · Ctrl+R react
+ | tooltips_class32 | Messages  Alt+J/K select · Ctrl+P play voice · Ctrl+T transcript · Ctrl+R react
+1008 | RICHEDIT50W | RichEdit Control
+1016 | ListBox | 
+ |  | 
+ |  | 
+1024 | WacliMessageCanvas | 
+1136 | Button | Attach photo or file
+1032 | RICHEDIT50W | RichEdit Control
+1056 | Button | Dictate
+1080 | Button | 😊
+1040 | Button | Send
+1048 | Static | Showing Slack e99443198b139b7e
+TitleBar |  | Slack e99443198b139b7e - Wazig v0.0.526
+SystemMenuBar |  | System Menu Bar
+Item 1 |  | System
+Minimize |  | Minimize
+Restore |  | Restore
+Close |  | Close

@@ -1,0 +1,18 @@
+{
+  "id": "a46ff28f-05ae-46d1-89ee-6b6afde77fae",
+  "pid": 5280,
+  "startTicks": "639285528909454695",
+  "root": "D:\\a\\_temp\\wazig-verify-a46ff28f-05ae-46d1-89ee-6b6afde77fae",
+  "evidence": "D:\\a\\wazig\\wazig\\verification-evidence",
+  "exe": "D:\\a\\wazig\\wazig\\zig-out\\bin\\Messages.exe",
+  "ctl": "D:\\a\\wazig\\wazig\\zig-out\\bin\\wazigctl.exe",
+  "username": "verify-a46ff28f-05ae-46d1-89ee-6b6afde77fae",
+  "sha256": "E9C9CE4795E9BF27152DBCB7D641342F1DA800102A1173C1FB316B3FCBC518B7",
+  "commit": "abb740b19e068cbfeba735e620e83392214dd267",
+  "feature": "slack-archive",
+  "expected_version": "0.0.526",
+  "bridge_pid": 4652,
+  "bridge_start_ticks": "639285528906706279",
+  "bridge_exe": "C:\\hostedtoolcache\\windows\\Python\\3.12.10\\x64\\python.exe",
+  "bridge_url": "http://127.0.0.1:62509"
+}

@@ -1,0 +1,40 @@
+{
+  "messenger": "slack",
+  "archived": false,
+  "filtered": false,
+  "total": 2,
+  "chats": [
+    {
+      "id": "fixture-alpha",
+      "provider": "slack",
+      "account": "af5f68378628df7e",
+      "view_account": "af5f68378628df7e",
+      "saved": false,
+      "name": "Verification Alpha",
+      "kind": "group",
+      "messenger": "slack",
+      "unread": true,
+      "unread_count": 2,
+      "pinned": false,
+      "archived": false,
+      "last_message_time": "2026-10-25T19:57:06Z",
+      "archive_label": ""
+    },
+    {
+      "id": "fixture-beta",
+      "provider": "slack",
+      "account": "af5f68378628df7e",
+      "view_account": "af5f68378628df7e",
+      "saved": false,
+      "name": "Verification Beta",
+      "kind": "direct",
+      "messenger": "slack",
+      "unread": false,
+      "unread_count": 0,
+      "pinned": false,
+      "archived": false,
+      "last_message_time": "2026-10-25T19:56:47Z",
+      "archive_label": ""
+    }
+  ]
+}

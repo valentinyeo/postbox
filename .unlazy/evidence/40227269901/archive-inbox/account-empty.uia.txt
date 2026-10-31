@@ -1,0 +1,17 @@
+MessagesZig | WhatsApp personal - Wazig v0.0.526
+1008 | RICHEDIT50W | RichEdit Control
+1016 | ListBox | 
+1024 | WacliMessageCanvas | 
+1136 | Button | Attach photo or file
+1032 | RICHEDIT50W | RichEdit Control
+1104 | Button | Voice
+1056 | Button | Dictate
+1080 | Button | 😊
+1040 | Button | Send
+1048 | Static | Showing WhatsApp personal
+TitleBar |  | WhatsApp personal - Wazig v0.0.526
+SystemMenuBar |  | System Menu Bar
+Item 1 |  | System
+Minimize |  | Minimize
+Restore |  | Restore
+Close |  | Close

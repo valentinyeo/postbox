@@ -1,0 +1,52 @@
+keys: hello
+keys: ^a
+keys: {BACKSPACE}
+keys: ^a
+keys: {ESC}
+keys: ^a
+keys: {ESC}
+keys: ^a
+keys: {ESC}
+keys: ^a
+keys: {ESC}
+keys: ^a
+keys: {ESC}
+keys: ^a
+keys: {ESC}
+keys: ^a
+keys: {ESC}
+keys: ^a
+keys: {ESC}
+keys: ^a
+keys: {ESC}
+keys: ^a
+keys: ^e
+keys: ^k
+keys: Refresh
+keys: {ENTER}
+keys: ^k
+keys: Show archived chats
+keys: {ENTER}
+keys: ^k
+keys: Show inbox chats
+keys: {ENTER}
+keys: %1
+keys: ^k
+keys: Quit Messages
+keys: {ENTER}
+keys: %i
+keys: ^k
+keys: Show archived chats
+keys: {ENTER}
+keys: ^k
+keys: Show inbox chats
+keys: {ENTER}
+keys: ^k
+keys: Refresh
+keys: {ENTER}
+keys: ^k
+keys: Show archived chats
+keys: {ENTER}
+keys: ^k
+keys: Show inbox chats
+keys: {ENTER}

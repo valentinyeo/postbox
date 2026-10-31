@@ -1,0 +1,149 @@
+﻿2026-10-25T19:05:17.2570125Z Current runner version: '2.338.0'
+2026-10-25T19:05:17.2592522Z ##[group]Runner Image Provisioner
+2026-10-25T19:05:17.2593356Z Hosted Compute Agent
+2026-10-25T19:05:17.2593938Z Version: 20261021.618
+2026-10-25T19:05:17.2595052Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+2026-10-25T19:05:17.2595789Z Build Date: 2026-10-21T00:45:21Z
+2026-10-25T19:05:17.2596455Z Worker ID: {6298f286-f0f6-4891-a131-b5b2f68b9a8c}
+2026-10-25T19:05:17.2597125Z Region: westcentralus
+2026-10-25T19:05:17.2597652Z Cloud: Azure
+2026-10-25T19:05:17.2598200Z ##[endgroup]
+2026-10-25T19:05:17.2599937Z ##[group]Operating System
+2026-10-25T19:05:17.2600564Z Ubuntu
+2026-10-25T19:05:17.2601054Z 26.04.1
+2026-10-25T19:05:17.2601526Z LTS
+2026-10-25T19:05:17.2602051Z ##[endgroup]
+2026-10-25T19:05:17.2602598Z ##[group]Runner Image
+2026-10-25T19:05:17.2603156Z Image: ubuntu-26.04
+2026-10-25T19:05:17.2603710Z Version: 20261012.163.1
+2026-10-25T19:05:17.2605187Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261012.163/images/ubuntu/Ubuntu2604-Readme.md
+2026-10-25T19:05:17.2606766Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261012.163
+2026-10-25T19:05:17.2607679Z ##[endgroup]
+2026-10-25T19:05:17.2608867Z ##[group]GITHUB_TOKEN Permissions
+2026-10-25T19:05:17.2611099Z Contents: read
+2026-10-25T19:05:17.2611693Z Metadata: read
+2026-10-25T19:05:17.2612231Z PullRequests: read
+2026-10-25T19:05:17.2612832Z ##[endgroup]
+2026-10-25T19:05:17.2615161Z Secret source: Actions
+2026-10-25T19:05:17.2616055Z Cache mode: write
+2026-10-25T19:05:17.2616950Z Prepare workflow directory
+2026-10-25T19:05:17.2966027Z Prepare all required actions
+2026-10-25T19:05:17.3014575Z Getting action download info
+2026-10-25T19:05:17.5494962Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-25T19:05:17.8118518Z Complete job name: update-card
+2026-10-25T19:05:17.8985866Z ##[group]Run actions/checkout@v4
+2026-10-25T19:05:17.8986709Z with:
+2026-10-25T19:05:17.8987235Z   repository: valentinyeo/wazig
+2026-10-25T19:05:17.8991112Z   token: ***
+2026-10-25T19:05:17.8991636Z   ssh-strict: true
+2026-10-25T19:05:17.8992196Z   ssh-user: git
+2026-10-25T19:05:17.8992704Z   persist-credentials: true
+2026-10-25T19:05:17.8993265Z   clean: true
+2026-10-25T19:05:17.8993778Z   sparse-checkout-cone-mode: true
+2026-10-25T19:05:17.8994517Z   fetch-depth: 1
+2026-10-25T19:05:17.8995055Z   fetch-tags: false
+2026-10-25T19:05:17.8995551Z   show-progress: true
+2026-10-25T19:05:17.8996086Z   lfs: false
+2026-10-25T19:05:17.8996568Z   submodules: false
+2026-10-25T19:05:17.8997081Z   set-safe-directory: true
+2026-10-25T19:05:17.8997715Z   allow-unsafe-pr-checkout: false
+2026-10-25T19:05:17.8998425Z ##[endgroup]
+2026-10-25T19:05:18.0992470Z Syncing repository: valentinyeo/wazig
+2026-10-25T19:05:18.0995492Z ##[group]Getting Git version info
+2026-10-25T19:05:18.0996780Z Working directory is '/home/runner/work/wazig/wazig'
+2026-10-25T19:05:18.0998210Z [command]/usr/bin/git version
+2026-10-25T19:05:18.1019182Z git version 2.55.0
+2026-10-25T19:05:18.1037668Z ##[endgroup]
+2026-10-25T19:05:18.1049982Z Temporarily overriding HOME='/home/runner/work/_temp/3a975c82-325e-44c0-b476-0f64ab3f2771' before making global git config changes
+2026-10-25T19:05:18.1051695Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-25T19:05:18.1053445Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/wazig/wazig
+2026-10-25T19:05:18.1133187Z Deleting the contents of '/home/runner/work/wazig/wazig'
+2026-10-25T19:05:18.1137397Z ##[group]Initializing the repository
+2026-10-25T19:05:18.1142065Z [command]/usr/bin/git init /home/runner/work/wazig/wazig
+2026-10-25T19:05:18.1303709Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-25T19:05:18.1305128Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-25T19:05:18.1306867Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-25T19:05:18.1308411Z hint: call:
+2026-10-25T19:05:18.1309110Z hint:
+2026-10-25T19:05:18.1310021Z hint: 	git config --global init.defaultBranch <name>
+2026-10-25T19:05:18.1310933Z hint:
+2026-10-25T19:05:18.1311947Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-25T19:05:18.1313595Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-25T19:05:18.1315064Z hint:
+2026-10-25T19:05:18.1315814Z hint: 	git branch -m <name>
+2026-10-25T19:05:18.1316563Z hint:
+2026-10-25T19:05:18.1317542Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-25T19:05:18.1319023Z Initialized empty Git repository in /home/runner/work/wazig/wazig/.git/
+2026-10-25T19:05:18.1321375Z [command]/usr/bin/git remote add origin https://github.com/valentinyeo/wazig
+2026-10-25T19:05:18.1497808Z ##[endgroup]
+2026-10-25T19:05:18.1499423Z ##[group]Disabling automatic garbage collection
+2026-10-25T19:05:18.1501362Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-25T19:05:18.1587864Z ##[endgroup]
+2026-10-25T19:05:18.1589035Z ##[group]Setting up auth
+2026-10-25T19:05:18.1594836Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-25T19:05:18.1621493Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-25T19:05:18.2377403Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-25T19:05:18.2406666Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-25T19:05:18.2647816Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-25T19:05:18.2673767Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-25T19:05:18.2910208Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-25T19:05:18.3142006Z ##[endgroup]
+2026-10-25T19:05:18.3143604Z ##[group]Fetching the repository
+2026-10-25T19:05:18.3152209Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +9b39dfb7274cdc15ec388eef0052cfc06d2863e2:refs/remotes/pull/387/merge
+2026-10-25T19:05:19.3135471Z From https://github.com/valentinyeo/wazig
+2026-10-25T19:05:19.3137049Z  * [new ref]         9b39dfb7274cdc15ec388eef0052cfc06d2863e2 -> pull/387/merge
+2026-10-25T19:05:19.3139865Z ##[endgroup]
+2026-10-25T19:05:19.3140864Z ##[group]Determining the checkout info
+2026-10-25T19:05:19.3142458Z ##[endgroup]
+2026-10-25T19:05:19.3148591Z [command]/usr/bin/git sparse-checkout disable
+2026-10-25T19:05:19.3254687Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-25T19:05:19.3285203Z ##[group]Checking out the ref
+2026-10-25T19:05:19.3298324Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/387/merge
+2026-10-25T19:05:19.3787875Z Note: switching to 'refs/remotes/pull/387/merge'.
+2026-10-25T19:05:19.3789162Z 
+2026-10-25T19:05:19.3790082Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-10-25T19:05:19.3792663Z changes and commit them, and you can discard any commits you make in this
+2026-10-25T19:05:19.3795202Z state without impacting any branches by switching back to a branch.
+2026-10-25T19:05:19.3796322Z 
+2026-10-25T19:05:19.3797281Z If you want to create a new branch to retain commits you create, you may
+2026-10-25T19:05:19.3799203Z do so (now or later) by using -c with the switch command. Example:
+2026-10-25T19:05:19.3800235Z 
+2026-10-25T19:05:19.3800763Z   git switch -c <new-branch-name>
+2026-10-25T19:05:19.3801591Z 
+2026-10-25T19:05:19.3802070Z Or undo this operation with:
+2026-10-25T19:05:19.3802892Z 
+2026-10-25T19:05:19.3803939Z   git switch -
+2026-10-25T19:05:19.3804991Z 
+2026-10-25T19:05:19.3805975Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-10-25T19:05:19.3807185Z 
+2026-10-25T19:05:19.3808642Z HEAD is now at 9b39dfb Merge 839a03fe39d313886ba1aea4102f6bda295a9fa9 into ef54fd8347ab436d94e2aa8683ae884ad32c23c6
+2026-10-25T19:05:19.3813901Z ##[endgroup]
+2026-10-25T19:05:19.3839165Z [command]/usr/bin/git log -1 --format=%H
+2026-10-25T19:05:19.3860842Z 9b39dfb7274cdc15ec388eef0052cfc06d2863e2
+2026-10-25T19:05:19.4139660Z ##[group]Run jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/pr-body.txt"
+2026-10-25T19:05:19.4142286Z [36;1mjq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/pr-body.txt"[0m
+2026-10-25T19:05:19.4145712Z [36;1mgh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/pr-files.txt"[0m
+2026-10-25T19:05:19.4149512Z [36;1mpython3 tools/update_cards.py check --body-file "$RUNNER_TEMP/pr-body.txt" --files "$RUNNER_TEMP/pr-files.txt"[0m
+2026-10-25T19:05:19.4272506Z shell: /usr/bin/bash -e {0}
+2026-10-25T19:05:19.4273806Z env:
+2026-10-25T19:05:19.4284111Z   GH_TOKEN: ***
+2026-10-25T19:05:19.4285394Z   PR_NUMBER: 387
+2026-10-25T19:05:19.4286522Z ##[endgroup]
+2026-10-25T19:05:20.2440486Z Add exactly one Card: <plain product change> line (or Card: none)
+2026-10-25T19:05:20.2526659Z ##[error]Process completed with exit code 1.
+2026-10-25T19:05:20.2691832Z Post job cleanup.
+2026-10-25T19:05:20.3486422Z [command]/usr/bin/git version
+2026-10-25T19:05:20.3519263Z git version 2.55.0
+2026-10-25T19:05:20.3551332Z Temporarily overriding HOME='/home/runner/work/_temp/d3db325c-431c-448d-bdd8-846cabc165d8' before making global git config changes
+2026-10-25T19:05:20.3553580Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-25T19:05:20.3556434Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/wazig/wazig
+2026-10-25T19:05:20.3590107Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-25T19:05:20.3618056Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-25T19:05:20.3838386Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-25T19:05:20.3856840Z http.https://github.com/.extraheader
+2026-10-25T19:05:20.3864660Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-10-25T19:05:20.3895012Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-25T19:05:20.4101370Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-25T19:05:20.4127945Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-25T19:05:20.4458545Z Cleaning up orphan processes
+2026-10-25T19:05:20.4815920Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

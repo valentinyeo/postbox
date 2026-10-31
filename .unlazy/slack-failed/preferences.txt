@@ -1,0 +1,19 @@
+
+HubToken     : {1, 0, 0, 0…}
+PinnedChats  : 
+ViewOrder    : slack:e99443198b139b7e
+               telegram:telegram
+               signal:signal
+               
+InboxView    : 1
+AccountView  : e99443198b139b7e
+WindowLeft   : 0
+WindowTop    : 8
+WindowRight  : 1044
+WindowBottom : 768
+PSPath       : Microsoft.PowerShell.Core\Registry::HKEY_CURRENT_USER\Software\MessagesVerification\a46ff28f-05ae-46d1-89ee-6b6afde77fae\Software\Messages
+PSParentPath : Microsoft.PowerShell.Core\Registry::HKEY_CURRENT_USER\Software\MessagesVerification\a46ff28f-05ae-46d1-89ee-6b6afde77fae\Software
+PSChildName  : Messages
+PSDrive      : HKCU
+PSProvider   : Microsoft.PowerShell.Core\Registry
+

@@ -1,0 +1,4 @@
+wazig-msg-cache v2
+e99443198b139b7e
+fixture-alpha
+{"success":true,"data":{"messages":[{"MsgID":"ARCHIVE-INCOMING-3","ChatJID":"fixture-alpha","Timestamp":"2026-10-25T19:21:51Z","Text":"Synthetic Slack incoming 3","FromMe":false,"SenderName":"Fixture Sender","LocalPath":""},{"MsgID":"ARCHIVE-INCOMING-2","ChatJID":"fixture-alpha","Timestamp":"2026-10-25T19:21:48Z","Text":"Synthetic Slack incoming 2","FromMe":false,"SenderName":"Fixture Sender","LocalPath":""},{"MsgID":"ARCHIVE-INCOMING-1","ChatJID":"fixture-alpha","Timestamp":"2026-10-25T19:21:45Z","Text":"Synthetic Slack incoming 1","FromMe":false,"SenderName":"Fixture Sender","LocalPath":""},{"MsgID":"ARCHIVE-BASELINE","ChatJID":"fixture-alpha","Timestamp":"2026-10-25T19:21:30Z","Text":"Synthetic Slack history","FromMe":false,"SenderName":"Fixture Sender","LocalPath":""}]}}

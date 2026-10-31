@@ -1,0 +1,414 @@
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 verify-wazig valentinyeo/wazig#387 · 40226709016
+Triggered via pull_request about 1 minute ago
+
+JOBS
+* plan (ID 121269613866)
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 verify-wazig valentinyeo/wazig#387 · 40226709016
+Triggered via pull_request about 2 minutes ago
+
+JOBS
+* plan (ID 121269613866)
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 verify-wazig valentinyeo/wazig#387 · 40226709016
+Triggered via pull_request about 3 minutes ago
+
+JOBS
+* plan (ID 121269613866)
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 verify-wazig valentinyeo/wazig#387 · 40226709016
+Triggered via pull_request about 4 minutes ago
+
+JOBS
+✓ plan in 4s (ID 121269613866)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Plan registered journeys
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* verify (reactions, true) (ID 121270402176)
+* verify (palette-archived, true) (ID 121270402178)
+* verify (passage-copy, true) (ID 121270402179)
+* verify (hub, true) (ID 121270402188)
+* verify (slack-mentions, true) (ID 121270402196)
+* verify (slack-archive, true) (ID 121270402200)
+* verify (paste-image, true) (ID 121270402220)
+* verify (drafts, false) (ID 121270402236)
+* verify (menus, false) (ID 121270402240)
+* verify (slack-sort, true) (ID 121270402242)
+* verify (link-previews, true) (ID 121270402246)
+* verify (slack-emoji, true) (ID 121270402258)
+* verify (slack-threads, true) (ID 121270402261)
+* verify (search, true) (ID 121270402267)
+* verify (hub-archive, true) (ID 121270402296)
+* verify (show-archived, true) (ID 121270402337)
+* verify (telegram, true) (ID 121270402339)
+* verify (archive-bulk, false) (ID 121270402354)
+* verify (notrap, true) (ID 121270402355)
+* verify (repaint, true) (ID 121270402357)
+* verify (window, true) (ID 121270402364)
+* verify (media-fit, true) (ID 121270402371)
+* verify (composer-border, false) (ID 121270402388)
+* verify (signal, true) (ID 121270402391)
+* verify (archive-inbox, true) (ID 121270402396)
+* verify (text-comparison, false) (ID 121270402397)
+* verify (workspace-icons, true) (ID 121270402398)
+* verify (voice, true) (ID 121270402401)
+* verify (views, true) (ID 121270402413)
+* verify (whatsapp-hub, true) (ID 121270402457)
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 verify-wazig valentinyeo/wazig#387 · 40226709016
+Triggered via pull_request about 5 minutes ago
+
+JOBS
+✓ plan in 4s (ID 121269613866)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Plan registered journeys
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* verify (reactions, true) (ID 121270402176)
+* verify (palette-archived, true) (ID 121270402178)
+* verify (passage-copy, true) (ID 121270402179)
+* verify (hub, true) (ID 121270402188)
+* verify (slack-mentions, true) (ID 121270402196)
+* verify (slack-archive, true) (ID 121270402200)
+* verify (paste-image, true) (ID 121270402220)
+* verify (drafts, false) (ID 121270402236)
+* verify (menus, false) (ID 121270402240)
+* verify (slack-sort, true) (ID 121270402242)
+* verify (link-previews, true) (ID 121270402246)
+* verify (slack-emoji, true) (ID 121270402258)
+* verify (slack-threads, true) (ID 121270402261)
+* verify (search, true) (ID 121270402267)
+* verify (hub-archive, true) (ID 121270402296)
+* verify (show-archived, true) (ID 121270402337)
+* verify (telegram, true) (ID 121270402339)
+* verify (archive-bulk, false) (ID 121270402354)
+* verify (notrap, true) (ID 121270402355)
+* verify (repaint, true) (ID 121270402357)
+* verify (window, true) (ID 121270402364)
+* verify (media-fit, true) (ID 121270402371)
+* verify (composer-border, false) (ID 121270402388)
+* verify (signal, true) (ID 121270402391)
+* verify (archive-inbox, true) (ID 121270402396)
+* verify (text-comparison, false) (ID 121270402397)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Check skill map and PowerShell syntax
+  ✓ ISSUE-462 fixture text and native font metric parity with negative controls
+  ✓ Install Chrome screenshot driver
+  ✓ Run mlugg/setup-zig@v2
+  * ISSUE-462 row-sized DirectWrite regression
+  * Build real desktop and control client
+  * Native DirectWrite editing regression tests
+  * Launch, doctor and drive
+  * Validate surviving journey evidence
+  * Archive rows through the production renderer with a light fixture palette
+  * Validate search pill ink centering
+  * ISSUE-462 validate text comparison artifact
+  * Cleanup even after a failed journey
+  * Validate menus evidence
+  * Validate archive evidence
+  * Upload screenshots and logs
+  * Post Run mlugg/setup-zig@v2
+  * Post Run actions/checkout@v4
+* verify (workspace-icons, true) (ID 121270402398)
+* verify (voice, true) (ID 121270402401)
+* verify (views, true) (ID 121270402413)
+* verify (whatsapp-hub, true) (ID 121270402457)
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 verify-wazig valentinyeo/wazig#387 · 40226709016
+Triggered via pull_request about 6 minutes ago
+
+JOBS
+✓ plan in 4s (ID 121269613866)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Plan registered journeys
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* verify (reactions, true) (ID 121270402176)
+* verify (palette-archived, true) (ID 121270402178)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Check skill map and PowerShell syntax
+  ✓ ISSUE-462 fixture text and native font metric parity with negative controls
+  - Install Chrome screenshot driver
+  * Run mlugg/setup-zig@v2
+  * ISSUE-462 row-sized DirectWrite regression
+  * Build real desktop and control client
+  * Native DirectWrite editing regression tests
+  * Launch, doctor and drive
+  * Validate surviving journey evidence
+  * Archive rows through the production renderer with a light fixture palette
+  * Validate search pill ink centering
+  * ISSUE-462 validate text comparison artifact
+  * Cleanup even after a failed journey
+  * Validate menus evidence
+  * Validate archive evidence
+  * Upload screenshots and logs
+  * Post Run mlugg/setup-zig@v2
+  * Post Run actions/checkout@v4
+* verify (passage-copy, true) (ID 121270402179)
+* verify (hub, true) (ID 121270402188)
+* verify (slack-mentions, true) (ID 121270402196)
+* verify (slack-archive, true) (ID 121270402200)
+* verify (paste-image, true) (ID 121270402220)
+* verify (drafts, false) (ID 121270402236)
+* verify (menus, false) (ID 121270402240)
+* verify (slack-sort, true) (ID 121270402242)
+* verify (link-previews, true) (ID 121270402246)
+* verify (slack-emoji, true) (ID 121270402258)
+* verify (slack-threads, true) (ID 121270402261)
+* verify (search, true) (ID 121270402267)
+* verify (hub-archive, true) (ID 121270402296)
+* verify (show-archived, true) (ID 121270402337)
+* verify (telegram, true) (ID 121270402339)
+* verify (archive-bulk, false) (ID 121270402354)
+* verify (notrap, true) (ID 121270402355)
+* verify (repaint, true) (ID 121270402357)
+* verify (window, true) (ID 121270402364)
+* verify (media-fit, true) (ID 121270402371)
+* verify (composer-border, false) (ID 121270402388)
+* verify (signal, true) (ID 121270402391)
+* verify (archive-inbox, true) (ID 121270402396)
+* verify (text-comparison, false) (ID 121270402397)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Check skill map and PowerShell syntax
+  ✓ ISSUE-462 fixture text and native font metric parity with negative controls
+  ✓ Install Chrome screenshot driver
+  ✓ Run mlugg/setup-zig@v2
+  * ISSUE-462 row-sized DirectWrite regression
+  * Build real desktop and control client
+  * Native DirectWrite editing regression tests
+  * Launch, doctor and drive
+  * Validate surviving journey evidence
+  * Archive rows through the production renderer with a light fixture palette
+  * Validate search pill ink centering
+  * ISSUE-462 validate text comparison artifact
+  * Cleanup even after a failed journey
+  * Validate menus evidence
+  * Validate archive evidence
+  * Upload screenshots and logs
+  * Post Run mlugg/setup-zig@v2
+  * Post Run actions/checkout@v4
+* verify (workspace-icons, true) (ID 121270402398)
+* verify (voice, true) (ID 121270402401)
+* verify (views, true) (ID 121270402413)
+* verify (whatsapp-hub, true) (ID 121270402457)
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 verify-wazig valentinyeo/wazig#387 · 40226709016
+Triggered via pull_request about 7 minutes ago
+
+JOBS
+✓ plan in 4s (ID 121269613866)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Plan registered journeys
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+X verify (reactions, true) in 3m20s (ID 121270402176)
+X verify (palette-archived, true) in 1m33s (ID 121270402178)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Check skill map and PowerShell syntax
+  ✓ ISSUE-462 fixture text and native font metric parity with negative controls
+  - Install Chrome screenshot driver
+  ✓ Run mlugg/setup-zig@v2
+  X ISSUE-462 row-sized DirectWrite regression
+  - Build real desktop and control client
+  - Native DirectWrite editing regression tests
+  - Launch, doctor and drive
+  - Validate surviving journey evidence
+  - Archive rows through the production renderer with a light fixture palette
+  - Validate search pill ink centering
+  - ISSUE-462 validate text comparison artifact
+  ✓ Cleanup even after a failed journey
+  - Validate menus evidence
+  - Validate archive evidence
+  X Upload screenshots and logs
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+X verify (passage-copy, true) in 3m20s (ID 121270402179)
+X verify (hub, true) in 3m20s (ID 121270402188)
+X verify (slack-mentions, true) in 3m20s (ID 121270402196)
+X verify (slack-archive, true) in 3m20s (ID 121270402200)
+* verify (paste-image, true) (ID 121270402220)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Check skill map and PowerShell syntax
+  ✓ ISSUE-462 fixture text and native font metric parity with negative controls
+  - Install Chrome screenshot driver
+  ✓ Run mlugg/setup-zig@v2
+  * ISSUE-462 row-sized DirectWrite regression
+  * Build real desktop and control client
+  * Native DirectWrite editing regression tests
+  * Launch, doctor and drive
+  * Validate surviving journey evidence
+  * Archive rows through the production renderer with a light fixture palette
+  * Validate search pill ink centering
+  * ISSUE-462 validate text comparison artifact
+  * Cleanup even after a failed journey
+  * Validate menus evidence
+  * Validate archive evidence
+  * Upload screenshots and logs
+  * Post Run mlugg/setup-zig@v2
+  * Post Run actions/checkout@v4
+X verify (drafts, false) in 3m20s (ID 121270402236)
+X verify (menus, false) in 3m20s (ID 121270402240)
+X verify (slack-sort, true) in 3m20s (ID 121270402242)
+X verify (link-previews, true) in 3m20s (ID 121270402246)
+X verify (slack-emoji, true) in 3m21s (ID 121270402258)
+X verify (slack-threads, true) in 3m20s (ID 121270402261)
+X verify (search, true) in 3m20s (ID 121270402267)
+X verify (hub-archive, true) in 3m20s (ID 121270402296)
+X verify (show-archived, true) in 3m21s (ID 121270402337)
+X verify (telegram, true) in 3m21s (ID 121270402339)
+X verify (archive-bulk, false) in 3m21s (ID 121270402354)
+X verify (notrap, true) in 3m21s (ID 121270402355)
+X verify (repaint, true) in 3m21s (ID 121270402357)
+X verify (window, true) in 3m21s (ID 121270402364)
+X verify (media-fit, true) in 3m21s (ID 121270402371)
+X verify (composer-border, false) in 3m21s (ID 121270402388)
+X verify (signal, true) in 3m21s (ID 121270402391)
+X verify (archive-inbox, true) in 3m21s (ID 121270402396)
+X verify (text-comparison, false) in 2m48s (ID 121270402397)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Check skill map and PowerShell syntax
+  ✓ ISSUE-462 fixture text and native font metric parity with negative controls
+  ✓ Install Chrome screenshot driver
+  ✓ Run mlugg/setup-zig@v2
+  ✓ ISSUE-462 row-sized DirectWrite regression
+  X Build real desktop and control client
+  - Native DirectWrite editing regression tests
+  - Launch, doctor and drive
+  - Validate surviving journey evidence
+  - Archive rows through the production renderer with a light fixture palette
+  - Validate search pill ink centering
+  - ISSUE-462 validate text comparison artifact
+  ✓ Cleanup even after a failed journey
+  - Validate menus evidence
+  - Validate archive evidence
+  X Upload screenshots and logs
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+X verify (workspace-icons, true) in 3m21s (ID 121270402398)
+X verify (voice, true) in 3m21s (ID 121270402401)
+X verify (views, true) in 3m21s (ID 121270402413)
+X verify (whatsapp-hub, true) in 3m20s (ID 121270402457)
+X ceo/IGSH-833 verify-wazig valentinyeo/wazig#387 · 40226709016
+Triggered via pull_request about 8 minutes ago
+
+JOBS
+✓ plan in 4s (ID 121269613866)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Plan registered journeys
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+X verify (reactions, true) in 3m20s (ID 121270402176)
+X verify (palette-archived, true) in 1m33s (ID 121270402178)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Check skill map and PowerShell syntax
+  ✓ ISSUE-462 fixture text and native font metric parity with negative controls
+  - Install Chrome screenshot driver
+  ✓ Run mlugg/setup-zig@v2
+  X ISSUE-462 row-sized DirectWrite regression
+  - Build real desktop and control client
+  - Native DirectWrite editing regression tests
+  - Launch, doctor and drive
+  - Validate surviving journey evidence
+  - Archive rows through the production renderer with a light fixture palette
+  - Validate search pill ink centering
+  - ISSUE-462 validate text comparison artifact
+  ✓ Cleanup even after a failed journey
+  - Validate menus evidence
+  - Validate archive evidence
+  X Upload screenshots and logs
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+X verify (passage-copy, true) in 3m20s (ID 121270402179)
+X verify (hub, true) in 3m20s (ID 121270402188)
+X verify (slack-mentions, true) in 3m20s (ID 121270402196)
+X verify (slack-archive, true) in 3m20s (ID 121270402200)
+X verify (paste-image, true) in 1m37s (ID 121270402220)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Check skill map and PowerShell syntax
+  ✓ ISSUE-462 fixture text and native font metric parity with negative controls
+  - Install Chrome screenshot driver
+  ✓ Run mlugg/setup-zig@v2
+  X ISSUE-462 row-sized DirectWrite regression
+  - Build real desktop and control client
+  - Native DirectWrite editing regression tests
+  - Launch, doctor and drive
+  - Validate surviving journey evidence
+  - Archive rows through the production renderer with a light fixture palette
+  - Validate search pill ink centering
+  - ISSUE-462 validate text comparison artifact
+  ✓ Cleanup even after a failed journey
+  - Validate menus evidence
+  - Validate archive evidence
+  X Upload screenshots and logs
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+X verify (drafts, false) in 3m20s (ID 121270402236)
+X verify (menus, false) in 3m20s (ID 121270402240)
+X verify (slack-sort, true) in 3m20s (ID 121270402242)
+X verify (link-previews, true) in 3m20s (ID 121270402246)
+X verify (slack-emoji, true) in 3m21s (ID 121270402258)
+X verify (slack-threads, true) in 3m20s (ID 121270402261)
+X verify (search, true) in 3m20s (ID 121270402267)
+X verify (hub-archive, true) in 3m20s (ID 121270402296)
+X verify (show-archived, true) in 3m21s (ID 121270402337)
+X verify (telegram, true) in 3m21s (ID 121270402339)
+X verify (archive-bulk, false) in 3m21s (ID 121270402354)
+X verify (notrap, true) in 3m21s (ID 121270402355)
+X verify (repaint, true) in 3m21s (ID 121270402357)
+X verify (window, true) in 3m21s (ID 121270402364)
+X verify (media-fit, true) in 3m21s (ID 121270402371)
+X verify (composer-border, false) in 3m21s (ID 121270402388)
+X verify (signal, true) in 3m21s (ID 121270402391)
+X verify (archive-inbox, true) in 3m21s (ID 121270402396)
+X verify (text-comparison, false) in 2m48s (ID 121270402397)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Check skill map and PowerShell syntax
+  ✓ ISSUE-462 fixture text and native font metric parity with negative controls
+  ✓ Install Chrome screenshot driver
+  ✓ Run mlugg/setup-zig@v2
+  ✓ ISSUE-462 row-sized DirectWrite regression
+  X Build real desktop and control client
+  - Native DirectWrite editing regression tests
+  - Launch, doctor and drive
+  - Validate surviving journey evidence
+  - Archive rows through the production renderer with a light fixture palette
+  - Validate search pill ink centering
+  - ISSUE-462 validate text comparison artifact
+  ✓ Cleanup even after a failed journey
+  - Validate menus evidence
+  - Validate archive evidence
+  X Upload screenshots and logs
+  ✓ Post Run mlugg/setup-zig@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+X verify (workspace-icons, true) in 3m21s (ID 121270402398)
+X verify (voice, true) in 3m21s (ID 121270402401)
+X verify (views, true) in 3m21s (ID 121270402413)
+X verify (whatsapp-hub, true) in 3m20s (ID 121270402457)

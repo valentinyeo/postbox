@@ -1,0 +1,18 @@
+{
+  "id": "6ca29e99-bf8a-4ecf-9da9-ae22ef0de6f7",
+  "pid": 6624,
+  "startTicks": "639285547514737493",
+  "root": "D:\\a\\_temp\\wazig-verify-6ca29e99-bf8a-4ecf-9da9-ae22ef0de6f7",
+  "evidence": "D:\\a\\wazig\\wazig\\verification-evidence",
+  "exe": "D:\\a\\wazig\\wazig\\zig-out\\bin\\Messages.exe",
+  "ctl": "D:\\a\\wazig\\wazig\\zig-out\\bin\\wazigctl.exe",
+  "username": "verify-6ca29e99-bf8a-4ecf-9da9-ae22ef0de6f7",
+  "sha256": "E9C9CE4795E9BF27152DBCB7D641342F1DA800102A1173C1FB316B3FCBC518B7",
+  "commit": "83286831e662c0c22469e38e6b46f3731155ec61",
+  "feature": "archive-inbox",
+  "expected_version": "0.0.526",
+  "bridge_pid": 3144,
+  "bridge_start_ticks": "639285547428327496",
+  "bridge_exe": "C:\\hostedtoolcache\\windows\\Python\\3.12.10\\x64\\python.exe",
+  "bridge_url": "http://127.0.0.1:62818"
+}

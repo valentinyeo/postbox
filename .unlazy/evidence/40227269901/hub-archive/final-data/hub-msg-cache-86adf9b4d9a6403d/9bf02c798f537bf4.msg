@@ -1,0 +1,4 @@
+wazig-msg-cache v2
+86adf9b4d9a6403d
+personal:15550000005@s.whatsapp.net
+{"success":true,"data":{"messages":[{"MsgID":"PLAIN-REACTION","ChatJID":"personal:15550000005@s.whatsapp.net","Timestamp":"2026-10-25T19:53:15Z","Text":"","FromMe":true,"ReactionToID":"PLAIN-INCOMING","SenderName":"Fixture Owner","SenderJID":"15550000007@s.whatsapp.net","LocalPath":""},{"MsgID":"PLAIN-INCOMING","ChatJID":"personal:15550000005@s.whatsapp.net","Timestamp":"2026-10-10T11:30:00Z","Text":"Synthetic incoming direct message","FromMe":false,"SenderName":"Fixture Contact","SenderJID":"personal:15550000005@s.whatsapp.net","LocalPath":""}]}}

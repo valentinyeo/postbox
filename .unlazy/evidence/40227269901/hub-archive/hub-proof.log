@@ -1,0 +1,4 @@
+hub-archive first PASS
+hub-archive restart PASS
+hub-archive plain PASS
+hub-archive telegram-single-bulk-restart-incoming PASS

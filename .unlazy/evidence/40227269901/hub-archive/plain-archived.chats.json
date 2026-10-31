@@ -1,0 +1,40 @@
+{
+  "messenger": "all",
+  "archived": true,
+  "filtered": false,
+  "total": 2,
+  "chats": [
+    {
+      "id": "personal:15550000005@s.whatsapp.net",
+      "provider": "whatsapp",
+      "account": "personal",
+      "view_account": "personal",
+      "saved": false,
+      "name": "Fixture Contact",
+      "kind": "direct",
+      "messenger": "whatsapp",
+      "unread": false,
+      "unread_count": 0,
+      "pinned": false,
+      "archived": true,
+      "last_message_time": "2026-10-25T19:53:15Z",
+      "archive_label": "Archived"
+    },
+    {
+      "id": "personal:120363000000000001@g.us",
+      "provider": "whatsapp",
+      "account": "86adf9b4d9a6403d",
+      "view_account": "personal",
+      "saved": false,
+      "name": "Verification Group",
+      "kind": "Group",
+      "messenger": "whatsapp",
+      "unread": true,
+      "unread_count": 1,
+      "pinned": false,
+      "archived": true,
+      "last_message_time": "2026-10-10T13:00:00Z",
+      "archive_label": "Kept archived"
+    }
+  ]
+}

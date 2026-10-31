@@ -1,0 +1,24 @@
+{
+  "messenger": "slack",
+  "archived": true,
+  "filtered": false,
+  "total": 1,
+  "chats": [
+    {
+      "id": "fixture-alpha",
+      "provider": "slack",
+      "account": "af5f68378628df7e",
+      "view_account": "af5f68378628df7e",
+      "saved": false,
+      "name": "Verification Alpha",
+      "kind": "group",
+      "messenger": "slack",
+      "unread": false,
+      "unread_count": 0,
+      "pinned": false,
+      "archived": true,
+      "last_message_time": "2026-10-25T19:57:08Z",
+      "archive_label": "Archived"
+    }
+  ]
+}

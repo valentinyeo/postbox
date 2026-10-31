@@ -1,0 +1,28 @@
+**********************
+PowerShell transcript start
+Start time: 20261025195302
+Username: runnervmdaln5\runneradmin
+RunAs User: runnervmdaln5\runneradmin
+Configuration Name: 
+Machine: runnervmdaln5 (Microsoft Windows NT 10.0.26100.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll -NoProfile -File tools/verify-wazig/run.ps1 -Feature hub-archive -Bin zig-out/bin -Evidence verification-evidence
+Process ID: 5560
+PSVersion: 7.6.7
+PSEdition: Core
+GitCommitId: 7.6.7
+OS: Microsoft Windows 10.0.26100
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.4
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits
+hub-archive first PASS
+hub-archive restart PASS
+hub-archive plain PASS
+hub-archive telegram-single-bulk-restart-incoming PASS
+**********************
+PowerShell transcript end
+End time: 20261025195928
+**********************

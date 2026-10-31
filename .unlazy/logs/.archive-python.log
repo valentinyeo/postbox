@@ -1,0 +1,21 @@
+.E..............TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+SIGNAL EVIDENCE VERIFIED: prelinked hub, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+.......................................................
+======================================================================
+ERROR: test_fake_hub_delivers_three_distinct_messages_and_unarchived_rows (tools.test_slack_sort.SlackArchiveEvidenceTests.test_fake_hub_delivers_three_distinct_messages_and_unarchived_rows)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/valentin/projects/ceo/runs/wazig-IGSH-833/tools/test_slack_sort.py", line 206, in test_fake_hub_delivers_three_distinct_messages_and_unarchived_rows
+    handler.event(number + 1, 'msg', number)
+  File "/home/valentin/projects/ceo/runs/wazig-IGSH-833/tools/verify-wazig/fake-hub.py", line 1522, in event
+    data = dict(id=event_id, kind=kind, chat=ALPHA if incoming else '', ts=self.stamp(incoming))
+                                                                           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/valentin/projects/ceo/runs/wazig-IGSH-833/tools/verify-wazig/fake-hub.py", line 1487, in stamp
+    return self.state.archive_stamps[incoming]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'State' object has no attribute 'archive_stamps'
+
+----------------------------------------------------------------------
+Ran 71 tests in 67.318s
+
+FAILED (errors=1)

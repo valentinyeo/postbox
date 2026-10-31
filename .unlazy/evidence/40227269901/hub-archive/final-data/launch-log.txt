@@ -1,0 +1,96 @@
+1792957982 message backend: hub
+1792957982 startup: no saved account tag, caches wait for auth status
+1792957982 startup: no deepgram key
+1792957982 startup-timing: pre-window work done 31 ms
+1792957982 verification: hub fixture ready
+1792957982 startup: window zoomed=true
+1792957982 startup-timing: window shown 109 ms
+1792957982 cache-load: chats snapshot missing
+1792957982 hub: baseline refreshed
+1792957982 chats-read: ok 409 bytes, 1 chats
+1792957982 chats-read: ok 408 bytes, 1 chats
+1792957983 hub: baseline refreshed
+1792957983 chats-read: ok 408 bytes, 1 chats
+1792957985 chats-read: ok 423 bytes, 1 chats
+1792957985 messages-read: dropped reply, identity changed
+1792957985 startup-timing: first messages shown (fresh) 2593 ms
+1792957985 chats-read: ok 408 bytes, 1 chats
+1792957985 messages-read: dropped reply, identity changed
+1792957986 message backend: hub
+1792957986 startup: saved account tag loaded
+1792957986 startup: no deepgram key
+1792957986 startup-timing: pre-window work done 0 ms
+1792957986 verification: hub fixture ready
+1792957986 startup: window zoomed=true
+1792957986 startup-timing: window shown 78 ms
+1792957986 startup-timing: chat list from cache 94 ms
+1792957986 cache-load: 408 bytes, applied=true
+1792957986 hub: baseline refreshed
+1792957986 chats-read: ok 409 bytes, 1 chats
+1792957986 chats-read: ok 408 bytes, 1 chats
+1792957987 chats-read: ok 423 bytes, 1 chats
+1792957987 startup-timing: first messages shown (cache) 844 ms
+1792957987 messages-read: dropped reply, identity changed
+1792957987 hub: baseline refreshed
+1792957987 chats-read: ok 423 bytes, 1 chats
+1792957987 chats-read: ok 408 bytes, 1 chats
+1792957987 messages-read: dropped reply, identity changed
+1792957988 chats-read: ok 852 bytes, 3 chats
+1792957990 chats-read: ok 851 bytes, 2 chats
+1792957990 chats-read: ok 851 bytes, 2 chats
+1792957990 chats-read: ok 850 bytes, 1 chats
+1792957990 chats-read: ok 850 bytes, 1 chats
+1792957990 chats-read: ok 851 bytes, 2 chats
+1792958006 archive-scan: 2 archived
+1792958016 memory: working set 45624 KB, private 64760 KB, 61 modules loaded
+1792958046 paints: window=19 window_full=7 canvas=8 canvas_full=8 list=12 list_full=12 per min
+1792958106 paints: window=0 window_full=0 canvas=0 canvas_full=0 list=0 list_full=0 per min
+1792958166 paints: window=0 window_full=0 canvas=0 canvas_full=0 list=0 list_full=0 per min
+1792958226 paints: window=0 window_full=0 canvas=0 canvas_full=0 list=0 list_full=0 per min
+1792958286 paints: window=0 window_full=0 canvas=0 canvas_full=0 list=0 list_full=0 per min
+1792958306 archive-scan: 2 archived
+1792958346 paints: window=0 window_full=0 canvas=0 canvas_full=0 list=0 list_full=0 per min
+1792958354 chats-read: ok 866 bytes, 2 chats
+1792958354 messages-read: dropped reply, identity changed
+1792958354 chats-read: ok 851 bytes, 2 chats
+1792958354 messages-read: dropped reply, identity changed
+1792958354 chats-read: ok 850 bytes, 1 chats
+1792958355 chats-read: ok 1057 bytes, 2 chats
+1792958355 chats-read: ok 1056 bytes, 1 chats
+1792958355 chats-read: ok 1056 bytes, 1 chats
+1792958356 chats-read: ok 1071 bytes, 5 chats
+1792958357 chats-read: ok 1056 bytes, 1 chats
+1792958357 messages-read: dropped reply, identity changed
+1792958358 message backend: hub
+1792958358 startup: saved account tag loaded
+1792958358 startup: no deepgram key
+1792958358 startup-timing: pre-window work done 15 ms
+1792958358 verification: hub fixture ready
+1792958358 startup: window zoomed=true
+1792958358 startup-timing: window shown 78 ms
+1792958358 startup-timing: chat list from cache 78 ms
+1792958358 cache-load: 1056 bytes, applied=true
+1792958358 hub: baseline refreshed
+1792958358 chats-read: ok 1056 bytes, 0 chats
+1792958358 chats-read: ok 1056 bytes, 0 chats
+1792958358 chats-read: ok 1056 bytes, 0 chats
+1792958358 chats-read: ok 1071 bytes, 5 chats
+1792958358 startup-timing: first messages shown (cache) 734 ms
+1792958359 hub: baseline refreshed
+1792958359 chats-read: ok 1071 bytes, 5 chats
+1792958359 chats-read: ok 1056 bytes, 0 chats
+1792958359 messages-read: dropped reply, selection changed
+1792958359 chats-read: ok 1057 bytes, 0 chats
+1792958360 chats-read: ok 1057 bytes, 1 chats
+1792958360 chats-read: ok 1072 bytes, 4 chats
+1792958360 messages-read: dropped reply, identity changed
+1792958361 chats-read: ok 1057 bytes, 1 chats
+1792958361 messages-read: dropped reply, identity changed
+1792958361 chats-read: ok 1057 bytes, 1 chats
+1792958362 chats-read: ok 1072 bytes, 4 chats
+1792958362 messages-read: dropped reply, identity changed
+1792958364 chats-read: ok 1072 bytes, 4 chats
+1792958367 chats-read: ok 1073 bytes, 3 chats
+1792958367 chats-read: ok 1073 bytes, 3 chats
+1792958367 chats-read: ok 1058 bytes, 2 chats
+1792958367 messages-read: dropped reply, identity changed

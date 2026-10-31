@@ -1,0 +1,22 @@
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ceo/IGSH-833 pr-title valentinyeo/wazig#387 · 40228542067
+Triggered via pull_request about 2 minutes ago
+
+JOBS
+* pr-title (ID 121275121784)
+* update-card (ID 121275121954)
+✓ ceo/IGSH-833 pr-title valentinyeo/wazig#387 · 40228542067
+Triggered via pull_request about 3 minutes ago
+
+JOBS
+✓ pr-title in 4s (ID 121275121784)
+  ✓ Set up job
+  ✓ check the PR title says something
+  ✓ Complete job
+✓ update-card in 6s (ID 121275121954)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Check product update card line
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job

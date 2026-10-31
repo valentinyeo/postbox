@@ -1,0 +1,80 @@
+ci	Preflight	﻿2026-10-25T19:39:33.6201338Z ##[group]Run ZIG=zig bash tools/preflight.sh
+ci	Preflight	2026-10-25T19:39:33.6202057Z ^[[36;1mZIG=zig bash tools/preflight.sh^[[0m
+ci	Preflight	2026-10-25T19:39:33.6239740Z shell: /usr/bin/bash -e {0}
+ci	Preflight	2026-10-25T19:39:33.6240071Z env:
+ci	Preflight	2026-10-25T19:39:33.6240377Z   ZIG_GLOBAL_CACHE_DIR: /home/runner/work/wazig/wazig/.zig-cache
+ci	Preflight	2026-10-25T19:39:33.6240806Z   ZIG_LOCAL_CACHE_DIR: /home/runner/work/wazig/wazig/.zig-cache
+ci	Preflight	2026-10-25T19:39:33.6241140Z ##[endgroup]
+ci	Preflight	2026-10-25T19:39:33.6367209Z preflight: zig fmt --check src build.zig
+ci	Preflight	2026-10-25T19:39:33.7033519Z preflight: node tools/check-fonts.mjs
+ci	Preflight	2026-10-25T19:39:33.7426763Z IBMPlexSans-Bold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=700
+ci	Preflight	2026-10-25T19:39:33.7428502Z IBMPlexSans-Medium.ttf: Version 3.005, head.fontRevision=196935/65536, weight=500
+ci	Preflight	2026-10-25T19:39:33.7429235Z IBMPlexSans-Regular.ttf: Version 3.005, head.fontRevision=196935/65536, weight=400
+ci	Preflight	2026-10-25T19:39:33.7429772Z IBMPlexSans-SemiBold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=600
+ci	Preflight	2026-10-25T19:39:33.7430351Z WAZI-161 font delivery check passed
+ci	Preflight	2026-10-25T19:39:33.7461639Z preflight: node --test tools/check-fonts.test.mjs
+ci	Preflight	2026-10-25T19:39:33.8473498Z IBMPlexSans-Bold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=700
+ci	Preflight	2026-10-25T19:39:33.8475157Z IBMPlexSans-Medium.ttf: Version 3.005, head.fontRevision=196935/65536, weight=500
+ci	Preflight	2026-10-25T19:39:33.8476011Z IBMPlexSans-Regular.ttf: Version 3.005, head.fontRevision=196935/65536, weight=400
+ci	Preflight	2026-10-25T19:39:33.8476920Z IBMPlexSans-SemiBold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=600
+ci	Preflight	2026-10-25T19:39:33.8477724Z WAZI-161 font delivery check passed
+ci	Preflight	2026-10-25T19:39:33.8926083Z ✔ WAZI-161 real bundled fonts and all delivery paths pass (9.016065ms)
+ci	Preflight	2026-10-25T19:39:33.8927865Z ✔ WAZI-161 rejects missing or incorrect build install (3.437492ms)
+ci	Preflight	2026-10-25T19:39:33.8928596Z ✔ WAZI-161 rejects missing or incorrect MSI (1.889012ms)
+ci	Preflight	2026-10-25T19:39:33.8943532Z ✔ WAZI-161 rejects missing or incorrect MSI reference (1.900748ms)
+ci	Preflight	2026-10-25T19:39:33.8947449Z ✔ WAZI-161 rejects missing or incorrect x64 release zip (2.290441ms)
+ci	Preflight	2026-10-25T19:39:33.8948396Z ✔ WAZI-161 rejects missing or incorrect ARM64 release zip (1.911466ms)
+ci	Preflight	2026-10-25T19:39:33.8949397Z ✔ WAZI-161 rejects missing or incorrect install smoke (1.764492ms)
+ci	Preflight	2026-10-25T19:39:33.8950202Z ✔ WAZI-161 rejects missing or incorrect private load list (1.602741ms)
+ci	Preflight	2026-10-25T19:39:33.8951292Z ✔ WAZI-161 rejects missing or incorrect smoke private load (4.58261ms)
+ci	Preflight	2026-10-25T19:39:33.8952259Z ✔ WAZI-161 rejects missing or incorrect startup private load (4.856799ms)
+ci	Preflight	2026-10-25T19:39:33.8953037Z ✔ WAZI-161 rejects missing or incorrect body weight (2.968965ms)
+ci	Preflight	2026-10-25T19:39:33.8953673Z ✔ WAZI-161 rejects missing or incorrect body font size (4.05668ms)
+ci	Preflight	2026-10-25T19:39:33.8954111Z ✔ WAZI-161 rejects a missing Medium asset (3.071804ms)
+ci	Preflight	2026-10-25T19:39:33.8954624Z ✔ IGSH-466 OLE initialization preserves both private font-loader boundaries (5.715562ms)
+ci	Preflight	2026-10-25T19:39:33.9038620Z ℹ tests 14
+ci	Preflight	2026-10-25T19:39:33.9039039Z ℹ suites 0
+ci	Preflight	2026-10-25T19:39:33.9039334Z ℹ pass 14
+ci	Preflight	2026-10-25T19:39:33.9039598Z ℹ fail 0
+ci	Preflight	2026-10-25T19:39:33.9039816Z ℹ cancelled 0
+ci	Preflight	2026-10-25T19:39:33.9040363Z ℹ skipped 0
+ci	Preflight	2026-10-25T19:39:33.9040594Z ℹ todo 0
+ci	Preflight	2026-10-25T19:39:33.9040833Z ℹ duration_ms 119.073279
+ci	Preflight	2026-10-25T19:39:33.9090341Z preflight: zig build test
+ci	Preflight	2026-10-25T19:39:46.6164770Z test
+ci	Preflight	2026-10-25T19:39:46.6165479Z +- run test
+ci	Preflight	2026-10-25T19:39:46.6165957Z    +- compile test Debug native 1 errors
+ci	Preflight	2026-10-25T19:39:46.6167124Z .zig-cache/o/9d5489e2986c4b7e89f0048f40135321/archive_actions_test.zig:1668:48: error: no field named 'unread_count' in struct 'archive_actions_test.Chat'
+ci	Preflight	2026-10-25T19:39:46.6168253Z         const was_unread = chat.unread or chat.unread_count > 0;
+ci	Preflight	2026-10-25T19:39:46.6168921Z                                                ^~~~~~~~~~~~
+ci	Preflight	2026-10-25T19:39:46.6169776Z .zig-cache/o/9d5489e2986c4b7e89f0048f40135321/archive_actions_test.zig:34:14: note: struct declared here
+ci	Preflight	2026-10-25T19:39:46.6171023Z const Chat = struct {
+ci	Preflight	2026-10-25T19:39:46.6171470Z              ^~~~~~
+ci	Preflight	2026-10-25T19:39:46.6172367Z referenced by:
+ci	Preflight	2026-10-25T19:39:46.6173449Z     test.IGSH-833 bulk plain group direct and Slack return on incoming while kept stays archived: .zig-cache/o/9d5489e2986c4b7e89f0048f40135321/archive_actions_test.zig:1640:29
+ci	Preflight	2026-10-25T19:39:46.6186592Z error: 1 compilation errors
+ci	Preflight	2026-10-25T19:39:46.6191440Z failed command: /home/runner/work/_temp/b5d5e93e-876d-4839-95c1-057dabc35b34/zig-x86_64-linux-0.16.0/zig test -Mroot=.zig-cache/o/9d5489e2986c4b7e89f0048f40135321/archive_actions_test.zig --cache-dir .zig-cache --global-cache-dir .zig-cache --name test --zig-lib-dir /home/runner/work/_temp/b5d5e93e-876d-4839-95c1-057dabc35b34/zig-x86_64-linux-0.16.0/lib/ --listen=-
+ci	Preflight	2026-10-25T19:39:46.6194322Z 
+ci	Preflight	2026-10-25T19:39:58.4852081Z test
+ci	Preflight	2026-10-25T19:39:58.4854601Z +- run test w
+ci	Preflight	2026-10-25T19:39:58.4855959Z IGSH-510 typing amoled dpi=96: edits=100 layouts=0
+ci	Preflight	2026-10-25T19:39:58.4857316Z IGSH-510 typing amoled dpi=120: edits=100 layouts=0
+ci	Preflight	2026-10-25T19:39:58.4858139Z IGSH-510 typing amoled dpi=144: edits=100 layouts=0
+ci	Preflight	2026-10-25T19:39:58.4858885Z IGSH-510 typing amoled dpi=192: edits=100 layouts=0
+ci	Preflight	2026-10-25T19:39:58.4859973Z IGSH-510 typing green dpi=96: edits=100 layouts=0
+ci	Preflight	2026-10-25T19:39:58.4860738Z IGSH-510 typing green dpi=120: edits=100 layouts=0
+ci	Preflight	2026-10-25T19:39:58.4861888Z IGSH-510 typing green dpi=144: edits=100 layouts=0
+ci	Preflight	2026-10-25T19:39:58.4862850Z IGSH-510 typing green dpi=192: edits=100 layouts=0
+ci	Preflight	2026-10-25T19:39:58.4863769Z ISSUE_545 client 1200x800 row bitmap 760x128 = 389120 bytes, 15 rows 5836800 bytes
+ci	Preflight	2026-10-25T19:39:58.4865225Z ISSUE_545 client 3840x2160 row bitmap 760x128 = 389120 bytes, 15 rows 5836800 bytes
+ci	Preflight	2026-10-25T19:39:58.4866331Z ISSUE_545 client 7680x4320 row bitmap 760x128 = 389120 bytes, 15 rows 5836800 bytes
+ci	Preflight	2026-10-25T19:39:58.4867667Z failed command: ./.zig-cache/o/a5e558edd69ba94ee74b39ef5d1ee55e/test --cache-dir=./.zig-cache --seed=0x79e831dc --listen=-
+ci	Preflight	2026-10-25T19:39:58.4869012Z 
+ci	Preflight	2026-10-25T19:40:57.1671861Z Build Summary: 183/186 steps succeeded (1 failed); 1157/1162 tests passed (5 skipped)
+ci	Preflight	2026-10-25T19:40:57.1672386Z test transitive failure
+ci	Preflight	2026-10-25T19:40:57.1672700Z +- run test transitive failure
+ci	Preflight	2026-10-25T19:40:57.1672984Z    +- compile test Debug native 1 errors
+ci	Preflight	2026-10-25T19:40:57.1673175Z 
+ci	Preflight	2026-10-25T19:40:57.1683632Z error: the following build command failed with exit code 1:
+ci	Preflight	2026-10-25T19:40:57.1685645Z .zig-cache/o/19723bb755f2ff765a6125571f3fb87f/build /home/runner/work/_temp/b5d5e93e-876d-4839-95c1-057dabc35b34/zig-x86_64-linux-0.16.0/zig /home/runner/work/_temp/b5d5e93e-876d-4839-95c1-057dabc35b34/zig-x86_64-linux-0.16.0/lib /home/runner/work/wazig/wazig .zig-cache .zig-cache --seed 0x79e831dc -Z03dfd91d461a25a5 test
+ci	Preflight	2026-10-25T19:40:57.1749034Z ##[error]Process completed with exit code 1.

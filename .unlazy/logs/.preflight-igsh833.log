@@ -1,0 +1,581 @@
+preflight-light: bash tools/test-preflight-guard.sh --check-light
+preflight-light: bash tools/lint-repeats.sh .
+lint-repeats: PASS
+preflight-light: node tools/strip-comments.mjs --check
+No code comments found.
+preflight-light: node tools/check-fonts.mjs
+IBMPlexSans-Bold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=700
+IBMPlexSans-Medium.ttf: Version 3.005, head.fontRevision=196935/65536, weight=500
+IBMPlexSans-Regular.ttf: Version 3.005, head.fontRevision=196935/65536, weight=400
+IBMPlexSans-SemiBold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=600
+WAZI-161 font delivery check passed
+preflight-light: python3 tools/check_cache_keys.py
+preflight-light: python3 tools/verify-wazig/check-map.py
+SLACK SORT MAP VERIFIED: dispatch, recipe, synthetic hub and passed/failed evidence
+MAP VERIFIED: 34 complete feature entries, workflow/index parity, 77 coverage dispositions, source labels, stable controls, bounded chat-switch journey and GitHub triggers
+WORKSPACE ICON MAP VERIFIED: dispatch, synthetic team icons, screenshot pixels and surviving cache evidence
+SIGNAL MARK MAP VERIFIED: shared provider renderer and workspace-icons screenshot evidence
+TELEGRAM MAP VERIFIED: prelinked hub, messaging journey, CI wiring and indexed evidence
+NOTRAP MAP VERIFIED: saved empty startup, every-view Escape and Alt matrix, dispatch and indexed evidence
+REACTIONS MAP VERIFIED: real mouse journey, exact hub emoji evidence and PR matrix
+SLACK THREADS MAP VERIFIED: synthetic hub, keyboard journey, read-only measurements and restart
+HUB ARCHIVE MAP VERIFIED: legacy seed, archive request, keep state, same-profile restart, marker, evidence and PR wiring
+PALETTE ARCHIVED MAP VERIFIED: synthetic hub, every-view palette queries, Enter without unarchive, evidence and PR wiring
+WINDOW MAP VERIFIED: unforced startup, real keyboard restore/close, same-profile relaunch and zoomed evidence
+VOICE MAP VERIFIED: voice notes, cached transcripts, scroll, expand and partial-repaint pixel checks
+REPAINT MAP VERIFIED: cumulative counters, no-input incoming workload and PR journey
+SLACK ARCHIVE MAP VERIFIED: unified fixture, three deliveries, restart, unarchive and no archive endpoint requests
+PASTE IMAGE MAP VERIFIED: native clipboard, decoded uploads, four providers, isolated folders, focused file-name picker, popup diagnostics and remove-first evidence
+LINK PREVIEWS MAP VERIFIED: dispatch, PR matrix, hub mode and surviving evidence
+COMPOSER BORDER MAP VERIFIED: four screenshot edges, exact saved text scales, negative oracle and PR wiring
+PASSAGE COPY MAP VERIFIED: id-based targets and evidence, chronological clipboard, newest-first wire rows, real drag and held-edge scrolling on both providers
+JOURNEY REGISTRY VERIFIED: 34 journeys, maps, scripts, hub switches, evidence and plan matrix
+MEDIA FIT MAP VERIFIED: hub downloads, wide/narrow geometry and screenshot pixels, timestamp clearance and PR wiring
+preflight-light: private-marker scan skipped (PRIVATE_MARKERS unavailable); CI enforces it.
+preflight-light: node --test tools/check-fonts.test.mjs tools/strip-comments.test.js
+TAP version 13
+# IBMPlexSans-Bold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=700
+# IBMPlexSans-Medium.ttf: Version 3.005, head.fontRevision=196935/65536, weight=500
+# IBMPlexSans-Regular.ttf: Version 3.005, head.fontRevision=196935/65536, weight=400
+# IBMPlexSans-SemiBold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=600
+# WAZI-161 font delivery check passed
+# Subtest: WAZI-161 real bundled fonts and all delivery paths pass
+ok 1 - WAZI-161 real bundled fonts and all delivery paths pass
+  ---
+  duration_ms: 19.225354
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect build install
+ok 2 - WAZI-161 rejects missing or incorrect build install
+  ---
+  duration_ms: 7.369711
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect MSI
+ok 3 - WAZI-161 rejects missing or incorrect MSI
+  ---
+  duration_ms: 3.939015
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect MSI reference
+ok 4 - WAZI-161 rejects missing or incorrect MSI reference
+  ---
+  duration_ms: 2.666715
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect x64 release zip
+ok 5 - WAZI-161 rejects missing or incorrect x64 release zip
+  ---
+  duration_ms: 4.021066
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect ARM64 release zip
+ok 6 - WAZI-161 rejects missing or incorrect ARM64 release zip
+  ---
+  duration_ms: 2.731005
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect install smoke
+ok 7 - WAZI-161 rejects missing or incorrect install smoke
+  ---
+  duration_ms: 3.07765
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect private load list
+ok 8 - WAZI-161 rejects missing or incorrect private load list
+  ---
+  duration_ms: 1.917951
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect smoke private load
+ok 9 - WAZI-161 rejects missing or incorrect smoke private load
+  ---
+  duration_ms: 6.100979
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect startup private load
+ok 10 - WAZI-161 rejects missing or incorrect startup private load
+  ---
+  duration_ms: 8.853504
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect body weight
+ok 11 - WAZI-161 rejects missing or incorrect body weight
+  ---
+  duration_ms: 4.242158
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect body font size
+ok 12 - WAZI-161 rejects missing or incorrect body font size
+  ---
+  duration_ms: 8.949783
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects a missing Medium asset
+ok 13 - WAZI-161 rejects a missing Medium asset
+  ---
+  duration_ms: 5.31785
+  type: 'test'
+  ...
+# Subtest: IGSH-466 OLE initialization preserves both private font-loader boundaries
+ok 14 - IGSH-466 OLE initialization preserves both private font-loader boundaries
+  ---
+  duration_ms: 12.565464
+  type: 'test'
+  ...
+# Subtest: Zig: doc comments, URLs, characters and multiline literal lines
+ok 15 - Zig: doc comments, URLs, characters and multiline literal lines
+  ---
+  duration_ms: 7.142818
+  type: 'test'
+  ...
+# Subtest: JavaScript/TypeScript: regex lexical goals and nested templates
+ok 16 - JavaScript/TypeScript: regex lexical goals and nested templates
+  ---
+  duration_ms: 7.848012
+  type: 'test'
+  ...
+# Subtest: Python: tokenizer/AST distinguish f-strings, docstrings and live strings
+ok 17 - Python: tokenizer/AST distinguish f-strings, docstrings and live strings
+  ---
+  duration_ms: 499.8451
+  type: 'test'
+  ...
+# Subtest: Kotlin/Java/Gradle: nested Kotlin comments, characters and raw strings
+ok 18 - Kotlin/Java/Gradle: nested Kotlin comments, characters and raw strings
+  ---
+  duration_ms: 1.740601
+  type: 'test'
+  ...
+# Subtest: PowerShell: here-strings, quote doubling, escapes and directives
+ok 19 - PowerShell: here-strings, quote doubling, escapes and directives
+  ---
+  duration_ms: 1.141996
+  type: 'test'
+  ...
+# Subtest: Shell: shebangs, directives, word hashes, quoted substitutions and heredocs
+ok 20 - Shell: shebangs, directives, word hashes, quoted substitutions and heredocs
+  ---
+  duration_ms: 2.458347
+  type: 'test'
+  ...
+# Subtest: C/C++ headers: raw literals, escaped characters and token separators
+ok 21 - C/C++ headers: raw literals, escaped characters and token separators
+  ---
+  duration_ms: 1.140393
+  type: 'test'
+  ...
+# Subtest: C\#: normal, verbatim, raw and character literals preserve comment markers
+ok 22 - C\#: normal, verbatim, raw and character literals preserve comment markers
+  ---
+  duration_ms: 2.688335
+  type: 'test'
+  ...
+# Subtest: C\#: interpolated literals preserve text and lex nested expressions and format strings
+ok 23 - C\#: interpolated literals preserve text and lex nested expressions and format strings
+  ---
+  duration_ms: 7.376915
+  type: 'test'
+  ...
+# Subtest: CSS: only block comments, not string contents or URL fragments
+ok 24 - CSS: only block comments, not string contents or URL fragments
+  ---
+  duration_ms: 1.366765
+  type: 'test'
+  ...
+# Subtest: HTML: quoted attributes, script regex/template strings and style blocks
+ok 25 - HTML: quoted attributes, script regex/template strings and style blocks
+  ---
+  duration_ms: 2.001857
+  type: 'test'
+  ...
+# Subtest: YAML: comments, quoted scalars, escapes, URLs, fragments and expressions
+ok 26 - YAML: comments, quoted scalars, escapes, URLs, fragments and expressions
+  ---
+  duration_ms: 4.243521
+  type: 'test'
+  ...
+# Subtest: YAML: block scalars keep literal quotes, hashes and trailing shell text
+ok 27 - YAML: block scalars keep literal quotes, hashes and trailing shell text
+  ---
+  duration_ms: 5.730669
+  type: 'test'
+  ...
+# Subtest: TOML: basic, literal and multiline strings protect hashes and escapes
+ok 28 - TOML: basic, literal and multiline strings protect hashes and escapes
+  ---
+  duration_ms: 2.143631
+  type: 'test'
+  ...
+# Subtest: SQL: line and block comments, doubled quotes and quoted identifiers
+ok 29 - SQL: line and block comments, doubled quotes and quoted identifiers
+  ---
+  duration_ms: 0.658456
+  type: 'test'
+  ...
+# Subtest: Batch: REM and labels are comments only at the start of a command line
+ok 30 - Batch: REM and labels are comments only at the start of a command line
+  ---
+  duration_ms: 0.974846
+  type: 'test'
+  ...
+# Subtest: secret scanner directives remain protected in new languages and existing ones
+ok 31 - secret scanner directives remain protected in new languages and existing ones
+  ---
+  duration_ms: 1.856546
+  type: 'test'
+  ...
+# Subtest: license headers and directives retained in full, never join code lines
+ok 32 - license headers and directives retained in full, never join code lines
+  ---
+  duration_ms: 0.684865
+  type: 'test'
+  ...
+# Subtest: protected directories/data and generated sources are excluded
+ok 33 - protected directories/data and generated sources are excluded
+  ---
+  duration_ms: 1.547692
+  type: 'test'
+  ...
+# Subtest: CLI --verify rejects token changes and protected modifications
+ok 34 - CLI --verify rejects token changes and protected modifications
+  ---
+  duration_ms: 5434.386476
+  type: 'test'
+  ...
+# Subtest: CLI --check fails on a new code comment and names where it is
+ok 35 - CLI --check fails on a new code comment and names where it is
+  ---
+  duration_ms: 332.015005
+  type: 'test'
+  ...
+# Subtest: CLI .cs: --check detects comments and --verify accepts only comment removal
+ok 36 - CLI .cs: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 5616.114522
+  type: 'test'
+  ...
+# Subtest: CLI .yml: --check detects comments and --verify accepts only comment removal
+ok 37 - CLI .yml: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 5354.51496
+  type: 'test'
+  ...
+# Subtest: CLI .yaml: --check detects comments and --verify accepts only comment removal
+ok 38 - CLI .yaml: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 5387.831272
+  type: 'test'
+  ...
+# Subtest: CLI .toml: --check detects comments and --verify accepts only comment removal
+ok 39 - CLI .toml: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 5426.679602
+  type: 'test'
+  ...
+# Subtest: CLI .sql: --check detects comments and --verify accepts only comment removal
+ok 40 - CLI .sql: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 5218.776613
+  type: 'test'
+  ...
+# Subtest: CLI .bat: --check detects comments and --verify accepts only comment removal
+ok 41 - CLI .bat: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 5427.655498
+  type: 'test'
+  ...
+# Subtest: CLI .cmd: --check detects comments and --verify accepts only comment removal
+ok 42 - CLI .cmd: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 5510.065802
+  type: 'test'
+  ...
+1..42
+# tests 42
+# suites 0
+# pass 42
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 44432.986782
+preflight-light: python3 -m unittest test_ai_review test_check_cache_keys test_check_hub_only test_check_private_markers test_fake_wa_bridge test_link_previews test_media_layout test_no_comments test_no_stories test_palette_archived test_pin_icon test_reaction_layout test_recording_paint test_repaint test_search_center test_show_archived test_slack_emoji test_slack_sort test_slack_threads test_tdlib_release test_update_cards test_verify_journeys test_workspace_names
+........................RED FIXTURE REJECTED: src/main.zig
+RED FIXTURE REJECTED: src/nested/connector.zig
+.......PRIVATE_MARKERS is empty: set the repo secret from the private companion repo. Refusing to pass.
+.................................EVIDENCE VERIFIED: clean Slack labels, inline image and viewer, Open Graph cards, four providers and URL caches
+.......................................................archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=8.831450 contrast_excess_ratio=0.391572 mix_error=12.0 text_delta=87
+archive-sidebar-dim: dark live=21.000000 archived=11.542303 contrast_excess_ratio=0.527115 mix_error=12.0 text_delta=63
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-search-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: light live=21.000000 archived=10.530901 contrast_excess_ratio=0.476545 mix_error=12.0 text_delta=63
+archive-sidebar-dim: light live=21.000000 archived=7.226057 contrast_excess_ratio=0.311303 mix_error=12.0 text_delta=87
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=20.621543 archived=10.128220 contrast_excess_ratio=0.465214 mix_error=7.666666666666657 text_delta=75
+archive-search-dim: dark live=20.621543 archived=10.128220 contrast_excess_ratio=0.465214 mix_error=7.666666666666657 text_delta=75
+archive-inbox-dim: dark live=20.621543 archived=10.128220 contrast_excess_ratio=0.465214 mix_error=7.666666666666657 text_delta=75
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-search-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: light live=20.570953 archived=8.723822 contrast_excess_ratio=0.394657 mix_error=7.333333333333329 text_delta=75
+archive-search-dim: light live=20.570953 archived=8.723822 contrast_excess_ratio=0.394657 mix_error=7.333333333333329 text_delta=75
+archive-inbox-dim: light live=20.570953 archived=8.723822 contrast_excess_ratio=0.394657 mix_error=7.333333333333329 text_delta=75
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-sidebar-hover: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+archive-sidebar-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+archive-sidebar-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-search-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-search-hover: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+archive-search-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+archive-search-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-inbox-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-inbox-hover: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+archive-inbox-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+archive-inbox-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-hover: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+archive-sidebar-selected: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+archive-search-hover: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+archive-search-selected: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+archive-inbox-hover: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+archive-inbox-selected: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-search-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-hover: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+archive-sidebar-selected: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+archive-search-hover: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+archive-search-selected: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+archive-inbox-hover: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+archive-inbox-selected: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-search-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+.archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+sarchive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-search-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-search-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+..........EVIDENCE VERIFIED: Slack Unicode, custom message/reaction pixels, animated GIF frames and hub caches
+............................RED FIXTURE REJECTED: src/main.zig
+RED FIXTURE REJECTED: src/nested/connector.zig
+.....................TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+SIGNAL EVIDENCE VERIFIED: prelinked hub, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+..........................................TOOLTIP REGISTRATION VERIFIED: V2 size for registration and updates, failures logged; old V3 source rejected
+WORKSPACE NAMES VERIFIED: fixture names, parsing, cache, shared labels and four journey checks; old parser rejected
+views workspace-names static PASS
+.
+----------------------------------------------------------------------
+Ran 236 tests in 239.371s
+
+OK (skipped=1)
+preflight-light: all checks passed

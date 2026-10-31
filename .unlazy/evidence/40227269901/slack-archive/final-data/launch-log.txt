@@ -1,0 +1,54 @@
+1792958208 message backend: hub
+1792958208 startup: no saved account tag, caches wait for auth status
+1792958208 startup: no deepgram key
+1792958208 startup-timing: pre-window work done 0 ms
+1792958208 verification: hub fixture ready
+1792958208 startup: window zoomed=true
+1792958208 startup-timing: window shown 63 ms
+1792958208 cache-load: chats snapshot missing
+1792958208 hub: baseline refreshed
+1792958208 chats-read: ok 361 bytes, 2 chats
+1792958208 startup-timing: first messages shown (fresh) 79 ms
+1792958209 hub: baseline refreshed
+1792958209 chats-read: ok 361 bytes, 2 chats
+1792958210 chats-read: ok 361 bytes, 2 chats
+1792958211 chats-read: ok 376 bytes, 1 chats
+1792958211 messages-read: dropped reply, identity changed
+1792958212 chats-read: ok 361 bytes, 1 chats
+1792958212 messages-read: dropped reply, identity changed
+1792958212 chats-read: ok 360 bytes, 1 chats
+1792958212 chats-read: ok 360 bytes, 2 chats
+1792958213 chats-read: ok 375 bytes, 0 chats
+1792958213 messages-read: dropped reply, selection changed
+1792958214 chats-read: ok 360 bytes, 2 chats
+1792958214 chats-read: ok 360 bytes, 2 chats
+1792958215 chats-read: ok 375 bytes, 0 chats
+1792958215 messages-read: dropped reply, selection changed
+1792958215 chats-read: ok 360 bytes, 2 chats
+1792958216 chats-read: ok 360 bytes, 2 chats
+1792958216 chats-read: ok 375 bytes, 0 chats
+1792958216 messages-read: dropped reply, selection changed
+1792958217 chats-read: ok 360 bytes, 2 chats
+1792958217 chats-read: ok 360 bytes, 2 chats
+1792958218 chats-read: ok 375 bytes, 1 chats
+1792958218 messages-read: dropped reply, identity changed
+1792958218 message backend: hub
+1792958218 startup: saved account tag loaded
+1792958218 startup: no deepgram key
+1792958218 startup-timing: pre-window work done 15 ms
+1792958218 verification: hub fixture ready
+1792958218 startup: window zoomed=true
+1792958218 startup-timing: window shown 62 ms
+1792958218 startup-timing: chat list from cache 62 ms
+1792958218 cache-load: 375 bytes, applied=true
+1792958218 startup-timing: first messages shown (cache) 62 ms
+1792958218 hub: baseline refreshed
+1792958218 chats-read: ok 360 bytes, 1 chats
+1792958219 chats-read: ok 375 bytes, 1 chats
+1792958219 messages-read: dropped reply, identity changed
+1792958219 hub: baseline refreshed
+1792958219 chats-read: ok 375 bytes, 0 chats
+1792958220 chats-read: ok 360 bytes, 2 chats
+1792958220 chats-read: ok 375 bytes, 0 chats
+1792958220 messages-read: dropped reply, selection changed
+1792958221 chats-read: ok 360 bytes, 2 chats

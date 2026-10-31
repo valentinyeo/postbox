@@ -1,0 +1,36 @@
+1792956090 message backend: hub
+1792956090 startup: no saved account tag, caches wait for auth status
+1792956090 startup: no deepgram key
+1792956090 startup-timing: pre-window work done 31 ms
+1792956091 verification: hub fixture ready
+1792956091 startup: window zoomed=true
+1792956091 startup-timing: window shown 109 ms
+1792956091 cache-load: chats snapshot missing
+1792956091 hub: baseline refreshed
+1792956091 chats-read: ok 361 bytes, 2 chats
+1792956091 startup-timing: first messages shown (fresh) 125 ms
+1792956092 hub: baseline refreshed
+1792956092 chats-read: ok 361 bytes, 2 chats
+1792956092 chats-read: ok 361 bytes, 2 chats
+1792956093 chats-read: ok 376 bytes, 1 chats
+1792956093 messages-read: dropped reply, identity changed
+1792956094 chats-read: ok 361 bytes, 1 chats
+1792956094 messages-read: dropped reply, identity changed
+1792956095 chats-read: ok 360 bytes, 1 chats
+1792956095 chats-read: ok 360 bytes, 2 chats
+1792956095 chats-read: ok 375 bytes, 0 chats
+1792956095 messages-read: dropped reply, selection changed
+1792956096 chats-read: ok 360 bytes, 2 chats
+1792956096 chats-read: ok 360 bytes, 2 chats
+1792956097 chats-read: ok 375 bytes, 0 chats
+1792956097 messages-read: dropped reply, selection changed
+1792956098 chats-read: ok 360 bytes, 2 chats
+1792956098 chats-read: ok 360 bytes, 2 chats
+1792956099 chats-read: ok 375 bytes, 0 chats
+1792956099 messages-read: dropped reply, selection changed
+1792956100 chats-read: ok 360 bytes, 2 chats
+1792956100 chats-read: ok 360 bytes, 2 chats
+1792956101 chats-read: ok 375 bytes, 0 chats
+1792956101 messages-read: dropped reply, selection changed
+1792956111 archive-scan: 0 archived
+1792956121 memory: working set 45908 KB, private 65492 KB, 61 modules loaded

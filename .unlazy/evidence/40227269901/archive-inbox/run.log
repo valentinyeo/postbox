@@ -1,0 +1,37 @@
+**********************
+PowerShell transcript start
+Start time: 20261025195222
+Username: runnervmdaln5\runneradmin
+RunAs User: runnervmdaln5\runneradmin
+Configuration Name: 
+Machine: runnervmdaln5 (Microsoft Windows NT 10.0.26100.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll -NoProfile -File tools/verify-wazig/run.ps1 -Feature archive-inbox -Bin zig-out/bin -Evidence verification-evidence
+Process ID: 7516
+PSVersion: 7.6.7
+PSEdition: Core
+GitCommitId: 7.6.7
+OS: Microsoft Windows 10.0.26100
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.4
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits
+ctrl_a_press=1 ok=true
+ctrl_a_press=2 ok=true
+ctrl_a_press=3 ok=true
+ctrl_a_press=4 ok=true
+ctrl_a_press=5 ok=true
+ctrl_a_press=6 ok=true
+ctrl_a_press=7 ok=true
+ctrl_a_press=8 ok=true
+ctrl_a_press=9 ok=true
+ctrl_a_press=10 ok=true
+ctrl_a_ok=10
+bulk_archive_ms_total=1672 bulk_archive_ms_per_chat=6.333
+archived_among_shown=264
+**********************
+PowerShell transcript end
+End time: 20261025195235
+**********************

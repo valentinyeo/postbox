@@ -1,0 +1,18 @@
+{
+  "id": "dbabdf3e-bc25-4872-9ca7-259db61cc2cd",
+  "pid": 7656,
+  "startTicks": "639285551581119450",
+  "root": "D:\\a\\_temp\\wazig-verify-dbabdf3e-bc25-4872-9ca7-259db61cc2cd",
+  "evidence": "D:\\a\\wazig\\wazig\\verification-evidence",
+  "exe": "D:\\a\\wazig\\wazig\\zig-out\\bin\\Messages.exe",
+  "ctl": "D:\\a\\wazig\\wazig\\zig-out\\bin\\wazigctl.exe",
+  "username": "verify-dbabdf3e-bc25-4872-9ca7-259db61cc2cd",
+  "sha256": "E9C9CE4795E9BF27152DBCB7D641342F1DA800102A1173C1FB316B3FCBC518B7",
+  "commit": "83286831e662c0c22469e38e6b46f3731155ec61",
+  "feature": "hub-archive",
+  "expected_version": "0.0.526",
+  "bridge_pid": 3020,
+  "bridge_start_ticks": "639285547821414227",
+  "bridge_exe": "C:\\hostedtoolcache\\windows\\Python\\3.12.10\\x64\\python.exe",
+  "bridge_url": "http://127.0.0.1:52093"
+}

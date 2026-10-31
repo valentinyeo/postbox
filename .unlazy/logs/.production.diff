@@ -1,0 +1,417 @@
+diff --git a/build.zig b/build.zig
+index b673aee..01a4118 100644
+--- a/build.zig
++++ b/build.zig
+@@ -503,11 +503,12 @@ pub fn build(b: *std.Build) void {
+     const archive_filter_source = @embedFile("src/messenger_view.zig");
+     const archive_harness_source = std.mem.concat(b.allocator, u8, &.{
+         @embedFile("src/archive_actions_test.zig"),
++        sourceSection("fn applyUnreadProbe(", "fn setPaletteCue("),
+         std.mem.replaceOwned(u8, b.allocator, sourceSection("fn refreshChats(", "fn isUnresolvableChatEntry("), "fn refreshChats(", "fn requestChats(") catch @panic("Out of memory building archive scan harness"),
+         "const messenger_view = struct {\n",
+         archive_filter_source[std.mem.indexOf(u8, archive_filter_source, "pub fn archiveMatches(").?..std.mem.indexOf(u8, archive_filter_source, "pub fn mergeChatData(").?],
+         "};\n",
+-        sourceSection("fn getBool(", "fn getInt("),
++        sourceSection("fn getString(", "fn getInt("),
+         sourceSection("fn chatArchiveState(", "fn queueUnarchiveChat("),
+         "fn archiveInboxRow(a: *App, row: Chat, object: std.json.ObjectMap) ?Chat { for ([_]Chat{row}) |item| { var chat = item;\n",
+         sourceSection("        chat.archived =", "        a.chats[a.chat_count] = chat;"),
+@@ -550,6 +551,8 @@ pub fn build(b: *std.Build) void {
+         .target = b.resolveTargetQuery(.{}),
+         .imports = &.{
+             .{ .name = "chat_key", .module = b.createModule(.{ .root_source_file = b.path("src/chat_key.zig"), .target = b.resolveTargetQuery(.{}) }) },
++            .{ .name = "read_state", .module = b.createModule(.{ .root_source_file = b.path("src/read_state.zig"), .target = b.resolveTargetQuery(.{}) }) },
++            .{ .name = "media_age", .module = b.createModule(.{ .root_source_file = b.path("src/media_age.zig"), .target = b.resolveTargetQuery(.{}) }) },
+             .{ .name = "archive_rules", .module = b.createModule(.{
+                 .root_source_file = b.path("src/archive_rules.zig"),
+                 .target = b.resolveTargetQuery(.{}),
+diff --git a/src/archive_actions_test.zig b/src/archive_actions_test.zig
+index 435a5d3..85910da 100644
+--- a/src/archive_actions_test.zig
++++ b/src/archive_actions_test.zig
+@@ -2,6 +2,8 @@ const std = @import("std");
+ const verification_fixture = false;
+ const chat_key = @import("chat_key");
+ const archive_rules = @import("archive_rules");
++const read_state = @import("read_state");
++const media_age = @import("media_age");
+ const voice_sent = @import("voice_sent");
+ const ArchiveSource = if (@hasDecl(archive_rules, "Source")) archive_rules.Source else enum { shortcut, menu, control, send };
+ const command_archive: u16 = 2007;
+@@ -55,6 +57,8 @@ const PendingArchive = struct {
+ const WacliResult = struct {
+     gen: u64 = 0,
+     data: []const u8 = "",
++    extra: Utf8Text(47) = .{},
++    msg_id: Utf8Text(191) = .{},
+     kind: enum { hub_archive, hub_media } = .hub_archive,
+     provider: Provider = .whatsapp,
+     account: Utf8Text(32) = .{},
+@@ -78,6 +82,8 @@ const App = struct {
+     chat_view: enum { all, whatsapp } = .whatsapp,
+     bulk: std.ArrayList(Chat) = .empty,
+     archive_state: ?*archive_rules.State,
++    read_state: read_state.State = .{ .allow_opaque = true },
++    startup_probe_pending: bool = false,
+     pending_archives: []PendingArchive = &.{},
+     pending_archive_count: usize = 0,
+     archive_batch_total: usize = 0,
+@@ -849,7 +855,7 @@ test "Slack archive persists per Key without ever queuing either archive transpo
+     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+     try std.testing.expect(a.archive_child == null);
+     try std.testing.expectEqual(@as(usize, 0), a.log_count);
+-    try std.testing.expectEqualStrings("Kept archived. Won't come back", a.status.slice());
++    try std.testing.expectEqualStrings("Archived", a.status.slice());
+     var loaded = archive_rules.State{};
+     loaded.parse(a.saved[0..a.saved_len]);
+     try std.testing.expect(loaded.localArchived(key.key()));
+@@ -1417,7 +1423,7 @@ test "archive row labels survive contact kind pin unread and Show archived toggl
+                     chat.account.set("fixture-account");
+                     chat.kind.text = std.mem.span(lit("Contact"));
+                     if (expected == .kept_archived and provider == .whatsapp) try std.testing.expect(state.archive(chat.jid.slice(), "baseline", true));
+-                    const kept = expected == .kept_archived and provider == .whatsapp or provider == .slack;
++                    const kept = expected == .kept_archived and provider == .whatsapp;
+                     const row_state = chatArchiveState(&a, &chat);
+                     try std.testing.expectEqual(archive_rules.archiveState(chat.archived, kept), row_state);
+                     if (expected != .incoming) {
+@@ -1585,3 +1591,70 @@ test "Ctrl A routes every non-text control and empty composer focus but preserve
+         }
+     }
+ }
++
++fn queueUnreadProbe(_: *App, _: *const Chat) void {}
++fn invalidateChatRow(_: *App, _: usize) void {}
++
++test "IGSH-833 bulk plain group direct and Slack return on incoming while kept stays archived" {
++    for ([_]Provider{ .whatsapp, .whatsapp, .slack }, [_][]const u8{
++        "personal:120363000000000002@g.us",
++        "personal:15550000007@s.whatsapp.net",
++        "fixture-channel",
++    }) |provider, id| {
++        for ([_]bool{ false, true }) |keep| {
++            var state = archive_rules.State{};
++            var a = fixture(&state);
++            defer a.allocator.free(a.pending_archives);
++            defer a.bulk.deinit(a.allocator);
++            defer a.read_state.deinit(a.allocator);
++            a.unified_hub = true;
++            a.cache_tag.set("0123456789abcdef");
++            a.chats[0].provider = provider;
++            a.chats[0].account.set("fixture-account");
++            a.chats[0].jid.set(id);
++            const row = a.chats[0];
++            selectAllChats(&a);
++            archiveSelected(&a, keep);
++            try std.testing.expectEqual(@as(usize, 0), a.chat_count);
++            try std.testing.expect(state.localArchived(chat_key.of(&row)));
++            if (provider == .whatsapp) try std.testing.expectEqual(keep, state.isKept(id));
++            if (provider == .slack) {
++                var found = false;
++                for (state.entries[0..state.count]) |*entry| {
++                    if (entry.provider != .slack or !std.mem.eql(u8, entry.jidSlice(), id)) continue;
++                    found = true;
++                    try std.testing.expectEqual(keep, entry.keep);
++                    try std.testing.expect(entry.tsSlice().len > 0);
++                }
++                try std.testing.expect(found);
++            }
++            var loaded = archive_rules.State{};
++            loaded.parse(a.saved[0..a.saved_len]);
++            a.archive_state = &loaded;
++            a.pending_archive_count = 0;
++            a.hub_archive_inflight = false;
++            var result = WacliResult{ .provider = provider, .account = row.account, .jid = row.jid, .ok = true };
++            result.msg_id = a.cache_tag;
++            result.extra.set("2026-10-10T11:00:00Z");
++            result.data = "{\"data\":{\"messages\":[{\"Timestamp\":\"2026-10-10T11:00:00Z\",\"FromMe\":true,\"ReactionToID\":\"old-message\"}]}}";
++            applyUnreadProbe(&a, &result);
++            try std.testing.expect(loaded.localArchived(chat_key.of(&row)));
++            result.extra.set("2026-10-10T12:04:00Z");
++            result.data = "{\"data\":{\"messages\":[{\"Timestamp\":\"2026-10-10T12:04:00Z\",\"FromMe\":false}]}}";
++            applyUnreadProbe(&a, &result);
++            try std.testing.expectEqual(keep, loaded.localArchived(chat_key.of(&row)));
++            result.extra.set("2026-10-10T18:34:00Z");
++            result.data = "{\"data\":{\"messages\":[{\"Timestamp\":\"2026-10-10T18:34:00Z\",\"FromMe\":false}]}}";
++            applyUnreadProbe(&a, &result);
++            try std.testing.expectEqual(keep, loaded.localArchived(chat_key.of(&row)));
++            try std.testing.expectEqual(@as(usize, if (!keep and provider == .whatsapp) 1 else 0), a.pending_archive_count);
++            var parsed = try std.json.parseFromSlice(std.json.Value, a.allocator, "{\"archived\":true}", .{});
++            defer parsed.deinit();
++            const inbox = archiveInboxRow(&a, row, parsed.value.object);
++            try std.testing.expectEqual(!keep, inbox != null);
++            a.show_archived = true;
++            try std.testing.expectEqual(keep, archiveInboxRow(&a, row, parsed.value.object) != null);
++            if (inbox) |chat| try std.testing.expect(!chat.archived);
++        }
++    }
++}
+diff --git a/src/archive_rules.zig b/src/archive_rules.zig
+index c9f71c1..7abda1c 100644
+--- a/src/archive_rules.zig
++++ b/src/archive_rules.zig
+@@ -1,4 +1,5 @@
+ const std = @import("std");
++const media_age = @import("media_age.zig");
+ 
+ pub const max_entries = 2048;
+ pub const scan_limit = std.fmt.comptimePrint("{d}", .{max_entries});
+@@ -48,7 +49,7 @@ pub fn progressStatus(out: []u8, should_unarchive: bool, total: usize, remaining
+     }) catch null;
+ }
+ 
+-pub const Source = enum { shortcut, menu, control, send, kept };
++pub const Source = enum { shortcut, menu, control, send, kept, incoming };
+ 
+ pub fn logLine(out: []u8, jid: []const u8, archived: bool, source: Source) []const u8 {
+     return std.fmt.bufPrint(out, "archive: jid={s} archived={} source={s}", .{ jid, archived, @tagName(source) }) catch unreachable;
+@@ -77,6 +78,8 @@ pub const Entry = struct {
+     ts: [max_ts]u8 = undefined,
+     ts_len: u8 = 0,
+     keep: bool = false,
++    archived: bool = true,
++    checked: i64 = 0,
+     held: bool = false,
+     held_ts: [max_ts]u8 = undefined,
+     held_ts_len: u8 = 0,
+@@ -101,14 +104,14 @@ pub const State = struct {
+     }
+ 
+     pub fn localArchived(self: *const State, key: anytype) bool {
+-        return if (key.provider == .whatsapp) self.find(key.id) != null else if (self.findLocal(key)) |index| self.entries[index].keep else false;
++        return if (key.provider == .whatsapp) self.find(key.id) != null else if (self.findLocal(key)) |index| self.entries[index].archived else false;
+     }
+ 
+     pub fn isArchived(self: *const State, key: anytype, provider_archived: bool) bool {
+         if (key.provider == .whatsapp) {
+             if (self.find(key.id) != null) return true;
+         } else {
+-            if (self.findLocal(key)) |index| return self.entries[index].keep;
++            if (self.findLocal(key)) |index| return self.entries[index].archived;
+         }
+         return self.localArchived(key) or provider_archived;
+     }
+@@ -116,6 +119,7 @@ pub const State = struct {
+     pub fn setLocalUnarchived(self: *State, key: anytype) bool {
+         if (!self.setLocalArchived(key, true)) return false;
+         self.entries[self.findLocal(key).?].keep = false;
++        self.entries[self.findLocal(key).?].archived = false;
+         return true;
+     }
+ 
+@@ -133,7 +137,10 @@ pub const State = struct {
+     pub fn setLocalArchived(self: *State, key: anytype, archived: bool) bool {
+         if (key.provider == .whatsapp or key.account.len > 32 or key.id.len == 0 or key.id.len > max_jid) return false;
+         if (self.findLocal(key)) |index| {
+-            if (!archived) self.removeAt(index) else self.entries[index].keep = true;
++            if (!archived) self.removeAt(index) else {
++                self.entries[index].keep = true;
++                self.entries[index].archived = true;
++            }
+             return true;
+         }
+         if (!archived) return true;
+@@ -148,6 +155,46 @@ pub const State = struct {
+         return true;
+     }
+ 
++    fn findKey(self: *const State, key: anytype) ?usize {
++        return if (key.provider == .whatsapp) self.find(key.id) else self.findLocal(key);
++    }
++
++    pub fn isKeptKey(self: *const State, key: anytype) bool {
++        const index = self.findKey(key) orelse return false;
++        return self.entries[index].archived and self.entries[index].keep;
++    }
++
++    pub fn archiveLocal(self: *State, key: anytype, ts: []const u8, keep: bool) bool {
++        if (!self.setLocalArchived(key, true)) return false;
++        const entry = &self.entries[self.findLocal(key).?];
++        entry.keep = keep;
++        const n = @min(ts.len, max_ts);
++        @memcpy(entry.ts[0..n], ts[0..n]);
++        entry.ts_len = @intCast(n);
++        entry.checked = 0;
++        return true;
++    }
++
++    pub fn returnsOn(self: *const State, key: anytype, ts: []const u8) bool {
++        const index = self.findKey(key) orelse return false;
++        const entry = &self.entries[index];
++        if (!entry.archived or entry.keep) return false;
++        const baseline_time = media_age.unixSeconds(entry.tsSlice()) orelse return false;
++        const incoming_time = media_age.unixSeconds(ts) orelse return false;
++        return incoming_time > baseline_time;
++    }
++
++    pub fn needsReturnProbe(self: *const State, key: anytype, ts: []const u8) bool {
++        if (!self.returnsOn(key, ts)) return false;
++        const index = self.findKey(key).?;
++        return (media_age.unixSeconds(ts) orelse return false) > self.entries[index].checked;
++    }
++
++    pub fn checkedReturnProbe(self: *State, key: anytype, ts: []const u8) void {
++        const index = self.findKey(key) orelse return;
++        self.entries[index].checked = @max(self.entries[index].checked, media_age.unixSeconds(ts) orelse return);
++    }
++
+     pub fn isKept(self: *const State, jid: []const u8) bool {
+         const index = self.find(jid) orelse return false;
+         return self.entries[index].keep;
+@@ -198,6 +245,7 @@ pub const State = struct {
+     pub fn archive(self: *State, jid: []const u8, ts: []const u8, keep: bool) bool {
+         const entry = self.slot(jid) orelse return false;
+         entry.keep = keep;
++        entry.checked = 0;
+         if (ts.len > 0) self.setBaseline(jid, ts);
+         return true;
+     }
+@@ -226,7 +274,10 @@ pub const State = struct {
+         var len: usize = 0;
+         for (self.entries[0..self.count]) |*entry| {
+             const line = if (entry.provider != .whatsapp)
+-                std.fmt.bufPrint(out[len..], "{s}\t{s}\t{s}{s}\n", .{ @tagName(entry.provider), entry.account[0..entry.account_len], entry.jidSlice(), if (entry.keep) @as([]const u8, "") else "\t0" }) catch break
++                if (entry.archived and !entry.keep)
++                    std.fmt.bufPrint(out[len..], "{s}\t{s}\t{s}\t0\t{s}\n", .{ @tagName(entry.provider), entry.account[0..entry.account_len], entry.jidSlice(), entry.tsSlice() }) catch break
++                else
++                    std.fmt.bufPrint(out[len..], "{s}\t{s}\t{s}{s}\n", .{ @tagName(entry.provider), entry.account[0..entry.account_len], entry.jidSlice(), if (entry.archived) @as([]const u8, "") else "\t0" }) catch break
+             else
+                 std.fmt.bufPrint(out[len..], "{s}\t{d}\t{s}\n", .{ entry.jidSlice(), @intFromBool(entry.keep), entry.tsSlice() }) catch break;
+             len += line.len;
+@@ -246,6 +297,13 @@ pub const State = struct {
+                 if (account.len > 32 or id.len == 0 or id.len > max_jid or self.count >= max_entries) continue;
+                 const entry = &self.entries[self.count];
+                 entry.* = .{ .provider = std.meta.stringToEnum(@FieldType(Entry, "provider"), jid).?, .keep = !std.mem.eql(u8, fields.next() orelse "1", "0") };
++                const ts = fields.next();
++                entry.archived = entry.keep or ts != null;
++                if (ts) |stamp| {
++                    const n = @min(stamp.len, max_ts);
++                    @memcpy(entry.ts[0..n], stamp[0..n]);
++                    entry.ts_len = @intCast(n);
++                }
+                 @memcpy(entry.account[0..account.len], account);
+                 entry.account_len = @intCast(account.len);
+                 @memcpy(entry.jid[0..id.len], id);
+diff --git a/src/main.zig b/src/main.zig
+index 4bc8a22..c44180c 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -2431,6 +2431,12 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
+         }
+         const jid = getString(object, "jid");
+         chat.jid.set(jid);
++        if (fresh) {
++            chat.timestamp.set(getString(object, "last_message_ts"));
++            if (a.archive_state) |state| {
++                if (state.needsReturnProbe(chat_key.of(&chat), chat.timestamp.slice())) queueUnreadProbe(a, &chat);
++            }
++        }
+         if (!chatInView(a, chatViewKey(&chat))) continue;
+         if (fresh and chat.provider != .slack) _ = holdKeptArchived(a, chat_key.of(&chat), getBool(object, "archived"), getString(object, "last_message_ts"));
+         if (pendingArchiveHidesChat(a, jid, a.show_archived)) continue;
+@@ -2623,7 +2629,8 @@ fn persistReadState(a: *App) void {
+ fn queueUnreadProbe(a: *App, chat: *const Chat) void {
+     if ((!unifiedHub(a) and chat.provider != .whatsapp) or a.startup_probe_pending or wacliPendingGet(a, .unread_probe) > 0) return;
+     const timestamp = media_age.unixSeconds(chat.timestamp.slice()) orelse return;
+-    if (!a.read_state.needsProbe(a.cache_tag.slice(), chat.jid.slice(), timestamp, chat.provider_unread)) return;
++    const archive_probe = if (a.archive_state) |state| state.needsReturnProbe(chat_key.of(chat), chat.timestamp.slice()) else false;
++    if (!archive_probe and !a.read_state.needsProbe(a.cache_tag.slice(), chat.jid.slice(), timestamp, chat.provider_unread)) return;
+     var job = WacliJob{ .account = a.cache_tag, .kind = .unread_probe };
+     job.provider = chat.provider;
+     job.account = chat.account;
+@@ -2638,6 +2645,7 @@ fn applyUnreadProbe(a: *App, result: *const WacliResult) void {
+     if (!result.ok or !std.mem.eql(u8, result.msg_id.slice(), a.cache_tag.slice())) return;
+     const timestamp = media_age.unixSeconds(result.extra.slice()) orelse return;
+     if (!a.read_state.acceptProbe(a.allocator, a.cache_tag.slice(), result.jid.slice(), timestamp, result.data)) return;
++    applyArchiveIncoming(a, .{ .provider = result.provider, .account = result.account.slice(), .id = result.jid.slice() }, result.extra.slice(), result.data);
+     for (a.chats[0..a.chat_count], 0..) |*chat, index| {
+         if (!unifiedHub(a) and chat.provider != .whatsapp) continue;
+         const was_unread = chat.unread or chat.unread_count > 0;
+@@ -10865,7 +10873,7 @@ fn isKeptArchived(a: *const App, jid: []const u8) bool {
+ }
+ 
+ fn chatArchiveState(a: *const App, chat: *const Chat) archive_rules.ArchiveState {
+-    const kept = chat.provider == .slack or (chat.provider == .whatsapp and isKeptArchived(a, chat.jid.slice()));
++    const kept = if (a.archive_state) |state| (chat.provider == .whatsapp or chat.provider == .slack) and state.isKeptKey(chat_key.of(chat)) else false;
+     return archive_rules.archiveState(chat.archived, kept);
+ }
+ 
+@@ -10906,6 +10914,35 @@ fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) vo
+     startNextArchive(a);
+ }
+ 
++fn applyArchiveIncoming(a: *App, key: chat_key.Key, row_ts: []const u8, raw: []const u8) void {
++    const state = a.archive_state orelse return;
++    if (!state.needsReturnProbe(key, row_ts)) return;
++    var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
++    defer parsed.deinit();
++    if (parsed.value != .object) return;
++    const data = parsed.value.object.get("data") orelse return;
++    if (data != .object) return;
++    const messages = data.object.get("messages") orelse return;
++    if (messages != .array) return;
++    state.checkedReturnProbe(key, row_ts);
++    for (messages.array.items) |message| {
++        if (message != .object) continue;
++        const object = message.object;
++        const from_me = object.get("FromMe") orelse continue;
++        if (from_me != .bool or from_me.bool or getString(object, "ReactionToID").len > 0) continue;
++        if (!state.returnsOn(key, getString(object, "Timestamp"))) continue;
++        if (key.provider == .whatsapp) {
++            queueUnarchiveChat(a, key.id, .incoming);
++        } else {
++            if (!state.setLocalUnarchived(key)) return;
++            saveArchiveState(a);
++        }
++        refreshChats(a);
++        return;
++    }
++    refreshChats(a);
++}
++
+ fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []const u8) bool {
+     if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal))) return false;
+     const jid = key.id;
+@@ -11129,7 +11166,12 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
+     if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal))) {
+         const state = a.archive_state orelse return "Archive is not available";
+         const provider_archived = if (visibleChatIndex(a, key)) |index| a.chats[index].provider_archived else false;
+-        const saved = if (unarchive and provider_archived) state.setLocalUnarchived(key) else state.setLocalArchived(key, !unarchive);
++        var stamp_buffer: [archive_rules.stamp_len]u8 = undefined;
++        const row_stamp = if (visibleChatIndex(a, key)) |index| a.chats[index].timestamp.slice() else "";
++        const stamp = archive_rules.archiveBaseline(&stamp_buffer, row_stamp, nowUnixSeconds());
++        const saved = if (unarchive)
++            if (provider_archived) state.setLocalUnarchived(key) else state.setLocalArchived(key, false)
++        else if (key.provider == .slack) state.archiveLocal(key, stamp, action == .keep) else state.setLocalArchived(key, true);
+         if (!saved) return "Keep archived list is full";
+         saveArchiveState(a);
+         if (visibleChatIndex(a, key)) |index| {
+@@ -11235,7 +11277,7 @@ fn archiveSelectedChat(a: *App, keep: bool, source: archive_rules.Source) void {
+     key.set(chat_key.of(chat));
+     if (archiveChat(a, key.key(), action, source)) |problem| return setStatus(a, problem);
+     paneFollowSelection(a, open_jid.slice());
+-    setStatus(a, if (key.provider == .slack and action != .unarchive) archive_rules.Action.keep.status() else action.status());
++    setStatus(a, action.status());
+ }
+ 
+ fn selectAllChats(a: *App) void {
+@@ -11263,11 +11305,9 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void
+     if (a.selected_chat < a.chat_count) open_jid.set(a.chats[a.selected_chat].jid.slice());
+     const action: archive_rules.Action = if (keep) .keep else if (a.show_archived) .unarchive else .archive;
+     var problem: ?[]const u8 = null;
+-    var slack_only = true;
+     var index: usize = 0;
+     while (index < a.bulk.items.len) : (index += 1) {
+         const key = chat_key.of(&a.bulk.items[index]);
+-        slack_only = slack_only and key.provider == .slack;
+         if (key.provider != .slack and !unifiedHub(a) and (key.provider != .whatsapp or !std.mem.eql(u8, key.account, a.cache_tag.slice()))) {
+             problem = "Archiving is only available for the active WhatsApp account";
+             continue;
+@@ -11280,7 +11320,7 @@ fn archiveBulkSelection(a: *App, keep: bool, source: archive_rules.Source) void
+     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+     paneFollowSelection(a, open_jid.slice());
+     if (problem) |why| return setStatus(a, why);
+-    setStatus(a, if (slack_only and action != .unarchive) archive_rules.Action.keep.status() else action.status());
++    setStatus(a, action.status());
+ }
+ 
+ const control_call_posted: u8 = 0;

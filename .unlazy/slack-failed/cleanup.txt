@@ -1,0 +1,1 @@
+CLEANUP PASSED: owned process, scratch registry and scratch data removed; evidence retained
