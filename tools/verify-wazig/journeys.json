@@ -413,7 +413,7 @@
       "pr": false,
       "hub": "inline-links",
       "evidence": true,
-      "chats": 2,
+      "chats": 4,
       "script": "journey-inline-links.ps1",
       "validator": {
         "file": "check-inline-links-evidence.py",

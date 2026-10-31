@@ -1041,6 +1041,10 @@ const App = struct {
     drag_origin: win.POINT = .{ .x = 0, .y = 0 },
     quote_links: std.ArrayList(QuoteLinkHit) = .empty,
     quote_link_down: ?QuoteLinkHit = null,
+    verification_reply_jump_count: u64 = 0,
+    verification_reply_jump_id: Utf8Text(191) = .{},
+    verification_canvas_up_count: u64 = 0,
+    verification_canvas_up_point: win.POINT = .{ .x = 0, .y = 0 },
     quote_link_scroll: i32 = 0,
     quote_link_font_scale: i32 = 0,
     quote_link_dpi: u32 = 0,
@@ -9078,6 +9082,10 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         } else {
             message.text.set(a.allocator, if (media_drain.isPlaceholder(media_type, text)) "" else text);
         }
+        if (verification_fixture and getString(object, "fixture_quote").len > 0) {
+            message.quote.set(a.allocator, getString(object, "fixture_quote"));
+            message.quote_sender.set(a.allocator, getString(object, "fixture_quote_sender"));
+        }
         message.from_me = getBool(object, "FromMe");
         message.forwarded = !revoked and chat.provider == .whatsapp and getBool(object, "IsForwarded");
         message.media_type.set(media_type);
@@ -10860,6 +10868,10 @@ fn jumpToReply(a: *App, id: []const u8) void {
         const selected = a.selected_message;
         a.selected_message = index;
         a.reply_flash.set(id);
+        if (verification_fixture) {
+            a.verification_reply_jump_count +%= 1;
+            a.verification_reply_jump_id.set(id);
+        }
         scrollToSelectedMessage(a);
         a.selected_message = selected;
         if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
@@ -13679,6 +13691,8 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
     if (verification_fixture) {
+        try w.print(",\"canvas_up_count\":{d},\"canvas_up_point\":[{d},{d}],\"reply_jump_count\":{d},\"reply_jump_id\":", .{ a.verification_canvas_up_count, a.verification_canvas_up_point.x, a.verification_canvas_up_point.y, a.verification_reply_jump_count });
+        try control_api.writeString(w, a.verification_reply_jump_id.slice());
         try w.print(",\"staged_capacity\":{d}", .{staged_images.capacity});
         const avatar_rect = a.header_icon_tip_rect;
         try w.print(",\"header_avatar\":[{d},{d},{d},{d}]", .{ avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom });
@@ -14082,6 +14096,15 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             .{ .name = "toggle", .rect = message.toggle_hit },
         }) |entry| try w.print(",\"{s}\":[{d},{d},{d},{d}]", .{ entry.name, entry.rect.left, entry.rect.top, entry.rect.right, entry.rect.bottom });
         if (verification_fixture) {
+            try w.writeAll(",\"quote_fragments\":[");
+            var first_quote_fragment = true;
+            for (a.quote_links.items) |hit| {
+                if (hit.message_index != a.message_count - count + index) continue;
+                if (!first_quote_fragment) try w.writeByte(',');
+                first_quote_fragment = false;
+                try w.print("{{\"start\":{d},\"end\":{d},\"rect\":[{d},{d},{d},{d}]}}", .{ hit.start, hit.end, hit.rect.left, hit.rect.top, hit.rect.right, hit.rect.bottom });
+            }
+            try w.writeByte(']');
             try w.writeAll(",\"link_rects\":[");
             for (message.links[0..message.link_count], 0..) |*link, link_index| {
                 if (link_index > 0) try w.writeByte(',');
@@ -17810,6 +17833,10 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
 
 fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    defer if (verification_fixture and message == win.WM_LBUTTONUP) {
+        a.verification_canvas_up_count +%= 1;
+        a.verification_canvas_up_point = .{ .x = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))), .y = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam))))) };
+    };
     if (message == win.WM_MOUSEMOVE) updateMessageHover(a, hwnd, lparam);
     switch (message) {
         win.WM_SETCURSOR => {
@@ -17918,6 +17945,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             }
             for (a.messages[0..a.message_count]) |*item| {
                 if (item.quote_hit.right > item.quote_hit.left and rectHasPoint(item.quote_hit, x, y)) {
+                    a.canvas_double_click_handled = true;
                     jumpToReply(a, item.quoted_msg_id.slice());
                     return 0;
                 }
