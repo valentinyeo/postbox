@@ -42,6 +42,10 @@ public static class VerifyMenus {
         if (SendInput(1, input, Marshal.SizeOf(typeof(Input))) != 1) throw new Exception("SendInput failed");
     }
     public static void Hover(int pid, int x, int y) {
+        long begin, end;
+        Hover(pid, x, y, out begin, out end);
+    }
+    public static void Hover(int pid, int x, int y, out long inputBeginTicks, out long inputEndTicks) {
         uint owner; GetWindowThreadProcessId(WindowFromPoint(new Point { X = x, Y = y }), out owner);
         if (owner != pid) throw new Exception("Refusing mouse input outside owned process");
         int width = GetSystemMetrics(78), height = GetSystemMetrics(79);
@@ -49,7 +53,9 @@ public static class VerifyMenus {
         int absoluteX = (int)(((long)x - GetSystemMetrics(76)) * 65535 / (width - 1));
         int absoluteY = (int)(((long)y - GetSystemMetrics(77)) * 65535 / (height - 1));
         var input = new Input[] { new Input { type = 0, mouse = new MouseInput { x = absoluteX, y = absoluteY, flags = 0xE001, extra = UIntPtr.Zero } } };
+        inputBeginTicks = System.Diagnostics.Stopwatch.GetTimestamp();
         if (SendInput(1, input, Marshal.SizeOf(typeof(Input))) != 1) throw new Exception("Hover input failed");
+        inputEndTicks = System.Diagnostics.Stopwatch.GetTimestamp();
         System.Threading.Thread.Sleep(100);
     }
     public static void Click(int pid, int x, int y, bool right) {

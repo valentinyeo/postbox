@@ -14,6 +14,18 @@ pub const State = enum(u8) { idle, recording, encoding, ready, failed };
 
 pub const max_seconds: u32 = 300;
 
+fn fixtureValid(pcm: []const u8) bool {
+    return pcm.len >= voice_note.sample_rate / 2 and pcm.len % 2 == 0;
+}
+
+test "voice fixture rejects missing truncated and odd PCM" {
+    const pcm: [voice_note.sample_rate / 2 + 1]u8 = @splat(0);
+    try std.testing.expect(!fixtureValid(&.{}));
+    try std.testing.expect(!fixtureValid(pcm[0 .. voice_note.sample_rate / 2 - 2]));
+    try std.testing.expect(!fixtureValid(&pcm));
+    try std.testing.expect(fixtureValid(pcm[0 .. voice_note.sample_rate / 2]));
+}
+
 const guid_mmdevice_enumerator = win.GUID{ .Data1 = 0xbcde0395, .Data2 = 0xe52f, .Data3 = 0x467c, .Data4 = .{ 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e } };
 const guid_immdevice_enumerator = win.GUID{ .Data1 = 0xa95664d2, .Data2 = 0x9614, .Data3 = 0x4f35, .Data4 = .{ 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6 } };
 const guid_iaudioclient = win.GUID{ .Data1 = 0x1cb9ad4c, .Data2 = 0xdbfa, .Data3 = 0x4c32, .Data4 = .{ 0xb1, 0x78, 0xc2, 0xf5, 0x68, 0xa7, 0x03, 0xb2 } };
@@ -28,6 +40,10 @@ pub const Session = struct {
     samples: std.atomic.Value(usize) = .init(0),
     level: std.atomic.Value(u32) = .init(0),
     result: ?voice_note.Result = null,
+    require_fixture: bool = false,
+    fixture_pcm: ?[]u8 = null,
+    microphone_entries: std.atomic.Value(u32) = .init(0),
+    fixture_entries: std.atomic.Value(u32) = .init(0),
 
     pub fn create(allocator: std.mem.Allocator) !*Session {
         const self = try allocator.create(Session);
@@ -40,6 +56,7 @@ pub const Session = struct {
         self.stop_requested.store(true, .release);
         if (self.thread) |thread| thread.join();
         if (self.result) |result| self.allocator.free(result.ogg);
+        if (self.fixture_pcm) |pcm| self.allocator.free(pcm);
         self.allocator.destroy(self);
     }
 
@@ -56,6 +73,10 @@ pub const Session = struct {
     }
 
     pub fn start(self: *Session) bool {
+        if (self.require_fixture) {
+            const pcm = self.fixture_pcm orelse return false;
+            if (!fixtureValid(pcm)) return false;
+        }
         const current = self.state();
         if (current == .recording or current == .encoding) return false;
         self.reap();
@@ -108,10 +129,18 @@ pub const Session = struct {
 fn workerMain(self: *Session) void {
     var pcm: std.ArrayList(i16) = .empty;
     defer pcm.deinit(self.allocator);
-    capture(self, &pcm) catch {
-        self.state_value.store(@intFromEnum(State.failed), .release);
-        return;
-    };
+    if (self.require_fixture) {
+        captureFixture(self, &pcm) catch {
+            self.state_value.store(@intFromEnum(State.failed), .release);
+            return;
+        };
+    } else {
+        _ = self.microphone_entries.fetchAdd(1, .monotonic);
+        capture(self, &pcm) catch {
+            self.state_value.store(@intFromEnum(State.failed), .release);
+            return;
+        };
+    }
     if (self.cancelled.load(.acquire)) {
         self.state_value.store(@intFromEnum(State.idle), .release);
         return;
@@ -126,6 +155,26 @@ fn workerMain(self: *Session) void {
         return;
     };
     self.state_value.store(@intFromEnum(State.ready), .release);
+}
+
+fn captureFixture(self: *Session, pcm: *std.ArrayList(i16)) !void {
+    const fixture = self.fixture_pcm orelse return error.MissingFixture;
+    if (!fixtureValid(fixture)) return error.InvalidFixture;
+    _ = self.fixture_entries.fetchAdd(1, .monotonic);
+    var offset: usize = 0;
+    const max_samples: usize = @as(usize, max_seconds) * voice_note.sample_rate;
+    while (!self.stop_requested.load(.acquire) and pcm.items.len < max_samples) {
+        var peak: u32 = 0;
+        for (0..voice_note.sample_rate / 100) |_| {
+            const sample = std.mem.readInt(i16, fixture[offset..][0..2], .little);
+            try pcm.append(self.allocator, sample);
+            peak = @max(peak, @abs(@as(i32, sample)));
+            offset = (offset + 2) % fixture.len;
+        }
+        self.level.store(peak, .release);
+        self.samples.store(pcm.items.len, .release);
+        win.Sleep(10);
+    }
 }
 
 fn capture(self: *Session, pcm: *std.ArrayList(i16)) !void {
