@@ -280,10 +280,11 @@ def check_fixture():
 
 def tooltip_registration(source):
     require(source, ['const tooltip_info_size = @offsetOf(win.TOOLINFOW, "lParam") + @sizeOf(win.LPARAM);'])
-    infos = re.findall(r'win\.TOOLINFOW\{(.*?)\n    };', source, re.S)
-    assert len(infos) == 4, 'audit every tooltip registration and update structure'
+    starts = list(re.finditer(r'win\.TOOLINFOW\s*\{', source))
+    infos = list(re.finditer(r'win\.TOOLINFOW\s*\{([^{}]*)\}', source, re.S))
+    assert starts and len(infos) == len(starts), 'audit every tooltip registration and update structure'
     for info in infos:
-        require(info, ['.cbSize = tooltip_info_size,'])
+        assert re.search(r'\.cbSize\s*=\s*tooltip_info_size\s*(?:,|$)', info.group(1)), 'tooltip structure must use V2 size'
     add = section(source, 'fn addTooltip(', 'fn updateChatTooltip(')
     require(add, ['.uFlags = win.TTF_IDISHWND | win.TTF_SUBCLASS,',
                   '.hwnd = win.GetParent(target),', '.uId = @intFromPtr(target),',
@@ -320,13 +321,22 @@ def check_tooltip_registration():
             pass
         else:
             raise AssertionError('unchecked tooltip registration negative control unexpectedly accepted')
-    for match in re.finditer(r'\.cbSize = tooltip_info_size,', source):
+    for match in re.finditer(r'\.cbSize\s*=\s*tooltip_info_size\b', source):
         try:
-            tooltip_registration(source[:match.start()] + '.cbSize = @sizeOf(win.TOOLINFOW),' + source[match.end():])
+            tooltip_registration(source[:match.start()] + '.cbSize = @sizeOf(win.TOOLINFOW)' + source[match.end():])
         except AssertionError:
             pass
         else:
             raise AssertionError('V3 tooltip size mutation unexpectedly accepted')
+    for extra in ('var extra = win.TOOLINFOW{ .uId = 1 };',
+                  'var extra = win.TOOLINFOW{ .cbSize = @sizeOf(win.TOOLINFOW) };',
+                  'var extra = win.TOOLINFOW{ .cbSize = tooltip_info_size, .rect = .{} };'):
+        try:
+            tooltip_registration(source + '\n' + extra)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError('new tooltip initializer mutation unexpectedly accepted')
     print('TOOLTIP REGISTRATION VERIFIED: V2 size for registration and updates, failures logged; old V3 source rejected')
 
 

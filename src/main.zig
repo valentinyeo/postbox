@@ -13630,8 +13630,8 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
     if (verification_fixture) {
         try w.print(",\"staged_capacity\":{d}", .{staged_images.capacity});
-        const avatar = a.header_icon_tip_rect;
-        try w.print(",\"header_avatar\":[{d},{d},{d},{d}]", .{ avatar.left, avatar.top, avatar.right, avatar.bottom });
+        const avatar_rect = a.header_icon_tip_rect;
+        try w.print(",\"header_avatar\":[{d},{d},{d},{d}]", .{ avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom });
         try w.writeAll(",\"staged_remove_rects\":[");
         for (0..a.staged_images.count) |index| {
             if (index > 0) try w.writeByte(',');

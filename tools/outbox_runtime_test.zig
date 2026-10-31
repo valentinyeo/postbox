@@ -372,6 +372,7 @@ fn tgSelectedChatIsGroup(_: *App) bool {
 fn tgSelectedChatId(_: *App) ?i64 {
     return 1;
 }
+fn invalidateCanvasIconTooltips(_: *App) void {}
 fn clearReply(a: *App) void {
     a.reply_to = .{};
     a.reply_sender = .{};

@@ -228,6 +228,8 @@ class StatusLineTests(unittest.TestCase):
         expected = expected[:first] + expected[last:]
         expected = expected.replace('    if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);\n', '')
         expected = expected.replace('a.voice_active);', 'a.voice_active, a.last_dictation_state == .recording or a.last_dictation_state == .transcribing);')
+        expected = expected.replace('    a.compose_client_width = width;\n', '    invalidateCanvasIconTooltips(a);\n    clearHeaderIconTooltip(a);\n    a.compose_client_width = width;\n', 1)
+        expected = expected.replace('    updateAttachButton(a);\n', '    updateAttachButton(a);\n    syncMainIconTooltips(a);\n', 1)
         self.assertEqual(expected, function(source(), 'layoutRegion'))
 
     def test_real_fixture_failure_and_recovery(self):

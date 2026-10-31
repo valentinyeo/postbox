@@ -102,6 +102,7 @@ fn unifiedWriteProtected(_: *App, path: []const u8, data: []const u8) !void {
     protected_writes += 1;
 }
 fn appendWhatsAppPending(_: *App, _: anytype, _: bool) void {}
+fn invalidateCanvasIconTooltips(_: *App) void {}
 fn discardStagedImage(a: *App) void {
     a.staged_images.clear();
 }
