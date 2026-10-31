@@ -10,7 +10,7 @@ def check(root):
     main = (root / 'src/main.zig').read_text()
     assert main.count('/repos/valentinyeo/postbox/releases') == 3, 'Update endpoints must use the renamed repository'
     assert '/repos/valentinyeo/wazig/releases' not in main, 'Old update endpoint remains'
-    for required in ['"Postbox v{s}"', 'migrateProductName(init);', '"Postbox.lnk"', '"Messages.lnk"', 'win.IID_IShellLinkW', 'eqlWideIgnoreCase(target[0..target_len], exe[0..exe_len])']:
+    for required in ['migrateProductName(init);', '"Postbox.lnk"', '"Messages.lnk"', 'win.IID_IShellLinkW', 'eqlWideIgnoreCase(target[0..target_len], exe[0..exe_len])']:
         assert required in main, required
     for name in ['main.zig', 'messenger_view.zig', 'wazigctl.zig', 'control.zig']:
         for literal in re.findall(r'"(?:[^"\\]|\\.)*"', (root / 'src' / name).read_text()):

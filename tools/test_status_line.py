@@ -214,6 +214,15 @@ class StatusLineTests(unittest.TestCase):
                                   '    const pending_notes = if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read) and a.update_card_error_len > 0) "" else if (a.update_pending)')
         painter = painter.replace('    else if (failed)\n        "Update failed"',
                                   '    else if (failed and a.update_card_error_source == .chats_read)\n        "Chats unavailable"\n    else if (failed and a.update_card_error_source == .message_read)\n        "Messages unavailable"\n    else if (failed)\n        "Update failed"')
+        painter = painter.replace('    else\n        std.fmt.bufPrint(&title_buf, "Postbox v{s}", .{tag}) catch "Postbox update available";',
+                                  '    else\n        "Update ready";')
+        painter = painter.replace('    else if (a.update_staged)\n        "Ready to install"\n    else\n        "Downloading in the background...";',
+                                  '    else if (a.update_staged)\n        std.fmt.bufPrint(&line_buf, "v{s} - takes a few seconds", .{tag}) catch "Takes a few seconds"\n    else\n        std.fmt.bufPrint(&line_buf, "v{s} - downloading in the background", .{tag}) catch "Downloading in the background";')
+        painter = painter.replace('    if (busy) {\n        const bar = updateCardWinRect(card_layout.bar);\n        var track = bar;\n        if (win.CreateSolidBrush(theme.current.secondary_container)) |brush| {\n            _ = win.FillRect(hdc, &track, brush);\n            _ = win.DeleteObject(brush);\n        }\n        var fill = bar;\n        fill.right = bar.left + @divTrunc((bar.right - bar.left) * @as(i32, @intCast(pct)), 100);\n        if (win.CreateSolidBrush(theme.current.primary)) |brush| {\n            _ = win.FillRect(hdc, &fill, brush);\n            _ = win.DeleteObject(brush);\n        }\n        return;\n    }\n',
+                                  '    if (busy) return;\n')
+        painter = painter.replace('    var close_rc = updateCardCloseRect(a, card);\n    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);\n    drawAscii(hdc, &close_rc, "x",',
+                                  '    var close_rc = updateCardCloseRect(a, card);\n    _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));\n    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);\n    drawAscii(hdc, &close_rc, "Later",')
+        painter = painter.replace('utf8ToUtf16LeStringLiteral("Update now")', 'utf8ToUtf16LeStringLiteral("Restart")')
         self.assertEqual(painter, function(source(), 'paintUpdateCard'))
 
     def test_only_list_layout_changes(self):

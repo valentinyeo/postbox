@@ -22,11 +22,11 @@ pub fn heightForNotes(dpi: i32, notes_height: i32) i32 {
 
 pub fn compute(card: Rect, dpi: i32) Layout {
     return .{
-        .title = .{ .left = card.left + scale(12, dpi), .top = card.top + scale(8, dpi), .right = card.right - scale(32, dpi), .bottom = card.top + scale(30, dpi) },
+        .title = .{ .left = card.left + scale(12, dpi), .top = card.top + scale(8, dpi), .right = card.right - scale(12, dpi), .bottom = card.top + scale(30, dpi) },
         .line = .{ .left = card.left + scale(12, dpi), .top = card.top + scale(30, dpi), .right = card.right - scale(12, dpi), .bottom = card.top + scale(50, dpi) },
         .notes = .{ .left = card.left + scale(12, dpi), .top = card.top + scale(50, dpi), .right = card.right - scale(12, dpi), .bottom = card.bottom - scale(40, dpi) },
         .button = .{ .left = card.left + scale(12, dpi), .top = card.bottom - scale(36, dpi), .right = card.left + scale(124, dpi), .bottom = card.bottom - scale(10, dpi) },
-        .close = .{ .left = card.right - scale(28, dpi), .top = card.top + scale(4, dpi), .right = card.right - scale(4, dpi), .bottom = card.top + scale(28, dpi) },
+        .close = .{ .left = card.left + scale(140, dpi), .top = card.bottom - scale(36, dpi), .right = card.left + scale(200, dpi), .bottom = card.bottom - scale(10, dpi) },
         .bar = .{ .left = card.left + scale(12, dpi), .top = card.bottom - scale(22, dpi), .right = card.right - scale(12, dpi), .bottom = card.bottom - scale(14, dpi) },
     };
 }

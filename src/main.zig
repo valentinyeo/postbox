@@ -21178,7 +21178,7 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     else if (a.update_card_busy)
         "Updating..."
     else
-        std.fmt.bufPrint(&title_buf, "Postbox v{s}", .{tag}) catch "Postbox update available";
+        "Update ready";
     _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
     _ = win.SetTextColor(hdc, theme.current.on_surface);
     const card_layout = updateCardLayout(a, card);
@@ -21196,9 +21196,9 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     else if (busy)
         std.fmt.bufPrint(&line_buf, "Downloading {d}%", .{pct}) catch "Downloading..."
     else if (a.update_staged)
-        "Ready to install"
+        std.fmt.bufPrint(&line_buf, "v{s} - takes a few seconds", .{tag}) catch "Takes a few seconds"
     else
-        "Downloading in the background...";
+        std.fmt.bufPrint(&line_buf, "v{s} - downloading in the background", .{tag}) catch "Downloading in the background";
     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
     var line_rc = updateCardWinRect(card_layout.line);
     drawAscii(hdc, &line_rc, line, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX | win.DT_END_ELLIPSIS);
@@ -21209,27 +21209,14 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
         _ = text_draw.drawText(hdc, notes.ptr, @intCast(notes.len), &notes_rc, win.DT_WORDBREAK | win.DT_NOPREFIX);
     } else |_| {}
 
-    if (busy) {
-        const bar = updateCardWinRect(card_layout.bar);
-        var track = bar;
-        if (win.CreateSolidBrush(theme.current.secondary_container)) |brush| {
-            _ = win.FillRect(hdc, &track, brush);
-            _ = win.DeleteObject(brush);
-        }
-        var fill = bar;
-        fill.right = bar.left + @divTrunc((bar.right - bar.left) * @as(i32, @intCast(pct)), 100);
-        if (win.CreateSolidBrush(theme.current.primary)) |brush| {
-            _ = win.FillRect(hdc, &fill, brush);
-            _ = win.DeleteObject(brush);
-        }
-        return;
-    }
+    if (busy) return;
 
     var close_rc = updateCardCloseRect(a, card);
+    _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-    drawAscii(hdc, &close_rc, "x", win.DT_SINGLELINE | win.DT_VCENTER | win.DT_CENTER | win.DT_NOPREFIX);
+    drawAscii(hdc, &close_rc, "Later", win.DT_SINGLELINE | win.DT_VCENTER | win.DT_CENTER | win.DT_NOPREFIX);
 
-    const label: []const u16 = if (failed) std.unicode.utf8ToUtf16LeStringLiteral("Retry") else std.unicode.utf8ToUtf16LeStringLiteral("Update now");
+    const label: []const u16 = if (failed) std.unicode.utf8ToUtf16LeStringLiteral("Retry") else std.unicode.utf8ToUtf16LeStringLiteral("Restart");
     paintRoundedButton(a, shapes, hdc, updateCardButtonRect(a, card), if (theme.choice == .amoled) theme.amoled_send else theme.current.primary, if (theme.choice == .amoled) theme.send_text else theme.current.on_primary, a.font_bold.?, if (theme.choice == .amoled) theme.current.outline else null, label);
 }
 
