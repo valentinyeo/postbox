@@ -16,7 +16,8 @@ function Focus-InlineApp($Session) {
         $foreground = [VerifyWindow]::GetForegroundWindow()
         $owner = [uint32]0
         if ($foreground -ne [IntPtr]::Zero) { [VerifyWindow]::GetWindowThreadProcessId($foreground, [ref]$owner) | Out-Null }
-        $owner -eq $Session.pid
+        $root = if ($foreground -ne [IntPtr]::Zero) { [VerifyWindow]::GetAncestor($foreground, 3) } else { [IntPtr]::Zero }
+        $root -eq $app.MainWindowHandle -and $owner -eq $Session.pid
     } 'inline links app foreground'
 }
 
