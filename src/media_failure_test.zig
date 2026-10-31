@@ -52,6 +52,14 @@ fn failTerminally(a: *App, jid: []const u8, id: []const u8) void {
     for (0..max_media_retries) |_| noteMediaFailure(a, jid, id);
 }
 
+test "media failure log identifies a scoped item without exposing its IDs" {
+    var buffer: [128]u8 = undefined;
+    const line = mediaFailureLog(&buffer, "", "account:chat@example.invalid", "account:message-id", 404);
+    try std.testing.expectEqualStrings("media: download failed status=404 ref=179f890a27e8a9588940bb32724d628ee88efd360f4680538ff6ed95330b082f", line);
+    var other: [128]u8 = undefined;
+    try std.testing.expect(!std.mem.eql(u8, mediaFailureLog(&other, "", "account:chat@example.invalid", "account:message-id", 404), mediaFailureLog(&buffer, "account", "chat@example.invalid", "account:message-id", 404)));
+}
+
 test "success suppression and transient failures are not terminal failures" {
     var a = fixture();
     const jid = a.chats[0].jid.slice();

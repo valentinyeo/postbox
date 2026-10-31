@@ -5,6 +5,9 @@ const chat_key = @import("chat_key.zig");
 const media_drain = @import("media_drain.zig");
 const played = @import("played.zig");
 fn appendLaunchLog(_: *App, _: []const u8) void {}
+fn unifiedHub(_: *const App) bool {
+    return true;
+}
 const max_chats = 4;
 const max_wacli_args = 16;
 const wacli_arg_cap = 256;
@@ -18,6 +21,7 @@ const win = struct {
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     cache_tag: Utf8Text(32) = .{},
+    hub_account: Utf8Text(32) = .{},
     wacli_path: []const u8 = "wacli.exe",
     background_media_chats: [max_chats]BackgroundMediaChat = [_]BackgroundMediaChat{.{}} ** max_chats,
     background_media_count: usize = 0,

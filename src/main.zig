@@ -6675,6 +6675,20 @@ fn mediaRetryDelayMs(status: u32, count: u8) u64 {
     return media_retry_base_ms * @as(u64, count);
 }
 
+fn mediaFailureLog(buffer: []u8, account: []const u8, jid: []const u8, id: []const u8, status: u32) []const u8 {
+    var hash = std.crypto.hash.sha2.Sha256.init(.{});
+    for ([_][]const u8{ account, jid, id }) |part| {
+        var length: [8]u8 = undefined;
+        std.mem.writeInt(u64, &length, @intCast(part.len), .big);
+        hash.update(&length);
+        hash.update(part);
+    }
+    var digest: [32]u8 = undefined;
+    hash.final(&digest);
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    return std.fmt.bufPrint(buffer, "media: download failed status={d} ref={s}", .{ status, &hex }) catch "media: download failed";
+}
+
 fn noteMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
     noteMediaFailureStatus(a, jid, id, 0);
 }
@@ -21474,8 +21488,13 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                     return;
                 }
                 slot.hub_pending = false;
-                appendLaunchLog(a, if (result.ok and result.http_status != 202) "media: download finished" else "media: download failed");
                 const ok = result.ok and result.http_status != 202;
+                if (ok) {
+                    appendLaunchLog(a, "media: download finished");
+                } else {
+                    var log_buffer: [128]u8 = undefined;
+                    appendLaunchLog(a, mediaFailureLog(&log_buffer, if (unifiedHub(a)) "" else a.hub_account.slice(), slot.jid.slice(), slot.id.slice(), result.http_status));
+                }
                 if (ok) {
                     markMediaAttempted(a, slot.jid.slice(), slot.id.slice());
                     clearMediaFailure(a, slot.jid.slice(), slot.id.slice());
