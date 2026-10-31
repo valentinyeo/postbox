@@ -1049,6 +1049,7 @@ const App = struct {
     quote_link_font_scale: i32 = 0,
     quote_link_dpi: u32 = 0,
     quote_link_client: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+    header_pill_rect: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     click_origin: win.POINT = .{ .x = 0, .y = 0 },
     click_moved: bool = false,
     canvas_double_click_handled: bool = false,
@@ -16758,12 +16759,12 @@ const QuoteMetrics = struct {
         return if (text.len == 0) 0 else runWidth(self.hdc, text);
     }
 
-    pub fn fit(self: @This(), text: []const u16, width: i32) usize {
+    pub fn fit(self: @This(), text: []const u16, available: i32) usize {
         var low: usize = 0;
         var high = text.len;
         while (low < high) {
             const middle = low + (high - low + 1) / 2;
-            if (self.width(text[0..middle]) <= width) low = middle else high = middle - 1;
+            if (self.width(text[0..middle]) <= available) low = middle else high = middle - 1;
         }
         return if (low < text.len) wrapChunkLen(text, low) else low;
     }
@@ -16825,8 +16826,7 @@ fn layoutQuoteBody(hdc: win.HDC, a: *App, text: []const u16, width: i32, paint: 
         const right = x + metrics.width(visible);
         if (span.y == line_height * (quote_max_lines - 1)) last_right = span.x + metrics.width(visible);
         if (!span.space and wordIsUrl(text[span.word_start..span.word_end])) {
-            const top = if (a.selected_chat < a.chat_count) target.client.top + px(a, 72) else target.client.top;
-            const hit = win.RECT{ .left = @max(x, target.client.left), .top = @max(y, top), .right = @min(@min(right, target.rect.right), target.client.right), .bottom = @min(@min(y + line_height, target.rect.bottom), target.client.bottom) };
+            const hit = win.RECT{ .left = @max(x, target.client.left), .top = @max(y, target.client.top), .right = @min(@min(right, target.rect.right), target.client.right), .bottom = @min(@min(y + line_height, target.rect.bottom), target.client.bottom) };
             if (hit.left < hit.right and hit.top < hit.bottom) {
                 a.quote_links.append(a.allocator, .{ .message_index = target.message_index, .start = span.word_start, .end = span.word_end, .fingerprint = quoteFingerprint(&a.messages[target.message_index], span.word_start, span.word_end), .rect = hit }) catch continue;
                 smooth.fillRoundRect(target.shapes, .{ .left = hit.left, .top = hit.bottom - px(a, 2), .right = hit.right, .bottom = hit.bottom - px(a, 1) }, 0, 0, theme.current.primary);
@@ -17212,6 +17212,7 @@ fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
 }
 
 fn drawChatTitle(shapes: *const smooth.Context, hdc: win.HDC, a: *App, client: win.RECT) void {
+    a.header_pill_rect = std.mem.zeroes(win.RECT);
     if (a.selected_chat >= a.chat_count) {
         if (a.canvas) |owner| setIconTooltipRect(a, owner, @intFromEnum(IconTip.header_avatar), &a.header_icon_tip_rect, std.mem.zeroes(win.RECT));
         return;
@@ -17243,6 +17244,7 @@ fn drawChatTitle(shapes: *const smooth.Context, hdc: win.HDC, a: *App, client: w
     const width = @min(client.right - px(a, 32), name_width + subtitle_width + px(a, 72));
     const left = @divTrunc(client.right - width, 2);
     const rect = win.RECT{ .left = left, .top = px(a, 16), .right = left + width, .bottom = px(a, 52) };
+    a.header_pill_rect = rect;
     smooth.fillRoundRect(shapes, rect, px(a, 36), px(a, 36), theme.current.surface_container);
     smooth.strokeRoundRect(shapes, rect, px(a, 36), px(a, 36), theme.current.outline, px(a, 1));
     const avatar_rect = win.RECT{ .left = left + px(a, 6), .top = px(a, 22), .right = left + px(a, 30), .bottom = px(a, 46) };
@@ -17328,7 +17330,8 @@ fn visibleLinkAt(a: *const App, x: i32, y: i32) ?VisibleLink {
     if (win.GetUpdateRect(canvas, null, win.FALSE) != 0 or win.GetClientRect(canvas, &client) == 0) return null;
     if (a.scroll_y != a.quote_link_scroll or a.font_scale != a.quote_link_font_scale or a.dpi != a.quote_link_dpi or client.right != a.quote_link_client.right or client.bottom != a.quote_link_client.bottom) return null;
     if (x < client.left or x >= client.right or y < client.top or y >= client.bottom) return null;
-    if (a.selected_chat < a.chat_count and y < client.top + px(a, 72)) return null;
+    const pill = a.header_pill_rect;
+    if (pill.right > pill.left and x >= pill.left and x < pill.right and y >= pill.top and y < pill.bottom) return null;
     for (a.quote_links.items) |hit| {
         if (hit.message_index >= a.message_count or x < hit.rect.left or x >= hit.rect.right or y < hit.rect.top or y >= hit.rect.bottom) continue;
         const message = &a.messages[hit.message_index];
@@ -17387,8 +17390,7 @@ fn drawCompactQuote(hdc: win.HDC, shapes: *const smooth.Context, a: *App, messag
                 start = end;
                 continue;
             }).x;
-            const top = if (a.selected_chat < a.chat_count) client.top + px(a, 72) else client.top;
-            const hit = win.RECT{ .left = @max(left, client.left), .top = @max(rect.top, top), .right = @min(right, client.right), .bottom = @min(rect.bottom, client.bottom) };
+            const hit = win.RECT{ .left = @max(left, client.left), .top = @max(rect.top, client.top), .right = @min(right, client.right), .bottom = @min(rect.bottom, client.bottom) };
             if (hit.left < hit.right and hit.top < hit.bottom) {
                 a.quote_links.append(a.allocator, .{ .message_index = message_index, .start = start, .end = end, .fingerprint = quoteFingerprint(&a.messages[message_index], start, end), .rect = hit }) catch {
                     start = end;
@@ -17412,7 +17414,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     defer surface.deinit();
     const hdc = surface.hdc;
     a.quote_links.clearRetainingCapacity();
-    a.quote_link_scroll = a.scroll_y;
     a.quote_link_font_scale = a.font_scale;
     a.quote_link_dpi = a.dpi;
     a.quote_link_client = client;
@@ -17452,6 +17453,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     a.scroll_y = std.math.clamp(a.scroll_y, 0, a.max_scroll);
+    a.quote_link_scroll = a.scroll_y;
     var cursor_y = client.bottom - px(a, 14) + a.scroll_y;
     var index = a.message_count;
     while (index > 0) {

@@ -1,26 +1,36 @@
 # Inline links
 
-## Sub-features
+## Coverage
 
-- Body URLs open through Windows on the first and last wrapped fragments.
-- Plain text does not launch a URL; Ctrl+O retains the body URL.
-- A compact quoted-reply URL opens its complete stored target.
+- Body URLs open from wrapped fragments.
+- Incoming and outgoing reply previews open URLs.
+- Two-line fallback quotes open complete URLs.
+- Plain text and dragging do not dispatch.
+- Ordinary reply navigation and Ctrl+O remain usable.
+- Control-click marks and unmarks a message.
+- Cursor shape and underlines use native evidence.
+- Four synthetic providers share the journey.
 
-## How to get to it (user POV)
+## Driving it
 
-- Open the synthetic inline-links chat and click its wrapped URL.
-- Click ordinary text, then open the body URL with Ctrl+O.
-- Click the URL in the reply preview.
+- Run `inline-links` on hosted Windows.
+- The fixture serves synthetic loopback URLs.
+- No real provider or account is used.
+- Mouse and keyboard actions use `SendInput`.
+- Fixture geometry guides actual screen input.
+- Each mouse-up has a handled acknowledgment.
+- Positive actions also await exact launch receipts.
+- Screenshots and cursor handles capture appearance.
+- The checker examines receipts and screenshot pixels.
 
-## Driving it with PowerShell UI Automation
+## Evidence boundaries
 
-- Run feature=inline-links on GitHub Actions. The fixture serves synthetic loopback URLs and never contacts a provider.
-- SendInput uses the body's painted link rectangles and the compact reply line. The fixture-only receipt records the real ShellExecuteW result after the call.
-- Capture each stage's messages, geometry, status, local requests, receipt history and screenshot before assertions. The baseline may fail at quoted-reply dispatch; earlier failures identify setup, body dispatch or browser availability instead.
-- The evidence checker validates successful candidate runs. A Windows-accepted dispatch does not prove a browser page loaded. Loopback GETs may also come from previews and are not treated as browser proof.
-
-## Gotchas
-
-- No browser association, protocol, certificate or system registry is changed. A missing default browser makes dispatch inconclusive, not a quoted-link reproduction.
-- The baseline covers the compact reply line, not the separate fallback quote block. The later feature must cover both presentations.
-- Only synthetic fixture data and the owned verification profile are used. Inspect the screenshots and retained failure evidence before drawing conclusions.
+- Receipts follow the real `ShellExecuteW` call.
+- Windows acceptance does not prove page loading.
+- Loopback requests may come from link previews.
+- Browser associations and certificates remain unchanged.
+- Missing browser support makes dispatch inconclusive.
+- The historical baseline had a sampling race.
+- Its quote result is not clean red.
+- Current evidence does not cover upper-band links.
+- See `tools/verify-wazig/inline-links-proof.md`.
