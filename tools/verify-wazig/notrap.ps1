@@ -77,40 +77,107 @@ function Invoke-NotrapJourney($Session) {
     $state = Read-Control $Session status
     Assert-That ($state.current_view.account -eq $order[0].account -and -not $state.current_view.inbox) 'intervening key cancels g prefix'
     Save-Screen $Session 'cancelled-gi'
+    $compose = Get-Edit (Get-Window $Session) '1032'
+    Assert-That ($compose.Current.IsEnabled -and (Read-Edit $compose) -ceq '') 'Fixture composer must start empty'
+    (Get-Edit (Get-Window $Session) '1016').SetFocus()
+    Send-Keys $Session 'g'
+    $compose.SetFocus()
+    Send-Keys $Session 'i'
+    $null = Wait-Until { (Read-Edit $compose) -ceq 'i' } 'focus change cancels prefix and types i'
+    $state = Read-Control $Session status
+    Assert-That ($state.current_view.account -eq $order[0].account -and -not $state.current_view.inbox) 'focus change must not open inbox'
+    $focused = [Windows.Automation.AutomationElement]::FocusedElement
+    Assert-That ($focused.Current.ProcessId -eq $Session.pid -and $focused.Current.AutomationId -ceq '1032' -and $focused.Current.HasKeyboardFocus) 'Composer lost focus after prefix'
+    @{ text = (Read-Edit $compose); focus_id = $focused.Current.AutomationId; focus_pid = $focused.Current.ProcessId; current_view = $state.current_view } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'focus-cancelled-gi.json')
+    Save-Screen $Session 'focus-cancelled-gi'
+    Send-Keys $Session '^a{BACKSPACE}'
+    Send-Keys $Session 'gi'
+    $null = Wait-Until { (Read-Edit $compose) -ceq 'gi' } 'composer preserves typed gi'
+    $focused = [Windows.Automation.AutomationElement]::FocusedElement
+    Assert-That ($focused.Current.ProcessId -eq $Session.pid -and $focused.Current.AutomationId -ceq '1032' -and $focused.Current.HasKeyboardFocus) 'Composer lost focus'
+    $state = Read-Control $Session status
+    Assert-That ($state.current_view.account -eq $order[0].account -and -not $state.current_view.inbox) 'typed gi changed view'
+    @{ text = (Read-Edit $compose); focus_id = $focused.Current.AutomationId; focus_pid = $focused.Current.ProcessId; current_view = $state.current_view } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'composer-gi.json')
+    Save-Screen $Session 'composer-gi'
+    Send-Keys $Session '^a{BACKSPACE}'
+    $null = Wait-Until { (Read-Edit $compose) -ceq '' } 'composer draft restored'
+    @{ text = (Read-Edit $compose) } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'composer-restored.json')
     Send-Keys $Session '%1'
     $null = Wait-Until { (Read-Control $Session status).current_view.inbox } 'return to combined inbox'
-    # Capture only the fixture window, without audio or external services.
+    $bounds = (Get-Window $Session).Current.BoundingRectangle
+    $captureX = [int]$bounds.X; $captureY = [int]$bounds.Y
+    $captureWidth = [int]$bounds.Width; $captureHeight = [int]$bounds.Height
+    Assert-That ($captureWidth -gt 0 -and $captureHeight -gt 0) 'Invalid fixture window bounds'
+    $video = Join-Path $Session.evidence 'ticketProof.mp4'
     $ffmpeg = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
-    if ($ffmpeg) {
-        $bounds = (Get-Window $Session).Current.BoundingRectangle
-        $video = Join-Path $Session.evidence 'ticketProof.mp4'
-        $size = "{0}x{1}" -f [int]$bounds.Width, [int]$bounds.Height
-        $arguments = @('-y', '-f', 'gdigrab', '-framerate', '5', '-offset_x', [int]$bounds.X, '-offset_y', [int]$bounds.Y, '-video_size', $size, '-i', 'desktop', '-t', '20', '-an', '-c:v', 'mpeg4', '-q:v', '5', "`"$video`"")
-        $recorder = Start-Process -FilePath $ffmpeg.Source -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $Session.evidence 'ticketProof-ffmpeg.log')
-        try {
+    $captureJob = $null; $recorder = $null
+    try {
+        if ($ffmpeg) {
+            $size = "{0}x{1}" -f $captureWidth, $captureHeight
+            $arguments = @('-y', '-f', 'gdigrab', '-framerate', '5', '-offset_x', $captureX, '-offset_y', $captureY, '-video_size', $size, '-i', 'desktop', '-t', '20', '-an', '-c:v', 'mpeg4', '-q:v', '5', "`"$video`"")
+            $recorder = Start-Process -FilePath $ffmpeg.Source -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $Session.evidence 'ticketProof-ffmpeg.log')
             $null = Wait-Until { (Test-Path $video) -and (Get-Item $video).Length -gt 0 } 'fixture recorder started'
-            $ledger = @()
-            foreach ($demo in @(@('%2', 1), @('%3', 2), @('%1', 0), @('%i', 0), @('gi', 0))) {
-                $null = Select-NotrapView $Session $order 1
-                if ($demo[0] -eq 'gi') { (Get-Edit (Get-Window $Session) '1016').SetFocus() }
-                $at = [DateTime]::UtcNow.ToString('o')
-                Send-Keys $Session $demo[0]
-                $wanted = [int]$demo[1]
-                $null = Wait-Until {
-                    $state = Read-Control $Session status
-                    if ($wanted -eq 0) { $state.current_view.inbox } else { -not $state.current_view.inbox -and $state.current_view.account -eq $order[$wanted - 1].account }
-                } 'recorded shortcut destination'
-                $ledger += @{ key = $demo[0]; utc = $at; current_view = (Read-Control $Session status).current_view }
+            $recordStarted = [DateTime]::UtcNow.ToString('o')
+        } else {
+            $frameDir = Join-Path $Session.evidence 'ticketProof-frames'
+            New-Item -ItemType Directory -Path $frameDir -ErrorAction Stop | Out-Null
+            $captureJob = Start-ThreadJob -ArgumentList $frameDir, $captureX, $captureY, $captureWidth, $captureHeight -ScriptBlock {
+                param($frameDir, $x, $y, $width, $height)
+                $ErrorActionPreference = 'Stop'
+                Add-Type -AssemblyName System.Drawing
+                $clock = [Diagnostics.Stopwatch]::StartNew()
+                $frames = @()
+                for ($index = 0; $index -lt 100; $index++) {
+                    $delay = $index * 200 - $clock.ElapsedMilliseconds
+                    if ($delay -gt 0) { Start-Sleep -Milliseconds $delay }
+                    $bitmap = [Drawing.Bitmap]::new($width, $height)
+                    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                    try {
+                        $graphics.CopyFromScreen($x, $y, 0, 0, $bitmap.Size)
+                        $frameTime = [DateTime]::UtcNow.ToString('o')
+                        $elapsed = $clock.ElapsedMilliseconds
+                        $name = 'frame-{0:D3}.png' -f $index
+                        $bitmap.Save((Join-Path $frameDir $name), [Drawing.Imaging.ImageFormat]::Png)
+                        $frames += @{ file = $name; utc = $frameTime; elapsed_ms = $elapsed }
+                    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+                }
+                @{ mode = 'frames'; width = $width; height = $height; fps = 5; frames = $frames } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path (Split-Path $frameDir) 'ticketProof-capture.json')
             }
-            $ledger | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'ticketProof.json')
+            $null = Wait-Until { Test-Path (Join-Path $frameDir 'frame-000.png') } 'fixture frame recorder started'
+        }
+        $ledger = @()
+        foreach ($demo in @(@('%2', 1), @('%3', 2), @('%1', 0), @('%i', 0), @('gi', 0))) {
+            $null = Select-NotrapView $Session $order 1
+            if ($demo[0] -eq 'gi') { (Get-Edit (Get-Window $Session) '1016').SetFocus() }
+            $at = [DateTime]::UtcNow.ToString('o')
+            Send-Keys $Session $demo[0]
+            $wanted = [int]$demo[1]
+            $null = Wait-Until {
+                $state = Read-Control $Session status
+                if ($wanted -eq 0) { $state.current_view.inbox } else { -not $state.current_view.inbox -and $state.current_view.account -eq $order[$wanted - 1].account }
+            } 'recorded shortcut destination'
+            $ledger += @{ key = $demo[0]; utc = $at; current_view = (Read-Control $Session status).current_view }
+        }
+        $ledger | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'ticketProof.json')
+        if ($recorder) {
+            $recorder.Refresh()
+            Assert-That (-not $recorder.HasExited) 'Recording ended before shortcut demonstration'
             Wait-Process -Id $recorder.Id -Timeout 30 -ErrorAction Stop
             $recorder.Refresh()
             Assert-That ($recorder.ExitCode -eq 0 -and (Test-Path $video) -and (Get-Item $video).Length -gt 10000) 'Fixture recording failed'
-        } finally {
-            if (-not $recorder.HasExited) { Stop-Process -Id $recorder.Id }
+            @{ mode = 'video'; width = $captureWidth; height = $captureHeight; fps = 5; started = $recordStarted; finished = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'ticketProof-capture.json')
+        } else {
+            $null = Wait-Job -Job $captureJob -Timeout 35
+            Assert-That ($captureJob.State -eq 'Completed') 'Fixture frame recording failed or timed out'
+            Receive-Job -Job $captureJob -ErrorAction Stop | Out-Null
         }
-    } else {
-        'ffmpeg.exe unavailable on Windows host' | Set-Content (Join-Path $Session.evidence 'ticketProof-unavailable.txt')
+    } finally {
+        if ($recorder -and -not $recorder.HasExited) { Stop-Process -Id $recorder.Id; $recorder.WaitForExit() }
+        if ($captureJob) {
+            if ($captureJob.State -in @('Running', 'NotStarted')) { Stop-Job -Job $captureJob }
+            $null = Wait-Job -Job $captureJob
+            Remove-Job -Job $captureJob -Force
+        }
     }
     $transitions | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'transitions.json')
     Hub-Pass $Session every-view-escape-alt

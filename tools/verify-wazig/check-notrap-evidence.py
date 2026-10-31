@@ -1,5 +1,7 @@
 import re
 import json
+import struct
+from datetime import datetime
 from urllib.parse import urlsplit
 
 
@@ -52,7 +54,7 @@ def check_notrap(folder):
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
     for key in [*(f'%{number + 1}' for number in range(1, len(order) + 1)), '%1', '%i', 'gi', '^1', 'g', 'x', 'i', '^f', 'no-trap-search', '{ESC}']:
         assert f'keys: {key}' in actions, key
-    for name in ('ctrl-one', 'typed-gi', 'cancelled-gi'):
+    for name in ('ctrl-one', 'typed-gi', 'cancelled-gi', 'focus-cancelled-gi', 'composer-gi'):
         state, _ = capture(name)
         assert state['current_view'] == identity(order[0]), name
         if name == 'typed-gi':
@@ -62,14 +64,46 @@ def check_notrap(folder):
                          ('shortcut-g-i', startup['current_view'])]:
         state, _ = capture(name)
         assert state['current_view'] == wanted, name
-    video = folder / 'ticketProof.mp4'
-    if video.exists():
-        assert video.stat().st_size > 10000
-        ledger = read('ticketProof.json')
-        assert [row['key'] for row in ledger] == ['%2', '%3', '%1', '%i', 'gi']
-        assert [row['current_view'] for row in ledger] == [identity(order[0]), identity(order[1]), *[startup['current_view']] * 3]
+    composer = read('composer-gi.json')
+    assert composer == dict(text='gi', focus_id='1032', focus_pid=session['pid'], current_view=identity(order[0]))
+    assert read('focus-cancelled-gi.json') == dict(text='i', focus_id='1032', focus_pid=session['pid'], current_view=identity(order[0]))
+    assert read('composer-restored.json') == dict(text='')
+    assert 'keys: ^a{BACKSPACE}' in actions
+    ledger = read('ticketProof.json')
+    assert [row['key'] for row in ledger] == ['%2', '%3', '%1', '%i', 'gi']
+    assert [row['current_view'] for row in ledger] == [identity(order[0]), identity(order[1]), *[startup['current_view']] * 3]
+    times = [datetime.fromisoformat(row['utc'].replace('Z', '+00:00')) for row in ledger]
+    assert times == sorted(times)
+    recording = read('ticketProof-capture.json')
+    width, height = recording['width'], recording['height']
+    assert width > 0 and height > 0 and recording['fps'] == 5
+    if recording['mode'] == 'video':
+        video = (folder / 'ticketProof.mp4').read_bytes()
+        assert len(video) > 10000 and video[4:8] == b'ftyp'
+        log = (folder / 'ticketProof-ffmpeg.log').read_text(encoding='utf-8-sig')
+        counts = [int(count) for count in re.findall(r'frame=\s*(\d+)', log)]
+        assert counts and max(counts) >= 90
+        assert f'{width}x{height}' in log
+        started = datetime.fromisoformat(recording['started'].replace('Z', '+00:00'))
+        finished = datetime.fromisoformat(recording['finished'].replace('Z', '+00:00'))
+        assert started <= times[0] <= times[-1] <= finished
     else:
-        assert (folder / 'ticketProof-unavailable.txt').exists()
+        assert recording['mode'] == 'frames'
+        frames = recording['frames']
+        assert len(frames) == 100
+        frame_dir = folder / 'ticketProof-frames'
+        assert len(list(frame_dir.glob('frame-*.png'))) == 100
+        for index, frame in enumerate(frames):
+            assert frame['file'] == f'frame-{index:03}.png'
+            data = (frame_dir / frame['file']).read_bytes()
+            assert len(data) > 1000 and data[:8] == b'\x89PNG\r\n\x1a\n'
+            assert struct.unpack('>II', data[16:24]) == (width, height)
+        elapsed = [frame['elapsed_ms'] for frame in frames]
+        assert 19500 <= elapsed[-1] - elapsed[0] <= 25000
+        assert all(0 < later - earlier <= 1000 for earlier, later in zip(elapsed, elapsed[1:]))
+        frame_times = [datetime.fromisoformat(frame['utc'].replace('Z', '+00:00')) for frame in frames]
+        assert frame_times == sorted(frame_times)
+        assert frame_times[0] <= times[0] <= times[-1] <= frame_times[-1]
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert any(row['path'].startswith('/v1/wazig/chats') and row['status'] == 200 for row in requests)
     for row in requests:
