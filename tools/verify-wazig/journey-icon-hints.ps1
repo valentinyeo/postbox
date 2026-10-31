@@ -104,7 +104,9 @@ function Icon-Hover([string]$Id, [string]$Expected, [int]$X, [int]$Y, [int]$Anch
     @{ id = $Id; expected = $Expected; actual = $actual; popup = $popup.ToInt64(); pid = $session.pid; owner = $owner.ToInt64(); owner_pid = $ownerPid; owner_rect = @($ownerBounds.Left, $ownerBounds.Top, $ownerBounds.Right, $ownerBounds.Bottom); x = $X; y = $Y; bounds = @($bounds.Left, $bounds.Top, $bounds.Right, $bounds.Bottom) } |
         ConvertTo-Json | Set-Content (Join-Path $session.evidence "hover-$Id.json")
     Save-Screen $session "hover-$Id"
-    if ($null -ne (Read-Control $session status).selected) {
+    $hoverState = Read-Control $session status
+    $hoverState | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence "hover-$Id.state.json")
+    if ($null -ne $hoverState.selected) {
         Read-Control $session messages | ConvertTo-Json -Depth 16 | Set-Content (Join-Path $session.evidence "hover-$Id.messages.json")
     }
 }
