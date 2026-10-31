@@ -1,6 +1,24 @@
 {
   "journeys": [
     {
+      "name": "icon-hints",
+      "pr": true,
+      "hub": "icon-hints",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-icon-hints.ps1",
+      "validator": {
+        "file": "check-icon-hints-evidence.py",
+        "function": "check_evidence"
+      },
+      "hub_handler": {
+        "file": "icon-hints-fixture.py",
+        "class": "IconHintsHandler"
+      },
+      "maximize": true,
+      "prepare": "prepare-icon-hints.ps1"
+    },
+    {
       "name": "dictation-shortcuts",
       "pr": true,
       "hub": "dictation-shortcuts",

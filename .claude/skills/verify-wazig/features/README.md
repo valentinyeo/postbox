@@ -19,6 +19,7 @@ The `workspace-icons` journey verifies rounded Slack workspace icon badges, the 
 ## Recent changes coverage
 
 - IGSH-1267: dictation finish and cancel -> `dictation-shortcuts` (asserts native keys, scoped durable sends, cancellation races, navigation disarming and Unicode multiline drafts)
+- IGSH-1268: icon hints and voice shortcut -> `icon-hints` (native popup and isolated synthetic voice evidence)
 
 - IGSH-745: unresolved Slack mentions -> `slack-mentions` (asserts hub-named and labelled mentions, @someone fallback, no raw user ids, report link cleanup, real keyboard selection and before/after screenshots)
 

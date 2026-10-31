@@ -365,6 +365,7 @@ pub fn build(b: *std.Build) void {
     const double_click_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("src/message_double_click_test.zig"),
         "fn hubConfigured(_: *const App) bool { return true; }\n",
+        "fn invalidateCanvasIconTooltips(_: *App) void {}\n",
         sourceSection("fn WideText(", "const Chat = struct"),
         sourceSection("const max_pending_reactions =", "const WacliJobKind = enum"),
         sourceSection("fn selectionPoint(", "fn copyPassage("),
@@ -422,6 +423,7 @@ pub fn build(b: *std.Build) void {
     const buffer_source = @embedFile("src/paint_buffer.zig");
     const repaint_source = std.mem.concat(b.allocator, u8, &.{
         @embedFile("tools/repaint_test.zig"),
+        "fn syncMainIconTooltips(_: *App) void {}\n",
         buffer_source[(std.mem.indexOfScalar(u8, buffer_source, '\n') orelse unreachable) + 1 ..],
         sourceSection("fn stagedPreviewColumns(", "fn layout(a:"),
         "fn composeChanged(a: *App) void {\n",

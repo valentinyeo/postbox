@@ -165,6 +165,7 @@ const command_quit = 2006;
 const command_archive = 2007;
 const command_archived = 2008;
 const command_dictate = 2009;
+const command_voice = 2075;
 const command_font_smaller = 2010;
 const command_font_larger = 2011;
 const command_font_reset = 2012;
@@ -791,6 +792,10 @@ const App = struct {
     compose_prev_proc: usize = 0,
     btn_prev_proc: [10]usize = @splat(0),
     tooltips: ?win.HWND = null,
+    main_icon_tip_rects: [1 + staged_images.capacity]win.RECT = @splat(std.mem.zeroes(win.RECT)),
+    canvas_icon_tip_rects: [3]win.RECT = @splat(std.mem.zeroes(win.RECT)),
+    header_icon_tip_rect: win.RECT = std.mem.zeroes(win.RECT),
+    canvas_tip_selected: bool = false,
     palette: ?win.HWND = null,
     palette_edit: ?win.HWND = null,
     palette_list: ?win.HWND = null,
@@ -1406,6 +1411,90 @@ fn addTooltip(a: *App, tt: win.HWND, tool: ?win.HWND, text: [*:0]const u16) void
     }
 }
 
+const IconTip = enum(usize) { reply_close = 3000, staged_first = 3001, react = 3100, reply = 3101, more = 3102, header_avatar = 3103 };
+
+fn addIconTooltip(a: *App, owner: win.HWND, id: usize, text: [*:0]const u16) void {
+    const tt = a.tooltips orelse return;
+    var info = win.TOOLINFOW{
+        .cbSize = tooltip_info_size,
+        .uFlags = win.TTF_SUBCLASS,
+        .hwnd = owner,
+        .uId = id,
+        .lpszText = @constCast(text),
+    };
+    if (win.SendMessageW(tt, win.TTM_ADDTOOLW, 0, @bitCast(@intFromPtr(&info))) == 0) appendLaunchLog(a, "tooltip: TTM_ADDTOOLW failed for icon rectangle");
+}
+
+fn popIconTooltip(a: *App, owner: win.HWND, id: usize) void {
+    const tt = a.tooltips orelse return;
+    var current = win.TOOLINFOW{ .cbSize = tooltip_info_size };
+    if (win.SendMessageW(tt, win.TTM_GETCURRENTTOOLW, 0, @bitCast(@intFromPtr(&current))) != 0 and current.hwnd == owner and current.uId == id and (current.uFlags & win.TTF_IDISHWND) == 0) {
+        _ = win.SendMessageW(tt, win.TTM_POP, 0, 0);
+    }
+}
+
+fn setIconTooltipRect(a: *App, owner: win.HWND, id: usize, current: *win.RECT, rect: win.RECT) void {
+    const tt = a.tooltips orelse return;
+    if (std.meta.eql(current.*, rect)) return;
+    popIconTooltip(a, owner, id);
+    current.* = rect;
+    var info = win.TOOLINFOW{ .cbSize = tooltip_info_size, .hwnd = owner, .uId = id, .rect = rect };
+    _ = win.SendMessageW(tt, win.TTM_NEWTOOLRECTW, 0, @bitCast(@intFromPtr(&info)));
+}
+
+fn syncMainIconTooltips(a: *App) void {
+    const owner = a.hwnd orelse return;
+    const empty = std.mem.zeroes(win.RECT);
+    setIconTooltipRect(a, owner, @intFromEnum(IconTip.reply_close), &a.main_icon_tip_rects[0], if (a.reply_to.len > 0) replyCloseRect(a) else empty);
+    for (0..staged_images.capacity) |index| {
+        setIconTooltipRect(a, owner, @intFromEnum(IconTip.staged_first) + index, &a.main_icon_tip_rects[index + 1], if (index < a.staged_images.count) stagedRemoveRect(a, index) else empty);
+    }
+}
+
+fn clearCanvasIconTooltips(a: *App) void {
+    const owner = a.canvas orelse return;
+    for (&a.canvas_icon_tip_rects, 0..) |*rect, index| setIconTooltipRect(a, owner, @intFromEnum(IconTip.react) + index, rect, std.mem.zeroes(win.RECT));
+}
+
+fn invalidateCanvasIconTooltips(a: *App) void {
+    clearCanvasIconTooltips(a);
+    a.message_hover = null;
+}
+
+fn clearHeaderIconTooltip(a: *App) void {
+    if (a.canvas) |owner| setIconTooltipRect(a, owner, @intFromEnum(IconTip.header_avatar), &a.header_icon_tip_rect, std.mem.zeroes(win.RECT));
+}
+
+fn syncCanvasIconTooltips(a: *App) void {
+    const owner = a.canvas orelse return;
+    const index = a.message_hover orelse return clearCanvasIconTooltips(a);
+    if (index >= a.message_count) return clearCanvasIconTooltips(a);
+    const bubble = a.messages[index].bubble_hit;
+    if (bubble.right <= bubble.left or bubble.bottom <= bubble.top) return clearCanvasIconTooltips(a);
+    var client: win.RECT = undefined;
+    if (win.GetClientRect(owner, &client) == 0) return clearCanvasIconTooltips(a);
+    const selected = a.selected_message != null and a.selected_message.? == index;
+    if (a.canvas_tip_selected != selected) {
+        a.canvas_tip_selected = selected;
+        if (a.tooltips) |tt| {
+            popIconTooltip(a, owner, @intFromEnum(IconTip.react));
+            popIconTooltip(a, owner, @intFromEnum(IconTip.reply));
+            const texts = if (selected) [_][*:0]const u16{ lit("React  Ctrl+R"), lit("Reply  Ctrl+Shift+R") } else [_][*:0]const u16{ lit("React"), lit("Reply") };
+            for (texts, 0..) |text, cell| {
+                var info = win.TOOLINFOW{ .cbSize = tooltip_info_size, .hwnd = owner, .uId = @intFromEnum(IconTip.react) + cell, .lpszText = @constCast(text) };
+                _ = win.SendMessageW(tt, win.TTM_UPDATETIPTEXTW, 0, @bitCast(@intFromPtr(&info)));
+            }
+        }
+    }
+    const actions = messageActionsRect(a, &a.messages[index]);
+    for (&a.canvas_icon_tip_rects, 0..) |*current, cell| {
+        const hit = messageActionCellRect(a, actions, cell);
+        var rect = win.RECT{ .left = @max(client.left, hit.left), .top = @max(client.top + px(a, 72), hit.top), .right = @min(client.right - scrollbar_width, hit.right), .bottom = @min(client.bottom, hit.bottom) };
+        if (rect.right <= rect.left or rect.bottom <= rect.top) rect = std.mem.zeroes(win.RECT);
+        setIconTooltipRect(a, owner, @intFromEnum(IconTip.react) + cell, current, rect);
+    }
+}
+
 fn updateChatTooltip(a: *App, coords: win.LPARAM) void {
     const list = a.chats_hwnd orelse return;
     const tt = a.tooltips orelse return;
@@ -1469,7 +1558,15 @@ fn createTooltips(a: *App, hwnd: win.HWND) void {
     addTooltip(a, tt, a.dictate, lit("Dictate  Ctrl+D"));
     addTooltip(a, tt, a.send, lit("Send message  Enter"));
     addTooltip(a, tt, a.emoji_btn, lit("Emoji menu"));
-    addTooltip(a, tt, a.voice_btn, lit("Record a voice note  Enter sends · Esc cancels"));
+    addTooltip(a, tt, a.voice_btn, lit("Record a voice note  Ctrl+Shift+M"));
+    addIconTooltip(a, hwnd, @intFromEnum(IconTip.reply_close), lit("Cancel reply"));
+    for (0..staged_images.capacity) |index| addIconTooltip(a, hwnd, @intFromEnum(IconTip.staged_first) + index, lit("Remove attachment"));
+    if (a.canvas) |canvas| {
+        addIconTooltip(a, canvas, @intFromEnum(IconTip.react), lit("React"));
+        addIconTooltip(a, canvas, @intFromEnum(IconTip.reply), lit("Reply"));
+        addIconTooltip(a, canvas, @intFromEnum(IconTip.more), lit("Message actions"));
+        addIconTooltip(a, canvas, @intFromEnum(IconTip.header_avatar), lit("Current chat"));
+    }
     addTooltip(a, tt, a.attach_btn, lit("Attach photo or file"));
     var attach_info = win.TOOLINFOW{
         .cbSize = tooltip_info_size,
@@ -2614,6 +2711,8 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     if (a.selected_chat >= a.chat_count or
         !chat_key.Key.eql(selected_key.key(), chat_key.of(&a.chats[a.selected_chat])))
     {
+        clearHeaderIconTooltip(a);
+        invalidateCanvasIconTooltips(a);
         a.user_viewed = false;
         cancelSlackMark(a);
     }
@@ -4119,6 +4218,7 @@ fn insertMessageSorted(a: *App, message: Message) void {
         a.messages[index] = a.messages[index - 1];
     }
     a.messages[index] = message;
+    invalidateCanvasIconTooltips(a);
     a.message_count += 1;
     if (a.selected_message) |selected| {
         if (selected >= index) a.selected_message = selected + 1;
@@ -4141,6 +4241,7 @@ fn appendSlackPending(a: *App, text: []const u8, client_msg_id: []const u8, thre
         message.time.set(a.allocator, rendered);
     } else |_| {}
     message.send_state = .pending;
+    invalidateCanvasIconTooltips(a);
     a.messages[a.message_count] = message;
     a.message_count += 1;
     a.scroll_y = 0;
@@ -4214,6 +4315,7 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
     } else |_| {}
     message.send_state = .pending;
     a.messages[a.message_count] = message;
+    invalidateCanvasIconTooltips(a);
     a.message_count += 1;
     noteChatActivity(a, chat_key.of(pending), pending.queued_unix);
     if (!from_reload) refilterChats(a);
@@ -4303,6 +4405,7 @@ fn appendWhatsAppFailed(a: *App, failed: *const FailedSend) void {
     message.send_state = .failed;
     if (failed.unified) message.timestamp.set(&failed.id);
     a.messages[a.message_count] = message;
+    invalidateCanvasIconTooltips(a);
     a.message_count += 1;
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
@@ -4600,6 +4703,7 @@ fn removeMessageAt(a: *App, index: usize) void {
     }
     var shift = index;
     while (shift + 1 < a.message_count) : (shift += 1) a.messages[shift] = a.messages[shift + 1];
+    invalidateCanvasIconTooltips(a);
     a.message_count -= 1;
 }
 
@@ -5996,6 +6100,8 @@ fn retryPendingDownload(a: *App) void {
 }
 
 fn clearMessages(a: *App) void {
+    invalidateCanvasIconTooltips(a);
+    if (a.selected_chat >= a.chat_count) clearHeaderIconTooltip(a);
     if (a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.marked_chat.key(), chat_key.of(&a.chats[a.selected_chat]))) _ = clearMessageMarks(a);
     a.text_selection = .{};
     a.text_dragging = false;
@@ -8960,6 +9066,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         if (chat.provider == .slack and slackThreadsEnabled(a)) rememberSlackThreadRow(a, &message);
         if (source_index >= max_messages) continue;
         a.messages[a.message_count] = message;
+        invalidateCanvasIconTooltips(a);
         a.message_count += 1;
         const stored = &a.messages[a.message_count - 1];
         if (isAudio(stored)) loadTranscriptCache(a, stored);
@@ -8989,6 +9096,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         }
         var shift = reaction_index;
         while (shift + 1 < a.message_count) : (shift += 1) a.messages[shift] = a.messages[shift + 1];
+        invalidateCanvasIconTooltips(a);
         a.message_count -= 1;
     }
     reapplyPendingReactions(a, chat.jid.slice());
@@ -9678,6 +9786,10 @@ fn discardStagedImage(a: *App) void {
 
 fn removeStagedImage(a: *App, index: usize, discard: bool) void {
     const image = a.staged_images.remove(index) orelse return;
+    if (a.hwnd) |owner| {
+        for (0..staged_images.capacity) |slot| setIconTooltipRect(a, owner, @intFromEnum(IconTip.staged_first) + slot, &a.main_icon_tip_rects[slot + 1], std.mem.zeroes(win.RECT));
+    }
+    syncMainIconTooltips(a);
     disarmDictationSend(a);
     if (image.preview) |bitmap| _ = win.DeleteObject(bitmap);
     if (discard and image.owned and image.path.len > 0) deleteFileUtf8(image.path.slice());
@@ -10064,6 +10176,20 @@ fn voiceChatAllowed(a: *const App) bool {
     return a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .whatsapp;
 }
 
+fn updateVoiceTooltip(a: *App) void {
+    const tt = a.tooltips orelse return;
+    const button = a.voice_btn orelse return;
+    const text = if (a.voice_finishing) lit("Preparing voice note...") else if (a.voice_active) lit("Finish voice note  Ctrl+Shift+M · Enter sends · Esc cancels") else lit("Record a voice note  Ctrl+Shift+M");
+    var info = win.TOOLINFOW{
+        .cbSize = tooltip_info_size,
+        .uFlags = win.TTF_IDISHWND,
+        .hwnd = win.GetParent(button),
+        .uId = @intFromPtr(button),
+        .lpszText = @constCast(text),
+    };
+    _ = win.SendMessageW(tt, win.TTM_UPDATETIPTEXTW, 0, @bitCast(@intFromPtr(&info)));
+}
+
 fn updateVoiceButton(a: *App) void {
     const button = a.voice_btn orelse return;
     const allowed = voiceChatAllowed(a);
@@ -10083,13 +10209,24 @@ fn toggleVoice(a: *App) void {
         setStatus(a, "Send queue is full");
         return;
     }
-    if (a.voice_session == null) a.voice_session = voice_capture.Session.create(a.allocator) catch null;
+    if (a.voice_session == null) {
+        a.voice_session = voice_capture.Session.create(a.allocator) catch null;
+        if (a.voice_session) |created| {
+            if (verification_fixture) {
+                created.require_fixture = true;
+                if (messagesDirPath(a, "voice.pcm")) |path| {
+                    defer a.allocator.free(path);
+                    created.fixture_pcm = readFileWin(a.allocator, path, 1024 * 1024);
+                }
+            }
+        }
+    }
     const session = a.voice_session orelse {
         setStatus(a, "Could not start the microphone");
         return;
     };
     if (!session.start()) {
-        setStatus(a, "Could not start the microphone");
+        setStatus(a, if (verification_fixture) "Voice fixture is unavailable" else "Could not start the microphone");
         return;
     }
     a.voice_jid.set(a.chats[a.selected_chat].jid.slice());
@@ -10098,6 +10235,7 @@ fn toggleVoice(a: *App) void {
     a.voice_reply_sender = a.reply_sender;
     a.voice_active = true;
     a.voice_finishing = false;
+    updateVoiceTooltip(a);
     if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_voice, recording_paint.tick_interval_ms, null);
     layout(a, a.compose_client_width, a.compose_client_height);
     setStatus(a, "Recording... Enter sends, Esc cancels");
@@ -10107,6 +10245,7 @@ fn toggleVoice(a: *App) void {
 fn finishVoice(a: *App) void {
     const session = a.voice_session orelse return;
     a.voice_finishing = true;
+    updateVoiceTooltip(a);
     session.finish();
     setStatus(a, "Preparing voice note...");
 }
@@ -10114,6 +10253,7 @@ fn finishVoice(a: *App) void {
 fn endVoiceUi(a: *App) void {
     a.voice_active = false;
     a.voice_finishing = false;
+    updateVoiceTooltip(a);
     if (a.hwnd) |hwnd| _ = win.KillTimer(hwnd, timer_voice);
     layout(a, a.compose_client_width, a.compose_client_height);
     if (a.voice_btn) |button| _ = win.InvalidateRect(button, null, win.TRUE);
@@ -10198,6 +10338,7 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
         acceptUnifiedSends(a, &entries, ogg) catch return false;
         if (a.draft_store.isOpen(key)) clearReply(a);
         a.user_viewed = true;
+        invalidateCanvasIconTooltips(a);
         a.scroll_y = 0;
         for (a.pending_sends[0..a.pending_send_count]) |*pending| {
             if (std.mem.eql(u8, &pending.id, entry.idSlice())) {
@@ -10239,6 +10380,7 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
     }
     if (a.draft_store.isOpen(a.voice_origin.key())) clearReply(a);
     a.user_viewed = true;
+    invalidateCanvasIconTooltips(a);
     a.scroll_y = 0;
     appendWhatsAppPending(a, pending, false);
     persistFileOutbox(a);
@@ -10309,6 +10451,7 @@ fn sendUnifiedMessage(a: *App, thread: bool) bool {
     if (count > 0) discardStagedImage(a);
     if (!thread) clearReply(a);
     a.user_viewed = true;
+    invalidateCanvasIconTooltips(a);
     a.scroll_y = 0;
     _ = win.SetWindowTextW(compose, lit(""));
     if (!thread) saveComposerDraft(a);
@@ -10398,6 +10541,7 @@ fn sendMessageFrom(a: *App, thread: bool) bool {
         releaseStagedImage(a);
         if (!thread) clearReply(a);
         a.user_viewed = true;
+        invalidateCanvasIconTooltips(a);
         a.scroll_y = 0;
         for (a.pending_sends[start..a.pending_send_count]) |*pending| {
             forgetFailedSend(a, chat_key.of(pending), pending.text.slice());
@@ -10545,6 +10689,7 @@ fn sendMessageFrom(a: *App, thread: bool) bool {
     if (!thread) clearReply(a);
     forgetFailedSend(a, chat_key.of(pending), pending.text.slice());
     a.user_viewed = true;
+    invalidateCanvasIconTooltips(a);
     a.scroll_y = 0;
     appendWhatsAppPending(a, pending, false);
     _ = win.SetWindowTextW(compose, lit(""));
@@ -11311,8 +11456,12 @@ fn selectChat(a: *App, delta: i32, wrap: bool) void {
     } else {
         next = std.math.clamp(next, 0, count - 1);
     }
-    if (next != a.selected_chat) discardStagedImage(a);
+    if (next != a.selected_chat) {
+        clearHeaderIconTooltip(a);
+        discardStagedImage(a);
+    }
     cancelSlackMark(a);
+    invalidateCanvasIconTooltips(a);
     a.selected_chat = @intCast(next);
     switchComposerDraft(a);
     a.user_viewed = true;
@@ -11361,6 +11510,7 @@ fn scrollToSelectedMessage(a: *App) void {
         y -= height + messageGap(a, index);
         if (index != selected) continue;
         const delta = message_scroll.scrollDelta(y, height, client.top, client.bottom, px(a, 8));
+        invalidateCanvasIconTooltips(a);
         a.scroll_y = std.math.clamp(a.scroll_y + delta, 0, a.max_scroll);
         break;
     }
@@ -11384,6 +11534,7 @@ fn walkMessageHighlight(a: *App, key: u32) void {
         if (a.selected_message) |selected| {
             if (selected + 1 >= a.message_count) {
                 a.selected_message = null;
+                invalidateCanvasIconTooltips(a);
                 a.scroll_y = 0;
                 if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
             } else selectMessage(a, 1);
@@ -13463,6 +13614,15 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
     if (verification_fixture) {
+        const avatar = a.header_icon_tip_rect;
+        try w.print(",\"header_avatar\":[{d},{d},{d},{d}]", .{ avatar.left, avatar.top, avatar.right, avatar.bottom });
+        try w.writeAll(",\"staged_remove_rects\":[");
+        for (0..a.staged_images.count) |index| {
+            if (index > 0) try w.writeByte(',');
+            const rect = stagedRemoveRect(a, index);
+            try w.print("[{d},{d},{d},{d}]", .{ rect.left, rect.top, rect.right, rect.bottom });
+        }
+        try w.writeByte(']');
         const dictation_intent = if (a.dictation_operation) |operation| @tagName(std.meta.activeTag(operation.intent)) else "none";
         if (a.dictation_session) |session| {
             const phase = session.state();
@@ -13473,6 +13633,11 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
             });
         } else {
             try w.print(",\"dictation\":{{\"phase\":\"idle\",\"intent\":\"{s}\",\"cancelled\":false,\"draining\":false,\"ready\":false,\"generation\":0,\"consumed\":0,\"accepted\":{d},\"microphone_entries\":0,\"transcription_attempts\":0,\"gate_phase\":0,\"consume_open\":false,\"fixture_loaded\":false}}", .{ dictation_intent, a.verification_dictation_accepts });
+        }
+        if (a.voice_session) |session| {
+            try w.print(",\"voice_recording\":{{\"active\":{},\"finishing\":{},\"phase\":\"{s}\",\"samples\":{d},\"fixture_loaded\":{},\"fixture_entries\":{d},\"microphone_entries\":{d}}}", .{ a.voice_active, a.voice_finishing, @tagName(session.state()), session.samples.load(.acquire), session.fixture_pcm != null, session.fixture_entries.load(.acquire), session.microphone_entries.load(.acquire) });
+        } else {
+            try w.writeAll(",\"voice_recording\":{\"active\":false,\"finishing\":false,\"phase\":\"idle\",\"samples\":0,\"fixture_loaded\":false,\"fixture_entries\":0,\"microphone_entries\":0}");
         }
         var ready: usize = 0;
         var uncertain: usize = 0;
@@ -13725,9 +13890,11 @@ fn currentViewKey(a: *App) ?chat_key.Key {
 
 fn controlSelectIndex(a: *App, index: usize) void {
     if (index != a.selected_chat) {
+        clearHeaderIconTooltip(a);
         clearReply(a);
         discardStagedImage(a);
     }
+    invalidateCanvasIconTooltips(a);
     a.selected_chat = index;
     switchComposerDraft(a);
     a.user_viewed = true;
@@ -13849,6 +14016,15 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             .{ .name = "toggle", .rect = message.toggle_hit },
         }) |entry| try w.print(",\"{s}\":[{d},{d},{d},{d}]", .{ entry.name, entry.rect.left, entry.rect.top, entry.rect.right, entry.rect.bottom });
         if (verification_fixture) {
+            const actions = messageActionsRect(a, message);
+            try w.print(",\"selected\":{}", .{if (a.selected_message) |selected| selected == a.message_count - count + index else false});
+            try w.writeAll(",\"action_cells\":[");
+            for (0..3) |cell| {
+                if (cell > 0) try w.writeByte(',');
+                const rect = messageActionCellRect(a, actions, cell);
+                try w.print("[{d},{d},{d},{d}]", .{ rect.left, rect.top, rect.right, rect.bottom });
+            }
+            try w.writeByte(']');
             try w.writeAll(",\"download_state\":");
             try control_api.writeString(w, @tagName(media_drain.voiceState(message.local_path.len > 0, mediaDownloading(a, a.displayed_jid.slice(), message.id.slice()), mediaFailed(a, a.displayed_jid.slice(), message.id.slice()), message.media_size)));
             try w.print(",\"playing\":{},\"position_ms\":{d}", .{ std.mem.eql(u8, a.audio_playing_id.slice(), message.id.slice()) and a.audio_state == .playing, a.audio_position_ms });
@@ -13967,6 +14143,7 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Keyboard shortcuts", "F1", command_shortcuts_help);
     appendPalette(a, "You are on v" ++ app_version ++ " - this is the newest version", "", 0);
     appendPalette(a, "Dictate", "Ctrl+D", command_dictate);
+    appendPalette(a, "Record a voice note", "Ctrl+Shift+M", command_voice);
     appendPalette(a, "Dictation language: Automatic", "", command_dictation_auto);
     appendPalette(a, "Dictation language: English", "", command_dictation_english);
     appendPalette(a, "Dictation language: German", "", command_dictation_german);
@@ -14353,6 +14530,7 @@ fn paletteActivate(a: *App) void {
             break :blk selected;
         };
         discardStagedImage(a);
+        invalidateCanvasIconTooltips(a);
         a.selected_chat = @intCast(reselected);
         switchComposerDraft(a);
         if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, reselected, 0);
@@ -15078,6 +15256,7 @@ fn runCommand(a: *App, command: u16) void {
             refreshMessages(a);
         },
         command_dictate => toggleDictation(a),
+        command_voice => toggleVoice(a),
         command_dictation_auto, command_dictation_english, command_dictation_german => {
             a.dictation_language = switch (command) {
                 command_dictation_english => .english,
@@ -15277,7 +15456,10 @@ fn stagedRemoveRect(a: *const App, index: usize) win.RECT {
 fn layoutComposer(a: *App) void {
     const height = a.compose_client_height;
     const sizes = stagedComposerSizes(a, a.compose_client_width, height);
-    if (a.compose_strip_top == height - sizes.strip_height and a.compose_pill.top == height - px(a, 11) - sizes.edit_height) return;
+    if (a.compose_strip_top == height - sizes.strip_height and a.compose_pill.top == height - px(a, 11) - sizes.edit_height) {
+        syncMainIconTooltips(a);
+        return;
+    }
     const left_width = @min(px(a, theme.sidebar_width), @divTrunc(a.compose_client_width, 2));
     var dirty = win.RECT{ .left = left_width + 1, .top = @min(a.compose_strip_top, height - sizes.strip_height), .right = a.compose_client_width, .bottom = height };
     layoutRegion(a, a.compose_client_width, height, &dirty);
@@ -15288,6 +15470,8 @@ fn layout(a: *App, width: i32, height: i32) void {
 }
 
 fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void {
+    invalidateCanvasIconTooltips(a);
+    clearHeaderIconTooltip(a);
     a.compose_client_width = width;
     a.compose_client_height = height;
     const left_width = @min(px(a, theme.sidebar_width), @divTrunc(width, 2));
@@ -15319,6 +15503,7 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
         if (button) |hwnd| _ = win.MoveWindow(hwnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, win.TRUE);
     }
     updateAttachButton(a);
+    syncMainIconTooltips(a);
     if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, dirty, win.FALSE);
 }
 
@@ -16693,6 +16878,7 @@ fn canvasScrollInfo(a: *App) ScrollInfo {
 
 fn setCanvasScroll(a: *App, top: i32) void {
     const max_scroll = @max(0, a.max_scroll);
+    invalidateCanvasIconTooltips(a);
     a.scroll_y = std.math.clamp(max_scroll - @max(0, top), 0, max_scroll);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     if (a.scroll_y >= max_scroll) requestHubOlder(a);
@@ -16843,7 +17029,10 @@ fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
 }
 
 fn drawChatTitle(shapes: *const smooth.Context, hdc: win.HDC, a: *App, client: win.RECT) void {
-    if (a.selected_chat >= a.chat_count) return;
+    if (a.selected_chat >= a.chat_count) {
+        if (a.canvas) |owner| setIconTooltipRect(a, owner, @intFromEnum(IconTip.header_avatar), &a.header_icon_tip_rect, std.mem.zeroes(win.RECT));
+        return;
+    }
     const chat = &a.chats[a.selected_chat];
     smooth.fillRoundRectGradient(shapes, .{ .left = client.left, .top = client.top, .right = client.right, .bottom = client.top + px(a, 72) }, 1, theme.current.surface, theme.current.surface, 0);
     if (a.compose) |compose| {
@@ -16874,6 +17063,11 @@ fn drawChatTitle(shapes: *const smooth.Context, hdc: win.HDC, a: *App, client: w
     smooth.fillRoundRect(shapes, rect, px(a, 36), px(a, 36), theme.current.surface_container);
     smooth.strokeRoundRect(shapes, rect, px(a, 36), px(a, 36), theme.current.outline, px(a, 1));
     const avatar_rect = win.RECT{ .left = left + px(a, 6), .top = px(a, 22), .right = left + px(a, 30), .bottom = px(a, 46) };
+    if (a.canvas) |owner| {
+        var clipped = win.RECT{ .left = @max(client.left, avatar_rect.left), .top = @max(client.top, avatar_rect.top), .right = @min(client.right, avatar_rect.right), .bottom = @min(client.bottom, avatar_rect.bottom) };
+        if (clipped.right <= clipped.left or clipped.bottom <= clipped.top) clipped = std.mem.zeroes(win.RECT);
+        setIconTooltipRect(a, owner, @intFromEnum(IconTip.header_avatar), &a.header_icon_tip_rect, clipped);
+    }
     smooth.fillEllipse(shapes, avatar_rect, theme.current.surface_container_highest);
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
     _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
@@ -16897,6 +17091,11 @@ fn messageActionsRect(a: *const App, message: *const Message) win.RECT {
     return .{ .left = left, .top = bubble.bottom - px(a, 24), .right = left + px(a, 72), .bottom = bubble.bottom };
 }
 
+fn messageActionCellRect(a: *const App, actions: win.RECT, cell: usize) win.RECT {
+    const left = actions.left + @as(i32, @intCast(cell)) * px(a, 24);
+    return .{ .left = left, .top = actions.top, .right = if (cell == 2) actions.right else left + px(a, 24), .bottom = actions.bottom };
+}
+
 fn drawMessageActions(shapes: *const smooth.Context, hdc: win.HDC, a: *App) void {
     const index = a.message_hover orelse return;
     if (index >= a.message_count) return;
@@ -16915,12 +17114,18 @@ fn drawMessageActions(shapes: *const smooth.Context, hdc: win.HDC, a: *App) void
 fn updateMessageHover(a: *App, hwnd: win.HWND, lparam: win.LPARAM) void {
     const hover_x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
     const hover_y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+    updateMessageHoverAt(a, hwnd, hover_x, hover_y);
+}
+
+fn updateMessageHoverAt(a: *App, hwnd: win.HWND, hover_x: i32, hover_y: i32) void {
     var hovered: ?usize = null;
     for (a.messages[0..a.message_count], 0..) |*item, index| {
         if (item.bubble_hit.right > item.bubble_hit.left and (rectHasPoint(item.bubble_hit, hover_x, hover_y) or rectHasPoint(messageActionsRect(a, item), hover_x, hover_y))) hovered = index;
     }
     if (a.message_hover != hovered) {
+        clearCanvasIconTooltips(a);
         a.message_hover = hovered;
+        syncCanvasIconTooltips(a);
         _ = win.InvalidateRect(hwnd, null, win.FALSE);
     }
     var track = win.TRACKMOUSEEVENT{ .cbSize = @sizeOf(win.TRACKMOUSEEVENT), .dwFlags = win.TME_LEAVE, .hwndTrack = hwnd, .dwHoverTime = 0 };
@@ -17337,6 +17542,11 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = text_draw.drawText(hdc, text, -1, &badge, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
     }
+    var cursor: win.POINT = undefined;
+    if (win.GetCursorPos(&cursor) != 0 and win.WindowFromPoint(cursor) == hwnd and win.ScreenToClient(hwnd, &cursor) != 0) {
+        updateMessageHoverAt(a, hwnd, cursor.x, cursor.y);
+    }
+    syncCanvasIconTooltips(a);
     drawMessageActions(&shapes, hdc, a);
     drawChatTitle(&shapes, hdc, a, client);
     drawScrollbar(&shapes, canvasStripRect(a), canvasScrollInfo(a), theme.current.outline);
@@ -17348,6 +17558,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
     switch (message) {
         win.WM_MOUSELEAVE => {
             a.message_hover = null;
+            clearCanvasIconTooltips(a);
             _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return 0;
         },
@@ -17363,6 +17574,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             if (win.GetCursorPos(&point) == 0 or win.ScreenToClient(hwnd, &point) == 0 or win.GetClientRect(hwnd, &client) == 0) return 0;
             const step: i32 = if (point.y <= client.top) px(a, 24) else if (point.y >= client.bottom - 1) -px(a, 24) else return 0;
             const previous = a.scroll_y;
+            invalidateCanvasIconTooltips(a);
             a.scroll_y = std.math.clamp(a.scroll_y + step, 0, a.max_scroll);
             if (a.scroll_y != previous) a.drag_moved = true;
             _ = win.InvalidateRect(hwnd, null, win.FALSE);
@@ -17373,6 +17585,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         },
         win.WM_MOUSEWHEEL => {
             const delta: i16 = @bitCast(hiword(wparam));
+            invalidateCanvasIconTooltips(a);
             a.scroll_y = std.math.clamp(a.scroll_y + @divTrunc(@as(i32, delta), 2), 0, a.max_scroll);
             _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return 0;
@@ -17385,6 +17598,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                     const actions = messageActionsRect(a, &a.messages[index]);
                     if (rectHasPoint(actions, x, y)) {
                         a.selected_message = index;
+                        syncCanvasIconTooltips(a);
                         a.canvas_double_click_handled = true;
                         switch (@divTrunc(x - actions.left, px(a, 24))) {
                             0 => openReactionPicker(a),
@@ -17585,7 +17799,9 @@ fn selectChatRow(a: *App, row: usize) void {
     _ = clearBulkSelection(a);
     if (row >= a.chat_count) return;
     _ = win.SendMessageW(a.chats_hwnd.?, win.LB_SETCURSEL, row, 0);
+    if (row != a.selected_chat) clearHeaderIconTooltip(a);
     discardStagedImage(a);
+    invalidateCanvasIconTooltips(a);
     a.selected_chat = row;
     switchComposerDraft(a);
     a.user_viewed = true;
@@ -18036,7 +18252,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             subclassComposerButton(a, a.dictate, 0);
             subclassComposerButton(a, a.send, 1);
             subclassComposerButton(a, a.emoji_btn, 2);
-            createTooltips(a, hwnd);
             text_draw.reset();
             recreateFonts(a);
             createTooltips(a, hwnd);
@@ -18532,6 +18747,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return 0;
         },
         win.WM_DESTROY => {
+            if (a.tooltips) |tt| {
+                _ = win.DestroyWindow(tt);
+                a.tooltips = null;
+            }
             if (a.notification_icon) {
                 var icon = notificationIcon(a);
                 _ = win.Shell_NotifyIconW(win.NIM_DELETE, &icon);
@@ -18787,6 +19006,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
                 win.VK_NEXT => -page,
                 else => -a.scroll_y,
             };
+            invalidateCanvasIconTooltips(a);
             a.scroll_y = std.math.clamp(a.scroll_y + step, 0, a.max_scroll);
             _ = win.InvalidateRect(canvas, null, win.FALSE);
             if (key == win.VK_PRIOR and a.scroll_y >= a.max_scroll) requestHubOlder(a);
@@ -18885,6 +19105,13 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             return true;
         }
         return false;
+    }
+    const voice_key = shortcuts.voiceKey(key, control, shift, alt, (@as(usize, @bitCast(message.lParam)) & (@as(usize, 1) << 30)) != 0);
+    if (voice_key != .ignore) {
+        const owner = a.hwnd orelse return false;
+        if (win.GetForegroundWindow() != owner or win.IsWindowEnabled(owner) == 0 or focus == null or win.GetAncestor(focus, win.GA_ROOT) != owner or (a.thread_compose != null and focus == a.thread_compose.?)) return false;
+        if (voice_key == .start_or_finish) runCommand(a, command_voice);
+        return true;
     }
     if (a.thread_parent.len > 0 and !control and !alt) {
         if (key == win.VK_ESCAPE) {
@@ -18989,7 +19216,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         copySelectedText(a);
         return true;
     }
-    if (control and key == 'R') {
+    if (control and !shift and !alt and key == 'R') {
         openReactionPicker(a);
         return true;
     }
@@ -19106,6 +19333,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
 fn jumpToLatestMessage(a: *App) void {
     if (a.message_count == 0) return;
     a.selected_message = a.message_count - 1;
+    invalidateCanvasIconTooltips(a);
     a.scroll_y = 0;
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
@@ -20076,6 +20304,7 @@ pub fn main(init: std.process.Init) !void {
             _ = win.GetWindowRect(app.canvas.?, &canvas_rect);
             if (wheel_point.x >= canvas_rect.left and wheel_point.x <= canvas_rect.right and wheel_point.y >= canvas_rect.top and wheel_point.y <= canvas_rect.bottom) {
                 const wheel_delta: i16 = @bitCast(hiword(@as(usize, @bitCast(message.wParam))));
+                invalidateCanvasIconTooltips(app);
                 app.scroll_y = std.math.clamp(app.scroll_y + @divTrunc(@as(i32, wheel_delta), 2), 0, app.max_scroll);
                 _ = win.InvalidateRect(app.canvas.?, null, win.TRUE);
                 if (wheel_delta > 0 and app.scroll_y >= app.max_scroll) requestHubOlder(app);
@@ -22408,6 +22637,7 @@ fn toggleSlackThreads(a: *App) void {
     a.threads_enabled = enabled;
     closeSlackThread(a);
     a.selected_message = null;
+    invalidateCanvasIconTooltips(a);
     a.scroll_y = 0;
     a.slack_history_hash = 0;
     a.msg_applied_hash = 0;

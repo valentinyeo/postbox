@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Composer and message icons show hover labels. Ctrl+Shift+M records a WhatsApp voice note.
+
 - Group chats show each sender’s face and coloured name, repeat names after date breaks, and keep short replies compact.
 
 - Queued messages show sending. Failed sends no longer block later messages forever.

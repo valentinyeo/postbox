@@ -50,6 +50,7 @@ pub const groups = [_]Group{
         .{ .key = "Ctrl+A", .desc = "Select all text, or all visible chats if the message box is empty" },
         .{ .key = "C", .desc = "Focus the composer" },
         .{ .key = "Ctrl+V", .desc = "Paste a copied image to send" },
+        .{ .key = "Ctrl+Shift+M", .desc = "Start or finish a voice note" },
         .{ .key = "Esc", .desc = "Cancel the reply or discard a pasted image" },
         .{ .key = "Arrows / Enter / Esc, emoji picker open", .desc = "Move, insert or close the emoji picker" },
     } },
@@ -75,6 +76,22 @@ pub const groups = [_]Group{
         .{ .key = "Ctrl+- / Ctrl++ / Ctrl+0", .desc = "Make text smaller, larger, or reset it" },
     } },
 };
+
+pub const VoiceKey = enum { ignore, start_or_finish, consume_repeat };
+
+pub fn voiceKey(key: u32, control: bool, shift: bool, alt: bool, repeated: bool) VoiceKey {
+    if (key != 'M' or !control or !shift or alt) return .ignore;
+    return if (repeated) .consume_repeat else .start_or_finish;
+}
+
+test "voice shortcut requires exact modifiers and ignores held repeats" {
+    try std.testing.expectEqual(VoiceKey.start_or_finish, voiceKey('M', true, true, false, false));
+    try std.testing.expectEqual(VoiceKey.consume_repeat, voiceKey('M', true, true, false, true));
+    try std.testing.expectEqual(VoiceKey.ignore, voiceKey('M', true, false, false, false));
+    try std.testing.expectEqual(VoiceKey.ignore, voiceKey('M', false, true, false, false));
+    try std.testing.expectEqual(VoiceKey.ignore, voiceKey('M', true, true, true, false));
+    try std.testing.expectEqual(VoiceKey.ignore, voiceKey('N', true, true, false, false));
+}
 
 fn hasDuplicateKeys(group: Group) bool {
     for (group.items, 0..) |item, i| {
