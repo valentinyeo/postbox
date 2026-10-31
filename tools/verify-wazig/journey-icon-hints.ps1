@@ -16,6 +16,7 @@ public static class IconHintKeys {
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int x, y; }
     [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
     [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
     [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", SetLastError=true)]
     public static extern IntPtr Selection(IntPtr window, uint message, ref uint start, ref uint end, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, INPUT[] inputs, int size);
@@ -63,26 +64,97 @@ function Icon-Snapshot([string]$Name) {
 }
 
 function Icon-Popup {
-    $tools = @([VerifyInboxTooltip]::Tools($session.pid))
-    Assert-That ($tools.Count -eq 1) 'Tooltip window count changed'
+    $begin = [Diagnostics.Stopwatch]::GetTimestamp()
+    $first = @([VerifyInboxTooltip]::Tools($session.pid))
+    Assert-That ($first.Count -eq 1) 'Tooltip window count changed'
     $tip = [VerifyMenus]::Find($session.pid, 'tooltips_class32')
-    if ($tip -eq [IntPtr]::Zero) { return @{ visible = $false; hwnd = 0; text = ''; ticks = [Diagnostics.Stopwatch]::GetTimestamp(); frequency = [Diagnostics.Stopwatch]::Frequency; tooltips = $tools } }
-    $bounds = [VerifyMenus]::Bounds($tip)
-    $text = Read-EditText $tip
-    return @{ visible = $true; hwnd = $tip.ToInt64(); text = $text; bounds = @($bounds.Left, $bounds.Top, $bounds.Right, $bounds.Bottom); ticks = [Diagnostics.Stopwatch]::GetTimestamp(); frequency = [Diagnostics.Stopwatch]::Frequency; tooltips = $tools }
+    $text = ''
+    $bounds = $null
+    if ($tip -ne [IntPtr]::Zero) {
+        $bounds = [VerifyMenus]::Bounds($tip)
+        $text = Read-EditText $tip
+    }
+    $last = @([VerifyInboxTooltip]::Tools($session.pid))
+    $endTip = [VerifyMenus]::Find($session.pid, 'tooltips_class32')
+    $endText = if ($endTip -ne [IntPtr]::Zero) { Read-EditText $endTip } else { '' }
+    $end = [Diagnostics.Stopwatch]::GetTimestamp()
+    Assert-That ($last.Count -eq 1 -and $first[0].hwnd -eq $last[0].hwnd -and $first[0].visible -eq $last[0].visible -and $tip -eq $endTip -and $text -ceq $endText -and $first[0].visible -eq ($tip -ne [IntPtr]::Zero)) 'Tooltip observation changed during native reads'
+    if ($tip -ne [IntPtr]::Zero) {
+        Assert-That (($first[0].current | ConvertTo-Json -Compress) -ceq ($last[0].current | ConvertTo-Json -Compress)) 'Tooltip target changed during native reads'
+    }
+    return @{ visible = ($tip -ne [IntPtr]::Zero); hwnd = $tip.ToInt64(); text = $text; bounds = if ($null -eq $bounds) { @() } else { @($bounds.Left, $bounds.Top, $bounds.Right, $bounds.Bottom) }; ticks = $end; begin_ticks = $begin; end_ticks = $end; frequency = [Diagnostics.Stopwatch]::Frequency; tooltips = $last; first_tools = $first }
 }
 
-function Icon-Transition([string]$Name, $Before, [string]$OldText) {
+$script:hoverSequence = 0
+function Icon-FreshHover([string]$Id, [int]$AnchorX = 0, [int]$AnchorY = 0) {
+    $evidence = Get-Content (Join-Path $session.evidence "hover-$Id.json") -Raw | ConvertFrom-Json
+    $tool = $evidence.tooltips[0].current
+    $screen = @($evidence.owner_rect)
+    $clientOrigin = @()
+    if (($tool.flags -band 1) -eq 0) {
+        $client = [VerifyWindow+Point]::new()
+        Assert-That ([VerifyWindow]::ClientToScreen([IntPtr][long]$tool.owner, [ref]$client)) 'Tool owner origin unavailable'
+        $clientOrigin = @($client.X, $client.Y)
+        $screen = @($client.X + $tool.rect[0], $client.Y + $tool.rect[1], $client.X + $tool.rect[2], $client.Y + $tool.rect[3])
+    }
+    $neutral = [VerifyWindow+Point]::new()
+    $neutral.X = 4; $neutral.Y = 4
+    Assert-That ([VerifyWindow]::ClientToScreen([IntPtr](Get-App $session).MainWindowHandle, [ref]$neutral)) 'Neutral origin unavailable'
+    [VerifyMenus]::Hover($session.pid, $neutral.X, $neutral.Y)
+    if ($AnchorX -ne 0 -or $AnchorY -ne 0) { [VerifyMenus]::Hover($session.pid, $AnchorX, $AnchorY) }
+    $reset = Wait-Until { $value = Icon-Popup; if (-not $value.visible) { return ,$value } } 'hidden tooltip reset'
+    $cursor = [IconHintKeys+POINT]::new()
+    Assert-That ([IconHintKeys]::GetCursorPos([ref]$cursor)) 'Cursor position unavailable'
+    $cursorWindow = [IconHintKeys]::WindowFromPoint($cursor)
+    $cursorPid = [uint32]0
+    [VerifyWindow]::GetWindowThreadProcessId($cursorWindow, [ref]$cursorPid) | Out-Null
+    Assert-That ($cursorPid -eq $session.pid -and -not ($cursor.x -ge $screen[0] -and $cursor.x -lt $screen[2] -and $cursor.y -ge $screen[1] -and $cursor.y -lt $screen[3])) 'Reset cursor still hits target'
+    $entryBegin = [long]0; $entryEnd = [long]0
+    [VerifyMenus]::Hover($session.pid, [int]$evidence.x, [int]$evidence.y, [ref]$entryBegin, [ref]$entryEnd)
+    $entered = [IconHintKeys+POINT]::new()
+    Assert-That ([IconHintKeys]::GetCursorPos([ref]$entered)) 'Target cursor position unavailable'
+    $enteredWindow = [IconHintKeys]::WindowFromPoint($entered)
+    $enteredPid = [uint32]0
+    [VerifyWindow]::GetWindowThreadProcessId($enteredWindow, [ref]$enteredPid) | Out-Null
+    Assert-That ($enteredPid -eq $session.pid -and $enteredWindow.ToInt64() -eq $evidence.owner -and $entered.x -ge $screen[0] -and $entered.x -lt $screen[2] -and $entered.y -ge $screen[1] -and $entered.y -lt $screen[3]) 'Target cursor hit changed'
+    $first = Wait-Until {
+        $value = Icon-Popup
+        if ($value.visible -and $value.text -ceq $evidence.expected -and ($value.tooltips[0].current | ConvertTo-Json -Compress) -ceq ($tool | ConvertTo-Json -Compress)) { return ,$value }
+    } "fresh tooltip $Id"
+    $script:hoverSequence++
+    return @{ hover_id = $Id; sequence = $script:hoverSequence; pid = $session.pid; start_ticks = $session.startTicks; exe = $session.exe; sha256 = $session.sha256; commit = $session.commit; frequency = [Diagnostics.Stopwatch]::Frequency; tooltip_hwnd = $first.hwnd; autopop_ms = $first.tooltips[0].autopop_ms; text = $first.text; tool = $tool; target_hwnd = $evidence.owner; target_screen_rect = $screen; client_origin = $clientOrigin; reset = $reset; reset_cursor = @{ x = $cursor.x; y = $cursor.y; owner_hwnd = $cursorWindow.ToInt64(); owner_pid = $cursorPid }; target_move = @{ x = $entered.x; y = $entered.y; requested_x = $evidence.x; requested_y = $evidence.y; owner_hwnd = $enteredWindow.ToInt64(); owner_pid = $enteredPid; input_begin_ticks = $entryBegin; input_end_ticks = $entryEnd }; first_visible = $first }
+}
+
+function Icon-Transition([string]$Name, [string]$Id, [scriptblock]$Action, [string]$AfterText = '', [int]$AnchorX = 0, [int]$AnchorY = 0) {
+    $generation = $null; $before = $null
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        $generation = Icon-FreshHover $Id $AnchorX $AnchorY
+        $before = Icon-Popup
+        $now = [Diagnostics.Stopwatch]::GetTimestamp()
+        $f = [bigint]$generation.frequency; $a = [bigint]$generation.autopop_ms
+        $reserve = [bigint]::Min([bigint]500 * $f, [bigint]::Min([bigint]3000 * $f, $a * $f))
+        if ($before.visible -and ($before.tooltips[0].current | ConvertTo-Json -Compress) -ceq ($generation.tool | ConvertTo-Json -Compress) -and 2000 * ([bigint]$now - $generation.target_move.input_begin_ticks) + $reserve -lt $a * $f) { break }
+        $generation = $null
+    }
+    Assert-That ($null -ne $generation) "$Name could not establish fresh hover"
+    $transition = [Diagnostics.Stopwatch]::GetTimestamp()
+    Assert-That (2000 * ([bigint]$transition - $generation.target_move.input_begin_ticks) + $reserve -lt $a * $f) "$Name hover became too old"
+    $actionBegin = [Diagnostics.Stopwatch]::GetTimestamp()
+    & $Action
+    $actionEnd = [Diagnostics.Stopwatch]::GetTimestamp()
     $after = Wait-Until {
         $value = Icon-Popup
-        if (-not $value.visible -or $value.text -cne $OldText) { return ,$value }
-    } "$Name old tooltip disappears"
-    $elapsed = 1000.0 * ($after.ticks - $Before.ticks) / $Before.frequency
-    $autopop = $Before.tooltips[0].autopop_ms
-    Assert-That ($autopop -gt 0 -and $elapsed -ge 0 -and $elapsed -lt [Math]::Min(1500, $autopop / 2)) "$Name tooltip stayed visible too long"
+        $elapsedTicks = [bigint]$value.end_ticks - $transition
+        $ageTicks = [bigint]$value.end_ticks - $generation.target_move.input_begin_ticks
+        Assert-That (1000 * $elapsedTicks -lt 1500 * $f -and 2000 * $elapsedTicks -lt $a * $f -and 2000 * $ageTicks -lt $a * $f) "$Name native tooltip deadline missed"
+        if (($AfterText -eq '' -and -not $value.visible) -or ($AfterText -ne '' -and $value.visible -and $value.text -ceq $AfterText)) { return ,$value }
+    } "$Name native tooltip transition"
+    $prompt = [bigint]$after.end_ticks - $transition
+    $age = [bigint]$after.end_ticks - $generation.target_move.input_begin_ticks
+    Assert-That (1000 * $prompt -lt 1500 * $f -and 2000 * $prompt -lt $a * $f -and 2000 * $age -lt $a * $f) "$Name native tooltip deadline missed"
     $screenshot = "transition-$Name"
     Save-Screen $session $screenshot
-    $script:iconTransitions[$Name] = @{ before = $Before; after = $after; elapsed_ms = $elapsed; screenshot = "$screenshot.png" }
+    $script:iconTransitions[$Name] = @{ generation = $generation; before = $before; after = $after; transition_ticks = $transition; action_begin_ticks = $actionBegin; action_end_ticks = $actionEnd; pid = $session.pid; start_ticks = $session.startTicks; exe = $session.exe; sha256 = $session.sha256; commit = $session.commit; screenshot = "$screenshot.png" }
 }
 
 function Icon-Hover([string]$Id, [string]$Expected, [int]$X, [int]$Y, [int]$AnchorX = 0, [int]$AnchorY = 0) {
@@ -221,25 +293,28 @@ foreach ($control in $state.composer.controls) {
     $y = $origin.Y + [int](($control.top + $control.bottom) / 2)
     Icon-Hover $control.name $labels[$control.name] $x $y
 }
-$oldPopup = Icon-Popup
-Assert-That ($oldPopup.visible -and $oldPopup.text -ceq 'Send message  Enter') 'Send tooltip was not visible'
-[VerifyMenus]::Hover($session.pid, $origin.X + 4, $origin.Y + 4)
-Icon-Transition 'leave' $oldPopup 'Send message  Enter'
+Icon-Transition 'leave' 'send' { [VerifyMenus]::Hover($session.pid, $origin.X + 4, $origin.Y + 4) }
 $canvas = [IntPtr](Get-Edit (Get-Window $session) '1024').Current.NativeWindowHandle
 $canvasOrigin = [VerifyWindow+Point]::new()
 Assert-That ([VerifyWindow]::ClientToScreen($canvas, [ref]$canvasOrigin)) 'Canvas origin unavailable'
 $header = Wait-Until { $value = (Read-Control $session status).header_avatar; if ($value[2] -gt $value[0] -and $value[3] -gt $value[1]) { return ,$value } } 'header avatar painted'
 Icon-Hover 'header-avatar' 'Current chat' ($canvasOrigin.X + [int](($header[0] + $header[2]) / 2)) ($canvasOrigin.Y + [int](($header[1] + $header[3]) / 2))
-$beforeResize = Icon-Popup
 $originalBounds = [VerifyMenus]::Bounds($main)
 [VerifyWindow]::ShowWindow($main, 9) | Out-Null
-Assert-That ([VerifyWindow]::SetWindowPos($main, [IntPtr]::Zero, 0, 0, 1100, 700, 0x16)) 'Resize failed'
+$null = Wait-Until { $value = [VerifyMenus]::Bounds($main); ($value.Right - $value.Left) -ne ($originalBounds.Right - $originalBounds.Left) } 'restored window settled'
+$restoredBounds = [VerifyMenus]::Bounds($main)
+$canvasOrigin = [VerifyWindow+Point]::new()
+Assert-That ([VerifyWindow]::ClientToScreen($canvas, [ref]$canvasOrigin)) 'Restored canvas origin unavailable'
+$header = Wait-Until { $value = (Read-Control $session status).header_avatar; if ($value[2] -gt $value[0]) { return ,$value } } 'restored header painted'
+Icon-Hover 'header-resize' 'Current chat' ($canvasOrigin.X + [int](($header[0] + $header[2]) / 2)) ($canvasOrigin.Y + [int](($header[1] + $header[3]) / 2))
+$resizeWidth = [Math]::Max(400, $restoredBounds.Right - $restoredBounds.Left - 80)
+$resizeHeight = [Math]::Max(300, $restoredBounds.Bottom - $restoredBounds.Top - 40)
+Icon-Transition 'resize' 'header-resize' { Assert-That ([VerifyWindow]::SetWindowPos($main, [IntPtr]::Zero, 0, 0, $resizeWidth, $resizeHeight, 0x16)) 'Resize failed' }
 $resizedBounds = Wait-Until {
     $value = [VerifyMenus]::Bounds($main)
     if (($value.Right - $value.Left) -ne ($originalBounds.Right - $originalBounds.Left) -or ($value.Bottom - $value.Top) -ne ($originalBounds.Bottom - $originalBounds.Top)) { return ,$value }
 } 'window resized'
-Icon-Transition 'resize' $beforeResize 'Current chat'
-$script:iconTransitions['resize']['before_window'] = @($originalBounds.Left, $originalBounds.Top, $originalBounds.Right, $originalBounds.Bottom)
+$script:iconTransitions['resize']['before_window'] = @($restoredBounds.Left, $restoredBounds.Top, $restoredBounds.Right, $restoredBounds.Bottom)
 $script:iconTransitions['resize']['after_window'] = @($resizedBounds.Left, $resizedBounds.Top, $resizedBounds.Right, $resizedBounds.Bottom)
 [VerifyWindow]::ShowWindow($main, 3) | Out-Null
 $null = Wait-Until { $bounds = [VerifyMenus]::Bounds($main); ($bounds.Right - $bounds.Left) -eq ($originalBounds.Right - $originalBounds.Left) } 'window maximized again'
@@ -319,34 +394,29 @@ foreach ($case in @(@{ name = 'selected'; message = $selected }, @{ name = 'unse
         $y = $canvasOrigin.Y + [int](($rect[1] + $rect[3]) / 2)
         Icon-Hover "$($ids[$cell])-$($case.name)" $wanted[$cell] $x $y $anchorX $anchorY
         if ($case.name -eq 'selected' -and $cell -eq 0) {
-            $beforePopup = Icon-Popup
             $next = $row.action_cells[1]
             $nextX = $canvasOrigin.X + [int](($next[0] + $next[2]) / 2)
             $nextY = $canvasOrigin.Y + [int](($next[1] + $next[3]) / 2)
-            [VerifyMenus]::Hover($session.pid, $nextX, $nextY)
-            $afterPopup = Wait-Until { $value = Icon-Popup; if ($value.visible -and $value.text -ceq 'Reply  Ctrl+Shift+R') { return ,$value } } 'adjacent action tooltip'
-            $elapsed = 1000.0 * ($afterPopup.ticks - $beforePopup.ticks) / $beforePopup.frequency
-            Assert-That ($elapsed -ge 0 -and $elapsed -lt [Math]::Min(1500, $beforePopup.tooltips[0].autopop_ms / 2)) 'Adjacent tooltip update was too slow'
-            Save-Screen $session 'transition-adjacent'
-            $script:iconTransitions['adjacent'] = @{ before = $beforePopup; after = $afterPopup; elapsed_ms = $elapsed; screenshot = 'transition-adjacent.png' }
+            Icon-Transition 'adjacent' 'react-selected' { [VerifyMenus]::Hover($session.pid, $nextX, $nextY) } 'Reply  Ctrl+Shift+R' $anchorX $anchorY
         }
     }
 }
-$beforeScroll = Icon-Popup
-Assert-That ($beforeScroll.visible -and $beforeScroll.text -ceq 'Message actions') 'Scroll tooltip unavailable'
-Assert-That ([IconHintKeys]::Wheel(120)) 'Mouse wheel SendInput failed'
+$scrollBefore = Read-Control $session messages
+Icon-Transition 'scroll' 'more-unselected' { Assert-That ([IconHintKeys]::Wheel(120)) 'Mouse wheel SendInput failed' } '' $anchorX $anchorY
+$scrollAfter = Read-Control $session messages
+$script:iconTransitions['scroll']['before_messages'] = $scrollBefore.messages
+$script:iconTransitions['scroll']['after_messages'] = $scrollAfter.messages
 Add-Content (Join-Path $session.evidence 'actions.log') 'icon-wheel: 120'
-Icon-Transition 'scroll' $beforeScroll 'Message actions'
 Send-Keys $session '^+r'
 $reply = Wait-Until { $value = Read-Control $session status; if ($value.reply.id -ceq $selected.id) { $value.reply } } 'selected message reply'
 $rect = $reply.close
 $x = $origin.X + [int](($rect[0] + $rect[2]) / 2)
 $y = $origin.Y + [int](($rect[1] + $rect[3]) / 2)
 Icon-Hover 'reply-close' 'Cancel reply  Esc in message box' $x $y
-$oldPopup = Icon-Popup
-[VerifyMenus]::Click($session.pid, $x, $y, $false)
-$null = Wait-Until { (Read-Control $session status).reply.id -ceq '' } 'reply closed'
-Icon-Transition 'reply-close' $oldPopup 'Cancel reply  Esc in message box'
+Icon-Transition 'reply-close' 'reply-close' { [VerifyMenus]::Click($session.pid, $x, $y, $false) }
+$closedReply = Wait-Until { $value = Read-Control $session status; if ($value.reply.id -ceq '') { return ,$value } } 'reply closed'
+$script:iconTransitions['reply-close']['before_reply'] = $reply.id
+$script:iconTransitions['reply-close']['after_reply'] = $closedReply.reply.id
 $fixture = Join-Path (Join-Path $session.root 'profile') 'icon-fixture.png'
 [VerifyPasteImage]::Fixture($fixture)
 $capacity = (Read-Control $session status).staged_capacity
@@ -368,10 +438,10 @@ $rect = $staged.staged_remove_rects[0]
 $x = $origin.X + [int](($rect[0] + $rect[2]) / 2)
 $y = $origin.Y + [int](($rect[1] + $rect[3]) / 2)
 Icon-Hover 'staged-before-compaction' 'Remove attachment' $x $y
-$oldPopup = Icon-Popup
-[VerifyMenus]::Click($session.pid, $x, $y, $false)
+Icon-Transition 'staged-compaction' 'staged-before-compaction' { [VerifyMenus]::Click($session.pid, $x, $y, $false) }
 $staged = Wait-Until { $value = Read-Control $session status; if ($value.staged_attachment_count -eq ($capacity - 1)) { $value } } 'attachment compacted'
-Icon-Transition 'staged-compaction' $oldPopup 'Remove attachment'
+$script:iconTransitions['staged-compaction']['before_count'] = $capacity
+$script:iconTransitions['staged-compaction']['after_count'] = $staged.staged_attachment_count
 $rect = $staged.staged_remove_rects[0]
 $x = $origin.X + [int](($rect[0] + $rect[2]) / 2)
 $y = $origin.Y + [int](($rect[1] + $rect[3]) / 2)
@@ -395,10 +465,19 @@ Assert-That ([VerifyWindow]::ClientToScreen($canvas, [ref]$canvasOrigin)) 'Canva
 $chatBefore = Read-Control $session status
 $header = Wait-Until { $value = (Read-Control $session status).header_avatar; if ($value[2] -gt $value[0] -and $value[3] -gt $value[1]) { return ,$value } } 'header restored'
 Icon-Hover 'header-before-chat' 'Current chat' ($canvasOrigin.X + [int](($header[0] + $header[2]) / 2)) ($canvasOrigin.Y + [int](($header[1] + $header[3]) / 2))
-$oldPopup = Icon-Popup
-Send-Keys $session '^{TAB}'
+Assert-That ([VerifyWindow]::GetForegroundWindow() -eq $main) 'Chat window is not foreground'
+Icon-Transition 'chat' 'header-before-chat' {
+    Assert-That ([VerifyWindow]::GetForegroundWindow() -eq $main) 'Chat window lost foreground'
+    try {
+        Assert-That ([IconHintKeys]::Key(17, $false)) 'Ctrl down failed'
+        Assert-That ([IconHintKeys]::Key(9, $false)) 'Tab down failed'
+    } finally {
+        Assert-That ([IconHintKeys]::Key(9, $true)) 'Tab up failed'
+        Assert-That ([IconHintKeys]::Key(17, $true)) 'Ctrl up failed'
+    }
+    Assert-That ([VerifyWindow]::GetForegroundWindow() -eq $main) 'Chat window lost foreground'
+}
 $chatAfter = Wait-Until { $value = Read-Control $session status; if ($null -ne $value.selected -and $value.selected.id -cne $chatBefore.selected.id) { $value } } 'different chat selected'
-Icon-Transition 'chat' $oldPopup 'Current chat'
 $script:iconTransitions['chat']['before_selected'] = $chatBefore.selected
 $script:iconTransitions['chat']['after_selected'] = $chatAfter.selected
 for ($attempt = 0; $attempt -lt 5; $attempt++) {

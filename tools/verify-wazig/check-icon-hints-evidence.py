@@ -34,19 +34,50 @@ def check_no_send(requests):
 
 
 def check_transition(item):
+    generation = item['generation']
+    reset, first = generation['reset'], generation['first_visible']
     before, after = item['before'], item['after']
-    assert before['visible'] and before['hwnd'] > 0 and before['text']
-    assert len(before['tooltips']) == len(after['tooltips']) == 1
+    observations = (reset, first, before, after)
+    frequency = generation['frequency']
+    assert type(frequency) is int and frequency > 0
+    assert generation['sequence'] > 0 and generation['pid'] == item['pid'] > 0
+    assert generation['start_ticks'] == item['start_ticks'] and generation['exe'] == item['exe']
+    assert generation['sha256'] == item['sha256'] and generation['commit'] == item['commit']
+    assert not reset['visible'] and first['visible'] and before['visible']
+    for observation in observations:
+        assert observation['frequency'] == frequency and len(observation['tooltips']) == len(observation['first_tools']) == 1
+        assert type(observation['begin_ticks']) is int and type(observation['end_ticks']) is int
+        assert observation['begin_ticks'] <= observation['end_ticks'] == observation['ticks']
+        assert observation['tooltips'][0]['hwnd'] == generation['tooltip_hwnd']
+        assert observation['first_tools'][0]['hwnd'] == generation['tooltip_hwnd']
+        assert observation['tooltips'][0]['autopop_ms'] == observation['first_tools'][0]['autopop_ms'] == generation['autopop_ms'] > 0
+        assert observation['visible'] == observation['tooltips'][0]['visible'] == observation['first_tools'][0]['visible']
+    cursor, target = generation['reset_cursor'], generation['target_move']
+    left, top, right, bottom = generation['target_screen_rect']
+    assert cursor['owner_pid'] == generation['pid'] and cursor['owner_hwnd'] > 0
+    assert not (left <= cursor['x'] < right and top <= cursor['y'] < bottom)
+    assert left <= target['x'] < right and top <= target['y'] < bottom
+    assert target['owner_pid'] == generation['pid'] and target['owner_hwnd'] == generation['target_hwnd']
     old = before['tooltips'][0]['current']
     assert old is not None and old in before['tooltips'][0]['tools']
+    assert old == first['tooltips'][0]['current'] == generation['tool']
+    assert first['first_tools'][0]['current'] == before['first_tools'][0]['current'] == old
+    assert (old['id'] if old['flags'] & 1 else old['owner']) == generation['target_hwnd']
+    assert old['flags'] & 0x10
+    assert before['text'] == first['text'] == generation['text']
+    assert before['hwnd'] == first['hwnd'] == generation['tooltip_hwnd']
     current = after['tooltips'][0]['current']
     if current is not None:
         assert current in after['tooltips'][0]['tools']
     assert not after['visible'] or (after['text'] != before['text'] and current != old)
-    assert before['frequency'] == after['frequency'] > 0
-    elapsed = 1000 * (after['ticks'] - before['ticks']) / before['frequency']
-    assert 0 <= elapsed < min(1500, before['tooltips'][0]['autopop_ms'] / 2)
-    assert abs(item['elapsed_ms'] - elapsed) < 0.01
+    timestamps = (reset['begin_ticks'], reset['end_ticks'], target['input_begin_ticks'], target['input_end_ticks'], first['begin_ticks'], first['end_ticks'], before['begin_ticks'], before['end_ticks'], item['transition_ticks'], item['action_begin_ticks'], item['action_end_ticks'], after['begin_ticks'], after['end_ticks'])
+    assert all(type(value) is int for value in timestamps) and list(timestamps) == sorted(timestamps)
+    prompt = after['end_ticks'] - item['transition_ticks']
+    age = after['end_ticks'] - target['input_begin_ticks']
+    autopop = generation['autopop_ms']
+    assert 1000 * prompt < 1500 * frequency and 2000 * prompt < autopop * frequency
+    assert 2000 * age < autopop * frequency
+    assert 2000 * (item['transition_ticks'] - target['input_begin_ticks']) + min(3000 * frequency, autopop * frequency, 500 * frequency) < autopop * frequency
 
 
 def check_evidence(folder):
@@ -140,19 +171,47 @@ def check_evidence(folder):
             assert hit[1] <= rect[1] < rect[3] <= hit[3]
             assert rect[0] <= x < rect[2] and rect[1] <= y < rect[3]
     transitions = load(folder, 'icon-transitions.json')
-    for name in ('leave', 'adjacent', 'resize', 'scroll', 'chat', 'reply-close', 'staged-compaction'):
+    expected_generations = {'leave': 'send', 'resize': 'header-resize', 'adjacent': 'react-selected',
+                            'scroll': 'more-unselected', 'reply-close': 'reply-close',
+                            'staged-compaction': 'staged-before-compaction', 'chat': 'header-before-chat'}
+    sequences = []
+    for name in ('leave', 'resize', 'adjacent', 'scroll', 'reply-close', 'staged-compaction', 'chat'):
         item = transitions[name]
         check_transition(item)
+        receipt = item['generation']
+        assert receipt['hover_id'] == expected_generations[name]
+        sequences.append(receipt['sequence'])
+        assert item['pid'] == session['pid'] and str(item['start_ticks']) == str(session['startTicks'])
+        assert item['exe'] == session['exe'] and item['sha256'] == session['sha256'] and item['commit'] == session['commit']
+        hover = load(folder, f"hover-{receipt['hover_id']}.json")
+        assert hover['pid'] == session['pid'] and hover['popup'] == receipt['tooltip_hwnd']
+        assert hover['tooltips'][0]['current'] == receipt['tool']
+        assert hover['owner'] == receipt['target_hwnd'] and [hover['x'], hover['y']] == [receipt['target_move']['requested_x'], receipt['target_move']['requested_y']]
+        if receipt['tool']['flags'] & 1:
+            assert receipt['target_screen_rect'] == hover['owner_rect']
+        else:
+            origin = receipt['client_origin']
+            rect = receipt['tool']['rect']
+            assert receipt['target_screen_rect'] == [origin[0] + rect[0], origin[1] + rect[1], origin[0] + rect[2], origin[1] + rect[3]]
         old = item['before']['tooltips'][0]['current']
         remaining = [tool for tool in item['after']['tooltips'][0]['tools'] if tool['owner'] == old['owner'] and tool['id'] == old['id']]
         assert len(remaining) <= 1
         if name in ('scroll', 'reply-close') and remaining:
             assert remaining[0]['rect'] != old['rect']
         assert (folder / item['screenshot']).read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+    assert sequences == sorted(set(sequences))
     assert transitions['resize']['before_window'] != transitions['resize']['after_window']
     assert transitions['chat']['before_selected']['id'] != transitions['chat']['after_selected']['id']
     assert transitions['adjacent']['before']['text'] == 'React  Ctrl+R'
     assert transitions['adjacent']['after']['text'] == 'Reply  Ctrl+Shift+R'
+    assert transitions['adjacent']['after']['tooltips'][0]['current']['id'] == 3101
+    assert transitions['adjacent']['after']['tooltips'][0]['current']['owner'] == transitions['adjacent']['before']['tooltips'][0]['current']['owner']
+    assert transitions['reply-close']['before_reply'] and not transitions['reply-close']['after_reply']
+    assert transitions['staged-compaction']['before_count'] == capacity
+    assert transitions['staged-compaction']['after_count'] == capacity - 1
+    before_rows = {row['id']: row['bubble'] for row in transitions['scroll']['before_messages']}
+    after_rows = {row['id']: row['bubble'] for row in transitions['scroll']['after_messages']}
+    assert any(before_rows[key] != after_rows[key] for key in before_rows.keys() & after_rows.keys())
     snapshots = {}
     for name in ('voice-before', 'voice-held', 'voice-cancelled', 'voice-unsupported-before', 'voice-unsupported', 'voice-no-chat', 'voice-bad-fixture', 'voice-invalid-fixture', 'voice-modifiers', 'voice-inactive'):
         item = load(folder, f'{name}.icon.json')
