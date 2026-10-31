@@ -692,6 +692,7 @@ const DictationContext = struct {
     view: messenger_view.View,
     view_account: Utf8Text(32),
     archived: bool,
+    include_archived: bool,
     reply_to: Utf8Text(191),
     reply_sender: Utf8Text(191),
     thread_parent: Utf8Text(191),
@@ -3587,6 +3588,7 @@ fn toggleViewArchived(a: *App) void {
     a.archive_toggle_fetch_ms = 0;
     a.archive_toggle_fetches = 0;
     a.archive_toggle_paints = a.paints.list;
+    disarmDictationSend(a);
     a.include_archived = !a.include_archived;
     _ = clearBulkSelection(a);
     refilterChats(a);
@@ -10909,6 +10911,7 @@ fn captureDictationContext(a: *App) ?DictationContext {
         .view = a.chat_view,
         .view_account = a.view_account,
         .archived = a.show_archived,
+        .include_archived = a.include_archived,
         .reply_to = a.reply_to,
         .reply_sender = a.reply_sender,
         .thread_parent = a.thread_parent,
@@ -10925,7 +10928,7 @@ fn captureDictationContext(a: *App) ?DictationContext {
 fn sameDictationContext(a: *App, expected: *const DictationContext) bool {
     const current = captureDictationContext(a) orelse return false;
     if (!chat_key.Key.eql(current.origin.key(), expected.origin.key()) or current.compose != expected.compose or
-        current.view != expected.view or current.archived != expected.archived or
+        current.view != expected.view or current.archived != expected.archived or current.include_archived != expected.include_archived or
         !std.mem.eql(u8, current.view_account.slice(), expected.view_account.slice()) or
         !std.mem.eql(u8, current.reply_to.slice(), expected.reply_to.slice()) or
         !std.mem.eql(u8, current.reply_sender.slice(), expected.reply_sender.slice()) or
@@ -14395,6 +14398,7 @@ fn paletteActivate(a: *App) void {
 fn openSearchPalette(a: *App) void {
     if (a.palette != null and a.palette_search_mode) {
         if (a.palette_edit) |edit| {
+            disarmDictationSend(a);
             _ = win.SetFocus(edit);
             _ = win.SendMessageW(edit, win.EM_SETSEL, 0, @bitCast(@as(isize, -1)));
         }
@@ -14603,6 +14607,7 @@ fn showPaletteWindow(a: *App) void {
         a.instance,
         null,
     ) orelse return;
+    disarmDictationSend(a);
     a.palette = palette;
     a.palette_ever_active = false;
     var corner: win.DWORD = 2;

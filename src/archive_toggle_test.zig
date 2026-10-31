@@ -42,6 +42,7 @@ const App = struct {
     reconciled: usize = 0,
     messages_refreshed: usize = 0,
     cleared: usize = 0,
+    disarmed: usize = 0,
     registry_ok: bool = true,
     palette: ?usize = null,
     palette_search_mode: bool = false,
@@ -99,6 +100,10 @@ fn setStatus(a: *App, text: []const u8) void {
     a.status.set(text);
 }
 
+fn disarmDictationSend(a: *App) void {
+    a.disarmed += 1;
+}
+
 fn clearBulkSelection(a: *App) bool {
     a.cleared += 1;
     return true;
@@ -153,6 +158,7 @@ test "Alt A reuses a mixed snapshot in every account and inbox without a child o
         defer current_app = null;
         clock_ms = 1000;
         toggleViewArchived(&a);
+        try std.testing.expectEqual(@as(usize, 1), a.disarmed);
         try std.testing.expect(a.include_archived);
         try std.testing.expectEqual(@as(usize, 1), a.rebuilds);
         try std.testing.expectEqual(@as(usize, 0), a.enqueued);
@@ -165,6 +171,7 @@ test "Alt A reuses a mixed snapshot in every account and inbox without a child o
         logArchiveTogglePaint(&a);
         try std.testing.expectEqual(@as(usize, 1), a.logs);
         toggleViewArchived(&a);
+        try std.testing.expectEqual(@as(usize, 2), a.disarmed);
         try std.testing.expect(!a.include_archived);
         try std.testing.expectEqual(@as(usize, 2), a.rebuilds);
         try std.testing.expectEqual(@as(usize, 0), a.enqueued);
@@ -213,6 +220,7 @@ test "failed preference persistence leaves the toggle and fetch path untouched" 
     try std.testing.expectEqual(@as(?u64, null), a.archive_toggle_started_ms);
     try std.testing.expectEqual(@as(usize, 0), a.enqueued);
     try std.testing.expectEqual(@as(usize, 0), a.cleared);
+    try std.testing.expectEqual(@as(usize, 0), a.disarmed);
 }
 
 test "unlabelled disk snapshots fetch fresh coverage before completing the toggle" {
