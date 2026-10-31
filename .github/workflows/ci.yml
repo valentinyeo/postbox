@@ -1,9 +1,9 @@
 name: ci
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  schedule:
+    - cron: "20 2 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -38,6 +38,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: No new code comments
+        run: python3 tools/check_new_comments.py
+
+      - name: Multiprompt shared design ownership and historical control
+        run: |
+          python3 tools/check_shared_design.py --upstream
+          base=f07df8f
+          mkdir "$RUNNER_TEMP/original-design"
+          git archive "$base" src | tar -x -C "$RUNNER_TEMP/original-design"
+          if python3 tools/check_shared_design.py --root "$RUNNER_TEMP/original-design" > "$RUNNER_TEMP/design-red.log" 2>&1; then
+            echo 'Original independent painters unexpectedly pass shared ownership'
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/design-red.log"
+          python3 -c 'import os,pathlib; assert "Missing Multiprompt-owned design manifest" in pathlib.Path(os.environ["RUNNER_TEMP"],"design-red.log").read_text()'
+          echo 'ORIGINAL_SHARED_DESIGN_RED_PROVEN'
+
       - name: Python tooling tests
         run: python3 -m unittest discover -s tools -p 'test_*.py'
 
@@ -57,6 +74,28 @@ jobs:
       - name: Preflight
         run: ZIG=zig bash tools/preflight.sh
 
+      - name: IGSH-767 archive intent and historical negative control
+        run: |
+          set -euo pipefail
+          path=src/archive_rules.zig
+          cp "$path" "$RUNNER_TEMP/archive_rules.zig"
+          fixed='const index = self.find(key.id) orelse return provider_archived;'
+          old='const index = self.find(key.id) orelse return provider_archived; if (!self.entries[index].keep) return provider_archived;'
+          grep -qF "$fixed" "$path" || { echo 'Archive negative control anchor missing'; exit 1; }
+          FIXED="$fixed" OLD="$old" python3 -c "import os,sys;p=sys.argv[1];s=open(p,encoding='utf-8').read();open(p,'w',encoding='utf-8').write(s.replace(os.environ['FIXED'],os.environ['OLD']))" "$path"
+          set +e
+          zig build test > "$RUNNER_TEMP/archive-old.log" 2>&1
+          status=$?
+          set -e
+          cp "$RUNNER_TEMP/archive_rules.zig" "$path"
+          if [ "$status" -eq 0 ]; then echo 'Old archive resolution unexpectedly passed'; exit 1; fi
+          if ! grep -qE "archive_rules\.test\.WhatsApp archive (entry overrides the provider flag|presence is independent of keep and the provider flag)' failed" "$RUNNER_TEMP/archive-old.log"; then
+            echo 'Old archive resolution did not fail the metadata-free regression'
+            tail -40 "$RUNNER_TEMP/archive-old.log"
+            exit 1
+          fi
+          echo 'Old archive resolution fails the metadata-free regression'
+
       - name: Compile ARM64 release
         run: zig build -Dtarget=aarch64-windows-gnu --release=small -p zig-out-arm64
 
@@ -67,6 +106,9 @@ jobs:
           bash tools/test-agent-setup.sh
           bash tools/test-lint-repeats.sh
           bash tools/test-ci-green.sh
+          bash tools/test-auto-release-pick.sh
+          bash tools/test-automerge-admit.sh
+          bash tools/test-ai-review.sh
 
       - name: Outbox lifecycle and regression controls
         run: python3 tools/test_outbox_runtime.py --zig "$(command -v zig)" --negative-controls
@@ -78,54 +120,30 @@ jobs:
           path: zig-out/bin/
 
   tdlib-cache:
-    uses: ./.github/workflows/tdlib-cache.yml
+    name: tdlib-cache / cache
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject retired desktop dependencies
+        run: python3 tools/check_hub_only.py
 
   tdlib:
     needs: tdlib-cache
     name: tdlib
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-
-      - name: Install toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y g++-mingw-w64-x86-64 gperf php-cli cmake ninja-build
-
-      - name: TDLib revision
-        id: tdlib
-        run: echo "commit=$(cat tools/TDLIB_COMMIT)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore TDLib
-        id: tdcache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: /tmp/tdlib-install
-          key: tdlib-${{ steps.tdlib.outputs.commit }}-${{ hashFiles('tools/build-tdlib.sh') }}
-
-      - name: Build TDLib
-        if: steps.tdcache.outputs.cache-hit != 'true'
-        run: bash tools/build-tdlib.sh
-
-      - name: Build with Telegram (placeholder credentials)
-        run: |
-          zig build -Dtarget=x86_64-windows-gnu --release=small \
-            -Dtdlib=/tmp/tdlib-install \
-            -Dtelegram-api-id=1 \
-            -Dtelegram-api-hash=smoke-placeholder
-
-      - name: Verify x64 TDLib
-        run: python3 -c 'from pathlib import Path; assert b"setTdlibParameters" in Path("zig-out/bin/Messages.exe").read_bytes(), "x64 build is missing TDLib"'
-
+      - name: Build hub-only desktop
+        run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526
+      - name: Verify hub-only binary
+        run: python3 tools/check_hub_only.py --binary zig-out/bin/Messages.exe
       - name: Exe size report
-        run: |
-          du -h zig-out/bin/Messages.exe
-
+        run: du -h zig-out/bin/Messages.exe
       - name: Upload Telegram build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -138,17 +156,62 @@ jobs:
     needs: tdlib
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - name: Download build
         uses: actions/download-artifact@v4
         with:
           name: Messages-windows-x86_64-telegram
           path: bin/
 
-      - name: Run TDLib smoke
+      - name: Run hub smoke
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath "bin\Messages.exe" -ArgumentList "--tdlib-smoke" -Wait -PassThru
-          exit $p.ExitCode
+          tools/verify-wazig/run.ps1 -Feature telegram -Bin bin -Evidence verification-evidence
+      - name: Validate hub smoke evidence
+        shell: pwsh
+        run: python tools/verify-wazig/check-evidence.py verification-evidence
+      - name: Cleanup hub smoke
+        if: always()
+        shell: pwsh
+        run: tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
+      - name: Upload hub smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-hub-smoke
+          path: verification-evidence/
+
+  caption-verification:
+    name: caption-verification
+    runs-on: windows-latest
+    needs: tdlib
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Messages-windows-x86_64-telegram
+          path: bin/
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+      - name: Verify forwarded image caption
+        shell: pwsh
+        run: tools/verify-wazig/run.ps1 -Feature media-fit -Bin bin -Evidence caption-evidence
+      - name: Validate caption evidence
+        shell: pwsh
+        run: python tools/verify-wazig/check-evidence.py caption-evidence
+      - name: Cleanup
+        if: always()
+        shell: pwsh
+        run: tools/verify-wazig/cleanup.ps1 -Evidence caption-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: caption-verification-evidence
+          path: caption-evidence/
 
   unfurl-verification:
     name: unfurl-verification
@@ -186,27 +249,3 @@ jobs:
         with:
           name: unfurl-verification-evidence
           path: smoke-out/
-
-  notify-release:
-    name: notify-release
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [ci, tdlib, windows-smoke]
-    permissions:
-      actions: write
-    steps:
-      - name: Hand off to auto-release
-        if: >-
-          success() &&
-          github.event_name == 'workflow_dispatch' &&
-          github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for _ in 1 2 3; do
-            if gh workflow run auto-release.yml -R "${GITHUB_REPOSITORY}" --ref main; then
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1

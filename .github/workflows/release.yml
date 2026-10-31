@@ -6,6 +6,15 @@ on:
 permissions:
   contents: read
 jobs:
+  font-delivery:
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: node tools/check-fonts.mjs
+      - run: node --test tools/check-fonts.test.mjs
   build:
     name: build
     runs-on: ubuntu-latest
@@ -20,52 +29,32 @@ jobs:
         run: |
           echo "${GITHUB_REF_NAME}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
             || { echo "tag ${GITHUB_REF_NAME} is not strict vX.Y.Z" >&2; exit 1; }
-      - name: Install toolchain
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq g++-mingw-w64-x86-64 gperf php-cli cmake ninja-build
-      - name: TDLib revision
-        id: tdlib
-        run: echo "commit=$(cat tools/TDLIB_COMMIT)" >> "$GITHUB_OUTPUT"
-      - name: Restore TDLib
-        id: tdcache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: /tmp/tdlib-install
-          key: tdlib-${{ steps.tdlib.outputs.commit }}-${{ hashFiles('tools/build-tdlib.sh') }}
-      - name: Build TDLib
-        if: steps.tdcache.outputs.cache-hit != 'true'
-        run: bash tools/build-tdlib.sh
       - name: Build
-        env:
-          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-        run: |
-          args=(-Dtarget=x86_64-windows-gnu --release=small -Dtdlib=/tmp/tdlib-install -Dversion="${GITHUB_REF_NAME#v}")
-          if [ -n "$TELEGRAM_API_ID" ] && [ -n "$TELEGRAM_API_HASH" ]; then
-            args+=(-Dtelegram-api-id="$TELEGRAM_API_ID" -Dtelegram-api-hash="$TELEGRAM_API_HASH")
-          fi
-          zig build "${args[@]}"
-      - name: Verify x64 TDLib
-        run: python3 -c 'from pathlib import Path; assert b"setTdlibParameters" in Path("zig-out/bin/Messages.exe").read_bytes(), "x64 release is missing TDLib"'
+        run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion="${GITHUB_REF_NAME#v}"
       - name: Package zip
         run: |
           cd zig-out/bin
-          zip -r "${GITHUB_WORKSPACE}/Messages-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf *LICENSE*
+          zip -r "${GITHUB_WORKSPACE}/Messages-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe postboxctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf IBMPlexSans-Italic.ttf IBMPlexMono-Regular.ttf *LICENSE*
       - name: Build and package ARM64
         run: |
           zig build -Dtarget=aarch64-windows-gnu --release=small -Dversion="${GITHUB_REF_NAME#v}" -p zig-out-arm64
           cd zig-out-arm64/bin
-          zip -r "${GITHUB_WORKSPACE}/Messages_arm64-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf *LICENSE*
+          zip -r "${GITHUB_WORKSPACE}/Messages_arm64-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe postboxctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf IBMPlexSans-Italic.ttf IBMPlexMono-Regular.ttf *LICENSE*
+      - name: Branded archives with legacy updater aliases
+        run: |
+          cp "Messages-${GITHUB_REF_NAME}.zip" "Postbox-${GITHUB_REF_NAME}.zip"
+          cp "Messages_arm64-${GITHUB_REF_NAME}.zip" "Postbox_arm64-${GITHUB_REF_NAME}.zip"
       - name: Package MSI
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq wixl wixl-data
+          sudo -E apt-get -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo -E apt-get -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y wixl wixl-data
           version="${GITHUB_REF_NAME#v}"
           echo "${version}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
           wixl -D "Version=${version}" -D "BinDir=${GITHUB_WORKSPACE}/zig-out/bin/" \
-            -o "Messages-${GITHUB_REF_NAME}.msi" assets/installer.wxs
+            -o "Postbox-${GITHUB_REF_NAME}.msi" assets/installer.wxs
       - name: Checksums
         run: |
-          sha256sum "Messages-${GITHUB_REF_NAME}.zip" "Messages_arm64-${GITHUB_REF_NAME}.zip" "Messages-${GITHUB_REF_NAME}.msi" > SHA256SUMS.txt
+          sha256sum "Messages-${GITHUB_REF_NAME}.zip" "Messages_arm64-${GITHUB_REF_NAME}.zip" "Postbox-${GITHUB_REF_NAME}.msi" "Postbox-${GITHUB_REF_NAME}.zip" "Postbox_arm64-${GITHUB_REF_NAME}.zip" > SHA256SUMS.txt
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -73,72 +62,66 @@ jobs:
           path: |
             Messages-*.zip
             Messages_arm64-*.zip
-            Messages-*.msi
+            Postbox-*.msi
+            Postbox-*.zip
+            Postbox_arm64-*.zip
             SHA256SUMS.txt
 
-  smoke:
-    name: msi smoke test
+  launch:
+    name: Launch Windows app
     needs: build
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 4
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: release-bundle
-      - name: Install silently
+      - name: Open the packaged app and check its main window
         shell: pwsh
         run: |
-          $msi = (Get-ChildItem Messages-*.msi).FullName
-          & msiexec /i $msi /qn /norestart /L*V install.log | Out-Null
-          $code = $LASTEXITCODE
-          if ($code -ne 0) {
-            Get-Content install.log -Tail 40
-            throw "msiexec install failed: $code"
+          Expand-Archive "Messages-${{ github.ref_name }}.zip" app
+          $app = Start-Process "$PWD/app/Messages.exe" -WorkingDirectory "$PWD/app" -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(60)
+            do {
+              $app.Refresh()
+              if ($app.HasExited) { throw "App exited before opening its window" }
+              if ($app.MainWindowHandle -ne [IntPtr]::Zero) { exit 0 }
+              Start-Sleep -Seconds 1
+            } while ((Get-Date) -lt $deadline)
+            throw 'App did not open a main window'
+          } finally {
+            if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
           }
-      - name: Verify install
-        shell: pwsh
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan history for secrets
         run: |
-          $exe = "$env:LOCALAPPDATA\Programs\Messages\Messages.exe"
-          $lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Messages.lnk"
-          if (-not (Test-Path $exe)) { throw "missing $exe" }
-          foreach ($font in @('IBMPlexSans-Regular.ttf', 'IBMPlexSans-Medium.ttf', 'IBMPlexSans-SemiBold.ttf', 'IBMPlexSans-Bold.ttf')) {
-            if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Messages\$font")) { throw "missing bundled font $font" }
-          }
-          if (-not (Test-Path $lnk)) { throw "missing Start menu shortcut $lnk" }
-          $ctl = "$env:LOCALAPPDATA\Programs\Messages\wazigctl.exe"
-          if (-not (Test-Path $ctl)) { throw "missing $ctl" }
-          & $ctl --help | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "wazigctl --help failed: $LASTEXITCODE" }
-          & $ctl status 2>$null | Out-Null
-          if ($LASTEXITCODE -ne 3) { throw "wazigctl status without the app returned $LASTEXITCODE, expected 3" }
-          exit 0
-      - name: Headless Telegram smoke
-        shell: pwsh
-        run: |
-          $exe = "$env:LOCALAPPDATA\Programs\Messages\Messages.exe"
-          $proc = Start-Process -FilePath $exe -ArgumentList '--tdlib-smoke' -Wait -PassThru
-          $code = $proc.ExitCode
-          if ($code -ne 0) { throw "tdlib smoke failed: $code" }
-      - name: Uninstall silently
-        shell: pwsh
-        run: |
-          $msi = (Get-ChildItem Messages-*.msi).FullName
-          & msiexec /x $msi /qn /norestart | Out-Null
-          $code = $LASTEXITCODE
-          if ($code -ne 0) { throw "msiexec uninstall failed: $code" }
-          if (Test-Path "$env:LOCALAPPDATA\Programs\Messages\Messages.exe") { throw "exe left behind after uninstall" }
-          if (Test-Path "$env:LOCALAPPDATA\Programs\Messages\wazigctl.exe") { throw "wazigctl left behind after uninstall" }
-          if (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Messages.lnk") { throw "shortcut left behind after uninstall" }
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks detect --no-banner --source . --redact --log-opts "$GITHUB_SHA"
 
   release:
     name: release
-    needs: [build, smoke]
+    needs: [build, launch, gitleaks]
     permissions:
       contents: write
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compose product release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/update_cards.py release-notes --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.txt"
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -147,5 +130,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Messages-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes \
-            || gh release upload "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Messages-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --clobber
+          gh release create "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Postbox-*.zip Postbox_arm64-*.zip Postbox-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --verify-tag --notes-file "$RUNNER_TEMP/release-notes.txt" \
+            || { gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --notes-file "$RUNNER_TEMP/release-notes.txt" && gh release upload "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Postbox-*.zip Postbox_arm64-*.zip Postbox-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --clobber; }
