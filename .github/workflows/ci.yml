@@ -1,11 +1,9 @@
 name: ci
 
 on:
-  push:
-    branches: [main]
   pull_request:
-  # automerge.yml dispatches ci on main after a GITHUB_TOKEN squash merge,
-  # because merges made with that token do not fire the push trigger.
+  schedule:
+    - cron: "20 2 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -16,12 +14,52 @@ permissions:
   contents: read
 
 jobs:
+  pin-icon-tests:
+    name: pin-icon-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: IGSH-494 pin geometry
+        run: zig test src/pin_icon_test.zig
+      - name: IGSH-494 pin source regression and negative controls
+        if: ${{ !cancelled() }}
+        run: python3 tools/test_pin_icon.py
+
   ci:
     name: ci
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: No new code comments
+        run: python3 tools/check_new_comments.py
+
+      - name: Multiprompt shared design ownership and historical control
+        run: |
+          python3 tools/check_shared_design.py --upstream
+          base=f07df8f
+          mkdir "$RUNNER_TEMP/original-design"
+          git archive "$base" src | tar -x -C "$RUNNER_TEMP/original-design"
+          if python3 tools/check_shared_design.py --root "$RUNNER_TEMP/original-design" > "$RUNNER_TEMP/design-red.log" 2>&1; then
+            echo 'Original independent painters unexpectedly pass shared ownership'
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/design-red.log"
+          python3 -c 'import os,pathlib; assert "Missing Multiprompt-owned design manifest" in pathlib.Path(os.environ["RUNNER_TEMP"],"design-red.log").read_text()'
+          echo 'ORIGINAL_SHARED_DESIGN_RED_PROVEN'
+
+      - name: Python tooling tests
+        run: python3 -m unittest discover -s tools -p 'test_*.py'
+
+      - name: Cache keys skip workflow files
+        run: python3 tools/check_cache_keys.py
 
       - uses: mlugg/setup-zig@v2
         with:
@@ -30,17 +68,50 @@ jobs:
       - name: Zig version
         run: zig version
 
-      - name: Check formatting
-        run: zig fmt --check src build.zig
+      - name: ISSUE-517 voice transcription and historical negative control
+        run: python3 tools/check_voice_transcription_regression.py --zig "$(command -v zig)"
 
-      - name: Test
-        run: zig build test
+      - name: Preflight
+        run: ZIG=zig bash tools/preflight.sh
 
-      - name: Stretch tests
-        run: zig test src/stretch.zig
+      - name: IGSH-767 archive intent and historical negative control
+        run: |
+          set -euo pipefail
+          path=src/archive_rules.zig
+          cp "$path" "$RUNNER_TEMP/archive_rules.zig"
+          fixed='const index = self.find(key.id) orelse return provider_archived;'
+          old='const index = self.find(key.id) orelse return provider_archived; if (!self.entries[index].keep) return provider_archived;'
+          grep -qF "$fixed" "$path" || { echo 'Archive negative control anchor missing'; exit 1; }
+          FIXED="$fixed" OLD="$old" python3 -c "import os,sys;p=sys.argv[1];s=open(p,encoding='utf-8').read();open(p,'w',encoding='utf-8').write(s.replace(os.environ['FIXED'],os.environ['OLD']))" "$path"
+          set +e
+          zig build test > "$RUNNER_TEMP/archive-old.log" 2>&1
+          status=$?
+          set -e
+          cp "$RUNNER_TEMP/archive_rules.zig" "$path"
+          if [ "$status" -eq 0 ]; then echo 'Old archive resolution unexpectedly passed'; exit 1; fi
+          if ! grep -qE "archive_rules\.test\.WhatsApp archive (entry overrides the provider flag|presence is independent of keep and the provider flag)' failed" "$RUNNER_TEMP/archive-old.log"; then
+            echo 'Old archive resolution did not fail the metadata-free regression'
+            tail -40 "$RUNNER_TEMP/archive-old.log"
+            exit 1
+          fi
+          echo 'Old archive resolution fails the metadata-free regression'
 
-      - name: Build
-        run: zig build -Dtarget=x86_64-windows-gnu --release=small
+      - name: Compile ARM64 release
+        run: zig build -Dtarget=aarch64-windows-gnu --release=small -p zig-out-arm64
+
+      - name: Agent guard tests
+        run: |
+          git fetch --quiet --no-tags origin '+refs/pull/*/head:refs/remotes/pr/*'
+          bash tools/test-preflight-guard.sh
+          bash tools/test-agent-setup.sh
+          bash tools/test-lint-repeats.sh
+          bash tools/test-ci-green.sh
+          bash tools/test-auto-release-pick.sh
+          bash tools/test-automerge-admit.sh
+          bash tools/test-ai-review.sh
+
+      - name: Outbox lifecycle and regression controls
+        run: python3 tools/test_outbox_runtime.py --zig "$(command -v zig)" --negative-controls
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -48,121 +119,100 @@ jobs:
           name: Messages-windows-x86_64
           path: zig-out/bin/
 
-  # Builds TDLib for Windows once and links the Telegram-enabled binary.
-  # The install dir is cached, so the expensive C++ build runs only when the
-  # pinned TDLib commit or this script changes.
-  tdlib:
-    name: tdlib
+  tdlib-cache:
+    name: tdlib-cache / cache
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    env:
-      TDLIB_COMMIT: d1085f9cebc5a62379991ae1652673954f229c1f
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - name: Reject retired desktop dependencies
+        run: python3 tools/check_hub_only.py
 
+  tdlib:
+    needs: tdlib-cache
+    name: tdlib
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-
-      - name: Install toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y g++-mingw-w64-x86-64 gperf php-cli cmake ninja-build
-
-      - name: Restore TDLib
-        id: tdcache
-        uses: actions/cache@v4
-        with:
-          path: |
-            /tmp/tdlib-install
-            /tmp/tdbuild-prefix
-          key: tdlib-${{ env.TDLIB_COMMIT }}-${{ hashFiles('.github/workflows/ci.yml') }}
-
-      - name: Build TDLib
-        if: steps.tdcache.outputs.cache-hit != 'true'
-        run: |
-          P=/tmp/tdbuild-prefix
-          mkdir -p "$P" /tmp/tdlib-install
-          git clone --depth 1 --branch v1.3.1 https://github.com/madler/zlib.git /tmp/zlibsrc
-          (cd /tmp/zlibsrc && CC=x86_64-w64-mingw32-gcc ./configure --static --prefix="$P" && make -j$(nproc) install)
-          # Integrity: this tarball is statically linked into the shipped binary; pin the
-          # sha256 published on the official openssl-3.3.2 GitHub release.
-          echo '2e8a40b01979afe8be0bbfb3de5dc1c6709fedb46d6c89c10da114ab5fc3d281  /tmp/openssl.tar.gz' > /tmp/openssl.sha256
-          curl -fsSL --retry 3 --connect-timeout 30 --max-time 600 -o /tmp/openssl.tar.gz https://github.com/openssl/openssl/releases/download/openssl-3.3.2/openssl-3.3.2.tar.gz
-          sha256sum -c /tmp/openssl.sha256
-          mkdir -p /tmp/opensslsrc && tar -C /tmp/opensslsrc --strip-components=1 -xzf /tmp/openssl.tar.gz
-          (cd /tmp/opensslsrc && ./Configure mingw64 no-asm no-shared no-tests no-docs --libdir=lib --prefix="$P" --cross-compile-prefix=x86_64-w64-mingw32- && make -j1 -s install_sw)
-          cp -n "$P/lib64"/*.a "$P/lib/" 2>/dev/null || true
-          git clone https://github.com/tdlib/td.git /tmp/tdsrc
-          (cd /tmp/tdsrc && git checkout "$TDLIB_COMMIT")
-          # Stage 1: build TDLib's host generators natively; they write the
-          # generated sources into the shared source tree.
-          cmake -S /tmp/tdsrc -B /tmp/tdsrc/build-host -DCMAKE_BUILD_TYPE=Release -DTD_ENABLE_JNI=OFF
-          cmake --build /tmp/tdsrc/build-host --target prepare_cross_compiling -j$(nproc)
-          # Stage 2: cross-compile TDLib itself for Windows.
-          cmake -S /tmp/tdsrc -B /tmp/tdsrc/build -G Ninja \
-            -DCMAKE_SYSTEM_NAME=Windows \
-            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
-            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DOPENSSL_ROOT_DIR="$P" \
-            -DZLIB_INCLUDE_DIR="$P/include" \
-            -DZLIB_LIBRARY="$P/lib/libz.a" \
-            -DTD_ENABLE_JNI=OFF \
-            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
-          cmake --build /tmp/tdsrc/build --target tdjson_static -j$(nproc)
-          mkdir -p /tmp/tdlib-install/lib /tmp/tdlib-install/include/td
-          find /tmp/tdsrc/build -name '*.a' -exec cp {} /tmp/tdlib-install/lib/ \;
-          cp "$P"/lib/libcrypto.a "$P"/lib/libssl.a "$P"/lib/libz.a /tmp/tdlib-install/lib/
-          for m in tdactor tdclient tdcore tdnet tdutils tddb tdmtproto tde2e; do cp -r /tmp/tdsrc/$m/td/. /tmp/tdlib-install/include/td/ 2>/dev/null || true; done
-          cp -r /tmp/tdsrc/td/. /tmp/tdlib-install/include/td/
-          cp -r /tmp/tdsrc/td/generate/auto/td/. /tmp/tdlib-install/include/td/
-
-      # Placeholder credentials: this artifact exists for the Windows smoke
-      # test only, and workflow artifacts are readable by anyone with repo
-      # access, so the real API credentials are compiled in exclusively by
-      # release.yml.
-      - name: Build with Telegram (placeholder credentials)
-        run: |
-          zig build -Dtarget=x86_64-windows-gnu --release=small \
-            -Dtdlib=/tmp/tdlib-install \
-            -Dtelegram-api-id=1 \
-            -Dtelegram-api-hash=smoke-placeholder
-
+      - name: Build hub-only desktop
+        run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526
+      - name: Verify hub-only binary
+        run: python3 tools/check_hub_only.py --binary zig-out/bin/Messages.exe
       - name: Exe size report
-        run: |
-          du -h zig-out/bin/Messages.exe
-
+        run: du -h zig-out/bin/Messages.exe
       - name: Upload Telegram build artifact
         uses: actions/upload-artifact@v4
         with:
           name: Messages-windows-x86_64-telegram
           path: zig-out/bin/
 
-  # Runs the Telegram-enabled exe headlessly on a real Windows machine to
-  # prove TDLib loads, opens its database and reaches the first auth state.
   windows-smoke:
     name: windows-smoke
     runs-on: windows-latest
     needs: tdlib
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - name: Download build
         uses: actions/download-artifact@v4
         with:
           name: Messages-windows-x86_64-telegram
           path: bin/
 
-      - name: Run TDLib smoke
+      - name: Run hub smoke
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath "bin\Messages.exe" -ArgumentList "--tdlib-smoke" -Wait -PassThru
-          exit $p.ExitCode
+          tools/verify-wazig/run.ps1 -Feature telegram -Bin bin -Evidence verification-evidence
+      - name: Validate hub smoke evidence
+        shell: pwsh
+        run: python tools/verify-wazig/check-evidence.py verification-evidence
+      - name: Cleanup hub smoke
+        if: always()
+        shell: pwsh
+        run: tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
+      - name: Upload hub smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-hub-smoke
+          path: verification-evidence/
 
-  # WAZI-68 affected-machine verification: runs the shipped unfurl code
-  # (link classifier, live card fetch, card painter, MFPlay player window,
-  # fullscreen toggle) on a real Windows desktop, without a WhatsApp
-  # session, and uploads the screenshots and result log as evidence.
+  caption-verification:
+    name: caption-verification
+    runs-on: windows-latest
+    needs: tdlib
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Messages-windows-x86_64-telegram
+          path: bin/
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+      - name: Verify forwarded image caption
+        shell: pwsh
+        run: tools/verify-wazig/run.ps1 -Feature media-fit -Bin bin -Evidence caption-evidence
+      - name: Validate caption evidence
+        shell: pwsh
+        run: python tools/verify-wazig/check-evidence.py caption-evidence
+      - name: Cleanup
+        if: always()
+        shell: pwsh
+        run: tools/verify-wazig/cleanup.ps1 -Evidence caption-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: caption-verification-evidence
+          path: caption-evidence/
+
   unfurl-verification:
     name: unfurl-verification
     runs-on: windows-latest
@@ -174,6 +224,12 @@ jobs:
         with:
           version: 0.16.0
 
+      - name: ISSUE-517 isolated Windows user key loading
+        run: zig test src/environment_keys.zig -lc -ladvapi32 -lkernel32 -lcrypt32 --test-filter ISSUE-517
+
+      - name: ISSUE-545 row-sized paint buffer pixel placement
+        run: zig test src/smooth_shapes.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-545
+
       - name: Build Messages.exe
         run: zig build -Dtarget=x86_64-windows-gnu --release=small
 
@@ -181,6 +237,7 @@ jobs:
         shell: pwsh
         env:
           UNFURL_SMOKE_DIR: smoke-out
+          UNFURL_SMOKE_VIDEO: ${{ github.workspace }}\tools\fixtures\smoke-clip.mp4
         run: |
           $p = Start-Process -FilePath "zig-out\bin\Messages.exe" -ArgumentList "--unfurl-smoke" -Wait -PassThru
           if (Test-Path "smoke-out\results.txt") { Get-Content "smoke-out\results.txt" | Write-Host }
@@ -192,38 +249,3 @@ jobs:
         with:
           name: unfurl-verification-evidence
           path: smoke-out/
-
-  # A ci run on main that was started by workflow_dispatch (the automerge
-  # bot-merge path and the automerge self-heal) gets no downstream
-  # workflow_run trigger: GitHub does not fire workflow_run for runs that
-  # were themselves dispatched. Push-triggered ci runs already start
-  # auto-release through workflow_run, so this handoff is dispatch-only.
-  notify-release:
-    name: notify-release
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [ci, tdlib, windows-smoke]
-    # success() must stay explicit: a job-level if replaces the implicit
-    # all-dependencies-succeeded check.
-    if: >-
-      success() &&
-      github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/main'
-    permissions:
-      actions: write
-    steps:
-      - name: Hand off to auto-release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # auto-release re-verifies everything itself (head of main, tag
-          # dedupe, app-files-changed) before it tags anything.
-          # Retry transient dispatch failures: this handoff is the only
-          # auto-release trigger for heads without a push-triggered ci run.
-          for _ in 1 2 3; do
-            if gh workflow run auto-release.yml -R "${GITHUB_REPOSITORY}" --ref main; then
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1

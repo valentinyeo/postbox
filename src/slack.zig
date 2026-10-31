@@ -174,21 +174,37 @@ fn numberField(object: std.json.ObjectMap, key: []const u8) ?i64 {
     };
 }
 
-/// Best recency for a conversations.list entry, in unix seconds: the newest
-/// message (`latest.ts`) when the listing carries it, else `updated` (ms),
-/// else `created` (seconds). 0 when none is usable.
+/// Newest message time of a conversations.list entry, in unix seconds, from
+/// `latest.ts`. A session token's listing usually has no `latest`; the real
+/// time then comes from users.counts. `updated` and `created` are channel
+/// metadata, not message times, so they are never used: a wrong time here
+/// could not be corrected later, because chat times only ever move forward.
+/// 0 when unknown.
 pub fn conversationSeconds(object: std.json.ObjectMap) i64 {
     if (object.get("latest")) |latest| switch (latest) {
         .object => |latest_object| if (tsSeconds(objectStringField(latest_object, "ts"))) |seconds| return seconds,
         else => {},
     };
-    if (numberField(object, "updated")) |updated| {
-        // Slack sends `updated` in milliseconds; tolerate a seconds value.
-        const seconds = if (updated > 100_000_000_000) @divTrunc(updated, 1000) else updated;
-        if (seconds > 0) return seconds;
-    }
-    if (numberField(object, "created")) |created| if (created > 0) return created;
     return 0;
+}
+
+/// users.counts lists each conversation the user is in under these keys.
+pub const counts_lists = [_][]const u8{ "channels", "groups", "mpims", "ims" };
+
+/// One users.counts entry: its id and newest message time in seconds.
+/// Null when the entry has no id or no usable `latest` (Slack sends
+/// "0000000000.000000" for a conversation without messages).
+pub const CountsEntry = struct { id: []const u8, seconds: i64 };
+
+pub fn countsEntry(value: std.json.Value) ?CountsEntry {
+    const object = switch (value) {
+        .object => |object| object,
+        else => return null,
+    };
+    const id = objectStringField(object, "id");
+    if (id.len == 0) return null;
+    const seconds = tsSeconds(objectStringField(object, "latest")) orelse return null;
+    return .{ .id = id, .seconds = seconds };
 }
 
 /// One conversations.history item (already filtered to real messages).
@@ -800,26 +816,106 @@ pub const Log = struct {
 };
 
 /// One conversations.list entry, borrowed from the parsed JSON. DMs carry
-/// the other person's user id instead of a name; the caller maps it.
+/// the other person's user id instead of a name; group DMs carry their
+/// members. The caller maps ids to names.
 pub const WorkspaceChannel = struct {
     id: []const u8,
     name: []const u8,
     user: []const u8,
     is_im: bool,
+    is_mpim: bool,
+    members: []const std.json.Value,
     seconds: i64,
+    /// False for channels the sidebar leaves out: archived ones and ones
+    /// the user is not a member of. DMs and group DMs always stay.
+    listed: bool,
 };
 
 /// Read one conversations.list entry; null when it has no id.
 pub fn workspaceChannel(object: std.json.ObjectMap) ?WorkspaceChannel {
     const id = objectStringField(object, "id");
     if (id.len == 0) return null;
+    const is_im = id[0] == 'D' or boolField(object, "is_im");
+    const is_mpim = boolField(object, "is_mpim");
+    const members: []const std.json.Value = if (object.get("members")) |value| switch (value) {
+        .array => |array| array.items,
+        else => &.{},
+    } else &.{};
     return .{
         .id = id,
         .name = objectStringField(object, "name"),
         .user = objectStringField(object, "user"),
-        .is_im = id[0] == 'D',
+        .is_im = is_im,
+        .is_mpim = is_mpim,
+        .members = members,
         .seconds = conversationSeconds(object),
+        // IM entries carry no is_member key, so they must not be judged by it.
+        .listed = is_im or is_mpim or (boolField(object, "is_member") and !boolField(object, "is_archived")),
     };
+}
+
+/// First word of a person's name ("Hicham Rahmani" -> "Hicham").
+pub fn firstName(name: []const u8) []const u8 {
+    const trimmed = std.mem.trim(u8, name, " ");
+    const space = std.mem.indexOfScalar(u8, trimmed, ' ') orelse trimmed.len;
+    return trimmed[0..space];
+}
+
+/// Sidebar name for a 1:1 DM or a group DM. A DM shows the person's real
+/// name; a group DM shows the other members' first names, comma-joined.
+/// Until users.list has named someone, a DM shows the raw user id and a
+/// group DM falls back to the handles in Slack's "mpdm-a--b--c-1" name, so
+/// calling this again once users load gives the real names.
+pub const DmInfo = struct {
+    is_im: bool,
+    /// The other person, for a 1:1 DM.
+    user: []const u8 = "",
+    /// Member user ids, for a group DM.
+    members: []const []const u8 = &.{},
+    /// Slack's own "mpdm-..." name, for a group DM.
+    handle_name: []const u8 = "",
+};
+
+pub fn dmName(buffer: []u8, dm: DmInfo, self_id: []const u8, users: UserLookup) []const u8 {
+    if (dm.is_im) return copyClamped(buffer, users.find(dm.user) orelse dm.user);
+    var len: usize = 0;
+    var resolved: usize = 0;
+    var others: usize = 0;
+    for (dm.members) |member_id| {
+        if (std.mem.eql(u8, member_id, self_id)) continue;
+        others += 1;
+        const name = firstName(users.find(member_id) orelse continue);
+        if (name.len == 0) continue;
+        if (resolved > 0) len = appendClamped(buffer, len, ", ");
+        len = appendClamped(buffer, len, name);
+        resolved += 1;
+    }
+    // Any member still unnamed: the handle list names everyone at once.
+    if (resolved == 0 or resolved < others) return mpimHandleNames(buffer, dm.handle_name);
+    return buffer[0..len];
+}
+
+/// "mpdm-valentin--giulia--hicham-1" -> "valentin, giulia, hicham". Any
+/// other name is returned unchanged.
+pub fn mpimHandleNames(buffer: []u8, name: []const u8) []const u8 {
+    if (!std.mem.startsWith(u8, name, "mpdm-")) return copyClamped(buffer, name);
+    var inner = name["mpdm-".len..];
+    if (std.mem.lastIndexOfScalar(u8, inner, '-')) |dash| {
+        const suffix = inner[dash + 1 ..];
+        const numeric = suffix.len > 0 and for (suffix) |char| {
+            if (!std.ascii.isDigit(char)) break false;
+        } else true;
+        if (numeric and dash > 0 and inner[dash - 1] != '-') inner = inner[0..dash];
+    }
+    var len: usize = 0;
+    var parts = std.mem.tokenizeSequence(u8, inner, "--");
+    var first = true;
+    while (parts.next()) |part| {
+        if (!first) len = appendClamped(buffer, len, ", ");
+        len = appendClamped(buffer, len, part);
+        first = false;
+    }
+    return buffer[0..len];
 }
 
 /// response_metadata.next_cursor, or "" on the last page.

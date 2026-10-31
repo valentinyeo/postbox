@@ -1,0 +1,131 @@
+name: Release package proof
+on:
+  schedule:
+    - cron: "15 3 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  font-delivery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: node tools/check-fonts.mjs
+      - run: node --test tools/check-fonts.test.mjs
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.16.0
+      - name: Build
+        run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion="0.9.999"
+      - name: Verify hub-only binary
+        run: python3 tools/check_hub_only.py --binary zig-out/bin/Messages.exe
+      - name: Package zip
+        run: |
+          cd zig-out/bin
+          zip -r "${GITHUB_WORKSPACE}/Messages-v0.9.999.zip" Messages.exe wazigctl.exe postboxctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf IBMPlexSans-Italic.ttf IBMPlexMono-Regular.ttf *LICENSE*
+      - name: Build and package ARM64
+        run: |
+          zig build -Dtarget=aarch64-windows-gnu --release=small -Dversion="0.9.999" -p zig-out-arm64
+          cd zig-out-arm64/bin
+          zip -r "${GITHUB_WORKSPACE}/Messages_arm64-v0.9.999.zip" Messages.exe wazigctl.exe postboxctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf IBMPlexSans-Italic.ttf IBMPlexMono-Regular.ttf *LICENSE*
+      - name: Branded archives with legacy updater aliases
+        run: |
+          cp "Messages-v0.9.999.zip" "Postbox-v0.9.999.zip"
+          cp "Messages_arm64-v0.9.999.zip" "Postbox_arm64-v0.9.999.zip"
+      - name: Package MSI
+        run: |
+          sudo -E apt-get -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo -E apt-get -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y wixl wixl-data
+          version="0.9.999"
+          echo "${version}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+          wixl -D "Version=${version}" -D "BinDir=${GITHUB_WORKSPACE}/zig-out/bin/" \
+            -o "Postbox-v0.9.999.msi" assets/installer.wxs
+      - name: Checksums
+        run: |
+          sha256sum "Messages-v0.9.999.zip" "Messages_arm64-v0.9.999.zip" "Postbox-v0.9.999.msi" "Postbox-v0.9.999.zip" "Postbox_arm64-v0.9.999.zip" > SHA256SUMS.txt
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: |
+            Messages-*.zip
+            Messages_arm64-*.zip
+            Postbox-*.msi
+            Postbox-*.zip
+            Postbox_arm64-*.zip
+            SHA256SUMS.txt
+
+  smoke:
+    name: msi smoke test
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+      - name: Install silently
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem Postbox-*.msi).FullName
+          & msiexec /i $msi /qn /norestart /L*V install.log | Out-Null
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Get-Content install.log -Tail 40
+            throw "msiexec install failed: $code"
+          }
+      - name: Verify install
+        shell: pwsh
+        run: |
+          $exe = "$env:LOCALAPPDATA\Programs\Messages\Messages.exe"
+          $lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Postbox.lnk"
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          foreach ($font in @('IBMPlexSans-Regular.ttf', 'IBMPlexSans-Medium.ttf', 'IBMPlexSans-SemiBold.ttf', 'IBMPlexSans-Bold.ttf', 'IBMPlexSans-Italic.ttf', 'IBMPlexMono-Regular.ttf')) {
+            if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Messages\$font")) { throw "missing bundled font $font" }
+          }
+          if (-not (Test-Path $lnk)) { throw "missing Start menu shortcut $lnk" }
+          $ctl = "$env:LOCALAPPDATA\Programs\Messages\wazigctl.exe"
+          if (-not (Test-Path $ctl)) { throw "missing $ctl" }
+          & $ctl --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "wazigctl --help failed: $LASTEXITCODE" }
+          & $ctl status 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 3) { throw "wazigctl status without the app returned $LASTEXITCODE, expected 3" }
+          exit 0
+      - name: Headless Telegram smoke
+        shell: pwsh
+        env:
+          RELEASE_TAG: v0.9.999
+        run: tools/verify-wazig/run.ps1 -Feature telegram -Bin "$env:LOCALAPPDATA/Programs/Messages" -Evidence verification-evidence -ExpectedVersion ($env:RELEASE_TAG -replace '^v', '')
+      - name: Validate hub smoke evidence
+        shell: pwsh
+        run: python tools/verify-wazig/check-evidence.py verification-evidence
+      - name: Uninstall silently
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem Postbox-*.msi).FullName
+          & msiexec /x $msi /qn /norestart | Out-Null
+          $code = $LASTEXITCODE
+          if ($code -ne 0) { throw "msiexec uninstall failed: $code" }
+          if (Test-Path "$env:LOCALAPPDATA\Programs\Messages\Messages.exe") { throw "exe left behind after uninstall" }
+          if (Test-Path "$env:LOCALAPPDATA\Programs\Messages\wazigctl.exe") { throw "wazigctl left behind after uninstall" }
+          if (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Postbox.lnk") { throw "shortcut left behind after uninstall" }
+      - name: Cleanup hub smoke
+        if: always()
+        shell: pwsh
+        run: tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
+      - name: Upload hub smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-hub-smoke
+          path: verification-evidence/

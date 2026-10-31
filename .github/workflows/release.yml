@@ -1,190 +1,127 @@
-# Tag vX.Y.Z on main -> build Messages.exe, package zip + per-user MSI on GitHub
-# runners, smoke-test the MSI on a real Windows runner, publish a GitHub Release.
 name: release
 on:
   push:
     tags: ["v*"]
-  # Fallback only: auto-release normally relies on the tag push to start us,
-  # but GITHUB_TOKEN ref creation does not reliably fire the push trigger, so
-  # auto-release dispatches us at the tag after confirming the push did not.
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  font-delivery:
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: node tools/check-fonts.mjs
+      - run: node --test tools/check-fonts.test.mjs
   build:
     name: build
     runs-on: ubuntu-latest
-    # Dispatches on a branch must never publish untagged code; the tag-shape
-    # check below also enforces strict vX.Y.Z.
     if: github.ref_type == 'tag'
     timeout-minutes: 120
-    env:
-      TDLIB_COMMIT: d1085f9cebc5a62379991ae1652673954f229c1f
     steps:
       - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.16.0
       - name: Check tag shape
-        # Strict: no prerelease suffixes, no four-part versions, no leading
-        # zeros; the MSI ProductVersion below needs exactly three integers.
         run: |
           echo "${GITHUB_REF_NAME}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
             || { echo "tag ${GITHUB_REF_NAME} is not strict vX.Y.Z" >&2; exit 1; }
-      - name: Install toolchain
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq g++-mingw-w64-x86-64 gperf php-cli cmake ninja-build
-      - name: Restore TDLib
-        id: tdcache
-        # Telegram is off for now (not in use); flip back to re-enable.
-        if: false
-        uses: actions/cache@v4
-        with:
-          path: /tmp/tdlib-install
-          key: tdlib-${{ env.TDLIB_COMMIT }}-v2
-      - name: Build TDLib
-        # Telegram is off for now (not in use); flip back to re-enable.
-        if: false
-        run: |
-          P=/tmp/tdbuild-prefix
-          mkdir -p "$P" /tmp/tdlib-install
-          # Pinned to the v1.3.1 commit so the release build never runs
-          # code from a tag that could be moved.
-          git clone https://github.com/madler/zlib.git /tmp/zlibsrc
-          (cd /tmp/zlibsrc && git checkout 51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf && CC=x86_64-w64-mingw32-gcc ./configure --static --prefix="$P" && make -j$(nproc) install)
-          # Integrity: this tarball is statically linked into the shipped binary; pin the
-          # sha256 published on the official openssl-3.3.2 GitHub release.
-          echo '2e8a40b01979afe8be0bbfb3de5dc1c6709fedb46d6c89c10da114ab5fc3d281  /tmp/openssl.tar.gz' > /tmp/openssl.sha256
-          curl -fsSL --retry 3 --connect-timeout 30 --max-time 600 -o /tmp/openssl.tar.gz https://github.com/openssl/openssl/releases/download/openssl-3.3.2/openssl-3.3.2.tar.gz
-          sha256sum -c /tmp/openssl.sha256
-          mkdir -p /tmp/opensslsrc && tar -C /tmp/opensslsrc --strip-components=1 -xzf /tmp/openssl.tar.gz
-          (cd /tmp/opensslsrc && ./Configure mingw64 no-asm no-shared no-tests no-docs --libdir=lib --prefix="$P" --cross-compile-prefix=x86_64-w64-mingw32- && make -j1 -s install_sw)
-          cp -n "$P/lib64"/*.a "$P/lib/" 2>/dev/null || true
-          git clone https://github.com/tdlib/td.git /tmp/tdsrc
-          (cd /tmp/tdsrc && git checkout "$TDLIB_COMMIT")
-          # Stage 1: build TDLib's host generators natively; they write the
-          # generated sources into the shared source tree.
-          cmake -S /tmp/tdsrc -B /tmp/tdsrc/build-host -DCMAKE_BUILD_TYPE=Release -DTD_ENABLE_JNI=OFF
-          cmake --build /tmp/tdsrc/build-host --target prepare_cross_compiling -j$(nproc)
-          # Stage 2: cross-compile TDLib itself for Windows.
-          cmake -S /tmp/tdsrc -B /tmp/tdsrc/build -G Ninja \
-            -DCMAKE_SYSTEM_NAME=Windows \
-            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
-            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DOPENSSL_ROOT_DIR="$P" \
-            -DZLIB_INCLUDE_DIR="$P/include" \
-            -DZLIB_LIBRARY="$P/lib/libz.a" \
-            -DTD_ENABLE_JNI=OFF \
-            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
-          cmake --build /tmp/tdsrc/build --target tdjson_static -j$(nproc)
-          mkdir -p /tmp/tdlib-install/lib /tmp/tdlib-install/include/td
-          find /tmp/tdsrc/build -name '*.a' -exec cp {} /tmp/tdlib-install/lib/ \;
-          cp "$P"/lib/libcrypto.a "$P"/lib/libssl.a "$P"/lib/libz.a /tmp/tdlib-install/lib/
-          for m in tdactor tdclient tdcore tdnet tdutils tddb tdmtproto tde2e; do cp -r /tmp/tdsrc/$m/td/. /tmp/tdlib-install/include/td/ 2>/dev/null || true; done
-          cp -r /tmp/tdsrc/td/. /tmp/tdlib-install/include/td/
-          cp -r /tmp/tdsrc/td/generate/auto/td/. /tmp/tdlib-install/include/td/
       - name: Build
-        env:
-          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-        # Telegram is switched off for now (no -Dtdlib). The api keys are optional baked
-        # defaults; without them the app asks for keys in the Add Telegram
-        # flow, so the build must succeed with or without the secrets.
-        run: |
-          args=(-Dtarget=x86_64-windows-gnu --release=small -Dversion="${GITHUB_REF_NAME#v}")  # add -Dtdlib=/tmp/tdlib-install to re-enable Telegram
-          if [ -n "$TELEGRAM_API_ID" ] && [ -n "$TELEGRAM_API_HASH" ]; then
-            args+=(-Dtelegram-api-id="$TELEGRAM_API_ID" -Dtelegram-api-hash="$TELEGRAM_API_HASH")
-          fi
-          zig build "${args[@]}"
+        run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion="${GITHUB_REF_NAME#v}"
       - name: Package zip
         run: |
           cd zig-out/bin
-          zip -r "${GITHUB_WORKSPACE}/Messages-${GITHUB_REF_NAME}.zip" Messages.exe *.ttf *LICENSE*
+          zip -r "${GITHUB_WORKSPACE}/Messages-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe postboxctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf IBMPlexSans-Italic.ttf IBMPlexMono-Regular.ttf *LICENSE*
+      - name: Build and package ARM64
+        run: |
+          zig build -Dtarget=aarch64-windows-gnu --release=small -Dversion="${GITHUB_REF_NAME#v}" -p zig-out-arm64
+          cd zig-out-arm64/bin
+          zip -r "${GITHUB_WORKSPACE}/Messages_arm64-${GITHUB_REF_NAME}.zip" Messages.exe wazigctl.exe postboxctl.exe IBMPlexSans-Regular.ttf IBMPlexSans-Medium.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Bold.ttf IBMPlexSans-Italic.ttf IBMPlexMono-Regular.ttf *LICENSE*
+      - name: Branded archives with legacy updater aliases
+        run: |
+          cp "Messages-${GITHUB_REF_NAME}.zip" "Postbox-${GITHUB_REF_NAME}.zip"
+          cp "Messages_arm64-${GITHUB_REF_NAME}.zip" "Postbox_arm64-${GITHUB_REF_NAME}.zip"
       - name: Package MSI
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq wixl wixl-data
+          sudo -E apt-get -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo -E apt-get -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y wixl wixl-data
           version="${GITHUB_REF_NAME#v}"
-          # MSI ProductVersion must be exactly three numeric components; refuse
-          # anything else instead of building an installer that cannot upgrade.
           echo "${version}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
           wixl -D "Version=${version}" -D "BinDir=${GITHUB_WORKSPACE}/zig-out/bin/" \
-            -o "Messages-${GITHUB_REF_NAME}.msi" assets/installer.wxs
+            -o "Postbox-${GITHUB_REF_NAME}.msi" assets/installer.wxs
       - name: Checksums
         run: |
-          sha256sum "Messages-${GITHUB_REF_NAME}.zip" "Messages-${GITHUB_REF_NAME}.msi" > SHA256SUMS.txt
+          sha256sum "Messages-${GITHUB_REF_NAME}.zip" "Messages_arm64-${GITHUB_REF_NAME}.zip" "Postbox-${GITHUB_REF_NAME}.msi" "Postbox-${GITHUB_REF_NAME}.zip" "Postbox_arm64-${GITHUB_REF_NAME}.zip" > SHA256SUMS.txt
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-bundle
           path: |
             Messages-*.zip
-            Messages-*.msi
+            Messages_arm64-*.zip
+            Postbox-*.msi
+            Postbox-*.zip
+            Postbox_arm64-*.zip
             SHA256SUMS.txt
 
-  smoke:
-    name: msi smoke test
+  launch:
+    name: Launch Windows app
     needs: build
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 4
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: release-bundle
-      - name: Install silently
+      - name: Open the packaged app and check its main window
         shell: pwsh
         run: |
-          $msi = (Get-ChildItem Messages-*.msi).FullName
-          # Call msiexec directly: Start-Process -PassThru uses ShellExecute and
-          # leaves ExitCode null on Windows PowerShell 5.1, so the exit status
-          # was unreadable. /L*V keeps a full log to diagnose any real failure.
-          & msiexec /i $msi /qn /norestart /L*V install.log | Out-Null
-          $code = $LASTEXITCODE
-          if ($code -ne 0) {
-            Get-Content install.log -Tail 40
-            throw "msiexec install failed: $code"
+          Expand-Archive "Messages-${{ github.ref_name }}.zip" app
+          $app = Start-Process "$PWD/app/Messages.exe" -WorkingDirectory "$PWD/app" -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(60)
+            do {
+              $app.Refresh()
+              if ($app.HasExited) { throw "App exited before opening its window" }
+              if ($app.MainWindowHandle -ne [IntPtr]::Zero) { exit 0 }
+              Start-Sleep -Seconds 1
+            } while ((Get-Date) -lt $deadline)
+            throw 'App did not open a main window'
+          } finally {
+            if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
           }
-      - name: Verify install
-        shell: pwsh
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan history for secrets
         run: |
-          $exe = "$env:LOCALAPPDATA\Programs\Messages\Messages.exe"
-          $lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Messages.lnk"
-          if (-not (Test-Path $exe)) { throw "missing $exe" }
-          if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Messages\IBMPlexSans-Regular.ttf")) { throw "missing bundled font" }
-          if (-not (Test-Path $lnk)) { throw "missing Start menu shortcut $lnk" }
-      - name: Headless Telegram smoke
-        # Telegram is off for now (not in use); flip back to re-enable.
-        if: false
-        shell: pwsh
-        run: |
-          # --tdlib-smoke starts TDLib, waits for the first authorization
-          # state, and exits; it proves the Telegram link is live without a
-          # window or a login.
-          # Messages.exe is a GUI-subsystem binary, so `& $exe` does not wait
-          # and $LASTEXITCODE stays empty; Start-Process -Wait does.
-          $exe = "$env:LOCALAPPDATA\Programs\Messages\Messages.exe"
-          $proc = Start-Process -FilePath $exe -ArgumentList '--tdlib-smoke' -Wait -PassThru
-          $code = $proc.ExitCode
-          if ($code -ne 0) { throw "tdlib smoke failed: $code" }
-      - name: Uninstall silently
-        shell: pwsh
-        run: |
-          $msi = (Get-ChildItem Messages-*.msi).FullName
-          & msiexec /x $msi /qn /norestart | Out-Null
-          $code = $LASTEXITCODE
-          if ($code -ne 0) { throw "msiexec uninstall failed: $code" }
-          if (Test-Path "$env:LOCALAPPDATA\Programs\Messages\Messages.exe") { throw "exe left behind after uninstall" }
-          if (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Messages.lnk") { throw "shortcut left behind after uninstall" }
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks detect --no-banner --source . --redact --log-opts "$GITHUB_SHA"
 
   release:
     name: release
-    needs: [build, smoke]
+    needs: [build, launch, gitleaks]
     permissions:
       contents: write
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compose product release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/update_cards.py release-notes --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.txt"
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -193,7 +130,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Re-run safe: first create publishes with assets attached (atomic);
-          # on a re-run create fails because the release exists, so clobber-upload instead.
-          gh release create "${GITHUB_REF_NAME}" Messages-*.zip Messages-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes \
-            || gh release upload "${GITHUB_REF_NAME}" Messages-*.zip Messages-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --clobber
+          gh release create "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Postbox-*.zip Postbox_arm64-*.zip Postbox-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --verify-tag --notes-file "$RUNNER_TEMP/release-notes.txt" \
+            || { gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --notes-file "$RUNNER_TEMP/release-notes.txt" && gh release upload "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Postbox-*.zip Postbox_arm64-*.zip Postbox-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --clobber; }

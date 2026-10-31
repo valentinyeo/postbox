@@ -1,0 +1,77 @@
+name: AI review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  code-review:
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       !github.event.pull_request.draft) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       startsWith(github.event.comment.body, '/ai-review') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Resolve eligible PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          info=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")
+          if ! jq -e --arg repo "$GITHUB_REPOSITORY" --arg head "$EVENT_HEAD" '
+            .state == "open" and .draft == false and .head.repo.full_name == $repo
+            and ($head == "" or .head.sha == $head)' <<< "$info" > /dev/null; then
+            echo '::notice::AI review skipped: fork, draft, closed PR, or superseded head.'
+            exit 0
+          fi
+          base=$(jq -er '.base.sha | select(test("^[0-9a-f]{40}$"))' <<< "$info")
+          head=$(jq -er '.head.sha | select(test("^[0-9a-f]{40}$"))' <<< "$info")
+          printf 'number=%s\nbase=%s\nhead=%s\n' "$PR_NUMBER" "$base" "$head" >> "$GITHUB_OUTPUT"
+
+      - name: Check review key availability
+        id: key
+        if: steps.pr.outputs.number != ''
+        env:
+          AI_REVIEW_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$AI_REVIEW_API_KEY" ]]; then
+            echo '::notice::AI review skipped: the review key is not configured; a maintainer must set it.'
+            exit 0
+          fi
+          echo 'available=true' >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.available == 'true'
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Review and post advisory comment
+        if: steps.key.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AI_REVIEW_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+          AI_REVIEW_HEAD_SHA: ${{ steps.pr.outputs.head }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: bash tools/ai-review.sh "$PR_NUMBER"
