@@ -40,11 +40,16 @@ class InlineLinksHandler(VoiceHandler):
             self.respond(404, {'error': 'unavailable'})
 
     def do_POST(self):
-        self.wire_path = self.path
+        self.wire_path = urlsplit(self.path).path
+        if self.wire_path != '/v1/wazig/mark-read':
+            self.record(403)
+            self.close_connection = True
+            self.send_response(403)
+            self.send_header('Content-Length', '0')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            return
         if not self.authorized():
             return
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
-        if self.path == '/v1/wazig/mark-read':
-            self.respond(200, {'status': 'ok'}, body=body)
-        else:
-            self.respond(400, {'error': 'unexpected write'}, body=body)
+        self.respond(200, {'status': 'ok'}, body=body)
