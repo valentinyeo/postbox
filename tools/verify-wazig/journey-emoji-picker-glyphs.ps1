@@ -36,6 +36,8 @@ function Capture-Emoji($Session, [string]$Name) {
     $state = Read-Control $Session status
     $state | ConvertTo-Json -Depth 32 | Set-Content (Join-Path $Session.evidence "emoji-$Name.status.json")
     @(Read-BridgeRequests $Session) | ConvertTo-Json -Depth 32 -AsArray | Set-Content (Join-Path $Session.evidence "emoji-$Name.requests.json")
+    $desktop = [Windows.Forms.SystemInformation]::VirtualScreen
+    @{ origin=@($desktop.Left,$desktop.Top); size=@($desktop.Width,$desktop.Height) } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence "emoji-$Name.screen.json")
     Save-Screen $Session "emoji-$Name"
     return $state
 }
@@ -106,6 +108,13 @@ if ($seed -eq 11) {
     $afterMissing = Capture-Emoji $session 'missing-enter'
     Assert-That ($null -ne $afterMissing.emoji_picker -and $afterMissing.emoji_picker.match_count -eq 0) 'Empty search activated an emoji'
 }
+Search-Emoji $session $picker 'zzqqxx'
+$unmatched = Capture-Emoji $session 'unmatched'
+Assert-That ($unmatched.emoji_picker.match_count -eq 0) 'Unmatched query returned emoji'
+Assert-EmojiForeground $session $picker
+[InlineLinksNative]::Press(0x0D)
+$unmatchedEnter = Capture-Emoji $session 'unmatched-enter'
+Assert-That ($null -ne $unmatchedEnter.emoji_picker -and $unmatchedEnter.emoji_picker.match_count -eq 0) 'Unmatched query activated an emoji'
 Close-Emoji $session $picker
 $compose = Get-Edit (Get-Window $session) '1032'
 $picker = Open-EmojiPalette $session 'Insert emoji'
@@ -120,15 +129,50 @@ Assert-EmojiForeground $session $picker
 $null = Wait-Until { (Read-Edit $compose) -ceq $heartText } 'exact heart inserted'
 @{ text=(Read-Edit $compose); expected=$heartText } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'emoji-heart-insert.json')
 $picker = Open-EmojiPalette $session 'Insert emoji'
-Search-Emoji $session $picker 'winking face'
-$winkState = Capture-Emoji $session 'wink-search'
+$winkState = Capture-Emoji $session 'wink-grid'
 $wink = [char]::ConvertFromUtf32(0x1F609)
-Assert-That ($winkState.emoji_picker.cells[0].text -ceq $wink -and $winkState.emoji_picker.cells[0].coverage -ceq 'supported') 'Wink first result unavailable'
+$winkCells = @($winkState.emoji_picker.cells | Where-Object { $_.match -ge 8 -and $_.text -ceq $wink })
+Assert-That ($winkCells.Count -eq 1 -and $winkCells[0].coverage -ceq 'supported') 'Wink catalog cell unavailable'
+$winkCell = $winkCells[0]
+$rect = $winkCell.rect
+$x = [int](($rect[0]+$rect[2])/2); $y = [int](($rect[1]+$rect[3])/2)
 Assert-EmojiForeground $session $picker
-[InlineLinksNative]::Press(0x0D)
+[InlineLinksNative]::Hover($session.pid, $x, $y)
+$cursor = [InlineLinksNative]::Cursor()
+@{ cell=$winkCell; point=@($x,$y); cursor=$cursor } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'emoji-wink-hover.json')
+$hoverState = Capture-Emoji $session 'wink-hover'
+Assert-That ([Math]::Abs($cursor[2] - $x) -le 1 -and [Math]::Abs($cursor[3] - $y) -le 1) 'Wink hover did not reach cell'
+Assert-EmojiForeground $session $picker
+@{ cell=$winkCell; point=@($x,$y) } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'emoji-wink-click.json')
+[InlineLinksNative]::Click($session.pid, $x, $y)
 $draft = $heartText + $wink
 $null = Wait-Until { (Read-Edit $compose) -ceq $draft } 'exact wink inserted'
 @{ text=(Read-Edit $compose); expected=$draft } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'emoji-wink-insert.json')
+$picker = Open-EmojiPalette $session 'Insert emoji'
+$grid = Capture-Emoji $session 'gap-grid'
+$winkCells = @($grid.emoji_picker.cells | Where-Object { $_.match -ge 8 -and $_.text -ceq $wink })
+Assert-That ($winkCells.Count -eq 1) 'Wink missing from reopened catalog'
+$winkCell = $winkCells[0]
+$previous = @($grid.emoji_picker.cells | Where-Object { $_.match -eq ($winkCell.match - 1) })
+Assert-That ($previous.Count -eq 1 -and $grid.emoji_picker.selected_match -eq 0) 'Gap navigation starting state missing'
+if ($target.coverage -ceq 'missing') { Assert-That ($previous[0].index -lt 11 -and $winkCell.index -gt 11) 'Navigation does not cross missing target' }
+for ($i = 0; $i -lt $previous[0].match; $i++) {
+    Assert-EmojiForeground $session $picker
+    [InlineLinksNative]::Press(0x27)
+}
+$null = Wait-Until { (Read-Control $session status).emoji_picker.selected_match -eq $previous[0].match } 'selection before gap'
+$beforeGap = Capture-Emoji $session 'gap-before'
+Assert-That ($beforeGap.emoji_picker.selected_index -eq $previous[0].index) 'Wrong canonical selection before gap'
+Assert-EmojiForeground $session $picker
+[InlineLinksNative]::Press(0x27)
+$null = Wait-Until { (Read-Control $session status).emoji_picker.selected_match -eq $winkCell.match } 'selection after gap'
+$afterGap = Capture-Emoji $session 'gap-after'
+Assert-That ($afterGap.emoji_picker.selected_index -eq $winkCell.index) 'Wrong canonical selection after gap'
+Assert-EmojiForeground $session $picker
+[InlineLinksNative]::Press(0x0D)
+$draft = $heartText + $wink + $wink
+$null = Wait-Until { (Read-Edit $compose) -ceq $draft } 'exact keyboard wink inserted'
+@{ text=(Read-Edit $compose); expected=$draft; before=$beforeGap.emoji_picker.selected_index; after=$afterGap.emoji_picker.selected_index } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'emoji-gap-insert.json')
 $picker = Open-EmojiPalette $session 'Insert emoji'
 $recent = Capture-Emoji $session 'recent'
 Assert-That ($recent.emoji_picker.cells[0].text -ceq $wink -and $recent.emoji_picker.cells[1].text -ceq $heartText) 'Recent canonical mapping changed'
@@ -140,10 +184,14 @@ Assert-EmojiForeground $session $window
 [InlineLinksNative]::Combo(0x52)
 $picker = Get-EmojiWindow $session
 $reaction = Capture-Emoji $session 'reaction-cancel'
-Assert-That $reaction.emoji_picker.react 'Reaction picker did not open'
+Assert-That ($reaction.emoji_picker.react -and $reaction.pending_reaction_count -eq 0) 'Reaction picker did not open cleanly'
 Close-Emoji $session $picker
+$cancelled = Read-Control $session status
+$cancelled | ConvertTo-Json -Depth 32 | Set-Content (Join-Path $session.evidence 'emoji-reaction-closed.status.json')
+Assert-That ($cancelled.pending_reaction_count -eq 0) 'Reaction cancellation queued work'
 $final = Read-Control $session status
 $requests = @(Read-BridgeRequests $session)
 @{ draft=(Read-Edit $compose); expected=$draft; status=$final; requests=$requests } | ConvertTo-Json -Depth 32 | Set-Content (Join-Path $session.evidence 'emoji-final.json')
 Assert-That ((Read-Edit $compose) -ceq $draft) 'Reaction cancel changed draft'
+Assert-That ($final.pending_reaction_count -eq 0) 'Reaction work remains pending'
 Assert-That (@($requests | Where-Object { $_.method -in @('POST','PUT','PATCH','DELETE') }).Count -eq 0) 'Unexpected mutating request'

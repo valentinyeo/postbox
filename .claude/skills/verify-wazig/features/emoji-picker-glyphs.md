@@ -5,6 +5,7 @@
 - Missing glyphs leave the real picker grid.
 - Recent and search results retain canonical identity.
 - Heart and wink insert their exact Unicode.
+- Hover and arrow selection cross the catalog gap.
 - Compose and reaction cancellation preserve the draft.
 
 ## How to get to it (user POV)
@@ -19,7 +20,8 @@
 - Native input drives the actual popup.
 - Isolated preferences seed an actually missing recent.
 - Status records native coverage, geometry and cells.
-- Screenshots and request logs survive failures.
+- Screenshots provide per-cell foreground measurements.
+- The complete request log is checked after shutdown.
 
 ## Gotchas
 

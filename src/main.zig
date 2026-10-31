@@ -13717,7 +13717,9 @@ fn controlEmojiPicker(a: *App, w: *std.Io.Writer) !void {
     _ = win.GetClientRect(list, &client);
     const top: usize = @intCast(@max(0, win.SendMessageW(list, win.LB_GETTOPINDEX, 0, 0)));
     const rows: usize = @intCast(@min(emoji_max_rows, @divTrunc(client.bottom - client.top, emojiCell(a))));
-    try w.print("{{\"bounds\":[{d},{d},{d},{d}],\"em\":{d},\"react\":{},\"match_count\":{d},\"seed\":", .{ bounds.left, bounds.top, bounds.right, bounds.bottom, px(a, 28), a.emoji_react, a.emoji_match_count });
+    try w.print("{{\"bounds\":[{d},{d},{d},{d}],\"em\":{d},\"react\":{},\"match_count\":{d},\"selected_match\":{d},\"selected_index\":", .{ bounds.left, bounds.top, bounds.right, bounds.bottom, px(a, 28), a.emoji_react, a.emoji_match_count, a.emoji_selected });
+    if (a.emoji_selected < a.emoji_match_count) try w.print("{d}", .{a.emoji_matches[a.emoji_selected]}) else try w.writeAll("null");
+    try w.writeAll(",\"seed\":");
     if (verification_emoji_seed) |seed| try w.print("{d}", .{seed}) else try w.writeAll("null");
     try w.writeAll(",\"recents\":[");
     for (a.emoji_recents[0..a.emoji_recents_count], 0..) |recent, i| {
@@ -13789,6 +13791,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
     if (verification_fixture) {
         try controlEmojiPicker(a, w);
+        try w.print(",\"pending_reaction_count\":{d}", .{a.pending_reaction_count});
         try w.print(",\"canvas_up_count\":{d},\"canvas_up_point\":[{d},{d}],\"reply_jump_count\":{d},\"reply_jump_id\":", .{ a.verification_canvas_up_count, a.verification_canvas_up_point.x, a.verification_canvas_up_point.y, a.verification_reply_jump_count });
         try control_api.writeString(w, a.verification_reply_jump_id.slice());
         try w.print(",\"canvas_cursor_count\":{d},\"canvas_cursor_point\":[{d},{d}]", .{ a.verification_cursor_count, a.verification_cursor_point.x, a.verification_cursor_point.y });
