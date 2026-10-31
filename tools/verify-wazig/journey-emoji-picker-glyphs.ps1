@@ -18,10 +18,12 @@ function Get-EmojiWindow($Session) {
     } 'owned emoji picker'
 }
 
-$app = Get-App $session
+$font = Get-Item (Join-Path $env:WINDIR 'Fonts/seguiemj.ttf')
+@{ commit=$session.commit; sha256=$session.sha256; os=[Environment]::OSVersion.VersionString; font_file=$font.Name; font_version=$font.VersionInfo.FileVersion; font_sha256=(Get-FileHash $font.FullName).Hash; dpi=[VerifyWindow]::GetDpiForWindow((Get-App $session).MainWindowHandle) } | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'emoji-environment.json')
+$emojiOwnedApp = Get-App $session
 $null = Wait-Until {
-    [VerifyWindow]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
-    [VerifyWindow]::GetForegroundWindow() -eq $app.MainWindowHandle
+    [VerifyWindow]::SetForegroundWindow($emojiOwnedApp.MainWindowHandle) | Out-Null
+    [VerifyWindow]::GetForegroundWindow() -eq $emojiOwnedApp.MainWindowHandle
 } 'owned app foreground'
 $window = Get-Window $session
 Assert-EmojiForeground $session $window
@@ -36,6 +38,14 @@ $null = Wait-Until {
     $shown = Read-Control $session messages
     $shown.chat.id -ceq 'fixture-alpha' -and @($shown.messages | Where-Object id -CEQ 'INLINE-BODY').Count -eq 1
 } 'synthetic chat loaded'
+$chatPalette = Get-PaletteWindow $session
+Assert-EmojiForeground $session $chatPalette
+[InlineLinksNative]::Press(0x0D)
+$null = Wait-Until {
+    $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MessagesPalette')
+    $palettes = $window.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+    $palettes.Count -eq 0 -and [VerifyWindow]::GetForegroundWindow() -eq $emojiOwnedApp.MainWindowHandle
+} 'chat search closed and owned app foreground'
 Assert-EmojiForeground $session $window
 [InlineLinksNative]::Combo(0x4B)
 $palette = Get-PaletteWindow $session
