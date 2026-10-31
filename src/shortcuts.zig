@@ -74,6 +74,7 @@ pub const groups = [_]Group{
         .{ .key = "Alt+G, Alt+G", .desc = "Jump to the latest message (press twice)" },
         .{ .key = "Ctrl+R", .desc = "React to message (search any emoji)" },
         .{ .key = "Ctrl+Shift+R", .desc = "Reply to the selected message" },
+        .{ .key = "Enter or R on a focused message", .desc = "Start a reply to it" },
         .{ .key = "Ctrl+C or Ctrl+Shift+C", .desc = "Copy the selected message text" },
         .{ .key = "Ctrl+P", .desc = "Play or pause the selected voice message" },
         .{ .key = "Ctrl+T", .desc = "Show or hide the transcript" },

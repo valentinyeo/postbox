@@ -68,6 +68,18 @@ foreach ($target in @(
     Invoke-PaletteCommand $session 'Reply to selected message'
     Send-Keys $session '{ESC}'
     $null = Wait-Until { (Read-Control $session status).reply.id -ceq '' } "$name Escape cancels reply"
+    Send-Keys $session '{UP}'
+    $focused = Wait-Until {
+        $rows = @((Read-Control $session messages).messages | Where-Object { $_.selected })
+        if ($rows.Count -eq 1) { $rows[0] }
+    } "$name arrow up focuses one message"
+    Send-Keys $session '{ENTER}'
+    $null = Wait-Until { (Read-Control $session status).reply.id -ceq $focused.id } "$name Enter replies to the focused message"
+    Assert-That ((Read-Control $session status).reply.preview.Length -gt 0) "$name reply preview shows the focused message text"
+    @{ focused = $focused.id; reply = (Read-Control $session status).reply.id; preview = (Read-Control $session status).reply.preview } | ConvertTo-Json | Set-Content (Join-Path $session.evidence "$name-enter-reply.json")
+    Save-Screen $session "$name-enter-reply"
+    Send-Keys $session '{ESC}'
+    $null = Wait-Until { (Read-Control $session status).reply.id -ceq '' } "$name Escape cancels the key reply"
     Invoke-PaletteCommand $session 'Reply to selected message'
     Send-Keys $session "Synthetic $name reply"
     Send-Keys $session '+{ENTER}Second line'

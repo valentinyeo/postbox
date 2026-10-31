@@ -19729,6 +19729,20 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             }
         }
     }
+    if (!control and !alt and !shift and (key == win.VK_RETURN or key == 'R') and a.thread_parent.len == 0 and
+        a.palette == null and a.emoji_wnd == null and a.image_viewer_window == null and a.shortcut_help == null)
+    {
+        if (a.selected_message) |selected| {
+            const composer_focused = if (a.compose) |compose| focus == compose else false;
+            const compose_empty = if (a.compose) |compose| win.GetWindowTextLengthW(compose) == 0 else true;
+            if (selected < a.message_count and compose_empty and a.messages[selected].send_state == .none and
+                (key == win.VK_RETURN or !composer_focused))
+            {
+                startReply(a);
+                return true;
+            }
+        }
+    }
     if (key == win.VK_ESCAPE and clearMessageMarks(a)) return true;
     if (key == win.VK_ESCAPE and clearBulkSelection(a)) {
         setStatus(a, "Selection cleared");
