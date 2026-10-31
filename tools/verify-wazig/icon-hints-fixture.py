@@ -2,6 +2,17 @@ from urllib.parse import parse_qs, urlsplit
 
 
 class IconHintsHandler(VoiceHandler):
+    def do_POST(self):
+        if urlsplit(self.path).path != '/v1/wazig/send':
+            return super().do_POST()
+        self.wire_path = '/v1/wazig/send'
+        self.record(403)
+        self.close_connection = True
+        self.send_response(403)
+        self.send_header('Content-Length', '0')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+
     def do_GET(self):
         self.wire_path = self.path
         if not self.authorized():

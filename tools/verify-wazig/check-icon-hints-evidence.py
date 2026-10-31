@@ -29,6 +29,10 @@ def load(folder, name):
     return json.loads((folder / name).read_text(encoding='utf-8-sig'))
 
 
+def check_no_send(requests):
+    assert not [row for row in requests if row.get('wire_path') == '/v1/wazig/send']
+
+
 def check_transition(item):
     before, after = item['before'], item['after']
     assert before['visible'] and before['hwnd'] > 0 and before['text']
@@ -184,10 +188,10 @@ def check_evidence(folder):
     assert before['selection'] == held['selection'] == cancelled['selection']
     for name in ('voice-before', 'voice-held', 'voice-cancelled'):
         requests = load(folder, f'{name}.requests.json')
-        assert not [row for row in requests if row.get('wire_path') == '/v1/wazig/send']
+        check_no_send(requests)
     for path in [folder / 'bridge-requests.jsonl'] + [folder / case / f'bridge-{boundary}.jsonl' for case in ('voice-no-chat', 'voice-bad-fixture', 'voice-invalid-fixture') for boundary in ('before', 'after')]:
         requests = [json.loads(line) for line in path.read_text(encoding='utf-8-sig').splitlines() if line.strip()]
-        assert not [row for row in requests if row.get('wire_path') == '/v1/wazig/send']
+        check_no_send(requests)
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
     assert actions.count('icon-key: 77 up=False') >= 5
     assert 'icon-key: 18 up=False' in actions and 'icon-key: 27 up=False' in actions

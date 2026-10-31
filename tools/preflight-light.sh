@@ -15,6 +15,7 @@ PYTHON_LIGHT_TESTS=(
     test_fake_wa_bridge
     test_identity_fixture
     test_icon_hint_oracle
+    test_icon_hint_send_boundary
     test_link_previews
     test_media_layout
     test_no_comments
