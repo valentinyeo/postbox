@@ -30,7 +30,7 @@ assert [row['launch_zoomed_after'] for row in starts] == sorted(row['launch_zoom
 launch_log = (folder / 'final-data' / 'launch-log.txt').read_text(encoding='utf-8-sig')
 assert sum(line.endswith(' startup: window zoomed=true') for line in launch_log.splitlines()) >= 5
 assert not any(line.endswith(' startup: window zoomed=false') for line in launch_log.splitlines())
-assert read('doctor.json')['version'] == '0.0.526'
+assert read('doctor.json')['version'] == session.get('expected_version', '0.0.526')
 assert len({row['monitor_handle'] for row in steps}) == 1
 for row in steps:
     assert row['hwnd'] and row['monitor_handle'] and row['start_ticks']

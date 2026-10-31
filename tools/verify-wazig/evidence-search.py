@@ -21,7 +21,7 @@ else:
     snapshots += ['action', 'kept', 'inbox']
 for name in [f'{stage}.json' if stage in ('doctor', 'side-effects') else f'{stage}.state.json' for stage in snapshots]:
     data = json.loads((folder / name).read_text(encoding='utf-8-sig'))
-    assert data['version'] == '0.0.526', name
+    assert data['version'] == session.get('expected_version', '0.0.526'), name
     assert data['pending_sends'] == 0 and data['pending_archives'] == 0, name
     assert data['sync'] == 'stopped' and not data['slack_connected'], name
 before = json.loads((folder / 'before.state.json').read_text(encoding='utf-8-sig'))

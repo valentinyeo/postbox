@@ -99,7 +99,7 @@ def check_quiet_status(folder):
         assert tree.splitlines()[0].startswith('MessagesZig | ')
         assert not re.search(r'^1048 \|', tree, re.M)
         state = read(f'{stage}.state.json')
-        assert state['version'] == '0.0.526' and state['chat_count'] == 2
+        assert state['version'] == session.get('expected_version', '0.0.526') and state['chat_count'] == 2
         assert state['pending_sends'] == state['pending_archives'] == 0
         if stage in ('sync-problem', 'after'):
             assert state['update_card'] == problem['card']

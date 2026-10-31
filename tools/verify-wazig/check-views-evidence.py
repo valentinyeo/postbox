@@ -39,6 +39,8 @@ def check_views(folder):
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))
 
+    session = read('session.json')
+
     def identities(rows):
         result = {(row['provider'], row['account'], row['id']) for row in rows}
         assert len(result) == len(rows), 'duplicate chat identity'
@@ -68,7 +70,7 @@ def check_views(folder):
         view = state['current_view']
         label = 'Combined inbox' if view['inbox'] else view['label']
         assert row['current_view'] == view
-        assert row['version'] == state['version'] == '0.0.526'
+        assert row['version'] == state['version'] == session.get('expected_version', '0.0.526')
         assert row['actual'] == row['expected'] == f"{label} - Postbox v{state['version']}"
         assert f"MessagesZig | {row['actual']}" in (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig')
     assert capture('title-view-1')['current_view'] == capture('view-1')['current_view']

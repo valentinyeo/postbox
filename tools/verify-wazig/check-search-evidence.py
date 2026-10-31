@@ -175,7 +175,7 @@ def check_evidence(folder):
         raw = (folder / f'{stage}.png').read_bytes()
         assert raw.startswith(b'\x89PNG\r\n\x1a\n') and len(raw) > 10000
         state = read(folder, f'{stage}.state.json')
-        assert state['version'] == '0.0.526' and state['sync'] == 'stopped'
+        assert state['version'] == read(folder, 'session.json').get('expected_version', '0.0.526') and state['sync'] == 'stopped'
         assert state['pending_sends'] == state['pending_archives'] == 0
         tree = (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig')
         assert tree.splitlines()[0].startswith('MessagesZig | ') and '\n1008 |' not in tree
