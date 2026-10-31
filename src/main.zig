@@ -17422,7 +17422,7 @@ fn drawReactIcon(hdc: win.HDC, a: *App, actions: win.RECT) void {
     const left = target.left + @divTrunc(target.right - target.left - em, 2);
     const top = target.top + @divTrunc(target.bottom - target.top - em, 2);
     if (emoji_draw.draw(hdc, wide.slice(), left, top, em, em) != null) return;
-    const font = (a.font_emoji orelse a.font) orelse return;
+    const font = (if (a.font_emoji != null) a.font_emoji else a.font) orelse return;
     _ = win.SelectObject(hdc, @ptrCast(font));
     _ = text_draw.drawText(hdc, wide.ptr(), -1, &target, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
