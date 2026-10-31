@@ -409,6 +409,23 @@
       "maximize": true
     },
     {
+      "name": "inline-links",
+      "pr": false,
+      "hub": "inline-links",
+      "evidence": true,
+      "chats": 4,
+      "script": "journey-inline-links.ps1",
+      "validator": {
+        "file": "check-inline-links-evidence.py",
+        "function": "check_inline_links"
+      },
+      "hub_handler": {
+        "file": "inline-links-fixture.py",
+        "class": "InlineLinksHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "link-previews",
       "pr": true,
       "hub": "link-previews",

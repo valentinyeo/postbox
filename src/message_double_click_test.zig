@@ -14,6 +14,7 @@ const win = struct {
     const WM_TIMER = 6;
     const VK_CONTROL = 17;
     const VK_SHIFT = 16;
+    const VK_MENU = 18;
     fn GetKeyState(_: u32) i16 {
         return 0;
     }
@@ -55,6 +56,9 @@ const win = struct {
     fn ReleaseCapture() i32 {
         return 1;
     }
+    fn GetCapture() usize {
+        return 1;
+    }
     fn DefWindowProcW(_: usize, _: u32, _: usize, _: isize) isize {
         return 0;
     }
@@ -88,6 +92,7 @@ const Message = struct {
     image: bool = false,
     gif: bool = false,
     text: WideText(4095) = .{},
+    quote: WideText(4095) = .{},
     word_rects: [3]struct { start: u16, len: u16, rect: Rect } = .{
         .{ .start = 0, .len = 3, .rect = .{ .left = 10, .top = 20, .right = 40, .bottom = 40 } },
         .{ .start = 4, .len = 3, .rect = .{ .left = 40, .top = 20, .right = 70, .bottom = 40 } },
@@ -114,6 +119,8 @@ const WacliResult = struct {
     ok: bool = true,
     http_status: u32 = 0,
 };
+const QuoteLinkHit = struct { message_index: usize, start: usize, end: usize, fingerprint: u64 };
+const VisibleLink = union(enum) { body: void, quote: QuoteLinkHit };
 const App = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     chats: [1]Chat = .{.{}},
@@ -135,6 +142,7 @@ const App = struct {
     downloads: usize = 0,
     click_origin: Point = .{},
     click_moved: bool = false,
+    quote_link_down: ?QuoteLinkHit = null,
     canvas_double_click_handled: bool = false,
     marking_message: bool = false,
     scroll_y: i32 = 0,
@@ -378,6 +386,16 @@ fn setCanvasScroll(_: *App, _: i32) void {}
 fn handleCanvasClick(a: *App, _: usize, _: i32, _: i32) void {
     a.clicks += 1;
 }
+fn visibleLinkAt(_: *const App, _: i32, _: i32) ?VisibleLink {
+    return null;
+}
+fn quoteFingerprint(_: *const Message, _: usize, _: usize) u64 {
+    return 0;
+}
+fn wordIsUrl(_: []const u16) bool {
+    return false;
+}
+fn openUrlWide(_: *App, _: [*:0]const u16) void {}
 fn mouse(a: *App, event: u32, x: u16, y: u16) void {
     app_ptr = a;
     defer app_ptr = null;

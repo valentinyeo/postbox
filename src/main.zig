@@ -722,6 +722,19 @@ const DictationOperation = struct {
     intent: union(enum) { insert_only, sending: DictationFinish, manual } = .insert_only,
 };
 
+const QuoteLinkHit = struct {
+    message_index: usize,
+    start: usize,
+    end: usize,
+    fingerprint: u64,
+    rect: win.RECT,
+};
+
+const VisibleLink = union(enum) {
+    body: struct { message_index: usize, link_index: usize },
+    quote: QuoteLinkHit,
+};
+
 const App = struct {
     allocator: std.mem.Allocator,
     people: people_index.Index,
@@ -1026,6 +1039,20 @@ const App = struct {
     text_dragging: bool = false,
     drag_moved: bool = false,
     drag_origin: win.POINT = .{ .x = 0, .y = 0 },
+    quote_links: std.ArrayList(QuoteLinkHit) = .empty,
+    quote_link_down: ?QuoteLinkHit = null,
+    verification_reply_jump_count: u64 = 0,
+    verification_reply_jump_id: Utf8Text(191) = .{},
+    verification_canvas_up_count: u64 = 0,
+    verification_canvas_up_point: win.POINT = .{ .x = 0, .y = 0 },
+    verification_cursor_count: u64 = 0,
+    verification_cursor_point: win.POINT = .{ .x = 0, .y = 0 },
+    quote_link_scroll: i32 = 0,
+    quote_link_font_scale: i32 = 0,
+    quote_link_dpi: u32 = 0,
+    quote_link_client: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+    header_pill_rect: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+    header_badge_rect: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     click_origin: win.POINT = .{ .x = 0, .y = 0 },
     click_moved: bool = false,
     canvas_double_click_handled: bool = false,
@@ -1951,6 +1978,9 @@ fn scaledFontHeight(base: i32, scale: i32, dpi: i32) i32 {
 }
 
 fn recreateFonts(a: *App) void {
+    if (a.quote_link_down != null) a.canvas_double_click_handled = true;
+    a.quote_link_down = null;
+    a.quote_links.clearRetainingCapacity();
     const body_weight = @import("font_config.zig").body_weight;
     comptime std.debug.assert(body_weight == win.FW_NORMAL);
     const dpi: i32 = @intCast(a.dpi);
@@ -6115,6 +6145,10 @@ fn retryPendingDownload(a: *App) void {
 }
 
 fn clearMessages(a: *App) void {
+    if (a.quote_link_down != null) a.canvas_double_click_handled = true;
+    a.quote_links.deinit(a.allocator);
+    a.quote_links = .empty;
+    a.quote_link_down = null;
     invalidateCanvasIconTooltips(a);
     if (a.selected_chat >= a.chat_count) clearHeaderIconTooltip(a);
     if (a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.marked_chat.key(), chat_key.of(&a.chats[a.selected_chat]))) _ = clearMessageMarks(a);
@@ -9052,6 +9086,10 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         } else {
             message.text.set(a.allocator, if (media_drain.isPlaceholder(media_type, text)) "" else text);
         }
+        if (verification_fixture and getString(object, "fixture_quote").len > 0) {
+            message.quote.set(a.allocator, getString(object, "fixture_quote"));
+            message.quote_sender.set(a.allocator, getString(object, "fixture_quote_sender"));
+        }
         message.from_me = getBool(object, "FromMe");
         message.forwarded = !revoked and chat.provider == .whatsapp and getBool(object, "IsForwarded");
         message.media_type.set(media_type);
@@ -10834,6 +10872,10 @@ fn jumpToReply(a: *App, id: []const u8) void {
         const selected = a.selected_message;
         a.selected_message = index;
         a.reply_flash.set(id);
+        if (verification_fixture) {
+            a.verification_reply_jump_count +%= 1;
+            a.verification_reply_jump_id.set(id);
+        }
         scrollToSelectedMessage(a);
         a.selected_message = selected;
         if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
@@ -11982,14 +12024,15 @@ fn handleCanvasClick(a: *App, hwnd: win.HWND, x: i32, y: i32) void {
             return;
         }
         if (x >= bubble.left and x <= bubble.right and y >= bubble.top and y <= bubble.bottom) {
-            for (item.links[0..item.link_count]) |*span| {
-                if (linkSpanHit(span, x, y)) {
-                    openUrlWide(a, span.url.ptr());
+            if (visibleLinkAt(a, x, y)) |link| switch (link) {
+                .body => |body| if (body.message_index == index) {
+                    openUrlWide(a, item.links[body.link_index].url.ptr());
                     a.selected_message = index;
                     _ = win.InvalidateRect(hwnd, null, win.FALSE);
                     return;
-                }
-            }
+                },
+                .quote => {},
+            };
             a.selected_message = index;
             _ = win.InvalidateRect(hwnd, null, win.FALSE);
             return;
@@ -12716,6 +12759,29 @@ fn openUrlWide(a: *App, url: [*:0]const u16) void {
         return;
     }
     const result = shell_lazy.shellExecuteW.?(a.hwnd.?, lit("open"), url, null, null, win.SW_SHOWNORMAL);
+    if (verification_fixture) receipt: {
+        const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, std.mem.span(url)) catch break :receipt;
+        defer a.allocator.free(text);
+        var session_buf: [128]u16 = undefined;
+        const session_len = win.GetEnvironmentVariableW(lit("WAZIG_VERIFY_ID"), &session_buf, session_buf.len);
+        if (session_len > 0 and session_len < session_buf.len) {
+            const session = std.unicode.utf16LeToUtf8Alloc(a.allocator, session_buf[0..session_len]) catch break :receipt;
+            defer a.allocator.free(session);
+            const data = std.json.Stringify.valueAlloc(a.allocator, .{ .url = text, .result = @intFromPtr(result), .pid = win.GetCurrentProcessId(), .session = session }, .{}) catch break :receipt;
+            defer a.allocator.free(data);
+            const path = messagesDirPath(a, "verification-url-launches.jsonl") orelse break :receipt;
+            defer a.allocator.free(path);
+            const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch break :receipt;
+            defer a.allocator.free(wide);
+            const handle = win.CreateFileW(wide.ptr, win.FILE_APPEND_DATA, win.FILE_SHARE_READ | win.FILE_SHARE_WRITE, null, win.OPEN_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
+            if (handle != win.INVALID_HANDLE_VALUE and handle != null) {
+                defer _ = win.CloseHandle(handle);
+                var written: win.DWORD = 0;
+                _ = win.WriteFile(handle, data.ptr, @intCast(data.len), &written, null);
+                _ = win.WriteFile(handle, "\n", 1, &written, null);
+            }
+        }
+    }
     if (@intFromPtr(result) <= 32) setStatus(a, "Windows could not open the link");
 }
 
@@ -13629,6 +13695,9 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
     if (verification_fixture) {
+        try w.print(",\"canvas_up_count\":{d},\"canvas_up_point\":[{d},{d}],\"reply_jump_count\":{d},\"reply_jump_id\":", .{ a.verification_canvas_up_count, a.verification_canvas_up_point.x, a.verification_canvas_up_point.y, a.verification_reply_jump_count });
+        try control_api.writeString(w, a.verification_reply_jump_id.slice());
+        try w.print(",\"canvas_cursor_count\":{d},\"canvas_cursor_point\":[{d},{d}]", .{ a.verification_cursor_count, a.verification_cursor_point.x, a.verification_cursor_point.y });
         try w.print(",\"staged_capacity\":{d}", .{staged_images.capacity});
         const avatar_rect = a.header_icon_tip_rect;
         try w.print(",\"header_avatar\":[{d},{d},{d},{d}]", .{ avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom });
@@ -14032,6 +14101,27 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             .{ .name = "toggle", .rect = message.toggle_hit },
         }) |entry| try w.print(",\"{s}\":[{d},{d},{d},{d}]", .{ entry.name, entry.rect.left, entry.rect.top, entry.rect.right, entry.rect.bottom });
         if (verification_fixture) {
+            try w.writeAll(",\"quote_fragments\":[");
+            var first_quote_fragment = true;
+            for (a.quote_links.items) |hit| {
+                if (hit.message_index != a.message_count - count + index) continue;
+                if (!first_quote_fragment) try w.writeByte(',');
+                first_quote_fragment = false;
+                try w.print("{{\"start\":{d},\"end\":{d},\"rect\":[{d},{d},{d},{d}]}}", .{ hit.start, hit.end, hit.rect.left, hit.rect.top, hit.rect.right, hit.rect.bottom });
+            }
+            try w.writeByte(']');
+            try w.writeAll(",\"link_rects\":[");
+            for (message.links[0..message.link_count], 0..) |*link, link_index| {
+                if (link_index > 0) try w.writeByte(',');
+                try w.writeByte('[');
+                const rect = link.rect;
+                try w.print("[{d},{d},{d},{d}]", .{ rect.left, rect.top, rect.right, rect.bottom });
+                for (link.chunk_rects[0..link.chunk_count]) |chunk| {
+                    try w.print(",[{d},{d},{d},{d}]", .{ chunk.left, chunk.top, chunk.right, chunk.bottom });
+                }
+                try w.writeByte(']');
+            }
+            try w.writeByte(']');
             const actions = messageActionsRect(a, message);
             try w.print(",\"selected\":{}", .{if (a.selected_message) |selected| selected == a.message_count - count + index else false});
             try w.writeAll(",\"action_cells\":[");
@@ -16268,6 +16358,9 @@ fn formattedMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, 
                 if (run_style.mono and !run_style.block) smooth.fillRoundRect(&shapes, .{ .left = x, .top = line_top, .right = x + run_width, .bottom = line_top + line_height }, px(a, 8), px(a, 8), theme.code_inline);
                 _ = win.SetTextColor(hdc, if (is_link or mention) theme.current.primary else if (run_style.footer) theme.current.on_surface_variant else theme.current.on_surface);
                 _ = drawWordSlice(hdc, a, font, a.font_emoji orelse font, em, fontAscent(hdc, font), run, x, line_top, false);
+                if (is_link) {
+                    smooth.fillRoundRect(&shapes, .{ .left = x, .top = line_top + line_height - px(a, 2), .right = x + run_width, .bottom = line_top + line_height - px(a, 1) }, 0, 0, theme.current.primary);
+                }
                 if (run_style.strike) {
                     smooth.fillRoundRect(&shapes, .{ .left = x, .top = line_top + @divTrunc(em * 2, 3), .right = x + run_width, .bottom = line_top + @divTrunc(em * 2, 3) + px(a, 1) }, 0, 0, theme.current.on_surface);
                 }
@@ -16663,14 +16756,92 @@ fn quoteTextWidth(a: *const App, bubble_width: i32) i32 {
     return @max(1, bubble_width - px(a, quote_inset) * 2 - px(a, quote_bar_width) - px(a, quote_text_gap) * 2);
 }
 
+const QuoteMetrics = struct {
+    hdc: win.HDC,
+
+    pub fn width(self: @This(), text: []const u16) i32 {
+        return if (text.len == 0) 0 else runWidth(self.hdc, text);
+    }
+
+    pub fn fit(self: @This(), text: []const u16, available: i32) usize {
+        var low: usize = 0;
+        var high = text.len;
+        while (low < high) {
+            const middle = low + (high - low + 1) / 2;
+            if (self.width(text[0..middle]) <= available) low = middle else high = middle - 1;
+        }
+        return if (low < text.len) wrapChunkLen(text, low) else low;
+    }
+};
+
+const QuotePaint = struct {
+    shapes: *const smooth.Context,
+    message_index: usize,
+    rect: win.RECT,
+    client: win.RECT,
+};
+
 fn quoteBodyHeight(hdc: win.HDC, a: *App, text: []const u16, width: i32) i32 {
+    return layoutQuoteBody(hdc, a, text, width, null);
+}
+
+fn layoutQuoteBody(hdc: win.HDC, a: *App, text: []const u16, width: i32, paint: ?QuotePaint) i32 {
     if (text.len == 0) return 0;
     const font = a.font_small orelse return 0;
     _ = win.SelectObject(hdc, @ptrCast(font));
     const line_height = textLineHeight(hdc, font);
-    var rect = win.RECT{ .left = 0, .top = 0, .right = width, .bottom = 0 };
-    _ = text_draw.drawText(hdc, text.ptr, @intCast(text.len), &rect, win.DT_CALCRECT | win.DT_WORDBREAK | win.DT_EDITCONTROL | win.DT_NOPREFIX);
-    return @min(rect.bottom - rect.top, line_height * quote_max_lines);
+    const metrics = QuoteMetrics{ .hdc = hdc };
+    var measure = @import("chat_list_layout.zig").Layout{ .text = text, .width = width, .line_height = line_height, .lists = false };
+    var overflow = false;
+    while (measure.next(metrics)) |span| {
+        if (span.y >= line_height * quote_max_lines) {
+            overflow = true;
+            break;
+        }
+    }
+    const height = @min(measure.height(), line_height * quote_max_lines);
+    const target = paint orelse return height;
+    var layout_text = @import("chat_list_layout.zig").Layout{ .text = text, .width = width, .line_height = line_height, .lists = false };
+    const ellipsis = std.mem.span(lit("..."));
+    const last_width = @max(0, width - if (overflow) metrics.width(ellipsis) else @as(i32, 0));
+    var last_right: i32 = 0;
+    while (layout_text.next(metrics)) |span| {
+        if (span.y >= height) break;
+        const limit = if (overflow and span.y == line_height * (quote_max_lines - 1)) last_width else width;
+        if (span.x >= limit) continue;
+        const chunk = text[span.start..][0..span.len];
+        var count = chunk.len;
+        if (metrics.width(chunk) > limit - span.x) {
+            var low: usize = 0;
+            var high = count;
+            while (low < high) {
+                const middle = low + (high - low + 1) / 2;
+                if (metrics.width(chunk[0..middle]) <= limit - span.x) low = middle else high = middle - 1;
+            }
+            count = low;
+            if (count > 0 and count < chunk.len and isHighSurrogate(chunk[count - 1]) and isLowSurrogate(chunk[count])) count -= 1;
+        }
+        if (count == 0) continue;
+        const visible = chunk[0..count];
+        const x = target.rect.left + span.x;
+        const y = target.rect.top + span.y;
+        var text_rect = win.RECT{ .left = x, .top = y, .right = target.rect.right, .bottom = @min(target.rect.bottom, y + line_height) };
+        _ = text_draw.drawText(hdc, visible.ptr, @intCast(visible.len), &text_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
+        const right = x + metrics.width(visible);
+        if (span.y == line_height * (quote_max_lines - 1)) last_right = span.x + metrics.width(visible);
+        if (!span.space and wordIsUrl(text[span.word_start..span.word_end])) {
+            const hit = win.RECT{ .left = @max(x, target.client.left), .top = @max(y, target.client.top), .right = @min(@min(right, target.rect.right), target.client.right), .bottom = @min(@min(y + line_height, target.rect.bottom), target.client.bottom) };
+            if (hit.left < hit.right and hit.top < hit.bottom) {
+                a.quote_links.append(a.allocator, .{ .message_index = target.message_index, .start = span.word_start, .end = span.word_end, .fingerprint = quoteFingerprint(&a.messages[target.message_index], span.word_start, span.word_end), .rect = hit }) catch continue;
+                smooth.fillRoundRect(target.shapes, .{ .left = hit.left, .top = hit.bottom - px(a, 2), .right = hit.right, .bottom = hit.bottom - px(a, 1) }, 0, 0, theme.current.primary);
+            }
+        }
+    }
+    if (overflow) {
+        var ellipsis_rect = win.RECT{ .left = target.rect.left + last_right, .top = target.rect.top + line_height * (quote_max_lines - 1), .right = target.rect.right, .bottom = target.rect.bottom };
+        _ = text_draw.drawText(hdc, ellipsis.ptr, @intCast(ellipsis.len), &ellipsis_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
+    }
+    return height;
 }
 
 fn quoteBlockHeight(hdc: win.HDC, a: *App, message: *const Message, width: i32) i32 {
@@ -16959,7 +17130,7 @@ fn syncScrollbarStrips(a: *App) void {
     }
 }
 
-fn drawQuoteBlock(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message: *const Message, left: i32, right: i32, top: i32) i32 {
+fn drawQuoteBlock(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message: *const Message, message_index: usize, client: win.RECT, left: i32, right: i32, top: i32) i32 {
     const font = a.font_small orelse return top;
     const block_left = left + px(a, quote_inset);
     const block_right = right - px(a, quote_inset);
@@ -16990,8 +17161,8 @@ fn drawQuoteBlock(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     }
     if (body_height > 0) {
         _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-        var body_rect = win.RECT{ .left = text_left, .top = cursor, .right = text_right, .bottom = cursor + body_height };
-        _ = text_draw.drawText(hdc, message.quote.ptr(), @intCast(message.quote.len), &body_rect, win.DT_LEFT | win.DT_WORDBREAK | win.DT_EDITCONTROL | win.DT_WORD_ELLIPSIS | win.DT_NOPREFIX);
+        const body_rect = win.RECT{ .left = text_left, .top = cursor, .right = text_right, .bottom = cursor + body_height };
+        _ = layoutQuoteBody(hdc, a, message.quote.slice(), quoteTextWidth(a, right - left), .{ .shapes = shapes, .message_index = message_index, .rect = body_rect, .client = client });
     }
     _ = win.SetTextColor(hdc, if (message.from_me) theme.current.on_primary_container else theme.current.on_surface);
     return block_bottom + px(a, quote_after_gap);
@@ -17045,6 +17216,7 @@ fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
 }
 
 fn drawChatTitle(shapes: *const smooth.Context, hdc: win.HDC, a: *App, client: win.RECT) void {
+    a.header_pill_rect = std.mem.zeroes(win.RECT);
     if (a.selected_chat >= a.chat_count) {
         if (a.canvas) |owner| setIconTooltipRect(a, owner, @intFromEnum(IconTip.header_avatar), &a.header_icon_tip_rect, std.mem.zeroes(win.RECT));
         return;
@@ -17076,6 +17248,7 @@ fn drawChatTitle(shapes: *const smooth.Context, hdc: win.HDC, a: *App, client: w
     const width = @min(client.right - px(a, 32), name_width + subtitle_width + px(a, 72));
     const left = @divTrunc(client.right - width, 2);
     const rect = win.RECT{ .left = left, .top = px(a, 16), .right = left + width, .bottom = px(a, 52) };
+    a.header_pill_rect = rect;
     smooth.fillRoundRect(shapes, rect, px(a, 36), px(a, 36), theme.current.surface_container);
     smooth.strokeRoundRect(shapes, rect, px(a, 36), px(a, 36), theme.current.outline, px(a, 1));
     const avatar_rect = win.RECT{ .left = left + px(a, 6), .top = px(a, 22), .right = left + px(a, 30), .bottom = px(a, 46) };
@@ -17148,6 +17321,94 @@ fn updateMessageHoverAt(a: *App, hwnd: win.HWND, hover_x: i32, hover_y: i32) voi
     _ = win.TrackMouseEvent(&track);
 }
 
+fn quoteFingerprint(message: *const Message, start: usize, end: usize) u64 {
+    var hash = std.hash.Wyhash.init(0);
+    hash.update(message.id.slice());
+    hash.update(std.mem.sliceAsBytes(message.quote.slice()[start..end]));
+    return hash.final();
+}
+
+fn visibleLinkAt(a: *const App, x: i32, y: i32) ?VisibleLink {
+    const canvas = a.canvas orelse return null;
+    var client: win.RECT = undefined;
+    if (win.GetUpdateRect(canvas, null, win.FALSE) != 0 or win.GetClientRect(canvas, &client) == 0) return null;
+    if (a.scroll_y != a.quote_link_scroll or a.font_scale != a.quote_link_font_scale or a.dpi != a.quote_link_dpi or client.right != a.quote_link_client.right or client.bottom != a.quote_link_client.bottom) return null;
+    if (x < client.left or x >= client.right or y < client.top or y >= client.bottom) return null;
+    const pill = a.header_pill_rect;
+    if (pill.right > pill.left and x >= pill.left and x < pill.right and y >= pill.top and y < pill.bottom) return null;
+    const badge = a.header_badge_rect;
+    if (badge.right > badge.left and x >= badge.left and x < badge.right and y >= badge.top and y < badge.bottom) return null;
+    for (a.quote_links.items) |hit| {
+        if (hit.message_index >= a.message_count or x < hit.rect.left or x >= hit.rect.right or y < hit.rect.top or y >= hit.rect.bottom) continue;
+        const message = &a.messages[hit.message_index];
+        if (hit.end <= message.quote.len and quoteFingerprint(message, hit.start, hit.end) == hit.fingerprint) return .{ .quote = hit };
+    }
+    for (a.messages[0..a.message_count], 0..) |*message, message_index| {
+        if (!rectHasPoint(message.bubble_hit, x, y)) continue;
+        for (message.links[0..message.link_count], 0..) |*link, link_index| {
+            if (linkSpanHit(link, x, y)) return .{ .body = .{ .message_index = message_index, .link_index = link_index } };
+        }
+    }
+    return null;
+}
+
+fn drawCompactQuote(hdc: win.HDC, shapes: *const smooth.Context, a: *App, message_index: usize, line: []const u16, quote_start: usize, rect: win.RECT, client: win.RECT, right_align: bool) void {
+    const width = @max(0, rect.right - rect.left);
+    const ellipsis = std.mem.span(lit("..."));
+    const full_width = runWidth(hdc, line);
+    const shortened = full_width > width;
+    const available = @max(0, width - if (shortened) runWidth(hdc, ellipsis) else @as(i32, 0));
+    var visible = line.len;
+    if (shortened) {
+        var low: usize = 0;
+        var high = line.len;
+        while (low < high) {
+            const middle = low + (high - low + 1) / 2;
+            if (runWidth(hdc, line[0..middle]) <= available) low = middle else high = middle - 1;
+        }
+        visible = low;
+        if (visible > 0 and visible < line.len and isHighSurrogate(line[visible - 1]) and isLowSurrogate(line[visible])) visible -= 1;
+    }
+    const text_width = if (visible > 0) runWidth(hdc, line[0..visible]) else 0;
+    const painted_width = text_width + if (shortened) runWidth(hdc, ellipsis) else @as(i32, 0);
+    const x = if (right_align) @max(rect.left, rect.right - painted_width) else rect.left;
+    var text_rect = win.RECT{ .left = x, .top = rect.top, .right = rect.right, .bottom = rect.bottom };
+    if (visible > 0) _ = text_draw.drawText(hdc, line.ptr, @intCast(visible), &text_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
+    if (shortened) {
+        var ellipsis_rect = win.RECT{ .left = x + text_width, .top = rect.top, .right = rect.right, .bottom = rect.bottom };
+        _ = text_draw.drawText(hdc, ellipsis.ptr, @intCast(ellipsis.len), &ellipsis_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
+    }
+    const quote = a.messages[message_index].quote.slice();
+    var start: usize = 0;
+    while (start < quote.len) {
+        while (start < quote.len and quote[start] <= ' ') : (start += 1) {}
+        var end = start;
+        while (end < quote.len and quote[end] > ' ') : (end += 1) {}
+        if (end == start) break;
+        const from = quote_start + start;
+        const to = @min(quote_start + end, visible);
+        if (from < to and wordIsUrl(quote[start..end])) {
+            const left = (text_draw.hitText(hdc, line[0..visible], text_rect, from, 0) orelse {
+                start = end;
+                continue;
+            }).x;
+            const right = (text_draw.hitText(hdc, line[0..visible], text_rect, to, 0) orelse {
+                start = end;
+                continue;
+            }).x;
+            const hit = win.RECT{ .left = @max(left, client.left), .top = @max(rect.top, client.top), .right = @min(right, client.right), .bottom = @min(rect.bottom, client.bottom) };
+            if (hit.left < hit.right and hit.top < hit.bottom) {
+                a.quote_links.append(a.allocator, .{ .message_index = message_index, .start = start, .end = end, .fingerprint = quoteFingerprint(&a.messages[message_index], start, end), .rect = hit }) catch {
+                    start = end;
+                    continue;
+                };
+                smooth.fillRoundRect(shapes, .{ .left = hit.left, .top = hit.bottom - px(a, 2), .right = hit.right, .bottom = hit.bottom - px(a, 1) }, 0, 0, theme.current.primary);
+            }
+        }
+        start = end;
+    }
+}
+
 fn drawCanvas(hwnd: win.HWND, a: *App) void {
     var paint: win.PAINTSTRUCT = undefined;
     const screen_dc = win.BeginPaint(hwnd, &paint);
@@ -17158,6 +17419,11 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     var surface = paint_buffer.Buffer.init(screen_dc, client, paint.rcPaint);
     defer surface.deinit();
     const hdc = surface.hdc;
+    a.quote_links.clearRetainingCapacity();
+    a.header_badge_rect = std.mem.zeroes(win.RECT);
+    a.quote_link_font_scale = a.font_scale;
+    a.quote_link_dpi = a.dpi;
+    a.quote_link_client = client;
     var shapes = smooth.Context.init(hdc);
     defer shapes.deinit();
     _ = win.FillRect(hdc, &client, a.brush_bg.?);
@@ -17194,6 +17460,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     a.scroll_y = std.math.clamp(a.scroll_y, 0, a.max_scroll);
+    a.quote_link_scroll = a.scroll_y;
     var cursor_y = client.bottom - px(a, 14) + a.scroll_y;
     var index = a.message_count;
     while (index > 0) {
@@ -17234,7 +17501,13 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             message.quote_hit = .{ .left = if (message.from_me) right - bubble_width else left, .top = y, .right = if (message.from_me) right else left + bubble_width, .bottom = y + reply_height - px(a, 6) };
             var line = WideText(4095){};
             line.set(a.allocator, "↩ ");
-            for ([_][]const u16{ message.quote_sender.slice(), std.mem.span(lit(": ")), if (message.quote.len > 0) message.quote.slice() else std.mem.span(lit("Original message")) }) |part| {
+            for ([_][]const u16{ message.quote_sender.slice(), std.mem.span(lit(": ")) }) |part| {
+                const count = @min(part.len, line.buf.len - 1 - line.len);
+                @memcpy(line.buf[line.len..][0..count], part[0..count]);
+                line.len += count;
+            }
+            const quote_start = line.len;
+            for ([_][]const u16{if (message.quote.len > 0) message.quote.slice() else std.mem.span(lit("Original message"))}) |part| {
                 const count = @min(part.len, line.buf.len - 1 - line.len);
                 @memcpy(line.buf[line.len..][0..count], part[0..count]);
                 line.len += count;
@@ -17242,8 +17515,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             line.buf[line.len] = 0;
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-            var line_rect = message.quote_hit;
-            _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &line_rect, @intCast((if (message.from_me) win.DT_RIGHT else win.DT_LEFT) | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX));
+            drawCompactQuote(hdc, &shapes, a, index, line.slice(), quote_start, message.quote_hit, client, message.from_me);
             y += reply_height;
         }
         const sender_height = if (show_sender) senderBandHeight(hdc, a) + px(a, 8) else @as(i32, 0);
@@ -17306,7 +17578,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             var date_rect = win.RECT{ .left = column.left, .top = y - reply_height - separator, .right = column.right, .bottom = y - reply_height - px(a, 8) };
             _ = text_draw.drawText(hdc, date.ptr(), @intCast(date.len), &date_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
-        if (message.quote.len > 0 and message.quoted_msg_id.len == 0) text_top = drawQuoteBlock(&shapes, hdc, a, message, left, right, text_top);
+        if (message.quote.len > 0 and message.quoted_msg_id.len == 0) text_top = drawQuoteBlock(&shapes, hdc, a, message, index, client, left, right, text_top);
         if (message.bitmap) |bitmap| {
             const display = media_layout.fit(message.bitmap_width, message.bitmap_height, bubble_width - px(a, 24), px(a, 250));
             const image_left = left + @divTrunc(bubble_width - display.width, 2);
@@ -17550,6 +17822,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         if (archiveMarker(a, &a.chats[a.selected_chat])) |text| {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             var badge = win.RECT{ .left = client.right - px(a, 150), .top = client.top + px(a, 8), .right = client.right - px(a, 24), .bottom = client.top + px(a, 32) };
+            a.header_badge_rect = badge;
             if (win.CreateSolidBrush(theme.current.surface_container_high)) |badge_brush| {
                 defer _ = win.DeleteObject(badge_brush);
                 _ = win.FillRect(hdc, &badge, badge_brush);
@@ -17570,8 +17843,27 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
 
 fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    defer if (verification_fixture and message == win.WM_LBUTTONUP) {
+        a.verification_canvas_up_count +%= 1;
+        a.verification_canvas_up_point = .{ .x = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))), .y = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam))))) };
+    };
     if (message == win.WM_MOUSEMOVE) updateMessageHover(a, hwnd, lparam);
     switch (message) {
+        win.WM_SETCURSOR => {
+            var point: win.POINT = undefined;
+            const check_link = !a.text_dragging and a.sb_drag == .none and a.quote_link_down == null;
+            if (check_link) _ = win.UpdateWindow(hwnd);
+            const point_valid = (verification_fixture or check_link) and win.GetCursorPos(&point) != 0 and win.ScreenToClient(hwnd, &point) != 0;
+            defer if (verification_fixture and point_valid) {
+                a.verification_cursor_count +%= 1;
+                a.verification_cursor_point = point;
+            };
+            if (check_link and point_valid and visibleLinkAt(a, point.x, point.y) != null) {
+                _ = win.SetCursor(win.LoadCursorA(null, @ptrFromInt(32649)));
+                return 1;
+            }
+            return win.DefWindowProcW(hwnd, message, wparam, lparam);
+        },
         win.WM_MOUSELEAVE => {
             a.message_hover = null;
             clearCanvasIconTooltips(a);
@@ -17607,6 +17899,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             return 0;
         },
         win.WM_LBUTTONDOWN => {
+            _ = win.UpdateWindow(hwnd);
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
             if (a.message_hover) |index| {
@@ -17652,8 +17945,22 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                     }
                 }
             }
+            if (!control and !shift and win.GetKeyState(win.VK_MENU) >= 0) {
+                if (visibleLinkAt(a, x, y)) |link| {
+                    if (link == .quote) {
+                        a.quote_link_down = link.quote;
+                        a.click_origin = .{ .x = x, .y = y };
+                        a.click_moved = false;
+                        a.canvas_double_click_handled = false;
+                        _ = win.SetFocus(hwnd);
+                        _ = win.SetCapture(hwnd);
+                        return 0;
+                    }
+                }
+            }
             for (a.messages[0..a.message_count]) |*item| {
                 if (item.quote_hit.right > item.quote_hit.left and rectHasPoint(item.quote_hit, x, y)) {
+                    a.canvas_double_click_handled = true;
                     jumpToReply(a, item.quoted_msg_id.slice());
                     return 0;
                 }
@@ -17697,9 +18004,21 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             return 0;
         },
         win.WM_LBUTTONDBLCLK => {
+            if (a.quote_link_down != null) {
+                a.quote_link_down = null;
+                a.canvas_double_click_handled = true;
+                _ = win.ReleaseCapture();
+                return 0;
+            }
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
             if (win.GetKeyState(win.VK_CONTROL) < 0 or win.GetKeyState(win.VK_SHIFT) < 0) return canvasProc(hwnd, win.WM_LBUTTONDOWN, wparam, lparam);
+            if (visibleLinkAt(a, x, y)) |link| {
+                if (link == .quote) {
+                    a.canvas_double_click_handled = true;
+                    return 0;
+                }
+            }
             if (handleCanvasDoubleClick(a, x, y)) {
                 a.canvas_double_click_handled = true;
                 a.click_moved = true;
@@ -17733,6 +18052,34 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         win.WM_LBUTTONUP => {
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+            if (a.quote_link_down) |down| {
+                _ = win.UpdateWindow(hwnd);
+                const up = visibleLinkAt(a, x, y);
+                const dx = x - a.click_origin.x;
+                const dy = y - a.click_origin.y;
+                const captured = win.GetCapture() == hwnd;
+                a.quote_link_down = null;
+                _ = win.ReleaseCapture();
+                if (captured and !a.click_moved and dx * dx + dy * dy <= 16 and win.GetKeyState(win.VK_CONTROL) >= 0 and win.GetKeyState(win.VK_SHIFT) >= 0 and win.GetKeyState(win.VK_MENU) >= 0) {
+                    if (up) |link| {
+                        if (link == .quote) {
+                            const hit = link.quote;
+                            if (hit.message_index == down.message_index and hit.start == down.start and hit.end == down.end and hit.fingerprint == down.fingerprint and hit.message_index < a.message_count) {
+                                const quoted_message = &a.messages[hit.message_index];
+                                const quote = quoted_message.quote.slice();
+                                if (hit.end <= quote.len and quoteFingerprint(quoted_message, hit.start, hit.end) == down.fingerprint and wordIsUrl(quote[hit.start..hit.end])) {
+                                    var target: [4096]u16 = undefined;
+                                    const token = quote[hit.start..hit.end];
+                                    @memcpy(target[0..token.len], token);
+                                    target[token.len] = 0;
+                                    openUrlWide(a, @ptrCast(&target));
+                                }
+                            }
+                        }
+                    }
+                }
+                return 0;
+            }
             if (a.sb_drag == .canvas) {
                 _ = win.ReleaseCapture();
                 a.sb_drag = .none;
@@ -17753,15 +18100,19 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                 _ = win.ReleaseCapture();
                 if (!a.drag_moved) {
                     a.text_selection = .{};
+                    _ = win.UpdateWindow(hwnd);
                     handleCanvasClick(a, hwnd, x, y);
                 }
                 _ = win.InvalidateRect(hwnd, null, win.FALSE);
                 return 0;
             }
+            _ = win.UpdateWindow(hwnd);
             handleCanvasClick(a, hwnd, x, y);
             return 0;
         },
         win.WM_CAPTURECHANGED => {
+            if (a.quote_link_down != null) a.canvas_double_click_handled = true;
+            a.quote_link_down = null;
             _ = win.KillTimer(hwnd, timer_passage_scroll);
             a.sb_drag = .none;
             a.text_dragging = false;
