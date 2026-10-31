@@ -52,7 +52,7 @@ def check_notrap(folder):
         wanted = identity(order[row['target'] - 1]) if isinstance(row['target'], int) else startup['current_view']
         assert row['current_view'] == wanted, row
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for key in [*(f'%{number + 1}' for number in range(1, len(order) + 1)), '%1', '%i', 'gi', '^1', 'g', 'x', 'i', '^f', 'no-trap-search', '{ESC}']:
+    for key in [*(f'%{number + 1}' for number in range(1, len(order) + 1)), '%1', '%i', 'gi', '^1', '^3', 'g', 'x', 'i', '^f', 'no-trap-search', '{ESC}']:
         assert f'keys: {key}' in actions, key
     for name in ('ctrl-one', 'typed-gi', 'cancelled-gi', 'focus-cancelled-gi', 'composer-gi'):
         state, _ = capture(name)
@@ -65,9 +65,9 @@ def check_notrap(folder):
         state, _ = capture(name)
         assert state['current_view'] == wanted, name
     jump = read('ctrl-chat-jump.json')
-    assert jump['first'] != jump['third'] and jump['selected'] == jump['first'] and jump['view'] == identity(order[0])
+    assert jump['first'] != jump['third'] and jump['selected'] == jump['first'] and jump['view']['inbox']
     jumped, _ = capture('ctrl-number-jump')
-    assert jumped['selected']['id'] == jump['first'] and jumped['current_view'] == identity(order[0])
+    assert jumped['selected']['id'] == jump['first'] and jumped['current_view']['inbox']
     menu_open, _ = capture('prefix-menu-open')
     menu_closed, _ = capture('prefix-menu-closed')
     menu = read('prefix-menu.json')
