@@ -102,10 +102,16 @@ def check_inline_links(folder):
 
     whatsapp = targets['providers']['whatsapp']
     appearance = by_name['appearance']
-    for key in ('body_cursor', 'quote_cursor'):
+    previous_cursor_ack = 0
+    for key, name in (('body_cursor', 'body'), ('quote_cursor', 'quote'), ('plain_cursor', 'plain')):
         sample = appearance[key]
-        assert sample['cursor'] == sample['hand'] != 0 and sample['flags'] & 1
-    assert appearance['plain_cursor']['cursor'] != appearance['plain_cursor']['hand']
+        assert sample == read('inline-cursor-' + name + '.json')
+        assert sample['ack'] > sample['before'] >= previous_cursor_ack
+        assert all(abs(sample['ack_point'][i] - sample['point'][i]) <= 1 for i in (0, 1))
+        assert all(abs(sample['cursor_screen'][i] - sample['screen'][i]) <= 1 for i in (0, 1))
+        assert sample['hand'] != 0 and sample['flags'] & 1
+        assert (sample['cursor'] == sample['hand']) == (name != 'plain')
+        previous_cursor_ack = sample['ack']
     for key in ('body_style', 'quote_style'):
         sample = appearance[key]
         assert underline(folder / sample['screenshot'], sample['pixel_rect']) == sample['longest_bright_run'] >= 8

@@ -1045,6 +1045,8 @@ const App = struct {
     verification_reply_jump_id: Utf8Text(191) = .{},
     verification_canvas_up_count: u64 = 0,
     verification_canvas_up_point: win.POINT = .{ .x = 0, .y = 0 },
+    verification_cursor_count: u64 = 0,
+    verification_cursor_point: win.POINT = .{ .x = 0, .y = 0 },
     quote_link_scroll: i32 = 0,
     quote_link_font_scale: i32 = 0,
     quote_link_dpi: u32 = 0,
@@ -13694,6 +13696,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     if (verification_fixture) {
         try w.print(",\"canvas_up_count\":{d},\"canvas_up_point\":[{d},{d}],\"reply_jump_count\":{d},\"reply_jump_id\":", .{ a.verification_canvas_up_count, a.verification_canvas_up_point.x, a.verification_canvas_up_point.y, a.verification_reply_jump_count });
         try control_api.writeString(w, a.verification_reply_jump_id.slice());
+        try w.print(",\"canvas_cursor_count\":{d},\"canvas_cursor_point\":[{d},{d}]", .{ a.verification_cursor_count, a.verification_cursor_point.x, a.verification_cursor_point.y });
         try w.print(",\"staged_capacity\":{d}", .{staged_images.capacity});
         const avatar_rect = a.header_icon_tip_rect;
         try w.print(",\"header_avatar\":[{d},{d},{d},{d}]", .{ avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom });
@@ -17842,12 +17845,16 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
     if (message == win.WM_MOUSEMOVE) updateMessageHover(a, hwnd, lparam);
     switch (message) {
         win.WM_SETCURSOR => {
-            if (!a.text_dragging and a.sb_drag == .none and a.quote_link_down == null) {
-                var point: win.POINT = undefined;
-                if (win.GetCursorPos(&point) != 0 and win.ScreenToClient(hwnd, &point) != 0 and visibleLinkAt(a, point.x, point.y) != null) {
-                    _ = win.SetCursor(win.LoadCursorW(null, @ptrFromInt(32649)));
-                    return 1;
-                }
+            var point: win.POINT = undefined;
+            const check_link = !a.text_dragging and a.sb_drag == .none and a.quote_link_down == null;
+            const point_valid = (verification_fixture or check_link) and win.GetCursorPos(&point) != 0 and win.ScreenToClient(hwnd, &point) != 0;
+            defer if (verification_fixture and point_valid) {
+                a.verification_cursor_count +%= 1;
+                a.verification_cursor_point = point;
+            };
+            if (check_link and point_valid and visibleLinkAt(a, point.x, point.y) != null) {
+                _ = win.SetCursor(win.LoadCursorW(null, @ptrFromInt(32649)));
+                return 1;
             }
             return win.DefWindowProcW(hwnd, message, wparam, lparam);
         },
