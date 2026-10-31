@@ -16008,6 +16008,7 @@ const TextRun = emoji_runs.Run;
 const max_text_runs = emoji_runs.max_runs;
 const splitRuns = emoji_runs.splitRuns;
 const containsEmoji = emoji_runs.containsEmoji;
+const emojiUnitAt = emoji_runs.emojiUnitAt;
 
 fn runWidth(hdc: win.HDC, text: []const u16) i32 {
     var rect = win.RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };

@@ -11,9 +11,9 @@ pub fn isEmojiCodepoint(cp: u21) bool {
         cp == 0x00A9 or cp == 0x00AE or cp == 0x2122;
 }
 
-const TextUnit = struct { emoji: bool, len: usize };
+pub const TextUnit = struct { emoji: bool, len: usize };
 
-fn emojiUnitAt(text: []const u16, index: usize) TextUnit {
+pub fn emojiUnitAt(text: []const u16, index: usize) TextUnit {
     const unit = text[index];
     if (unit >= 0xD800 and unit <= 0xDBFF and index + 1 < text.len) {
         const low = text[index + 1];
