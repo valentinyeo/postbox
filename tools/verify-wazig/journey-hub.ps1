@@ -1,6 +1,7 @@
 Invoke-WhatsAppHubJourney $session $messages
 
 . "$PSScriptRoot/paste-image.ps1"
+. "$PSScriptRoot/hub-picker-proof.ps1"
 
 function Save-IdentityState($Session, [string]$Name) {
     $snapshots = @(Get-ChildItem (Join-Path $messages 'unified-journal-v2') -Filter 'snapshot.v2' -Recurse -File)
@@ -132,10 +133,21 @@ $fileSource | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidenc
 $fixture = Join-Path (Join-Path $session.root 'profile') 'identity-image.png'
 [VerifyPasteImage]::Fixture($fixture)
 Copy-Item $fixture (Join-Path $session.evidence 'identity-original.png')
-Add-PickerImage $session $fixture
-$null = Wait-Until { (Read-Control $session status).staged_attachment_count -eq 1 } 'identity picker staged image'
-Invoke-PaletteCommand $session 'Compose message'
+$fixtureHash = (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant()
+@{ filename = [IO.Path]::GetFileName($fixture); sha256 = $fixtureHash } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'picker-fixture.json')
 Send-Keys $session 'Identity file'
+$draft = Read-Edit (Get-Edit (Get-Window $session) '1032')
+Assert-That ($draft -ceq 'Identity file') 'picker: synthetic draft missing'
+Add-HubPickerImage $session $fixture
+$null = Wait-Until { (Read-Control $session status).staged_attachment_count -eq 1 } 'identity picker staged image'
+Assert-That ((Read-Edit (Get-Edit (Get-Window $session) '1032')) -ceq $draft) 'picker: synthetic draft changed'
+Save-Screen $session picker-staged
+$canvas = (Get-Edit (Get-Window $session) '1024').Current.BoundingRectangle
+$compose = (Get-Edit (Get-Window $session) '1032').Current.BoundingRectangle
+$screen = [Windows.Forms.SystemInformation]::VirtualScreen
+$preview = [VerifyPasteImage]::Preview((Join-Path $session.evidence 'picker-staged.png'), [int]($canvas.Left - $screen.Left), [int]($canvas.Bottom - $screen.Top), [int]($canvas.Right - $screen.Left), [int]($compose.Top - $screen.Top), $true)
+@{ draft_before = $draft; draft_after = (Read-Edit (Get-Edit (Get-Window $session) '1032')); preview = $preview } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'picker-staged.json')
+Invoke-PaletteCommand $session 'Compose message'
 Send-Keys $session '{ENTER}'
 $null = Wait-Until {
     $state = Read-Control $session status
@@ -175,5 +187,6 @@ $null = Wait-Until {
 $fileSends = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity file' })
 Assert-That ($fileSends.Count -eq 5 -and @($fileSends.body.client_id | Select-Object -Unique).Count -eq 1 -and $fileSends[-1].body.client_id -eq $fileId) 'File retry changed identity'
 Assert-That (@($fileSends.file_sha256 | Select-Object -Unique).Count -eq 1 -and @($fileSends | Where-Object accepted -eq $true).Count -eq 1) 'File retry changed bytes or duplicated delivery'
+Assert-That ($fileSends[0].file_sha256 -ceq $fixtureHash -and $fileSends[0].body.file -ceq [IO.Path]::GetFileName($fixture) -and $fileSends[0].body.chat -ceq 'fixture-alpha') 'picker: fixture upload differs from original'
 @{ idle_start = $fileIdleStart.ToString('o'); click = $fileClickAt.ToString('o'); before = 4; after = $fileSends.Count } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'file-identity-boundary.json')
 Hub-Pass $session terminal-file-identity-restart
