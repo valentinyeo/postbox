@@ -19410,7 +19410,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     const shift = win.GetKeyState(win.VK_SHIFT) < 0;
     const alt = win.GetKeyState(win.VK_MENU) < 0;
     const composing = directwrite_edit.isComposing(focus);
-    const navigation = focus != null and (focus == a.chats_hwnd or focus == a.canvas) and
+    const navigation = focus != null and ((a.chats_hwnd != null and focus == a.chats_hwnd.?) or (a.canvas != null and focus == a.canvas.?)) and
         a.palette == null and a.emoji_wnd == null and a.image_viewer_window == null and a.shortcut_help == null and !composing;
     const repeated = (@as(usize, @bitCast(message.lParam)) & (@as(usize, 1) << 30)) != 0;
     if (a.inbox_sequence.key(key, win.GetTickCount64(), navigation and !control and !shift and !alt, repeated)) {
