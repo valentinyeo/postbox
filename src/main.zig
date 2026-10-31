@@ -17405,12 +17405,27 @@ fn drawMessageActions(shapes: *const smooth.Context, hdc: win.HDC, a: *App) void
     smooth.fillRoundRect(shapes, rect, px(a, 16), px(a, 16), theme.current.surface);
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-    inline for (.{ "☺", "↩", "⋯" }, 0..) |label, cell| {
+    drawReactIcon(hdc, a, rect);
+    inline for (.{ "↩", "⋯" }, 0..) |label, cell| {
         var target = rect;
         target.left += px(a, @as(i32, @intCast(cell)) * 24);
         target.right = target.left + px(a, 24);
         _ = text_draw.drawText(hdc, lit(label), -1, &target, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     }
+}
+
+fn drawReactIcon(hdc: win.HDC, a: *App, actions: win.RECT) void {
+    var target = messageActionCellRect(a, actions, 0);
+    var wide = WideText(7){};
+    wide.set(a.allocator, "🙂");
+    const em = px(a, 16);
+    const left = target.left + @divTrunc(target.right - target.left - em, 2);
+    const top = target.top + @divTrunc(target.bottom - target.top - em, 2);
+    if (emoji_draw.draw(hdc, wide.slice(), left, top, em, em) != null) return;
+    const font = (a.font_emoji orelse a.font) orelse return;
+    _ = win.SelectObject(hdc, @ptrCast(font));
+    _ = text_draw.drawText(hdc, wide.ptr(), -1, &target, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+    _ = win.SelectObject(hdc, @ptrCast(a.font.?));
 }
 
 fn updateMessageHover(a: *App, hwnd: win.HWND, lparam: win.LPARAM) void {
