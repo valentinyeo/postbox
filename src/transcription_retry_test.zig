@@ -1,6 +1,23 @@
 const std = @import("std");
 const dictation_policy = @import("dictation_policy");
 const Language = dictation_policy.Language;
+const SessionState = enum { transcribing, request_in_flight, cancelled };
+const Session = struct {
+    phase: SessionState = .transcribing,
+    attempts: usize = 0,
+    fn noteTranscriptionAttempt(self: *Session) void {
+        self.attempts += 1;
+    }
+    fn transition(self: *Session, from: SessionState, to: SessionState) bool {
+        if (self.phase != from) return false;
+        self.phase = to;
+        return true;
+    }
+    fn state(self: *Session) SessionState {
+        return self.phase;
+    }
+};
+var cancel_during_request: ?*Session = null;
 const Text = struct {
     value: []const u8 = "",
     len: usize = 0,
@@ -34,6 +51,7 @@ fn lit(comptime text: []const u8) [*:0]const u16 {
 }
 fn transcribeAt(allocator: std.mem.Allocator, key: []const u8, _: [*:0]const u16, _: []const u8, _: []const u8) ![]u8 {
     calls += 1;
+    if (cancel_during_request) |session| session.phase = .cancelled;
     if (fixture_failure) |err| return err;
     if (std.mem.eql(u8, key, "inherited-value") or reject_replacement) return error.Unauthorized;
     return allocator.dupe(u8, "transcript");
@@ -44,6 +62,7 @@ fn reset() void {
     fixture_saved = "replacement-value";
     reject_replacement = false;
     fixture_failure = null;
+    cancel_during_request = null;
 }
 
 test "ISSUE-517 failed voice notes retry once per chat open without redoing cached or active notes" {
@@ -117,4 +136,20 @@ test "ISSUE-517 missing keys and non-Unauthorized failures never retry" {
         try std.testing.expectEqual(@as(usize, 1), calls);
         try std.testing.expectEqual(@as(usize, 0), reads);
     }
+}
+
+test "IGSH-1267 cancellation suppresses requests and unauthorized retry" {
+    reset();
+    var cancelled = Session{ .phase = .cancelled };
+    var first = Transport{ .allocator = std.testing.allocator, .api_key = "inherited-value", .session = &cancelled };
+    try std.testing.expectError(error.Cancelled, first.send(.english, "audio/wav", "audio"));
+    try std.testing.expectEqual(@as(usize, 0), calls);
+    try std.testing.expectEqual(@as(usize, 0), reads);
+    var active = Session{};
+    cancel_during_request = &active;
+    var second = Transport{ .allocator = std.testing.allocator, .api_key = "inherited-value", .session = &active };
+    try std.testing.expectError(error.Cancelled, second.send(.english, "audio/wav", "audio"));
+    try std.testing.expectEqual(@as(usize, 1), calls);
+    try std.testing.expectEqual(@as(usize, 0), reads);
+    cancel_during_request = null;
 }

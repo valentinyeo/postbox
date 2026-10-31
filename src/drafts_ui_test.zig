@@ -2,7 +2,8 @@ const std = @import("std");
 const drafts = @import("drafts.zig");
 const chat_key = @import("chat_key.zig");
 const edit_contract = @import("edit_contract.zig");
-const allocator = std.testing.allocator;
+const test_allocator = std.testing.allocator;
+const verification_fixture = false;
 
 const Text = struct {
     value: []const u8,
@@ -22,19 +23,41 @@ const dictation = struct {
 const Session = struct {
     origin: drafts.Identity,
     ready: bool = true,
+    failed: bool = false,
+    transcript: []const u8 = "spoken transcript",
     fn state(self: *const Session) dictation.State {
-        return if (self.ready) .ready else .idle;
+        return if (self.failed) .failed else if (self.ready) .ready else .idle;
     }
-    fn takeTranscript(self: *Session, buffer: []u8) ?[]const u8 {
-        if (!self.ready) return null;
-        self.ready = false;
-        const text = "spoken transcript";
+    fn fixtureConsumeReady(_: *const Session) bool {
+        return true;
+    }
+    fn peekTranscript(self: *Session, buffer: []u8) ?[]const u8 {
+        const text = self.transcript;
+        if (!self.ready or buffer.len < text.len) return null;
         @memcpy(buffer[0..text.len], text);
         return buffer[0..text.len];
     }
+    fn consumeTranscript(self: *Session) bool {
+        if (!self.ready) return false;
+        self.ready = false;
+        return true;
+    }
+};
+const outbox = struct {
+    const max_text_len = 4095;
+};
+const DictationFinish = struct {
+    context: struct {},
+    text: [:0]u16,
+    selection_start: u32,
+    selection_end: u32,
+};
+const DictationOperation = struct {
+    text: [:0]u16,
+    intent: union(enum) { insert_only, sending: DictationFinish, manual } = .insert_only,
 };
 const App = struct {
-    allocator: std.mem.Allocator = allocator,
+    allocator: std.mem.Allocator = test_allocator,
     draft_store: drafts.Store = .{},
     draft_loading: bool = false,
     compose: ?usize = 1,
@@ -47,6 +70,7 @@ const App = struct {
     compose_client_width: i32 = 600,
     compose_client_height: i32 = 400,
     dictation_session: ?*Session = null,
+    dictation_operation: ?DictationOperation = null,
     last_dictation_state: dictation.State = .idle,
     text: [drafts.max_text + 1]u16 = @splat(0),
     disk: []u8 = &.{},
@@ -56,6 +80,11 @@ const App = struct {
     enabled: bool = true,
     invalidated_row: ?win.RECT = null,
     full_list_invalidations: usize = 0,
+    context_matches: bool = true,
+    send_accept: bool = true,
+    send_calls: usize = 0,
+    verification_dictation_accepts: u64 = 0,
+    disk_failure: bool = false,
     selection_start: usize = 0,
     selection_end: usize = 0,
 
@@ -178,6 +207,30 @@ const win = struct {
 
 fn layout(_: *App, _: i32, _: i32) void {}
 fn clearReply(_: *App) void {}
+fn disarmDictationSend(_: *App) void {}
+fn observeDictationContext(_: *App) void {}
+fn sameDictationContext(a: *App, _: *const @TypeOf(@as(DictationFinish, undefined).context)) bool {
+    return a.context_matches;
+}
+fn sendMessageFrom(a: *App, _: bool) bool {
+    a.send_calls += 1;
+    if (!a.send_accept) return false;
+    _ = win.SetWindowTextW(a.compose.?, lit(""));
+    return true;
+}
+fn freeDictationOperation(a: std.mem.Allocator, operation: DictationOperation) void {
+    switch (operation.intent) {
+        .sending => |finish| a.free(finish.text),
+        .insert_only, .manual => {},
+    }
+    a.free(operation.text);
+}
+fn releaseDictationOperation(a: *App) void {
+    if (a.dictation_operation) |operation| {
+        freeDictationOperation(a.allocator, operation);
+        a.dictation_operation = null;
+    }
+}
 fn shortcodeHide(_: *App) void {}
 fn focusCompose(_: *App) void {}
 fn updateAttachButton(_: *App) void {}
@@ -189,6 +242,7 @@ fn messagesDirPath(a: *App, name: []const u8) ?[]u8 {
     return a.allocator.dupe(u8, name) catch null;
 }
 fn writeCacheFileAtomic(a: *App, _: []const u8, bytes: []const u8) bool {
+    if (a.disk_failure) return false;
     const copy = a.allocator.dupe(u8, bytes) catch return false;
     a.allocator.free(a.disk);
     a.disk = copy;
@@ -221,7 +275,7 @@ test "IGSH-497 UI restore and persist never leaks between workspaces and clears 
     try expectComposer(&app, "workspace A draft");
     try std.testing.expectEqual(@as(usize, 3), app.undo_clears);
     _ = win.SetWindowTextW(1, lit(""));
-    app.draft_store.deinit(allocator);
+    app.draft_store.deinit(test_allocator);
     loadDrafts(&app);
     switchComposerDraft(&app);
     try expectComposer(&app, "");
@@ -310,4 +364,180 @@ test "IGSH-466 Ctrl V and Shift Insert paste once and keep the cross-chat draft 
         switchComposerDraft(&app);
         try expectComposer(&app, "A pasted transcript");
     }
+}
+
+fn prepareAllocationCase(a: std.mem.Allocator) !void {
+    const value = try prepareDictation(a, std.mem.span(lit("Grüße old\r\n😀")), 6, 9, "Welt");
+    defer value.deinit(a);
+    try std.testing.expectEqualStrings("Grüße Welt\r\n😀", value.utf8);
+}
+
+test "IGSH-1267 preparation preserves Unicode, selection and line endings" {
+    try prepareAllocationCase(test_allocator);
+    try std.testing.checkAllAllocationFailures(test_allocator, prepareAllocationCase, .{});
+    const prepared = try prepareDictation(test_allocator, std.mem.span(lit("oneXtwo")), 3, 4, "spoken");
+    defer prepared.deinit(test_allocator);
+    try std.testing.expectEqualStrings("one spoken two", prepared.utf8);
+    try std.testing.expectEqualSlices(u16, std.mem.span(lit(" spoken ")), prepared.insertion);
+}
+
+fn prepareNewlineCase(a: std.mem.Allocator) !void {
+    const value = try prepareDictation(a, std.mem.span(lit("Grüße old\r\nEnde")), 6, 9, "一\r\nZwei\rDrei\n😀");
+    defer value.deinit(a);
+    try std.testing.expectEqualStrings("Grüße 一\nZwei\nDrei\n😀\r\nEnde", value.utf8);
+    try std.testing.expectEqualSlices(u16, std.mem.span(lit("一\nZwei\nDrei\n😀")), value.insertion);
+}
+
+test "IGSH-1267 transcription line endings match native editor paragraphs" {
+    try prepareNewlineCase(test_allocator);
+    try std.testing.checkAllAllocationFailures(test_allocator, prepareNewlineCase, .{});
+}
+
+test "IGSH-1267 preparation rejects invalid, empty and oversized input" {
+    try std.testing.expectError(error.EmptyTranscript, prepareDictation(test_allocator, std.mem.span(lit("draft")), 0, 0, " \t\xc2\xa0\xe3\x80\x80"));
+    try std.testing.expectError(error.InvalidTranscript, prepareDictation(test_allocator, std.mem.span(lit("draft")), 0, 0, "\xff"));
+    try std.testing.expectError(error.InvalidSelection, prepareDictation(test_allocator, std.mem.span(lit("😀")), 1, 1, "word"));
+    try std.testing.expectError(error.InvalidSelection, prepareDictation(test_allocator, std.mem.span(lit("draft")), 4, 2, "word"));
+    try std.testing.expectError(error.InvalidText, prepareDictation(test_allocator, &.{0xd800}, 0, 0, "word"));
+    const oversized = try test_allocator.alloc(u8, drafts.max_text + 1);
+    defer test_allocator.free(oversized);
+    @memset(oversized, 'x');
+    try std.testing.expectError(error.DraftTooLong, prepareDictation(test_allocator, std.mem.span(lit("")), 0, 0, oversized));
+}
+
+fn armSending(a: *App, text: []const u8, start: u32, end: u32) !void {
+    const wide = try std.unicode.utf8ToUtf16LeAllocZ(test_allocator, text);
+    errdefer test_allocator.free(wide);
+    const original = try test_allocator.dupeZ(u16, wide);
+    a.dictation_operation = .{ .text = original, .intent = .{ .sending = .{ .context = .{}, .text = wide, .selection_start = start, .selection_end = end } } };
+}
+
+test "IGSH-1267 accepted send occurs once and rejection retains text" {
+    for ([_]bool{ true, false }) |accepted| {
+        var app = App{};
+        current = &app;
+        defer app.deinit();
+        switchComposerDraft(&app);
+        _ = win.SetWindowTextW(1, lit("one old two"));
+        var session = Session{ .origin = app.draft_store.open.? };
+        app.dictation_session = &session;
+        app.send_accept = accepted;
+        try armSending(&app, "one old two", 4, 7);
+        updateDictation(&app);
+        updateDictation(&app);
+        try std.testing.expectEqual(@as(usize, 1), app.send_calls);
+        try expectComposer(&app, if (accepted) "" else "one spoken transcript two");
+        if (!accepted) try std.testing.expectEqualStrings("one spoken transcript two", app.draft_store.get(session.origin.key()));
+    }
+}
+
+test "IGSH-1267 changed context and other chat keep unsent origin text" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    switchComposerDraft(&app);
+    _ = win.SetWindowTextW(1, lit("origin"));
+    var session = Session{ .origin = app.draft_store.open.? };
+    app.dictation_session = &session;
+    try armSending(&app, "origin", 6, 6);
+    app.context_matches = false;
+    app.selected_chat = 1;
+    switchComposerDraft(&app);
+    _ = win.SetWindowTextW(1, lit("other"));
+    updateDictation(&app);
+    try expectComposer(&app, "other");
+    try std.testing.expectEqualStrings("origin spoken transcript", app.draft_store.get(session.origin.key()));
+    try std.testing.expectEqual(@as(usize, 0), app.send_calls);
+}
+
+test "IGSH-1267 disk failure consumes once and retains full draft" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    switchComposerDraft(&app);
+    _ = win.SetWindowTextW(1, lit("draft"));
+    var session = Session{ .origin = app.draft_store.open.? };
+    app.dictation_session = &session;
+    try armSending(&app, "draft", 5, 5);
+    app.disk_failure = true;
+    updateDictation(&app);
+    updateDictation(&app);
+    try expectComposer(&app, "draft spoken transcript");
+    try std.testing.expectEqualStrings("draft spoken transcript", app.draft_store.get(session.origin.key()));
+    try std.testing.expect(!session.ready);
+    try std.testing.expectEqual(@as(usize, 0), app.send_calls);
+}
+
+test "IGSH-1267 empty and failed transcripts never send a draft" {
+    for ([_]bool{ false, true }) |failed| {
+        var app = App{};
+        current = &app;
+        defer app.deinit();
+        switchComposerDraft(&app);
+        _ = win.SetWindowTextW(1, lit("draft"));
+        var session = Session{ .origin = app.draft_store.open.?, .failed = failed, .transcript = " \t" };
+        app.dictation_session = &session;
+        try armSending(&app, "draft", 5, 5);
+        updateDictation(&app);
+        try expectComposer(&app, "draft");
+        try std.testing.expectEqual(@as(usize, 0), app.send_calls);
+    }
+}
+
+test "IGSH-1267 rejected draft save retains mailbox and retries once" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    switchComposerDraft(&app);
+    app.draft_loading = true;
+    _ = win.SetWindowTextW(1, lit("draft"));
+    app.draft_loading = false;
+    var session = Session{ .origin = app.draft_store.open.? };
+    app.dictation_session = &session;
+    for (0..drafts.max_drafts) |index| {
+        var id: [32]u8 = undefined;
+        const value = try std.fmt.bufPrint(&id, "fixture-{d}", .{index});
+        try app.draft_store.save(test_allocator, .{ .provider = .slack, .account = "fixture", .id = value }, "held");
+    }
+    try armSending(&app, "draft", 5, 5);
+    updateDictation(&app);
+    try std.testing.expect(session.ready);
+    try expectComposer(&app, "draft");
+    try std.testing.expectEqual(@as(usize, 0), app.send_calls);
+    try app.draft_store.save(test_allocator, .{ .provider = .slack, .account = "fixture", .id = "fixture-0" }, "");
+    app.send_accept = false;
+    updateDictation(&app);
+    updateDictation(&app);
+    try std.testing.expect(!session.ready);
+    try expectComposer(&app, "draft spoken transcript");
+    try std.testing.expectEqual(@as(usize, 1), app.send_calls);
+}
+
+test "IGSH-1267 manual completion appends and never sends" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    switchComposerDraft(&app);
+    _ = win.SetWindowTextW(1, lit("edited"));
+    var session = Session{ .origin = app.draft_store.open.? };
+    app.dictation_session = &session;
+    app.dictation_operation = .{ .text = try test_allocator.dupeZ(u16, std.mem.span(lit("original"))), .intent = .manual };
+    updateDictation(&app);
+    try expectComposer(&app, "edited spoken transcript");
+    try std.testing.expectEqual(@as(usize, 0), app.send_calls);
+}
+
+test "IGSH-1267 context mismatch keeps current origin draft unsent" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    switchComposerDraft(&app);
+    _ = win.SetWindowTextW(1, lit("edited"));
+    var session = Session{ .origin = app.draft_store.open.? };
+    app.dictation_session = &session;
+    app.context_matches = false;
+    try armSending(&app, "old", 3, 3);
+    updateDictation(&app);
+    try expectComposer(&app, "edited spoken transcript");
+    try std.testing.expectEqual(@as(usize, 0), app.send_calls);
 }

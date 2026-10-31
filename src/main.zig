@@ -686,6 +686,41 @@ const FontDrawProof = struct {
     text: text_draw.DrawMeasurement,
 };
 
+const DictationContext = struct {
+    origin: drafts.Identity,
+    compose: win.HWND,
+    view: messenger_view.View,
+    view_account: Utf8Text(32),
+    archived: bool,
+    include_archived: bool,
+    reply_to: Utf8Text(191),
+    reply_sender: Utf8Text(191),
+    thread_parent: Utf8Text(191),
+    thread_origin: drafts.Identity,
+    thread_compose: ?win.HWND,
+    attachments: [staged_images.capacity]StagedImage,
+    attachment_count: usize,
+    slack_attach: WideText(519),
+    slack_attach_jid: Utf8Text(191),
+    slack_attach_account: Utf8Text(32),
+};
+
+const DictationFinish = struct {
+    context: DictationContext,
+    text: [:0]u16,
+    selection_start: u32,
+    selection_end: u32,
+};
+
+const DictationOperation = struct {
+    origin: drafts.Identity,
+    context: DictationContext,
+    text: [:0]u16,
+    selection_start: u32,
+    selection_end: u32,
+    intent: union(enum) { insert_only, sending: DictationFinish, manual } = .insert_only,
+};
+
 const App = struct {
     allocator: std.mem.Allocator,
     people: people_index.Index,
@@ -888,6 +923,11 @@ const App = struct {
     draft_store: drafts.Store = .{},
     draft_loading: bool = false,
     dictation_session: ?*dictation.Session = null,
+    dictation_operation: ?DictationOperation = null,
+    dictation_escape_held: bool = false,
+    dictation_return_held: bool = false,
+    verification_dictation_id: []const u8 = "",
+    verification_dictation_accepts: u64 = 0,
     dictation_language: dictation.Language = .automatic,
     last_dictation_state: dictation.State = .idle,
     dictation_wave: [8]u8 = @splat(0),
@@ -3548,6 +3588,7 @@ fn toggleViewArchived(a: *App) void {
     a.archive_toggle_fetch_ms = 0;
     a.archive_toggle_fetches = 0;
     a.archive_toggle_paints = a.paints.list;
+    disarmDictationSend(a);
     a.include_archived = !a.include_archived;
     _ = clearBulkSelection(a);
     refilterChats(a);
@@ -3563,6 +3604,9 @@ fn switchChatView(a: *App, view: messenger_view.View) void {
 }
 
 fn switchAccountView(a: *App, wanted: ?chat_key.Key) void {
+    const next_view = if (wanted) |key| messenger_view.providerView(key.provider) else .all;
+    const next_account = if (wanted) |key| key.account else "";
+    if (a.chat_view != next_view or !std.mem.eql(u8, a.view_account.slice(), next_account)) disarmDictationSend(a);
     a.startup_view_pending = false;
     _ = clearBulkSelection(a);
     if (a.selected_chat < a.chat_count) selectedViewKey(a).set(chat_key.of(&a.chats[a.selected_chat]));
@@ -9634,6 +9678,7 @@ fn discardStagedImage(a: *App) void {
 
 fn removeStagedImage(a: *App, index: usize, discard: bool) void {
     const image = a.staged_images.remove(index) orelse return;
+    disarmDictationSend(a);
     if (image.preview) |bitmap| _ = win.DeleteObject(bitmap);
     if (discard and image.owned and image.path.len > 0) deleteFileUtf8(image.path.slice());
 }
@@ -9934,6 +9979,7 @@ fn stageImageFromClipboard(a: *App) bool {
         setStatus(a, "Could not stage the pasted image");
         return true;
     }
+    disarmDictationSend(a);
     layout(a, a.compose_client_width, a.compose_client_height);
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
     setStatus(a, "Image ready... Enter sends, Esc discards");
@@ -9967,6 +10013,7 @@ fn stageFile(a: *App, path: []const u8) bool {
         setStatus(a, "Could not stage the attachment");
         return false;
     }
+    disarmDictationSend(a);
     layout(a, a.compose_client_width, a.compose_client_height);
     setStatus(a, "File attached - Enter sends, Esc discards");
     focusCompose(a);
@@ -10201,34 +10248,40 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
 }
 
 fn sendMessage(a: *App) void {
-    sendMessageFrom(a, false);
+    if (a.dictation_operation) |*operation| {
+        if (a.draft_store.isOpen(operation.origin.key())) {
+            finishDictation(a);
+            return;
+        }
+    }
+    _ = sendMessageFrom(a, false);
 }
 
-fn sendUnifiedMessage(a: *App, thread: bool) void {
-    const compose = (if (thread) a.thread_compose else a.compose) orelse return;
-    if (a.selected_chat >= a.chat_count) return;
+fn sendUnifiedMessage(a: *App, thread: bool) bool {
+    const compose = (if (thread) a.thread_compose else a.compose) orelse return false;
+    if (a.selected_chat >= a.chat_count) return false;
     const key = chat_key.of(&a.chats[a.selected_chat]);
     const origin_view = a.chat_view;
     const origin_account = a.view_account;
     const origin_archived = a.show_archived;
-    if (thread and (a.thread_parent.len == 0 or !chat_key.Key.eql(a.thread_origin.key(), key))) return;
+    if (thread and (a.thread_parent.len == 0 or !chat_key.Key.eql(a.thread_origin.key(), key))) return false;
     const count = if (thread) 0 else a.staged_images.count;
     for (a.staged_images.items[0..count]) |*image| {
         if (!chat_key.Key.eql(chat_key.of(image), key)) {
             setStatus(a, "Attachments belong to another chat");
-            return;
+            return false;
         }
     }
     var wide: [drafts.max_text + 1]u16 = undefined;
     const length: usize = @intCast(win.GetWindowTextW(compose, &wide, wide.len));
-    if (length == 0 and count == 0) return;
-    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length]) catch return;
+    if (length == 0 and count == 0) return false;
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length]) catch return false;
     defer a.allocator.free(text);
     if (text.len > outbox.max_text_len) {
         setStatus(a, "Message exceeds 4095 UTF-8 bytes; shorten it first");
-        return;
+        return false;
     }
-    const entries = a.allocator.alloc(outbox.Entry, @max(count, 1)) catch return;
+    const entries = a.allocator.alloc(outbox.Entry, @max(count, 1)) catch return false;
     defer a.allocator.free(entries);
     for (entries, 0..) |*entry, index| {
         entry.* = .{};
@@ -10243,7 +10296,7 @@ fn sendUnifiedMessage(a: *App, thread: bool) void {
     }
     acceptUnifiedSends(a, entries, null) catch {
         setStatus(a, "Could not save outbox; input retained");
-        return;
+        return false;
     };
     for (entries) |*entry| {
         for (a.pending_sends[0..a.pending_send_count]) |*pending| {
@@ -10274,26 +10327,30 @@ fn sendUnifiedMessage(a: *App, thread: bool) void {
     }
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
     setStatus(a, "Message saved");
+    return true;
 }
 
-fn sendMessageFrom(a: *App, thread: bool) void {
+fn sendMessageFrom(a: *App, thread: bool) bool {
     if (unifiedHub(a)) return sendUnifiedMessage(a, thread);
-    const compose = (if (thread) a.thread_compose else a.compose) orelse return;
-    if (thread and (a.thread_parent.len == 0 or a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) return;
+    const compose = (if (thread) a.thread_compose else a.compose) orelse return false;
+    if (thread and (a.thread_parent.len == 0 or a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) return false;
     const reply_to = if (thread) a.thread_parent.slice() else a.reply_to.slice();
-    if (verification_fixture and !hubConfigured(a)) return setStatus(a, "Verification is offline; sending is disabled");
-    if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
+    if (verification_fixture and !hubConfigured(a)) {
+        setStatus(a, "Verification is offline; sending is disabled");
+        return false;
+    }
+    if (a.chat_count == 0 or a.selected_chat >= a.chat_count) return false;
     if (a.outbox_load_failed) {
         setStatus(a, "Outbox could not be loaded; sends paused");
-        return;
+        return false;
     }
     if (!selectedChatIsSlack(a) and a.pending_send_count >= max_pending_sends) {
         setStatus(a, "Send queue is full");
-        return;
+        return false;
     }
     var wide_buffer: [drafts.max_text + 1]u16 = undefined;
     const length: usize = @intCast(win.GetWindowTextW(compose, &wide_buffer, wide_buffer.len));
-    if (length == 0 and a.staged_images.count == 0) return;
+    if (length == 0 and a.staged_images.count == 0) return false;
     var staged_file: []const u8 = "";
     var attach_path_buffer: [1600]u8 = undefined;
     if (!thread and a.staged_images.count > 0) {
@@ -10301,19 +10358,19 @@ fn sendMessageFrom(a: *App, thread: bool) void {
             staged_file = a.staged_images.items[0].path.slice();
         } else discardStagedImage(a);
     }
-    if (length == 0 and staged_file.len == 0) return;
-    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide_buffer[0..length]) catch return;
+    if (length == 0 and staged_file.len == 0) return false;
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide_buffer[0..length]) catch return false;
     defer a.allocator.free(text);
     if (text.len > outbox.max_text_len) {
         setStatus(a, "Message exceeds 4095 UTF-8 bytes; shorten it first");
-        return;
+        return false;
     }
     if (staged_file.len > 0 and (unifiedHub(a) or stagedFileGoesToWacli(a.chats[a.selected_chat].provider))) {
         const plan = a.staged_images.sendPlan(text, .single_file);
         const start = a.pending_send_count;
         if (plan.count > max_pending_sends - start) {
             setStatus(a, "Send queue is full");
-            return;
+            return false;
         }
         for (plan.items[0..plan.count]) |send| {
             const image = &a.staged_images.items[send.first];
@@ -10336,7 +10393,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
             for (a.pending_sends[start..a.pending_send_count]) |*pending| pending.* = .{};
             a.pending_send_count = start;
             setStatus(a, "Could not save outbox; message not queued");
-            return;
+            return false;
         }
         releaseStagedImage(a);
         if (!thread) clearReply(a);
@@ -10352,7 +10409,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
         layout(a, a.compose_client_width, a.compose_client_height);
         if (a.hwnd) |main_hwnd| _ = win.InvalidateRect(main_hwnd, null, win.FALSE);
         startNextSend(a);
-        return;
+        return true;
     }
 
     if (selectedChatIsSlack(a)) {
@@ -10361,7 +10418,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
         defer refilterChats(a);
         if (a.slack_outbox_count >= max_slack_outbox and !evictOldestFailedSlackOutbox(a)) {
             setStatus(a, "Send queue is full");
-            return;
+            return false;
         }
         const chat = &a.chats[a.selected_chat];
         var attach: []const u8 = "";
@@ -10374,7 +10431,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
         } else if (staged_file.len > 0) {
             if (slackAccountIsBridge(a, chat.account.slice())) {
                 setStatus(a, "File upload not available over the Slack bridge");
-                return;
+                return false;
             }
             const staged_len = @min(staged_file.len, staged_attach_buffer.len);
             @memcpy(staged_attach_buffer[0..staged_len], staged_file[0..staged_len]);
@@ -10382,7 +10439,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
         }
         if (attach.len > outbox.max_file_len) {
             setStatus(a, "Attachment path is too long; file not queued");
-            return;
+            return false;
         }
         if (attach.len > 0) {
             var plan = a.staged_images.sendPlan(text, .single_file);
@@ -10393,7 +10450,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
             while (plan.count > max_slack_outbox - a.slack_outbox_count) {
                 if (!evictOldestFailedSlackOutbox(a)) {
                     setStatus(a, "Send queue is full");
-                    return;
+                    return false;
                 }
             }
             const start = a.slack_outbox_count;
@@ -10414,7 +10471,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
                 for (a.slack_outbox[start..a.slack_outbox_count]) |*slot| slot.* = .{};
                 a.slack_outbox_count = start;
                 setStatus(a, "Could not save outbox; message not queued");
-                return;
+                return false;
             }
             for (a.slack_outbox[start..a.slack_outbox_count]) |*slot| enqueueSlackOutbox(a, slot);
         } else {
@@ -10444,7 +10501,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
                 a.slack_outbox_count -= 1;
                 slot.* = .{};
                 setStatus(a, "Could not save outbox; message not queued");
-                return;
+                return false;
             }
             enqueueSlackOutbox(a, slot);
             appendSlackPending(a, text, client_msg_id, reply_to);
@@ -10463,7 +10520,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
         if (thread) {
             _ = win.SetFocus(compose);
         } else focusCompose(a);
-        return;
+        return true;
     }
 
     const pending = &a.pending_sends[a.pending_send_count];
@@ -10483,7 +10540,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
         a.pending_send_count -= 1;
         pending.* = .{};
         setStatus(a, "Could not save outbox; message not queued");
-        return;
+        return false;
     }
     if (!thread) clearReply(a);
     forgetFailedSend(a, chat_key.of(pending), pending.text.slice());
@@ -10496,6 +10553,7 @@ fn sendMessageFrom(a: *App, thread: bool) void {
         _ = win.SetFocus(compose);
     } else focusCompose(a);
     startNextSend(a);
+    return true;
 }
 
 fn replySnippet(a: *App, message: *const Message) WideText(4095) {
@@ -10539,6 +10597,7 @@ fn clearReply(a: *App) void {
         if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     }
     if (a.reply_to.len == 0) return;
+    disarmDictationSend(a);
     a.reply_to.set("");
     a.reply_sender.set("");
     a.reply_preview = .{};
@@ -10554,6 +10613,7 @@ fn startReply(a: *App) void {
     };
     if (selected >= a.message_count or a.selected_chat >= a.chat_count) return;
     const message = &a.messages[selected];
+    if (!std.mem.eql(u8, a.reply_to.slice(), message.id.slice()) or !std.mem.eql(u8, a.reply_sender.slice(), message.sender_jid.slice())) disarmDictationSend(a);
     a.reply_to.set(message.id.slice());
     a.reply_sender.set(message.sender_jid.slice());
     a.reply_preview = replySnippet(a, message);
@@ -10737,6 +10797,7 @@ fn switchComposerDraft(a: *App) void {
             if (chat_key.Key.eql(open.key(), key)) return;
         }
     } else if (next == null) return;
+    disarmDictationSend(a);
     const text = composerText(a);
     defer if (text) |value| a.allocator.free(value);
     const previous = if (a.draft_store.open) |*open| a.draft_store.get(open.key()) else "";
@@ -10758,6 +10819,8 @@ fn ensureDictation(a: *App) ?*dictation.Session {
     a.dictation_session = dictation.Session.create(a.allocator) catch null;
     if (verification_fixture) {
         if (a.dictation_session) |session| {
+            session.require_fixture = true;
+            session.setupFixtureGates(a.verification_dictation_id) catch return a.dictation_session;
             const pcm_path = messagesDirPath(a, "dictation.pcm") orelse return a.dictation_session;
             defer a.allocator.free(pcm_path);
             const response_path = messagesDirPath(a, "dictation-response.json") orelse return a.dictation_session;
@@ -10773,22 +10836,306 @@ fn ensureDictation(a: *App) ?*dictation.Session {
     return a.dictation_session;
 }
 
+const PreparedDictation = struct {
+    whole: [:0]u16,
+    insertion: [:0]u16,
+    utf8: []u8,
+
+    fn deinit(self: PreparedDictation, allocator: std.mem.Allocator) void {
+        allocator.free(self.whole);
+        allocator.free(self.insertion);
+        allocator.free(self.utf8);
+    }
+};
+
+fn prepareDictation(allocator: std.mem.Allocator, original: []const u16, start: usize, end: usize, transcript: []const u8) error{ OutOfMemory, InvalidSelection, InvalidText, InvalidTranscript, EmptyTranscript, DraftTooLong }!PreparedDictation {
+    if (start > end or end > original.len) return error.InvalidSelection;
+    if (original.len > drafts.max_text or transcript.len > drafts.max_text) return error.DraftTooLong;
+    if (std.mem.indexOfScalar(u16, original, 0) != null) return error.InvalidText;
+    if (!std.unicode.utf8ValidateSlice(transcript) or std.mem.indexOfScalar(u8, transcript, 0) != null) return error.InvalidTranscript;
+    var iterator = std.unicode.Utf8View.initUnchecked(transcript).iterator();
+    var has_text = false;
+    while (iterator.nextCodepoint()) |codepoint| {
+        switch (codepoint) {
+            0x09...0x0d, 0x20, 0x85, 0xa0, 0x1680, 0x2000...0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000 => {},
+            else => {
+                has_text = true;
+                break;
+            },
+        }
+    }
+    if (!has_text) return error.EmptyTranscript;
+    const checked = std.unicode.utf16LeToUtf8Alloc(allocator, original) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidText,
+    };
+    allocator.free(checked);
+    const spoken = std.unicode.utf8ToUtf16LeAllocZ(allocator, transcript) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidUtf8 => return error.InvalidTranscript,
+    };
+    defer allocator.free(spoken);
+    var source: usize = 0;
+    var spoken_len: usize = 0;
+    while (source < spoken.len) {
+        const unit = spoken[source];
+        source += 1;
+        if (unit == '\r') {
+            if (source < spoken.len and spoken[source] == '\n') source += 1;
+            spoken[spoken_len] = '\n';
+        } else spoken[spoken_len] = unit;
+        spoken_len += 1;
+    }
+    const padding = edit_contract.dictationPadding(original, start, end);
+    const before: usize = @intFromBool(padding.before);
+    const after: usize = @intFromBool(padding.after);
+    const insertion_len = before + spoken_len + after;
+    const whole_len = start + insertion_len + original.len - end;
+    if (whole_len > drafts.max_text) return error.DraftTooLong;
+    const insertion = try allocator.allocSentinel(u16, insertion_len, 0);
+    errdefer allocator.free(insertion);
+    if (padding.before) insertion[0] = ' ';
+    @memcpy(insertion[before..][0..spoken_len], spoken[0..spoken_len]);
+    if (padding.after) insertion[insertion_len - 1] = ' ';
+    const whole = try allocator.allocSentinel(u16, whole_len, 0);
+    errdefer allocator.free(whole);
+    @memcpy(whole[0..start], original[0..start]);
+    @memcpy(whole[start..][0..insertion_len], insertion);
+    @memcpy(whole[start + insertion_len ..], original[end..]);
+    const utf8 = std.unicode.utf16LeToUtf8Alloc(allocator, whole) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidSelection,
+    };
+    errdefer allocator.free(utf8);
+    if (utf8.len > drafts.max_text) return error.DraftTooLong;
+    return .{ .whole = whole, .insertion = insertion, .utf8 = utf8 };
+}
+
+fn captureDictationContext(a: *App) ?DictationContext {
+    const compose = a.compose orelse return null;
+    if (a.selected_chat >= a.chat_count) return null;
+    const key = chat_key.of(&a.chats[a.selected_chat]);
+    if (key.account.len == 0 or !a.draft_store.isOpen(key)) return null;
+    return .{
+        .origin = drafts.Identity.init(key),
+        .compose = compose,
+        .view = a.chat_view,
+        .view_account = a.view_account,
+        .archived = a.show_archived,
+        .include_archived = a.include_archived,
+        .reply_to = a.reply_to,
+        .reply_sender = a.reply_sender,
+        .thread_parent = a.thread_parent,
+        .thread_origin = a.thread_origin,
+        .thread_compose = a.thread_compose,
+        .attachments = a.staged_images.items,
+        .attachment_count = a.staged_images.count,
+        .slack_attach = a.slack_attach,
+        .slack_attach_jid = a.slack_attach_jid,
+        .slack_attach_account = a.slack_attach_account,
+    };
+}
+
+fn sameDictationContext(a: *App, expected: *const DictationContext) bool {
+    const current = captureDictationContext(a) orelse return false;
+    if (!chat_key.Key.eql(current.origin.key(), expected.origin.key()) or current.compose != expected.compose or
+        current.view != expected.view or current.archived != expected.archived or current.include_archived != expected.include_archived or
+        !std.mem.eql(u8, current.view_account.slice(), expected.view_account.slice()) or
+        !std.mem.eql(u8, current.reply_to.slice(), expected.reply_to.slice()) or
+        !std.mem.eql(u8, current.reply_sender.slice(), expected.reply_sender.slice()) or
+        !std.mem.eql(u8, current.thread_parent.slice(), expected.thread_parent.slice()) or
+        !chat_key.Key.eql(current.thread_origin.key(), expected.thread_origin.key()) or
+        current.thread_compose != expected.thread_compose or current.attachment_count != expected.attachment_count or
+        !std.mem.eql(u16, current.slack_attach.slice(), expected.slack_attach.slice()) or
+        !std.mem.eql(u8, current.slack_attach_jid.slice(), expected.slack_attach_jid.slice()) or
+        !std.mem.eql(u8, current.slack_attach_account.slice(), expected.slack_attach_account.slice())) return false;
+    for (current.attachments[0..current.attachment_count], expected.attachments[0..expected.attachment_count]) |*left, *right| {
+        if (!chat_key.Key.eql(chat_key.of(left), chat_key.of(right)) or left.owned != right.owned or
+            !std.mem.eql(u8, left.path.slice(), right.path.slice())) return false;
+    }
+    return true;
+}
+
+fn disarmDictationSend(a: *App) void {
+    if (a.dictation_operation) |*operation| {
+        switch (operation.intent) {
+            .sending => |finish| a.allocator.free(finish.text),
+            .insert_only, .manual => {},
+        }
+        operation.intent = .manual;
+    }
+}
+
+fn freeDictationOperation(allocator: std.mem.Allocator, operation: DictationOperation) void {
+    switch (operation.intent) {
+        .sending => |finish| allocator.free(finish.text),
+        .insert_only, .manual => {},
+    }
+    allocator.free(operation.text);
+}
+
+fn releaseDictationOperation(a: *App) void {
+    if (a.dictation_operation) |operation| {
+        a.dictation_operation = null;
+        freeDictationOperation(a.allocator, operation);
+    }
+}
+
+fn observeDictationContext(a: *App) void {
+    const operation = if (a.dictation_operation) |*value| value else return;
+    if (!sameDictationContext(a, &operation.context) or
+        (a.thread_compose != null and win.GetFocus() == a.thread_compose.?))
+    {
+        disarmDictationSend(a);
+        return;
+    }
+    switch (operation.intent) {
+        .sending => |*finish| {
+            if (!sameDictationContext(a, &finish.context)) {
+                disarmDictationSend(a);
+                return;
+            }
+            var wide: [drafts.max_text + 1]u16 = undefined;
+            const length: usize = @intCast(win.GetWindowTextW(finish.context.compose, &wide, wide.len));
+            var start: u32 = 0;
+            var end: u32 = 0;
+            _ = win.SendMessageW(finish.context.compose, win.EM_GETSEL, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
+            if (!std.mem.eql(u16, wide[0..length], finish.text) or start != finish.selection_start or end != finish.selection_end) disarmDictationSend(a);
+        },
+        .insert_only, .manual => {},
+    }
+}
+
+fn finishDictation(a: *App) void {
+    observeDictationContext(a);
+    const session = a.dictation_session orelse return;
+    if (session.state() == .idle or session.state() == .failed) return;
+    const operation = if (a.dictation_operation) |*value| value else return;
+    switch (operation.intent) {
+        .sending => return,
+        .manual => {
+            session.requestStop();
+            return;
+        },
+        .insert_only => {},
+    }
+    const context = captureDictationContext(a) orelse {
+        disarmDictationSend(a);
+        session.requestStop();
+        return;
+    };
+    if (!sameDictationContext(a, &operation.context)) {
+        disarmDictationSend(a);
+        session.requestStop();
+        return;
+    }
+    const length: usize = @intCast(win.GetWindowTextLengthW(context.compose));
+    const text = a.allocator.allocSentinel(u16, length, 0) catch {
+        setStatus(a, "Could not prepare dictation send");
+        return;
+    };
+    const got: usize = @intCast(win.GetWindowTextW(context.compose, text.ptr, @intCast(length + 1)));
+    if (got != length) {
+        a.allocator.free(text);
+        setStatus(a, "Could not prepare dictation send");
+        return;
+    }
+    var start: u32 = 0;
+    var end: u32 = 0;
+    _ = win.SendMessageW(context.compose, win.EM_GETSEL, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
+    operation.intent = .{ .sending = .{ .context = context, .text = text, .selection_start = start, .selection_end = end } };
+    session.requestStop();
+    setStatus(a, "Transcribing...");
+}
+
+fn cancelDictation(a: *App) void {
+    const session = a.dictation_session orelse return;
+    session.cancel();
+    disarmDictationSend(a);
+    const operation = a.dictation_operation orelse return;
+    updateDictateButton(a, .idle);
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, operation.text) catch {
+        setStatus(a, "Dictation cancelled; could not restore draft");
+        return;
+    };
+    defer a.allocator.free(text);
+    a.draft_store.save(a.allocator, operation.origin.key(), text) catch {
+        setStatus(a, "Dictation cancelled; could not restore draft");
+        return;
+    };
+    if (a.draft_store.isOpen(operation.origin.key())) {
+        const compose = a.compose orelse {
+            persistDrafts(a);
+            setStatus(a, if (a.draft_store.dirty) "Dictation cancelled; draft could not be saved to disk" else "Dictation cancelled; draft saved without selection");
+            return;
+        };
+        a.draft_loading = true;
+        const restored = win.SetWindowTextW(compose, operation.text.ptr);
+        a.draft_loading = false;
+        if (restored == 0) {
+            persistDrafts(a);
+            setStatus(a, "Dictation cancelled; draft saved but display restore failed");
+            return;
+        }
+        _ = win.SendMessageW(compose, win.EM_SETSEL, operation.selection_start, @intCast(operation.selection_end));
+        _ = win.SendMessageW(compose, win.EM_SCROLLCARET, 0, 0);
+        layout(a, a.compose_client_width, a.compose_client_height);
+    }
+    persistDrafts(a);
+    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+    if (a.draft_store.dirty) {
+        setStatus(a, "Dictation cancelled; draft could not be saved to disk");
+        return;
+    }
+    releaseDictationOperation(a);
+    setStatus(a, "Dictation cancelled");
+}
+
 fn toggleDictation(a: *App) void {
     const session = ensureDictation(a) orelse {
         setStatus(a, "Could not initialize dictation");
         return;
     };
+    if (verification_fixture and session.fixture == null) {
+        setStatus(a, "Dictation fixture is unavailable");
+        return;
+    }
     if (!a.deepgram_configured and session.fixture == null) {
         setStatus(a, "Set DEEPGRAM_API_KEY to enable dictation");
         return;
     }
     switch (session.state()) {
         .idle, .failed => {
+            if (a.dictation_operation != null) {
+                setStatus(a, "Restore the cancelled draft before starting dictation");
+                return;
+            }
             if (a.selected_chat >= a.chat_count or a.chats[a.selected_chat].account.len == 0) return;
-            if (session.start(a.deepgram_key, a.dictation_language, chat_key.of(&a.chats[a.selected_chat]))) {
+            const context = captureDictationContext(a) orelse return;
+            const origin = context.origin.key();
+            const compose = context.compose;
+            const length: usize = @intCast(win.GetWindowTextLengthW(compose));
+            const text = a.allocator.allocSentinel(u16, length, 0) catch {
+                setStatus(a, "Could not save draft before dictation");
+                return;
+            };
+            const got: usize = @intCast(win.GetWindowTextW(compose, text.ptr, @intCast(length + 1)));
+            if (got != length) {
+                a.allocator.free(text);
+                setStatus(a, "Could not save draft before dictation");
+                return;
+            }
+            var start: u32 = 0;
+            var end: u32 = 0;
+            _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
+            if (session.start(a.deepgram_key, a.dictation_language, origin)) {
+                a.dictation_operation = .{ .origin = drafts.Identity.init(origin), .context = context, .text = text, .selection_start = start, .selection_end = end };
                 updateDictateButton(a, .recording);
                 setStatus(a, "Listening... press Ctrl+D to stop");
-            } else setStatus(a, "Could not start microphone capture");
+            } else {
+                a.allocator.free(text);
+                setStatus(a, "Could not start microphone capture");
+            }
         },
         .recording => {
             session.requestStop();
@@ -10802,47 +11149,141 @@ fn toggleDictation(a: *App) void {
 
 fn updateDictation(a: *App) void {
     const session = a.dictation_session orelse return;
+    observeDictationContext(a);
     const state = session.state();
     if (state == .ready) {
+        if (!session.fixtureConsumeReady()) return;
         var transcript_buffer: [8192]u8 = undefined;
-        if (session.takeTranscript(&transcript_buffer)) |transcript| {
-            const composer = composerText(a) orelse return;
-            defer a.allocator.free(composer);
-            const same_chat = a.draft_store.isOpen(session.origin.key());
-            if (same_chat) {
-                const compose = a.compose orelse return;
-                var start: u32 = 0;
-                var end: u32 = 0;
-                _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
-                const composer_wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, composer) catch return;
-                defer a.allocator.free(composer_wide);
-                const padding = edit_contract.dictationPadding(composer_wide, start, end);
-                var wide: [8195]u16 = undefined;
-                const offset: usize = @intFromBool(padding.before);
-                if (padding.before) wide[0] = ' ';
-                const count = std.unicode.utf8ToUtf16Le(wide[offset .. wide.len - 2], transcript) catch return;
-                var length = offset + count;
-                if (padding.after) {
-                    wide[length] = ' ';
-                    length += 1;
+        const transcript = session.peekTranscript(&transcript_buffer) orelse return;
+        const same_chat = a.draft_store.isOpen(session.origin.key());
+        const compose = if (same_chat) a.compose else null;
+        var sending = false;
+        var manual = !same_chat;
+        var base_owned: ?[:0]u16 = null;
+        defer if (base_owned) |base| a.allocator.free(base);
+        var base: []const u16 = undefined;
+        var start: u32 = 0;
+        var end: u32 = 0;
+        if (a.dictation_operation) |*operation| {
+            switch (operation.intent) {
+                .sending => |*finish| {
+                    if (compose != null and sameDictationContext(a, &finish.context)) {
+                        sending = true;
+                        base = finish.text;
+                        start = finish.selection_start;
+                        end = finish.selection_end;
+                    } else {
+                        disarmDictationSend(a);
+                        manual = true;
+                    }
+                },
+                .manual => manual = true,
+                .insert_only => {},
+            }
+        }
+        if (!sending) {
+            if (compose) |edit| {
+                const length: usize = @intCast(win.GetWindowTextLengthW(edit));
+                if (length > drafts.max_text) {
+                    setStatus(a, "Dictation needs a shorter draft");
+                    return;
                 }
-                wide[length] = 0;
-                _ = win.SendMessageW(compose, win.EM_REPLACESEL, win.TRUE, @bitCast(@intFromPtr(&wide)));
-                _ = win.SendMessageW(compose, win.EM_SCROLLCARET, 0, 0);
-                _ = win.SetFocus(compose);
-            } else {
-                _ = a.draft_store.transcript(a.allocator, session.origin.key(), composer, transcript) catch {
-                    setStatus(a, "Could not insert dictation: draft limit reached");
+                const text = a.allocator.allocSentinel(u16, length, 0) catch {
+                    setStatus(a, "Could not prepare dictation draft");
                     return;
                 };
+                base_owned = text;
+                const got: usize = @intCast(win.GetWindowTextW(edit, text.ptr, @intCast(length + 1)));
+                if (got != length) {
+                    setStatus(a, "Could not read dictation draft");
+                    return;
+                }
+                base = text;
+                if (manual) {
+                    start = @intCast(length);
+                    end = start;
+                } else {
+                    _ = win.SendMessageW(edit, win.EM_GETSEL, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
+                }
+            } else {
+                const text = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, a.draft_store.get(session.origin.key())) catch {
+                    setStatus(a, "Could not prepare dictation draft");
+                    return;
+                };
+                base_owned = text;
+                base = text;
+                start = @intCast(text.len);
+                end = start;
+                manual = true;
             }
-            persistDrafts(a);
-            if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
-            setStatus(a, if (same_chat) "Dictation inserted" else "Dictation saved to its chat draft");
         }
+        const prepared = prepareDictation(a.allocator, base, start, end, transcript) catch |err| {
+            switch (err) {
+                error.OutOfMemory => setStatus(a, "Could not prepare dictation draft"),
+                error.DraftTooLong => setStatus(a, "Dictation needs a shorter draft"),
+                else => {
+                    if (!session.consumeTranscript()) return;
+                    releaseDictationOperation(a);
+                    updateDictateButton(a, .idle);
+                    setStatus(a, "Dictation could not be inserted");
+                },
+            }
+            return;
+        };
+        defer prepared.deinit(a.allocator);
+        a.draft_store.save(a.allocator, session.origin.key(), prepared.utf8) catch {
+            setStatus(a, "Could not save dictation draft");
+            return;
+        };
+        if (!session.consumeTranscript()) return;
+        const operation = a.dictation_operation;
+        a.dictation_operation = null;
+        defer if (operation) |value| freeDictationOperation(a.allocator, value);
+        persistDrafts(a);
+        const draft_saved = !a.draft_store.dirty;
+        var readback_ok = false;
+        if (compose) |edit| {
+            a.draft_loading = true;
+            _ = win.SendMessageW(edit, win.EM_SETSEL, start, @intCast(end));
+            _ = win.SendMessageW(edit, win.EM_REPLACESEL, win.TRUE, @bitCast(@intFromPtr(prepared.insertion.ptr)));
+            a.draft_loading = false;
+            var readback: [drafts.max_text + 1]u16 = undefined;
+            const length: usize = @intCast(win.GetWindowTextW(edit, &readback, readback.len));
+            readback_ok = std.mem.eql(u16, readback[0..length], prepared.whole);
+            if (readback_ok and !manual) {
+                _ = win.SendMessageW(edit, win.EM_SCROLLCARET, 0, 0);
+                _ = win.SetFocus(edit);
+            }
+        }
+        if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
         updateDictateButton(a, .idle);
+        if (!draft_saved) {
+            setStatus(a, "Dictation saved in memory; disk save failed");
+            return;
+        }
+        if (compose != null and !readback_ok) {
+            setStatus(a, "Dictation saved to draft; display restore failed");
+            return;
+        }
+        if (sending and readback_ok and prepared.utf8.len <= outbox.max_text_len) {
+            if (operation) |value| {
+                switch (value.intent) {
+                    .sending => |*finish| {
+                        if (sameDictationContext(a, &finish.context)) {
+                            if (sendMessageFrom(a, false)) {
+                                if (verification_fixture) a.verification_dictation_accepts +%= 1;
+                            } else setStatus(a, "Dictation saved; send manually");
+                            return;
+                        }
+                    },
+                    .insert_only, .manual => {},
+                }
+            }
+        }
+        setStatus(a, if (manual or sending) "Dictation saved; send manually" else "Dictation inserted");
         return;
     }
+    if (state == .failed) releaseDictationOperation(a);
     if (state == a.last_dictation_state) return;
     updateDictateButton(a, state);
     switch (state) {
@@ -13022,6 +13463,17 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
     if (verification_fixture) {
+        const dictation_intent = if (a.dictation_operation) |operation| @tagName(std.meta.activeTag(operation.intent)) else "none";
+        if (a.dictation_session) |session| {
+            const phase = session.state();
+            try w.print(",\"dictation\":{{\"phase\":\"{s}\",\"intent\":\"{s}\",\"cancelled\":{},\"draining\":{},\"ready\":{},\"generation\":{d},\"consumed\":{d},\"accepted\":{d},\"microphone_entries\":{d},\"transcription_attempts\":{d},\"gate_phase\":{d},\"consume_open\":{},\"fixture_loaded\":{}}}", .{
+                @tagName(phase),                           dictation_intent,              session.cancelled(),                                       session.draining(),                        phase == .ready,
+                session.generation,                        session.consumed_count,        a.verification_dictation_accepts,                          session.microphone_entries.load(.acquire), session.transcription_attempts.load(.acquire),
+                session.fixture_gate_phase.load(.acquire), session.fixtureConsumeReady(), session.fixture != null and session.fixture_gates != null,
+            });
+        } else {
+            try w.print(",\"dictation\":{{\"phase\":\"idle\",\"intent\":\"{s}\",\"cancelled\":false,\"draining\":false,\"ready\":false,\"generation\":0,\"consumed\":0,\"accepted\":{d},\"microphone_entries\":0,\"transcription_attempts\":0,\"gate_phase\":0,\"consume_open\":false,\"fixture_loaded\":false}}", .{ dictation_intent, a.verification_dictation_accepts });
+        }
         var ready: usize = 0;
         var uncertain: usize = 0;
         var held: usize = 0;
@@ -13957,6 +14409,7 @@ fn paletteActivate(a: *App) void {
 fn openSearchPalette(a: *App) void {
     if (a.palette != null and a.palette_search_mode) {
         if (a.palette_edit) |edit| {
+            disarmDictationSend(a);
             _ = win.SetFocus(edit);
             _ = win.SendMessageW(edit, win.EM_SETSEL, 0, @bitCast(@as(isize, -1)));
         }
@@ -14165,6 +14618,7 @@ fn showPaletteWindow(a: *App) void {
         a.instance,
         null,
     ) orelse return;
+    disarmDictationSend(a);
     a.palette = palette;
     a.palette_ever_active = false;
     var corner: win.DWORD = 2;
@@ -14617,6 +15071,7 @@ fn runCommand(a: *App, command: u16) void {
         command_include_archived => toggleViewArchived(a),
         command_archived => {
             _ = clearBulkSelection(a);
+            disarmDictationSend(a);
             a.show_archived = !a.show_archived;
             if (!unifiedHub(a) and messenger_view.includes(activeChatView(a), .slack)) _ = applyChats(a, "{\"data\":[]}", false);
             refreshChats(a);
@@ -17544,7 +17999,12 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return win.DefWindowProcW(hwnd, message, wparam, lparam);
         },
         win.WM_ACTIVATEAPP => {
-            if (wparam != 0) focusCompose(a);
+            if (wparam != 0) {
+                focusCompose(a);
+            } else {
+                a.dictation_escape_held = false;
+                a.dictation_return_held = false;
+            }
             return win.DefWindowProcW(hwnd, message, wparam, lparam);
         },
         win.WM_SETFOCUS => {
@@ -17909,6 +18369,9 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 _ = win.InflateRect(&dirty, 1, 1);
                 _ = win.InvalidateRect(hwnd, &dirty, win.FALSE);
             } else if (id == id_compose and notification == win.EN_CHANGE) {
+                if (a.dictation_operation) |*operation| {
+                    if (std.meta.activeTag(operation.intent) == .sending) disarmDictationSend(a);
+                }
                 if (a.compose) |compose| {
                     if (win.GetWindowTextLengthW(compose) == 0) a.compose_dragged = 0;
                 }
@@ -18112,6 +18575,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 session.destroy();
                 a.dictation_session = null;
             }
+            releaseDictationOperation(a);
             if (a.voice_session) |session| {
                 session.destroy();
                 a.voice_session = null;
@@ -18225,13 +18689,37 @@ fn deleteWordBeforeCaret(edit: win.HWND) void {
 }
 
 fn handleKeyboard(a: *App, message: *const win.MSG) bool {
+    if (message.message == win.WM_KEYUP or message.message == win.WM_SYSKEYUP) {
+        if (message.wParam == win.VK_RETURN and a.dictation_return_held) {
+            a.dictation_return_held = false;
+            return true;
+        }
+        if (message.wParam == win.VK_ESCAPE and a.dictation_escape_held) {
+            a.dictation_escape_held = false;
+            return true;
+        }
+        return false;
+    }
     if (message.message != win.WM_KEYDOWN and message.message != win.WM_SYSKEYDOWN) return false;
     const key: u32 = @intCast(message.wParam);
+    if (key == win.VK_ESCAPE and a.dictation_escape_held) return true;
+    if (key == win.VK_RETURN and a.dictation_return_held) return true;
+    observeDictationContext(a);
     const focus = win.GetFocus();
     const control = win.GetKeyState(win.VK_CONTROL) < 0;
     const shift = win.GetKeyState(win.VK_SHIFT) < 0;
     const alt = win.GetKeyState(win.VK_MENU) < 0;
     if (directwrite_edit.isComposing(focus)) return false;
+    if (a.dictation_operation != null and key == win.VK_RETURN and control and !shift and !alt and a.image_viewer_window == null and a.shortcut_help == null) {
+        a.dictation_return_held = true;
+        finishDictation(a);
+        return true;
+    }
+    if (a.dictation_operation != null and key == win.VK_ESCAPE and !control and !shift and !alt and a.image_viewer_window == null and a.shortcut_help == null) {
+        a.dictation_escape_held = true;
+        cancelDictation(a);
+        return true;
+    }
     if (a.palette != null and a.palette_views_mode and control and !alt and !shift and (key == win.VK_UP or key == win.VK_DOWN)) {
         moveView(a, key == win.VK_DOWN);
         return true;
@@ -18404,7 +18892,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             return true;
         }
         if (a.thread_compose != null and focus == a.thread_compose.? and key == win.VK_RETURN and !shift) {
-            sendMessageFrom(a, true);
+            _ = sendMessageFrom(a, true);
             return true;
         }
     }
@@ -19352,6 +19840,7 @@ pub fn main(init: std.process.Init) !void {
     defer app.read_state.deinit(init.gpa);
     if (verification_fixture) {
         const migration_id = init.environ_map.get("WAZIG_VERIFY_ID") orelse "";
+        app.verification_dictation_id = migration_id;
         const migration_case = init.environ_map.get("WAZIG_VERIFY_MIGRATION_CASE") orelse "";
         if (migration_id.len == 36 and
             (std.mem.eql(u8, migration_case, "hub-migration-crash") or std.mem.eql(u8, migration_case, "hub-migration-before-rename")) and
@@ -19610,11 +20099,15 @@ pub fn main(init: std.process.Init) !void {
             }
         }
         if (message.message == win.WM_MOUSEMOVE and app.chats_hwnd != null and message.hwnd == app.chats_hwnd.?) updateChatTooltip(app, message.lParam);
-        if (handleKeyboard(app, &message)) continue;
+        if (handleKeyboard(app, &message)) {
+            observeDictationContext(app);
+            continue;
+        }
         const clicked_chat_list = message.message == win.WM_LBUTTONDOWN and
             app.chats_hwnd != null and message.hwnd == app.chats_hwnd.?;
         _ = win.TranslateMessage(&message);
         _ = win.DispatchMessageW(&message);
+        observeDictationContext(app);
         if (clicked_chat_list) {
             focusCompose(app);
         }
@@ -21952,6 +22445,7 @@ fn threadPanelWidth(a: *const App, width: i32, left_width: i32) i32 {
 
 fn closeSlackThread(a: *App) void {
     if (a.thread_parent.len == 0) return;
+    disarmDictationSend(a);
     a.thread_parent.set("");
     if (a.thread_list) |hwnd| _ = win.DestroyWindow(hwnd);
     if (a.thread_compose) |hwnd| _ = win.DestroyWindow(hwnd);
@@ -21978,6 +22472,7 @@ fn openSlackThread(a: *App, selected: usize) void {
         closeSlackThread(a);
         return;
     }
+    disarmDictationSend(a);
     setFont(a.thread_list, a.font);
     setFont(a.thread_compose, a.font);
     _ = win.SendMessageW(a.thread_compose.?, win.EM_SETLIMITTEXT, drafts.max_text, 0);

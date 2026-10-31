@@ -1,6 +1,24 @@
 {
   "journeys": [
     {
+      "name": "dictation-shortcuts",
+      "pr": true,
+      "hub": "dictation-shortcuts",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-dictation-shortcuts.ps1",
+      "validator": {
+        "file": "check-dictation-evidence.py",
+        "function": "check_evidence"
+      },
+      "hub_handler": {
+        "file": "dictation-fixture.py",
+        "class": "DictationHandler"
+      },
+      "maximize": true,
+      "prepare": "prepare-dictation.ps1"
+    },
+    {
       "name": "sidebar-surface",
       "pr": true,
       "hub": null,

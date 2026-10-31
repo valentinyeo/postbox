@@ -127,6 +127,12 @@ fn recordVerificationDispatch(_: *App, _: *const WacliJob) void {}
 fn captureVerificationCheckpointBefore(_: *App, _: []const u8) void {}
 
 const App = struct {
+    dictation_operation: ?struct { origin: chat_key.Stored } = null,
+    draft_store: struct {
+        fn isOpen(_: *const @This(), _: chat_key.Key) bool {
+            return false;
+        }
+    } = .{},
     allocator: std.mem.Allocator = std.testing.allocator,
     io: std.Io = std.testing.io,
     cache_tag: Utf8Text(32) = .{},
@@ -416,7 +422,9 @@ fn unifiedHub(a: *const App) bool {
     return a.unified_hub;
 }
 
-fn sendUnifiedMessage(_: *App, _: bool) void {
+fn finishDictation(_: *App) void {}
+
+fn sendUnifiedMessage(_: *App, _: bool) bool {
     @panic("unified admission belongs to the unified harness");
 }
 fn beginUnifiedSend(_: *App, _: u64) void {
