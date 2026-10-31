@@ -1052,6 +1052,7 @@ const App = struct {
     quote_link_dpi: u32 = 0,
     quote_link_client: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     header_pill_rect: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+    header_badge_rect: win.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
     click_origin: win.POINT = .{ .x = 0, .y = 0 },
     click_moved: bool = false,
     canvas_double_click_handled: bool = false,
@@ -17335,6 +17336,8 @@ fn visibleLinkAt(a: *const App, x: i32, y: i32) ?VisibleLink {
     if (x < client.left or x >= client.right or y < client.top or y >= client.bottom) return null;
     const pill = a.header_pill_rect;
     if (pill.right > pill.left and x >= pill.left and x < pill.right and y >= pill.top and y < pill.bottom) return null;
+    const badge = a.header_badge_rect;
+    if (badge.right > badge.left and x >= badge.left and x < badge.right and y >= badge.top and y < badge.bottom) return null;
     for (a.quote_links.items) |hit| {
         if (hit.message_index >= a.message_count or x < hit.rect.left or x >= hit.rect.right or y < hit.rect.top or y >= hit.rect.bottom) continue;
         const message = &a.messages[hit.message_index];
@@ -17417,6 +17420,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     defer surface.deinit();
     const hdc = surface.hdc;
     a.quote_links.clearRetainingCapacity();
+    a.header_badge_rect = std.mem.zeroes(win.RECT);
     a.quote_link_font_scale = a.font_scale;
     a.quote_link_dpi = a.dpi;
     a.quote_link_client = client;
@@ -17818,6 +17822,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         if (archiveMarker(a, &a.chats[a.selected_chat])) |text| {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             var badge = win.RECT{ .left = client.right - px(a, 150), .top = client.top + px(a, 8), .right = client.right - px(a, 24), .bottom = client.top + px(a, 32) };
+            a.header_badge_rect = badge;
             if (win.CreateSolidBrush(theme.current.surface_container_high)) |badge_brush| {
                 defer _ = win.DeleteObject(badge_brush);
                 _ = win.FillRect(hdc, &badge, badge_brush);
