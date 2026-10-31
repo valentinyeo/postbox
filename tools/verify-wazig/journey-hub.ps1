@@ -187,6 +187,10 @@ $null = Wait-Until {
 $fileSends = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity file' })
 Assert-That ($fileSends.Count -eq 5 -and @($fileSends.body.client_id | Select-Object -Unique).Count -eq 1 -and $fileSends[-1].body.client_id -eq $fileId) 'File retry changed identity'
 Assert-That (@($fileSends.file_sha256 | Select-Object -Unique).Count -eq 1 -and @($fileSends | Where-Object accepted -eq $true).Count -eq 1) 'File retry changed bytes or duplicated delivery'
-Assert-That ($fileSends[0].file_sha256 -ceq $fixtureHash -and $fileSends[0].body.file -ceq [IO.Path]::GetFileName($fixture) -and $fileSends[0].body.chat -ceq 'fixture-alpha') 'picker: fixture upload differs from original'
+$stagedFilename = $fileSends[0].body.file
+Assert-That ($stagedFilename -cmatch '^paste-[0-9]+-[0-9]\.png$') 'picker: invalid staged filename'
+foreach ($send in $fileSends) {
+    Assert-That ($send.file_sha256 -ceq $fixtureHash -and $send.body.file -ceq $stagedFilename -and $send.body.chat -ceq 'fixture-alpha') 'picker: fixture upload differs from original'
+}
 @{ idle_start = $fileIdleStart.ToString('o'); click = $fileClickAt.ToString('o'); before = 4; after = $fileSends.Count } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'file-identity-boundary.json')
 Hub-Pass $session terminal-file-identity-restart
