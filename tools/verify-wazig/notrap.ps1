@@ -10,6 +10,14 @@ function Select-NotrapView($Session, $Order, [int]$Number) {
     return (Read-Control $Session status)
 }
 
+function Focus-Canvas($Session, $Point) {
+    [VerifyMenus]::Click($Session.pid, $Point.X, $Point.Y, $false)
+    $null = Wait-Until {
+        $focused = [Windows.Automation.AutomationElement]::FocusedElement
+        $focused.Current.ProcessId -eq $Session.pid -and $focused.Current.AutomationId -ceq '1024'
+    } 'canvas holds keyboard focus'
+}
+
 function Invoke-NotrapJourney($Session) {
     $startup = Read-Control $Session status
     Assert-That ($startup.view -notin @('signal', 'telegram') -and $startup.chat_count -gt 0) 'Saved unlinked view trapped startup'
@@ -86,9 +94,13 @@ function Invoke-NotrapJourney($Session) {
     $point = [VerifyWindow+Point]::new()
     $point.X = [int](($bubble.bubble[0] + $bubble.bubble[2]) / 2)
     $point.Y = [int](($bubble.bubble[1] + $bubble.bubble[3]) / 2)
+    $focusPoint = [VerifyWindow+Point]::new()
+    $focusPoint.X = [int]($bubble.bubble[0] + ($bubble.bubble[2] - $bubble.bubble[0]) / 4)
+    $focusPoint.Y = $point.Y
     Assert-That ([VerifyWindow]::ClientToScreen([IntPtr]$canvas.Current.NativeWindowHandle, [ref]$point)) 'Canvas screen origin unavailable'
+    Assert-That ([VerifyWindow]::ClientToScreen([IntPtr]$canvas.Current.NativeWindowHandle, [ref]$focusPoint)) 'Canvas focus screen origin unavailable'
     $beforeMenu = Read-Control $Session status
-    $canvas.SetFocus()
+    Focus-Canvas $Session $focusPoint
     Send-Keys $Session 'g'
     [VerifyMenus]::Click($Session.pid, $point.X, $point.Y, $true)
     Add-Content (Join-Path $Session.evidence 'actions.log') 'SendInput: right-click synthetic message for prefix cancellation'
@@ -99,7 +111,7 @@ function Invoke-NotrapJourney($Session) {
     Close-Popup $Session '#32768'
     $afterMenu = Read-Control $Session status
     Assert-That ($afterMenu.menu_entry_count -eq $beforeMenu.menu_entry_count + 1 -and $null -ne $afterMenu.menu_prefix_age_ms -and $afterMenu.menu_prefix_age_ms -le 900 -and -not $afterMenu.menu_prefix_pending) 'Menu must clear a live G prefix'
-    $canvas.SetFocus()
+    Focus-Canvas $Session $focusPoint
     Send-Keys $Session 'i'
     $afterI = Read-Control $Session status
     Assert-That ($afterI.current_view.account -eq $order[0].account -and -not $afterI.current_view.inbox) 'I after menu must not open inbox'
