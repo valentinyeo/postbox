@@ -159,8 +159,8 @@ function Dictation-CloseSearch($Session) {
     $owner = [uint32]0
     if ($foreground -ne [IntPtr]::Zero) { [VerifyWindow]::GetWindowThreadProcessId($foreground, [ref]$owner) | Out-Null }
     Assert-That ($owner -eq $Session.pid -and $foreground -eq $paletteHandle) 'Search window is not foreground'
-    [Windows.Forms.SendKeys]::SendWait('{ESC}')
-    Add-Content (Join-Path $Session.evidence 'actions.log') 'owned-search: {ESC}'
+    [Windows.Forms.SendKeys]::SendWait('^k')
+    Add-Content (Join-Path $Session.evidence 'actions.log') 'owned-search: ^k'
     $null = Wait-Until {
         $active = [VerifyWindow]::GetForegroundWindow()
         $active -ne $paletteHandle
@@ -197,7 +197,8 @@ function Dictation-NavigationCase([string]$Name) {
         }
     }
     $changed = Dictation-Snapshot $session "$Name-changed"
-    Assert-That ($changed.state.dictation.intent -ceq 'manual') 'Navigation did not disarm sending'
+    Assert-That ($changed.state.dictation.intent -ceq 'manual' -and $changed.state.dictation.gate_phase -eq 1) 'Navigation did not preserve manual transcription'
+    Assert-That (@(Dictation-Sends $session).Count -eq $before) 'Navigation sent before transcription completed'
     $null = $gates['transcribe'].Set()
     $null = Wait-Until { (Read-Control $session status).dictation.phase -eq 'idle' } "$Name completion" 30
     $finished = Dictation-Snapshot $session "$Name-finished"

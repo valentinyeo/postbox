@@ -79,7 +79,7 @@ def check_evidence(folder):
     assert actions.count('dictation-key: 13 up=False') >= 3
     assert 'dictation-key: 17 up=True' in actions and 'dictation-key: 13 up=True' in actions
     assert actions.count('dictation-key: 27 up=False') >= 8 and actions.count('dictation-key: 27 up=True') >= 4
-    for action in ('keys: %a', 'keys: ^f', 'owned-search: {ESC}', 'keys: ^{TAB}', 'keys: ^+{TAB}', 'keys: {ENTER}', 'keys: {ESC}'):
+    for action in ('keys: %a', 'keys: ^f', 'owned-search: ^k', 'keys: ^{TAB}', 'keys: ^+{TAB}', 'keys: {ENTER}', 'keys: {ESC}'):
         assert action in actions, action
     assert actions.count('keys: %a') >= 2
 
@@ -134,6 +134,7 @@ def check_evidence(folder):
         check_scope(armed)
         assert armed['text'] == origin_text(name) and armed['state']['dictation']['intent'] == 'sending'
         assert armed['state']['dictation']['gate_phase'] == 1 and changed['state']['dictation']['intent'] == 'manual'
+        assert changed['state']['dictation']['gate_phase'] == 1 and changed['state']['dictation']['phase'] == 'transcribing'
         assert count_sends(folder, name + '-armed') == count_sends(folder, name + '-changed') == count_sends(folder, name + '-finished') == 2
         if name == 'archive-roundtrip':
             assert armed['state']['include_archived'] == changed['state']['include_archived']
