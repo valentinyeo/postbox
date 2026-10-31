@@ -20,11 +20,15 @@ const ScriptItem = extern struct { char_pos: c_int, analysis: ScriptAnalysis };
 const ScriptVisAttr = extern struct { bits: u16 };
 const GOffset = extern struct { du: i32, dv: i32 };
 const ScriptCache = ?*anyopaque;
+const ScriptFontProperties = extern struct { size: c_int, blank: u16, default_glyph: u16, invalid: u16, kashida: u16, kashida_width: c_int };
+
+pub const GlyphCoverage = enum { supported, missing, unavailable, surface, font };
 
 extern "usp10" fn ScriptItemize(chars: [*]const u16, char_count: c_int, max_items: c_int, control: ?*const anyopaque, script_state: ?*const anyopaque, items: [*]ScriptItem, item_count: *c_int) callconv(.c) win.HRESULT;
 extern "usp10" fn ScriptShape(hdc: win.HDC, cache: *ScriptCache, chars: [*]const u16, char_count: c_int, max_glyph_count: c_int, analysis: *ScriptAnalysis, glyphs: [*]u16, clusters: [*]u16, attributes: [*]ScriptVisAttr, glyph_count: *c_int) callconv(.c) win.HRESULT;
 extern "usp10" fn ScriptPlace(hdc: win.HDC, cache: *ScriptCache, glyphs: [*]const u16, glyph_count: c_int, attributes: [*]const ScriptVisAttr, analysis: *ScriptAnalysis, advances: [*]c_int, offsets: [*]GOffset, abc: ?*win.ABC) callconv(.c) win.HRESULT;
 extern "usp10" fn ScriptFreeCache(cache: *ScriptCache) callconv(.c) win.HRESULT;
+extern "usp10" fn ScriptGetFontProperties(hdc: win.HDC, cache: *ScriptCache, properties: *ScriptFontProperties) callconv(.c) win.HRESULT;
 
 const ErrorStage = enum { surface, font, colour_tables, colour_parse, shape, bitmap };
 
@@ -156,7 +160,10 @@ fn selectFont(dc: win.HDC, em: i32) ?*FontEntry {
     for (&state.fonts, 0..) |*entry, index| {
         if (entry.em == em and entry.font != null) {
             if (state.selected_em != em) {
-                _ = win.SelectObject(dc, @ptrCast(entry.font.?));
+                _ = win.SelectObject(dc, @ptrCast(entry.font.?)) orelse {
+                    fail(.font, win.GetLastError());
+                    return null;
+                };
                 state.selected_em = em;
             }
             return entry;
@@ -168,7 +175,12 @@ fn selectFont(dc: win.HDC, em: i32) ?*FontEntry {
         fail(.font, win.GetLastError());
         return null;
     };
-    _ = win.SelectObject(dc, @ptrCast(font));
+    _ = win.SelectObject(dc, @ptrCast(font)) orelse {
+        const code = win.GetLastError();
+        _ = win.DeleteObject(@ptrCast(font));
+        fail(.font, code);
+        return null;
+    };
     state.selected_em = em;
     const entry = &state.fonts[slot];
     if (entry.font) |old| {
@@ -238,13 +250,20 @@ const Shaped = struct {
     width: i32 = 0,
 };
 
-fn shape(dc: win.HDC, font: *FontEntry, text: []const u16, out: *Shaped) bool {
+fn shape(dc: win.HDC, font: *FontEntry, text: []const u16, out: *Shaped) GlyphCoverage {
+    const single_scalar = text.len == 1 or (text.len == 2 and text[0] >= 0xD800 and text[0] <= 0xDBFF and text[1] >= 0xDC00 and text[1] <= 0xDFFF);
+    var properties = ScriptFontProperties{ .size = @sizeOf(ScriptFontProperties), .blank = 0, .default_glyph = 0, .invalid = 0, .kashida = 0, .kashida_width = 0 };
+    const properties_hr = ScriptGetFontProperties(dc, &font.cache, &properties);
+    if (properties_hr != 0) {
+        fail(.font, @bitCast(properties_hr));
+        return .font;
+    }
     var items: [max_sequence_units + 1]ScriptItem = undefined;
     var item_count: c_int = 0;
     const itemize_hr = ScriptItemize(text.ptr, @intCast(text.len), items.len, null, null, &items, &item_count);
     if (itemize_hr != 0 or item_count <= 0) {
         fail(.shape, @bitCast(itemize_hr));
-        return false;
+        return .unavailable;
     }
     out.count = 0;
     out.width = 0;
@@ -259,22 +278,24 @@ fn shape(dc: win.HDC, font: *FontEntry, text: []const u16, out: *Shaped) bool {
         const room: c_int = @intCast(max_glyphs - out.count);
         const glyphs = out.glyphs[out.count..].ptr;
         const shape_hr = ScriptShape(dc, &font.cache, text[start..].ptr, @intCast(end - start), room, &items[index].analysis, glyphs, &clusters, &attributes, &glyph_count);
-        if (shape_hr == usp_e_script_not_in_font) return false;
+        if (shape_hr == usp_e_script_not_in_font) return if (single_scalar) .missing else .unavailable;
         if (shape_hr != 0) {
             fail(.shape, @bitCast(shape_hr));
-            return false;
+            return .unavailable;
         }
         const placed: usize = @intCast(glyph_count);
-        for (out.glyphs[out.count..][0..placed]) |glyph| if (glyph == 0) return false;
+        for (out.glyphs[out.count..][0..placed]) |glyph| {
+            if (glyph == properties.default_glyph or glyph == properties.invalid) return if (single_scalar) .missing else .unavailable;
+        }
         const place_hr = ScriptPlace(dc, &font.cache, glyphs, glyph_count, &attributes, &items[index].analysis, out.advances[out.count..].ptr, &offsets, null);
         if (place_hr != 0) {
             fail(.shape, @bitCast(place_hr));
-            return false;
+            return .unavailable;
         }
         for (out.advances[out.count..][0..placed]) |advance| out.width += advance;
         out.count += placed;
     }
-    return out.count != 0;
+    return if (out.count != 0) .supported else .unavailable;
 }
 
 fn ensureScratch(dc: win.HDC, width: i32, height: i32) bool {
@@ -390,8 +411,19 @@ fn prepare(text: []const u16, em: i32, shaped: *Shaped) ?*FontEntry {
     const dc = ensureDc() orelse return null;
     const font = selectFont(dc, em) orelse return null;
     if (!ensureColour(dc)) return null;
-    if (!shape(dc, font, text, shaped)) return null;
+    if (shape(dc, font, text, shaped) != .supported) return null;
     return font;
+}
+
+pub fn probeCoverage(text: []const u16, em: i32) GlyphCoverage {
+    if (!validSequence(text, em)) return .unavailable;
+    const dc = ensureDc() orelse return .surface;
+    const font = selectFont(dc, em) orelse return .font;
+    var face: [32]u16 = undefined;
+    const length = win.GetTextFaceW(dc, face.len, &face);
+    if (length <= 0 or !std.mem.eql(u16, face[0..@intCast(length - 1)], std.unicode.utf8ToUtf16LeStringLiteral("Segoe UI Emoji"))) return .font;
+    var shaped: Shaped = .{};
+    return shape(dc, font, text, &shaped);
 }
 
 pub fn metrics(text: []const u16, em: i32) ?Metrics {

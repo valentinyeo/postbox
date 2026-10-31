@@ -70,16 +70,18 @@ pub fn indexOf(text: []const u8) ?u16 {
     return null;
 }
 
-pub fn frequentRow(recents: []const u16, out: *[grid_columns]u16) usize {
+pub fn frequentRow(recents: []const u16, out: *[grid_columns]u16, missing: *const std.StaticBitSet(count)) usize {
     var written: usize = 0;
     for (recents) |recent| {
         if (written == grid_columns) break;
+        if (missing.isSet(recent)) continue;
         out[written] = recent;
         written += 1;
     }
     for (default_frequent) |text| {
         if (written == grid_columns) break;
         const index = indexOf(text) orelse continue;
+        if (missing.isSet(index)) continue;
         if (std.mem.indexOfScalar(u16, out[0..written], index) != null) continue;
         out[written] = index;
         written += 1;
@@ -109,14 +111,14 @@ fn wordMatch(text: []const u8, query: []const u8) u8 {
     return best;
 }
 
-pub fn search(query: []const u8, out: []u16) usize {
+pub fn search(query: []const u8, out: []u16, missing: *const std.StaticBitSet(count)) usize {
     var written: usize = 0;
     const lowest: u8 = if (query.len == 0) 1 else 4;
     var rank: u8 = lowest;
     while (rank > 0) : (rank -= 1) {
         for (0..count) |index| {
             if (written == out.len) return written;
-            if (matchRank(index, query) != rank) continue;
+            if (missing.isSet(index) or matchRank(index, query) != rank) continue;
             out[written] = @intCast(index);
             written += 1;
         }
@@ -199,14 +201,14 @@ pub fn cellFromHit(offset_in_row: i32, cell: i32) ?usize {
 
 fn expectFirstMatch(query: []const u8, expected: []const u8) !void {
     var out: [count]u16 = undefined;
-    const found = search(query, &out);
+    const found = search(query, &out, &std.StaticBitSet(count).initEmpty());
     try std.testing.expect(found > 0);
     try std.testing.expectEqualStrings(expected, emoji(out[0]));
 }
 
 fn searchContains(query: []const u8, expected: []const u8) bool {
     var out: [count]u16 = undefined;
-    const found = search(query, &out);
+    const found = search(query, &out, &std.StaticBitSet(count).initEmpty());
     for (out[0..found]) |index| {
         if (std.mem.eql(u8, emoji(index), expected)) return true;
     }
@@ -273,15 +275,15 @@ test "search filters by name, alias and subgroup, word starts first" {
     try std.testing.expect(searchContains("fingers-open", "👋"));
     try std.testing.expect(!searchContains("fire", "👍"));
     var out: [count]u16 = undefined;
-    try std.testing.expectEqual(@as(usize, 0), search("zzqqxx", &out));
-    try std.testing.expectEqual(count, search("", &out));
+    try std.testing.expectEqual(@as(usize, 0), search("zzqqxx", &out, &std.StaticBitSet(count).initEmpty()));
+    try std.testing.expectEqual(count, search("", &out, &std.StaticBitSet(count).initEmpty()));
 }
 
 test "frequent row puts recents first, then fills with defaults" {
     var row: [grid_columns]u16 = undefined;
     const fire = indexOf("🔥").?;
     const wave = indexOf("👋").?;
-    try std.testing.expectEqual(grid_columns, frequentRow(&.{ wave, fire }, &row));
+    try std.testing.expectEqual(grid_columns, frequentRow(&.{ wave, fire }, &row, &std.StaticBitSet(count).initEmpty()));
     try std.testing.expectEqual(wave, row[0]);
     try std.testing.expectEqual(fire, row[1]);
     try std.testing.expectEqualStrings("👍", emoji(row[2]));
@@ -290,6 +292,23 @@ test "frequent row puts recents first, then fills with defaults" {
         if (index == fire) fires += 1;
     }
     try std.testing.expectEqual(@as(usize, 1), fires);
+}
+
+test "missing entries do not occupy frequent slots or ranked results" {
+    var missing = std.StaticBitSet(count).initEmpty();
+    const fire = indexOf("🔥").?;
+    const wave = indexOf("👋").?;
+    missing.set(fire);
+    var row: [grid_columns]u16 = undefined;
+    try std.testing.expectEqual(grid_columns, frequentRow(&.{ fire, wave }, &row, &missing));
+    try std.testing.expectEqual(wave, row[0]);
+    for (row) |index| try std.testing.expect(index != fire);
+    var results: [count]u16 = undefined;
+    const fire_results = search("fire", results[0..1], &missing);
+    if (fire_results > 0) try std.testing.expect(results[0] != fire);
+    const n = search("", &results, &missing);
+    try std.testing.expectEqual(count - 1, n);
+    for (results[0..n]) |index| try std.testing.expect(index != fire);
 }
 
 test "recents parse validates and deduplicates" {
