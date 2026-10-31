@@ -1,4 +1,5 @@
 import json
+import re
 import runpy
 from pathlib import Path
 
@@ -54,7 +55,11 @@ def check_emoji_picker_glyphs(folder):
     cells = empty['cells']
     assert session['feature'] == 'emoji-picker-glyphs'
     assert environment['commit'] == session['commit'] and environment['sha256'] == session['sha256']
-    assert environment['os'] and environment['font_version'] and environment['font_sha256'] and environment['dpi']
+    assert environment['os'] and environment['dpi'] > 0
+    assert environment['font_file'].lower() == 'seguiemj.ttf'
+    assert re.fullmatch(r'[0-9a-fA-F]{64}', environment['font_sha256'])
+    assert 'font_version' in environment and (environment['font_version'] is None or
+                                               isinstance(environment['font_version'], str) and bool(environment['font_version'].strip()))
     assert len(cells) == 48 and [cell['match'] for cell in cells] == list(range(48))
     assert sum(row['stage'] == 'empty' for row in measurements) == 48
     assert all(cell['coverage'] != 'missing' and cell['text'] and cell['name'] for cell in cells)
