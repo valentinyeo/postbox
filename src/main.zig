@@ -989,6 +989,8 @@ const App = struct {
     send_started_ms: u64 = 0,
     pending_sends: [max_pending_sends]PendingSend = [_]PendingSend{.{}} ** max_pending_sends,
     pending_send_count: usize = 0,
+    sent_media: [8]SentMedia = [_]SentMedia{.{}} ** 8,
+    sent_media_count: usize = 0,
     chat_activity: chat_order.Activity = .{},
     slack_outbox_dirty: bool = false,
     slack_outbox: [max_slack_outbox]SlackOutbox = [_]SlackOutbox{.{}} ** max_slack_outbox,
@@ -4333,6 +4335,36 @@ fn retryingBubbleText(buffer: []u8, text: []const u8, retries: u8) []const u8 {
     return std.fmt.bufPrint(buffer, "{s} (retrying {d}/{d})", .{ text, retries, max_send_retries - 1 }) catch text;
 }
 
+const SentMedia = struct {
+    id: Utf8Text(191) = .{},
+    path: WideText(519) = .{},
+};
+
+fn noteSentMedia(a: *App, id: []const u8, path: []const u16) void {
+    if (id.len == 0 or path.len == 0) return;
+    var entry = &a.sent_media[a.sent_media_count % a.sent_media.len];
+    entry.id.set(id);
+    entry.path.len = @min(path.len, entry.path.buf.len - 1);
+    @memcpy(entry.path.buf[0..entry.path.len], path[0..entry.path.len]);
+    entry.path.buf[entry.path.len] = 0;
+    if (a.sent_media_count < a.sent_media.len) a.sent_media_count += 1;
+}
+
+fn adoptSentMedia(a: *App) void {
+    if (a.sent_media_count == 0) return;
+    for (a.messages[0..a.message_count]) |*message| {
+        if (message.local_path.len > 0 or !message.from_me or message.id.len == 0) continue;
+        for (a.sent_media[0..a.sent_media_count]) |*entry| {
+            if (!std.mem.eql(u8, entry.id.slice(), message.id.slice())) continue;
+            const length = @min(entry.path.len, message.local_path.buf.len - 1);
+            @memcpy(message.local_path.buf[0..length], entry.path.slice()[0..length]);
+            message.local_path.len = length;
+            message.local_path.buf[length] = 0;
+            break;
+        }
+    }
+}
+
 fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool) void {
     if (pending.completed or a.message_count >= max_messages or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
     if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(pending))) return;
@@ -4360,7 +4392,13 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
         message.media_type.set("audio");
         message.local_path.set(a.allocator, pending.file.slice());
     } else if (pending.file.len > 0 and pending.text.len == 0) {
+        message.media_type.set("image");
+        const local_length = @min(pending.file.len, message.local_path.buf.len - 1);
+        @memcpy(message.local_path.buf[0..local_length], pending.file.slice()[0..local_length]);
+        message.local_path.len = local_length;
+        message.local_path.buf[local_length] = 0;
         message.text.set(a.allocator, file_send_placeholder);
+        noteSentMedia(a, &pending.id, pending.file.slice());
     } else {
         var retry_buffer: [4095]u8 = undefined;
         message.text.set(a.allocator, retryingBubbleText(&retry_buffer, pending.text.slice(), pending.retries));
@@ -9192,6 +9230,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         appendWhatsAppFailed(a, failed);
     }
     a.msg_applied_hash = std.hash.Wyhash.hash(0, raw);
+    adoptSentMedia(a);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     if (fresh_read) markChatRead(a);
     drainMediaDownloads(a);

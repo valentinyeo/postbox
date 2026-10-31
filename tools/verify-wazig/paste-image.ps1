@@ -155,6 +155,10 @@ function Invoke-PasteImageJourney($Session) {
         Save-Screen $Session "$name-staged"
         Send-Keys $Session '{ENTER}'
         $null = Wait-Until {
+            @((Read-Control $Session messages).messages | Where-Object { $_.from_me -and $_.media_type -eq 'image' -and $_.local -and $_.id -like 'local-*' }).Count -eq 1
+        } "paste-image: $name image paints from the local file while the upload runs"
+        Save-Screen $Session "$name-local-first"
+        $null = Wait-Until {
             $sends = @(Read-BridgeRequests $Session | Where-Object { $_.path -eq '/v1/wazig/send' -and $_.accepted })
             $sends.Count -eq $index -and (Read-Control $Session status).pending_sends -eq 0
         } "paste-image: $name image received exactly once"
