@@ -343,7 +343,7 @@
       },
       "library": "signal.ps1",
       "hub_handler": {
-        "file": "fake-hub.py",
+        "file": "fake-signal-hub.py",
         "class": "SignalHandler"
       },
       "maximize": true
