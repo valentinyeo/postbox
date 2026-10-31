@@ -651,7 +651,59 @@ pub fn hitText(dc: win.HDC, input: []const u16, rect: win.RECT, index: ?usize, x
     return .{ .index = @min(text.len, @as(usize, metrics.textPosition) + if (trailing != 0) @as(usize, metrics.length) else 0), .x = x };
 }
 
+const emoji_runs = @import("emoji_runs.zig");
+const emoji_draw = @import("emoji_draw.zig");
+
+fn emojiLineAllowed(flags: u32) bool {
+    if (flags & win.DT_SINGLELINE == 0) return false;
+    for ([_]u32{ win.DT_CENTER, win.DT_RIGHT, win.DT_VCENTER, win.DT_BOTTOM, win.DT_END_ELLIPSIS, win.DT_CALCRECT, win.DT_WORDBREAK }) |flag| {
+        if (flags & flag != 0) return false;
+    }
+    return true;
+}
+
+fn drawEmojiLine(dc: win.HDC, text: []const u16, rect: *win.RECT, flags: u32) bool {
+    if (!emoji_runs.containsEmoji(text)) return false;
+    var runs: [emoji_runs.max_runs]emoji_runs.Run = undefined;
+    const count = emoji_runs.splitRuns(text, &runs);
+    if (count == 0) return false;
+    var metrics: win.TEXTMETRICW = undefined;
+    if (win.GetTextMetricsW(dc, &metrics) == 0) return false;
+    const em = @max(1, metrics.tmHeight - metrics.tmInternalLeading);
+    var widths: [emoji_runs.max_runs]i32 = undefined;
+    for (runs[0..count], 0..) |run, index| {
+        const slice = text[run.start..][0..run.len];
+        if (run.emoji) {
+            const measured = emoji_draw.metrics(slice, em) orelse return false;
+            widths[index] = measured.width;
+        } else {
+            var probe = win.SIZE{};
+            if (win.GetTextExtentPoint32W(dc, slice.ptr, @intCast(slice.len), &probe) == 0) return false;
+            widths[index] = probe.cx;
+        }
+    }
+    var x = rect.left;
+    for (runs[0..count], 0..) |run, index| {
+        const slice = text[run.start..][0..run.len];
+        if (run.emoji) {
+            if (emoji_draw.draw(dc, slice, x, rect.top, metrics.tmAscent, em) == null) return true;
+        } else {
+            var sub = win.RECT{ .left = x, .top = rect.top, .right = rect.right, .bottom = rect.bottom };
+            const height = render(dc, slice.ptr, @intCast(slice.len), &sub, flags) catch blk: {
+                break :blk win.DrawTextW(dc, slice.ptr, @intCast(slice.len), &sub, flags);
+            };
+            _ = height;
+        }
+        x += widths[index];
+    }
+    return true;
+}
+
 pub fn drawText(dc: win.HDC, text: [*c]const u16, len: i32, rect: *win.RECT, flags: u32) i32 {
+    if (len > 0 and text != null and emojiLineAllowed(flags) and !failed) {
+        const slice: []const u16 = text[0..@intCast(len)];
+        if (drawEmojiLine(dc, slice, rect, flags)) return @max(1, rect.bottom - rect.top);
+    }
     if (!failed) {
         return render(dc, text, len, rect, flags) catch |err| {
             last_failure = err;
