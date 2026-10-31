@@ -55,6 +55,14 @@ foreach ($target in @(
     Assert-That ([VerifyWindow]::GetClientRect($canvas, [ref]$canvasRect)) 'Canvas bounds missing'
     Assert-That ($canvasRect.Bottom -le $state.reply.bar[1]) 'Reply bar overlaps messages'
     Save-Screen $session "$name-replying"
+    $beforeJump = (Read-Control $session status).reply_jump_count
+    Click-ReplyRect $session $window $state.reply.bar
+    $null = Wait-Until {
+        $jumped = Read-Control $session status
+        $jumped.reply_jump_count -eq $beforeJump + 1 -and $jumped.reply_flash -ceq 'REPLY-ORIGINAL' -and $jumped.reply.id -ceq 'REPLY-ORIGINAL'
+    } "$name reply bar jumps to the original"
+    @{ before = $beforeJump; after = (Read-Control $session status).reply_jump_count; flash = (Read-Control $session status).reply_flash } | ConvertTo-Json | Set-Content (Join-Path $session.evidence "$name-reply-bar.json")
+    Save-Screen $session "$name-reply-bar-jump"
     Click-ReplyRect $session $window $state.reply.close
     $null = Wait-Until { (Read-Control $session status).reply.id -ceq '' } "$name close cancels reply"
     Invoke-PaletteCommand $session 'Reply to selected message'

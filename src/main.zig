@@ -1122,6 +1122,7 @@ const App = struct {
     reply_name: WideText(159) = .{},
     reply_flash: Utf8Text(191) = .{},
     reply_notice: bool = false,
+    pending_reply_jump: Utf8Text(191) = .{},
     reply_close_hover: bool = false,
     displayed_provider: transport.Provider = .whatsapp,
     displayed_account: Utf8Text(32) = .{},
@@ -10880,7 +10881,7 @@ fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
     return if (message.quoted_msg_id.len > 0) textLineHeight(hdc, a.font_small.?) + px(a, 6) else 0;
 }
 
-fn jumpToReply(a: *App, id: []const u8) void {
+fn jumpToReply(a: *App, id: []const u8) bool {
     for (a.messages[0..a.message_count], 0..) |*message, index| {
         if (!std.mem.eql(u8, message.id.slice(), id)) continue;
         const selected = a.selected_message;
@@ -10894,11 +10895,21 @@ fn jumpToReply(a: *App, id: []const u8) void {
         a.selected_message = selected;
         if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
         if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_reply_flash, 1200, null);
-        return;
+        return true;
     }
     a.reply_notice = true;
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_reply_flash, 1200, null);
+    return false;
+}
+
+fn jumpToReplyOrLoad(a: *App, id: []const u8) void {
+    if (jumpToReply(a, id)) {
+        a.pending_reply_jump.set("");
+        return;
+    }
+    a.pending_reply_jump.set(id);
+    requestHubOlder(a);
 }
 
 fn focusCompose(a: *App) void {
@@ -18090,7 +18101,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             for (a.messages[0..a.message_count]) |*item| {
                 if (item.quote_hit.right > item.quote_hit.left and rectHasPoint(item.quote_hit, x, y)) {
                     a.canvas_double_click_handled = true;
-                    jumpToReply(a, item.quoted_msg_id.slice());
+                    _ = jumpToReply(a, item.quoted_msg_id.slice());
                     return 0;
                 }
             }
@@ -18910,6 +18921,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 var pt: win.POINT = undefined;
                 _ = win.GetCursorPos(&pt);
                 _ = win.ScreenToClient(hwnd, &pt);
+                if (a.reply_to.len > 0 and rectHasPoint(replyBarRect(a), pt.x, pt.y)) {
+                    _ = win.SetCursor(win.LoadCursorA(null, @ptrFromInt(32649)));
+                    return 1;
+                }
                 if (pt.y >= a.compose_strip_top and pt.y < a.compose_strip_top + px(a, 11) and pt.x > 0) {
                     _ = win.SetCursor(win.LoadCursorW(null, @as([*:0]const u16, @ptrFromInt(32646))));
                     return 1;
@@ -18935,6 +18950,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.reply_to.len > 0 and rectHasPoint(replyCloseRect(a), x, y)) {
                 clearReply(a);
                 focusCompose(a);
+                return 0;
+            }
+            if (a.reply_to.len > 0 and rectHasPoint(replyBarRect(a), x, y)) {
+                jumpToReplyOrLoad(a, a.reply_to.slice());
                 return 0;
             }
             for (0..a.staged_images.count) |index| {
@@ -23442,4 +23461,9 @@ fn applyHubOlderPage(a: *App, result: *const WacliResult) void {
     defer a.allocator.free(raw);
     _ = applyMessageData(a, raw, false);
     a.msg_applied_hash = 0;
+    if (a.pending_reply_jump.len > 0) {
+        var pending = Utf8Text(191){};
+        pending.set(a.pending_reply_jump.slice());
+        if (jumpToReply(a, pending.slice())) a.pending_reply_jump.set("") else requestHubOlder(a);
+    }
 }
