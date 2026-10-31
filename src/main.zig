@@ -17852,6 +17852,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
         win.WM_SETCURSOR => {
             var point: win.POINT = undefined;
             const check_link = !a.text_dragging and a.sb_drag == .none and a.quote_link_down == null;
+            if (check_link) _ = win.UpdateWindow(hwnd);
             const point_valid = (verification_fixture or check_link) and win.GetCursorPos(&point) != 0 and win.ScreenToClient(hwnd, &point) != 0;
             defer if (verification_fixture and point_valid) {
                 a.verification_cursor_count +%= 1;

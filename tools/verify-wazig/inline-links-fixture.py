@@ -38,7 +38,7 @@ class InlineLinksHandler(VoiceHandler):
                      quoted_msg_id='INLINE-BODY', quoted_sender_jid='fixture-sender', Timestamp=self.stamp(3)),
                 dict(MsgID='INLINE-OUT', Text='Synthetic outgoing reply', DisplayText='> ' + quote_url + '\nSynthetic outgoing reply',
                      quoted_msg_id='INLINE-BODY', quoted_sender_jid='fixture-sender', FromMe=True, Timestamp=self.stamp(4)),
-                dict(MsgID='INLINE-BLOCK', Text='Synthetic shared message', fixture_quote='Shared ' + fallback_url,
+                dict(MsgID='INLINE-BLOCK', Text='Synthetic shared message', fixture_quote=fallback_url,
                      fixture_quote_sender='Fixture Sender', Timestamp=self.stamp(5)),
             ]
             for row in rows:
