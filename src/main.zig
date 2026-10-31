@@ -1046,6 +1046,8 @@ const App = struct {
     quote_link_down: ?QuoteLinkHit = null,
     verification_reply_jump_count: u64 = 0,
     verification_reply_jump_id: Utf8Text(191) = .{},
+    verification_menu_prefix_age_ms: ?u64 = null,
+    verification_menu_entry_count: u64 = 0,
     verification_canvas_up_count: u64 = 0,
     verification_canvas_up_point: win.POINT = .{ .x = 0, .y = 0 },
     verification_cursor_count: u64 = 0,
@@ -1078,6 +1080,7 @@ const App = struct {
     transcribe_attempts: [512]u64 = [_]u64{0} ** 512,
     transcribe_attempt_count: usize = 0,
     last_alt_g_ms: u64 = 0,
+    inbox_sequence: shortcuts.InboxSequence = .{},
     chat_wheel_accum: i32 = 0,
     avatars: [max_avatars]AvatarEntry = [_]AvatarEntry{.{}} ** max_avatars,
     avatar_count: usize = 0,
@@ -3758,6 +3761,7 @@ fn switchChatView(a: *App, view: messenger_view.View) void {
 }
 
 fn switchAccountView(a: *App, wanted: ?chat_key.Key) void {
+    a.inbox_sequence.started = null;
     const next_view = if (wanted) |key| messenger_view.providerView(key.provider) else .all;
     const next_account = if (wanted) |key| key.account else "";
     if (a.chat_view != next_view or !std.mem.eql(u8, a.view_account.slice(), next_account)) disarmDictationSend(a);
@@ -12819,6 +12823,15 @@ fn openUrlWide(a: *App, url: [*:0]const u16) void {
     if (@intFromPtr(result) <= 32) setStatus(a, "Windows could not open the link");
 }
 
+fn trackPopupMenu(a: *App, menu: win.HMENU, x: i32, y: i32, flags: win.UINT) i32 {
+    if (verification_fixture) {
+        a.verification_menu_entry_count +%= 1;
+        a.verification_menu_prefix_age_ms = if (a.inbox_sequence.started) |started| win.GetTickCount64() -| started else null;
+    }
+    a.inbox_sequence.started = null;
+    return win.TrackPopupMenu(menu, flags, x, y, 0, a.hwnd.?, null);
+}
+
 fn openReactionMenu(a: *App, x: i32, y: i32) void {
     const menu = win.CreatePopupMenu() orelse return;
     defer _ = win.DestroyMenu(menu);
@@ -12833,7 +12846,7 @@ fn openReactionMenu(a: *App, x: i32, y: i32) void {
     appendMessageMenuItem(menu, 0, null);
     addReactionItems(menu);
     a.reaction_row_rect = null;
-    const choice = win.TrackPopupMenu(menu, win.TPM_RETURNCMD | win.TPM_NONOTIFY, x, y, 0, a.hwnd.?, null);
+    const choice = trackPopupMenu(a, menu, x, y, win.TPM_RETURNCMD | win.TPM_NONOTIFY);
     if (choice == command_reply) {
         startReply(a);
     } else if (choice == reaction_row) {
@@ -13792,6 +13805,8 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     if (verification_fixture) {
         try controlEmojiPicker(a, w);
         try w.print(",\"pending_reaction_count\":{d}", .{a.pending_reaction_count});
+        try w.print(",\"menu_entry_count\":{d},\"menu_prefix_pending\":{},\"menu_prefix_age_ms\":", .{ a.verification_menu_entry_count, a.inbox_sequence.started != null });
+        if (a.verification_menu_prefix_age_ms) |age| try w.print("{d}", .{age}) else try w.writeAll("null");
         try w.print(",\"canvas_up_count\":{d},\"canvas_up_point\":[{d},{d}],\"reply_jump_count\":{d},\"reply_jump_id\":", .{ a.verification_canvas_up_count, a.verification_canvas_up_point.x, a.verification_canvas_up_point.y, a.verification_reply_jump_count });
         try control_api.writeString(w, a.verification_reply_jump_id.slice());
         try w.print(",\"canvas_cursor_count\":{d},\"canvas_cursor_point\":[{d},{d}]", .{ a.verification_cursor_count, a.verification_cursor_point.x, a.verification_cursor_point.y });
@@ -14363,13 +14378,13 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Text size: Larger", "150%", command_font_larger_preset);
     appendPalette(a, "Theme: Graphite", "", command_theme_amoled);
     appendPalette(a, "Toggle unread chats", "U", command_unread);
-    appendPalette(a, "Show combined inbox", "Ctrl+1 / Alt+I", command_show_all);
+    appendPalette(a, "Show combined inbox", "Alt+1 / Alt+I", command_show_all);
     appendPalette(a, "Sort views", "", command_sort_views);
     for (a.views.items, 0..) |*view, index| {
         var shortcut: [16]u8 = undefined;
         var label_buffer: [300]u8 = undefined;
         const before = a.palette_item_count;
-        appendPalette(a, std.fmt.bufPrint(&label_buffer, "Show {s}", .{view.labelText()}) catch continue, if (index < 8) std.fmt.bufPrint(&shortcut, "Ctrl+{d}", .{index + 2}) catch "" else "", 0);
+        appendPalette(a, std.fmt.bufPrint(&label_buffer, "Show {s}", .{view.labelText()}) catch continue, if (index < 8) std.fmt.bufPrint(&shortcut, "Alt+{d}", .{index + 2}) catch "" else "", 0);
         if (a.palette_item_count > before) a.palette_items[before].view_identity = view.key;
     }
     appendPalette(a, if (a.selected_chat < a.chat_count and isChatPinned(a, chat_key.of(&a.chats[a.selected_chat]))) "Unpin selected chat" else "Pin chat to top", "", command_pin);
@@ -14897,7 +14912,7 @@ fn buildSortViewsItems(a: *App) void {
     for (a.views.items, 0..) |*view, index| {
         var shortcut: [16]u8 = undefined;
         const before = a.palette_item_count;
-        appendPalette(a, view.labelText(), if (index < 8) std.fmt.bufPrint(&shortcut, "Ctrl+{d}", .{index + 2}) catch "" else "", 0);
+        appendPalette(a, view.labelText(), if (index < 8) std.fmt.bufPrint(&shortcut, "Alt+{d}", .{index + 2}) catch "" else "", 0);
         if (a.palette_item_count > before) a.palette_items[before].view_identity = view.key;
     }
 }
@@ -17276,6 +17291,7 @@ fn countPaint(hwnd: win.HWND, dirty: win.RECT, total: *u64, full: *u64) void {
 
 fn chatsProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    if (message == win.WM_KILLFOCUS) a.inbox_sequence.started = null;
     if (message == win.WM_ERASEBKGND) return 1;
     if (message == win.WM_LBUTTONDOWN) {
         const point = win.POINT{ .x = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))), .y = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam))))) };
@@ -17940,6 +17956,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
 
 fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
     const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    if (message == win.WM_KILLFOCUS) a.inbox_sequence.started = null;
     defer if (verification_fixture and message == win.WM_LBUTTONUP) {
         a.verification_canvas_up_count +%= 1;
         a.verification_canvas_up_point = .{ .x = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam))))), .y = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam))))) };
@@ -18236,7 +18253,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                         _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_text, lit("Copy message text"));
                         if (item.transcript.len > 0) _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_transcript, lit("Copy transcript"));
                         if (item.link_count > 0) _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_link, lit("Copy link address"));
-                        const choice = win.TrackPopupMenu(menu, win.TPM_RETURNCMD | win.TPM_NONOTIFY, point.x, point.y, 0, a.hwnd.?, null);
+                        const choice = trackPopupMenu(a, menu, point.x, point.y, win.TPM_RETURNCMD | win.TPM_NONOTIFY);
                         if (choice == command_reply) startReply(a) else reactToSelected(a, @intCast(choice));
                         return 0;
                     }
@@ -18316,7 +18333,7 @@ fn openChatMenu(a: *App, lparam: win.LPARAM) void {
             .show_archived = a.show_archived,
         }, .{ .archive = command_archive, .pin = command_pin }, &out);
         for (rows) |item| _ = win.AppendMenuW(popup, win.MF_STRING, item.command, item.label.ptr);
-        break :menu win.TrackPopupMenu(popup, win.TPM_RETURNCMD | win.TPM_NONOTIFY | win.TPM_RIGHTBUTTON, point.x, point.y, 0, a.hwnd.?, null);
+        break :menu trackPopupMenu(a, popup, point.x, point.y, win.TPM_RETURNCMD | win.TPM_NONOTIFY | win.TPM_RIGHTBUTTON);
     };
     if (choice != 0) runCommand(a, @intCast(choice));
 }
@@ -18682,6 +18699,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (wparam != 0) {
                 focusCompose(a);
             } else {
+                a.inbox_sequence.started = null;
                 a.dictation_escape_held = false;
                 a.dictation_return_held = false;
             }
@@ -19392,7 +19410,16 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
     const control = win.GetKeyState(win.VK_CONTROL) < 0;
     const shift = win.GetKeyState(win.VK_SHIFT) < 0;
     const alt = win.GetKeyState(win.VK_MENU) < 0;
-    if (directwrite_edit.isComposing(focus)) return false;
+    const composing = directwrite_edit.isComposing(focus);
+    const navigation = focus != null and ((a.chats_hwnd != null and focus == a.chats_hwnd.?) or (a.canvas != null and focus == a.canvas.?)) and
+        a.palette == null and a.emoji_wnd == null and a.image_viewer_window == null and a.shortcut_help == null and !composing;
+    const repeated = (@as(usize, @bitCast(message.lParam)) & (@as(usize, 1) << 30)) != 0;
+    if (a.inbox_sequence.key(key, win.GetTickCount64(), navigation and !control and !shift and !alt, repeated)) {
+        switchChatView(a, .all);
+        return true;
+    }
+    if (navigation and !control and !shift and !alt and key == 'G') return true;
+    if (composing) return false;
     if (a.dictation_operation != null and key == win.VK_RETURN and control and !shift and !alt and a.image_viewer_window == null and a.shortcut_help == null) {
         a.dictation_return_held = true;
         finishDictation(a);
@@ -19438,7 +19465,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         switchChatView(a, .all);
         return true;
     }
-    if (control and !alt and !shift and key >= '1' and key <= '9') {
+    if (alt and !control and !shift and key >= '1' and key <= '9') {
         if (key == '1') switchChatView(a, .all) else if (messenger_view.forNumber(key - '1', a.views.items)) |index| switchAccountView(a, a.views.items[index].key.key());
         return true;
     }

@@ -1,4 +1,4 @@
-Send-Keys $session '^2'
+Send-Keys $session '%2'
 $null = Wait-Until { (Read-Control $session status).view -eq 'slack' } 'Slack sidebar'
 Send-Keys $session '^{TAB}'
 $null = Wait-Until {

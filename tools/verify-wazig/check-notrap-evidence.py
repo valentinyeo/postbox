@@ -1,5 +1,7 @@
 import re
 import json
+import struct
+from datetime import datetime
 from urllib.parse import urlsplit
 
 
@@ -10,7 +12,7 @@ def check_notrap(folder):
     def capture(name):
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, name
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + re.escape(session['expected_version']), (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
         state = read(f'{name}.state.json')
         rows = read(f'{name}.chats.json')['chats']
         assert state['chat_count'] == len(rows), name
@@ -43,15 +45,74 @@ def check_notrap(folder):
         assert escaped['current_view'] == (startup['current_view'] if empty else identity(view))
         assert read(f'escape-to-first-{number}.state.json')['current_view'] == identity(order[0])
     transitions = read('transitions.json')
-    expected = {(source, target) for source in range(1, len(order) + 1) for target in [*range(1, len(order) + 1), '^1', '%i']}
+    expected = {(source, target) for source in range(1, len(order) + 1) for target in [*range(1, len(order) + 1), '%1', '%i', 'gi']}
     assert len(transitions) == len(expected)
     assert {(row['source'], row['target']) for row in transitions} == expected
     for row in transitions:
         wanted = identity(order[row['target'] - 1]) if isinstance(row['target'], int) else startup['current_view']
         assert row['current_view'] == wanted, row
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for key in [*(f'^{number + 1}' for number in range(1, len(order) + 1)), '^1', '%i', '^f', 'no-trap-search', '{ESC}']:
+    for key in [*(f'%{number + 1}' for number in range(1, len(order) + 1)), '%1', '%i', 'gi', '^1', 'g', 'x', 'i', '^f', 'no-trap-search', '{ESC}']:
         assert f'keys: {key}' in actions, key
+    for name in ('ctrl-one', 'typed-gi', 'cancelled-gi', 'focus-cancelled-gi', 'composer-gi'):
+        state, _ = capture(name)
+        assert state['current_view'] == identity(order[0]), name
+        if name == 'typed-gi':
+            assert state['search'] == 'gi'
+    for name, wanted in [('shortcut-alt-2', identity(order[0])), ('shortcut-alt-3', identity(order[1])),
+                         ('shortcut-alt-1', startup['current_view']), ('shortcut-alt-i', startup['current_view']),
+                         ('shortcut-g-i', startup['current_view'])]:
+        state, _ = capture(name)
+        assert state['current_view'] == wanted, name
+    menu_open, _ = capture('prefix-menu-open')
+    menu_closed, _ = capture('prefix-menu-closed')
+    menu = read('prefix-menu.json')
+    assert menu['menu_class'] == '#32768' and menu['menu_pid'] == session['pid'] and menu['menu_handle'] != 0 and menu['closed']
+    assert menu['after_count'] == menu['before_count'] + 1 and 0 <= menu['prefix_age_ms'] <= 900 and not menu['prefix_pending']
+    assert menu_open['menu_entry_count'] == menu_closed['menu_entry_count'] == menu['after_count']
+    assert menu_open['menu_prefix_age_ms'] == menu['prefix_age_ms'] and not menu_open['menu_prefix_pending']
+    assert menu['current_view'] == menu_open['current_view'] == menu_closed['current_view'] == identity(order[0])
+    assert 'SendInput: right-click synthetic message for prefix cancellation' in actions
+    composer = read('composer-gi.json')
+    assert composer == dict(text='gi', focus_id='1032', focus_pid=session['pid'], current_view=identity(order[0]))
+    assert read('focus-cancelled-gi.json') == dict(text='i', focus_id='1032', focus_pid=session['pid'], current_view=identity(order[0]))
+    assert read('composer-restored.json') == dict(text='')
+    assert 'keys: ^a{BACKSPACE}' in actions
+    ledger = read('ticketProof.json')
+    assert [row['key'] for row in ledger] == ['%2', '%3', '%1', '%i', 'gi']
+    assert [row['current_view'] for row in ledger] == [identity(order[0]), identity(order[1]), *[startup['current_view']] * 3]
+    times = [datetime.fromisoformat(row['utc'].replace('Z', '+00:00')) for row in ledger]
+    assert times == sorted(times)
+    recording = read('ticketProof-capture.json')
+    width, height = recording['width'], recording['height']
+    assert width > 0 and height > 0 and recording['fps'] == 5
+    if recording['mode'] == 'video':
+        video = (folder / 'ticketProof.mp4').read_bytes()
+        assert len(video) > 10000 and video[4:8] == b'ftyp'
+        log = (folder / 'ticketProof-ffmpeg.log').read_text(encoding='utf-8-sig')
+        counts = [int(count) for count in re.findall(r'frame=\s*(\d+)', log)]
+        assert counts and max(counts) >= 90
+        assert f'{width}x{height}' in log
+        started = datetime.fromisoformat(recording['started'].replace('Z', '+00:00'))
+        finished = datetime.fromisoformat(recording['finished'].replace('Z', '+00:00'))
+        assert started <= times[0] <= times[-1] <= finished
+    else:
+        assert recording['mode'] == 'frames'
+        frames = recording['frames']
+        assert len(frames) == 100
+        frame_dir = folder / 'ticketProof-frames'
+        assert len(list(frame_dir.glob('frame-*.png'))) == 100
+        for index, frame in enumerate(frames):
+            assert frame['file'] == f'frame-{index:03}.png'
+            data = (frame_dir / frame['file']).read_bytes()
+            assert len(data) > 1000 and data[:8] == b'\x89PNG\r\n\x1a\n'
+            assert struct.unpack('>II', data[16:24]) == (width, height)
+        elapsed = [frame['elapsed_ms'] for frame in frames]
+        assert 19500 <= elapsed[-1] - elapsed[0] <= 25000
+        assert all(0 < later - earlier <= 1000 for earlier, later in zip(elapsed, elapsed[1:]))
+        frame_times = [datetime.fromisoformat(frame['utc'].replace('Z', '+00:00')) for frame in frames]
+        assert frame_times == sorted(frame_times)
+        assert frame_times[0] <= times[0] <= times[-1] <= frame_times[-1]
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert any(row['path'].startswith('/v1/wazig/chats') and row['status'] == 200 for row in requests)
     for row in requests:

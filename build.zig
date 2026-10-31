@@ -324,7 +324,7 @@ pub fn build(b: *std.Build) void {
         @embedFile("src/message_menu_test.zig"),
         "const design = @import(\"design_tokens.zig\");\n",
         sourceSection("fn appendMessageMenuItem(", "fn openUrlWide("),
-        sourceSection("fn openReactionMenu(", "fn measureReactionRow("),
+        sourceSection("fn trackPopupMenu(", "fn measureReactionRow("),
     }) catch @panic("Out of memory building message menu harness");
     const message_menu_files = b.addWriteFiles();
     _ = message_menu_files.addCopyFile(b.path("src/design_tokens.zig"), "design_tokens.zig");

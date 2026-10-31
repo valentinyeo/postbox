@@ -9,7 +9,7 @@ function Click-ReplyRect($Session, $Handle, $Rect, [bool]$Right = $false) {
     Add-Content (Join-Path $Session.evidence 'actions.log') "Reply SendInput right=$Right x=$($point.X) y=$($point.Y)"
 }
 
-Send-Keys $session '^1'
+Send-Keys $session '%1'
 foreach ($target in @(
     @{ provider = 'whatsapp'; chat = 'fixture-beta'; search = 'Verification Beta' },
     @{ provider = 'slack'; chat = 'fixture-alpha'; search = 'Verification Alpha' }

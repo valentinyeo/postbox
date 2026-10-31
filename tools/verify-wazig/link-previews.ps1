@@ -33,7 +33,7 @@ function Open-LinkChat($Session, [string]$Provider) {
 }
 
 function Invoke-LinkPreviewsJourney($Session) {
-    Send-Keys $Session '^1'
+    Send-Keys $Session '%1'
     $measurements = @()
     foreach ($provider in @('slack', 'whatsapp', 'telegram', 'signal')) {
         Open-LinkChat $Session $provider

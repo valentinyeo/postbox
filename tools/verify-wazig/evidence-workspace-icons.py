@@ -49,7 +49,7 @@ assert final['chat_count'] == 5 and final['pending_sends'] == final['pending_arc
 assert final['sync'] == 'stopped' and not final['slack_connected']
 assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
 assert 'workspace-icons workspace-icons-pixels PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
-assert 'keys: ^1' in (folder / 'actions.log').read_text(encoding='utf-8-sig')
+assert 'keys: %1' in (folder / 'actions.log').read_text(encoding='utf-8-sig')
 assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
 assert 'JOURNEY PASSED: workspace-icons' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
 print('EVIDENCE VERIFIED: workspace icon badge pixels, authenticated team cache, fallback, WhatsApp green, Signal blue and isolation')

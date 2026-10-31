@@ -95,7 +95,7 @@ function Invoke-TelegramJourney($Session, [string]$Messages) {
     $order = (Read-Control $Session status).view_order
     $number = 1
     while ($order[$number - 1].provider -ne 'telegram') { $number++ }
-    Send-Keys $Session "^$($number + 1)"
+    Send-Keys $Session "%$($number + 1)"
     $null = Wait-Until {
         $state = Read-Control $Session status
         $state.view -eq 'telegram' -and $state.current_view.account -eq 'telegram' -and $state.current_view.label -eq 'Telegram' -and $state.chat_count -eq 5

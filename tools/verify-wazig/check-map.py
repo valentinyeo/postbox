@@ -185,7 +185,7 @@ print('SLACK SORT MAP VERIFIED: dispatch, recipe, synthetic hub and passed/faile
 assert '.claude/skills/verify-wazig/features/slack-sort.md' in marker_namespace['PUBLIC_SKILL_PATHS']
 
 views = (root / 'tools/verify-wazig/views.ps1').read_text(encoding='utf-8')
-for required in ['Sort views', 'Show combined inbox', 'Ctrl+1 / Alt+I']:
+for required in ['Sort views', 'Show combined inbox', 'Alt+1 / Alt+I']:
     assert f'"{required}"' in source, required
 for required in ['src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig']:
     assert (root / required).is_file(), required
@@ -206,8 +206,8 @@ for name in ['hub Slack history refreshes ordering after caching its last messag
              'account view history accepts source accounts without confusing the hub cache namespace']:
     assert f'test "{name}"' in reconcile, name
 sort_journey = (registry_path.parent / 'journey-slack-sort.ps1').read_text(encoding='utf-8')
-assert "Send-Keys $session '^2'" in sort_journey and 'Drive Ctrl+2' in sort_map
-assert "for keys in ['^2', '^{TAB}'" in validator
+assert "Send-Keys $session '%2'" in sort_journey and 'Drive Alt+2' in sort_map
+assert "for keys in ['%2', '^{TAB}'" in validator
 signal = (skill / 'features/signal.md').read_text(encoding='utf-8')
 signal_journey = (root / 'tools/verify-wazig/signal.ps1').read_text(encoding='utf-8')
 signal_validator = (root / 'tools/verify-wazig/check-signal-evidence.py').read_text(encoding='utf-8')
@@ -272,7 +272,7 @@ for gate in ['startup-fallback', 'every-view-escape-alt']:
     assert gate in notrap_journey and gate in notrap_validator, gate
 for artifact in ['startup-seed.json', 'transitions.json', 'escape-to-first-', 'esc-']:
     assert artifact in runner + notrap_journey and artifact in notrap_validator, artifact
-for fragment in ['$source -le $order.Count', '$target -le $order.Count', "@('^1', '%i')", "'{ESC}'", 'Save-Screen $Session "view-$source"']:
+for fragment in ['$source -le $order.Count', '$target -le $order.Count', "@('%1', '%i', 'gi')", "'{ESC}'", 'Save-Screen $Session "view-$source"']:
     assert fragment in notrap_journey, fragment
 assert "-Name InboxView -Value 4" in runner and "-Name AccountView -Value 'signal'" in runner
 print('NOTRAP MAP VERIFIED: saved empty startup, every-view Escape and Alt matrix, dispatch and indexed evidence')

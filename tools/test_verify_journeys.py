@@ -430,7 +430,7 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
         self.chat = chat
         self.provider = provider
         self.checker = runpy.run_path(str(ROOT / f'tools/verify-wazig/check-{provider}-evidence.py'))
-        keys = ['^2' if provider == 'telegram' else '^3', '%k', 'Compose message', 'Attach photo or file',
+        keys = ['%2' if provider == 'telegram' else '%3', '%k', 'Compose message', 'Attach photo or file',
                 f'Synthetic {title} outgoing', f'Synthetic {title} file', 'Synthetic rejected send', 'Like', '{ENTER}']
         if provider == 'telegram':
             keys += ['Verification Telegram']

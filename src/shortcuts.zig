@@ -4,6 +4,40 @@ pub fn ctrlASelectsChats(text_field_focused: bool, compose_focused: bool, compos
     return !text_field_focused or (compose_focused and compose_empty);
 }
 
+pub const InboxSequence = struct {
+    started: ?u64 = null,
+
+    pub fn key(self: *InboxSequence, key_code: u32, now: u64, allowed: bool, repeated: bool) bool {
+        if (!allowed) {
+            self.started = null;
+            return false;
+        }
+        if (repeated and key_code == 'G') return false;
+        const start = self.started;
+        self.started = null;
+        if (!repeated and key_code == 'I' and start != null and now -| start.? <= 900) return true;
+        if (!repeated and key_code == 'G') self.started = now;
+        return false;
+    }
+};
+
+test "inbox sequence respects time, modifiers, repeats and cancellation" {
+    var sequence = InboxSequence{};
+    try std.testing.expect(!sequence.key('G', 100, true, false));
+    try std.testing.expect(!sequence.key('G', 900, true, true));
+    try std.testing.expect(!sequence.key('I', 1001, true, false));
+    try std.testing.expect(!sequence.key('G', 1100, true, false));
+    try std.testing.expect(sequence.key('I', 2000, true, false));
+    try std.testing.expect(!sequence.key('G', 2100, true, false));
+    try std.testing.expect(!sequence.key('X', 2101, true, false));
+    try std.testing.expect(!sequence.key('I', 2102, true, false));
+    try std.testing.expect(!sequence.key('G', 2200, true, false));
+    try std.testing.expect(!sequence.key('I', 2201, false, false));
+    try std.testing.expect(!sequence.key('I', 2202, true, false));
+    try std.testing.expect(!sequence.key('G', 2300, true, false));
+    try std.testing.expect(!sequence.key('I', 2301, true, true));
+}
+
 pub const Shortcut = struct {
     key: []const u8,
     desc: []const u8,
@@ -58,8 +92,8 @@ pub const groups = [_]Group{
         .{ .key = "Ctrl+K > Connect Slack workspace", .desc = "Sign in with Slack in the browser" },
         .{ .key = "Ctrl+K > Slack sign-in settings", .desc = "Change the Slack Client ID and Socket Mode token" },
         .{ .key = "Ctrl+K > Disconnect Slack workspace", .desc = "Remove a workspace and its saved credentials" },
-        .{ .key = "Ctrl+1 / Alt+I", .desc = "Combined inbox" },
-        .{ .key = "Ctrl+2..9", .desc = "Accounts in saved view order" },
+        .{ .key = "Alt+1 / Alt+I / G then I", .desc = "Combined inbox" },
+        .{ .key = "Alt+2..9", .desc = "Accounts in saved view order" },
     } },
     .{ .name = "Open and view", .items = &[_]Shortcut{
         .{ .key = "Ctrl+O", .desc = "Open links and media in the selected message" },

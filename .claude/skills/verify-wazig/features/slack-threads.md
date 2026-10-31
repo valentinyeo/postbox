@@ -8,7 +8,7 @@
 
 ## How to get to it (user POV)
 
-- Open a Slack account with Ctrl+2, select a parent and press Enter, or click its replies line.
+- Open a Slack account with Alt+2, select a parent and press Enter, or click its replies line.
 - Type in the panel and press Enter. Escape closes the panel.
 - Ctrl+K → Slack threads like Slack for this account toggles the current Slack account.
 

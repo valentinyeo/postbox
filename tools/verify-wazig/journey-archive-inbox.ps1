@@ -62,8 +62,8 @@ $files = @(Get-ChildItem $messages -Filter 'hub-*-archive-state.txt')
 Assert-That ($files.Count -eq 1) 'Archive state missing or ambiguous'
 Copy-Item $files[0].FullName (Join-Path $session.evidence 'saved-archive-state.txt')
 Invoke-PaletteCommand $session 'Show inbox chats'
-Send-Keys $session '^2'
-$null = Wait-Until { (Read-Control $session status).chat_count -eq 0 } 'Ctrl+2 does not restore archived sessions'
+Send-Keys $session '%2'
+$null = Wait-Until { (Read-Control $session status).chat_count -eq 0 } 'Alt+2 does not restore archived sessions'
 Save-Screen $session account-empty
 $old = Get-App $session
 $oldPid = $session.pid

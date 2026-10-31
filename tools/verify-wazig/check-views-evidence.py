@@ -157,18 +157,18 @@ def check_views(folder):
         assert len(rows) == 2 and all(row['view_account'] == account for row in rows)
     capture('after')
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for keys in ['^2', '^3', '^4', '^5', '%i', '^k', 'Show', '^+{HOME}', '^+{HOME}^{TAB}', '^{TAB}', '^+{TAB}', '^f', 'Shared', 'Sort views', '^{DOWN}', '{ENTER}', '{ESC}', 'Quit Postbox', 'Verification account send']:
+    for keys in ['%2', '%3', '%4', '%5', '%i', '^k', 'Show', '^+{HOME}', '^+{HOME}^{TAB}', '^{TAB}', '^+{TAB}', '^f', 'Shared', 'Sort views', '^{DOWN}', '{ENTER}', '{ESC}', 'Quit Postbox', 'Verification account send']:
         assert f'keys: {keys}' in actions, keys
     shortcuts = read('view-shortcuts.json')
     order = baseline['view_order']
-    assert len(shortcuts) == 2 * len(order) + 11
+    assert len(shortcuts) == 2 * len(order) + 10
     for index, view in enumerate(order):
         account, inbox = shortcuts[2 * index:2 * index + 2]
-        assert account['key'] == f'^{index + 2}' and account['current_view'] == dict(view, inbox=False)
-        assert inbox['key'] == '^1' and inbox['current_view']['inbox']
+        assert account['key'] == f'%{index + 2}' and account['current_view'] == dict(view, inbox=False)
+        assert inbox['key'] == '%1' and inbox['current_view']['inbox']
         capture(f'shortcut-account-{index + 2}')
     retired = shortcuts[2 * len(order):-1]
-    assert [row['key'] for row in retired] == [f'%{number}' for number in range(10)]
+    assert [row['key'] for row in retired] == [f'^{number}' for number in range(1, 10)]
     assert all(row['current_view'] == dict(order[0], inbox=False) for row in retired)
     assert shortcuts[-1]['key'] == '%i' and shortcuts[-1]['current_view']['inbox']
     capture('shortcut-inbox')

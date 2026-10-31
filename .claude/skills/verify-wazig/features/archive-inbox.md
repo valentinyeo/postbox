@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-- Local archive intent survives hub rows with no archived field, Ctrl+2 and same-profile restart.
+- Local archive intent survives hub rows with no archived field, Alt+2 and same-profile restart.
 - Sidebar and read-only control rows report archived=true and an archive label.
 - Ten independent Ctrl+A presses select all 264 visible chats, including rows beyond the old 256-row snapshot.
 - Ctrl+E sends one WhatsApp batch request, completes every selected provider path and reports total and per-chat elapsed milliseconds.
@@ -11,7 +11,7 @@
 
 ## How to get to it (user POV)
 
-Open the combined inbox. Focus the empty composer, chat list or message canvas and press Ctrl+A. Ctrl+E archives the complete selection. Ctrl+2 must not bring the sessions back. Open Show archived chats through Ctrl+K to see their archive labels. Composer text still uses text select all.
+Open the combined inbox. Focus the empty composer, chat list or message canvas and press Ctrl+A. Ctrl+E archives the complete selection. Alt+2 must not bring the sessions back. Open Show archived chats through Ctrl+K to see their archive labels. Composer text still uses text select all.
 
 ## Driving it with PowerShell UI Automation
 
@@ -27,7 +27,7 @@ Type hello and require text select all first. Clear the text. Alternate empty co
 
 Time Ctrl+E through zero pending archives and an empty sidebar. WhatsApp archive stays in Wazig (IGSH-902), so the hub must see zero `/v1/wazig/archive` and zero `/v1/wazig/archive-batch` requests. Emit `bulk_archive_ms_total=<n> bulk_archive_ms_per_chat=<n>`. bulk-timing.json records the fixed 264-chat workload, 261 remote chats and single and batch request counts, both zero. Save timing and archive.requests.json before asserting. Slack, Telegram and Signal paths also issue no hub archive request. The measurement includes local persistence and harness observation. It imposes no new timing threshold or artificial delay.
 
-Refresh, open Archive, require all 264 sidebar and control rows archived with labels and emit `archived_among_shown=264`. Preserve saved-archive-state.txt. Return to Inbox, press Ctrl+2 and require zero rows. Quit and restart the same isolated profile, return to the combined inbox and require zero rows, then Archive and require all 264 identities again. Save restart.json, archive.requests.json, before/selected/empty/archived/account-empty/restart-empty/after screenshots and matching state, chat and UIA snapshots.
+Refresh, open Archive, require all 264 sidebar and control rows archived with labels and emit `archived_among_shown=264`. Preserve saved-archive-state.txt. Return to Inbox, press Alt+2 and require zero rows. Quit and restart the same isolated profile, return to the combined inbox and require zero rows, then Archive and require all 264 identities again. Save restart.json, archive.requests.json, before/selected/empty/archived/account-empty/restart-empty/after screenshots and matching state, chat and UIA snapshots.
 
 ## Gotchas
 

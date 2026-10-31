@@ -46,7 +46,7 @@ class ShowArchivedTests(unittest.TestCase):
         self.write('archived-only.chats.json', dict(chats=archived))
         self.write('side-effects.json', dict(pending_sends=0, pending_archives=0, sync='stopped', include_archived=True, show_archived=False, current_view=dict(inbox=True), production_preferences_absent=True, whatsapp_store_absent=True, telegram_store_absent=True))
         (self.folder / 'preferences.txt').write_text('ShowArchived:all : 1\nShowArchived:whatsapp:personal : 1')
-        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ('%i', '^2', '^3', '^4', '^5', '^6', '%a', '^e', '^k', '{ENTER}')))
+        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ('%i', '%2', '%3', '%4', '%5', '%6', '%a', '^e', '^k', '{ENTER}')))
         (self.folder / 'hub-proof.log').write_text('show-archived show-archived-all PASS')
         (self.folder / 'result.txt').write_text('JOURNEY PASSED: show-archived')
         (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED: synthetic evidence')

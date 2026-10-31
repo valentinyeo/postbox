@@ -18,7 +18,7 @@ function Invoke-SignalJourney($Session, [string]$Messages) {
     $inbox | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'inbox.chats.json')
     Save-Screen $Session inbox
     Hub-Pass $Session inbox
-    Send-Keys $Session "^$($number + 1)"
+    Send-Keys $Session "%$($number + 1)"
     $null = Wait-Until {
         $state = Read-Control $Session status
         $state.view -eq 'signal' -and $state.current_view.account -eq 'signal' -and $state.current_view.label -eq 'Signal' -and $state.chat_count -eq 4

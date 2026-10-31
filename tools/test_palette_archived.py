@@ -62,7 +62,7 @@ class PaletteArchivedTests(unittest.TestCase):
         self.save_requests()
         self.write('side-effects.json', dict(pending_sends=0, pending_archives=0, sync='stopped', show_archived=False, current_view=dict(inbox=True), production_preferences_absent=True, whatsapp_store_absent=True, telegram_store_absent=True))
         (self.folder / 'hub-proof.log').write_text('palette-archived archived-scan-request PASS\npalette-archived palette-archived-all PASS\n')
-        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['%i', '^2', '^k', '{ENTER}']))
+        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['%i', '%2', '^k', '{ENTER}']))
         (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED: synthetic validator input')
         (self.folder / 'result.txt').write_text('JOURNEY PASSED: palette-archived')
 
