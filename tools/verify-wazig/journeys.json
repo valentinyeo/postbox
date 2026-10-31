@@ -410,6 +410,7 @@
     },
     {
       "name": "emoji-picker-glyphs",
+      "arguments": ["--verify-emoji-picker"],
       "pr": false,
       "hub": "emoji-picker-glyphs",
       "evidence": true,

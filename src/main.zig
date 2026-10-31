@@ -830,6 +830,9 @@ const App = struct {
     emoji_list: ?win.HWND = null,
     emoji_matches: [max_emoji_matches]u16 = [_]u16{0} ** max_emoji_matches,
     emoji_match_count: usize = 0,
+    emoji_coverage_em: i32 = 0,
+    emoji_coverage_checked: std.StaticBitSet(emoji_picker.count) = .initEmpty(),
+    emoji_coverage_missing: std.StaticBitSet(emoji_picker.count) = .initEmpty(),
     emoji_selected: usize = 0,
     emoji_ever_active: bool = false,
     emoji_react: bool = false,
@@ -1978,6 +1981,9 @@ fn scaledFontHeight(base: i32, scale: i32, dpi: i32) i32 {
 }
 
 fn recreateFonts(a: *App) void {
+    a.emoji_coverage_em = 0;
+    a.emoji_coverage_checked = .initEmpty();
+    a.emoji_coverage_missing = .initEmpty();
     if (a.quote_link_down != null) a.canvas_double_click_handled = true;
     a.quote_link_down = null;
     a.quote_links.clearRetainingCapacity();
@@ -2049,6 +2055,10 @@ fn recreateFonts(a: *App) void {
 
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    if (a.emoji_wnd != null) {
+        if (a.emoji_list) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, emojiCell(a));
+        emojiFilter(a);
+    }
 }
 
 fn setFontScale(a: *App, scale: i32) void {
@@ -12439,7 +12449,31 @@ fn emojiPickerWidth(a: *const App) i32 {
     return emojiCell(a) * @as(i32, @intCast(emoji_picker.grid_columns)) + px(a, 12) + scrollbar_width;
 }
 
+fn refreshEmojiCoverage(a: *App) void {
+    const em = px(a, 28);
+    if (a.emoji_coverage_em != em) {
+        a.emoji_coverage_em = em;
+        a.emoji_coverage_checked = .initEmpty();
+        a.emoji_coverage_missing = .initEmpty();
+    }
+    for (0..emoji_picker.count) |index| {
+        if (a.emoji_coverage_checked.isSet(index)) continue;
+        var text: [32]u16 = undefined;
+        const len = std.unicode.utf8ToUtf16Le(&text, emoji_picker.emoji(index)) catch continue;
+        switch (emoji_draw.probeCoverage(text[0..len], em)) {
+            .supported => a.emoji_coverage_checked.set(index),
+            .missing => {
+                a.emoji_coverage_checked.set(index);
+                a.emoji_coverage_missing.set(index);
+            },
+            .surface, .font => break,
+            .unavailable => {},
+        }
+    }
+}
+
 fn buildEmojiMatches(a: *App) void {
+    refreshEmojiCoverage(a);
     a.emoji_match_count = 0;
     var query_buf: [64]u16 = [_]u16{0} ** 64;
     const query_len: usize = if (a.emoji_edit) |edit| @intCast(win.GetWindowTextW(edit, &query_buf, query_buf.len)) else 0;
@@ -12449,11 +12483,11 @@ fn buildEmojiMatches(a: *App) void {
     for (@constCast(query)) |*character| character.* = std.ascii.toLower(character.*);
     if (query.len == 0) {
         var row: [emoji_picker.grid_columns]u16 = undefined;
-        const frequent = emoji_picker.frequentRow(a.emoji_recents[0..a.emoji_recents_count], &row);
+        const frequent = emoji_picker.frequentRow(a.emoji_recents[0..a.emoji_recents_count], &row, &a.emoji_coverage_missing);
         @memcpy(a.emoji_matches[0..frequent], row[0..frequent]);
         a.emoji_match_count = frequent;
     }
-    a.emoji_match_count += emoji_picker.search(query, a.emoji_matches[a.emoji_match_count..]);
+    a.emoji_match_count += emoji_picker.search(query, a.emoji_matches[a.emoji_match_count..], &a.emoji_coverage_missing);
 }
 
 fn emojiLayout(a: *App) void {
@@ -13683,7 +13717,30 @@ fn controlEmojiPicker(a: *App, w: *std.Io.Writer) !void {
     _ = win.GetClientRect(list, &client);
     const top: usize = @intCast(@max(0, win.SendMessageW(list, win.LB_GETTOPINDEX, 0, 0)));
     const rows: usize = @intCast(@min(emoji_max_rows, @divTrunc(client.bottom - client.top, emojiCell(a))));
-    try w.print("{{\"bounds\":[{d},{d},{d},{d}],\"cells\":[", .{ bounds.left, bounds.top, bounds.right, bounds.bottom });
+    try w.print("{{\"bounds\":[{d},{d},{d},{d}],\"em\":{d},\"react\":{},\"match_count\":{d},\"seed\":", .{ bounds.left, bounds.top, bounds.right, bounds.bottom, px(a, 28), a.emoji_react, a.emoji_match_count });
+    if (verification_emoji_seed) |seed| try w.print("{d}", .{seed}) else try w.writeAll("null");
+    try w.writeAll(",\"recents\":[");
+    for (a.emoji_recents[0..a.emoji_recents_count], 0..) |recent, i| {
+        if (i > 0) try w.writeByte(',');
+        try w.print("{d}", .{recent});
+    }
+    try w.writeAll("],\"journal\":[");
+    const journal = [_]?u16{ 9, 10, 11, 12, 13, verification_emoji_seed, emoji_picker.indexOf("❤️"), emoji_picker.indexOf("😉") };
+    var journal_count: usize = 0;
+    for (journal) |optional_index| {
+        const index = optional_index orelse continue;
+        if (journal_count > 0) try w.writeByte(',');
+        journal_count += 1;
+        var text: [32]u16 = undefined;
+        const len = std.unicode.utf8ToUtf16Le(&text, emoji_picker.emoji(index)) catch 0;
+        const coverage = emoji_draw.probeCoverage(text[0..len], px(a, 28));
+        try w.print("{{\"index\":{d},\"text\":", .{index});
+        try control_api.writeString(w, emoji_picker.emoji(index));
+        try w.writeAll(",\"name\":");
+        try control_api.writeString(w, emoji_picker.name(index));
+        try w.print(",\"coverage\":\"{s}\",\"checked\":{},\"missing\":{}}}", .{ @tagName(coverage), a.emoji_coverage_checked.isSet(index), a.emoji_coverage_missing.isSet(index) });
+    }
+    try w.writeAll("],\"cells\":[");
     var written: usize = 0;
     for (top..top + rows) |row| {
         var rect = std.mem.zeroes(win.RECT);
@@ -13703,7 +13760,7 @@ fn controlEmojiPicker(a: *App, w: *std.Io.Writer) !void {
             try control_api.writeString(w, emoji_picker.emoji(index));
             try w.writeAll(",\"name\":");
             try control_api.writeString(w, emoji_picker.name(index));
-            try w.print(",\"rect\":[{d},{d},{d},{d}],\"available\":{}}}", .{ left, rect.top, left + emojiCell(a), rect.bottom, available });
+            try w.print(",\"rect\":[{d},{d},{d},{d}],\"metrics_available\":{},\"coverage\":\"{s}\"}}", .{ left, rect.top, left + emojiCell(a), rect.bottom, available, if (!a.emoji_coverage_checked.isSet(index)) "unavailable" else if (a.emoji_coverage_missing.isSet(index)) "missing" else "supported" });
         }
     }
     try w.writeAll("]}");
@@ -20123,6 +20180,8 @@ fn LoadAppIcon(instance: win.HINSTANCE, cx: i32, cy: i32, flags: u32) win.HICON 
 }
 
 var verification_fixture = false;
+var verification_emoji_picker = false;
+var verification_emoji_seed: ?u16 = null;
 var verification_text_comparison = false;
 
 fn saveVerificationTextMetrics(a: *App, hdc: win.HDC, message: *const Message, x: i32, y: i32, width: i32, height: i32) void {
@@ -20299,6 +20358,7 @@ pub fn main(init: std.process.Init) !void {
     while (argument_iterator.next()) |argument| {
         if (std.mem.eql(u8, argument, "--update-relaunch")) update_relaunch = true;
         if (std.mem.eql(u8, argument, "--verify-fixture")) verification_fixture = true;
+        if (std.mem.eql(u8, argument, "--verify-emoji-picker")) verification_emoji_picker = true;
         if (std.mem.eql(u8, argument, "--verify-text-comparison")) verification_text_comparison = true;
         if (std.mem.eql(u8, argument, "--format-saved-transcripts")) {
             const input = argument_iterator.next() orelse return error.MissingTranscriptInput;
@@ -20311,6 +20371,22 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     const verification_key = if (verification_fixture) try prepareVerification(init) else null;
+    if (verification_fixture and verification_emoji_picker) {
+        for (0..emoji_picker.count) |offset| {
+            const index = if (offset == 0) 11 else if (offset <= 11) offset - 1 else offset;
+            var text: [32]u16 = undefined;
+            const len = std.unicode.utf8ToUtf16Le(&text, emoji_picker.emoji(index)) catch continue;
+            switch (emoji_draw.probeCoverage(text[0..len], 28)) {
+                .missing => {
+                    verification_emoji_seed = @intCast(index);
+                    if (!saveRegistryString(init.gpa, lit("EmojiRecents"), emoji_picker.emoji(index))) return error.VerificationRegistryFailed;
+                    break;
+                },
+                .surface, .font => break,
+                else => {},
+            }
+        }
+    }
     defer if (verification_key) |key| {
         _ = win.RegOverridePredefKey(winHandle(win.HKEY, @bitCast(@as(isize, -2147483647))), null);
         _ = win.RegCloseKey(key);
