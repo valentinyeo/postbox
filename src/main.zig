@@ -2019,6 +2019,8 @@ fn recreateFonts(a: *App) void {
     a.font_small = win.CreateFontW(scaledFontHeight(theme.type_preview, a.font_scale, dpi), 0, 0, 0, win.FW_MEDIUM, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
     a.font_bold = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
     a.font_emoji = win.CreateFontW(scaledFontHeight(theme.type_chat_name, a.font_scale, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe UI Emoji"));
+    text_draw.emoji_width = textDrawEmojiWidth;
+    text_draw.emoji_paint = textDrawEmojiPaint;
     a.font_underline = win.CreateFontW(scaledFontHeight(theme.type_body, a.font_scale, dpi), 0, 0, 0, body_weight, 0, 1, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
     a.font_icon = win.CreateFontW(scaledFontHeight(theme.icon_size, 100, dpi), 0, 0, 0, win.FW_NORMAL, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit("Segoe Fluent Icons"));
     a.font_title = win.CreateFontW(scaledFontHeight(theme.type_title, a.font_scale, dpi), 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_NATURAL_QUALITY, win.DEFAULT_PITCH, lit(design.font_face));
@@ -16009,6 +16011,14 @@ const max_text_runs = emoji_runs.max_runs;
 const splitRuns = emoji_runs.splitRuns;
 const containsEmoji = emoji_runs.containsEmoji;
 const emojiUnitAt = emoji_runs.emojiUnitAt;
+
+fn textDrawEmojiWidth(text: []const u16, em: i32) ?i32 {
+    return if (emoji_draw.metrics(text, em)) |measured| measured.width else null;
+}
+
+fn textDrawEmojiPaint(hdc: win.HDC, text: []const u16, x: i32, top: i32, ascent: i32, em: i32) ?i32 {
+    return if (emoji_draw.draw(hdc, text, x, top, ascent, em)) |measured| measured.width else null;
+}
 
 fn runWidth(hdc: win.HDC, text: []const u16) i32 {
     var rect = win.RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };

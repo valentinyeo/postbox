@@ -652,7 +652,14 @@ pub fn hitText(dc: win.HDC, input: []const u16, rect: win.RECT, index: ?usize, x
 }
 
 const emoji_runs = @import("emoji_runs.zig");
-const emoji_draw = @import("emoji_draw.zig");
+
+pub const EmojiLine = struct {
+    pub const Width = *const fn (text: []const u16, em: i32) ?i32;
+    pub const Paint = *const fn (hdc: win.HDC, text: []const u16, x: i32, top: i32, ascent: i32, em: i32) ?i32;
+};
+
+pub var emoji_width: ?EmojiLine.Width = null;
+pub var emoji_paint: ?EmojiLine.Paint = null;
 
 fn emojiLineAllowed(flags: u32) bool {
     if (flags & win.DT_SINGLELINE == 0) return false;
@@ -667,6 +674,8 @@ fn drawEmojiLine(dc: win.HDC, text: []const u16, rect: *win.RECT, flags: u32) bo
     var runs: [emoji_runs.max_runs]emoji_runs.Run = undefined;
     const count = emoji_runs.splitRuns(text, &runs);
     if (count == 0) return false;
+    const measure = emoji_width orelse return false;
+    const paint = emoji_paint orelse return false;
     var metrics: win.TEXTMETRICW = undefined;
     if (win.GetTextMetricsW(dc, &metrics) == 0) return false;
     const em = @max(1, metrics.tmHeight - metrics.tmInternalLeading);
@@ -674,8 +683,7 @@ fn drawEmojiLine(dc: win.HDC, text: []const u16, rect: *win.RECT, flags: u32) bo
     for (runs[0..count], 0..) |run, index| {
         const slice = text[run.start..][0..run.len];
         if (run.emoji) {
-            const measured = emoji_draw.metrics(slice, em) orelse return false;
-            widths[index] = measured.width;
+            widths[index] = measure(slice, em) orelse return false;
         } else {
             var probe = win.SIZE{};
             if (win.GetTextExtentPoint32W(dc, slice.ptr, @intCast(slice.len), &probe) == 0) return false;
@@ -686,7 +694,7 @@ fn drawEmojiLine(dc: win.HDC, text: []const u16, rect: *win.RECT, flags: u32) bo
     for (runs[0..count], 0..) |run, index| {
         const slice = text[run.start..][0..run.len];
         if (run.emoji) {
-            if (emoji_draw.draw(dc, slice, x, rect.top, metrics.tmAscent, em) == null) return true;
+            if (paint(dc, slice, x, rect.top, metrics.tmAscent, em) == null) return true;
         } else {
             var sub = win.RECT{ .left = x, .top = rect.top, .right = rect.right, .bottom = rect.bottom };
             const height = render(dc, slice.ptr, @intCast(slice.len), &sub, flags) catch blk: {
