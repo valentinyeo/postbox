@@ -64,25 +64,31 @@ function Icon-Snapshot([string]$Name) {
 }
 
 function Icon-Popup {
-    $begin = [Diagnostics.Stopwatch]::GetTimestamp()
-    $first = @([VerifyInboxTooltip]::Tools($session.pid))
-    Assert-That ($first.Count -eq 1) 'Tooltip window count changed'
-    $tip = [VerifyMenus]::Find($session.pid, 'tooltips_class32')
-    $text = ''
-    $bounds = $null
-    if ($tip -ne [IntPtr]::Zero) {
-        $bounds = [VerifyMenus]::Bounds($tip)
-        $text = Read-EditText $tip
+    for ($read = 0; $read -lt 8; $read++) {
+        $begin = [Diagnostics.Stopwatch]::GetTimestamp()
+        $first = @([VerifyInboxTooltip]::Tools($session.pid))
+        Assert-That ($first.Count -eq 1) 'Tooltip window count changed'
+        $tip = [VerifyMenus]::Find($session.pid, 'tooltips_class32')
+        $text = ''
+        $bounds = $null
+        if ($tip -ne [IntPtr]::Zero) {
+            $bounds = [VerifyMenus]::Bounds($tip)
+            $text = Read-EditText $tip
+        }
+        $last = @([VerifyInboxTooltip]::Tools($session.pid))
+        $endTip = [VerifyMenus]::Find($session.pid, 'tooltips_class32')
+        $endText = if ($endTip -ne [IntPtr]::Zero) { Read-EditText $endTip } else { '' }
+        $end = [Diagnostics.Stopwatch]::GetTimestamp()
+        $stable = $last.Count -eq 1 -and $first[0].hwnd -eq $last[0].hwnd -and $first[0].visible -eq $last[0].visible -and $tip -eq $endTip -and $text -ceq $endText -and $first[0].visible -eq ($tip -ne [IntPtr]::Zero)
+        if ($stable -and $tip -ne [IntPtr]::Zero) {
+            $stable = ($first[0].current | ConvertTo-Json -Compress) -ceq ($last[0].current | ConvertTo-Json -Compress)
+        }
+        if ($stable) {
+            return @{ visible = ($tip -ne [IntPtr]::Zero); hwnd = $tip.ToInt64(); text = $text; bounds = if ($null -eq $bounds) { @() } else { @($bounds.Left, $bounds.Top, $bounds.Right, $bounds.Bottom) }; ticks = $end; begin_ticks = $begin; end_ticks = $end; frequency = [Diagnostics.Stopwatch]::Frequency; tooltips = $last; first_tools = $first }
+        }
+        $script:rejectedPopupReads.Add(@{ begin_ticks = $begin; end_ticks = $end; first_tools = $first; tip = $tip.ToInt64(); text = $text; last_tools = $last; end_tip = $endTip.ToInt64(); end_text = $endText })
     }
-    $last = @([VerifyInboxTooltip]::Tools($session.pid))
-    $endTip = [VerifyMenus]::Find($session.pid, 'tooltips_class32')
-    $endText = if ($endTip -ne [IntPtr]::Zero) { Read-EditText $endTip } else { '' }
-    $end = [Diagnostics.Stopwatch]::GetTimestamp()
-    Assert-That ($last.Count -eq 1 -and $first[0].hwnd -eq $last[0].hwnd -and $first[0].visible -eq $last[0].visible -and $tip -eq $endTip -and $text -ceq $endText -and $first[0].visible -eq ($tip -ne [IntPtr]::Zero)) 'Tooltip observation changed during native reads'
-    if ($tip -ne [IntPtr]::Zero) {
-        Assert-That (($first[0].current | ConvertTo-Json -Compress) -ceq ($last[0].current | ConvertTo-Json -Compress)) 'Tooltip target changed during native reads'
-    }
-    return @{ visible = ($tip -ne [IntPtr]::Zero); hwnd = $tip.ToInt64(); text = $text; bounds = if ($null -eq $bounds) { @() } else { @($bounds.Left, $bounds.Top, $bounds.Right, $bounds.Bottom) }; ticks = $end; begin_ticks = $begin; end_ticks = $end; frequency = [Diagnostics.Stopwatch]::Frequency; tooltips = $last; first_tools = $first }
+    throw 'Tooltip observation changed during native reads'
 }
 
 $script:hoverSequence = 0
@@ -126,35 +132,42 @@ function Icon-FreshHover([string]$Id, [int]$AnchorX = 0, [int]$AnchorY = 0) {
 }
 
 function Icon-Transition([string]$Name, [string]$Id, [scriptblock]$Action, [string]$AfterText = '', [int]$AnchorX = 0, [int]$AnchorY = 0) {
-    $generation = $null; $before = $null
-    for ($attempt = 0; $attempt -lt 3; $attempt++) {
-        $generation = Icon-FreshHover $Id $AnchorX $AnchorY
-        $before = Icon-Popup
-        $now = [Diagnostics.Stopwatch]::GetTimestamp()
-        $f = [bigint]$generation.frequency; $a = [bigint]$generation.autopop_ms
-        $reserve = [bigint]::Min([bigint]500 * $f, [bigint]::Min([bigint]3000 * $f, $a * $f))
-        if ($before.visible -and ($before.tooltips[0].current | ConvertTo-Json -Compress) -ceq ($generation.tool | ConvertTo-Json -Compress) -and 2000 * ([bigint]$now - $generation.target_move.input_begin_ticks) + $reserve -lt $a * $f) { break }
-        $generation = $null
+    $script:rejectedPopupReads = [System.Collections.Generic.List[object]]::new()
+    try {
+        $generation = $null; $before = $null
+        for ($attempt = 0; $attempt -lt 3; $attempt++) {
+            $generation = Icon-FreshHover $Id $AnchorX $AnchorY
+            $before = Icon-Popup
+            $now = [Diagnostics.Stopwatch]::GetTimestamp()
+            $f = [bigint]$generation.frequency; $a = [bigint]$generation.autopop_ms
+            $reserve = [bigint]::Min([bigint]500 * $f, [bigint]::Min([bigint]3000 * $f, $a * $f))
+            if ($before.visible -and ($before.tooltips[0].current | ConvertTo-Json -Compress) -ceq ($generation.tool | ConvertTo-Json -Compress) -and 2000 * ([bigint]$now - $generation.target_move.input_begin_ticks) + $reserve -lt $a * $f) { break }
+            $generation = $null
+        }
+        Assert-That ($null -ne $generation) "$Name could not establish fresh hover"
+        $transition = [Diagnostics.Stopwatch]::GetTimestamp()
+        Assert-That (2000 * ([bigint]$transition - $generation.target_move.input_begin_ticks) + $reserve -lt $a * $f) "$Name hover became too old"
+        $actionBegin = [Diagnostics.Stopwatch]::GetTimestamp()
+        & $Action
+        $actionEnd = [Diagnostics.Stopwatch]::GetTimestamp()
+        $after = Wait-Until {
+            $value = Icon-Popup
+            $elapsedTicks = [bigint]$value.end_ticks - $transition
+            $ageTicks = [bigint]$value.end_ticks - $generation.target_move.input_begin_ticks
+            Assert-That (1000 * $elapsedTicks -lt 1500 * $f -and 2000 * $elapsedTicks -lt $a * $f -and 2000 * $ageTicks -lt $a * $f) "$Name native tooltip deadline missed"
+            if (($AfterText -eq '' -and -not $value.visible) -or ($AfterText -ne '' -and $value.visible -and $value.text -ceq $AfterText)) { return ,$value }
+        } "$Name native tooltip transition"
+        $prompt = [bigint]$after.end_ticks - $transition
+        $age = [bigint]$after.end_ticks - $generation.target_move.input_begin_ticks
+        Assert-That (1000 * $prompt -lt 1500 * $f -and 2000 * $prompt -lt $a * $f -and 2000 * $age -lt $a * $f) "$Name native tooltip deadline missed"
+        $screenshot = "transition-$Name"
+        Save-Screen $session $screenshot
+        $script:iconTransitions[$Name] = @{ generation = $generation; before = $before; after = $after; transition_ticks = $transition; action_begin_ticks = $actionBegin; action_end_ticks = $actionEnd; pid = $session.pid; start_ticks = $session.startTicks; exe = $session.exe; sha256 = $session.sha256; commit = $session.commit; screenshot = "$screenshot.png" }
+    } finally {
+        if ($script:rejectedPopupReads.Count -gt 0) {
+            ConvertTo-Json -InputObject @($script:rejectedPopupReads.ToArray()) -Depth 16 | Set-Content (Join-Path $session.evidence "transition-$Name-rejected.json")
+        }
     }
-    Assert-That ($null -ne $generation) "$Name could not establish fresh hover"
-    $transition = [Diagnostics.Stopwatch]::GetTimestamp()
-    Assert-That (2000 * ([bigint]$transition - $generation.target_move.input_begin_ticks) + $reserve -lt $a * $f) "$Name hover became too old"
-    $actionBegin = [Diagnostics.Stopwatch]::GetTimestamp()
-    & $Action
-    $actionEnd = [Diagnostics.Stopwatch]::GetTimestamp()
-    $after = Wait-Until {
-        $value = Icon-Popup
-        $elapsedTicks = [bigint]$value.end_ticks - $transition
-        $ageTicks = [bigint]$value.end_ticks - $generation.target_move.input_begin_ticks
-        Assert-That (1000 * $elapsedTicks -lt 1500 * $f -and 2000 * $elapsedTicks -lt $a * $f -and 2000 * $ageTicks -lt $a * $f) "$Name native tooltip deadline missed"
-        if (($AfterText -eq '' -and -not $value.visible) -or ($AfterText -ne '' -and $value.visible -and $value.text -ceq $AfterText)) { return ,$value }
-    } "$Name native tooltip transition"
-    $prompt = [bigint]$after.end_ticks - $transition
-    $age = [bigint]$after.end_ticks - $generation.target_move.input_begin_ticks
-    Assert-That (1000 * $prompt -lt 1500 * $f -and 2000 * $prompt -lt $a * $f -and 2000 * $age -lt $a * $f) "$Name native tooltip deadline missed"
-    $screenshot = "transition-$Name"
-    Save-Screen $session $screenshot
-    $script:iconTransitions[$Name] = @{ generation = $generation; before = $before; after = $after; transition_ticks = $transition; action_begin_ticks = $actionBegin; action_end_ticks = $actionEnd; pid = $session.pid; start_ticks = $session.startTicks; exe = $session.exe; sha256 = $session.sha256; commit = $session.commit; screenshot = "$screenshot.png" }
 }
 
 function Icon-Hover([string]$Id, [string]$Expected, [int]$X, [int]$Y, [int]$AnchorX = 0, [int]$AnchorY = 0) {
