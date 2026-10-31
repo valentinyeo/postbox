@@ -17408,7 +17408,7 @@ fn drawMessageActions(shapes: *const smooth.Context, hdc: win.HDC, a: *App) void
     drawReactIcon(hdc, a, rect);
     inline for (.{ "↩", "⋯" }, 0..) |label, cell| {
         var target = rect;
-        target.left += px(a, @as(i32, @intCast(cell)) * 24);
+        target.left += px(a, @as(i32, @intCast(cell + 1)) * 24);
         target.right = target.left + px(a, 24);
         _ = text_draw.drawText(hdc, lit(label), -1, &target, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
     }
