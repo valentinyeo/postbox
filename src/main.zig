@@ -13673,6 +13673,42 @@ fn controlFontDraw(w: *std.Io.Writer, proof: ?FontDrawProof) !void {
     try w.print("{{\"scale\":{d},\"renderer\":\"{s}\",\"item\":[{d},{d},{d},{d}],\"draw\":[{d},{d},{d},{d}],\"text_top\":{d},\"text_bottom\":{d}}}", .{ value.scale, @tagName(value.text.renderer), item.left, item.top, item.right, item.bottom, rect.left, rect.top, rect.right, rect.bottom, value.text.top, value.text.bottom });
 }
 
+fn controlEmojiPicker(a: *App, w: *std.Io.Writer) !void {
+    try w.writeAll(",\"emoji_picker\":");
+    const picker = a.emoji_wnd orelse return w.writeAll("null");
+    const list = a.emoji_list orelse return w.writeAll("null");
+    var bounds = std.mem.zeroes(win.RECT);
+    var client = std.mem.zeroes(win.RECT);
+    _ = win.GetWindowRect(picker, &bounds);
+    _ = win.GetClientRect(list, &client);
+    const top: usize = @intCast(@max(0, win.SendMessageW(list, win.LB_GETTOPINDEX, 0, 0)));
+    const rows: usize = @intCast(@min(emoji_max_rows, @divTrunc(client.bottom - client.top, emojiCell(a))));
+    try w.print("{{\"bounds\":[{d},{d},{d},{d}],\"cells\":[", .{ bounds.left, bounds.top, bounds.right, bounds.bottom });
+    var written: usize = 0;
+    for (top..top + rows) |row| {
+        var rect = std.mem.zeroes(win.RECT);
+        if (win.SendMessageW(list, win.LB_GETITEMRECT, row, @bitCast(@intFromPtr(&rect))) == win.LB_ERR) break;
+        _ = win.MapWindowPoints(list, null, @ptrCast(&rect), 2);
+        for (0..emoji_picker.grid_columns) |column| {
+            const match = row * emoji_picker.grid_columns + column;
+            if (match >= a.emoji_match_count) break;
+            const index = a.emoji_matches[match];
+            var wide = WideText(31){};
+            wide.set(a.allocator, emoji_picker.emoji(index));
+            const available = emoji_draw.metrics(wide.slice(), px(a, 28)) != null;
+            if (written > 0) try w.writeByte(',');
+            written += 1;
+            const left = rect.left + @as(i32, @intCast(column)) * emojiCell(a);
+            try w.print("{{\"match\":{d},\"index\":{d},\"text\":", .{ match, index });
+            try control_api.writeString(w, emoji_picker.emoji(index));
+            try w.writeAll(",\"name\":");
+            try control_api.writeString(w, emoji_picker.name(index));
+            try w.print(",\"rect\":[{d},{d},{d},{d}],\"available\":{}}}", .{ left, rect.top, left + emojiCell(a), rect.bottom, available });
+        }
+    }
+    try w.writeAll("]}");
+}
+
 fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     const sync = if (a.accounts_maintenance) "maintenance" else if (a.sync_logged_out) "logged_out" else if (a.sync_child != null) "running" else "stopped";
     const pending_sends = a.pending_send_count + wacliPendingGet(a, .slack_send) + wacliPendingGet(a, .slack_attach) + wacliPendingGet(a, .slack_share);
@@ -13695,6 +13731,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
     if (verification_fixture) {
+        try controlEmojiPicker(a, w);
         try w.print(",\"canvas_up_count\":{d},\"canvas_up_point\":[{d},{d}],\"reply_jump_count\":{d},\"reply_jump_id\":", .{ a.verification_canvas_up_count, a.verification_canvas_up_point.x, a.verification_canvas_up_point.y, a.verification_reply_jump_count });
         try control_api.writeString(w, a.verification_reply_jump_id.slice());
         try w.print(",\"canvas_cursor_count\":{d},\"canvas_cursor_point\":[{d},{d}]", .{ a.verification_cursor_count, a.verification_cursor_point.x, a.verification_cursor_point.y });

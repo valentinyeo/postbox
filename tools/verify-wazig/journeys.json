@@ -409,6 +409,23 @@
       "maximize": true
     },
     {
+      "name": "emoji-picker-glyphs",
+      "pr": false,
+      "hub": "emoji-picker-glyphs",
+      "evidence": true,
+      "chats": 4,
+      "script": "journey-emoji-picker-glyphs.ps1",
+      "validator": {
+        "file": "check-emoji-picker-glyphs-evidence.py",
+        "function": "check_emoji_picker_glyphs"
+      },
+      "hub_handler": {
+        "file": "inline-links-fixture.py",
+        "class": "InlineLinksHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "inline-links",
       "pr": false,
       "hub": "inline-links",
