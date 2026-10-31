@@ -129,10 +129,10 @@ public static class VerifyInboxTooltip {
         WriteMemory(process, memory, bytes);
         if (Message(window, message, index, memory, ref safeToFree) == 0) return null;
         bytes = ReadMemory(process, memory, size);
-        int offset = size == 72 ? 24 : 16;
+        int offset = size == 64 ? 24 : 16;
         return new ToolInfo {
-            owner = size == 72 ? BitConverter.ToUInt64(bytes, 8) : BitConverter.ToUInt32(bytes, 8),
-            id = size == 72 ? BitConverter.ToUInt64(bytes, 16) : BitConverter.ToUInt32(bytes, 12),
+            owner = size == 64 ? BitConverter.ToUInt64(bytes, 8) : BitConverter.ToUInt32(bytes, 8),
+            id = size == 64 ? BitConverter.ToUInt64(bytes, 16) : BitConverter.ToUInt32(bytes, 12),
             flags = BitConverter.ToUInt32(bytes, 4),
             rect = new int[] { BitConverter.ToInt32(bytes, offset), BitConverter.ToInt32(bytes, offset + 4), BitConverter.ToInt32(bytes, offset + 8), BitConverter.ToInt32(bytes, offset + 12) }
         };
@@ -153,8 +153,9 @@ public static class VerifyInboxTooltip {
             try {
                 bool wow64;
                 if (!IsWow64Process(process, out wow64)) throw new Exception("IsWow64Process failed");
-                int size = Environment.Is64BitOperatingSystem && !wow64 ? 72 : 48;
-                if (IntPtr.Size == 4 && size == 72) throw new Exception("64-bit harness required");
+                // Match the V2 TOOLINFO size used to register Postbox tools.
+                int size = Environment.Is64BitOperatingSystem && !wow64 ? 64 : 44;
+                if (IntPtr.Size == 4 && size == 64) throw new Exception("64-bit harness required");
                 memory = VirtualAllocEx(process, IntPtr.Zero, new UIntPtr((uint)size), 0x3000, 4);
                 if (memory == IntPtr.Zero) throw new Exception("VirtualAllocEx failed");
                 ToolInfo current = ReadTool(process, window, memory, size, 0x043B, 0, ref safe);
