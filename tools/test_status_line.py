@@ -214,6 +214,7 @@ class StatusLineTests(unittest.TestCase):
                                   '    const pending_notes = if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read) and a.update_card_error_len > 0) "" else if (a.update_pending)')
         painter = painter.replace('    else if (failed)\n        "Update failed"',
                                   '    else if (failed and a.update_card_error_source == .chats_read)\n        "Chats unavailable"\n    else if (failed and a.update_card_error_source == .message_read)\n        "Messages unavailable"\n    else if (failed)\n        "Update failed"')
+        painter = painter.replace('    var title_buf: [64]u8 = undefined;\n', '')
         painter = painter.replace('    else\n        std.fmt.bufPrint(&title_buf, "Postbox v{s}", .{tag}) catch "Postbox update available";',
                                   '    else\n        "Update ready";')
         painter = painter.replace('    else if (a.update_staged)\n        "Ready to install"\n    else\n        "Downloading in the background...";',

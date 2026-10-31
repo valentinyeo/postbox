@@ -21164,7 +21164,6 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     smooth.strokeRoundRect(shapes, card, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline, 1);
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
 
-    var title_buf: [64]u8 = undefined;
     const tag = if (pending_tag.len > 0 and pending_tag[0] == 'v') pending_tag[1..] else pending_tag;
     const failed = a.update_card_error_len > 0;
     const title: []const u8 = if (a.update_installed)
