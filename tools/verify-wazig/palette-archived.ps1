@@ -98,7 +98,7 @@ function Test-PaletteTarget($Session, [string]$Step, [string]$ViewLabel, [string
 
 function Switch-PaletteView($Session, [int]$Position) {
     $order = @((Read-Control $Session status).view_order)
-    Send-Keys $Session "^$($Position + 1)"
+    Send-Keys $Session "%$($Position + 1)"
     $label = [string]$order[$Position - 1].label
     $null = Wait-Until {
         $state = Read-Control $Session status

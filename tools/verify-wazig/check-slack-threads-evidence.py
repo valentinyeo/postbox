@@ -38,7 +38,7 @@ def check_threads(folder):
                          and row['body']['text'] == 'Synthetic thread reply'
                          and (row['body'].get('reply_to') == parent or row['body'].get('thread_ts') == parent) for row in sends)
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for key in ['^2', '^{UP}', '{ENTER}', 'Synthetic thread reply', '{ESC}', '^k', 'Slack threads like Slack for this account', 'Quit Postbox']:
+    for key in ['%2', '^{UP}', '{ENTER}', 'Synthetic thread reply', '{ESC}', '^k', 'Slack threads like Slack for this account', 'Quit Postbox']:
         assert f'keys: {key}' in actions
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'

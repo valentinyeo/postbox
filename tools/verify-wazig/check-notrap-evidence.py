@@ -57,6 +57,19 @@ def check_notrap(folder):
         assert state['current_view'] == identity(order[0]), name
         if name == 'typed-gi':
             assert state['search'] == 'gi'
+    for name, wanted in [('shortcut-alt-2', identity(order[0])), ('shortcut-alt-3', identity(order[1])),
+                         ('shortcut-alt-1', startup['current_view']), ('shortcut-alt-i', startup['current_view']),
+                         ('shortcut-g-i', startup['current_view'])]:
+        state, _ = capture(name)
+        assert state['current_view'] == wanted, name
+    video = folder / 'ticketProof.mp4'
+    if video.exists():
+        assert video.stat().st_size > 10000
+        ledger = read('ticketProof.json')
+        assert [row['key'] for row in ledger] == ['%2', '%3', '%1', '%i', 'gi']
+        assert [row['current_view'] for row in ledger] == [identity(order[0]), identity(order[1]), *[startup['current_view']] * 3]
+    else:
+        assert (folder / 'ticketProof-unavailable.txt').exists()
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert any(row['path'].startswith('/v1/wazig/chats') and row['status'] == 200 for row in requests)
     for row in requests:

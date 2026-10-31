@@ -76,7 +76,7 @@ def check_slack_archive(folder):
     assert all(final[field] for field in ['production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'])
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
     assert actions.count('keys: ^e\n') == 3
-    for keys in ['^2', '^+{HOME}', 'Show archived chats', 'Show inbox chats', 'Refresh']:
+    for keys in ['%2', '^+{HOME}', 'Show archived chats', 'Show inbox chats', 'Refresh']:
         assert f'keys: {keys}' in actions
     assert 'slack-archive local-archive-incoming-restart-unarchive PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')

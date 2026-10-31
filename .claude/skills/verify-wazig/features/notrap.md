@@ -26,7 +26,9 @@
 
 - No provider login is simulated. The fixture deliberately returns only WhatsApp and Slack rows; the ordinary registered Signal and Telegram views remain empty.
 - The saved view is seeded before the process starts, not selected after launch. A test that switches away first cannot prove startup recovery.
-- This journey exercises every assigned position in its fixture, not nonexistent Alt positions. Alt+1, Alt+I and G then I are both inbox aliases.
+- This journey exercises every assigned position in its fixture, not nonexistent Alt positions. Alt+1, Alt+I and G then I are inbox aliases.
 - Windows builds, Zig tests, PowerShell parsing/execution, old-binary regression runs and screenshot inspection belong to GitHub Actions. Source review on the development host is not runtime proof.
 
 - Verify Ctrl+1 leaves the account unchanged, typed gi remains in search, and an intervening key cancels G then I. Retain screenshots and exact current_view.
+
+- Capture each shortcut destination with state and screenshot. When ffmpeg.exe exists, retain a bounded, silent fixture-window recording and timestamped key ledger; otherwise retain the unavailable notice.

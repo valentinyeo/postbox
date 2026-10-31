@@ -7,7 +7,7 @@ function Save-ThreadsState($Session, [string]$Name) {
 }
 
 function Invoke-SlackThreadsJourney($Session, $Start) {
-    Send-Keys $Session '^2'
+    Send-Keys $Session '%2'
     $null = Wait-Until {
         $state = Read-Control $Session status
         $state.selected.id -eq 'slack:fixture-threads:channel' -and $state.slack_threads.parent_reply_line -eq '30 replies' -and $state.slack_threads.inline_replies -eq 0
@@ -46,7 +46,7 @@ function Invoke-SlackThreadsJourney($Session, $Start) {
     @{ old_pid = $oldPid; old_start = $oldTicks; new_pid = $Session.pid; new_start = $Session.startTicks; root = $Session.root; id = $Session.id; sha256 = $Session.sha256 } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'restart.json')
     $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted fixture window'
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
-    Send-Keys $Session '^2'
+    Send-Keys $Session '%2'
     $null = Wait-Until { $thread = (Read-Control $Session status).slack_threads; $thread.threads_option -eq 'off' -and $thread.inline_replies -eq 30 } 'account option survived same-profile restart'
     Invoke-Doctor $Session | Out-Null
     $thread = Save-ThreadsState $Session threads-restart

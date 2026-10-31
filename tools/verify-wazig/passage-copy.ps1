@@ -98,7 +98,7 @@ function Invoke-PassageCopyJourney($Session) {
         $fixture | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'passage-fixture.json')
         $checks = @()
         $reactionLog = Join-Path $Session.evidence 'react-requests.jsonl'
-        Send-Keys $Session '^1'
+        Send-Keys $Session '%1'
         foreach ($target in @(
             @{ provider = 'whatsapp'; chat = 'fixture-beta'; search = 'Verification Beta' },
             @{ provider = 'slack'; chat = 'fixture-alpha'; search = 'Verification Alpha' }

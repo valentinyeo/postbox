@@ -103,7 +103,7 @@ def check_palette_archived(folder):
     assert not final['show_archived'] and final['current_view']['inbox']
     assert all(final[key] for key in ['production_preferences_absent', 'whatsapp_store_absent', 'telegram_store_absent'])
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    assert 'keys: %i' in actions and 'keys: ^2' in actions and 'keys: {ENTER}' in actions and 'keys: ^k' in actions
+    assert 'keys: %i' in actions and 'keys: %2' in actions and 'keys: {ENTER}' in actions and 'keys: ^k' in actions
     assert 'JOURNEY PASSED: palette-archived' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
     print('PALETTE ARCHIVED EVIDENCE VERIFIED: archived and inbox chats found from every view, Enter opens without unarchiving')

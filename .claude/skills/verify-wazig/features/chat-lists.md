@@ -15,7 +15,7 @@ Open a Slack chat with a long list. Resize the window or choose Ctrl+K → `Make
 
 Dispatch `feature=chat-lists`; the registry also enables it for matching PRs in `verify.yml`. The isolated hub serves one synthetic Slack message with six long bullets and two nested list levels. Each item repeats the same word so its first glyph has the same ink bearing on every line.
 
-The journey opens Slack with Ctrl+2 and Ctrl+Tab, then captures baseline and larger-size screenshots. Fixture-only control snapshots expose the actual body HFONT weight and painted word rectangles with original UTF-16 ranges. Require weight 400, all 168 marker/word spans, and a bubble fully inside the canvas. Every continuation rectangle starts at that item's first text x and to the right of its marker x. Nested text x values strictly increase.
+The journey opens Slack with Alt+2 and Ctrl+Tab, then captures baseline and larger-size screenshots. Fixture-only control snapshots expose the actual body HFONT weight and painted word rectangles with original UTF-16 ranges. Require weight 400, all 168 marker/word spans, and a bubble fully inside the canvas. Every continuation rectangle starts at that item's first text x and to the right of its marker x. Nested text x values strictly increase.
 
 For each item, scan the screenshot's bright foreground pixels inside the first word rectangle and the first word rectangle of every continuation. Require their leftmost ink x positions to differ by at most one pixel. Retain `baseline.png`, `larger.png`, their message snapshots, and `list-alignment.json`. The journey resets text size and the standard cleanup checks isolated state and no sends, archives or reactions.
 

@@ -120,7 +120,7 @@ def check_integration():
         'appendPalette(a, "Sort views", "", command_sort_views)', 'command_sort_views => openSortViews(a)',
         'a.palette_views_mode and control and !alt and !shift', 'moveView(a, key == win.VK_DOWN)',
         'if (!saveViewOrder(a))', 'fn buildSortViewsItems(', 'item.view_identity.account_len > 0',
-        'switchAccountView(a, wanted.key())', 'appendPalette(a, "Show combined inbox", "Ctrl+1 / Alt+I", command_show_all)',
+        'switchAccountView(a, wanted.key())', 'appendPalette(a, "Show combined inbox", "Alt+1 / Alt+I", command_show_all)',
         'key == \'I\'', '"Show {s}"', 'activeViewLabel(a)', 'fn updateChatTooltip(',
         'win.TTM_UPDATETIPTEXTW', 'message.hwnd == app.chats_hwnd.?',
         '\\"current_view\\"', '\\"view_order\\"', '\\"provider\\"', '\\"account\\"', '\\"label\\"', '\\"inbox\\"',
@@ -174,10 +174,9 @@ def check_integration():
         last = ast.literal_eval('"' + end + '"')
         assert first in source, f'missing harness start: {first}'
         assert last in source[source.index(first) + len(first):], f'missing harness end: {last}'
-    require(read('src/shortcuts.zig'), ['Ctrl+1 / Alt+I', 'Ctrl+2..9'])
-    require(source, ['"Show combined inbox", "Ctrl+1 / Alt+I"', '"Ctrl+{d}", .{index + 2}',
-                     "if (control and !alt and !shift and key >= '1' and key <= '9')"])
-    assert '"Alt+{d}"' not in source
+    require(read('src/shortcuts.zig'), ['Alt+1 / Alt+I / G then I', 'Alt+2..9'])
+    require(source, ['"Show combined inbox", "Alt+1 / Alt+I"', '"Alt+{d}", .{index + 2}',
+                     "if (alt and !control and !shift and key >= '1' and key <= '9')"])
     assert 'Open the chat at that position in the list' not in read('src/shortcuts.zig')
 
 

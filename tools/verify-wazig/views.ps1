@@ -98,7 +98,7 @@ function Save-ViewTitle($Session, [string]$Capture) {
 }
 
 function Assert-AccountView($Session, [int]$Number, [string]$Account, [string]$Capture) {
-    Send-Keys $Session "^$($Number + 1)"
+    Send-Keys $Session "%$($Number + 1)"
     $null = Wait-Until {
         $state = Read-Control $Session status
         $state.current_view.account -eq $Account -and -not $state.current_view.inbox -and $state.chat_count -eq 2
@@ -115,7 +115,7 @@ function Assert-AccountView($Session, [int]$Number, [string]$Account, [string]$C
 function Assert-ViewShortcuts($Session, $Order) {
     $proof = @()
     for ($index = 0; $index -lt $Order.Count; $index++) {
-        $key = "^$($index + 2)"
+        $key = "%$($index + 2)"
         Send-Keys $Session $key
         $wanted = $Order[$index]
         $null = Wait-Until {
@@ -124,17 +124,17 @@ function Assert-ViewShortcuts($Session, $Order) {
         } "Ctrl+$($index + 2) opens saved account $($wanted.account)"
         $proof += @{ key = $key; current_view = (Read-Control $Session status).current_view }
         Save-Screen $Session "shortcut-account-$($index + 2)"
-        Send-Keys $Session '^1'
-        $null = Wait-Until { (Read-Control $Session status).current_view.inbox } 'Ctrl+1 opens combined inbox'
-        $proof += @{ key = '^1'; current_view = (Read-Control $Session status).current_view }
+        Send-Keys $Session '%1'
+        $null = Wait-Until { (Read-Control $Session status).current_view.inbox } 'Alt+1 opens combined inbox'
+        $proof += @{ key = '%1'; current_view = (Read-Control $Session status).current_view }
     }
-    Send-Keys $Session '^2'
+    Send-Keys $Session '%2'
     $null = Wait-Until { (Read-Control $Session status).current_view.account -eq $Order[0].account } 'first account before retired shortcuts'
-    foreach ($number in 0..9) {
-        $key = "%$number"
+    foreach ($number in 1..9) {
+        $key = "^$number"
         Send-Keys $Session $key
         $state = Read-Control $Session status
-        Assert-That (-not $state.current_view.inbox -and $state.current_view.account -eq $Order[0].account) "Retired Alt+$number changed the view"
+        Assert-That (-not $state.current_view.inbox -and $state.current_view.account -eq $Order[0].account) "Retired Ctrl+$number changed the view"
         $proof += @{ key = $key; current_view = $state.current_view }
     }
     Send-Keys $Session '%i'
@@ -231,17 +231,17 @@ function Invoke-ViewsJourney($Session, [string]$Messages, $Start) {
         } 'account archive held in Wazig'
     }
     Invoke-PaletteCommand $Session 'Refresh'
-    Send-Keys $Session '^2'
+    Send-Keys $Session '%2'
     $null = Wait-Until {
         $state = Read-Control $Session status
         $state.current_view.account -eq 'personal' -and -not $state.current_view.inbox -and $state.chat_count -eq 0 -and $state.pending_archives -eq 0
-    } 'drained account retains Ctrl+2 with an empty list'
+    } 'drained account retains Alt+2 with an empty list'
     $drained = Read-Control $Session status
     Assert-That (($drained.view_order | ConvertTo-Json -Depth 12 -Compress) -ceq ($baseline.view_order | ConvertTo-Json -Depth 12 -Compress)) 'Draining changed account positions'
     Assert-That ((Read-Control $Session chats).total -eq 0) 'Drained account still has visible chats'
     Save-ViewTitle $Session 'drained-alt1'
     $null = Assert-AccountView $Session 2 'business' 'drained-alt2'
-    Send-Keys $Session '^2'
+    Send-Keys $Session '%2'
     Invoke-PaletteCommand $Session 'Show archived chats'
     $null = Wait-Until { (Read-Control $Session status).chat_count -eq 2 } 'drained account archived chats'
     foreach ($remaining in @(1, 0)) {
