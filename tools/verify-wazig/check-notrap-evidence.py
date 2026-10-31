@@ -10,7 +10,7 @@ def check_notrap(folder):
     def capture(name):
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, name
-        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v0\.0\.526', (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
+        assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + re.escape(session['expected_version']), (folder / f'{name}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]), name
         state = read(f'{name}.state.json')
         rows = read(f'{name}.chats.json')['chats']
         assert state['chat_count'] == len(rows), name
@@ -43,15 +43,20 @@ def check_notrap(folder):
         assert escaped['current_view'] == (startup['current_view'] if empty else identity(view))
         assert read(f'escape-to-first-{number}.state.json')['current_view'] == identity(order[0])
     transitions = read('transitions.json')
-    expected = {(source, target) for source in range(1, len(order) + 1) for target in [*range(1, len(order) + 1), '^1', '%i']}
+    expected = {(source, target) for source in range(1, len(order) + 1) for target in [*range(1, len(order) + 1), '%1', '%i', 'gi']}
     assert len(transitions) == len(expected)
     assert {(row['source'], row['target']) for row in transitions} == expected
     for row in transitions:
         wanted = identity(order[row['target'] - 1]) if isinstance(row['target'], int) else startup['current_view']
         assert row['current_view'] == wanted, row
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for key in [*(f'^{number + 1}' for number in range(1, len(order) + 1)), '^1', '%i', '^f', 'no-trap-search', '{ESC}']:
+    for key in [*(f'%{number + 1}' for number in range(1, len(order) + 1)), '%1', '%i', 'gi', '^1', 'g', 'x', 'i', '^f', 'no-trap-search', '{ESC}']:
         assert f'keys: {key}' in actions, key
+    for name in ('ctrl-one', 'typed-gi', 'cancelled-gi'):
+        state, _ = capture(name)
+        assert state['current_view'] == identity(order[0]), name
+        if name == 'typed-gi':
+            assert state['search'] == 'gi'
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert any(row['path'].startswith('/v1/wazig/chats') and row['status'] == 200 for row in requests)
     for row in requests:
