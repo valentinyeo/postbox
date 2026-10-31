@@ -11,14 +11,7 @@ function Record-InlineStage($Session, $Record) {
 
 function Focus-InlineApp($Session) {
     $app = Get-App $Session
-    $client = [VerifyWindow+Rect]::new()
-    $null = [VerifyWindow]::GetClientRect($app.MainWindowHandle, [ref]$client)
-    $point = [VerifyWindow+Point]::new()
-    $point.X = $client.Left + 12
-    $point.Y = $client.Top + 12
-    $null = [VerifyWindow]::ClientToScreen($app.MainWindowHandle, [ref]$point)
     $null = Wait-Until {
-        [InlineLinksNative]::Hover($Session.pid, $point.X, $point.Y)
         [VerifyWindow]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
         $foreground = [VerifyWindow]::GetForegroundWindow()
         $owner = [uint32]0
