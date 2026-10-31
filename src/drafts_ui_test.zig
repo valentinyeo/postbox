@@ -3,6 +3,7 @@ const drafts = @import("drafts.zig");
 const chat_key = @import("chat_key.zig");
 const edit_contract = @import("edit_contract.zig");
 const allocator = std.testing.allocator;
+const verification_fixture = false;
 
 const Text = struct {
     value: []const u8,
@@ -27,6 +28,9 @@ const Session = struct {
     fn state(self: *const Session) dictation.State {
         return if (self.failed) .failed else if (self.ready) .ready else .idle;
     }
+    fn fixtureConsumeReady(_: *const Session) bool {
+        return true;
+    }
     fn peekTranscript(self: *Session, buffer: []u8) ?[]const u8 {
         const text = self.transcript;
         if (!self.ready or buffer.len < text.len) return null;
@@ -39,7 +43,9 @@ const Session = struct {
         return true;
     }
 };
-const outbox = struct { const max_text_len = 4095; };
+const outbox = struct {
+    const max_text_len = 4095;
+};
 const DictationFinish = struct {
     context: struct {},
     text: [:0]u16,
@@ -77,6 +83,7 @@ const App = struct {
     context_matches: bool = true,
     send_accept: bool = true,
     send_calls: usize = 0,
+    verification_dictation_accepts: u64 = 0,
     disk_failure: bool = false,
     selection_start: usize = 0,
     selection_end: usize = 0,

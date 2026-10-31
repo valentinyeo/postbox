@@ -36,6 +36,13 @@ pub const Session = struct {
     elapsed_ms: std.atomic.Value(u64) = .init(0),
     meter_level: std.atomic.Value(u8) = .init(0),
     fixture: ?struct { pcm: []u8, response: []u8 } = null,
+    require_fixture: bool = false,
+    fixture_gates: ?struct { transcribe: win.HANDLE, publish: win.HANDLE, consume: win.HANDLE } = null,
+    fixture_gate_phase: std.atomic.Value(u8) = .init(0),
+    microphone_entries: std.atomic.Value(u64) = .init(0),
+    transcription_attempts: std.atomic.Value(u64) = .init(0),
+    generation: u64 = 0,
+    consumed_count: u64 = 0,
 
     pub fn create(allocator: std.mem.Allocator) !*Session {
         const self = try allocator.create(Session);
@@ -46,11 +53,40 @@ pub const Session = struct {
     pub fn destroy(self: *Session) void {
         self.cancel();
         if (self.thread) |thread| thread.join();
+        if (self.fixture_gates) |gates| {
+            _ = win.CloseHandle(gates.transcribe);
+            _ = win.CloseHandle(gates.publish);
+            _ = win.CloseHandle(gates.consume);
+        }
         if (self.fixture) |fixture| {
             self.allocator.free(fixture.pcm);
             self.allocator.free(fixture.response);
         }
         self.allocator.destroy(self);
+    }
+
+    pub fn setupFixtureGates(self: *Session, id: []const u8) !void {
+        if (self.fixture_gates != null) return error.FixtureAlreadyConfigured;
+        const transcribe = try createFixtureEvent(self.allocator, id, "transcribe");
+        errdefer _ = win.CloseHandle(transcribe);
+        const publish = try createFixtureEvent(self.allocator, id, "publish");
+        errdefer _ = win.CloseHandle(publish);
+        const consume = try createFixtureEvent(self.allocator, id, "consume");
+        self.fixture_gates = .{ .transcribe = transcribe, .publish = publish, .consume = consume };
+    }
+
+    pub fn fixtureConsumeReady(self: *const Session) bool {
+        if (self.fixture_gates) |gates| return win.WaitForSingleObject(gates.consume, 0) == win.WAIT_OBJECT_0;
+        return !self.require_fixture;
+    }
+
+    pub fn cancelled(self: *const Session) bool {
+        return self.state_value.load(.acquire) == @intFromEnum(SessionState.cancelled);
+    }
+
+    pub fn draining(self: *const Session) bool {
+        if (self.thread) |thread| return win.WaitForSingleObject(@ptrCast(thread.getHandle()), 0) != win.WAIT_OBJECT_0;
+        return false;
     }
 
     pub fn state(self: *const Session) State {
@@ -76,6 +112,10 @@ pub const Session = struct {
         return self.meter_level.load(.acquire);
     }
 
+    fn noteTranscriptionAttempt(self: *Session) void {
+        _ = self.transcription_attempts.fetchAdd(1, .monotonic);
+    }
+
     pub fn reapFinished(self: *Session) bool {
         if (self.thread) |thread| {
             if (win.WaitForSingleObject(@ptrCast(thread.getHandle()), 0) != win.WAIT_OBJECT_0) return false;
@@ -88,6 +128,12 @@ pub const Session = struct {
     pub fn start(self: *Session, api_key: []const u8, language: Language, origin: chat_key.Key) bool {
         if (self.state() != .idle and self.state() != .failed) return false;
         if (!self.reapFinished()) return false;
+        if (self.require_fixture) {
+            const fixture = self.fixture orelse return false;
+            if (self.fixture_gates == null or fixture.pcm.len < 3200 or fixture.pcm.len % 2 != 0) return false;
+            var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, fixture.response, .{}) catch return false;
+            parsed.deinit();
+        }
         const key = self.allocator.dupe(u8, api_key) catch return false;
         self.origin = drafts.Identity.init(origin);
         self.result_len = 0;
@@ -100,6 +146,7 @@ pub const Session = struct {
             self.state_value.store(@intFromEnum(SessionState.failed), .release);
             return false;
         };
+        self.generation +%= 1;
         return true;
     }
 
@@ -122,10 +169,24 @@ pub const Session = struct {
     }
 
     pub fn consumeTranscript(self: *Session) bool {
-        return self.transition(.ready, .idle);
+        if (!self.transition(.ready, .idle)) return false;
+        self.consumed_count +%= 1;
+        return true;
     }
-
 };
+
+fn createFixtureEvent(allocator: std.mem.Allocator, id: []const u8, suffix: []const u8) !win.HANDLE {
+    const name = try std.fmt.allocPrint(allocator, "Local\\PostboxVerify-{s}-dictation-{s}", .{ id, suffix });
+    defer allocator.free(name);
+    const wide = try std.unicode.utf8ToUtf16LeAllocZ(allocator, name);
+    defer allocator.free(wide);
+    const handle = win.CreateEventW(null, win.TRUE, win.TRUE, wide.ptr) orelse return error.FixtureEventUnavailable;
+    if (win.GetLastError() == win.ERROR_ALREADY_EXISTS) {
+        _ = win.CloseHandle(handle);
+        return error.FixtureEventAlreadyExists;
+    }
+    return handle;
+}
 
 fn workerMain(self: *Session, api_key: []u8, language: Language) void {
     defer self.allocator.free(api_key);
@@ -139,6 +200,16 @@ fn workerMain(self: *Session, api_key: []u8, language: Language) void {
         return;
     }
     if (!self.transition(.recording, .transcribing)) return;
+    if (self.fixture_gates) |gates| {
+        self.fixture_gate_phase.store(1, .release);
+        const result = win.WaitForSingleObject(gates.transcribe, 30_000);
+        self.fixture_gate_phase.store(0, .release);
+        if (result != win.WAIT_OBJECT_0) {
+            _ = self.transition(.transcribing, .failed);
+            return;
+        }
+        if (self.cancelled()) return;
+    }
     var transport = Transport{ .allocator = self.allocator, .api_key = api_key, .session = self };
     defer if (transport.refreshed_key) |key| self.allocator.free(key);
     const transcript = (if (self.fixture) |fixture| parseResponse(self.allocator, fixture.response) else dictation_policy.transcribe(&transport, language, "audio/wav", wav)) catch {
@@ -146,6 +217,15 @@ fn workerMain(self: *Session, api_key: []u8, language: Language) void {
         return;
     };
     defer self.allocator.free(transcript);
+    if (self.fixture_gates) |gates| {
+        self.fixture_gate_phase.store(2, .release);
+        const result = win.WaitForSingleObject(gates.publish, 30_000);
+        self.fixture_gate_phase.store(0, .release);
+        if (result != win.WAIT_OBJECT_0) {
+            _ = self.transition(.transcribing, .failed);
+            return;
+        }
+    }
     if (transcript.len > self.result.len) {
         _ = self.transition(.transcribing, .failed);
         return;
@@ -171,6 +251,7 @@ fn captureFixture(self: *Session, pcm: []const u8) ![]u8 {
 }
 
 fn captureMicrophone(self: *Session) ![]u8 {
+    _ = self.microphone_entries.fetchAdd(1, .monotonic);
     _ = win.CoInitializeEx(null, win.COINIT_MULTITHREADED);
     defer win.CoUninitialize();
 
@@ -267,6 +348,7 @@ const Transport = struct {
         defer if (self.session) |session| {
             _ = session.transition(.request_in_flight, .transcribing);
         };
+        if (self.session) |session| session.noteTranscriptionAttempt();
         return transcribeAt(self.allocator, self.api_key, request_path, mime, audio);
     }
 

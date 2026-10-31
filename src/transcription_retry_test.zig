@@ -4,6 +4,10 @@ const Language = dictation_policy.Language;
 const SessionState = enum { transcribing, request_in_flight, cancelled };
 const Session = struct {
     phase: SessionState = .transcribing,
+    attempts: usize = 0,
+    fn noteTranscriptionAttempt(self: *Session) void {
+        self.attempts += 1;
+    }
     fn transition(self: *Session, from: SessionState, to: SessionState) bool {
         if (self.phase != from) return false;
         self.phase = to;

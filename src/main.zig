@@ -925,6 +925,8 @@ const App = struct {
     dictation_operation: ?DictationOperation = null,
     dictation_escape_held: bool = false,
     dictation_return_held: bool = false,
+    verification_dictation_id: []const u8 = "",
+    verification_dictation_accepts: u64 = 0,
     dictation_language: dictation.Language = .automatic,
     last_dictation_state: dictation.State = .idle,
     dictation_wave: [8]u8 = @splat(0),
@@ -10815,6 +10817,8 @@ fn ensureDictation(a: *App) ?*dictation.Session {
     a.dictation_session = dictation.Session.create(a.allocator) catch null;
     if (verification_fixture) {
         if (a.dictation_session) |session| {
+            session.require_fixture = true;
+            session.setupFixtureGates(a.verification_dictation_id) catch return a.dictation_session;
             const pcm_path = messagesDirPath(a, "dictation.pcm") orelse return a.dictation_session;
             defer a.allocator.free(pcm_path);
             const response_path = messagesDirPath(a, "dictation-response.json") orelse return a.dictation_session;
@@ -10966,7 +10970,8 @@ fn releaseDictationOperation(a: *App) void {
 fn observeDictationContext(a: *App) void {
     const operation = if (a.dictation_operation) |*value| value else return;
     if (!sameDictationContext(a, &operation.context) or
-        (a.thread_compose != null and win.GetFocus() == a.thread_compose.?)) {
+        (a.thread_compose != null and win.GetFocus() == a.thread_compose.?))
+    {
         disarmDictationSend(a);
         return;
     }
@@ -11133,6 +11138,7 @@ fn updateDictation(a: *App) void {
     observeDictationContext(a);
     const state = session.state();
     if (state == .ready) {
+        if (!session.fixtureConsumeReady()) return;
         var transcript_buffer: [8192]u8 = undefined;
         const transcript = session.peekTranscript(&transcript_buffer) orelse return;
         const same_chat = a.draft_store.isOpen(session.origin.key());
@@ -11250,7 +11256,9 @@ fn updateDictation(a: *App) void {
                 switch (value.intent) {
                     .sending => |*finish| {
                         if (sameDictationContext(a, &finish.context)) {
-                            if (!sendMessageFrom(a, false)) setStatus(a, "Dictation saved; send manually");
+                            if (sendMessageFrom(a, false)) {
+                                if (verification_fixture) a.verification_dictation_accepts +%= 1;
+                            } else setStatus(a, "Dictation saved; send manually");
                             return;
                         }
                     },
@@ -13441,6 +13449,17 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
     if (verification_fixture) {
+        const dictation_intent = if (a.dictation_operation) |operation| @tagName(std.meta.activeTag(operation.intent)) else "none";
+        if (a.dictation_session) |session| {
+            const phase = session.state();
+            try w.print(",\"dictation\":{{\"phase\":\"{s}\",\"intent\":\"{s}\",\"cancelled\":{},\"draining\":{},\"ready\":{},\"generation\":{d},\"consumed\":{d},\"accepted\":{d},\"microphone_entries\":{d},\"transcription_attempts\":{d},\"gate_phase\":{d},\"consume_open\":{},\"fixture_loaded\":{}}}", .{
+                @tagName(phase),                           dictation_intent,              session.cancelled(),                                       session.draining(),                        phase == .ready,
+                session.generation,                        session.consumed_count,        a.verification_dictation_accepts,                          session.microphone_entries.load(.acquire), session.transcription_attempts.load(.acquire),
+                session.fixture_gate_phase.load(.acquire), session.fixtureConsumeReady(), session.fixture != null and session.fixture_gates != null,
+            });
+        } else {
+            try w.print(",\"dictation\":{{\"phase\":\"idle\",\"intent\":\"{s}\",\"cancelled\":false,\"draining\":false,\"ready\":false,\"generation\":0,\"consumed\":0,\"accepted\":{d},\"microphone_entries\":0,\"transcription_attempts\":0,\"gate_phase\":0,\"consume_open\":false,\"fixture_loaded\":false}}", .{ dictation_intent, a.verification_dictation_accepts });
+        }
         var ready: usize = 0;
         var uncertain: usize = 0;
         var held: usize = 0;
@@ -19805,6 +19824,7 @@ pub fn main(init: std.process.Init) !void {
     defer app.read_state.deinit(init.gpa);
     if (verification_fixture) {
         const migration_id = init.environ_map.get("WAZIG_VERIFY_ID") orelse "";
+        app.verification_dictation_id = migration_id;
         const migration_case = init.environ_map.get("WAZIG_VERIFY_MIGRATION_CASE") orelse "";
         if (migration_id.len == 36 and
             (std.mem.eql(u8, migration_case, "hub-migration-crash") or std.mem.eql(u8, migration_case, "hub-migration-before-rename")) and
