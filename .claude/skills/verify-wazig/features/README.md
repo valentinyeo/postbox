@@ -18,6 +18,8 @@ The `workspace-icons` journey verifies rounded Slack workspace icon badges, the 
 
 ## Recent changes coverage
 
+- IGSH-1267: dictation finish and cancel -> `dictation-shortcuts` (asserts native keys, scoped durable sends, cancellation races, navigation disarming and Unicode multiline drafts)
+
 - IGSH-745: unresolved Slack mentions -> `slack-mentions` (asserts hub-named and labelled mentions, @someone fallback, no raw user ids, report link cleanup, real keyboard selection and before/after screenshots)
 
 - IGSH-647: local Slack archive -> `slack-archive` (asserts real Ctrl+E, three archived=false incoming hub rows, Archive-only presence, same-profile restart, unarchive and absence of archive endpoint requests; direct Slack remains Zig coverage)

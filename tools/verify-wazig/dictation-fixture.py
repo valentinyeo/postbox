@@ -91,6 +91,8 @@ class DictationHandler(Handler):
                 or not isinstance(body['reply_to'], str)):
             self.respond(400, {'error': 'invalid fixture send'}, body=body)
             return
+        self.capture_identity_ingress()
+        self.capture_identity_snapshot(body)
         with self.state.lock:
             intents = self.intents()
             previous = intents.get(client_id)
