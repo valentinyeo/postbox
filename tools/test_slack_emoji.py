@@ -99,9 +99,10 @@ class EmojiDataChecks(unittest.TestCase):
     def test_hub_cache_completion_regression_uses_real_handler(self):
         source = (ROOT / 'src/main.zig').read_text()
         handler = source.split('        .hub_media => {\n            for (&a.media_downloads)', 1)[1].split('        .hub_avatar => {', 1)[0]
-        success = handler.split('                if (ok) {', 1)[1].split('                } else {', 1)[0]
-        self.assertIn('markMediaAttempted(a, slot.jid.slice(), slot.id.slice());', success)
-        self.assertLess(success.index('markMediaAttempted('), success.index('clearMediaFailure('))
+        before, after = handler.split('markMediaAttempted(a, slot.jid.slice(), slot.id.slice());', 1)
+        success_prefix = before.rsplit('                if (ok) {', 1)[1]
+        self.assertNotIn('                } else {', success_prefix)
+        self.assertIn('clearMediaFailure(', after.split('                } else {', 1)[0])
         queue = source.split('    if (batch.phase == .downloading) {', 1)[1].split('fn ensureAvatarSession(', 1)[0]
         self.assertIn('hubMediaPath(a, a.allocator, chat_key.of(batch), id.slice())', queue)
         self.assertIn('.has_local_path = if (path) |cached| fileExistsUtf8(cached) else false,', queue)
