@@ -39,18 +39,23 @@ if unified:
     assert f"{session['feature']} terminal-identity-restart PASS" in proof
     runpy.run_path(str(Path(__file__).with_name('check-identity-evidence.py')))['check_identity'](folder, requests, session['bridge_url'])
     identity = [row for row in requests if row.get('wire_path') == '/v1/wazig/send' and row.get('body', {}).get('text') == 'Identity fixture']
-    assert len(identity) == 6 and len({row['body']['client_id'] for row in identity[:5]}) == 1
-    assert identity[-1]['body']['client_id'] != identity[0]['body']['client_id']
-    assert sum(row['accepted'] for row in identity) == 2
-    assert [row['status'] for row in identity] == [409, 409, 409, 409, 200, 200]
-    assert all(row['body'] == identity[0]['body'] for row in identity[:5])
+    text_retry = identity[4]['body']['client_id']
+    assert len(identity) == 6 and len({row['body']['client_id'] for row in identity[:4]}) == 1
+    assert len({identity[0]['body']['client_id'], text_retry, identity[-1]['body']['client_id']}) == 3
+    assert sum(row['accepted'] for row in identity) == 3
+    assert [row['status'] for row in identity] == [500, 500, 500, 500, 200, 200]
+    assert all(row['body'] == identity[0]['body'] for row in identity[:4])
+    assert dict(identity[4]['body'], client_id=identity[0]['body']['client_id']) == identity[0]['body']
     assert f"{session['feature']} terminal-file-identity-restart PASS" in proof
     files = [row for row in requests if row.get('wire_path') == '/v1/wazig/send' and row.get('body', {}).get('text') == 'Identity file']
-    assert len(files) == 5 and len({row['body']['client_id'] for row in files}) == 1
+    file_retry = files[4]['body']['client_id']
+    assert len(files) == 5 and len({row['body']['client_id'] for row in files[:4]}) == 1
+    assert file_retry != files[0]['body']['client_id']
     assert len({row['file_sha256'] for row in files}) == 1
-    assert sum(row['accepted'] for row in files) == 1
-    assert [row['status'] for row in files] == [409, 409, 409, 409, 200]
-    assert all(row['body'] == files[0]['body'] for row in files)
+    assert sum(row['accepted'] for row in files) == 2
+    assert [row['status'] for row in files] == [500, 500, 500, 500, 200]
+    assert all(row['body'] == files[0]['body'] for row in files[:4])
+    assert dict(files[4]['body'], client_id=files[0]['body']['client_id']) == files[0]['body']
     for name in ['identity-boundary.json', 'file-identity-boundary.json']:
         boundary = json.loads((folder / name).read_text(encoding='utf-8-sig'))
         assert boundary['before'] == 4 and boundary['after'] == 5
