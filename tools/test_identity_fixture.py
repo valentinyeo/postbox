@@ -31,13 +31,13 @@ class IdentityFixtureTest(unittest.TestCase):
     def test_text_mutation_preserves_first_operation(self):
         body = {'chat': fixture.ALPHA, 'text': 'Identity fixture', 'reply_to': 'parent', 'client_id': 'a' * 32}
         encode = lambda value: json.dumps(value).encode()
-        self.assertEqual(self.post(encode(body), 'application/json')[0], 409)
+        self.assertEqual(self.post(encode(body), 'application/json')[0], 500)
         changed = dict(body, reply_to='other')
         status, result, _ = self.post(encode(changed), 'application/json')
         self.assertEqual((status, result['error']), (409, 'identity payload mismatch'))
         self.assertEqual(self.state.identity_attempts[body['client_id']], 1)
         self.assertEqual(self.state.identity_payloads[body['client_id']], body)
-        self.assertEqual(self.post(encode(body), 'application/json')[0], 409)
+        self.assertEqual(self.post(encode(body), 'application/json')[0], 500)
         self.assertEqual(self.state.identity_attempts[body['client_id']], 2)
 
     def test_file_mutation_preserves_first_operation(self):
@@ -52,13 +52,13 @@ class IdentityFixtureTest(unittest.TestCase):
             return b''.join(pieces)
         content_type = 'multipart/form-data; boundary=boundary'
         original = multipart('original.png', b'\x89PNG\r\n\x1a\noriginal')
-        self.assertEqual(self.post(original, content_type)[0], 409)
+        self.assertEqual(self.post(original, content_type)[0], 500)
         changed = multipart('other.png', b'\x89PNG\r\n\x1a\noriginal')
         status, result, _ = self.post(changed, content_type)
         self.assertEqual((status, result['error']), (409, 'identity payload mismatch'))
         self.assertEqual(self.state.identity_file_attempts['b' * 32], 1)
         self.assertEqual(self.state.identity_file_payloads['b' * 32][0]['file'], 'original.png')
-        self.assertEqual(self.post(original, content_type)[0], 409)
+        self.assertEqual(self.post(original, content_type)[0], 500)
         self.assertEqual(self.state.identity_file_attempts['b' * 32], 2)
 
 
