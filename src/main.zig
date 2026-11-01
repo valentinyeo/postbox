@@ -216,6 +216,7 @@ const command_update_install = 2053;
 const command_emoji_diag = 2054;
 const command_open_image_external = 2055;
 const command_resend = 2056;
+const command_delete_unsent = 2057;
 const command_show_all = 2065;
 const command_show_whatsapp = 2057;
 const command_show_slack = 2058;
@@ -5645,14 +5646,67 @@ fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) !void {
         if (record.entry.file.len > 0 and (!record.attachment_ready or !try unifiedOwnedFileAvailable(a, record))) return error.AttachmentMissing;
         candidate.* = live.*;
         const retry = &candidate.records[index];
+        var fresh_id: [outbox.id_len]u8 = undefined;
+        mintSendId(a, &fresh_id);
+        if (a.verification_fixture) {
+            var marker_buffer: [128]u8 = undefined;
+            if (std.fmt.bufPrint(&marker_buffer, "resend: fresh client id {s} for {s}", .{ fresh_id[0..], id })) |line| appendLaunchLog(a, line) else |_| {}
+        }
+        retry.entry.id = fresh_id;
+        retry.entry.client_msg_id.set("");
         retry.phase = .ready;
         retry.entry.attempts = 0;
+        retry.entry.ambiguous = false;
+        retry.failure_reason = .{};
+        retry.attempt_serial = 0;
         retry.not_before_ms = 0;
         if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
+        for (a.messages[0..a.message_count]) |*message| {
+            if (!std.mem.eql(u8, message.timestamp.slice(), id)) continue;
+            message.timestamp.set(&fresh_id);
+            message.send_state = .pending;
+            break;
+        }
         refreshUnifiedViews(a);
+        refreshMessages(a);
+        setStatus(a, "Sending again with a new message id");
         return;
     }
     return error.IntentNotFound;
+}
+
+fn discardUnifiedSend(a: *App, id: []const u8) bool {
+    if (a.outbox_load_failed or a.unified_storage_blocked or !a.unified_imports_clean) return false;
+    if (a.unified_inflight) |inflight| if (std.mem.eql(u8, &inflight.id, id)) return false;
+    const live = a.unified_snapshot orelse return false;
+    const candidate = a.unified_candidate orelse return false;
+    for (live.records[0..live.count], 0..) |*record, index| {
+        if (!std.mem.eql(u8, record.entry.idSlice(), id)) continue;
+        candidate.* = live.*;
+        var drop = index;
+        while (drop + 1 < candidate.count) : (drop += 1) candidate.records[drop] = candidate.records[drop + 1];
+        if (candidate.count > 0) candidate.count -= 1;
+        if (!saveUnifiedCandidate(a, .any, 0)) return false;
+        refreshUnifiedViews(a);
+        refreshMessages(a);
+        setStatus(a, "Unsent message deleted");
+        return true;
+    }
+    return false;
+}
+
+fn discardUnsentMessage(a: *App, index: usize) void {
+    if (index >= a.message_count) return;
+    if (!a.messages[index].from_me or a.messages[index].send_state != .failed) return;
+    const id_buffer = a.messages[index].timestamp.slice();
+    var id_copy: [outbox.id_len]u8 = undefined;
+    const length = @min(id_buffer.len, id_copy.len);
+    @memcpy(id_copy[0..length], id_buffer[0..length]);
+    if (unifiedHub(a)) {
+        if (!discardUnifiedSend(a, id_copy[0..length])) setStatus(a, "Could not delete that unsent message");
+    } else {
+        setStatus(a, "Delete is only available for hub messages right now");
+    }
 }
 
 fn restoreOutbox(a: *App) void {
@@ -12936,10 +12990,23 @@ fn openReactionMenu(a: *App, x: i32, y: i32) void {
         _ = win.SetMenuInfo(menu, &info);
     }
     appendMessageMenuItem(menu, command_reply, lit("Reply                Ctrl+Shift+R"));
+    const failed_own = if (a.selected_message) |selected| selected < a.message_count and a.messages[selected].from_me and a.messages[selected].send_state == .failed else false;
+    if (failed_own) {
+        appendMessageMenuItem(menu, command_resend, lit("Send again"));
+        appendMessageMenuItem(menu, command_delete_unsent, lit("Delete unsent message"));
+    }
     appendMessageMenuItem(menu, 0, null);
     addReactionItems(menu);
     a.reaction_row_rect = null;
     const choice = trackPopupMenu(a, menu, x, y, win.TPM_RETURNCMD | win.TPM_NONOTIFY);
+    if (choice == command_resend) {
+        if (a.selected_message) |selected| if (selected < a.message_count) _ = resendFailedMessage(a, selected, false);
+        return;
+    }
+    if (choice == command_delete_unsent) {
+        if (a.selected_message) |selected| discardUnsentMessage(a, selected);
+        return;
+    }
     if (choice == command_reply) {
         startReply(a);
     } else if (choice == reaction_row) {
@@ -22677,6 +22744,7 @@ fn finishUnifiedSend(a: *App, result: *const WacliResult) void {
         .received_ms = win.GetTickCount64(),
     };
     if (!result.ok) outcome.reason.set(if (attachment_error) "attachment unavailable" else if (result.extra.len > 0) result.extra.slice() else "send failed");
+    if (!result.ok and result.http_status == 409) setStatus(a, "WhatsApp could not confirm the last send. Tap the message to send it again, or delete it.");
     a.unified_storage_blocked = true;
     a.unified_unsaved_result = outcome;
     a.unified_inflight = null;
