@@ -29,6 +29,7 @@ public static class InlineLinksNative {
     }
     public static void Hover(int pid, int x, int y) { Owned(pid, x, y); Send(MoveTo(x, y)); }
     public static void Click(int pid, int x, int y) { Owned(pid, x, y); Send(MoveTo(x, y), Button(2), Button(4)); }
+    public static void Nudge(int x, int y) { Send(MoveTo(x, y), Button(2), Button(4)); }
     public static void Drag(int pid, int x, int y, int endX, int endY) { Owned(pid, x, y); Owned(pid, endX, endY); Send(MoveTo(x, y), Button(2), MoveTo(endX, endY), Button(4)); }
     static Input Key(ushort key, ushort scan, uint flags) { return new Input { type = 1, data = new InputData { key = new KeyInput { key = key, scan = scan, flags = flags } } }; }
     public static void Combo(ushort key) { Send(Key(0x11, 0, 0), Key(key, 0, 0), Key(key, 0, 2), Key(0x11, 0, 2)); }
