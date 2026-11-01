@@ -157,6 +157,6 @@ $ack = Save-FaultEvidence $session 'ack-blocked' 'Fault ack file'
 Start-Sleep -Seconds 3
 $null = Save-FaultEvidence $session 'ack-still-blocked' 'Fault ack file'
 Restart-FaultApp $session '' ''
-Invoke-FaultManualRetry $session $ack ack 'Fault ack file' 1 0
+Invoke-FaultManualRetry $session $ack ack 'Fault ack file' 1 1
 Hub-Pass $session acknowledgement-uncertain-recovery
 Save-Screen $session after

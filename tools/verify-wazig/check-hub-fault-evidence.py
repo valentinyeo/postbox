@@ -162,7 +162,7 @@ def verify(data):
             assert not any(resumed[key] for key in ('fault', 'transition', 'attempt'))
         complete = data['complete'][name]['unified_snapshot']
         assert complete['ready'] == complete['uncertain'] == complete['inflight'] == complete['hub_jobs'] == 0
-        assert complete['held'] == (1 if name == 'terminal' else 0)
+        assert complete['held'] == (0 if name == 'checkpoint' else 1)
         assert not complete['storage_blocked'] and complete['unsaved_outcomes'] == 0
         if before:
             fresh = ids[name + 'retry']
