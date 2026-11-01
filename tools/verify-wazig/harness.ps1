@@ -8,6 +8,17 @@ public static class VerifyWindow {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr window, uint flags);
+    [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint attach, uint attachTo, bool flag);
+    [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+    public static bool ForceForeground(IntPtr window) {
+        uint owner;
+        uint target = GetWindowThreadProcessId(window, out owner);
+        uint self = GetCurrentThreadId();
+        bool attached = target != 0 && target != self && AttachThreadInput(self, target, true);
+        bool raised = SetForegroundWindow(window);
+        if (attached) AttachThreadInput(self, target, false);
+        return raised;
+    }
     [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr dialog, int id);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
     [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr window);

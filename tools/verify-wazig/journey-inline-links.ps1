@@ -12,7 +12,7 @@ function Record-InlineStage($Session, $Record) {
 function Focus-InlineApp($Session) {
     $app = Get-App $Session
     $null = Wait-Until {
-        [VerifyWindow]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
+        [VerifyWindow]::ForceForeground($app.MainWindowHandle) | Out-Null
         $foreground = [VerifyWindow]::GetForegroundWindow()
         $owner = [uint32]0
         if ($foreground -ne [IntPtr]::Zero) { [VerifyWindow]::GetWindowThreadProcessId($foreground, [ref]$owner) | Out-Null }
