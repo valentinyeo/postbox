@@ -43,7 +43,8 @@ $directRow = @{ id = 'cccccccccccccccccccccccccccccccc'; provider = 'signal'; ac
 Copy-Item $legacy (Join-Path $session.evidence 'rollback-seed.jsonl')
 Copy-Item $direct (Join-Path $session.evidence 'rollback-direct-before.jsonl')
 @{ id = $session.id; root = $session.root; local = $local; profile = $profile; runner_sid = $runnerSid; source_tag = $tag; cleanup_pattern = $pattern; cleanup_pattern_bytes = [Text.Encoding]::UTF8.GetByteCount($pattern); new_exe = $newExe; new_sha256 = $newHash; old_exe = $oldExe; old_sha256 = $oldHash; backend = $session.bridge_url } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $session.evidence 'rollback-ownership.json')
-$new = Start-RollbackApp $session $start $newExe $newCtl $newHash
+$releaseVersion = if ($env:VERIFY_VERSION) { $env:VERIFY_VERSION } else { $session.expected_version }
+$new = Start-RollbackApp $session $start $newExe $newCtl $newHash $releaseVersion
 $null = Wait-Until {
     $s = (Read-Control $session status).unified_snapshot
     $s.loaded -and $s.imports_clean -and $s.import_unresolved -eq 0 -and $s.import_overflow -eq 0 -and -not $s.storage_blocked -and $s.held -eq 2 -and $s.ready -eq 0 -and $s.uncertain -eq 0 -and $s.inflight -eq 0 -and $s.hub_jobs -eq 0
@@ -111,7 +112,7 @@ try {
 Stop-RollbackApp $session
 Copy-Item (Join-Path $messages 'launch-log.txt') (Join-Path $session.evidence 'rollback-before-old.launch.log')
 $logBefore = Get-Content (Join-Path $session.evidence 'rollback-before-old.launch.log') -Raw
-$old = Start-RollbackApp $session $oldStart $oldExe $oldCtl $oldHash
+$old = Start-RollbackApp $session $oldStart $oldExe $oldCtl $oldHash '0.0.526'
 Assert-That ((Process-Sid $session.pid) -ceq $runnerSid) 'Historical app runs as another user'
 $oldStatus = Read-Control $session status
 $oldStatus | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'rollback-old.status.json')

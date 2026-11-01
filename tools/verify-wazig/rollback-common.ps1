@@ -52,7 +52,7 @@ function Stop-RollbackApp($Session) {
     $null = Wait-Until { $old.Refresh(); $old.HasExited } 'owned rollback process stopped'
 }
 
-function Start-RollbackApp($Session, $Info, [string]$Exe, [string]$Ctl, [string]$Hash) {
+function Start-RollbackApp($Session, $Info, [string]$Exe, [string]$Ctl, [string]$Hash, [string]$Version = '0.0.526') {
     $Info.Environment['WAZIG_VERIFY_RESTART'] = $Session.id
     Assert-That ($Info.Environment['LOCALAPPDATA'] -ceq $local -and $Info.Environment['WAZIG_VERIFY_ROOT'] -ceq $Session.root) 'Rollback profile changed'
     Assert-That ((Get-FileHash $Exe -Algorithm SHA256).Hash -ceq $Hash) 'Rollback executable changed'
@@ -62,6 +62,7 @@ function Start-RollbackApp($Session, $Info, [string]$Exe, [string]$Ctl, [string]
     $Session.exe = $Exe
     $Session.ctl = $Ctl
     $Session.sha256 = $Hash
+    $Session.expected_version = $Version
     $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'session.json')
     $null = Wait-Until { $child.Refresh(); if ($child.HasExited) { throw "Rollback app exited: $($child.ExitCode)" }; $child.MainWindowHandle -ne [IntPtr]::Zero } 'rollback app window'
     [VerifyWindow]::ShowWindow($child.MainWindowHandle, 3) | Out-Null
