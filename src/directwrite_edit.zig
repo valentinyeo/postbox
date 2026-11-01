@@ -68,10 +68,8 @@ pub fn contentHeight(hwnd: win.HWND, minimum: i32) i32 {
     defer _ = win.RestoreDC(dc, saved);
     _ = win.SelectObject(dc, host.font());
     const rect = host.textRect();
-    var client: win.RECT = undefined;
-    _ = win.GetClientRect(hwnd, &client);
     const lines = @max(1, host.send(win.EM_GETLINECOUNT, 0, 0));
-    return @max(minimum, @as(i32, @intCast(lines)) * host.lineHeight(dc) + rect.top + client.bottom - rect.bottom);
+    return @max(minimum, @as(i32, @intCast(lines)) * host.lineHeight(dc) + 2 * rect.top);
 }
 
 const Host = struct {
