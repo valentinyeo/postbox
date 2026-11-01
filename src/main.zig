@@ -5655,10 +5655,6 @@ fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) !void {
         std.mem.writeInt(u64, raw_id[0..8], digest, .little);
         std.mem.writeInt(u64, raw_id[8..16], digest ^ 0x2545f4914f6cdd1d, .little);
         fresh_id = outbox.hexId(raw_id);
-        if (verification_fixture) {
-            var marker_buffer: [160]u8 = undefined;
-            if (std.fmt.bufPrint(&marker_buffer, "resend: fresh client id {s} for {s}", .{ fresh_id[0..], id })) |line| appendLaunchLog(a, line) else |_| {}
-        }
         retry.entry.id = fresh_id;
         retry.entry.client_msg_id.set("");
         retry.phase = .ready;
