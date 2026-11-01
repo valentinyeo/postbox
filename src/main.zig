@@ -15797,13 +15797,7 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
             a.compose_pill = @bitCast(a.compose_geometry.box);
             const inner = a.compose_geometry.text;
             _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
-            var rect_bottom = inner.bottom - inner.top - px(a, 8);
-            const box = a.compose_geometry.box;
-            if (box.bottom - box.top > px(a, compose_layout.edit_min_height)) {
-                const icons_top = a.compose_geometry.attach.top - inner.top - px(a, 4);
-                rect_bottom = @min(rect_bottom, @max(px(a, 8), icons_top));
-            }
-            var rect = win.RECT{ .left = px(a, 2), .top = px(a, 8), .right = @max(px(a, 2), inner.right - inner.left - px(a, 2)), .bottom = @max(px(a, 8), rect_bottom) };
+            var rect = win.RECT{ .left = px(a, 2), .top = px(a, 8), .right = @max(px(a, 2), inner.right - inner.left - px(a, 2)), .bottom = @max(px(a, 8), inner.bottom - inner.top - px(a, 8)) };
             _ = win.SendMessageW(hwnd, win.EM_SETRECTNP, 0, @bitCast(@intFromPtr(&rect)));
         }
     }
