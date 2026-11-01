@@ -9,8 +9,14 @@ function Record-InlineStage($Session, $Record) {
     Save-InlineStages $Session
 }
 
+function Get-InlineApp($Session) {
+    return Wait-Until {
+        try { Get-App $Session } catch { $null }
+    } 'inline links app window'
+}
+
 function Focus-InlineApp($Session) {
-    $app = Get-App $Session
+    $app = Get-InlineApp $Session
     $null = Wait-Until {
         [VerifyWindow]::ForceForeground($app.MainWindowHandle) | Out-Null
         $foreground = [VerifyWindow]::GetForegroundWindow()
@@ -43,7 +49,7 @@ function Screen-InlinePoint($Session, [int]$X, [int]$Y) {
 }
 
 function Send-InlineNative($Session, [scriptblock]$Send) {
-    $app = Get-App $Session
+    $app = Get-InlineApp $Session
     foreach ($attempt in 1..10) {
         try {
             & $Send
