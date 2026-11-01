@@ -121,6 +121,9 @@ def verify_identity(data):
             assert set(wire['body']) == {'chat', 'text', 'reply_to', 'client_id'}
             assert not captured['payload'] and not row['attachment_ready'] and not row['file'] and not row['owned_file']
             assert not row['ptt'] and row['voice_seconds'] == 0 and row['file_bytes'] == 0
+        if manual:
+            original = initial[text_id if wire['body']['text'] == 'Identity fixture' else file_id][0]
+            assert all(row[key] == original[key] for key in FIELDS - MUTABLE - {'id'})
     assert [len(initial[k]) for k in (text_id, second_id, file_id, text_retry_id, file_retry_id)] == [4, 1, 4, 1, 1]
     for client_id in (text_id, file_id):
         assert all(fingerprint(r) == fingerprint(initial[client_id][0]) for r in initial[client_id])
