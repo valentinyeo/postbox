@@ -82,7 +82,8 @@ if ($beforeRename) {
     Assert-That ((Test-Path $legacy) -and (Get-FileHash $legacy).Hash -ceq (Get-FileHash (Join-Path $session.evidence 'crash-seed.jsonl')).Hash) 'Old app changed pre-rename journal'
     Copy-Item $legacy (Join-Path $session.evidence 'crash-source-after-old.jsonl')
 }
-$null = Start-RollbackApp $session $start $newExe $newCtl $newHash
+$releaseVersion = if ($env:VERIFY_VERSION) { $env:VERIFY_VERSION } else { $session.expected_version }
+$null = Start-RollbackApp $session $start $newExe $newCtl $newHash $releaseVersion
 $null = Read-Control $session select -Arguments @('fixture-alpha', '--provider', 'slack')
 $null = Wait-Until { (Read-Control $session status).selected.id -ceq 'fixture-alpha' } 'migration recovery chat'
 $status = Read-Control $session status
