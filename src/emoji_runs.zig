@@ -25,7 +25,6 @@ pub fn emojiUnitAt(text: []const u16, index: usize) TextUnit {
     return .{ .emoji = isEmojiCodepoint(unit), .len = 1 };
 }
 
-
 pub fn splitRuns(text: []const u16, runs: []Run) usize {
     var count: usize = 0;
     var index: usize = 0;
