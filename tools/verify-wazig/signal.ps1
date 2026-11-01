@@ -135,6 +135,10 @@ function Invoke-SignalJourney($Session, [string]$Messages) {
         [System.Threading.Thread]::Sleep(500)
     }
     $archiveTrace | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Session.evidence 'archive-trace.json')
+    foreach ($logName in @('launch-log.txt', 'launch-log.old.txt')) {
+        $logPath = Join-Path $Session.root "local/Messages/$logName"
+        if (Test-Path $logPath) { Copy-Item $logPath (Join-Path $Session.evidence $logName) -Force }
+    }
     $null = Wait-Until {
         $state = Read-Control $Session status
         $rows = (Read-Control $Session chats).chats
