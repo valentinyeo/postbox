@@ -217,6 +217,7 @@ const command_emoji_diag = 2054;
 const command_open_image_external = 2055;
 const command_resend = 2056;
 const command_delete_unsent = 2057;
+const command_delete_message = 2058;
 const command_show_all = 2065;
 const command_show_whatsapp = 2057;
 const command_show_slack = 2058;
@@ -540,7 +541,7 @@ const PendingReaction = struct {
     retry_at_ms: u64 = 0,
 };
 
-const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar, hub_thread, hub_older };
+const WacliJobKind = enum(u8) { chats, groups, messages, reaction, slack_workspace, slack_users, slack_history, slack_replies, slack_send, slack_attach, slack_share, slack_download, slack_auth, slack_mark, cache_tag, archived_scan, kept_check, unread_probe, contacts_index, background_media, hub_send, hub_read, hub_archive, hub_media, hub_avatar, hub_thread, hub_older, hub_delete };
 const wacli_kind_count = @typeInfo(WacliJobKind).@"enum".fields.len;
 const WacliLane = enum { wacli, slack, hub_media, hub_send };
 
@@ -1021,6 +1022,7 @@ const App = struct {
     verification_migration_stop_root: []const u8 = "",
     verification_migration_stop_before_rename: bool = false,
     verification_mouse_retry: ?struct { id: [outbox.id_len]u8, attempt: u64 } = null,
+    delete_confirm_id: Utf8Text(191) = .{},
     send_seq: u64 = 0,
     failed_sends: [max_unified_failed_sends]FailedSend = [_]FailedSend{.{}} ** max_unified_failed_sends,
     failed_send_count: usize = 0,
@@ -2166,7 +2168,7 @@ fn wacliPendingSub(a: *App, kind: WacliJobKind) void {
 fn jobIsWrite(kind: WacliJobKind) bool {
     return switch (kind) {
         .reaction, .slack_send, .slack_attach, .slack_share => true,
-        .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar => true,
+        .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar, .hub_delete => true,
         else => false,
     };
 }
@@ -4611,6 +4613,48 @@ fn pruneFailedSends(a: *App, key: chat_key.Key) void {
         a.failed_sends[a.failed_send_count] = .{};
         persistFileOutbox(a);
     }
+}
+
+fn confirmMessageDelete(a: *App, index: usize) void {
+    if (!unifiedHub(a) or index >= a.message_count or a.selected_chat >= a.chat_count) return;
+    const message = &a.messages[index];
+    if (!message.from_me or !std.mem.eql(u8, message.id.slice(), a.delete_confirm_id.slice())) {
+        a.delete_confirm_id.set(a.allocator, message.id.slice());
+        setStatus(a, "Tap Delete for everyone again to remove it everywhere");
+        return;
+    }
+    a.delete_confirm_id = .{};
+    var job = WacliJob{ .kind = .hub_delete, .account = a.cache_tag };
+    job.jid.set(a.chats[a.selected_chat].jid.slice());
+    job.msg_id.set(message.id.slice());
+    var id: [outbox.id_len]u8 = undefined;
+    mintSendId(a, &id);
+    job.client_id.set(&id);
+    if (!wacliEnqueue(a, job, true)) {
+        setStatus(a, "Could not delete that message");
+        return;
+    }
+    setStatus(a, "Deleting for everyone");
+}
+
+fn applyHubDelete(a: *App, result: *const WacliResult) void {
+    const id = result.msg_id.slice();
+    if (result.ok) {
+        for (a.messages[0..a.message_count]) |*message| {
+            if (!std.mem.eql(u8, message.id.slice(), id)) continue;
+            message.revoked = true;
+            message.text.set(a.allocator, "Message deleted");
+            break;
+        }
+        if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+        setStatus(a, "Message deleted for everyone");
+        return;
+    }
+    setStatus(a, switch (result.http_status) {
+        404 => "This version of the message service cannot delete yet",
+        400, 403 => "That message cannot be deleted for everyone",
+        else => "Could not delete that message",
+    });
 }
 
 fn restoreFailedSendText(a: *App, failed: *const PendingSend) void {
@@ -12994,6 +13038,8 @@ fn openReactionMenu(a: *App, x: i32, y: i32) void {
         appendMessageMenuItem(menu, command_resend, lit("Send again"));
         appendMessageMenuItem(menu, command_delete_unsent, lit("Delete unsent message"));
     }
+    const sent_own = if (a.selected_message) |selected| selected < a.message_count and a.messages[selected].from_me and a.messages[selected].send_state == .sent and !a.messages[selected].revoked else false;
+    if (unifiedHub(a) and sent_own) appendMessageMenuItem(menu, command_delete_message, lit("Delete for everyone"));
     appendMessageMenuItem(menu, 0, null);
     addReactionItems(menu);
     a.reaction_row_rect = null;
@@ -13006,6 +13052,10 @@ fn openReactionMenu(a: *App, x: i32, y: i32) void {
     }
     if (choice == command_delete_unsent) {
         if (a.selected_message) |selected| discardUnsentMessage(a, selected);
+        return;
+    }
+    if (choice == command_delete_message) {
+        if (a.selected_message) |selected| confirmMessageDelete(a, selected);
         return;
     }
     if (choice == command_reply) {
@@ -22780,6 +22830,7 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
     switch (result.kind) {
         .hub_thread => applyHubThreadPage(a, result),
         .hub_older => applyHubOlderPage(a, result),
+        .hub_delete => applyHubDelete(a, result),
         .hub_send => {
             if (unifiedHub(a)) return finishUnifiedSend(a, result);
             if (a.pending_send_count == 0 or !std.mem.eql(u8, &a.pending_sends[0].id, result.msg_id.slice())) return;
@@ -23047,6 +23098,7 @@ fn unifiedHubRequest(a: *App, allocator: std.mem.Allocator, job: *const WacliJob
         .messages, .background_media => hub.messages(allocator, jid, std.fmt.parseInt(usize, hubArg(job, "--limit", "80"), 10) catch 80, ""),
         .unread_probe => hub.messages(allocator, jid, 20, ""),
         .reaction => hub.react(allocator, jid, job.msg_id.slice(), job.extra.slice(), job.client_id.slice()),
+        .hub_delete => hub.deleteMessage(allocator, jid, job.msg_id.slice(), job.client_id.slice()),
         .hub_read => hub.markRead(allocator, jid, job.msg_id.slice()),
         .hub_archive => hub.archive(allocator, jid, std.mem.eql(u8, job.extra.slice(), "true")),
         .hub_media => hub.binary(allocator, jid, job.msg_id.slice()),

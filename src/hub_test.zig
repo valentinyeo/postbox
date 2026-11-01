@@ -731,3 +731,21 @@ test "IGSH-745 installation names precede row names for history quotes and threa
         try std.testing.expect(std.mem.indexOf(u8, rendered, raw_id) == null);
     }
 }
+
+test "delete for everyone posts one scoped intent" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const request = try hub.deleteMessage(allocator, chat, "ABC4", client_id);
+    try std.testing.expectEqualStrings("POST", request.method);
+    try std.testing.expectEqualStrings("/v1/wazig/delete", request.path);
+    const body = try std.json.parseFromSlice(std.json.Value, allocator, request.body, .{});
+    defer body.deinit();
+    try std.testing.expectEqualStrings(chat, body.value.object.get("chat").?.string);
+    try std.testing.expectEqualStrings("ABC4", body.value.object.get("msg").?.string);
+    try std.testing.expectEqualStrings(client_id, body.value.object.get("client_id").?.string);
+    try std.testing.expectEqual(@as(usize, 3), body.value.object.count());
+    try std.testing.expectError(error.InvalidId, hub.deleteMessage(allocator, chat, "", client_id));
+    try std.testing.expectError(error.InvalidSend, hub.deleteMessage(allocator, chat, "ABC4", ""));
+    try std.testing.expectError(error.InvalidId, hub.deleteMessage(allocator, "", "ABC4", client_id));
+}

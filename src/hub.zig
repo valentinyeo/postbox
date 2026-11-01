@@ -132,6 +132,12 @@ pub fn react(allocator: std.mem.Allocator, chat: []const u8, msg: []const u8, em
     return .{ .method = "POST", .path = "/v1/wazig/react", .body = try std.json.Stringify.valueAlloc(allocator, .{ .chat = chat, .msg = msg, .emoji = emoji, .client_id = client_id }, .{}) };
 }
 
+pub fn deleteMessage(allocator: std.mem.Allocator, chat: []const u8, msg: []const u8, client_id: []const u8) !Request {
+    try validWrite(chat, client_id);
+    try validId(msg);
+    return .{ .method = "POST", .path = "/v1/wazig/delete", .body = try std.json.Stringify.valueAlloc(allocator, .{ .chat = chat, .msg = msg, .client_id = client_id }, .{}) };
+}
+
 pub fn binary(allocator: std.mem.Allocator, chat: []const u8, message_id: ?[]const u8) !Request {
     try validId(chat);
     const c = try bridge.encode(allocator, chat);
