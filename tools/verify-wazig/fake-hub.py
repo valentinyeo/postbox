@@ -218,13 +218,16 @@ class Handler(bridge.Handler):
                     count = self.state.identity_file_attempts.get(client_id, 0) + 1
                     self.state.identity_file_attempts[client_id] = count
                     self.state.identity_collision = True
+                    if getattr(self.state, 'identity_file_first', None) is None:
+                        self.state.identity_file_first = client_id
+                    first_intent = client_id == self.state.identity_file_first
             if mismatch:
                 self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False, duplicate=True, file_sha256=digest, file_size=len(image))
                 return
-            if count <= 4:
-                self.respond(409, {'client_id': client_id, 'status': 'unknown'}, body=body, accepted=count == 1, duplicate=count > 1, file_sha256=digest, file_size=len(image))
+            if first_intent and count <= 4:
+                self.respond(500, {'error': 'identity file unconfirmed'}, body=body, accepted=count == 1, duplicate=count > 1, file_sha256=digest, file_size=len(image))
             else:
-                self.respond(200, {'client_id': client_id, 'msg_id': 'identity-file', 'ts': self.state.stamp, 'status': 'sent'}, body=body, accepted=False, duplicate=True, file_sha256=digest, file_size=len(image))
+                self.respond(200, {'client_id': client_id, 'msg_id': 'identity-file', 'ts': self.state.stamp, 'status': 'sent'}, body=body, accepted=not first_intent, duplicate=False, file_sha256=digest, file_size=len(image))
             return
         body = json.loads(data)
         if self.path == '/v1/wazig/archive-batch':
@@ -271,7 +274,7 @@ class Handler(bridge.Handler):
                 self.respond(409, {'error': 'identity payload mismatch'}, body=body, accepted=False, duplicate=True)
                 return
             if first_intent and count <= 4:
-                self.respond(409, {'client_id': client_id, 'status': 'unknown'}, body=body, accepted=count == 1, duplicate=count > 1)
+                self.respond(500, {'error': 'identity fixture unconfirmed'}, body=body, accepted=count == 1, duplicate=count > 1)
             else:
                 self.respond(200, reply, body=body, accepted=new_intent, duplicate=not new_intent)
             return

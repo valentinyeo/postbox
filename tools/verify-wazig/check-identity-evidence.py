@@ -70,15 +70,18 @@ def verify_identity(data):
     files = [r for r in sends if r['body']['text'] == 'Identity file']
     assert len(text) == 6 and len(files) == 5 and len(sends) == 11
     text_id, second_id, file_id = text[0]['body']['client_id'], text[-1]['body']['client_id'], files[0]['body']['client_id']
-    assert len({text_id, second_id, file_id}) == 3
-    assert all(r['body']['client_id'] == text_id for r in text[:5])
-    assert all(r['body']['client_id'] == file_id for r in files)
-    assert [r['status'] for r in text] == [409, 409, 409, 409, 200, 200]
-    assert [r['status'] for r in files] == [409, 409, 409, 409, 200]
-    assert sum(r['accepted'] for r in text) == 2 and sum(r['accepted'] for r in files) == 1
-    assert all(r['body'] == text[0]['body'] for r in text[:5])
+    text_retry_id, file_retry_id = text[4]['body']['client_id'], files[4]['body']['client_id']
+    assert len({text_id, second_id, file_id, text_retry_id, file_retry_id}) == 5
+    assert all(r['body']['client_id'] == text_id for r in text[:4])
+    assert all(r['body']['client_id'] == file_id for r in files[:4])
+    assert [r['status'] for r in text] == [500, 500, 500, 500, 200, 200]
+    assert [r['status'] for r in files] == [500, 500, 500, 500, 200]
+    assert sum(r['accepted'] for r in text) == 3 and sum(r['accepted'] for r in files) == 2
+    assert all(r['body'] == text[0]['body'] for r in text[:4])
+    assert dict(text[4]['body'], client_id=text_id) == text[0]['body']
     assert dict(text[-1]['body'], client_id=text_id) == text[0]['body']
-    assert all(r['body'] == files[0]['body'] for r in files)
+    assert all(r['body'] == files[0]['body'] for r in files[:4])
+    assert dict(files[4]['body'], client_id=file_id) == files[0]['body']
     assert len(data['captures']) == len(sends)
     initial = {}
     for wire, captured in zip(sends, data['captures']):
@@ -87,8 +90,8 @@ def verify_identity(data):
         assert index['id'] == client_id
         row = record(captured['snapshot'], client_id, data['backend'])
         assert row['phase'] == 'uncertain' and row['attempt_serial'] == index['attempt']
-        assert index['attempt'] == len(initial.get(client_id, [])) + 1
-        manual = client_id in (text_id, file_id) and index['attempt'] == 5
+        manual = client_id in (text_retry_id, file_retry_id) and index['attempt'] == 5
+        assert index['attempt'] == (5 if manual else len(initial.get(client_id, [])) + 1)
         dispatch = dict(id=client_id, attempt=index['attempt'], mouse=manual)
         assert index['dispatch_marker'] == dispatch
         assert data['dispatch_markers'][f"verification-dispatch-{client_id}-{index['attempt']}.json"] == dispatch
@@ -118,10 +121,12 @@ def verify_identity(data):
             assert set(wire['body']) == {'chat', 'text', 'reply_to', 'client_id'}
             assert not captured['payload'] and not row['attachment_ready'] and not row['file'] and not row['owned_file']
             assert not row['ptt'] and row['voice_seconds'] == 0 and row['file_bytes'] == 0
-    assert [len(initial[k]) for k in (text_id, second_id, file_id)] == [5, 1, 5]
+    assert [len(initial[k]) for k in (text_id, second_id, file_id, text_retry_id, file_retry_id)] == [4, 1, 4, 1, 1]
     for client_id in (text_id, file_id):
         assert all(fingerprint(r) == fingerprint(initial[client_id][0]) for r in initial[client_id])
-        assert [r['attempts'] for r in initial[client_id]] == [0, 1, 2, 3, 0]
+        assert [r['attempts'] for r in initial[client_id]] == [0, 1, 2, 3]
+    for client_id in (text_retry_id, file_retry_id):
+        assert initial[client_id][0]['attempts'] == 0 and initial[client_id][0]['phase'] == 'uncertain'
     for source, client_id in ((data['text_source'], text_id), (data['second_source'], second_id), (data['file_source'], file_id)):
         selected = source['selected']
         row = initial[client_id][0]

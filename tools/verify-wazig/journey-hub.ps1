@@ -62,7 +62,7 @@ function Click-IdentityBubble($Session, $Bubble, [string]$Name, [string]$Label, 
     $requests = @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq $Label })
     $requests | ConvertTo-Json -Depth 12 -AsArray | Set-Content (Join-Path $Session.evidence "$Name-preclick.requests.json")
     Assert-That ($requests.Count -eq 4) 'Retry arrived before manual input'
-    Assert-That (-not (Test-Path (Join-Path $messages "verification-retry-$Id-5.json"))) 'Retry marker appeared before manual input'
+    Assert-That (@(Get-ChildItem -Path $messages -Filter 'verification-retry-*.json' -ErrorAction SilentlyContinue).Count -eq 0) 'Retry marker appeared before manual input'
     Assert-That (-not (Test-Path (Join-Path $messages "verification-dispatch-$Id-5.json"))) 'Retry dispatched before manual input'
     [VerifyMenus]::Click($Session.pid, $point.X, $point.Y, $false)
     Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: explicit identity retry x=$($point.X) y=$($point.Y)"
@@ -109,8 +109,10 @@ $null = Wait-Until {
         (Read-Control $session status).unified_snapshot.inflight -eq 0
 } 'explicit retry acknowledged'
 $after = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity fixture' })
-Assert-That ($after.Count -eq 5 -and @($after.body.client_id | Select-Object -Unique).Count -eq 1 -and $after[-1].body.client_id -eq $id) 'Explicit retry changed identity'
-Assert-That (@($after | Where-Object accepted -eq $true).Count -eq 1) 'Explicit retry duplicated delivery'
+$fresh = $after[-1].body.client_id
+Assert-That ($after.Count -eq 5 -and $fresh -cmatch '^[0-9a-f]{32}$' -and $fresh -cne $id) 'Explicit retry reused the failed identity'
+Assert-That (@($after | Where-Object { $_.body.client_id -ceq $id }).Count -eq 4) 'Explicit retry resent the failed identity'
+Assert-That (@($after | Where-Object accepted -eq $true).Count -eq 2) 'Explicit retry was not taken as a new intent'
 $null = Wait-Until { (Read-Control $session status).pending_sends -eq 0 } 'retry completion saved'
 @{ idle_start = $textIdleStart.ToString('o'); click = $textClickAt.ToString('o'); before = $afterRestart.Count; after = $after.Count } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'identity-boundary.json')
 Select-IdentityReply $session
@@ -173,7 +175,9 @@ $null = Wait-Until {
         (Read-Control $session status).pending_sends -eq 0 -and (Read-Control $session status).unified_snapshot.inflight -eq 0
 } 'file retry acknowledged'
 $fileSends = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Identity file' })
-Assert-That ($fileSends.Count -eq 5 -and @($fileSends.body.client_id | Select-Object -Unique).Count -eq 1 -and $fileSends[-1].body.client_id -eq $fileId) 'File retry changed identity'
-Assert-That (@($fileSends.file_sha256 | Select-Object -Unique).Count -eq 1 -and @($fileSends | Where-Object accepted -eq $true).Count -eq 1) 'File retry changed bytes or duplicated delivery'
+$fileFresh = $fileSends[-1].body.client_id
+Assert-That ($fileSends.Count -eq 5 -and $fileFresh -cmatch '^[0-9a-f]{32}$' -and $fileFresh -cne $fileId) 'File retry reused the failed identity'
+Assert-That (@($fileSends | Where-Object { $_.body.client_id -ceq $fileId }).Count -eq 4) 'File retry resent the failed identity'
+Assert-That (@($fileSends.file_sha256 | Select-Object -Unique).Count -eq 1 -and @($fileSends | Where-Object accepted -eq $true).Count -eq 2) 'File retry changed bytes or was not taken as a new intent'
 @{ idle_start = $fileIdleStart.ToString('o'); click = $fileClickAt.ToString('o'); before = 4; after = $fileSends.Count } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'file-identity-boundary.json')
 Hub-Pass $session terminal-file-identity-restart
