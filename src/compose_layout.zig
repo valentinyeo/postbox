@@ -23,8 +23,7 @@ pub fn computeScaled(dragged: i32, content_height: i32, client_height: i32, prev
     const room_for_edit: i32 = client_height - scale(canvas_min_height, dpi) - scale(strip_padding, dpi) - band;
     if (room_for_edit > 0 and edit > room_for_edit) edit = room_for_edit;
     if (edit < min_height) edit = @min(min_height, @max(0, room_for_edit));
-    const icon_band: i32 = if (edit > min_height) scale(@import("design_tokens.zig").button_size + 12, dpi) else 0;
-    return .{ .edit_height = edit, .strip_height = edit + scale(strip_padding, dpi) + band + icon_band };
+    return .{ .edit_height = edit, .strip_height = edit + scale(strip_padding, dpi) + band };
 }
 
 pub const Rect = extern struct {
