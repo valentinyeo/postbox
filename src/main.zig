@@ -22914,13 +22914,13 @@ fn readHubChats(a: *App, archived: bool) ?[]u8 {
     a.wacli_mutex.lockUncancelable(a.io);
     const account = a.hub_account;
     a.wacli_mutex.unlock(a.io);
-    const request = if (unifiedHub(a)) hub.chats(allocator, archived, 250) catch return null else wa_hub.chats(allocator, account.slice(), archived, 250) catch return null;
+    const request = if (unifiedHub(a)) hub.chats(allocator, archived, 500) catch return null else wa_hub.chats(allocator, account.slice(), archived, 500) catch return null;
     const client = a.hub_client orelse return null;
     var response = client.call(allocator, request) catch return null;
     defer response.deinit(allocator);
     if (response.status != 200) return null;
     const normalized = if (unifiedHub(a)) blk: {
-        const other = client.call(allocator, hub.chats(allocator, !archived, 250) catch return null) catch return null;
+        const other = client.call(allocator, hub.chats(allocator, !archived, 500) catch return null) catch return null;
         if (other.status != 200) return null;
         break :blk hub.archivedChats(allocator, if (archived) response.body else other.body, if (archived) other.body else response.body) catch return null;
     } else wa_hub.normalize(allocator, response.body, account.slice(), .chats) catch return null;
