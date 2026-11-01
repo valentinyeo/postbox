@@ -230,15 +230,16 @@ def negative_controls(data):
         return m['stages'][case][stage]['snapshot']['records'][0]
 
     def change_before_only(m, name):
+        identity = None
         if name == 'checkpoint':
             before = m['checkpoint_before']
             digest = before['meta']
         else:
-            identity = m['stages'][name]['blocked']['snapshot']['records'][0]['id']
+            identity = next(r['id'] for r in m['stages'][name]['blocked']['snapshot']['records'] if r['text'] == CASES[name][0])
             attempt = CASES[name][1]
             before = next(c for c in m['captures'] if c['index']['id'] == identity and c['index']['attempt'] == attempt)
             digest = before['index']
-        row = before['snapshot']['records'][0]
+        row = before['snapshot']['records'][0] if identity is None else next(r for r in before['snapshot']['records'] if r['id'] == identity)
         row['attempts'] = row['attempts'] - 1 if row['attempts'] else 1
         before['raw'] = json.dumps(before['snapshot'], ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         digest['snapshot_sha256'] = hashlib.sha256(before['raw']).hexdigest()
