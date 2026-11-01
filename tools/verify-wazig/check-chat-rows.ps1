@@ -14,10 +14,12 @@ $historicalMain = (& git show '44c90f3:src/main.zig') -join "`n"
 if ($LASTEXITCODE -ne 0) { throw 'Historical chat painter unavailable' }
 $historicalShapes = (& git show '44c90f3:src/smooth_shapes.zig') -join "`n"
 if ($LASTEXITCODE -ne 0) { throw 'Historical smooth shapes unavailable' }
+$end = $current.IndexOf('test "', $start + $marker.Length)
+$block = if ($end -gt $start) { $current.Substring($start, $end - $start) } else { $current.Substring($start) }
 try {
     [IO.File]::WriteAllText($mainPath, $historicalMain)
     [IO.File]::WriteAllText($shapesPath, $historicalShapes)
-    [IO.File]::WriteAllText($path, $historical + "`n" + $current.Substring($start))
+    [IO.File]::WriteAllText($path, $historical + "`n" + $block)
     $output = & zig test src/text_draw.zig -lc -lgdi32 -luser32 -lmsimg32 --test-filter ISSUE-462 2>&1
     $exit = $LASTEXITCODE
     $output | ForEach-Object { Write-Host "negative control, old renderer must fail: $_" }
