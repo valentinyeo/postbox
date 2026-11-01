@@ -106,12 +106,12 @@ def verify_identity(data):
         assert wire['body']['chat'] == row['jid'] and wire['body']['text'] == row['text']
         assert wire['body']['reply_to'] == row['reply_to']
         assert wire['body']['client_id'] == row['id']
-        if client_id == file_id:
+        if wire['body']['text'] == 'Identity file':
             assert row['attachment_ready'] and not row['ptt'] and row['voice_seconds'] == 0
             assert wire['body']['account'] == 'hub' and wire['body']['ptt'] == 'false'
             assert wire['body']['file'] == row['wire_filename'] == PureWindowsPath(row['file']).name
             owned = PureWindowsPath(row['owned_file'])
-            assert owned.name == 'payload' and owned.parent.name == client_id and owned.parent.parent.name == 'new'
+            assert owned.name == 'payload' and owned.parent.name == file_id and owned.parent.parent.name == 'new'
             assert owned.parent.parent.parent.name == 'files' and owned.parent.parent.parent.parent.parent.name == 'unified-journal-v2'
             payload = captured['payload']
             assert payload == data['original'] == data['held_payload']
