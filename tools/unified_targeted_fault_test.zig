@@ -348,7 +348,7 @@ test "fourth retryable exhaustion repeatedly fails held save" {
         const expected = f.a.unified_snapshot.?.records[0];
         const bytes = try std.testing.allocator.dupe(u8, disk[0..disk_len]);
         defer std.testing.allocator.free(bytes);
-        var result = WacliResult{ .kind = .hub_send, .provider = .slack, .gen = 4, .ok = false, .http_status = 409 };
+        var result = WacliResult{ .kind = .hub_send, .provider = .slack, .gen = 4, .ok = false, .http_status = 500 };
         result.msg_id.set("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         finishUnifiedSend(f.a, &result);
         try std.testing.expect(f.a.unified_unsaved_result.?.kind == .retryable);

@@ -269,17 +269,20 @@ test "stale result never retires active intent" {
     try std.testing.expectEqual(@as(usize, 1), f.a.save_calls);
 }
 
-test "retryable result commits ambiguity and bounded backoff" {
+test "an unknown send status holds the intent for his tap" {
     const f = try Fixture.init();
     defer f.deinit();
     beginUnifiedSend(f.a, 100);
     const result = completedResult(f, false, 409);
     finishUnifiedSend(f.a, &result);
     const record = &f.a.unified_snapshot.?.records[0];
-    try std.testing.expectEqual(unified_snapshot.Phase.ready, record.phase);
+    try std.testing.expectEqual(unified_snapshot.Phase.held, record.phase);
     try std.testing.expect(record.entry.ambiguous);
     try std.testing.expectEqual(@as(u8, 1), record.entry.attempts);
-    try std.testing.expectEqual(@as(u64, 4_000), record.not_before_ms);
+    try std.testing.expectEqual(@as(u64, 0), record.not_before_ms);
+    tickUnifiedOutbox(f.a);
+    try std.testing.expectEqual(@as(usize, 1), f.a.enqueue_calls);
+    try std.testing.expectEqual(unified_snapshot.Phase.held, f.a.unified_snapshot.?.records[0].phase);
 }
 
 test "missing file is held before later text dispatch" {
