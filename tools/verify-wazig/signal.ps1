@@ -126,6 +126,15 @@ function Invoke-SignalJourney($Session, [string]$Messages) {
     Invoke-PaletteCommand $Session 'Verification Signal'
     $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'signal:fixture-contact' } 'Signal chat restored'
     Send-Keys $Session '^e'
+    $archiveTrace = @()
+    foreach ($step in 1..6) {
+        $traced = Read-Control $Session status
+        $tracedRows = (Read-Control $Session chats).chats
+        $archiveTrace += @{ step = $step; utc = [DateTime]::UtcNow.ToString('o'); chat_count = $traced.chat_count; rows = @($tracedRows.Count); pending = $traced.pending_archives; archived = $traced.show_archived; view = $traced.current_view; selected = $traced.selected.id }
+        Save-Screen $Session "archive-trace-$step"
+        [System.Threading.Thread]::Sleep(500)
+    }
+    $archiveTrace | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Session.evidence 'archive-trace.json')
     $null = Wait-Until {
         $state = Read-Control $Session status
         $rows = (Read-Control $Session chats).chats
