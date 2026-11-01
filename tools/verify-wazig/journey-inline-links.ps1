@@ -42,6 +42,20 @@ function Screen-InlinePoint($Session, [int]$X, [int]$Y) {
     return $point
 }
 
+function Send-InlineNative($Session, [scriptblock]$Send) {
+    $app = Get-App $Session
+    foreach ($attempt in 1..10) {
+        try {
+            & $Send
+            return
+        } catch {
+            [VerifyWindow]::ForceForeground($app.MainWindowHandle) | Out-Null
+            [System.Threading.Thread]::Sleep(200)
+        }
+    }
+    & $Send
+}
+
 function Invoke-InlineClick($Session, [int]$X, [int]$Y, [string]$Name, [string]$Url = '', [bool]$Drag = $false, [bool]$Control = $false) {
     Focus-InlineApp $Session
     $before = Read-Control $Session status
@@ -51,9 +65,9 @@ function Invoke-InlineClick($Session, [int]$X, [int]$Y, [string]$Name, [string]$
     $end = Screen-InlinePoint $Session $endX $Y
     $path = Join-Path $Session.evidence "inline-input-$Name.json"
     @{ name=$Name; point=@($X,$Y); end=@($endX,$Y); before=$before.canvas_up_count; receipts=@(Read-InlineReceipts $Session) } | ConvertTo-Json -Depth 32 | Set-Content $path
-    if ($Drag) { [InlineLinksNative]::Drag($Session.pid, $point.X, $point.Y, $end.X, $end.Y) }
-    elseif ($Control) { [InlineLinksNative]::ControlClick($Session.pid, $point.X, $point.Y) }
-    else { [InlineLinksNative]::Click($Session.pid, $point.X, $point.Y) }
+    if ($Drag) { Send-InlineNative $Session { [InlineLinksNative]::Drag($Session.pid, $point.X, $point.Y, $end.X, $end.Y) } }
+    elseif ($Control) { Send-InlineNative $Session { [InlineLinksNative]::ControlClick($Session.pid, $point.X, $point.Y) } }
+    else { Send-InlineNative $Session { [InlineLinksNative]::Click($Session.pid, $point.X, $point.Y) } }
     $ack = Wait-Until {
         $state = Read-Control $Session status
         if ($state.canvas_up_count -eq ($before.canvas_up_count + 1) -and [Math]::Abs($state.canvas_up_point[0] - $endX) -le 1 -and [Math]::Abs($state.canvas_up_point[1] - $Y) -le 1) { $state }
