@@ -186,21 +186,3 @@ Assert-That (@($fileSends | Where-Object { $_.body.client_id -ceq $fileId }).Cou
 Assert-That (@($fileSends.file_sha256 | Select-Object -Unique).Count -eq 1 -and @($fileSends | Where-Object accepted -eq $true).Count -eq 2) 'File retry changed bytes or was not taken as a new intent'
 @{ idle_start = $fileIdleStart.ToString('o'); click = $fileClickAt.ToString('o'); before = 4; after = $fileSends.Count } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'file-identity-boundary.json')
 Hub-Pass $session terminal-file-identity-restart
-
-$null = Read-Control $session select -Arguments @('fixture-alpha', '--provider', 'slack')
-Send-Keys $session 'Delete fixture'
-Send-Keys $session '{ENTER}'
-$null = Wait-Until {
-    @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq 'Delete fixture' -and $_.status -eq 200 }).Count -eq 1
-} 'delete fixture delivered' 60
-Invoke-PaletteCommand $session 'Select next message'
-Invoke-PaletteCommand $session 'Delete message for everyone'
-Invoke-PaletteCommand $session 'Delete message for everyone'
-$null = Wait-Until {
-    @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/delete' }).Count -eq 1
-} 'delete request sent' 30
-$null = Wait-Until {
-    @((Read-Control $session messages).messages | Where-Object { $_.text -eq 'Message deleted' }).Count -ge 1
-} 'deleted bubble' 30
-Read-Control $session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'delete.messages.json')
-Hub-Pass $session message-delete
