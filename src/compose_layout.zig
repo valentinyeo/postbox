@@ -56,16 +56,10 @@ pub fn messageColumn(pane_width: i32, dpi: i32) Rect {
     return .{ .left = left, .top = 0, .right = @max(left, pane_width - inset - margin), .bottom = 0 };
 }
 
-pub fn iconBand(dpi: i32) i32 {
-    return scale(@import("design_tokens.zig").button_size + 12, dpi);
-}
-
 pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool, dictating: bool) Layout {
     const bottom = @max(pane.top, pane.bottom - scale(11, dpi));
-    const multiline = edit_height > scale(edit_min_height, dpi);
-    const band = if (multiline) iconBand(dpi) else 0;
     const column = messageColumn(pane.right - pane.left, dpi);
-    const box = Rect{ .left = pane.left + column.left, .top = @max(pane.top, bottom - edit_height - band), .right = pane.left + column.right, .bottom = bottom };
+    const box = Rect{ .left = pane.left + column.left, .top = @max(pane.top, bottom - edit_height), .right = pane.left + column.right, .bottom = bottom };
     const width = @max(0, box.right - box.left);
     const height = @max(0, box.bottom - box.top);
     const padding = @min(scale(16, dpi), @divTrunc(width, 12));
@@ -83,7 +77,7 @@ pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool, dictatin
     const text_left = attach.right + gap;
     const voice_width = if (recording) @max(icon, @min(scale(200, dpi), dictate.left - text_left - 3 * gap - text_min - scale(8, dpi))) else icon;
     const voice = Rect{ .left = dictate.left - gap - voice_width, .top = icon_top, .right = dictate.left - gap, .bottom = icon_bottom };
-    const text = Rect{ .left = text_left, .top = box.top + @min(1, height), .right = @max(text_left, voice.left - gap - @min(scale(8, dpi), icon)), .bottom = @max(box.top + @min(1, height), box.bottom - band - 1) };
+    const text = Rect{ .left = text_left, .top = box.top + @min(1, height), .right = @max(text_left, voice.left - gap - @min(scale(8, dpi), icon)), .bottom = @max(box.top + @min(1, height), box.bottom - 1) };
     return .{ .box = box, .attach = attach, .text = text, .voice = voice, .dictate = dictate, .emoji = emoji, .send = send };
 }
 
@@ -170,10 +164,9 @@ test "one box contains disjoint text and bottom anchored icons at narrow and wid
                     }
                     try testing.expectEqual(slots.box.left + scale(16, dpi), slots.attach.left);
                     try testing.expectEqual(slots.box.right - scale(16, dpi), slots.send.right);
-                    const multiline = size.edit_height > scale(edit_min_height, dpi);
-                    try testing.expectEqual(size.edit_height + (if (multiline) iconBand(dpi) else 0), slots.box.bottom - slots.box.top);
+                    try testing.expectEqual(size.edit_height, slots.box.bottom - slots.box.top);
                     try testing.expectEqual(slots.box.top + 1, slots.text.top);
-                    try testing.expectEqual(slots.box.bottom - (if (multiline) iconBand(dpi) else 0) - 1, slots.text.bottom);
+                    try testing.expectEqual(slots.box.bottom - 1, slots.text.bottom);
                 }
             }
         }
@@ -189,16 +182,10 @@ test "composer border centreline has equal inset on all four sides at 100 125 15
             const centreline = Rect{ .left = border.left, .top = border.top, .right = border.right - 1, .bottom = border.bottom - 1 };
             const insets = [_]i32{ centreline.left - box.left, centreline.top - box.top, box.right - centreline.right, box.bottom - centreline.bottom };
             for (insets) |inset| try testing.expectEqual(@as(i32, 0), inset);
-            const slots = arrange(.{ .left = box.left - scale(14, dpi), .right = box.right + scale(14, dpi), .bottom = box.bottom + scale(11, dpi) }, box.bottom - box.top, dpi, false, false);
-            const text = slots.text;
-            if (box.bottom - box.top > scale(edit_min_height, dpi)) {
-                try testing.expect(text.bottom <= slots.attach.top);
-                try testing.expect(text.bottom < box.bottom and text.top >= box.top);
-            } else {
-                try testing.expectEqual(box.top + 1, text.top);
-                try testing.expectEqual(box.bottom - 1, text.bottom);
-                try testing.expectEqual(text.top - centreline.top, centreline.bottom - text.bottom);
-            }
+            const text = arrange(.{ .left = box.left - scale(14, dpi), .right = box.right + scale(14, dpi), .bottom = box.bottom + scale(11, dpi) }, box.bottom - box.top, dpi, false, false).text;
+            try testing.expectEqual(box.top + 1, text.top);
+            try testing.expectEqual(box.bottom - 1, text.bottom);
+            try testing.expectEqual(text.top - centreline.top, centreline.bottom - text.bottom);
         }
     }
 }
