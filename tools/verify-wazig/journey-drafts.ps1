@@ -92,8 +92,7 @@ $long = Read-Control $session status
 $window = (Get-Window $session).Current.BoundingRectangle
 $halfWindow = [int][Math]::Floor($window.Height / 2)
 Assert-That ($long.composer.box.bottom - $long.composer.box.top -gt [int][Math]::Floor((240 * $dpi + 48) / 96)) 'Long composer did not grow past the old fixed limit'
-$iconBand = [int][Math]::Floor((56 * $dpi + 48) / 96)
-Assert-That ($long.composer.box.bottom - $long.composer.box.top -le ($halfWindow + $iconBand)) 'Long composer grew past half the chat'
+Assert-That ($long.composer.box.bottom - $long.composer.box.top -le $halfWindow) 'Long composer grew past half the chat'
 Start-Sleep -Milliseconds 400
 $longAgain = Read-Control $session status
 Assert-That ($longAgain.composer.box.bottom - $longAgain.composer.box.top -eq $long.composer.box.bottom - $long.composer.box.top) 'Composer height kept changing after the paste'
