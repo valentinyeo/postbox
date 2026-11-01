@@ -259,11 +259,6 @@ class Handler(bridge.Handler):
                 self.state.deleted_messages.add((body['chat'], body['msg']))
             self.respond(200, {'client_id': body['client_id'], 'status': 'deleted'}, body=body, accepted=True)
             return
-        if self.path == '/v1/wazig/send' and body.get('text') == 'Delete fixture':
-            with self.state.lock:
-                self.state.message(bridge.ALPHA, 'delete-fixture', 'Delete fixture')
-            self.respond(200, {'client_id': body['client_id'], 'status': 'sent', 'msg_id': 'delete-fixture', 'ts': self.state.stamp}, body=body, accepted=True)
-            return
         if self.path == '/v1/wazig/send' and body.get('text') == 'Identity fixture':
             self.capture_identity_snapshot(body)
             with self.state.lock:
