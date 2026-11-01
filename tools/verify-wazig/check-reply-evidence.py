@@ -29,7 +29,7 @@ def check_reply(folder):
             if phase == 'replying':
                 assert state['reply']['id'] == 'REPLY-ORIGINAL'
                 assert state['reply']['sender'] == 'Fixture Sender'
-                assert state['reply']['preview'] == 'First words of the original'
+                assert state['reply']['preview'] == 'First words of the original \U0001F642'
             if phase == 'sent':
                 assert state['composer']['lines'] == 1
             if phase == 'jumped':

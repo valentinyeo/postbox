@@ -9,7 +9,7 @@ class ReplyHandler(Handler):
             return
         chat = parse_qs(url.query).get('chat', [''])[0]
         rows = [dict(MsgID='REPLY-ORIGINAL', ChatJID=chat, Timestamp=self.state.stamp,
-                     Text='First words of the original\nSecond line stays out of the preview',
+                     Text='First words of the original \U0001F642\nSecond line stays out of the preview',
                      FromMe=False, SenderName='Fixture Sender', SenderJID='fixture-sender')]
         rows.append(dict(MsgID='REPLY-ORPHAN', ChatJID=chat, Timestamp=self.state.stamp,
                          Text='Reply to an unloaded message', FromMe=False, SenderName='Fixture Sender',
@@ -21,7 +21,7 @@ class ReplyHandler(Handler):
                 rows.insert(0, dict(MsgID=reply['msg_id'], ChatJID=chat, Timestamp=reply['ts'],
                                    Text=reply['text'], FromMe=True, SenderName='You',
                                    quoted_msg_id=reply['reply_to'], quoted_sender_jid='fixture-sender',
-                                   DisplayText='> First words of the original\n' + reply['text']))
+                                   DisplayText='> First words of the original \U0001F642\n' + reply['text']))
         self.respond(200, rows)
 
     def do_POST(self):

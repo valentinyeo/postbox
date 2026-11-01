@@ -48,7 +48,7 @@ foreach ($target in @(
         if ($observed.reply.id -ceq 'REPLY-ORIGINAL') { $observed }
     } 'Reply preview missing'
     Assert-That ($state.reply.sender -ceq 'Fixture Sender') 'Reply sender missing'
-    Assert-That ($state.reply.preview -ceq 'First words of the original') 'Reply preview must use first line'
+    Assert-That ($state.reply.preview -ceq "First words of the original $([char]0xD83D)$([char]0xDE42)") 'Reply preview must use first line with its emoji'
     Assert-That ($state.reply.bar[0] -eq $state.composer.box.left -and $state.reply.bar[2] -eq $state.composer.box.right) 'Reply and composer edges differ'
     Assert-That ($state.reply.bar[3] -lt $state.composer.box.top) 'Reply bar covers composer'
     $canvasRect = [VerifyWindow+Rect]::new()
