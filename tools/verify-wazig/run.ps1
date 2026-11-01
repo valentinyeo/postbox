@@ -9,7 +9,8 @@ param(
 . "$PSScriptRoot/harness.ps1"
 Assert-That ($ExpectedProduct -in @('Postbox', 'Wazig')) 'Unknown product identity'
 $historicalFeature = $Feature -cin @('hub-rollback', 'hub-migration-crash', 'hub-migration-before-rename', 'appearance')
-if (-not $ExpectedVersion) { $ExpectedVersion = if ($ExpectedProduct -eq 'Wazig' -or $historicalFeature) { '0.0.526' } elseif ($env:VERIFY_VERSION) { $env:VERIFY_VERSION } else { '0.0.526' } }
+$releaseBin = $Bin -ceq 'zig-out/bin'
+if (-not $ExpectedVersion) { $ExpectedVersion = if ($ExpectedProduct -eq 'Wazig' -or $historicalFeature -or -not $releaseBin) { '0.0.526' } elseif ($env:VERIFY_VERSION) { $env:VERIFY_VERSION } else { '0.0.526' } }
 Assert-That ($ExpectedVersion -match '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') 'Unknown expected version'
 if ($FontBaseline) { Assert-That ($Feature -ceq 'appearance' -and $ExpectedVersion -ceq '0.9.224' -and $ExpectedProduct -ceq 'Postbox') 'Font baseline requires the published 0.9.224 appearance fixture' }
 $registry = Get-Content (Join-Path $PSScriptRoot 'journeys.json') -Raw | ConvertFrom-Json
