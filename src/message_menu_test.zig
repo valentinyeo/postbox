@@ -4,6 +4,23 @@ const lit = std.unicode.utf8ToUtf16LeStringLiteral;
 const reaction_row = 3010;
 const reaction_remove = 3007;
 const command_reply = 2020;
+const command_resend = 2056;
+const command_delete_unsent = 2057;
+const command_delete_message = 2058;
+const SendState = enum { none, pending, failed };
+const FixedId = struct {
+    buf: [32]u8 = [_]u8{0} ** 32,
+    len: usize = 0,
+    fn slice(self: *const @This()) []const u8 {
+        return self.buf[0..self.len];
+    }
+};
+const MenuMessage = struct {
+    from_me: bool = false,
+    send_state: SendState = .none,
+    revoked: bool = false,
+    id: FixedId = .{},
+};
 const command_copy_text = 2021;
 const command_copy_link = 2022;
 const quick_reactions = [_]u16{ 3000, 3001, 3002, 3003, 3004, 3005, 3006 };
@@ -19,7 +36,21 @@ const App = struct {
     brush_muted: ?usize = 12,
     font: ?*anyopaque = @ptrFromInt(16),
     reaction_row_rect: ?win.RECT = null,
+    messages: [4]MenuMessage = [_]MenuMessage{.{}} ** 4,
+    message_count: usize = 0,
+    selected_message: ?usize = null,
+    delete_confirm_id: FixedId = .{},
 };
+
+fn setStatus(_: *App, _: []const u8) void {}
+fn unifiedHub(_: *const App) bool {
+    return false;
+}
+fn resendFailedMessage(_: *App, _: usize, _: bool) bool {
+    return false;
+}
+fn discardUnsentMessage(_: *App, _: usize) void {}
+fn confirmMessageDelete(_: *App, _: usize) void {}
 const smooth = struct {
     const Context = struct {
         fn init(_: usize) @This() {
