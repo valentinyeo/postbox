@@ -22782,6 +22782,17 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 setStatus(a, "Archive operation completed");
             } else {
                 if (result.http_status == 502 and (std.mem.startsWith(u8, result.jid.slice(), "signal:") or std.mem.startsWith(u8, result.jid.slice(), "telegram:"))) {
+                    var stamp: []const u8 = "";
+                    for (a.chats[0..a.chat_count]) |*chat| {
+                        if (std.mem.eql(u8, chat.jid.slice(), result.jid.slice())) {
+                            stamp = chat.timestamp.slice();
+                            break;
+                        }
+                    }
+                    if (a.archive_state) |state| {
+                        const archived = !a.pending_archives[0].should_unarchive;
+                        if (state.setLocalArchived(chat_key.of(result), archived, stamp, false)) saveArchiveState(a);
+                    }
                     removeFirstPendingArchive(a);
                     refreshChats(a);
                     setStatus(a, "Chat archive is managed locally in Postbox");
