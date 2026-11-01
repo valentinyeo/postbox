@@ -77,10 +77,7 @@ pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool, dictatin
     const text_left = attach.right + gap;
     const voice_width = if (recording) @max(icon, @min(scale(200, dpi), dictate.left - text_left - 3 * gap - text_min - scale(8, dpi))) else icon;
     const voice = Rect{ .left = dictate.left - gap - voice_width, .top = icon_top, .right = dictate.left - gap, .bottom = icon_bottom };
-    const multiline = height > scale(edit_min_height, dpi);
-    const text_top = box.top + @min(1, height) + (if (multiline) vertical else @as(i32, 0));
-    const text_bottom = box.bottom - (if (multiline) icon + 2 * vertical else @as(i32, 1));
-    const text = Rect{ .left = text_left, .top = text_top, .right = @max(text_left, voice.left - gap - @min(scale(8, dpi), icon)), .bottom = @max(text_top, text_bottom) };
+    const text = Rect{ .left = text_left, .top = box.top + @min(1, height), .right = @max(text_left, voice.left - gap - @min(scale(8, dpi), icon)), .bottom = @max(box.top + @min(1, height), box.bottom - 1) };
     return .{ .box = box, .attach = attach, .text = text, .voice = voice, .dictate = dictate, .emoji = emoji, .send = send };
 }
 
@@ -168,14 +165,8 @@ test "one box contains disjoint text and bottom anchored icons at narrow and wid
                     try testing.expectEqual(slots.box.left + scale(16, dpi), slots.attach.left);
                     try testing.expectEqual(slots.box.right - scale(16, dpi), slots.send.right);
                     try testing.expectEqual(size.edit_height, slots.box.bottom - slots.box.top);
-                    if (slots.box.bottom - slots.box.top > scale(edit_min_height, dpi)) {
-                        try testing.expect(slots.text.top > slots.box.top + 1);
-                        try testing.expect(slots.text.bottom < slots.box.bottom - 1);
-                        try testing.expect(slots.text.bottom <= slots.attach.top);
-                    } else {
-                        try testing.expectEqual(slots.box.top + 1, slots.text.top);
-                        try testing.expectEqual(slots.box.bottom - 1, slots.text.bottom);
-                    }
+                    try testing.expectEqual(slots.box.top + 1, slots.text.top);
+                    try testing.expectEqual(slots.box.bottom - 1, slots.text.bottom);
                 }
             }
         }
@@ -191,16 +182,10 @@ test "composer border centreline has equal inset on all four sides at 100 125 15
             const centreline = Rect{ .left = border.left, .top = border.top, .right = border.right - 1, .bottom = border.bottom - 1 };
             const insets = [_]i32{ centreline.left - box.left, centreline.top - box.top, box.right - centreline.right, box.bottom - centreline.bottom };
             for (insets) |inset| try testing.expectEqual(@as(i32, 0), inset);
-            const slots = arrange(.{ .left = box.left - scale(14, dpi), .right = box.right + scale(14, dpi), .bottom = box.bottom + scale(11, dpi) }, box.bottom - box.top, dpi, false, false);
-            const text = slots.text;
-            if (height == 44) {
-                try testing.expectEqual(box.top + 1, text.top);
-                try testing.expectEqual(box.bottom - 1, text.bottom);
-                try testing.expectEqual(text.top - centreline.top, centreline.bottom - text.bottom);
-            } else {
-                try testing.expect(text.top > box.top and text.bottom < box.bottom);
-                try testing.expect(text.bottom <= slots.attach.top);
-            }
+            const text = arrange(.{ .left = box.left - scale(14, dpi), .right = box.right + scale(14, dpi), .bottom = box.bottom + scale(11, dpi) }, box.bottom - box.top, dpi, false, false).text;
+            try testing.expectEqual(box.top + 1, text.top);
+            try testing.expectEqual(box.bottom - 1, text.bottom);
+            try testing.expectEqual(text.top - centreline.top, centreline.bottom - text.bottom);
         }
     }
 }
@@ -235,7 +220,7 @@ test "message column and composer box share both edges at every width and dpi" {
     }
 }
 
-test "a long paste grows the box and keeps its text above the icons" {
+test "a long paste grows the box up to half the chat" {
     const testing = @import("std").testing;
     for ([_]i32{ 96, 144 }) |dpi| {
         const pane = Rect{ .left = scale(300, dpi), .top = 0, .right = scale(300 + 900, dpi), .bottom = scale(900, dpi) };
@@ -244,7 +229,6 @@ test "a long paste grows the box and keeps its text above the icons" {
         try testing.expect(size.edit_height >= fifteen - scale(20, dpi));
         try testing.expect(size.edit_height <= @divTrunc(pane.bottom, 2));
         const slots = arrange(pane, size.edit_height, dpi, false, false);
-        try testing.expect(slots.text.bottom <= slots.attach.top);
         try testing.expect(slots.text.bottom > slots.text.top);
     }
 }

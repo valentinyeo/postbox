@@ -89,7 +89,13 @@ Save-Screen $session composer-two-lines
 for ($line = 0; $line -lt 30; $line++) { Send-Keys $session '+{ENTER}More' }
 $null = Wait-Until { (Read-Control $session status).composer.lines -eq 32 } 'long composer'
 $long = Read-Control $session status
-Assert-That ($long.composer.box.bottom - $long.composer.box.top -eq [int][Math]::Floor((240 * $dpi + 48) / 96)) 'Composer did not stop at its existing height limit'
+$window = (Get-Window $session).Current.BoundingRectangle
+$halfWindow = [int][Math]::Floor($window.Height / 2)
+Assert-That ($long.composer.box.bottom - $long.composer.box.top -gt [int][Math]::Floor((240 * $dpi + 48) / 96)) 'Long composer did not grow past the old fixed limit'
+Assert-That ($long.composer.box.bottom - $long.composer.box.top -le $halfWindow) 'Long composer grew past half the chat'
+Start-Sleep -Milliseconds 400
+$longAgain = Read-Control $session status
+Assert-That ($longAgain.composer.box.bottom - $longAgain.composer.box.top -eq $long.composer.box.bottom - $long.composer.box.top) 'Composer height kept changing after the paste'
 $measurements['two_line_height'] = $two.composer.box.bottom - $two.composer.box.top
 $measurements['capped_height'] = $long.composer.box.bottom - $long.composer.box.top
 Save-Screen $session composer-long
