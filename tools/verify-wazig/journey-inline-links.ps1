@@ -17,14 +17,8 @@ function Get-InlineApp($Session) {
 
 function Focus-InlineApp($Session) {
     $app = Get-InlineApp $Session
-    $state = Read-Control $Session status
-    $point = [VerifyWindow+Point]::new()
-    $point.X = [int](($state.composer.box.left + $state.composer.box.right) / 2)
-    $point.Y = [int](($state.composer.box.top + $state.composer.box.bottom) / 2)
-    $null = [VerifyWindow]::ClientToScreen($app.MainWindowHandle, [ref]$point)
     $null = Wait-Until {
         [VerifyWindow]::ForceForeground($app.MainWindowHandle) | Out-Null
-        try { [InlineLinksNative]::Click($Session.pid, $point.X, $point.Y) } catch { }
         $foreground = [VerifyWindow]::GetForegroundWindow()
         $owner = [uint32]0
         if ($foreground -ne [IntPtr]::Zero) { [VerifyWindow]::GetWindowThreadProcessId($foreground, [ref]$owner) | Out-Null }
