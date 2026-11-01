@@ -47,6 +47,15 @@ if unified:
     assert all(row['body'] == identity[0]['body'] for row in identity[:4])
     assert dict(identity[4]['body'], client_id=identity[0]['body']['client_id']) == identity[0]['body']
     assert f"{session['feature']} terminal-file-identity-restart PASS" in proof
+    assert f"{session['feature']} message-delete PASS" in proof
+    deletes = [row for row in requests if row.get('wire_path') == '/v1/wazig/delete']
+    assert len(deletes) == 1 and deletes[0]['status'] == 200 and deletes[0]['accepted']
+    assert set(deletes[0]['body']) == {'chat', 'msg', 'client_id'}
+    assert deletes[0]['body']['chat'] == 'fixture-alpha'
+    assert re.fullmatch(r'[0-9a-f]{32}', deletes[0]['body']['client_id'])
+    assert deletes[0]['body']['msg']
+    deleted = [m for m in json.loads((folder / 'delete.messages.json').read_text(encoding='utf-8-sig'))['messages'] if m['text'] == 'Message deleted']
+    assert len(deleted) == 1 and deleted[0]['from_me'] and deleted[0]['revoked']
     files = [row for row in requests if row.get('wire_path') == '/v1/wazig/send' and row.get('body', {}).get('text') == 'Identity file']
     file_retry = files[4]['body']['client_id']
     assert len(files) == 5 and len({row['body']['client_id'] for row in files[:4]}) == 1
