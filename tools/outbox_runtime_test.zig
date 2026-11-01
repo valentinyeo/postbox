@@ -123,6 +123,8 @@ const FailedSend = struct {
     ambiguous: bool = false,
 };
 fn recordVerificationDispatch(_: *App, _: *const WacliJob) void {}
+fn noteSentMedia(_: *App, _: []const u8, _: []const u8) void {}
+fn applyHubDelete(_: *App, _: *const WacliResult) void {}
 
 fn captureVerificationCheckpointBefore(_: *App, _: []const u8) void {}
 
