@@ -22896,7 +22896,9 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 setStatus(a, if (failed == 0) "Archive operation completed" else std.fmt.bufPrint(&buffer, "{d} chats archived; {d} failed; retrying", .{ count - failed, failed }) catch "Archive operations failed; retrying");
                 return;
             }
-            if (a.pending_archive_count == 0 or !std.mem.eql(u8, a.pending_archives[0].jid.slice(), result.jid.slice())) return;
+            if (a.pending_archive_count == 0) return;
+            const queued_key = chat_key.Key{ .provider = result.provider, .account = result.account.slice(), .id = a.pending_archives[0].jid.slice() };
+            if (!chat_key.Key.eql(queued_key, chat_key.of(result))) return;
             if (result.ok) {
                 acknowledgeWhatsAppArchive(a, result.jid.slice());
                 removeFirstPendingArchive(a);
