@@ -219,7 +219,7 @@ def verify(data):
             assert not capture['payload'] and not wire['multipart']
     for name, (_, before, _, _) in CASES.items():
         attempts = [c['index']['attempt'] for c in data['captures'] if c['index']['id'] == ids[name]]
-        assert attempts == list(range(1, before + 1))
+        assert attempts == (list(range(1, before + 1)) if before else [1])
         if before:
             retried = [c['index']['attempt'] for c in data['captures'] if c['index']['id'] == ids[name + 'retry']]
             assert retried == [before + 1]
