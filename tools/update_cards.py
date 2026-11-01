@@ -46,7 +46,7 @@ def card_from_subject(subject):
     text = re.sub(r"^\s*[A-Z][A-Z0-9]*-\d+:\s*", "", subject or "").strip()
     if not text or len(text) > 80:
         return None
-    if re.search(r"\b(ci|tests?|tooling|workflow|verify|journeys?|lint|harness|compil\w*|build)\b", text, re.IGNORECASE):
+    if re.search(r"\b(ci|tests?|tooling|workflow|verify|journeys?|lint|harness|compil\w*|build|renderer|module|layer|helper|refactor)\b", text, re.IGNORECASE):
         return None
     if re.search(r"\b[A-Z][A-Z0-9]*-\d+\b|#\d+|\b[\w-]+\.[a-zA-Z][\w]*\b|\w+://|www\.", text, re.IGNORECASE):
         return None
