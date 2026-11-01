@@ -392,7 +392,8 @@ test "retry and dispatch retain source account across view switches" {
     try std.testing.expectEqualStrings("personal", job.account.slice());
     try std.testing.expectEqualStrings("same-contact", job.jid.slice());
     try std.testing.expectEqualStrings("reply-id", job.args[2].slice());
-    try std.testing.expectEqualStrings("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", job.msg_id.slice());
+    try std.testing.expectEqualStrings(f.a.unified_snapshot.?.records[0].entry.idSlice(), job.msg_id.slice());
+    try std.testing.expect(!std.mem.eql(u8, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", job.msg_id.slice()));
 }
 
 test "slack workspaces retain retry account and thread reply" {
