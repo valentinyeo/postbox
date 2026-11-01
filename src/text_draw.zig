@@ -663,7 +663,7 @@ pub var emoji_paint: ?EmojiLine.Paint = null;
 
 fn emojiLineAllowed(flags: u32) bool {
     if (flags & win.DT_SINGLELINE == 0) return false;
-    for ([_]u32{ win.DT_CENTER, win.DT_RIGHT, win.DT_VCENTER, win.DT_BOTTOM, win.DT_END_ELLIPSIS, win.DT_CALCRECT, win.DT_WORDBREAK }) |flag| {
+    for ([_]u32{ win.DT_CENTER, win.DT_RIGHT, win.DT_BOTTOM, win.DT_CALCRECT, win.DT_WORDBREAK }) |flag| {
         if (flags & flag != 0) return false;
     }
     return true;
@@ -679,6 +679,13 @@ fn drawEmojiLine(dc: win.HDC, text: []const u16, rect: *win.RECT, flags: u32) bo
     var metrics: win.TEXTMETRICW = undefined;
     if (win.GetTextMetricsW(dc, &metrics) == 0) return false;
     const em = @max(1, metrics.tmHeight - metrics.tmInternalLeading);
+    var top = rect.top;
+    var bottom = rect.bottom;
+    if (flags & win.DT_VCENTER != 0) {
+        const offset = @divTrunc(@max(0, (rect.bottom - rect.top) - metrics.tmHeight), 2);
+        top = rect.top + offset;
+        bottom = top + metrics.tmHeight;
+    }
     var widths: [emoji_runs.max_runs]i32 = undefined;
     for (runs[0..count], 0..) |run, index| {
         const slice = text[run.start..][0..run.len];
@@ -690,13 +697,18 @@ fn drawEmojiLine(dc: win.HDC, text: []const u16, rect: *win.RECT, flags: u32) bo
             widths[index] = probe.cx;
         }
     }
+    if (flags & win.DT_END_ELLIPSIS != 0) {
+        var total: i32 = 0;
+        for (widths[0..count]) |width| total += width;
+        if (total > rect.right - rect.left) return false;
+    }
     var x = rect.left;
     for (runs[0..count], 0..) |run, index| {
         const slice = text[run.start..][0..run.len];
         if (run.emoji) {
-            if (paint(dc, slice, x, rect.top, metrics.tmAscent, em) == null) return true;
+            if (paint(dc, slice, x, top, metrics.tmAscent, em) == null) return true;
         } else {
-            var sub = win.RECT{ .left = x, .top = rect.top, .right = rect.right, .bottom = rect.bottom };
+            var sub = win.RECT{ .left = x, .top = top, .right = rect.right, .bottom = bottom };
             const height = render(dc, slice.ptr, @intCast(slice.len), &sub, flags) catch blk: {
                 break :blk win.DrawTextW(dc, slice.ptr, @intCast(slice.len), &sub, flags);
             };
@@ -1429,4 +1441,42 @@ test "ISSUE-462 DirectWrite paints every row-sized chat buffer" {
             if (buffered) try std.testing.expectEqualSlices(u32, expected, pixels) else @memcpy(expected, pixels);
         }
     }
+}
+
+var stub_emoji_width: i32 = 16;
+var stub_emoji_paint: usize = 0;
+
+fn stubEmojiWidth(_: []const u16, _: i32) ?i32 {
+    return stub_emoji_width;
+}
+
+fn stubEmojiPaint(_: win.HDC, _: []const u16, _: i32, _: i32, _: i32, _: i32) ?i32 {
+    stub_emoji_paint += 1;
+    return stub_emoji_width;
+}
+
+test "emoji lines keep row layout rules" {
+    const testing = @import("std").testing;
+    try testing.expect(emojiLineAllowed(win.DT_SINGLELINE | win.DT_NOPREFIX));
+    try testing.expect(emojiLineAllowed(win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS));
+    try testing.expect(!emojiLineAllowed(win.DT_SINGLELINE | win.DT_CENTER));
+    try testing.expect(!emojiLineAllowed(win.DT_SINGLELINE | win.DT_CALCRECT));
+    try testing.expect(!emojiLineAllowed(win.DT_WORDBREAK));
+
+    emoji_width = stubEmojiWidth;
+    emoji_paint = stubEmojiPaint;
+    defer {
+        emoji_width = null;
+        emoji_paint = null;
+    }
+    const dc = win.GetDC(null) orelse return error.NoDeviceContext;
+    defer _ = win.ReleaseDC(null, dc);
+    _ = win.SelectObject(dc, win.GetStockObject(win.DEFAULT_GUI_FONT));
+    const text = [_]u16{ 'a', 0xD83D, 0xDE42, 'b' };
+    var wide = win.RECT{ .left = 0, .top = 0, .right = 400, .bottom = 20 };
+    stub_emoji_paint = 0;
+    try testing.expect(drawEmojiLine(dc, &text, &wide, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS));
+    try testing.expectEqual(@as(usize, 1), stub_emoji_paint);
+    var narrow = win.RECT{ .left = 0, .top = 0, .right = 4, .bottom = 20 };
+    try testing.expect(!drawEmojiLine(dc, &text, &narrow, win.DT_SINGLELINE | win.DT_END_ELLIPSIS));
 }
