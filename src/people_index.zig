@@ -154,7 +154,7 @@ pub const Index = struct {
         if (query.len == 0) return 0;
         const limit = @min(max, out.len);
         var count: usize = 0;
-        for ([_][]const Entry{ self.archived.entries, self.contacts.entries, self.inbox.entries }) |entries| {
+        for ([_][]const Entry{ self.archived.entries, self.inbox.entries, self.contacts.entries }) |entries| {
             for (entries) |entry| {
                 if (count == limit) return count;
                 if (entry.origin != .archived and self.archived.by_jid.contains(entry.jid)) continue;
@@ -424,7 +424,7 @@ test "archived query rows without the flag stay searchable" {
     try std.testing.expectEqualStrings("110@s.whatsapp.net", out[0].jid);
 }
 
-test "a jid present in contacts and the inbox lists once" {
+test "a jid present in contacts and the inbox lists once as its chat" {
     var index = Index.init(std.testing.allocator);
     defer index.deinit();
     try index.replaceContacts(
@@ -437,6 +437,6 @@ test "a jid present in contacts and the inbox lists once" {
     try std.testing.expectEqual(@as(usize, 1), index.inbox.entries.len);
     var out: [4]Entry = undefined;
     try std.testing.expectEqual(@as(usize, 1), index.search("marco", &.{}, "", &out, out.len));
-    try std.testing.expectEqual(Origin.contact, out[0].origin);
+    try std.testing.expectEqual(Origin.inbox, out[0].origin);
     try std.testing.expectEqual(@as(usize, 0), index.search("marco", &.{.{ .provider = "whatsapp", .account = "", .id = "120@s.whatsapp.net" }}, "", &out, out.len));
 }

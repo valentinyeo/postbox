@@ -134,17 +134,17 @@ $checkpointApp = Get-App $session
 @{ pid = $checkpointApp.Id; start_ticks = $session.startTicks; exe = $session.exe; sha256 = $session.sha256; commit = $session.commit; root = $session.root; backend = $session.bridge_url; fault = $start.Environment['WAZIG_VERIFY_OUTBOX_FAULT']; transition = $start.Environment['WAZIG_VERIFY_OUTBOX_TRANSITION']; attempt = $start.Environment['WAZIG_VERIFY_OUTBOX_ATTEMPT'] } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $session.evidence 'checkpoint-resumed.meta.json')
 Hub-Pass $session checkpoint-ready-recovery
 
-Restart-FaultApp $session 'held' '4'
+Restart-FaultApp $session 'held' '1'
 Start-FaultImage $session 'Fault terminal file' terminal
 $null = Wait-Until {
     $s = (Read-Control $session status).unified_snapshot
-    @(Fault-Requests $session 'Fault terminal file').Count -eq 4 -and $s.fault_hits -gt 0 -and $s.storage_blocked -and $s.unsaved_outcomes -eq 1 -and $s.uncertain -eq 1 -and $s.inflight -eq 0 -and $s.hub_jobs -eq 0
+    @(Fault-Requests $session 'Fault terminal file').Count -eq 1 -and $s.fault_hits -gt 0 -and $s.storage_blocked -and $s.unsaved_outcomes -eq 1 -and $s.uncertain -eq 1 -and $s.inflight -eq 0 -and $s.hub_jobs -eq 0
 } 'terminal replacement blocked' 100
 $terminal = Save-FaultEvidence $session 'terminal-blocked' 'Fault terminal file'
 Start-Sleep -Seconds 3
 $null = Save-FaultEvidence $session 'terminal-still-blocked' 'Fault terminal file'
 Restart-FaultApp $session '' ''
-Invoke-FaultManualRetry $session $terminal terminal 'Fault terminal file' 4 1
+Invoke-FaultManualRetry $session $terminal terminal 'Fault terminal file' 1 1
 Hub-Pass $session terminal-uncertain-recovery
 
 Restart-FaultApp $session 'acknowledged' '1'

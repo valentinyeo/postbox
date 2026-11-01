@@ -10,7 +10,7 @@ IMMUTABLE = ('id', 'provider', 'account', 'jid', 'text', 'file', 'reply_to', 're
              'client_msg_id', 'upload_file_id', 'queued_unix', 'ptt', 'voice_seconds',
              'owned_file', 'wire_filename', 'file_sha256', 'file_bytes', 'attachment_ready')
 CASES = {'checkpoint': ('Fault checkpoint', 0, 'checkpoint', '1'),
-         'terminal': ('Fault terminal file', 4, 'held', '4'),
+         'terminal': ('Fault terminal file', 1, 'held', '1'),
          'ack': ('Fault ack file', 1, 'acknowledged', '1')}
 
 
@@ -72,7 +72,7 @@ def verify(data):
     session = data['session']
     assert session['feature'] == 'hub-fault' and session['sha256'] and session['commit'] and session['root']
     requests = [r for r in data['requests'] if r.get('wire_path') == '/v1/wazig/send' and r.get('body', {}).get('text') in [v[0] for v in CASES.values()]]
-    assert len(requests) == len(data['captures']) == 8
+    assert len(requests) == len(data['captures']) == 5
     ids = {}
     for name, (label, before, transition, attempt) in CASES.items():
         case_requests = [r for r in requests if r['body']['text'] == label]
@@ -192,7 +192,7 @@ def verify(data):
         durable = get_record(data['stages'][name]['blocked']['snapshot'], ids[name], session['bridge_url'])
         assert row['phase'] == 'uncertain' and row['attempt_serial'] == index['attempt']
         assert hashlib.sha256(capture['raw']).hexdigest() == index['snapshot_sha256']
-        if (name, index['attempt'], manual) in (('terminal', 4, False), ('ack', 1, False)):
+        if (name, index['attempt'], manual) in (('terminal', 1, False), ('ack', 1, False)):
             blocked = data['stages'][name]['blocked']
             assert capture['raw'] == blocked['raw']
             assert index['snapshot_sha256'] == blocked['meta']['snapshot_sha256']

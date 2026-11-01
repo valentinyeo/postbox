@@ -14783,7 +14783,7 @@ fn paletteFilter(a: *App) void {
             a.palette_match_count += 1;
         }
     }
-    appendPalettePeople(a, query_buf[0..query_len], scores);
+    if (unifiedHub(a) or messenger_view.includes(activeChatView(a), .whatsapp)) appendPalettePeople(a, query_buf[0..query_len], scores);
     const sent_counts = a.allocator.alloc(u32, a.palette_match_count) catch return;
     defer a.allocator.free(sent_counts);
     for (a.palette_matches[0..a.palette_match_count], 0..) |match, position| {
