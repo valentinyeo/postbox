@@ -1473,9 +1473,9 @@ test "emoji lines keep row layout rules" {
     defer _ = win.ReleaseDC(null, dc);
     _ = win.SelectObject(dc, win.GetStockObject(win.DEFAULT_GUI_FONT));
     const text = [_]u16{ 'a', 0xD83D, 0xDE42, 'b' };
-    var wide = win.RECT{ .left = 0, .top = 0, .right = 400, .bottom = 20 };
+    var roomy = win.RECT{ .left = 0, .top = 0, .right = 400, .bottom = 20 };
     stub_emoji_paint = 0;
-    try testing.expect(drawEmojiLine(dc, &text, &wide, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS));
+    try testing.expect(drawEmojiLine(dc, &text, &roomy, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS));
     try testing.expectEqual(@as(usize, 1), stub_emoji_paint);
     var narrow = win.RECT{ .left = 0, .top = 0, .right = 4, .bottom = 20 };
     try testing.expect(!drawEmojiLine(dc, &text, &narrow, win.DT_SINGLELINE | win.DT_END_ELLIPSIS));
