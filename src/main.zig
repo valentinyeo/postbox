@@ -14604,6 +14604,7 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, if (a.show_archived or (a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived)) "Unarchive selected chat" else "Archive selected chat", "Ctrl+E", command_archive);
     appendPalette(a, "Reply to selected message", "Ctrl+Shift+R", command_reply);
     appendPalette(a, "Resend failed message", "", command_resend);
+    if (unifiedHub(a) and a.selected_message != null) appendPalette(a, "Delete message for everyone", "", command_delete_message);
     appendPalette(a, "React to selected message", "Ctrl+R", command_react_menu);
     appendPalette(a, "Copy message text", "Ctrl+C", command_copy_text);
     appendPalette(a, "Copy message link", "", command_copy_link);
@@ -15660,6 +15661,9 @@ fn runCommand(a: *App, command: u16) void {
         command_archive => archiveSelectedChat(a, false, .menu),
         command_pin => togglePinSelected(a),
         command_reply => startReply(a),
+        command_delete_message => {
+            if (a.selected_message) |selected| confirmMessageDelete(a, selected);
+        },
         command_resend => {
             const selected = a.selected_message orelse {
                 setStatus(a, "Select a failed message first");

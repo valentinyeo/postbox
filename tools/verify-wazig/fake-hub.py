@@ -246,11 +246,19 @@ class Handler(bridge.Handler):
             '/v1/wazig/mark-read': {'chat', 'message_id'},
             '/v1/wazig/archive': {'chat', 'archived'},
             '/v1/wazig/react': {'chat', 'msg', 'emoji', 'client_id'},
+            '/v1/wazig/delete': {'chat', 'msg', 'client_id'},
         }
         if set(body) != fields.get(self.path) or body.get('chat') not in (ALPHA, BETA):
             self.respond(400, {'error': 'invalid unified payload'}, body=body)
             return
         self.wire_body = dict(body)
+        if self.path == '/v1/wazig/delete':
+            with self.state.lock:
+                if not hasattr(self.state, 'deleted_messages'):
+                    self.state.deleted_messages = set()
+                self.state.deleted_messages.add((body['chat'], body['msg']))
+            self.respond(200, {'client_id': body['client_id'], 'status': 'deleted'}, body=body, accepted=True)
+            return
         if self.path == '/v1/wazig/send' and body.get('text') == 'Identity fixture':
             self.capture_identity_snapshot(body)
             with self.state.lock:
