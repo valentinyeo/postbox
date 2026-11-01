@@ -202,10 +202,11 @@ test "only unowned uncertainty permits explicit retry" {
     const wrong = chat_key.Key{ .provider = .slack, .account = "other", .id = key.id };
     try std.testing.expectError(error.IntentNotFound, retryUnifiedSend(f.a, f.first.records[0].entry.idSlice(), wrong));
     const original_id = f.first.records[0].entry.id;
-    try retryUnifiedSend(f.a, f.first.records[0].entry.idSlice(), key);
+    const fresh_id = try retryUnifiedSend(f.a, f.first.records[0].entry.idSlice(), key);
     try std.testing.expectEqual(unified_snapshot.Phase.ready, f.a.unified_snapshot.?.records[0].phase);
     try std.testing.expectEqual(@as(u64, 41), f.a.unified_snapshot.?.records[0].attempt_serial);
     try std.testing.expect(!std.mem.eql(u8, &original_id, &f.a.unified_snapshot.?.records[0].entry.id));
+    try std.testing.expectEqualSlices(u8, &fresh_id, f.a.unified_snapshot.?.records[0].entry.idSlice());
     try std.testing.expectEqual(@as(u8, 0), f.a.unified_snapshot.?.records[0].entry.attempts);
     try std.testing.expect(!f.a.unified_snapshot.?.records[0].entry.ambiguous);
 }
@@ -386,7 +387,7 @@ test "retry and dispatch retain source account across view switches" {
     const wrong = chat_key.Key{ .provider = .whatsapp, .account = "business", .id = "same-contact" };
     try std.testing.expectError(error.IntentNotFound, retryUnifiedSend(f.a, first.entry.idSlice(), wrong));
     const right = chat_key.Key{ .provider = .whatsapp, .account = "personal", .id = "same-contact" };
-    try retryUnifiedSend(f.a, first.entry.idSlice(), right);
+    _ = try retryUnifiedSend(f.a, first.entry.idSlice(), right);
     beginUnifiedSend(f.a, 100);
     const job = f.a.observed_job.?;
     try std.testing.expectEqualStrings("personal", job.account.slice());
@@ -402,7 +403,7 @@ test "slack workspaces retain retry account and thread reply" {
     f.a.cache_tag.set("hub-cache");
     f.a.view_account.set("workspace-b");
     f.first.records[0].phase = .held;
-    try retryUnifiedSend(f.a, f.first.records[0].entry.idSlice(), .{ .provider = .slack, .account = "workspace-a", .id = "slack:workspace-a:channel" });
+    _ = try retryUnifiedSend(f.a, f.first.records[0].entry.idSlice(), .{ .provider = .slack, .account = "workspace-a", .id = "slack:workspace-a:channel" });
     beginUnifiedSend(f.a, 100);
     try std.testing.expectEqualStrings("workspace-a", f.a.observed_job.?.account.slice());
     try std.testing.expectEqualStrings("reply-id", f.a.observed_job.?.args[2].slice());
