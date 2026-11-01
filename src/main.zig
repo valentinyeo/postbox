@@ -4633,6 +4633,8 @@ fn resendFailedMessage(a: *App, index: usize, mouse_input: bool) bool {
             setStatus(a, "Could not save retry; message remains held");
             return true;
         };
+        refreshMessages(a);
+        setStatus(a, "Sending again with a new message id");
         if (verification_fixture and a.verification_retry_evidence and mouse_input) {
             if (a.unified_snapshot) |snapshot| {
                 for (snapshot.records[0..snapshot.count]) |*record| {
@@ -5664,15 +5666,7 @@ fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) !void {
         retry.attempt_serial = 0;
         retry.not_before_ms = 0;
         if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
-        for (a.messages[0..a.message_count]) |*message| {
-            if (!std.mem.eql(u8, message.timestamp.slice(), id)) continue;
-            message.timestamp.set(&fresh_id);
-            message.send_state = .pending;
-            break;
-        }
         refreshUnifiedViews(a);
-        refreshMessages(a);
-        setStatus(a, "Sending again with a new message id");
         return;
     }
     return error.IntentNotFound;
