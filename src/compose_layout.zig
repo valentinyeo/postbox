@@ -77,12 +77,7 @@ pub fn arrange(pane: Rect, edit_height: i32, dpi: i32, recording: bool, dictatin
     const text_left = attach.right + gap;
     const voice_width = if (recording) @max(icon, @min(scale(200, dpi), dictate.left - text_left - 3 * gap - text_min - scale(8, dpi))) else icon;
     const voice = Rect{ .left = dictate.left - gap - voice_width, .top = icon_top, .right = dictate.left - gap, .bottom = icon_bottom };
-<<<<<<< HEAD
-    const icon_band: i32 = if (multiline and edit_height > scale(edit_min_height, dpi)) iconBand(dpi) else 0;
-    const text = Rect{ .left = text_left, .top = box.top + @min(1, height), .right = @max(text_left, voice.left - gap - @min(scale(8, dpi), icon)), .bottom = @max(box.top + @min(1, height), box.bottom - icon_band - 1) };
-=======
     const text = Rect{ .left = text_left, .top = box.top + @min(1, height), .right = @max(text_left, voice.left - gap - @min(scale(8, dpi), icon)), .bottom = @max(box.top + @min(1, height), box.bottom - 1) };
->>>>>>> parent of 4699397 (IGSH-1410: a tall box keeps its text above the icon row)
     return .{ .box = box, .attach = attach, .text = text, .voice = voice, .dictate = dictate, .emoji = emoji, .send = send };
 }
 
