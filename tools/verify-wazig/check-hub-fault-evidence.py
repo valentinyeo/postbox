@@ -256,7 +256,7 @@ def negative_controls(data):
         'changed filename': lambda m: record_at(m, 'terminal', 'idle').update(wire_filename='wrong.png'),
         'changed reply': lambda m: record_at(m, 'terminal', 'idle').update(reply_to='changed'),
         'changed voice': lambda m: record_at(m, 'terminal', 'idle').update(ptt=True),
-        'duplicate acceptance': lambda m: next(r for r in reversed(m['requests']) if r.get('body', {}).get('text') == 'Fault ack file').update(accepted=True),
+        'missing acceptance': lambda m: next(r for r in reversed(m['requests']) if r.get('body', {}).get('text') == 'Fault ack file').update(accepted=False),
         'missing owned bytes': lambda m: m['stages']['terminal']['idle'].update(payload=b''),
         'premature unblock': lambda m: m['stages']['ack']['still-blocked']['status']['unified_snapshot'].update(storage_blocked=False),
         'pre-click dispatch': lambda m: m['captures'][-1]['index']['dispatch_marker'].update(mouse=False),

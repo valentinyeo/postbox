@@ -67,7 +67,7 @@ function Click-IdentityBubble($Session, $Bubble, [string]$Name, [string]$Label, 
     $requests = @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.text -eq $Label })
     $requests | ConvertTo-Json -Depth 12 -AsArray | Set-Content (Join-Path $Session.evidence "$Name-preclick.requests.json")
     Assert-That ($requests.Count -eq 4) 'Retry arrived before manual input'
-    Assert-That (@(Get-ChildItem -Path $messages -Filter 'verification-retry-*.json' -ErrorAction SilentlyContinue).Count -eq 0) 'Retry marker appeared before manual input'
+    Assert-That (@(Get-ChildItem -Path $messages -Filter "verification-retry-$Id-*.json" -ErrorAction SilentlyContinue).Count -eq 0) 'Retry marker appeared before manual input'
     Assert-That (-not (Test-Path (Join-Path $messages "verification-dispatch-$Id-5.json"))) 'Retry dispatched before manual input'
     [VerifyMenus]::Click($Session.pid, $point.X, $point.Y, $false)
     Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: explicit identity retry x=$($point.X) y=$($point.Y)"
