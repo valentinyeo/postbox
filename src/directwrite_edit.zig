@@ -60,12 +60,6 @@ pub fn isComposing(hwnd: ?win.HWND) bool {
     return host.composing;
 }
 
-pub fn lineCount(hwnd: win.HWND) usize {
-    const host = fromWindow(hwnd) orelse return 1;
-    const lines = @max(1, host.send(win.EM_GETLINECOUNT, 0, 0));
-    return @intCast(lines);
-}
-
 pub fn contentHeight(hwnd: win.HWND, minimum: i32) i32 {
     const host = fromWindow(hwnd) orelse return minimum;
     const dc = win.GetDC(hwnd);

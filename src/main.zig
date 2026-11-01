@@ -15730,11 +15730,6 @@ fn runCommand(a: *App, command: u16) void {
     }
 }
 
-fn composerMultiline(a: *App) bool {
-    const compose = a.compose orelse return false;
-    return directwrite_edit.lineCount(compose) > 1;
-}
-
 fn composerContentHeight(a: *App) i32 {
     const compose = a.compose orelse return compose_layout.edit_min_height;
     return directwrite_edit.contentHeight(compose, compose_layout.edit_min_height);
@@ -15798,7 +15793,7 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
     if (a.compose) |hwnd| {
         for (0..2) |pass| {
             if (pass > 0) sizes = stagedComposerSizes(a, width, height);
-            a.compose_geometry = compose_layout.arrange(.{ .left = left_width + 1, .top = 0, .right = width - threadPanelWidth(a, width, left_width), .bottom = height }, sizes.edit_height, @intCast(a.dpi), a.voice_active, a.last_dictation_state == .recording or a.last_dictation_state == .transcribing, composerMultiline(a));
+            a.compose_geometry = compose_layout.arrange(.{ .left = left_width + 1, .top = 0, .right = width - threadPanelWidth(a, width, left_width), .bottom = height }, sizes.edit_height, @intCast(a.dpi), a.voice_active, a.last_dictation_state == .recording or a.last_dictation_state == .transcribing);
             a.compose_pill = @bitCast(a.compose_geometry.box);
             const inner = a.compose_geometry.text;
             _ = win.MoveWindow(hwnd, inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, win.TRUE);
