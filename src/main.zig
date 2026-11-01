@@ -22732,7 +22732,7 @@ fn finishUnifiedSend(a: *App, result: *const WacliResult) void {
         return;
     }
     const attachment_error = std.mem.eql(u8, result.extra.slice(), "AttachmentChanged") or std.mem.eql(u8, result.extra.slice(), "FileReadFailed");
-    const terminal = attachment_error or result.http_status == 401 or result.http_status == 403 or
+    const terminal = attachment_error or result.http_status == 401 or result.http_status == 403 or result.http_status == 409 or
         (result.http_status == 429 and (result.provider == .signal or result.provider == .telegram));
     var outcome = unified_snapshot.UnifiedOutcome{
         .id = owner.id,
