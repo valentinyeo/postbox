@@ -14840,6 +14840,7 @@ fn paletteActivate(a: *App) void {
             }
             break :blk selected;
         };
+        _ = clearBulkSelection(a);
         discardStagedImage(a);
         invalidateCanvasIconTooltips(a);
         a.selected_chat = @intCast(reselected);

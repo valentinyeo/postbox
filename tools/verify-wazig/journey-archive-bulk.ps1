@@ -7,6 +7,12 @@ $null = Wait-Until {
 } 'bulk: Ctrl+A in empty composer selected no chats'
 Save-Screen $session selected
 Assert-That $compose.Current.HasKeyboardFocus 'bulk: selection moved focus out of composer'
+$firstName = @((Read-Control $session chats).chats)[0].name
+Invoke-PaletteCommand $session $firstName
+$null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 0 } 'bulk: palette pick left the multi-select on'
+Save-Screen $session palette-cleared-selection
+Send-Keys $session '^a'
+$null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 2 } 'bulk: Ctrl+A did not select both chats again'
 Send-Keys $session '^e'
 $null = Wait-Until {
     $state = Read-Control $session status
