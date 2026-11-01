@@ -123,8 +123,9 @@ function Invoke-SignalJourney($Session, [string]$Messages) {
         Hub-Pass $Session $failure.name
         Send-Keys $Session '^a{BACKSPACE}'
     }
+    Send-Keys $Session '{ESC}'
     Invoke-PaletteCommand $Session 'Verification Signal'
-    $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'signal:fixture-contact' } 'Signal chat restored'
+    $null = Wait-Until { (Read-Control $Session status).selected.id -eq 'signal:fixture-contact' -and (Read-Control $Session status).bulk_selected_count -eq 0 } 'Signal chat restored without a bulk selection'
     Send-Keys $Session '^e'
     $archiveTrace = @()
     foreach ($step in 1..6) {
