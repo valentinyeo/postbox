@@ -2487,10 +2487,13 @@ fn refreshGroups(a: *App) void {
 }
 
 fn refreshContactsIndex(a: *App) void {
-    if (unifiedHub(a)) return;
     if (wacliPendingGet(a, .contacts_index) > 0) return;
     var job = WacliJob{ .account = a.cache_tag, .kind = .contacts_index };
-    wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "contacts", "search", "@", "--limit", "10000" });
+    if (unifiedHub(a)) {
+        wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "chats", "list", "--limit", "500" });
+    } else {
+        wacliJobArgs(&job, &.{ a.wacli_path, "--json", "--read-only", "contacts", "search", "@", "--limit", "10000" });
+    }
     _ = wacliEnqueue(a, job, false);
 }
 
@@ -18620,6 +18623,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 .groups => if (result.ok) applyGroups(a, result.data),
                 .contacts_index => if (result.ok) {
                     a.people.replaceContacts(result.data) catch return 0;
+                    if (unifiedHub(a)) a.people.replaceInboxHub(result.data, peopleHubFields) catch return 0;
                     refreshPeopleSearch(a);
                 },
                 .chats => {

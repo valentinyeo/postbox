@@ -198,6 +198,8 @@ function Invoke-PaletteArchivedJourney($Session) {
     $views = @($status.view_order)
     $views | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Session.evidence 'view-order.json')
     Assert-That ($views.Count -ge 2 -and @($views | Where-Object provider -eq 'slack').Count -ge 1 -and @($views | Where-Object provider -eq 'whatsapp').Count -ge 1) 'Fixture did not produce WhatsApp and Slack account views'
+    $null = Wait-Until { @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -like '/v1/wazig/chats?archived=false&limit=500*' }).Count -ge 1 } 'whole chat store index' 30
+    Hub-Pass $Session everyone-index | Out-Null
     $archived = $script:PaletteArchivedChats
     try {
         Wait-PaletteArchivedScan $Session

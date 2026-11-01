@@ -100,8 +100,10 @@ pub const Index = struct {
             const hub_row = resolver != null;
             switch (origin) {
                 .archived => {
-                    const archived = object.get("archived") orelse continue;
-                    if (archived != .bool or !archived.bool or name.len == 0 or jid.len == 0) continue;
+                    if (object.get("archived")) |archived| {
+                        if (archived != .bool or !archived.bool) continue;
+                    }
+                    if (name.len == 0 or jid.len == 0) continue;
                     if (!hub_row and std.mem.indexOfScalar(u8, jid, '@') == null) continue;
                 },
                 .inbox => {
@@ -156,6 +158,14 @@ pub const Index = struct {
             for (entries) |entry| {
                 if (count == limit) return count;
                 if (entry.origin != .archived and self.archived.by_jid.contains(entry.jid)) continue;
+                var repeated = false;
+                for (out[0..count]) |shown| {
+                    if (std.mem.eql(u8, shown.jid, entry.jid)) {
+                        repeated = true;
+                        break;
+                    }
+                }
+                if (repeated) continue;
                 var excluded = false;
                 for (exclude) |shown| {
                     const account = if (entry.account.len == 0) fallback_account else entry.account;
@@ -400,4 +410,33 @@ test "build 5000 archived and 3000 contacts and search within a second" {
     try std.testing.expectEqualStrings("4321@g.us", out[0].jid);
     const elapsed = start.durationTo(std.Io.Clock.cpu_thread.now(std.testing.io)).toNanoseconds();
     try std.testing.expect(elapsed < std.time.ns_per_s);
+}
+
+test "archived query rows without the flag stay searchable" {
+    var index = Index.init(std.testing.allocator);
+    defer index.deinit();
+    try index.replaceArchived(
+        \\{"data":[{"jid":"110@s.whatsapp.net","name":"Person Marco","last_message_ts":"2026-01-05T00:00:00Z"},{"jid":"111@s.whatsapp.net","name":"Person Inbox","archived":false}]}
+    );
+    try std.testing.expectEqual(@as(usize, 1), index.archived.entries.len);
+    var out: [4]Entry = undefined;
+    try std.testing.expectEqual(@as(usize, 1), index.search("marco", &.{}, "", &out, out.len));
+    try std.testing.expectEqualStrings("110@s.whatsapp.net", out[0].jid);
+}
+
+test "a jid present in contacts and the inbox lists once" {
+    var index = Index.init(std.testing.allocator);
+    defer index.deinit();
+    try index.replaceContacts(
+        \\{"data":[{"jid":"120@s.whatsapp.net","name":"Person Marco","phone":"+44 7700 900120"}]}
+    );
+    try index.replaceInboxHub(
+        \\{"data":[{"jid":"120@s.whatsapp.net","provider":"whatsapp","name":"Person Marco","phone":"+44 7700 900120"}]}
+    , testResolver);
+    try std.testing.expectEqual(@as(usize, 1), index.contacts.entries.len);
+    try std.testing.expectEqual(@as(usize, 1), index.inbox.entries.len);
+    var out: [4]Entry = undefined;
+    try std.testing.expectEqual(@as(usize, 1), index.search("marco", &.{}, "", &out, out.len));
+    try std.testing.expectEqual(Origin.contact, out[0].origin);
+    try std.testing.expectEqual(@as(usize, 0), index.search("marco", &.{.{ .provider = "whatsapp", .account = "", .id = "120@s.whatsapp.net" }}, "", &out, out.len));
 }
