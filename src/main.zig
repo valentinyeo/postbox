@@ -5648,8 +5648,8 @@ fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) !void {
         const retry = &candidate.records[index];
         var fresh_id: [outbox.id_len]u8 = undefined;
         mintSendId(a, &fresh_id);
-        if (a.verification_fixture) {
-            var marker_buffer: [128]u8 = undefined;
+        if (verification_fixture) {
+            var marker_buffer: [160]u8 = undefined;
             if (std.fmt.bufPrint(&marker_buffer, "resend: fresh client id {s} for {s}", .{ fresh_id[0..], id })) |line| appendLaunchLog(a, line) else |_| {}
         }
         retry.entry.id = fresh_id;
@@ -13000,7 +13000,9 @@ fn openReactionMenu(a: *App, x: i32, y: i32) void {
     a.reaction_row_rect = null;
     const choice = trackPopupMenu(a, menu, x, y, win.TPM_RETURNCMD | win.TPM_NONOTIFY);
     if (choice == command_resend) {
-        if (a.selected_message) |selected| if (selected < a.message_count) _ = resendFailedMessage(a, selected, false);
+        if (a.selected_message) |selected| {
+            if (selected < a.message_count) _ = resendFailedMessage(a, selected, false);
+        }
         return;
     }
     if (choice == command_delete_unsent) {
