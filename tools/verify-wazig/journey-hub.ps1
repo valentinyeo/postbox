@@ -48,8 +48,13 @@ function Restart-IdentityApp($Session) {
     $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'session.json')
     $null = Wait-Until { $newApp.Refresh(); $newApp.MainWindowHandle -ne [IntPtr]::Zero } 'identity restart window'
     [VerifyWindow]::ShowWindow($newApp.MainWindowHandle, 3) | Out-Null
-    $null = Wait-Until { (Read-Control $Session status).chat_count -gt 0 } 'identity restart chats'
-    $null = Read-Control $Session select -Arguments @('fixture-alpha', '--provider', 'slack')
+    $null = Wait-Until {
+        try {
+            if ((Read-Control $Session status).chat_count -le 0) { return $false }
+            $null = Read-Control $Session select -Arguments @('fixture-alpha', '--provider', 'slack')
+            (Read-Control $Session status).selected.id -eq 'fixture-alpha'
+        } catch { $false }
+    } 'identity restart control' 40
 }
 
 function Click-IdentityBubble($Session, $Bubble, [string]$Name, [string]$Label, [string]$Id) {

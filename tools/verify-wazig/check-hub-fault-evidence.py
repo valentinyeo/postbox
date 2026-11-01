@@ -235,7 +235,7 @@ def negative_controls(data):
             digest = before['meta']
         else:
             identity = m['stages'][name]['blocked']['snapshot']['records'][0]['id']
-            attempt = 4 if name == 'terminal' else 1
+            attempt = CASES[name][1]
             before = next(c for c in m['captures'] if c['index']['id'] == identity and c['index']['attempt'] == attempt)
             digest = before['index']
         row = before['snapshot']['records'][0]
