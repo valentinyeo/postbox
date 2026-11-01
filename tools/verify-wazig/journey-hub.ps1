@@ -188,6 +188,7 @@ Assert-That (@($fileSends.file_sha256 | Select-Object -Unique).Count -eq 1 -and 
 Hub-Pass $session terminal-file-identity-restart
 
 $null = Read-Control $session select -Arguments @('fixture-alpha', '--provider', 'slack')
+Invoke-PaletteCommand $session 'Compose message'
 Send-Keys $session 'Delete fixture'
 Send-Keys $session '{ENTER}'
 $null = Wait-Until {
