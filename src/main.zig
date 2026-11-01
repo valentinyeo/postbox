@@ -5663,7 +5663,6 @@ fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) !void {
         retry.entry.attempts = 0;
         retry.entry.ambiguous = false;
         retry.failure_reason = .{};
-        retry.attempt_serial = 0;
         retry.not_before_ms = 0;
         if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
         refreshUnifiedViews(a);

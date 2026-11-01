@@ -201,9 +201,13 @@ test "only unowned uncertainty permits explicit retry" {
     f.a.unified_inflight = null;
     const wrong = chat_key.Key{ .provider = .slack, .account = "other", .id = key.id };
     try std.testing.expectError(error.IntentNotFound, retryUnifiedSend(f.a, f.first.records[0].entry.idSlice(), wrong));
+    const original_id = f.first.records[0].entry.id;
     try retryUnifiedSend(f.a, f.first.records[0].entry.idSlice(), key);
     try std.testing.expectEqual(unified_snapshot.Phase.ready, f.a.unified_snapshot.?.records[0].phase);
     try std.testing.expectEqual(@as(u64, 41), f.a.unified_snapshot.?.records[0].attempt_serial);
+    try std.testing.expect(!std.mem.eql(u8, &original_id, &f.a.unified_snapshot.?.records[0].entry.id));
+    try std.testing.expectEqual(@as(u8, 0), f.a.unified_snapshot.?.records[0].entry.attempts);
+    try std.testing.expect(!f.a.unified_snapshot.?.records[0].entry.ambiguous);
 }
 
 
