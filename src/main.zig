@@ -4619,7 +4619,7 @@ fn confirmMessageDelete(a: *App, index: usize) void {
     if (!unifiedHub(a) or index >= a.message_count or a.selected_chat >= a.chat_count) return;
     const message = &a.messages[index];
     if (!message.from_me or !std.mem.eql(u8, message.id.slice(), a.delete_confirm_id.slice())) {
-        a.delete_confirm_id.set(a.allocator, message.id.slice());
+        a.delete_confirm_id.set(message.id.slice());
         setStatus(a, "Tap Delete for everyone again to remove it everywhere");
         return;
     }
