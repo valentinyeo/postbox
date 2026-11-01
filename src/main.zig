@@ -4629,7 +4629,7 @@ fn resendFailedMessage(a: *App, index: usize, mouse_input: bool) bool {
         if (index >= a.message_count or a.selected_chat >= a.chat_count) return false;
         const message = &a.messages[index];
         if (!message.from_me or message.send_state != .failed) return false;
-        retryUnifiedSend(a, message.timestamp.slice(), chat_key.of(&a.chats[a.selected_chat])) catch {
+        const fresh_id = retryUnifiedSend(a, message.timestamp.slice(), chat_key.of(&a.chats[a.selected_chat])) catch {
             setStatus(a, "Could not save retry; message remains held");
             return true;
         };
@@ -4638,7 +4638,7 @@ fn resendFailedMessage(a: *App, index: usize, mouse_input: bool) bool {
         if (verification_fixture and a.verification_retry_evidence and mouse_input) {
             if (a.unified_snapshot) |snapshot| {
                 for (snapshot.records[0..snapshot.count]) |*record| {
-                    if (record.phase != .ready or !std.mem.eql(u8, record.entry.idSlice(), message.timestamp.slice()) or record.attempt_serial == std.math.maxInt(u64)) continue;
+                    if (record.phase != .ready or !std.mem.eql(u8, record.entry.idSlice(), &fresh_id) or record.attempt_serial == std.math.maxInt(u64)) continue;
                     const name = std.fmt.allocPrint(a.allocator, "verification-retry-{s}-{d}.json", .{ record.entry.idSlice(), record.attempt_serial + 1 }) catch break;
                     defer a.allocator.free(name);
                     const path = messagesDirPath(a, name) orelse break;
@@ -5636,7 +5636,7 @@ fn acceptUnifiedSends(a: *App, entries: []outbox.Entry, voice_bytes: ?[]const u8
     refreshUnifiedViews(a);
 }
 
-fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) !void {
+fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) ![outbox.id_len]u8 {
     if (a.outbox_load_failed or a.unified_storage_blocked or !a.unified_imports_clean) return error.OutboxUnavailable;
     if (a.unified_inflight) |inflight| if (std.mem.eql(u8, &inflight.id, id)) return error.InFlight;
     const live = a.unified_snapshot orelse return error.MissingSnapshot;
@@ -5666,7 +5666,7 @@ fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) !void {
         retry.not_before_ms = 0;
         if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
         refreshUnifiedViews(a);
-        return;
+        return fresh_id;
     }
     return error.IntentNotFound;
 }

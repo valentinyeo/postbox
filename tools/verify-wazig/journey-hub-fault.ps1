@@ -64,7 +64,7 @@ function Start-FaultImage($Session, [string]$Label, [string]$Name) {
     Send-Keys $Session '{ENTER}'
 }
 
-function Invoke-FaultManualRetry($Session, $Record, [string]$Name, [string]$Label, [int]$Before) {
+function Invoke-FaultManualRetry($Session, $Record, [string]$Name, [string]$Label, [int]$Before, [int]$Held) {
     $bubble = Wait-Until {
         (Read-Control $Session messages).messages | Where-Object { $_.time -ceq $Record.id -and $_.text -ceq "$Label (unconfirmed)" -and $_.send_state -ceq 'failed' -and $_.bubble[2] -gt $_.bubble[0] }
     } 'fault restored unconfirmed bubble'
@@ -88,10 +88,19 @@ function Invoke-FaultManualRetry($Session, $Record, [string]$Name, [string]$Labe
     Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: fault retry $Name x=$($point.X) y=$($point.Y)"
     $null = Wait-Until {
         $s = (Read-Control $Session status).unified_snapshot
-        @(Fault-Requests $Session $Label).Count -eq ($Before + 1) -and $s.hub_jobs -eq 0 -and $s.inflight -eq 0 -and $s.ready -eq 0 -and $s.uncertain -eq 0 -and $s.held -eq 0 -and -not $s.storage_blocked -and $s.unsaved_outcomes -eq 0
+        @(Fault-Requests $Session $Label).Count -eq ($Before + 1) -and $s.hub_jobs -eq 0 -and $s.inflight -eq 0 -and $s.ready -eq 0 -and $s.uncertain -eq 0 -and $s.held -eq $Held -and -not $s.storage_blocked -and $s.unsaved_outcomes -eq 0
     } 'fault retry acknowledged' 45
+    $after = @(Fault-Requests $Session $Label)
+    $fresh = $after[-1].body.client_id
+    Assert-That ($fresh -cmatch '^[0-9a-f]{32}$' -and $fresh -cne $Record.id) 'Retry reused the failed message id'
+    Assert-That (@($after | Where-Object { $_.body.client_id -ceq $fresh }).Count -eq 1) 'Retry id already used'
+    Assert-That ($after[-1].accepted -eq $true -and $after[-1].duplicate -eq $false) 'Retry was not accepted as a fresh intent'
     Read-Control $Session status | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.complete.status.json")
-    @{ idle_start = $idleStart.ToString('o'); click = $click.ToString('o'); before = $Before; after = @(Fault-Requests $Session $Label).Count } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence "$Name.boundary.json")
+    $paths = @(Get-ChildItem (Join-Path $messages 'unified-journal-v2') -Filter 'snapshot.v2' -Recurse -File)
+    Assert-That ($paths.Count -eq 1) 'Fault journey needs one snapshot after retry'
+    Copy-Item $paths[0].FullName (Join-Path $Session.evidence "$Name.retry.snapshot.json")
+    Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Name.retry.messages.json")
+    @{ idle_start = $idleStart.ToString('o'); click = $click.ToString('o'); before = $Before; after = $after.Count; fresh = $fresh; held = $Held } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence "$Name.boundary.json")
 }
 
 $null = Read-Control $session select -Arguments @('fixture-alpha', '--provider', 'slack')
@@ -135,7 +144,7 @@ $terminal = Save-FaultEvidence $session 'terminal-blocked' 'Fault terminal file'
 Start-Sleep -Seconds 3
 $null = Save-FaultEvidence $session 'terminal-still-blocked' 'Fault terminal file'
 Restart-FaultApp $session '' ''
-Invoke-FaultManualRetry $session $terminal terminal 'Fault terminal file' 4
+Invoke-FaultManualRetry $session $terminal terminal 'Fault terminal file' 4 1
 Hub-Pass $session terminal-uncertain-recovery
 
 Restart-FaultApp $session 'acknowledged' '1'
@@ -148,6 +157,6 @@ $ack = Save-FaultEvidence $session 'ack-blocked' 'Fault ack file'
 Start-Sleep -Seconds 3
 $null = Save-FaultEvidence $session 'ack-still-blocked' 'Fault ack file'
 Restart-FaultApp $session '' ''
-Invoke-FaultManualRetry $session $ack ack 'Fault ack file' 1
+Invoke-FaultManualRetry $session $ack ack 'Fault ack file' 1 0
 Hub-Pass $session acknowledgement-uncertain-recovery
 Save-Screen $session after

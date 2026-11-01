@@ -52,6 +52,7 @@ def load(folder):
                 originals={name: (folder / f'{name}.original.png').read_bytes() for name in ('terminal', 'ack')},
                 boundaries={name: read(folder / f'{name}.boundary.json') for name in ('terminal', 'ack')},
                 complete={name: read(folder / f'{name}.complete.status.json') for name in CASES},
+                retries={name: read(folder / f'{name}.retry.snapshot.json') for name in ('terminal', 'ack')},
                 retry_markers={p.name: read(p) for p in (folder / 'final-data').glob('verification-retry-*.json')},
                 dispatch_markers={p.name: read(p) for p in (folder / 'final-data').glob('verification-dispatch-*.json')})
 
@@ -79,12 +80,20 @@ def verify(data):
         identity = case_requests[0]['body']['client_id']
         ids[name] = identity
         assert re.fullmatch(r'[0-9a-f]{32}', identity)
-        assert all(r['body']['client_id'] == identity for r in case_requests)
-        assert sum(r['accepted'] for r in case_requests) == 1 and case_requests[0]['accepted']
-        assert [r['status'] for r in case_requests] == ([409] * 4 + [200] if name == 'terminal' else [200] * (before + 1))
-        assert all(r['body'] == case_requests[0]['body'] for r in case_requests)
+        assert all(r['body']['client_id'] == identity for r in case_requests[:before])
+        assert case_requests[0]['accepted'] and sum(r['accepted'] for r in case_requests) == int(bool(before)) + 1
+        assert [r['status'] for r in case_requests] == ([409] * (before + 1) if name == 'terminal' else [200] * (before + 1))
         if before:
-            assert case_requests[-1]['duplicate'] and not case_requests[-1]['accepted']
+            assert all(r['duplicate'] and not r['accepted'] for r in case_requests[1:before])
+            assert all(r['body'] == case_requests[0]['body'] for r in case_requests[1:before])
+            retry = case_requests[before]
+            fresh = retry['body']['client_id']
+            assert re.fullmatch(r'[0-9a-f]{32}', fresh) and fresh != identity
+            assert retry['accepted'] and not retry['duplicate']
+            assert dict(retry['body'], client_id=identity) == case_requests[0]['body']
+            ids[name + 'retry'] = fresh
+        else:
+            assert all(r['body'] == case_requests[0]['body'] for r in case_requests)
         source = data['sources'][name]
         blocked = data['stages'][name]['blocked']
         durable = get_record(blocked['snapshot'], identity, session['bridge_url'])
@@ -152,9 +161,20 @@ def verify(data):
             assert (resumed['pid'], resumed['start_ticks']) != (blocked['meta']['pid'], blocked['meta']['start_ticks'])
             assert not any(resumed[key] for key in ('fault', 'transition', 'attempt'))
         complete = data['complete'][name]['unified_snapshot']
-        assert complete['ready'] == complete['uncertain'] == complete['held'] == complete['inflight'] == complete['hub_jobs'] == 0
+        assert complete['ready'] == complete['uncertain'] == complete['inflight'] == complete['hub_jobs'] == 0
+        assert complete['held'] == (1 if name == 'terminal' else 0)
         assert not complete['storage_blocked'] and complete['unsaved_outcomes'] == 0
-    assert len(set(ids.values())) == 3
+        if before:
+            fresh = ids[name + 'retry']
+            retried = [row for row in data['retries'][name]['records'] if row['id'] == fresh]
+            if name == 'terminal':
+                assert len(retried) == 1 and retried[0]['phase'] == 'held'
+                assert retried[0]['attempt_serial'] == before + 1
+                fields = [key for key in IMMUTABLE if key != 'id']
+                assert [retried[0][key] for key in fields] == [durable[key] for key in fields]
+            else:
+                assert not retried
+    assert len(set(ids.values())) == len(ids) == 5
     for case in data['stages'].values():
         for item in case.values():
             meta = item['meta']
@@ -164,24 +184,28 @@ def verify(data):
         index = capture['index']
         label = wire['body']['text']
         name = next(k for k, value in CASES.items() if value[0] == label)
-        row = get_record(capture['snapshot'], ids[name], session['bridge_url'])
+        identity = index['id']
+        manual = ids.get(name + 'retry') == identity
+        assert identity == (ids[name + 'retry'] if manual else ids[name])
+        assert wire['body']['client_id'] == identity
+        row = get_record(capture['snapshot'], identity, session['bridge_url'])
         durable = get_record(data['stages'][name]['blocked']['snapshot'], ids[name], session['bridge_url'])
-        assert index['id'] == ids[name] and row['phase'] == 'uncertain' and row['attempt_serial'] == index['attempt']
+        assert row['phase'] == 'uncertain' and row['attempt_serial'] == index['attempt']
         assert hashlib.sha256(capture['raw']).hexdigest() == index['snapshot_sha256']
-        if (name, index['attempt']) in (('terminal', 4), ('ack', 1)):
+        if (name, index['attempt'], manual) in (('terminal', 4, False), ('ack', 1, False)):
             blocked = data['stages'][name]['blocked']
             assert capture['raw'] == blocked['raw']
             assert index['snapshot_sha256'] == blocked['meta']['snapshot_sha256']
-        assert immutable(row) == immutable(durable)
+        fields = IMMUTABLE if not manual else tuple(key for key in IMMUTABLE if key != 'id')
+        assert [row[key] for key in fields] == [durable[key] for key in fields]
         assert wire['body']['chat'] == row['jid'] and wire['body']['reply_to'] == row['reply_to']
-        manual = name != 'checkpoint' and index['attempt'] == CASES[name][1] + 1
-        dispatch = dict(id=ids[name], attempt=index['attempt'], mouse=manual)
+        dispatch = dict(id=identity, attempt=index['attempt'], mouse=manual)
         assert index['dispatch_marker'] == dispatch
-        assert data['dispatch_markers'][f"verification-dispatch-{ids[name]}-{index['attempt']}.json"] == dispatch
+        assert data['dispatch_markers'][f"verification-dispatch-{identity}-{index['attempt']}.json"] == dispatch
         if manual:
-            marker = dict(id=ids[name], attempt=index['attempt'], input='mouse', phase='ready')
+            marker = dict(id=identity, attempt=index['attempt'], input='mouse', phase='ready')
             assert index['retry_marker'] == marker
-            assert data['retry_markers'][f"verification-retry-{ids[name]}-{index['attempt']}.json"] == marker
+            assert data['retry_markers'][f"verification-retry-{identity}-{index['attempt']}.json"] == marker
         else:
             assert index['retry_marker'] is None
         if name != 'checkpoint':
@@ -195,7 +219,10 @@ def verify(data):
             assert not capture['payload'] and not wire['multipart']
     for name, (_, before, _, _) in CASES.items():
         attempts = [c['index']['attempt'] for c in data['captures'] if c['index']['id'] == ids[name]]
-        assert attempts == list(range(1, before + 2))
+        assert attempts == list(range(1, before + 1))
+        if before:
+            retried = [c['index']['attempt'] for c in data['captures'] if c['index']['id'] == ids[name + 'retry']]
+            assert retried == [before + 1]
 
 
 def negative_controls(data):
