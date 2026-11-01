@@ -13038,7 +13038,7 @@ fn openReactionMenu(a: *App, x: i32, y: i32) void {
         appendMessageMenuItem(menu, command_resend, lit("Send again"));
         appendMessageMenuItem(menu, command_delete_unsent, lit("Delete unsent message"));
     }
-    const sent_own = if (a.selected_message) |selected| selected < a.message_count and a.messages[selected].from_me and a.messages[selected].send_state == .sent and !a.messages[selected].revoked else false;
+    const sent_own = if (a.selected_message) |selected| selected < a.message_count and a.messages[selected].from_me and a.messages[selected].send_state == .none and !a.messages[selected].revoked else false;
     if (unifiedHub(a) and sent_own) appendMessageMenuItem(menu, command_delete_message, lit("Delete for everyone"));
     appendMessageMenuItem(menu, 0, null);
     addReactionItems(menu);
@@ -18669,7 +18669,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 return 0;
             }
             switch (result.kind) {
-                .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar, .hub_thread, .hub_older => applyHubResult(a, result),
+                .hub_send, .hub_read, .hub_archive, .hub_media, .hub_avatar, .hub_thread, .hub_older, .hub_delete => applyHubResult(a, result),
                 .groups => if (result.ok) applyGroups(a, result.data),
                 .contacts_index => if (result.ok) {
                     a.people.replaceContacts(result.data) catch return 0;
