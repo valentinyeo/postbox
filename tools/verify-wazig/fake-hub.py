@@ -1028,7 +1028,7 @@ class ChatListsHandler(SlackSortHandler):
         chat = 'slack:fixture-lists:channel'
         if url.path == '/v1/wazig/chats':
             self.respond(200, [] if query.get('archived') == ['true'] else [
-                dict(jid=chat, name='Verification Lists', provider='slack', account='fixture-lists',
+                dict(jid=chat, name='Verification Lists \U0001F642', provider='slack', account='fixture-lists',
                      kind='group', last_message_ts=self.state.stamp, unread_count=0, archived=False)])
         elif url.path == '/v1/wazig/messages' and query.get('chat') == [chat]:
             markers = ['• ', '- ', '* ', '1. ', '10. ', '• ', '  • ', '    1. ']
