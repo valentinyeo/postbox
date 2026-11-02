@@ -205,3 +205,10 @@ $null = Wait-Until {
 } 'deleted bubble' 30
 Read-Control $session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'delete.messages.json')
 Hub-Pass $session message-delete
+
+Invoke-PaletteCommand $session 'Compose message'
+Send-Keys $session '@'
+$null = Wait-Until { [VerifyWindow]::FindWindowEx([IntPtr]::Zero, [IntPtr]::Zero, 'MessagesShortcodePopup', $null) -ne [IntPtr]::Zero } 'mention list opened' 15
+Send-Keys $session '{TAB}'
+$null = Wait-Until { (Read-Edit (Get-Edit (Get-Window $session) '1032')) -like '*@*' } 'mention inserted' 15
+Hub-Pass $session mention-list
