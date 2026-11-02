@@ -17716,7 +17716,7 @@ fn drawCompactQuote(hdc: win.HDC, shapes: *const smooth.Context, a: *App, messag
     const painted_width = text_width + if (shortened) runWidth(hdc, ellipsis) else @as(i32, 0);
     const bar: i32 = @max(3, @divTrunc(rect.bottom - rect.top, 4));
     const indent = rect.left + bar + 6;
-    smooth.fillRoundRect(shapes, .{ .left = rect.left, .top = rect.top, .right = rect.left + bar, .bottom = rect.bottom }, bar, bar, theme.current.primary);
+    shapes.roundRect(.{ .left = rect.left, .top = rect.top, .right = rect.left + bar, .bottom = rect.bottom }, @divTrunc(bar, 2), theme.current.primary);
     const x = if (right_align) @max(indent, rect.right - painted_width) else indent;
     var text_rect = win.RECT{ .left = x, .top = rect.top, .right = rect.right, .bottom = rect.bottom };
     if (visible > 0) _ = text_draw.drawText(hdc, line.ptr, @intCast(visible), &text_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
