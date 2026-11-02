@@ -4295,8 +4295,8 @@ fn applyLocalReplies(a: *App, parent: []const u8) void {
         var row = SlackThreadRow{};
         row.id.set(message.id.slice());
         row.thread_ts.set(parent);
-        row.sender.set(message.sender.slice());
-        row.text.set(message.text.slice());
+        row.sender.set(a.allocator, message.sender.slice());
+        row.text.set(a.allocator, message.text.slice());
         row.timestamp.set(message.timestamp.slice());
         a.thread_rows.append(a.allocator, row) catch return;
     }
