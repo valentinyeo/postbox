@@ -84,14 +84,14 @@ pub fn activeToken(text: []const u8, caret: usize) ?Token {
 }
 
 test "the active token starts at an at sign and stops at the caret" {
-    try std.testing.expectEqual(@as(?usize, null), activeToken("hello @pau", 4));
+    try std.testing.expect(activeToken("hello @pau", 4) == null);
     const token = activeToken("hello @pau", 10).?;
     try std.testing.expectEqual(@as(usize, 6), token.start);
     try std.testing.expectEqualStrings("pau", token.query);
     try std.testing.expectEqualStrings("", activeToken("@", 1).?.query);
-    try std.testing.expectEqual(@as(?Token, null), activeToken("mail@pau", 8));
-    try std.testing.expectEqual(@as(?Token, null), activeToken("hello pau", 9));
-    try std.testing.expectEqual(@as(?Token, null), activeToken("hello @pau", 11));
+    try std.testing.expect(activeToken("mail@pau", 8) == null);
+    try std.testing.expect(activeToken("hello pau", 9) == null);
+    try std.testing.expect(activeToken("hello @pau", 11) == null);
 }
 
 test "deactivated people never show and in-chat people rank first" {
