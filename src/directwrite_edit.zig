@@ -148,15 +148,7 @@ const Host = struct {
         native.x -= self.horizontal_offset;
         const line = self.lineAt(dc, index) orelse return native;
         defer std.heap.page_allocator.free(line.text);
-        const units = @min(index -| line.first, line.last - line.first);
-        var prefix: usize = 0;
-        var step: usize = 0;
-        while (step < units and line.first + step < line.last) : (step += 1) {
-            prefix += 1;
-            const at = line.first + step;
-            if (at + 1 < line.last and line.text[at] >= 0xD800 and line.text[at] <= 0xDBFF and line.text[at + 1] >= 0xDC00 and line.text[at + 1] <= 0xDFFF) step += 1;
-        }
-        const hit = text_draw.hitText(dc, line.text[line.first..line.last], line.rect, prefix, 0) orelse return native;
+        const hit = text_draw.hitText(dc, line.text[line.first..line.last], line.rect, @min(index -| line.first, line.last - line.first), 0) orelse return native;
         return .{ .x = hit.x, .y = line.point.y };
     }
 
