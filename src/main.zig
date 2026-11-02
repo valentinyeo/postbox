@@ -11062,7 +11062,8 @@ fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
 
 fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
     if (message.quoted_msg_id.len == 0) return 0;
-    const lines: i32 = if (message.provider == .slack) 1 else 2;
+    const slack_chat = a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .slack;
+    const lines: i32 = if (slack_chat) 1 else 2;
     return textLineHeight(hdc, a.font_small.?) * lines + px(a, 6);
 }
 
