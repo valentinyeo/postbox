@@ -81,6 +81,10 @@ candidate_build = 'zig build -Dtarget=x86_64-windows-gnu --release=small'
 assert candidate_build not in workflow.split('\n  verify:\n', 1)[1], 'a journey leg must not build the candidate desktop'
 assert workflow.count(candidate_build) == 1, 'the candidate desktop must be built once per run'
 assert 'name: Postbox-candidate' in workflow, 'verify must consume the shared candidate build'
+native_test = "zig build test-edit '-Dtarget=x86_64-windows-gnu' --release=small"
+assert '  native-tests:\n    runs-on: windows-latest' in workflow, 'missing shared native Windows test job'
+assert native_test not in workflow.split('\n  verify:\n', 1)[1], 'a journey leg must not repeat the native Windows test'
+assert workflow.count(native_test) == 1, 'the native Windows test must run once per run'
 assert 'matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}' in workflow, 'verify must use plan-job matrix'
 assert 'if: matrix.evidence' in workflow, 'evidence must use registry matrix flag'
 for required in ["journeys.json", "row['evidence']", "row['name'] == feature", 'Unknown verification journey:', 'GITHUB_OUTPUT']:

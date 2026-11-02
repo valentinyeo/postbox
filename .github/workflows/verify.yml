@@ -79,6 +79,17 @@ jobs:
         with:
           name: Postbox-candidate
           path: zig-out/bin/
+  native-tests:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+          use-cache: false
+      - name: Native DirectWrite editing regression tests
+        run: zig build test-edit '-Dtarget=x86_64-windows-gnu' --release=small
   verify:
     needs: [plan, candidate]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.candidate.result != 'failure' }}
@@ -231,8 +242,6 @@ jobs:
           $release | ConvertTo-Json -Depth 20 | Set-Content verification-evidence/published-package.json
           (Get-FileHash zig-out/bin/Messages.exe).Hash | Set-Content verification-evidence/published-executable.sha256
           "VERIFY_VERSION=$($env:RELEASE_TAG.Substring(1))" >> $env:GITHUB_ENV
-      - name: Native DirectWrite editing regression tests
-        run: zig build test-edit '-Dtarget=x86_64-windows-gnu' --release=small
       - name: Build and capture the pre-change sidebar baseline
         if: matrix.feature == 'sidebar-surface'
         shell: pwsh

@@ -248,6 +248,8 @@ class JourneyRegistryTests(unittest.TestCase):
                               '      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n      - run: ' + build, 1),
              'a journey leg must not build the candidate desktop'),
             (original.replace('name: Postbox-candidate', 'name: Postbox-build'), 'verify must consume the shared candidate build'),
+            (original.replace("  native-tests:\n    runs-on: windows-latest\n", ''),
+             'missing shared native Windows test job'),
         ]
         for changed, expected in cases:
             with self.subTest(expected=expected):
