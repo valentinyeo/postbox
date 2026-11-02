@@ -212,3 +212,9 @@ Send-Keys $session '@'
 Start-Sleep -Seconds 2
 Read-Control $session status | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $session.evidence 'mention-probe.json')
 Hub-Pass $session mention-probe
+
+$null = Wait-Until { (Read-Control $session status).mention_roster -gt 0 } 'mention roster' 15
+Send-Keys $session '{TAB}'
+$null = Wait-Until { (Read-Edit (Get-Edit (Get-Window $session) '1032')) -ne '@' } 'mention inserted' 15
+Read-Control $session status | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $session.evidence 'mention-picked.json')
+Hub-Pass $session mention-list
