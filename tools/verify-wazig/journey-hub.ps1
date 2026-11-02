@@ -206,3 +206,9 @@ $null = Wait-Until {
 Read-Control $session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'delete.messages.json')
 Hub-Pass $session message-delete
 
+
+Invoke-PaletteCommand $session 'Compose message'
+Send-Keys $session '@'
+Start-Sleep -Seconds 2
+Read-Control $session status | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $session.evidence 'mention-probe.json')
+Hub-Pass $session mention-probe
