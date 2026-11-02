@@ -19342,6 +19342,9 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 if (x > bar.right - px(a, 120)) {
                     stopAudio(a);
                     setStatus(a, "Voice message stopped");
+                } else if (x > bar.right - px(a, 220)) {
+                    toggleBarAudio(a);
+                    setStatus(a, if (a.audio_state == .paused) "Voice message paused" else "Voice message playing");
                 } else {
                     for (a.chats[0..a.chat_count], 0..) |chat, index| {
                         if (!std.mem.eql(u8, chat.jid.slice(), a.audio_playing_jid.slice())) continue;
@@ -21651,6 +21654,23 @@ fn voiceBarRect(a: *const App) win.RECT {
     return .{ .left = point.x, .top = point.y, .right = point.x + (client.right - client.left), .bottom = point.y + px(a, 34) };
 }
 
+fn toggleBarAudio(a: *App) void {
+    const player = a.audio_player orelse return;
+    switch (player.state()) {
+        .playing => {
+            player.pause();
+            a.audio_state = .paused;
+            saveAudioPos(a);
+        },
+        .paused => {
+            player.unpause();
+            a.audio_state = .playing;
+        },
+        else => return,
+    }
+    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
+}
+
 fn paintVoiceBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     if (!voiceBarActive(a)) return;
     const bar = voiceBarRect(a);
@@ -21661,7 +21681,7 @@ fn paintVoiceBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     _ = win.SetTextColor(hdc, theme.current.on_secondary_container);
     var text: [160]u8 = undefined;
     var line = WideText(160){};
-    line.set(a.allocator, std.fmt.bufPrint(&text, "Playing voice message - {s} - pause | close", .{a.audio_playing_jid.slice()}) catch "Playing voice message");
+    line.set(a.allocator, std.fmt.bufPrint(&text, "{s} - {s} - pause | close", .{ if (a.audio_state == .paused) "Voice message paused" else "Playing voice message", a.audio_playing_jid.slice() }) catch "Playing voice message");
     var rect = win.RECT{ .left = bar.left + px(a, 12), .top = bar.top, .right = bar.right - px(a, 12), .bottom = bar.bottom };
     _ = text_draw.drawText(hdc, line.ptr(), -1, &rect, win.DT_LEFT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
     if (a.audio_duration_ms > 0) {
