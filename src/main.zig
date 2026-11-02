@@ -19337,6 +19337,16 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         win.WM_LBUTTONDOWN => {
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+            if (a.bulk.items.len > 0 and rectHasPoint(bulkArchiveRect(a), x, y)) {
+                archiveSelectedChat(a, false, .menu);
+                return 0;
+            }
+            if (a.bulk.items.len > 0 and rectHasPoint(bulkCancelRect(a), x, y)) {
+                _ = clearBulkSelection(a);
+                setStatus(a, "Selection cleared");
+                _ = win.InvalidateRect(hwnd, null, win.TRUE);
+                return 0;
+            }
             switch (updateCardHit(a, x, y)) {
                 .button => {
                     updateCardClick(a);
