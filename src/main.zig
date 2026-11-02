@@ -4286,23 +4286,6 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
     refreshVisibleChats(a);
 }
 
-fn applyLocalReplies(a: *App, parent: []const u8) void {
-    a.thread_rows.clearRetainingCapacity();
-    for (a.messages[0..a.message_count]) |*message| {
-        const is_parent = std.mem.eql(u8, message.id.slice(), parent);
-        const is_reply = std.mem.eql(u8, message.quoted_msg_id.slice(), parent);
-        if (!is_parent and !is_reply) continue;
-        var row = SlackThreadRow{};
-        row.id.set(message.id.slice());
-        row.thread_ts.set(parent);
-        row.sender.set(message.sender.slice());
-        row.text.set(message.text.slice());
-        row.timestamp.set(message.timestamp.slice());
-        a.thread_rows.append(a.allocator, row) catch return;
-    }
-    if (a.thread_list) |list| _ = win.InvalidateRect(list, null, win.FALSE);
-}
-
 fn applySlackReplies(a: *App, raw: []const u8, parent: []const u8) void {
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{}) catch return;
     defer parsed.deinit();
@@ -23519,7 +23502,7 @@ fn closeSlackThread(a: *App) void {
 }
 
 fn openSlackThread(a: *App, selected: usize) void {
-    if ((!slackThreadsEnabled(a) and !repliesSlackMode(a)) or selected >= a.message_count or a.hwnd == null) return;
+    if (!slackThreadsEnabled(a) or selected >= a.message_count or a.hwnd == null) return;
     const message = &a.messages[selected];
     var parent = Utf8Text(191){};
     parent.set(if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice())) message.thread_ts.slice() else message.id.slice());
@@ -23527,7 +23510,6 @@ fn openSlackThread(a: *App, selected: usize) void {
     a.thread_origin = drafts.Identity.init(chat_key.of(&a.chats[a.selected_chat]));
     a.thread_parent = parent;
     rememberSlackThreadRow(a, message);
-    if (a.chats[a.selected_chat].provider != .slack) applyLocalReplies(a, parent.slice());
     a.thread_list = directwrite_edit.create(a.instance, a.hwnd.?, controlId(id_thread_list), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_READONLY | win.ES_AUTOVSCROLL | win.WS_VSCROLL, 0, 0, 0, 0);
     a.thread_compose = directwrite_edit.create(a.instance, a.hwnd.?, controlId(id_thread_compose), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 0, 0);
     if (a.thread_list == null or a.thread_compose == null) {
