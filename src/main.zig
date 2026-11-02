@@ -16147,7 +16147,8 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
         }
     }
     a.compose_strip_top = height - sizes.strip_height;
-    if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height, left_width - scrollbar_width, list_bottom - header_height, win.TRUE);
+    const bulk_strip = if (a.bulk.items.len > 0) px(a, bulk_strip_height) else @as(i32, 0);
+    if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + bulk_strip, left_width - scrollbar_width, list_bottom - header_height - bulk_strip, win.TRUE);
     if (a.thread_parent.len > 0 and (a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) closeSlackThread(a);
     const chat_width = width - left_width - 1;
     const panel_width = if (a.thread_parent.len > 0) @divTrunc(chat_width, 2) else 0;
@@ -19312,6 +19313,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             if (a.chats_hwnd) |list| drawScrollbar(&shapes, stripRightOf(list, hwnd), listboxScrollInfo(list), theme.current.outline);
             if (a.compose) |edit| drawScrollbar(&shapes, stripRightOf(edit, hwnd), composeScrollInfo(a, edit), theme.current.outline);
+            paintBulkStrip(a, &shapes, hdc);
             paintUpdateCard(a, &shapes, hdc);
             return 0;
         },
@@ -21584,6 +21586,51 @@ fn removeLeftoverOldExe() void {
     for (".old", 0..) |c, i| buf[len + i] = c;
     buf[len + 4] = 0;
     _ = win.DeleteFileW(buf[0 .. len + 4 :0].ptr);
+}
+
+const bulk_strip_height = 30;
+
+fn bulkStripRect(a: *const App) win.RECT {
+    var width: i32 = 0;
+    if (a.chats_hwnd) |list| {
+        var client: win.RECT = undefined;
+        if (win.GetClientRect(list, &client) != 0) width = client.right;
+    }
+    return .{ .left = 0, .top = 0, .right = width, .bottom = px(a, bulk_strip_height) };
+}
+
+fn bulkArchiveRect(a: *const App) win.RECT {
+    const strip = bulkStripRect(a);
+    const button = px(a, 74);
+    return .{ .left = @max(strip.left + px(a, 96), strip.right - button * 2 - px(a, 12)), .top = strip.top + px(a, 4), .right = @max(strip.left + px(a, 96), strip.right - button * 2 - px(a, 12)) + button, .bottom = strip.bottom - px(a, 4) };
+}
+
+fn bulkCancelRect(a: *const App) win.RECT {
+    const archive = bulkArchiveRect(a);
+    return .{ .left = archive.right + px(a, 6), .top = archive.top, .right = archive.right + px(a, 6) + (archive.right - archive.left), .bottom = archive.bottom };
+}
+
+fn paintBulkStrip(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
+    if (a.bulk.items.len == 0) return;
+    const strip = bulkStripRect(a);
+    smooth.fillRoundRect(shapes, strip, px(a, 8), px(a, 8), theme.current.primary_container);
+    var label: [64]u8 = undefined;
+    var line = WideText(64){};
+    line.set(a.allocator, std.fmt.bufPrint(&label, "{d} selected", .{a.bulk.items.len}) catch "");
+    _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+    _ = win.SetBkMode(hdc, win.TRANSPARENT);
+    _ = win.SetTextColor(hdc, theme.current.on_primary_container);
+    var text_rect = win.RECT{ .left = strip.left + px(a, 12), .top = strip.top, .right = strip.right, .bottom = strip.bottom };
+    _ = text_draw.drawText(hdc, line.ptr(), -1, &text_rect, win.DT_LEFT | win.DT_VCENTER | win.DT_SINGLELINE);
+    const buttons = [_]struct { rect: win.RECT, text: []const u16 }{
+        .{ .rect = bulkArchiveRect(a), .text = lit("Archive") },
+        .{ .rect = bulkCancelRect(a), .text = lit("Cancel") },
+    };
+    for (buttons) |button| {
+        _ = win.SetTextColor(hdc, theme.current.primary);
+        var rect = button.rect;
+        _ = text_draw.drawText(hdc, button.text.ptr, -1, &rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
+    }
 }
 
 fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
