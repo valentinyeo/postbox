@@ -19337,6 +19337,22 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         win.WM_LBUTTONDOWN => {
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+            if (voiceBarActive(a) and rectHasPoint(voiceBarRect(a), x, y)) {
+                const bar = voiceBarRect(a);
+                if (x > bar.right - px(a, 120)) {
+                    stopAudio(a);
+                    setStatus(a, "Voice message stopped");
+                } else {
+                    for (a.chats[0..a.chat_count], 0..) |chat, index| {
+                        if (!std.mem.eql(u8, chat.jid.slice(), a.audio_playing_jid.slice())) continue;
+                        selectChatRow(a, index);
+                        setStatus(a, "Back to the chat that is playing");
+                        break;
+                    }
+                }
+                _ = win.InvalidateRect(hwnd, null, win.TRUE);
+                return 0;
+            }
             if (a.bulk.items.len > 0 and rectHasPoint(bulkArchiveRect(a), x, y)) {
                 archiveSelectedChat(a, false, .menu);
                 return 0;
