@@ -220,6 +220,7 @@ const command_resend = 2056;
 const command_delete_unsent = 2057;
 const command_delete_message = 2080;
 const command_cancel_selection = 2121;
+const command_pick_mention = 2199;
 const command_replies_whatsapp = 2161;
 const command_replies_slack = 2162;
 const command_show_all = 2065;
@@ -11109,6 +11110,47 @@ fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     drawFluentIcon(a, hdc, close, 0xE711, theme.current.on_surface_variant);
 }
 
+fn acceptMention(a: *App) bool {
+    const compose = a.compose orelse return false;
+    var wide: [drafts.max_text + 1]u16 = undefined;
+    const length: usize = @intCast(win.GetWindowTextW(compose, &wide, wide.len));
+    if (length == 0) return false;
+    var sel_start: u32 = 0;
+    var sel_end: u32 = 0;
+    _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
+    if (sel_start != sel_end) return false;
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length]) catch return false;
+    defer a.allocator.free(text);
+    const token = mention_index.activeToken(text, sel_start) orelse return false;
+    var names: [32][128]u8 = undefined;
+    var people: [32]mention_index.Person = undefined;
+    const roster = mentionPeople(a, &names, &people);
+    var matches: [8]?mention_index.Match = @splat(null);
+    const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
+    if (found == 0) return false;
+    const person = people[matches[0].?.index];
+    var token_buffer: [96]u8 = undefined;
+    const provider: mention_index.Provider = switch (a.chats[a.selected_chat].provider) {
+        .slack => .slack,
+        .telegram => .telegram,
+        .signal => .signal,
+        else => .whatsapp,
+    };
+    const replacement = mention_index.tokenInto(provider, person, &token_buffer);
+    if (replacement.len == 0) return false;
+    var buffer: [drafts.max_text]u8 = undefined;
+    const copy = @min(text.len, buffer.len);
+    @memcpy(buffer[0..copy], text[0..copy]);
+    const new_length = mention_index.replaceToken(&buffer, copy, token, replacement);
+    const new_wide = utf8ToWide(a.allocator, buffer[0..new_length]) catch return false;
+    defer a.allocator.free(new_wide);
+    _ = win.SetWindowTextW(compose, new_wide.ptr);
+    const caret: u32 = @intCast(token.start + replacement.len);
+    _ = win.SendMessageW(compose, win.EM_SETSEL, @intCast(caret), @intCast(caret));
+    setStatus(a, "Mention added");
+    return true;
+}
+
 fn mentionPeople(a: *App, names: [][128]u8, out: []mention_index.Person) usize {
     var count: usize = 0;
     for (a.messages[0..a.message_count]) |*message| {
@@ -14711,6 +14753,7 @@ fn buildPaletteItems(a: *App) void {
         appendPalette(a, std.fmt.bufPrint(&bulk_buffer, "Archive {d} selected chats", .{a.bulk.items.len}) catch "Archive selected chats", "", command_archive);
         appendPalette(a, "Cancel selection", "Esc", command_cancel_selection);
     }
+    appendPalette(a, "Pick the mention", "", command_pick_mention);
     const slack_replies = repliesSlackMode(a);
     appendPalette(a, if (slack_replies) "Replies: Slack style" else "Replies: WhatsApp style", "", if (slack_replies) command_replies_slack else command_replies_whatsapp);
     appendPalette(a, if (slack_replies) "Replies: WhatsApp style" else "Replies: Slack style", "", if (slack_replies) command_replies_whatsapp else command_replies_slack);
@@ -15773,6 +15816,7 @@ fn runCommand(a: *App, command: u16) void {
             refreshMessages(a);
         },
         command_archive => archiveSelectedChat(a, false, .menu),
+        command_pick_mention => _ = acceptMention(a),
         command_replies_whatsapp => setRepliesSlackMode(a, false),
         command_replies_slack => setRepliesSlackMode(a, true),
         command_cancel_selection => {
