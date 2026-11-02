@@ -57,6 +57,12 @@ jobs:
             fi
           fi
 
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Build the app before tagging
+        if: env.skip != 'true'
+        run: zig build '-Dtarget=x86_64-windows-gnu' --release=small
       - name: Work out the next version
         if: env.skip != 'true'
         env:
