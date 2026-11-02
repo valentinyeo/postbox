@@ -196,7 +196,7 @@ class JourneyRegistryTests(unittest.TestCase):
 
     def test_plan_yaml_and_nightly_matrix(self):
         verify = self.workflow['jobs']['verify']
-        self.assertEqual(verify['needs'], 'plan')
+        self.assertEqual(verify['needs'], ['plan', 'candidate'])
         self.assertEqual(verify['strategy']['matrix'], '${{ fromJSON(needs.plan.outputs.matrix) }}')
         evidence = next(step for step in verify['steps'] if step.get('name') == 'Validate surviving journey evidence')
         self.assertEqual(evidence['if'], 'matrix.evidence')

@@ -77,7 +77,7 @@ assert 'type: string' in workflow and 'options:' not in workflow, 'dispatch must
 assert '  plan:\n    runs-on: ubuntu-latest' in workflow, 'missing plan job'
 assert '  candidate:\n    runs-on: ubuntu-latest' in workflow, 'missing shared candidate build job'
 assert '    needs: [plan, candidate]' in workflow, 'verify must depend on plan and the shared candidate build'
-candidate_build = 'zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526'
+candidate_build = 'zig build -Dtarget=x86_64-windows-gnu --release=small'
 assert candidate_build not in workflow.split('\n  verify:\n', 1)[1], 'a journey leg must not build the candidate desktop'
 assert workflow.count(candidate_build) == 1, 'the candidate desktop must be built once per run'
 assert 'name: Postbox-candidate' in workflow, 'verify must consume the shared candidate build'
