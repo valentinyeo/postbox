@@ -19467,9 +19467,16 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                                 var matches: [8]?mention_index.Match = @splat(null);
                                 const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
                                 if (found > 0) {
-                                    const pick = people[matches[0].?.index].name;
-                                    var status_buffer: [192]u8 = undefined;
-                                    setStatus(a, std.fmt.bufPrint(&status_buffer, "Mention: {s}", .{pick}) catch "Mention");
+                                    var status_buffer: [320]u8 = undefined;
+                                    var stream = std.Io.Writer.fixed(&status_buffer);
+                                    stream.writeAll("Mention: ") catch {};
+                                    const shown = @min(found, 3);
+                                    for (matches[0..shown], 0..) |match, position| {
+                                        if (position > 0) stream.writeAll(", ") catch {};
+                                        stream.writeAll(people[match.?.index].name) catch {};
+                                    }
+                                    if (found > shown) stream.print(" +{d}", .{found - shown}) catch {};
+                                    setStatus(a, stream.buffered());
                                 }
                             }
                         } else |_| {}
