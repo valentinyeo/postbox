@@ -58,6 +58,18 @@ public static class VerifyMenus {
         inputEndTicks = System.Diagnostics.Stopwatch.GetTimestamp();
         System.Threading.Thread.Sleep(100);
     }
+    [DllImport("user32.dll")] static extern void keybd_event(byte virtualKey, byte scan, uint flags, UIntPtr extra);
+    public static void ClickWith(int pid, int x, int y, bool control, bool shift) {
+        if (control) keybd_event(0x11, 0, 0, UIntPtr.Zero);
+        if (shift) keybd_event(0x10, 0, 0, UIntPtr.Zero);
+        try {
+            Click(pid, x, y, false);
+            System.Threading.Thread.Sleep(150);
+        } finally {
+            if (shift) keybd_event(0x10, 0, 2, UIntPtr.Zero);
+            if (control) keybd_event(0x11, 0, 2, UIntPtr.Zero);
+        }
+    }
     public static void Click(int pid, int x, int y, bool right) {
         Mouse(pid, x, y, right ? 8u : 2u);
         Mouse(pid, x, y, right ? 16u : 4u);
