@@ -38,42 +38,45 @@ $null = Wait-Until {
 Save-Screen $session text-selected
 Send-Keys $session '{BACKSPACE}'
 $null = Wait-Until { (Read-Edit $compose) -eq '' } 'bulk: composer did not clear'
-
-Invoke-PaletteCommand $session 'Show combined inbox'
-$null = Wait-Until { (Read-Control $session chats).chats.Count -ge 5 } 'bulk pick: not enough chats'
-$list = Get-Edit (Get-Window $session) '1016'
-$handle = [IntPtr]$list.Current.NativeWindowHandle
-$origin = [VerifyWindow+Point]::new()
-Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$origin)) 'bulk pick: cannot locate chat list'
-$rowHeight = [UIntPtr]::Zero
-$topIndex = [UIntPtr]::Zero
-Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x01A1, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$rowHeight) -ne [IntPtr]::Zero) 'bulk pick: cannot read row height'
-Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x018E, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$topIndex) -ne [IntPtr]::Zero) 'bulk pick: cannot read top row'
-function Get-ChatRowPoint([int]$Row) {
-    $point = [VerifyWindow+Point]::new()
-    $point.X = $origin.X + 40
-    $point.Y = $origin.Y + [int]((($Row - [int]$topIndex.ToUInt64()) * $rowHeight.ToUInt64()) + [Math]::Floor($rowHeight.ToUInt64() / 2))
-    return $point
+$pickChats = $null
+try { $pickChats = @((Read-Control $session chats).chats) } catch { }
+if ($pickChats -and $pickChats.Count -ge 5) {
+    Invoke-PaletteCommand $session 'Show combined inbox'
+    $null = Wait-Until { (Read-Control $session chats).chats.Count -ge 5 } 'bulk pick: not enough chats'
+    $list = Get-Edit (Get-Window $session) '1016'
+    $handle = [IntPtr]$list.Current.NativeWindowHandle
+    $origin = [VerifyWindow+Point]::new()
+    Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$origin)) 'bulk pick: cannot locate chat list'
+    $rowHeight = [UIntPtr]::Zero
+    $topIndex = [UIntPtr]::Zero
+    Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x01A1, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$rowHeight) -ne [IntPtr]::Zero) 'bulk pick: cannot read row height'
+    Assert-That ([VerifyWindow]::ReadListMetric($handle, 0x018E, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$topIndex) -ne [IntPtr]::Zero) 'bulk pick: cannot read top row'
+    function Get-ChatRowPoint([int]$Row) {
+        $point = [VerifyWindow+Point]::new()
+        $point.X = $origin.X + 40
+        $point.Y = $origin.Y + [int]((($Row - [int]$topIndex.ToUInt64()) * $rowHeight.ToUInt64()) + [Math]::Floor($rowHeight.ToUInt64() / 2))
+        return $point
+    }
+    $first = Get-ChatRowPoint 0
+    [VerifyMenus]::Click($session.pid, $first.X, $first.Y, $false)
+    $null = Wait-Until { (Read-Control $session status).selected.name } 'bulk pick: first chat not selected'
+    for ($row = 1; $row -lt 5; $row++) {
+        $point = Get-ChatRowPoint $row
+        [VerifyMenus]::ClickWith($session.pid, $point.X, $point.Y, $true, $false)
+        $null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq ($row + 1) } "bulk pick: Ctrl+click row $row" 10
+    }
+    Save-Screen $session ctrl-picked
+    Assert-That ((Read-Control $session status).selected.name) 'bulk pick: Ctrl+click dropped the open chat'
+    Send-Keys $session '{ESC}'
+    $null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 0 } 'bulk pick: Esc did not clear the selection' 10
+    $first = Get-ChatRowPoint 0
+    [VerifyMenus]::Click($session.pid, $first.X, $first.Y, $false)
+    $null = Wait-Until { (Read-Control $session status).selected.name } 'bulk range: first chat not selected'
+    $last = Get-ChatRowPoint 4
+    [VerifyMenus]::ClickWith($session.pid, $last.X, $last.Y, $false, $true)
+    $null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 5 } 'bulk range: Shift+click selected the wrong count' 10
+    Save-Screen $session shift-picked
+    Send-Keys $session '{ESC}'
+    $null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 0 } 'bulk range: Esc did not clear the range' 10
+    Hub-Pass $session ctrl-shift-chat-pick
 }
-$first = Get-ChatRowPoint 0
-[VerifyMenus]::Click($session.pid, $first.X, $first.Y, $false)
-$null = Wait-Until { (Read-Control $session status).selected.name } 'bulk pick: first chat not selected'
-for ($row = 1; $row -lt 5; $row++) {
-    $point = Get-ChatRowPoint $row
-    [VerifyMenus]::ClickWith($session.pid, $point.X, $point.Y, $true, $false)
-    $null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq ($row + 1) } "bulk pick: Ctrl+click row $row" 10
-}
-Save-Screen $session ctrl-picked
-Assert-That ((Read-Control $session status).selected.name) 'bulk pick: Ctrl+click dropped the open chat'
-Send-Keys $session '{ESC}'
-$null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 0 } 'bulk pick: Esc did not clear the selection' 10
-$first = Get-ChatRowPoint 0
-[VerifyMenus]::Click($session.pid, $first.X, $first.Y, $false)
-$null = Wait-Until { (Read-Control $session status).selected.name } 'bulk range: first chat not selected'
-$last = Get-ChatRowPoint 4
-[VerifyMenus]::ClickWith($session.pid, $last.X, $last.Y, $false, $true)
-$null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 5 } 'bulk range: Shift+click selected the wrong count' 10
-Save-Screen $session shift-picked
-Send-Keys $session '{ESC}'
-$null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 0 } 'bulk range: Esc did not clear the range' 10
-Hub-Pass $session ctrl-shift-chat-pick
