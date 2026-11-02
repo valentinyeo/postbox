@@ -19421,12 +19421,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                                 var people: [32]mention_index.Person = undefined;
                                 const roster = mentionPeople(a, &names, &people);
                                 var matches: [8]?mention_index.Match = @splat(null);
-                                if (mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches)) |found| {
-                                    if (found > 0) {
-                                        const pick = people[matches[0].?.index].name;
-                                        var status_buffer: [192]u8 = undefined;
-                                        setStatus(a, std.fmt.bufPrint(&status_buffer, "Mention: {s}", .{pick}) catch "Mention");
-                                    }
+                                const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
+                                if (found > 0) {
+                                    const pick = people[matches[0].?.index].name;
+                                    var status_buffer: [192]u8 = undefined;
+                                    setStatus(a, std.fmt.bufPrint(&status_buffer, "Mention: {s}", .{pick}) catch "Mention");
                                 }
                             }
                         } else |_| {}
