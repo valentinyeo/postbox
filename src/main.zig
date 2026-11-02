@@ -18563,6 +18563,12 @@ fn openChatMenu(a: *App, lparam: win.LPARAM) void {
             .show_archived = a.show_archived,
         }, .{ .archive = command_archive, .pin = command_pin }, &out);
         for (rows) |item| _ = win.AppendMenuW(popup, win.MF_STRING, item.command, item.label.ptr);
+        if (a.bulk.items.len > 0) {
+            var bulk_buffer: [64]u8 = undefined;
+            const bulk_label = std.fmt.bufPrintZ(&bulk_buffer, "Archive {d} selected chats", .{a.bulk.items.len}) catch null;
+            if (bulk_label) |label| _ = win.AppendMenuW(popup, win.MF_STRING, command_archive, label.ptr);
+            _ = win.AppendMenuW(popup, win.MF_STRING, command_cancel_selection, lit("Cancel selection"));
+        }
         break :menu trackPopupMenu(a, popup, point.x, point.y, win.TPM_RETURNCMD | win.TPM_NONOTIFY | win.TPM_RIGHTBUTTON);
     };
     if (choice != 0) runCommand(a, @intCast(choice));
