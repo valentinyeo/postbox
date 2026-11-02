@@ -19312,6 +19312,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             if (a.chats_hwnd) |list| drawScrollbar(&shapes, stripRightOf(list, hwnd), listboxScrollInfo(list), theme.current.outline);
             if (a.compose) |edit| drawScrollbar(&shapes, stripRightOf(edit, hwnd), composeScrollInfo(a, edit), theme.current.outline);
+            paintVoiceBar(a, &shapes, hdc);
             paintBulkStrip(a, &shapes, hdc);
             paintUpdateCard(a, &shapes, hdc);
             return 0;
@@ -21617,6 +21618,36 @@ fn bulkArchiveRect(a: *const App) win.RECT {
 fn bulkCancelRect(a: *const App) win.RECT {
     const archive = bulkArchiveRect(a);
     return .{ .left = archive.right + px(a, 6), .top = archive.top, .right = archive.right + px(a, 6) + (archive.right - archive.left), .bottom = archive.bottom };
+}
+
+fn voiceBarActive(a: *const App) bool {
+    if (a.audio_playing_id.len == 0) return false;
+    if (a.selected_chat >= a.chat_count) return false;
+    return !std.mem.eql(u8, a.audio_playing_jid.slice(), a.chats[a.selected_chat].jid.slice());
+}
+
+fn voiceBarRect(a: *const App) win.RECT {
+    var client: win.RECT = undefined;
+    const canvas = a.canvas orelse return .{};
+    if (win.GetWindowRect(canvas, &client) == 0) return .{};
+    var point = win.POINT{ .x = client.left, .y = client.top };
+    if (win.ScreenToClient(a.hwnd.?, &point) == 0) return .{};
+    return .{ .left = point.x, .top = point.y, .right = point.x + (client.right - client.left), .bottom = point.y + px(a, 34) };
+}
+
+fn paintVoiceBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
+    if (!voiceBarActive(a)) return;
+    const bar = voiceBarRect(a);
+    if (bar.right <= bar.left) return;
+    smooth.fillRoundRect(shapes, bar, px(a, 8), px(a, 8), theme.current.secondary_container);
+    _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+    _ = win.SetBkMode(hdc, win.TRANSPARENT);
+    _ = win.SetTextColor(hdc, theme.current.on_secondary_container);
+    var text: [160]u8 = undefined;
+    var line = WideText(160){};
+    line.set(a.allocator, std.fmt.bufPrint(&text, "Playing voice message - {s} - pause | close", .{a.audio_playing_jid.slice()}) catch "Playing voice message");
+    var rect = win.RECT{ .left = bar.left + px(a, 12), .top = bar.top, .right = bar.right - px(a, 12), .bottom = bar.bottom };
+    _ = text_draw.drawText(hdc, line.ptr(), -1, &rect, win.DT_LEFT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
 }
 
 fn paintBulkStrip(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
