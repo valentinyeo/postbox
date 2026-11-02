@@ -125,10 +125,12 @@ $point.Y = [int](($bubble.bubble[1] + $bubble.bubble[3]) / 2)
 Assert-That ([VerifyWindow]::ClientToScreen($canvas, [ref]$point)) 'Migration retry origin missing'
 [VerifyMenus]::Click($session.pid, $point.X, $point.Y, $false)
 Add-Content (Join-Path $session.evidence 'actions.log') "SendInput: migration retry x=$($point.X) y=$($point.Y)"
-$null = Wait-Until { $s = (Read-Control $session status).unified_snapshot; @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.client_id -ceq $id -and $_.accepted }).Count -eq 1 -and $s.hub_jobs -eq 0 -and $s.inflight -eq 0 -and $s.ready -eq 0 -and $s.uncertain -eq 0 } 'migration retry acknowledged' -Seconds 45
+$null = Wait-Until { $s = (Read-Control $session status).unified_snapshot; @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.accepted }).Count -eq 1 -and $s.hub_jobs -eq 0 -and $s.inflight -eq 0 -and $s.ready -eq 0 -and $s.uncertain -eq 0 } 'migration retry acknowledged' -Seconds 45
 $null = Save-RollbackRequests $session 'crash-retry'
 Read-Control $session status | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'crash-retry.status.json')
-Copy-Item (Join-Path $messages "verification-retry-$id-1.json") (Join-Path $session.evidence 'crash-retry.marker.json')
-Copy-Item (Join-Path $messages "verification-dispatch-$id-1.json") (Join-Path $session.evidence 'crash-dispatch.marker.json')
+$fresh = @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.accepted })[-1].body.client_id
+Assert-That ($fresh -cmatch '^[0-9a-f]{32}$' -and $fresh -cne $id) 'Migration retry reused the interrupted identity'
+Copy-Item (Join-Path $messages "verification-retry-$fresh-1.json") (Join-Path $session.evidence 'crash-retry.marker.json')
+Copy-Item (Join-Path $messages "verification-dispatch-$fresh-1.json") (Join-Path $session.evidence 'crash-dispatch.marker.json')
 Hub-Pass $session interrupted-migration-recovered
 Save-Screen $session after

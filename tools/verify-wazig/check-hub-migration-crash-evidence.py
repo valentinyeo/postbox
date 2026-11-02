@@ -150,10 +150,11 @@ def verify(data):
     assert wire['accepted'] and not wire['duplicate'] and wire['status'] == 200 and wire['multipart']
     assert wire['file_size'] == len(data['payload']) and wire['file_sha256'] == original['sha256']
     body = wire['body']
-    assert body['client_id'] == IDENTITY and body['chat'] == seed['jid'] and body['text'] == seed['text']
+    fresh = body['client_id']
+    assert fresh != IDENTITY and body['chat'] == seed['jid'] and body['text'] == seed['text']
     assert body['account'] == 'hub' and body['reply_to'] == seed['reply_to'] and body['ptt'] == 'false' and body['file'] == record['wire_filename']
-    assert data['retry_marker'] == dict(id=IDENTITY, attempt=1, input='mouse', phase='ready')
-    assert data['dispatch'] == dict(id=IDENTITY, attempt=1, mouse=True)
+    assert data['retry_marker'] == dict(id=fresh, attempt=1, input='mouse', phase='ready')
+    assert data['dispatch'] == dict(id=fresh, attempt=1, mouse=True)
     final = data['retry_status']['unified_snapshot']
     assert final['ready'] == final['uncertain'] == final['inflight'] == final['hub_jobs'] == 0 and not final['storage_blocked']
 
