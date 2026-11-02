@@ -219,6 +219,8 @@ const command_resend = 2056;
 const command_delete_unsent = 2057;
 const command_delete_message = 2080;
 const command_cancel_selection = 2121;
+const command_replies_whatsapp = 2161;
+const command_replies_slack = 2162;
 const command_show_all = 2065;
 const command_show_whatsapp = 2057;
 const command_show_slack = 2058;
@@ -1679,6 +1681,32 @@ fn updateDictateButton(a: *App, state: dictation.State) void {
     }
     const button = a.dictate orelse return;
     _ = win.InvalidateRect(button, null, win.TRUE);
+}
+
+fn repliesModeKey(a: *App) ?[]u8 {
+    if (a.selected_chat >= a.chat_count) return null;
+    const chat = &a.chats[a.selected_chat];
+    return std.fmt.allocPrint(a.allocator, "RepliesSlack:{s}:{s}:{s}", .{ @tagName(chat.provider), chat.account.slice(), chat.jid.slice() }) catch null;
+}
+
+fn repliesSlackMode(a: *App) bool {
+    const key = repliesModeKey(a) orelse return false;
+    defer a.allocator.free(key);
+    const wide = utf8ToWide(a.allocator, key) catch return false;
+    defer a.allocator.free(wide);
+    const value = loadRegistryString(a.allocator, wide.ptr) orelse return false;
+    defer a.allocator.free(value);
+    return std.mem.eql(u8, value, "1");
+}
+
+fn setRepliesSlackMode(a: *App, slack: bool) void {
+    const key = repliesModeKey(a) orelse return;
+    defer a.allocator.free(key);
+    const wide = utf8ToWide(a.allocator, key) catch return;
+    defer a.allocator.free(wide);
+    _ = saveRegistryString(a.allocator, wide.ptr, if (slack) "1" else "0");
+    refreshMessages(a);
+    setStatus(a, if (slack) "Replies: Slack style in this chat" else "Replies: WhatsApp style in this chat");
 }
 
 fn loadRegistryString(allocator: std.mem.Allocator, name: [*:0]const u16) ?[]const u8 {
@@ -14640,6 +14668,9 @@ fn buildPaletteItems(a: *App) void {
         appendPalette(a, std.fmt.bufPrint(&bulk_buffer, "Archive {d} selected chats", .{a.bulk.items.len}) catch "Archive selected chats", "", command_archive);
         appendPalette(a, "Cancel selection", "Esc", command_cancel_selection);
     }
+    const slack_replies = repliesSlackMode(a);
+    appendPalette(a, if (slack_replies) "Replies: Slack style" else "Replies: WhatsApp style", "", if (slack_replies) command_replies_slack else command_replies_whatsapp);
+    appendPalette(a, if (slack_replies) "Replies: WhatsApp style" else "Replies: Slack style", "", if (slack_replies) command_replies_whatsapp else command_replies_slack);
     appendPalette(a, if (a.show_archived) "Show inbox chats" else "Show archived chats", "", command_archived);
     appendPalette(a, if (a.show_archived or (a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived)) "Unarchive selected chat" else "Archive selected chat", "Ctrl+E", command_archive);
     appendPalette(a, "Reply to selected message", "Ctrl+Shift+R", command_reply);
@@ -15699,6 +15730,8 @@ fn runCommand(a: *App, command: u16) void {
             refreshMessages(a);
         },
         command_archive => archiveSelectedChat(a, false, .menu),
+        command_replies_whatsapp => setRepliesSlackMode(a, false),
+        command_replies_slack => setRepliesSlackMode(a, true),
         command_cancel_selection => {
             _ = clearBulkSelection(a);
             setStatus(a, "Selection cleared");
