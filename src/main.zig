@@ -5,6 +5,7 @@ const design = @import("design_tokens.zig");
 const DesignCanvas = @import("design_canvas.zig");
 const menu_theme = @import("menu_theme.zig");
 const smooth = @import("smooth_shapes.zig");
+const mention_index = @import("mention_index.zig");
 const smooth_geometry = @import("smooth_geometry.zig");
 const pin_icon = @import("pin_icon.zig");
 const auth_status = @import("auth_status.zig");
@@ -11108,6 +11109,28 @@ fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     drawFluentIcon(a, hdc, close, 0xE711, theme.current.on_surface_variant);
 }
 
+fn mentionPeople(a: *App, names: [][128]u8, out: []mention_index.Person) usize {
+    var count: usize = 0;
+    for (a.messages[0..a.message_count]) |*message| {
+        if (message.from_me or message.sender.len == 0) continue;
+        const utf8 = wideToUtf8(a.allocator, message.sender.slice()) catch continue;
+        defer a.allocator.free(utf8);
+        var known = false;
+        for (out[0..count]) |person| {
+            if (std.mem.eql(u8, person.name, utf8)) {
+                known = true;
+                break;
+            }
+        }
+        if (known or count == out.len) continue;
+        const length = @min(utf8.len, names[count].len);
+        @memcpy(names[count][0..length], utf8[0..length]);
+        out[count] = .{ .name = names[count][0..length], .handle = message.sender_jid.slice(), .in_chat = true };
+        count += 1;
+    }
+    return count;
+}
+
 fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
     if (message.quoted_msg_id.len == 0) return 0;
     const threads_style = repliesSlackMode(a) or (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .slack);
@@ -19385,6 +19408,29 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 }
                 if (a.compose) |compose| {
                     if (win.GetWindowTextLengthW(compose) == 0) a.compose_dragged = 0;
+                    var wide: [drafts.max_text + 1]u16 = undefined;
+                    const length: usize = @intCast(win.GetWindowTextW(compose, &wide, wide.len));
+                    var sel_start: u32 = 0;
+                    var sel_end: u32 = 0;
+                    _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
+                    if (sel_start == sel_end and length > 0) {
+                        if (std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length])) |text| {
+                            defer a.allocator.free(text);
+                            if (mention_index.activeToken(text, sel_start)) |token| {
+                                var names: [32][128]u8 = undefined;
+                                var people: [32]mention_index.Person = undefined;
+                                const roster = mentionPeople(a, &names, &people);
+                                var matches: [8]?mention_index.Match = @splat(null);
+                                if (mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches)) |found| {
+                                    if (found > 0) {
+                                        const pick = people[matches[0].?.index].name;
+                                        var status_buffer: [192]u8 = undefined;
+                                        setStatus(a, std.fmt.bufPrint(&status_buffer, "Mention: {s}", .{pick}) catch "Mention");
+                                    }
+                                }
+                            }
+                        } else |_| {}
+                    }
                 }
                 saveComposerDraft(a);
                 layoutComposer(a);
