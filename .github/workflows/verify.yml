@@ -63,8 +63,26 @@ jobs:
           print(value)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'matrix={value}\n')
+  candidate:
+    name: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Build the candidate Windows desktop once
+        run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526
+      - name: Upload the candidate Windows desktop
+        uses: actions/upload-artifact@v4
+        with:
+          name: Postbox-candidate
+          path: zig-out/bin/
   verify:
-    needs: plan
+    needs: [plan, candidate]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.candidate.result != 'failure' }}
     runs-on: windows-latest
     timeout-minutes: 20
     strategy:
@@ -182,31 +200,38 @@ jobs:
           Expand-Archive $package font-baseline-bin/bin
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature appearance -FontBaseline -ExpectedVersion 0.9.224 -Bin font-baseline-bin/bin -Evidence $evidence
           if ($LASTEXITCODE -ne 0) { throw 'Published font baseline capture failed' }
-      - name: Build real desktop or download published release
+      - name: Download the shared candidate desktop
+        if: ${{ inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: Postbox-candidate
+          path: zig-out/bin
+      - name: Use the shared candidate desktop
+        if: ${{ inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/') }}
+        shell: pwsh
+        run: |
+          if (-not (Test-Path zig-out/bin/Messages.exe)) { throw 'Shared candidate build is missing Messages.exe' }
+          'VERIFY_VERSION=0.0.526' >> $env:GITHUB_ENV
+      - name: Download published release
+        if: ${{ inputs.tag != '' || startsWith(github.ref_name, 'verify-release/') }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag || (startsWith(github.ref_name, 'verify-release/') && github.ref_name || '') }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           $env:RELEASE_TAG = $env:RELEASE_TAG -replace '^verify-release/', ''
-          if ($env:RELEASE_TAG) {
-            if ($env:RELEASE_TAG -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'Invalid release tag' }
-            gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern "Postbox-$env:RELEASE_TAG.zip" --dir candidate
-            if ($LASTEXITCODE -ne 0) { throw 'Published package download failed' }
-            Expand-Archive "candidate/Postbox-$env:RELEASE_TAG.zip" zig-out/bin
-            $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0) { throw 'Published package metadata unavailable' }
-            $asset = @($release.assets | Where-Object name -CEQ "Postbox-$env:RELEASE_TAG.zip")
-            if ($asset.Count -ne 1 -or $asset[0].digest -cne ('sha256:' + (Get-FileHash "candidate/Postbox-$env:RELEASE_TAG.zip").Hash.ToLowerInvariant())) { throw 'Published package digest mismatch' }
-            New-Item verification-evidence -ItemType Directory -Force | Out-Null
-            $release | ConvertTo-Json -Depth 20 | Set-Content verification-evidence/published-package.json
-            (Get-FileHash zig-out/bin/Messages.exe).Hash | Set-Content verification-evidence/published-executable.sha256
-            "VERIFY_VERSION=$($env:RELEASE_TAG.Substring(1))" >> $env:GITHUB_ENV
-          } else {
-            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
-            if ($LASTEXITCODE -ne 0) { throw 'Candidate build failed' }
-            'VERIFY_VERSION=0.0.526' >> $env:GITHUB_ENV
-          }
+          if ($env:RELEASE_TAG -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'Invalid release tag' }
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern "Postbox-$env:RELEASE_TAG.zip" --dir candidate
+          if ($LASTEXITCODE -ne 0) { throw 'Published package download failed' }
+          Expand-Archive "candidate/Postbox-$env:RELEASE_TAG.zip" zig-out/bin
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Published package metadata unavailable' }
+          $asset = @($release.assets | Where-Object name -CEQ "Postbox-$env:RELEASE_TAG.zip")
+          if ($asset.Count -ne 1 -or $asset[0].digest -cne ('sha256:' + (Get-FileHash "candidate/Postbox-$env:RELEASE_TAG.zip").Hash.ToLowerInvariant())) { throw 'Published package digest mismatch' }
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          $release | ConvertTo-Json -Depth 20 | Set-Content verification-evidence/published-package.json
+          (Get-FileHash zig-out/bin/Messages.exe).Hash | Set-Content verification-evidence/published-executable.sha256
+          "VERIFY_VERSION=$($env:RELEASE_TAG.Substring(1))" >> $env:GITHUB_ENV
       - name: Native DirectWrite editing regression tests
         run: zig build test-edit '-Dtarget=x86_64-windows-gnu' --release=small
       - name: Build and capture the pre-change sidebar baseline
