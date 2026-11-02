@@ -9097,7 +9097,6 @@ fn refreshMessages(a: *App) void {
     const chat_changed = !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(chat));
     if (chat_changed) {
         clearMessageReadProblem(a);
-        stopAudio(a);
         beginTranscriptionOpen(a);
     }
     if (msgCacheGet(a, chat_key.of(chat))) |cached| {
