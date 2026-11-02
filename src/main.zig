@@ -11195,7 +11195,6 @@ fn showMentionPopup(a: *App, caret: u32) void {
 fn mentionPeople(a: *App, names: [][128]u8, out: []mention_index.Person) usize {
     var count: usize = 0;
     for (a.messages[0..a.message_count]) |*message| {
-        if (message.from_me) continue;
         if (message.sender.len == 0 and message.sender_jid.len == 0) continue;
         const display = if (message.sender.len > 0)
             (wideToUtf8(a.allocator, message.sender.slice()) catch continue)
