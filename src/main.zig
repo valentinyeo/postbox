@@ -218,6 +218,7 @@ const command_open_image_external = 2055;
 const command_resend = 2056;
 const command_delete_unsent = 2057;
 const command_delete_message = 2080;
+const command_cancel_selection = 2121;
 const command_show_all = 2065;
 const command_show_whatsapp = 2057;
 const command_show_slack = 2058;
@@ -939,6 +940,7 @@ const App = struct {
     archive_state_path: []u8 = &.{},
     archive_legacy_done: bool = false,
     bulk: std.ArrayList(Chat) = .empty,
+    bulk_anchor: usize = 0,
     archived_scan_dirty: bool = true,
     archived_scan_ticks: u32 = 0,
     group_refresh_ticks: u8 = 0,
@@ -13694,6 +13696,36 @@ fn selectAllChats(a: *App) void {
     setStatus(a, std.fmt.bufPrint(&buffer, "{d} chats selected - Ctrl+E archives, Esc cancels", .{a.bulk.items.len}) catch "Chats selected");
 }
 
+fn pickChatRows(a: *App, row: usize, control: bool, shift: bool) void {
+    if (row >= a.chat_count) return;
+    if (a.bulk.items.len == 0) a.bulk_anchor = a.selected_chat;
+    if (a.chats_hwnd) |list| _ = win.SendMessageW(list, win.LB_SETCURSEL, a.selected_chat, 0);
+    if (control) {
+        if (chat_key.indexOf(Chat, a.bulk.items, chat_key.of(&a.chats[row]))) |index| {
+            _ = a.bulk.orderedRemove(index);
+        } else a.bulk.append(a.allocator, a.chats[row]) catch return;
+        a.bulk_anchor = row;
+    } else if (shift) {
+        const first = @min(a.bulk_anchor, row);
+        const last = @max(a.bulk_anchor, row);
+        for (a.chats[first .. last + 1]) |chat| {
+            if (chat_key.indexOf(Chat, a.bulk.items, chat_key.of(&chat)) != null) continue;
+            a.bulk.append(a.allocator, chat) catch return;
+        }
+    }
+    setBulkStatus(a);
+}
+
+fn setBulkStatus(a: *App) void {
+    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+    if (a.bulk.items.len == 0) {
+        setStatus(a, "Selection cleared");
+        return;
+    }
+    var buffer: [128]u8 = undefined;
+    setStatus(a, std.fmt.bufPrint(&buffer, "{d} selected - Ctrl+E archives, Esc cancels", .{a.bulk.items.len}) catch "Chats selected");
+}
+
 fn clearBulkSelection(a: *App) bool {
     if (a.bulk.items.len == 0) return false;
     a.bulk.clearRetainingCapacity();
@@ -14600,6 +14632,11 @@ fn buildPaletteItems(a: *App) void {
     }
     appendPalette(a, if (a.selected_chat < a.chat_count and isChatPinned(a, chat_key.of(&a.chats[a.selected_chat]))) "Unpin selected chat" else "Pin chat to top", "", command_pin);
     appendPalette(a, if (a.include_archived) "Toggle archived chats in this view: On" else "Toggle archived chats in this view: Off", "Alt+A", command_include_archived);
+    if (a.bulk.items.len > 0) {
+        var bulk_buffer: [96]u8 = undefined;
+        appendPalette(a, std.fmt.bufPrint(&bulk_buffer, "Archive {d} selected chats", .{a.bulk.items.len}) catch "Archive selected chats", "", command_archive);
+        appendPalette(a, "Cancel selection", "Esc", command_cancel_selection);
+    }
     appendPalette(a, if (a.show_archived) "Show inbox chats" else "Show archived chats", "", command_archived);
     appendPalette(a, if (a.show_archived or (a.selected_chat < a.chat_count and a.chats[a.selected_chat].archived)) "Unarchive selected chat" else "Archive selected chat", "Ctrl+E", command_archive);
     appendPalette(a, "Reply to selected message", "Ctrl+Shift+R", command_reply);
@@ -15659,6 +15696,10 @@ fn runCommand(a: *App, command: u16) void {
             refreshMessages(a);
         },
         command_archive => archiveSelectedChat(a, false, .menu),
+        command_cancel_selection => {
+            _ = clearBulkSelection(a);
+            setStatus(a, "Selection cleared");
+        },
         command_pin => togglePinSelected(a),
         command_reply => startReply(a),
         command_delete_message => {
@@ -19248,7 +19289,13 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             const notification = hiword(wparam);
             if (id == id_chats and notification == win.LBN_SELCHANGE) {
                 const selected = win.SendMessageW(a.chats_hwnd.?, win.LB_GETCURSEL, 0, 0);
-                if (selected >= 0) selectChatRow(a, @intCast(selected)) else _ = clearBulkSelection(a);
+                const control = win.GetKeyState(win.VK_CONTROL) < 0;
+                const shift = win.GetKeyState(win.VK_SHIFT) < 0;
+                if (selected < 0) {
+                    _ = clearBulkSelection(a);
+                } else if (control or shift) {
+                    pickChatRows(a, @intCast(selected), control, shift);
+                } else selectChatRow(a, @intCast(selected));
             } else if (id == id_send and notification == win.BN_CLICKED) {
                 sendMessage(a);
             } else if (id == id_dictate and notification == win.BN_CLICKED) {
