@@ -61,6 +61,27 @@ pub fn search(people: []const Person, query: []const u8, slack_chat: bool, out: 
     return limit;
 }
 
+pub const Provider = enum { whatsapp, slack, signal, telegram };
+
+pub fn tokenInto(provider: Provider, person: Person, out: []u8) []const u8 {
+    const handle = if (person.handle.len > 0) person.handle else person.name;
+    return switch (provider) {
+        .slack => std.fmt.bufPrint(out, "<@{s}>", .{handle}) catch "",
+        .whatsapp => std.fmt.bufPrint(out, "@{s}", .{handle}) catch "",
+        .signal, .telegram => std.fmt.bufPrint(out, "@{s}", .{person.name}) catch "",
+    };
+}
+
+pub fn replaceToken(buffer: []u8, length: usize, token: Token, replacement: []const u8) usize {
+    const tail_start = token.start + 1 + token.query.len;
+    if (tail_start > length or length > buffer.len) return length;
+    const tail = length - tail_start;
+    if (token.start + replacement.len + tail > buffer.len) return length;
+    std.mem.copyBackwards(u8, buffer[token.start + replacement.len ..][0..tail], buffer[tail_start..][0..tail]);
+    @memcpy(buffer[token.start..][0..replacement.len], replacement);
+    return token.start + replacement.len + tail;
+}
+
 pub const Token = struct {
     start: usize,
     query: []const u8,
@@ -81,6 +102,22 @@ pub fn activeToken(text: []const u8, caret: usize) ?Token {
         if (unit == ' ' or unit == '\n' or unit == '\t' or unit == '@') return null;
     }
     return .{ .start = start, .query = query };
+}
+
+test "a picked person becomes the provider's own mention" {
+    var out: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("<@U123>", tokenInto(.slack, .{ .name = "Paula", .handle = "U123" }, &out));
+    try std.testing.expectEqualStrings("@447700900123", tokenInto(.whatsapp, .{ .name = "Paula", .handle = "447700900123" }, &out));
+    try std.testing.expectEqualStrings("@Paula", tokenInto(.telegram, .{ .name = "Paula", .handle = "U123" }, &out));
+}
+
+test "picking a name swaps only its at token" {
+    var buffer: [64]u8 = undefined;
+    const text = "hi @pau there";
+    @memcpy(buffer[0..text.len], text);
+    const token = activeToken(buffer[0..text.len], 7).?;
+    const length = replaceToken(&buffer, text.len, token, "@Paula");
+    try std.testing.expectEqualStrings("hi @Paula there", buffer[0..length]);
 }
 
 test "the active token starts at an at sign and stops at the caret" {
