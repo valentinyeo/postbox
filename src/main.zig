@@ -19523,8 +19523,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                                 var people: [32]mention_index.Person = undefined;
                                 const roster = mentionPeople(a, &names, &people);
                                 var matches: [8]?mention_index.Match = @splat(null);
-                                var probe: [160]u8 = undefined;
-                                appendLaunchLog(a, std.fmt.bufPrint(&probe, "mention: roster={d} query={s} caret={d}", .{ roster, token.query, sel_start }) catch "mention: probe");
                                 const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
                                 if (found > 0) {
                                     a.sc_mention = true;
