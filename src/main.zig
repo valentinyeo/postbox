@@ -11061,7 +11061,7 @@ fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
 }
 
 fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
-    return if (message.quoted_msg_id.len > 0) textLineHeight(hdc, a.font_small.?) + px(a, 6) else 0;
+    return if (message.quoted_msg_id.len > 0) textLineHeight(hdc, a.font_small.?) * 2 + px(a, 6) else 0;
 }
 
 fn jumpToReply(a: *App, id: []const u8) bool {
@@ -17700,7 +17700,7 @@ fn drawCompactQuote(hdc: win.HDC, shapes: *const smooth.Context, a: *App, messag
     const ellipsis = std.mem.span(lit("..."));
     const full_width = runWidth(hdc, line);
     const shortened = full_width > width;
-    const available = @max(0, width - if (shortened) runWidth(hdc, ellipsis) else @as(i32, 0));
+    const available = @max(0, width * 2 - if (shortened) runWidth(hdc, ellipsis) else @as(i32, 0));
     var visible = line.len;
     if (shortened) {
         var low: usize = 0;
@@ -17719,7 +17719,7 @@ fn drawCompactQuote(hdc: win.HDC, shapes: *const smooth.Context, a: *App, messag
     smooth.fillRoundRect(shapes, .{ .left = rect.left, .top = rect.top, .right = rect.left + bar, .bottom = rect.bottom }, bar, bar, theme.current.primary);
     const x = if (right_align) @max(indent, rect.right - painted_width) else indent;
     var text_rect = win.RECT{ .left = x, .top = rect.top, .right = rect.right, .bottom = rect.bottom };
-    if (visible > 0) _ = text_draw.drawText(hdc, line.ptr, @intCast(visible), &text_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
+    if (visible > 0) _ = text_draw.drawText(hdc, line.ptr, @intCast(visible), &text_rect, win.DT_LEFT | win.DT_WORDBREAK | win.DT_NOPREFIX);
     if (shortened) {
         var ellipsis_rect = win.RECT{ .left = x + text_width, .top = rect.top, .right = rect.right, .bottom = rect.bottom };
         _ = text_draw.drawText(hdc, ellipsis.ptr, @intCast(ellipsis.len), &ellipsis_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
