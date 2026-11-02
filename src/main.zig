@@ -20187,7 +20187,11 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
                         shortcodeMove(a, key == win.VK_DOWN);
                         return true;
                     },
-                    win.VK_RETURN, win.VK_TAB => if (!shift and shortcodeAccept(a)) return true,
+                    win.VK_RETURN, win.VK_TAB => {
+                        if (shift) return false;
+                        if (shortcodeAccept(a)) return true;
+                        return acceptMention(a);
+                    },
                     win.VK_ESCAPE => {
                         shortcodeHide(a);
                         return true;
