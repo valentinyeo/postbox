@@ -145,7 +145,7 @@ def source(text=None):
     draw = text.split('fn drawPaletteItem(', 1)[1].split('fn paletteProc(', 1)[0]
     assert 'theme.archivedRowColor' in draw and 'palette_item.archived' in draw
     assert '"Chats"' in draw and '"Commands"' in draw
-    assert 'win.MoveWindow(hwnd, 0, header_height, left_width - scrollbar_width, list_bottom - header_height' in text
+    assert 'win.MoveWindow(hwnd, 0, header_height + bulk_strip, left_width - scrollbar_width, list_bottom - header_height - bulk_strip' in text
     assert 'palette_items: []PaletteItem' in text and 'palette_matches: []usize' in text
     assert 'max_palette_items + a.chats.len' in text
     assert 'a.palette_item_count >= max_palette_items' not in text

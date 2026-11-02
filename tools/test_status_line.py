@@ -42,7 +42,7 @@ def assert_quiet(text):
         assert removed not in text, removed
     layout = function(text, 'layoutRegion')
     assert 'const list_bottom = if (updateCardVisible(a)) updateCardRect(a).top - px(a, 4) else height;' in layout
-    assert 'list_bottom - header_height, win.TRUE)' in layout
+    assert 'list_bottom - header_height - bulk_strip, win.TRUE)' in layout
     assert 'search' not in layout
     palette = function(text, 'buildPaletteItems')
     assert 'appendPalette(a, "You are on v" ++ app_version ++ " - this is the newest version", "", 0);' in palette
@@ -231,12 +231,15 @@ class StatusLineTests(unittest.TestCase):
         expected = function(parent, 'layoutRegion')
         expected = expected.replace('    const status_height: i32 = px(a, 26);\n', '')
         expected = expected.replace('    const search_height: i32 = px(a, 48);', '    const list_bottom = if (updateCardVisible(a)) updateCardRect(a).top - px(a, 4) else height;')
-        expected = expected.replace('height - header_height - search_height - status_height - updateCardSpan(a)', 'list_bottom - header_height')
-        expected = expected.replace('0, header_height + search_height, left_width', '0, header_height, left_width')
+        expected = expected.replace('height - header_height - search_height - status_height - updateCardSpan(a)', 'list_bottom - header_height - bulk_strip')
+        expected = expected.replace('0, header_height + search_height, left_width', '0, header_height + bulk_strip, left_width')
         first = expected.index('    a.search_pill = ')
         last = expected.index('    if (a.chats_hwnd) |hwnd|')
         expected = expected[:first] + expected[last:]
         expected = expected.replace('    if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);\n', '')
+        expected = expected.replace('    if (a.chats_hwnd) |hwnd|', '    const bulk_strip = if (a.bulk.items.len > 0) px(a, bulk_strip_height) else @as(i32, 0);\n    if (a.chats_hwnd) |hwnd|')
+        expected = expected.replace('            var rect = win.RECT{', '            const grown = inner.bottom - inner.top > px(a, 96);\n            const icon_band = if (grown) @min(px(a, 34), @divTrunc(inner.bottom - inner.top, 3)) else @as(i32, 0);\n            var rect = win.RECT{')
+        expected = expected.replace('inner.bottom - inner.top - px(a, 8)) };', 'inner.bottom - inner.top - icon_band - px(a, 4)) };')
         expected = expected.replace('a.voice_active);', 'a.voice_active, a.last_dictation_state == .recording or a.last_dictation_state == .transcribing);')
         expected = expected.replace('    a.compose_client_width = width;\n', '    invalidateCanvasIconTooltips(a);\n    clearHeaderIconTooltip(a);\n    a.compose_client_width = width;\n', 1)
         expected = expected.replace('    updateAttachButton(a);\n', '    updateAttachButton(a);\n    syncMainIconTooltips(a);\n', 1)
