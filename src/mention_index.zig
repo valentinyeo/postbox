@@ -61,6 +61,39 @@ pub fn search(people: []const Person, query: []const u8, slack_chat: bool, out: 
     return limit;
 }
 
+pub const Token = struct {
+    start: usize,
+    query: []const u8,
+};
+
+pub fn activeToken(text: []const u8, caret: usize) ?Token {
+    if (caret > text.len) return null;
+    var start = caret;
+    while (start > 0) {
+        const unit = text[start - 1];
+        if (unit == ' ' or unit == '\n' or unit == '\t') break;
+        start -= 1;
+    }
+    if (start >= caret or text[start] != '@') return null;
+    const query = text[start + 1 .. caret];
+    if (query.len > 64) return null;
+    for (query) |unit| {
+        if (unit == ' ' or unit == '\n' or unit == '\t' or unit == '@') return null;
+    }
+    return .{ .start = start, .query = query };
+}
+
+test "the active token starts at an at sign and stops at the caret" {
+    try std.testing.expectEqual(@as(?usize, null), activeToken("hello @pau", 4));
+    const token = activeToken("hello @pau", 10).?;
+    try std.testing.expectEqual(@as(usize, 6), token.start);
+    try std.testing.expectEqualStrings("pau", token.query);
+    try std.testing.expectEqualStrings("", activeToken("@", 1).?.query);
+    try std.testing.expectEqual(@as(?Token, null), activeToken("mail@pau", 8));
+    try std.testing.expectEqual(@as(?Token, null), activeToken("hello pau", 9));
+    try std.testing.expectEqual(@as(?Token, null), activeToken("hello @pau", 11));
+}
+
 test "deactivated people never show and in-chat people rank first" {
     const people = [_]Person{
         .{ .name = "Marco Rossi", .handle = "U1" },
