@@ -237,6 +237,28 @@ class JourneyRegistryTests(unittest.TestCase):
         path.write_text(path.read_text().replace('fromJSON(needs.plan.outputs.matrix)', 'fromJSON(inputs.feature)'))
         self.assertIn('verify must use plan-job matrix', self.check_map().stderr)
 
+    def test_journey_leg_rebuilding_the_shared_candidate_fails_map(self):
+        path = self.root / '.github/workflows/verify.yml'
+        original = path.read_text()
+        build = 'zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526\n'
+        cases = [
+            (original.replace('    needs: [plan, candidate]', '    needs: plan'),
+             'verify must depend on plan and the shared candidate build'),
+            (original.replace('      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n',
+                              '      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n      - run: ' + build, 1),
+             'a journey leg must not build the candidate desktop'),
+            (original.replace('name: Postbox-candidate', 'name: Postbox-build'), 'verify must consume the shared candidate build'),
+        ]
+        for changed, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertNotEqual(changed, original)
+                path.write_text(changed)
+                result = self.check_map()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+        path.write_text(original)
+        self.assert_map_passes()
+
     def test_all_fake_hub_switches_select_registered_handlers(self):
         namespace = runpy.run_path(str(self.tools / 'fake-hub.py'))
         parser, journeys = namespace['journey_parser']()

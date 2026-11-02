@@ -64,7 +64,6 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'matrix={value}\n')
   candidate:
-    name: candidate
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: ${{ inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/') }}
