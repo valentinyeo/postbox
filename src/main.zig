@@ -17839,9 +17839,12 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         const replies_height = threadSummaryHeight(a, message);
         height -= replies_height;
         const reply_height = replyLineHeight(hdc, a, message);
+        const sender_height = if (show_sender) senderBandHeight(hdc, a) + px(a, 8) else @as(i32, 0);
+        const bubble_top = y + sender_height;
+        const bubble_height = height - sender_height - @max(0, reaction_size.cy - px(a, 4));
+        message.bubble_hit = .{ .left = left, .top = bubble_top, .right = right, .bottom = bubble_top + bubble_height };
         if (reply_height > 0) {
-            height -= reply_height;
-            message.quote_hit = .{ .left = if (message.from_me) right - bubble_width else left, .top = y, .right = if (message.from_me) right else left + bubble_width, .bottom = y + reply_height - px(a, 6) };
+            message.quote_hit = .{ .left = if (message.from_me) right - bubble_width else left, .top = bubble_top + px(a, 4), .right = if (message.from_me) right else left + bubble_width, .bottom = bubble_top + px(a, 4) + reply_height - px(a, 6) };
             var line = WideText(4095){};
             line.set(a.allocator, "↩ ");
             for ([_][]const u16{ message.quote_sender.slice(), std.mem.span(lit(": ")) }) |part| {
@@ -17859,12 +17862,8 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             drawCompactQuote(hdc, &shapes, a, index, line.slice(), quote_start, message.quote_hit, client, message.from_me);
-            y += reply_height;
+            y = bubble_top + px(a, 4) + reply_height;
         }
-        const sender_height = if (show_sender) senderBandHeight(hdc, a) + px(a, 8) else @as(i32, 0);
-        const bubble_top = y + sender_height;
-        const bubble_height = height - sender_height - @max(0, reaction_size.cy - px(a, 4));
-        message.bubble_hit = .{ .left = left, .top = bubble_top, .right = right, .bottom = bubble_top + bubble_height };
         if (replies_height > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             _ = win.SetTextColor(hdc, theme.current.primary);
