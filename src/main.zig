@@ -1699,14 +1699,14 @@ fn repliesSlackMode(a: *App) bool {
     return std.mem.eql(u8, value, "1");
 }
 
-fn setRepliesSlackMode(a: *App, slack: bool) void {
+fn setRepliesSlackMode(a: *App, enabled: bool) void {
     const key = repliesModeKey(a) orelse return;
     defer a.allocator.free(key);
     const wide = utf8ToWide(a.allocator, key) catch return;
     defer a.allocator.free(wide);
-    _ = saveRegistryString(a.allocator, wide.ptr, if (slack) "1" else "0");
+    _ = saveRegistryString(a.allocator, wide.ptr, if (enabled) "1" else "0");
     refreshMessages(a);
-    setStatus(a, if (slack) "Replies: Slack style in this chat" else "Replies: WhatsApp style in this chat");
+    setStatus(a, if (enabled) "Replies: Slack style in this chat" else "Replies: WhatsApp style in this chat");
 }
 
 fn loadRegistryString(allocator: std.mem.Allocator, name: [*:0]const u16) ?[]const u8 {
