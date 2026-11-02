@@ -831,6 +831,8 @@ const App = struct {
     palette_archive_key: chat_key.Stored = .{},
     palette_archive_bulk_count: usize = 0,
     sc_mention: bool = false,
+    mention_roster: usize = 0,
+    mention_query: Utf8Text(64) = .{},
     mention_rows: [8]mention_index.Person = undefined,
     palette_archive_show_archived: bool = false,
     palette_archive_was_archived: bool = false,
@@ -14211,7 +14213,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         try controlWriteView(w, view.key.key(), view.labelText());
     }
     try w.writeByte(']');
-    try w.print(",\"include_archived\":{},\"bulk_selected_count\":{d}", .{ a.include_archived, a.bulk.items.len });
+    try w.print(",\"include_archived\":{},\"bulk_selected_count\":{d},\"mention_roster\":{d},\"mention_query\":\"{s}\"", .{ a.include_archived, a.bulk.items.len, a.mention_roster, a.mention_query.slice() });
     var buffer: [1024]u8 = undefined;
     try w.print(",\"sync\":\"{s}\",\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
         sync,              a.slack_connected.load(.acquire), pending_sends,   a.pending_archive_count,
@@ -19523,6 +19525,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                                 var people: [32]mention_index.Person = undefined;
                                 const roster = mentionPeople(a, &names, &people);
                                 var matches: [8]?mention_index.Match = @splat(null);
+                                a.mention_roster = roster;
+                                a.mention_query.set(token.query);
                                 const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
                                 if (found > 0) {
                                     a.sc_mention = true;
