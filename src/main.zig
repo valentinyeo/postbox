@@ -18566,7 +18566,8 @@ fn openChatMenu(a: *App, lparam: win.LPARAM) void {
         if (a.bulk.items.len > 0) {
             var bulk_buffer: [64]u8 = undefined;
             const bulk_label = std.fmt.bufPrint(&bulk_buffer, "Archive {d} selected chats", .{a.bulk.items.len}) catch "";
-            if (utf8ToWide(a.allocator, bulk_label)) |wide| {
+            const bulk_wide = utf8ToWide(a.allocator, bulk_label) catch null;
+            if (bulk_wide) |wide| {
                 defer a.allocator.free(wide);
                 _ = win.AppendMenuW(popup, win.MF_STRING, command_archive, wide.ptr);
             }
