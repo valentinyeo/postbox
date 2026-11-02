@@ -830,6 +830,8 @@ const App = struct {
     palette_ever_active: bool = false,
     palette_archive_key: chat_key.Stored = .{},
     palette_archive_bulk_count: usize = 0,
+    sc_mention: bool = false,
+    mention_rows: [8]mention_index.Person = undefined,
     palette_archive_show_archived: bool = false,
     palette_archive_was_archived: bool = false,
     emoji_wnd: ?win.HWND = null,
@@ -11128,7 +11130,22 @@ fn acceptMention(a: *App) bool {
     var matches: [8]?mention_index.Match = @splat(null);
     const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
     if (found == 0) return false;
-    const person = people[matches[0].?.index];
+    return acceptMentionPerson(a, people[matches[0].?.index]);
+}
+
+fn acceptMentionPerson(a: *App, person: mention_index.Person) bool {
+    const compose = a.compose orelse return false;
+    if (a.selected_chat >= a.chat_count) return false;
+    var wide_in: [drafts.max_text + 1]u16 = undefined;
+    const length: usize = @intCast(win.GetWindowTextW(compose, &wide_in, wide_in.len));
+    if (length == 0) return false;
+    var sel_start: u32 = 0;
+    var sel_end: u32 = 0;
+    _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
+    if (sel_start != sel_end) return false;
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide_in[0..length]) catch return false;
+    defer a.allocator.free(text);
+    const token = mention_index.activeToken(text, sel_start) orelse return false;
     var token_buffer: [96]u8 = undefined;
     const provider: mention_index.Provider = switch (a.chats[a.selected_chat].provider) {
         .slack => .slack,
@@ -11149,6 +11166,28 @@ fn acceptMention(a: *App) bool {
     _ = win.SendMessageW(compose, win.EM_SETSEL, @intCast(caret), @intCast(caret));
     setStatus(a, "Mention added");
     return true;
+}
+
+fn showMentionPopup(a: *App, caret: u32) void {
+    const owner = a.hwnd orelse return;
+    const compose = a.compose orelse return;
+    if (a.sc_wnd == null) {
+        a.sc_wnd = win.CreateWindowExW(win.WS_EX_TOOLWINDOW | win.WS_EX_NOACTIVATE, lit("MessagesShortcodePopup"), null, win.WS_POPUP, 0, 0, 10, 10, owner, null, a.instance, null);
+        if (a.sc_wnd) |popup| {
+            var corner: win.DWORD = 2;
+            _ = win.DwmSetWindowAttribute(popup, 33, &corner, @sizeOf(win.DWORD));
+        }
+    }
+    const popup = a.sc_wnd orelse return;
+    const row = px(a, sc_row_base);
+    const width = px(a, 300);
+    const height = row * @as(i32, @intCast(a.sc_count)) + px(a, 8);
+    const at = win.SendMessageW(compose, win.EM_POSFROMCHAR, caret, 0);
+    var point = win.POINT{ .x = @as(i16, @bitCast(loword(@as(usize, @bitCast(at))))), .y = @as(i16, @bitCast(hiword(@as(usize, @bitCast(at))))) };
+    _ = win.ClientToScreen(compose, &point);
+    _ = win.MoveWindow(popup, point.x, @max(0, point.y - height - px(a, 4)), width, height, win.TRUE);
+    _ = win.ShowWindow(popup, win.SW_SHOWNOACTIVATE);
+    _ = win.InvalidateRect(popup, null, win.TRUE);
 }
 
 fn mentionPeople(a: *App, names: [][128]u8, out: []mention_index.Person) usize {
@@ -12585,6 +12624,7 @@ fn shortcodeTyping(a: *App) ?shortcodes.Typing {
 }
 
 fn shortcodeHide(a: *App) void {
+    a.sc_mention = false;
     a.sc_count = 0;
     if (a.sc_wnd) |popup| _ = win.ShowWindow(popup, win.SW_HIDE);
 }
@@ -12632,6 +12672,11 @@ fn shortcodeUpdate(a: *App) void {
 
 fn shortcodeAccept(a: *App) bool {
     if (a.sc_count == 0 or a.sc_sel >= a.sc_count) return false;
+    if (a.sc_mention) {
+        const person = a.mention_rows[a.sc_sel];
+        shortcodeHide(a);
+        return acceptMentionPerson(a, person);
+    }
     const t = shortcodeTyping(a) orelse {
         shortcodeHide(a);
         return false;
@@ -12679,6 +12724,15 @@ fn shortcodeProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: 
                     const highlight = win.CreateSolidBrush(theme.current.secondary_container) orelse return 0;
                     defer _ = win.DeleteObject(highlight);
                     _ = win.FillRect(hdc, &cell, highlight);
+                }
+                if (a.sc_mention) {
+                    var name_wide = WideText(80){};
+                    name_wide.set(a.allocator, a.mention_rows[index].name);
+                    var name_cell = win.RECT{ .left = px(a, 12), .top = cell.top, .right = client.right, .bottom = cell.bottom };
+                    _ = win.SelectObject(hdc, @ptrCast(a.font.?));
+                    _ = win.SetTextColor(hdc, if (index == a.sc_sel and theme.choice == .amoled) theme.current.on_secondary_container else if (a.mention_rows[index].in_chat) theme.current.on_surface else theme.current.on_surface_variant);
+                    _ = text_draw.drawText(hdc, name_wide.ptr(), -1, &name_cell, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);
+                    continue;
                 }
                 var wide = WideText(31){};
                 wide.set(a.allocator, entry.emoji);
@@ -19467,6 +19521,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                                 var matches: [8]?mention_index.Match = @splat(null);
                                 const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
                                 if (found > 0) {
+                                    a.sc_mention = true;
+                                    a.sc_sel = 0;
+                                    a.sc_count = @min(found, a.mention_rows.len);
+                                    for (matches[0..a.sc_count], 0..) |match, position| a.mention_rows[position] = people[match.?.index];
+                                    showMentionPopup(a, sel_start);
                                     var status_buffer: [320]u8 = undefined;
                                     var stream = std.Io.Writer.fixed(&status_buffer);
                                     stream.writeAll("Mention: ") catch {};
