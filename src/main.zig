@@ -11193,23 +11193,19 @@ fn showMentionPopup(a: *App, caret: u32) void {
 fn mentionPeople(a: *App, names: [][128]u8, out: []mention_index.Person) usize {
     var count: usize = 0;
     for (a.messages[0..a.message_count]) |*message| {
-        if (message.from_me) continue;
-        if (message.sender.len == 0 and message.sender_jid.len == 0) continue;
-        const display = if (message.sender.len > 0)
-            (wideToUtf8(a.allocator, message.sender.slice()) catch continue)
-        else
-            (a.allocator.dupe(u8, message.sender_jid.slice()) catch continue);
-        defer a.allocator.free(display);
+        if (message.from_me or message.sender.len == 0) continue;
+        const utf8 = wideToUtf8(a.allocator, message.sender.slice()) catch continue;
+        defer a.allocator.free(utf8);
         var known = false;
         for (out[0..count]) |person| {
-            if (std.mem.eql(u8, person.name, display)) {
+            if (std.mem.eql(u8, person.name, utf8)) {
                 known = true;
                 break;
             }
         }
         if (known or count == out.len) continue;
-        const length = @min(display.len, names[count].len);
-        @memcpy(names[count][0..length], display[0..length]);
+        const length = @min(utf8.len, names[count].len);
+        @memcpy(names[count][0..length], utf8[0..length]);
         out[count] = .{ .name = names[count][0..length], .handle = message.sender_jid.slice(), .in_chat = true };
         count += 1;
     }
