@@ -21664,6 +21664,13 @@ fn paintVoiceBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     line.set(a.allocator, std.fmt.bufPrint(&text, "Playing voice message - {s} - pause | close", .{a.audio_playing_jid.slice()}) catch "Playing voice message");
     var rect = win.RECT{ .left = bar.left + px(a, 12), .top = bar.top, .right = bar.right - px(a, 12), .bottom = bar.bottom };
     _ = text_draw.drawText(hdc, line.ptr(), -1, &rect, win.DT_LEFT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    if (a.audio_duration_ms > 0) {
+        const width = bar.right - bar.left;
+        const done = @divTrunc(width * @as(i32, @intCast(@min(a.audio_position_ms, a.audio_duration_ms))), @as(i32, @intCast(a.audio_duration_ms)));
+        const line_height: i32 = @max(2, px(a, 2));
+        const progress = win.RECT{ .left = bar.left, .top = bar.bottom - line_height, .right = bar.left + @max(0, @min(width, done)), .bottom = bar.bottom };
+        smooth.fillRoundRect(shapes, progress, line_height, line_height, theme.current.primary);
+    }
 }
 
 fn paintBulkStrip(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
