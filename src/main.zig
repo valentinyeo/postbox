@@ -21622,14 +21622,14 @@ fn paintBulkStrip(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     _ = win.SetTextColor(hdc, theme.current.on_primary_container);
     var text_rect = win.RECT{ .left = strip.left + px(a, 12), .top = strip.top, .right = strip.right, .bottom = strip.bottom };
     _ = text_draw.drawText(hdc, line.ptr(), -1, &text_rect, win.DT_LEFT | win.DT_VCENTER | win.DT_SINGLELINE);
-    const buttons = [_]struct { rect: win.RECT, text: []const u16 }{
+    const buttons = [_]struct { rect: win.RECT, text: [*:0]const u16 }{
         .{ .rect = bulkArchiveRect(a), .text = lit("Archive") },
         .{ .rect = bulkCancelRect(a), .text = lit("Cancel") },
     };
     for (buttons) |button| {
         _ = win.SetTextColor(hdc, theme.current.primary);
         var rect = button.rect;
-        _ = text_draw.drawText(hdc, button.text.ptr, -1, &rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
+        _ = text_draw.drawText(hdc, button.text, -1, &rect, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE);
     }
 }
 
