@@ -796,12 +796,15 @@
     {
       "name": "archive-return",
       "pr": true,
-      "hub": null,
+      "hub": "hub-archive",
       "evidence": false,
       "chats": null,
       "script": "journey-archive-return.ps1",
       "validator": null,
-      "hub_handler": null,
+      "hub_handler": {
+        "file": "archive-return-fixture.py",
+        "class": "ArchiveReturnHandler"
+      },
       "prepare": "prepare-archive.ps1",
       "maximize": true,
       "provider": true
