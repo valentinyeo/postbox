@@ -1,5 +1,65 @@
 . "$PSScriptRoot/menus.ps1"
 
+function Invoke-PickerPlacement($Session) {
+    Send-Keys $Session '^f'
+    Send-Keys $Session 'Verification Beta'
+    $null = Wait-Until {
+        $shown = Read-Control $Session messages
+        $shown.chat.id -eq 'fixture-beta' -and @($shown.messages | Where-Object { $_.id -eq 'BASELINE_BETA' -and -not $_.from_me }).Count -eq 1
+    } 'picker placement: Beta message visible'
+    Click-Control $Session '1032'
+    $incoming = Wait-Until {
+        (Read-Control $Session messages).messages | Where-Object { $_.id -eq 'BASELINE_BETA' -and $_.bubble[2] -gt $_.bubble[0] -and $_.bubble[3] -gt $_.bubble[1] }
+    } 'picker placement: bubble painted'
+    $canvas = Get-Edit (Get-Window $Session) '1024'
+    $handle = [IntPtr]$canvas.Current.NativeWindowHandle
+    $dpi = [VerifyWindow]::GetDpiForWindow($handle)
+    $scale = { param($v) [int][Math]::Floor(($v * $dpi + 48) / 96) }
+    $origin = [VerifyWindow+Point]::new()
+    Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$origin)) 'picker placement: canvas origin unavailable'
+    $bubble = @{ left = $origin.X + [int]$incoming.bubble[0]; top = $origin.Y + [int]$incoming.bubble[1]; right = $origin.X + [int]$incoming.bubble[2]; bottom = $origin.Y + [int]$incoming.bubble[3] }
+    $hoverX = [int](($bubble.left + $bubble.right) / 2)
+    $hoverY = [int](($bubble.top + $bubble.bottom) / 2)
+    [VerifyMenus]::Click($Session.pid, $hoverX, $hoverY, $false)
+    Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: left-click bubble to hover x=$hoverX y=$hoverY"
+    $smileyX = $bubble.right + (& $scale 4) + (& $scale 12)
+    $smileyY = $bubble.bottom - (& $scale 12)
+    Save-Screen $Session 'picker-hover'
+    [VerifyMenus]::Click($Session.pid, $smileyX, $smileyY, $false)
+    Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: left-click react smiley x=$smileyX y=$smileyY"
+    $menu = Wait-Popup $Session '#32768'
+    $quick = [VerifyMenus]::Bounds($menu)
+    Save-Screen $Session 'quick-above'
+    $centre = ($bubble.left + $bubble.right) / 2
+    Assert-That ($quick.Bottom -le $bubble.top + (& $scale 8) -and $quick.Bottom -gt $bubble.top - (& $scale 80)) "Quick reactions are not right above the message: popup bottom=$($quick.Bottom) bubble top=$($bubble.top)"
+    Assert-That ([Math]::Abs((($quick.Left + $quick.Right) / 2) - $centre) -le (& $scale 140)) "Quick reactions are not centred on the message: popup=$($quick.Left)-$($quick.Right) bubble centre=$centre"
+    $client = [VerifyWindow+Rect]::new()
+    $menuOrigin = [VerifyWindow+Point]::new()
+    Assert-That ([VerifyWindow]::GetClientRect($menu, [ref]$client)) 'picker placement: menu client unavailable'
+    Assert-That ([VerifyWindow]::ClientToScreen($menu, [ref]$menuOrigin)) 'picker placement: menu origin unavailable'
+    $cell = & $scale 36
+    $plusX = $menuOrigin.X + 6 * $cell + [int][Math]::Floor($cell / 2)
+    $plusY = $menuOrigin.Y + [int][Math]::Floor($client.Bottom / 2)
+    [VerifyMenus]::Click($Session.pid, $plusX, $plusY, $false)
+    Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: left-click plus x=$plusX y=$plusY"
+    $null = Wait-Until { (Find-Popup $Session '#32768') -eq [IntPtr]::Zero } 'quick reactions closed'
+    $picker = Wait-Popup $Session 'MessagesEmojiPicker'
+    $full = [VerifyMenus]::Bounds($picker)
+    Save-Screen $Session 'picker-by-message'
+    $near = ($full.Bottom -le $bubble.top + (& $scale 8) -and $full.Bottom -gt $bubble.top - (& $scale 40)) -or ($full.Top -ge $bubble.bottom - (& $scale 8) -and $full.Top -lt $bubble.bottom + (& $scale 40))
+    Assert-That $near "Full picker is not next to the message: picker=$($full.Top)-$($full.Bottom) bubble=$($bubble.top)-$($bubble.bottom)"
+    [ordered]@{
+        dpi = $dpi; bubble = $bubble
+        quick = @{ left = $quick.Left; top = $quick.Top; right = $quick.Right; bottom = $quick.Bottom }
+        picker = @{ left = $full.Left; top = $full.Top; right = $full.Right; bottom = $full.Bottom }
+    } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Session.evidence 'picker-anchor.json')
+    Send-Keys $Session '{ESC}'
+    $null = Wait-Until { (Find-Popup $Session 'MessagesEmojiPicker') -eq [IntPtr]::Zero } 'picker closed'
+    Send-Keys $Session '^f'
+    Send-Keys $Session '^a{BACKSPACE}'
+    Send-Keys $Session '{ESC}'
+}
+
 function Invoke-ReactionsJourney($Session) {
     $source = Get-Content (Join-Path $PSScriptRoot '../../src/main.zig') -Raw
     $quick = [regex]::Match($source, 'const quick_reactions = \[_\]u16\{([^}]+)\}').Groups[1].Value.Split(',').Trim()
@@ -81,6 +141,7 @@ function Invoke-ReactionsJourney($Session) {
         Send-Keys $Session '{ESC}'
     }
     Assert-That ($failures.Count -eq 0) ($failures -join '; ')
+    Invoke-PickerPlacement $Session
     Send-Keys $Session '^f'
     Send-Keys $Session 'Verification Beta'
     $heart = [char]::ConvertFromUtf32(0x2764) + [string][char]0xfe0f

@@ -241,6 +241,7 @@ const reaction_remove = 3007;
 const reaction_woozy = 3008;
 const reaction_row = 3010;
 const emoji_picker = @import("emoji_picker.zig");
+const popup_anchor = @import("popup_anchor.zig");
 const emoji_draw = @import("emoji_draw.zig");
 const slack_emoji = @import("slack_emoji.zig");
 const shortcodes = @import("shortcodes.zig");
@@ -859,6 +860,7 @@ const App = struct {
     pending_reactions: [max_pending_reactions]PendingReaction = [_]PendingReaction{.{}} ** max_pending_reactions,
     pending_reaction_count: usize = 0,
     reaction_row_rect: ?win.RECT = null,
+    emoji_anchor: ?win.RECT = null,
     emoji_recents: [emoji_picker.max_recents]u16 = [_]u16{0} ** emoji_picker.max_recents,
     emoji_recents_count: usize = 0,
     sb_emoji_top: i32 = -1,
@@ -12804,6 +12806,7 @@ fn openEmojiPicker(a: *App) void {
     }
     if (a.selected_chat >= a.chat_count) return;
     a.emoji_react = false;
+    a.emoji_anchor = null;
     a.emoji_origin = drafts.Identity.init(chat_key.of(&a.chats[a.selected_chat]));
     showEmojiPickerWindow(a);
 }
@@ -12831,7 +12834,11 @@ fn openReactionPicker(a: *App) void {
         return;
     };
     scrollToSelectedMessage(a);
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    if (a.canvas) |canvas| {
+        _ = win.InvalidateRect(canvas, null, win.FALSE);
+        _ = win.UpdateWindow(canvas);
+    }
+    a.emoji_anchor = messageAnchorScreen(a, selected);
     a.emoji_react = true;
     a.emoji_react_jid.set(chat.jid.slice());
     a.emoji_react_id.set(a.messages[selected].id.slice());
@@ -13001,15 +13008,26 @@ fn showEmojiPickerWindow(a: *App) void {
     const width = emojiPickerWidth(a);
     const edit_zone = emojiEditZone(a);
     const grid_height = emoji_max_rows * emojiCell(a) + px(a, 12);
-    const x = owner_rect.right - width - px(a, 16);
-    const y = owner_rect.bottom - edit_zone - grid_height - px(a, 120);
+    var x = @max(owner_rect.left + px(a, 8), owner_rect.right - width - px(a, 16));
+    var y = @max(owner_rect.top + px(a, 60), owner_rect.bottom - edit_zone - grid_height - px(a, 120));
+    if (a.emoji_anchor) |anchor| {
+        var info = std.mem.zeroes(win.MONITORINFO);
+        info.cbSize = @sizeOf(win.MONITORINFO);
+        const monitor = win.MonitorFromRect(&anchor, win.MONITOR_DEFAULTTONEAREST);
+        if (win.GetMonitorInfoW(monitor, &info) != 0) {
+            const work = popup_anchor.Rect{ .left = info.rcWork.left, .top = info.rcWork.top, .right = info.rcWork.right, .bottom = info.rcWork.bottom };
+            const spot = popup_anchor.place(.{ .left = anchor.left, .top = anchor.top, .right = anchor.right, .bottom = anchor.bottom }, width, edit_zone + grid_height, work, px(a, 6));
+            x = spot.x;
+            y = spot.y;
+        }
+    }
     const picker = win.CreateWindowExW(
         win.WS_EX_TOOLWINDOW,
         lit("MessagesEmojiPicker"),
         null,
         win.WS_POPUP,
-        @max(owner_rect.left + px(a, 8), x),
-        @max(owner_rect.top + px(a, 60), y),
+        x,
+        y,
         width,
         edit_zone + grid_height,
         owner,
@@ -13167,7 +13185,7 @@ fn openEmojiMenu(a: *App) void {
     openEmojiPicker(a);
 }
 
-const quick_reactions = [_]u16{ reaction_like, reaction_love, reaction_laugh, reaction_surprised, reaction_sad, reaction_thanks, reaction_woozy };
+const quick_reactions = [_]u16{ reaction_like, reaction_love, reaction_laugh, reaction_surprised, reaction_sad, reaction_thanks };
 const quick_cells = quick_reactions.len + 1;
 
 fn reactionCellWidth(a: *const App) i32 {
@@ -13357,6 +13375,56 @@ fn drawReactionRow(a: *App, item: *win.DRAWITEMSTRUCT) void {
             _ = text_draw.drawText(item.hDC, wide.ptr(), -1, &box, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
     }
+}
+
+fn messageAnchorScreen(a: *const App, index: usize) ?win.RECT {
+    if (index >= a.message_count) return null;
+    const canvas = a.canvas orelse return null;
+    const bubble = a.messages[index].bubble_hit;
+    if (bubble.right <= bubble.left or bubble.bottom <= bubble.top) return null;
+    var rect = win.RECT{ .left = bubble.left, .top = bubble.top, .right = bubble.right, .bottom = bubble.bottom };
+    _ = win.MapWindowPoints(canvas, null, @ptrCast(&rect), 2);
+    return rect;
+}
+
+fn openQuickReactions(a: *App) void {
+    const selected = a.selected_message orelse return;
+    if (a.selected_chat >= a.chat_count) return;
+    if (a.chats[a.selected_chat].provider != .whatsapp and !unifiedHub(a)) {
+        setStatus(a, "Reactions work in WhatsApp chats only for now");
+        return;
+    }
+    const anchor = messageAnchorScreen(a, selected) orelse {
+        openReactionPicker(a);
+        return;
+    };
+    const menu = win.CreatePopupMenu() orelse return;
+    defer _ = win.DestroyMenu(menu);
+    if (theme.choice == .amoled) {
+        var info = std.mem.zeroes(win.MENUINFO);
+        info.cbSize = @sizeOf(win.MENUINFO);
+        info.fMask = @as(win.DWORD, win.MIM_BACKGROUND) | win.MIM_APPLYTOSUBMENUS;
+        info.hbrBack = a.brush_panel.?;
+        _ = win.SetMenuInfo(menu, &info);
+    }
+    _ = win.AppendMenuW(menu, win.MF_OWNERDRAW, reaction_row, null);
+    a.reaction_row_rect = null;
+    var params = std.mem.zeroes(win.TPMPARAMS);
+    params.cbSize = @sizeOf(win.TPMPARAMS);
+    params.rcExclude = anchor;
+    const center = anchor.left + @divTrunc(anchor.right - anchor.left, 2);
+    const flags: win.UINT = win.TPM_RETURNCMD | win.TPM_NONOTIFY | win.TPM_VERTICAL | win.TPM_BOTTOMALIGN | win.TPM_CENTERALIGN;
+    const choice = win.TrackPopupMenuEx(menu, flags, center, anchor.top, a.hwnd.?, &params);
+    if (choice != reaction_row) return;
+    const position = win.GetMessagePos();
+    const mouse_x: i32 = @as(i16, @bitCast(@as(u16, @truncate(position))));
+    const mouse_y: i32 = @as(i16, @bitCast(@as(u16, @truncate(position >> 16))));
+    var cell: usize = 0;
+    if (a.reaction_row_rect) |rect| {
+        if (mouse_y >= rect.top and mouse_y < rect.bottom and mouse_x < rect.right)
+            cell = reactionCellAt(mouse_x, rect.left, reactionCellWidth(a), quick_cells);
+    }
+    if (cell == quick_reactions.len) openReactionPicker(a) else reactToSelected(a, quick_reactions[cell]);
 }
 
 fn migrateLegacyArchiveState(a: *App, chats: []const std.json.Value) void {
@@ -18468,7 +18536,7 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
                         syncCanvasIconTooltips(a);
                         a.canvas_double_click_handled = true;
                         switch (@divTrunc(x - actions.left, px(a, 24))) {
-                            0 => openReactionPicker(a),
+                            0 => openQuickReactions(a),
                             1 => startReply(a),
                             else => {
                                 var point = win.POINT{ .x = x, .y = y };

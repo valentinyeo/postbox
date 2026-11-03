@@ -23,7 +23,7 @@ const MenuMessage = struct {
 };
 const command_copy_text = 2021;
 const command_copy_link = 2022;
-const quick_reactions = [_]u16{ 3000, 3001, 3002, 3003, 3004, 3005, 3006 };
+const quick_reactions = [_]u16{ 3000, 3001, 3002, 3003, 3004, 3005 };
 var verification_fixture = false;
 const InboxSequenceStub = struct { started: ?u64 = null };
 const App = struct {
@@ -271,7 +271,7 @@ test "IGSH-645 reaction cells use screen origin and retain every boundary includ
 }
 
 test "IGSH-645 closed menu routes captured cells and plus without querying its destroyed window" {
-    for (0..8) |cell| {
+    for (0..7) |cell| {
         reset(.amoled);
         var app: App = .{ .reaction_row_rect = .{} };
         tracking_app = &app;
@@ -283,8 +283,8 @@ test "IGSH-645 closed menu routes captured cells and plus without querying its d
         openReactionMenu(&app, 100, 100);
         try std.testing.expect(row_was_reset);
         try std.testing.expect(destroyed);
-        try std.testing.expectEqual(cell == 7, picker_opened);
-        try std.testing.expectEqual(if (cell == 7) null else @as(?u16, quick_reactions[cell]), reacted);
+        try std.testing.expectEqual(cell == 6, picker_opened);
+        try std.testing.expectEqual(if (cell == 6) null else @as(?u16, quick_reactions[cell]), reacted);
     }
 }
 
