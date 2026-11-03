@@ -104,6 +104,7 @@ const App = struct {
     pending_send_count: usize = 0,
     failed_send_count: usize = 0,
     msg_applied_hash: u64 = 0,
+    msg_applied_overlay: bool = false,
 };
 fn markChatRead(_: *App) void {}
 fn drainMediaDownloads(_: *App) void {}
@@ -223,6 +224,18 @@ test "an identical fresh read for the open chat is not repainted" {
     result.data = "{\"data\":{\"messages\":[{}]}}";
     deliver(&a, &result);
     try std.testing.expectEqual(@as(u32, 1), a.cached);
+}
+
+test "an identical read repaints once after a send finishes so the waiting copy goes" {
+    var a = fixture();
+    refreshMessages(&a);
+    var result = resultFor(a.last_job);
+    a.message_count = 1;
+    a.msg_applied_hash = std.hash.Wyhash.hash(0, result.data);
+    a.msg_applied_overlay = true;
+    const painted = a.painted;
+    deliver(&a, &result);
+    try std.testing.expectEqual(painted + 1, a.painted);
 }
 
 test "retry budget stops after two retries" {

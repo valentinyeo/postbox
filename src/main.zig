@@ -1086,6 +1086,7 @@ const App = struct {
     format_workspace: []const u8 = "",
     formatting_requests: format_cache.Requests = .{},
     msg_applied_hash: u64 = 0,
+    msg_applied_overlay: bool = false,
     paints: control_api.Paints = .{},
     paints_previous: control_api.Paints = .{},
     chats_prev_proc: usize = 0,
@@ -9233,7 +9234,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         .array => |items| items,
         else => return false,
     };
-    if (!chat_changed and a.pending_send_count == 0 and a.failed_send_count == 0 and
+    if (!chat_changed and a.pending_send_count == 0 and a.failed_send_count == 0 and !a.msg_applied_overlay and
         std.hash.Wyhash.hash(0, raw) == a.msg_applied_hash)
     {
         if (fresh_read) {
@@ -9427,6 +9428,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         appendWhatsAppFailed(a, failed);
     }
     a.msg_applied_hash = std.hash.Wyhash.hash(0, raw);
+    a.msg_applied_overlay = a.pending_send_count != 0 or a.failed_send_count != 0;
     adoptSentMedia(a);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     if (fresh_read) markChatRead(a);
@@ -18959,7 +18961,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(result)) and
                         result.gen == a.messages_gen)
                     {
-                        if (a.message_count > 0 and a.pending_send_count == 0 and a.failed_send_count == 0 and
+                        if (a.message_count > 0 and a.pending_send_count == 0 and a.failed_send_count == 0 and !a.msg_applied_overlay and
                             chat_key.Key.eql(chat_key.displayed(a), chat_key.of(result)) and
                             std.hash.Wyhash.hash(0, result.data) == a.msg_applied_hash)
                         {
