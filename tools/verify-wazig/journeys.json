@@ -410,7 +410,9 @@
     },
     {
       "name": "emoji-picker-glyphs",
-      "arguments": ["--verify-emoji-picker"],
+      "arguments": [
+        "--verify-emoji-picker"
+      ],
       "pr": false,
       "hub": "emoji-picker-glyphs",
       "evidence": true,
@@ -790,6 +792,19 @@
       "validator": null,
       "hub_handler": null,
       "maximize": false
+    },
+    {
+      "name": "archive-return",
+      "pr": true,
+      "hub": null,
+      "evidence": false,
+      "chats": null,
+      "script": "journey-archive-return.ps1",
+      "validator": null,
+      "hub_handler": null,
+      "prepare": "prepare-archive.ps1",
+      "maximize": true,
+      "provider": true
     }
   ]
 }
