@@ -31,11 +31,18 @@ Save-Screen $session before-reply
 
 Send-ReplyMessage $session 'Once reply from the archive' 'reply'
 Invoke-PaletteCommand $session 'Show inbox chats'
-$null = Wait-Until { Test-ChatListed $session 'fixture-beta' } 'replied chat back in the WhatsApp inbox' 60
-Save-Screen $session whatsapp-inbox
-Send-Keys $session '%i'
+$null = Wait-Until { -not (Read-Control $session status).show_archived } 'inbox shown after the reply'
+Send-Keys $session '%1'
 $null = Wait-Until { $state = Read-Control $session status; $state.current_view.inbox -and (Test-ChatListed $session 'fixture-beta') } 'replied chat back in Combined' 60
 Save-Screen $session combined-inbox
+$inMessenger = $false
+foreach ($number in 2..4) {
+    Send-Keys $session "%$number"
+    Start-Sleep -Seconds 2
+    if (Test-ChatListed $session 'fixture-beta') { $inMessenger = $true; Save-Screen $session whatsapp-inbox; break }
+}
+Assert-That $inMessenger 'replied chat is missing from its messenger inbox'
+Send-Keys $session '%1'
 
 $old = Get-App $session
 $oldPid = $session.pid
