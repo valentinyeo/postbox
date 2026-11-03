@@ -811,6 +811,20 @@
       "maximize": true
     },
     {
+      "name": "archived-search",
+      "pr": true,
+      "hub": "palette-archived",
+      "evidence": false,
+      "chats": 3,
+      "script": "journey-archived-search.ps1",
+      "validator": null,
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "PaletteArchivedHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "app-icon",
       "pr": true,
       "hub": null,

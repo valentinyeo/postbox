@@ -116,3 +116,4 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-1123: reply preview and quoted-message navigation -> `reply` (two-provider native preview, both cancellation paths, send target and fading original highlight)
 - IGSH-1602: a sent message shows once and no bubble keeps "(sending)" -> `send-once` (normal chat and archived chat, one bubble by text, no waiting bubble, empty outbox)
 - IGSH-1603: a reply in an archived chat returns it to Combined and its messenger inbox, Keep archived stays archived -> `reply-unarchive` (archive, reply, inbox and Combined, restart, keep archived reply)
+- IGSH-1595: the first search after a fresh start finds archived chats -> `archived-search` (fresh app start, Ctrl+F, archived test chat listed on the first try)
