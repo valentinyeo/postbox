@@ -1,4 +1,5 @@
 $headers = @{ Authorization = 'Bearer fixture-key-not-a-secret' }
+$null = Wait-Until { try { (Read-Control $session status).chat_count -gt 0 } catch { $false } } 'archive-return control ready' 60
 $null = Read-Control $session select -Arguments @('fixture-alpha', '--provider', 'slack')
 Send-Keys $session '^e'
 $null = Wait-Until { (Read-Control $session status).selected.archived } 'archive-return: chat archived' 30
