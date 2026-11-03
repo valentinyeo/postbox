@@ -13535,12 +13535,6 @@ fn tickArchivedScan(a: *App, store_changed: bool) void {
     _ = wacliEnqueue(a, job, false);
 }
 
-fn primeArchivedScan(a: *App) void {
-    a.archived_scan_dirty = true;
-    a.archived_scan_ticks = archived_scan_min_ticks;
-    tickArchivedScan(a, false);
-}
-
 fn applyArchivedScan(a: *App, raw: []const u8) void {
     if (unifiedHub(a)) {
         a.people.replaceArchivedHub(raw, peopleHubFields) catch {};
@@ -19226,7 +19220,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 pruneStaleMsgCache(a);
                 refreshChats(a);
                 refreshContactsIndex(a);
-                primeArchivedScan(a);
+                a.archived_scan_ticks = archived_scan_min_ticks;
+                tickArchivedScan(a, false);
                 refreshMessages(a);
                 _ = storeChanged(a);
                 startSync(a);
@@ -22969,7 +22964,6 @@ fn applyHubAccounts(a: *App, result: *const WacliResult) void {
         refreshGroups(a);
         refreshChats(a);
         refreshContactsIndex(a);
-        primeArchivedScan(a);
         refreshMessages(a);
         setStatus(a, if (unifiedHub(a)) "Message hub connected" else "WhatsApp hub connected");
         return;
