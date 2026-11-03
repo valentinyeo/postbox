@@ -238,8 +238,6 @@ class StatusLineTests(unittest.TestCase):
         expected = expected[:first] + expected[last:]
         expected = expected.replace('    if (a.status) |hwnd| _ = win.MoveWindow(hwnd, px(a, 12), height - status_height, left_width - px(a, 24), status_height, win.TRUE);\n', '')
         expected = expected.replace('    if (a.chats_hwnd) |hwnd|', '    const bulk_strip = if (a.bulk.items.len > 0) px(a, bulk_strip_height) else @as(i32, 0);\n    if (a.chats_hwnd) |hwnd|')
-        expected = expected.replace('            var rect = win.RECT{', '            const grown = inner.bottom - inner.top > px(a, 96);\n            const icon_band = if (grown) @min(px(a, 34), @divTrunc(inner.bottom - inner.top, 3)) else @as(i32, 0);\n            var rect = win.RECT{')
-        expected = expected.replace('inner.bottom - inner.top - px(a, 8)) };', 'inner.bottom - inner.top - icon_band - px(a, 4)) };')
         expected = expected.replace('a.voice_active);', 'a.voice_active, a.last_dictation_state == .recording or a.last_dictation_state == .transcribing);')
         expected = expected.replace('    a.compose_client_width = width;\n', '    invalidateCanvasIconTooltips(a);\n    clearHeaderIconTooltip(a);\n    a.compose_client_width = width;\n', 1)
         expected = expected.replace('    updateAttachButton(a);\n', '    updateAttachButton(a);\n    syncMainIconTooltips(a);\n', 1)
