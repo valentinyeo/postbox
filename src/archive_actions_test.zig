@@ -1196,8 +1196,8 @@ test "hub Ctrl E archives a one-row bulk selection outside the WhatsApp cache ac
         try std.testing.expectEqual(@as(usize, if (provider == .whatsapp) 1 else 0), a.hub_archive_requests);
         try std.testing.expectEqual(@as(usize, 0), a.chat_count);
         try std.testing.expectEqual(@as(usize, 0), a.bulk.items.len);
-        try std.testing.expectEqual(provider != .whatsapp, state.localArchived(key.key()));
-        if (provider == .whatsapp) try std.testing.expect(state.baseline(key.key().id) == null);
+        try std.testing.expect(state.localArchived(key.key()));
+        if (provider == .whatsapp) try std.testing.expect(state.baseline(key.key().id) != null);
     }
 }
 
@@ -1684,7 +1684,7 @@ test "IGSH-949 WhatsApp ordinary actions queue provider writes and keep remains 
         try std.testing.expectEqual(@as(usize, if (action == .keep) 0 else 1), a.hub_archive_requests);
         if (action != .keep) try std.testing.expectEqual(action == .unarchive, a.pending_archives[0].should_unarchive);
         try std.testing.expectEqual(action == .keep, state.isKept(key.id));
-        try std.testing.expectEqual(action == .keep, state.isArchived(key, false));
+        try std.testing.expectEqual(action != .unarchive, state.isArchived(key, false));
     }
 }
 
