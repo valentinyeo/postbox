@@ -932,7 +932,7 @@ test "explicit keep alone persists kept status and label on every provider" {
     }
 }
 
-test "stored Slack keep unarchives across restart then shortcut archives without keep" {
+test "stored Slack archive without a time unarchives across restart then shortcut archives without keep" {
     for ([_][]const u8{ "slack\tfixture-team\tchannel-shared\n", "slack\tfixture-team\tchannel-shared\t1\n" }) |stored| {
         var state = archive_rules.State{};
         state.parse(stored);
@@ -946,7 +946,8 @@ test "stored Slack keep unarchives across restart then shortcut archives without
         a.chats[0].archived = true;
         a.chats[0].provider_archived = true;
         const key = chat_key.of(&a.chats[0]);
-        try std.testing.expect(state.localKept(key));
+        try std.testing.expect(state.localArchived(key));
+        try std.testing.expect(!state.localKept(key));
         archiveSelected(&a, false);
         try std.testing.expectEqualStrings("Chat unarchived", a.status.slice());
         try std.testing.expect(!state.localKept(key));

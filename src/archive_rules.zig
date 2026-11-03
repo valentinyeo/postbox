@@ -360,7 +360,11 @@ pub const State = struct {
                 if (account.len > 32 or id.len == 0 or id.len > max_jid or self.count >= max_entries) continue;
                 const entry = &self.entries[self.count];
                 entry.* = .{ .provider = std.meta.stringToEnum(@FieldType(Entry, "provider"), jid).?, .keep = !std.mem.eql(u8, fields.next() orelse "1", "0") };
-                const ts = fields.next() orelse "";
+                var ts = fields.next() orelse "";
+                if (entry.keep and ts.len == 0) {
+                    entry.keep = false;
+                    ts = legacy_local_baseline;
+                }
                 const n = @min(ts.len, max_ts);
                 @memcpy(entry.ts[0..n], ts[0..n]);
                 entry.ts_len = @intCast(n);
@@ -390,6 +394,8 @@ pub const State = struct {
 };
 
 pub const stamp_len = 20;
+
+pub const legacy_local_baseline = "2026-11-03T00:00:00Z";
 
 pub fn archiveBaseline(out: *[stamp_len]u8, row_ts: []const u8, now_seconds: i64) []const u8 {
     const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(@max(0, now_seconds)) };
