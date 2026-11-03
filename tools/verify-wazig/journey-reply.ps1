@@ -118,3 +118,10 @@ foreach ($target in @(
     Send-Keys $session '^f'
     Send-Keys $session '^a{BACKSPACE}{ESC}'
 }
+
+Invoke-PaletteCommand $session 'Replies: Slack style'
+$null = Wait-Until { (Read-Control $session status).status -like '*Slack style*' } 'slack reply style switched' 20
+Save-Screen $session slack-style
+Invoke-PaletteCommand $session 'Replies: WhatsApp style'
+$null = Wait-Until { (Read-Control $session status).status -like '*WhatsApp style*' } 'whatsapp reply style switched' 20
+Hub-Pass $session reply-style-switch
