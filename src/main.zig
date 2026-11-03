@@ -786,6 +786,8 @@ const App = struct {
     thread_panel_replies: usize = 0,
     threads_account: Utf8Text(32) = .{},
     threads_enabled: bool = true,
+    replies_mode_key: Utf8Text(383) = .{},
+    replies_mode_on: bool = false,
     compose: ?win.HWND = null,
     compose_pill: win.RECT = std.mem.zeroes(win.RECT),
     compose_geometry: compose_layout.Layout = .{},
@@ -1697,13 +1699,23 @@ fn repliesModeKey(a: *App) ?[]u8 {
 }
 
 fn repliesSlackMode(a: *App) bool {
+    if (a.selected_chat >= a.chat_count) return false;
+    const chat = &a.chats[a.selected_chat];
+    var key_buffer: [383]u8 = undefined;
+    const cached_key = std.fmt.bufPrint(&key_buffer, "RepliesSlack:{s}:{s}:{s}", .{ @tagName(chat.provider), chat.account.slice(), chat.jid.slice() }) catch "";
+    if (cached_key.len > 0 and std.mem.eql(u8, cached_key, a.replies_mode_key.slice())) return a.replies_mode_on;
     const key = repliesModeKey(a) orelse return false;
     defer a.allocator.free(key);
     const wide = utf8ToWide(a.allocator, key) catch return false;
     defer a.allocator.free(wide);
-    const value = loadRegistryString(a.allocator, wide.ptr) orelse return false;
-    defer a.allocator.free(value);
-    return std.mem.eql(u8, value, "1");
+    const value = loadRegistryString(a.allocator, wide.ptr);
+    defer if (value) |text| a.allocator.free(text);
+    const on = if (value) |text| std.mem.eql(u8, text, "1") else false;
+    if (cached_key.len > 0) {
+        a.replies_mode_key.set(cached_key);
+        a.replies_mode_on = on;
+    }
+    return on;
 }
 
 fn setRepliesSlackMode(a: *App, enabled: bool) void {
@@ -1712,6 +1724,7 @@ fn setRepliesSlackMode(a: *App, enabled: bool) void {
     const wide = utf8ToWide(a.allocator, key) catch return;
     defer a.allocator.free(wide);
     _ = saveRegistryString(a.allocator, wide.ptr, if (enabled) "1" else "0");
+    a.replies_mode_key.set("");
     refreshMessages(a);
     setStatus(a, if (enabled) "Replies: Slack style in this chat" else "Replies: WhatsApp style in this chat");
 }
@@ -4297,7 +4310,8 @@ fn applyLocalReplies(a: *App, parent: []const u8) void {
     a.thread_rows.clearRetainingCapacity();
     for (a.messages[0..a.message_count]) |*message| {
         const is_parent = std.mem.eql(u8, message.id.slice(), parent);
-        if (!is_parent and !std.mem.eql(u8, message.quoted_msg_id.slice(), parent)) continue;
+        const root = localThreadRoot(a, message);
+        if (!is_parent and !(root != null and std.mem.eql(u8, root.?, parent))) continue;
         const sender = wideToUtf8(a.allocator, message.sender.slice()) catch null;
         defer if (sender) |text| a.allocator.free(text);
         const body = wideToUtf8(a.allocator, message.text.slice()) catch null;
@@ -4307,6 +4321,7 @@ fn applyLocalReplies(a: *App, parent: []const u8) void {
         row.thread_ts.set(parent);
         row.sender.set(a.allocator, sender orelse "");
         row.text.set(a.allocator, body orelse "");
+        row.time = message.time;
         row.timestamp.set(message.timestamp.slice());
         a.thread_rows.append(a.allocator, row) catch return;
     }
@@ -11234,8 +11249,6 @@ fn mentionPeople(a: *App, names: [][128]u8, out: []mention_index.Person) usize {
 
 fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
     if (message.quoted_msg_id.len == 0) return 0;
-    const slack_chat = a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .slack;
-    if (!slack_chat and repliesSlackMode(a)) return 0;
     return textLineHeight(hdc, a.font_small.?) * 2 + px(a, 6);
 }
 
@@ -14636,6 +14649,7 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             .{ .name = "sender_header", .rect = message.sender_hit },
             .{ .name = "time_header", .rect = message.time_hit },
             .{ .name = "quote_line", .rect = message.quote_hit },
+            .{ .name = "replies_line", .rect = message.replies_hit },
             .{ .name = "reaction_chip", .rect = message.reaction_hit },
             .{ .name = "media", .rect = message.media_hit },
             .{ .name = "card", .rect = message.unfurl_card_hit },
@@ -23795,12 +23809,44 @@ fn toggleSlackThreads(a: *App) void {
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.TRUE);
 }
 
+fn localSlackStyle(a: *App) bool {
+    return a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider != .slack and repliesSlackMode(a);
+}
+
+fn localThreadRoot(a: *const App, message: *const Message) ?[]const u8 {
+    var current = message;
+    var hops: usize = 0;
+    while (hops < 32 and current.quoted_msg_id.len > 0) : (hops += 1) {
+        var next: ?*const Message = null;
+        for (a.messages[0..a.message_count]) |*other| {
+            if (std.mem.eql(u8, other.id.slice(), current.quoted_msg_id.slice())) {
+                next = other;
+                break;
+            }
+        }
+        current = next orelse break;
+    }
+    return if (current == message) null else current.id.slice();
+}
+
+fn localReplyHidden(a: *App, message: *const Message) bool {
+    return message.quoted_msg_id.len > 0 and localSlackStyle(a) and localThreadRoot(a, message) != null;
+}
+
 fn channelMessageVisible(a: *App, message: *const Message) bool {
-    return (message.from_me and message.send_state != .none) or !slackThreadsEnabled(a) or !slack.isThreadReply(message.id.slice(), message.thread_ts.slice());
+    return (message.from_me and message.send_state != .none) or (!localReplyHidden(a, message) and (!slackThreadsEnabled(a) or !slack.isThreadReply(message.id.slice(), message.thread_ts.slice())));
 }
 
 fn threadReplyCount(a: *const App, parent: *const Message) usize {
     var loaded: usize = 0;
+    if (localSlackStyle(@constCast(a))) {
+        for (a.messages[0..a.message_count]) |*message| {
+            if (message.quoted_msg_id.len == 0) continue;
+            const root = localThreadRoot(a, message) orelse continue;
+            if (std.mem.eql(u8, root, parent.id.slice())) loaded += 1;
+        }
+        return loaded;
+    }
     for (a.thread_rows.items) |*message| {
         if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and std.mem.eql(u8, parent.id.slice(), message.thread_ts.slice())) loaded += 1;
     }
@@ -23816,7 +23862,7 @@ fn threadLatestReply(a: *const App, parent: *const Message) []const u8 {
 }
 
 fn threadSummaryHeight(a: *App, message: *const Message) i32 {
-    return if (slackThreadsEnabled(a) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 40), @as(i32, @intCast(@abs(scaledFontHeight(theme.type_preview, a.font_scale, @intCast(a.dpi))))) * 2 + px(a, 8)) else 0;
+    return if ((slackThreadsEnabled(a) or localSlackStyle(a)) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 40), @as(i32, @intCast(@abs(scaledFontHeight(theme.type_preview, a.font_scale, @intCast(a.dpi))))) * 2 + px(a, 8)) else 0;
 }
 
 fn threadPanelWidth(a: *const App, width: i32, left_width: i32) i32 {
@@ -23859,7 +23905,9 @@ fn openSlackThread(a: *App, selected: usize) void {
     _ = win.SendMessageW(a.thread_compose.?, win.EM_SETLIMITTEXT, drafts.max_text, 0);
     layout(a, a.compose_client_width, a.compose_client_height);
     refreshSlackThreadPanel(a);
-    if (unifiedHub(a)) requestHubThreadPage(a, "") else requestSlackThread(a, parent.slice(), "");
+    if (a.chats[a.selected_chat].provider == .slack) {
+        if (unifiedHub(a)) requestHubThreadPage(a, "") else requestSlackThread(a, parent.slice(), "");
+    }
     _ = win.SetFocus(a.thread_compose.?);
 }
 
@@ -23905,12 +23953,13 @@ fn refreshSlackThreadPanel(a: *App) void {
 }
 
 fn controlSlackThreads(a: *App, w: *std.Io.Writer) !void {
-    if (slackThreadsAccount(a).len == 0) return;
-    const enabled = slackThreadsEnabled(a);
+    const local = localSlackStyle(a);
+    if (slackThreadsAccount(a).len == 0 and !local) return;
+    const enabled = slackThreadsEnabled(a) or local;
     var parent: ?*const Message = null;
     var inline_replies: usize = 0;
     for (a.messages[0..a.message_count]) |*message| {
-        if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice())) {
+        if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) or (local and localThreadRoot(a, message) != null)) {
             if (channelMessageVisible(a, message)) inline_replies += 1;
         } else if (threadReplyCount(a, message) > 0 and (parent == null or std.mem.eql(u8, message.id.slice(), a.thread_parent.slice()))) parent = message;
     }

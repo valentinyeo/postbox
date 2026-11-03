@@ -11,6 +11,9 @@ const Message = struct {
     from_me: bool = false,
     send_state: enum { none, pending, failed } = .none,
 };
+fn localReplyHidden(_: *App, _: *const Message) bool {
+    return false;
+}
 fn slackThreadsEnabled(a: *App) bool {
     return a.provider == .slack and a.threads_enabled;
 }
