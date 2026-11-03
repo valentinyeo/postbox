@@ -23286,6 +23286,11 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                     if (index < count) {
                         const ok = if (parsed) |reply| result.ok and reply.value.results.len == count and reply.value.results[index].ok and std.mem.eql(u8, reply.value.results[index].chat, pending.jid.slice()) else false;
                         if (ok) {
+                            if (!pending.should_unarchive) {
+                                if (a.archive_state) |state| {
+                                    if (state.confirmArchived(pending.jid.slice())) saveArchiveState(a);
+                                }
+                            }
                             continue;
                         }
                         failed += 1;
@@ -23307,6 +23312,11 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
             const queued_key = chat_key.Key{ .provider = result.provider, .account = result.account.slice(), .id = a.pending_archives[0].jid.slice() };
             if (!chat_key.Key.eql(queued_key, chat_key.of(result))) return;
             if (result.ok) {
+                if (!a.pending_archives[0].should_unarchive) {
+                    if (a.archive_state) |state| {
+                        if (state.confirmArchived(a.pending_archives[0].jid.slice())) saveArchiveState(a);
+                    }
+                }
                 removeFirstPendingArchive(a);
                 if (a.pending_archive_count > 0) startNextArchive(a) else refreshChats(a);
                 setStatus(a, "Archive operation completed");

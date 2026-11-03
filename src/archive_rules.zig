@@ -282,6 +282,14 @@ pub const State = struct {
         return true;
     }
 
+    pub fn confirmArchived(self: *State, jid: []const u8) bool {
+        const index = self.find(jid) orelse return false;
+        const entry = &self.entries[index];
+        if (entry.provider != .whatsapp or entry.keep or entry.returned or entry.phone) return false;
+        entry.phone = true;
+        return true;
+    }
+
     pub fn isPhone(self: *const State, jid: []const u8) bool {
         const index = self.find(jid) orelse return false;
         return self.entries[index].phone;

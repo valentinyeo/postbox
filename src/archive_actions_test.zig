@@ -1688,6 +1688,23 @@ test "IGSH-949 WhatsApp ordinary actions queue provider writes and keep remains 
     }
 }
 
+test "IGSH-1540 an acknowledged hub archive is never queued again by a later chat list" {
+    var state = archive_rules.State{};
+    var a = fixture(&state);
+    defer a.allocator.free(a.pending_archives);
+    defer a.bulk.deinit(a.allocator);
+    a.unified_hub = true;
+    a.cache_tag.set("hub-cache");
+    const key = chat_key.Key{ .provider = .whatsapp, .account = "fixture-account", .id = "personal:fixture@s.whatsapp.net" };
+    try std.testing.expect(archiveChat(&a, key, .archive, .shortcut) == null);
+    var result = WacliResult{ .provider = .whatsapp, .account = a.cache_tag, .jid = a.pending_archives[0].jid, .ok = true, .http_status = 200 };
+    applyHubArchiveResult(&a, &result);
+    try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+    try std.testing.expect(state.isPhone(key.id));
+    migrateWhatsAppArchives(&a);
+    try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
+}
+
 test "IGSH-949 migration is durable on failure and keeps the archive time after provider acknowledgement" {
     var state = archive_rules.State{};
     state.parse("personal:old@s.whatsapp.net\t0\tbaseline\npersonal:kept@g.us\t1\tbaseline\ntelegram\ttelegram\ttelegram:user:7001\t0\tbaseline\n");
