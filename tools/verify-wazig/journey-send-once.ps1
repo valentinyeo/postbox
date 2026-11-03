@@ -9,6 +9,8 @@ function Send-OnceMessage($Session, [string]$Text, [string]$Label) {
     Click-Control $Session '1032'
     Send-Keys $Session $Text
     Send-Keys $Session '{ENTER}'
+    Start-Sleep -Milliseconds 800
+    Invoke-PaletteCommand $Session 'Refresh'
     $null = Wait-Until {
         @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.status -eq 200 }).Count -eq $before + 1
     } "$Label send accepted by the hub" 30

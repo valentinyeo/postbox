@@ -38,5 +38,6 @@ class SendOnceHandler(Handler):
                 self.state.sends[body['client_id']] = dict(
                     body, msg_id='ONCE-SENT-%d' % (len(self.state.sends) + 1), ts=self.state.stamp, status='sent')
             sent = self.state.sends[body['client_id']]
+        bridge.time.sleep(2.5)
         self.respond(200, {k: sent[k] for k in ('client_id', 'msg_id', 'ts', 'status')},
                      body=body, accepted=not duplicate, duplicate=duplicate)
