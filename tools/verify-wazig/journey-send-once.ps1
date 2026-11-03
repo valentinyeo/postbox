@@ -1,3 +1,5 @@
+. "$PSScriptRoot/menus.ps1"
+
 function Select-OnceChat($Session, [string]$Id, [string]$Provider) {
     $null = Wait-Until { try { (Read-Control $Session chats).chats | Where-Object { $_.id -ceq $Id } } catch { $false } } "$Id listed" 60
     $null = Read-Control $Session select -Arguments @($Id, '--provider', $Provider)
