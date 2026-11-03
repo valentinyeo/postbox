@@ -9107,6 +9107,7 @@ fn refreshMessages(a: *App) void {
         return;
     }
     const chat = &a.chats[a.selected_chat];
+    if (a.thread_parent.len > 0 and !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(chat))) closeSlackThread(a);
     a.slack_history_hash = 0;
     if ((!unifiedHub(a) and chat.provider != .whatsapp) or !std.mem.eql(u8, a.msg_read_last_jid.slice(), chat.jid.slice())) {
         a.msg_read_last_jid.set(chat.jid.slice());
