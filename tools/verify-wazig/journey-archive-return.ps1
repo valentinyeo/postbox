@@ -16,6 +16,12 @@ Invoke-PaletteCommand $session 'Refresh'
 $null = Wait-Until { (Read-Control $session status).pending_archives -eq 0 } 'archive-return return acknowledged' 60
 Hub-Pass $session whatsapp-return
 
+$null = Wait-Until {
+    try {
+        $null = Read-Control $session select -Arguments @($target.id, '--provider', $target.provider)
+        (Read-Control $session status).selected.id -eq $target.id
+    } catch { $false }
+} 'archive-return kept chat selected' 30
 Send-Keys $session '^+e'
 $null = Wait-Until { (Read-Control $session status).pending_archives -eq 0 -and -not ((Read-Control $session chats).chats.id -contains $target.id) } 'archive-return chat kept' 60
 $null = Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/notification-archived" -Headers $headers -Body '{}' -ContentType 'application/json'
