@@ -13482,15 +13482,6 @@ fn migrateWhatsAppArchives(a: *App) void {
     startNextArchive(a);
 }
 
-fn acknowledgeWhatsAppArchive(a: *App, jid: []const u8) void {
-    if (!unifiedHub(a)) return;
-    const state = a.archive_state orelse return;
-    if (state.isKept(jid)) return;
-    if (state.baseline(jid)) |base| {
-        if (base.len > 0) return;
-    }
-}
-
 fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []const u8) bool {
     const jid = key.id;
     const state = a.archive_state orelse return false;
@@ -23293,7 +23284,6 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                     if (index < count) {
                         const ok = if (parsed) |reply| result.ok and reply.value.results.len == count and reply.value.results[index].ok and std.mem.eql(u8, reply.value.results[index].chat, pending.jid.slice()) else false;
                         if (ok) {
-                            acknowledgeWhatsAppArchive(a, pending.jid.slice());
                             continue;
                         }
                         failed += 1;
@@ -23315,7 +23305,6 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
             const queued_key = chat_key.Key{ .provider = result.provider, .account = result.account.slice(), .id = a.pending_archives[0].jid.slice() };
             if (!chat_key.Key.eql(queued_key, chat_key.of(result))) return;
             if (result.ok) {
-                acknowledgeWhatsAppArchive(a, result.jid.slice());
                 removeFirstPendingArchive(a);
                 if (a.pending_archive_count > 0) startNextArchive(a) else refreshChats(a);
                 setStatus(a, "Archive operation completed");
