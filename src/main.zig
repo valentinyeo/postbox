@@ -13485,9 +13485,9 @@ fn migrateWhatsAppArchives(a: *App) void {
 fn acknowledgeWhatsAppArchive(a: *App, jid: []const u8) void {
     if (!unifiedHub(a)) return;
     const state = a.archive_state orelse return;
-    if (!state.isKept(jid)) {
-        state.remove(jid);
-        saveArchiveState(a);
+    if (state.isKept(jid)) return;
+    if (state.baseline(jid)) |base| {
+        if (base.len > 0) return;
     }
 }
 
