@@ -13498,7 +13498,6 @@ fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []c
         if (state.observeLocal(key, ts)) saveArchiveState(a);
         return false;
     }
-    if (key.provider == .whatsapp and unifiedHub(a)) return false;
     if (!state.isKept(jid)) {
         if (!provider_archived) {
             if (state.baseline(jid)) |base| {
