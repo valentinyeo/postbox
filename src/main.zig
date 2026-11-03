@@ -23875,6 +23875,8 @@ fn threadPanelWidth(a: *const App, width: i32, left_width: i32) i32 {
 fn closeSlackThread(a: *App) void {
     if (a.thread_parent.len == 0) return;
     disarmDictationSend(a);
+    const focus = win.GetFocus();
+    const panel_had_focus = focus != null and ((a.thread_list != null and focus == a.thread_list.?) or (a.thread_compose != null and focus == a.thread_compose.?));
     a.thread_parent.set("");
     if (a.thread_list) |hwnd| _ = win.DestroyWindow(hwnd);
     if (a.thread_compose) |hwnd| _ = win.DestroyWindow(hwnd);
@@ -23883,7 +23885,7 @@ fn closeSlackThread(a: *App) void {
     a.thread_panel_hash = 0;
     a.thread_panel_replies = 0;
     layout(a, a.compose_client_width, a.compose_client_height);
-    focusCompose(a);
+    if (panel_had_focus) focusCompose(a);
 }
 
 fn openSlackThread(a: *App, selected: usize) void {
