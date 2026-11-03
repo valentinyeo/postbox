@@ -221,7 +221,7 @@ fn importUnifiedOutbox(a: *App) !void {
     a.unified_storage_blocked = false;
 }
 fn setStatus(_: *App, _: []const u8) void {}
-fn returnSentChatToInbox(_: *App, _: *const outbox.Entry) void {}
+fn returnSentChatsToInbox(_: *App, _: []const outbox.Entry) void {}
 fn refreshUnifiedViews(a: *App) void {
     const snapshot = a.unified_snapshot orelse return;
     a.pending_send_count = 0;

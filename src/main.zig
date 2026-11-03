@@ -5738,6 +5738,9 @@ fn acceptUnifiedSends(a: *App, entries: []outbox.Entry, voice_bytes: ?[]const u8
     }
     if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
     refreshUnifiedViews(a);
+}
+
+fn returnSentChatsToInbox(a: *App, entries: []const outbox.Entry) void {
     for (entries) |*entry| returnSentChatToInbox(a, entry);
 }
 
@@ -10661,6 +10664,7 @@ fn queueVoiceNote(a: *App, jid: []const u8, ogg: []const u8, seconds: u32, wavef
                 break;
             }
         }
+        returnSentChatsToInbox(a, &entries);
         setStatus(a, "Voice note saved");
         return true;
     }
@@ -10783,6 +10787,7 @@ fn sendUnifiedMessage(a: *App, thread: bool) bool {
             if (current == compose) focusCompose(a);
         }
     }
+    returnSentChatsToInbox(a, entries);
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
     setStatus(a, "Message saved");
     return true;
