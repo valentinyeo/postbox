@@ -114,3 +114,4 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-829: regular message bodies and hanging list indentation -> `chat-lists` (six long bullets and two nested levels, actual font weight and screenshot text-edge alignment at two saved sizes)
 
 - IGSH-1123: reply preview and quoted-message navigation -> `reply` (two-provider native preview, both cancellation paths, send target and fading original highlight)
+- IGSH-1602: a sent message shows once and no bubble keeps "(sending)" -> `send-once` (normal chat and archived chat, one bubble by text, no waiting bubble, empty outbox)
