@@ -340,7 +340,7 @@ test "a plain archive persists intent separately from the keep flag before savin
     }
 }
 
-test "a legacy non-kept entry alone sends no hub archive request" {
+test "a legacy non-kept entry returns when a newer message arrives" {
     var state = archive_rules.State{};
     var a = fixture(&state);
     defer a.allocator.free(a.pending_archives);
@@ -357,7 +357,7 @@ test "a legacy non-kept entry alone sends no hub archive request" {
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expect(!a.hub_archive_inflight);
     try std.testing.expectEqual(@as(usize, 2), a.chat_count);
-    try std.testing.expect(state.find(key.id) != null);
+    try std.testing.expect(state.isReturned(key.id));
 }
 
 test "a kept entry alone sends no hub archive request" {
