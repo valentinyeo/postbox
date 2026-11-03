@@ -357,10 +357,11 @@ test "a legacy non-kept entry returns when a newer message arrives" {
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expect(!a.hub_archive_inflight);
     try std.testing.expectEqual(@as(usize, 2), a.chat_count);
-    try std.testing.expect(state.isReturned(key.id));
+    try std.testing.expect(state.find(key.id) == null);
+    try std.testing.expect(!state.isArchived(key, false));
 }
 
-test "a kept entry alone sends no hub archive request" {
+test "a kept entry alone sends no hub archive request and archives the row locally" {
     var state = archive_rules.State{};
     var a = fixture(&state);
     defer a.allocator.free(a.pending_archives);
@@ -375,7 +376,8 @@ test "a kept entry alone sends no hub archive request" {
     try std.testing.expectEqual(@as(usize, 0), a.hub_archive_requests);
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expect(!a.hub_archive_inflight);
-    try std.testing.expectEqual(@as(usize, 2), a.chat_count);
+    try std.testing.expectEqual(@as(usize, 1), a.chat_count);
+    try std.testing.expectEqualStrings("b@g.us", a.chats[0].jid.slice());
     try std.testing.expect(state.isKept(key.id));
 }
 
@@ -1686,7 +1688,7 @@ test "IGSH-949 WhatsApp ordinary actions queue provider writes and keep remains 
     }
 }
 
-test "IGSH-949 migration is durable on failure and removed only after provider acknowledgement" {
+test "IGSH-949 migration is durable on failure and keeps the archive time after provider acknowledgement" {
     var state = archive_rules.State{};
     state.parse("personal:old@s.whatsapp.net\t0\tbaseline\npersonal:kept@g.us\t1\tbaseline\ntelegram\ttelegram\ttelegram:user:7001\t0\tbaseline\n");
     var a = fixture(&state);
@@ -1710,8 +1712,9 @@ test "IGSH-949 migration is durable on failure and removed only after provider a
     result.http_status = 200;
     applyHubArchiveResult(&a, &result);
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
-    try std.testing.expectEqual(@as(usize, 2), restarted.count);
-    try std.testing.expect(restarted.find("personal:old@s.whatsapp.net") == null);
+    try std.testing.expectEqual(@as(usize, 3), restarted.count);
+    try std.testing.expect(restarted.find("personal:old@s.whatsapp.net") != null);
+    try std.testing.expect(restarted.baseline("personal:old@s.whatsapp.net") != null);
     try std.testing.expect(restarted.isKept("personal:kept@g.us"));
     try std.testing.expect(restarted.localArchived(chat_key.Key{ .provider = .telegram, .account = "telegram", .id = "telegram:user:7001" }));
 }
