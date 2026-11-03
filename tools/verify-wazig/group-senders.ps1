@@ -16,8 +16,10 @@ foreach ($messageId in @('GROUP-SAME', 'GROUP-QUOTE', 'GROUP-OWN')) {
 $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'WacliMessageCanvas')
 $canvas = (Get-Window $session).FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
 $bounds = $canvas.Current.BoundingRectangle
-$columnWidth = [Math]::Min(920, $bounds.Width - 32)
-$columnLeft = [Math]::Floor(($bounds.Width - $columnWidth) / 2)
+$inset = [Math]::Max(0, [Math]::Floor(($bounds.Width - 920) / 2))
+$margin = [Math]::Min(14, [Math]::Floor($bounds.Width / 2))
+$columnLeft = $inset + $margin
+$columnRight = $bounds.Width - $inset - $margin
 foreach ($messageId in @('GROUP-FIRST', 'GROUP-SAME', 'GROUP-DAY', 'GROUP-OTHER', 'GROUP-QUOTE')) {
     $row = $rows[$messageId]
     Assert-That ($row.bubble[0] -eq ($columnLeft + 42)) "Group continuation lost avatar gutter: $messageId"
@@ -25,7 +27,7 @@ foreach ($messageId in @('GROUP-FIRST', 'GROUP-SAME', 'GROUP-DAY', 'GROUP-OTHER'
 Assert-That (($rows['GROUP-SAME'].bubble[1] - $rows['GROUP-FIRST'].bubble[3]) -eq 4) 'Same sender messages not tightly grouped'
 Assert-That (($rows['GROUP-QUOTE'].bubble[2] - $rows['GROUP-QUOTE'].bubble[0]) -lt 100) 'Quoted short reply stretches across the screen'
 Assert-That (($rows['GROUP-QUOTE'].quote_line[2] - $rows['GROUP-QUOTE'].quote_line[0]) -gt ($rows['GROUP-QUOTE'].bubble[2] - $rows['GROUP-QUOTE'].bubble[0])) 'Compact reply hides its original-message preview'
-Assert-That ($rows['GROUP-OWN'].bubble[2] -eq ($columnLeft + $columnWidth)) 'Own group message is not right-aligned'
+Assert-That ($rows['GROUP-OWN'].bubble[2] -eq $columnRight) "Own group message is not right-aligned: own=$($rows['GROUP-OWN'].bubble[2]) expected=$columnRight canvas=$($bounds.Width)"
 Save-Screen $session group-senders
 $image = [Drawing.Bitmap]::new((Join-Path $Evidence 'group-senders.png'))
 try {
