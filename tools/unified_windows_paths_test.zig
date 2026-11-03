@@ -28,6 +28,7 @@ const App = struct {
     outbox_load_failed: bool = false,
 };
 fn refreshUnifiedViews(_: *App) void {}
+fn returnSentChatToInbox(_: *App, _: *const outbox.Entry) void {}
 
 fn sharedPath(a: *App, source_name: []const u8, entry: *const outbox.Entry) ![]u8 {
     var h = std.crypto.hash.sha2.Sha256.init(.{});
