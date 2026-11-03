@@ -1,9 +1,10 @@
 $headers = @{ Authorization = 'Bearer fixture-key-not-a-secret' }
 $null = Wait-Until { try { (Read-Control $session status).chat_count -gt 0 } catch { $false } } 'archive-return control ready' 60
+$target = Wait-Until { try { @((Read-Control $session chats).chats)[0] } catch { $null } } 'archive-return chats loaded' 60
 $null = Wait-Until {
     try {
-        $null = Read-Control $session select -Arguments @('fixture-alpha', '--provider', 'slack')
-        (Read-Control $session status).selected.id -eq 'fixture-alpha'
+        $null = Read-Control $session select -Arguments @($target.id, '--provider', $target.provider)
+        (Read-Control $session status).selected.id -eq $target.id
     } catch { $false }
 } 'archive-return chat selected' 60
 Send-Keys $session '^e'
