@@ -11218,8 +11218,8 @@ fn mentionPeople(a: *App, names: [][128]u8, out: []mention_index.Person) usize {
 
 fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
     if (message.quoted_msg_id.len == 0) return 0;
-    const threads_style = repliesSlackMode(a) or (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .slack);
-    if (threads_style) return 0;
+    const slack_chat = a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .slack;
+    if (!slack_chat and repliesSlackMode(a)) return 0;
     return textLineHeight(hdc, a.font_small.?) * 2 + px(a, 6);
 }
 
