@@ -119,10 +119,47 @@ foreach ($target in @(
     Send-Keys $session '^a{BACKSPACE}{ESC}'
 }
 
+function Open-FixtureChat($Session, [string]$Search, [string]$Id) {
+    Send-Keys $Session '^f'
+    Send-Keys $Session $Search
+    $null = Wait-Until { (Read-Control $Session status).selected.id -eq $Id } "$Id selected"
+    Click-Control $Session '1032'
+    Send-Keys $Session '^f'
+    Send-Keys $Session '^a{BACKSPACE}{ESC}'
+}
+
+Open-FixtureChat $session 'Verification Beta' 'fixture-beta'
+$canvas = [IntPtr](Get-Edit (Get-Window $session) '1024').Current.NativeWindowHandle
+$null = Wait-Until {
+    @((Read-Control $session messages).messages | Where-Object { $_.from_me -and $_.quoted_msg_id -ceq 'REPLY-ORIGINAL' -and $_.quote_line[2] -gt $_.quote_line[0] }).Count -eq 1
+} 'whatsapp chat shows the reply inline with its quote'
 Invoke-PaletteCommand $session 'Replies: Slack style'
-Start-Sleep -Seconds 3
-Save-Screen $session slack-style
+$threads = Wait-Until {
+    $found = (Read-Control $session status).slack_threads
+    if ($found -and $found.parent_reply_line -ceq '1 reply') { $found }
+} 'whatsapp chat in Slack style shows 1 reply under the original'
+Assert-That ($threads.parent_id -ceq 'REPLY-ORIGINAL') 'The reply line sits under the original'
+Assert-That ($threads.inline_replies -eq 0) 'The reply left the chat rows'
+Save-Screen $session whatsapp-slack-style
+$parent = Wait-Until {
+    (Read-Control $session messages).messages | Where-Object { $_.id -ceq 'REPLY-ORIGINAL' -and $_.replies_line[2] -gt $_.replies_line[0] }
+} 'replies line painted under the original'
+Click-ReplyRect $session $canvas $parent.replies_line
+$pane = Wait-Until {
+    $found = (Read-Control $session status).slack_threads
+    if ($found -and $found.open -and $found.replies -eq 1) { $found }
+} 'reply line click opens the thread pane with the reply'
+Save-Screen $session whatsapp-slack-thread
+Open-FixtureChat $session 'Verification Alpha' 'fixture-alpha'
+Open-FixtureChat $session 'Verification Beta' 'fixture-beta'
+$kept = Wait-Until {
+    $found = (Read-Control $session status).slack_threads
+    if ($found -and $found.parent_reply_line -ceq '1 reply' -and $found.inline_replies -eq 0) { $found }
+} 'Slack style is remembered for the whatsapp chat'
+Save-Screen $session whatsapp-slack-remembered
 Invoke-PaletteCommand $session 'Replies: WhatsApp style'
-Start-Sleep -Seconds 3
-Save-Screen $session whatsapp-style
+$null = Wait-Until {
+    @((Read-Control $session messages).messages | Where-Object { $_.from_me -and $_.quoted_msg_id -ceq 'REPLY-ORIGINAL' -and $_.quote_line[2] -gt $_.quote_line[0] }).Count -eq 1
+} 'WhatsApp style brings the reply back inline'
+Save-Screen $session whatsapp-style-restored
 Hub-Pass $session reply-style-switch

@@ -40,6 +40,19 @@ def check_reply(folder):
         sent, = [row for row in read(f'{provider}-sent.messages.json')['messages'] if row['from_me']]
         assert sent['quoted_msg_id'] == 'REPLY-ORIGINAL'
         assert sent['quote_line'][3] < sent['bubble'][1]
+    shots = []
+    for name in ['whatsapp-sent', 'whatsapp-slack-style', 'whatsapp-slack-thread', 'whatsapp-slack-remembered', 'whatsapp-style-restored']:
+        image = (folder / f'{name}.png').read_bytes()
+        assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
+        shots.append(hashlib.sha256(image).hexdigest())
+        assert read(f'{name}.state.json')['selected']['id'] == 'fixture-beta'
+    assert shots[0] != shots[1] and shots[1] != shots[2] and shots[1] != shots[4]
+    for name in ['whatsapp-slack-style', 'whatsapp-slack-thread', 'whatsapp-slack-remembered']:
+        threads = read(f'{name}.state.json')['slack_threads']
+        assert threads['parent_id'] == 'REPLY-ORIGINAL' and threads['parent_reply_line'] == '1 reply'
+        assert threads['inline_replies'] == 0
+    thread = read('whatsapp-slack-thread.state.json')['slack_threads']
+    assert thread['open'] and thread['replies'] == 1
     effects = read('side-effects.json')
     assert effects['pending_sends'] == effects['pending_archives'] == 0
     assert effects['production_preferences_absent'] and effects['whatsapp_store_absent']

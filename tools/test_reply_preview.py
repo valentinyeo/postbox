@@ -28,6 +28,10 @@ class ReplyEvidenceTests(unittest.TestCase):
                   quoted_msg_id='REPLY-ORIGINAL', quote_line=[10, 10, 110, 30], bubble=[10, 36, 110, 80])]))
             requests.append(dict(wire_path='/v1/wazig/send', status=200, authorized=True,
                                  body=dict(chat=chat, reply_to='REPLY-ORIGINAL', text=f'Synthetic {provider} reply\nSecond line')))
+        for name in ['whatsapp-slack-style', 'whatsapp-slack-thread', 'whatsapp-slack-remembered', 'whatsapp-style-restored']:
+            threads = dict(parent_id='REPLY-ORIGINAL', parent_reply_line='1 reply', inline_replies=0, replies=1, open=name.endswith('thread'))
+            write(f'{name}.state.json', dict(selected=dict(id='fixture-beta', provider='whatsapp'), slack_threads=threads))
+            (root / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + name.encode() * 1001)
         (root / 'bridge-requests.jsonl').write_text('\n'.join(map(json.dumps, requests)))
 
     def test_complete_two_provider_reply_evidence(self):
@@ -41,6 +45,9 @@ class ReplyEvidenceTests(unittest.TestCase):
             ('whatsapp-replying.state.json', lambda row: row['reply'].update(id='')),
             ('slack-sent.messages.json', lambda row: row['messages'][0].update(quoted_msg_id='wrong')),
             ('whatsapp-sent.messages.json', lambda row: row['messages'][0].update(quote_line=[10, 40, 110, 60])),
+            ('whatsapp-slack-style.state.json', lambda row: row['slack_threads'].update(inline_replies=1)),
+            ('whatsapp-slack-thread.state.json', lambda row: row['slack_threads'].update(open=False)),
+            ('whatsapp-slack-remembered.state.json', lambda row: row['slack_threads'].update(parent_reply_line='')),
             ('side-effects.json', lambda row: row.update(pending_sends=1)),
             ('whatsapp-sent.state.json', lambda row: row['composer'].update(lines=2)),
         ]:
