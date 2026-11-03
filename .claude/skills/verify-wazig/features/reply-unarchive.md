@@ -4,6 +4,7 @@
 
 - Replying in an archived chat returns it to the Combined inbox right away.
 - It also returns to its own messenger inbox, shown here for the WhatsApp test chat. The same rule covers Slack, Telegram and Signal chats.
+- The reply text leaves the compose box and does not come back as a draft, in Combined and after a restart.
 - The chat is still back after an app restart.
 - A chat marked Keep archived stays archived after a reply.
 
@@ -13,7 +14,7 @@ Archive a chat, open it from the archived list or from search, and send a reply.
 
 ## Driving it with PowerShell UI Automation
 
-Run `feature=reply-unarchive` through `tools/verify-wazig/run.ps1` on hosted Windows. The registry in `journeys.json` selects the isolated hub in `send-once-fixture.py`. The journey archives the test chat with Ctrl+E, opens it from the archived list, sends one test message, then checks the WhatsApp inbox and Combined, restarts the app and checks Combined again. It then marks the chat Keep archived, replies once more and checks the chat is still missing from the inbox. A screenshot is saved at every step.
+Run `feature=reply-unarchive` through `tools/verify-wazig/run.ps1` on hosted Windows. The registry in `journeys.json` selects the isolated hub in `send-once-fixture.py`. The journey archives the test chat with Ctrl+E, opens it from the archived list, sends one test message, then checks the WhatsApp inbox and Combined, asserts the compose box is empty, restarts the app and checks Combined and the empty compose box again. It then marks the chat Keep archived, replies once more and checks the chat is still missing from the inbox. A screenshot is saved at every step.
 
 ## Gotchas
 

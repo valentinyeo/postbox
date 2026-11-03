@@ -17,6 +17,12 @@ function Send-ReplyMessage($Session, [string]$Text, [string]$Label) {
     $null = Wait-Until { (Read-Control $Session status).pending_sends -eq 0 -and (Read-Control $Session status).pending_archives -eq 0 } "$Label outbox and archive queue empty" 60
 }
 
+function Assert-ComposerClear($Session, [string]$Label) {
+    Select-ReplyChat $Session 'fixture-beta'
+    $compose = Get-Edit (Get-Window $Session) '1032'
+    $null = Wait-Until { (Read-Edit $compose) -ceq '' } "$Label composer cleared after the reply was sent" 15
+}
+
 function Test-ChatListed($Session, [string]$Id) {
     try { return [bool]((Read-Control $Session chats).chats.id -contains $Id) } catch { return $false }
 }
@@ -34,6 +40,7 @@ Invoke-PaletteCommand $session 'Show inbox chats'
 $null = Wait-Until { -not (Read-Control $session status).show_archived } 'inbox shown after the reply'
 Send-Keys $session '%1'
 $null = Wait-Until { $state = Read-Control $session status; $state.current_view.inbox -and (Test-ChatListed $session 'fixture-beta') } 'replied chat back in Combined' 60
+Assert-ComposerClear $session 'Combined'
 Save-Screen $session combined-inbox
 $inMessenger = $false
 foreach ($number in 2..4) {
@@ -60,6 +67,7 @@ $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 
 [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
 Send-Keys $session '%i'
 $null = Wait-Until { $state = Read-Control $session status; $state.current_view.inbox -and (Test-ChatListed $session 'fixture-beta') } 'replied chat still in Combined after restart' 60
+Assert-ComposerClear $session 'Restarted'
 Save-Screen $session after-restart
 Hub-Pass $session reply-returns
 
