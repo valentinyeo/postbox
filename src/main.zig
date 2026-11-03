@@ -1725,6 +1725,7 @@ fn setRepliesSlackMode(a: *App, enabled: bool) void {
     defer a.allocator.free(wide);
     _ = saveRegistryString(a.allocator, wide.ptr, if (enabled) "1" else "0");
     a.replies_mode_key.set("");
+    a.msg_applied_hash = 0;
     refreshMessages(a);
     setStatus(a, if (enabled) "Replies: Slack style in this chat" else "Replies: WhatsApp style in this chat");
 }
