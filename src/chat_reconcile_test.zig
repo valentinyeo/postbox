@@ -175,6 +175,7 @@ fn refreshVisibleChats(a: *App) void {
     a.refreshed_chats += 1;
 }
 fn refreshContactsIndex(_: *App) void {}
+fn primeArchivedScan(_: *App) void {}
 
 test "fresh sidebar row triggers one generation-guarded read" {
     var a = fixture();
