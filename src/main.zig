@@ -5738,6 +5738,15 @@ fn acceptUnifiedSends(a: *App, entries: []outbox.Entry, voice_bytes: ?[]const u8
     }
     if (!saveUnifiedCandidate(a, .any, 0)) return error.SnapshotWriteFailed;
     refreshUnifiedViews(a);
+    for (entries) |*entry| returnSentChatToInbox(a, entry);
+}
+
+fn returnSentChatToInbox(a: *App, entry: *const outbox.Entry) void {
+    const provider = std.meta.stringToEnum(transport.Provider, @tagName(entry.provider)) orelse return;
+    const key = chat_key.Key{ .provider = provider, .account = entry.account.slice(), .id = entry.jid.slice() };
+    const index = visibleChatIndex(a, key) orelse return;
+    if (chatArchiveState(a, &a.chats[index]) != .archived) return;
+    _ = archiveChat(a, key, .unarchive, .send);
 }
 
 fn retryUnifiedSend(a: *App, id: []const u8, key: chat_key.Key) ![outbox.id_len]u8 {

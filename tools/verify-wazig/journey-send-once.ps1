@@ -33,8 +33,8 @@ Send-Keys $session '%1'
 Select-OnceChat $session 'fixture-beta' 'whatsapp'
 Send-OnceMessage $session 'Once normal chat message' 'normal-chat'
 
-Send-Keys $session '^e'
-$null = Wait-Until { (Read-Control $session status).pending_archives -eq 0 -and -not ((Read-Control $session chats).chats.id -contains 'fixture-beta') } 'test chat archived' 60
+Send-Keys $session '^+e'
+$null = Wait-Until { -not ((Read-Control $session chats).chats.id -contains 'fixture-beta') } 'test chat kept archived' 60
 Invoke-PaletteCommand $session 'Show archived chats'
 $null = Wait-Until { $state = Read-Control $session status; $state.show_archived -and $state.chat_count -eq 1 -and $state.selected.name -eq 'Verification Beta' } 'test chat open in the archived list' 60
 Send-OnceMessage $session 'Once archived chat message' 'archived-chat'
