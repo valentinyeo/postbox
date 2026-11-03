@@ -13767,7 +13767,7 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
     if (a.archive_state) |state| {
         if (unarchive) {
             state.remove(jid);
-        } else {
+        } else if (!unifiedHub(a) or action == .keep) {
             const row_stamp = if (visibleChatIndex(a, key)) |index| a.chats[index].timestamp.slice() else "";
             var stamp_buffer: [archive_rules.stamp_len]u8 = undefined;
             const stamp = archive_rules.archiveBaseline(&stamp_buffer, row_stamp, nowUnixSeconds());
