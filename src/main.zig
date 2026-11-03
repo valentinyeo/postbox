@@ -23784,7 +23784,7 @@ fn threadLatestReply(a: *const App, parent: *const Message) []const u8 {
 }
 
 fn threadSummaryHeight(a: *App, message: *const Message) i32 {
-    return if (slackThreadsEnabled(a) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 40), @as(i32, @intCast(@abs(scaledFontHeight(theme.type_preview, a.font_scale, @intCast(a.dpi))))) * 2 + px(a, 8)) else 0;
+    return if ((slackThreadsEnabled(a) or repliesSlackMode(a)) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 40), @as(i32, @intCast(@abs(scaledFontHeight(theme.type_preview, a.font_scale, @intCast(a.dpi))))) * 2 + px(a, 8)) else 0;
 }
 
 fn threadPanelWidth(a: *const App, width: i32, left_width: i32) i32 {
