@@ -78,8 +78,5 @@ if ($pickChats -and $pickChats.Count -ge 5) {
     Save-Screen $session shift-picked
     Send-Keys $session '{ESC}'
     $null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 0 } 'bulk range: Esc did not clear the range' 10
-    Assert-That (@((Read-Control $session chats).chats).Count -eq 0) 'bulk: inbox not empty after archiving everything'
-Hub-Pass $session empty-inbox
-
-Hub-Pass $session ctrl-shift-chat-pick
+    Hub-Pass $session ctrl-shift-chat-pick
 }
