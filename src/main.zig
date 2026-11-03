@@ -17111,7 +17111,8 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     }
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_row.?));
     _ = win.SetTextColor(item.hDC, row_text);
-    var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + row.name_top, .right = item.rcItem.right - px(a, if (pinned_chat) @as(i32, 78) else 54), .bottom = item.rcItem.top + row.preview_top };
+    const edges = @import("font_config.zig").rowEdges(item.rcItem.right, @intCast(a.dpi), pinned_chat);
+    var name_rect = win.RECT{ .left = item.rcItem.left + px(a, 66), .top = item.rcItem.top + row.name_top, .right = edges.name_right, .bottom = item.rcItem.top + row.preview_top };
     if (verification_fixture and index == 0) {
         if (text_draw.drawTextMeasured(item.hDC, chat.name.ptr(), @intCast(chat.name.len), &name_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_VCENTER)) |measurement| {
             a.font_list_proof = .{ .scale = a.font_scale, .item = item.rcItem, .text = measurement };
@@ -17121,7 +17122,7 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
     _ = win.SetTextColor(item.hDC, row_muted);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_time.?));
     if (chat.unread or chat.unread_count > 0) _ = win.SetTextColor(item.hDC, row_primary);
-    var time_rect = win.RECT{ .left = item.rcItem.right - px(a, 52), .top = item.rcItem.top + row.name_top, .right = item.rcItem.right - px(a, 4), .bottom = item.rcItem.top + row.preview_top };
+    var time_rect = win.RECT{ .left = edges.time_left, .top = item.rcItem.top + row.name_top, .right = edges.time_right, .bottom = item.rcItem.top + row.preview_top };
     _ = text_draw.drawText(item.hDC, chat.time.ptr(), @intCast(chat.time.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(item.hDC, row_muted);

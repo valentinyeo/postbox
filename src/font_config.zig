@@ -93,9 +93,9 @@ fn scaled(value: i32, dpi: i32) i32 {
 pub fn rowEdges(item_right: i32, dpi: i32, is_pinned: bool) RowEdges {
     return .{
         .highlight_right = item_right - scaled(8, dpi),
-        .time_left = item_right - scaled(52, dpi),
-        .time_right = item_right - scaled(4, dpi),
-        .name_right = item_right - scaled(if (is_pinned) 78 else 54, dpi),
+        .time_left = item_right - scaled(60, dpi),
+        .time_right = item_right - scaled(12, dpi),
+        .name_right = item_right - scaled(if (is_pinned) 78 else 62, dpi),
     };
 }
 
