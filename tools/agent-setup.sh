@@ -41,3 +41,19 @@ printf '%s\n' '#!/bin/sh' \
   '[ -f "$top/tools/agent-setup.sh" ] || exit 0' \
   'cd "$top" && exec bash tools/agent-setup.sh' > "$hook"
 chmod +x "$hook"
+card_hook="$hooks/commit-msg"
+if [ -e "$card_hook" ] && ! grep -q 'tools/update_cards.py' "$card_hook"; then
+  echo "agent-setup: $card_hook already exists, so commits will not need a release note line. Add a call to tools/update_cards.py check to it." >&2
+  exit 1
+fi
+printf '%s\n' '#!/bin/sh' \
+  'head -n 1 "$1" | grep -q "^Merge" && exit 0' \
+  'top="$(git rev-parse --show-toplevel)" || exit 0' \
+  '[ -f "$top/tools/update_cards.py" ] || exit 0' \
+  'files="$(mktemp)"' \
+  'git diff --cached --name-only > "$files"' \
+  'python3 "$top/tools/update_cards.py" check --body-file "$1" --files "$files"' \
+  'status=$?' \
+  'rm -f "$files"' \
+  'exit $status' > "$card_hook"
+chmod +x "$card_hook"

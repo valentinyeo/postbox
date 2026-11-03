@@ -62,7 +62,14 @@ def commit_product_text(sha):
     changed = [name for name in app_files(sha) if name.startswith(("src/", "assets/")) and not name.endswith(("_test.zig", "/test.zig"))]
     if not changed:
         return None
-    return card_from_subject(command("git", "log", "-1", "--format=%s", sha))
+    message = command("git", "log", "-1", "--format=%B", sha)
+    if re.search(r"^Card:", message, re.MULTILINE):
+        try:
+            text = card_text(message)
+        except ValueError:
+            return None
+        return None if text.lower() == "none" else text
+    return card_from_subject(message.splitlines()[0] if message else "")
 
 
 def compose_release(repo, tag):

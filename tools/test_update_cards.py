@@ -66,6 +66,13 @@ class UpdateCardTest(unittest.TestCase):
         self.assertIsNone(update_cards.commit_product_text("sha"))
 
     @patch("update_cards.command")
+    def test_commit_card_line_wins_over_a_long_subject(self, command):
+        command.side_effect = ["src/main.zig\n", "IGSH-1540: a very long subject " + "x" * 80 + "\n\nUndo: revert\nCard: Archiving a chat now empties the inbox\n"]
+        self.assertEqual(update_cards.commit_product_text("sha"), "Archiving a chat now empties the inbox")
+        command.side_effect = ["src/main.zig\n", "IGSH-1540: subject\n\nCard: none\n"]
+        self.assertIsNone(update_cards.commit_product_text("sha"))
+
+    @patch("update_cards.command")
     def test_paginated_api(self, command):
         command.return_value = '[{"number":1}]\n[{"number":2}]'
         self.assertEqual(list(update_cards.api_pages("repos/example/app/pulls")), [{"number": 1}, {"number": 2}])

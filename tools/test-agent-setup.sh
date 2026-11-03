@@ -37,6 +37,9 @@ assert_linked() {
 (cd "$repo" && bash tools/agent-setup.sh >/dev/null)
 assert_linked "$repo"
 printf 'test-agent-setup: main checkout linked\n'
+grep -q 'tools/update_cards.py' "$repo/.git/hooks/commit-msg" || fail "commit-msg release note hook missing"
+[ -x "$repo/.git/hooks/commit-msg" ] || fail "commit-msg release note hook not executable"
+printf 'test-agent-setup: release note hook installed\n'
 
 git -C "$repo" worktree add -q --detach "$temp/fresh" HEAD >/dev/null 2>&1 || fail "worktree add failed with the private repo present"
 assert_linked "$temp/fresh"
