@@ -78,3 +78,34 @@ test "chat row geometry fits measured fonts at any scale" {
     try std.testing.expect(high_dpi.preview_top - high_dpi.name_top >= 60);
     try std.testing.expect(high_dpi.preview_bottom - high_dpi.preview_top >= 50);
 }
+
+pub const RowEdges = struct {
+    highlight_right: i32,
+    time_left: i32,
+    time_right: i32,
+    name_right: i32,
+};
+
+fn scaled(value: i32, dpi: i32) i32 {
+    return @divTrunc(value * dpi + 48, 96);
+}
+
+pub fn rowEdges(item_right: i32, dpi: i32, is_pinned: bool) RowEdges {
+    return .{
+        .highlight_right = item_right - scaled(8, dpi),
+        .time_left = item_right - scaled(52, dpi),
+        .time_right = item_right - scaled(4, dpi),
+        .name_right = item_right - scaled(if (is_pinned) 78 else 54, dpi),
+    };
+}
+
+test "IGSH-1538 the row time sits inside the highlight with the avatar's padding" {
+    for ([_]i32{ 96, 120, 144, 192 }) |dpi| {
+        for ([_]bool{ false, true }) |is_pinned| {
+            const edges = rowEdges(360, dpi, is_pinned);
+            const avatar_inset = scaled(12, dpi) - scaled(8, dpi);
+            try std.testing.expect(edges.time_right <= edges.highlight_right - avatar_inset);
+            try std.testing.expect(edges.name_right <= edges.time_left);
+        }
+    }
+}
