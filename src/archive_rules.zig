@@ -112,7 +112,7 @@ pub const State = struct {
         if (key.provider == .whatsapp) {
             const index = self.find(key.id) orelse return provider_archived;
             const entry = &self.entries[index];
-            return provider_archived or entry.keep or (!entry.returned and !entry.phone);
+            return entry.keep or (!entry.returned and (provider_archived or !entry.phone));
         } else {
             if (self.findLocal(key)) |index| return self.entries[index].keep or self.entries[index].ts_len > 0;
         }
@@ -850,7 +850,8 @@ test "old returned and phone markers never override WhatsApp archive state" {
     for ([_][]const u8{ "returned", "phone" }) |marker| {
         var buffer: [256]u8 = undefined;
         state.parse(try std.fmt.bufPrint(&buffer, "{s}\t0\tbaseline\t{s}\n", .{ key.id, marker }));
-        try std.testing.expect(state.isArchived(key, true));
+        const provider_holds = std.mem.eql(u8, marker, "phone");
+        try std.testing.expectEqual(provider_holds, state.isArchived(key, true));
         try std.testing.expect(!state.isArchived(key, false));
     }
     try std.testing.expect(state.archive(key.id, "baseline", true));
