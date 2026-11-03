@@ -772,6 +772,34 @@ test "local Slack Telegram and Signal archives round trip with provider and acco
     }
 }
 
+test "local archives saved before the return rule come back on a message after the rule shipped" {
+    const Key = struct { provider: enum { whatsapp, slack, telegram, signal }, account: []const u8, id: []const u8 };
+    for ([_]struct { key: Key, line: []const u8 }{
+        .{ .key = .{ .provider = .telegram, .account = "acct", .id = "telegram:user:7001" }, .line = "telegram\tacct\ttelegram:user:7001\t1\t\n" },
+        .{ .key = .{ .provider = .slack, .account = "T1", .id = "C1" }, .line = "slack\tT1\tC1\t1\t\n" },
+        .{ .key = .{ .provider = .slack, .account = "T1", .id = "C1" }, .line = "slack\tT1\tC1\n" },
+    }) |case| {
+        var state = State{};
+        state.parse(case.line);
+        try std.testing.expect(state.localArchived(case.key));
+        try std.testing.expect(!state.localKept(case.key));
+        try std.testing.expect(!state.observeLocal(case.key, "2026-10-20T09:00:00Z"));
+        try std.testing.expect(state.localArchived(case.key));
+        try std.testing.expect(state.observeLocal(case.key, "2026-11-03T15:31:53Z"));
+        try std.testing.expect(!state.localArchived(case.key));
+    }
+}
+
+test "a stamped Keep archived choice on a local chat never comes back" {
+    const Key = struct { provider: enum { whatsapp, slack, telegram, signal }, account: []const u8, id: []const u8 };
+    const key = Key{ .provider = .telegram, .account = "acct", .id = "telegram:user:7001" };
+    var state = State{};
+    state.parse("telegram\tacct\ttelegram:user:7001\t1\t2026-11-03T10:00:00Z\n");
+    try std.testing.expect(state.localKept(key));
+    try std.testing.expect(!state.observeLocal(key, "2026-11-03T15:31:53Z"));
+    try std.testing.expect(state.localArchived(key));
+}
+
 test "old plain Telegram and Signal archives become local regardless of keep or timestamp" {
     const Key = struct { provider: enum { whatsapp, slack, telegram, signal }, account: []const u8, id: []const u8 };
     for ([_]Key{
