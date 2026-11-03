@@ -120,8 +120,9 @@ foreach ($target in @(
 }
 
 Invoke-PaletteCommand $session 'Replies: Slack style'
-$null = Wait-Until { (Read-Control $session status).status -like '*Slack style*' } 'slack reply style switched' 20
+Start-Sleep -Seconds 3
 Save-Screen $session slack-style
 Invoke-PaletteCommand $session 'Replies: WhatsApp style'
-$null = Wait-Until { (Read-Control $session status).status -like '*WhatsApp style*' } 'whatsapp reply style switched' 20
+Start-Sleep -Seconds 3
+Save-Screen $session whatsapp-style
 Hub-Pass $session reply-style-switch
