@@ -16079,10 +16079,7 @@ fn stagedComposerSizes(a: *App, width: i32, height: i32) compose_layout.Composer
     const columns = stagedPreviewColumns(a, width);
     const extra = @as(i32, @intCast((a.staged_images.count -| 1) / columns)) * px(a, compose_layout.preview_band);
     const reply_height = if (a.reply_to.len > 0) px(a, 64) else @as(i32, 0);
-    const content_height = composerContentHeight(a);
-    const one_line = a.font_body_height + px(a, 16);
-    const icon_band = if (content_height > one_line) px(a, 34) else @as(i32, 0);
-    var sizes = compose_layout.computeScaled(a.compose_dragged, content_height + icon_band, height - extra - reply_height, a.staged_images.count > 0, @intCast(a.dpi));
+    var sizes = compose_layout.computeScaled(a.compose_dragged, composerContentHeight(a), height - extra - reply_height, a.staged_images.count > 0, @intCast(a.dpi));
     sizes.strip_height += extra + reply_height;
     return sizes;
 }
