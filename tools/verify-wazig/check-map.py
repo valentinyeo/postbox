@@ -72,7 +72,7 @@ for required in ['workflow_dispatch:', 'schedule:', 'windows-latest', 'actions/u
     assert required in workflow, required
 triggers = workflow.split('\non:\n', 1)[1].split('\npermissions:', 1)[0]
 assert 'pull_request:' not in triggers and 'push:' not in triggers, 'verification is nightly/manual only'
-assert "if os.environ['EVENT_NAME'] == 'schedule':\n              selected = journeys" in workflow, 'nightly must cover every journey'
+assert "if os.environ['EVENT_NAME'] == 'schedule' or feature == 'all':\n              selected = journeys" in workflow, 'nightly must cover every journey'
 assert 'type: string' in workflow and 'options:' not in workflow, 'dispatch must accept a registry-validated string'
 assert '  plan:\n    runs-on: ubuntu-latest' in workflow, 'missing plan job'
 assert '  candidate:\n    runs-on: ubuntu-latest' in workflow, 'missing shared candidate build job'

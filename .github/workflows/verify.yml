@@ -52,7 +52,7 @@ jobs:
 
           journeys = json.loads(Path('tools/verify-wazig/journeys.json').read_text())['journeys']
           feature = os.environ['FEATURE']
-          if os.environ['EVENT_NAME'] == 'schedule':
+          if os.environ['EVENT_NAME'] == 'schedule' or feature == 'all':
               selected = journeys
           else:
               selected = [row for row in journeys if row['name'] == feature]
