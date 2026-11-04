@@ -634,6 +634,9 @@ pub fn hitText(dc: win.HDC, input: []const u16, rect: win.RECT, index: ?usize, x
         };
         text = buffer;
     }
+    if (!failed) {
+        if (hitEmojiLine(dc, text, rect, index, x)) |hit| return hit;
+    }
     const key = keyForDC(dc) catch return null;
     const shaped = layoutFor(text, key, rect, win.DT_SINGLELINE | win.DT_NOPREFIX | win.DT_NOCLIP) catch return null;
     const layout = shaped.object;
@@ -652,6 +655,49 @@ pub fn hitText(dc: win.HDC, input: []const u16, rect: win.RECT, index: ?usize, x
 }
 
 const emoji_runs = @import("emoji_runs.zig");
+
+fn hitEmojiLine(dc: win.HDC, text: []const u16, rect: win.RECT, index: ?usize, x: i32) ?TextHit {
+    if (!emoji_runs.containsEmoji(text)) return null;
+    var runs: [emoji_runs.max_runs]emoji_runs.Run = undefined;
+    const count = emoji_runs.splitRuns(text, &runs);
+    if (count == 0 or runs[count - 1].start + runs[count - 1].len != text.len) return null;
+    const measure = emoji_width orelse return null;
+    if (emoji_paint == null) return null;
+    var metrics: win.TEXTMETRICW = undefined;
+    if (win.GetTextMetricsW(dc, &metrics) == 0) return null;
+    const em = @max(1, metrics.tmHeight - metrics.tmInternalLeading);
+    var origin = rect.left;
+    for (runs[0..count]) |run| {
+        const slice = text[run.start..][0..run.len];
+        var width: i32 = undefined;
+        if (run.emoji) {
+            width = measure(slice, em) orelse return null;
+        } else {
+            var probe = win.SIZE{};
+            if (win.GetTextExtentPoint32W(dc, slice.ptr, @intCast(slice.len), &probe) == 0) return null;
+            width = probe.cx;
+        }
+        const run_end = run.start + run.len;
+        if (index) |position| {
+            if (position <= run.start) return .{ .index = position, .x = origin };
+            if (position < run_end) {
+                if (run.emoji) return .{ .index = position, .x = origin + width };
+                const inner = hitText(dc, slice, .{ .left = origin, .top = rect.top, .right = rect.right, .bottom = rect.bottom }, position - run.start, 0) orelse return null;
+                return .{ .index = position, .x = inner.x };
+            }
+        } else if (x < origin + width) {
+            if (run.emoji) {
+                const nearer_end = x - origin >= @divTrunc(width, 2);
+                return .{ .index = if (nearer_end) run_end else run.start, .x = x };
+            }
+            const inner = hitText(dc, slice, .{ .left = origin, .top = rect.top, .right = rect.right, .bottom = rect.bottom }, null, x) orelse return null;
+            return .{ .index = run.start + inner.index, .x = x };
+        }
+        origin += width;
+    }
+    if (index) |position| return .{ .index = position, .x = origin };
+    return .{ .index = text.len, .x = x };
+}
 
 pub const EmojiLine = struct {
     pub const Width = *const fn (text: []const u16, em: i32) ?i32;
@@ -1479,4 +1525,31 @@ test "emoji lines keep row layout rules" {
     try testing.expectEqual(@as(usize, 1), stub_emoji_paint);
     var narrow = win.RECT{ .left = 0, .top = 0, .right = 4, .bottom = 20 };
     try testing.expect(!drawEmojiLine(dc, &text, &narrow, win.DT_SINGLELINE | win.DT_END_ELLIPSIS));
+}
+
+test "IGSH-1542 the caret follows the emoji width the line is painted at" {
+    const testing = @import("std").testing;
+    emoji_width = stubEmojiWidth;
+    emoji_paint = stubEmojiPaint;
+    defer {
+        emoji_width = null;
+        emoji_paint = null;
+    }
+    const dc = win.GetDC(null) orelse return error.NoDeviceContext;
+    defer _ = win.ReleaseDC(null, dc);
+    _ = win.SelectObject(dc, win.GetStockObject(win.DEFAULT_GUI_FONT));
+    const text = [_]u16{ 'a', 0xD83D, 0xDE42, 'b' };
+    var probe = win.SIZE{};
+    try testing.expect(win.GetTextExtentPoint32W(dc, text[0..1].ptr, 1, &probe) != 0);
+    const rect = win.RECT{ .left = 10, .top = 0, .right = 400, .bottom = 20 };
+    const before = hitText(dc, &text, rect, 1, 0) orelse return error.NoHit;
+    try testing.expectEqual(10 + probe.cx, before.x);
+    const after = hitText(dc, &text, rect, 3, 0) orelse return error.NoHit;
+    try testing.expectEqual(10 + probe.cx + stub_emoji_width, after.x);
+    const inside = hitText(dc, &text, rect, 2, 0) orelse return error.NoHit;
+    try testing.expectEqual(after.x, inside.x);
+    const click_late = hitText(dc, &text, rect, null, 10 + probe.cx + stub_emoji_width - 2) orelse return error.NoHit;
+    try testing.expectEqual(@as(usize, 3), click_late.index);
+    const click_early = hitText(dc, &text, rect, null, 10 + probe.cx + 2) orelse return error.NoHit;
+    try testing.expectEqual(@as(usize, 1), click_early.index);
 }
