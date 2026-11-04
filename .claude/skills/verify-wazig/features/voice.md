@@ -6,6 +6,7 @@
 - `voice-transcript-cache`: cached transcripts beside the downloaded files show in their bubbles, cut to the first part with Show more.
 - `voice-scroll`: mouse-wheel scrolling up and down keeps every bubble, player and time stamp inside its own bubble.
 - `voice-expand`: Show more expands one long transcript; scrolling again keeps the layout clean.
+- `voice-bar`: with a note paused in the voice chat, the row shows `Voice message paused 1x`; in the other chat the bar offers a 1x, 1.5x and 2x speed control, pause and resume, and the row shows `Playing voice message 1.5x`.
 - `voice-partial-repaint`: repainting only the voice bubbles, as the playback timer does, draws exactly what a full repaint draws.
 
 ## How to get to it (user POV)
@@ -17,6 +18,8 @@ Open a WhatsApp chat with several voice messages. Scroll with the mouse wheel, c
 PowerShell UI Automation runs `Invoke-VoiceJourney` with the unified `Start-FakeBridge -Voice` fixture: `Verification Voice` holds five incoming `audio/ogg` voice notes served by the fake hub, `Verification Beta` one text message. Wait for the five automatic media downloads, reopen the chat with Ctrl+Tab and Ctrl+Shift+Tab, write one long cached transcript (`<voice file>.txt`) beside each downloaded `.ogg` and reopen again until all five show. Then probe, scroll up four notches and down two with real SendInput wheel input over the canvas, click Show more with a real SendInput click, and scroll up six and down three, probing after every step.
 
 Each probe reads the read-only `wazigctl messages` geometry (bubble, player and Show more rectangles), asks the canvas for a full repaint and saves `<step>-full.png`, then invalidates only the visible voice bubble rectangles, exactly what the playback timer does each tick, and saves `<step>.png`. The canvas pixels of both screenshots must match (at most 16 differing pixels). Both screenshots must have no drawn pixels outside every bubble, no overlapping bubbles, a filled bubble, a player circle with its play glyph inside its own bubble and visible time stamp ink. Results go to `voice-checks.json`; failures read `voice: <step>: <problem>`. `transcripts.json`, every screenshot pair, UIA trees and state snapshots are retained.
+
+`Invoke-VoiceBar` then switches to Verification Beta, reads the bar rectangle and speed and pause zones from `wazigctl status`, and clicks them with real SendInput: resume, speed 1.5x, 2x, 1x and pause. `voice-bar.json` plus `voice-bar-paused.png` and `voice-bar-speed.png` are retained.
 
 ## Gotchas
 

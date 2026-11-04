@@ -6501,6 +6501,7 @@ fn stopAudio(a: *App) void {
     a.audio_position_ms = 0;
     a.audio_duration_ms = 0;
     if (a.audio_player) |player| player.stop();
+    refreshChatList(a);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
@@ -6524,6 +6525,7 @@ fn startAudioPlayback(a: *App, message: *Message) void {
     a.audio_position_ms = 0;
     a.audio_duration_ms = 0;
     setStatus(a, "Playing voice message...");
+    refreshChatList(a);
 }
 
 fn toggleAudio(a: *App, message: *Message) void {
@@ -6545,6 +6547,7 @@ fn toggleAudio(a: *App, message: *Message) void {
         },
         else => startAudioPlayback(a, message),
     }
+    refreshChatList(a);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
@@ -6642,6 +6645,7 @@ fn updateAudioPlayback(a: *App) void {
     if (mapped != a.audio_state) {
         a.audio_state = mapped;
         changed = true;
+        refreshChatList(a);
         if (mapped == .empty) {
             a.audio_playing_id.set("");
             a.audio_position_ms = 0;
@@ -8047,6 +8051,8 @@ fn cycleSpeed(a: *App) void {
         else => "1x",
     };
     setStatus(a, std.fmt.bufPrint(&buffer, "Playback speed {s}", .{label}) catch "Playback speed changed");
+    refreshChatList(a);
+    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
@@ -14386,7 +14392,25 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.writeByte('}');
     try w.writeAll(",\"audio\":{\"id\":");
     try control_api.writeString(w, a.audio_playing_id.slice());
-    try w.print(",\"state\":\"{s}\",\"position_ms\":{d},\"duration_ms\":{d}}}", .{ @tagName(a.audio_state), a.audio_position_ms, a.audio_duration_ms });
+    try w.print(",\"state\":\"{s}\",\"position_ms\":{d},\"duration_ms\":{d},\"speed\":{d},\"bar_visible\":{}", .{ @tagName(a.audio_state), a.audio_position_ms, a.audio_duration_ms, if (a.audio_player) |player| player.speed() else 100, voiceBarActive(a) });
+    const voice_bar = voiceBarRect(a);
+    try w.print(",\"bar\":[{d},{d},{d},{d}],\"speed_zone\":[{d},{d}],\"pause_zone\":[{d},{d}],\"row\":", .{ voice_bar.left, voice_bar.top, voice_bar.right, voice_bar.bottom, voice_bar.right - px(a, 300), voice_bar.right - px(a, 220), voice_bar.right - px(a, 220), voice_bar.right - px(a, 120) });
+    var row_buffer: [64]u8 = undefined;
+    var row_index: ?usize = null;
+    for (a.chats[0..a.chat_count], 0..) |chat, chat_index| {
+        if (playingRowText(a, chat.jid.slice(), &row_buffer) != null) {
+            row_index = chat_index;
+            break;
+        }
+    }
+    if (row_index) |found| {
+        try w.writeAll("{\"chat\":");
+        try control_api.writeString(w, a.chats[found].jid.slice());
+        try w.writeAll(",\"text\":");
+        try control_api.writeString(w, playingRowText(a, a.chats[found].jid.slice(), &row_buffer) orelse "");
+        try w.writeByte('}');
+    } else try w.writeAll("null");
+    try w.writeByte('}');
     try w.writeAll(",\"paints\":");
     try a.paints.write(w);
     const reply = replyBarRect(a);
@@ -17233,6 +17257,11 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
             @memcpy(kind.buf[0..chat.kind.len], chat.kind.slice());
             kind.len = chat.kind.len;
         }
+        var playing_buffer: [64]u8 = undefined;
+        if (playingRowText(a, chat.jid.slice(), &playing_buffer)) |playing| {
+            kind.set(a.allocator, playing);
+            _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else row_primary);
+        }
         if (verification_fixture and index == 0) {
             if (text_draw.drawTextMeasured(item.hDC, kind.ptr(), @intCast(kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS)) |measurement| {
                 a.font_preview_proof = .{ .scale = a.font_scale, .item = item.rcItem, .text = measurement };
@@ -19441,6 +19470,8 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 } else if (x > bar.right - px(a, 220)) {
                     toggleBarAudio(a);
                     setStatus(a, if (a.audio_state == .paused) "Voice message paused" else "Voice message playing");
+                } else if (x > bar.right - px(a, 300)) {
+                    cycleSpeed(a);
                 } else {
                     for (a.chats[0..a.chat_count], 0..) |chat, index| {
                         if (!std.mem.eql(u8, chat.jid.slice(), a.audio_playing_jid.slice())) continue;
@@ -21750,6 +21781,27 @@ fn voiceBarRect(a: *const App) win.RECT {
     return .{ .left = point.x, .top = point.y, .right = point.x + (client.right - client.left), .bottom = point.y + px(a, 34) };
 }
 
+fn voiceBarZone(bar: win.RECT, a: *const App, slot: i32) win.RECT {
+    return .{ .left = bar.right - px(a, slot + 100), .top = bar.top, .right = bar.right - px(a, slot), .bottom = bar.bottom };
+}
+
+fn playingRowText(a: *const App, jid: []const u8, buffer: []u8) ?[]const u8 {
+    if (a.audio_playing_id.len == 0) return null;
+    if (a.audio_state != .playing and a.audio_state != .paused) return null;
+    if (!std.mem.eql(u8, a.audio_playing_jid.slice(), jid)) return null;
+    const speed: u32 = if (a.audio_player) |player| player.speed() else 100;
+    const label: []const u8 = switch (speed) {
+        150 => "1.5x",
+        200 => "2x",
+        else => "1x",
+    };
+    return std.fmt.bufPrint(buffer, "{s} {s}", .{ if (a.audio_state == .paused) "Voice message paused" else "Playing voice message", label }) catch null;
+}
+
+fn refreshChatList(a: *App) void {
+    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+}
+
 fn toggleBarAudio(a: *App) void {
     const player = a.audio_player orelse return;
     switch (player.state()) {
@@ -21764,6 +21816,7 @@ fn toggleBarAudio(a: *App) void {
         },
         else => return,
     }
+    refreshChatList(a);
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
 }
 
@@ -21777,9 +21830,19 @@ fn paintVoiceBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     _ = win.SetTextColor(hdc, theme.current.on_secondary_container);
     var text: [160]u8 = undefined;
     var line = WideText(160){};
-    line.set(a.allocator, std.fmt.bufPrint(&text, "{s} - {s} - pause | close", .{ if (a.audio_state == .paused) "Voice message paused" else "Playing voice message", a.audio_playing_jid.slice() }) catch "Playing voice message");
-    var rect = win.RECT{ .left = bar.left + px(a, 12), .top = bar.top, .right = bar.right - px(a, 12), .bottom = bar.bottom };
+    line.set(a.allocator, std.fmt.bufPrint(&text, "{s} - {s}", .{ if (a.audio_state == .paused) "Voice message paused" else "Playing voice message", a.audio_playing_jid.slice() }) catch "Playing voice message");
+    var rect = win.RECT{ .left = bar.left + px(a, 12), .top = bar.top, .right = bar.right - px(a, 312), .bottom = bar.bottom };
     _ = text_draw.drawText(hdc, line.ptr(), -1, &rect, win.DT_LEFT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    const controls = [_]struct { slot: i32, label: [*:0]const u16 }{
+        .{ .slot = 200, .label = speedLabel(a.audio_player) },
+        .{ .slot = 100, .label = if (a.audio_state == .paused) lit("resume") else lit("pause") },
+        .{ .slot = 0, .label = lit("close") },
+    };
+    for (controls) |control| {
+        var zone = voiceBarZone(bar, a, control.slot);
+        zone.right -= px(a, 8);
+        _ = text_draw.drawText(hdc, control.label, -1, &zone, win.DT_RIGHT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_NOPREFIX);
+    }
     if (a.audio_duration_ms > 0) {
         const width = bar.right - bar.left;
         const done = @divTrunc(width * @as(i32, @intCast(@min(a.audio_position_ms, a.audio_duration_ms))), @as(i32, @intCast(a.audio_duration_ms)));

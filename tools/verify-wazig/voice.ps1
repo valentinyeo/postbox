@@ -146,6 +146,43 @@ function Invoke-VoicePlayback($Session) {
     Save-Screen $Session 'voice-paused'
 }
 
+function Invoke-VoiceBarClick($Session, [string]$Zone) {
+    $audio = (Read-Control $Session status).audio
+    Assert-That $audio.bar_visible "voice bar: no bar to click for $Zone"
+    $canvas = [VerifyVoice]::Bounds($Session.pid, (Get-VoiceCanvas $Session))
+    $span = if ($Zone -eq 'speed') { $audio.speed_zone } else { $audio.pause_zone }
+    $x = $canvas.Left + [int][Math]::Floor(($span[0] + $span[1]) / 2) - $audio.bar[0]
+    $y = $canvas.Top + [int][Math]::Floor(($audio.bar[3] - $audio.bar[1]) / 2)
+    [VerifyMenus]::Click($Session.pid, $x, $y, $false)
+    Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: voice bar $Zone x=$x y=$y"
+}
+
+function Invoke-VoiceBar($Session) {
+    $paused = (Read-Control $Session status).audio
+    Assert-That ($paused.state -eq 'paused' -and $paused.speed -eq 100) 'voice bar: expected paused playback at 1x'
+    Assert-That ($paused.row.chat -ceq 'fixture-alpha' -and $paused.row.text -ceq 'Voice message paused 1x') "voice bar: paused row text was $($paused.row.text)"
+    Assert-That (-not $paused.bar_visible) 'voice bar: bar shown inside the playing chat'
+    Send-Keys $Session '^{TAB}'
+    $null = Wait-Until { $state = Read-Control $Session status; $state.selected.id -eq 'fixture-beta' -and $state.audio.bar_visible } 'voice bar: bar shown in the other chat'
+    Save-Screen $Session 'voice-bar-paused'
+    Invoke-VoiceBarClick $Session 'pause'
+    $null = Wait-Until { (Read-Control $Session status).audio.state -eq 'playing' } 'voice bar: resume from the bar'
+    Invoke-VoiceBarClick $Session 'speed'
+    $null = Wait-Until { $audio = (Read-Control $Session status).audio; $audio.speed -eq 150 -and $audio.row.text -ceq 'Playing voice message 1.5x' } 'voice bar: speed 1.5x from the bar'
+    $fast = (Read-Control $Session status).audio
+    Save-Screen $Session 'voice-bar-speed'
+    Invoke-VoiceBarClick $Session 'speed'
+    $null = Wait-Until { (Read-Control $Session status).audio.speed -eq 200 } 'voice bar: speed 2x from the bar'
+    Invoke-VoiceBarClick $Session 'speed'
+    $null = Wait-Until { (Read-Control $Session status).audio.speed -eq 100 } 'voice bar: speed back to 1x from the bar'
+    Invoke-VoiceBarClick $Session 'pause'
+    $null = Wait-Until { (Read-Control $Session status).audio.state -eq 'paused' } 'voice bar: pause from the bar'
+    $final = (Read-Control $Session status).audio
+    [ordered]@{ paused = $paused; fast = $fast; final = $final } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Session.evidence 'voice-bar.json')
+    Send-Keys $Session '^+{TAB}'
+    $null = Wait-Until { $state = Read-Control $Session status; $state.selected.id -eq 'fixture-alpha' -and -not $state.audio.bar_visible } 'voice bar: back in the playing chat'
+}
+
 function Invoke-VoiceJourney($Session, [string]$Messages) {
     $media = Join-Path $Messages 'hub-media'
     $null = Wait-Until {
@@ -177,6 +214,7 @@ function Invoke-VoiceJourney($Session, [string]$Messages) {
         $rows.Count -eq 5 -and @($rows | Where-Object { $_.transcript_chars -lt 900 }).Count -eq 0
     } 'five cached long transcripts shown' -Seconds 60
     Invoke-VoicePlayback $Session
+    Invoke-VoiceBar $Session
     Invoke-VoiceProbe $Session 'voice-opened'
     Invoke-VoiceWheel $Session 4
     Invoke-VoiceProbe $Session 'voice-scrolled-up'

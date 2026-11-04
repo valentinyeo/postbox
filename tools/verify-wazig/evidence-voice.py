@@ -24,6 +24,14 @@ assert playback['paused']['state'] == playback['after']['state'] == 'paused'
 assert abs(playback['after']['position_ms'] - playback['paused']['position_ms']) <= 100
 for name in ('voice-playing.png', 'voice-paused.png'):
     assert (folder / name).read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+bar = read('voice-bar.json')
+assert bar['paused']['state'] == 'paused' and bar['paused']['speed'] == 100 and not bar['paused']['bar_visible']
+assert bar['paused']['row'] == dict(chat='fixture-alpha', text='Voice message paused 1x')
+assert bar['fast']['speed'] == 150 and bar['fast']['state'] == 'playing' and bar['fast']['bar_visible']
+assert bar['fast']['row'] == dict(chat='fixture-alpha', text='Playing voice message 1.5x')
+assert bar['final']['speed'] == 100 and bar['final']['state'] == 'paused'
+for name in ('voice-bar-paused.png', 'voice-bar-speed.png'):
+    assert len((folder / name).read_bytes()) > 10000, name
 transcripts = read('transcripts.json')
 assert len(transcripts) == 5 and all(row['chars'] >= 900 and row['file'].endswith('.ogg') for row in transcripts)
 checks = read('voice-checks.json')
@@ -42,6 +50,7 @@ for check in checks:
 assert len(tops) >= 4, 'scrolling and expanding did not move the voice bubbles'
 assert not any(row['expanded'] for row in checks[2]['messages']) and any(row['expanded'] for row in checks[3]['messages'])
 actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
+assert actions.count('SendInput: voice bar speed') == 3 and actions.count('SendInput: voice bar pause') == 2
 assert actions.count('SendInput: wheel') == 4 and 'SendInput: Show more on VOICE-' in actions
 requests = [row for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines() if 'status' in (row := json.loads(line))]
 media = {row['wire_path'] for row in requests if row['method'] == 'GET' and row['wire_path'].startswith('/v1/wazig/media/') and row['status'] == 200}

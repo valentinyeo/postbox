@@ -378,8 +378,9 @@ voice = (root / 'tools/verify-wazig/voice.ps1').read_text(encoding='utf-8')
 assert 'Invoke-VoiceJourney $session $messages' in runner and 'voice' in {row['hub'] for row in journeys}
 assert 'voice' in {row['hub'] for row in journeys}
 assert 'voice' in options and entries['voice']['evidence']
-for artifact in ['voice-checks.json', 'transcripts.json']:
+for artifact in ['voice-checks.json', 'transcripts.json', 'voice-bar.json']:
     assert artifact in voice and artifact in validator, artifact
+assert 'Invoke-VoiceBar $Session' in voice and "'speed'" in voice
 print('VOICE MAP VERIFIED: voice notes, cached transcripts, scroll, expand and partial-repaint pixel checks')
 print('REPAINT MAP VERIFIED: cumulative counters, no-input incoming workload and PR journey')
 
