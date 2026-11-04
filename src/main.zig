@@ -2578,7 +2578,7 @@ fn peopleChat(a: *App, entry: people_index.Entry) Chat {
     }
     chat.jid.set(entry.jid);
     chat.name.set(a.allocator, entry.name);
-    chat.kind.set(a.allocator, if (entry.origin == .contact) "Contact" else if (std.mem.endsWith(u8, entry.jid, "@g.us")) "Group" else "Chat");
+    chat.kind.set(a.allocator, if (std.mem.endsWith(u8, entry.jid, "@g.us")) "Group" else "Chat");
     chat.timestamp.set(entry.last_message_ts);
     formatTime(&chat.time, a.allocator, entry.last_message_ts);
     return chat;
@@ -13510,7 +13510,6 @@ fn chatArchiveState(a: *const App, chat: *const Chat) archive_rules.ArchiveState
 
 fn archiveMarker(a: *const App, chat: *const Chat) ?[*:0]const u16 {
     if (chatArchiveState(a, chat).label()) |label| return label;
-    if (chat.provider == .whatsapp and std.mem.eql(u16, chat.kind.slice(), std.mem.span(lit("Contact")))) return lit("Contact");
     return null;
 }
 
@@ -15081,10 +15080,10 @@ fn appendPalettePeople(a: *App, query_wide: []const u16, scores: []i32) void {
     const count = a.people.search(query, exclude[0..exclude_count], a.cache_tag.slice(), matches, matches.len);
     for (matches[0..count]) |entry| {
         if (!ensurePaletteCapacity(a)) break;
-        const label = (if (entry.origin == .inbox)
-            std.fmt.allocPrint(a.allocator, "{s}", .{entry.name})
+        const label = (if (entry.origin == .archived)
+            std.fmt.allocPrint(a.allocator, "{s}  ·  Archived", .{entry.name})
         else
-            std.fmt.allocPrint(a.allocator, "{s}  ·  {s}", .{ entry.name, if (entry.origin == .archived) "Archived" else "Contact" })) catch continue;
+            std.fmt.allocPrint(a.allocator, "{s}", .{entry.name})) catch continue;
         defer a.allocator.free(label);
         const index = a.palette_item_count;
         appendPalette(a, label, "", 0);
