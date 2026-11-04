@@ -13,17 +13,22 @@ function Send-OnceMessage($Session, [string]$Text, [string]$Label) {
     Send-Keys $Session '{ENTER}'
     Start-Sleep -Milliseconds 800
     Invoke-PaletteCommand $Session 'Refresh'
+    $script:onceMaxCopies = 0
     $null = Wait-Until {
+        $seen = @((Read-Control $Session messages).messages | Where-Object { $_.text -like "$Text*" }).Count
+        if ($seen -gt $script:onceMaxCopies) { $script:onceMaxCopies = $seen }
         @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.status -eq 200 }).Count -eq $before + 1
     } "$Label send accepted by the hub" 30
+    $maxCopies = $script:onceMaxCopies
     Start-Sleep -Seconds 10
     Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence "$Label.messages.json")
     Save-Screen $Session $Label
     $rows = @((Read-Control $Session messages).messages | Where-Object { $_.text -like "$Text*" })
     $waiting = @((Read-Control $Session messages).messages | Where-Object { $_.text -like '*(sending)*' })
     $status = Read-Control $Session status
-    @{ label = $Label; text = $Text; copies = $rows.Count; waiting = $waiting.Count; pending_sends = $status.pending_sends } |
+    @{ label = $Label; text = $Text; max_copies_while_waiting = $maxCopies; copies = $rows.Count; waiting = $waiting.Count; pending_sends = $status.pending_sends } |
         ConvertTo-Json | Set-Content (Join-Path $Session.evidence "$Label.once.json")
+    Assert-That ($maxCopies -le 1) "$Label showed $maxCopies copies while the hub was still confirming, expected one"
     Assert-That ($rows.Count -eq 1) "$Label sent message shows $($rows.Count) times, expected once"
     Assert-That ($waiting.Count -eq 0) "$Label still shows a (sending) bubble"
     Assert-That ($status.pending_sends -eq 0) "$Label outbox still holds the send"

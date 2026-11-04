@@ -3,7 +3,7 @@
 ## Sub-features
 
 - One sent message makes exactly one bubble, in a normal chat and in an archived chat.
-- No bubble keeps the "(sending)" ending after the hub confirms the send.
+- No bubble ever carries a "(sending)" ending, and the waiting copy never shows beside the confirmed copy while the hub is still acknowledging.
 - The waiting copy and the confirmed copy are matched, never hidden.
 
 ## How to get to it (user POV)

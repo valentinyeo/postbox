@@ -4479,19 +4479,35 @@ fn adoptSentMedia(a: *App) void {
 fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool) void {
     if (pending.completed or a.message_count >= max_messages or a.chat_count == 0 or a.selected_chat >= a.chat_count) return;
     if (!chat_key.Key.eql(chat_key.of(&a.chats[a.selected_chat]), chat_key.of(pending))) return;
-    if (!unifiedHub(a) and from_reload and !pending.from_disk) {
+    if (from_reload and (unifiedHub(a) or !pending.from_disk)) {
+        var earlier: usize = 0;
+        if (unifiedHub(a)) {
+            for (a.pending_sends[0..a.pending_send_count]) |*other| {
+                if (other.seq >= pending.seq or other.completed or other.ptt != pending.ptt) continue;
+                if (!chat_key.Key.eql(chat_key.of(other), chat_key.of(pending))) continue;
+                if (pending.ptt or std.mem.eql(u8, other.text.slice(), pending.text.slice())) earlier += 1;
+            }
+        }
+        var seen: usize = 0;
         for (a.messages[0..a.message_count]) |*message| {
             if (!message.from_me or message.send_state != .none) continue;
             if (pending.ptt) {
                 const row_unix = media_age.unixSeconds(message.timestamp.slice()) orelse continue;
-                if (voice_sent.rowMatchesEntry(true, message.media_type.slice(), row_unix, pending.queued_unix, true)) return;
+                if (voice_sent.rowMatchesEntry(true, message.media_type.slice(), row_unix, pending.queued_unix, true)) {
+                    if (seen >= earlier) return;
+                    seen += 1;
+                }
                 continue;
             }
             const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch continue;
             defer a.allocator.free(text);
             if (!std.mem.eql(u8, text, pending.text.slice())) continue;
+            if (pending.file.len > 0 and pending.text.len == 0 and message.media_type.len == 0) continue;
             const stored_unix = media_age.unixSeconds(message.timestamp.slice()) orelse continue;
-            if (stored_unix >= pending.queued_unix - 5) return;
+            if (stored_unix >= pending.queued_unix - 5) {
+                if (seen >= earlier) return;
+                seen += 1;
+            }
         }
     }
     var message = Message{};
