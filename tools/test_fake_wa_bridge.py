@@ -104,6 +104,49 @@ class FakeWaBridgeArchiveTests(unittest.TestCase):
         self.assert_views([])
 
 
+class ShortSleepClock:
+    def __init__(self):
+        self.now = 0.0
+        self.lock = threading.Lock()
+
+    def monotonic(self):
+        with self.lock:
+            return self.now
+
+    def sleep(self, seconds):
+        with self.lock:
+            self.now += max(seconds - 0.005, 0.001)
+
+
+class FakeWaBridgeHistoryDelayTests(unittest.TestCase):
+    def test_first_beta_history_reply_is_delayed_at_least_three_seconds_on_its_own_clock_when_sleep_returns_short(self):
+        spec = importlib.util.spec_from_file_location('delay_bridge_fixture', ROOT / 'tools/verify-wazig/fake-wa-bridge.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.time = ShortSleepClock()
+        with tempfile.TemporaryDirectory() as temp:
+            log = Path(temp) / 'requests.jsonl'
+            server = ThreadingHTTPServer(('127.0.0.1', 0), module.Handler)
+            server.daemon_threads = True
+            server.state = module.State(log)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                connection = HTTPConnection('127.0.0.1', server.server_port, timeout=5)
+                connection.request('GET', '/v1/messages?chat=' + quote(f'{module.ACCOUNT}:{module.BETA}'),
+                                   headers={'Authorization': f'Bearer {module.KEY}', 'Connection': 'close'})
+                self.assertEqual(connection.getresponse().status, 200)
+                connection.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join()
+            rows = [json.loads(line) for line in log.read_text(encoding='utf-8').splitlines()]
+        delayed = [row for row in rows if row.get('history_request') == 1 and row.get('status') == 200]
+        self.assertEqual(len(delayed), 1, rows)
+        self.assertGreaterEqual(delayed[0]['history_delay_ms'], 3000)
+
+
 class FakeUnifiedHubArchiveTests(FakeWaBridgeArchiveTests):
     fixture = 'fake-hub.py'
     prefix = '/v1/wazig'

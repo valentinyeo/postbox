@@ -161,7 +161,7 @@ for proof in ['mixed-lid-page', 'mixed-older-pages', 'chats', 'chat-switch', 'hi
     assert f'Hub-Pass $Session {proof}' in harness, proof
 bridge = (root / 'tools/verify-wazig/fake-wa-bridge.py').read_text(encoding='utf-8')
 assert "last_message_ts='2026-01-01T00:00:00Z'" in bridge
-assert 'if request == 1:\n                    time.sleep(3)' in bridge
+assert 'while request == 1 and time.monotonic() - started < 3:\n                    time.sleep(3 - (time.monotonic() - started))' in bridge
 for required in ['ReadToEndAsync()', '$child.WaitForExit($TimeoutMilliseconds)', '$remaining = 1000 -',
                  'Read-Control $Session messages -TimeoutMilliseconds $remaining', '$elapsed -le 1000',
                  '$shown.messages.Count -eq 0', 'Save-Screen $Session beta-empty']:

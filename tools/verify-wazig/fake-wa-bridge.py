@@ -119,8 +119,8 @@ class Handler(BaseHTTPRequestHandler):
                     request = state.beta_history_requests
                 self.record(0, history_request=request, history_phase='requested')
                 started = time.monotonic()
-                if request == 1:
-                    time.sleep(3)
+                while request == 1 and time.monotonic() - started < 3:
+                    time.sleep(3 - (time.monotonic() - started))
                 history = dict(history_request=request, history_delay_ms=(time.monotonic() - started) * 1000)
             rows = [state.message(chat, 'BASELINE' if chat == ALPHA else 'BASELINE_BETA',
                                   'Fixture history' if chat == ALPHA else 'Fixture Beta history')]
