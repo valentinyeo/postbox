@@ -178,6 +178,7 @@ jobs:
             zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
             if ($LASTEXITCODE -ne 0) { throw 'Original ordering build failed' }
           } finally { Pop-Location }
+          $env:VERIFY_VIEW_MODIFIER = '^'
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature slack-sort -Bin sent-order-original-bin/bin -Evidence verification-evidence/red-control
           if ($LASTEXITCODE -eq 0) { throw 'Original ordering unexpectedly passed stale WhatsApp sends' }
           $failure = Get-Content verification-evidence/red-control/failure.txt -Raw
@@ -431,7 +432,7 @@ jobs:
           'ORIGINAL_CHAT_BUBBLE_RED_OK' | Add-Content verification-evidence/icon-red-control.txt
           exit 0
       - name: Install typing recorder
-        if: matrix.feature == 'drafts'
+        if: matrix.feature == 'drafts' || matrix.feature == 'media-fit'
         shell: pwsh
         run: |
           choco install ffmpeg --yes --no-progress

@@ -47,9 +47,12 @@ assert {row['chat'] for row in batches[0]['body']['chats']} == remote
 assert batches[0]['body']['archived'] is True
 assert all(row['ok'] for row in batches[0]['results'])
 lines = (folder / 'saved-archive-state.txt').read_text(encoding='utf-8-sig').splitlines()
+assert len(lines) == len(remote) + 3, len(lines)
+whatsapp = [line.split('\t') for line in lines if line.split('\t')[0] in remote]
+assert {row[0] for row in whatsapp} == remote and len(whatsapp) == len(remote)
+assert all(row[1] == '0' and row[2] for row in whatsapp)
+lines = [line for line in lines if line.split('\t')[0] not in remote]
 assert len(lines) == 3
-assert not {line.split('\t')[0] for line in lines} & remote
-assert all(line.split('\t')[1] == '0' for line in lines if line.split('\t')[0] in remote)
 for provider in ('slack', 'telegram', 'signal'):
     row, = [row for row in initial if row['provider'] == provider]
     stored, = [line.split('\t') for line in lines if line.split('\t')[:3] == [provider, row['account'], row['id']]]

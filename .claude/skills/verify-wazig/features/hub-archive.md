@@ -8,7 +8,7 @@ Run `feature=hub-archive` on GitHub Windows Actions. The journey drives the real
 - Phone unarchive changes the provider row; Wazig follows it.
 - Incoming messages return when WhatsApp returns them. No Wazig return write.
 - Ctrl+Shift+E remains local: kept chats stay hidden even when WhatsApp returns them.
-- Existing ordinary local entries migrate through acknowledged archive writes. Failed writes retain durable entries. Successful migration does not repeat after restart.
+- Existing ordinary local entries migrate through acknowledged archive writes. Failed writes retain durable entries. An acknowledged entry stays in the file with the provider mark. Successful migration does not repeat after restart.
 - Telegram archives remain local through bulk selection and restart. Slack and Signal retain their existing local archive tests.
 - Legacy keep migration retains the original file and hub-scoped marker.
 

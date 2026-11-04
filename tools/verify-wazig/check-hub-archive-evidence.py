@@ -62,7 +62,8 @@ def check_hub_archive(folder):
     before = (folder / 'migration-before.txt').read_text(encoding='utf-8-sig')
     after = (folder / 'migration-after.txt').read_text(encoding='utf-8-sig')
     assert PLAIN_REACTED + '\t0\t' in before
-    assert PLAIN_REACTED not in after, 'MIGRATION_ACK_REMOVES_LOCAL_ENTRY'
+    assert PLAIN_REACTED + '\t0\t2026-10-10T10:00:00Z\tphone' in after, 'MIGRATION_ACK_MARKS_LOCAL_ENTRY_DONE'
+    assert PLAIN_REACTED + '\t0\t2026-10-10T10:00:00Z\tphone' not in before
     assert GROUP + '\t1\t' in after and 'telegram\ttelegram\t' + TELEGRAM in after
     assert (folder / 'legacy-archive-state.txt').read_bytes() == (folder / 'final-data/archive-state.txt').read_bytes()
     state_files = list((folder / 'final-data').glob('hub-*-archive-state.txt'))

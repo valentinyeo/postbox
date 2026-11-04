@@ -215,7 +215,7 @@ for name in ['hub Slack history refreshes ordering after caching its last messag
              'account view history accepts source accounts without confusing the hub cache namespace']:
     assert f'test "{name}"' in reconcile, name
 sort_journey = (registry_path.parent / 'journey-slack-sort.ps1').read_text(encoding='utf-8')
-assert "Send-Keys $session '%2'" in sort_journey and 'Drive Alt+2' in sort_map
+assert 'Send-Keys $session "$viewModifier$slackNumber"' in sort_journey and "else { '%' }" in sort_journey and 'Drive Alt+2' in sort_map
 assert "for keys in ['%2', '^{TAB}'" in validator
 signal = (skill / 'features/signal.md').read_text(encoding='utf-8')
 signal_journey = (root / 'tools/verify-wazig/signal.ps1').read_text(encoding='utf-8')
@@ -328,7 +328,7 @@ for artifact in ['legacy-archive-state.txt', 'restart.json', 'archive-state.txt'
     assert artifact in runner + archive_journey and artifact in archive_validator, artifact
 for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages', 'Show archived chats', 'Show inbox chats', 'Quit Postbox', 'Get-FileHash']:
     assert fragment in archive_journey, fragment
-for fragment in ['PROVIDER_UNARCHIVE_REQUIRED', 'PHONE_UNARCHIVE_REQUIRED', 'PROVIDER_INCOMING_REQUIRED', 'MIGRATION_ACK_REMOVES_LOCAL_ENTRY']:
+for fragment in ['PROVIDER_UNARCHIVE_REQUIRED', 'PHONE_UNARCHIVE_REQUIRED', 'PROVIDER_INCOMING_REQUIRED', 'MIGRATION_ACK_MARKS_LOCAL_ENTRY_DONE']:
     assert fragment in archive_validator, fragment
 print('HUB ARCHIVE MAP VERIFIED: provider archive, phone unarchive, incoming, kept, acknowledged migration and restart')
 
