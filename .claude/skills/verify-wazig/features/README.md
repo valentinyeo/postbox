@@ -100,6 +100,7 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-679: clipboard screenshot paste and Enter send -> `paste-image` (full-screen and 4K RGBA, V5/PNG and bitmap formats, decoded upload dimensions, alpha and orientation on four synthetic provider chats)
 - IGSH-688: attach two or more images -> `paste-image` (WhatsApp and Slack Ctrl+V plus real + picker, two screenshot-measured previews, ordered per-image sends with first-only caption and distinct client IDs, remove-first keeps the second image)
 - IGSH-700: Ctrl+K finds archived chats on every account -> `palette-archived` (archived WhatsApp, Telegram and Slack names from the combined inbox and every account view, inbox names from every view, Enter opens the chat without a hub archive write)
+- IGSH-1329: holding Ctrl numbers the top nine chat rows -> `ctrl-badges` (real Ctrl key-down shows six numbered badges, Ctrl+3 opens the third row with badges kept, key-up clears them; pixel measures per badge)
 
 - IGSH-667: drag across full chat passages -> `passage-copy` (exact stamped partial clipboard and held-edge scrolling on WhatsApp and Slack)
 - IGSH-701: Ctrl+A from an empty composer -> `archive-bulk` (two visible chats selected, Ctrl+E archives both, empty inbox and text select-all preserved)

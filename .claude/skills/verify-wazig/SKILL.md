@@ -94,6 +94,8 @@ The `hub-archive` journey seeds legacy WhatsApp keep state before hub launch, re
 
 The `palette-archived` journey seeds archived WhatsApp, Telegram and Slack chats on the unified fake hub and requires Ctrl+K to find them, and every inbox chat, from every view, with Enter opening an archived result without a hub archive write. See [Palette archived](features/palette-archived.md).
 
+The `ctrl-badges` journey holds a real Ctrl key on the search fixture and requires numbered badges 1 to 6 on the chat rows, kept through Ctrl+3, gone after release. See [Ctrl badges](features/ctrl-badges.md).
+
 The `repaint` journey uses the unified fake hub for 60 seconds without input: unchanged baseline updates every two seconds and incoming messages in the non-selected chat every ten seconds. `paints.json`, before/after chat snapshots and screenshots prove arrival and at most three full-surface repaints. Windows CI must demonstrate the instrumentation-only commit fails and the fix passes.
 
 The `voice` journey opens a synthetic WhatsApp chat with five downloaded voice notes and long cached transcripts, scrolls with the wheel, clicks Show more and scrolls again. After each step it repaints only the voice bubbles, as the playback timer does, and requires the canvas pixels to match a full repaint, with no ink outside bubbles, no overlaps, visible time stamps and player circles inside their own bubbles. See [voice](features/voice.md).

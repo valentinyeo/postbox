@@ -1095,6 +1095,8 @@ const App = struct {
     paints_previous: control_api.Paints = .{},
     chats_prev_proc: usize = 0,
     chat_hover_y: ?i32 = null,
+    ctrl_badges: bool = false,
+    ctrl_badge_rects: [9]?win.RECT = [_]?win.RECT{null} ** 9,
     paint_minute_ticks: u32 = 0,
     transcribe_active_id: Utf8Text(191) = .{},
     transcribe_attempts: [512]u64 = [_]u64{0} ** 512,
@@ -14393,6 +14395,17 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.print(",\"update_card\":{{\"visible\":{},\"span\":{d},\"rect\":[{d},{d},{d},{d}],\"error\":", .{ updateCardVisible(a), updateCardSpan(a), card.left, card.top, card.right, card.bottom });
     try control_api.writeString(w, a.update_card_error[0..a.update_card_error_len]);
     try w.writeByte('}');
+    try w.print(",\"ctrl_badges\":{{\"held\":{},\"badges\":[", .{a.ctrl_badges});
+    var badge_origin = win.POINT{ .x = 0, .y = 0 };
+    if (a.chats_hwnd) |list| _ = win.ClientToScreen(list, &badge_origin);
+    var first_badge = true;
+    for (a.ctrl_badge_rects, 0..) |maybe, number| {
+        const rect = maybe orelse continue;
+        if (!first_badge) try w.writeByte(',');
+        first_badge = false;
+        try w.print("{{\"number\":{d},\"rect\":[{d},{d},{d},{d}]}}", .{ number + 1, rect.left + badge_origin.x, rect.top + badge_origin.y, rect.right + badge_origin.x, rect.bottom + badge_origin.y });
+    }
+    try w.writeAll("]}");
     try w.writeAll(",\"audio\":{\"id\":");
     try control_api.writeString(w, a.audio_playing_id.slice());
     try w.print(",\"state\":\"{s}\",\"position_ms\":{d},\"duration_ms\":{d},\"speed\":{d},\"bar_visible\":{}", .{ @tagName(a.audio_state), a.audio_position_ms, a.audio_duration_ms, if (a.audio_player) |player| player.speed() else 100, voiceBarActive(a) });
@@ -17174,6 +17187,14 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
         const dot_top = item.rcItem.top + @divTrunc(row.preview_top + row.preview_bottom - diameter, 2);
         smooth.fillEllipse(&shapes, .{ .left = dot_right - diameter, .top = dot_top, .right = dot_right, .bottom = dot_top + diameter }, row_primary);
     }
+    var ctrl_number_rect: ?win.RECT = null;
+    if (a.ctrl_badges and index < a.ctrl_badge_rects.len) {
+        const size = px(a, 18);
+        const number_rect = win.RECT{ .left = item.rcItem.left + px(a, 4), .top = @max(item.rcItem.top + px(a, 2), avatar_top - px(a, 4)), .right = item.rcItem.left + px(a, 4) + size, .bottom = @max(item.rcItem.top + px(a, 2), avatar_top - px(a, 4)) + size };
+        smooth.fillRoundRect(&shapes, number_rect, size, size, theme.current.primary);
+        a.ctrl_badge_rects[index] = number_rect;
+        ctrl_number_rect = number_rect;
+    }
     shapes.deinit();
     _ = win.SetBkMode(item.hDC, win.TRANSPARENT);
     if ((avatar_entry == null or avatar_entry.?.bitmap == null) and chat.name.len > 0) {
@@ -17204,6 +17225,12 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
             .letter_t => lit("T"),
             else => unreachable,
         }, 1, &badge_text, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+    }
+    if (ctrl_number_rect) |number_rect| {
+        const digit = [_:0]u16{@as(u16, '1') + @as(u16, @intCast(index))};
+        var digit_rect = number_rect;
+        _ = win.SetTextColor(item.hDC, theme.current.on_primary);
+        _ = text_draw.drawText(item.hDC, &digit, 1, &digit_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
     }
     _ = win.SelectObject(item.hDC, @ptrCast(a.font_row.?));
     _ = win.SetTextColor(item.hDC, row_text);
@@ -19792,6 +19819,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     syncScrollbarStrips(a);
                 }
                 updateAudioPlayback(a);
+                reconcileCtrlBadges(a);
                 updateDictation(a);
                 if (a.last_dictation_state == .recording or a.last_dictation_state == .transcribing) {
                     if (a.dictation_session) |session| {
@@ -20026,7 +20054,24 @@ fn deleteWordBeforeCaret(edit: win.HWND) void {
     _ = win.SendMessageW(edit, win.EM_REPLACESEL, win.TRUE, @bitCast(@intFromPtr(lit(""))));
 }
 
+fn setCtrlBadges(a: *App, on: bool) void {
+    if (a.ctrl_badges == on) return;
+    a.ctrl_badges = on;
+    if (!on) a.ctrl_badge_rects = [_]?win.RECT{null} ** 9;
+    if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+}
+
+fn reconcileCtrlBadges(a: *App) void {
+    if (!a.ctrl_badges) return;
+    if (win.GetActiveWindow() == null or win.GetAsyncKeyState(win.VK_CONTROL) >= 0) setCtrlBadges(a, false);
+}
+
 fn handleKeyboard(a: *App, message: *const win.MSG) bool {
+    if (message.wParam == win.VK_CONTROL) switch (message.message) {
+        win.WM_KEYDOWN, win.WM_SYSKEYDOWN => setCtrlBadges(a, true),
+        win.WM_KEYUP, win.WM_SYSKEYUP => setCtrlBadges(a, false),
+        else => {},
+    };
     if (message.message == win.WM_KEYUP or message.message == win.WM_SYSKEYUP) {
         if (message.wParam == win.VK_RETURN and a.dictation_return_held) {
             a.dictation_return_held = false;

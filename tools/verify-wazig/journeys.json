@@ -71,6 +71,23 @@
       "maximize": true
     },
     {
+      "name": "ctrl-badges",
+      "pr": true,
+      "hub": "ctrl-badges",
+      "evidence": true,
+      "chats": 6,
+      "script": "journey-ctrl-badges.ps1",
+      "validator": {
+        "file": "check-ctrl-badges-evidence.py",
+        "function": "check_evidence"
+      },
+      "hub_handler": {
+        "file": "search-fixture.py",
+        "class": "SearchHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "navigation",
       "pr": false,
       "hub": null,
