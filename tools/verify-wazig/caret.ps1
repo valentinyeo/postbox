@@ -248,6 +248,7 @@ function Invoke-CaretAlignment($Session) {
             @{ name = 'url'; text = 'https://example.test/path/012345678901234567890123456789'; unicode = $false },
             @{ name = 'spaces'; text = 'MMMM        MMMM'; unicode = $false },
             @{ name = 'emoji'; text = "word $($emoji)x"; unicode = $true },
+            @{ name = 'emoji-many'; text = "word $($emoji)$($emoji)$($emoji)x"; unicode = $true },
             @{ name = 'emoji-zwj'; text = "team $($zwj)x"; unicode = $true }
         )) {
             $samples += Measure-CaretAlignment $Session $edit "$($entry.name)-$($case.name)" $case.text $case.unicode
@@ -285,7 +286,9 @@ function Invoke-CaretAlignment($Session) {
     }
     foreach ($sample in $samples) {
         Assert-That ($sample.on -ge 2 -and $sample.off -ge 2 -and $sample.caret.left -ge 0 -and $sample.ink_right -ge 0) "$($sample.name): cannot measure caret and ink"
-        Assert-That ($sample.gap -ge -2 -and $sample.gap -le $sample.tolerance) "$($sample.name): caret-to-ink gap $($sample.gap) pixels exceeds tolerance"
+        $lowest = if ($sample.name -like '*-emoji*') { -1 } else { -2 }
+        $highest = if ($sample.name -like '*-emoji*') { 2 } else { $sample.tolerance }
+        Assert-That ($sample.gap -ge $lowest -and $sample.gap -le $highest) "$($sample.name): caret-to-ink gap $($sample.gap) pixels exceeds tolerance"
     }
 }
 
