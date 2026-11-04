@@ -36,7 +36,7 @@ class SendOnceHandler(Handler):
             duplicate = body['client_id'] in self.state.sends
             if not duplicate:
                 self.state.sends[body['client_id']] = dict(
-                    body, msg_id='ONCE-SENT-%d' % (len(self.state.sends) + 1), ts=self.state.stamp, status='sent')
+                    body, msg_id='ONCE-SENT-%d' % (len(self.state.sends) + 1), ts=plain_stamp(0), status='sent')
             sent = self.state.sends[body['client_id']]
         bridge.time.sleep(2.5)
         self.respond(200, {k: sent[k] for k in ('client_id', 'msg_id', 'ts', 'status')},
