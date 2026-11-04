@@ -692,6 +692,24 @@
       "maximize": true
     },
     {
+      "name": "media-speed",
+      "pr": true,
+      "hub": "media-speed",
+      "evidence": true,
+      "chats": 1,
+      "script": "journey-media-speed.ps1",
+      "validator": {
+        "file": "check-media-speed-evidence.py",
+        "function": "check_media_speed"
+      },
+      "library": "media-speed.ps1",
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "MediaSpeedHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "composer-border",
       "pr": true,
       "hub": null,

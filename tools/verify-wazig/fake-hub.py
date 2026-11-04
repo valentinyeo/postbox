@@ -10,6 +10,7 @@ import re
 import socket
 import shutil
 import subprocess
+import time
 import struct
 from http.server import ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlencode, urlsplit
@@ -1823,6 +1824,105 @@ class MediaFitHandler(Handler):
             self.respond(400, {'error': 'unexpected media-fit write'}, body=body)
 
 
+SPEED_CHAT = 'fixture-speed@g.us'
+SPEED_IMAGES = ['SPEED-IMG-%d' % n for n in range(1, 7)]
+SPEED_VOICE = ['SPEED-VOICE-%d' % n for n in range(1, 5)]
+SPEED_GONE = 'SPEED-GONE-1'
+SPEED_FLAKY = 'SPEED-IMG-3'
+SPEED_DELAY = 0.8
+
+
+class MediaSpeedHandler(Handler):
+    def respond(self, status, data, content_type='application/json', **extra):
+        bridge.Handler.respond(self, status, data, content_type, **extra)
+
+    def note(self, message, status):
+        with self.state.lock:
+            with self.state.log.with_name('media-speed-server.jsonl').open('a', encoding='utf-8') as stream:
+                stream.write(json.dumps(dict(id=message, status=status, at=time.time())) + '\n')
+
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        if url.path == '/v1/wazig/chats':
+            self.respond(200, [dict(jid=SPEED_CHAT, name='Verification Speed', provider='whatsapp', kind='group',
+                                    last_message_ts=self.state.stamp, unread_count=0, archived=False)])
+        elif url.path == '/v1/wazig/messages':
+            stamp = datetime.fromisoformat(self.state.stamp)
+            ids = SPEED_IMAGES + SPEED_VOICE + [SPEED_GONE]
+            rows = []
+            for n, key in enumerate(ids):
+                audio = key in SPEED_VOICE
+                rows.append(dict(MsgID=key, ChatJID=SPEED_CHAT,
+                                 Timestamp=(stamp - timedelta(seconds=len(ids) - n)).isoformat().replace('+00:00', 'Z'),
+                                 Text='', FromMe=False, SenderJID='fixture-speed-sender', SenderName='Fixture Sender',
+                                 MediaType='audio' if audio else 'image',
+                                 MimeType='audio/ogg' if audio else 'image/png',
+                                 Filename=key + ('.ogg' if audio else '.png')))
+            self.respond(200, list(reversed(rows)))
+        elif url.path.startswith('/v1/wazig/media/'):
+            chat, message = map(unquote, url.path.removeprefix('/v1/wazig/media/').split('/', 1))
+            known = SPEED_IMAGES + SPEED_VOICE + [SPEED_GONE]
+            if chat != SPEED_CHAT or message not in known:
+                self.respond(404, {'error': 'unknown media'})
+                return
+            with self.state.lock:
+                seen = self.state.speed_seen.get(message, 0)
+                self.state.speed_seen[message] = seen + 1
+            if message == SPEED_GONE:
+                self.note(message, 410)
+                self.respond(410, {'error': 'media unavailable'})
+            elif seen == 0 and message == SPEED_FLAKY:
+                self.note(message, 502)
+                self.respond(502, {'error': 'forced server error'})
+            elif seen == 0:
+                self.note(message, 202)
+                self.respond(202, {'status': 'pending'})
+            else:
+                time.sleep(SPEED_DELAY)
+                self.note(message, 200)
+                if message in SPEED_VOICE:
+                    data, mime = self.state.speed_audio, 'audio/ogg'
+                else:
+                    data, mime = self.state.speed_images[message], 'image/png'
+                self.respond(200, data, mime, sha256=hashlib.sha256(data).hexdigest())
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        elif url.path == '/v1/wazig/events':
+            self.record(200)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            last = int(self.headers.get('Last-Event-ID', '0'))
+            try:
+                if last == 0:
+                    self.event(1, 'reset', '')
+                    self.close_connection = True
+                    return
+                while True:
+                    self.wfile.write(b': heartbeat\n\n')
+                    self.wfile.flush()
+                    time.sleep(2)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                self.close_connection = True
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/v1/wazig/mark-read':
+            self.respond(200, {'status': 'ok'}, body=body)
+        else:
+            self.respond(400, {'error': 'unexpected media-speed write'}, body=body)
+
+
 def voice_playback_bytes():
     def page(packet, sequence, granule, flags):
         header = b'OggS' + bytes([0, flags]) + struct.pack('<QIII', granule, 1, sequence, 0) + bytes([1, len(packet)])
@@ -2363,6 +2463,11 @@ def main():
     server.state.telegram_read = set()
     if args.mode == 'voice':
         server.state.voice_audio = voice_playback_bytes()
+    if args.mode == 'media-speed':
+        server.state.speed_seen = {}
+        server.state.speed_audio = voice_playback_bytes()
+        server.state.speed_images = {key: media_fit_png(400, 300, (40 + 30 * n, 120, 200 - 20 * n))
+                                     for n, key in enumerate(SPEED_IMAGES)}
     if args.mode == 'media-fit':
         server.state.fit_text = 'M M M M M M M M'
         server.state.fit_media = {

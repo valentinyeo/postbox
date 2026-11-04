@@ -118,3 +118,4 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-1602: a sent message shows once and no bubble keeps "(sending)" -> `send-once` (normal chat and archived chat, one bubble by text, no waiting bubble, empty outbox)
 - IGSH-1603: a reply in an archived chat returns it to Combined and its messenger inbox, Keep archived stays archived -> `reply-unarchive` (archive, reply, inbox and Combined, restart, keep archived reply)
 - IGSH-1595: the first search after a fresh start finds archived chats -> `archived-search` (fresh app start, Ctrl+F, archived test chat listed on the first try)
+- IGSH-1689: gone media is unavailable at once, server errors back off from 5 s, hub downloads run three at once -> `media-speed` (ten images and voice notes with slow replies, one server error and one gone file; all ten show within 15 seconds)
