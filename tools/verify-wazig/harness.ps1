@@ -116,7 +116,13 @@ function Get-Window($Session) {
         [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$Session.pid),
         [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MessagesZig')
     )
-    $window = [Windows.Automation.AutomationElement]::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, $condition)
+    $window = $null
+    foreach ($attempt in 1..20) {
+        $window = [Windows.Automation.AutomationElement]::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, $condition)
+        if ($null -ne $window) { break }
+        Start-Sleep -Milliseconds 250
+        $null = Get-App $Session
+    }
     Assert-That ($null -ne $window) 'App window is not up'
     Assert-That ($window.Current.ProcessId -eq $Session.pid) 'UI Automation found another process'
     Assert-That ($window.Current.ClassName -eq 'MessagesZig') 'Wrong window class'
