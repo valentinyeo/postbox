@@ -6668,6 +6668,10 @@ fn updateAudioPlayback(a: *App) void {
     }
     if (changed) {
         if (a.canvas) |canvas| {
+            if (voiceBarActive(a)) {
+                const bar = voiceBarRect(a);
+                _ = win.InvalidateRect(canvas, &bar, win.FALSE);
+            }
             for (a.messages[0..a.message_count]) |*message| {
                 if (!isAudio(message)) continue;
                 const dirty = message.bubble_hit;
@@ -8052,7 +8056,6 @@ fn cycleSpeed(a: *App) void {
     };
     setStatus(a, std.fmt.bufPrint(&buffer, "Playback speed {s}", .{label}) catch "Playback speed changed");
     refreshChatList(a);
-    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
@@ -18493,6 +18496,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     drawMessageActions(&shapes, hdc, a);
     drawChatTitle(&shapes, hdc, a, client);
     drawScrollbar(&shapes, canvasStripRect(a), canvasScrollInfo(a), theme.current.outline);
+    paintVoiceBar(a, &shapes, hdc);
 }
 
 fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
@@ -18557,6 +18561,27 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             _ = win.UpdateWindow(hwnd);
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+            if (voiceBarActive(a) and rectHasPoint(voiceBarRect(a), x, y)) {
+                const bar = voiceBarRect(a);
+                if (x > bar.right - px(a, 120)) {
+                    stopAudio(a);
+                    setStatus(a, "Voice message stopped");
+                } else if (x > bar.right - px(a, 220)) {
+                    toggleBarAudio(a);
+                    setStatus(a, if (a.audio_state == .paused) "Voice message paused" else "Voice message playing");
+                } else if (x > bar.right - px(a, 300)) {
+                    cycleSpeed(a);
+                } else {
+                    for (a.chats[0..a.chat_count], 0..) |chat, index| {
+                        if (!std.mem.eql(u8, chat.jid.slice(), a.audio_playing_jid.slice())) continue;
+                        selectChatRow(a, index);
+                        setStatus(a, "Back to the chat that is playing");
+                        break;
+                    }
+                }
+                _ = win.InvalidateRect(hwnd, null, win.FALSE);
+                return 0;
+            }
             if (a.message_hover) |index| {
                 if (index < a.message_count) {
                     const actions = messageActionsRect(a, &a.messages[index]);
@@ -19437,7 +19462,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             }
             if (a.chats_hwnd) |list| drawScrollbar(&shapes, stripRightOf(list, hwnd), listboxScrollInfo(list), theme.current.outline);
             if (a.compose) |edit| drawScrollbar(&shapes, stripRightOf(edit, hwnd), composeScrollInfo(a, edit), theme.current.outline);
-            paintVoiceBar(a, &shapes, hdc);
             paintBulkStrip(a, &shapes, hdc);
             paintUpdateCard(a, &shapes, hdc);
             return 0;
@@ -19462,27 +19486,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         win.WM_LBUTTONDOWN => {
             const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
-            if (voiceBarActive(a) and rectHasPoint(voiceBarRect(a), x, y)) {
-                const bar = voiceBarRect(a);
-                if (x > bar.right - px(a, 120)) {
-                    stopAudio(a);
-                    setStatus(a, "Voice message stopped");
-                } else if (x > bar.right - px(a, 220)) {
-                    toggleBarAudio(a);
-                    setStatus(a, if (a.audio_state == .paused) "Voice message paused" else "Voice message playing");
-                } else if (x > bar.right - px(a, 300)) {
-                    cycleSpeed(a);
-                } else {
-                    for (a.chats[0..a.chat_count], 0..) |chat, index| {
-                        if (!std.mem.eql(u8, chat.jid.slice(), a.audio_playing_jid.slice())) continue;
-                        selectChatRow(a, index);
-                        setStatus(a, "Back to the chat that is playing");
-                        break;
-                    }
-                }
-                _ = win.InvalidateRect(hwnd, null, win.TRUE);
-                return 0;
-            }
             if (a.bulk.items.len > 0 and rectHasPoint(bulkArchiveRect(a), x, y)) {
                 archiveSelectedChat(a, false, .menu);
                 return 0;
@@ -21775,10 +21778,8 @@ fn voiceBarActive(a: *const App) bool {
 fn voiceBarRect(a: *const App) win.RECT {
     var client: win.RECT = undefined;
     const canvas = a.canvas orelse return .{};
-    if (win.GetWindowRect(canvas, &client) == 0) return .{};
-    var point = win.POINT{ .x = client.left, .y = client.top };
-    if (win.ScreenToClient(a.hwnd.?, &point) == 0) return .{};
-    return .{ .left = point.x, .top = point.y, .right = point.x + (client.right - client.left), .bottom = point.y + px(a, 34) };
+    if (win.GetClientRect(canvas, &client) == 0) return .{};
+    return .{ .left = 0, .top = 0, .right = client.right, .bottom = px(a, 34) };
 }
 
 fn voiceBarZone(bar: win.RECT, a: *const App, slot: i32) win.RECT {
@@ -21817,7 +21818,7 @@ fn toggleBarAudio(a: *App) void {
         else => return,
     }
     refreshChatList(a);
-    if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.TRUE);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn paintVoiceBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
