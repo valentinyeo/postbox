@@ -14721,6 +14721,9 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try control_api.writeString(w, message.quoted_msg_id.slice());
         try w.writeAll(",\"quote\":");
         try control_api.writeStringUtf16(w, message.quote.slice());
+        try w.writeAll(",\"thread_ts\":");
+        try control_api.writeString(w, message.thread_ts.slice());
+        try w.print(",\"reply_count\":{d}", .{message.reply_count});
         try w.writeAll(",\"links\":[");
         for (message.links[0..message.link_count], 0..) |*link, link_index| {
             if (link_index > 0) try w.writeByte(',');
