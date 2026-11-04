@@ -785,6 +785,7 @@ const App = struct {
     thread_origin: drafts.Identity = .{},
     thread_panel_hash: u64 = 0,
     thread_panel_replies: usize = 0,
+    thread_local_count: usize = 0,
     threads_account: Utf8Text(32) = .{},
     threads_enabled: bool = true,
     replies_mode_key: Utf8Text(383) = .{},
@@ -4311,12 +4312,22 @@ fn applySlackHistory(a: *App, raw: []const u8) void {
     refreshVisibleChats(a);
 }
 
-fn applyLocalReplies(a: *App, parent: []const u8) void {
-    a.thread_rows.clearRetainingCapacity();
+fn applyLocalReplies(a: *App, parent: []const u8, clear: bool) void {
+    if (clear) a.thread_rows.clearRetainingCapacity();
     for (a.messages[0..a.message_count]) |*message| {
         const is_parent = std.mem.eql(u8, message.id.slice(), parent);
         const root = localThreadRoot(a, message);
         if (!is_parent and !(root != null and std.mem.eql(u8, root.?, parent))) continue;
+        if (!clear) {
+            var known = false;
+            for (a.thread_rows.items) |*existing| {
+                if (std.mem.eql(u8, existing.id.slice(), message.id.slice())) {
+                    known = true;
+                    break;
+                }
+            }
+            if (known) continue;
+        }
         const sender = wideToUtf8(a.allocator, message.sender.slice()) catch null;
         defer if (sender) |text| a.allocator.free(text);
         const body = wideToUtf8(a.allocator, message.text.slice()) catch null;
@@ -18127,6 +18138,10 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     defer shapes.deinit();
     _ = win.FillRect(hdc, &client, a.brush_bg.?);
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
+    if (a.thread_parent.len > 0 and a.thread_local_count != a.message_count and localSlackStyle(a)) {
+        applyLocalReplies(a, a.thread_parent.slice(), a.chats[a.selected_chat].provider != .slack);
+        a.thread_local_count = a.message_count;
+    }
     refreshSlackThreadPanel(a);
     const available_width = client.right - client.left;
     const bubble_width = messageBubbleWidth(a, available_width);
@@ -24005,7 +24020,15 @@ fn toggleSlackThreads(a: *App) void {
 }
 
 fn localSlackStyle(a: *App) bool {
-    return a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider != .slack and repliesSlackMode(a);
+    if (a.selected_chat >= a.chat_count) return false;
+    return if (a.chats[a.selected_chat].provider == .slack) slackThreadsEnabled(a) else repliesSlackMode(a);
+}
+
+fn hasDirectReplies(a: *const App, parent: *const Message) bool {
+    for (a.messages[0..a.message_count]) |*other| {
+        if (other.quoted_msg_id.len > 0 and std.mem.eql(u8, other.quoted_msg_id.slice(), parent.id.slice())) return true;
+    }
+    return false;
 }
 
 fn localThreadRoot(a: *const App, message: *const Message) ?[]const u8 {
@@ -24034,24 +24057,32 @@ fn channelMessageVisible(a: *App, message: *const Message) bool {
 
 fn threadReplyCount(a: *const App, parent: *const Message) usize {
     var loaded: usize = 0;
-    if (localSlackStyle(@constCast(a))) {
+    var local: usize = 0;
+    if (localSlackStyle(@constCast(a)) and hasDirectReplies(a, parent)) {
         for (a.messages[0..a.message_count]) |*message| {
             if (message.quoted_msg_id.len == 0) continue;
             const root = localThreadRoot(a, message) orelse continue;
-            if (std.mem.eql(u8, root, parent.id.slice())) loaded += 1;
+            if (std.mem.eql(u8, root, parent.id.slice())) local += 1;
         }
-        return loaded;
     }
+    if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider != .slack and localSlackStyle(@constCast(a))) return local;
     for (a.thread_rows.items) |*message| {
         if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and std.mem.eql(u8, parent.id.slice(), message.thread_ts.slice())) loaded += 1;
     }
-    return @max(parent.reply_count, loaded);
+    return @max(@max(parent.reply_count, loaded), local);
 }
 
 fn threadLatestReply(a: *const App, parent: *const Message) []const u8 {
     var latest = parent.latest_reply.slice();
     for (a.thread_rows.items) |*message| {
         if (std.mem.eql(u8, parent.id.slice(), message.thread_ts.slice()) and slack.compareTs(message.id.slice(), latest) == .gt) latest = message.id.slice();
+    }
+    if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .slack and localSlackStyle(@constCast(a)) and hasDirectReplies(a, parent)) {
+        for (a.messages[0..a.message_count]) |*message| {
+            if (message.quoted_msg_id.len == 0) continue;
+            const root = localThreadRoot(a, message) orelse continue;
+            if (std.mem.eql(u8, root, parent.id.slice()) and slack.compareTs(message.id.slice(), latest) == .gt) latest = message.id.slice();
+        }
     }
     return latest;
 }
@@ -24084,12 +24115,15 @@ fn openSlackThread(a: *App, selected: usize) void {
     if ((!slackThreadsEnabled(a) and !repliesSlackMode(a)) or selected >= a.message_count or a.hwnd == null) return;
     const message = &a.messages[selected];
     var parent = Utf8Text(191){};
-    parent.set(if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice())) message.thread_ts.slice() else message.id.slice());
+    parent.set(if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice())) message.thread_ts.slice() else if (localSlackStyle(a)) localThreadRoot(a, message) orelse message.id.slice() else message.id.slice());
     closeSlackThread(a);
     a.thread_origin = drafts.Identity.init(chat_key.of(&a.chats[a.selected_chat]));
     a.thread_parent = parent;
     rememberSlackThreadRow(a, message);
-    if (a.chats[a.selected_chat].provider != .slack) applyLocalReplies(a, parent.slice());
+    if (localSlackStyle(a)) {
+        applyLocalReplies(a, parent.slice(), true);
+        a.thread_local_count = a.message_count;
+    }
     a.thread_list = directwrite_edit.create(a.instance, a.hwnd.?, controlId(id_thread_list), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_READONLY | win.ES_AUTOVSCROLL | win.WS_VSCROLL, 0, 0, 0, 0);
     a.thread_compose = directwrite_edit.create(a.instance, a.hwnd.?, controlId(id_thread_compose), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 0, 0);
     if (a.thread_list == null or a.thread_compose == null) {
@@ -24156,7 +24190,7 @@ fn controlSlackThreads(a: *App, w: *std.Io.Writer) !void {
     var parent: ?*const Message = null;
     var inline_replies: usize = 0;
     for (a.messages[0..a.message_count]) |*message| {
-        if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) or (local and localThreadRoot(a, message) != null)) {
+        if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) or (message.quoted_msg_id.len > 0 and localThreadRoot(a, message) != null)) {
             if (channelMessageVisible(a, message)) inline_replies += 1;
         } else if (threadReplyCount(a, message) > 0 and (parent == null or std.mem.eql(u8, message.id.slice(), a.thread_parent.slice()))) parent = message;
     }

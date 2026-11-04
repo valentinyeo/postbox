@@ -23,7 +23,7 @@
 
 ## Gotchas
 
-- Hub message rows use `thread_ts` for the parent, `reply_count` and `latest_reply` for the summary; ordinary quoted-message fields remain separate.
+- The live hub sends Slack thread replies with only `quoted_msg_id` (the parent) and no `thread_ts`, `reply_count` or `latest_reply`; the fixture does the same and the client groups replies by the quote chain. Rows that do carry `thread_ts`, `reply_count` and `latest_reply` still group by them.
 - Synthetic data proves the client contract, not a live Slack service. Inspect screenshots before claiming rendered behavior.
 - Only real foreground-checked SendKeys drives this recipe; UIA and wazigctl are read-only observers. Clicking the replies line, multiple accounts and direct Slack transport require source/unit coverage in addition to this keyboard journey.
 - Source: `src/main.zig` handles grouping, panel and palette; `src/slack.zig` supplies direct Slack history metadata.

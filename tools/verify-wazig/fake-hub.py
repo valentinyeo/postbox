@@ -1094,10 +1094,9 @@ THREAD_PARENT = '1740000000.000100'
 
 
 def thread_rows():
-    rows = [dict(MsgID=THREAD_PARENT, Text='Synthetic thread parent', reply_count=30,
-                 latest_reply='1740000030.000100')]
+    rows = [dict(MsgID=THREAD_PARENT, Text='Synthetic thread parent')]
     rows.extend(dict(MsgID=f'17400000{index:02d}.000100', Text=f'Synthetic thread reply {index}',
-                     thread_ts=THREAD_PARENT) for index in range(1, 31))
+                     quoted_msg_id=THREAD_PARENT) for index in range(1, 31))
     rows.extend(dict(MsgID=f'17400000{index}.000100', Text='Synthetic channel message') for index in (31, 32))
     for index, row in enumerate(rows):
         row.update(ChatJID=THREAD_CHAT, Timestamp=f'2025-02-19T21:20:{index:02d}Z',

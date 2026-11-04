@@ -88,9 +88,8 @@ class SlackThreadsTests(unittest.TestCase):
         spec.loader.exec_module(fixture)
         rows = fixture.thread_rows()
         self.assertEqual(len(rows), 33)
-        self.assertEqual(sum(row.get('thread_ts') == PARENT for row in rows), 30)
-        parent, = [row for row in rows if row['MsgID'] == PARENT]
-        self.assertEqual(parent['reply_count'], 30)
+        self.assertEqual(sum(row.get('quoted_msg_id') == PARENT for row in rows), 30)
+        self.assertFalse(any('thread_ts' in row or 'reply_count' in row for row in rows))
         self.assertEqual(len({row['MsgID'] for row in rows}), 33)
         ast.parse((ROOT / 'tools/verify-wazig/fake-hub.py').read_text())
 
