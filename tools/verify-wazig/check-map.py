@@ -328,7 +328,7 @@ for artifact in ['legacy-archive-state.txt', 'restart.json', 'archive-state.txt'
     assert artifact in runner + archive_journey and artifact in archive_validator, artifact
 for fragment in ['WAZIG_VERIFY_RESTART', 'Wait-HubArchive $Session $Messages', 'Show archived chats', 'Show inbox chats', 'Quit Postbox', 'Get-FileHash']:
     assert fragment in archive_journey, fragment
-for fragment in ['PROVIDER_UNARCHIVE_REQUIRED', 'PHONE_UNARCHIVE_REQUIRED', 'PROVIDER_INCOMING_REQUIRED', 'MIGRATION_ACK_MARKS_LOCAL_ENTRY_DONE']:
+for fragment in ['PROVIDER_UNARCHIVE_REQUIRED', 'PHONE_UNARCHIVE_REQUIRED', 'PROVIDER_INCOMING_REQUIRED', 'MIGRATION_ACK_CLEARS_PENDING_ENTRY']:
     assert fragment in archive_validator, fragment
 print('HUB ARCHIVE MAP VERIFIED: provider archive, phone unarchive, incoming, kept, acknowledged migration and restart')
 

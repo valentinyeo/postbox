@@ -192,7 +192,7 @@ function Invoke-HubArchiveJourney($Session, [string]$Messages, $Start) {
     $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'migration fixture window'
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
     Wait-ArchiveRows $Session @()
-    $null = Wait-Until { @(Get-Content $files[0].FullName | Where-Object { $_.StartsWith("$script:PlainReacted`t") -and $_.EndsWith("`tphone") }).Count -eq 1 } 'local archive marked done only after provider acknowledgement'
+    $null = Wait-Until { @(Get-Content $files[0].FullName | Where-Object { $_.StartsWith("$script:PlainReacted`t") -and -not $_.EndsWith("`tphone") }).Count -eq 0 } 'local archive no longer pending only after provider acknowledgement'
     $writes = @(Get-AnyHubArchiveWrites $Session | Select-Object -Skip $before)
     Assert-That ($writes.Count -eq 1 -and $writes[0].status -eq 200 -and $writes[0].body.chat -eq $script:PlainReacted -and $writes[0].body.archived) 'Local archive migration not acknowledged exactly once'
     Copy-Item $files[0].FullName (Join-Path $Session.evidence 'migration-after.txt')
