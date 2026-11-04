@@ -4439,8 +4439,6 @@ fn localSendId(buffer: []u8, seq: u64) []const u8 {
     return std.fmt.bufPrint(buffer, "local-{d}", .{seq}) catch "local";
 }
 
-const file_send_placeholder = "Sending file...";
-
 fn sendBaseText(buffer: []u8, text: []const u8, has_file: bool, ptt: bool, voice_seconds: u32) []const u8 {
     if (ptt) return std.fmt.bufPrint(buffer, "Voice message {d}:{d:0>2}", .{ voice_seconds / 60, voice_seconds % 60 }) catch "Voice message";
     if (has_file and text.len == 0) return "Image";
@@ -4448,9 +4446,9 @@ fn sendBaseText(buffer: []u8, text: []const u8, has_file: bool, ptt: bool, voice
 }
 
 fn retryingBubbleText(buffer: []u8, text: []const u8, retries: u8) []const u8 {
-    if (text.len == 0) return text;
-    if (retries == 0) return std.fmt.bufPrint(buffer, "{s} (sending)", .{text}) catch text;
-    return std.fmt.bufPrint(buffer, "{s} (retrying {d}/{d})", .{ text, retries, max_send_retries - 1 }) catch text;
+    _ = buffer;
+    _ = retries;
+    return text;
 }
 
 const SentMedia = struct {
@@ -4507,7 +4505,6 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
     } else if (pending.file.len > 0 and pending.text.len == 0) {
         message.media_type.set("image");
         message.local_path.set(a.allocator, pending.file.slice());
-        message.text.set(a.allocator, file_send_placeholder);
         noteSentMedia(a, &pending.id, pending.file.slice());
     } else {
         var retry_buffer: [4095]u8 = undefined;
@@ -22768,9 +22765,9 @@ test "a stored message only counts as delivering a queued send at or after it wa
 
 test "a retry bubble shows a fresh retry count instead of stacking suffixes" {
     var buffer: [64]u8 = undefined;
-    try std.testing.expectEqualStrings("hi (sending)", retryingBubbleText(&buffer, "hi", 0));
-    try std.testing.expectEqualStrings("hi (retrying 1/3)", retryingBubbleText(&buffer, "hi", 1));
-    try std.testing.expectEqualStrings("hi (retrying 2/3)", retryingBubbleText(&buffer, "hi", 2));
+    try std.testing.expectEqualStrings("hi", retryingBubbleText(&buffer, "hi", 0));
+    try std.testing.expectEqualStrings("hi", retryingBubbleText(&buffer, "hi", 1));
+    try std.testing.expectEqualStrings("hi", retryingBubbleText(&buffer, "hi", 2));
 }
 
 test "a send-failure snippet collapses newlines and stays on one UTF-8 boundary" {

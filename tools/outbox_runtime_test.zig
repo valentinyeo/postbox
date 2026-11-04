@@ -15,7 +15,6 @@ const Utf8Text = outbox.Str;
 const max_pending_sends = 32;
 const max_messages = 3;
 const max_send_retries = 4;
-const file_send_placeholder = "Sending file...";
 const max_slack_outbox = 16;
 const max_wacli_args = 4;
 const wacli_arg_cap = 4095;
@@ -1103,7 +1102,7 @@ test "pending replies retain original id sender and snippet without overwriting 
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Server-provided excerpt"), reply.quote.slice());
 }
 
-test "IGSH-1213 queued group text is visibly sending before any confirmation" {
+test "IGSH-1654 queued group text shows as plain sent text before any confirmation" {
     reset();
     var a = fixture();
     a.chats[0].jid.set("personal:fixture-group@g.us");
@@ -1113,7 +1112,7 @@ test "IGSH-1213 queued group text is visibly sending before any confirmation" {
     appendWhatsAppPending(&a, &pending, false);
     try std.testing.expectEqual(@as(usize, 1), a.message_count);
     try std.testing.expectEqual(.pending, a.messages[0].send_state);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Synthetic group message (sending)"), a.messages[0].text.slice());
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Synthetic group message"), a.messages[0].text.slice());
 }
 
 test "intermediate unified outbox refuses send jobs" {
