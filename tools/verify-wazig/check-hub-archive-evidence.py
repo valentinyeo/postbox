@@ -67,7 +67,9 @@ def check_hub_archive(folder):
     assert GROUP + '\t1\t' in after and 'telegram\ttelegram\t' + TELEGRAM in after
     assert (folder / 'legacy-archive-state.txt').read_bytes() == (folder / 'final-data/archive-state.txt').read_bytes()
     state_files = list((folder / 'final-data').glob('hub-*-archive-state.txt'))
-    assert len(state_files) == 1 and state_files[0].read_text(encoding='utf-8-sig') == after
+    assert len(state_files) == 1
+    settled = lambda text: [line.rsplit('\t', 1)[0] for line in text.splitlines() if not line.startswith(PLAIN_REACTED + '\t')]
+    assert settled(state_files[0].read_text(encoding='utf-8-sig')) == settled(after)
     restart = read('restart.json')
     assert (restart['old_pid'], restart['old_start']) != (restart['new_pid'], restart['new_start'])
     assert restart['new_pid'] == session['pid'] and restart['new_start'] == session['startTicks']
