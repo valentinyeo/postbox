@@ -80,6 +80,8 @@ const App = struct {
     displayed_timestamp: Utf8Text(47) = .{},
     messages_gen: u64 = 0,
     messages_read_key: chat_key.Stored = .{},
+    thread_parent: Utf8Text(191) = .{},
+    thread_origin: chat_key.Stored = .{},
     messages_refresh_again: bool = false,
     chats_gen: u64 = 1,
     chats_read_attempts: u32 = 0,
@@ -120,6 +122,7 @@ fn clearMessages(a: *App) void {
     a.message_count = 0;
 }
 fn cancelSlackMark(_: *App) void {}
+fn closeSlackThread(_: *App) void {}
 fn stopAudio(_: *App) void {}
 fn refreshTelegramMessages(_: *App) void {}
 fn refreshSlackHistory(_: *App) void {}
