@@ -607,7 +607,7 @@ const HubOlder = struct {
     exhausted: bool = false,
 };
 
-const max_media_children = media_drain.max_children;
+const max_media_children = media_drain.max_hub_children;
 const media_timeout_ms: u64 = 90_000;
 const media_cache_eviction_days: i64 = 14;
 const MediaDownload = struct {
@@ -643,7 +643,9 @@ const BackgroundMedia = struct {
 const MediaFailure = struct { hash: u64 = 0, count: u8 = 0, retry_after_ms: u64 = 0 };
 const max_media_retries = 3;
 const media_retry_base_ms: u64 = 30_000;
-const gone_media_retry_ms: u64 = 15 * 60_000;
+const media_transient_base_ms: u64 = 5_000;
+const media_transient_cap_ms: u64 = 60_000;
+const max_transient_media_retries = 8;
 
 fn mediaBusy(a: *const App) bool {
     for (&a.media_downloads) |*slot| if (slot.child != null or slot.hub_pending) return true;
@@ -657,8 +659,12 @@ fn mediaDownloading(a: *const App, jid: []const u8, id: []const u8) bool {
     return false;
 }
 
+fn mediaSlotLimit(a: *const App) usize {
+    return if (hubConfigured(a)) media_drain.max_hub_children else media_drain.max_children;
+}
+
 fn freeMediaSlot(a: *App) ?*MediaDownload {
-    for (&a.media_downloads) |*slot| if (slot.child == null and !slot.hub_pending) return slot;
+    for (a.media_downloads[0..mediaSlotLimit(a)]) |*slot| if (slot.child == null and !slot.hub_pending) return slot;
     return null;
 }
 
@@ -7167,8 +7173,15 @@ fn clearMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
     }
 }
 
+fn mediaTransientStatus(status: u32) bool {
+    return status == 429 or (status >= 500 and status < 600);
+}
+
 fn mediaRetryDelayMs(status: u32, count: u8) u64 {
-    if (status == 404 or status == 410) return gone_media_retry_ms;
+    if (mediaTransientStatus(status)) {
+        const doublings: u6 = @intCast(@min(count -| 1, 4));
+        return @min(media_transient_cap_ms, media_transient_base_ms << doublings);
+    }
     return media_retry_base_ms * @as(u64, count);
 }
 
@@ -7203,7 +7216,8 @@ fn noteMediaFailureStatus(a: *App, jid: []const u8, id: []const u8, status: u32)
     }
     count += 1;
     const retry_after_ms = win.GetTickCount64() + mediaRetryDelayMs(status, count);
-    if (count >= max_media_retries) {
+    const retry_limit: u8 = if (mediaTransientStatus(status)) max_transient_media_retries else max_media_retries;
+    if (status == 410 or count >= retry_limit) {
         if (matched) |entry| {
             entry.hash = 0;
             entry.count = 0;
@@ -7279,7 +7293,7 @@ fn drainMediaDownloads(a: *App) void {
     retryPendingDownload(a);
     var steps: usize = 0;
     var started = true;
-    while (media_drain.mayDrainStep(steps, started) and freeMediaSlot(a) != null) {
+    while (media_drain.mayDrainStepWithin(steps, started, mediaSlotLimit(a)) and freeMediaSlot(a) != null) {
         started = autoDownloadNextMedia(a);
         if (!started) started = autoDownloadBackgroundMedia(a);
         steps += 1;

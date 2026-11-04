@@ -3,6 +3,7 @@ const std = @import("std");
 pub const wazi_135 = true;
 
 pub const max_children = 1;
+pub const max_hub_children = 3;
 pub const max_auto_bytes: u64 = 100 * 1024 * 1024;
 pub const max_burst_files = 4;
 pub const burst_budget_ms = 20_000;
@@ -74,7 +75,11 @@ pub fn mayContinueBurst(files_started: usize, started_ms: u64, now_ms: u64) bool
 pub const max_drain_steps = max_children;
 
 pub fn mayDrainStep(steps_done: usize, last_step_started: bool) bool {
-    return steps_done < max_drain_steps and (steps_done == 0 or last_step_started);
+    return mayDrainStepWithin(steps_done, last_step_started, max_drain_steps);
+}
+
+pub fn mayDrainStepWithin(steps_done: usize, last_step_started: bool, limit: usize) bool {
+    return steps_done < limit and (steps_done == 0 or last_step_started);
 }
 
 pub fn forgetAttempt(attempts: []u64, count: *usize, key: u64) void {
@@ -221,6 +226,15 @@ test "bounded serial refill and burst yield prevent UI loops and long sync starv
     try std.testing.expect(mayContinueBurst(max_burst_files - 1, 100, 100));
     try std.testing.expect(!mayContinueBurst(max_burst_files, 100, 100));
     try std.testing.expect(!mayContinueBurst(1, 100, 100 + burst_budget_ms));
+}
+
+test "IGSH-1689 hub downloads start three at once and local ones stay serial" {
+    try std.testing.expectEqual(@as(usize, 3), max_hub_children);
+    try std.testing.expect(mayDrainStepWithin(0, false, max_hub_children));
+    try std.testing.expect(mayDrainStepWithin(2, true, max_hub_children));
+    try std.testing.expect(!mayDrainStepWithin(3, true, max_hub_children));
+    try std.testing.expect(!mayDrainStepWithin(1, false, max_hub_children));
+    try std.testing.expect(!mayDrainStepWithin(1, true, max_children));
 }
 
 test "size metadata tolerates missing negative and string byte counts" {

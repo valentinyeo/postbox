@@ -85,17 +85,39 @@ test "success suppression and transient failures are not terminal failures" {
     try std.testing.expect(!mediaAttempted(&a, jid, id));
 }
 
-test "gone media waits out the bridge failure memory and other failures back off" {
+test "IGSH-1689 a gone file is unavailable at once and a server error backs off from five seconds" {
     var a = fixture();
     const jid = a.chats[0].jid.slice();
     const id = a.messages[0].id.slice();
     noteMediaFailureStatus(&a, jid, id, 410);
-    try std.testing.expectEqual(@as(u64, 100_000 + 15 * 60_000), a.media_failures[0].retry_after_ms);
+    try std.testing.expect(mediaUnavailable(&a, jid, id));
+    try std.testing.expectEqual(@as(u8, 0), a.media_failures[0].count);
     var b = fixture();
     noteMediaFailureStatus(&b, jid, id, 502);
-    try std.testing.expectEqual(@as(u64, 100_000 + 30_000), b.media_failures[0].retry_after_ms);
+    try std.testing.expectEqual(@as(u64, 100_000 + 5_000), b.media_failures[0].retry_after_ms);
+    noteMediaFailureStatus(&b, jid, id, 429);
+    try std.testing.expectEqual(@as(u64, 100_000 + 10_000), b.media_failures[0].retry_after_ms);
     noteMediaFailureStatus(&b, jid, id, 502);
-    try std.testing.expectEqual(@as(u64, 100_000 + 60_000), b.media_failures[0].retry_after_ms);
+    try std.testing.expectEqual(@as(u64, 100_000 + 20_000), b.media_failures[0].retry_after_ms);
+    try std.testing.expect(!mediaUnavailable(&b, jid, id));
+    var c = fixture();
+    for (0..max_transient_media_retries - 1) |_| noteMediaFailureStatus(&c, jid, id, 502);
+    try std.testing.expect(!mediaUnavailable(&c, jid, id));
+    try std.testing.expectEqual(@as(u64, 100_000 + 60_000), c.media_failures[0].retry_after_ms);
+    noteMediaFailureStatus(&c, jid, id, 502);
+    try std.testing.expect(mediaUnavailable(&c, jid, id));
+}
+
+test "IGSH-1689 a missing file keeps the short retry and then gives up" {
+    var a = fixture();
+    const jid = a.chats[0].jid.slice();
+    const id = a.messages[0].id.slice();
+    noteMediaFailureStatus(&a, jid, id, 404);
+    try std.testing.expectEqual(@as(u64, 100_000 + 30_000), a.media_failures[0].retry_after_ms);
+    try std.testing.expect(!mediaUnavailable(&a, jid, id));
+    noteMediaFailureStatus(&a, jid, id, 404);
+    noteMediaFailureStatus(&a, jid, id, 404);
+    try std.testing.expect(mediaUnavailable(&a, jid, id));
 }
 
 test "manual retry resets terminal failure before starting or queuing" {
