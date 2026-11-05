@@ -1,5 +1,6 @@
 const std = @import("std");
 const staged_images = @import("staged_images.zig");
+const toast = @import("toast.zig");
 const theme = @import("theme.zig");
 const design = @import("design_tokens.zig");
 const DesignCanvas = @import("design_canvas.zig");
@@ -1241,7 +1242,8 @@ const App = struct {
     chats_read_attempts: u32 = 0,
     startup_probe_pending: bool = false,
     notifications: message_notifications.State = .{},
-    notification_icon: bool = false,
+    alert_chats: [toast.kept]chat_key.Stored = @splat(.{}),
+    alert_next: usize = 0,
     notification_message: Utf8Text(191) = .{},
     startup_logged: u8 = 0,
 };
@@ -2982,14 +2984,6 @@ fn observeNotificationChats(a: *App, rows: []const std.json.Value) void {
     if (a.notifications.baseline == null) a.notifications.baseline = nowUnixSeconds();
 }
 
-fn notificationIcon(a: *const App) win.NOTIFYICONDATAW {
-    var data = std.mem.zeroes(win.NOTIFYICONDATAW);
-    data.cbSize = @sizeOf(win.NOTIFYICONDATAW);
-    data.hWnd = a.hwnd orelse null;
-    data.uID = 1;
-    return data;
-}
-
 fn applyMessageNotification(a: *App, result: *const WacliResult, probe: WacliJob.Notification) void {
     var parsed = std.json.parseFromSlice(std.json.Value, a.allocator, result.data, .{}) catch return;
     defer parsed.deinit();
@@ -3000,32 +2994,34 @@ fn applyMessageNotification(a: *App, result: *const WacliResult, probe: WacliJob
     if (messages != .array) return;
     const message = message_notifications.incoming(messages.array.items, probe.after) orelse return;
     if (probe.archived and !isKeptArchived(a, result.jid.slice())) queueUnarchiveChat(a, result.jid.slice(), .incoming);
-    var icon = notificationIcon(a);
-    if (!a.notification_icon) {
-        icon.uFlags = win.NIF_MESSAGE | win.NIF_ICON | win.NIF_TIP;
-        icon.uCallbackMessage = wm_notification;
-        icon.hIcon = LoadAppIcon(a.instance, 16, 16, win.LR_SHARED);
-        const tip = std.mem.span(lit("Postbox"));
-        @memcpy(icon.szTip[0..tip.len], tip);
-        if (win.Shell_NotifyIconW(win.NIM_ADD, &icon) == 0) {
-            appendLaunchLog(a, "notification: icon registration failed");
-            return;
-        }
-        a.notification_icon = true;
-    }
-    icon.uFlags = win.NIF_INFO;
-    icon.dwInfoFlags = win.NIIF_INFO;
-    var title = WideText(63){};
-    title.set(a.allocator, probe.name[0..probe.name_len]);
-    @memcpy(icon.szInfoTitle[0..title.len], title.slice());
-    var body = WideText(255){};
+    var title = Utf8Text(191){};
+    title.set(probe.name[0..probe.name_len]);
     const text = getString(message, "Text");
-    body.set(a.allocator, if (text.len > 0) text else "New WhatsApp message");
-    @memcpy(icon.szInfo[0..body.len], body.slice());
     a.notification_message.set(getString(message, "MsgID"));
+    const index = a.alert_next;
+    a.alert_next = (index + 1) % toast.kept;
+    a.alert_chats[index].set(.{ .provider = result.provider, .account = result.account.slice(), .id = result.jid.slice() });
+    toast.register("Postbox", @embedFile("postbox_icon"));
+    const accepted = toast.show(a.hwnd, wm_notification, index, title.slice(), if (text.len > 0) text else "New WhatsApp message");
     var buffer: [512]u8 = undefined;
-    const accepted = win.Shell_NotifyIconW(win.NIM_MODIFY, &icon) != 0;
     appendLaunchLog(a, std.fmt.bufPrint(&buffer, "notification: {s} chat={s} message={s}", .{ if (accepted) @as([]const u8, "accepted") else "failed", result.jid.slice(), a.notification_message.slice() }) catch return);
+    if (accepted) appendLaunchLog(a, std.fmt.bufPrint(&buffer, "notification: shown message={s}", .{a.notification_message.slice()}) catch return);
+}
+
+fn openAlertChat(a: *App, index: usize) void {
+    if (index >= toast.kept) return;
+    const stored = &a.alert_chats[index];
+    if (stored.id_len == 0) return;
+    if (visibleChatIndex(a, stored.key()) == null) {
+        a.view_selected[@intFromEnum(messenger_view.View.all)] = stored.*;
+        switchChatView(a, .all);
+    }
+    const found = visibleChatIndex(a, stored.key()) orelse return;
+    controlSelectIndex(a, found);
+    const hwnd = a.hwnd orelse return;
+    if (win.IsIconic(hwnd) != 0) _ = win.ShowWindow(hwnd, win.SW_RESTORE);
+    _ = win.SetForegroundWindow(hwnd);
+    appendLaunchLog(a, "notification: opened chat from alert");
 }
 
 fn queueUnreadProbe(a: *App, chat: *const Chat) void {
@@ -19090,10 +19086,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return 0;
         },
         wm_notification => {
-            if (lparam == win.NIN_BALLOONSHOW) {
-                var buffer: [256]u8 = undefined;
-                appendLaunchLog(a, std.fmt.bufPrint(&buffer, "notification: shown message={s}", .{a.notification_message.slice()}) catch return 0);
-            }
+            openAlertChat(a, wparam);
             return 0;
         },
         wm_hub_event => {
@@ -19941,10 +19934,6 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.tooltips) |tt| {
                 _ = win.DestroyWindow(tt);
                 a.tooltips = null;
-            }
-            if (a.notification_icon) {
-                var icon = notificationIcon(a);
-                _ = win.Shell_NotifyIconW(win.NIM_DELETE, &icon);
             }
             a.notifications.deinit(a.allocator);
             a.chat_activity.deinit(a.allocator);
