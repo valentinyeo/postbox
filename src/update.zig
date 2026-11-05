@@ -168,9 +168,21 @@ pub fn releaseFromValue(root: std.json.Value) ?Release {
     return .{ .tag = tag.string, .body = releaseBody(root) };
 }
 
-pub const fallback_note = "Small fixes and speed improvements";
+pub const fallback_note = "No visible changes in this update";
 
-pub fn isCardLine(text: []const u8) bool {
+fn withoutTicketPrefix(text: []const u8) []const u8 {
+    if (text.len == 0 or !std.ascii.isUpper(text[0])) return text;
+    var i: usize = 0;
+    while (i < text.len and (std.ascii.isUpper(text[i]) or std.ascii.isDigit(text[i]))) i += 1;
+    if (i >= text.len or text[i] != '-') return text;
+    var j = i + 1;
+    while (j < text.len and std.ascii.isDigit(text[j])) j += 1;
+    if (j == i + 1 or j + 1 >= text.len or text[j] != ':' or text[j + 1] != ' ') return text;
+    return text[j + 2 ..];
+}
+
+pub fn isCardLine(line: []const u8) bool {
+    const text = withoutTicketPrefix(line);
     const length = std.unicode.utf8CountCodepoints(text) catch return false;
     if (length == 0 or length > 80) return false;
     if (std.mem.indexOf(u8, text, "://") != null or std.mem.indexOf(u8, text, "www.") != null) return false;
@@ -250,7 +262,15 @@ test "update notes ignore developer bullets and handle empty bodies" {
     const releases = [_]Release{.{ .tag = "v1.0.1", .body = "" }};
     const notes = try notesForReleases(std.testing.allocator, &releases, parseVersion("1.0.0").?, parseVersion("1.0.1").?);
     defer std.testing.allocator.free(notes);
-    try std.testing.expectEqualStrings("- Small fixes and speed improvements", notes);
+    try std.testing.expectEqualStrings("- No visible changes in this update", notes);
+}
+
+test "IGSH-1683 update notes keep a leading ticket number and still drop developer text" {
+    var lines: std.ArrayList([]const u8) = .empty;
+    defer lines.deinit(std.testing.allocator);
+    try appendBodyLines(std.testing.allocator, "- IGSH-1683: Update notes name their ticket\n- IGSH-715: inbox slots (#346)\n- IGSH-9: Fix main.zig\n- IGSH-1\n- IGSH-12: See https://example.com\n", &lines);
+    try std.testing.expectEqual(@as(usize, 1), lines.items.len);
+    try std.testing.expectEqualStrings("IGSH-1683: Update notes name their ticket", lines.items[0]);
 }
 
 test "update notes with exactly five changes have no overflow line" {
