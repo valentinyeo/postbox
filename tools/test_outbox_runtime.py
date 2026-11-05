@@ -42,7 +42,7 @@ def mutate(source, name):
         "delete-before-retirement": ("if (!persistOutbox(a)) {\n        setStatus(a, \"Could not save send completion; retrying journal\");\n        return false;\n    }", "_ = persistOutbox(a);"),
         "silent-admission": ("if (!persistOutbox(a)) {\n        a.pending_send_count -= 1;\n        pending.* = .{};\n        setStatus(a, \"Could not save outbox; message not queued\");\n        return false;\n    }", "_ = persistOutbox(a);"),
         "utf8-truncation": ("if (text.len > outbox.max_text_len)", "if (false)"),
-        "hidden-restored-bubble": ("if (!unifiedHub(a) and from_reload and !pending.from_disk)", "if (!unifiedHub(a) and from_reload)"),
+        "hidden-restored-bubble": ("if (from_reload and (unifiedHub(a) or !pending.from_disk))", "if (from_reload)"),
         "voice-metadata": ("entry.ptt = pending.ptt;", "entry.ptt = false;"),
         "reaction-eviction": (".reaction, .slack_send, .slack_attach, .slack_share => true,", ".slack_send, .slack_attach, .slack_share => true,"),
         "lost-refresh": ("if (!jobIsWrite(job.kind)) a.wacli_refresh_again = true;", ""),
