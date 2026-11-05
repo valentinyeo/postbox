@@ -14793,7 +14793,7 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
         try w.print(",\"gif_frames\":{d},\"gif_frame\":{d}", .{ message.gif_frame_count, message.gif_frame_index });
         try w.writeAll(",\"media_type\":");
         try control_api.writeString(w, message.media_type.slice());
-        try w.print(",\"local\":{},\"transcript_chars\":{d},\"expanded\":{},\"forwarded\":{}", .{ message.local_path.len > 0, message.transcript.len, message.transcript_expanded, message.forwarded });
+        try w.print(",\"local\":{},\"unavailable\":{},\"transcript_chars\":{d},\"expanded\":{},\"forwarded\":{}", .{ message.local_path.len > 0, mediaUnavailable(a, a.displayed_jid.slice(), message.id.slice()), message.transcript.len, message.transcript_expanded, message.forwarded });
         for ([_]struct { name: []const u8, rect: win.RECT }{
             .{ .name = "bubble", .rect = message.bubble_hit },
             .{ .name = "sender_header", .rect = message.sender_hit },
