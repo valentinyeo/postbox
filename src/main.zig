@@ -614,6 +614,7 @@ const media_cache_eviction_days: i64 = 14;
 const MediaDownload = struct {
     hub_pending: bool = false,
     hub_retry_ms: u64 = 0,
+    polls: u16 = 0,
     child: ?std.process.Child = null,
     jid: Utf8Text(191) = .{},
     id: Utf8Text(191) = .{},
@@ -23331,7 +23332,8 @@ fn enqueueHubMedia(a: *App, slot: *MediaDownload) bool {
     if (!wacliEnqueue(a, job, false)) return false;
     slot.hub_pending = true;
     slot.hub_retry_ms = 0;
-    appendLaunchLog(a, "media: download started");
+    slot.polls +|= 1;
+    if (slot.polls == 1) appendLaunchLog(a, "media: download started");
     return true;
 }
 
@@ -23587,6 +23589,8 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 }
                 slot.hub_pending = false;
                 const ok = result.ok and result.http_status != 202;
+                var timing_buffer: [96]u8 = undefined;
+                appendLaunchLog(a, std.fmt.bufPrint(&timing_buffer, "media: timing ms={d} polls={d}", .{ win.GetTickCount64() -| slot.started_ms, slot.polls }) catch "media: timing");
                 if (ok) {
                     appendLaunchLog(a, "media: download finished");
                 } else {
