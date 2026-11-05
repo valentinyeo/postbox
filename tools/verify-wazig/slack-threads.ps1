@@ -10,8 +10,8 @@ function Invoke-SlackThreadsJourney($Session, $Start) {
     Send-Keys $Session '%2'
     $null = Wait-Until {
         $state = Read-Control $Session status
-        $state.selected.id -eq 'slack:fixture-threads:channel' -and $state.slack_threads.parent_reply_line -eq '30 replies' -and $state.slack_threads.inline_replies -eq 0
-    } 'thread parent replies line without inline replies'
+        $state.selected.id -eq 'slack:fixture-threads:channel' -and $state.slack_threads.parent_reply_line -eq '30 replies' -and $state.slack_threads.inline_replies -eq 0 -and $state.slack_threads.loose_replies -eq 0
+    } 'thread parent replies line without inline or loose replies'
     $on = Save-ThreadsState $Session threads-on
     Assert-That ($on.parent_id -eq '1740000000.000100') 'Wrong thread parent'
     Invoke-PaletteCommand $Session 'Compose message'
@@ -31,7 +31,7 @@ function Invoke-SlackThreadsJourney($Session, $Start) {
     Send-Keys $Session '{ESC}'
     $null = Wait-Until { -not (Read-Control $Session status).slack_threads.open } 'thread panel closed'
     Invoke-PaletteCommand $Session 'Slack threads like Slack for this account'
-    $null = Wait-Until { $thread = (Read-Control $Session status).slack_threads; $thread.inline_replies -eq 30 -and $thread.parent_reply_line -eq '' -and $thread.threads_option -eq 'off' } 'inline mode restored'
+    $null = Wait-Until { $thread = (Read-Control $Session status).slack_threads; $thread.inline_replies -eq 32 -and $thread.loose_replies -eq 32 -and $thread.parent_reply_line -eq '' -and $thread.threads_option -eq 'off' } 'inline mode restored'
     $null = Save-ThreadsState $Session threads-off
     $old = Get-App $Session
     $oldPid = $Session.pid
@@ -47,7 +47,7 @@ function Invoke-SlackThreadsJourney($Session, $Start) {
     $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted fixture window'
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
     Send-Keys $Session '%2'
-    $null = Wait-Until { $thread = (Read-Control $Session status).slack_threads; $thread.threads_option -eq 'off' -and $thread.inline_replies -eq 30 } 'account option survived same-profile restart'
+    $null = Wait-Until { $thread = (Read-Control $Session status).slack_threads; $thread.threads_option -eq 'off' -and $thread.inline_replies -eq 32 } 'account option survived same-profile restart'
     Invoke-Doctor $Session | Out-Null
     $thread = Save-ThreadsState $Session threads-restart
     $thread | Add-Member -NotePropertyName restarted -NotePropertyValue ($old.HasExited -and $Session.startTicks -ne $oldTicks)

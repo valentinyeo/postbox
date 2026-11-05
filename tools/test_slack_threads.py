@@ -20,13 +20,13 @@ class SlackThreadsTests(unittest.TestCase):
         self.write('session.json', dict(feature='slack-threads', sha256='synthetic-hash', commit='synthetic-commit', pid=2, root='fixture', id='fixture-id'))
         self.write('result.json', dict(feature='slack-threads', status='passed'))
         self.write('restart.json', dict(old_start='1', new_start='2', new_pid=2, root='fixture', id='fixture-id', sha256='synthetic-hash'))
-        base = dict(parent_id=PARENT, parent_reply_line='30 replies', inline_replies=0, threads_option='on', open=False, replies=0)
+        base = dict(parent_id=PARENT, parent_reply_line='30 replies', inline_replies=0, loose_replies=0, threads_option='on', open=False, replies=0)
         for stage in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart']:
             state = dict(base)
             if stage in ('thread-panel', 'thread-reply'):
                 state.update(open=True, replies=30)
             if stage in ('threads-off', 'threads-restart'):
-                state.update(parent_reply_line='', inline_replies=30, threads_option='off')
+                state.update(parent_reply_line='', inline_replies=32, loose_replies=32, threads_option='off')
             self.write(f'{stage}.state.json', dict(selected=dict(provider='slack', id='slack:fixture-threads:channel'), slack_threads=state))
             if stage != 'thread-reply':
                 self.write(f'{stage}.json', dict(state, **({'restarted': True} if stage == 'threads-restart' else {})))
@@ -57,7 +57,7 @@ class SlackThreadsTests(unittest.TestCase):
     def test_rejects_broken_feature_measurements_and_restart(self):
         cases = [('threads-on.json', dict(inline_replies=30)), ('threads-on.json', dict(parent_reply_line='')),
                  ('thread-panel.json', dict(replies=29)), ('thread-panel.json', dict(open=False)),
-                 ('threads-off.json', dict(inline_replies=0)), ('threads-off.json', dict(parent_reply_line='30 replies')),
+                 ('threads-on.json', dict(loose_replies=2)), ('threads-off.json', dict(inline_replies=0)), ('threads-off.json', dict(parent_reply_line='30 replies')),
                  ('threads-restart.json', dict(threads_option='on')), ('threads-restart.json', dict(restarted=False)),
                  ('restart.json', dict(new_start='1')), ('result.json', dict(status='failed')),
                  ('side-effects.json', dict(pending_sends=1))]
@@ -82,15 +82,18 @@ class SlackThreadsTests(unittest.TestCase):
             self.assertNotEqual(self.validate().returncode, 0)
             path.write_bytes(original)
 
-    def test_fixture_has_exactly_thirty_replies_and_two_normal_messages(self):
+    def test_fixture_has_thirty_replies_two_orphan_replies_and_two_normal_messages(self):
         spec = importlib.util.spec_from_file_location('thread_fixture', ROOT / 'tools/verify-wazig/fake-hub.py')
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
         rows = fixture.thread_rows()
-        self.assertEqual(len(rows), 33)
+        self.assertEqual(len(rows), 35)
         self.assertEqual(sum(row.get('quoted_msg_id') == PARENT for row in rows), 30)
         self.assertFalse(any('thread_ts' in row or 'reply_count' in row for row in rows))
-        self.assertEqual(len({row['MsgID'] for row in rows}), 33)
+        self.assertEqual(len({row['MsgID'] for row in rows}), 35)
+        orphans = [row for row in rows if row.get('quoted_msg_id') == fixture.THREAD_ORPHAN_PARENT]
+        self.assertEqual(len(orphans), 2)
+        self.assertFalse(any(row['MsgID'] == fixture.THREAD_ORPHAN_PARENT for row in rows))
         ast.parse((ROOT / 'tools/verify-wazig/fake-hub.py').read_text())
 
     def test_single_chat_baseline_and_native_edit_keyboard_routing(self):
@@ -113,6 +116,7 @@ class SlackThreadsTests(unittest.TestCase):
         journey = (ROOT / 'tools/verify-wazig/slack-threads.ps1').read_text()
         self.assertIn('.slack_threads.parent_reply_line', journey)
         self.assertIn("'30 replies'", journey)
+        self.assertIn('loose_replies -eq 0', journey)
 
 
 if __name__ == '__main__':

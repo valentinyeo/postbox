@@ -24082,7 +24082,10 @@ fn localThreadRoot(a: *const App, message: *const Message) ?[]const u8 {
                 break;
             }
         }
-        current = next orelse break;
+        current = next orelse {
+            if (a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .slack) return current.quoted_msg_id.slice();
+            break;
+        };
     }
     return if (current == message) null else current.id.slice();
 }
@@ -24229,7 +24232,9 @@ fn controlSlackThreads(a: *App, w: *std.Io.Writer) !void {
     const enabled = slackThreadsEnabled(a) or local;
     var parent: ?*const Message = null;
     var inline_replies: usize = 0;
+    var loose_replies: usize = 0;
     for (a.messages[0..a.message_count]) |*message| {
+        if (message.quoted_msg_id.len > 0 and message.send_state == .none and channelMessageVisible(a, message)) loose_replies += 1;
         if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) or (message.quoted_msg_id.len > 0 and localThreadRoot(a, message) != null)) {
             if (channelMessageVisible(a, message)) inline_replies += 1;
         } else if (threadReplyCount(a, message) > 0 and (parent == null or std.mem.eql(u8, message.id.slice(), a.thread_parent.slice()))) parent = message;
@@ -24239,7 +24244,7 @@ fn controlSlackThreads(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, if (parent) |message| message.id.slice() else "");
     try w.writeAll(",\"parent_reply_line\":");
     try control_api.writeString(w, if (enabled and parent != null) slack.repliesLine(&line_buffer, threadReplyCount(a, parent.?)) else "");
-    try w.print(",\"inline_replies\":{d},\"replies\":{d},\"open\":{},\"threads_option\":\"{s}\"}}", .{ inline_replies, a.thread_panel_replies, a.thread_list != null, slack.threadsSettingValue(enabled) });
+    try w.print(",\"inline_replies\":{d},\"loose_replies\":{d},\"replies\":{d},\"open\":{},\"threads_option\":\"{s}\"}}", .{ inline_replies, loose_replies, a.thread_panel_replies, a.thread_list != null, slack.threadsSettingValue(enabled) });
 }
 
 fn rememberSlackThreadRow(a: *App, message: *const Message) void {

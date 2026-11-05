@@ -19,11 +19,11 @@ def check_threads(folder):
     panel = read('thread-panel.json')
     off = read('threads-off.json')
     restarted = read('threads-restart.json')
-    assert on['parent_id'] == parent and on['parent_reply_line'] == '30 replies' and on['inline_replies'] == 0
+    assert on['parent_id'] == parent and on['parent_reply_line'] == '30 replies' and on['inline_replies'] == 0 and on['loose_replies'] == 0
     assert on['threads_option'] == 'on' and not on['open']
     assert panel['parent_id'] == parent and panel['open'] and panel['replies'] == 30
-    assert off['inline_replies'] == 30 and off['parent_reply_line'] == '' and off['threads_option'] == 'off' and not off['open']
-    assert restarted['restarted'] and restarted['threads_option'] == 'off' and restarted['inline_replies'] == 30
+    assert off['inline_replies'] == 32 and off['loose_replies'] == 32 and off['parent_reply_line'] == '' and off['threads_option'] == 'off' and not off['open']
+    assert restarted['restarted'] and restarted['threads_option'] == 'off' and restarted['inline_replies'] == 32
     restart = read('restart.json')
     assert restart['old_start'] != restart['new_start'] and restart['new_pid'] == session['pid']
     assert restart['root'] == session['root'] and restart['id'] == session['id'] and restart['sha256'] == session['sha256']
