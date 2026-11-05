@@ -38,6 +38,7 @@ const chat_reconcile = @import("chat_reconcile.zig");
 const compose_layout = @import("compose_layout.zig");
 const update_card_layout = @import("update_card_layout.zig");
 const media_age = @import("media_age.zig");
+const notification_icon_state = @import("notification_icon.zig");
 const media_layout = @import("media_layout.zig");
 const media_drain = @import("media_drain.zig");
 const video_alias = @import("video_alias.zig");
@@ -1242,6 +1243,7 @@ const App = struct {
     startup_probe_pending: bool = false,
     notifications: message_notifications.State = .{},
     notification_icon: bool = false,
+    notification_balloons: notification_icon_state.Balloons = .{},
     notification_message: Utf8Text(191) = .{},
     startup_logged: u8 = 0,
 };
@@ -3012,6 +3014,7 @@ fn applyMessageNotification(a: *App, result: *const WacliResult, probe: WacliJob
             return;
         }
         a.notification_icon = true;
+        a.notification_balloons.reset();
     }
     icon.uFlags = win.NIF_INFO;
     icon.dwInfoFlags = win.NIIF_INFO;
@@ -19093,6 +19096,12 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (lparam == win.NIN_BALLOONSHOW) {
                 var buffer: [256]u8 = undefined;
                 appendLaunchLog(a, std.fmt.bufPrint(&buffer, "notification: shown message={s}", .{a.notification_message.slice()}) catch return 0);
+            }
+            if (a.notification_balloons.event(std.math.cast(usize, lparam) orelse 0) and a.notification_icon) {
+                var icon = notificationIcon(a);
+                _ = win.Shell_NotifyIconW(win.NIM_DELETE, &icon);
+                a.notification_icon = false;
+                appendLaunchLog(a, "notification: icon removed");
             }
             return 0;
         },
