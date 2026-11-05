@@ -1523,10 +1523,8 @@ test "archive row labels survive contact kind pin unread and Show archived toggl
                     if (expected != .incoming) {
                         const label = archiveMarker(&a, &chat) orelse return error.MissingArchiveLabel;
                         try std.testing.expectEqualSlices(u16, std.mem.span(if (kept) lit("Kept archived") else lit("Archived")), std.mem.span(label));
-                    } else if (provider != .whatsapp) {
-                        try std.testing.expect(archiveMarker(&a, &chat) == null);
                     } else {
-                        try std.testing.expectEqualSlices(u16, std.mem.span(lit("Contact")), std.mem.span(archiveMarker(&a, &chat).?));
+                        try std.testing.expect(archiveMarker(&a, &chat) == null);
                     }
                     const original_label = archiveMarker(&a, &chat);
                     for ([_]bool{ false, true }) |include_archived| {
