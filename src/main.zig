@@ -3030,7 +3030,7 @@ fn openAlertChat(a: *App, index: usize) void {
 fn queueUnreadProbe(a: *App, chat: *const Chat) void {
     if ((!unifiedHub(a) and chat.provider != .whatsapp) or a.startup_probe_pending or wacliPendingGet(a, .unread_probe) > 0) return;
     const timestamp = media_age.unixSeconds(chat.timestamp.slice()) orelse return;
-    const archive_probe = !unifiedHub(a) and chat.provider == .whatsapp and if (a.archive_state) |state| state.needsReturnProbe(chat.jid.slice(), chat.timestamp.slice()) else false;
+    const archive_probe = chat.provider == .whatsapp and if (a.archive_state) |state| state.needsReturnProbe(chat.jid.slice(), chat.timestamp.slice()) else false;
     if (!archive_probe and !a.read_state.needsProbe(a.cache_tag.slice(), chat.jid.slice(), timestamp, chat.provider_unread)) return;
     var job = WacliJob{ .account = a.cache_tag, .kind = .unread_probe };
     job.provider = chat.provider;
@@ -3046,7 +3046,7 @@ fn applyUnreadProbe(a: *App, result: *const WacliResult) void {
     if (!result.ok or !std.mem.eql(u8, result.msg_id.slice(), a.cache_tag.slice())) return;
     const timestamp = media_age.unixSeconds(result.extra.slice()) orelse return;
     if (!a.read_state.acceptProbe(a.allocator, a.cache_tag.slice(), result.jid.slice(), timestamp, result.data)) return;
-    if (!unifiedHub(a) and result.provider == .whatsapp) applyArchiveIncoming(a, result.jid.slice(), result.extra.slice(), result.data);
+    if (result.provider == .whatsapp) applyArchiveIncoming(a, result.jid.slice(), result.extra.slice(), result.data);
     for (a.chats[0..a.chat_count], 0..) |*chat, index| {
         if (!unifiedHub(a) and chat.provider != .whatsapp) continue;
         const was_unread = chat.unread or chat.unread_count > 0;
@@ -13529,15 +13529,6 @@ fn loadArchiveState(a: *App) void {
     const data = readFileWin(a.allocator, path, archive_rules.max_entries * 260) orelse return;
     defer a.allocator.free(data);
     state.parse(data);
-    if (unifiedHub(a)) {
-        var index = state.count;
-        while (index > 0) {
-            index -= 1;
-            const entry = &state.entries[index];
-            if (entry.provider == .whatsapp and !entry.keep and (entry.phone or entry.returned)) state.remove(entry.jidSlice());
-        }
-        saveArchiveState(a);
-    }
 }
 
 fn saveArchiveState(a: *App) void {
@@ -13647,6 +13638,10 @@ fn holdKeptArchived(a: *App, key: chat_key.Key, provider_archived: bool, ts: []c
     }
     if (!state.isKept(jid)) {
         if (!provider_archived) {
+            if (unifiedHub(a) and state.forgetProviderUnarchived(jid)) {
+                saveArchiveState(a);
+                return false;
+            }
             if (state.baseline(jid)) |base| {
                 if (std.mem.order(u8, ts, base) == .gt) {
                     state.remove(jid);
@@ -13716,6 +13711,9 @@ fn applyArchivedScan(a: *App, raw: []const u8) void {
         const stamp = getString(object, "last_message_ts");
         if (jid.len == 0 or stamp.len == 0 or std.mem.indexOfScalar(u8, jid, '@') == null) continue;
         const kept = state.isKept(jid);
+        if (!kept and unifiedHub(a) and (hub.sourceProvider(object) orelse .slack) == .whatsapp) {
+            if (state.observeProviderArchived(jid, stamp)) changed = true;
+        }
         if (!kept) {
             if (state.needsReturnProbe(jid, stamp)) {
                 var probe = Chat{ .provider = .whatsapp };
