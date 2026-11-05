@@ -1092,12 +1092,15 @@ class SlackMentionsHandler(SlackSortHandler):
 
 THREAD_CHAT = 'slack:fixture-threads:channel'
 THREAD_PARENT = '1740000000.000100'
+THREAD_ORPHAN_PARENT = '1739999000.000100'
 
 
 def thread_rows():
     rows = [dict(MsgID=THREAD_PARENT, Text='Synthetic thread parent')]
     rows.extend(dict(MsgID=f'17400000{index:02d}.000100', Text=f'Synthetic thread reply {index}',
                      quoted_msg_id=THREAD_PARENT) for index in range(1, 31))
+    rows.extend(dict(MsgID=f'1739999{index}.000100', Text=f'Synthetic orphan reply {index}',
+                     quoted_msg_id=THREAD_ORPHAN_PARENT) for index in (990, 991))
     rows.extend(dict(MsgID=f'17400000{index}.000100', Text='Synthetic channel message') for index in (31, 32))
     for index, row in enumerate(rows):
         row.update(ChatJID=THREAD_CHAT, Timestamp=f'2025-02-19T21:20:{index:02d}Z',
