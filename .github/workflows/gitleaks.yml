@@ -47,7 +47,8 @@ jobs:
           echo "SCAN_HEAD=$head" >> "$GITHUB_ENV"
       - name: Run gitleaks
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz gitleaks
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 5 -o gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          tar -xzf gitleaks.tgz gitleaks
           if [ -n "$SCAN_ALL" ]; then
             ./gitleaks detect --no-banner --source . --redact --log-opts "--all"
           else
@@ -55,7 +56,8 @@ jobs:
           fi
       - name: Run trufflehog
         run: |
-          curl -sSfL https://github.com/trufflesecurity/trufflehog/releases/download/v3.97.0/trufflehog_3.97.0_linux_amd64.tar.gz | tar -xz trufflehog
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 5 -o trufflehog.tgz https://github.com/trufflesecurity/trufflehog/releases/download/v3.97.0/trufflehog_3.97.0_linux_amd64.tar.gz
+          tar -xzf trufflehog.tgz trufflehog
           set +e
           ./trufflehog git "file://$PWD" ${SCAN_HEAD:+--branch "$SCAN_HEAD"} ${SCAN_BASE:+--since-commit "$SCAN_BASE"} \
             --fail --no-update --json > found.json 2> trufflehog.err
