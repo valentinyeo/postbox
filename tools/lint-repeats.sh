@@ -187,6 +187,20 @@ END { exit failed ? 1 : 0 }
     failed=1
 fi
 
+if ! awk '
+{
+    code = $0
+    sub(/\/\/.*$/, "", code)
+    if (code ~ /(^|[^[:alnum:]_])(Shell_NotifyIconW|Shell_NotifyIconA|NOTIFYICONDATAW|NOTIFYICONDATAA|NIM_ADD|NIM_MODIFY)([^[:alnum:]_]|$)/) {
+        printf "lint-repeats: %s:%d: [K1] the app has no tray icon, ever. Use toast.show for alerts.\n", FILENAME, FNR
+        failed = 1
+    }
+}
+END { exit failed ? 1 : 0 }
+' "${text_sources[@]}"; then
+    failed=1
+fi
+
 shopt -s nullglob
 workflows=(.github/workflows/*.yml .github/workflows/*.yaml)
 if (( ${#workflows[@]} == 0 )); then

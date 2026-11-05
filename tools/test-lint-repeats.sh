@@ -260,6 +260,21 @@ fi
 rm "$fixture/src/nested/bypass.zig"
 printf 'const safe = win.DrawTextWrap;\nconst quality = win.CLEARTYPE_NATURAL_QUALITY;\nconst draw = text_draw.drawText;\n' > "$fixture/src/bypass.zig"
 "$lint" "$fixture"
+k1_cases=0
+for api in Shell_NotifyIconW NOTIFYICONDATAW NIM_ADD; do
+    printf 'const Raw = win.%s;\n' "$api" > "$fixture/src/bypass.zig"
+    status=0
+    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+    if (( status != 1 )) || ! grep -Eq '^lint-repeats: src/bypass.zig:[0-9]+: \[K1\] .*toast.show' "$temp/output"; then
+        cat "$temp/output" >&2
+        printf 'test-lint-repeats: FAIL K1 %s must exit 1 with [K1], got exit %s\n' "$api" "$status" >&2
+        exit 1
+    fi
+    k1_cases=$((k1_cases + 1))
+done
+printf 'const note = win.Shell_NotifyIconWrap;\n// win.Shell_NotifyIconW\n' > "$fixture/src/bypass.zig"
+"$lint" "$fixture"
+printf 'test-lint-repeats: IGSH-1737 K1 rejects %s tray icon APIs\n' "$k1_cases"
 h1_cases=0
 for storage in \
     'var app = App{};' \
