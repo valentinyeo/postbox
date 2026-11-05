@@ -52,7 +52,11 @@ jobs:
             if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
               echo "skip=true" >> "$GITHUB_ENV"
             else
-              gh workflow run release.yml -R "$GITHUB_REPOSITORY" --ref "$tag"
+              for attempt in 1 2 3 4 5; do
+                gh workflow run release.yml -R "$GITHUB_REPOSITORY" --ref "$tag" && break
+                [ "$attempt" = 5 ] && exit 1
+                sleep 15
+              done
               echo "skip=true" >> "$GITHUB_ENV"
             fi
           fi
@@ -94,6 +98,10 @@ jobs:
           sha="${target_sha}"
           gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
             -f "ref=refs/tags/${next_tag}" -f "sha=${sha}" >/dev/null
-          gh workflow run release.yml -R "${GITHUB_REPOSITORY}" --ref "${next_tag}"
+          for attempt in 1 2 3 4 5; do
+            gh workflow run release.yml -R "${GITHUB_REPOSITORY}" --ref "${next_tag}" && break
+            [ "$attempt" = 5 ] && exit 1
+            sleep 15
+          done
           echo "### Released ${next_tag}" >> "$GITHUB_STEP_SUMMARY"
           echo "Tag created and the release workflow dispatched on it." >> "$GITHUB_STEP_SUMMARY"
