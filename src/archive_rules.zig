@@ -282,6 +282,27 @@ pub const State = struct {
         return true;
     }
 
+    pub fn observeProviderArchived(self: *State, jid: []const u8, ts: []const u8) bool {
+        if (ts.len == 0) return false;
+        if (self.find(jid)) |index| {
+            const entry = &self.entries[index];
+            if (entry.keep or entry.returned or entry.ts_len > 0) return false;
+            const n = @min(ts.len, max_ts);
+            @memcpy(entry.ts[0..n], ts[0..n]);
+            entry.ts_len = @intCast(n);
+            return true;
+        }
+        return self.observePhone(jid, ts);
+    }
+
+    pub fn forgetProviderUnarchived(self: *State, jid: []const u8) bool {
+        const index = self.find(jid) orelse return false;
+        const entry = &self.entries[index];
+        if (entry.keep or !(entry.phone or entry.returned)) return false;
+        self.removeAt(index);
+        return true;
+    }
+
     pub fn confirmArchived(self: *State, jid: []const u8) bool {
         const index = self.find(jid) orelse return false;
         const entry = &self.entries[index];
@@ -969,4 +990,66 @@ test "IGSH-920 phone entries round trip with a marker and lose it when the user 
     try std.testing.expect(loaded.archive("a@s.whatsapp.net", "", false));
     try std.testing.expect(!loaded.isPhone("a@s.whatsapp.net"));
     try std.testing.expectEqualStrings("a@s.whatsapp.net\t0\t2026-10-10T10:00:00Z\n", loaded.format(&buffer));
+}
+
+test "IGSH-1650 a chat archived at the provider returns on a newer incoming message for personal and Business jids" {
+    const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
+    for ([_][]const u8{ "business:matt@s.whatsapp.net", "personal:matt@s.whatsapp.net" }) |jid| {
+        const key = Key{ .provider = .whatsapp, .account = "hub", .id = jid };
+        var state = State{};
+        try std.testing.expect(state.isArchived(key, true));
+        try std.testing.expect(state.observeProviderArchived(jid, "2026-11-02T10:00:00Z"));
+        try std.testing.expect(state.isArchived(key, true));
+        try std.testing.expect(!state.needsReturnProbe(jid, "2026-11-02T10:00:00Z"));
+        try std.testing.expect(state.needsReturnProbe(jid, "2026-11-04T09:30:00Z"));
+        try std.testing.expect(!state.returnsOn(jid, "2026-11-02T09:00:00Z"));
+        try std.testing.expect(state.returnsOn(jid, "2026-11-04T09:30:00Z"));
+        try std.testing.expect(state.returnToInbox(jid));
+        try std.testing.expect(!state.isArchived(key, true));
+        try std.testing.expect(!state.observeProviderArchived(jid, "2026-11-04T09:30:00Z"));
+        try std.testing.expect(!state.isArchived(key, true));
+    }
+}
+
+test "IGSH-1650 provider archive baselines survive a restart and an own message does not move them" {
+    const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
+    const key = Key{ .provider = .whatsapp, .account = "hub", .id = "business:matt@s.whatsapp.net" };
+    var state = State{};
+    try std.testing.expect(state.observeProviderArchived(key.id, "2026-11-02T10:00:00Z"));
+    try std.testing.expect(!state.observeProviderArchived(key.id, "2026-11-04T09:30:00Z"));
+    var buffer: [512]u8 = undefined;
+    const saved = state.format(&buffer);
+    var reloaded = State{};
+    reloaded.parse(saved);
+    try std.testing.expect(reloaded.isArchived(key, true));
+    try std.testing.expectEqualStrings("2026-11-02T10:00:00Z", reloaded.baseline(key.id).?);
+    try std.testing.expect(reloaded.returnsOn(key.id, "2026-11-04T09:30:00Z"));
+    try std.testing.expect(reloaded.returnToInbox(key.id));
+    var second: [512]u8 = undefined;
+    var after_return = State{};
+    after_return.parse(reloaded.format(&second));
+    try std.testing.expect(after_return.isReturned(key.id));
+    try std.testing.expect(!after_return.isArchived(key, true));
+}
+
+test "IGSH-1650 kept chats stay archived and a provider unarchive forgets the observed entry" {
+    const Key = struct { provider: enum { whatsapp }, account: []const u8, id: []const u8 };
+    const key = Key{ .provider = .whatsapp, .account = "hub", .id = "business:matt@s.whatsapp.net" };
+    var state = State{};
+    try std.testing.expect(state.archive(key.id, "2026-11-02T10:00:00Z", true));
+    try std.testing.expect(!state.observeProviderArchived(key.id, "2026-11-04T09:30:00Z"));
+    try std.testing.expect(!state.returnsOn(key.id, "2026-11-04T09:30:00Z"));
+    try std.testing.expect(!state.forgetProviderUnarchived(key.id));
+    try std.testing.expect(state.isArchived(key, false));
+
+    var observed = State{};
+    try std.testing.expect(observed.observeProviderArchived("personal:a@s.whatsapp.net", "2026-11-02T10:00:00Z"));
+    try std.testing.expect(observed.forgetProviderUnarchived("personal:a@s.whatsapp.net"));
+    try std.testing.expectEqual(@as(usize, 0), observed.count);
+    try std.testing.expect(!observed.forgetProviderUnarchived("personal:a@s.whatsapp.net"));
+
+    try std.testing.expect(observed.observeProviderArchived("personal:b@s.whatsapp.net", "2026-11-02T10:00:00Z"));
+    try std.testing.expect(observed.returnToInbox("personal:b@s.whatsapp.net"));
+    try std.testing.expect(observed.forgetProviderUnarchived("personal:b@s.whatsapp.net"));
+    try std.testing.expect(observed.observeProviderArchived("personal:b@s.whatsapp.net", "2026-11-06T10:00:00Z"));
 }
