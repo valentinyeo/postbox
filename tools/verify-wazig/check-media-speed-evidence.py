@@ -14,6 +14,7 @@ def check_media_speed(folder):
     assert proof['ids'] == ids
     assert sorted(proof['seen']) == sorted(ids), 'every image and voice note must show'
     assert proof['total_seconds'] < 15, proof['total_seconds']
+    assert proof['gone_unavailable_seconds'] < 15, proof['gone_unavailable_seconds']
     rows = [json.loads(line) for line in (folder / 'media-speed-server.jsonl').read_text(encoding='utf-8').splitlines() if line.strip()]
     first = min(row['at'] for row in rows)
     done = {}
@@ -28,6 +29,6 @@ def check_media_speed(folder):
     assert len(gone) == 1 and gone[0]['status'] == 410, 'a gone file must be asked for once only'
     messages = read('media-speed.messages.json')['messages']
     gone_row = [row for row in messages if row['id'] == 'SPEED-GONE-1']
-    assert len(gone_row) == 1 and not gone_row[0]['local']
+    assert len(gone_row) == 1 and not gone_row[0]['local'] and gone_row[0]['unavailable'] is True
     assert len([row for row in messages if row['id'] in ids and row['local']]) == len(ids)
     assert (folder / 'media-speed-done.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
