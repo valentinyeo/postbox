@@ -5,7 +5,35 @@ import subprocess
 from pathlib import Path
 
 
-FALLBACK = "Small fixes and speed improvements"
+TICKET = r"[A-Z][A-Z0-9]*-\d+"
+FILLER = re.compile(r"^(checks? and fix(es)?|small fix(es)?( and [\w ]+)?|bug ?fix(es)?|fix(es)?|improvements?|updates?|misc\w*|various( [\w ]+)?|general [\w ]+|speed improvements?|polish|cleanup|tweaks?)[.!]?$", re.IGNORECASE)
+
+
+def product_line_problem(text):
+    if FILLER.match(text.strip()):
+        return "Card text is filler; say what the person sees change"
+    if len(text.split()) < 3:
+        return "Card text needs at least 3 words so the ticket title explains the change"
+    return None
+
+
+def ticket_of(text):
+    found = re.match(r"\s*(" + TICKET + r")\b", text or "")
+    return found.group(1) if found else None
+
+
+def note_line(ticket, text):
+    return f"{ticket}: {text}" if ticket else None
+
+
+def check_notes(notes):
+    for raw in (notes or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        found = re.fullmatch(r"- (" + TICKET + r"): (.+)", line)
+        if not found or product_line_problem(found.group(2)):
+            raise ValueError("Release note line needs a ticket number and a real title: " + line)
 
 
 def card_text(body):
@@ -17,6 +45,10 @@ def card_text(body):
         raise ValueError("Card text must contain 1 to 80 characters")
     if re.search(r"\b[A-Z][A-Z0-9]*-\d+\b|#\d+|\b[\w-]+\.[a-zA-Z][\w]*\b|\w+://|www\.", text, re.IGNORECASE):
         raise ValueError("Card text must not contain ticket ids, PR numbers, file names or URLs")
+    if text.lower() != "none":
+        problem = product_line_problem(text)
+        if problem:
+            raise ValueError(problem)
     return text
 
 
@@ -63,13 +95,17 @@ def commit_product_text(sha):
     if not changed:
         return None
     message = command("git", "log", "-1", "--format=%B", sha)
+    ticket = ticket_of(message.splitlines()[0] if message else "")
     if re.search(r"^Card:", message, re.MULTILINE):
         try:
             text = card_text(message)
         except ValueError:
             return None
-        return None if text.lower() == "none" else text
-    return card_from_subject(message.splitlines()[0] if message else "")
+        return None if text.lower() == "none" else note_line(ticket, text)
+    text = card_from_subject(message.splitlines()[0] if message else "")
+    if text and product_line_problem(text):
+        return None
+    return note_line(ticket, text) if text else None
 
 
 def compose_release(repo, tag):
@@ -90,15 +126,18 @@ def compose_release(repo, tag):
             except ValueError:
                 continue
             if candidate.lower() != "none":
-                text = candidate
-                break
+                text = note_line(ticket_of(pull.get("title")), candidate)
+                if text:
+                    break
         if text is None:
             text = commit_product_text(sha)
         if not text or text in seen:
             continue
         seen.add(text)
         bullets.append("- " + text)
-    return "\n".join(bullets[:12] or ["- " + FALLBACK]) + "\n"
+    notes = "\n".join(bullets[:12])
+    check_notes(notes)
+    return notes + "\n" if notes else ""
 
 
 def main():
