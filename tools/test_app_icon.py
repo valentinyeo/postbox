@@ -66,7 +66,7 @@ class AppIconTests(unittest.TestCase):
         self.assertIn('1 ICON "messages.ico"', (ROOT / 'assets/app.rc').read_text())
         source = (ROOT / 'src/main.zig').read_text()
         self.assertIn('LoadImageW(instance, 1, win.IMAGE_ICON', source)
-        self.assertIn('icon.hIcon = LoadAppIcon(a.instance, 16, 16', source)
+        self.assertNotIn('Shell_NotifyIconW', source)
         installer = (ROOT / 'assets/installer.wxs').read_text()
         self.assertIn('Target="[INSTALLDIR]Messages.exe"', installer)
 
