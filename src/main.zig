@@ -3002,7 +3002,7 @@ fn applyMessageNotification(a: *App, result: *const WacliResult, probe: WacliJob
     a.alert_next = (index + 1) % toast.kept;
     a.alert_chats[index].set(.{ .provider = result.provider, .account = result.account.slice(), .id = result.jid.slice() });
     toast.register("Postbox", @embedFile("postbox_icon"));
-    const accepted = toast.show(a.hwnd, wm_notification, index, title.slice(), if (text.len > 0) text else "New WhatsApp message");
+    const accepted = toast.show(a.hwnd orelse null, wm_notification, index, title.slice(), if (text.len > 0) text else "New WhatsApp message");
     var buffer: [512]u8 = undefined;
     appendLaunchLog(a, std.fmt.bufPrint(&buffer, "notification: {s} chat={s} message={s}", .{ if (accepted) @as([]const u8, "accepted") else "failed", result.jid.slice(), a.notification_message.slice() }) catch return);
     if (accepted) appendLaunchLog(a, std.fmt.bufPrint(&buffer, "notification: shown message={s}", .{a.notification_message.slice()}) catch return);

@@ -92,7 +92,7 @@ fn activationFactory(loaded: Api, comptime class: []const u8, iid: *const Guid) 
 const Handler = extern struct {
     vtable: *const Table,
     refs: u32,
-    hwnd: ?win.HWND,
+    hwnd: win.HWND,
     message: u32,
     index: usize,
 
@@ -132,7 +132,7 @@ const Handler = extern struct {
     fn invoke(self: *Handler, sender: ?*anyopaque, args: ?*anyopaque) callconv(.winapi) HRESULT {
         _ = sender;
         _ = args;
-        if (self.hwnd) |hwnd| _ = win.PostMessageW(hwnd, self.message, self.index, 0);
+        if (self.hwnd != null) _ = win.PostMessageW(self.hwnd, self.message, self.index, 0);
         return 0;
     }
 };
@@ -162,9 +162,9 @@ fn ensureNotifier(loaded: Api) bool {
     return true;
 }
 
-fn hkeyCurrentUser() win.HKEY {
+fn hkeyAt(value: usize) win.HKEY {
     @setRuntimeSafety(false);
-    return @ptrFromInt(0x80000001);
+    return @ptrFromInt(value);
 }
 
 var registered = false;
@@ -174,7 +174,7 @@ fn writeIcon(png: []const u8, out: *[330]u16) ?[]const u16 {
     const local_len = win.GetEnvironmentVariableW(lit("LOCALAPPDATA"), &local, local.len);
     if (local_len == 0 or local_len >= local.len) return null;
     const suffix = std.unicode.utf8ToUtf16LeStringLiteral("\\Messages\\toast-icon.png");
-    const suffix_len = std.mem.len(suffix);
+    const suffix_len = suffix.len;
     if (local_len + suffix_len >= out.len) return null;
     @memcpy(out[0..local_len], local[0..local_len]);
     @memcpy(out[local_len..][0..suffix_len], suffix[0..suffix_len]);
@@ -201,7 +201,7 @@ pub fn register(display_name: []const u8, icon_png: []const u8) void {
     const wide_path = utf16Alloc(text, &path) orelse return;
     path[wide_path.len] = 0;
     var key: win.HKEY = null;
-    if (win.RegCreateKeyExW(hkeyCurrentUser(), @ptrCast(&path), 0, null, 0, win.KEY_SET_VALUE, null, &key, null) != win.ERROR_SUCCESS) return;
+    if (win.RegCreateKeyExW(hkeyAt(0x80000001), @ptrCast(&path), 0, null, 0, win.KEY_SET_VALUE, null, &key, null) != win.ERROR_SUCCESS) return;
     defer _ = win.RegCloseKey(key);
     var name: [64]u16 = undefined;
     const name_wide = utf16Alloc(display_name, name[0 .. name.len - 1]) orelse return;
@@ -213,7 +213,7 @@ pub fn register(display_name: []const u8, icon_png: []const u8) void {
     }
 }
 
-pub fn show(hwnd: ?win.HWND, message: u32, index: usize, title: []const u8, body: []const u8) bool {
+pub fn show(hwnd: win.HWND, message: u32, index: usize, title: []const u8, body: []const u8) bool {
     const loaded = loadApi() orelse return false;
     if (!ensureNotifier(loaded)) return false;
     var xml_utf8: [toast_xml.max_xml_bytes]u8 = undefined;
