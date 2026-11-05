@@ -49,6 +49,7 @@ const scrollbar = @import("scrollbar.zig");
 const message_scroll = @import("message_scroll.zig");
 const message_double_click = @import("message_double_click.zig");
 const reaction_chip = @import("reaction_chip.zig");
+const read_receipt = @import("read_receipt.zig");
 const passage = @import("passage.zig");
 const sidebar_nav = @import("sidebar_nav.zig");
 const archive_rules = @import("archive_rules.zig");
@@ -488,6 +489,7 @@ const Message = struct {
     reaction: WideText(1023) = .{},
     my_reaction: Utf8Text(63) = .{},
     from_me: bool = false,
+    read_by: i32 = 0,
     revoked: bool = false,
     forwarded: bool = false,
     send_state: enum { none, pending, failed } = .none,
@@ -9325,6 +9327,10 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
     if (a.selected_message) |selected| {
         if (selected < a.message_count) selected_id.set(a.messages[selected].id.slice());
     }
+    var read_id = Utf8Text(191){};
+    if (read_receipt.newestOwn(a.message_count, a, ownReadable)) |newest| {
+        if (a.messages[newest].read_by >= 1) read_id.set(a.messages[newest].id.slice());
+    }
     clearMessages(a);
     a.selected_message = null;
     var united: std.ArrayList(std.json.Value) = .empty;
@@ -9419,6 +9425,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
             message.quote_sender.set(a.allocator, getString(object, "fixture_quote_sender"));
         }
         message.from_me = getBool(object, "FromMe");
+        message.read_by = if (chat.provider == .whatsapp) @intCast(std.math.clamp(getInt(object, "ReadBy"), 0, 1000)) else 0;
         message.forwarded = !revoked and chat.provider == .whatsapp and getBool(object, "IsForwarded");
         message.media_type.set(media_type);
         message.mime_type.set(getString(object, "MimeType"));
@@ -9453,6 +9460,11 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         if (isAudio(stored)) loadTranscriptCache(a, stored);
     }
     if (merged) storeHubOlder(a, chat_key.of(chat), rows);
+    if (read_id.len > 0) {
+        for (a.messages[0..a.message_count]) |*message| {
+            if (std.mem.eql(u8, message.id.slice(), read_id.slice())) message.read_by = @intCast(read_receipt.upgrade(true, message.read_by));
+        }
+    }
     for (a.messages[0..a.message_count]) |*message| {
         const quoted_id = message.quoted_msg_id;
         setReplyQuote(a, message, quoted_id.slice());
@@ -17426,6 +17438,21 @@ fn startsSenderGroup(a: *App, index: usize) bool {
     return !std.mem.eql(u16, message.sender.slice(), previous.sender.slice());
 }
 
+fn ownReadable(a: *App, index: usize) bool {
+    const message = &a.messages[index];
+    return message.from_me and message.send_state == .none and !message.revoked and channelMessageVisible(a, message);
+}
+
+fn receiptCapability(a: *const App) read_receipt.Capability {
+    if (a.selected_chat >= a.chat_count) return .signal;
+    return switch (a.chats[a.selected_chat].provider) {
+        .whatsapp => if (groupChat(a)) .whatsapp_group else .whatsapp_dm,
+        .slack => .slack,
+        .telegram => .telegram,
+        .signal => .signal,
+    };
+}
+
 fn groupChat(a: *const App) bool {
     if (a.selected_chat >= a.chat_count) return false;
     const chat = &a.chats[a.selected_chat];
@@ -18187,6 +18214,8 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     a.scroll_y = std.math.clamp(a.scroll_y, 0, a.max_scroll);
     a.quote_link_scroll = a.scroll_y;
     var cursor_y = client.bottom - px(a, 14) + a.scroll_y;
+    const receipt_message = read_receipt.newestOwn(a.message_count, a, ownReadable);
+    const receipt_capability = receiptCapability(a);
     var index = a.message_count;
     while (index > 0) {
         index -= 1;
@@ -18527,6 +18556,12 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                     }
                 }
             }
+        }
+        if (receipt_message == index and read_receipt.shows(receipt_capability, message.from_me, message.send_state == .none, message.revoked, message.read_by)) {
+            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+            _ = win.SetTextColor(hdc, design.ReaderHint);
+            var tick_rect = win.RECT{ .left = right - px(a, 20), .top = message.bubble_hit.bottom - px(a, 22), .right = right - px(a, 4), .bottom = message.bubble_hit.bottom - px(a, 4) };
+            _ = text_draw.drawText(hdc, lit("\u{2713}\u{2713}"), 2, &tick_rect, win.DT_RIGHT | win.DT_BOTTOM | win.DT_SINGLELINE | win.DT_NOPREFIX);
         }
         if (message.reaction.len > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font.?));
