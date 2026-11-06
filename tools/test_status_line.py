@@ -241,6 +241,7 @@ class StatusLineTests(unittest.TestCase):
         expected = expected.replace('a.voice_active);', 'a.voice_active, a.last_dictation_state == .recording or a.last_dictation_state == .transcribing);')
         expected = expected.replace('    a.compose_client_width = width;\n', '    invalidateCanvasIconTooltips(a);\n    clearHeaderIconTooltip(a);\n    a.compose_client_width = width;\n', 1)
         expected = expected.replace('    updateAttachButton(a);\n', '    updateAttachButton(a);\n    syncMainIconTooltips(a);\n', 1)
+        expected = expected.replace('        }\n    }\n    a.compose_strip_top', '        }\n        composeRevealTop(a);\n    }\n    a.compose_strip_top', 1)
         self.assertEqual(expected, function(source(), 'layoutRegion'))
 
     def test_real_fixture_failure_and_recovery(self):
