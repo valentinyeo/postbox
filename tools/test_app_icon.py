@@ -48,18 +48,18 @@ def check_icon(data):
         sizes.add(size)
         assert planes in (0, 1) and bits == 32
         pixel = png_pixels(data[offset:offset + length], size)
-        r, g, b, a = pixel(round(size * 0.65), round(size * 0.3))
-        assert a > 245 and r > 210 and 90 < g < 170 and b < g, 'Approved red flag missing'
-        r, g, b, a = pixel(round(size * 0.27), round(size * 0.75))
-        assert a > 245 and max(r, g, b) - min(r, g, b) < 5 and 140 < r < 175, 'Flag pole missing'
-        r, g, b, a = pixel(round(size * 0.7), round(size * 0.8))
+        r, g, b, a = pixel(round(size * 0.65), round(size * 0.58))
+        assert a > 245 and g > r + 60 and g > b + 30, 'Green front bubble missing'
+        r, g, b, a = pixel(round(size * 0.3), round(size * 0.28))
+        assert a > 245 and max(r, g, b) - min(r, g, b) < 16 and 110 < r < 170, 'Grey back bubble missing'
+        r, g, b, a = pixel(round(size * 0.5), round(size * 0.92))
         assert a > 245 and max(r, g, b) < 40, 'Dark tile missing'
         assert pixel(0, 0)[3] < 10, 'Tile corners are not transparent'
     assert sizes == SIZES
 
 
 class AppIconTests(unittest.TestCase):
-    def test_approved_flag_at_every_shell_size(self):
+    def test_two_chat_bubbles_at_every_shell_size(self):
         check_icon((ROOT / 'assets/messages.ico').read_bytes())
 
     def test_resource_and_installer_share_app_icon(self):
