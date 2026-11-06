@@ -137,6 +137,20 @@ Send-Keys $session '^a'
 Send-Keys $session '+{INSERT}'
 $null = Wait-Until { (Read-Edit $compose) -eq 'Verification draft' } 'Shift-Insert uses the guarded paste path'
 Save-Screen $session paste
+$numbered = (1..6 | ForEach-Object { "$_. Numbered line $_ of the pasted list" }) -join "`r`n"
+Send-Keys $session '^a{BACKSPACE}'
+$null = Wait-Until { (Read-Edit $compose) -eq '' } 'composer cleared before the numbered paste'
+Set-Clipboard -Value $numbered
+Send-Keys $session '^v'
+$null = Wait-Until { (Read-Control $session status).composer.lines -eq 6 } 'six pasted numbered lines'
+Start-Sleep -Milliseconds 400
+$pasted = Read-Control $session status
+Assert-That ($pasted.composer.first_line -eq 0) "Pasted numbered list scrolled its first lines out of view (first line $($pasted.composer.first_line))"
+Assert-That ((Read-Edit $compose) -replace "`r`n", "`n" -eq ($numbered -replace "`r`n", "`n")) 'Pasted numbered list text changed'
+Save-Screen $session composer-pasted-numbered
+Send-Keys $session '^a{BACKSPACE}'
+$null = Wait-Until { (Read-Edit $compose) -eq '' } 'composer cleared after the numbered paste'
+Send-Keys $session 'Verification draft'
 Send-Keys $session '{END}'
 Send-Keys $session '+{ENTER}'
 Send-Keys $session 'second'

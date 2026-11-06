@@ -14486,7 +14486,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, a.reply_flash.slice());
     try w.print(",\"reply_notice\":{}", .{a.reply_notice});
     const box = a.compose_pill;
-    try w.print(",\"composer\":{{\"box\":{{\"left\":{d},\"top\":{d},\"right\":{d},\"bottom\":{d}}},\"lines\":{d},\"controls\":[", .{ box.left, box.top, box.right, box.bottom, if (a.compose) |edit| win.SendMessageW(edit, win.EM_GETLINECOUNT, 0, 0) else 0 });
+    try w.print(",\"composer\":{{\"box\":{{\"left\":{d},\"top\":{d},\"right\":{d},\"bottom\":{d}}},\"lines\":{d},\"first_line\":{d},\"controls\":[", .{ box.left, box.top, box.right, box.bottom, if (a.compose) |edit| win.SendMessageW(edit, win.EM_GETLINECOUNT, 0, 0) else 0, if (a.compose) |edit| win.SendMessageW(edit, win.EM_GETFIRSTVISIBLELINE, 0, 0) else 0 });
     const controls = [_]?win.HWND{ a.attach_btn, a.compose, a.voice_btn, a.dictate, a.emoji_btn, a.send };
     const names = [_][]const u8{ "attach", "text", "mic", "dictate", "emoji", "send" };
     for (controls, names, 0..) |control, name, index| {
@@ -16292,10 +16292,20 @@ fn stagedRemoveRect(a: *const App, index: usize) win.RECT {
     return .{ .left = preview.right - px(a, 14), .top = preview.top, .right = preview.right, .bottom = preview.top + px(a, 14) };
 }
 
+fn composeRevealTop(a: *App) void {
+    const hwnd = a.compose orelse return;
+    const info = composeScrollInfo(a, hwnd);
+    if (info.top > 0 and info.total <= info.page) {
+        setComposeTop(hwnd, 0);
+        _ = win.InvalidateRect(hwnd, null, win.FALSE);
+    }
+}
+
 fn layoutComposer(a: *App) void {
     const height = a.compose_client_height;
     const sizes = stagedComposerSizes(a, a.compose_client_width, height);
     if (a.compose_strip_top == height - sizes.strip_height and a.compose_pill.top == height - px(a, 11) - sizes.edit_height) {
+        composeRevealTop(a);
         syncMainIconTooltips(a);
         return;
     }
@@ -16327,6 +16337,7 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
             var rect = win.RECT{ .left = px(a, 2), .top = px(a, 8), .right = @max(px(a, 2), inner.right - inner.left - px(a, 2)), .bottom = @max(px(a, 8), inner.bottom - inner.top - px(a, 8)) };
             _ = win.SendMessageW(hwnd, win.EM_SETRECTNP, 0, @bitCast(@intFromPtr(&rect)));
         }
+        composeRevealTop(a);
     }
     a.compose_strip_top = height - sizes.strip_height;
     const bulk_strip = if (a.bulk.items.len > 0) px(a, bulk_strip_height) else @as(i32, 0);
