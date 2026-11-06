@@ -169,6 +169,15 @@ fn validMediaUrl(url: []const u8, id: []const u8) bool {
     return true;
 }
 
+pub const MediaParts = struct { host: []const u8, path_query: []const u8 };
+
+pub fn mediaParts(url: []const u8, id: []const u8) ?MediaParts {
+    if (!validMediaUrl(url, id)) return null;
+    const rest = url["https://".len..];
+    const slash = std.mem.indexOfScalar(u8, rest, '/') orelse return null;
+    return .{ .host = rest[0..slash], .path_query = rest[slash..] };
+}
+
 fn rendition(raw: RawRendition, id: []const u8) !Rendition {
     if (!validMediaUrl(raw.url, id)) return error.InvalidMedia;
     if (!decimalDigits(raw.width) or !decimalDigits(raw.height) or !decimalDigits(raw.size)) return error.InvalidMedia;
@@ -311,6 +320,14 @@ test "only matching giphy GIF media is accepted" {
         "https://media1.giphy.com.evil.test/media/abc123/giphy.gif",
     }) |url| try std.testing.expect(!validMediaUrl(url, "abc123"));
     try std.testing.expectError(error.InvalidMedia, rendition(.{ .url = "https://media.giphy.com/media/abc123/giphy.gif", .width = "0", .height = "5", .size = "1" }, "abc123"));
+}
+
+test "media parts split a validated CDN URL into host and path" {
+    const parts = mediaParts("https://media1.giphy.com/media/abc123/200.gif?cid=x", "abc123").?;
+    try std.testing.expectEqualStrings("media1.giphy.com", parts.host);
+    try std.testing.expectEqualStrings("/media/abc123/200.gif?cid=x", parts.path_query);
+    try std.testing.expect(mediaParts("https://media1.giphy.com/media/abc123/200.gif", "other") == null);
+    try std.testing.expect(mediaParts("https://example.com/media/abc123/200.gif", "abc123") == null);
 }
 
 test "selection belongs to the request and complete target and cancellation clears it" {

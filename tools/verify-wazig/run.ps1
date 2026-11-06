@@ -81,7 +81,7 @@ $start.Environment['LOCALAPPDATA'] = $local
 $start.Environment['APPDATA'] = $local
 $start.Environment['USERPROFILE'] = $profile
 $start.Environment['USERNAME'] = "verify-$id"
-foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN', 'WAZIG_VERIFY_RESTART', 'WAZIG_VERIFY_RETRY_EVIDENCE', 'WAZIG_VERIFY_OUTBOX_FAULT', 'WAZIG_VERIFY_OUTBOX_TRANSITION', 'WAZIG_VERIFY_OUTBOX_ATTEMPT', 'WAZIG_VERIFY_MIGRATION_CASE', 'WAZIG_VERIFY_MIGRATION_STOP')) { $null = $start.Environment.Remove($name) }
+foreach ($name in @('DEEPGRAM_API_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'WAZIG_FAKE_VERSION', 'WA_BRIDGE_KEY', 'WAZIG_VERIFY_HUB_URL', 'WAZIG_VERIFY_HUB_KEY', 'WAZIG_HUB_URL', 'WAZIG_HUB_TOKEN', 'WAZIG_VERIFY_RESTART', 'WAZIG_VERIFY_RETRY_EVIDENCE', 'WAZIG_VERIFY_OUTBOX_FAULT', 'WAZIG_VERIFY_OUTBOX_TRANSITION', 'WAZIG_VERIFY_OUTBOX_ATTEMPT', 'WAZIG_VERIFY_MIGRATION_CASE', 'WAZIG_VERIFY_MIGRATION_STOP', 'GIPHY_API_KEY', 'POSTBOX_GIPHY_PORT')) { $null = $start.Environment.Remove($name) }
 if ($Feature -cin @('hub', 'hub-fault', 'hub-migration-crash', 'hub-migration-before-rename')) { $start.Environment['WAZIG_VERIFY_RETRY_EVIDENCE'] = '1' }
 $bridge = $null
 if ($journey.prepare) { . (Join-Path $PSScriptRoot $journey.prepare) }
@@ -93,6 +93,7 @@ if ($journey.hub) {
     } else {
         $start.Environment['WAZIG_HUB_URL'] = $bridge.url
         $start.Environment['WAZIG_HUB_TOKEN'] = (Get-Content (Join-Path $PSScriptRoot 'fake-wa-bridge.py') | Where-Object { $_.StartsWith('KEY = ') }).Split("'")[1]
+        if ($Feature -ceq 'gif-picker') { $start.Environment['POSTBOX_GIPHY_PORT'] = ([Uri]$bridge.url).Port.ToString() }
     }
 }
 try {

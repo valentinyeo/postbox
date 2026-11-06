@@ -18,6 +18,8 @@ pub const Cancel = struct {
 
 pub const Result = union(enum) {
     page: catalogue.Page,
+    body: []u8,
+    not_gif,
     needs_key,
     invalid_request,
     cancelled,
@@ -149,19 +151,67 @@ fn signalPending(ctx: *CallbackContext, probe: ?*FixtureProbe, kind: u32) void {
     };
 }
 
-pub fn fetch(allocator: std.mem.Allocator, key: []const u8, query: []const u8, offset: usize, limit: usize, cancel: *const Cancel) Result {
-    if (builtin.is_test) return .transport;
-    return fetchAt(allocator, wide("api.giphy.com"), 443, true, key, query, offset, limit, cancel, 20_000, null);
+pub var loopback_port: u16 = 0;
+
+const Target = struct {
+    host: [*:0]const u16,
+    port: u16,
+    secure: bool,
+};
+
+fn liveTarget(live_host: [*:0]const u16) Target {
+    if (!builtin.is_test and loopback_port != 0) return .{ .host = wide("127.0.0.1"), .port = loopback_port, .secure = false };
+    return .{ .host = live_host, .port = 443, .secure = true };
 }
 
-fn fetchAt(allocator: std.mem.Allocator, host: [*:0]const u16, port: u16, secure: bool, key: []const u8, query: []const u8, offset: usize, limit: usize, cancel: *const Cancel, budget_ms: u32, probe: ?*FixtureProbe) Result {
+pub fn fetch(allocator: std.mem.Allocator, key: []const u8, query: []const u8, offset: usize, limit: usize, cancel: *const Cancel) Result {
+    if (builtin.is_test) return .transport;
+    return fetchAt(allocator, liveTarget(wide("api.giphy.com")), key, query, offset, limit, cancel, 20_000, null);
+}
+
+pub const max_preview_bytes = 4 * 1024 * 1024;
+pub const max_original_bytes = 25 * 1024 * 1024;
+
+pub fn fetchMedia(allocator: std.mem.Allocator, url: []const u8, id: []const u8, max_bytes: usize, cancel: *const Cancel) Result {
+    if (builtin.is_test) return .transport;
+    const parts = catalogue.mediaParts(url, id) orelse return .invalid_request;
+    const host_wide = std.unicode.utf8ToUtf16LeAllocZ(allocator, parts.host) catch return .transport;
+    defer allocator.free(host_wide);
+    const got = getAt(allocator, liveTarget(host_wide.ptr), parts.path_query, wide("Accept: image/gif\r\n"), max_bytes, cancel, 30_000, null);
+    switch (got) {
+        .body => |bytes| {
+            if (bytes.len < 6 or !(std.mem.eql(u8, bytes[0..6], "GIF87a") or std.mem.eql(u8, bytes[0..6], "GIF89a"))) {
+                allocator.free(bytes);
+                return .not_gif;
+            }
+            return got;
+        },
+        else => return got,
+    }
+}
+
+fn fetchAt(allocator: std.mem.Allocator, target: Target, key: []const u8, query: []const u8, offset: usize, limit: usize, cancel: *const Cancel, budget_ms: u32, probe: ?*FixtureProbe) Result {
     const request_url = catalogue.request(key, query, offset, limit) catch |err| return switch (err) {
         error.NeedsKey => .needs_key,
         else => .invalid_request,
     };
     if (cancel.stopped.load(.acquire)) return .cancelled;
+    const got = getAt(allocator, target, request_url.url()["https://api.giphy.com".len..], wide("Accept: application/json\r\n"), catalogue.max_response_bytes, cancel, budget_ms, probe);
+    const bytes = switch (got) {
+        .body => |b| b,
+        else => return got,
+    };
+    defer allocator.free(bytes);
+    const page = catalogue.parse(allocator, bytes, offset, limit) catch return .malformed;
+    if (cancel.stopped.load(.acquire)) return .cancelled;
+    return .{ .page = page };
+}
+
+fn getAt(allocator: std.mem.Allocator, target: Target, path: []const u8, accept: [*:0]const u16, max_bytes: usize, cancel: *const Cancel, budget_ms: u32, probe: ?*FixtureProbe) Result {
+    const host = target.host;
+    const port = target.port;
+    const secure = target.secure;
     const deadline = win.GetTickCount64() + budget_ms;
-    const path = request_url.url()["https://api.giphy.com".len..];
     const wide_path = std.unicode.utf8ToUtf16LeAllocZ(allocator, path) catch return .transport;
     defer allocator.free(wide_path);
     if (stopReason(cancel, deadline)) |reason| return reason;
@@ -192,7 +242,7 @@ fn fetchAt(allocator: std.mem.Allocator, host: [*:0]const u16, port: u16, secure
         if (p.before_send) return .cancelled;
     };
     if (stopReason(cancel, deadline)) |reason| return reason;
-    if (win.WinHttpSendRequest(request, wide("Accept: application/json\r\n"), 0xffffffff, null, 0, 0, context) == 0) return stopReason(cancel, deadline) orelse .transport;
+    if (win.WinHttpSendRequest(request, accept, 0xffffffff, null, 0, 0, context) == 0) return stopReason(cancel, deadline) orelse .transport;
     signalPending(&ctx, probe, headers);
     switch (waitCompletion(&ctx, sent, cancel, deadline)) {
         .stopped => |reason| return reason,
@@ -233,13 +283,11 @@ fn fetchAt(allocator: std.mem.Allocator, host: [*:0]const u16, port: u16, secure
         };
         if (read > ctx.read_buffer.len) return .transport;
         if (read == 0) break;
-        if (read > catalogue.max_response_bytes - body.items.len) return .oversized;
+        if (read > max_bytes - body.items.len) return .oversized;
         body.appendSlice(allocator, ctx.read_buffer[0..read]) catch return .transport;
     }
     if (stopReason(cancel, deadline)) |reason| return reason;
-    const page = catalogue.parse(allocator, body.items, offset, limit) catch return .malformed;
-    if (stopReason(cancel, deadline)) |reason| return reason;
-    return .{ .page = page };
+    return .{ .body = body.toOwnedSlice(allocator) catch return .transport };
 }
 
 fn fixturePort() !u16 {
@@ -266,7 +314,7 @@ fn fixtureFetch(port: u16, query: []const u8, cancel: *const Cancel, budget_ms: 
 
 fn fixtureFetchProbed(port: u16, query: []const u8, cancel: *const Cancel, budget_ms: u32, probe: ?*FixtureProbe) Result {
     if (!builtin.is_test) return .transport;
-    return fetchAt(std.testing.allocator, wide("127.0.0.1"), port, false, "fixture-key", query, 0, 1, cancel, budget_ms, probe);
+    return fetchAt(std.testing.allocator, .{ .host = wide("127.0.0.1"), .port = port, .secure = false }, "fixture-key", query, 0, 1, cancel, budget_ms, probe);
 }
 
 test "GIPHY_LOOPBACK native status, size and redirect behavior" {

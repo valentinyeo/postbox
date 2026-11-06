@@ -204,6 +204,23 @@
       "maximize": true
     },
     {
+      "name": "gif-picker",
+      "pr": true,
+      "hub": "gif-picker",
+      "evidence": true,
+      "chats": 4,
+      "script": "journey-gif-picker.ps1",
+      "validator": {
+        "file": "check-gif-picker-evidence.py",
+        "function": "check_gif_picker"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "GifPickerHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "whatsapp-hub",
       "pr": true,
       "hub": "legacy",

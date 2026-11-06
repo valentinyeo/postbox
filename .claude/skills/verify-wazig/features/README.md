@@ -119,3 +119,4 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-1603: a reply in an archived chat returns it to Combined and its messenger inbox, Keep archived stays archived -> `reply-unarchive` (archive, reply, inbox and Combined, restart, keep archived reply)
 - IGSH-1595: the first search after a fresh start finds archived chats -> `archived-search` (fresh app start, Ctrl+F, archived test chat listed on the first try)
 - IGSH-1689: gone media is unavailable at once, server errors back off from 5 s, hub downloads run three at once -> `media-speed` (ten images and voice notes with slow replies, one server error and one gone file; all ten show within 15 seconds)
+- IGSH-1242: GIF picker -> `gif-picker` (Ctrl+K Send a GIF against a loopback GIPHY look-alike: missing-key notice, protected storage, search and download retry, Escape keeps draft and reply, staged original sent once with the reply and caption)
