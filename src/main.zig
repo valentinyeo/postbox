@@ -16292,15 +16292,6 @@ fn stagedRemoveRect(a: *const App, index: usize) win.RECT {
     return .{ .left = preview.right - px(a, 14), .top = preview.top, .right = preview.right, .bottom = preview.top + px(a, 14) };
 }
 
-fn composeRevealTop(a: *App) void {
-    const hwnd = a.compose orelse return;
-    const info = composeScrollInfo(a, hwnd);
-    if (info.top > 0 and info.total <= info.page) {
-        setComposeTop(hwnd, 0);
-        _ = win.InvalidateRect(hwnd, null, win.FALSE);
-    }
-}
-
 fn layoutComposer(a: *App) void {
     const height = a.compose_client_height;
     const sizes = stagedComposerSizes(a, a.compose_client_width, height);
@@ -17766,6 +17757,15 @@ fn listboxScrollInfo(hwnd: win.HWND) ScrollInfo {
 
 fn setListboxTop(hwnd: win.HWND, top: i32) void {
     _ = win.SendMessageW(hwnd, win.LB_SETTOPINDEX, @intCast(@max(0, top)), 0);
+}
+
+fn composeRevealTop(a: *App) void {
+    const hwnd = a.compose orelse return;
+    const info = composeScrollInfo(a, hwnd);
+    if (info.top > 0 and info.total <= info.page) {
+        setComposeTop(hwnd, 0);
+        _ = win.InvalidateRect(hwnd, null, win.FALSE);
+    }
 }
 
 fn composeScrollInfo(a: *App, hwnd: win.HWND) ScrollInfo {
