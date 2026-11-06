@@ -59,6 +59,7 @@ Artifacts are uploaded as `verify-wazig-<feature>` even after failure. `verifica
 Download and **look at** before and after screenshots. Require the app title, actual action and resulting visible state, plus the corresponding logged/read-only assertion. A green exit or a final screenshot alone is insufficient. Check search removal/restoration or per-chat draft persistence alongside visible results. Reject blank/obscured screenshots. An absent provider account is deliberate; never call a skipped send, media download, transcription or login verified. Never substitute test-only setters. Only the provider data boundary is fixture-backed; the UI path is production code.
 
 - Paste-image retains full-screen/4K uploads, sizes.json with decoded dimensions and RGBA samples, and staged/sent screenshots on all four providers. See [Clipboard images](features/paste-image.md).
+- Gif-picker retains the missing-key notice, search and download retry screenshots, the single GIF upload with its served-original hash, and a scan proving the fixture secret never reaches evidence. See [GIF picker](features/gif-picker.md).
 
 ## Cleanup
 

@@ -13,7 +13,7 @@ import subprocess
 import time
 import struct
 from http.server import ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlencode, urlsplit
+from urllib.parse import parse_qs, parse_qsl, unquote, urlencode, urlsplit
 import zlib
 
 
@@ -2129,6 +2129,13 @@ class SlackArchiveHandler(SlackSortHandler):
 
 
 class PasteImageHandler(TelegramHandler):
+    upload_magic = b'\x89PNG\r\n\x1a\n'
+    upload_suffix = '.png'
+    upload_mime = 'image/png'
+
+    def extra_rows(self, chat):
+        return []
+
     def do_GET(self):
         self.wire_path = self.path
         if not self.authorized():
@@ -2144,9 +2151,11 @@ class PasteImageHandler(TelegramHandler):
             chat = query.get('chat', [''])[0]
             with self.state.lock:
                 rows = [self.message(chat, reply['msg_id'], reply['text'], FromMe=True, MediaType='image',
-                                     MimeType='image/png', Filename=reply['filename'])
+                                     MimeType=self.upload_mime, Filename=reply['filename'],
+                                     **({'quoted_msg_id': reply['reply_to'], 'quoted_sender_jid': 'fixture-sender'}
+                                        if reply.get('reply_to') else {}))
                         for reply in self.state.sends.values() if reply['chat'] == chat]
-            self.respond(200, list(reversed(rows)))
+            self.respond(200, list(reversed(rows)) + self.extra_rows(chat))
         elif url.path == '/v1/wazig/events':
             self.events()
         elif url.path.startswith('/v1/wazig/media/'):
@@ -2155,7 +2164,7 @@ class PasteImageHandler(TelegramHandler):
                 reply = next((row for row in self.state.sends.values()
                               if row['chat'] == chat and row['msg_id'] == message), None)
             if reply:
-                self.respond(200, (self.state.log.parent / reply['upload']).read_bytes(), 'image/png')
+                self.respond(200, (self.state.log.parent / reply['upload']).read_bytes(), self.upload_mime)
             else:
                 self.respond(404, {'error': 'unknown image'})
         elif url.path == '/v1/wazig/groups':
@@ -2186,18 +2195,19 @@ class PasteImageHandler(TelegramHandler):
             self.respond(400, {'error': 'invalid paste chat'}, body=body)
         elif self.path == '/v1/wazig/mark-read':
             self.respond(200, {'status': 'ok'}, body=body)
-        elif (self.path == '/v1/wazig/send' and multipart and image.startswith(b'\x89PNG\r\n\x1a\n')
+        elif (self.path == '/v1/wazig/send' and multipart and image.startswith(self.upload_magic)
               and {'chat', 'text', 'file', 'client_id'}.issubset(body) and body['client_id'].isalnum()):
             with self.state.lock:
                 duplicate = body['client_id'] in self.state.sends
                 if not duplicate:
-                    upload = 'paste-uploads/' + body['client_id'] + '.png'
+                    upload = 'paste-uploads/' + body['client_id'] + self.upload_suffix
                     target = self.state.log.parent / upload
                     target.parent.mkdir(exist_ok=True)
                     target.write_bytes(image)
                     self.state.sends[body['client_id']] = dict(client_id=body['client_id'],
                         msg_id=f'paste-{len(self.state.sends) + 1}', ts=self.state.stamp, status='sent',
-                        chat=body['chat'], text=body['text'], filename=body['file'], upload=upload)
+                        chat=body['chat'], text=body['text'], filename=body['file'], upload=upload,
+                        reply_to=body.get('reply_to', ''))
                     self.state.telegram_events.append(('msg', body['chat']))
                     self.state.lock.notify_all()
                 reply = dict(self.state.sends[body['client_id']])
@@ -2206,6 +2216,107 @@ class PasteImageHandler(TelegramHandler):
                          upload=reply['upload'], message_id=reply['msg_id'])
         else:
             self.respond(400, {'error': 'paste-image requires an image upload'}, body=body)
+
+
+GIF_COLOURS = [(224, 96, 48), (64, 96, 192), (32, 180, 220), (250, 250, 250)]
+GIF_CATALOGUE = {'catwave1': (0, 1), 'catwave2': (1, 2), 'catwave3': (2, 3)}
+GIF_RESULTS = {'': ['catwave1', 'catwave2', 'catwave3'], 'boom': ['catwave2', 'catwave1'], 'cats': ['catwave1', 'catwave3']}
+GIF_SIZES = {'200': (32, 24), 'giphy': (64, 48)}
+
+
+def gif_bytes(width, height, left, right):
+    codes = [4]
+    for index in range(width * height):
+        codes.append(left if index % width < width // 2 else right)
+        if index % 2 == 1:
+            codes.append(4)
+    codes.append(5)
+    packed, bits, count = bytearray(), 0, 0
+    for code in codes:
+        bits |= code << count
+        count += 3
+        while count >= 8:
+            packed.append(bits & 255)
+            bits >>= 8
+            count -= 8
+    if count:
+        packed.append(bits & 255)
+    blocks = b''.join(bytes([len(packed[i:i + 255])]) + bytes(packed[i:i + 255]) for i in range(0, len(packed), 255))
+    palette = b''.join(bytes(colour) for colour in GIF_COLOURS)
+    return (b'GIF89a' + struct.pack('<HHBBB', width, height, 0xF1, 0, 0) + palette + b',' +
+            struct.pack('<HHHHB', 0, 0, width, height, 0) + b'\x02' + blocks + b'\x00;')
+
+
+def gif_rendition(identifier, name):
+    left, right = GIF_CATALOGUE[identifier]
+    width, height = GIF_SIZES[name]
+    return gif_bytes(width, height, left, right)
+
+
+class GifPickerHandler(PasteImageHandler):
+    upload_magic = b'GIF8'
+    upload_suffix = '.gif'
+    upload_mime = 'image/gif'
+
+    def extra_rows(self, chat):
+        return [self.message(chat, 'GIF-ORIGINAL', 'Which GIF fits this?')]
+
+    def giphy_send(self, status, data, content_type='application/json', **extra):
+        self.state.record(dict(kind='giphy', method=self.command, path=self.giphy_path, wire_path=self.giphy_path,
+                               status=status, authorized=False, key_sha256=self.giphy_key, **extra))
+        payload = json.dumps(data).encode() if content_type == 'application/json' else data
+        self.send_response(status)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def giphy_attempt(self, name):
+        with self.state.lock:
+            self.state.gif_attempts[name] = self.state.gif_attempts.get(name, 0) + 1
+            return self.state.gif_attempts[name]
+
+    def giphy_get(self, url):
+        query = parse_qs(url.query)
+        key = query.get('api_key', [''])[0]
+        self.giphy_key = hashlib.sha256(key.encode()).hexdigest() if key else ''
+        rest = urlencode([(name, value) for name, value in parse_qsl(url.query) if name != 'api_key'])
+        self.giphy_path = url.path + ('?' + rest if rest else '')
+        media = re.fullmatch(r'/media/(catwave[123])/(200|giphy)\.gif', url.path)
+        if media:
+            identifier, name = media.groups()
+            body = gif_rendition(identifier, name)
+            if (identifier, name) == ('catwave3', 'giphy') and self.giphy_attempt('original-catwave3') == 1:
+                self.giphy_send(500, {'error': 'first original download fails'}, rendition=name, id=identifier)
+            else:
+                self.giphy_send(200, body, 'image/gif', rendition=name, id=identifier, file_sha256=hashlib.sha256(body).hexdigest())
+            return
+        if url.path not in ('/v1/gifs/trending', '/v1/gifs/search'):
+            self.giphy_send(404, {'error': 'unavailable'})
+            return
+        text = query.get('q', [''])[0]
+        if not key or (url.path == '/v1/gifs/search') != bool(text):
+            self.giphy_send(401 if not key else 400, {'error': 'bad request'}, query=text)
+            return
+        if text == 'boom' and self.giphy_attempt('search-boom') == 1:
+            self.giphy_send(500, {'error': 'first search fails'}, query=text)
+            return
+        data = []
+        for identifier in GIF_RESULTS.get(text, []):
+            small, large = gif_rendition(identifier, '200'), gif_rendition(identifier, 'giphy')
+            base = f'https://media0.giphy.com/media/{identifier}/'
+            data.append(dict(type='gif', id=identifier, images=dict(
+                fixed_width=dict(url=base + '200.gif?cid=fixture&rid=200.gif&ct=g', width='32', height='24', size=str(len(small))),
+                original=dict(url=base + 'giphy.gif?cid=fixture&rid=giphy.gif&ct=g', width='64', height='48', size=str(len(large))))))
+        self.giphy_send(200, dict(data=data, pagination=dict(total_count=len(data), count=len(data), offset=0),
+                                  meta=dict(status=200)), query=text, count=len(data))
+
+    def do_GET(self):
+        url = urlsplit(self.path)
+        if url.path.startswith('/v1/gifs/') or url.path.startswith('/media/'):
+            self.giphy_get(url)
+        else:
+            super().do_GET()
 
 
 LINK_CHATS = [('slack:fixture-links:channel', 'slack'), ('whatsapp:fixture-links', 'whatsapp'),
@@ -2464,6 +2575,7 @@ def main():
     server.state.telegram_reaction = None
     server.state.telegram_events = []
     server.state.telegram_read = set()
+    server.state.gif_attempts = {}
     if args.mode == 'voice':
         server.state.voice_audio = voice_playback_bytes()
     if args.mode == 'media-speed':

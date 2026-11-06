@@ -128,6 +128,9 @@ const wm_slack_reload = win.WM_APP + 5;
 const wm_unfurl_done = win.WM_APP + 6;
 const wm_control = win.WM_APP + 7;
 const wm_startup_probe = win.WM_APP + 8;
+const wm_gif_search = win.WM_APP + 9;
+const wm_gif_tile = win.WM_APP + 10;
+const wm_gif_media = win.WM_APP + 11;
 const wacli_queue_size = 8;
 const max_wacli_args = 16;
 const wacli_arg_cap = 4095;
@@ -200,6 +203,7 @@ const command_next_chat = 2035;
 const command_prev_chat = 2036;
 const command_send = 2037;
 const command_emoji = 2027;
+const command_gif = 2451;
 const command_accounts = 2038;
 const command_accounts_reconnect = 2039;
 const command_accounts_add = 2040;
@@ -243,6 +247,8 @@ const reaction_remove = 3007;
 const reaction_woozy = 3008;
 const reaction_row = 3010;
 const emoji_picker = @import("emoji_picker.zig");
+const giphy = @import("giphy_catalogue.zig");
+const giphy_http = @import("giphy_http_win.zig");
 const popup_anchor = @import("popup_anchor.zig");
 const emoji_draw = @import("emoji_draw.zig");
 const slack_emoji = @import("slack_emoji.zig");
@@ -874,6 +880,14 @@ const App = struct {
     emoji_anchor: ?win.RECT = null,
     emoji_recents: [emoji_picker.max_recents]u16 = [_]u16{0} ** emoji_picker.max_recents,
     emoji_recents_count: usize = 0,
+    gif_mode: bool = false,
+    gif_state: giphy.State = .{},
+    gif_job: ?*GifShared = null,
+    gif_download: ?*GifShared = null,
+    gif_download_id: u64 = 0,
+    gif_tiles: [giphy.max_results]?win.HBITMAP = [_]?win.HBITMAP{null} ** giphy.max_results,
+    gif_query: [giphy.max_query_bytes]u8 = undefined,
+    gif_query_len: usize = 0,
     sb_emoji_top: i32 = -1,
     sb_emoji_total: i32 = -1,
     user_viewed: bool = false,
@@ -2134,7 +2148,7 @@ fn recreateFonts(a: *App) void {
     if (a.hwnd) |hwnd| _ = win.InvalidateRect(hwnd, null, win.FALSE);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     if (a.emoji_wnd != null) {
-        if (a.emoji_list) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, emojiCell(a));
+        if (a.emoji_list) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, pickerCellH(a));
         emojiFilter(a);
     }
 }
@@ -12911,8 +12925,27 @@ fn emojiEditZone(a: *const App) i32 {
     return px(a, emoji_edit_zone_base);
 }
 
+const gif_columns: usize = 4;
+const gif_max_rows: i32 = 3;
+
+fn pickerColumns(a: *const App) usize {
+    return if (a.gif_mode) gif_columns else emoji_picker.grid_columns;
+}
+
+fn pickerCellW(a: *const App) i32 {
+    return if (a.gif_mode) px(a, 132) else emojiCell(a);
+}
+
+fn pickerCellH(a: *const App) i32 {
+    return if (a.gif_mode) px(a, 104) else emojiCell(a);
+}
+
+fn pickerMaxRows(a: *const App) i32 {
+    return if (a.gif_mode) gif_max_rows else emoji_max_rows;
+}
+
 fn emojiPickerWidth(a: *const App) i32 {
-    return emojiCell(a) * @as(i32, @intCast(emoji_picker.grid_columns)) + px(a, 12) + scrollbar_width;
+    return pickerCellW(a) * @as(i32, @intCast(pickerColumns(a))) + px(a, 12) + scrollbar_width;
 }
 
 fn refreshEmojiCoverage(a: *App) void {
@@ -12939,6 +12972,10 @@ fn refreshEmojiCoverage(a: *App) void {
 }
 
 fn buildEmojiMatches(a: *App) void {
+    if (a.gif_mode) {
+        a.emoji_match_count = if (a.gif_state.status == .ready) a.gif_state.page.count else 0;
+        return;
+    }
     refreshEmojiCoverage(a);
     a.emoji_match_count = 0;
     var query_buf: [64]u16 = [_]u16{0} ** 64;
@@ -12958,11 +12995,11 @@ fn buildEmojiMatches(a: *App) void {
 
 fn emojiLayout(a: *App) void {
     const picker = a.emoji_wnd orelse return;
-    const columns = emoji_picker.grid_columns;
+    const columns = pickerColumns(a);
     const match_rows: i32 = @intCast(@divTrunc(a.emoji_match_count + columns - 1, columns));
-    const rows = @max(1, @min(match_rows, emoji_max_rows));
+    const rows = @max(1, @min(match_rows, pickerMaxRows(a)));
     const width = emojiPickerWidth(a);
-    const height = emojiEditZone(a) + rows * emojiCell(a) + px(a, 12);
+    const height = emojiEditZone(a) + rows * pickerCellH(a) + px(a, 12);
     _ = win.SetWindowPos(picker, null, 0, 0, width, height, win.SWP_NOMOVE | win.SWP_NOZORDER | win.SWP_NOACTIVATE);
     if (a.emoji_list) |list| {
         _ = win.MoveWindow(list, 1, emojiEditZone(a), width - 2 - scrollbar_width, height - emojiEditZone(a) - 1, win.TRUE);
@@ -12975,7 +13012,7 @@ fn emojiFilter(a: *App) void {
     if (a.emoji_list) |list| {
         _ = win.SendMessageW(list, win.WM_SETREDRAW, 0, 0);
         _ = win.SendMessageW(list, win.LB_RESETCONTENT, 0, 0);
-        const rows: i32 = @divTrunc(@as(i32, @intCast(a.emoji_match_count)) + @as(i32, @intCast(emoji_picker.grid_columns)) - 1, @as(i32, @intCast(emoji_picker.grid_columns)));
+        const rows: i32 = @divTrunc(@as(i32, @intCast(a.emoji_match_count)) + @as(i32, @intCast(pickerColumns(a))) - 1, @as(i32, @intCast(pickerColumns(a))));
         for (0..@intCast(@max(0, rows))) |_| {
             _ = win.SendMessageW(list, win.LB_ADDSTRING, 0, 1);
         }
@@ -12988,7 +13025,7 @@ fn emojiFilter(a: *App) void {
 
 fn emojiMove(a: *App, delta_columns: i32, delta_rows: i32) void {
     if (a.emoji_match_count == 0) return;
-    const columns: i32 = @intCast(emoji_picker.grid_columns);
+    const columns: i32 = @intCast(pickerColumns(a));
     var next: i32 = @as(i32, @intCast(a.emoji_selected)) + delta_rows * columns + delta_columns;
     next = std.math.clamp(next, 0, @as(i32, @intCast(a.emoji_match_count - 1)));
     a.emoji_selected = @intCast(next);
@@ -12999,6 +13036,10 @@ fn emojiMove(a: *App, delta_columns: i32, delta_rows: i32) void {
 }
 
 fn emojiActivate(a: *App) void {
+    if (a.gif_mode) {
+        gifActivate(a);
+        return;
+    }
     if (a.emoji_selected >= a.emoji_match_count) return;
     const catalog_index = a.emoji_matches[a.emoji_selected];
     const emoji = emoji_picker.emoji(catalog_index);
@@ -13014,14 +13055,24 @@ fn emojiActivate(a: *App) void {
 }
 
 fn emojiCellClicked(a: *App, x: i32, item_index: i32) void {
-    const column = emoji_picker.cellFromHit(x, emojiCell(a)) orelse return;
-    const index = @as(i32, @intCast(item_index)) * @as(i32, @intCast(emoji_picker.grid_columns)) + @as(i32, @intCast(column));
+    const cell = pickerCellW(a);
+    if (x < 0 or x >= cell * @as(i32, @intCast(pickerColumns(a)))) return;
+    const column = @divTrunc(x, cell);
+    const index = @as(i32, @intCast(item_index)) * @as(i32, @intCast(pickerColumns(a))) + column;
     if (index < 0 or index >= @as(i32, @intCast(a.emoji_match_count))) return;
     a.emoji_selected = @intCast(index);
+    if (a.gif_mode) {
+        gifStartDownload(a, a.emoji_selected);
+        return;
+    }
     emojiActivate(a);
 }
 
 fn drawEmojiCell(a: *App, item: *win.DRAWITEMSTRUCT) void {
+    if (a.gif_mode) {
+        drawGifCell(a, item);
+        return;
+    }
     const background = win.CreateSolidBrush(theme.current.surface_container_low) orelse return;
     defer _ = win.DeleteObject(background);
     _ = win.FillRect(item.hDC, &item.rcItem, background);
@@ -13065,7 +13116,7 @@ fn showEmojiPickerWindow(a: *App) void {
     _ = win.GetWindowRect(owner, &owner_rect);
     const width = emojiPickerWidth(a);
     const edit_zone = emojiEditZone(a);
-    const grid_height = emoji_max_rows * emojiCell(a) + px(a, 12);
+    const grid_height = pickerMaxRows(a) * pickerCellH(a) + px(a, 12);
     var x = @max(owner_rect.left + px(a, 8), owner_rect.right - width - px(a, 16));
     var y = @max(owner_rect.top + px(a, 60), owner_rect.bottom - edit_zone - grid_height - px(a, 120));
     if (a.emoji_anchor) |anchor| {
@@ -13109,10 +13160,10 @@ fn showEmojiPickerWindow(a: *App) void {
     setFont(a.emoji_edit, a.font);
     setFont(a.emoji_list, a.font);
     if (a.emoji_edit) |edit| {
-        const cue = if (a.emoji_react) lit("React: search emoji (thumbs, heart, laugh...)") else lit("Search emoji");
+        const cue = if (a.gif_mode) lit("Search GIPHY") else if (a.emoji_react) lit("React: search emoji (thumbs, heart, laugh...)") else lit("Search emoji");
         _ = win.SendMessageW(edit, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(cue)));
     }
-    if (a.emoji_list) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, emojiCell(a));
+    if (a.emoji_list) |list| _ = win.SendMessageW(list, win.LB_SETITEMHEIGHT, 0, pickerCellH(a));
     emojiFilter(a);
     _ = win.ShowWindow(picker, win.SW_SHOW);
     if (a.emoji_edit) |edit| _ = win.SetFocus(edit);
@@ -13129,7 +13180,7 @@ fn emojiProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
                 return 0;
             }
             if (id == id_emoji_edit and notification == win.EN_CHANGE) {
-                emojiFilter(a);
+                if (!a.gif_mode) emojiFilter(a);
             } else if (id == id_emoji_list and notification == win.LBN_SELCHANGE) {
                 const list = a.emoji_list orelse return 0;
                 const row = win.SendMessageW(list, win.LB_GETCURSEL, 0, 0);
@@ -13167,7 +13218,7 @@ fn emojiProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
                 _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
                 _ = win.SelectObject(hdc, @ptrCast(a.font.?));
                 var empty_rect = win.RECT{ .left = px(a, 20), .top = edit_zone + px(a, 4), .right = client.right - px(a, 20), .bottom = edit_zone + px(a, 36) };
-                _ = text_draw.drawText(hdc, lit("No matching emoji"), -1, &empty_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
+                _ = text_draw.drawText(hdc, if (a.gif_mode) gifEmptyText(a) else lit("No matching emoji"), -1, &empty_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER);
             }
             var shapes = smooth.Context.init(hdc);
             defer shapes.deinit();
@@ -13217,6 +13268,7 @@ fn emojiProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.
             return 0;
         },
         win.WM_DESTROY => {
+            if (a.gif_mode) gifPickerClosed(a);
             a.emoji_wnd = null;
             a.emoji_edit = null;
             a.emoji_list = null;
@@ -13241,6 +13293,498 @@ fn emojiCellX(a: *App) i32 {
 
 fn openEmojiMenu(a: *App) void {
     openEmojiPicker(a);
+}
+
+const GifShared = struct {
+    cancel: giphy_http.Cancel = .{},
+    refs: std.atomic.Value(u32) = .init(2),
+
+    fn release(self: *GifShared) void {
+        if (self.refs.fetchSub(1, .acq_rel) == 1) std.heap.page_allocator.destroy(self);
+    }
+};
+
+const GifSearchJob = struct {
+    hwnd: win.HWND,
+    shared: *GifShared,
+    generation: u64,
+    target: giphy.Target,
+    key: [giphy.max_key_bytes]u8,
+    key_len: usize,
+    query: [giphy.max_query_bytes]u8,
+    query_len: usize,
+};
+
+const GifSearchReply = struct {
+    generation: u64,
+    target: giphy.Target,
+    page: ?giphy.Page,
+    problem: []const u8,
+};
+
+const GifTileReply = struct {
+    generation: u64,
+    index: usize,
+    bytes: []u8,
+};
+
+const GifMediaJob = struct {
+    hwnd: win.HWND,
+    shared: *GifShared,
+    id: u64,
+    generation: u64,
+    target: giphy.Target,
+    index: usize,
+    gif: giphy.Gif,
+};
+
+const GifMediaReply = struct {
+    id: u64,
+    generation: u64,
+    target: giphy.Target,
+    index: usize,
+    body: ?[]u8,
+    problem: []const u8,
+};
+
+fn gifProblemText(result: giphy_http.Result, searching: bool) []const u8 {
+    return switch (result) {
+        .unauthorized, .forbidden => "GIPHY refused the key. Check it, then try again",
+        .rate_limited => "GIPHY is busy. Wait a moment, then press Enter to retry",
+        .invalid_request => "GIF search text is too long",
+        .oversized, .not_gif => if (searching) "GIF search failed. Press Enter to retry" else "That GIF is too large to send",
+        else => if (searching) "GIF search failed. Press Enter to retry" else "GIF download failed. Press Enter to retry",
+    };
+}
+
+fn loadGiphyKey(a: *App, buffer: *[giphy.max_key_bytes]u8) usize {
+    seedGiphyKey(a.allocator);
+    const stored = slack_win.loadSecret(a.allocator, lit("GiphyApiKey")) orelse return 0;
+    defer {
+        std.crypto.secureZero(u8, stored.value);
+        a.allocator.free(stored.value);
+    }
+    const value = std.mem.trim(u8, stored.value, " \r\n\t");
+    if (value.len == 0 or value.len > buffer.len) return 0;
+    @memcpy(buffer[0..value.len], value);
+    return value.len;
+}
+
+fn seedGiphyKey(allocator: std.mem.Allocator) void {
+    const seed = environment_keys.load(allocator, "GIPHY_API_KEY", null) catch return;
+    defer {
+        std.crypto.secureZero(u8, seed);
+        allocator.free(seed);
+    }
+    const value = std.mem.trim(u8, seed, " \r\n\t");
+    if (value.len == 0 or value.len > giphy.max_key_bytes) return;
+    if (slack_win.loadSecret(allocator, lit("GiphyApiKey"))) |stored| {
+        defer {
+            std.crypto.secureZero(u8, stored.value);
+            allocator.free(stored.value);
+        }
+        if (std.mem.eql(u8, std.mem.trim(u8, stored.value, " \r\n\t"), value)) return;
+    }
+    _ = slack_win.saveSecret(lit("GiphyApiKey"), value);
+}
+
+fn gifClearNotice(a: *App) void {
+    if (a.update_card_error_source != .general or !std.mem.startsWith(u8, a.update_card_error[0..a.update_card_error_len], "GIF")) return;
+    a.update_card_error_len = 0;
+    a.update_card_error_source = .update;
+    updateCardRefresh(a);
+}
+
+fn gifFreeTiles(a: *App) void {
+    for (&a.gif_tiles) |*tile| {
+        if (tile.*) |bitmap| _ = win.DeleteObject(bitmap);
+        tile.* = null;
+    }
+}
+
+fn gifStopSearch(a: *App) void {
+    if (a.gif_job) |shared| {
+        shared.cancel.stop();
+        shared.release();
+        a.gif_job = null;
+    }
+}
+
+fn gifStopDownload(a: *App) void {
+    if (a.gif_download) |shared| {
+        shared.cancel.stop();
+        shared.release();
+        a.gif_download = null;
+    }
+    a.gif_download_id = 0;
+}
+
+fn gifPickerClosed(a: *App) void {
+    gifStopSearch(a);
+    gifStopDownload(a);
+    gifFreeTiles(a);
+    a.gif_state.cancel();
+    a.gif_mode = false;
+}
+
+fn gifCurrentTarget(a: *App) ?giphy.Target {
+    if (a.selected_chat >= a.chat_count) return null;
+    return giphy.Target.init(chat_key.of(&a.chats[a.selected_chat]), a.reply_to.slice(), a.reply_sender.slice()) catch null;
+}
+
+fn gifEmptyText(a: *const App) [*:0]const u16 {
+    return switch (a.gif_state.status) {
+        .loading => lit("Searching GIPHY..."),
+        .failed => lit("Search failed. Press Enter to retry"),
+        .ready => lit("No GIFs found"),
+        else => lit("Type a search, then press Enter"),
+    };
+}
+
+fn openGifPicker(a: *App) void {
+    if (a.emoji_wnd != null) {
+        closeEmojiPicker(a);
+        return;
+    }
+    var key: [giphy.max_key_bytes]u8 = undefined;
+    defer std.crypto.secureZero(u8, &key);
+    if (loadGiphyKey(a, &key) == 0) {
+        showProblem(a, "GIF search needs a GIPHY key");
+        return;
+    }
+    if (attachUnavailableReason(a)) |reason| {
+        showProblem(a, reason);
+        return;
+    }
+    const target = gifCurrentTarget(a) orelse return;
+    gifClearNotice(a);
+    _ = a.gif_state.begin(target, true) catch return;
+    a.gif_mode = true;
+    a.emoji_react = false;
+    a.emoji_anchor = null;
+    a.emoji_origin = drafts.Identity.init(chat_key.of(&a.chats[a.selected_chat]));
+    showEmojiPickerWindow(a);
+    if (a.emoji_wnd == null) {
+        gifPickerClosed(a);
+        return;
+    }
+    gifStartSearch(a, "");
+}
+
+fn gifStartSearch(a: *App, query: []const u8) void {
+    const hwnd = a.hwnd orelse return;
+    gifStopSearch(a);
+    gifFreeTiles(a);
+    var key: [giphy.max_key_bytes]u8 = undefined;
+    defer std.crypto.secureZero(u8, &key);
+    const key_len = loadGiphyKey(a, &key);
+    const target = a.gif_state.target;
+    const generation = a.gif_state.begin(target, key_len > 0) catch return;
+    a.emoji_selected = 0;
+    if (key_len == 0) {
+        showProblem(a, "GIF search needs a GIPHY key");
+        emojiFilter(a);
+        return;
+    }
+    const text = query[0..@min(query.len, giphy.max_query_bytes)];
+    @memcpy(a.gif_query[0..text.len], text);
+    a.gif_query_len = text.len;
+    const shared = std.heap.page_allocator.create(GifShared) catch return gifSearchFailed(a, generation);
+    shared.* = .{};
+    const job = std.heap.page_allocator.create(GifSearchJob) catch {
+        std.heap.page_allocator.destroy(shared);
+        return gifSearchFailed(a, generation);
+    };
+    job.* = .{ .hwnd = hwnd, .shared = shared, .generation = generation, .target = target, .key = undefined, .key_len = key_len, .query = undefined, .query_len = text.len };
+    @memcpy(job.key[0..key_len], key[0..key_len]);
+    @memcpy(job.query[0..text.len], text);
+    const thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, gifSearchMain, .{job}) catch {
+        std.crypto.secureZero(u8, &job.key);
+        std.heap.page_allocator.destroy(job);
+        std.heap.page_allocator.destroy(shared);
+        return gifSearchFailed(a, generation);
+    };
+    thread.detach();
+    a.gif_job = shared;
+    gifClearNotice(a);
+    emojiFilter(a);
+}
+
+fn gifSearchFailed(a: *App, generation: u64) void {
+    const target = a.gif_state.target;
+    a.gif_state.fail(generation, &target);
+    showProblem(a, "GIF search failed. Press Enter to retry");
+    emojiFilter(a);
+}
+
+fn gifSearchMain(job: *GifSearchJob) void {
+    defer {
+        std.crypto.secureZero(u8, &job.key);
+        job.shared.release();
+        std.heap.page_allocator.destroy(job);
+    }
+    const allocator = std.heap.page_allocator;
+    const got = giphy_http.fetch(allocator, job.key[0..job.key_len], job.query[0..job.query_len], 0, giphy.max_results, &job.shared.cancel);
+    if (job.shared.cancel.stopped.load(.acquire)) return;
+    var page: ?giphy.Page = null;
+    var problem: []const u8 = "";
+    switch (got) {
+        .page => |found| page = found,
+        else => problem = gifProblemText(got, true),
+    }
+    const reply = allocator.create(GifSearchReply) catch return;
+    reply.* = .{ .generation = job.generation, .target = job.target, .page = page, .problem = problem };
+    if (win.PostMessageW(job.hwnd, wm_gif_search, 0, @bitCast(@intFromPtr(reply))) == 0) {
+        allocator.destroy(reply);
+        return;
+    }
+    const found = page orelse return;
+    for (found.items[0..found.count], 0..) |gif, index| {
+        if (job.shared.cancel.stopped.load(.acquire)) return;
+        const media = giphy_http.fetchMedia(allocator, gif.preview.url.slice(), gif.id.slice(), giphy_http.max_preview_bytes, &job.shared.cancel);
+        const bytes = switch (media) {
+            .body => |body| body,
+            else => continue,
+        };
+        const tile = allocator.create(GifTileReply) catch {
+            allocator.free(bytes);
+            continue;
+        };
+        tile.* = .{ .generation = job.generation, .index = index, .bytes = bytes };
+        if (win.PostMessageW(job.hwnd, wm_gif_tile, 0, @bitCast(@intFromPtr(tile))) == 0) {
+            allocator.free(bytes);
+            allocator.destroy(tile);
+            return;
+        }
+    }
+}
+
+fn gifSearchArrived(a: *App, reply: *GifSearchReply) void {
+    defer std.heap.page_allocator.destroy(reply);
+    if (!a.gif_mode or a.emoji_wnd == null) return;
+    if (reply.page) |page| {
+        if (!a.gif_state.accept(reply.generation, &reply.target, page)) return;
+        gifClearNotice(a);
+    } else {
+        a.gif_state.fail(reply.generation, &reply.target);
+        if (a.gif_state.generation != reply.generation or a.gif_state.status != .failed) return;
+        showProblem(a, reply.problem);
+    }
+    a.emoji_selected = 0;
+    emojiFilter(a);
+}
+
+fn gifTileArrived(a: *App, tile: *GifTileReply) void {
+    defer {
+        std.heap.page_allocator.free(tile.bytes);
+        std.heap.page_allocator.destroy(tile);
+    }
+    if (!a.gif_mode or a.emoji_wnd == null or tile.generation != a.gif_state.generation or a.gif_state.status != .ready) return;
+    if (tile.index >= a.gif_state.page.count or a.gif_tiles[tile.index] != null) return;
+    a.gif_tiles[tile.index] = decodeGifTile(a, tile.bytes, pickerCellW(a) - px(a, 8), pickerCellH(a) - px(a, 8));
+    if (a.emoji_list) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+}
+
+fn gifActivate(a: *App) void {
+    var query_buf: [64]u16 = [_]u16{0} ** 64;
+    const query_len: usize = if (a.emoji_edit) |edit| @intCast(win.GetWindowTextW(edit, &query_buf, query_buf.len)) else 0;
+    var utf8_buf: [192]u8 = undefined;
+    const utf8_len = std.unicode.utf16LeToUtf8(&utf8_buf, query_buf[0..query_len]) catch 0;
+    const query = std.mem.trim(u8, utf8_buf[0..utf8_len], " ");
+    const changed = !std.mem.eql(u8, query, a.gif_query[0..a.gif_query_len]);
+    if (changed or a.gif_state.status == .failed or a.gif_state.status == .needs_key) {
+        gifStartSearch(a, query);
+        return;
+    }
+    if (a.gif_state.status == .ready) gifStartDownload(a, a.emoji_selected);
+}
+
+fn gifStartDownload(a: *App, index: usize) void {
+    const hwnd = a.hwnd orelse return;
+    if (a.gif_download != null or a.gif_state.status != .ready or index >= a.gif_state.page.count) return;
+    const shared = std.heap.page_allocator.create(GifShared) catch return;
+    shared.* = .{};
+    const job = std.heap.page_allocator.create(GifMediaJob) catch {
+        std.heap.page_allocator.destroy(shared);
+        return;
+    };
+    a.gif_download_id +%= 1;
+    if (a.gif_download_id == 0) a.gif_download_id = 1;
+    job.* = .{ .hwnd = hwnd, .shared = shared, .id = a.gif_download_id, .generation = a.gif_state.generation, .target = a.gif_state.target, .index = index, .gif = a.gif_state.page.items[index] };
+    const thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, gifMediaMain, .{job}) catch {
+        std.heap.page_allocator.destroy(job);
+        std.heap.page_allocator.destroy(shared);
+        a.gif_download_id = 0;
+        showProblem(a, "GIF download failed. Press Enter to retry");
+        return;
+    };
+    thread.detach();
+    a.gif_download = shared;
+    gifClearNotice(a);
+    setStatus(a, "Downloading GIF...");
+}
+
+fn gifMediaMain(job: *GifMediaJob) void {
+    defer {
+        job.shared.release();
+        std.heap.page_allocator.destroy(job);
+    }
+    const allocator = std.heap.page_allocator;
+    const got = giphy_http.fetchMedia(allocator, job.gif.original.url.slice(), job.gif.id.slice(), giphy_http.max_original_bytes, &job.shared.cancel);
+    if (job.shared.cancel.stopped.load(.acquire)) {
+        if (got == .body) allocator.free(got.body);
+        return;
+    }
+    const reply = allocator.create(GifMediaReply) catch {
+        if (got == .body) allocator.free(got.body);
+        return;
+    };
+    reply.* = .{ .id = job.id, .generation = job.generation, .target = job.target, .index = job.index, .body = null, .problem = "" };
+    switch (got) {
+        .body => |bytes| reply.body = bytes,
+        else => reply.problem = gifProblemText(got, false),
+    }
+    if (win.PostMessageW(job.hwnd, wm_gif_media, 0, @bitCast(@intFromPtr(reply))) == 0) {
+        if (reply.body) |bytes| allocator.free(bytes);
+        allocator.destroy(reply);
+    }
+}
+
+fn gifMediaArrived(a: *App, reply: *GifMediaReply) void {
+    defer {
+        if (reply.body) |bytes| std.heap.page_allocator.free(bytes);
+        std.heap.page_allocator.destroy(reply);
+    }
+    if (reply.id != a.gif_download_id or !a.gif_mode or a.emoji_wnd == null) return;
+    gifStopDownload(a);
+    const bytes = reply.body orelse {
+        showProblem(a, reply.problem);
+        return;
+    };
+    const current = gifCurrentTarget(a);
+    if (current == null or !current.?.eql(&reply.target)) {
+        showProblem(a, "GIF dropped because the chat or reply changed");
+        closeEmojiPicker(a);
+        return;
+    }
+    if (reply.generation != a.gif_state.generation or a.gif_state.status != .ready or reply.index >= a.gif_state.page.count) return;
+    var path: [520]u8 = undefined;
+    const length = stageNewPath(a, &path, "gif") orelse {
+        showProblem(a, "Could not save the GIF");
+        return;
+    };
+    if (!writeCacheFileAtomic(a, path[0..length], bytes)) {
+        deleteFileUtf8(path[0..length]);
+        showProblem(a, "Could not save the GIF");
+        return;
+    }
+    if (!stageFile(a, path[0..length])) {
+        deleteFileUtf8(path[0..length]);
+        showProblem(a, "Could not attach the GIF");
+        return;
+    }
+    a.staged_images.items[a.staged_images.count - 1].owned = true;
+    _ = a.gif_state.select(reply.generation, &reply.target, reply.index);
+    gifClearNotice(a);
+    closeEmojiPicker(a);
+}
+
+fn decodeGifTile(a: *App, bytes: []const u8, max_width: i32, max_height: i32) ?win.HBITMAP {
+    if (a.wic_factory == null or bytes.len == 0 or max_width <= 0 or max_height <= 0) return null;
+    var stream: [*c]win.IWICStream = null;
+    if (a.wic_factory.*.lpVtbl.*.CreateStream.?(a.wic_factory, &stream) < 0 or stream == null) return null;
+    defer _ = stream.*.lpVtbl.*.Release.?(stream);
+    if (stream.*.lpVtbl.*.InitializeFromMemory.?(stream, @constCast(bytes.ptr), @intCast(bytes.len)) < 0) return null;
+    var decoder: [*c]win.IWICBitmapDecoder = null;
+    if (a.wic_factory.*.lpVtbl.*.CreateDecoderFromStream.?(a.wic_factory, @ptrCast(stream), null, win.WICDecodeMetadataCacheOnLoad, &decoder) < 0 or decoder == null) return null;
+    defer _ = decoder.*.lpVtbl.*.Release.?(decoder);
+    var frame: [*c]win.IWICBitmapFrameDecode = null;
+    if (decoder.*.lpVtbl.*.GetFrame.?(decoder, 0, &frame) < 0 or frame == null) return null;
+    defer _ = frame.*.lpVtbl.*.Release.?(frame);
+    var source_width: win.UINT = 0;
+    var source_height: win.UINT = 0;
+    if (frame.*.lpVtbl.*.GetSize.?(@ptrCast(frame), &source_width, &source_height) < 0 or source_width == 0 or source_height == 0) return null;
+    var converter: [*c]win.IWICFormatConverter = null;
+    if (a.wic_factory.*.lpVtbl.*.CreateFormatConverter.?(a.wic_factory, &converter) < 0 or converter == null) return null;
+    defer _ = converter.*.lpVtbl.*.Release.?(converter);
+    if (converter.*.lpVtbl.*.Initialize.?(converter, @ptrCast(frame), &win.GUID_WICPixelFormat32bppBGR, win.WICBitmapDitherTypeNone, null, 0, win.WICBitmapPaletteTypeCustom) < 0) return null;
+    var source: *win.IWICBitmapSource = @ptrCast(converter);
+    var scaler: [*c]win.IWICBitmapScaler = null;
+    const fit = webp_detect.fitBox(source_width, source_height, @intCast(max_width), @intCast(max_height));
+    if (fit.width == 0 or fit.height == 0) return null;
+    if (fit.width != source_width or fit.height != source_height) {
+        if (a.wic_factory.*.lpVtbl.*.CreateBitmapScaler.?(a.wic_factory, &scaler) < 0 or scaler == null) return null;
+        if (scaler.*.lpVtbl.*.Initialize.?(scaler, source, fit.width, fit.height, win.WICBitmapInterpolationModeFant) < 0) {
+            _ = scaler.*.lpVtbl.*.Release.?(scaler);
+            return null;
+        }
+        source = @ptrCast(scaler);
+    }
+    defer {
+        if (scaler) |scaled| _ = scaled.*.lpVtbl.*.Release.?(scaled);
+    }
+    var info = std.mem.zeroes(win.BITMAPINFO);
+    info.bmiHeader.biSize = @sizeOf(win.BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = @intCast(fit.width);
+    info.bmiHeader.biHeight = -@as(i32, @intCast(fit.height));
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = win.BI_RGB;
+    var bits: ?*anyopaque = null;
+    const bitmap = win.CreateDIBSection(null, &info, win.DIB_RGB_COLORS, &bits, null, 0) orelse return null;
+    if (bits == null) {
+        _ = win.DeleteObject(bitmap);
+        return null;
+    }
+    if (source.*.lpVtbl.*.CopyPixels.?(source, null, fit.width * 4, fit.width * 4 * fit.height, @ptrCast(bits.?)) < 0) {
+        _ = win.DeleteObject(bitmap);
+        return null;
+    }
+    return bitmap;
+}
+
+fn drawGifCell(a: *App, item: *win.DRAWITEMSTRUCT) void {
+    const background = win.CreateSolidBrush(theme.current.surface_container_low) orelse return;
+    defer _ = win.DeleteObject(background);
+    _ = win.FillRect(item.hDC, &item.rcItem, background);
+    const row: i32 = @intCast(item.itemID);
+    const columns: i32 = @intCast(gif_columns);
+    const cell_w = pickerCellW(a);
+    const memory = win.CreateCompatibleDC(item.hDC) orelse return;
+    defer _ = win.DeleteDC(memory);
+    for (0..gif_columns) |column| {
+        const index = row * columns + @as(i32, @intCast(column));
+        if (index < 0 or index >= @as(i32, @intCast(a.emoji_match_count))) break;
+        var cell = win.RECT{
+            .left = item.rcItem.left + @as(i32, @intCast(column)) * cell_w,
+            .top = item.rcItem.top,
+            .right = item.rcItem.left + @as(i32, @intCast(column)) * cell_w + cell_w,
+            .bottom = item.rcItem.bottom,
+        };
+        if (index == @as(i32, @intCast(a.emoji_selected))) {
+            const selected_brush = win.CreateSolidBrush(theme.current.secondary_container) orelse return;
+            defer _ = win.DeleteObject(selected_brush);
+            _ = win.FillRect(item.hDC, &cell, selected_brush);
+        }
+        const bitmap = a.gif_tiles[@intCast(index)] orelse continue;
+        var size: win.BITMAP = undefined;
+        if (win.GetObjectW(bitmap, @sizeOf(win.BITMAP), &size) == 0) continue;
+        const previous = win.SelectObject(memory, @ptrCast(bitmap));
+        defer _ = win.SelectObject(memory, previous);
+        _ = win.BitBlt(item.hDC, cell.left + @divTrunc(cell_w - size.bmWidth, 2), cell.top + @divTrunc((cell.bottom - cell.top) - size.bmHeight, 2), size.bmWidth, size.bmHeight, memory, 0, 0, win.SRCCOPY);
+    }
+}
+
+fn controlGifPicker(a: *App, w: *std.Io.Writer) !void {
+    try w.writeAll(",\"gif_picker\":");
+    if (!a.gif_mode) return w.writeAll("null");
+    var tiles: usize = 0;
+    for (a.gif_tiles) |tile| {
+        if (tile != null) tiles += 1;
+    }
+    try w.print("{{\"status\":\"{s}\",\"generation\":{d},\"count\":{d},\"tiles\":{d},\"selected\":{d},\"downloading\":{},\"query\":", .{ @tagName(a.gif_state.status), a.gif_state.generation, a.emoji_match_count, tiles, a.emoji_selected, a.gif_download != null });
+    try control_api.writeString(w, a.gif_query[0..a.gif_query_len]);
+    try w.writeByte('}');
 }
 
 const quick_reactions = [_]u16{ reaction_like, reaction_love, reaction_laugh, reaction_surprised, reaction_sad, reaction_thanks };
@@ -14289,6 +14833,7 @@ fn controlFontDraw(w: *std.Io.Writer, proof: ?FontDrawProof) !void {
 
 fn controlEmojiPicker(a: *App, w: *std.Io.Writer) !void {
     try w.writeAll(",\"emoji_picker\":");
+    if (a.gif_mode) return w.writeAll("null");
     const picker = a.emoji_wnd orelse return w.writeAll("null");
     const list = a.emoji_list orelse return w.writeAll("null");
     var bounds = std.mem.zeroes(win.RECT);
@@ -14371,6 +14916,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
     if (verification_fixture) {
         try controlEmojiPicker(a, w);
+        try controlGifPicker(a, w);
         try w.print(",\"pending_reaction_count\":{d}", .{a.pending_reaction_count});
         try w.print(",\"menu_entry_count\":{d},\"menu_prefix_pending\":{},\"menu_prefix_age_ms\":", .{ a.verification_menu_entry_count, a.inbox_sequence.started != null });
         if (a.verification_menu_prefix_age_ms) |age| try w.print("{d}", .{age}) else try w.writeAll("null");
@@ -15017,6 +15563,7 @@ fn buildPaletteItems(a: *App) void {
     appendPalette(a, "Next chat", "Ctrl+Tab", command_next_chat);
     appendPalette(a, "Previous chat", "Ctrl+Shift+Tab", command_prev_chat);
     appendPalette(a, "Insert emoji", "", command_emoji);
+    appendPalette(a, "Send a GIF", "", command_gif);
     if (emoji_draw.failureNotice() != null) appendPalette(a, "Why are emoji black and white?", "", command_emoji_diag);
     appendPalette(a, "Send message", "Enter", command_send);
     appendPalette(a, "React to message: 👍 Like", "", reaction_like);
@@ -16048,6 +16595,7 @@ fn runCommand(a: *App, command: u16) void {
             if (a.compose) |compose| _ = win.SetFocus(compose);
         },
         command_emoji => openEmojiPicker(a),
+        command_gif => openGifPicker(a),
         command_shortcuts_help => openShortcutHelp(a),
         command_emoji_diag => setStatus(a, emoji_draw.failureNotice() orelse "Colour emoji is working"),
         command_unread => {
@@ -19358,6 +19906,18 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             applyUnfurlResult(a, result);
             return 0;
         },
+        wm_gif_search => {
+            gifSearchArrived(a, @ptrFromInt(@as(usize, @bitCast(lparam))));
+            return 0;
+        },
+        wm_gif_tile => {
+            gifTileArrived(a, @ptrFromInt(@as(usize, @bitCast(lparam))));
+            return 0;
+        },
+        wm_gif_media => {
+            gifMediaArrived(a, @ptrFromInt(@as(usize, @bitCast(lparam))));
+            return 0;
+        },
         wm_startup_probe => {
             applyStartupProbe(a, wparam, @bitCast(lparam));
             return 0;
@@ -21184,6 +21744,9 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     const verification_key = if (verification_fixture) try prepareVerification(init) else null;
+    if (verification_fixture) {
+        if (init.environ_map.get("POSTBOX_GIPHY_PORT")) |text| giphy_http.loopback_port = std.fmt.parseInt(u16, text, 10) catch 0;
+    }
     if (verification_fixture and verification_emoji_picker) {
         for (0..emoji_picker.count) |offset| {
             const index = if (offset == 0) 11 else if (offset <= 11) offset - 1 else offset;
