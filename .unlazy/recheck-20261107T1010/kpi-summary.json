@@ -1,0 +1,39 @@
+{
+  "at": "2026-11-07T09:24:09Z",
+  "repos": [
+    {
+      "repo": "valentinyeo/multiprompt-android",
+      "day": {
+        "n": 27,
+        "within": 14,
+        "ratio": 0.519,
+        "median": 9.9,
+        "p90": 16.3
+      },
+      "week": {
+        "n": 90,
+        "within": 40,
+        "ratio": 0.444,
+        "median": 10.8,
+        "p90": 20.1
+      }
+    },
+    {
+      "repo": "valentinyeo/postbox",
+      "day": {
+        "n": 8,
+        "within": 7,
+        "ratio": 0.875,
+        "median": 5.1,
+        "p90": 10.8
+      },
+      "week": {
+        "n": 30,
+        "within": 21,
+        "ratio": 0.7,
+        "median": 7.0,
+        "p90": 13.8
+      }
+    }
+  ]
+}

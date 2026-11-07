@@ -1,0 +1,181 @@
+{
+  "repository": "valentinyeo/postbox",
+  "pull_request": {
+    "number": 449,
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-11-06T23:46:27Z",
+    "merge_commit_sha": "f4b12a82fd663e66c217653275e326a0f28dc8af",
+    "html_url": "https://github.com/valentinyeo/postbox/pull/449",
+    "title": "HYCI-143 [CI] Run Postbox checks once through preflight",
+    "body": "## Summary for non-engineers\n- Postbox repeats several checks in one run.\n- Run each check once, keeping full coverage.\n- No new machines or paid services.\n\nTicket: https://app.hypertask.ai/detail/project-11514/143\n\n## Change\nPreflight already runs Python tooling discovery, cache-key validation, outbox lifecycle negative controls, PR-ref fetching and the four agent guards removed here. Keep that fail-fast step intact, remove duplicate workflow invocations, and retain the three release/review guards not included in preflight. ARM64, historical archive controls, artifacts, triggers and other jobs are unchanged.\n\n## Timing evidence\n**Postbox ci execution: 796 seconds before \u2192 597 seconds after**, one successful run per side (199 seconds less, 25.0%). This is an observed single-pair result, not a reproducible median or proof that the slowdown alarm recovered.\n\n- Before: https://github.com/valentinyeo/postbox/actions/runs/42257181979 \u2014 exact parent cc45db5d34dd30065a2340a79845cb4ba38fb27a, 16:57:41\u201317:10:57 UTC.\n- After: https://github.com/valentinyeo/postbox/actions/runs/42258407065 \u2014 PR head 3cab0aee9959d1f9021e294fe37896e8220cc422, 17:05:35\u201317:15:32 UTC.\n- Same app source, Zig 0.16.0 and hosted runner label; only ci.yml differs. Execution excludes queue delay. Runs overlap on distinct GitHub machines, so machine/cache variability remains a confounder.\n- Before duplicated Python discovery took 152 seconds; standalone outbox controls took 30 seconds; agent guards took 21 seconds versus 4 seconds for the retained unique guards. These removed step costs total 199 seconds. Remaining preflight was nearly unchanged (486 \u2192 484 seconds), as was ARM64 (70 \u2192 68 seconds). Preflight remains the limiting serial stage.\n- Earlier exploratory baseline https://github.com/valentinyeo/postbox/actions/runs/42238283077 was 524 seconds, versus 597 seconds after. Its app source differs (cfc8d6b), so it is not the matching-parent comparison and cannot support a speedup claim.\n\n## Coverage and review\nAll seven jobs in the changed ci workflow succeeded, including Windows smoke, caption, unfurl, ARM64 compilation and historical archive controls. Current-head metadata checks also passed.\n\nThe advisory review's omitted-coverage concerns are disproved by the after-run Preflight log: Python discovery executes 340 tests (one existing skip), outbox runtime executes with --negative-controls, cache-key validation executes, PR refs are fetched, and test-preflight-guard.sh, test-agent-setup.sh, test-lint-repeats.sh and test-ci-green.sh all execute. The separate release/review guard step retains test-auto-release-pick.sh, test-automerge-admit.sh and test-ai-review.sh. No local builds or tests were run.\n\nThis is NOT ready for unattended automerge: tools/automerge-admit.sh requires notify-release, which is absent from the current-head rollup; it also excludes bot-authored PRs and requires manual review for ci.yml changes. Do not bypass those gates. Independent review and the existing merge policy remain required.\n\nAndroid already has cancellation and broad path filters. Per-phone dependency filtering and a full quiet day for both apps remain unproved. This PR does not complete the entire ticket.\n\nCard: none\n"
+  },
+  "comments": [
+    {
+      "user": "github-actions[bot]",
+      "created_at": "2026-11-06T17:05:48Z",
+      "body": "<!-- wazig-ai-review -->\n### AI review (Groq openai/gpt-oss-120b, advisory)\n\nCommit 22b3daebf2f389cd6e1672667fd12aac1a546aa5\n\nVerdict: CONCERNS\n\n- **major** `ci.yml:57` Removed **Python tooling tests**: the CI workflow no longer runs `python3 -m unittest discover -s tools -p 'test_*.py'`. These tests verify Python tooling discovery and other unit\u2011tests that are not duplicated elsewhere. Skipping them can let regressions slip into the repo. **Fix**: restore the step or ensure `tools/preflight.sh` invokes the same unittest discovery.\n- **major** `ci.yml:60` Removed **Cache keys skip workflow files** step: `python3 tools/check_cache_keys.py` validates that workflow files are not duplicated in the cache key list. This check is required by the repository\u2019s caching policy and its omission may cause stale caches or cache\u2011key collisions. **Fix**: re\u2011add the step or integrate the check into `tools/preflight.sh`.\n- **major** `ci.yml:99` Removed **Agent guard tests** (including `test-preflight-guard.sh`, `test-agent-setup.sh`, `test-lint-repeats.sh`, `test-ci-green.sh`): these scripts enforce critical repo rules such as:\n- **major** `ci.yml:108` Removed **Outbox lifecycle and regression controls** (`tools/test_outbox_runtime.py --negative-controls`): this test checks the outbox runtime\u2019s negative controls and regression safeguards. Skipping it could allow outbox\u2011related bugs (e.g., message loss or deadlocks) to regress unnoticed. **Fix**: reinstate the step or incorporate its checks into the main preflight script.\n- **minor** `ci.yml:94` Renamed step from **Agent guard tests** to **Release and review guard tests** without updating dependent documentation or comments. This is purely cosmetic but may cause confusion for future maintainers. **Fix**: update any documentation or comments that reference the old step name.\n",
+      "html_url": "https://github.com/valentinyeo/postbox/pull/449#issuecomment-6690636601"
+    },
+    {
+      "user": "software-factory-runners[bot]",
+      "created_at": "2026-11-06T18:12:09Z",
+      "body": "Reviewed advisory findings against tools/preflight.sh and the completed 3cab0ae run: all removed commands run inside the retained preflight step. The four agent guards remain at preflight lines 48\u201353; Python discovery and cache-key validation at lines 41\u201342; outbox negative controls at line 32. The original run log confirms each command executed and 340 tooling tests ran. No coverage is removed. The renamed step retains the unique release/review guards; no downstream step-name references were found.\n\nRebased onto main 4ac55fc; new head 22b3daebf2f389cd6e1672667fd12aac1a546aa5. Earlier 796s \u2192 597s timing belongs to 3cab0ae only, not this new head. Checks must rerun.\n\nMerge remains blocked by the existing automerge admission policy: run 42267792950 explicitly reports missing notify-release. No active workflow supplies that job. The owner-only and release-gating workflow manual-review restrictions also remain intact. No merge, synthetic check, policy bypass, or paid service used.",
+      "html_url": "https://github.com/valentinyeo/postbox/pull/449#issuecomment-6691998375"
+    },
+    {
+      "user": "software-factory-runners[bot]",
+      "created_at": "2026-11-06T19:24:46Z",
+      "body": "Current-head recheck: all 13 checks pass on 22b3daebf2f389cd6e1672667fd12aac1a546aa5. Windows native media playback passed on attempt 2 (PLAYING, 160x90; zero failed smoke checks). Run: https://github.com/valentinyeo/postbox/actions/runs/42268538783\n\nThe successful ci job still ran Python discovery (340 tests), cache-key validation, outbox negative controls and all four retained agent guards inside preflight. Matching-parent speed evidence remains 796 seconds before \u2192 597 seconds after, n=1 each; the rebased head took 491 seconds, not a controlled comparison.\n\nAdmission is still blocked: https://github.com/valentinyeo/postbox/actions/runs/42274100327 reports required checks not green: notify-release. The admission script additionally requires manual review for ci.yml edits. No approval exists. No check fabrication, author-policy override, direct-merge bypass or product changes were made. Authorized workflow review remains required.",
+      "html_url": "https://github.com/valentinyeo/postbox/pull/449#issuecomment-6693462235"
+    }
+  ],
+  "runs": {
+    "42257181979": {
+      "name": "ci",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "cc45db5d34dd30065a2340a79845cb4ba38fb27a",
+      "event": "workflow_dispatch",
+      "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42257181979",
+      "jobs": [
+        {
+          "name": "unfurl-verification",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T16:57:41Z",
+          "completed_at": "2026-11-06T16:58:44Z",
+          "execution_seconds": 63.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42257181979/job/128027372243"
+        },
+        {
+          "name": "pin-icon-tests",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T16:57:41Z",
+          "completed_at": "2026-11-06T16:57:57Z",
+          "execution_seconds": 16.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42257181979/job/128027372357"
+        },
+        {
+          "name": "ci",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T16:57:41Z",
+          "completed_at": "2026-11-06T17:10:57Z",
+          "execution_seconds": 796.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42257181979/job/128027372414"
+        },
+        {
+          "name": "tdlib-cache / cache",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T16:57:42Z",
+          "completed_at": "2026-11-06T16:57:47Z",
+          "execution_seconds": 5.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42257181979/job/128027372457"
+        },
+        {
+          "name": "tdlib",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T16:57:49Z",
+          "completed_at": "2026-11-06T16:58:15Z",
+          "execution_seconds": 26.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42257181979/job/128027444204"
+        },
+        {
+          "name": "windows-smoke",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T16:58:17Z",
+          "completed_at": "2026-11-06T16:58:56Z",
+          "execution_seconds": 39.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42257181979/job/128027694382"
+        },
+        {
+          "name": "caption-verification",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T16:58:18Z",
+          "completed_at": "2026-11-06T16:59:28Z",
+          "execution_seconds": 70.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42257181979/job/128027694810"
+        }
+      ]
+    },
+    "42315226773": {
+      "name": "ci",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "f4b12a82fd663e66c217653275e326a0f28dc8af",
+      "event": "workflow_dispatch",
+      "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42315226773",
+      "jobs": [
+        {
+          "name": "pin-icon-tests",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T23:57:43Z",
+          "completed_at": "2026-11-06T23:57:59Z",
+          "execution_seconds": 16.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42315226773/job/128226085157"
+        },
+        {
+          "name": "tdlib-cache / cache",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T23:57:43Z",
+          "completed_at": "2026-11-06T23:57:47Z",
+          "execution_seconds": 4.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42315226773/job/128226085493"
+        },
+        {
+          "name": "unfurl-verification",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T23:57:43Z",
+          "completed_at": "2026-11-07T00:01:00Z",
+          "execution_seconds": 197.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42315226773/job/128226085520"
+        },
+        {
+          "name": "ci",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T23:57:43Z",
+          "completed_at": "2026-11-07T00:07:43Z",
+          "execution_seconds": 600.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42315226773/job/128226085530"
+        },
+        {
+          "name": "tdlib",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T23:57:49Z",
+          "completed_at": "2026-11-06T23:58:08Z",
+          "execution_seconds": 19.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42315226773/job/128226124617"
+        },
+        {
+          "name": "caption-verification",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T23:58:10Z",
+          "completed_at": "2026-11-06T23:59:14Z",
+          "execution_seconds": 64.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42315226773/job/128226238003"
+        },
+        {
+          "name": "windows-smoke",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T23:58:10Z",
+          "completed_at": "2026-11-06T23:58:51Z",
+          "execution_seconds": 41.0,
+          "html_url": "https://github.com/valentinyeo/postbox/actions/runs/42315226773/job/128226238005"
+        }
+      ]
+    }
+  }
+}

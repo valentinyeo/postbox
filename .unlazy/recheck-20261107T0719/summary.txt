@@ -1,0 +1,9 @@
+HYCI-143 read-only recheck
+
+- PR #449 is merged (2026-11-06 23:46:27 UTC).
+- Merge SHA: f4b12a82fd663e66c217653275e326a0f28dc8af.
+- Main run 42315226773 succeeded on that exact SHA.
+- `ci` job execution: baseline run 42257181979 = 796 seconds; main run 42315226773 = 600 seconds.
+- Difference: 196 seconds faster (24.6%). Execution is completed_at minus started_at; queue time excluded.
+- PR body and all 3 issue comments are included in evidence.json.
+- No code, board, build, or test actions were performed.
