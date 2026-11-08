@@ -242,6 +242,9 @@ class StatusLineTests(unittest.TestCase):
         expected = expected.replace('    a.compose_client_width = width;\n', '    invalidateCanvasIconTooltips(a);\n    clearHeaderIconTooltip(a);\n    a.compose_client_width = width;\n', 1)
         expected = expected.replace('    updateAttachButton(a);\n', '    updateAttachButton(a);\n    syncMainIconTooltips(a);\n', 1)
         expected = expected.replace('        }\n    }\n    a.compose_strip_top', '        }\n        composeRevealTop(a);\n    }\n    a.compose_strip_top', 1)
+        expected = expected.replace('    const panel_width = if (a.thread_parent.len > 0) @divTrunc(chat_width, 2) else 0;\n', '    const panel_width = threadPanelWidth(a, width, left_width);\n')
+        expected = expected.replace('win.MoveWindow(hwnd, width - panel_width + px(a, 8), px(a, 8), @max(1, panel_width - px(a, 16)), @max(1, height - sizes.strip_height - px(a, 16)), win.TRUE);', 'win.MoveWindow(hwnd, width - panel_width, 0, @max(1, panel_width), @max(1, height - sizes.strip_height), win.TRUE);')
+        expected = expected.replace('win.MoveWindow(hwnd, width - panel_width + px(a, 8), height - sizes.strip_height + px(a, 8), @max(1, panel_width - px(a, 16)), @max(1, sizes.strip_height - px(a, 16)), win.TRUE);', 'win.MoveWindow(hwnd, width - panel_width + px(a, 40), height - px(a, 52), @max(1, panel_width - px(a, 80)), px(a, 24), win.TRUE);')
         self.assertEqual(expected, function(source(), 'layoutRegion'))
 
     def test_real_fixture_failure_and_recovery(self):
