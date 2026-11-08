@@ -18864,11 +18864,11 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             for (senders[0..sender_count]) |maybe_row| {
                 const row = maybe_row.?;
                 const tint = senderColorFor(std.mem.sliceAsBytes(row.sender.slice()));
-                var avatar = win.RECT{ .left = x, .top = message.replies_hit.top + @divTrunc(replies_height - px(a, 18), 2), .right = x + px(a, 18), .bottom = message.replies_hit.top + @divTrunc(replies_height - px(a, 18), 2) + px(a, 18) };
-                smooth.fillEllipse(&shapes, avatar, rgb(tint.r, tint.g, tint.b));
+                var initial_dot = win.RECT{ .left = x, .top = message.replies_hit.top + @divTrunc(replies_height - px(a, 18), 2), .right = x + px(a, 18), .bottom = message.replies_hit.top + @divTrunc(replies_height - px(a, 18), 2) + px(a, 18) };
+                smooth.fillEllipse(&shapes, initial_dot, rgb(tint.r, tint.g, tint.b));
                 _ = win.SetTextColor(hdc, theme.current.on_surface);
                 const initial = senderInitial(row.sender.slice());
-                _ = text_draw.drawText(hdc, @ptrCast(initial.ptr), @intCast(initial.len), &avatar, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+                _ = text_draw.drawText(hdc, @ptrCast(initial.ptr), @intCast(initial.len), &initial_dot, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
                 x += px(a, 13);
             }
             if (sender_count > 0) x += px(a, 13);
@@ -24891,11 +24891,11 @@ fn threadPaneProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam:
                         const bubble = win.RECT{ .left = left, .top = y + px(a, 28), .right = right, .bottom = y + px(a, 28) + body_height + px(a, 20) };
                         if (pass == 1) {
                             const tint = senderColorFor(std.mem.sliceAsBytes(row.sender.slice()));
-                            const avatar = win.RECT{ .left = px(a, 24), .top = y, .right = px(a, 56), .bottom = y + px(a, 32) };
-                            smooth.fillEllipse(&shapes, avatar, rgb(tint.r, tint.g, tint.b));
+                            const initial_dot = win.RECT{ .left = px(a, 24), .top = y, .right = px(a, 56), .bottom = y + px(a, 32) };
+                            smooth.fillEllipse(&shapes, initial_dot, rgb(tint.r, tint.g, tint.b));
                             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
                             _ = win.SetTextColor(hdc, theme.current.on_surface);
-                            var initial_rect = avatar;
+                            var initial_rect = initial_dot;
                             const initial = senderInitial(row.sender.slice());
                             _ = text_draw.drawText(hdc, @ptrCast(initial.ptr), @intCast(initial.len), &initial_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
                             _ = win.SetTextColor(hdc, rgb(tint.r, tint.g, tint.b));
