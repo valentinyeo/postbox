@@ -801,6 +801,9 @@ const App = struct {
     thread_origin: drafts.Identity = .{},
     thread_panel_hash: u64 = 0,
     thread_panel_replies: usize = 0,
+    thread_scroll: i32 = 0,
+    thread_scroll_max: i32 = 0,
+    thread_follow: bool = true,
     thread_local_count: usize = 0,
     threads_account: Utf8Text(32) = .{},
     threads_enabled: bool = true,
@@ -2125,7 +2128,6 @@ fn recreateFonts(a: *App) void {
     }
     setFont(a.chats_hwnd, a.font);
     setFont(a.compose, a.font);
-    setFont(a.thread_list, a.font);
     setFont(a.thread_compose, a.font);
     setFont(a.dictate, a.font_bold);
     setFont(a.send, a.font_bold);
@@ -16883,10 +16885,10 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
     if (a.chats_hwnd) |hwnd| _ = win.MoveWindow(hwnd, 0, header_height + bulk_strip, left_width - scrollbar_width, list_bottom - header_height - bulk_strip, win.TRUE);
     if (a.thread_parent.len > 0 and (a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat])))) closeSlackThread(a);
     const chat_width = width - left_width - 1;
-    const panel_width = if (a.thread_parent.len > 0) @divTrunc(chat_width, 2) else 0;
+    const panel_width = threadPanelWidth(a, width, left_width);
     if (a.canvas) |hwnd| _ = win.MoveWindow(hwnd, left_width + 1, header_height, chat_width - panel_width, height - header_height - sizes.strip_height, win.TRUE);
-    if (a.thread_list) |hwnd| _ = win.MoveWindow(hwnd, width - panel_width + px(a, 8), px(a, 8), @max(1, panel_width - px(a, 16)), @max(1, height - sizes.strip_height - px(a, 16)), win.TRUE);
-    if (a.thread_compose) |hwnd| _ = win.MoveWindow(hwnd, width - panel_width + px(a, 8), height - sizes.strip_height + px(a, 8), @max(1, panel_width - px(a, 16)), @max(1, sizes.strip_height - px(a, 16)), win.TRUE);
+    if (a.thread_list) |hwnd| _ = win.MoveWindow(hwnd, width - panel_width, 0, @max(1, panel_width), @max(1, height - sizes.strip_height), win.TRUE);
+    if (a.thread_compose) |hwnd| _ = win.MoveWindow(hwnd, width - panel_width + px(a, 40), height - px(a, 52), @max(1, panel_width - px(a, 80)), px(a, 24), win.TRUE);
     const buttons = [_]?win.HWND{ a.attach_btn, a.voice_btn, a.dictate, a.emoji_btn, a.send };
     const rects = [_]compose_layout.Rect{ a.compose_geometry.attach, a.compose_geometry.voice, a.compose_geometry.dictate, a.compose_geometry.emoji, a.compose_geometry.send };
     for (buttons, rects) |button, rect| {
@@ -18835,20 +18837,50 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         message.bubble_hit = .{ .left = left, .top = bubble_top, .right = right, .bottom = bubble_top + bubble_height };
         if (replies_height > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-            _ = win.SetTextColor(hdc, theme.current.primary);
             var line_buffer: [64]u8 = undefined;
             var line = WideText(63){};
             line.set(a.allocator, slack.repliesLine(&line_buffer, threadReplyCount(a, message)));
-            message.replies_hit = .{ .left = left + px(a, 12), .top = message.bubble_hit.bottom, .right = right - px(a, 12), .bottom = message.bubble_hit.bottom + replies_height };
-            var line_rect = message.replies_hit;
-            line_rect.bottom = line_rect.top + @divTrunc(replies_height, 2);
-            _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &line_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
             var last_time = WideText(15){};
             formatSlackTime(&last_time, a.allocator, threadLatestReply(a, message));
-            line_rect.top = line_rect.bottom;
-            line_rect.bottom = message.replies_hit.bottom;
+            var senders: [2]?*const SlackThreadRow = .{ null, null };
+            var sender_count: usize = 0;
+            var row_index = a.thread_rows.items.len;
+            while (row_index > 0 and sender_count < senders.len) {
+                row_index -= 1;
+                const row = &a.thread_rows.items[row_index];
+                if (!slack.inThread(row.id.slice(), row.thread_ts.slice(), message.id.slice()) or std.mem.eql(u8, row.id.slice(), message.id.slice())) continue;
+                if (sender_count > 0 and std.mem.eql(u16, senders[0].?.sender.slice(), row.sender.slice())) continue;
+                senders[sender_count] = row;
+                sender_count += 1;
+            }
+            const avatars_width: i32 = if (sender_count == 0) 0 else px(a, 18) + @as(i32, @intCast(sender_count - 1)) * px(a, 13) + px(a, 8);
+            const prefix = std.mem.span(lit("Last reply "));
+            const line_width = runWidth(hdc, line.slice());
+            const time_width = runWidth(hdc, prefix) + runWidth(hdc, last_time.slice());
+            const pill_width = px(a, 24) + avatars_width + line_width + px(a, 12) + time_width;
+            message.replies_hit = .{ .left = left, .top = message.bubble_hit.bottom, .right = left + pill_width, .bottom = message.bubble_hit.bottom + replies_height };
+            smooth.fillRoundRect(&shapes, message.replies_hit, px(a, 16), px(a, 16), theme.current.surface_container);
+            var x = left + px(a, 12);
+            for (senders[0..sender_count]) |maybe_row| {
+                const row = maybe_row.?;
+                const tint = senderColorFor(std.mem.sliceAsBytes(row.sender.slice()));
+                var avatar = win.RECT{ .left = x, .top = message.replies_hit.top + @divTrunc(replies_height - px(a, 18), 2), .right = x + px(a, 18), .bottom = message.replies_hit.top + @divTrunc(replies_height - px(a, 18), 2) + px(a, 18) };
+                smooth.fillEllipse(&shapes, avatar, rgb(tint.r, tint.g, tint.b));
+                _ = win.SetTextColor(hdc, theme.current.on_surface);
+                const initial = senderInitial(row.sender.slice());
+                _ = text_draw.drawText(hdc, @ptrCast(initial.ptr), @intCast(initial.len), &avatar, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+                x += px(a, 13);
+            }
+            if (sender_count > 0) x += px(a, 13);
+            _ = win.SetTextColor(hdc, theme.current.primary);
+            var label_rect = win.RECT{ .left = x, .top = message.replies_hit.top, .right = x + line_width, .bottom = message.replies_hit.bottom };
+            _ = text_draw.drawText(hdc, line.ptr(), @intCast(line.len), &label_rect, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+            x += line_width + px(a, 12);
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-            _ = text_draw.drawText(hdc, last_time.ptr(), @intCast(last_time.len), &line_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_NOPREFIX);
+            var time_rect = win.RECT{ .left = x, .top = message.replies_hit.top, .right = x + time_width, .bottom = message.replies_hit.bottom };
+            _ = text_draw.drawText(hdc, lit("Last reply "), -1, &time_rect, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+            time_rect.left += runWidth(hdc, prefix);
+            _ = text_draw.drawText(hdc, last_time.ptr(), @intCast(last_time.len), &time_rect, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
         }
         const selected = messageMarked(a, message.id.slice()) or if (a.selected_message) |selected_index| selected_index == index else false;
         var shared_canvas = DesignCanvas{ .hdc = hdc, .shapes = &shapes };
@@ -20097,6 +20129,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             defer shapes.deinit();
             paintReplyBar(a, &shapes, hdc);
             if (a.compose != null) paintInputField(a, &shapes, hdc, a.compose.?, a.compose_pill);
+            if (a.thread_compose != null) {
+                const panel_width = threadPanelWidth(a, client.right, left_width);
+                const pill = win.RECT{ .left = client.right - panel_width + px(a, 24), .top = client.bottom - px(a, 64), .right = client.right - px(a, 24), .bottom = client.bottom - px(a, 16) };
+                smooth.fillRoundRect(&shapes, pill, px(a, theme.radius_field * 2), px(a, theme.radius_field * 2), theme.current.surface_container);
+            }
             if (a.compose != null) {
                 const cx = @divTrunc(left_width + 1 + client.right, 2);
                 var grip = win.RECT{ .left = cx - px(a, 22), .top = a.compose_strip_top + px(a, 4), .right = cx + px(a, 22), .bottom = a.compose_strip_top + px(a, 6) };
@@ -20514,7 +20551,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 _ = win.SetBkColor(hdc, theme.current.sidebar_surface);
                 return @bitCast(@intFromPtr(a.brush_sidebar.?));
             }
-            for ([_]?win.HWND{ a.thread_list, a.thread_compose }) |control| {
+            for ([_]?win.HWND{a.thread_compose}) |control| {
                 if (control != null and control_value == @intFromPtr(control.?)) {
                     _ = win.SetBkColor(hdc, theme.current.surface_container);
                     return @bitCast(@intFromPtr(a.brush_raised.?));
@@ -22026,6 +22063,9 @@ pub fn main(init: std.process.Init) !void {
         .hIconSm = icon_small,
     };
     if (win.RegisterClassExW(&canvas_class) == 0) return error.RegisterCanvasClassFailed;
+    canvas_class.lpszClassName = lit("MessagesThreadPane");
+    canvas_class.lpfnWndProc = threadPaneProc;
+    if (win.RegisterClassExW(&canvas_class) == 0) return error.RegisterCanvasClassFailed;
 
     var main_class = win.WNDCLASSEXW{
         .cbSize = @sizeOf(win.WNDCLASSEXW),
@@ -22156,6 +22196,14 @@ pub fn main(init: std.process.Init) !void {
                 .x = @as(i16, @bitCast(loword(@as(usize, @bitCast(message.lParam))))),
                 .y = @as(i16, @bitCast(hiword(@as(usize, @bitCast(message.lParam))))),
             };
+            if (app.thread_list) |pane| {
+                var pane_rect: win.RECT = undefined;
+                _ = win.GetWindowRect(pane, &pane_rect);
+                if (wheel_point.x >= pane_rect.left and wheel_point.x < pane_rect.right and wheel_point.y >= pane_rect.top and wheel_point.y < pane_rect.bottom) {
+                    _ = win.SendMessageW(pane, win.WM_MOUSEWHEEL, message.wParam, message.lParam);
+                    continue;
+                }
+            }
             var canvas_rect: win.RECT = undefined;
             _ = win.GetWindowRect(app.canvas.?, &canvas_rect);
             if (wheel_point.x >= canvas_rect.left and wheel_point.x <= canvas_rect.right and wheel_point.y >= canvas_rect.top and wheel_point.y <= canvas_rect.bottom) {
@@ -24705,11 +24753,11 @@ fn threadLatestReply(a: *const App, parent: *const Message) []const u8 {
 }
 
 fn threadSummaryHeight(a: *App, message: *const Message) i32 {
-    return if ((slackThreadsEnabled(a) or localSlackStyle(a)) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 40), @as(i32, @intCast(@abs(scaledFontHeight(theme.type_preview, a.font_scale, @intCast(a.dpi))))) * 2 + px(a, 8)) else 0;
+    return if ((slackThreadsEnabled(a) or localSlackStyle(a)) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 30), @as(i32, @intCast(@abs(scaledFontHeight(theme.type_preview, a.font_scale, @intCast(a.dpi))))) + px(a, 10)) else 0;
 }
 
 fn threadPanelWidth(a: *const App, width: i32, left_width: i32) i32 {
-    return if (a.thread_parent.len > 0) @divTrunc(width - left_width - 1, 2) else 0;
+    return if (a.thread_parent.len > 0) @min(@divTrunc(width - left_width - 1, 2), px(a, 620)) else 0;
 }
 
 fn closeSlackThread(a: *App) void {
@@ -24741,16 +24789,19 @@ fn openSlackThread(a: *App, selected: usize) void {
         applyLocalReplies(a, parent.slice(), true);
         a.thread_local_count = a.message_count;
     }
-    a.thread_list = directwrite_edit.create(a.instance, a.hwnd.?, controlId(id_thread_list), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_READONLY | win.ES_AUTOVSCROLL | win.WS_VSCROLL, 0, 0, 0, 0);
+    a.thread_list = win.CreateWindowExW(0, lit("MessagesThreadPane"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, a.hwnd.?, controlId(id_thread_list), a.instance, null);
+    a.thread_scroll = 0;
+    a.thread_scroll_max = 0;
+    a.thread_follow = true;
     a.thread_compose = directwrite_edit.create(a.instance, a.hwnd.?, controlId(id_thread_compose), win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP | win.ES_MULTILINE | win.ES_AUTOVSCROLL, 0, 0, 0, 0);
     if (a.thread_list == null or a.thread_compose == null) {
         closeSlackThread(a);
         return;
     }
     disarmDictationSend(a);
-    setFont(a.thread_list, a.font);
     setFont(a.thread_compose, a.font);
     _ = win.SendMessageW(a.thread_compose.?, win.EM_SETLIMITTEXT, drafts.max_text, 0);
+    _ = win.SendMessageW(a.thread_compose.?, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(lit("Reply in thread"))));
     layout(a, a.compose_client_width, a.compose_client_height);
     refreshSlackThreadPanel(a);
     if (a.chats[a.selected_chat].provider == .slack) {
@@ -24768,36 +24819,161 @@ fn requestSlackThread(a: *App, parent: []const u8, cursor: []const u8) void {
     _ = wacliEnqueue(a, job, false);
 }
 
+fn threadPaneProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
+    const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    switch (message) {
+        win.WM_ERASEBKGND => return 1,
+        win.WM_SIZE => {
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
+            return 0;
+        },
+        win.WM_MOUSEWHEEL => {
+            const delta: i16 = @bitCast(hiword(wparam));
+            a.thread_scroll = std.math.clamp(a.thread_scroll - @divTrunc(@as(i32, delta), 2), 0, a.thread_scroll_max);
+            a.thread_follow = a.thread_scroll == a.thread_scroll_max;
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
+            return 0;
+        },
+        win.WM_LBUTTONDOWN => {
+            var client: win.RECT = undefined;
+            _ = win.GetClientRect(hwnd, &client);
+            const x: i32 = @as(i16, @bitCast(loword(@as(usize, @bitCast(lparam)))));
+            const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
+            if (x >= client.right - px(a, 56) and y >= 0 and y < px(a, 56)) closeSlackThread(a);
+            return 0;
+        },
+        win.WM_PAINT => {
+            var paint: win.PAINTSTRUCT = undefined;
+            const screen = win.BeginPaint(hwnd, &paint);
+            defer _ = win.EndPaint(hwnd, &paint);
+            var client: win.RECT = undefined;
+            _ = win.GetClientRect(hwnd, &client);
+            var buffer = paint_buffer.Buffer.init(screen, client, paint.rcPaint);
+            defer buffer.deinit();
+            const hdc = buffer.hdc;
+            _ = win.FillRect(hdc, &client, a.brush_bg.?);
+            var shapes = smooth.Context.init(hdc);
+            defer shapes.deinit();
+            _ = win.SetBkMode(hdc, win.TRANSPARENT);
+            const header = px(a, 56);
+            for (0..2) |pass| {
+                var y = header + px(a, 16) - if (pass == 1) a.thread_scroll else @as(i32, 0);
+                for ([_]bool{ true, false }) |parent_pass| {
+                    if (!parent_pass and a.thread_panel_replies > 0) {
+                        if (pass == 1) {
+                            var label_buffer: [64]u8 = undefined;
+                            var label = WideText(63){};
+                            label.set(a.allocator, slack.repliesLine(&label_buffer, a.thread_panel_replies));
+                            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+                            _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+                            var label_rect = win.RECT{ .left = px(a, 24), .top = y, .right = client.right - px(a, 24), .bottom = y + px(a, 24) };
+                            _ = text_draw.drawText(hdc, label.ptr(), @intCast(label.len), &label_rect, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+                            const line_left = px(a, 24) + runWidth(hdc, label.slice()) + px(a, 12);
+                            if (line_left < client.right - px(a, 24)) {
+                                var line = win.RECT{ .left = line_left, .top = y + px(a, 12), .right = client.right - px(a, 24), .bottom = y + px(a, 12) + 1 };
+                                if (win.CreateSolidBrush(theme.current.sidebar_divider)) |brush| {
+                                    _ = win.FillRect(hdc, &line, brush);
+                                    _ = win.DeleteObject(brush);
+                                }
+                            }
+                        }
+                        y += px(a, 40);
+                    }
+                    for (a.thread_rows.items) |*row| {
+                        const is_parent = std.mem.eql(u8, row.id.slice(), a.thread_parent.slice());
+                        if (parent_pass != is_parent or !slack.inThread(row.id.slice(), row.thread_ts.slice(), a.thread_parent.slice())) continue;
+                        const left = px(a, 68);
+                        const right = @max(left + px(a, 20), client.right - px(a, 24));
+                        _ = win.SelectObject(hdc, @ptrCast(a.font.?));
+                        var measure = win.RECT{ .left = left + px(a, 12), .top = 0, .right = right - px(a, 12), .bottom = 0 };
+                        _ = text_draw.drawText(hdc, row.text.ptr(), @intCast(row.text.len), &measure, win.DT_WORDBREAK | win.DT_CALCRECT | win.DT_NOPREFIX);
+                        const body_height = @max(px(a, 20), measure.bottom - measure.top);
+                        const bubble = win.RECT{ .left = left, .top = y + px(a, 28), .right = right, .bottom = y + px(a, 28) + body_height + px(a, 20) };
+                        if (pass == 1) {
+                            const tint = senderColorFor(std.mem.sliceAsBytes(row.sender.slice()));
+                            const avatar = win.RECT{ .left = px(a, 24), .top = y, .right = px(a, 56), .bottom = y + px(a, 32) };
+                            smooth.fillEllipse(&shapes, avatar, rgb(tint.r, tint.g, tint.b));
+                            _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
+                            _ = win.SetTextColor(hdc, theme.current.on_surface);
+                            var initial_rect = avatar;
+                            const initial = senderInitial(row.sender.slice());
+                            _ = text_draw.drawText(hdc, @ptrCast(initial.ptr), @intCast(initial.len), &initial_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+                            _ = win.SetTextColor(hdc, rgb(tint.r, tint.g, tint.b));
+                            const sender_width = @min(runWidth(hdc, row.sender.slice()), @max(0, right - left - px(a, 70)));
+                            var name_rect = win.RECT{ .left = left, .top = y, .right = left + sender_width, .bottom = y + px(a, 24) };
+                            _ = text_draw.drawText(hdc, row.sender.ptr(), @intCast(row.sender.len), &name_rect, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+                            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+                            _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+                            var time_rect = win.RECT{ .left = left + sender_width + px(a, 8), .top = y, .right = right, .bottom = y + px(a, 24) };
+                            _ = text_draw.drawText(hdc, row.time.ptr(), @intCast(row.time.len), &time_rect, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+                            var canvas = DesignCanvas{ .hdc = hdc, .shapes = &shapes };
+                            design.bubble(&canvas, @bitCast(bubble), px(a, theme.radius_bubble), px(a, 1), if (std.mem.eql(u16, row.sender.slice(), std.mem.span(lit("You")))) design.ReaderUserCard else design.ReaderCard, true, true, .{ bubble.top, bubble.bottom });
+                            _ = win.SelectObject(hdc, @ptrCast(a.font.?));
+                            _ = win.SetTextColor(hdc, theme.current.on_surface);
+                            var text_rect = win.RECT{ .left = bubble.left + px(a, 12), .top = bubble.top + px(a, 10), .right = bubble.right - px(a, 12), .bottom = bubble.bottom - px(a, 10) };
+                            _ = text_draw.drawText(hdc, row.text.ptr(), @intCast(row.text.len), &text_rect, win.DT_WORDBREAK | win.DT_NOPREFIX);
+                        }
+                        y = bubble.bottom + px(a, 16);
+                    }
+                }
+                if (pass == 0) {
+                    a.thread_scroll_max = @max(0, y - client.bottom);
+                    a.thread_scroll = if (a.thread_follow) a.thread_scroll_max else @min(a.thread_scroll, a.thread_scroll_max);
+                }
+            }
+            var header_rect = win.RECT{ .left = 0, .top = 0, .right = client.right, .bottom = header };
+            _ = win.FillRect(hdc, &header_rect, a.brush_bg.?);
+            _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
+            _ = win.SetTextColor(hdc, theme.current.on_surface);
+            var title = win.RECT{ .left = px(a, 24), .top = 0, .right = client.right - px(a, 56), .bottom = header };
+            _ = text_draw.drawText(hdc, lit("Thread"), -1, &title, win.DT_SINGLELINE | win.DT_VCENTER);
+            const title_width = runWidth(hdc, std.mem.span(lit("Thread")));
+            if (a.selected_chat < a.chat_count) {
+                _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+                _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+                var name = win.RECT{ .left = px(a, 36) + title_width, .top = 0, .right = client.right - px(a, 56), .bottom = header };
+                const chat = &a.chats[a.selected_chat];
+                _ = text_draw.drawText(hdc, chat.name.ptr(), @intCast(chat.name.len), &name, win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+            }
+            _ = win.SelectObject(hdc, @ptrCast(a.font.?));
+            _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+            var close = win.RECT{ .left = client.right - px(a, 56), .top = 0, .right = client.right - px(a, 16), .bottom = header };
+            _ = text_draw.drawText(hdc, lit("×"), -1, &close, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
+            var border = win.RECT{ .left = 0, .top = 0, .right = 1, .bottom = client.bottom };
+            if (win.CreateSolidBrush(theme.current.sidebar_divider)) |brush| {
+                _ = win.FillRect(hdc, &border, brush);
+                _ = win.DeleteObject(brush);
+            }
+            return 0;
+        },
+        else => {},
+    }
+    return win.DefWindowProcW(hwnd, message, wparam, lparam);
+}
+
 fn refreshSlackThreadPanel(a: *App) void {
     const list = a.thread_list orelse return;
     if (a.selected_chat >= a.chat_count or !chat_key.Key.eql(a.thread_origin.key(), chat_key.of(&a.chats[a.selected_chat]))) {
         closeSlackThread(a);
         return;
     }
-    var text = std.Io.Writer.Allocating.init(a.allocator);
-    defer text.deinit();
+    var hasher = std.hash.Wyhash.init(0);
     var replies: usize = 0;
     for ([_]bool{ true, false }) |parent_pass| {
-        for (a.thread_rows.items) |*message| {
-            const is_parent = std.mem.eql(u8, message.id.slice(), a.thread_parent.slice());
-            if (parent_pass != is_parent or !slack.inThread(message.id.slice(), message.thread_ts.slice(), a.thread_parent.slice())) continue;
+        for (a.thread_rows.items) |*row| {
+            const is_parent = std.mem.eql(u8, row.id.slice(), a.thread_parent.slice());
+            if (parent_pass != is_parent or !slack.inThread(row.id.slice(), row.thread_ts.slice(), a.thread_parent.slice())) continue;
             if (!is_parent) replies += 1;
-            const sender = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.sender.slice()) catch return;
-            defer a.allocator.free(sender);
-            const body = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.text.slice()) catch return;
-            defer a.allocator.free(body);
-            const time = std.unicode.utf16LeToUtf8Alloc(a.allocator, message.time.slice()) catch return;
-            defer a.allocator.free(time);
-            text.writer.print("{s}  {s}\r\n{s}\r\n\r\n", .{ sender, time, body }) catch return;
+            hasher.update(std.mem.sliceAsBytes(row.sender.slice()));
+            hasher.update(std.mem.sliceAsBytes(row.text.slice()));
+            hasher.update(std.mem.sliceAsBytes(row.time.slice()));
         }
     }
-    const hash = std.hash.Wyhash.hash(0, text.written());
-    if (hash == a.thread_panel_hash) return;
-    const wide = utf8ToWide(a.allocator, text.written()) catch return;
-    defer a.allocator.free(wide);
-    if (win.SetWindowTextW(list, wide.ptr) == 0) return;
+    const hash = hasher.final();
+    if (hash == a.thread_panel_hash and replies == a.thread_panel_replies) return;
     a.thread_panel_hash = hash;
     a.thread_panel_replies = replies;
+    _ = win.InvalidateRect(list, null, win.FALSE);
 }
 
 fn controlSlackThreads(a: *App, w: *std.Io.Writer) !void {
