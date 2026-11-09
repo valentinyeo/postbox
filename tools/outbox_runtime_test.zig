@@ -178,6 +178,7 @@ const App = struct {
     thread_compose: ?usize = null,
     thread_parent: Utf8Text(191) = .{},
     thread_broadcast: bool = false,
+    thread_check: ?usize = null,
     thread_origin: chat_key.Stored = .{},
     canvas: ?usize = null,
     hwnd: ?usize = null,
