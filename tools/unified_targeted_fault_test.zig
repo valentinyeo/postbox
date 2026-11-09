@@ -31,6 +31,7 @@ const App = struct {
     compose: ?usize = 1,
     thread_compose: ?usize = null,
     thread_parent: Utf8Text(191) = .{},
+    thread_broadcast: bool = false,
     thread_origin: chat_key.Stored = .{},
     chat_view: u8 = 0,
     show_archived: bool = false,
