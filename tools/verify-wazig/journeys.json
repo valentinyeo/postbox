@@ -443,6 +443,23 @@
       "maximize": true
     },
     {
+      "name": "read-ticks",
+      "pr": true,
+      "hub": "read-ticks",
+      "evidence": true,
+      "chats": 4,
+      "script": "journey-read-ticks.ps1",
+      "validator": {
+        "file": "check-read-ticks-evidence.py",
+        "function": "check_read_ticks"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "ReadTicksHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "emoji-picker-glyphs",
       "arguments": [
         "--verify-emoji-picker"

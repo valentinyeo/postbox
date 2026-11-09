@@ -1144,6 +1144,54 @@ class SlackThreadsHandler(SlackSortHandler):
             self.respond(400, {'error': 'invalid thread request'}, body=body)
 
 
+TICK_CHATS = [
+    dict(jid='ticks-read@s.whatsapp.net', name='Verification Read', provider='whatsapp', kind='direct', read_by=1),
+    dict(jid='ticks-sent@s.whatsapp.net', name='Verification Sent', provider='whatsapp', kind='direct', read_by=0),
+    dict(jid='ticks-group@g.us', name='Verification Group', provider='whatsapp', kind='group', read_by=2),
+    dict(jid='slack:fixture-ticks:channel', name='Verification Slack', provider='slack', kind='direct', read_by=1),
+]
+
+
+class ReadTicksHandler(SlackSortHandler):
+    def do_GET(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            rows = [dict(jid=chat['jid'], name=chat['name'], provider=chat['provider'], kind=chat['kind'],
+                         last_message_ts=f'2025-02-19T21:2{index}:00Z', unread_count=0, archived=False)
+                    for index, chat in enumerate(TICK_CHATS)]
+            self.respond(200, [] if query.get('archived') == ['true'] else rows)
+        elif url.path == '/v1/wazig/messages':
+            chat = next((row for row in TICK_CHATS if [row['jid']] == query.get('chat')), None)
+            if chat is None:
+                self.respond(404, {'error': 'unknown fixture chat'})
+                return
+            rows = [dict(MsgID='tick-own', ChatJID=chat['jid'], Timestamp='2025-02-19T21:20:30Z', FromMe=True,
+                         Text='Synthetic message you sent', SenderName='Me', ReadBy=chat['read_by']),
+                    dict(MsgID='tick-in', ChatJID=chat['jid'], Timestamp='2025-02-19T21:20:10Z', FromMe=False,
+                         Text='Synthetic message you received', SenderName='Fixture Sender', ReadBy=0)]
+            self.respond(200, rows)
+        elif url.path == '/v1/wazig/events':
+            self.events()
+        elif url.path == '/v1/wazig/groups':
+            self.respond(200, [])
+        else:
+            self.respond(404, {'error': 'unavailable'})
+
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/v1/wazig/mark-read':
+            self.respond(200, {'status': 'ok'}, body=body)
+        else:
+            self.respond(400, {'error': 'invalid read tick request'}, body=body)
+
+
 VIEW_ACCOUNTS = [
     ('slack', 'T0ABC123', 'Alpha Workspace'),
     ('whatsapp', 'personal', ''),
