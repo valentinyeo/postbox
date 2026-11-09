@@ -81,6 +81,7 @@ const App = struct {
     messages_gen: u64 = 0,
     messages_read_key: chat_key.Stored = .{},
     thread_parent: Utf8Text(191) = .{},
+    thread_broadcast: bool = false,
     thread_origin: chat_key.Stored = .{},
     messages_refresh_again: bool = false,
     chats_gen: u64 = 1,
