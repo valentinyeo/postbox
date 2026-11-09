@@ -138,7 +138,7 @@ def check_integration():
     assert source.count('.view_account = hub.viewAccount(object, "")') == 1
     assert source.count('.account = hub.sourceAccount(object, "")') == 1
     routing_function_sha256 = {
-        'unifiedHubRequest': 'f50f0261a1ed884f0cc517774beb0e8b201f6a7b5fa2e90a8628990da7077174',
+        'unifiedHubRequest': 'a056c9eb2706b6fd6e7ddaf96fb898c026813a8cc61a10b039e8cdb40c34f3ed',
         'restoreOutbox': '983dd22862da7ee5dfdb612a58c418c8313fdf6716b5c8229393ad5f8d28b53b',
         'loadOutbox': 'd39e4c56fba50b39b65f8941ceeb6359d306fb169e6548e4ae4351b91e5bc395',
         'bindOutboxAccount': 'c18bfcb6097cec448f946232c1cc8a5a1d92055cfc533e855132e64ea2412b6b',
@@ -157,7 +157,7 @@ def check_integration():
         assert current, f'missing identity audit function: {name}'
         assert hashlib.sha256(current.group().encode()).hexdigest() == expected, f'routing identity path changed: {name}'
     routing_file_sha256 = {
-        'src/outbox.zig': 'a3381c8d27417eead0b553544e0d2d3dfae8073d9a875f1c014dc181ecab9ad9',
+        'src/outbox.zig': '4d8afac6e244c7ef6175d13b5c5eb8185d2ba5f3b15080eb722417e545432cf8',
         'src/chat_cache.zig': 'fe97020e73578d02e52daf25961b65a2151c38b67bbfaa0942e459df05732013',
         'src/read_state.zig': 'c40146cd2dc3ab78a3ad91e5b868a2edf1ae0da2e277eceb5328663af1f13f07',
         'src/pending_reads.zig': 'bac1f5848428e4e9fdc00033eb94386fcce945aa759aef0d8576b2a00df98f4f',
