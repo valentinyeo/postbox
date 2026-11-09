@@ -569,6 +569,19 @@ test "Slack thread metadata survives unified normalization and sends retain pare
     const request = try hub.send(allocator, "fixture", "Synthetic thread reply", "1740000000.000100", "fixture-client");
     const body = try std.json.parseFromSliceLeaky(std.json.Value, allocator, request.body, .{});
     try std.testing.expectEqualStrings("1740000000.000100", body.object.get("reply_to").?.string);
+    try std.testing.expect(body.object.get("reply_broadcast") == null);
+}
+
+test "IGSH-1898 a broadcast thread reply carries reply_broadcast and needs a parent" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const request = try hub.sendBroadcast(allocator, "fixture", "Synthetic thread reply", "1740000000.000100", "fixture-client");
+    try std.testing.expectEqualStrings("/v1/wazig/send", request.path);
+    const body = try std.json.parseFromSliceLeaky(std.json.Value, allocator, request.body, .{});
+    try std.testing.expectEqualStrings("1740000000.000100", body.object.get("reply_to").?.string);
+    try std.testing.expect(body.object.get("reply_broadcast").?.bool);
+    try std.testing.expectError(error.InvalidSend, hub.sendBroadcast(allocator, "fixture", "text", "", "fixture-client"));
 }
 
 test "Archive merges inbox candidates for local archives without changing provider flags" {

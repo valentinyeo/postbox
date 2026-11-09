@@ -58,6 +58,7 @@ const WireRecord = struct {
     file_bytes: u64,
     attachment_ready: bool,
     failure_reason: []const u8,
+    reply_broadcast: ?bool = null,
 };
 
 const WireSnapshot = struct {
@@ -86,6 +87,7 @@ fn validRecord(record: *const Record) bool {
     if (record.wire_filename.len > 0 and (std.mem.indexOfAny(u8, record.wire_filename.slice(), "\\/:\r\n") != null or
         std.mem.eql(u8, record.wire_filename.slice(), ".") or std.mem.eql(u8, record.wire_filename.slice(), ".."))) return false;
     if (record.file_bytes > 64 * 1024 * 1024) return false;
+    if (e.reply_broadcast and (e.reply_to.len == 0 or e.file.len != 0)) return false;
     if (record.phase == .uncertain and record.attempt_serial == 0) return false;
     if (e.file.len == 0) {
         if (record.attachment_ready or record.owned_file.len != 0 or record.wire_filename.len != 0 or record.file_bytes != 0 or
@@ -143,9 +145,10 @@ pub fn encode(allocator: std.mem.Allocator, snapshot: *const Snapshot) EncodeErr
             .file_bytes = r.file_bytes,
             .attachment_ready = r.attachment_ready,
             .failure_reason = r.failure_reason.slice(),
+            .reply_broadcast = if (e.reply_broadcast) true else null,
         };
     }
-    const encoded = std.json.Stringify.valueAlloc(allocator, WireSnapshot{ .version = 2, .backend = snapshot.backend.slice(), .records = rows }, .{}) catch return error.OutOfMemory;
+    const encoded = std.json.Stringify.valueAlloc(allocator, WireSnapshot{ .version = 2, .backend = snapshot.backend.slice(), .records = rows }, .{ .emit_null_optional_fields = false }) catch return error.OutOfMemory;
     if (encoded.len > max_document_bytes) {
         allocator.free(encoded);
         return error.CapacityExceeded;
@@ -193,6 +196,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, expected_backend:
         r.entry.queued_unix = wire.queued_unix;
         r.entry.ptt = wire.ptt;
         r.entry.voice_seconds = wire.voice_seconds;
+        r.entry.reply_broadcast = wire.reply_broadcast orelse false;
         r.phase = std.meta.stringToEnum(Phase, wire.phase) orelse return error.InvalidSnapshot;
         r.attempt_serial = wire.attempt_serial;
         r.owned_file.set(wire.owned_file);
@@ -244,6 +248,30 @@ fn testSnapshot() !*Snapshot {
     voice.phase = .held;
     snapshot.count = 2;
     return snapshot;
+}
+
+test "IGSH-1898 a broadcast reply roundtrips and an attachment cannot be one" {
+    const original = try testSnapshot();
+    defer std.testing.allocator.destroy(original);
+    const candidate = try std.testing.allocator.create(Snapshot);
+    defer std.testing.allocator.destroy(candidate);
+    const plain = try encode(std.testing.allocator, original);
+    defer std.testing.allocator.free(plain);
+    try std.testing.expect(std.mem.indexOf(u8, plain, "reply_broadcast") == null);
+    original.records[0].entry.reply_broadcast = true;
+    const bytes = try encode(std.testing.allocator, original);
+    defer std.testing.allocator.free(bytes);
+    try decode(std.testing.allocator, bytes, original.backend.slice(), candidate);
+    try std.testing.expect(candidate.records[0].entry.reply_broadcast);
+    try std.testing.expect(!candidate.records[1].entry.reply_broadcast);
+    try std.testing.expect(sameIntent(&original.records[0], &candidate.records[0]));
+    candidate.records[0].entry.reply_broadcast = false;
+    try std.testing.expect(!sameIntent(&original.records[0], &candidate.records[0]));
+    original.records[0].entry.reply_to.set("");
+    try std.testing.expectError(error.InvalidSnapshot, encode(std.testing.allocator, original));
+    original.records[0].entry.reply_to.set("1700000000.000001");
+    original.records[1].entry.reply_broadcast = true;
+    try std.testing.expectError(error.InvalidSnapshot, encode(std.testing.allocator, original));
 }
 
 test "snapshot roundtrip retains full intent and normalizes runtime fields" {
@@ -402,7 +430,7 @@ pub fn sameIntent(left: *const Record, right: *const Record) bool {
         !std.mem.eql(u8, a.reply_sender.slice(), b.reply_sender.slice()) or
         !std.mem.eql(u8, a.client_msg_id.slice(), b.client_msg_id.slice()) or
         !std.mem.eql(u8, a.upload_file_id.slice(), b.upload_file_id.slice()) or
-        a.queued_unix != b.queued_unix or a.ptt != b.ptt or a.voice_seconds != b.voice_seconds or
+        a.queued_unix != b.queued_unix or a.ptt != b.ptt or a.voice_seconds != b.voice_seconds or a.reply_broadcast != b.reply_broadcast or
         (a.file.len == 0) != (b.file.len == 0)) return false;
     if (a.file.len == 0) return true;
     return left.attachment_ready and right.attachment_ready and

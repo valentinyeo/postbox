@@ -308,6 +308,15 @@ assert 'slack_threads.parent_reply_line' in threads and 'WAZIG_VERIFY_RESTART' i
 assert 'slack-threads' in {row['hub'] for row in journeys}
 print('SLACK THREADS MAP VERIFIED: synthetic hub, keyboard journey, read-only measurements and restart')
 
+broadcast = (root / 'tools/verify-wazig/slack-thread-broadcast.ps1').read_text(encoding='utf-8')
+for artifact in ['broadcast-unticked', 'broadcast-ticked', 'broadcast-reset', 'broadcast-thread-result', 'broadcast-chat-result', 'broadcast-messages.json']:
+    assert artifact in broadcast, artifact
+assert 'slack-thread-broadcast' in options and entries['slack-thread-broadcast']['evidence'] and entries['slack-thread-broadcast']['pr']
+assert entries['slack-thread-broadcast']['validator']['file'] == 'check-slack-thread-broadcast-evidence.py'
+assert 'slack-thread-broadcast' in {row['hub'] for row in journeys}
+assert '.broadcast_shown' in broadcast
+print('SLACK THREAD BROADCAST MAP VERIFIED: synthetic hub, keyboard journey, hub flag and reset')
+
 archive_journey = (root / 'tools/verify-wazig/hub-archive.ps1').read_text(encoding='utf-8')
 archive_validator = (root / 'tools/verify-wazig/check-hub-archive-evidence.py').read_text(encoding='utf-8')
 for name in ['RULE-MAP.md']:

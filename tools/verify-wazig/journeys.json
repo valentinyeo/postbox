@@ -443,6 +443,23 @@
       "maximize": true
     },
     {
+      "name": "slack-thread-broadcast",
+      "pr": true,
+      "hub": "slack-thread-broadcast",
+      "evidence": true,
+      "chats": 1,
+      "script": "journey-slack-thread-broadcast.ps1",
+      "validator": {
+        "file": "check-slack-thread-broadcast-evidence.py",
+        "function": "check_thread_broadcast"
+      },
+      "hub_handler": {
+        "file": "fake-hub.py",
+        "class": "SlackThreadBroadcastHandler"
+      },
+      "maximize": true
+    },
+    {
       "name": "read-ticks",
       "pr": true,
       "hub": "read-ticks",

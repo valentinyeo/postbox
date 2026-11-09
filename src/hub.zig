@@ -103,6 +103,12 @@ pub fn send(allocator: std.mem.Allocator, chat: []const u8, text: []const u8, re
     return .{ .method = "POST", .path = "/v1/wazig/send", .body = try std.json.Stringify.valueAlloc(allocator, .{ .chat = chat, .text = text, .reply_to = reply_to, .client_id = client_id }, .{}) };
 }
 
+pub fn sendBroadcast(allocator: std.mem.Allocator, chat: []const u8, text: []const u8, reply_to: []const u8, client_id: []const u8) !Request {
+    try validWrite(chat, client_id);
+    if (reply_to.len == 0) return error.InvalidSend;
+    return .{ .method = "POST", .path = "/v1/wazig/send", .body = try std.json.Stringify.valueAlloc(allocator, .{ .chat = chat, .text = text, .reply_to = reply_to, .client_id = client_id, .reply_broadcast = true }, .{}) };
+}
+
 pub fn sendFile(allocator: std.mem.Allocator, chat: []const u8, text: []const u8, reply_to: []const u8, client_id: []const u8, filename: []const u8, bytes: []const u8, ptt: bool, boundary: []const u8) !Request {
     try validWrite(chat, client_id);
     var request = try bridge.sendFile(allocator, .{ .provider = .whatsapp, .account = "hub", .id = chat }, text, reply_to, client_id, filename, bytes, ptt, boundary);
