@@ -365,6 +365,35 @@ pub fn strokeEllipse(ctx: *const Context, rect: win.RECT, color: win.COLORREF, w
     draw(ctx, rect, 0, 0, color, width, true);
 }
 
+pub fn fillTriangle(ctx: *const Context, points: [3][2]f32, color: win.COLORREF) void {
+    const opened = open(ctx);
+    defer close(opened);
+    if (opened) |graphics| {
+        const f = api.?;
+        var path: Handle = null;
+        if (f.GdipCreatePath(0, &path) == 0 and path != null) {
+            defer _ = f.GdipDeletePath(path);
+            var brush: Handle = null;
+            if (f.GdipCreateSolidFill(argb(color), &brush) == 0 and brush != null) {
+                defer _ = f.GdipDeleteBrush(brush);
+                const status = f.GdipAddPathLine(path, points[0][0], points[0][1], points[1][0], points[1][1]) |
+                    f.GdipAddPathLine(path, points[1][0], points[1][1], points[2][0], points[2][1]) |
+                    f.GdipClosePathFigure(path);
+                if (status == 0 and f.GdipFillPath(graphics, brush, path) == 0) return;
+            }
+        }
+    }
+    const brush = win.CreateSolidBrush(color) orelse return;
+    defer _ = win.DeleteObject(brush);
+    const previous_brush = win.SelectObject(ctx.hdc, brush);
+    const previous_pen = win.SelectObject(ctx.hdc, win.GetStockObject(win.NULL_PEN));
+    var triangle: [3]win.POINT = undefined;
+    for (points, 0..) |point, index| triangle[index] = .{ .x = @intFromFloat(@round(point[0])), .y = @intFromFloat(@round(point[1])) };
+    _ = win.Polygon(ctx.hdc, &triangle, 3);
+    _ = win.SelectObject(ctx.hdc, previous_brush);
+    _ = win.SelectObject(ctx.hdc, previous_pen);
+}
+
 pub fn strokeArc(ctx: *const Context, rect: win.RECT, start: f32, sweep: f32, color: win.COLORREF, width: i32) void {
     const opened = open(ctx);
     defer close(opened);
