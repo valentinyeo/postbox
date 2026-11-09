@@ -428,7 +428,7 @@ jobs:
           python -c "import subprocess,sys; sys.path.insert(0,'tools'); from test_app_icon import check_icon; check_icon(subprocess.check_output(['git','show','9ad8d25:assets/messages.ico']))" *> verification-evidence/icon-red-control.txt
           if ($LASTEXITCODE -eq 0) { throw 'Original chat bubble unexpectedly passed' }
           $failure = Get-Content verification-evidence/icon-red-control.txt -Raw
-          if ($failure -notmatch 'Approved red flag missing|Missing app icon sizes') { throw "Wrong icon red failure: $failure" }
+          if ($failure -notmatch 'Green front bubble missing|Grey back bubble missing|Missing app icon sizes') { throw "Wrong icon red failure: $failure" }
           'ORIGINAL_CHAT_BUBBLE_RED_OK' | Add-Content verification-evidence/icon-red-control.txt
           exit 0
       - name: Install typing recorder

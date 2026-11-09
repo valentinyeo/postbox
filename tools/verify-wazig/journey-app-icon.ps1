@@ -22,10 +22,10 @@ function Save-AppIcon([IntPtr]$Icon, [int]$Size, [string]$Name) {
         $dc = $graphics.GetHdc()
         try { Assert-That ([AppIconNative]::DrawIconEx($dc, 0, 0, $Icon, $Size, $Size, 0, [IntPtr]::Zero, 3)) 'DrawIconEx failed' }
         finally { $graphics.ReleaseHdc($dc) }
-        $flag = $bitmap.GetPixel([int]($Size * 0.65), [int]($Size * 0.3))
-        Assert-That ($flag.R -gt 210 -and $flag.G -gt 90 -and $flag.G -lt 170 -and $flag.B -lt $flag.G) "Approved red flag missing: $Name"
-        $pole = $bitmap.GetPixel([int]($Size * 0.27), [int]($Size * 0.75))
-        Assert-That ($pole.R -gt 140 -and $pole.R -lt 175 -and [Math]::Abs([int]$pole.R - $pole.G) -lt 5) "Flag pole missing: $Name"
+        $front = $bitmap.GetPixel([int]($Size * 0.65), [int]($Size * 0.58))
+        Assert-That ($front.G -gt $front.R + 60 -and $front.G -gt $front.B + 30) "Green front bubble missing: $Name"
+        $back = $bitmap.GetPixel([int]($Size * 0.3), [int]($Size * 0.28))
+        Assert-That (([Math]::Max([int]$back.R, [Math]::Max([int]$back.G, [int]$back.B)) - [Math]::Min([int]$back.R, [Math]::Min([int]$back.G, [int]$back.B))) -lt 16 -and $back.R -gt 110 -and $back.R -lt 170) "Grey back bubble missing: $Name"
         $bitmap.Save((Join-Path $session.evidence "$Name.png"), [Drawing.Imaging.ImageFormat]::Png)
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
