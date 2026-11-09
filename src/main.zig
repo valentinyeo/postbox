@@ -6729,8 +6729,8 @@ fn updateAudioPlayback(a: *App) void {
 }
 
 fn formatClock(buffer: []u8, ms: i64) []const u8 {
-    const seconds = @divTrunc(ms, 1000);
-    return std.fmt.bufPrint(buffer, "{d}:{d:0>2}", .{ @divTrunc(seconds, 60), @mod(seconds, 60) }) catch "0:00";
+    const seconds: u64 = @intCast(@max(@divTrunc(ms, 1000), 0));
+    return std.fmt.bufPrint(buffer, "{d}:{d:0>2}", .{ seconds / 60, seconds % 60 }) catch "0:00";
 }
 
 fn isGif(message: *const Message) bool {
