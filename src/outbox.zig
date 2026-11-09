@@ -47,6 +47,7 @@ pub const Entry = struct {
     queued_unix: i64 = 0,
     ptt: bool = false,
     voice_seconds: u32 = 0,
+    reply_broadcast: bool = false,
 
     pub fn idSlice(self: *const Entry) []const u8 {
         return &self.id;
@@ -87,6 +88,7 @@ const line_fields = struct {
     queued_unix: i64,
     ptt: bool,
     voice_seconds: u32,
+    reply_broadcast: ?bool = null,
 };
 
 pub fn writeLine(writer: *std.Io.Writer, entry: *const Entry) !void {
@@ -107,7 +109,8 @@ pub fn writeLine(writer: *std.Io.Writer, entry: *const Entry) !void {
         .queued_unix = entry.queued_unix,
         .ptt = entry.ptt,
         .voice_seconds = entry.voice_seconds,
-    }, .{}, writer);
+        .reply_broadcast = if (entry.reply_broadcast) true else null,
+    }, .{ .emit_null_optional_fields = false }, writer);
     try writer.writeByte('\n');
 }
 
@@ -128,6 +131,7 @@ const parsed_line = struct {
     queued_unix: i64 = 0,
     ptt: bool = false,
     voice_seconds: u32 = 0,
+    reply_broadcast: bool = false,
 };
 
 fn parseLineWithOptions(allocator: std.mem.Allocator, line: []const u8, out: *Entry, ignore_unknown_fields: bool) error{ OutOfMemory, InvalidEntry }!void {
@@ -152,7 +156,7 @@ fn parseLineWithOptions(allocator: std.mem.Allocator, line: []const u8, out: *En
     for ([_][]const u8{ value.account, value.jid, value.text, value.file, value.reply_to, value.reply_sender, value.client_msg_id, value.upload_file_id }) |field| {
         if (std.mem.indexOfScalar(u8, field, 0) != null) return error.InvalidEntry;
     }
-    out.* = .{ .provider = provider, .queued_unix = value.queued_unix, .ptt = value.ptt, .voice_seconds = value.voice_seconds, .attempts = value.attempts, .ambiguous = value.ambiguous, .state = state };
+    out.* = .{ .provider = provider, .queued_unix = value.queued_unix, .ptt = value.ptt, .voice_seconds = value.voice_seconds, .reply_broadcast = value.reply_broadcast, .attempts = value.attempts, .ambiguous = value.ambiguous, .state = state };
     @memcpy(&out.id, value.id);
     out.account.set(value.account);
     out.jid.set(value.jid);
@@ -493,6 +497,31 @@ test "slack upload state round-trips" {
     try writeLine(&allocating.writer, &entry);
     try std.testing.expect(parseLine(std.testing.allocator, allocating.written(), &parsed));
     try std.testing.expectEqualDeep(entry, parsed);
+}
+
+test "IGSH-1898 a broadcast reply survives the line and a plain entry keeps the old bytes" {
+    const allocator = std.testing.allocator;
+    var entry = Entry{ .provider = .slack, .queued_unix = 1_700_000_000 };
+    entry.id = hexId([_]u8{0xab} ** 16);
+    entry.jid.set("C01234567");
+    entry.text.set("hello");
+    entry.reply_to.set("1700000000.000100");
+    var plain = std.Io.Writer.Allocating.init(allocator);
+    defer plain.deinit();
+    try writeLine(&plain.writer, &entry);
+    try std.testing.expect(std.mem.indexOf(u8, plain.written(), "reply_broadcast") == null);
+    entry.reply_broadcast = true;
+    var flagged = std.Io.Writer.Allocating.init(allocator);
+    defer flagged.deinit();
+    try writeLine(&flagged.writer, &entry);
+    try std.testing.expect(std.mem.indexOf(u8, flagged.written(), "\"reply_broadcast\":true") != null);
+    var parsed = Entry{};
+    try std.testing.expect(parseLine(allocator, flagged.written(), &parsed));
+    try std.testing.expect(parsed.reply_broadcast);
+    var plain_parsed = Entry{};
+    try std.testing.expect(parseLine(allocator, plain.written(), &plain_parsed));
+    try std.testing.expect(!plain_parsed.reply_broadcast);
+    try parseLineStrict(allocator, flagged.written(), &parsed);
 }
 
 test "old line without upload fields parses" {

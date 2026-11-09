@@ -1144,6 +1144,54 @@ class SlackThreadsHandler(SlackSortHandler):
             self.respond(400, {'error': 'invalid thread request'}, body=body)
 
 
+BROADCAST_PLAIN = 'Synthetic plain thread reply'
+BROADCAST_TEXT = 'Synthetic broadcast reply'
+BROADCAST_THREAD_ID = '1740000060.000100'
+BROADCAST_CHANNEL_ID = '1740000060.000200'
+
+
+class SlackThreadBroadcastHandler(SlackThreadsHandler):
+    def do_GET(self):
+        url = urlsplit(self.path)
+        if url.path == '/v1/wazig/messages' and parse_qs(url.query).get('chat') == [THREAD_CHAT]:
+            self.wire_path = self.path
+            if not self.authorized():
+                return
+            with self.state.lock:
+                extra = list(getattr(self.state, 'broadcast_rows', []))
+            self.respond(200, list(reversed(extra)) + thread_rows())
+            return
+        super().do_GET()
+
+    def do_POST(self):
+        if self.path != '/v1/wazig/send':
+            super().do_POST()
+            return
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        text = body.get('text')
+        broadcast = body.get('reply_broadcast')
+        valid = (body.get('chat') == THREAD_CHAT and body.get('reply_to') == THREAD_PARENT and body.get('client_id')
+                 and ((text == BROADCAST_PLAIN and 'reply_broadcast' not in body)
+                      or (text == BROADCAST_TEXT and broadcast is True)))
+        if not valid:
+            self.respond(400, {'error': 'invalid thread broadcast request'}, body=body)
+            return
+        row = dict(ChatJID=THREAD_CHAT, FromMe=True, SenderName='Fixture Sender', Text=text, quoted_msg_id=THREAD_PARENT,
+                   MsgID=BROADCAST_THREAD_ID if broadcast else '1740000050.000100',
+                   Timestamp='2025-02-19T21:21:20Z' if broadcast else '2025-02-19T21:21:10Z')
+        rows = [row]
+        if broadcast:
+            rows.append({key: value for key, value in dict(row, MsgID=BROADCAST_CHANNEL_ID).items() if key != 'quoted_msg_id'})
+        with self.state.lock:
+            if not hasattr(self.state, 'broadcast_rows'):
+                self.state.broadcast_rows = []
+            self.state.broadcast_rows.extend(rows)
+        self.respond(200, dict(client_id=body['client_id'], msg_id=row['MsgID'], ts=self.state.stamp, status='sent'), body=body)
+
+
 TICK_CHATS = [
     dict(jid='ticks-read@s.whatsapp.net', name='Verification Read', provider='whatsapp', kind='direct', read_by=1),
     dict(jid='ticks-sent@s.whatsapp.net', name='Verification Sent', provider='whatsapp', kind='direct', read_by=0),

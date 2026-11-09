@@ -33,6 +33,7 @@ PYTHON_LIGHT_TESTS=(
     test_show_archived
     test_slack_emoji
     test_slack_sort
+    test_slack_thread_broadcast
     test_slack_threads
     test_composer_paste_scroll
     test_tdlib_release

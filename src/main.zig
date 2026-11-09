@@ -162,6 +162,7 @@ const command_slack_threads = 2068;
 const command_include_archived = 2069;
 const id_thread_list = 1144;
 const id_thread_compose = 1145;
+const id_thread_check = 1146;
 const command_search = 2001;
 const command_compose = 2002;
 const command_unread = 2003;
@@ -583,6 +584,7 @@ const WacliJob = struct {
     unified_filename: Utf8Text(outbox.max_file_len) = .{},
     unified_file_sha256: [32]u8 = @splat(0),
     unified_file_bytes: u64 = 0,
+    reply_broadcast: bool = false,
     arg_count: usize = 0,
     args: [max_wacli_args]Utf8Text(wacli_arg_cap) = [_]Utf8Text(wacli_arg_cap){.{}} ** max_wacli_args,
 };
@@ -797,6 +799,8 @@ const App = struct {
     thread_rows_origin: drafts.Identity = .{},
     thread_list: ?win.HWND = null,
     thread_compose: ?win.HWND = null,
+    thread_check: ?win.HWND = null,
+    thread_broadcast: bool = false,
     thread_parent: Utf8Text(191) = .{},
     thread_origin: drafts.Identity = .{},
     thread_panel_hash: u64 = 0,
@@ -10845,6 +10849,7 @@ fn sendUnifiedMessage(a: *App, thread: bool) bool {
         entry.text.set(if (index == 0) text else "");
         entry.reply_to.set(if (thread) a.thread_parent.slice() else a.reply_to.slice());
         entry.reply_sender.set(if (thread) "" else a.reply_sender.slice());
+        entry.reply_broadcast = thread and a.thread_broadcast and key.provider == .slack;
         entry.queued_unix = nowUnixSeconds();
         if (count > 0) entry.file.set(a.staged_images.items[index].path.slice());
     }
@@ -10862,6 +10867,10 @@ fn sendUnifiedMessage(a: *App, thread: bool) bool {
     }
     if (count > 0) discardStagedImage(a);
     if (!thread) clearReply(a);
+    if (thread) {
+        a.thread_broadcast = false;
+        if (a.thread_check) |check| _ = win.InvalidateRect(check, null, win.FALSE);
+    }
     a.user_viewed = true;
     invalidateCanvasIconTooltips(a);
     a.scroll_y = 0;
@@ -16888,7 +16897,10 @@ fn layoutRegion(a: *App, width: i32, height: i32, dirty: ?*const win.RECT) void 
     const chat_width = width - left_width - 1;
     const panel_width = threadPanelWidth(a, width, left_width);
     if (a.canvas) |hwnd| _ = win.MoveWindow(hwnd, left_width + 1, header_height, chat_width - panel_width, height - header_height - sizes.strip_height, win.TRUE);
-    if (a.thread_list) |hwnd| _ = win.MoveWindow(hwnd, width - panel_width, 0, @max(1, panel_width), @max(1, height - sizes.strip_height), win.TRUE);
+    const check_rect = threadCheckRect(a, width, height);
+    const thread_bottom = if (a.thread_check != null) @min(height - sizes.strip_height, check_rect.top) else height - sizes.strip_height;
+    if (a.thread_list) |hwnd| _ = win.MoveWindow(hwnd, width - panel_width, 0, @max(1, panel_width), @max(1, thread_bottom), win.TRUE);
+    if (a.thread_check) |hwnd| _ = win.MoveWindow(hwnd, check_rect.left, check_rect.top, @max(1, check_rect.right - check_rect.left), @max(1, check_rect.bottom - check_rect.top), win.TRUE);
     if (a.thread_compose) |hwnd| _ = win.MoveWindow(hwnd, width - panel_width + px(a, 40), height - px(a, 52), @max(1, panel_width - px(a, 80)), px(a, 24), win.TRUE);
     const buttons = [_]?win.HWND{ a.attach_btn, a.voice_btn, a.dictate, a.emoji_btn, a.send };
     const rects = [_]compose_layout.Rect{ a.compose_geometry.attach, a.compose_geometry.voice, a.compose_geometry.dictate, a.compose_geometry.emoji, a.compose_geometry.send };
@@ -20976,6 +20988,16 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
             _ = sendMessageFrom(a, true);
             return true;
         }
+        if (a.thread_check) |check| {
+            if (focus != null and focus == check and (key == win.VK_SPACE or key == win.VK_RETURN)) {
+                toggleThreadBroadcast(a);
+                return true;
+            }
+            if (key == win.VK_TAB and ((a.thread_compose != null and focus == a.thread_compose.? and !shift) or (focus != null and focus == check))) {
+                _ = win.SetFocus(if (focus == check) a.thread_compose.? else check);
+                return true;
+            }
+        }
     }
     if (a.thread_compose != null and focus == a.thread_compose.?) return false;
     if (!control and !alt and !shift and key == win.VK_RETURN and a.thread_parent.len == 0 and slackThreadsEnabled(a)) {
@@ -22066,6 +22088,9 @@ pub fn main(init: std.process.Init) !void {
     if (win.RegisterClassExW(&canvas_class) == 0) return error.RegisterCanvasClassFailed;
     canvas_class.lpszClassName = lit("MessagesThreadPane");
     canvas_class.lpfnWndProc = threadPaneProc;
+    if (win.RegisterClassExW(&canvas_class) == 0) return error.RegisterCanvasClassFailed;
+    canvas_class.lpszClassName = lit("MessagesThreadCheck");
+    canvas_class.lpfnWndProc = threadCheckProc;
     if (win.RegisterClassExW(&canvas_class) == 0) return error.RegisterCanvasClassFailed;
 
     var main_class = win.WNDCLASSEXW{
@@ -23907,6 +23932,7 @@ fn beginUnifiedSend(a: *App, now_ms: u64) void {
         job.unified_filename.set(record.wire_filename.slice());
         job.unified_file_sha256 = record.file_sha256;
         job.unified_file_bytes = record.file_bytes;
+        job.reply_broadcast = record.entry.reply_broadcast;
         wacliJobArgs(&job, &.{ record.entry.text.slice(), record.owned_file.slice(), record.entry.reply_to.slice(), if (record.entry.ptt) "true" else "false" });
         const id = record.entry.id;
         candidate.* = live.*;
@@ -24429,7 +24455,7 @@ fn unifiedHubRequest(a: *App, allocator: std.mem.Allocator, job: *const WacliJob
         .hub_media => hub.binary(allocator, jid, job.msg_id.slice()),
         .hub_avatar => if (std.mem.eql(u8, job.extra.slice(), "workspace-icon")) hub.workspaceIcon(allocator, jid[6 .. jid.len - 1]) else hub.binary(allocator, jid, null),
         .hub_send => blk: {
-            if (job.args[1].len == 0) break :blk hub.send(allocator, jid, job.args[0].slice(), job.args[2].slice(), job.msg_id.slice());
+            if (job.args[1].len == 0) break :blk if (job.reply_broadcast) hub.sendBroadcast(allocator, jid, job.args[0].slice(), job.args[2].slice(), job.msg_id.slice()) else hub.send(allocator, jid, job.args[0].slice(), job.args[2].slice(), job.msg_id.slice());
             const bytes = (unifiedReadAttachment(a, job.args[1].slice()) catch return error.FileReadFailed) orelse return error.FileReadFailed;
             defer a.allocator.free(bytes);
             if (job.unified_filename.len == 0 or !unified_snapshot.attachmentMatches(bytes, job.unified_file_bytes, &job.unified_file_sha256)) return error.AttachmentChanged;
@@ -24761,16 +24787,104 @@ fn threadPanelWidth(a: *const App, width: i32, left_width: i32) i32 {
     return if (a.thread_parent.len > 0) @min(@divTrunc(width - left_width - 1, 2), px(a, 620)) else 0;
 }
 
+fn threadBroadcastAvailable(a: *const App) bool {
+    return unifiedHub(a) and a.thread_parent.len > 0 and a.selected_chat < a.chat_count and a.chats[a.selected_chat].provider == .slack;
+}
+
+fn threadCheckRect(a: *const App, width: i32, height: i32) win.RECT {
+    const left_width = @min(px(a, theme.sidebar_width), @divTrunc(width, 2));
+    const panel_width = threadPanelWidth(a, width, left_width);
+    const bottom = height - px(a, 64);
+    return .{ .left = width - panel_width + px(a, 24), .top = bottom - px(a, 28), .right = width - px(a, 24), .bottom = bottom };
+}
+
+fn threadBroadcastLabel(a: *const App, label: *WideText(191)) void {
+    label.set(a.allocator, "Also send to ");
+    if (a.selected_chat >= a.chat_count) return;
+    const name = a.chats[a.selected_chat].name.slice();
+    const count = @min(name.len, label.buf.len - 1 - label.len);
+    @memcpy(label.buf[label.len..][0..count], name[0..count]);
+    label.len += count;
+    label.buf[label.len] = 0;
+}
+
+fn toggleThreadBroadcast(a: *App) void {
+    const check = a.thread_check orelse return;
+    a.thread_broadcast = !a.thread_broadcast;
+    _ = win.InvalidateRect(check, null, win.FALSE);
+}
+
+fn threadCheckProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(.winapi) win.LRESULT {
+    const a = app_ptr orelse return win.DefWindowProcW(hwnd, message, wparam, lparam);
+    switch (message) {
+        win.WM_ERASEBKGND => return 1,
+        win.WM_SETFOCUS, win.WM_KILLFOCUS => {
+            _ = win.InvalidateRect(hwnd, null, win.FALSE);
+            return 0;
+        },
+        win.WM_LBUTTONDOWN => {
+            toggleThreadBroadcast(a);
+            return 0;
+        },
+        win.WM_KEYDOWN => {
+            if (wparam == win.VK_SPACE) {
+                toggleThreadBroadcast(a);
+                return 0;
+            }
+        },
+        win.WM_PAINT => {
+            var paint: win.PAINTSTRUCT = undefined;
+            const screen = win.BeginPaint(hwnd, &paint);
+            defer _ = win.EndPaint(hwnd, &paint);
+            var client: win.RECT = undefined;
+            _ = win.GetClientRect(hwnd, &client);
+            var buffer = paint_buffer.Buffer.init(screen, client, paint.rcPaint);
+            defer buffer.deinit();
+            const hdc = buffer.hdc;
+            _ = win.FillRect(hdc, &client, a.brush_bg.?);
+            var shapes = smooth.Context.init(hdc);
+            defer shapes.deinit();
+            const size = px(a, 16);
+            const top = client.top + @divTrunc(client.bottom - client.top - size, 2);
+            const box = win.RECT{ .left = client.left + px(a, 16), .top = top, .right = client.left + px(a, 16) + size, .bottom = top + size };
+            const corner = px(a, theme.radius_inline * 2);
+            if (a.thread_broadcast) {
+                smooth.fillRoundRect(&shapes, box, corner, corner, theme.current.primary);
+                drawFluentIcon(a, hdc, box, 0xE73E, theme.current.on_primary);
+            } else {
+                smooth.strokeRoundRect(&shapes, box, corner, corner, theme.current.outline, px(a, 2));
+            }
+            if (win.GetFocus() == hwnd) {
+                const ring = win.RECT{ .left = box.left - px(a, 3), .top = box.top - px(a, 3), .right = box.right + px(a, 3), .bottom = box.bottom + px(a, 3) };
+                smooth.strokeRoundRect(&shapes, ring, corner + px(a, 4), corner + px(a, 4), theme.current.primary, px(a, 2));
+            }
+            var label = WideText(191){};
+            threadBroadcastLabel(a, &label);
+            _ = win.SetBkMode(hdc, win.TRANSPARENT);
+            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+            _ = win.SetTextColor(hdc, if (a.thread_broadcast) theme.current.on_surface else theme.current.on_surface_variant);
+            var text = win.RECT{ .left = box.right + px(a, 8), .top = client.top, .right = client.right, .bottom = client.bottom };
+            _ = text_draw.drawText(hdc, label.ptr(), @intCast(label.len), &text, win.DT_LEFT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
+            return 0;
+        },
+        else => {},
+    }
+    return win.DefWindowProcW(hwnd, message, wparam, lparam);
+}
+
 fn closeSlackThread(a: *App) void {
     if (a.thread_parent.len == 0) return;
     disarmDictationSend(a);
     const focus = win.GetFocus();
-    const panel_had_focus = focus != null and ((a.thread_list != null and focus == a.thread_list.?) or (a.thread_compose != null and focus == a.thread_compose.?));
+    const panel_had_focus = focus != null and ((a.thread_list != null and focus == a.thread_list.?) or (a.thread_compose != null and focus == a.thread_compose.?) or (a.thread_check != null and focus == a.thread_check.?));
     a.thread_parent.set("");
     if (a.thread_list) |hwnd| _ = win.DestroyWindow(hwnd);
     if (a.thread_compose) |hwnd| _ = win.DestroyWindow(hwnd);
+    if (a.thread_check) |hwnd| _ = win.DestroyWindow(hwnd);
     a.thread_list = null;
     a.thread_compose = null;
+    a.thread_check = null;
+    a.thread_broadcast = false;
     a.thread_panel_hash = 0;
     a.thread_panel_replies = 0;
     layout(a, a.compose_client_width, a.compose_client_height);
@@ -24800,6 +24914,7 @@ fn openSlackThread(a: *App, selected: usize) void {
         return;
     }
     disarmDictationSend(a);
+    if (threadBroadcastAvailable(a)) a.thread_check = win.CreateWindowExW(0, lit("MessagesThreadCheck"), null, win.WS_CHILD | win.WS_VISIBLE | win.WS_TABSTOP, 0, 0, 0, 0, a.hwnd.?, controlId(id_thread_check), a.instance, null);
     setFont(a.thread_compose, a.font);
     _ = win.SendMessageW(a.thread_compose.?, win.EM_SETLIMITTEXT, drafts.max_text, 0);
     _ = win.SendMessageW(a.thread_compose.?, win.EM_SETCUEBANNER, 1, @bitCast(@intFromPtr(lit("Reply in thread"))));
@@ -25007,7 +25122,14 @@ fn controlSlackThreads(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, if (parent) |message| message.id.slice() else "");
     try w.writeAll(",\"parent_reply_line\":");
     try control_api.writeString(w, if (enabled and parent != null) slack.repliesLine(&line_buffer, threadReplyCount(a, parent.?)) else "");
-    try w.print(",\"inline_replies\":{d},\"loose_replies\":{d},\"replies\":{d},\"open\":{},\"threads_option\":\"{s}\"}}", .{ inline_replies, loose_replies, a.thread_panel_replies, a.thread_list != null, slack.threadsSettingValue(enabled) });
+    try w.print(",\"inline_replies\":{d},\"loose_replies\":{d},\"replies\":{d},\"open\":{},\"threads_option\":\"{s}\"", .{ inline_replies, loose_replies, a.thread_panel_replies, a.thread_list != null, slack.threadsSettingValue(enabled) });
+    var label = WideText(191){};
+    threadBroadcastLabel(a, &label);
+    const label_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, label.slice()) catch return error.OutOfMemory;
+    defer a.allocator.free(label_utf8);
+    try w.print(",\"broadcast_shown\":{},\"broadcast_checked\":{},\"broadcast_label\":", .{ a.thread_check != null, a.thread_broadcast });
+    try control_api.writeString(w, if (a.thread_check != null) label_utf8 else "");
+    try w.writeAll("}");
 }
 
 fn rememberSlackThreadRow(a: *App, message: *const Message) void {
