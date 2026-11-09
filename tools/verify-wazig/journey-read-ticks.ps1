@@ -19,4 +19,3 @@ foreach ($chat in $chats) {
     Save-Screen $session $chat.stage
     Hub-Pass $session "$($chat.stage)=$($chat.shown)"
 }
-$app = Get-App $session
