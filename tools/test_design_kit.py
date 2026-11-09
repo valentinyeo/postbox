@@ -28,7 +28,7 @@ class DesignKitTests(unittest.TestCase):
 
     def test_voice_play_glyph_uses_readable_dark_ink_on_the_light_control(self):
         source = (ROOT / 'src/main.zig').read_text()
-        self.assertTrue('win.CreateSolidBrush(if (theme.choice == .amoled) theme.send_text else theme.current.on_primary)' in source)
+        self.assertTrue('const glyph_color = if (theme.choice == .amoled) theme.send_text else theme.current.on_primary;' in source)
 
     def test_native_probes_follow_the_shared_font_and_measured_row_size(self):
         border = (ROOT / 'tools/verify-wazig/composer-border.ps1').read_text()
