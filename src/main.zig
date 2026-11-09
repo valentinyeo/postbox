@@ -15048,6 +15048,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     }
     try w.writeAll("]}");
     try controlSlackThreads(a, w);
+    try controlReadTick(a, w);
     const memory = readMemorySnapshot();
     try w.print(",\"memory\":{{\"working_set_kb\":{d},\"private_kb\":{d},\"module_count\":{d},\"media_foundation_loaded\":{}}}", .{
         memory.working_set_bytes / 1024,
@@ -24974,6 +24975,18 @@ fn refreshSlackThreadPanel(a: *App) void {
     a.thread_panel_hash = hash;
     a.thread_panel_replies = replies;
     _ = win.InvalidateRect(list, null, win.FALSE);
+}
+
+fn controlReadTick(a: *App, w: *std.Io.Writer) !void {
+    const newest = read_receipt.newestOwn(a.message_count, a, ownReadable) orelse {
+        try w.writeAll(",\"read_tick\":{\"shown\":false,\"message\":\"\"}");
+        return;
+    };
+    const message = &a.messages[newest];
+    const shown = read_receipt.shows(receiptCapability(a), message.from_me, message.send_state == .none, message.revoked, message.read_by);
+    try w.print(",\"read_tick\":{{\"shown\":{},\"message\":", .{shown});
+    try control_api.writeString(w, message.id.slice());
+    try w.writeAll("}");
 }
 
 fn controlSlackThreads(a: *App, w: *std.Io.Writer) !void {
