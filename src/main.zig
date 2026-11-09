@@ -9445,7 +9445,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
             message.quote_sender.set(a.allocator, getString(object, "fixture_quote_sender"));
         }
         message.from_me = getBool(object, "FromMe");
-        message.read_by = if (chat.provider == .whatsapp) @intCast(std.math.clamp(getInt(object, "ReadBy"), 0, 1000)) else 0;
+        message.read_by = if (chat.provider == .whatsapp or chat.provider == .telegram or chat.provider == .signal) @intCast(std.math.clamp(getInt(object, "ReadBy"), 0, 1000)) else 0;
         message.forwarded = !revoked and chat.provider == .whatsapp and getBool(object, "IsForwarded");
         message.media_type.set(media_type);
         message.mime_type.set(getString(object, "MimeType"));
@@ -18011,8 +18011,8 @@ fn receiptCapability(a: *const App) read_receipt.Capability {
     return switch (a.chats[a.selected_chat].provider) {
         .whatsapp => if (groupChat(a)) .whatsapp_group else .whatsapp_dm,
         .slack => .slack,
-        .telegram => .telegram,
-        .signal => .signal,
+        .telegram => if (groupChat(a)) .telegram else .telegram_dm,
+        .signal => if (groupChat(a)) .signal else .signal_dm,
     };
 }
 
