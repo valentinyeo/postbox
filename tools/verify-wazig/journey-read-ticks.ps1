@@ -3,10 +3,10 @@ $chats = @(
     @{ name = 'Verification Sent'; id = 'ticks-sent@s.whatsapp.net'; shown = $false; stage = 'ticks-sent' },
     @{ name = 'Verification Group'; id = 'ticks-group@g.us'; shown = $false; stage = 'ticks-group' },
     @{ name = 'Verification Slack'; id = 'slack:fixture-ticks:channel'; shown = $false; stage = 'ticks-slack' },
-    @{ name = 'Verification Signal'; id = 'signal:ticks-contact'; shown = $true; stage = 'ticks-signal' },
-    @{ name = 'Verification Signal Group'; id = 'signal:group:ticks-group'; shown = $false; stage = 'ticks-signal-group' },
-    @{ name = 'Verification Telegram'; id = 'telegram:user:ticks-contact'; shown = $true; stage = 'ticks-telegram' },
-    @{ name = 'Verification Telegram Unread'; id = 'telegram:user:ticks-unread'; shown = $false; stage = 'ticks-telegram-unread' }
+    @{ name = 'Verification Signal Contact'; id = 'signal:ticks-contact'; shown = $true; stage = 'ticks-signal' },
+    @{ name = 'Verification Signal Crowd'; id = 'signal:group:ticks-group'; shown = $false; stage = 'ticks-signal-group' },
+    @{ name = 'Verification Telegram Contact'; id = 'telegram:user:ticks-contact'; shown = $true; stage = 'ticks-telegram' },
+    @{ name = 'Verification Telegram Fresh'; id = 'telegram:user:ticks-unread'; shown = $false; stage = 'ticks-telegram-unread' }
 )
 foreach ($chat in $chats) {
     Send-Keys $session '^f'
