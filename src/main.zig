@@ -6601,8 +6601,8 @@ fn toggleAudio(a: *App, message: *Message) void {
 fn seekAudio(a: *App, x: i32, hit: win.RECT) void {
     const player = a.audio_player orelse return;
     if (a.audio_duration_ms <= 0) return;
-    const track_left = hit.left + px(a, 94);
-    const track_right = hit.right - px(a, 64);
+    const track_left = hit.left - px(a, 8) + px(a, 96);
+    const track_right = @max(track_left + px(a, 40), hit.right + px(a, 8) - px(a, 100));
     if (track_right <= track_left) return;
     const fraction = std.math.clamp(@as(f64, @floatFromInt(x - track_left)) / @as(f64, @floatFromInt(track_right - track_left)), 0, 1);
     const target_ms: i64 = @intFromFloat(fraction * @as(f64, @floatFromInt(a.audio_duration_ms)));
@@ -18974,65 +18974,51 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &media_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
             } else {
                 const playing_now = active and a.audio_state == .playing;
-                const glyph_brush = win.CreateSolidBrush(if (theme.choice == .amoled) theme.send_text else theme.current.on_primary) orelse continue;
-                const previous_brush = win.SelectObject(hdc, glyph_brush);
-                const previous_pen = win.SelectObject(hdc, win.GetStockObject(win.NULL_PEN));
-                smooth.fillEllipse(&shapes, .{ .left = left + px(a, 12), .top = strip_top + px(a, 4), .right = left + px(a, 40), .bottom = strip_top + px(a, 32) }, if (theme.choice == .amoled) theme.amoled_send else theme.current.primary);
-                if (theme.choice == .amoled) smooth.strokeEllipse(&shapes, .{ .left = left + px(a, 12), .top = strip_top + px(a, 4), .right = left + px(a, 40), .bottom = strip_top + px(a, 32) }, theme.current.outline, 1);
+                const button_rect = win.RECT{ .left = left + px(a, 12), .top = strip_top + px(a, 4), .right = left + px(a, 40), .bottom = strip_top + px(a, 32) };
+                const glyph_color = if (theme.choice == .amoled) theme.send_text else theme.current.on_primary;
+                smooth.fillEllipse(&shapes, button_rect, if (theme.choice == .amoled) theme.amoled_send else theme.current.primary);
                 if (playing_now) {
-                    _ = win.Rectangle(hdc, button_cx - 7, button_cy - 8, button_cx - 2, button_cy + 8);
-                    _ = win.Rectangle(hdc, button_cx + 2, button_cy - 8, button_cx + 7, button_cy + 8);
+                    smooth.fillRoundRect(&shapes, .{ .left = button_cx - px(a, 6), .top = button_cy - px(a, 7), .right = button_cx - px(a, 2), .bottom = button_cy + px(a, 7) }, px(a, 2), px(a, 2), glyph_color);
+                    smooth.fillRoundRect(&shapes, .{ .left = button_cx + px(a, 2), .top = button_cy - px(a, 7), .right = button_cx + px(a, 6), .bottom = button_cy + px(a, 7) }, px(a, 2), px(a, 2), glyph_color);
                 } else {
-                    var triangle = [3]win.POINT{
-                        .{ .x = button_cx - 4, .y = button_cy - 8 },
-                        .{ .x = button_cx - 4, .y = button_cy + 8 },
-                        .{ .x = button_cx + 9, .y = button_cy },
-                    };
-                    _ = win.Polygon(hdc, &triangle, 3);
+                    const cx: f32 = @floatFromInt(button_cx);
+                    const cy: f32 = @floatFromInt(button_cy);
+                    const half: f32 = @floatFromInt(px(a, 7));
+                    const reach: f32 = @floatFromInt(px(a, 6));
+                    smooth.fillTriangle(&shapes, .{ .{ cx - reach * 0.6, cy - half }, .{ cx - reach * 0.6, cy + half }, .{ cx + reach, cy } }, glyph_color);
                 }
-                _ = win.SelectObject(hdc, previous_brush);
-                _ = win.SelectObject(hdc, previous_pen);
-                _ = win.DeleteObject(glyph_brush);
 
-                _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                 const speed_active = a.audio_player != null and a.audio_player.?.speed() != 100;
+                const speed_pill = win.RECT{ .left = left + px(a, 48), .top = button_cy - px(a, 10), .right = left + px(a, 86), .bottom = button_cy + px(a, 10) };
+                smooth.fillRoundRect(&shapes, speed_pill, px(a, 20), px(a, 20), theme.current.surface_container_highest);
+                _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                 _ = win.SetTextColor(hdc, if (speed_active) theme.current.primary else theme.current.on_surface_variant);
-                var speed_rect = win.RECT{ .left = left + px(a, 48), .top = strip_top + px(a, 4), .right = left + px(a, 90), .bottom = strip_top + px(a, 32) };
+                var speed_rect = speed_pill;
                 _ = text_draw.drawText(hdc, speedLabel(a.audio_player), -1, &speed_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
 
-                const track_left = left + px(a, 94);
-                const track_right = right - px(a, 64);
-                const track_brush = win.CreateSolidBrush(theme.current.outline_variant) orelse continue;
-                var track = win.RECT{ .left = track_left, .top = button_cy - 3, .right = track_right, .bottom = button_cy + 3 };
-                _ = win.FillRect(hdc, &track, track_brush);
+                const track_left = left + px(a, 96);
+                const track_right = @max(track_left + px(a, 40), right - px(a, 100));
+                const track_radius = px(a, 4);
+                const track = win.RECT{ .left = track_left, .top = button_cy - px(a, 2), .right = track_right, .bottom = button_cy + px(a, 2) };
+                smooth.fillRoundRect(&shapes, track, track_radius, track_radius, theme.current.outline_variant);
+                var played_fraction: f64 = 0;
                 if (active and a.audio_duration_ms > 0) {
-                    const fraction = std.math.clamp(@as(f64, @floatFromInt(a.audio_position_ms)) / @as(f64, @floatFromInt(a.audio_duration_ms)), 0, 1);
-                    track.right = track_left + @as(i32, @intFromFloat(fraction * @as(f64, @floatFromInt(track_right - track_left))));
-                    const filled_brush = win.CreateSolidBrush(theme.current.primary) orelse {
-                        _ = win.DeleteObject(track_brush);
-                        continue;
-                    };
-                    _ = win.FillRect(hdc, &track, filled_brush);
-                    _ = win.DeleteObject(filled_brush);
-                }
-                if (!active) {
+                    played_fraction = std.math.clamp(@as(f64, @floatFromInt(a.audio_position_ms)) / @as(f64, @floatFromInt(a.audio_duration_ms)), 0, 1);
+                } else if (!active) {
                     const jid_here = if (a.chat_count > 0 and a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else "";
                     if (a.voice_pos.get(voicePosKey(a, jid_here, message.id.slice()))) |saved| {
-                        if (saved.dur_ms > 0) {
-                            const fraction = std.math.clamp(@as(f64, @floatFromInt(saved.pos_ms)) / @as(f64, @floatFromInt(saved.dur_ms)), 0, 1);
-                            track.right = track_left + @as(i32, @intFromFloat(fraction * @as(f64, @floatFromInt(track_right - track_left))));
-                            if (win.CreateSolidBrush(theme.current.primary)) |filled_brush| {
-                                _ = win.FillRect(hdc, &track, filled_brush);
-                                _ = win.DeleteObject(filled_brush);
-                            }
-                        }
+                        if (saved.dur_ms > 0) played_fraction = std.math.clamp(@as(f64, @floatFromInt(saved.pos_ms)) / @as(f64, @floatFromInt(saved.dur_ms)), 0, 1);
                     }
                 }
-                _ = win.DeleteObject(track_brush);
+                if (played_fraction > 0) {
+                    var filled = track;
+                    filled.right = track_left + @max(track_radius, @as(i32, @intFromFloat(played_fraction * @as(f64, @floatFromInt(track_right - track_left)))));
+                    smooth.fillRoundRect(&shapes, filled, track_radius, track_radius, theme.current.primary);
+                }
                 if (!active and a.played_set.wasPlayed(message.id.slice())) {
                     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-                    var played_rect = win.RECT{ .left = right - px(a, 60), .top = strip_top, .right = right - px(a, 10), .bottom = strip_top + px(a, 42) };
+                    var played_rect = win.RECT{ .left = right - px(a, 92), .top = strip_top, .right = right - px(a, 12), .bottom = strip_top + px(a, 42) };
                     _ = text_draw.drawText(hdc, lit("✓ played"), -1, &played_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
                 }
                 if (active and a.audio_duration_ms > 0) {
@@ -19044,7 +19030,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                     time_wide.set(a.allocator, time_text);
                     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
                     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-                    var time_rect = win.RECT{ .left = right - px(a, 60), .top = strip_top, .right = right - px(a, 10), .bottom = strip_top + px(a, 42) };
+                    var time_rect = win.RECT{ .left = right - px(a, 92), .top = strip_top, .right = right - px(a, 12), .bottom = strip_top + px(a, 42) };
                     _ = text_draw.drawText(hdc, time_wide.ptr(), @intCast(time_wide.len), &time_rect, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER);
                 }
             }
