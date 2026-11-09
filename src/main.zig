@@ -9348,8 +9348,10 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         if (selected < a.message_count) selected_id.set(a.messages[selected].id.slice());
     }
     var read_id = Utf8Text(191){};
-    if (read_receipt.newestOwn(a.message_count, a, ownReadable)) |newest| {
-        if (a.messages[newest].read_by >= 1) read_id.set(a.messages[newest].id.slice());
+    if (!chat_changed) {
+        if (read_receipt.newestOwn(a.message_count, a, ownReadable)) |newest| {
+            if (a.messages[newest].read_by >= 1) read_id.set(a.messages[newest].id.slice());
+        }
     }
     clearMessages(a);
     a.selected_message = null;
