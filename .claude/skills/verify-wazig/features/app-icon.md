@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-- Approved red flag at 16, 24, 32, 48, 64, 128 and 256 pixels.
+- Two chat bubbles, grey behind and green in front, at 16, 24, 32, 48, 64, 128 and 256 pixels.
 - Executable resources, window class large/small icons, taskbar and Alt+Tab.
 
 ## How to get to it (user POV)
@@ -13,7 +13,7 @@
 
 - Run feature=app-icon on GitHub Actions, optionally with a published release tag.
 - Extract resource 1 from the actual executable through LoadImageW at every ICO size.
-- Draw actual class HICON handles and require red flag and grey pole pixels.
+- Draw actual class HICON handles and require green front bubble and grey back bubble pixels.
 - Capture the taskbar and Alt+Tab; retain native icon PNGs and executable digest.
 - Send WM_DPICHANGED at 144 DPI and capture the application's transition.
 - Run the pixel regression against the original chat bubble as a red control.
