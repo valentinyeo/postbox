@@ -1,11 +1,11 @@
 const std = @import("std");
 
-pub const Capability = enum { whatsapp_dm, whatsapp_group, slack, telegram, signal };
+pub const Capability = enum { whatsapp_dm, whatsapp_group, slack, telegram, telegram_dm, signal, signal_dm };
 
 pub fn shows(capability: Capability, from_me: bool, sent: bool, revoked: bool, read_by: i64) bool {
     if (!from_me or !sent or revoked) return false;
     return switch (capability) {
-        .whatsapp_dm => read_by >= 1,
+        .whatsapp_dm, .telegram_dm, .signal_dm => read_by >= 1,
         .whatsapp_group, .slack, .telegram, .signal => false,
     };
 }
@@ -40,6 +40,14 @@ test "IGSH-1307 only a read one-to-one WhatsApp chat shows ticks" {
     try std.testing.expect(!shows(.slack, true, true, false, 1));
     try std.testing.expect(!shows(.telegram, true, true, false, 1));
     try std.testing.expect(!shows(.signal, true, true, false, 1));
+}
+
+test "IGSH-1899 a read one-to-one Telegram or Signal chat shows ticks" {
+    try std.testing.expect(shows(.telegram_dm, true, true, false, 1));
+    try std.testing.expect(!shows(.telegram_dm, true, true, false, 0));
+    try std.testing.expect(shows(.signal_dm, true, true, false, 1));
+    try std.testing.expect(!shows(.signal_dm, true, true, false, 0));
+    try std.testing.expect(!shows(.signal_dm, false, true, false, 1));
 }
 
 test "IGSH-1307 incoming, unsent and deleted messages never show ticks" {

@@ -1197,6 +1197,10 @@ TICK_CHATS = [
     dict(jid='ticks-sent@s.whatsapp.net', name='Verification Sent', provider='whatsapp', kind='direct', read_by=0),
     dict(jid='ticks-group@g.us', name='Verification Group', provider='whatsapp', kind='group', read_by=2),
     dict(jid='slack:fixture-ticks:channel', name='Verification Slack', provider='slack', kind='direct', read_by=1),
+    dict(jid='signal:ticks-contact', name='Verification Signal', provider='signal', kind='direct', read_by=1),
+    dict(jid='signal:group:ticks-group', name='Verification Signal Group', provider='signal', kind='group', read_by=2),
+    dict(jid='telegram:user:ticks-contact', name='Verification Telegram', provider='telegram', kind='direct', read_by=1),
+    dict(jid='telegram:user:ticks-unread', name='Verification Telegram Unread', provider='telegram', kind='direct', read_by=0),
 ]
 
 

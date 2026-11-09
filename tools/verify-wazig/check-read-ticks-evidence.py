@@ -19,6 +19,10 @@ def check_read_ticks(folder):
         'ticks-sent': ('whatsapp', 'ticks-sent@s.whatsapp.net', False),
         'ticks-group': ('whatsapp', 'ticks-group@g.us', False),
         'ticks-slack': ('slack', 'slack:fixture-ticks:channel', False),
+        'ticks-signal': ('signal', 'signal:ticks-contact', True),
+        'ticks-signal-group': ('signal', 'signal:group:ticks-group', False),
+        'ticks-telegram': ('telegram', 'telegram:user:ticks-contact', True),
+        'ticks-telegram-unread': ('telegram', 'telegram:user:ticks-unread', False),
     }
     pictures = set()
     for stage, (provider, chat, shown) in expected.items():
@@ -38,4 +42,4 @@ def check_read_ticks(folder):
     assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
     assert 'JOURNEY PASSED: read-ticks' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('EVIDENCE VERIFIED: grey double tick only on a read one-to-one WhatsApp message, none for unread, group or Slack')
+    print('EVIDENCE VERIFIED: grey double tick only on a read one-to-one WhatsApp, Signal or Telegram message, none for unread, group or Slack')
