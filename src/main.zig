@@ -5120,7 +5120,10 @@ fn captureVerificationCheckpointBefore(a: *App, path: []const u8) void {
     defer a.allocator.free(before);
     const evidence = messagesDirPath(a, "verification-checkpoint-before.v2") orelse return;
     defer a.allocator.free(evidence);
-    unifiedWriteProtected(a, evidence, before) catch {};
+    unifiedWriteProtected(a, evidence, before) catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendLaunchLog(a, std.fmt.bufPrint(&buffer, "verification checkpoint: evidence write failed: {s}", .{@errorName(err)}) catch "verification checkpoint: evidence write failed");
+    };
 }
 
 fn writeOutboxAtomic(a: *App, path: []const u8, data: []const u8, unified: bool) bool {
@@ -14680,23 +14683,35 @@ fn controlHandle(context: *anyopaque, line: []const u8, out: *std.Io.Writer.Allo
     const a: *App = @ptrCast(@alignCast(context));
     const w = &out.writer;
     const parsed = control_api.parseRequest(a.allocator, line) catch {
-        control_api.writeError(w, "bad request; run postboxctl --help") catch {};
+        control_api.writeError(w, "bad request; run postboxctl --help") catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "control: bad request response write failed: {s}", .{@errorName(err)}) catch "control: bad request response write failed");
+        };
         return;
     };
     if (parsed.value.cmd == .font and !control_api.validFontScale(parsed.value.font_scale)) {
         parsed.deinit();
-        control_api.writeError(w, "font needs a whole number from 60 to 160") catch {};
+        control_api.writeError(w, "font needs a whole number from 60 to 160") catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "control: invalid font response write failed: {s}", .{@errorName(err)}) catch "control: invalid font response write failed");
+        };
         return;
     }
     const event = win.CreateEventW(null, win.FALSE, win.FALSE, null) orelse {
         parsed.deinit();
-        control_api.writeError(w, "could not create an event") catch {};
+        control_api.writeError(w, "could not create an event") catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "control: event error response write failed: {s}", .{@errorName(err)}) catch "control: event error response write failed");
+        };
         return;
     };
     const call = a.allocator.create(ControlCall) catch {
         parsed.deinit();
         _ = win.CloseHandle(event);
-        control_api.writeError(w, "out of memory") catch {};
+        control_api.writeError(w, "out of memory") catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "control: allocation error response write failed: {s}", .{@errorName(err)}) catch "control: allocation error response write failed");
+        };
         return;
     };
     call.* = .{ .parsed = parsed, .out = .init(a.allocator), .event = event };
@@ -14761,7 +14776,10 @@ fn controlReadWhatsAppChats(a: *App, archived: bool) ?[]u8 {
 fn controlOnUi(a: *App, call: *ControlCall) void {
     controlDispatch(a, call) catch {
         call.out.clearRetainingCapacity();
-        control_api.writeError(&call.out.writer, "out of memory") catch {};
+        control_api.writeError(&call.out.writer, "out of memory") catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "control: dispatch error response write failed: {s}", .{@errorName(err)}) catch "control: dispatch error response write failed");
+        };
     };
     if (call.state.cmpxchgStrong(control_call_posted, control_call_answered, .acq_rel, .acquire) == null) {
         _ = win.SetEvent(call.event);
@@ -15727,7 +15745,10 @@ fn paletteSentCount(a: *App, key: chat_key.Key) u32 {
     const sent = if (msgCacheGet(a, key) orelse disk) |raw| search_rank.sentCount(a.allocator, raw) else 0;
     var identity: chat_key.Stored = .{};
     identity.set(key);
-    a.search_counts.append(a.allocator, .{ .identity = identity, .sent = sent }) catch {};
+    a.search_counts.append(a.allocator, .{ .identity = identity, .sent = sent }) catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendLaunchLog(a, std.fmt.bufPrint(&buffer, "search: sent count cache update failed: {s}", .{@errorName(err)}) catch "search: sent count cache update failed");
+    };
     return sent;
 }
 
