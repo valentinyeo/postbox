@@ -14368,7 +14368,10 @@ fn checkArchive(a: *App) void {
         const handle = child.id orelse return;
         var code: win.DWORD = 0;
         if (win.GetExitCodeProcess(handle, &code) == 0 or code == win.STILL_ACTIVE) return;
-        _ = child.wait(a.io) catch {};
+        _ = child.wait(a.io) catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "archive: child wait failed: {s}", .{@errorName(err)}) catch "archive: child wait failed");
+        };
         a.archive_child = null;
         completeArchive(a, code);
     } else startNextArchive(a);
