@@ -14115,7 +14115,7 @@ fn archiveMarker(a: *const App, chat: *const Chat) ?[*:0]const u16 {
 fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) void {
     var already_queued = false;
     for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
-        if (std.mem.eql(u8, pending.jid.slice(), jid)) already_queued = pending.state == .unarchive_pending;
+        if (std.mem.eql(u8, pending.jid.slice(), jid)) already_queued = archive_state.sameIntent(pending.state, .unarchive_pending);
     }
     if (already_queued) {
         if (std.mem.eql(u8, a.unarchive_retry.slice(), jid)) a.unarchive_retry.set("");
@@ -14486,9 +14486,10 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
     };
     if (source == .control and unifiedHub(a) and visibleChatIndex(a, key) == null and std.mem.indexOfScalar(u8, jid, '@') == null) return "Unknown chat id";
     if (jid.len == 0 or jid.len > archive_rules.max_jid or (!unifiedHub(a) and std.mem.indexOfScalar(u8, jid, '@') == null)) return "Unknown chat id";
+    const wanted = archive_state.fromUnarchive(unarchive);
     var already_queued = false;
     for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
-        if (std.mem.eql(u8, pending.jid.slice(), jid)) already_queued = (pending.state == .unarchive_pending) == unarchive;
+        if (std.mem.eql(u8, pending.jid.slice(), jid)) already_queued = archive_state.sameIntent(pending.state, wanted);
     }
     if (!already_queued and a.pending_archive_count >= a.pending_archives.len) return "Archive queue is full";
     if (a.archive_state) |state| {
@@ -14509,7 +14510,7 @@ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source:
         const pending = &a.pending_archives[a.pending_archive_count];
         pending.* = .{};
         pending.jid.set(jid);
-        pending.state = if (unarchive) .unarchive_pending else .archive_pending;
+        pending.state = wanted;
         pending.source = source;
         a.archive_batch_total = if (a.pending_archive_count == 0) 1 else a.archive_batch_total + 1;
         a.pending_archive_count += 1;
