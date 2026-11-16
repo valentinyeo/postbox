@@ -2269,7 +2269,10 @@ fn recordVerificationDispatch(a: *App, job: *const WacliJob) void {
     defer a.allocator.free(path);
     const marker = std.json.Stringify.valueAlloc(a.allocator, .{ .id = job.msg_id.slice(), .attempt = job.gen, .mouse = mouse }, .{}) catch return;
     defer a.allocator.free(marker);
-    unifiedWriteProtected(a, path, marker) catch {};
+    unifiedWriteProtected(a, path, marker) catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendLaunchLog(a, std.fmt.bufPrint(&buffer, "verification dispatch: marker write failed: {s}", .{@errorName(err)}) catch "verification dispatch: marker write failed");
+    };
 }
 
 fn wacliEnqueue(a: *App, job: WacliJob, urgent: bool) bool {
@@ -2710,7 +2713,10 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         }
     }
     rebuildViews(a, data.items);
-    if (unifiedHub(a) and !a.show_archived) a.people.replaceInboxHub(raw, peopleHubFields) catch {};
+    if (unifiedHub(a) and !a.show_archived) a.people.replaceInboxHub(raw, peopleHubFields) catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendLaunchLog(a, std.fmt.bufPrint(&buffer, "inbox: people cache update failed: {s}", .{@errorName(err)}) catch "inbox: people cache update failed");
+    };
     if (fresh and unifiedHub(a) and !a.show_archived and a.startup_view_pending) {
         a.startup_view_pending = false;
         if (a.chat_view == .signal or a.chat_view == .telegram) {
@@ -6426,7 +6432,10 @@ fn checkMarkRead(a: *App) void {
             if (win.GetTickCount64() - a.read_started_ms <= mark_read_hung_child_timeout_ms) return;
             _ = child.kill(a.io);
             code = 1;
-        } else _ = child.wait(a.io) catch {};
+        } else _ = child.wait(a.io) catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "mark read: child wait failed: {s}", .{@errorName(err)}) catch "mark read: child wait failed");
+        };
         a.read_child = null;
         if (code != 0) requeueFailedRead(a) else removeFirstPendingRead(a);
         if (a.pending_read_count > 0) {
@@ -9683,7 +9692,10 @@ fn checkSync(a: *App) void {
         if (child.id) |handle| {
             var code: win.DWORD = 0;
             if (win.GetExitCodeProcess(handle, &code) != 0 and code != win.STILL_ACTIVE) {
-                _ = child.wait(a.io) catch {};
+                _ = child.wait(a.io) catch |err| {
+                    var buffer: [128]u8 = undefined;
+                    appendLaunchLog(a, std.fmt.bufPrint(&buffer, "sync: child wait failed: {s}", .{@errorName(err)}) catch "sync: child wait failed");
+                };
                 a.sync_child = null;
                 appendLaunchLog(a, "sync: child exited");
                 const lived_secs = nowUnixSeconds() - a.sync_started_secs;
@@ -10202,7 +10214,10 @@ fn pasteDirectory(a: *App) ?[]u8 {
     const parent = std.fs.path.dirname(a.avatar_dir) orelse return null;
     const dir = std.fs.path.join(a.allocator, &.{ parent, "paste" }) catch return null;
     const cwd = std.Io.Dir.cwd();
-    cwd.createDirPath(a.io, dir) catch {};
+    cwd.createDirPath(a.io, dir) catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendLaunchLog(a, std.fmt.bufPrint(&buffer, "paste: directory creation failed: {s}", .{@errorName(err)}) catch "paste: directory creation failed");
+    };
     return dir;
 }
 
@@ -14222,9 +14237,15 @@ fn primeArchivedScan(a: *App) void {
 
 fn applyArchivedScan(a: *App, raw: []const u8) void {
     if (unifiedHub(a)) {
-        a.people.replaceArchivedHub(raw, peopleHubFields) catch {};
+        a.people.replaceArchivedHub(raw, peopleHubFields) catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "archive: hub people cache update failed: {s}", .{@errorName(err)}) catch "archive: hub people cache update failed");
+        };
     } else {
-        a.people.replaceArchived(raw) catch {};
+        a.people.replaceArchived(raw) catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "archive: people cache update failed: {s}", .{@errorName(err)}) catch "archive: people cache update failed");
+        };
     }
     refreshPeopleSearch(a);
     const state = a.archive_state orelse return;
@@ -23622,7 +23643,10 @@ fn hubNormalized(a: *App, allocator: std.mem.Allocator, job: *const WacliJob, ra
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, normalized, .{});
     defer parsed.deinit();
     const rows = parsed.value.object.getPtr("data").?.object.getPtr("messages").?;
-    if (unifiedHub(a)) cacheSlackEmoji(a, allocator, jid, rows.array.items) catch {};
+    if (unifiedHub(a)) cacheSlackEmoji(a, allocator, jid, rows.array.items) catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendLaunchLog(a, std.fmt.bufPrint(&buffer, "slack emoji: cache update failed: {s}", .{@errorName(err)}) catch "slack emoji: cache update failed");
+    };
     for (rows.array.items) |*row| {
         const id = getString(row.object, "MsgID");
         const path = try hubMediaPath(a, allocator, .{ .provider = .whatsapp, .account = job.account.slice(), .id = jid }, id);
@@ -24410,7 +24434,10 @@ fn configureHub(a: *App, init: std.process.Init) void {
     appendLaunchLog(a, "message backend: hub");
     if (messagesDirPath(a, "hub-media")) |dir| {
         defer allocator.free(dir);
-        std.Io.Dir.cwd().createDirPath(a.io, dir) catch {};
+        std.Io.Dir.cwd().createDirPath(a.io, dir) catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "message backend: media directory creation failed: {s}", .{@errorName(err)}) catch "message backend: media directory creation failed");
+        };
     }
 }
 
@@ -24467,7 +24494,10 @@ fn configureWaHub(a: *App, init: std.process.Init) void {
         appendLaunchLog(a, "whatsapp backend: hub");
         if (messagesDirPath(a, "hub-media")) |dir| {
             defer a.allocator.free(dir);
-            std.Io.Dir.cwd().createDirPath(a.io, dir) catch {};
+            std.Io.Dir.cwd().createDirPath(a.io, dir) catch |err| {
+                var buffer: [128]u8 = undefined;
+                appendLaunchLog(a, std.fmt.bufPrint(&buffer, "whatsapp backend: media directory creation failed: {s}", .{@errorName(err)}) catch "whatsapp backend: media directory creation failed");
+            };
         }
     } else {
         var buffer: [96]u8 = undefined;
