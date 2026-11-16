@@ -8538,7 +8538,7 @@ fn unfurlCardVisible(a: *App, message: *Message) bool {
         }
         return false;
     }
-    return message.unfurl_provider != .page or (entry.status == .ready and entry.thumb != null);
+    return true;
 }
 
 fn unfurlEntryFor(a: *App, message: *Message) ?*UnfurlEntry {
@@ -8570,16 +8570,6 @@ fn unfurlEntryFor(a: *App, message: *Message) ?*UnfurlEntry {
         startUnfurlFetch(a, entry, canonical_buffer[0..message.unfurl_canonical.len]);
     }
     return entry;
-}
-
-fn unfurlProviderLabel(provider: unfurl.Provider) []const u8 {
-    return switch (provider) {
-        .youtube => "YouTube",
-        .instagram => "Instagram",
-        .facebook => "Facebook",
-        .page, .image => "Link",
-        .none => "Video",
-    };
 }
 
 fn unfurlPlaceholderColor(provider: unfurl.Provider) u32 {
@@ -8633,26 +8623,30 @@ fn drawUnfurlThumbnail(hdc: win.HDC, bitmap: ?win.HBITMAP, rect: win.RECT, color
     _ = win.AlphaBlend(hdc, rect.left, rect.top, width, height, memory, 0, 0, width, height, .{ .BlendOp = win.AC_SRC_OVER, .BlendFlags = 0, .SourceConstantAlpha = 255, .AlphaFormat = win.AC_SRC_ALPHA });
 }
 
+fn unfurlCardHeight(a: *const App, message: *const Message) i32 {
+    return px(a, if (message.unfurl_provider == .page) 72 else unfurl_card_height);
+}
+
 fn drawUnfurlCard(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message: *Message, x: i32, top: i32, width: i32) void {
-    const card_width = @min(@max(width, 200), unfurl_card_width);
+    const card_width = @min(width, px(a, unfurl_card_width));
     const entry = unfurlEntryFor(a, message) orelse return;
-    const bottom = top + unfurl_card_height;
+    const bottom = top + unfurlCardHeight(a, message);
     message.unfurl_card_hit = .{ .left = x, .top = top, .right = x + card_width, .bottom = bottom };
     var face = message.unfurl_card_hit;
-    face.left += 5;
+    face.left += px(a, 5);
     smooth.fillRoundRect(shapes, face, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container_low);
     if (theme.choice == .amoled) smooth.strokeRoundRect(shapes, message.unfurl_card_hit, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline_variant, 1);
     const old_pen = win.SelectObject(hdc, win.GetStockObject(win.NULL_PEN));
     defer _ = win.SelectObject(hdc, old_pen);
 
-    const thumb_right = x + unfurl_thumb_width;
-    drawUnfurlThumbnail(hdc, entry.thumb, .{ .left = x, .top = top, .right = thumb_right, .bottom = bottom }, unfurlPlaceholderColor(message.unfurl_provider));
+    const thumb_right = if (message.unfurl_provider == .page) x else x + @min(px(a, unfurl_thumb_width), @divTrunc(card_width, 2));
+    if (thumb_right > x) drawUnfurlThumbnail(hdc, entry.thumb, .{ .left = x, .top = top, .right = thumb_right, .bottom = bottom }, unfurlPlaceholderColor(message.unfurl_provider));
     if (message.unfurl_provider != .page) {
         const play_brush = win.CreateSolidBrush(theme.current.on_surface) orelse return;
         defer _ = win.DeleteObject(play_brush);
         const old_play = win.SelectObject(hdc, play_brush);
-        const center_x = x + @divTrunc(unfurl_thumb_width, 2);
-        const center_y = top + @divTrunc(unfurl_card_height, 2);
+        const center_x = @divTrunc(x + thumb_right, 2);
+        const center_y = top + @divTrunc(bottom - top, 2);
         var points = [3]win.POINT{
             .{ .x = center_x - 9, .y = center_y - 13 },
             .{ .x = center_x - 9, .y = center_y + 13 },
@@ -8663,33 +8657,14 @@ fn drawUnfurlCard(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     }
     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(hdc, theme.current.on_surface);
-    var title: []const u16 = std.unicode.utf8ToUtf16LeStringLiteral("Loading…")[0..];
-    if (entry.status == .ready and entry.title.len > 0) {
-        title = entry.title.slice();
-    } else if (entry.status == .failed) {
-        title = std.unicode.utf8ToUtf16LeStringLiteral("Open in browser")[0..];
-    }
-    var title_rect = win.RECT{ .left = thumb_right + 10, .top = top + 10, .right = x + card_width - 10, .bottom = top + unfurl_card_height - (if (entry.description.len > 0) @as(i32, 54) else 34) };
-    _ = text_draw.drawText(hdc, title.ptr, @intCast(title.len), &title_rect, win.DT_WORDBREAK | win.DT_END_ELLIPSIS);
+    const card = chat_screen.LinkCard.init(message.text.slice(), message.unfurl_canonical.slice(), entry.title.slice());
+    var title_rect = win.RECT{ .left = thumb_right + px(a, 12), .top = top + px(a, 12), .right = x + card_width - px(a, 12), .bottom = bottom - px(a, 32) };
+    _ = text_draw.drawText(hdc, card.title.ptr, @intCast(card.title.len), &title_rect, win.DT_WORDBREAK | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-    var label_buffer: [96]u8 = undefined;
-    var author_utf8: [128]u8 = undefined;
-    const author_length = std.unicode.utf16LeToUtf8(&author_utf8, entry.author.slice()) catch 0;
-    const author = author_utf8[0..author_length];
-    if (entry.description.len > 0) {
-        var description_rect = win.RECT{ .left = thumb_right + 10, .top = bottom - 50, .right = x + card_width - 10, .bottom = bottom - 30 };
-        _ = text_draw.drawText(hdc, entry.description.ptr(), @intCast(entry.description.len), &description_rect, win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
-    }
-    const label = if (message.unfurl_provider == .page)
-        author
-    else if (author.len > 0)
-        std.fmt.bufPrint(&label_buffer, "{s} · {s}", .{ unfurlProviderLabel(message.unfurl_provider), author }) catch "Video"
-    else
-        std.fmt.bufPrint(&label_buffer, "{s}", .{unfurlProviderLabel(message.unfurl_provider)}) catch "Video";
-    var label_wide = WideText(96){};
-    label_wide.set(a.allocator, label);
-    var label_rect = win.RECT{ .left = thumb_right + 10, .top = bottom - 28, .right = x + card_width - 10, .bottom = bottom - 8 };
-    _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    var label_wide = WideText(255){};
+    label_wide.set(a.allocator, card.site);
+    var label_rect = win.RECT{ .left = title_rect.left, .top = bottom - px(a, 28), .right = title_rect.right, .bottom = bottom - px(a, 8) };
+    _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
 }
 
@@ -17555,7 +17530,15 @@ const MessageMetrics = struct {
 };
 
 fn formattedMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, draw: bool, left: i32, top: i32, extent: ?*i32) i32 {
-    const parsed = message_format.parse(message.text.slice(), selectedChatIsSlack(a));
+    var parsed = message_format.parse(message.text.slice(), selectedChatIsSlack(a));
+    if (unfurlCardVisible(a, @constCast(message))) {
+        const card = chat_screen.LinkCard.init(message.text.slice(), message.unfurl_canonical.slice(), &.{});
+        parsed = card.body(parsed);
+        if (parsed.len == 0) {
+            if (extent) |value| value.* = 0;
+            return 0;
+        }
+    }
     const em = @max(1, -scaledFontHeight(theme.type_body, a.font_scale, @intCast(a.dpi)));
     const line_height = @divTrunc(em * 3 + 1, 2);
     const metrics = MessageMetrics{ .hdc = hdc, .app = a, .parsed = &parsed, .em = em };
@@ -18206,7 +18189,7 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, sh
     if (!skip_body_line) {
         height += wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), if (message.text.len > 0) @intCast(message.text.len) else 1, text_width, false, 0, 0, message);
     }
-    if (unfurlCardVisible(a, @constCast(message))) height += unfurl_card_height + px(a, 6);
+    if (unfurlCardVisible(a, @constCast(message))) height += unfurlCardHeight(a, message) + px(a, 6);
     if (message.bitmap_height > 0) {
         const display = media_layout.fit(message.bitmap_width, message.bitmap_height, text_width, px(a, 250));
         height += display.height + px(a, 8);
@@ -19116,7 +19099,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         }
         if (unfurlCardVisible(a, message)) {
             drawUnfurlCard(&shapes, hdc, a, message, left + px(a, 12), text_top + text_height + px(a, 4), right - left - px(a, 24));
-            text_top += text_height + unfurl_card_height + px(a, 6);
+            text_top += text_height + unfurlCardHeight(a, message) + px(a, 6);
         }
         if (a.text_selection.range(index, message.text.len)) |range| {
             const colors = theme.selectionColors(theme.current.*, message.from_me);

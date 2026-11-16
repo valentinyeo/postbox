@@ -147,3 +147,77 @@ test "message groups show one time and only day changes show a day line" {
     try std.testing.expectEqual(.none, groupHeader(next, next, true).kind);
     try std.testing.expect(groupHeader(.{}, null, false).day == null);
 }
+
+pub const LinkCard = struct {
+    title: []const u16,
+    site: []const u8,
+    omitted: ?struct { start: usize, end: usize },
+
+    pub fn init(text: []const u16, canonical: []const u8, title: []const u16) LinkCard {
+        const unfurl = @import("unfurl.zig");
+        const target = unfurl.classify(canonical);
+        const rest = if (std.mem.indexOf(u8, canonical, "://")) |at| canonical[at + 3 ..] else canonical;
+        var host = rest[0 .. std.mem.indexOfAny(u8, rest, "/?#") orelse rest.len];
+        if (std.mem.startsWith(u8, host, "www.")) host = host[4..];
+        var card = LinkCard{ .title = if (title.len > 0) title else switch (target.provider) {
+            .instagram => std.unicode.utf8ToUtf16LeStringLiteral("Reel"),
+            .youtube, .facebook => std.unicode.utf8ToUtf16LeStringLiteral("Video"),
+            else => std.unicode.utf8ToUtf16LeStringLiteral("Open link"),
+        }, .site = host, .omitted = null };
+        var words = std.mem.tokenizeAny(u16, text, &.{ ' ', '\t', '\r', '\n', '<', '>' });
+        while (words.next()) |word| {
+            var buffer: [2048]u8 = undefined;
+            const length = std.unicode.utf16LeToUtf8(&buffer, word) catch continue;
+            const info = unfurl.classify(buffer[0..length]);
+            if (target.provider == .none or info.provider != target.provider or !std.mem.eql(u8, info.idSlice(), target.idSlice())) continue;
+            const start = (@intFromPtr(word.ptr) - @intFromPtr(text.ptr)) / @sizeOf(u16);
+            card.omitted = .{ .start = start, .end = start + word.len };
+            break;
+        }
+        return card;
+    }
+
+    pub fn body(self: LinkCard, input: @import("message_format.zig").Parsed) @import("message_format.zig").Parsed {
+        const omitted = self.omitted orelse return input;
+        var result = input;
+        result.len = 0;
+        for (0..input.len) |index| {
+            const source = input.source[index];
+            if (source >= omitted.start and source < omitted.end) continue;
+            result.text[result.len] = input.text[index];
+            result.styles[result.len] = input.styles[index];
+            result.source[result.len] = source;
+            result.len += 1;
+        }
+        var start: usize = 0;
+        while (start < result.len and std.mem.indexOfScalar(u16, &.{ ' ', '\r', '\n', '\t', '<', '>' }, result.text[start]) != null) : (start += 1) {}
+        var end = result.len;
+        while (end > start and std.mem.indexOfScalar(u16, &.{ ' ', '\r', '\n', '\t', '<', '>' }, result.text[end - 1]) != null) : (end -= 1) {}
+        std.mem.copyForwards(u16, &result.text, result.text[start..end]);
+        std.mem.copyForwards(@import("message_format.zig").Style, &result.styles, result.styles[start..end]);
+        std.mem.copyForwards(u16, &result.source, result.source[start..end]);
+        result.len = end - start;
+        return result;
+    }
+};
+
+test "a link card replaces a bare URL with its title and site" {
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("https://www.example.com/story?x=1");
+    const title = std.unicode.utf8ToUtf16LeStringLiteral("Fixture headline");
+    const card = LinkCard.init(text, "https://www.example.com/story?x=1", title);
+    try std.testing.expectEqualSlices(u16, title, card.title);
+    try std.testing.expectEqualStrings("example.com", card.site);
+    try std.testing.expectEqual(@as(usize, 0), card.body(@import("message_format.zig").parse(text, false)).len);
+}
+
+test "card removal keeps captions styles source offsets and other links" {
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("*Caption* https://www.instagram.com/reel/ABCDE/?x=1\nafter https://example.com/other");
+    const card = LinkCard.init(text, "https://www.instagram.com/reel/ABCDE/", &.{});
+    const body = card.body(@import("message_format.zig").parse(text, false));
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Caption \nafter https://example.com/other"), body.text[0..body.len]);
+    try std.testing.expect(body.styles[0].bold);
+    for (body.text[0..body.len], body.source[0..body.len]) |unit, source| try std.testing.expectEqual(text[source], unit);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Reel"), card.title);
+    const unrelated = LinkCard.init(text, "https://example.com/missing", &.{});
+    try std.testing.expect(unrelated.omitted == null);
+}
