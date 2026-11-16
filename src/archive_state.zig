@@ -4,6 +4,22 @@ pub const Pending = enum { archive_pending, unarchive_pending };
 pub const Intent = enum { archive, unarchive };
 pub const Base = enum { inbox, archived };
 
+pub fn visibleArchived(base_archived: bool, pending: ?Pending) bool {
+    return switch (pending orelse return base_archived) {
+        .archive_pending => true,
+        .unarchive_pending => false,
+    };
+}
+
+test "pending archive intent determines visible archived state" {
+    try std.testing.expect(!visibleArchived(false, null));
+    try std.testing.expect(visibleArchived(true, null));
+    try std.testing.expect(visibleArchived(false, .archive_pending));
+    try std.testing.expect(visibleArchived(true, .archive_pending));
+    try std.testing.expect(!visibleArchived(true, .unarchive_pending));
+    try std.testing.expect(!visibleArchived(false, .unarchive_pending));
+}
+
 pub const Operation = union(enum) {
     none: ?Intent,
     archiving: ?Intent,
