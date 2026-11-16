@@ -27,5 +27,6 @@
 | No private markers in tracked files, PR title, PR body or PR commit messages; private agent files stay out of git | `tools/check_private_markers.py` in `private-markers.yml`, patterns from the `PRIVATE_MARKERS` secret (WAZI-138) |
 | A dispatched auto-release waits for the running ci on main HEAD instead of refusing to tag | `tools/ci-green.sh` (WAZI-142) |
 | Build marker operations and Python files reading Zig source text must not increase | `tools/check-no-source-text-tests.sh` and `tools/test-check-no-source-text-tests.sh` |
+| Empty catches in Zig source must not increase (SOFT-2509) | `tools/check-no-empty-catch.sh` and `tools/test-check-no-empty-catch.sh` |
 | Each check still fails on the past commit it was written for | `tools/test-preflight-guard.sh`, `tools/test-lint-repeats.sh`, `tools/test-ci-green.sh` in CI |
 | New Actions run logs carry no private markers | `run-log-markers.yml` hourly, `tools/check_private_markers.py --logs` |
