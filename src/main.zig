@@ -8174,7 +8174,10 @@ fn checkMediaDownload(a: *App) void {
             if (got_code and code == win.STILL_ACTIVE and !timed_out) continue;
             if (timed_out or !got_code) _ = child.kill(a.io);
             if (!got_code) code = 1;
-            _ = child.wait(a.io) catch {};
+            _ = child.wait(a.io) catch |err| {
+                var buffer: [128]u8 = undefined;
+                appendLaunchLog(a, std.fmt.bufPrint(&buffer, "media download: child wait failed: {s}", .{@errorName(err)}) catch "media download: child wait failed");
+            };
             if (code == 0) {
                 markMediaAttempted(a, slot.jid.slice(), slot.id.slice());
                 clearMediaFailure(a, slot.jid.slice(), slot.id.slice());
