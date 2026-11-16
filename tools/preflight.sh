@@ -36,6 +36,7 @@ run "$ZIG" build -Dtarget=x86_64-windows-gnu --release=small
 run du -h zig-out/bin/Messages.exe
 run bash tools/lint-repeats.sh .
 run bash tools/check-required-checks.sh .
+run bash tools/check-no-source-text-tests.sh .
 run python3 -m unittest discover -s tools -p 'test_*.py'
 run python3 tools/check_cache_keys.py
 run node --test tools/strip-comments.test.js
@@ -45,5 +46,6 @@ run bash tools/test-preflight-guard.sh
 run bash tools/test-agent-setup.sh
 run bash tools/test-lint-repeats.sh
 run bash tools/test-check-required-checks.sh
+run bash tools/test-check-no-source-text-tests.sh
 run bash tools/test-people-index-speed.sh
 run bash tools/test-ci-green.sh
