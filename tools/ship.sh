@@ -2,11 +2,11 @@
 set -euo pipefail
 
 if (( $# == 1 )) && [[ "$1" == --help || "$1" == -h ]]; then
-    printf 'usage: tools/ship.sh <TICKET> "<what changed>" "<card line or none>"\n'
+    printf 'usage: tools/ship.sh <TICKET> "<what changed>" "<card line or none>" "<proof>"\n'
     exit 0
 fi
-if (( $# != 3 )) || [[ -z "$1" || -z "$2" || -z "$3" || "$1" == -* ]]; then
-    printf 'usage: tools/ship.sh <TICKET> "<what changed>" "<card line or none>"\n' >&2
+if (( $# != 4 )) || [[ -z "$1" || -z "$2" || -z "$3" || -z "$4" || "$1" == -* ]]; then
+    printf 'usage: tools/ship.sh <TICKET> "<what changed>" "<card line or none>" "<proof>"\n' >&2
     exit 2
 fi
 
@@ -46,7 +46,7 @@ git push -u origin HEAD
 pr="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
 if [[ -z "$pr" ]]; then
     body="$(git log --reverse --format='- %s' origin/main..HEAD)"
-    body+=$'\n\nCard: '"$3"$'\n\nOpened by tools/ship.sh.'
+    body+=$'\n\nCard: '"$3"$'\n\nProof: '"$4"$'\n\nOpened by tools/ship.sh.'
     pr="$(gh pr create --base main --head "$branch" --title "$1: $2" --body "$body")"
 fi
 printf '%s\n' "$pr"

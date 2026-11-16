@@ -36,6 +36,9 @@ run "$ZIG" build -Dtarget=x86_64-windows-gnu --release=small
 run du -h zig-out/bin/Messages.exe
 run bash tools/lint-repeats.sh .
 run bash tools/check-required-checks.sh .
+run bash tools/check-feature-map.sh .
+run bash tools/test-check-feature-map.sh
+run bash tools/test-check-pr-proof.sh
 run bash tools/check-no-source-text-tests.sh .
 run bash tools/check-no-empty-catch.sh .
 run python3 -m unittest discover -s tools -p 'test_*.py'
