@@ -54,6 +54,8 @@ PYTHON_HEAVY_TESTS=(
 )
 run bash tools/test-preflight-guard.sh --check-light
 run bash tools/lint-repeats.sh .
+run bash tools/check-required-checks.sh .
+run bash tools/test-check-required-checks.sh
 run node tools/strip-comments.mjs --check
 run node tools/check-fonts.mjs
 run python3 tools/check_cache_keys.py

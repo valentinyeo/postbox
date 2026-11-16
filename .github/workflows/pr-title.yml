@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   pr-title:
+    name: pr-title
     runs-on: ubuntu-latest
     steps:
       - name: check the PR title says something

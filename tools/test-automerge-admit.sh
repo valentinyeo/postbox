@@ -9,7 +9,7 @@ trap 'rm -rf -- "$temp"' EXIT
 pr318_head=c131e1073b73305c4bf95b5b485aa3949effc33c
 main_at_merge=ac9b43b7c60ccb1c4209249ad2b6daa1bb30240a
 merge_base=fc4e1a09efbfa7f176dd3cb0bcd92204167a53ee
-required=(ci tdlib windows-smoke no-comments unfurl-verification private-markers secret-scan pr-title notify-release "tdlib-cache / cache")
+mapfile -t required < "$script_dir/required-checks.txt"
 
 rollup=$(printf '%s\n' "${required[@]}" | jq -R '{__typename: "CheckRun", name: ., status: "COMPLETED", conclusion: "SUCCESS"}' | jq -cs .)
 
@@ -69,5 +69,13 @@ expect "failed code-review alone never blocks" 'merge' \
     "$(echo "$base_info" | jq -c '.statusCheckRollup += [{__typename: "CheckRun", name: "code-review", status: "COMPLETED", conclusion: "FAILURE"}]')" "$base_files" 0
 expect "failed status context blocks" 'skip (required checks not green: lint)' \
     "$(echo "$base_info" | jq -c '.statusCheckRollup += [{__typename: "StatusContext", context: "lint", state: "FAILURE"}]')" "$base_files" 0
+
+cp "$admit" "$temp/automerge-admit.sh"
+original_admit=$admit
+admit="$temp/automerge-admit.sh"
+expect "missing list fails closed" 'skip (could not read required checks)' "$base_info" "$base_files" 0
+: > "$temp/required-checks.txt"
+expect "empty list fails closed" 'skip (could not read required checks)' "$base_info" "$base_files" 0
+admit=$original_admit
 
 exit "$failed"

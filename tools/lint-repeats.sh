@@ -215,7 +215,8 @@ if [[ -f $admit && -f .github/workflows/automerge.yml ]]; then
     done
     workflows=("${ordered[@]}")
 fi
-if ! awk '
+if ! awk -v checks_file="$(dirname -- "${BASH_SOURCE[0]}")/required-checks.txt" '
+BEGIN { while ((getline check < checks_file) > 0) required_checks[++count] = check; close(checks_file) }
 function fail(line, rule, problem, fix) {
     printf "lint-repeats: %s:%d: [%s] %s. Use %s.\n", file, line, rule, problem, fix
     failed = 1
@@ -299,9 +300,8 @@ FNR == 1 {
         if (code ~ /required=/) {
             automerge_line = FNR
             all_required = 1
-            count = split("ci|tdlib|windows-smoke|no-comments|unfurl-verification|private-markers|secret-scan|pr-title|notify-release|tdlib-cache / cache", required_checks, "[|]")
             for (i = 1; i <= count; i++)
-                if (!index(code, "\"" required_checks[i] "\"")) all_required = 0
+                if (!index(code, "\"" required_checks[i] "\"") && !index(code, "/required-checks.txt")) all_required = 0
         }
         if (code ~ /\(\$checks \| length\) == 0/) missing_checks = 1
         if (code ~ /select\(\(\.name \/\/ \.context\) != "code-review"\)/) ai_optional = 1
@@ -326,6 +326,38 @@ END {
 }
 ' "${workflows[@]}"; then
     failed=1
+fi
+
+if [[ -s tools/required-checks.txt ]]; then
+    if ! python3 - <<'PYCODE'
+from pathlib import Path
+import subprocess
+
+source = Path('tools/required-checks.txt')
+checks = source.read_text().splitlines()
+try:
+    files = subprocess.check_output(['git', 'ls-files', '-co', '--exclude-standard', '-z'], stderr=subprocess.DEVNULL).decode().split('\0')
+except subprocess.CalledProcessError:
+    files = [str(path) for path in Path('.').rglob('*') if path.is_file()]
+failed = False
+for name in files:
+    if not name or Path(name) == source:
+        continue
+    path = Path(name)
+    if not path.is_file():
+        continue
+    try:
+        text = path.read_text()
+    except (UnicodeError, OSError):
+        continue
+    if checks and all(check in text for check in checks):
+        print(f'lint-repeats: {name}:1: [B10] copied required check list. Use tools/required-checks.txt.')
+        failed = True
+raise SystemExit(failed)
+PYCODE
+    then
+        failed=1
+    fi
 fi
 
 if (( failed )); then

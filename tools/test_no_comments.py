@@ -76,8 +76,7 @@ elif args[:2] == ['pr', 'view']:
     if 'mergeCommit' in args:
         print(sha)
     else:
-        checks = ['ci', 'tdlib', 'windows-smoke', 'no-comments', 'unfurl-verification',
-                  'private-markers', 'secret-scan', 'pr-title', 'notify-release', 'tdlib-cache / cache']
+        checks = pathlib.Path('tools/required-checks.txt').read_text().splitlines()
         if mode == 'missing-check': checks.remove('no-comments')
         if mode == 'read-failure': sys.exit(1)
         if mode == 'invalid-json': print('{'); sys.exit(0)
@@ -156,8 +155,7 @@ else:
         self.assertIn('could not start no-comments.yml', result.stderr)
 
     def test_IGSH_504_every_head_check_must_be_green(self):
-        checks = ('ci', 'tdlib', 'windows-smoke', 'no-comments', 'unfurl-verification',
-                  'private-markers', 'secret-scan', 'pr-title', 'notify-release', 'tdlib-cache / cache')
+        checks = (ROOT / 'tools/required-checks.txt').read_text().splitlines()
         modes = [f'{state}:{name}' for name in checks
                  for state in ('missing', 'pending', 'FAILURE', 'SKIPPED', 'CANCELLED', 'stale-success')]
         modes += ['FAILURE:future-check', 'FAILURE:tdlib-cache / cache', 'pending:future-check', 'status:PENDING', 'status:FAILURE']
