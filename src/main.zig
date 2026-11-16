@@ -62,6 +62,7 @@ const chat_cache = @import("chat_cache.zig");
 const people_index = @import("people_index.zig");
 const search_rank = @import("search_rank.zig");
 const unfurl = @import("unfurl.zig");
+const chat_screen = @import("chat_screen.zig");
 const shortcuts = @import("shortcuts.zig");
 const control_api = @import("control.zig");
 const control_pipe = @import("control_pipe.zig");
@@ -8537,7 +8538,7 @@ fn unfurlCardVisible(a: *App, message: *Message) bool {
         }
         return false;
     }
-    return message.unfurl_provider != .page or (entry.status == .ready and entry.thumb != null);
+    return true;
 }
 
 fn unfurlEntryFor(a: *App, message: *Message) ?*UnfurlEntry {
@@ -8569,16 +8570,6 @@ fn unfurlEntryFor(a: *App, message: *Message) ?*UnfurlEntry {
         startUnfurlFetch(a, entry, canonical_buffer[0..message.unfurl_canonical.len]);
     }
     return entry;
-}
-
-fn unfurlProviderLabel(provider: unfurl.Provider) []const u8 {
-    return switch (provider) {
-        .youtube => "YouTube",
-        .instagram => "Instagram",
-        .facebook => "Facebook",
-        .page, .image => "Link",
-        .none => "Video",
-    };
 }
 
 fn unfurlPlaceholderColor(provider: unfurl.Provider) u32 {
@@ -8632,26 +8623,30 @@ fn drawUnfurlThumbnail(hdc: win.HDC, bitmap: ?win.HBITMAP, rect: win.RECT, color
     _ = win.AlphaBlend(hdc, rect.left, rect.top, width, height, memory, 0, 0, width, height, .{ .BlendOp = win.AC_SRC_OVER, .BlendFlags = 0, .SourceConstantAlpha = 255, .AlphaFormat = win.AC_SRC_ALPHA });
 }
 
+fn unfurlCardHeight(a: *const App, message: *const Message) i32 {
+    return px(a, if (message.unfurl_provider == .page) 72 else unfurl_card_height);
+}
+
 fn drawUnfurlCard(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message: *Message, x: i32, top: i32, width: i32) void {
-    const card_width = @min(@max(width, 200), unfurl_card_width);
+    const card_width = @min(width, px(a, unfurl_card_width));
     const entry = unfurlEntryFor(a, message) orelse return;
-    const bottom = top + unfurl_card_height;
+    const bottom = top + unfurlCardHeight(a, message);
     message.unfurl_card_hit = .{ .left = x, .top = top, .right = x + card_width, .bottom = bottom };
     var face = message.unfurl_card_hit;
-    face.left += 5;
+    face.left += px(a, 5);
     smooth.fillRoundRect(shapes, face, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container_low);
     if (theme.choice == .amoled) smooth.strokeRoundRect(shapes, message.unfurl_card_hit, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline_variant, 1);
     const old_pen = win.SelectObject(hdc, win.GetStockObject(win.NULL_PEN));
     defer _ = win.SelectObject(hdc, old_pen);
 
-    const thumb_right = x + unfurl_thumb_width;
-    drawUnfurlThumbnail(hdc, entry.thumb, .{ .left = x, .top = top, .right = thumb_right, .bottom = bottom }, unfurlPlaceholderColor(message.unfurl_provider));
+    const thumb_right = if (message.unfurl_provider == .page) x else x + @min(px(a, unfurl_thumb_width), @divTrunc(card_width, 2));
+    if (thumb_right > x) drawUnfurlThumbnail(hdc, entry.thumb, .{ .left = x, .top = top, .right = thumb_right, .bottom = bottom }, unfurlPlaceholderColor(message.unfurl_provider));
     if (message.unfurl_provider != .page) {
         const play_brush = win.CreateSolidBrush(theme.current.on_surface) orelse return;
         defer _ = win.DeleteObject(play_brush);
         const old_play = win.SelectObject(hdc, play_brush);
-        const center_x = x + @divTrunc(unfurl_thumb_width, 2);
-        const center_y = top + @divTrunc(unfurl_card_height, 2);
+        const center_x = @divTrunc(x + thumb_right, 2);
+        const center_y = top + @divTrunc(bottom - top, 2);
         var points = [3]win.POINT{
             .{ .x = center_x - 9, .y = center_y - 13 },
             .{ .x = center_x - 9, .y = center_y + 13 },
@@ -8662,33 +8657,14 @@ fn drawUnfurlCard(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     }
     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
     _ = win.SetTextColor(hdc, theme.current.on_surface);
-    var title: []const u16 = std.unicode.utf8ToUtf16LeStringLiteral("Loading…")[0..];
-    if (entry.status == .ready and entry.title.len > 0) {
-        title = entry.title.slice();
-    } else if (entry.status == .failed) {
-        title = std.unicode.utf8ToUtf16LeStringLiteral("Open in browser")[0..];
-    }
-    var title_rect = win.RECT{ .left = thumb_right + 10, .top = top + 10, .right = x + card_width - 10, .bottom = top + unfurl_card_height - (if (entry.description.len > 0) @as(i32, 54) else 34) };
-    _ = text_draw.drawText(hdc, title.ptr, @intCast(title.len), &title_rect, win.DT_WORDBREAK | win.DT_END_ELLIPSIS);
+    const card = chat_screen.LinkCard.init(message.text.slice(), message.unfurl_canonical.slice(), entry.title.slice());
+    var title_rect = win.RECT{ .left = thumb_right + px(a, 12), .top = top + px(a, 12), .right = x + card_width - px(a, 12), .bottom = bottom - px(a, 32) };
+    _ = text_draw.drawText(hdc, card.title.ptr, @intCast(card.title.len), &title_rect, win.DT_WORDBREAK | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-    var label_buffer: [96]u8 = undefined;
-    var author_utf8: [128]u8 = undefined;
-    const author_length = std.unicode.utf16LeToUtf8(&author_utf8, entry.author.slice()) catch 0;
-    const author = author_utf8[0..author_length];
-    if (entry.description.len > 0) {
-        var description_rect = win.RECT{ .left = thumb_right + 10, .top = bottom - 50, .right = x + card_width - 10, .bottom = bottom - 30 };
-        _ = text_draw.drawText(hdc, entry.description.ptr(), @intCast(entry.description.len), &description_rect, win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
-    }
-    const label = if (message.unfurl_provider == .page)
-        author
-    else if (author.len > 0)
-        std.fmt.bufPrint(&label_buffer, "{s} · {s}", .{ unfurlProviderLabel(message.unfurl_provider), author }) catch "Video"
-    else
-        std.fmt.bufPrint(&label_buffer, "{s}", .{unfurlProviderLabel(message.unfurl_provider)}) catch "Video";
-    var label_wide = WideText(96){};
-    label_wide.set(a.allocator, label);
-    var label_rect = win.RECT{ .left = thumb_right + 10, .top = bottom - 28, .right = x + card_width - 10, .bottom = bottom - 8 };
-    _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    var label_wide = WideText(255){};
+    label_wide.set(a.allocator, card.site);
+    var label_rect = win.RECT{ .left = title_rect.left, .top = bottom - px(a, 28), .right = title_rect.right, .bottom = bottom - px(a, 8) };
+    _ = text_draw.drawText(hdc, label_wide.ptr(), @intCast(label_wide.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
 }
 
@@ -12038,7 +12014,7 @@ fn scrollToSelectedMessage(a: *App) void {
     ensureBitmap(a, &a.messages[selected]);
     var total_height: i32 = px(a, 18);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
-        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, showSenderName(a, index)) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message) + messageGap(a, index);
+        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, startsSenderGroup(a, index)) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message) + messageGap(a, index);
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     var y = client.bottom - px(a, 14) + a.scroll_y;
@@ -12046,7 +12022,7 @@ fn scrollToSelectedMessage(a: *App) void {
     while (index > 0) {
         index -= 1;
         if (!channelMessageVisible(a, &a.messages[index])) continue;
-        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, showSenderName(a, index)) + threadSummaryHeight(a, &a.messages[index]) + replyLineHeight(hdc, a, &a.messages[index]);
+        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, startsSenderGroup(a, index)) + threadSummaryHeight(a, &a.messages[index]) + replyLineHeight(hdc, a, &a.messages[index]);
         y -= height + messageGap(a, index);
         if (index != selected) continue;
         const delta = message_scroll.scrollDelta(y, height, client.top, client.bottom, px(a, 8));
@@ -15013,11 +14989,10 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, a.audio_playing_id.slice());
     try w.print(",\"state\":\"{s}\",\"position_ms\":{d},\"duration_ms\":{d},\"speed\":{d},\"bar_visible\":{}", .{ @tagName(a.audio_state), a.audio_position_ms, a.audio_duration_ms, if (a.audio_player) |player| player.speed() else 100, voiceBarActive(a) });
     const voice_bar = voiceBarRect(a);
-    try w.print(",\"bar\":[{d},{d},{d},{d}],\"speed_zone\":[{d},{d}],\"pause_zone\":[{d},{d}],\"row\":", .{ voice_bar.left, voice_bar.top, voice_bar.right, voice_bar.bottom, voice_bar.right - px(a, 300), voice_bar.right - px(a, 220), voice_bar.right - px(a, 220), voice_bar.right - px(a, 120) });
-    var row_buffer: [64]u8 = undefined;
+    try w.print(",\"bar\":[{d},{d},{d},{d}],\"speed_zone\":[{d},{d}],\"pause_zone\":[{d},{d}],\"row\":", .{ voice_bar.left, voice_bar.top, voice_bar.right, voice_bar.bottom, voiceBarZone(voice_bar, a, 1).left, voiceBarZone(voice_bar, a, 1).right, voiceBarZone(voice_bar, a, 2).left, voiceBarZone(voice_bar, a, 2).right });
     var row_index: ?usize = null;
     for (a.chats[0..a.chat_count], 0..) |chat, chat_index| {
-        if (playingRowText(a, chat.jid.slice(), &row_buffer) != null) {
+        if (a.audio_playing_id.len > 0 and std.mem.eql(u8, a.audio_playing_jid.slice(), chat.jid.slice())) {
             row_index = chat_index;
             break;
         }
@@ -15026,7 +15001,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         try w.writeAll("{\"chat\":");
         try control_api.writeString(w, a.chats[found].jid.slice());
         try w.writeAll(",\"text\":");
-        try control_api.writeString(w, playingRowText(a, a.chats[found].jid.slice(), &row_buffer) orelse "");
+        try control_api.writeStringUtf16(w, chat_screen.ChatRow.init(a.chats[found].name.slice(), a.chats[found].preview.slice()).subtitle);
         try w.writeByte('}');
     } else try w.writeAll("null");
     try w.writeByte('}');
@@ -17555,7 +17530,15 @@ const MessageMetrics = struct {
 };
 
 fn formattedMessage(hdc: win.HDC, a: *App, message: *const Message, width: i32, draw: bool, left: i32, top: i32, extent: ?*i32) i32 {
-    const parsed = message_format.parse(message.text.slice(), selectedChatIsSlack(a));
+    var parsed = message_format.parse(message.text.slice(), selectedChatIsSlack(a));
+    if (unfurlCardVisible(a, @constCast(message))) {
+        const card = chat_screen.LinkCard.init(message.text.slice(), message.unfurl_canonical.slice(), &.{});
+        parsed = card.body(parsed);
+        if (parsed.len == 0) {
+            if (extent) |value| value.* = 0;
+            return 0;
+        }
+    }
     const em = @max(1, -scaledFontHeight(theme.type_body, a.font_scale, @intCast(a.dpi)));
     const line_height = @divTrunc(em * 3 + 1, 2);
     const metrics = MessageMetrics{ .hdc = hdc, .app = a, .parsed = &parsed, .em = em };
@@ -17887,25 +17870,11 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
             _ = text_draw.drawText(item.hDC, wide_label.ptr() + 7, @intCast(wide_label.len - 7), &preview_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
         } else |_| {}
     } else {
+        const row_label = chat_screen.ChatRow.init(chat.name.slice(), chat.preview.slice());
         var kind = WideText(255){};
-        if (chat.provider == .slack and slackWorkspaceCount(a) > 1) {
-            if (slackInstallation(a, chat.account.slice())) |installation| {
-                var kind_utf8: [96]u8 = undefined;
-                const kind_len = std.unicode.utf16LeToUtf8(&kind_utf8, chat.kind.slice()) catch 0;
-                var label: [320]u8 = undefined;
-                kind.set(a.allocator, std.fmt.bufPrint(&label, "{s} · {s}", .{ kind_utf8[0..kind_len], if (installation.team_name.len > 0) installation.team_name.slice() else installation.team_id.slice() }) catch installation.team_name.slice());
-            }
-        }
-        if (chat.preview.len > 0) kind = chat.preview;
-        if (kind.len == 0) {
-            @memcpy(kind.buf[0..chat.kind.len], chat.kind.slice());
-            kind.len = chat.kind.len;
-        }
-        var playing_buffer: [64]u8 = undefined;
-        if (playingRowText(a, chat.jid.slice(), &playing_buffer)) |playing| {
-            kind.set(a.allocator, playing);
-            _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else row_primary);
-        }
+        kind.len = row_label.subtitle.len;
+        @memcpy(kind.buf[0..kind.len], row_label.subtitle);
+        kind.buf[kind.len] = 0;
         if (verification_fixture and index == 0) {
             if (text_draw.drawTextMeasured(item.hDC, kind.ptr(), @intCast(kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS)) |measurement| {
                 a.font_preview_proof = .{ .scale = a.font_scale, .item = item.rcItem, .text = measurement };
@@ -17992,15 +17961,23 @@ fn transcriptRender(hdc: win.HDC, a: *App, message: *const Message, shown: c_int
     return y - top;
 }
 
+fn messageGroup(message: *const Message) chat_screen.GroupMessage {
+    const stamp = message.timestamp.slice();
+    const day: ?chat_screen.Day = if (localTimestamp(stamp)) |local|
+        .{ .year = local.wYear, .month = local.wMonth, .day = local.wDay }
+    else if (stamp.len >= 10)
+        .{ .year = timestampPart(stamp, 0, 4) orelse 0, .month = timestampPart(stamp, 5, 2) orelse 0, .day = timestampPart(stamp, 8, 2) orelse 0 }
+    else
+        null;
+    return .{ .day = day, .seconds = media_age.unixSeconds(stamp), .from_me = message.from_me, .sender_id = message.sender_jid.slice(), .sender = message.sender.slice() };
+}
+
+fn messageGroupHeader(a: *const App, index: usize) chat_screen.GroupHeader {
+    return chat_screen.groupHeader(messageGroup(&a.messages[index]), if (index > 0) messageGroup(&a.messages[index - 1]) else null, groupChat(a));
+}
+
 fn startsSenderGroup(a: *App, index: usize) bool {
-    if (index == 0 or separatorHeight(a, index) > 0) return true;
-    const message = &a.messages[index];
-    const previous = &a.messages[index - 1];
-    if (message.from_me != previous.from_me) return true;
-    if (message.sender_jid.len > 0 and previous.sender_jid.len > 0)
-        return !std.mem.eql(u8, message.sender_jid.slice(), previous.sender_jid.slice());
-    if (message.sender.len == 0 or previous.sender.len == 0) return true;
-    return !std.mem.eql(u16, message.sender.slice(), previous.sender.slice());
+    return messageGroupHeader(a, index).kind != .none;
 }
 
 fn ownReadable(a: *App, index: usize) bool {
@@ -18029,10 +18006,7 @@ fn showSenderName(a: *App, index: usize) bool {
 }
 
 fn separatorHeight(a: *const App, index: usize) i32 {
-    const current = media_age.unixSeconds(a.messages[index].timestamp.slice()) orelse return 0;
-    if (index == 0) return px(a, 32);
-    const previous = media_age.unixSeconds(a.messages[index - 1].timestamp.slice()) orelse return 0;
-    return if (@divFloor(current, 86400) != @divFloor(previous, 86400) or current - previous >= 3600) px(a, 32) else 0;
+    return if (messageGroupHeader(a, index).day != null) px(a, 32) else 0;
 }
 
 fn messageGap(a: *App, index: usize) i32 {
@@ -18215,7 +18189,7 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, sh
     if (!skip_body_line) {
         height += wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), if (message.text.len > 0) @intCast(message.text.len) else 1, text_width, false, 0, 0, message);
     }
-    if (unfurlCardVisible(a, @constCast(message))) height += unfurl_card_height + px(a, 6);
+    if (unfurlCardVisible(a, @constCast(message))) height += unfurlCardHeight(a, message) + px(a, 6);
     if (message.bitmap_height > 0) {
         const display = media_layout.fit(message.bitmap_width, message.bitmap_height, text_width, px(a, 250));
         height += display.height + px(a, 8);
@@ -18782,7 +18756,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     }
     var total_height: i32 = px(a, 90);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
-        if (channelMessageVisible(a, message)) total_height += measureMessageCached(hdc, a, message, bubble_width, showSenderName(a, index)) + messageGap(a, index);
+        if (channelMessageVisible(a, message)) total_height += measureMessageCached(hdc, a, message, bubble_width, startsSenderGroup(a, index)) + messageGap(a, index);
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     a.scroll_y = std.math.clamp(a.scroll_y, 0, a.max_scroll);
@@ -18807,7 +18781,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         message.link_count = 0;
         message.word_count = 0;
         if (!channelMessageVisible(a, message)) continue;
-        const show_sender = showSenderName(a, index);
+        const show_sender = startsSenderGroup(a, index);
         const estimated_height = measureMessageCached(hdc, a, message, bubble_width, show_sender);
         var y = cursor_y - estimated_height;
         cursor_y = y - messageGap(a, index);
@@ -18905,17 +18879,17 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         var text_top = bubble_top + px(a, 10);
         if (show_sender) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
-            if (!message.from_me) drawSenderAvatar(&shapes, hdc, a, left - px(a, 42), y, message);
+            if (groupChat(a) and !message.from_me) drawSenderAvatar(&shapes, hdc, a, left - px(a, 42), y, message);
             const seed = if (message.sender_jid.len > 0) message.sender_jid.slice() else std.mem.sliceAsBytes(message.sender.slice());
             const tint = senderColorFor(seed);
             _ = win.SetTextColor(hdc, rgb(tint.r, tint.g, tint.b));
-            const sender_width = if (message.from_me) @as(i32, 0) else @min(column.right - left - px(a, 60), runWidth(hdc, message.sender.slice()));
+            const sender_width = if (message.from_me or !groupChat(a)) @as(i32, 0) else @min(column.right - left - px(a, 60), runWidth(hdc, message.sender.slice()));
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             const header_width = sender_width + px(a, 8) + runWidth(hdc, message.time.slice());
             const header_left = if (message.from_me) @max(column.left, column.right - header_width) else left;
             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
             var sender_rect = win.RECT{ .left = header_left, .top = y, .right = header_left + sender_width, .bottom = bubble_top - px(a, 8) };
-            if (!message.from_me) _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+            if (groupChat(a) and !message.from_me) _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             var time_rect = win.RECT{ .left = sender_rect.right + px(a, 8), .top = y + px(a, 1), .right = @min(column.right, header_left + header_width), .bottom = sender_rect.bottom };
@@ -18929,11 +18903,15 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             var date = WideText(63){};
             var buffer: [80]u8 = undefined;
-            const stamp = message.timestamp.slice();
-            var time_buffer: [32]u8 = undefined;
-            const time_len = std.unicode.utf16LeToUtf8(&time_buffer, message.time.slice()) catch 0;
-            date.set(a.allocator, std.fmt.bufPrint(&buffer, "{s}  {s}", .{ stamp[0..@min(10, stamp.len)], time_buffer[0..time_len] }) catch "");
+            var today: win.SYSTEMTIME = undefined;
+            win.GetLocalTime(&today);
+            if (messageGroupHeader(a, index).day) |day| date.set(a.allocator, day.label(.{ .year = today.wYear, .month = today.wMonth, .day = today.wDay }, &buffer));
             var date_rect = win.RECT{ .left = column.left, .top = y - reply_height - separator, .right = column.right, .bottom = y - reply_height - px(a, 8) };
+            const label_width = runWidth(hdc, date.slice()) + px(a, 24);
+            const center = @divTrunc(date_rect.left + date_rect.right, 2);
+            const line_y = @divTrunc(date_rect.top + date_rect.bottom, 2);
+            smooth.fillRoundRect(&shapes, .{ .left = date_rect.left, .top = line_y, .right = @max(date_rect.left, center - @divTrunc(label_width, 2)), .bottom = line_y + px(a, 1) }, 0, 0, theme.current.outline_variant);
+            smooth.fillRoundRect(&shapes, .{ .left = @min(date_rect.right, center + @divTrunc(label_width, 2)), .top = line_y, .right = date_rect.right, .bottom = line_y + px(a, 1) }, 0, 0, theme.current.outline_variant);
             _ = text_draw.drawText(hdc, date.ptr(), @intCast(date.len), &date_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
         if (message.quote.len > 0 and message.quoted_msg_id.len == 0) text_top = drawQuoteBlock(&shapes, hdc, a, message, index, client, left, right, text_top);
@@ -19121,7 +19099,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         }
         if (unfurlCardVisible(a, message)) {
             drawUnfurlCard(&shapes, hdc, a, message, left + px(a, 12), text_top + text_height + px(a, 4), right - left - px(a, 24));
-            text_top += text_height + unfurl_card_height + px(a, 6);
+            text_top += text_height + unfurlCardHeight(a, message) + px(a, 6);
         }
         if (a.text_selection.range(index, message.text.len)) |range| {
             const colors = theme.selectionColors(theme.current.*, message.from_me);
@@ -19256,13 +19234,13 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
             if (voiceBarActive(a) and rectHasPoint(voiceBarRect(a), x, y)) {
                 const bar = voiceBarRect(a);
-                if (x > bar.right - px(a, 120)) {
+                if (rectHasPoint(voiceBarZone(bar, a, 0), x, y)) {
                     stopAudio(a);
                     setStatus(a, "Voice message stopped");
-                } else if (x > bar.right - px(a, 220)) {
+                } else if (rectHasPoint(voiceBarZone(bar, a, 2), x, y)) {
                     toggleBarAudio(a);
                     setStatus(a, if (a.audio_state == .paused) "Voice message paused" else "Voice message playing");
-                } else if (x > bar.right - px(a, 300)) {
+                } else if (rectHasPoint(voiceBarZone(bar, a, 1), x, y)) {
                     cycleSpeed(a);
                 } else {
                     for (a.chats[0..a.chat_count], 0..) |chat, index| {
@@ -22527,24 +22505,26 @@ fn voiceBarRect(a: *const App) win.RECT {
     var client: win.RECT = undefined;
     const canvas = a.canvas orelse return .{};
     if (win.GetClientRect(canvas, &client) == 0) return .{};
-    return .{ .left = 0, .top = 0, .right = client.right, .bottom = px(a, 34) };
+    return @bitCast(chat_screen.voicePillRect(client.right, @intCast(a.dpi)));
 }
 
 fn voiceBarZone(bar: win.RECT, a: *const App, slot: i32) win.RECT {
-    return .{ .left = bar.right - px(a, slot + 100), .top = bar.top, .right = bar.right - px(a, slot), .bottom = bar.bottom };
+    return switch (slot) {
+        0 => .{ .left = bar.right - px(a, 28), .top = bar.top, .right = bar.right, .bottom = bar.bottom },
+        1 => .{ .left = bar.right - px(a, 64), .top = bar.top, .right = bar.right - px(a, 28), .bottom = bar.bottom },
+        else => .{ .left = bar.left, .top = bar.top, .right = bar.left + px(a, 28), .bottom = bar.bottom },
+    };
 }
 
-fn playingRowText(a: *const App, jid: []const u8, buffer: []u8) ?[]const u8 {
-    if (a.audio_playing_id.len == 0) return null;
-    if (a.audio_state != .playing and a.audio_state != .paused) return null;
-    if (!std.mem.eql(u8, a.audio_playing_jid.slice(), jid)) return null;
-    const speed: u32 = if (a.audio_player) |player| player.speed() else 100;
-    const label: []const u8 = switch (speed) {
-        150 => "1.5x",
-        200 => "2x",
-        else => "1x",
-    };
-    return std.fmt.bufPrint(buffer, "{s} {s}", .{ if (a.audio_state == .paused) "Voice message paused" else "Playing voice message", label }) catch null;
+fn voicePill(a: *const App) chat_screen.VoicePill {
+    var name: []const u16 = &.{};
+    for (a.chats[0..a.chat_count]) |*chat| {
+        if (std.mem.eql(u8, chat.jid.slice(), a.audio_playing_jid.slice())) {
+            name = chat.name.slice();
+            break;
+        }
+    }
+    return chat_screen.VoicePill.init(name, a.audio_position_ms, a.audio_duration_ms, if (a.audio_state == .paused) .paused else .playing);
 }
 
 fn refreshChatList(a: *App) void {
@@ -22577,27 +22557,22 @@ fn paintVoiceBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
     _ = win.SetTextColor(hdc, theme.current.on_secondary_container);
-    var text: [160]u8 = undefined;
-    var line = WideText(160){};
-    line.set(a.allocator, std.fmt.bufPrint(&text, "{s} - {s}", .{ if (a.audio_state == .paused) "Voice message paused" else "Playing voice message", a.audio_playing_jid.slice() }) catch "Playing voice message");
-    var rect = win.RECT{ .left = bar.left + px(a, 12), .top = bar.top, .right = bar.right - px(a, 312), .bottom = bar.bottom };
-    _ = text_draw.drawText(hdc, line.ptr(), -1, &rect, win.DT_LEFT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    const pill = voicePill(a);
+    var rect = win.RECT{ .left = bar.left + px(a, 32), .top = bar.top, .right = @max(bar.left + px(a, 32), bar.right - px(a, 160)), .bottom = bar.bottom };
+    _ = text_draw.drawText(hdc, pill.name.ptr, @intCast(pill.name.len), &rect, win.DT_LEFT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
+    var buffer: [40]u8 = undefined;
+    var time = WideText(39){};
+    time.set(a.allocator, pill.time(&buffer));
+    var time_rect = win.RECT{ .left = @max(rect.left, bar.right - px(a, 156)), .top = bar.top, .right = bar.right - px(a, 64), .bottom = bar.bottom };
+    _ = text_draw.drawText(hdc, time.ptr(), @intCast(time.len), &time_rect, win.DT_RIGHT | win.DT_VCENTER | win.DT_SINGLELINE);
     const controls = [_]struct { slot: i32, label: [*:0]const u16 }{
-        .{ .slot = 200, .label = speedLabel(a.audio_player) },
-        .{ .slot = 100, .label = if (a.audio_state == .paused) lit("resume") else lit("pause") },
-        .{ .slot = 0, .label = lit("close") },
+        .{ .slot = 2, .label = if (pill.state == .paused) lit("▶") else lit("Ⅱ") },
+        .{ .slot = 1, .label = speedLabel(a.audio_player) },
+        .{ .slot = 0, .label = lit("×") },
     };
     for (controls) |control| {
         var zone = voiceBarZone(bar, a, control.slot);
-        zone.right -= px(a, 8);
-        _ = text_draw.drawText(hdc, control.label, -1, &zone, win.DT_RIGHT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_NOPREFIX);
-    }
-    if (a.audio_duration_ms > 0) {
-        const width = bar.right - bar.left;
-        const done = @divTrunc(width * @as(i32, @intCast(@min(a.audio_position_ms, a.audio_duration_ms))), @as(i32, @intCast(a.audio_duration_ms)));
-        const line_height: i32 = @max(2, px(a, 2));
-        const progress = win.RECT{ .left = bar.left, .top = bar.bottom - line_height, .right = bar.left + @max(0, @min(width, done)), .bottom = bar.bottom };
-        smooth.fillRoundRect(shapes, progress, line_height, line_height, theme.current.primary);
+        _ = text_draw.drawText(hdc, control.label, -1, &zone, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_NOPREFIX);
     }
 }
 

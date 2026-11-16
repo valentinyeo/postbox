@@ -232,3 +232,24 @@ test "a long paste grows the box up to half the chat" {
         try testing.expect(slots.text.bottom > slots.text.top);
     }
 }
+
+test "Quiet chat keeps distinct voice note and dictation buttons in every capture state" {
+    const testing = @import("std").testing;
+    for ([_]i32{ 96, 120, 144, 192 }) |dpi| {
+        for ([_]i32{ 280, 900 }) |width| {
+            const pane = Rect{ .right = scale(width, dpi), .bottom = scale(800, dpi) };
+            for ([_]bool{ false, true }) |recording| {
+                for ([_]bool{ false, true }) |dictating| {
+                    const slots = arrange(pane, scale(44, dpi), dpi, recording, dictating);
+                    try testing.expect(slots.voice.right > slots.voice.left);
+                    try testing.expect(slots.dictate.right > slots.dictate.left);
+                    try testing.expect(slots.voice.right < slots.dictate.left);
+                    try testing.expectEqual(slots.voice.top, slots.dictate.top);
+                    try testing.expectEqual(slots.voice.bottom, slots.dictate.bottom);
+                    try testing.expect(slots.text.right < slots.voice.left);
+                    try testing.expect(slots.dictate.right < slots.emoji.left);
+                }
+            }
+        }
+    }
+}
