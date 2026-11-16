@@ -1,4 +1,5 @@
 const std = @import("std");
+const archive_state = @import("archive_state.zig");
 const verification_fixture = false;
 const chat_key = @import("chat_key.zig");
 const archive_rules = @import("archive_rules.zig");
@@ -51,7 +52,7 @@ const Chat = struct {
 const PendingArchive = struct {
     batch_count: usize = 0,
     jid: Utf8Text(191) = .{},
-    should_unarchive: bool = false,
+    state: archive_state.Pending = .archive_pending,
     source: ArchiveSource = .shortcut,
     retry_at_ms: u64 = 0,
 };
@@ -184,7 +185,7 @@ fn nowUnixSeconds() i64 {
 fn setStatus(a: *App, status: []const u8) void {
     var buffer: [64]u8 = undefined;
     const progress = if (a.pending_archive_count > 0)
-        archive_rules.progressStatus(&buffer, a.pending_archives[0].should_unarchive, a.archive_batch_total, a.pending_archive_count)
+        archive_rules.progressStatus(&buffer, (a.pending_archives[0].state == .unarchive_pending), a.archive_batch_total, a.pending_archive_count)
     else
         null;
     a.status.set(progress orelse status);
@@ -304,7 +305,7 @@ test "a new message that unarchives a kept chat sends it straight back to the ar
     try std.testing.expectEqual(@as(usize, 0), a.pending_archive_count);
     try std.testing.expect(holdKept(&a, "a@g.us", false, "2026-10-10T11:00:00Z"));
     try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-    try std.testing.expect(!a.pending_archives[0].should_unarchive);
+    try std.testing.expect((a.pending_archives[0].state == .archive_pending));
     try std.testing.expectEqualStrings("a@g.us", a.spawned_jid.slice());
     try std.testing.expect(pendingArchiveHidesChat(&a, "a@g.us", false));
     try std.testing.expect(!pendingArchiveHidesChat(&a, "a@g.us", true));
@@ -331,7 +332,7 @@ test "a plain archive persists intent separately from the keep flag before savin
         try std.testing.expect(!state.isKept(key.key().id));
         try std.testing.expect(state.baseline(key.key().id) != null);
         try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-        try std.testing.expect(!a.pending_archives[0].should_unarchive);
+        try std.testing.expect((a.pending_archives[0].state == .archive_pending));
         try std.testing.expectEqual(@as(usize, 1), a.chat_count);
         var loaded = archive_rules.State{};
         loaded.parse(a.saved[0..a.saved_len]);
@@ -412,7 +413,7 @@ test "a kept chat stays kept through a restart and is archived again on the next
     defer a.bulk.deinit(a.allocator);
     try std.testing.expect(holdKept(&a, "a@g.us", false, "2026-10-10T11:00:00Z"));
     try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-    try std.testing.expect(!a.pending_archives[0].should_unarchive);
+    try std.testing.expect((a.pending_archives[0].state == .archive_pending));
     var again = archive_rules.State{};
     again.parse(a.saved[0..a.saved_len]);
     try std.testing.expect(again.isKept("a@g.us"));
@@ -435,7 +436,7 @@ test "keep archives the selected chat and persists before the child starts" {
     archiveSelected(&a, true);
     try std.testing.expect(a.persisted_before_start);
     try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-    try std.testing.expect(!a.pending_archives[0].should_unarchive);
+    try std.testing.expect((a.pending_archives[0].state == .archive_pending));
     try std.testing.expectEqualStrings("a@g.us", a.pending_archives[0].jid.slice());
     try std.testing.expectEqual(@as(usize, 1), a.chat_count);
     try std.testing.expectEqualStrings("Kept archived. Won't come back", a.status.slice());
@@ -505,7 +506,7 @@ test "unarchive clears keep while unavailable and full queues do not claim succe
     a.show_archived = true;
     state.setKeep("a@g.us", true);
     archiveSelected(&a, false);
-    try std.testing.expect(a.pending_archives[0].should_unarchive);
+    try std.testing.expect((a.pending_archives[0].state == .unarchive_pending));
     try std.testing.expect(!state.isKept("a@g.us"));
 
     refixture(&a, &state);
@@ -542,7 +543,7 @@ test "keep overrides an earlier archive followed by an unarchive" {
     try std.testing.expect(archiveRequest(&a, "a@g.us", .unarchive) == null);
     try std.testing.expect(archiveRequest(&a, "a@g.us", .keep) == null);
     try std.testing.expectEqual(@as(usize, 3), a.pending_archive_count);
-    try std.testing.expect(!a.pending_archives[2].should_unarchive);
+    try std.testing.expect((a.pending_archives[2].state == .archive_pending));
     try std.testing.expect(state.isKept("a@g.us"));
 }
 
@@ -616,7 +617,7 @@ test "Ctrl+E archives from the compose box and Ctrl+Alt+E is unbound" {
     try std.testing.expect(archiveKey(&a, 'E', true, false, false, a.compose, &message));
     try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
     try std.testing.expectEqualStrings("a@g.us", a.pending_archives[0].jid.slice());
-    try std.testing.expect(!a.pending_archives[0].should_unarchive);
+    try std.testing.expect((a.pending_archives[0].state == .archive_pending));
     try std.testing.expect(!state.isKept("a@g.us"));
     try std.testing.expectEqualStrings("Archived", a.status.slice());
     const repeated = win.MSG{ .lParam = 1 << 30 };
@@ -741,7 +742,7 @@ test "successful local text file and voice sends unarchive even kept chats" {
             a.pending_send_count = 1;
             removeFirstPendingSend(&a, true);
             try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
-            try std.testing.expect(a.pending_archives[0].should_unarchive);
+            try std.testing.expect((a.pending_archives[0].state == .unarchive_pending));
             try std.testing.expectEqual(ArchiveSource.send, a.pending_archives[0].source);
             try std.testing.expect(!state.isKept("a@g.us"));
         }
@@ -773,7 +774,7 @@ test "local send unarchives its jid even when a different chat is selected" {
     removeFirstPendingSend(&a, true);
     try std.testing.expectEqual(@as(usize, 1), a.pending_archive_count);
     try std.testing.expectEqualStrings("sent@g.us", a.pending_archives[0].jid.slice());
-    try std.testing.expect(a.pending_archives[0].should_unarchive);
+    try std.testing.expect((a.pending_archives[0].state == .unarchive_pending));
 }
 
 test "hub archive dispatch uses the queued jid direction and source once" {
@@ -790,7 +791,7 @@ test "hub archive dispatch uses the queued jid direction and source once" {
         startNextArchive(&a);
         startNextArchive(&a);
         try std.testing.expectEqual(@as(usize, 1), a.hub_archive_requests);
-        try std.testing.expectEqual(action == .unarchive, a.pending_archives[0].should_unarchive);
+        try std.testing.expectEqual(action == .unarchive, (a.pending_archives[0].state == .unarchive_pending));
         try std.testing.expectEqual(ArchiveSource.control, a.pending_archives[0].source);
         try std.testing.expectEqualStrings("a@g.us", a.spawned_jid.slice());
     }
@@ -847,7 +848,7 @@ test "local send deferred unarchive retains send source past a full queue" {
     removeFirstPendingArchive(&a);
     retryUnarchiveChat(&a);
     try std.testing.expectEqual(@as(usize, 0), a.unarchive_retry.len);
-    try std.testing.expect(a.pending_archives[a.pending_archive_count - 1].should_unarchive);
+    try std.testing.expect((a.pending_archives[a.pending_archive_count - 1].state == .unarchive_pending));
     try std.testing.expectEqual(ArchiveSource.send, a.pending_archives[a.pending_archive_count - 1].source);
     try std.testing.expect(!state.isKept("a@g.us"));
 }
@@ -1681,7 +1682,7 @@ test "IGSH-949 WhatsApp ordinary actions queue provider writes and keep remains 
         try std.testing.expect(archiveChat(&a, key, action, .shortcut) == null);
         try std.testing.expectEqual(@as(usize, if (action == .keep) 0 else 1), a.pending_archive_count);
         try std.testing.expectEqual(@as(usize, if (action == .keep) 0 else 1), a.hub_archive_requests);
-        if (action != .keep) try std.testing.expectEqual(action == .unarchive, a.pending_archives[0].should_unarchive);
+        if (action != .keep) try std.testing.expectEqual(action == .unarchive, (a.pending_archives[0].state == .unarchive_pending));
         try std.testing.expectEqual(action == .keep, state.isKept(key.id));
         try std.testing.expectEqual(action != .unarchive, state.isArchived(key, false));
     }
