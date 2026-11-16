@@ -28,7 +28,8 @@ printf 'catch {}\n' > "$temp/src/new.zig"
 reject
 printf '%s\n' '// catch {}' 'const s = "catch {}";' 'const q = "\\\" catch {}";' > "$temp/src/new.zig"
 bash "$check" "$temp" > "$temp/output"
-sed -i 's/^src\/main.zig 42$/src\/main.zig 43/' "$temp/tools/empty-catch-limits.txt"
+main_limit=$(awk '$1 == "src/main.zig" { print $2 }' "$temp/tools/empty-catch-limits.txt")
+sed -i "s|^src/main.zig $main_limit$|src/main.zig $((main_limit + 1))|" "$temp/tools/empty-catch-limits.txt"
 bash "$check" "$temp" > "$temp/output"
-grep -Fq 'lower the limit for src/main.zig to 42' "$temp/output"
+grep -Fq "lower the limit for src/main.zig to $main_limit" "$temp/output"
 printf 'test-check-no-empty-catch: PASS\n'
