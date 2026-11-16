@@ -1,0 +1,5 @@
+src/audio.zig 1
+src/control_pipe.zig 1
+src/main.zig 42
+src/slack_emoji.zig 1
+total 45
