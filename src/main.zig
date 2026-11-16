@@ -15015,10 +15015,9 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.print(",\"state\":\"{s}\",\"position_ms\":{d},\"duration_ms\":{d},\"speed\":{d},\"bar_visible\":{}", .{ @tagName(a.audio_state), a.audio_position_ms, a.audio_duration_ms, if (a.audio_player) |player| player.speed() else 100, voiceBarActive(a) });
     const voice_bar = voiceBarRect(a);
     try w.print(",\"bar\":[{d},{d},{d},{d}],\"speed_zone\":[{d},{d}],\"pause_zone\":[{d},{d}],\"row\":", .{ voice_bar.left, voice_bar.top, voice_bar.right, voice_bar.bottom, voiceBarZone(voice_bar, a, 1).left, voiceBarZone(voice_bar, a, 1).right, voiceBarZone(voice_bar, a, 2).left, voiceBarZone(voice_bar, a, 2).right });
-    var row_buffer: [64]u8 = undefined;
     var row_index: ?usize = null;
     for (a.chats[0..a.chat_count], 0..) |chat, chat_index| {
-        if (playingRowText(a, chat.jid.slice(), &row_buffer) != null) {
+        if (a.audio_playing_id.len > 0 and std.mem.eql(u8, a.audio_playing_jid.slice(), chat.jid.slice())) {
             row_index = chat_index;
             break;
         }
@@ -15027,7 +15026,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         try w.writeAll("{\"chat\":");
         try control_api.writeString(w, a.chats[found].jid.slice());
         try w.writeAll(",\"text\":");
-        try control_api.writeString(w, playingRowText(a, a.chats[found].jid.slice(), &row_buffer) orelse "");
+        try control_api.writeStringUtf16(w, chat_screen.ChatRow.init(a.chats[found].name.slice(), a.chats[found].preview.slice(), a.chats[found].kind.slice()).subtitle);
         try w.writeByte('}');
     } else try w.writeAll("null");
     try w.writeByte('}');
@@ -17902,11 +17901,10 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
             @memcpy(kind.buf[0..chat.kind.len], chat.kind.slice());
             kind.len = chat.kind.len;
         }
-        var playing_buffer: [64]u8 = undefined;
-        if (playingRowText(a, chat.jid.slice(), &playing_buffer)) |playing| {
-            kind.set(a.allocator, playing);
-            _ = win.SetTextColor(item.hDC, if (selected or bulk_selected) row_text else row_primary);
-        }
+        const row_label = chat_screen.ChatRow.init(chat.name.slice(), chat.preview.slice(), kind.slice());
+        kind.len = row_label.subtitle.len;
+        @memcpy(kind.buf[0..kind.len], row_label.subtitle);
+        kind.buf[kind.len] = 0;
         if (verification_fixture and index == 0) {
             if (text_draw.drawTextMeasured(item.hDC, kind.ptr(), @intCast(kind.len), &kind_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS)) |measurement| {
                 a.font_preview_proof = .{ .scale = a.font_scale, .item = item.rcItem, .text = measurement };
@@ -22548,19 +22546,6 @@ fn voicePill(a: *const App) chat_screen.VoicePill {
         }
     }
     return chat_screen.VoicePill.init(name, a.audio_position_ms, a.audio_duration_ms, if (a.audio_state == .paused) .paused else .playing);
-}
-
-fn playingRowText(a: *const App, jid: []const u8, buffer: []u8) ?[]const u8 {
-    if (a.audio_playing_id.len == 0) return null;
-    if (a.audio_state != .playing and a.audio_state != .paused) return null;
-    if (!std.mem.eql(u8, a.audio_playing_jid.slice(), jid)) return null;
-    const speed: u32 = if (a.audio_player) |player| player.speed() else 100;
-    const label: []const u8 = switch (speed) {
-        150 => "1.5x",
-        200 => "2x",
-        else => "1x",
-    };
-    return std.fmt.bufPrint(buffer, "{s} {s}", .{ if (a.audio_state == .paused) "Voice message paused" else "Playing voice message", label }) catch null;
 }
 
 fn refreshChatList(a: *App) void {
