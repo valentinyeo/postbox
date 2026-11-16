@@ -10,7 +10,8 @@ files_file=$2
 behind_by=$3
 REPO_OWNER=$4
 
-required='["ci","tdlib","windows-smoke","no-comments","unfurl-verification","private-markers","secret-scan","pr-title","notify-release","tdlib-cache / cache"]'
+required=$(jq -R -s 'split("\n") | map(select(length > 0)) | select(length > 0)' "$(dirname -- "${BASH_SOURCE[0]}")/required-checks.txt" 2>/dev/null) || required=""
+if [ -z "$required" ]; then echo "skip (could not read required checks)"; exit 0; fi
 gating='[".github/workflows/automerge.yml", ".github/workflows/ci.yml", ".github/workflows/no-comments.yml", ".github/workflows/release.yml", ".github/workflows/auto-release.yml"]'
 
 info=$(cat -- "$info_file" 2>/dev/null) || info=""

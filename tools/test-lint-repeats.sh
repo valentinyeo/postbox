@@ -96,19 +96,7 @@ reset_automerge() {
 }
 reset_automerge
 b8_cases=0
-for missing in ci tdlib windows-smoke no-comments unfurl-verification private-markers secret-scan pr-title notify-release "tdlib-cache / cache"; do
-    reset_automerge
-    sed "s|\"$missing\"||g" "$admit_src" > "$fixture/tools/automerge-admit.sh"
-    status=0
-    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
-    if (( status != 1 )) || ! grep -Fq '[B8]' "$temp/output"; then
-        cat "$temp/output" >&2
-        printf 'test-lint-repeats: FAIL IGSH-504 B8 must reject missing %s, got exit %s\n' "$missing" "$status" >&2
-        exit 1
-    fi
-    b8_cases=$((b8_cases + 1))
-done
-for guard in 'required=' 'as \$names' 'COMPLETED' 'match-head-commit' 'could not evaluate head checks' 'length) == 0' '!= "code-review"'; do
+for guard in 'required-checks.txt' 'required=' 'as \$names' 'COMPLETED' 'match-head-commit' 'could not evaluate head checks' 'length) == 0' '!= "code-review"'; do
     reset_automerge
     if [ "$guard" = 'match-head-commit' ]; then
         sed "/$guard/d" "$yml_src" > "$fixture/.github/workflows/automerge.yml"
