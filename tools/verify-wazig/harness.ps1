@@ -61,14 +61,28 @@ function Assert-That($Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-function Wait-Until([scriptblock]$Check, [string]$Description, [int]$Seconds = 20) {
-    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
+function Wait-Until([scriptblock]$Check, [string]$Description, [int]$Seconds = 20, [scriptblock]$Observed = $null) {
+    $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
         $value = & $Check
         if ($value) { return $value }
         [System.Threading.Thread]::Sleep(100)
-    } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Timed out: $Description"
+    } while ($timer.Elapsed.TotalSeconds -lt $Seconds)
+    try {
+        if ($Observed) {
+            $snapshot = (& $Observed | Out-String).Trim()
+        } else {
+            $handle = [VerifyWindow]::GetForegroundWindow()
+            $foreground = if ($handle -ne [IntPtr]::Zero) { [Windows.Automation.AutomationElement]::FromHandle($handle).Current.Name } else { '<none>' }
+            $focus = [Windows.Automation.AutomationElement]::FocusedElement
+            $focused = if ($null -ne $focus) { $focus.Current.Name } else { '<none>' }
+            $snapshot = "foreground=$foreground; focused=$focused"
+        }
+    } catch { $snapshot = "observation unavailable: $($_.Exception.Message)" }
+    $data = @{ step = $Description; expected = $Description; observed = $snapshot; elapsed = $timer.Elapsed.TotalSeconds } | ConvertTo-Json -Compress
+    $message = $data | & python "$PSScriptRoot/wait_message.py"
+    if ($LASTEXITCODE -ne 0) { throw "Timed out: $Description; observed: $snapshot; elapsed: $($timer.Elapsed.TotalSeconds) seconds" }
+    throw $message
 }
 
 function Read-Session([string]$Evidence) {

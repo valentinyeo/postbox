@@ -8,6 +8,10 @@ on:
         description: User journey to drive
         type: string
         default: search
+      repeat:
+        description: Number of independent journey runs (1 to 3)
+        type: string
+        default: '1'
       tag:
         description: Published release to verify instead of building
         type: string
@@ -94,7 +98,7 @@ jobs:
     needs: [plan, candidate]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.candidate.result != 'failure' }}
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -439,7 +443,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Typing recorder installation failed' }
       - name: Launch, doctor and drive
         shell: pwsh
-        run: pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature '${{ matrix.feature }}' -Bin zig-out/bin -Evidence verification-evidence -ExpectedVersion $env:VERIFY_VERSION
+        env:
+          REPEAT: ${{ inputs.repeat || '1' }}
+          FEATURE: ${{ matrix.feature }}
+          VALIDATE_EVIDENCE: ${{ matrix.evidence }}
+        run: |
+          if ($env:REPEAT -notmatch '^[1-3]$') { throw 'repeat must be 1, 2 or 3' }
+          $failed = $false
+          for ($i = 1; $i -le [int]$env:REPEAT; $i++) {
+            $evidence = if ($i -eq 1) { 'verification-evidence' } else { "verification-evidence/repeat-$i" }
+            pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence $evidence -ExpectedVersion $env:VERIFY_VERSION
+            $code = $LASTEXITCODE
+            if ($code -eq 0 -and $env:VALIDATE_EVIDENCE -eq 'true') {
+              python tools/verify-wazig/check-evidence.py $evidence
+              $code = $LASTEXITCODE
+            }
+            if ($code -eq 0) {
+              Write-Host "Run ${i}: PASS"
+            } else {
+              $failed = $true
+              $failure = Join-Path $evidence 'failure.txt'
+              $reason = if (Test-Path $failure) { (Get-Content $failure -Raw).Trim() } else { 'launch, drive or evidence validation failed; see log' }
+              Write-Host "Run ${i}: FAIL: $reason"
+            }
+          }
+          if ($failed) { throw 'One or more journey runs failed' }
       - name: Validate surviving journey evidence
         if: matrix.evidence
         shell: pwsh

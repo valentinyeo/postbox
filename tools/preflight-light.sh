@@ -41,6 +41,7 @@ PYTHON_LIGHT_TESTS=(
     test_update_cards
     test_verify_journeys
     test_voice_language
+    test_wait_message
     test_workflow_contract
     test_workspace_names
 )

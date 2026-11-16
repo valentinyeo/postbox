@@ -7,6 +7,9 @@ description: Verify the Wazig Messages native Windows desktop through real keybo
 
 ## Launch
 
+A new probe must pass `repeat=3` before it merges.
+Run `gh workflow run verify.yml -f feature=<id> -f repeat=3` and inspect all three runs.
+
 Run only on GitHub-hosted Windows, never on a workstation or shared build host:
 
 ```sh
