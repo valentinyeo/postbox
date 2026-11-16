@@ -7741,13 +7741,19 @@ fn deleteAccountCaches(a: *App) void {
     if (std.fmt.bufPrint(&name_buffer, "msg-cache-{s}", .{tag})) |dir_name| {
         if (messagesDirPath(a, dir_name)) |dir_path| {
             defer a.allocator.free(dir_path);
-            std.Io.Dir.cwd().deleteTree(a.io, dir_path) catch {};
+            std.Io.Dir.cwd().deleteTree(a.io, dir_path) catch |err| {
+                var buffer: [128]u8 = undefined;
+                appendLaunchLog(a, std.fmt.bufPrint(&buffer, "message cache: directory deletion failed: {s}", .{@errorName(err)}) catch "message cache: directory deletion failed");
+            };
         }
     } else |_| {}
     if (std.fmt.bufPrint(&name_buffer, "voice-format-{s}", .{tag})) |dir_name| {
         if (messagesDirPath(a, dir_name)) |dir_path| {
             defer a.allocator.free(dir_path);
-            std.Io.Dir.cwd().deleteTree(a.io, dir_path) catch {};
+            std.Io.Dir.cwd().deleteTree(a.io, dir_path) catch |err| {
+                var buffer: [128]u8 = undefined;
+                appendLaunchLog(a, std.fmt.bufPrint(&buffer, "voice format cache: directory deletion failed: {s}", .{@errorName(err)}) catch "voice format cache: directory deletion failed");
+            };
         }
     } else |_| {}
 }
