@@ -397,8 +397,8 @@ class Workflow(unittest.TestCase):
         self.assertEqual(text.count("if: steps.pr.outputs.number != ''"), 1)
         automerge = (TOOLS.parent / ".github/workflows/automerge.yml").read_text() + (TOOLS / "automerge-admit.sh").read_text()
         self.assertIn('select((.name // .context) != "code-review")', automerge)
-        required = re.search(r"required='([^']+)'", automerge).group(1)
-        self.assertNotIn("code-review", json.loads(required))
+        required = (TOOLS / 'required-checks.txt').read_text().splitlines()
+        self.assertNotIn('code-review', required)
         self.assertIn("  code-review:\n", text)
 
 
