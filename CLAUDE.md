@@ -4,7 +4,7 @@
 - Private agent rules, board, skills and handoff live in a private companion repo. Run `bash tools/agent-setup.sh` once in the main checkout: it links them in as `CLAUDE.local.md`, `HANDOFF.md`, `board.yml` and `.claude/skills` (all gitignored) and installs a `post-checkout` hook, so every worktree cut from it is linked too and `git worktree add` fails if the private repo is missing. Never commit them back.
 - Nothing that names a person's machines, servers, accounts or contacts goes in this public repo, its PR text or commit messages: the `private-markers` check fails on it.
 - One git worktree per ticket under `~/projects/wazig-wt/<TICKET>`, branched from `origin/main`. Never edit or build in the main checkout.
-- Ship: `tools/ship.sh <TICKET> "<what changed>"` runs light checks locally, pushes, opens the PR and waits for `automerge.yml` to merge it and `auto-release.yml`/`release.yml` to publish a release for app changes.
+- Ship: `tools/ship.sh <TICKET> "<what changed>" "<card line>" "<proof: feature id or no user-visible change>"` runs light checks locally, pushes, opens the PR and waits for `automerge.yml` to merge it and `auto-release.yml`/`release.yml` to publish a release for app changes.
 
 ## Build and test
 - Pushes and PR commands run `tools/preflight-light.sh` locally: fast static checks and Python/Node tooling tests with J2-enforced parity against CI Python discovery and reasoned heavy exclusions, with no Zig or Wine invocation. The private-marker scan runs when `PRIVATE_MARKERS` is available; CI always enforces it.
