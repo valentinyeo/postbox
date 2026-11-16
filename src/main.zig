@@ -10108,7 +10108,10 @@ fn checkSend(a: *App) void {
         defer if (stdout_output) |buffer| a.allocator.free(buffer);
         const stderr_output = readChildOutput(a, child.stderr);
         defer if (stderr_output) |buffer| a.allocator.free(buffer);
-        if (!timed_out) _ = child.wait(a.io) catch {};
+        if (!timed_out) _ = child.wait(a.io) catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "send: child wait failed: {s}", .{@errorName(err)}) catch "send: child wait failed");
+        };
         a.send_child = null;
         a.send_direct = false;
         if (code == 0) {
