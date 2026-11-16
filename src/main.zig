@@ -62,6 +62,7 @@ const chat_cache = @import("chat_cache.zig");
 const people_index = @import("people_index.zig");
 const search_rank = @import("search_rank.zig");
 const unfurl = @import("unfurl.zig");
+const chat_screen = @import("chat_screen.zig");
 const shortcuts = @import("shortcuts.zig");
 const control_api = @import("control.zig");
 const control_pipe = @import("control_pipe.zig");
@@ -15013,7 +15014,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, a.audio_playing_id.slice());
     try w.print(",\"state\":\"{s}\",\"position_ms\":{d},\"duration_ms\":{d},\"speed\":{d},\"bar_visible\":{}", .{ @tagName(a.audio_state), a.audio_position_ms, a.audio_duration_ms, if (a.audio_player) |player| player.speed() else 100, voiceBarActive(a) });
     const voice_bar = voiceBarRect(a);
-    try w.print(",\"bar\":[{d},{d},{d},{d}],\"speed_zone\":[{d},{d}],\"pause_zone\":[{d},{d}],\"row\":", .{ voice_bar.left, voice_bar.top, voice_bar.right, voice_bar.bottom, voice_bar.right - px(a, 300), voice_bar.right - px(a, 220), voice_bar.right - px(a, 220), voice_bar.right - px(a, 120) });
+    try w.print(",\"bar\":[{d},{d},{d},{d}],\"speed_zone\":[{d},{d}],\"pause_zone\":[{d},{d}],\"row\":", .{ voice_bar.left, voice_bar.top, voice_bar.right, voice_bar.bottom, voiceBarZone(voice_bar, a, 1).left, voiceBarZone(voice_bar, a, 1).right, voiceBarZone(voice_bar, a, 2).left, voiceBarZone(voice_bar, a, 2).right });
     var row_buffer: [64]u8 = undefined;
     var row_index: ?usize = null;
     for (a.chats[0..a.chat_count], 0..) |chat, chat_index| {
@@ -19256,13 +19257,13 @@ fn canvasProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win
             const y: i32 = @as(i16, @bitCast(hiword(@as(usize, @bitCast(lparam)))));
             if (voiceBarActive(a) and rectHasPoint(voiceBarRect(a), x, y)) {
                 const bar = voiceBarRect(a);
-                if (x > bar.right - px(a, 120)) {
+                if (rectHasPoint(voiceBarZone(bar, a, 0), x, y)) {
                     stopAudio(a);
                     setStatus(a, "Voice message stopped");
-                } else if (x > bar.right - px(a, 220)) {
+                } else if (rectHasPoint(voiceBarZone(bar, a, 2), x, y)) {
                     toggleBarAudio(a);
                     setStatus(a, if (a.audio_state == .paused) "Voice message paused" else "Voice message playing");
-                } else if (x > bar.right - px(a, 300)) {
+                } else if (rectHasPoint(voiceBarZone(bar, a, 1), x, y)) {
                     cycleSpeed(a);
                 } else {
                     for (a.chats[0..a.chat_count], 0..) |chat, index| {
@@ -22527,11 +22528,26 @@ fn voiceBarRect(a: *const App) win.RECT {
     var client: win.RECT = undefined;
     const canvas = a.canvas orelse return .{};
     if (win.GetClientRect(canvas, &client) == 0) return .{};
-    return .{ .left = 0, .top = 0, .right = client.right, .bottom = px(a, 34) };
+    return @bitCast(chat_screen.voicePillRect(client.right, @intCast(a.dpi)));
 }
 
 fn voiceBarZone(bar: win.RECT, a: *const App, slot: i32) win.RECT {
-    return .{ .left = bar.right - px(a, slot + 100), .top = bar.top, .right = bar.right - px(a, slot), .bottom = bar.bottom };
+    return switch (slot) {
+        0 => .{ .left = bar.right - px(a, 28), .top = bar.top, .right = bar.right, .bottom = bar.bottom },
+        1 => .{ .left = bar.right - px(a, 64), .top = bar.top, .right = bar.right - px(a, 28), .bottom = bar.bottom },
+        else => .{ .left = bar.left, .top = bar.top, .right = bar.left + px(a, 28), .bottom = bar.bottom },
+    };
+}
+
+fn voicePill(a: *const App) chat_screen.VoicePill {
+    var name: []const u16 = &.{};
+    for (a.chats[0..a.chat_count]) |*chat| {
+        if (std.mem.eql(u8, chat.jid.slice(), a.audio_playing_jid.slice())) {
+            name = chat.name.slice();
+            break;
+        }
+    }
+    return chat_screen.VoicePill.init(name, a.audio_position_ms, a.audio_duration_ms, if (a.audio_state == .paused) .paused else .playing);
 }
 
 fn playingRowText(a: *const App, jid: []const u8, buffer: []u8) ?[]const u8 {
@@ -22577,27 +22593,22 @@ fn paintVoiceBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
     _ = win.SetBkMode(hdc, win.TRANSPARENT);
     _ = win.SetTextColor(hdc, theme.current.on_secondary_container);
-    var text: [160]u8 = undefined;
-    var line = WideText(160){};
-    line.set(a.allocator, std.fmt.bufPrint(&text, "{s} - {s}", .{ if (a.audio_state == .paused) "Voice message paused" else "Playing voice message", a.audio_playing_jid.slice() }) catch "Playing voice message");
-    var rect = win.RECT{ .left = bar.left + px(a, 12), .top = bar.top, .right = bar.right - px(a, 312), .bottom = bar.bottom };
-    _ = text_draw.drawText(hdc, line.ptr(), -1, &rect, win.DT_LEFT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+    const pill = voicePill(a);
+    var rect = win.RECT{ .left = bar.left + px(a, 32), .top = bar.top, .right = @max(bar.left + px(a, 32), bar.right - px(a, 160)), .bottom = bar.bottom };
+    _ = text_draw.drawText(hdc, pill.name.ptr, @intCast(pill.name.len), &rect, win.DT_LEFT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
+    var buffer: [40]u8 = undefined;
+    var time = WideText(39){};
+    time.set(a.allocator, pill.time(&buffer));
+    var time_rect = win.RECT{ .left = @max(rect.left, bar.right - px(a, 156)), .top = bar.top, .right = bar.right - px(a, 64), .bottom = bar.bottom };
+    _ = text_draw.drawText(hdc, time.ptr(), @intCast(time.len), &time_rect, win.DT_RIGHT | win.DT_VCENTER | win.DT_SINGLELINE);
     const controls = [_]struct { slot: i32, label: [*:0]const u16 }{
-        .{ .slot = 200, .label = speedLabel(a.audio_player) },
-        .{ .slot = 100, .label = if (a.audio_state == .paused) lit("resume") else lit("pause") },
-        .{ .slot = 0, .label = lit("close") },
+        .{ .slot = 2, .label = if (pill.state == .paused) lit("▶") else lit("Ⅱ") },
+        .{ .slot = 1, .label = speedLabel(a.audio_player) },
+        .{ .slot = 0, .label = lit("×") },
     };
     for (controls) |control| {
         var zone = voiceBarZone(bar, a, control.slot);
-        zone.right -= px(a, 8);
-        _ = text_draw.drawText(hdc, control.label, -1, &zone, win.DT_RIGHT | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_NOPREFIX);
-    }
-    if (a.audio_duration_ms > 0) {
-        const width = bar.right - bar.left;
-        const done = @divTrunc(width * @as(i32, @intCast(@min(a.audio_position_ms, a.audio_duration_ms))), @as(i32, @intCast(a.audio_duration_ms)));
-        const line_height: i32 = @max(2, px(a, 2));
-        const progress = win.RECT{ .left = bar.left, .top = bar.bottom - line_height, .right = bar.left + @max(0, @min(width, done)), .bottom = bar.bottom };
-        smooth.fillRoundRect(shapes, progress, line_height, line_height, theme.current.primary);
+        _ = text_draw.drawText(hdc, control.label, -1, &zone, win.DT_CENTER | win.DT_VCENTER | win.DT_SINGLELINE | win.DT_NOPREFIX);
     }
 }
 
