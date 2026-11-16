@@ -8174,7 +8174,10 @@ fn checkMediaDownload(a: *App) void {
             if (got_code and code == win.STILL_ACTIVE and !timed_out) continue;
             if (timed_out or !got_code) _ = child.kill(a.io);
             if (!got_code) code = 1;
-            _ = child.wait(a.io) catch {};
+            _ = child.wait(a.io) catch |err| {
+                var buffer: [128]u8 = undefined;
+                appendLaunchLog(a, std.fmt.bufPrint(&buffer, "media download: child wait failed: {s}", .{@errorName(err)}) catch "media download: child wait failed");
+            };
             if (code == 0) {
                 markMediaAttempted(a, slot.jid.slice(), slot.id.slice());
                 clearMediaFailure(a, slot.jid.slice(), slot.id.slice());
@@ -10108,7 +10111,10 @@ fn checkSend(a: *App) void {
         defer if (stdout_output) |buffer| a.allocator.free(buffer);
         const stderr_output = readChildOutput(a, child.stderr);
         defer if (stderr_output) |buffer| a.allocator.free(buffer);
-        if (!timed_out) _ = child.wait(a.io) catch {};
+        if (!timed_out) _ = child.wait(a.io) catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "send: child wait failed: {s}", .{@errorName(err)}) catch "send: child wait failed");
+        };
         a.send_child = null;
         a.send_direct = false;
         if (code == 0) {
@@ -14365,7 +14371,10 @@ fn checkArchive(a: *App) void {
         const handle = child.id orelse return;
         var code: win.DWORD = 0;
         if (win.GetExitCodeProcess(handle, &code) == 0 or code == win.STILL_ACTIVE) return;
-        _ = child.wait(a.io) catch {};
+        _ = child.wait(a.io) catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "archive: child wait failed: {s}", .{@errorName(err)}) catch "archive: child wait failed");
+        };
         a.archive_child = null;
         completeArchive(a, code);
     } else startNextArchive(a);
