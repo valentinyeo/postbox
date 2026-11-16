@@ -62,8 +62,10 @@ run bash tools/test-check-feature-map.sh
 run bash tools/test-check-pr-proof.sh
 run bash tools/check-no-source-text-tests.sh .
 run bash tools/check-no-empty-catch.sh .
+run bash tools/check-no-new-pixel-numbers.sh .
 run bash tools/test-check-no-source-text-tests.sh
 run bash tools/test-check-no-empty-catch.sh
+run bash tools/test-check-no-new-pixel-numbers.sh
 run node tools/strip-comments.mjs --check
 run node tools/check-fonts.mjs
 run python3 tools/check_cache_keys.py
