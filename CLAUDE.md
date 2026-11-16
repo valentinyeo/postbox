@@ -15,6 +15,7 @@
 ## Rules and what enforces them (WAZI-123)
 | Rule | Enforced by |
 |---|---|
+| PR bodies name a mapped feature proof or declare no user-visible change | `pr-proof` in `.github/workflows/pr-title.yml` and `tools/test-check-pr-proof.sh` |
 | Palette commands have mapped proofs and verification gaps cannot increase | `tools/check-feature-map.sh` and `tools/test-check-feature-map.sh` |
 | Pushes run only light checks locally; GitHub CI runs the full preflight. Never run full preflight on the shared build server (IGSH-518) | `.claude/hooks/preflight-guard.sh` and `tools/ship.sh` run `tools/preflight-light.sh`; `tools/test-preflight-guard.sh` rule J1 rejects full preflight and direct Zig calls in either entrypoint; rule J2 (IGSH-711) requires every CI-discovered Python test in the light list or a reasoned heavy-exclusion list; CI runs `tools/preflight.sh` |
 | The wacli worker keeps the job it dequeues; a full archive queue keeps the unarchive request | `tools/lint-repeats.sh` rules A1, A2 |

@@ -58,6 +58,7 @@ run bash tools/check-required-checks.sh .
 run bash tools/test-check-required-checks.sh
 run bash tools/check-feature-map.sh .
 run bash tools/test-check-feature-map.sh
+run bash tools/test-check-pr-proof.sh
 run bash tools/check-no-source-text-tests.sh .
 run bash tools/check-no-empty-catch.sh .
 run bash tools/test-check-no-source-text-tests.sh
