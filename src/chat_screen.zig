@@ -2,23 +2,23 @@ const std = @import("std");
 
 pub const VoicePill = struct {
     name: []const u16,
-    position_ms: u32,
-    duration_ms: u32,
+    position_ms: i64,
+    duration_ms: i64,
     state: enum { playing, paused },
 
-    pub fn init(name: []const u16, position_ms: u32, duration_ms: u32, state: @FieldType(VoicePill, "state")) VoicePill {
+    pub fn init(name: []const u16, position_ms: i64, duration_ms: i64, state: @FieldType(VoicePill, "state")) VoicePill {
         return .{
             .name = if (name.len > 0 and std.mem.indexOfScalar(u16, name, '@') == null) name else std.unicode.utf8ToUtf16LeStringLiteral("Voice message"),
-            .position_ms = @min(position_ms, duration_ms),
-            .duration_ms = duration_ms,
+            .position_ms = @min(@max(0, position_ms), @max(0, duration_ms)),
+            .duration_ms = @max(0, duration_ms),
             .state = state,
         };
     }
 
     pub fn time(self: VoicePill, buffer: []u8) []const u8 {
-        const position = self.position_ms / 1000;
-        const duration = self.duration_ms / 1000;
-        return std.fmt.bufPrint(buffer, "{d}:{d:0>2} / {d}:{d:0>2}", .{ position / 60, position % 60, duration / 60, duration % 60 }) catch "";
+        const position: u64 = @intCast(@divTrunc(self.position_ms, 1000));
+        const duration: u64 = @intCast(@divTrunc(self.duration_ms, 1000));
+        return std.fmt.bufPrint(buffer, "{d}:{d:0>2} / {d}:{d:0>2}", .{ @divTrunc(position, 60), @mod(position, 60), @divTrunc(duration, 60), @mod(duration, 60) }) catch "";
     }
 };
 
@@ -220,4 +220,12 @@ test "card removal keeps captions styles source offsets and other links" {
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Reel"), card.title);
     const unrelated = LinkCard.init(text, "https://example.com/missing", &.{});
     try std.testing.expect(unrelated.omitted == null);
+}
+
+test "voice pill accepts signed player clocks and normalizes unset positions" {
+    var buffer: [40]u8 = undefined;
+    const pill = VoicePill.init(&.{}, -1, -1, .playing);
+    try std.testing.expectEqualStrings("0:00 / 0:00", pill.time(&buffer));
+    const duration: i64 = 48000;
+    try std.testing.expectEqualStrings("0:12 / 0:48", VoicePill.init(&.{}, 12000, duration, .paused).time(&buffer));
 }
