@@ -23187,8 +23187,14 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
     const asset = maybe_asset orelse return .none;
     if (!update.isNewer(asset.tag, current)) return .none;
     if (stage_only and staged and std.mem.eql(u8, marker.?.tag, asset.tag)) return .staged;
-    root.deleteFile(io, "ready.txt") catch {};
-    root.deleteTree(io, "stage") catch {};
+    root.deleteFile(io, "ready.txt") catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendUpdateLogLine(std.fmt.bufPrint(&buffer, "update: ready marker deletion failed: {s}\r\n", .{@errorName(err)}) catch "update: ready marker deletion failed\r\n");
+    };
+    root.deleteTree(io, "stage") catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendUpdateLogLine(std.fmt.bufPrint(&buffer, "update: stage directory deletion failed: {s}\r\n", .{@errorName(err)}) catch "update: stage directory deletion failed\r\n");
+    };
 
     const asset_url = try utf8ToWide(allocator, asset.url);
     defer allocator.free(asset_url);
@@ -23323,9 +23329,18 @@ fn swapStaged(
         }
     }
     _ = win.DeleteFileW(exe_old_wide.ptr);
-    root.deleteFile(io, "ready.txt") catch {};
-    root.deleteTree(io, "stage") catch {};
-    root.deleteFile(io, "Messages.zip") catch {};
+    root.deleteFile(io, "ready.txt") catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendUpdateLogLine(std.fmt.bufPrint(&buffer, "update: ready marker deletion failed: {s}\r\n", .{@errorName(err)}) catch "update: ready marker deletion failed\r\n");
+    };
+    root.deleteTree(io, "stage") catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendUpdateLogLine(std.fmt.bufPrint(&buffer, "update: stage directory deletion failed: {s}\r\n", .{@errorName(err)}) catch "update: stage directory deletion failed\r\n");
+    };
+    root.deleteFile(io, "Messages.zip") catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendUpdateLogLine(std.fmt.bufPrint(&buffer, "update: archive deletion failed: {s}\r\n", .{@errorName(err)}) catch "update: archive deletion failed\r\n");
+    };
     return .installed;
 }
 
@@ -24367,7 +24382,10 @@ fn hubEventsMain(a: *App) void {
     const allocator = std.heap.page_allocator;
     var sse = wa_hub.Sse{};
     while (!a.hub_stop.load(.acquire)) {
-        hubEventSession(a, allocator, &sse) catch {};
+        hubEventSession(a, allocator, &sse) catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "hub events: session failed: {s}", .{@errorName(err)}) catch "hub events: session failed");
+        };
         var wait: usize = 0;
         while (wait < 10 and !a.hub_stop.load(.acquire)) : (wait += 1) win.Sleep(100);
     }
