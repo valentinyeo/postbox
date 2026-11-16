@@ -56,18 +56,25 @@ pub const ChatRow = struct {
     title: []const u16,
     subtitle: []const u16,
 
-    pub fn init(name: []const u16, preview: []const u16, fallback: []const u16) ChatRow {
-        return .{ .title = name, .subtitle = if (preview.len > 0) preview else fallback };
+    pub fn init(name: []const u16, preview: []const u16) ChatRow {
+        return .{ .title = name, .subtitle = preview };
     }
 };
 
 test "chat row keeps its normal preview while audio plays" {
     const name = std.unicode.utf8ToUtf16LeStringLiteral("Fixture chat");
     const preview = std.unicode.utf8ToUtf16LeStringLiteral("Voice message");
-    const row = ChatRow.init(name, preview, &.{});
+    const row = ChatRow.init(name, preview);
     try std.testing.expectEqualSlices(u16, name, row.title);
     try std.testing.expectEqualSlices(u16, preview, row.subtitle);
     const pill = VoicePill.init(name, 12000, 48000, .paused);
     try std.testing.expectEqual(.paused, pill.state);
-    try std.testing.expectEqualSlices(u16, preview, ChatRow.init(name, preview, &.{}).subtitle);
+    try std.testing.expectEqualSlices(u16, preview, ChatRow.init(name, preview).subtitle);
+}
+
+test "empty chats show their name without a kind subtitle" {
+    const name = std.unicode.utf8ToUtf16LeStringLiteral("Fixture chat");
+    const row = ChatRow.init(name, &.{});
+    try std.testing.expectEqualSlices(u16, name, row.title);
+    try std.testing.expectEqual(@as(usize, 0), row.subtitle.len);
 }

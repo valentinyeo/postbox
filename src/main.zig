@@ -15026,7 +15026,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         try w.writeAll("{\"chat\":");
         try control_api.writeString(w, a.chats[found].jid.slice());
         try w.writeAll(",\"text\":");
-        try control_api.writeStringUtf16(w, chat_screen.ChatRow.init(a.chats[found].name.slice(), a.chats[found].preview.slice(), a.chats[found].kind.slice()).subtitle);
+        try control_api.writeStringUtf16(w, chat_screen.ChatRow.init(a.chats[found].name.slice(), a.chats[found].preview.slice()).subtitle);
         try w.writeByte('}');
     } else try w.writeAll("null");
     try w.writeByte('}');
@@ -17887,21 +17887,8 @@ fn drawChat(a: *App, screen_item: *win.DRAWITEMSTRUCT) void {
             _ = text_draw.drawText(item.hDC, wide_label.ptr() + 7, @intCast(wide_label.len - 7), &preview_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS | win.DT_NOPREFIX);
         } else |_| {}
     } else {
+        const row_label = chat_screen.ChatRow.init(chat.name.slice(), chat.preview.slice());
         var kind = WideText(255){};
-        if (chat.provider == .slack and slackWorkspaceCount(a) > 1) {
-            if (slackInstallation(a, chat.account.slice())) |installation| {
-                var kind_utf8: [96]u8 = undefined;
-                const kind_len = std.unicode.utf16LeToUtf8(&kind_utf8, chat.kind.slice()) catch 0;
-                var label: [320]u8 = undefined;
-                kind.set(a.allocator, std.fmt.bufPrint(&label, "{s} · {s}", .{ kind_utf8[0..kind_len], if (installation.team_name.len > 0) installation.team_name.slice() else installation.team_id.slice() }) catch installation.team_name.slice());
-            }
-        }
-        if (chat.preview.len > 0) kind = chat.preview;
-        if (kind.len == 0) {
-            @memcpy(kind.buf[0..chat.kind.len], chat.kind.slice());
-            kind.len = chat.kind.len;
-        }
-        const row_label = chat_screen.ChatRow.init(chat.name.slice(), chat.preview.slice(), kind.slice());
         kind.len = row_label.subtitle.len;
         @memcpy(kind.buf[0..kind.len], row_label.subtitle);
         kind.buf[kind.len] = 0;
