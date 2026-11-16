@@ -12039,7 +12039,7 @@ fn scrollToSelectedMessage(a: *App) void {
     ensureBitmap(a, &a.messages[selected]);
     var total_height: i32 = px(a, 18);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
-        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, showSenderName(a, index)) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message) + messageGap(a, index);
+        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, startsSenderGroup(a, index)) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message) + messageGap(a, index);
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     var y = client.bottom - px(a, 14) + a.scroll_y;
@@ -12047,7 +12047,7 @@ fn scrollToSelectedMessage(a: *App) void {
     while (index > 0) {
         index -= 1;
         if (!channelMessageVisible(a, &a.messages[index])) continue;
-        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, showSenderName(a, index)) + threadSummaryHeight(a, &a.messages[index]) + replyLineHeight(hdc, a, &a.messages[index]);
+        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, startsSenderGroup(a, index)) + threadSummaryHeight(a, &a.messages[index]) + replyLineHeight(hdc, a, &a.messages[index]);
         y -= height + messageGap(a, index);
         if (index != selected) continue;
         const delta = message_scroll.scrollDelta(y, height, client.top, client.bottom, px(a, 8));
@@ -17978,15 +17978,23 @@ fn transcriptRender(hdc: win.HDC, a: *App, message: *const Message, shown: c_int
     return y - top;
 }
 
+fn messageGroup(message: *const Message) chat_screen.GroupMessage {
+    const stamp = message.timestamp.slice();
+    const day: ?chat_screen.Day = if (localTimestamp(stamp)) |local|
+        .{ .year = local.wYear, .month = local.wMonth, .day = local.wDay }
+    else if (stamp.len >= 10)
+        .{ .year = timestampPart(stamp, 0, 4) orelse 0, .month = timestampPart(stamp, 5, 2) orelse 0, .day = timestampPart(stamp, 8, 2) orelse 0 }
+    else
+        null;
+    return .{ .day = day, .seconds = media_age.unixSeconds(stamp), .from_me = message.from_me, .sender_id = message.sender_jid.slice(), .sender = message.sender.slice() };
+}
+
+fn messageGroupHeader(a: *const App, index: usize) chat_screen.GroupHeader {
+    return chat_screen.groupHeader(messageGroup(&a.messages[index]), if (index > 0) messageGroup(&a.messages[index - 1]) else null, groupChat(a));
+}
+
 fn startsSenderGroup(a: *App, index: usize) bool {
-    if (index == 0 or separatorHeight(a, index) > 0) return true;
-    const message = &a.messages[index];
-    const previous = &a.messages[index - 1];
-    if (message.from_me != previous.from_me) return true;
-    if (message.sender_jid.len > 0 and previous.sender_jid.len > 0)
-        return !std.mem.eql(u8, message.sender_jid.slice(), previous.sender_jid.slice());
-    if (message.sender.len == 0 or previous.sender.len == 0) return true;
-    return !std.mem.eql(u16, message.sender.slice(), previous.sender.slice());
+    return messageGroupHeader(a, index).kind != .none;
 }
 
 fn ownReadable(a: *App, index: usize) bool {
@@ -18015,10 +18023,7 @@ fn showSenderName(a: *App, index: usize) bool {
 }
 
 fn separatorHeight(a: *const App, index: usize) i32 {
-    const current = media_age.unixSeconds(a.messages[index].timestamp.slice()) orelse return 0;
-    if (index == 0) return px(a, 32);
-    const previous = media_age.unixSeconds(a.messages[index - 1].timestamp.slice()) orelse return 0;
-    return if (@divFloor(current, 86400) != @divFloor(previous, 86400) or current - previous >= 3600) px(a, 32) else 0;
+    return if (messageGroupHeader(a, index).day != null) px(a, 32) else 0;
 }
 
 fn messageGap(a: *App, index: usize) i32 {
@@ -18768,7 +18773,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     }
     var total_height: i32 = px(a, 90);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
-        if (channelMessageVisible(a, message)) total_height += measureMessageCached(hdc, a, message, bubble_width, showSenderName(a, index)) + messageGap(a, index);
+        if (channelMessageVisible(a, message)) total_height += measureMessageCached(hdc, a, message, bubble_width, startsSenderGroup(a, index)) + messageGap(a, index);
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     a.scroll_y = std.math.clamp(a.scroll_y, 0, a.max_scroll);
@@ -18793,7 +18798,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         message.link_count = 0;
         message.word_count = 0;
         if (!channelMessageVisible(a, message)) continue;
-        const show_sender = showSenderName(a, index);
+        const show_sender = startsSenderGroup(a, index);
         const estimated_height = measureMessageCached(hdc, a, message, bubble_width, show_sender);
         var y = cursor_y - estimated_height;
         cursor_y = y - messageGap(a, index);
@@ -18891,17 +18896,17 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         var text_top = bubble_top + px(a, 10);
         if (show_sender) {
             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
-            if (!message.from_me) drawSenderAvatar(&shapes, hdc, a, left - px(a, 42), y, message);
+            if (groupChat(a) and !message.from_me) drawSenderAvatar(&shapes, hdc, a, left - px(a, 42), y, message);
             const seed = if (message.sender_jid.len > 0) message.sender_jid.slice() else std.mem.sliceAsBytes(message.sender.slice());
             const tint = senderColorFor(seed);
             _ = win.SetTextColor(hdc, rgb(tint.r, tint.g, tint.b));
-            const sender_width = if (message.from_me) @as(i32, 0) else @min(column.right - left - px(a, 60), runWidth(hdc, message.sender.slice()));
+            const sender_width = if (message.from_me or !groupChat(a)) @as(i32, 0) else @min(column.right - left - px(a, 60), runWidth(hdc, message.sender.slice()));
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             const header_width = sender_width + px(a, 8) + runWidth(hdc, message.time.slice());
             const header_left = if (message.from_me) @max(column.left, column.right - header_width) else left;
             _ = win.SelectObject(hdc, @ptrCast(a.font_bold.?));
             var sender_rect = win.RECT{ .left = header_left, .top = y, .right = header_left + sender_width, .bottom = bubble_top - px(a, 8) };
-            if (!message.from_me) _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
+            if (groupChat(a) and !message.from_me) _ = text_draw.drawText(hdc, message.sender.ptr(), @intCast(message.sender.len), &sender_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_END_ELLIPSIS);
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             var time_rect = win.RECT{ .left = sender_rect.right + px(a, 8), .top = y + px(a, 1), .right = @min(column.right, header_left + header_width), .bottom = sender_rect.bottom };
@@ -18915,11 +18920,15 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
             var date = WideText(63){};
             var buffer: [80]u8 = undefined;
-            const stamp = message.timestamp.slice();
-            var time_buffer: [32]u8 = undefined;
-            const time_len = std.unicode.utf16LeToUtf8(&time_buffer, message.time.slice()) catch 0;
-            date.set(a.allocator, std.fmt.bufPrint(&buffer, "{s}  {s}", .{ stamp[0..@min(10, stamp.len)], time_buffer[0..time_len] }) catch "");
+            var today: win.SYSTEMTIME = undefined;
+            win.GetLocalTime(&today);
+            if (messageGroupHeader(a, index).day) |day| date.set(a.allocator, day.label(.{ .year = today.wYear, .month = today.wMonth, .day = today.wDay }, &buffer));
             var date_rect = win.RECT{ .left = column.left, .top = y - reply_height - separator, .right = column.right, .bottom = y - reply_height - px(a, 8) };
+            const label_width = runWidth(hdc, date.slice()) + px(a, 24);
+            const center = @divTrunc(date_rect.left + date_rect.right, 2);
+            const line_y = @divTrunc(date_rect.top + date_rect.bottom, 2);
+            smooth.fillRoundRect(&shapes, .{ .left = date_rect.left, .top = line_y, .right = @max(date_rect.left, center - @divTrunc(label_width, 2)), .bottom = line_y + px(a, 1) }, 0, 0, theme.current.outline_variant);
+            smooth.fillRoundRect(&shapes, .{ .left = @min(date_rect.right, center + @divTrunc(label_width, 2)), .top = line_y, .right = date_rect.right, .bottom = line_y + px(a, 1) }, 0, 0, theme.current.outline_variant);
             _ = text_draw.drawText(hdc, date.ptr(), @intCast(date.len), &date_rect, win.DT_CENTER | win.DT_SINGLELINE | win.DT_VCENTER);
         }
         if (message.quote.len > 0 and message.quoted_msg_id.len == 0) text_top = drawQuoteBlock(&shapes, hdc, a, message, index, client, left, right, text_top);
