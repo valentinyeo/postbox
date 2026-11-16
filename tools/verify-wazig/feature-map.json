@@ -1,0 +1,732 @@
+{
+  "features": [
+    {
+      "feature": "command_accounts",
+      "source": "buildPaletteItems:command_accounts",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_archive",
+      "source": "buildPaletteItems:command_archive",
+      "proof": "archive",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_archived",
+      "source": "buildPaletteItems:command_archived",
+      "proof": "archive",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_cancel_selection",
+      "source": "buildPaletteItems:command_cancel_selection",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_compose",
+      "source": "buildPaletteItems:command_compose",
+      "proof": "drafts",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_copy_all_transcripts",
+      "source": "buildPaletteItems:command_copy_all_transcripts",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_copy_link",
+      "source": "buildPaletteItems:command_copy_link",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_copy_text",
+      "source": "buildPaletteItems:command_copy_text",
+      "proof": "passage-copy",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_copy_transcript",
+      "source": "buildPaletteItems:command_copy_transcript",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_delete_message",
+      "source": "buildPaletteItems:command_delete_message",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_dictate",
+      "source": "buildPaletteItems:command_dictate",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_dictation_auto",
+      "source": "buildPaletteItems:command_dictation_auto",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_dictation_english",
+      "source": "buildPaletteItems:command_dictation_english",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_dictation_german",
+      "source": "buildPaletteItems:command_dictation_german",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_emoji",
+      "source": "buildPaletteItems:command_emoji",
+      "proof": "emoji-picker-glyphs",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_emoji_diag",
+      "source": "buildPaletteItems:command_emoji_diag",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_font_default",
+      "source": "buildPaletteItems:command_font_default",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_font_large",
+      "source": "buildPaletteItems:command_font_large",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_font_larger",
+      "source": "buildPaletteItems:command_font_larger",
+      "proof": "appearance",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_font_larger_preset",
+      "source": "buildPaletteItems:command_font_larger_preset",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_font_reset",
+      "source": "buildPaletteItems:command_font_reset",
+      "proof": "appearance",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_font_small",
+      "source": "buildPaletteItems:command_font_small",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_font_smaller",
+      "source": "buildPaletteItems:command_font_smaller",
+      "proof": "appearance",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_gif",
+      "source": "buildPaletteItems:command_gif",
+      "proof": "gif-picker",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_include_archived",
+      "source": "buildPaletteItems:command_include_archived",
+      "proof": "show-archived",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_jump_latest",
+      "source": "buildPaletteItems:command_jump_latest",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_links",
+      "source": "buildPaletteItems:command_links",
+      "proof": "inline-links",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_next_chat",
+      "source": "buildPaletteItems:command_next_chat",
+      "proof": "navigation",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_next_message",
+      "source": "buildPaletteItems:command_next_message",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_open_image_external",
+      "source": "buildPaletteItems:command_open_image_external",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_open_video_external",
+      "source": "buildPaletteItems:command_open_video_external",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_pick_mention",
+      "source": "buildPaletteItems:command_pick_mention",
+      "proof": "slack-mentions",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_pin",
+      "source": "buildPaletteItems:command_pin",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_play_audio",
+      "source": "buildPaletteItems:command_play_audio",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_prev_chat",
+      "source": "buildPaletteItems:command_prev_chat",
+      "proof": "navigation",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_prev_message",
+      "source": "buildPaletteItems:command_prev_message",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_quit",
+      "source": "buildPaletteItems:command_quit",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_react_menu",
+      "source": "buildPaletteItems:command_react_menu",
+      "proof": "reactions",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_refresh",
+      "source": "buildPaletteItems:command_refresh",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_replies_slack",
+      "source": "buildPaletteItems:command_replies_slack",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_replies_whatsapp",
+      "source": "buildPaletteItems:command_replies_whatsapp",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_reply",
+      "source": "buildPaletteItems:command_reply",
+      "proof": "reply",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_resend",
+      "source": "buildPaletteItems:command_resend",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_search",
+      "source": "buildPaletteItems:command_search",
+      "proof": "search",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_send",
+      "source": "buildPaletteItems:command_send",
+      "proof": "send-once",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_shortcuts_help",
+      "source": "buildPaletteItems:command_shortcuts_help",
+      "proof": "palette",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_show_all",
+      "source": "buildPaletteItems:command_show_all",
+      "proof": "views",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_slack_attach",
+      "source": "buildPaletteItems:command_slack_attach",
+      "proof": "paste-image",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_slack_connect",
+      "source": "buildPaletteItems:command_slack_connect",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_slack_disconnect_workspace",
+      "source": "buildPaletteItems:command_slack_disconnect_workspace",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_slack_setup",
+      "source": "buildPaletteItems:command_slack_setup",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_slack_threads",
+      "source": "buildPaletteItems:command_slack_threads",
+      "proof": "slack-threads",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_sort_views",
+      "source": "buildPaletteItems:command_sort_views",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_speed_1",
+      "source": "buildPaletteItems:command_speed_1",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_speed_150",
+      "source": "buildPaletteItems:command_speed_150",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_speed_200",
+      "source": "buildPaletteItems:command_speed_200",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_sync",
+      "source": "buildPaletteItems:command_sync",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_theme_amoled",
+      "source": "buildPaletteItems:command_theme_amoled",
+      "proof": "menus",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "command_toggle_transcript",
+      "source": "buildPaletteItems:command_toggle_transcript",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_unread",
+      "source": "buildPaletteItems:command_unread",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_update_check",
+      "source": "buildPaletteItems:command_update_check",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_update_install",
+      "source": "buildPaletteItems:command_update_install",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "command_voice",
+      "source": "buildPaletteItems:command_voice",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "reaction_laugh",
+      "source": "buildPaletteItems:reaction_laugh",
+      "proof": "reactions",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "reaction_like",
+      "source": "buildPaletteItems:reaction_like",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "reaction_love",
+      "source": "buildPaletteItems:reaction_love",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "reaction_remove",
+      "source": "buildPaletteItems:reaction_remove",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "reaction_sad",
+      "source": "buildPaletteItems:reaction_sad",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "reaction_surprised",
+      "source": "buildPaletteItems:reaction_surprised",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "reaction_thanks",
+      "source": "buildPaletteItems:reaction_thanks",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
+    },
+    {
+      "feature": "chat-search",
+      "source": "AGENTS:search",
+      "proof": "search",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "keyboard-navigation",
+      "source": "AGENTS:keyboard",
+      "proof": "navigation",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "queued-sending",
+      "source": "AGENTS:queued-send",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this complete behavior end to end."
+    },
+    {
+      "feature": "mark-read",
+      "source": "AGENTS:mark-read",
+      "proof": "hub",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "group-names",
+      "source": "AGENTS:group-names",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this complete behavior end to end."
+    },
+    {
+      "feature": "profile-images",
+      "source": "AGENTS:profile-images",
+      "proof": "workspace-icons",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "media-auto-download",
+      "source": "AGENTS:media",
+      "proof": "whatsapp-hub",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "media-cache-reopen",
+      "source": "AGENTS:media-cache",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this complete behavior end to end."
+    },
+    {
+      "feature": "animated-gifs",
+      "source": "AGENTS:gif",
+      "proof": "slack-emoji",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "video-thumbnails",
+      "source": "AGENTS:video",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this complete behavior end to end."
+    },
+    {
+      "feature": "voice-playback",
+      "source": "AGENTS:voice",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this complete behavior end to end."
+    },
+    {
+      "feature": "voice-transcription-cache",
+      "source": "AGENTS:transcription",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this complete behavior end to end."
+    },
+    {
+      "feature": "dictation",
+      "source": "AGENTS:dictation",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this complete behavior end to end."
+    },
+    {
+      "feature": "dictation-shortcuts",
+      "source": "src:dictation-shortcuts",
+      "proof": "dictation-shortcuts",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "gif-picker",
+      "source": "src:gif-picker",
+      "proof": "gif-picker",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "link-cards",
+      "source": "src:link-previews",
+      "proof": "link-previews",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "drafts",
+      "source": "src:drafts",
+      "proof": "drafts",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "hub",
+      "source": "src:hub",
+      "proof": "hub",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "update-card",
+      "source": "src:update-card",
+      "proof": "quiet-status",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "atomic-update",
+      "source": "AGENTS:atomic-update",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this complete behavior end to end."
+    },
+    {
+      "feature": "no-toolbar",
+      "source": "AGENTS:no-toolbar",
+      "proof": "quiet-status",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "window-title",
+      "source": "AGENTS:window-title",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this complete behavior end to end."
+    },
+    {
+      "feature": "font-and-scale",
+      "source": "AGENTS:font",
+      "proof": "text-comparison",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "appearance",
+      "source": "src:appearance",
+      "proof": "appearance",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "slack",
+      "source": "src:slack",
+      "proof": "hub",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "signal",
+      "source": "src:signal",
+      "proof": "signal",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "telegram",
+      "source": "src:telegram",
+      "proof": "telegram",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "attachment-upload",
+      "source": "src:attachments",
+      "proof": "paste-image",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "image-gallery",
+      "source": "src:image-gallery",
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this complete behavior end to end."
+    },
+    {
+      "feature": "read-ticks",
+      "source": "src:read-ticks",
+      "proof": "read-ticks",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "reply-navigation",
+      "source": "src:reply",
+      "proof": "reply",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "view-switching",
+      "source": "src:views",
+      "proof": "views",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "chat-list-formatting",
+      "source": "src:chat-lists",
+      "proof": "chat-lists",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "slack-threads",
+      "source": "src:slack-threads",
+      "proof": "slack-threads",
+      "status": "covered",
+      "why": ""
+    }
+  ]
+}

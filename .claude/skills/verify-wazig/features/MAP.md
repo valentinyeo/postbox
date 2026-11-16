@@ -1,0 +1,110 @@
+# Feature proof map
+
+The registry records existing journeys, not proof that a journey ran. GAP means the named behavior lacks an end-to-end journey.
+
+| Feature | Source | Proof | Status |
+|---|---|---|---|
+| `command_accounts` | `buildPaletteItems:command_accounts` | GAP | GAP: No journey asserts this command end to end. |
+| `command_archive` | `buildPaletteItems:command_archive` | archive | covered |
+| `command_archived` | `buildPaletteItems:command_archived` | archive | covered |
+| `command_cancel_selection` | `buildPaletteItems:command_cancel_selection` | GAP | GAP: No journey asserts this command end to end. |
+| `command_compose` | `buildPaletteItems:command_compose` | drafts | covered |
+| `command_copy_all_transcripts` | `buildPaletteItems:command_copy_all_transcripts` | GAP | GAP: No journey asserts this command end to end. |
+| `command_copy_link` | `buildPaletteItems:command_copy_link` | GAP | GAP: No journey asserts this command end to end. |
+| `command_copy_text` | `buildPaletteItems:command_copy_text` | passage-copy | covered |
+| `command_copy_transcript` | `buildPaletteItems:command_copy_transcript` | GAP | GAP: No journey asserts this command end to end. |
+| `command_delete_message` | `buildPaletteItems:command_delete_message` | GAP | GAP: No journey asserts this command end to end. |
+| `command_dictate` | `buildPaletteItems:command_dictate` | GAP | GAP: No journey asserts this command end to end. |
+| `command_dictation_auto` | `buildPaletteItems:command_dictation_auto` | GAP | GAP: No journey asserts this command end to end. |
+| `command_dictation_english` | `buildPaletteItems:command_dictation_english` | GAP | GAP: No journey asserts this command end to end. |
+| `command_dictation_german` | `buildPaletteItems:command_dictation_german` | GAP | GAP: No journey asserts this command end to end. |
+| `command_emoji` | `buildPaletteItems:command_emoji` | emoji-picker-glyphs | covered |
+| `command_emoji_diag` | `buildPaletteItems:command_emoji_diag` | GAP | GAP: No journey asserts this command end to end. |
+| `command_font_default` | `buildPaletteItems:command_font_default` | GAP | GAP: No journey asserts this command end to end. |
+| `command_font_large` | `buildPaletteItems:command_font_large` | GAP | GAP: No journey asserts this command end to end. |
+| `command_font_larger` | `buildPaletteItems:command_font_larger` | appearance | covered |
+| `command_font_larger_preset` | `buildPaletteItems:command_font_larger_preset` | GAP | GAP: No journey asserts this command end to end. |
+| `command_font_reset` | `buildPaletteItems:command_font_reset` | appearance | covered |
+| `command_font_small` | `buildPaletteItems:command_font_small` | GAP | GAP: No journey asserts this command end to end. |
+| `command_font_smaller` | `buildPaletteItems:command_font_smaller` | appearance | covered |
+| `command_gif` | `buildPaletteItems:command_gif` | gif-picker | covered |
+| `command_include_archived` | `buildPaletteItems:command_include_archived` | show-archived | covered |
+| `command_jump_latest` | `buildPaletteItems:command_jump_latest` | GAP | GAP: No journey asserts this command end to end. |
+| `command_links` | `buildPaletteItems:command_links` | inline-links | covered |
+| `command_next_chat` | `buildPaletteItems:command_next_chat` | navigation | covered |
+| `command_next_message` | `buildPaletteItems:command_next_message` | GAP | GAP: No journey asserts this command end to end. |
+| `command_open_image_external` | `buildPaletteItems:command_open_image_external` | GAP | GAP: No journey asserts this command end to end. |
+| `command_open_video_external` | `buildPaletteItems:command_open_video_external` | GAP | GAP: No journey asserts this command end to end. |
+| `command_pick_mention` | `buildPaletteItems:command_pick_mention` | slack-mentions | covered |
+| `command_pin` | `buildPaletteItems:command_pin` | GAP | GAP: No journey asserts this command end to end. |
+| `command_play_audio` | `buildPaletteItems:command_play_audio` | GAP | GAP: No journey asserts this command end to end. |
+| `command_prev_chat` | `buildPaletteItems:command_prev_chat` | navigation | covered |
+| `command_prev_message` | `buildPaletteItems:command_prev_message` | GAP | GAP: No journey asserts this command end to end. |
+| `command_quit` | `buildPaletteItems:command_quit` | GAP | GAP: No journey asserts this command end to end. |
+| `command_react_menu` | `buildPaletteItems:command_react_menu` | reactions | covered |
+| `command_refresh` | `buildPaletteItems:command_refresh` | GAP | GAP: No journey asserts this command end to end. |
+| `command_replies_slack` | `buildPaletteItems:command_replies_slack` | GAP | GAP: No journey asserts this command end to end. |
+| `command_replies_whatsapp` | `buildPaletteItems:command_replies_whatsapp` | GAP | GAP: No journey asserts this command end to end. |
+| `command_reply` | `buildPaletteItems:command_reply` | reply | covered |
+| `command_resend` | `buildPaletteItems:command_resend` | GAP | GAP: No journey asserts this command end to end. |
+| `command_search` | `buildPaletteItems:command_search` | search | covered |
+| `command_send` | `buildPaletteItems:command_send` | send-once | covered |
+| `command_shortcuts_help` | `buildPaletteItems:command_shortcuts_help` | palette | covered |
+| `command_show_all` | `buildPaletteItems:command_show_all` | views | covered |
+| `command_slack_attach` | `buildPaletteItems:command_slack_attach` | paste-image | covered |
+| `command_slack_connect` | `buildPaletteItems:command_slack_connect` | GAP | GAP: No journey asserts this command end to end. |
+| `command_slack_disconnect_workspace` | `buildPaletteItems:command_slack_disconnect_workspace` | GAP | GAP: No journey asserts this command end to end. |
+| `command_slack_setup` | `buildPaletteItems:command_slack_setup` | GAP | GAP: No journey asserts this command end to end. |
+| `command_slack_threads` | `buildPaletteItems:command_slack_threads` | slack-threads | covered |
+| `command_sort_views` | `buildPaletteItems:command_sort_views` | GAP | GAP: No journey asserts this command end to end. |
+| `command_speed_1` | `buildPaletteItems:command_speed_1` | GAP | GAP: No journey asserts this command end to end. |
+| `command_speed_150` | `buildPaletteItems:command_speed_150` | GAP | GAP: No journey asserts this command end to end. |
+| `command_speed_200` | `buildPaletteItems:command_speed_200` | GAP | GAP: No journey asserts this command end to end. |
+| `command_sync` | `buildPaletteItems:command_sync` | GAP | GAP: No journey asserts this command end to end. |
+| `command_theme_amoled` | `buildPaletteItems:command_theme_amoled` | menus | covered |
+| `command_toggle_transcript` | `buildPaletteItems:command_toggle_transcript` | GAP | GAP: No journey asserts this command end to end. |
+| `command_unread` | `buildPaletteItems:command_unread` | GAP | GAP: No journey asserts this command end to end. |
+| `command_update_check` | `buildPaletteItems:command_update_check` | GAP | GAP: No journey asserts this command end to end. |
+| `command_update_install` | `buildPaletteItems:command_update_install` | GAP | GAP: No journey asserts this command end to end. |
+| `command_voice` | `buildPaletteItems:command_voice` | GAP | GAP: No journey asserts this command end to end. |
+| `reaction_laugh` | `buildPaletteItems:reaction_laugh` | reactions | covered |
+| `reaction_like` | `buildPaletteItems:reaction_like` | GAP | GAP: No journey asserts this command end to end. |
+| `reaction_love` | `buildPaletteItems:reaction_love` | GAP | GAP: No journey asserts this command end to end. |
+| `reaction_remove` | `buildPaletteItems:reaction_remove` | GAP | GAP: No journey asserts this command end to end. |
+| `reaction_sad` | `buildPaletteItems:reaction_sad` | GAP | GAP: No journey asserts this command end to end. |
+| `reaction_surprised` | `buildPaletteItems:reaction_surprised` | GAP | GAP: No journey asserts this command end to end. |
+| `reaction_thanks` | `buildPaletteItems:reaction_thanks` | GAP | GAP: No journey asserts this command end to end. |
+| `chat-search` | `AGENTS:search` | search | covered |
+| `keyboard-navigation` | `AGENTS:keyboard` | navigation | covered |
+| `queued-sending` | `AGENTS:queued-send` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `mark-read` | `AGENTS:mark-read` | hub | covered |
+| `group-names` | `AGENTS:group-names` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `profile-images` | `AGENTS:profile-images` | workspace-icons | covered |
+| `media-auto-download` | `AGENTS:media` | whatsapp-hub | covered |
+| `media-cache-reopen` | `AGENTS:media-cache` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `animated-gifs` | `AGENTS:gif` | slack-emoji | covered |
+| `video-thumbnails` | `AGENTS:video` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `voice-playback` | `AGENTS:voice` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `voice-transcription-cache` | `AGENTS:transcription` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `dictation` | `AGENTS:dictation` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `dictation-shortcuts` | `src:dictation-shortcuts` | dictation-shortcuts | covered |
+| `gif-picker` | `src:gif-picker` | gif-picker | covered |
+| `link-cards` | `src:link-previews` | link-previews | covered |
+| `drafts` | `src:drafts` | drafts | covered |
+| `hub` | `src:hub` | hub | covered |
+| `update-card` | `src:update-card` | quiet-status | covered |
+| `atomic-update` | `AGENTS:atomic-update` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `no-toolbar` | `AGENTS:no-toolbar` | quiet-status | covered |
+| `window-title` | `AGENTS:window-title` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `font-and-scale` | `AGENTS:font` | text-comparison | covered |
+| `appearance` | `src:appearance` | appearance | covered |
+| `slack` | `src:slack` | hub | covered |
+| `signal` | `src:signal` | signal | covered |
+| `telegram` | `src:telegram` | telegram | covered |
+| `attachment-upload` | `src:attachments` | paste-image | covered |
+| `image-gallery` | `src:image-gallery` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `read-ticks` | `src:read-ticks` | read-ticks | covered |
+| `reply-navigation` | `src:reply` | reply | covered |
+| `view-switching` | `src:views` | views | covered |
+| `chat-list-formatting` | `src:chat-lists` | chat-lists | covered |
+| `slack-threads` | `src:slack-threads` | slack-threads | covered |

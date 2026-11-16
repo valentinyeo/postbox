@@ -9,7 +9,7 @@ skill = root / '.claude/skills/verify-wazig'
 text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
-features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name != 'README.md')
+features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name not in {'README.md', 'MAP.md'})
 registry_path = root / 'tools/verify-wazig/journeys.json'
 registry = json.loads(registry_path.read_text(encoding='utf-8'))
 journeys = registry['journeys']

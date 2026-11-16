@@ -34,6 +34,8 @@ pwsh -NoProfile -File tools/verify-wazig/doctor.ps1 -Evidence verification-evide
 
 This checks PID plus start time, absolute executable path and SHA-256, exact build title/version, UI Automation process and class, readable palette edit `1064` (or legacy sidebar edit `1008` on the evidence-only baseline), enabled composer `1032`, stopped sync and no pending sends/archives. It reads `wazigctl status`; it never uses a control command to change state. `doctor.json` records the observed app state. A failed doctor invalidates the journey; fix launch rather than driving another window. The process lasts only for the workflow's drive step, so running doctor after cleanup must fail.
 
+The [feature proof map](features/MAP.md) identifies journey coverage and gaps.
+
 ## Drive
 
 Harness: **PowerShell UI Automation + SendKeys**. UI Automation resolves native controls by AutomationId; the `RICHEDIT50W` DirectWrite hosts expose UIA ValuePattern, checked against bounded read-only `WM_GETTEXT` reads; keyboard input goes through Windows Forms `SendKeys.SendWait` after checking foreground-process ownership. Menus additionally uses owned-control UIA bounds and Win32 `SendInput` for real mouse clicks and text-selection dragging. No `WM_COMMAND`, text-setting window message, internal state setter, control-client mutation or coordinate click replaces the user action. Palette rows and the message canvas are custom drawn; do not invent accessible row names. Filter the palette with its actual label and press Enter. Screenshots are the visual oracle for custom-drawn content.
