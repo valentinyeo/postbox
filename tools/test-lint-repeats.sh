@@ -115,6 +115,18 @@ done
 reset_automerge
 "$lint" "$fixture"
 printf 'test-lint-repeats: IGSH-504 B8 rejects %s incomplete check policies and permits the fixed workflow\n' "$b8_cases"
+cp "$repo/tools/required-checks.txt" "$fixture/tools/required-checks.txt"
+cp "$repo/tools/required-checks.txt" "$fixture/tools/copied-checks.txt"
+status=0
+"$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+if (( status != 1 )) || ! grep -Eq '\[B10\].*tools/required-checks.txt' "$temp/output"; then
+    cat "$temp/output" >&2
+    printf 'test-lint-repeats: FAIL B10 must reject a copied list\n' >&2
+    exit 1
+fi
+rm "$fixture/tools/copied-checks.txt"
+"$lint" "$fixture"
+printf 'test-lint-repeats: B10 rejects a copied list\n'
 b9_cases=0
 for mutation in fields owner_env owner_arg same_repo owner_author; do
     reset_automerge

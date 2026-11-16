@@ -328,6 +328,38 @@ END {
     failed=1
 fi
 
+if [[ -s tools/required-checks.txt ]]; then
+    if ! python3 - <<'PYCODE'
+from pathlib import Path
+import subprocess
+
+source = Path('tools/required-checks.txt')
+checks = source.read_text().splitlines()
+try:
+    files = subprocess.check_output(['git', 'ls-files', '-co', '--exclude-standard', '-z'], stderr=subprocess.DEVNULL).decode().split('\0')
+except subprocess.CalledProcessError:
+    files = [str(path) for path in Path('.').rglob('*') if path.is_file()]
+failed = False
+for name in files:
+    if not name or Path(name) == source:
+        continue
+    path = Path(name)
+    if not path.is_file():
+        continue
+    try:
+        text = path.read_text()
+    except (UnicodeError, OSError):
+        continue
+    if checks and all(check in text for check in checks):
+        print(f'lint-repeats: {name}:1: [B10] copied required check list. Use tools/required-checks.txt.')
+        failed = True
+raise SystemExit(failed)
+PYCODE
+    then
+        failed=1
+    fi
+fi
+
 if (( failed )); then
     exit 1
 fi
