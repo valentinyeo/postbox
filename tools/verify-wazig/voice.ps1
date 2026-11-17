@@ -162,7 +162,7 @@ function Invoke-VoiceBarClick($Session, [string]$Zone) {
 function Invoke-VoiceBar($Session) {
     $paused = (Read-Control $Session status).audio
     Assert-That ($paused.state -eq 'paused' -and $paused.speed -eq 100) 'voice bar: expected paused playback at 1x'
-    Assert-That ($paused.row.chat -ceq 'fixture-alpha' -and $paused.row.text -ceq 'Voice message paused 1x') "voice bar: paused row text was $($paused.row.text)"
+    Assert-That ($paused.row.chat -ceq 'fixture-alpha' -and $paused.row.text -ceq 'Do not copy this marked text message.') "voice bar: playing chat row must show its last message, got $($paused.row.text)"
     Assert-That (-not $paused.bar_visible) 'voice bar: bar shown inside the playing chat'
     Send-Keys $Session '^{TAB}'
     $null = Wait-Until { $state = Read-Control $Session status; $state.selected.id -eq 'fixture-beta' -and $state.audio.bar_visible } 'voice bar: bar shown in the other chat'
