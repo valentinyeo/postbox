@@ -208,7 +208,7 @@ jobs:
         env:
           FEATURE: ${{ matrix.feature }}
         run: |
-          git apply "tools/verify-wazig/planted/$env:FEATURE.patch"
+          git apply --ignore-whitespace "tools/verify-wazig/planted/$env:FEATURE.patch"
           if ($LASTEXITCODE -ne 0) { throw 'Patch failed to apply' }
       - name: Build planted desktop
         shell: pwsh
