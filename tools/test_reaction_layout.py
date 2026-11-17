@@ -34,7 +34,7 @@ def verify(source):
         '.cx = text_width + px(a, 12), .cy = text_height + px(a, 8)',
     ):
         assert token in size, f'ISSUE-533 chip measurement missing {token}'
-    assert 'return @max(height, min_height) + @max(0, reactionChipSize(hdc, a, message, width).cy - px(a, 4));' in measure, 'ISSUE-533 row must reserve the chip overhang after the minimum bubble height'
+    assert 'parts.reaction_overhang = reactionChipSize(hdc, a, message, width).cy - px(a, 4);' in measure and 'return message_layout.total(parts);' in measure, 'ISSUE-533 row must reserve the chip overhang after the minimum bubble height'
     for token in (
         'const reaction_size = reactionChipSize(hdc, a, message, width);',
         'const bubble_height = height - sender_height - @max(0, reaction_size.cy - px(a, 4));',
@@ -65,7 +65,7 @@ class ReactionLayoutTests(unittest.TestCase):
         source = read_source()
         verify(source)
         for old, new in (
-            ('return @max(height, min_height) + @max(0, reactionChipSize(hdc, a, message, width).cy - px(a, 4));', 'return @max(height, min_height);'),
+            ('parts.reaction_overhang = reactionChipSize(hdc, a, message, width).cy - px(a, 4);', 'parts.reaction_overhang = 0;'),
             ('message.bubble_hit.bottom - px(a, 4)', 'y + px(a, 6)'),
             ('const bubble_height = height - sender_height - @max(0, reaction_size.cy - px(a, 4));', 'const bubble_height = height;'),
             ('chip.top + px(a, 4), null)', 'y + px(a, 6), null)'),

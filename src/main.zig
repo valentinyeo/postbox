@@ -42,6 +42,7 @@ const quote_layout = @import("quote_layout.zig");
 const update_card_layout = @import("update_card_layout.zig");
 const media_age = @import("media_age.zig");
 const media_layout = @import("media_layout.zig");
+const message_layout = @import("message_layout.zig");
 const media_drain = @import("media_drain.zig");
 const video_alias = @import("video_alias.zig");
 const sync_gate = @import("sync_gate.zig");
@@ -18242,27 +18243,31 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, sh
     const width = messageWidth(hdc, a, message, limit);
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
     const header_height = messageHeaderHeight(hdc, a, show_sender);
-    const skip_body_line = message.text.len == 0 and message.quote.len > 0;
-    var height = quoteBlockHeight(hdc, a, message, width) + header_height;
-    if (message.forwarded) height += textLineHeight(hdc, a.font_small.?) + px(a, 4);
+    var parts = message_layout.Parts{
+        .quote = quoteBlockHeight(hdc, a, message, width),
+        .header = header_height,
+        .skip_body = message.text.len == 0 and message.quote.len > 0,
+    };
+    if (message.forwarded) parts.forwarded = textLineHeight(hdc, a.font_small.?) + px(a, 4);
     const text_width = width - px(a, 28);
-    if (!skip_body_line) {
-        height += wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), if (message.text.len > 0) @intCast(message.text.len) else 1, text_width, false, 0, 0, message);
+    if (!parts.skip_body) {
+        parts.body = wrapMixedSink(hdc, a, if (message.text.len > 0) message.text.ptr() else lit(" "), if (message.text.len > 0) @intCast(message.text.len) else 1, text_width, false, 0, 0, message);
     }
-    if (unfurlCardVisible(a, @constCast(message))) height += unfurlCardHeight(a, message) + px(a, 6);
+    if (unfurlCardVisible(a, @constCast(message))) parts.unfurl = unfurlCardHeight(a, message) + px(a, 6);
     if (message.bitmap_height > 0) {
         const display = media_layout.fit(message.bitmap_width, message.bitmap_height, text_width, px(a, 250));
-        height += display.height + px(a, 8);
-    } else if (message.media_type.len > 0) height += px(a, 54);
-    if (message.transcript_state == .loading or message.transcript_state == .failed) height += @max(px(a, 24), @max(px(a, 20), voiceFooterLineHeight(hdc, a)) + px(a, 4));
+        parts.media = display.height + px(a, 8);
+    } else if (message.media_type.len > 0) parts.media = px(a, 54);
+    if (message.transcript_state == .loading or message.transcript_state == .failed) parts.voice_status = @max(px(a, 24), @max(px(a, 20), voiceFooterLineHeight(hdc, a)) + px(a, 4));
     if (message.transcript.len > 0) {
         _ = win.SelectObject(hdc, @ptrCast(a.font.?));
         const shown: c_int = if (message.transcript_expanded) @intCast(message.transcript.len) else @intCast(@min(message.transcript.len, 400));
-        height += transcriptRender(hdc, a, message, shown, width - px(a, 24), false, 0, 0) + px(a, 2) + @max(px(a, 20), @max(px(a, 18), voiceFooterLineHeight(hdc, a)) + px(a, 2));
+        parts.transcript = transcriptRender(hdc, a, message, shown, width - px(a, 24), false, 0, 0) + px(a, 2) + @max(px(a, 20), @max(px(a, 18), voiceFooterLineHeight(hdc, a)) + px(a, 2));
     }
-    height += px(a, 10);
-    const min_height: i32 = header_height + px(a, 20);
-    return @max(height, min_height) + @max(0, reactionChipSize(hdc, a, message, width).cy - px(a, 4));
+    parts.tail_pad = px(a, 10);
+    parts.min_body = px(a, 20);
+    parts.reaction_overhang = reactionChipSize(hdc, a, message, width).cy - px(a, 4);
+    return message_layout.total(parts);
 }
 
 const SenderColor = design.SenderColor;
