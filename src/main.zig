@@ -14370,7 +14370,7 @@ fn retryUnarchiveChat(a: *App) void {
 fn pendingArchiveHidesChat(a: *const App, jid: []const u8, show_archived: bool) bool {
     if (a.include_archived and !show_archived) return false;
     for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
-        if (archive_rules.pendingHidesChat(show_archived, pending.state == .unarchive_pending) and
+        if (archive_rules.pendingHidesChat(show_archived, archive_state.isUnarchive(pending.state)) and
             std.mem.eql(u8, pending.jid.slice(), jid)) return true;
     }
     return false;
@@ -14391,10 +14391,10 @@ fn checkArchive(a: *App) void {
     if (verification_fixture and !hubConfigured(a)) {
         if (a.pending_archive_count == 0) return;
         const pending = &a.pending_archives[0];
-        const response = verificationProvider(a, if (pending.state == .unarchive_pending) .unarchive else .archive, pending.jid.slice()) orelse return;
+        const response = verificationProvider(a, if (archive_state.isUnarchive(pending.state)) .unarchive else .archive, pending.jid.slice()) orelse return;
         a.allocator.free(response);
         var log_buffer: [288]u8 = undefined;
-        appendLaunchLog(a, archive_rules.logLine(&log_buffer, pending.jid.slice(), pending.state == .archive_pending, pending.source));
+        appendLaunchLog(a, archive_rules.logLine(&log_buffer, pending.jid.slice(), !archive_state.isUnarchive(pending.state), pending.source));
         completeArchive(a, 0);
         return;
     }
@@ -14413,7 +14413,7 @@ fn checkArchive(a: *App) void {
 
 fn completeArchive(a: *App, code: win.DWORD) void {
     const completed = &a.pending_archives[0];
-    const action: archive_rules.Action = if (completed.state == .unarchive_pending) .unarchive else if (isKeptArchived(a, completed.jid.slice())) .keep else .archive;
+    const action: archive_rules.Action = if (archive_state.isUnarchive(completed.state)) .unarchive else if (isKeptArchived(a, completed.jid.slice())) .keep else .archive;
     const quiet = completed.source == .kept and code == 0;
     removeFirstPendingArchive(a);
     if (a.pending_archive_count > 0) {
@@ -14556,7 +14556,7 @@ fn unarchiveSentChat(a: *App, jid: []const u8) void {
     if (visibleChatIndex(a, .{ .provider = .whatsapp, .account = a.cache_tag.slice(), .id = jid })) |index| archived = archived or a.chats[index].archived;
     if (a.people.find(jid)) |entry| archived = archived or entry.origin == .archived;
     for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
-        if (std.mem.eql(u8, pending.jid.slice(), jid)) archived = pending.state == .archive_pending;
+        if (std.mem.eql(u8, pending.jid.slice(), jid)) archived = !archive_state.isUnarchive(pending.state);
     }
     if (archived) queueUnarchiveChat(a, jid, .send);
 }
@@ -24043,7 +24043,7 @@ fn startHubMarkRead(a: *App) void {
 
 fn startHubArchive(a: *App) void {
     if (a.bulk.items.len > 0 or a.hub_account.len == 0 or a.pending_archive_count == 0 or wacliPendingGet(a, .hub_archive) > 0 or a.pending_archives[0].retry_at_ms > win.GetTickCount64()) return;
-    const archived = a.pending_archives[0].state == .archive_pending;
+    const archived = !archive_state.isUnarchive(a.pending_archives[0].state);
     const count = @min(a.pending_archives[0].batch_count, a.pending_archive_count);
     if (count == 0) {
         _ = hubTransport(a).archive(a.pending_archives[0].jid.slice(), archived);

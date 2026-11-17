@@ -3,6 +3,15 @@ const std = @import("std");
 pub const Pending = enum { archive_pending, unarchive_pending };
 pub const Completion = enum { confirm_archived_and_drop, drop, drop_managed_locally, retry };
 
+pub fn isUnarchive(pending: Pending) bool {
+    return pending == .unarchive_pending;
+}
+
+test "pending unarchive intent" {
+    try std.testing.expect(!isUnarchive(.archive_pending));
+    try std.testing.expect(isUnarchive(.unarchive_pending));
+}
+
 pub fn completion(pending: Pending, ok: bool, managed_locally: bool) Completion {
     if (ok) return if (pending == .archive_pending) .confirm_archived_and_drop else .drop;
     return if (managed_locally) .drop_managed_locally else .retry;
