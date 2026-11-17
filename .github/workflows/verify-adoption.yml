@@ -112,11 +112,15 @@ jobs:
         run: zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
       - name: Launch, doctor, drive search
         shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature search -Bin zig-out/bin -Evidence verification-evidence -ExpectedVersion 0.0.526
           if ($LASTEXITCODE) { throw 'Real desktop journey failed' }
           python tools/verify-wazig/check-evidence.py verification-evidence
           if ($LASTEXITCODE) { throw 'Desktop evidence failed' }
+          python -c "import json, os; from pathlib import Path; assert json.loads(Path('verification-evidence/session.json').read_text(encoding='utf-8-sig'))['commit'] == os.environ['EXPECTED_HEAD'], 'Wrong checkout identity'"
+          if ($LASTEXITCODE) { throw 'Desktop proof names another checkout' }
       - name: Preserve proof and clean owned session
         if: always()
         shell: pwsh

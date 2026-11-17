@@ -20,8 +20,15 @@
     },
     "existing_search_fixture": {
       "chats": 2,
-      "source": "tools/verify-wazig/run.ps1"
+      "source": "tools/verify-wazig/run.ps1",
+      "phase": "Initial cached seed, before hub journey initialization"
     },
-    "required_comparison": "Verifier must count exercised records and explain production relevance. Two fixture chats do not prove production scale."
+    "required_comparison": "Verifier must count exercised records and explain production relevance. Two fixture chats do not prove production scale.",
+    "observed_search_journey": {
+      "chats": 6,
+      "unit": "synthetic visible chats",
+      "source": "Hosted search before.state.json and after.state.json",
+      "production_comparison": "Private installed profile unavailable; six synthetic chats do not establish production scale."
+    }
   }
 }
