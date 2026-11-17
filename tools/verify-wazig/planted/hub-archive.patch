@@ -1,12 +1,13 @@
 diff --git a/src/hub.zig b/src/hub.zig
+index cc22ba5..815ebf7 100644
 --- a/src/hub.zig
 +++ b/src/hub.zig
-@@ -129,7 +129,7 @@
-
+@@ -129,7 +129,7 @@ pub fn archiveBatch(allocator: std.mem.Allocator, chats_to_archive: []const brid
+ 
  pub fn archive(allocator: std.mem.Allocator, chat: []const u8, archived: bool) !Request {
      try validId(chat);
 -    return .{ .method = "POST", .path = "/v1/wazig/archive", .body = try std.json.Stringify.valueAlloc(allocator, .{ .chat = chat, .archived = archived }, .{}) };
 +    return .{ .method = "POST", .path = "/v1/wazig/archive", .body = try std.json.Stringify.valueAlloc(allocator, .{ .chat = chat, .archived = !archived }, .{}) };
  }
-
+ 
  pub fn react(allocator: std.mem.Allocator, chat: []const u8, msg: []const u8, emoji: []const u8, client_id: []const u8) !Request {

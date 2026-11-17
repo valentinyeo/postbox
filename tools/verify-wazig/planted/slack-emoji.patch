@@ -1,7 +1,8 @@
 diff --git a/src/slack_emoji.zig b/src/slack_emoji.zig
+index cdd87d9..157192e 100644
 --- a/src/slack_emoji.zig
 +++ b/src/slack_emoji.zig
-@@ -73,7 +73,7 @@
+@@ -73,7 +73,7 @@ pub fn replace(buffer: []u8, text: []const u8, custom: ?Resolver) []const u8 {
              const tone = next(text, end) orelse break;
              if (tone.start != end or !std.mem.startsWith(u8, tone.name, "skin-tone-")) break;
              const combined = std.fmt.bufPrint(&name_buffer, "{s}::{s}", .{ text[token.start + 1 .. end - 1], tone.name }) catch break;
