@@ -25,6 +25,13 @@ function Invoke-MediaSpeedJourney($Session) {
     $gone = @($shown.messages | Where-Object { $_.id -ceq 'SPEED-GONE-1' })
     $null = Assert-That ($gone.Count -eq 1 -and -not $gone[0].local -and $gone[0].unavailable) 'media-speed: the gone file must show as unavailable'
     $null = Assert-That ($goneSeen['seconds'] -lt 15) "media-speed: the gone file took $($goneSeen['seconds']) seconds to show as unavailable, limit is 15"
+    $speeds = @()
+    foreach ($entry in @(@{ query = 'Playback speed: 1.5x'; value = 150 }, @{ query = 'Playback speed: 2x'; value = 200 }, @{ query = 'Playback speed: 1x'; value = 100 })) {
+        $null = Invoke-PaletteCommand $Session $entry.query
+        $audio = Wait-Until { $value = (Read-Control $Session status).audio; if ($value.speed -eq $entry.value) { $value } } "media-speed: palette sets playback speed to $($entry.value)"
+        $speeds += $audio.speed
+    }
+    $speeds | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'playback-speeds.json')
     Read-BridgeRequests $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'media-speed.requests.json')
     $null = Assert-That ($total -lt 15) "media-speed: ten files took $total seconds, limit is 15"
 }

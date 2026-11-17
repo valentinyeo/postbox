@@ -234,9 +234,9 @@
     {
       "feature": "command_play_audio",
       "source": "buildPaletteItems:command_play_audio",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "voice",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_prev_chat",
@@ -374,23 +374,23 @@
     {
       "feature": "command_speed_1",
       "source": "buildPaletteItems:command_speed_1",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "media-speed",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_speed_150",
       "source": "buildPaletteItems:command_speed_150",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "media-speed",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_speed_200",
       "source": "buildPaletteItems:command_speed_200",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "media-speed",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_sync",
@@ -437,9 +437,9 @@
     {
       "feature": "command_voice",
       "source": "buildPaletteItems:command_voice",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "voice",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "reaction_laugh",

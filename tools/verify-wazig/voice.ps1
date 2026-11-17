@@ -120,7 +120,9 @@ function Invoke-VoicePlayback($Session) {
     $handle = Get-VoiceCanvas $Session
     $canvas = [VerifyVoice]::Bounds($Session.pid, $handle)
     $height = $canvas.Bottom - $canvas.Top
-    $target = @(Get-VoiceRows (Get-VoiceLayout $Session) | Where-Object { $_.local -and $_.media[1] -ge 0 -and $_.media[3] -le $height -and $_.media[3] -gt $_.media[1] }) | Select-Object -Last 1
+    Send-Keys $Session '%j'
+    $null = Wait-Until { @(Read-VoiceMessages $Session | Where-Object { $_.selected -and $_.media_type -eq 'audio' }).Count -eq 1 } 'voice: select a voice message'
+    $target = @(Get-VoiceRows (Get-VoiceLayout $Session) | Where-Object { $_.selected -and $_.local -and $_.media[1] -ge 0 -and $_.media[3] -le $height -and $_.media[3] -gt $_.media[1] }) | Select-Object -Last 1
     Assert-That ($null -ne $target) 'voice: no visible downloaded play button'
     $dpi = [int][VerifyWindow]::GetDpiForWindow($handle)
     $x = $canvas.Left + $target.media[0] + [int][Math]::Floor((18 * $dpi + 48) / 96)
@@ -135,8 +137,8 @@ function Invoke-VoicePlayback($Session) {
         $audio.id -ceq $target.id -and $audio.state -eq 'playing' -and $audio.duration_ms -gt 0 -and $audio.position_ms -ge 1000
     } 'voice: downloaded playback position advances' -Seconds 15
     Save-Screen $Session 'voice-playing'
-    [VerifyMenus]::Click($Session.pid, $x, $y, $false)
-    $null = Wait-Until { (Read-Control $Session status).audio.state -eq 'paused' } 'voice: click pauses playback'
+    Send-Keys $Session '^p'
+    $null = Wait-Until { (Read-Control $Session status).audio.state -eq 'paused' } 'voice: Ctrl+P pauses selected playback'
     [Threading.Thread]::Sleep(600)
     $paused = (Read-Control $Session status).audio
     [Threading.Thread]::Sleep(600)
@@ -213,6 +215,11 @@ function Invoke-VoiceJourney($Session, [string]$Messages) {
         $rows = @(Read-VoiceMessages $Session | Where-Object { $_.media_type -eq 'audio' })
         $rows.Count -eq 5 -and @($rows | Where-Object { $_.transcript_chars -lt 900 }).Count -eq 0
     } 'five cached long transcripts shown' -Seconds 60
+    Send-Keys $Session '^+m'
+    $recording = Wait-Until { $value = (Read-Control $Session status).voice_recording; if ($value.active -and $value.samples -gt 0 -and $value.fixture_entries -eq 1) { $value } } 'voice: Ctrl+Shift+M starts recording'
+    $recording | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $Session.evidence 'voice-recording.json')
+    Send-Keys $Session '{ESC}'
+    $null = Wait-Until { -not (Read-Control $Session status).voice_recording.active } 'voice: recording cancelled'
     Invoke-VoicePlayback $Session
     Invoke-VoiceBar $Session
     Invoke-VoiceProbe $Session 'voice-opened'
