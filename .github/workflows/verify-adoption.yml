@@ -153,9 +153,9 @@ jobs:
           test -n "$ANTHROPIC_API_KEY"
           mkdir -p verifier-evidence
           npx --yes @anthropic-ai/claude-code@2.1.326 -p \
-            --model opus --max-turns 20 --output-format json \
+            --model opus --max-turns 40 --output-format json \
             --tools 'Bash,Read,Glob,Grep' \
-            --allowedTools 'Read,Glob,Grep,Bash(python3:*),Bash(git diff:*),Bash(git status:*)' \
+            --allowedTools 'Bash,Read,Glob,Grep' \
             -- \
             "Read $GITHUB_WORKSPACE/.verify/worker.md before anything else. Goal: verify Postbox gate adoption independently. Author family is OpenAI; you are Anthropic. Read AGENTS.md, .verify, source code and downloaded-evidence. Run python3 tools/verify-postbox-map.py. Try removing one marker temporarily, verify failure, then restore it. Inspect for omitted Win32 entry points, inflated counts, broken workflow references and unsafe exclusions. Check actual desktop evidence. Do not fabricate a real-app run, a verdict attestation, or production data size. Do not run the full product suite. Do not commit, merge, publish, change policy or contact anyone. Give FAIL if 100% code entry coverage or current-head app proof is absent. Start your report with PASS, PASS+NOTES or FAIL, then evidence and limits. Inspect comments in this diff too. Return your complete report in your final response." \
             > verifier-evidence/agent.json
