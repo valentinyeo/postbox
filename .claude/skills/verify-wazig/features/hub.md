@@ -9,6 +9,7 @@ The IGSH-531 backend runs through the existing transport interface with no new U
 - `chat-switch`: opening timestamped, uncached WhatsApp Beta clears Slack Alpha before delayed history arrives.
 - `hub-live`: fragmented SSE framing, reconnect replay and live history invalidation use the existing cancellable WinHTTP reader.
 - `hub-send`: a lost response retries the persisted client_id; exactly one send is accepted.
+- `message-delete`: the palette deletes a selected sent message, sends one delete request and shows the deleted bubble.
 - `hub-read-archive`: opening a remote chat marks it read and keyboard archiving removes it from the inbox without a hub archive request.
 - `hub-media`: automatic fetch polls 202 then caches the exact 200 binary response.
 - `workspace-icons`: Slack provider badges use authenticated `/v1/wazig/workspace-icon/<team>` image bytes through the existing avatar worker and disk cache, with S on loading/missing/error; WhatsApp uses a green handset and Telegram retains T. The dedicated [workspace-icons](workspace-icons.md) journey proves badge pixels.

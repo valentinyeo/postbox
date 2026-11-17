@@ -8,6 +8,7 @@
 - Multiline replies send intact and restore the one-line empty composer.
 - One grey quote line sits above replies.
 - Clicking that line finds and briefly highlights the original.
+- Palette commands switch between Slack-style threads and WhatsApp-style inline replies.
 
 ## How to get to it (user POV)
 

@@ -5,6 +5,7 @@ Move between chats while keeping the selected conversation and its composer alig
 ## Sub-features
 
 - `navigation-next`: next and previous chat, with wraparound.
+- `navigation-pin`: pin and unpin the selected chat through the palette, checking saved preferences.
 - `navigation-position`: Ctrl+number switches views; Ctrl+Shift+Home selects the first chat.
 - `navigation-edges`: jump to the first or last chat.
 - `navigation-page`: move by a page; sidebar arrow keys and mouse selection are also available.

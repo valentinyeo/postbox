@@ -9,7 +9,7 @@
 - `voice-bar`: with a note paused in the voice chat, the row keeps its last message; in the other chat the bar offers a 1x, 1.5x and 2x speed control, pause and resume, and the row still keeps its last message.
 - `voice-partial-repaint`: repainting only the voice bubbles, as the playback timer does, draws exactly what a full repaint draws.
 
-- `voice-commands`: Ctrl+Shift+M starts fixture recording; Ctrl+P pauses the selected playing voice note.
+- `voice-commands`: Ctrl+Shift+M starts fixture recording; Ctrl+P pauses the selected playing voice note. The palette toggles the selected transcript and restores it.
 - `transcript-selection`: Copy all transcripts copies the marked raw transcripts in chronological order; Escape clears the marks.
 
 ## How to get to it (user POV)
