@@ -66,9 +66,9 @@
     {
       "feature": "command_delete_message",
       "source": "buildPaletteItems:command_delete_message",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "hub",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_dictate",
@@ -227,9 +227,9 @@
     {
       "feature": "command_pin",
       "source": "buildPaletteItems:command_pin",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "navigation",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_play_audio",
@@ -276,16 +276,16 @@
     {
       "feature": "command_replies_slack",
       "source": "buildPaletteItems:command_replies_slack",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "reply",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_replies_whatsapp",
       "source": "buildPaletteItems:command_replies_whatsapp",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "reply",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_reply",
@@ -409,9 +409,9 @@
     {
       "feature": "command_toggle_transcript",
       "source": "buildPaletteItems:command_toggle_transcript",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "voice",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_unread",

@@ -122,6 +122,12 @@ function Invoke-VoicePlayback($Session) {
     $height = $canvas.Bottom - $canvas.Top
     Send-Keys $Session '%j'
     $null = Wait-Until { @(Read-VoiceMessages $Session | Where-Object { $_.selected -and $_.media_type -eq 'audio' }).Count -eq 1 } 'voice: select a voice message'
+    $selected = @(Read-VoiceMessages $Session | Where-Object { $_.selected })[0]
+    $wasExpanded = $selected.expanded
+    Invoke-PaletteCommand $Session 'Show or hide transcript'
+    $null = Wait-Until { @((Read-VoiceMessages $Session) | Where-Object { $_.id -ceq $selected.id -and $_.expanded -ne $wasExpanded }).Count -eq 1 } 'voice: palette toggles transcript'
+    Invoke-PaletteCommand $Session 'Show or hide transcript'
+    $null = Wait-Until { @((Read-VoiceMessages $Session) | Where-Object { $_.id -ceq $selected.id -and $_.expanded -eq $wasExpanded }).Count -eq 1 } 'voice: palette restores transcript'
     $target = @(Get-VoiceRows (Get-VoiceLayout $Session) | Where-Object { $_.selected -and $_.local -and $_.media[1] -ge 0 -and $_.media[3] -le $height -and $_.media[3] -gt $_.media[1] }) | Select-Object -Last 1
     Assert-That ($null -ne $target) 'voice: no visible downloaded play button'
     $dpi = [int][VerifyWindow]::GetDpiForWindow($handle)
