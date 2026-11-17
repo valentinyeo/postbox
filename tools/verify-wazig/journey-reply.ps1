@@ -97,6 +97,24 @@ foreach ($target in @(
     $dpi = [int][VerifyWindow]::GetDpiForWindow($app.MainWindowHandle)
     Assert-That ((Read-Edit $compose) -eq '' -and $sentState.composer.lines -eq 1) "$name sending clears composer text"
     Assert-That ($sentState.composer.box.bottom - $sentState.composer.box.top -eq [int][Math]::Floor((44 * $dpi + 48) / 96)) "$name sending restores one-line composer"
+    if ($name -eq 'slack') {
+        $null = Wait-Until {
+            $thread = (Read-Control $session status).slack_threads
+            $thread.threads_option -ceq 'on' -and $thread.parent_id -ceq 'REPLY-ORIGINAL' -and $thread.parent_reply_line -ceq '1 reply' -and $thread.inline_replies -eq 0
+        } 'slack reply grouped under the original'
+        $parent = Wait-Until {
+            (Read-Control $session messages).messages | Where-Object { $_.id -ceq 'REPLY-ORIGINAL' -and $_.replies_line[2] -gt $_.replies_line[0] }
+        } 'slack replies line painted'
+        Save-Screen $session slack-threaded
+        Click-ReplyRect $session $canvas $parent.replies_line
+        $null = Wait-Until {
+            $thread = (Read-Control $session status).slack_threads
+            $thread.open -and $thread.parent_id -ceq 'REPLY-ORIGINAL' -and $thread.replies -eq 1
+        } 'slack thread opens with the reply'
+        Save-Screen $session slack-thread
+        Invoke-PaletteCommand $session 'Slack threads like Slack for this account'
+        $null = Wait-Until { (Read-Control $session status).slack_threads.threads_option -ceq 'off' } 'slack inline replies enabled'
+    }
     $sent = Wait-Until {
         (Read-Control $session messages).messages | Where-Object { $_.from_me -and $_.quoted_msg_id -ceq 'REPLY-ORIGINAL' -and $_.quote_line[2] -gt $_.quote_line[0] }
     } "$name quoted reply visible"

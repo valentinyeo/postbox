@@ -22,12 +22,19 @@ class ReplyEvidenceTests(unittest.TestCase):
             for phase in ['before', 'replying', 'sent', 'jumped', 'unavailable']:
                 state = dict(selected=dict(id=chat, provider=provider), reply=dict(id='REPLY-ORIGINAL',
                              sender='Fixture Sender', preview='First words of the original \U0001F642'), reply_flash='REPLY-ORIGINAL', reply_notice=True, composer=dict(lines=1))
+                if provider == 'slack':
+                    state['slack_threads'] = dict(threads_option='off')
                 write(f'{provider}-{phase}.state.json', state)
                 (root / f'{provider}-{phase}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + phase.encode() * 10001)
             write(f'{provider}-sent.messages.json', dict(messages=[dict(from_me=True,
                   quoted_msg_id='REPLY-ORIGINAL', quote_line=[10, 10, 110, 30], bubble=[10, 36, 110, 80])]))
             requests.append(dict(wire_path='/v1/wazig/send', status=200, authorized=True,
                                  body=dict(chat=chat, reply_to='REPLY-ORIGINAL', text=f'Synthetic {provider} reply\nSecond line')))
+        for name in ['slack-threaded', 'slack-thread']:
+            threads = dict(threads_option='on', parent_id='REPLY-ORIGINAL', parent_reply_line='1 reply',
+                           inline_replies=0, replies=1, open=name == 'slack-thread')
+            write(f'{name}.state.json', dict(selected=dict(id='fixture-alpha', provider='slack'), slack_threads=threads))
+            (root / f'{name}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + name.encode() * 10001)
         for name in ['whatsapp-slack-style', 'whatsapp-slack-thread', 'whatsapp-slack-remembered', 'whatsapp-style-restored']:
             threads = dict(parent_id='REPLY-ORIGINAL', parent_reply_line='1 reply', inline_replies=0, replies=1, open=name.endswith('thread'))
             write(f'{name}.state.json', dict(selected=dict(id='fixture-beta', provider='whatsapp'), slack_threads=threads))
@@ -44,6 +51,9 @@ class ReplyEvidenceTests(unittest.TestCase):
         for name, change in [
             ('whatsapp-replying.state.json', lambda row: row['reply'].update(id='')),
             ('slack-sent.messages.json', lambda row: row['messages'][0].update(quoted_msg_id='wrong')),
+            ('slack-threaded.state.json', lambda row: row['slack_threads'].update(inline_replies=1)),
+            ('slack-thread.state.json', lambda row: row['slack_threads'].update(replies=0)),
+            ('slack-sent.state.json', lambda row: row['slack_threads'].update(threads_option='on')),
             ('whatsapp-sent.messages.json', lambda row: row['messages'][0].update(quote_line=[10, 40, 110, 60])),
             ('whatsapp-slack-style.state.json', lambda row: row['slack_threads'].update(inline_replies=1)),
             ('whatsapp-slack-thread.state.json', lambda row: row['slack_threads'].update(open=False)),
