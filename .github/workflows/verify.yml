@@ -40,6 +40,7 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       repro: ${{ steps.matrix.outputs.repro }}
       needed: ${{ steps.matrix.outputs.needed }}
+      planted: ${{ steps.planted.outputs.planted }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -104,6 +105,16 @@ jobs:
           print(value)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'matrix={value}\n')
+      - name: Plan planted journeys
+        id: planted
+        shell: python
+        run: |
+          import json
+          import os
+          from pathlib import Path
+          patches = sorted(p.stem for p in Path('tools/verify-wazig/planted').glob('*.patch'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('planted=' + json.dumps({'feature': patches}, separators=(',', ':')) + '\n')
   base-fails:
     name: base-fails (${{ needs.plan.outputs.repro }})
     needs: [plan]
@@ -167,11 +178,8 @@ jobs:
           GITHUB_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence base-evidence -ExpectedVersion 0.0.526
-          if ($LASTEXITCODE -eq 0) { throw 'repro passed on base, so it does not reproduce the bug' }
-          if (-not (Test-Path base-evidence/journey-started.txt) -or -not (Test-Path base-evidence/failure.txt)) { throw 'base failed before the journey ran' }
-          $failure = Get-Content base-evidence/failure.txt -Raw
-          if ([string]::IsNullOrWhiteSpace($failure) -or $failure.StartsWith("${env:FEATURE}: App exited", [StringComparison]::OrdinalIgnoreCase) -or $failure -match 'Unknown verification journey|Hosted runner|Verification runs only|Timed out:\s*main window') { throw 'base failed before the journey ran' }
-          Write-Host $failure
+          $code = $LASTEXITCODE
+          & tools/verify-wazig/classify-red.ps1 -Feature $env:FEATURE -Evidence base-evidence -ExitCode $code
           exit 0
       - name: Upload base evidence
         if: ${{ always() && needs.plan.outputs.repro != '' }}
@@ -180,6 +188,113 @@ jobs:
           name: repro-base
           path: base-evidence/
           if-no-files-found: warn
+  planted:
+    name: planted (${{ matrix.feature }})
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    needs: [plan]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.planted) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+          use-cache: false
+      - name: Apply planted bug
+        shell: pwsh
+        env:
+          FEATURE: ${{ matrix.feature }}
+        run: |
+          git apply --ignore-whitespace "tools/verify-wazig/planted/$env:FEATURE.patch"
+          if ($LASTEXITCODE -ne 0) { throw 'Patch failed to apply' }
+      - name: Build planted desktop
+        shell: pwsh
+        run: |
+          zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
+          if ($LASTEXITCODE -ne 0) { throw 'Planted build failed' }
+      - name: Install audio output
+        if: matrix.feature == 'voice'
+        shell: pwsh
+        run: tools/verify-wazig/install-audio.ps1
+      - name: Run planted journey
+        id: journey
+        continue-on-error: true
+        shell: pwsh
+        env:
+          FEATURE: ${{ matrix.feature }}
+        run: |
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence planted-evidence -ExpectedVersion 0.0.526
+          "code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
+      - name: Classify planted failure
+        id: classify
+        shell: pwsh
+        env:
+          FEATURE: ${{ matrix.feature }}
+          CODE: ${{ steps.journey.outputs.code }}
+        run: |
+          if ($env:CODE -notmatch '^\d+$') { throw 'Journey did not report an exit code' }
+          & tools/verify-wazig/classify-red.ps1 -Feature $env:FEATURE -Evidence planted-evidence -ExitCode ([int]$env:CODE) -PassedMessage 'planted bug not caught'
+          exit 0
+      - name: Record planted result
+        if: always()
+        shell: pwsh
+        env:
+          CLASSIFICATION: ${{ steps.classify.outcome }}
+          CODE: ${{ steps.journey.outputs.code }}
+        run: |
+          New-Item planted-result -ItemType Directory -Force | Out-Null
+          $result = if ($env:CLASSIFICATION -eq 'success') { 'FAIL as expected' } elseif ($env:CODE -eq '0') { 'NOT CAUGHT' } else { 'BUILD ERROR' }
+          $result | Set-Content planted-result/result.txt
+      - name: Upload planted result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: planted-result-${{ matrix.feature }}
+          path: planted-result/
+      - name: Upload planted evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: planted-evidence-${{ matrix.feature }}
+          path: planted-evidence/
+          if-no-files-found: warn
+  planted-summary:
+    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.plan.result == 'success' }}
+    needs: [plan, planted, verify]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: planted-result-*
+          path: results
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: verify-wazig-*
+          path: results
+        continue-on-error: true
+      - name: Summarize planted and clean journeys
+        shell: python
+        env:
+          MATRIX: ${{ needs.plan.outputs.planted }}
+        run: |
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('results')
+          lines = ['| Journey | Planted result | Clean result |', '|---|---|---|']
+          for name in json.loads(os.environ['MATRIX'])['feature']:
+              result = root / f'planted-result-{name}' / 'result.txt'
+              planted = result.read_text(encoding='utf-8-sig').strip() if result.exists() else 'BUILD ERROR'
+              clean_file = root / f'verify-wazig-{name}' / 'clean-result.txt'
+              clean = clean_file.read_text(encoding='utf-8-sig').strip().upper() if clean_file.exists() else 'NOT RUN OR NO EVIDENCE'
+              lines.append(f'| {name} | {planted} | {clean} |')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write('\n'.join(lines) + '\n')
   candidate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -625,6 +740,14 @@ jobs:
       - name: Validate archive evidence
         if: ${{ success() && inputs.feature == 'archive' }}
         run: python tools/verify-wazig/check-evidence.py verification-evidence
+      - name: Record clean result
+        if: always()
+        shell: pwsh
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          $env:JOB_STATUS | Set-Content verification-evidence/clean-result.txt
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4

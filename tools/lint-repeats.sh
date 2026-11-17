@@ -348,6 +348,15 @@ if [[ -f .github/workflows/pr-title.yml && -f .github/workflows/automerge.yml ]]
     fi
 fi
 
+if [[ -f .github/workflows/verify.yml ]]; then
+    if ! grep -Eq '^  planted:$' .github/workflows/verify.yml ||
+       ! grep -Eq '^  schedule:$' .github/workflows/verify.yml ||
+       ! grep -Eq '^    - cron: ' .github/workflows/verify.yml; then
+        printf 'lint-repeats: .github/workflows/verify.yml:1: [B13] Planted journey verification or its nightly trigger is missing. Restore both.\n'
+        failed=1
+    fi
+fi
+
 if [[ -s tools/required-checks.txt ]]; then
     if ! python3 - <<'PYCODE'
 from pathlib import Path

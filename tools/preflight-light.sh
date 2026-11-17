@@ -12,6 +12,7 @@ PYTHON_LIGHT_TESTS=(
     test_shared_design
     test_check_cache_keys
     test_check_hub_only
+    test_check_planted
     test_check_private_markers
     test_fake_wa_bridge
     test_identity_fixture
@@ -68,6 +69,7 @@ run bash tools/test-check-no-empty-catch.sh
 run bash tools/test-check-no-new-pixel-numbers.sh
 run node tools/strip-comments.mjs --check
 run node tools/check-fonts.mjs
+run python3 tools/check-planted.py
 run python3 tools/check_cache_keys.py
 run python3 tools/verify-wazig/check-map.py
 if [ -n "${PRIVATE_MARKERS:-}" ]; then

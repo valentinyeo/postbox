@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -11194,7 +11194,7 @@
+     if (!std.mem.eql(u8, a.reply_to.slice(), message.id.slice()) or !std.mem.eql(u8, a.reply_sender.slice(), message.sender_jid.slice())) disarmDictationSend(a);
+     a.reply_to.set(message.id.slice());
+     a.reply_sender.set(message.sender_jid.slice());
+-    a.reply_preview = replySnippet(a, message);
++    a.reply_preview = .{};
+     a.reply_name = message.sender;
+     layout(a, a.compose_client_width, a.compose_client_height);
+     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);

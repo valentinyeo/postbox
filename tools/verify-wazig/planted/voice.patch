@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -6581,7 +6581,7 @@
+     defer a.allocator.free(path_utf8);
+     if (a.audio_state != .empty and !std.mem.eql(u8, a.audio_playing_id.slice(), message.id.slice())) saveAudioPos(a);
+     const jid = if (a.chat_count > 0 and a.selected_chat < a.chat_count) a.chats[a.selected_chat].jid.slice() else "";
+-    player.play(path_utf8);
++    player.pause();
+     markPlayed(a, message.id.slice());
+     a.audio_auto_advance = true;
+     a.audio_chain_waiting = false;
