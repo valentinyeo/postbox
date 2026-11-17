@@ -1,6 +1,24 @@
 const std = @import("std");
 
 pub const Pending = enum { archive_pending, unarchive_pending };
+pub const Completion = enum { confirm_archived_and_drop, drop, drop_managed_locally, retry };
+
+pub fn completion(pending: Pending, ok: bool, managed_locally: bool) Completion {
+    if (ok) return if (pending == .archive_pending) .confirm_archived_and_drop else .drop;
+    return if (managed_locally) .drop_managed_locally else .retry;
+}
+
+test "archive completion covers pending intent and result" {
+    try std.testing.expectEqual(Completion.confirm_archived_and_drop, completion(.archive_pending, true, false));
+    try std.testing.expectEqual(Completion.confirm_archived_and_drop, completion(.archive_pending, true, true));
+    try std.testing.expectEqual(Completion.drop, completion(.unarchive_pending, true, false));
+    try std.testing.expectEqual(Completion.drop, completion(.unarchive_pending, true, true));
+    try std.testing.expectEqual(Completion.retry, completion(.archive_pending, false, false));
+    try std.testing.expectEqual(Completion.drop_managed_locally, completion(.archive_pending, false, true));
+    try std.testing.expectEqual(Completion.retry, completion(.unarchive_pending, false, false));
+    try std.testing.expectEqual(Completion.drop_managed_locally, completion(.unarchive_pending, false, true));
+}
+
 pub const Intent = enum { archive, unarchive };
 pub const Base = enum { inbox, archived };
 
