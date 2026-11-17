@@ -40,6 +40,17 @@ def check_reply(folder):
         sent, = [row for row in read(f'{provider}-sent.messages.json')['messages'] if row['from_me']]
         assert sent['quoted_msg_id'] == 'REPLY-ORIGINAL'
         assert sent['quote_line'][3] < sent['bubble'][1]
+    for name in ['slack-threaded', 'slack-thread']:
+        image = (folder / f'{name}.png').read_bytes()
+        assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
+        state = read(f'{name}.state.json')
+        assert state['selected']['id'] == 'fixture-alpha' and state['selected']['provider'] == 'slack'
+        thread = state['slack_threads']
+        assert thread['threads_option'] == 'on' and thread['parent_id'] == 'REPLY-ORIGINAL'
+        assert thread['parent_reply_line'] == '1 reply' and thread['inline_replies'] == 0
+        if name == 'slack-thread':
+            assert thread['open'] and thread['replies'] == 1
+    assert read('slack-sent.state.json')['slack_threads']['threads_option'] == 'off'
     shots = []
     for name in ['whatsapp-sent', 'whatsapp-slack-style', 'whatsapp-slack-thread', 'whatsapp-slack-remembered', 'whatsapp-style-restored']:
         image = (folder / f'{name}.png').read_bytes()
