@@ -213,11 +213,11 @@ function Invoke-ReactionsJourney($Session) {
     Send-Keys $Session '{ESC}'
     $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object { $_.id -eq 'CHIP' -and $_.selected }).Count -eq 1 } 'CHIP selected'
     foreach ($item in @(
-        @{ query = 'Like'; emoji = [char]::ConvertFromUtf32(0x1f44d) },
-        @{ query = 'Love'; emoji = $heart },
-        @{ query = 'Sad'; emoji = [char]::ConvertFromUtf32(0x1f622) },
-        @{ query = 'Surprised'; emoji = [char]::ConvertFromUtf32(0x1f62e) },
-        @{ query = 'Thanks'; emoji = [char]::ConvertFromUtf32(0x1f64f) },
+        @{ query = 'message: Like'; emoji = [char]::ConvertFromUtf32(0x1f44d) },
+        @{ query = 'message: Love'; emoji = $heart },
+        @{ query = 'message: Sad'; emoji = [char]::ConvertFromUtf32(0x1f622) },
+        @{ query = 'message: Surprised'; emoji = [char]::ConvertFromUtf32(0x1f62e) },
+        @{ query = 'message: Thanks'; emoji = [char]::ConvertFromUtf32(0x1f64f) },
         @{ query = 'Remove reaction'; emoji = '' }
     )) {
         Invoke-PaletteCommand $Session $item.query
