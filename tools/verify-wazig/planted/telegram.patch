@@ -1,0 +1,11 @@
+diff --git a/src/hub.zig b/src/hub.zig
+index cc22ba5..fcf5afc 100644
+--- a/src/hub.zig
++++ b/src/hub.zig
+@@ -410,5 +410,5 @@ pub fn telegramSendFailure(allocator: std.mem.Allocator, status: u32, raw: []con
+ pub fn savedMessages(row: std.json.ObjectMap) bool {
+     if (sourceProvider(row) != .telegram) return false;
+     const saved = row.get("saved") orelse return false;
+-    return saved == .bool and saved.bool;
++    return saved == .bool and !saved.bool;
+ }

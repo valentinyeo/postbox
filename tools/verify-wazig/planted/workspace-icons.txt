@@ -1,0 +1,1 @@
+Cached Slack workspace icons are replaced by letter badges.

@@ -1,0 +1,1 @@
+Select all chats leaves the bulk selection empty.
