@@ -14741,13 +14741,19 @@ const ControlOutcome = enum { answered, abandoned, gone, too_slow, wacli_failed 
 
 fn controlFinish(call: *ControlCall, outcome: ControlOutcome, w: *std.Io.Writer) void {
     const problem = switch (outcome) {
-        .answered => return w.writeAll(call.out.written()) catch {},
+        .answered => return w.writeAll(call.out.written()) catch |err| {
+            var buffer: [128]u8 = undefined;
+            appendCrashLog(std.fmt.bufPrint(&buffer, "control: response write failed: {s}\r\n", .{@errorName(err)}) catch "control: response write failed\r\n");
+        },
         .abandoned => "Postbox did not answer within 10 s",
         .gone => "Postbox is closing",
         .too_slow => "timed out waiting for the app (chat still loading?)",
         .wacli_failed => "could not read the WhatsApp chat list",
     };
-    control_api.writeError(w, problem) catch {};
+    control_api.writeError(w, problem) catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendCrashLog(std.fmt.bufPrint(&buffer, "control: error response write failed: {s}\r\n", .{@errorName(err)}) catch "control: error response write failed\r\n");
+    };
 }
 
 fn controlRound(a: *App, call: *ControlCall) ControlOutcome {
@@ -21261,7 +21267,10 @@ fn hashStorePath(init: std.process.Init, allocator: std.mem.Allocator, filename:
     const local = init.environ_map.get("LOCALAPPDATA") orelse return &.{};
     const dir = std.fs.path.join(allocator, &.{ local, "Messages" }) catch return &.{};
     const cwd = std.Io.Dir.cwd();
-    cwd.createDirPath(init.io, dir) catch {};
+    cwd.createDirPath(init.io, dir) catch |err| {
+        var buffer: [128]u8 = undefined;
+        appendCrashLog(std.fmt.bufPrint(&buffer, "hash store: directory creation failed: {s}\r\n", .{@errorName(err)}) catch "hash store: directory creation failed\r\n");
+    };
     const path = std.fs.path.join(allocator, &.{ dir, filename }) catch {
         allocator.free(dir);
         return &.{};
