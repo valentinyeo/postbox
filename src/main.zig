@@ -24261,24 +24261,28 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
             if (a.pending_archive_count == 0) return;
             const queued_key = chat_key.Key{ .provider = result.provider, .account = result.account.slice(), .id = a.pending_archives[0].jid.slice() };
             if (!chat_key.Key.eql(queued_key, chat_key.of(result))) return;
-            if (result.ok) {
-                if (a.pending_archives[0].state == .archive_pending) {
-                    if (a.archive_state) |state| {
-                        if (state.confirmArchived(a.pending_archives[0].jid.slice())) saveArchiveState(a);
+            const managed_locally = result.http_status == 502 and (std.mem.startsWith(u8, result.jid.slice(), "signal:") or std.mem.startsWith(u8, result.jid.slice(), "telegram:"));
+            const completion = archive_state.completion(a.pending_archives[0].state, result.ok, managed_locally);
+            switch (completion) {
+                .confirm_archived_and_drop, .drop => {
+                    if (completion == .confirm_archived_and_drop) {
+                        if (a.archive_state) |state| {
+                            if (state.confirmArchived(a.pending_archives[0].jid.slice())) saveArchiveState(a);
+                        }
                     }
-                }
-                removeFirstPendingArchive(a);
-                if (a.pending_archive_count > 0) startNextArchive(a) else refreshChats(a);
-                setStatus(a, "Archive operation completed");
-            } else {
-                if (result.http_status == 502 and (std.mem.startsWith(u8, result.jid.slice(), "signal:") or std.mem.startsWith(u8, result.jid.slice(), "telegram:"))) {
+                    removeFirstPendingArchive(a);
+                    if (a.pending_archive_count > 0) startNextArchive(a) else refreshChats(a);
+                    setStatus(a, "Archive operation completed");
+                },
+                .drop_managed_locally => {
                     removeFirstPendingArchive(a);
                     refreshChats(a);
                     setStatus(a, "Chat archive is managed locally in Postbox");
-                } else {
+                },
+                .retry => {
                     a.pending_archives[0].retry_at_ms = win.GetTickCount64() + 3_000;
                     setStatus(a, "Archive operation failed; retrying");
-                }
+                },
             }
         },
         .hub_media => {
