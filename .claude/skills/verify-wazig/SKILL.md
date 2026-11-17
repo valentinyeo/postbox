@@ -19,7 +19,8 @@ gh run watch <id> --interval 60 --exit-status
 gh run download <id> --name verify-wazig-search --dir evidence/<id>
 ```
 
-Replace `search` with a [feature ID](features/README.md). Confirm the run's branch and commit before trusting it. Dispatch requires this workflow on the default branch. Before merge, retained `pull_request` path triggers run the journeys marked `pr` in [journeys.json](../../../tools/verify-wazig/journeys.json).
+Replace `search` with a [feature ID](features/README.md). Confirm the run's branch and commit before trusting it. Dispatch requires this workflow on the default branch. PRs touching verification paths run the default and path-mapped journeys in [pr-journeys.json](../../../tools/verify-wazig/pr-journeys.json).
+Automerge waits for the successful `verify-wazig` run on the PR head; unrelated paths do not require a run.
 
 `verify.yml` installs Zig 0.16.0 and builds `Messages.exe`, `wazigctl.exe` and bundled IBM Plex fonts with the same Windows `--release=small` build used by ci.yml's unfurl-verification job. The workflow pins the evidence build to `0.0.526` (not the default or release version); this base desktop build does not include TDLib. It does not download or install wacli, authenticate a provider, or install the app. The `whatsapp-hub` journey additionally verifies the production HTTPS backend against an authenticated loopback fake bridge; it never contacts a real provider. Loopback HTTP is allowed only inside the guarded verification fixture.
 

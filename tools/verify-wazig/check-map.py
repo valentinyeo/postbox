@@ -71,7 +71,11 @@ workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'schedule:', 'windows-latest', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
 triggers = workflow.split('\non:\n', 1)[1].split('\npermissions:', 1)[0]
-assert 'pull_request:' not in triggers and 'push:' not in triggers, 'verification is nightly/manual only'
+assert 'pull_request:' in triggers and 'push:' not in triggers, 'verification must gate PRs and run nightly/manual'
+pr_map = json.loads((registry_path.parent / 'pr-journeys.json').read_text(encoding='utf-8'))
+assert pr_map['default'] and 0 < pr_map['max_journeys'] <= 12
+assert all(name in options for name in pr_map['default']), 'unknown default PR journey'
+assert all(name in options for names in pr_map['paths'].values() for name in names), 'unknown mapped PR journey'
 assert "if os.environ['EVENT_NAME'] == 'schedule' or feature == 'all':\n              selected = journeys" in workflow, 'nightly must cover every journey'
 assert 'type: string' in workflow and 'options:' not in workflow, 'dispatch must accept a registry-validated string'
 assert '  plan:\n    runs-on: ubuntu-latest' in workflow, 'missing plan job'

@@ -92,9 +92,30 @@ admit_src="$repo/tools/automerge-admit.sh"
 yml_src="$repo/.github/workflows/automerge.yml"
 reset_automerge() {
     cp "$yml_src" "$fixture/.github/workflows/automerge.yml"
+    cp "$repo/.github/workflows/verify.yml" "$fixture/.github/workflows/verify.yml"
     cp "$admit_src" "$fixture/tools/automerge-admit.sh"
 }
 reset_automerge
+for mutation in old trigger workflow head success; do
+    reset_automerge
+    case "$mutation" in
+        old) git -C "$repo" show 6747858248d6:.github/workflows/verify.yml > "$fixture/.github/workflows/verify.yml"; git -C "$repo" show 6747858248d6:.github/workflows/automerge.yml > "$fixture/.github/workflows/automerge.yml" ;;
+        trigger) sed -i 's/^  pull_request:/  pull_request_target:/' "$fixture/.github/workflows/verify.yml" ;;
+        workflow) sed -i 's/, "verify-wazig"//' "$fixture/.github/workflows/automerge.yml" ;;
+        head) sed -i 's/head_sha=\$head_oid/head_sha=missing/' "$fixture/.github/workflows/automerge.yml" ;;
+        success) sed -i 's/\.conclusion == "success"/.conclusion != "failure"/' "$fixture/.github/workflows/automerge.yml" ;;
+    esac
+    status=0
+    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+    if (( status != 1 )) || ! grep -Fq '[B11]' "$temp/output"; then
+        cat "$temp/output" >&2
+        printf 'test-lint-repeats: FAIL B11 must reject %s\n' "$mutation" >&2
+        exit 1
+    fi
+done
+reset_automerge
+"$lint" "$fixture"
+printf 'test-lint-repeats: B11 rejects pre-change workflows and missing PR journey guards\n'
 b8_cases=0
 for guard in 'required-checks.txt' 'required=' 'as \$names' 'COMPLETED' 'match-head-commit' 'could not evaluate head checks' 'length) == 0' '!= "code-review"'; do
     reset_automerge

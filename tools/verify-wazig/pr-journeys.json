@@ -1,0 +1,415 @@
+{
+  "default": [
+    "search",
+    "voice",
+    "reply"
+  ],
+  "max_journeys": 12,
+  "paths": {
+    "src/audio": [
+      "voice"
+    ],
+    "src/voice": [
+      "voice"
+    ],
+    "src/reply": [
+      "reply"
+    ],
+    "src/dictation": [
+      "dictation-shortcuts"
+    ],
+    "src/paste_image": [
+      "paste-image"
+    ],
+    "src/emoji": [
+      "emoji-picker-glyphs"
+    ],
+    "src/search": [
+      "search"
+    ],
+    "src/archive": [
+      "archive"
+    ],
+    "src/slack": [
+      "slack-threads"
+    ],
+    "src/telegram": [
+      "telegram"
+    ],
+    "src/signal": [
+      "signal"
+    ],
+    "src/media": [
+      "media-fit"
+    ],
+    "src/theme": [
+      "sidebar-surface"
+    ],
+    "tools/verify-wazig/journey-voice": [
+      "voice"
+    ],
+    "tools/verify-wazig/journey-reply": [
+      "reply"
+    ],
+    "tools/verify-wazig/caret.ps1": [
+      "caret"
+    ],
+    "tools/verify-wazig/check-ctrl-badges-evidence.py": [
+      "ctrl-badges"
+    ],
+    "tools/verify-wazig/check-dictation-evidence.py": [
+      "dictation-shortcuts"
+    ],
+    "tools/verify-wazig/check-emoji-picker-glyphs-evidence.py": [
+      "emoji-picker-glyphs"
+    ],
+    "tools/verify-wazig/check-gif-picker-evidence.py": [
+      "gif-picker"
+    ],
+    "tools/verify-wazig/check-hub-archive-evidence.py": [
+      "hub-archive"
+    ],
+    "tools/verify-wazig/check-hub-fault-evidence.py": [
+      "hub-fault"
+    ],
+    "tools/verify-wazig/check-hub-rollback-evidence.py": [
+      "hub-rollback"
+    ],
+    "tools/verify-wazig/check-icon-hints-evidence.py": [
+      "icon-hints"
+    ],
+    "tools/verify-wazig/check-inline-links-evidence.py": [
+      "inline-links"
+    ],
+    "tools/verify-wazig/check-link-previews-evidence.py": [
+      "link-previews"
+    ],
+    "tools/verify-wazig/check-media-fit-evidence.py": [
+      "media-fit"
+    ],
+    "tools/verify-wazig/check-media-speed-evidence.py": [
+      "media-speed"
+    ],
+    "tools/verify-wazig/check-notrap-evidence.py": [
+      "notrap"
+    ],
+    "tools/verify-wazig/check-palette-archived-evidence.py": [
+      "palette-archived"
+    ],
+    "tools/verify-wazig/check-paste-image-evidence.py": [
+      "paste-image"
+    ],
+    "tools/verify-wazig/check-read-ticks-evidence.py": [
+      "read-ticks"
+    ],
+    "tools/verify-wazig/check-reply-evidence.py": [
+      "reply"
+    ],
+    "tools/verify-wazig/check-search-evidence.py": [
+      "search"
+    ],
+    "tools/verify-wazig/check-show-archived-evidence.py": [
+      "show-archived"
+    ],
+    "tools/verify-wazig/check-sidebar-surface.py": [
+      "sidebar-surface"
+    ],
+    "tools/verify-wazig/check-signal-evidence.py": [
+      "signal"
+    ],
+    "tools/verify-wazig/check-slack-archive-evidence.py": [
+      "slack-archive"
+    ],
+    "tools/verify-wazig/check-slack-emoji-evidence.py": [
+      "slack-emoji"
+    ],
+    "tools/verify-wazig/check-slack-mentions-evidence.py": [
+      "slack-mentions"
+    ],
+    "tools/verify-wazig/check-slack-thread-broadcast-evidence.py": [
+      "slack-thread-broadcast"
+    ],
+    "tools/verify-wazig/check-slack-threads-evidence.py": [
+      "slack-threads"
+    ],
+    "tools/verify-wazig/check-telegram-evidence.py": [
+      "telegram"
+    ],
+    "tools/verify-wazig/composer-border.ps1": [
+      "composer-border"
+    ],
+    "tools/verify-wazig/evidence-archive-inbox.py": [
+      "archive-inbox"
+    ],
+    "tools/verify-wazig/evidence-chat-lists.py": [
+      "chat-lists"
+    ],
+    "tools/verify-wazig/evidence-menus.py": [
+      "menus"
+    ],
+    "tools/verify-wazig/evidence-passage-copy.py": [
+      "passage-copy"
+    ],
+    "tools/verify-wazig/evidence-quiet-status.py": [
+      "quiet-status"
+    ],
+    "tools/verify-wazig/evidence-reactions.py": [
+      "reactions"
+    ],
+    "tools/verify-wazig/evidence-repaint.py": [
+      "repaint"
+    ],
+    "tools/verify-wazig/evidence-search.py": [
+      "archive"
+    ],
+    "tools/verify-wazig/evidence-slack-sort.py": [
+      "slack-sort"
+    ],
+    "tools/verify-wazig/evidence-views.py": [
+      "views"
+    ],
+    "tools/verify-wazig/evidence-voice.py": [
+      "voice"
+    ],
+    "tools/verify-wazig/evidence-window.py": [
+      "window"
+    ],
+    "tools/verify-wazig/evidence-workspace-icons.py": [
+      "workspace-icons"
+    ],
+    "tools/verify-wazig/hub-archive.ps1": [
+      "hub-archive"
+    ],
+    "tools/verify-wazig/journey-app-icon.ps1": [
+      "app-icon"
+    ],
+    "tools/verify-wazig/journey-appearance.ps1": [
+      "appearance"
+    ],
+    "tools/verify-wazig/journey-archive-bulk.ps1": [
+      "archive-bulk"
+    ],
+    "tools/verify-wazig/journey-archive-inbox.ps1": [
+      "archive-inbox"
+    ],
+    "tools/verify-wazig/journey-archive-return.ps1": [
+      "archive-return"
+    ],
+    "tools/verify-wazig/journey-archive.ps1": [
+      "archive"
+    ],
+    "tools/verify-wazig/journey-archived-search.ps1": [
+      "archived-search"
+    ],
+    "tools/verify-wazig/journey-caret.ps1": [
+      "caret"
+    ],
+    "tools/verify-wazig/journey-chat-lists.ps1": [
+      "chat-lists"
+    ],
+    "tools/verify-wazig/journey-composer-border.ps1": [
+      "composer-border"
+    ],
+    "tools/verify-wazig/journey-ctrl-badges.ps1": [
+      "ctrl-badges"
+    ],
+    "tools/verify-wazig/journey-dictation-shortcuts.ps1": [
+      "dictation-shortcuts"
+    ],
+    "tools/verify-wazig/journey-drafts.ps1": [
+      "drafts"
+    ],
+    "tools/verify-wazig/journey-emoji-picker-glyphs.ps1": [
+      "emoji-picker-glyphs"
+    ],
+    "tools/verify-wazig/journey-gif-picker.ps1": [
+      "gif-picker"
+    ],
+    "tools/verify-wazig/journey-hub-archive.ps1": [
+      "hub-archive"
+    ],
+    "tools/verify-wazig/journey-hub-fault.ps1": [
+      "hub-fault"
+    ],
+    "tools/verify-wazig/journey-hub-rollback.ps1": [
+      "hub-rollback"
+    ],
+    "tools/verify-wazig/journey-hub.ps1": [
+      "hub"
+    ],
+    "tools/verify-wazig/journey-icon-hints.ps1": [
+      "icon-hints"
+    ],
+    "tools/verify-wazig/journey-inline-links.ps1": [
+      "inline-links"
+    ],
+    "tools/verify-wazig/journey-link-previews.ps1": [
+      "link-previews"
+    ],
+    "tools/verify-wazig/journey-media-fit.ps1": [
+      "media-fit"
+    ],
+    "tools/verify-wazig/journey-media-speed.ps1": [
+      "media-speed"
+    ],
+    "tools/verify-wazig/journey-menus.ps1": [
+      "menus"
+    ],
+    "tools/verify-wazig/journey-navigation.ps1": [
+      "navigation"
+    ],
+    "tools/verify-wazig/journey-notrap.ps1": [
+      "notrap"
+    ],
+    "tools/verify-wazig/journey-palette-archived.ps1": [
+      "palette-archived"
+    ],
+    "tools/verify-wazig/journey-palette.ps1": [
+      "palette"
+    ],
+    "tools/verify-wazig/journey-passage-copy.ps1": [
+      "passage-copy"
+    ],
+    "tools/verify-wazig/journey-paste-image.ps1": [
+      "paste-image"
+    ],
+    "tools/verify-wazig/journey-quiet-status.ps1": [
+      "quiet-status"
+    ],
+    "tools/verify-wazig/journey-reactions.ps1": [
+      "reactions"
+    ],
+    "tools/verify-wazig/journey-read-ticks.ps1": [
+      "read-ticks"
+    ],
+    "tools/verify-wazig/journey-repaint.ps1": [
+      "repaint"
+    ],
+    "tools/verify-wazig/journey-reply-unarchive.ps1": [
+      "reply-unarchive"
+    ],
+    "tools/verify-wazig/journey-reply.ps1": [
+      "reply"
+    ],
+    "tools/verify-wazig/journey-search.ps1": [
+      "search"
+    ],
+    "tools/verify-wazig/journey-send-independence.ps1": [
+      "send-independence"
+    ],
+    "tools/verify-wazig/journey-send-once.ps1": [
+      "send-once"
+    ],
+    "tools/verify-wazig/journey-show-archived.ps1": [
+      "show-archived"
+    ],
+    "tools/verify-wazig/journey-sidebar-surface.ps1": [
+      "sidebar-surface"
+    ],
+    "tools/verify-wazig/journey-signal.ps1": [
+      "signal"
+    ],
+    "tools/verify-wazig/journey-slack-archive.ps1": [
+      "slack-archive"
+    ],
+    "tools/verify-wazig/journey-slack-emoji.ps1": [
+      "slack-emoji"
+    ],
+    "tools/verify-wazig/journey-slack-mentions.ps1": [
+      "slack-mentions"
+    ],
+    "tools/verify-wazig/journey-slack-sort.ps1": [
+      "slack-sort"
+    ],
+    "tools/verify-wazig/journey-slack-thread-broadcast.ps1": [
+      "slack-thread-broadcast"
+    ],
+    "tools/verify-wazig/journey-slack-threads.ps1": [
+      "slack-threads"
+    ],
+    "tools/verify-wazig/journey-telegram.ps1": [
+      "telegram"
+    ],
+    "tools/verify-wazig/journey-text-comparison.ps1": [
+      "text-comparison"
+    ],
+    "tools/verify-wazig/journey-views.ps1": [
+      "views"
+    ],
+    "tools/verify-wazig/journey-voice.ps1": [
+      "voice"
+    ],
+    "tools/verify-wazig/journey-whatsapp-hub.ps1": [
+      "whatsapp-hub"
+    ],
+    "tools/verify-wazig/journey-window.ps1": [
+      "window"
+    ],
+    "tools/verify-wazig/journey-workspace-icons.ps1": [
+      "workspace-icons"
+    ],
+    "tools/verify-wazig/media-fit.ps1": [
+      "media-fit"
+    ],
+    "tools/verify-wazig/media-speed.ps1": [
+      "media-speed"
+    ],
+    "tools/verify-wazig/notrap.ps1": [
+      "notrap"
+    ],
+    "tools/verify-wazig/palette-archived.ps1": [
+      "palette-archived"
+    ],
+    "tools/verify-wazig/prepare-dictation.ps1": [
+      "dictation-shortcuts"
+    ],
+    "tools/verify-wazig/prepare-drafts.ps1": [
+      "drafts"
+    ],
+    "tools/verify-wazig/prepare-hub-archive.ps1": [
+      "hub-archive"
+    ],
+    "tools/verify-wazig/prepare-hub-fault.ps1": [
+      "hub-fault"
+    ],
+    "tools/verify-wazig/prepare-icon-hints.ps1": [
+      "icon-hints"
+    ],
+    "tools/verify-wazig/prepare-menus.ps1": [
+      "menus"
+    ],
+    "tools/verify-wazig/prepare-notrap.ps1": [
+      "notrap"
+    ],
+    "tools/verify-wazig/prepare-shared-design.ps1": [
+      "appearance"
+    ],
+    "tools/verify-wazig/prepare-voice.ps1": [
+      "voice"
+    ],
+    "tools/verify-wazig/prepare-whatsapp-hub.ps1": [
+      "whatsapp-hub"
+    ],
+    "tools/verify-wazig/ready-hub-archive.ps1": [
+      "hub-archive"
+    ],
+    "tools/verify-wazig/ready-whatsapp-hub.ps1": [
+      "whatsapp-hub"
+    ],
+    "tools/verify-wazig/repaint.ps1": [
+      "repaint"
+    ],
+    "tools/verify-wazig/show-archived.ps1": [
+      "show-archived"
+    ],
+    "tools/verify-wazig/signal.ps1": [
+      "signal"
+    ],
+    "tools/verify-wazig/telegram.ps1": [
+      "telegram"
+    ],
+    "tools/verify-wazig/window.ps1": [
+      "window"
+    ]
+  }
+}
