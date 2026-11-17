@@ -105,7 +105,7 @@ try {
 $session = [ordered]@{
     id = $id; pid = $app.Id; startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
     root = $root; evidence = $Evidence; exe = $exe; ctl = $ctl; username = "verify-$id"
-    sha256 = (Get-FileHash $exe).Hash; commit = $env:GITHUB_SHA; feature = $Feature; expected_version = $ExpectedVersion; expected_product = $ExpectedProduct
+    sha256 = (Get-FileHash $exe).Hash; commit = (git rev-parse HEAD).Trim(); feature = $Feature; expected_version = $ExpectedVersion; expected_product = $ExpectedProduct
 }
 if ($null -ne $bridge) {
     $session['bridge_pid'] = $bridge.process.Id

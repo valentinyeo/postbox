@@ -1,0 +1,12 @@
+{
+  "authors": {
+    "valentinyeo": "openai"
+  },
+  "verifiers": {},
+  "gate_workflow": "valentinyeo/house-rules/.github/workflows/verify-gate.yml@314afbe2aea6a2083cc931f49aabd7ad0edcf45b",
+  "source_exclusions": {},
+  "release_workflows": [
+    ".github/workflows/auto-release.yml",
+    ".github/workflows/release.yml"
+  ]
+}

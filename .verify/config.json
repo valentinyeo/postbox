@@ -1,0 +1,40 @@
+{
+  "adapter": "zig-native-v1",
+  "source_roots": [
+    "src",
+    "tools",
+    "vendor",
+    "build.zig"
+  ],
+  "skill": ".cursor/skills/verify-postbox/SKILL.md",
+  "features": ".cursor/skills/verify-postbox/features",
+  "adoption_status": "blocked: house-rules has no Zig source adapter; do not exclude application code",
+  "inventory_command": "python3 tools/verify-postbox-map.py",
+  "real_data": {
+    "production_count": null,
+    "reason": "Private installed Windows profile is unavailable. No customer data copied.",
+    "code_limits": {
+      "legacy_slack_chats_per_installation": 256,
+      "messages_per_loaded_chat": 1000,
+      "global_chat_list": "Dynamically reallocated from fetched rows; 256 is not its total limit.",
+      "sources": [
+        "src/main.zig:95-97",
+        "src/main.zig:707",
+        "src/main.zig:968-973",
+        "src/main.zig:2746-2750"
+      ]
+    },
+    "required_comparison": "Verifier must count exercised records and explain production relevance. Six synthetic search chats do not prove production scale.",
+    "observed_search_journey": {
+      "chats": 6,
+      "unit": "synthetic visible chats",
+      "source": "Hosted search before.state.json and after.state.json",
+      "production_comparison": "Private installed profile unavailable; six synthetic chats do not establish production scale."
+    },
+    "non_hub_fixture_seed": {
+      "chats": 2,
+      "source": "tools/verify-wazig/run.ps1",
+      "phase": "Only non-hub journeys use this cached seed; search uses the six-chat hub fixture."
+    }
+  }
+}

@@ -27,14 +27,14 @@ class JourneyRegistryTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         for name in ['tools/verify-wazig', '.claude/skills/verify-wazig', 'src']:
             shutil.copytree(ROOT / name, self.root / name, ignore=shutil.ignore_patterns('__pycache__'))
-        for name in ['tools/check_private_markers.py', '.github/workflows/verify.yml', 'CHANGELOG.md']:
+        for name in ['tools/check_private_markers.py', '.github/workflows/verify-desktop.yml', 'CHANGELOG.md']:
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
         self.tools = self.root / 'tools/verify-wazig'
         self.registry_path = self.tools / 'journeys.json'
         self.registry = json.loads(self.registry_path.read_text())
-        self.workflow = yaml.safe_load((self.root / '.github/workflows/verify.yml').read_text())
+        self.workflow = yaml.safe_load((self.root / '.github/workflows/verify-desktop.yml').read_text())
 
     def save_registry(self):
         self.registry_path.write_text(json.dumps(self.registry))
@@ -101,7 +101,7 @@ class JourneyRegistryTests(unittest.TestCase):
         self.assertIn("assert timestamps == sorted(timestamps) and len(set(timestamps)) == 7", validator)
         self.assertIn("assert check['actual'] == check['expected'] == '\\r\\n'.join(blocks)", validator)
         self.assertIn("assert actions.count('held drag beyond canvas 1024 bottom') == 2", validator)
-        self.assertIn('check-chat-rows.ps1', (self.root / '.github/workflows/verify.yml').read_text())
+        self.assertIn('check-chat-rows.ps1', (self.root / '.github/workflows/verify-desktop.yml').read_text())
 
     def test_main_added_journey_configuration_regressions_fail(self):
         entries = {row['name']: row for row in self.registry['journeys']}
@@ -124,7 +124,7 @@ class JourneyRegistryTests(unittest.TestCase):
         self.assert_map_passes()
 
     def test_removed_chat_rows_workflow_check_fails(self):
-        path = self.root / '.github/workflows/verify.yml'
+        path = self.root / '.github/workflows/verify-desktop.yml'
         path.write_text(path.read_text().replace('check-chat-rows.ps1', 'missing-rows.ps1'))
         self.assertNotEqual(self.check_map().returncode, 0)
 
@@ -221,7 +221,7 @@ class JourneyRegistryTests(unittest.TestCase):
             self.assertEqual(output, '')
 
     def test_wrong_verification_triggers_fail_map(self):
-        path = self.root / '.github/workflows/verify.yml'
+        path = self.root / '.github/workflows/verify-desktop.yml'
         original = path.read_text()
         for changed in [original.replace('  schedule:', '  push:'),
                         original.replace('  schedule:', '  pull_request:\n  schedule:'),
@@ -233,12 +233,12 @@ class JourneyRegistryTests(unittest.TestCase):
         path.write_text(original)
 
     def test_plan_without_plan_matrix_fails_map(self):
-        path = self.root / '.github/workflows/verify.yml'
+        path = self.root / '.github/workflows/verify-desktop.yml'
         path.write_text(path.read_text().replace('fromJSON(needs.plan.outputs.matrix)', 'fromJSON(inputs.feature)'))
         self.assertIn('verify must use plan-job matrix', self.check_map().stderr)
 
     def test_journey_leg_rebuilding_the_shared_candidate_fails_map(self):
-        path = self.root / '.github/workflows/verify.yml'
+        path = self.root / '.github/workflows/verify-desktop.yml'
         original = path.read_text()
         build = 'zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526\n'
         cases = [

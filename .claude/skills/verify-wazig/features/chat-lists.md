@@ -13,7 +13,7 @@ Open a Slack chat with a long list. Resize the window or choose Ctrl+K → `Make
 
 ## Driving it with PowerShell UI Automation
 
-Dispatch `feature=chat-lists`; the registry also enables it for matching PRs in `verify.yml`. The isolated hub serves one synthetic Slack message with six long bullets and two nested list levels. Each item repeats the same word so its first glyph has the same ink bearing on every line.
+Dispatch `feature=chat-lists`; the registry also enables it for matching PRs in `verify-desktop.yml`. The isolated hub serves one synthetic Slack message with six long bullets and two nested list levels. Each item repeats the same word so its first glyph has the same ink bearing on every line.
 
 The journey opens Slack with Alt+2 and Ctrl+Tab, then captures baseline and larger-size screenshots. Fixture-only control snapshots expose the actual body HFONT weight and painted word rectangles with original UTF-16 ranges. Require weight 400, all 168 marker/word spans, and a bubble fully inside the canvas. Every continuation rectangle starts at that item's first text x and to the right of its marker x. Nested text x values strictly increase.
 

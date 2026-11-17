@@ -1,0 +1,14 @@
+{
+  "entries": 286,
+  "by_kind": {
+    "button": 19,
+    "command": 91,
+    "endpoint": 11,
+    "job": 39,
+    "menu": 19,
+    "screen": 16,
+    "setting": 14,
+    "shortcut": 77
+  },
+  "result": "PASS bounded inventory; semantic completeness unverified"
+}
