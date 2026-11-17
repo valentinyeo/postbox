@@ -234,6 +234,21 @@ class JourneyRegistryTests(unittest.TestCase):
                 self.assertIn('hand-maintained journey table', self.check_map().stderr)
                 path.write_text(original)
 
+    def test_base_repro_requires_started_journey_and_failure(self):
+        run = (self.tools / 'run.ps1').read_text()
+        doctor = run.index('    Invoke-Doctor $session\n')
+        marker = run.index("    'JOURNEY STARTED' | Set-Content (Join-Path $Evidence 'journey-started.txt')\n")
+        self.assertEqual(marker, doctor + len('    Invoke-Doctor $session\n'))
+        step = next(step for step in self.workflow['jobs']['base-fails']['steps']
+                    if step.get('name') == 'Run reproduction on base')
+        script = step['run']
+        for expected in ['journey-started.txt', 'failure.txt', '$LASTEXITCODE -eq 0',
+                         'App exited', 'Unknown verification journey', 'Hosted runner',
+                         'Verification runs only', 'Timed out:', 'Write-Host $failure', 'exit 0']:
+            with self.subTest(expected=expected):
+                self.assertIn(expected, script)
+        self.assertNotIn('Base failure cannot be classified', script)
+
     def test_plan_yaml_and_nightly_matrix(self):
         verify = self.workflow['jobs']['verify']
         self.assertEqual(verify['needs'], ['plan', 'candidate'])

@@ -167,8 +167,12 @@ jobs:
           GITHUB_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence base-evidence -ExpectedVersion 0.0.526
-          if ($LASTEXITCODE -eq 0) { throw 'Reproduction unexpectedly passed on base' }
-          throw 'Base failure cannot be classified as a failed journey check; reproduction gate is closed'
+          if ($LASTEXITCODE -eq 0) { throw 'repro passed on base, so it does not reproduce the bug' }
+          if (-not (Test-Path base-evidence/journey-started.txt) -or -not (Test-Path base-evidence/failure.txt)) { throw 'base failed before the journey ran' }
+          $failure = Get-Content base-evidence/failure.txt -Raw
+          if ([string]::IsNullOrWhiteSpace($failure) -or $failure.StartsWith("${env:FEATURE}: App exited", [StringComparison]::OrdinalIgnoreCase) -or $failure -match 'Unknown verification journey|Hosted runner|Verification runs only|Timed out:\s*main window') { throw 'base failed before the journey ran' }
+          Write-Host $failure
+          exit 0
       - name: Upload base evidence
         if: ${{ always() && needs.plan.outputs.repro != '' }}
         uses: actions/upload-artifact@v4
