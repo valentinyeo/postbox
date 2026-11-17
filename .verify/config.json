@@ -14,9 +14,15 @@
     "production_count": null,
     "reason": "Private installed Windows profile is unavailable. No customer data copied.",
     "code_limits": {
-      "chats": 256,
+      "legacy_slack_chats_per_installation": 256,
       "messages_per_loaded_chat": 1000,
-      "source": "src/main.zig:95-97"
+      "global_chat_list": "Dynamically reallocated from fetched rows; 256 is not its total limit.",
+      "sources": [
+        "src/main.zig:95-97",
+        "src/main.zig:707",
+        "src/main.zig:968-973",
+        "src/main.zig:2746-2750"
+      ]
     },
     "existing_search_fixture": {
       "chats": 2,

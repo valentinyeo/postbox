@@ -87,7 +87,9 @@ Current desktop artifacts alone cannot satisfy that contract.
 No synthetic verdict or attestation substitutes for execution.
 
 Production profile counts remain unavailable here.
-Code caps are 256 chats and 1,000 messages.
+Legacy Slack installations reserve 256 chat slots.
+The active message buffer holds 1,000 messages.
+The combined chat list grows dynamically.
 Two synthetic chats do not prove production scale.
 The verifier must report observed counts and relevance.
 Release still lacks current-head video or trace proof.
