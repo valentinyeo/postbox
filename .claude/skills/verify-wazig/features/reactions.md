@@ -4,6 +4,7 @@
 
 - WhatsApp and Slack incoming messages send exactly the laughing-face emoji selected in the quick reaction row.
 - The actual hub request and the visible reaction chip agree with the mouse selection.
+- The palette selects the next, previous and latest message and sends or removes five reactions.
 
 ## How to get to it (user POV)
 
@@ -19,8 +20,10 @@ Capture `whatsapp-before.png` and `slack-before.png` with the menu open, then re
 
 Retain `react-requests.jsonl` with every reaction body, `bridge-requests.jsonl` with authenticated response status, `reaction-clicks.json` with native menu geometry, PID, cell index and click coordinates, `*-after.messages.json`, screenshot UIA/state companions, `actions.log`, doctor, `result.json` passed/failed, side-effect assertions and cleanup proof. Validate with `python tools/verify-wazig/check-evidence.py verification-evidence` and inspect the screenshots. Matching PRs run both reactions and menus.
 
+In the two-message WhatsApp chat, use the palette to select the latest message, move to the previous and next messages, and jump back to latest. Check the selected message after each command. Select CHIP and use the palette for Like, Love, Sad, Surprised, Thanks and Remove reaction. Check each hub request and the displayed own reaction.
+
 ## Gotchas
 
 - The old code sends 👍 because it asks for menu-item bounds after the popup has closed. The red-first journey must fail on that actual payload, not on setup or a script error.
 - Menu coordinates come from the visible native menu window and row layout, not app internals. All mouse input checks process ownership.
-- Fake hub acceptance proves client selection and transport, not delivery to a live provider account. This journey does not claim keyboard, plus-picker, other emoji cells, media or login coverage; unit tests cover cell boundaries and plus routing.
+- Fake hub acceptance proves client selection and transport, not delivery to a live provider account. This journey does not claim plus-picker, other emoji cells, media or login coverage; unit tests cover cell boundaries and plus routing.

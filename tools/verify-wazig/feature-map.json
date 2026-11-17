@@ -178,9 +178,9 @@
     {
       "feature": "command_jump_latest",
       "source": "buildPaletteItems:command_jump_latest",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "reactions",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_links",
@@ -199,9 +199,9 @@
     {
       "feature": "command_next_message",
       "source": "buildPaletteItems:command_next_message",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "reactions",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_open_image_external",
@@ -248,9 +248,9 @@
     {
       "feature": "command_prev_message",
       "source": "buildPaletteItems:command_prev_message",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "reactions",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_quit",
@@ -451,44 +451,44 @@
     {
       "feature": "reaction_like",
       "source": "buildPaletteItems:reaction_like",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "reactions",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "reaction_love",
       "source": "buildPaletteItems:reaction_love",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "reactions",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "reaction_remove",
       "source": "buildPaletteItems:reaction_remove",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "reactions",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "reaction_sad",
       "source": "buildPaletteItems:reaction_sad",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "reactions",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "reaction_surprised",
       "source": "buildPaletteItems:reaction_surprised",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "reactions",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "reaction_thanks",
       "source": "buildPaletteItems:reaction_thanks",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "reactions",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "chat-search",

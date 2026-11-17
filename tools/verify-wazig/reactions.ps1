@@ -189,5 +189,43 @@ function Invoke-ReactionsJourney($Session) {
         Save-Screen $Session "chip-$phase"
         Hub-Pass $Session "chip-$phase"
     }
+    $rows = @((Read-Control $Session messages).messages)
+    Assert-That ($rows.Count -ge 2) 'Navigation needs at least two messages'
+    $latest = $rows[-1].id
+    $previous = $rows[-2].id
+    Invoke-PaletteCommand $Session 'Jump to latest message'
+    $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object { $_.selected -and $_.id -ceq $latest }).Count -eq 1 } 'latest message selected'
+    Invoke-PaletteCommand $Session 'Select previous message'
+    $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object { $_.selected -and $_.id -ceq $previous }).Count -eq 1 } 'previous message selected'
+    Invoke-PaletteCommand $Session 'Select next message'
+    $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object { $_.selected -and $_.id -ceq $latest }).Count -eq 1 } 'next message selected'
+    Invoke-PaletteCommand $Session 'Select previous message'
+    $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object { $_.selected -and $_.id -ceq $previous }).Count -eq 1 } 'previous message selected again'
+    Invoke-PaletteCommand $Session 'Jump to latest message'
+    $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object { $_.selected -and $_.id -ceq $latest }).Count -eq 1 } 'jump returns to latest message'
+    $chip = Wait-Until { (Read-Control $Session messages).messages | Where-Object { $_.id -eq 'CHIP' -and $_.bubble[2] -gt $_.bubble[0] } } 'CHIP bubble painted for palette'
+    $point = [VerifyWindow+Point]::new()
+    $point.X = [int](($chip.bubble[0] + $chip.bubble[2]) / 2)
+    $point.Y = [int](($chip.bubble[1] + $chip.bubble[3]) / 2)
+    Assert-That ([VerifyWindow]::ClientToScreen($handle, [ref]$point)) 'CHIP canvas origin unavailable'
+    [VerifyMenus]::Click($Session.pid, $point.X, $point.Y, $true)
+    $null = Wait-Popup $Session '#32768'
+    Send-Keys $Session '{ESC}'
+    $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object { $_.id -eq 'CHIP' -and $_.selected }).Count -eq 1 } 'CHIP selected'
+    foreach ($item in @(
+        @{ query = 'Like'; emoji = [char]::ConvertFromUtf32(0x1f44d) },
+        @{ query = 'Love'; emoji = $heart },
+        @{ query = 'Sad'; emoji = [char]::ConvertFromUtf32(0x1f622) },
+        @{ query = 'Surprised'; emoji = [char]::ConvertFromUtf32(0x1f62e) },
+        @{ query = 'Thanks'; emoji = [char]::ConvertFromUtf32(0x1f64f) },
+        @{ query = 'Remove reaction'; emoji = '' }
+    )) {
+        Invoke-PaletteCommand $Session $item.query
+        $null = Wait-Until {
+            $requests = @(Get-Content $path | Where-Object { $_.EndsWith('}') } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.chat -eq 'fixture-beta' -and $_.msg -eq 'CHIP' })
+            $requests.Count -gt 0 -and $requests[-1].emoji -ceq $item.emoji
+        } "$($item.query) hub request"
+        $null = Wait-Until { @((Read-Control $Session messages).messages | Where-Object { $_.id -eq 'CHIP' -and $_.my_reaction -ceq $item.emoji }).Count -eq 1 } "$($item.query) shown"
+    }
     Save-Screen $Session after
 }
