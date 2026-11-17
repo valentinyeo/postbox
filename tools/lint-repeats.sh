@@ -338,6 +338,16 @@ if [[ -f .github/workflows/automerge.yml && -f .github/workflows/verify.yml ]]; 
     fi
 fi
 
+if [[ -f .github/workflows/pr-title.yml && -f .github/workflows/automerge.yml ]]; then
+    if ! grep -Fq 'bash tools/check-repro-first.sh' .github/workflows/pr-title.yml ||
+       ! grep -Fq 'bash tools/check-repro-first.sh' .github/workflows/automerge.yml ||
+       ! grep -Fq '.name == "repro-first" and .status == "COMPLETED" and .conclusion == "SUCCESS"' .github/workflows/automerge.yml ||
+       ! grep -Fq '.name == ("base-fails (" + $repro + ")") and .status == "completed" and .conclusion == "success"' .github/workflows/automerge.yml; then
+        printf 'lint-repeats: .github/workflows/automerge.yml:1: [B12] Reproduction checks can be skipped. Require repro-first and a successful base-fails job.\n'
+        failed=1
+    fi
+fi
+
 if [[ -s tools/required-checks.txt ]]; then
     if ! python3 - <<'PYCODE'
 from pathlib import Path

@@ -3,6 +3,7 @@ run-name: verify-wazig ${{ inputs.feature || 'pr' }} ${{ github.head_ref || gith
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
     paths:
       - "src/**"
       - "build.zig"
@@ -37,6 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      repro: ${{ steps.matrix.outputs.repro }}
+      needed: ${{ steps.matrix.outputs.needed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,7 +74,18 @@ jobs:
           elif os.environ['EVENT_NAME'] == 'pull_request':
               mapping = json.loads(Path('tools/verify-wazig/pr-journeys.json').read_text())
               files = subprocess.check_output(['git', 'diff', '--name-only', '--no-renames', '-z', os.environ['BASE_SHA'], 'HEAD']).decode().split('\0')
-              names = set(mapping['default'])
+              event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())['pull_request']
+              body = Path(os.environ['RUNNER_TEMP']) / 'pr-body.txt'
+              changed = Path(os.environ['RUNNER_TEMP']) / 'pr-files.txt'
+              body.write_text(event.get('body') or '')
+              changed.write_text('\n'.join(files))
+              repro = subprocess.check_output(['bash', 'tools/check-repro-first.sh', event['title'], str(body), str(changed)], text=True).strip()
+              needed = bool(repro and repro != 'none') or any(p.startswith(('src/', 'tools/verify-wazig/')) or p in ('build.zig', '.github/workflows/verify.yml') for p in files)
+              names = set(mapping['default']) if needed else set()
+              if repro and repro != 'none':
+                  names.add(repro)
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                  output.write(f'repro={repro if repro != "none" else ""}\nneeded={str(needed).lower()}\n')
               for path in files:
                   for prefix, features in mapping['paths'].items():
                       if path.startswith(prefix):
@@ -90,10 +104,83 @@ jobs:
           print(value)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'matrix={value}\n')
+  base-fails:
+    name: base-fails (${{ needs.plan.outputs.repro }})
+    needs: [plan]
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.plan.outputs.repro != ''
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: mlugg/setup-zig@v2
+        if: needs.plan.outputs.repro != ''
+        with:
+          version: 0.16.0
+          use-cache: false
+      - name: Build base desktop
+        if: needs.plan.outputs.repro != ''
+        shell: pwsh
+        run: |
+          zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
+          if ($LASTEXITCODE -ne 0) { throw 'Base build failed' }
+      - uses: actions/checkout@v4
+        if: needs.plan.outputs.repro != ''
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-head
+      - name: Overlay PR journey tools
+        if: needs.plan.outputs.repro != ''
+        shell: pwsh
+        run: |
+          Remove-Item tools/verify-wazig -Recurse -Force
+          Copy-Item pr-head/tools/verify-wazig tools/verify-wazig -Recurse
+      - name: Install audio output
+        if: needs.plan.outputs.repro == 'voice'
+        shell: pwsh
+        run: tools/verify-wazig/install-audio.ps1
+      - name: Install typing recorder
+        if: needs.plan.outputs.repro == 'drafts' || needs.plan.outputs.repro == 'media-fit'
+        shell: pwsh
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Typing recorder installation failed' }
+      - name: Build historical rollback input
+        if: needs.plan.outputs.repro == 'hub-rollback' || needs.plan.outputs.repro == 'hub-migration-crash' || needs.plan.outputs.repro == 'hub-migration-before-rename'
+        shell: pwsh
+        run: |
+          & tools/verify-wazig/build-historical-847.ps1 -Evidence verification-evidence/historical-847
+          if ($LASTEXITCODE -ne 0) { throw 'Historical rollback build failed' }
+      - name: Install Chrome screenshot driver
+        if: needs.plan.outputs.repro == 'text-comparison'
+        shell: pwsh
+        run: |
+          npm install --prefix "$env:RUNNER_TEMP/text-compare" --no-save playwright-core@1.58.2
+          if ($LASTEXITCODE -ne 0) { throw 'Chrome driver installation failed' }
+      - name: Run reproduction on base
+        if: needs.plan.outputs.repro != ''
+        shell: pwsh
+        env:
+          FEATURE: ${{ needs.plan.outputs.repro }}
+          GITHUB_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence base-evidence -ExpectedVersion 0.0.526
+          if ($LASTEXITCODE -eq 0) { throw 'Reproduction unexpectedly passed on base' }
+          throw 'Base failure cannot be classified as a failed journey check; reproduction gate is closed'
+      - name: Upload base evidence
+        if: ${{ always() && needs.plan.outputs.repro != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: repro-base
+          path: base-evidence/
+          if-no-files-found: warn
   candidate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/') }}
+    needs: [plan]
+    if: ${{ (github.event_name != 'pull_request' || needs.plan.outputs.needed == 'true') && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/') }}
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
@@ -119,7 +206,7 @@ jobs:
         run: zig build test-edit '-Dtarget=x86_64-windows-gnu' --release=small
   verify:
     needs: [plan, candidate]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.candidate.result != 'failure' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (github.event_name != 'pull_request' || needs.plan.outputs.needed == 'true') && needs.candidate.result != 'failure' }}
     runs-on: windows-latest
     timeout-minutes: ${{ github.event_name == 'pull_request' && 20 || 60 }}
     strategy:
