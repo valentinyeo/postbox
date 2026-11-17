@@ -10,6 +10,9 @@ permissions:
   contents: read
   actions: read
   pull-requests: write
+concurrency:
+  group: verify-adoption-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
   adoption-checks:
     runs-on: ubuntu-latest
@@ -125,7 +128,7 @@ jobs:
           path: verification-evidence
   independent-verifier:
     needs: [adoption-checks, desktop]
-    if: ${{ always() && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -149,6 +152,7 @@ jobs:
             --model opus --max-turns 20 --output-format json \
             --tools 'Bash,Read,Glob,Grep' \
             --allowedTools 'Read,Glob,Grep,Bash(python3:*),Bash(git diff:*),Bash(git status:*)' \
+            -- \
             "Read $GITHUB_WORKSPACE/.verify/worker.md before anything else. Goal: verify Postbox gate adoption independently. Author family is OpenAI; you are Anthropic. Read AGENTS.md, .verify, source code and downloaded-evidence. Run python3 tools/verify-postbox-map.py. Try removing one marker temporarily, verify failure, then restore it. Inspect for omitted Win32 entry points, inflated counts, broken workflow references and unsafe exclusions. Check actual desktop evidence. Do not fabricate a real-app run, a verdict attestation, or production data size. Do not run the full product suite. Do not commit, merge, publish, change policy or contact anyone. Give FAIL if 100% code entry coverage or current-head app proof is absent. Start your report with PASS, PASS+NOTES or FAIL, then evidence and limits. Inspect comments in this diff too. Return your complete report in your final response." \
             > verifier-evidence/agent.json
       - name: Post independent agent verdict
