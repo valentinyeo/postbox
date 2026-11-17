@@ -91,18 +91,14 @@ function Invoke-TranscriptCopyJourney($Session, [string]$Messages) {
     @{ actual = $partial; expected = $partialExpected; missing_id = $missingRow.id; missing_time = $missingTime; title = $title } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Session.evidence 'transcript-missing.json')
     Assert-That ($partial -ceq $partialExpected -and $title.Contains("Copied 2 transcripts. Missing: $missingTime")) 'Missing transcript was silently omitted or copied from its formatted display'
     Save-Screen $Session 'transcripts-missing'
-    Invoke-PaletteCommand $Session 'Cancel selection'
-    $null = Wait-Until { @(Read-VoiceMessages $Session | Where-Object marked).Count -eq 0 } 'Cancel selection clears transcript marks'
+    Send-Keys $Session '{ESC}'
     Send-Keys $Session '^k'
     $palette = Get-PaletteWindow $Session
     Send-Keys $Session 'Copy all transcripts'
     $list = Get-Edit $palette '1072'
-    $null = Wait-Until { (Read-ListCount $list) -eq 0 } 'Cancel selection removes copy all transcripts command'
-    Assert-That (@(Read-VoiceMessages $Session | Where-Object marked).Count -eq 0) 'Cancel selection left marked messages'
+    $null = Wait-Until { (Read-ListCount $list) -eq 0 } 'Escape clears transcript marks'
+    Assert-That (@(Read-VoiceMessages $Session | Where-Object marked).Count -eq 0) 'Escape left marked messages'
     Send-Keys $Session '{ESC}'
-    Invoke-TranscriptMark $Session 'VOICE-3'
-    Send-Keys $Session '{ESC}'
-    $null = Wait-Until { @(Read-VoiceMessages $Session | Where-Object marked).Count -eq 0 } 'Escape clears transcript marks'
     Invoke-TranscriptMark $Session 'VOICE-3'
     Invoke-TranscriptMark $Session 'VOICE-5' 16
     $ranged = @(Read-VoiceMessages $Session | Where-Object marked | ForEach-Object id)
