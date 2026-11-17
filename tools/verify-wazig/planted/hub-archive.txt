@@ -1,0 +1,1 @@
+WhatsApp archive requests send the opposite archive state.

@@ -1,0 +1,1 @@
+Unknown Slack members no longer display as @someone.
