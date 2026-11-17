@@ -4,6 +4,26 @@ pub const Pending = enum { archive_pending, unarchive_pending };
 pub const Intent = enum { archive, unarchive };
 pub const Base = enum { inbox, archived };
 
+pub fn fromUnarchive(unarchive: bool) Pending {
+    return if (unarchive) .unarchive_pending else .archive_pending;
+}
+
+pub fn sameIntent(existing: Pending, wanted: Pending) bool {
+    return existing == wanted;
+}
+
+test "unarchive flag maps to pending intent" {
+    try std.testing.expectEqual(Pending.archive_pending, fromUnarchive(false));
+    try std.testing.expectEqual(Pending.unarchive_pending, fromUnarchive(true));
+}
+
+test "pending intents match only in the same direction" {
+    try std.testing.expect(sameIntent(.archive_pending, .archive_pending));
+    try std.testing.expect(sameIntent(.unarchive_pending, .unarchive_pending));
+    try std.testing.expect(!sameIntent(.archive_pending, .unarchive_pending));
+    try std.testing.expect(!sameIntent(.unarchive_pending, .archive_pending));
+}
+
 pub fn visibleArchived(base_archived: bool, pending: ?Pending) bool {
     return switch (pending orelse return base_archived) {
         .archive_pending => true,
