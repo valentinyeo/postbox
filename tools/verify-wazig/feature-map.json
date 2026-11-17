@@ -115,16 +115,16 @@
     {
       "feature": "command_font_default",
       "source": "buildPaletteItems:command_font_default",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "appearance",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_font_large",
       "source": "buildPaletteItems:command_font_large",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "appearance",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_font_larger",
@@ -136,9 +136,9 @@
     {
       "feature": "command_font_larger_preset",
       "source": "buildPaletteItems:command_font_larger_preset",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "appearance",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_font_reset",
@@ -150,9 +150,9 @@
     {
       "feature": "command_font_small",
       "source": "buildPaletteItems:command_font_small",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "appearance",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_font_smaller",

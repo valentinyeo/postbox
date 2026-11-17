@@ -78,6 +78,12 @@ foreach ($preset in @(
     foreach ($word in $message.words) {
         Assert-That ($word.rect[0] -ge $message.bubble[0] -and $word.rect[2] -le $message.bubble[2] -and $word.rect[1] -ge $message.bubble[1] -and $word.rect[3] -le $message.bubble[3]) 'Chat text clips outside its bubble'
     }
+    if ($preset.scale -eq 80) {
+        Assert-That ($points -lt $baselinePoints) 'Small preset did not decrease the UI Automation font size'
+    }
+    if ($preset.scale -eq 100) {
+        Assert-That ($points -eq $baselinePoints) 'Default preset did not restore the UI Automation font size'
+    }
     if ($presetPoints.Count -gt 0) {
         $previous = $presetPoints[-1]
         Assert-That ($points -gt $previous.points -and $message.font_height -lt $previous.chat_font_height -and $layout.row_font_height -lt $previous.list_font_height) 'Preset did not increase all three fonts'
