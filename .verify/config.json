@@ -1,0 +1,27 @@
+{
+  "adapter": "zig-native-v1",
+  "source_roots": [
+    "src",
+    "tools",
+    "vendor",
+    "build.zig"
+  ],
+  "skill": ".cursor/skills/verify-postbox/SKILL.md",
+  "features": ".cursor/skills/verify-postbox/features",
+  "adoption_status": "blocked: house-rules has no Zig source adapter; do not exclude application code",
+  "inventory_command": "python3 tools/verify-postbox-map.py",
+  "real_data": {
+    "production_count": null,
+    "reason": "Private installed Windows profile is unavailable. No customer data copied.",
+    "code_limits": {
+      "chats": 256,
+      "messages_per_loaded_chat": 1000,
+      "source": "src/main.zig:95-97"
+    },
+    "existing_search_fixture": {
+      "chats": 2,
+      "source": "tools/verify-wazig/run.ps1"
+    },
+    "required_comparison": "Verifier must count exercised records and explain production relevance. Two fixture chats do not prove production scale."
+  }
+}

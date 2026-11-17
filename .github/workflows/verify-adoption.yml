@@ -1,0 +1,171 @@
+name: verify-adoption
+on:
+  pull_request:
+    paths:
+      - '.verify/**'
+      - '.cursor/skills/verify-postbox/**'
+      - '.github/workflows/verify*.yml'
+      - 'tools/verify-postbox-map.py'
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+jobs:
+  adoption-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: valentinyeo/house-rules
+          ref: 314afbe2aea6a2083cc931f49aabd7ad0edcf45b
+          path: gate
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install PyYAML==6.0.2
+      - name: Gate tests, broken variants first
+        run: |
+          mkdir -p adoption-evidence
+          set -o pipefail
+          python3 gate/tests/test_verify_gate.py --demonstrate | tee adoption-evidence/gate-demonstration.log
+          python3 -m unittest discover -s gate/tests -p test_verify_gate.py -v 2>&1 | tee adoption-evidence/gate-tests.log
+      - name: Inventory and single-entry negative control
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          import subprocess
+          command = ['python3', 'tools/verify-postbox-map.py']
+          def run():
+              result = subprocess.run(command, text=True, capture_output=True)
+              print(result.stdout, end='')
+              return result
+          original = run()
+          assert original.returncode == 0, original.stderr
+          path = Path('.cursor/skills/verify-postbox/features/command.md')
+          text = path.read_text()
+          removed, count = re.subn(r'<!-- entry: [^\n]+ -->\n', '', text, count=1)
+          assert count == 1
+          try:
+              path.write_text(removed)
+              broken = run()
+              assert broken.returncode == 1 and 'missing' in broken.stdout
+          finally:
+              path.write_text(text)
+          restored = run()
+          assert restored.returncode == 0, restored.stderr
+          Path('adoption-evidence/inventory-negative-control.log').write_text(
+              'BOUNDARY: bounded Postbox inventory, not shared Zig coverage\n'
+              + 'BROKEN inventory: FAIL\n' + broken.stdout
+              + 'VALID inventory: PASS\n' + restored.stdout)
+      - name: Record actual gate failures without granting approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > adoption-evidence/pr.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          pr = json.loads(Path('adoption-evidence/pr.json').read_text())
+          context = {'repository': pr['base']['repo']['full_name'], 'pr_number': pr['number'],
+                     'head_sha': pr['head']['sha'], 'author_login': pr['user']['login'],
+                     'labels': [row['name'] for row in pr['labels']],
+                     'policy': json.loads(Path('.verify/policy.json').read_text())}
+          Path('adoption-evidence/context.json').write_text(json.dumps(context))
+          PY
+          set +e
+          python3 gate/fleet/verify-score . --context adoption-evidence/context.json --json > adoption-evidence/gate-snapshot.json
+          result=$?
+          set -e
+          test "$result" -eq 1
+          echo 'Expected FAIL snapshot. PR policy is not trusted-base attestation.'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: postbox-adoption-checks
+          path: adoption-evidence
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Build actual Windows executable
+        run: zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
+      - name: Launch, doctor, drive search
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature search -Bin zig-out/bin -Evidence verification-evidence -ExpectedVersion 0.0.526
+          if ($LASTEXITCODE) { throw 'Real desktop journey failed' }
+          python tools/verify-wazig/check-evidence.py verification-evidence
+          if ($LASTEXITCODE) { throw 'Desktop evidence failed' }
+      - name: Preserve proof and clean owned session
+        if: always()
+        shell: pwsh
+        run: pwsh -NoProfile -File tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: postbox-adoption-desktop
+          path: verification-evidence
+  independent-verifier:
+    needs: [adoption-checks, desktop]
+    if: ${{ always() && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: postbox-adoption-*
+          path: downloaded-evidence
+      - name: Different-family agent verifies adoption
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          test -n "$ANTHROPIC_API_KEY"
+          mkdir -p verifier-evidence
+          npx --yes @anthropic-ai/claude-code@2.1.326 -p \
+            --model opus --max-turns 20 --output-format json \
+            --tools 'Bash,Read,Glob,Grep' \
+            --allowedTools 'Read,Glob,Grep,Bash(python3:*),Bash(git diff:*),Bash(git status:*)' \
+            "Read $GITHUB_WORKSPACE/.verify/worker.md before anything else. Goal: verify Postbox gate adoption independently. Author family is OpenAI; you are Anthropic. Read AGENTS.md, .verify, source code and downloaded-evidence. Run python3 tools/verify-postbox-map.py. Try removing one marker temporarily, verify failure, then restore it. Inspect for omitted Win32 entry points, inflated counts, broken workflow references and unsafe exclusions. Check actual desktop evidence. Do not fabricate a real-app run, a verdict attestation, or production data size. Do not run the full product suite. Do not commit, merge, publish, change policy or contact anyone. Give FAIL if 100% code entry coverage or current-head app proof is absent. Start your report with PASS, PASS+NOTES or FAIL, then evidence and limits. Inspect comments in this diff too. Return your complete report in your final response." \
+            > verifier-evidence/agent.json
+      - name: Post independent agent verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('verifier-evidence/agent.json').read_text())
+          assert not result.get('is_error'), 'Verifier agent failed'
+          report = result.get('result')
+          assert report, 'Verifier returned no report'
+          Path('verifier-evidence/report.md').write_text(report)
+          PY
+          gh pr comment "$PR_NUMBER" --body-file verifier-evidence/report.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: postbox-independent-verifier
+          path: verifier-evidence

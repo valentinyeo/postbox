@@ -128,7 +128,7 @@ class WorkspaceNamesSourceTests(unittest.TestCase):
             root = Path(directory)
             for name in ['src', 'tools/verify-wazig']:
                 shutil.copytree(ROOT / name, root / name)
-            for name in ['build.zig', 'CHANGELOG.md', '.github/workflows/verify.yml',
+            for name in ['build.zig', 'CHANGELOG.md', '.github/workflows/verify-desktop.yml',
                          '.claude/skills/verify-wazig/features/views.md']:
                 target = root / name
                 target.parent.mkdir(parents=True, exist_ok=True)

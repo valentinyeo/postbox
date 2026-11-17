@@ -316,7 +316,7 @@ class EmojiJourneyChecks(unittest.TestCase):
         self.assertIn("$shown.chat.id -eq 'slack:fixture-emoji:other' -and $shown.chat.provider -eq 'slack'", journey)
 
     def test_journey_registration(self):
-        workflow = (ROOT / '.github/workflows/verify.yml').read_text()
+        workflow = (ROOT / '.github/workflows/verify-desktop.yml').read_text()
         runner = (TOOLS / 'run.ps1').read_text()
         registry = json.loads((TOOLS / 'journeys.json').read_text())
         entry, = [row for row in registry['journeys'] if row['name'] == 'slack-emoji']

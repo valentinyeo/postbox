@@ -67,7 +67,7 @@ for removed in ['resurface_probe', 'enqueueResurfaceProbe', 'applyResurfaceProbe
     assert removed not in source, ('removed archive resurfacing path or command', removed)
 for control in ['id_palette_edit = 1064', 'id_compose = 1032']:
     assert control in source
-workflow = (root / '.github/workflows/verify.yml').read_text(encoding="utf-8")
+workflow = (root / '.github/workflows/verify-desktop.yml').read_text(encoding="utf-8")
 for required in ['workflow_dispatch:', 'schedule:', 'windows-latest', 'actions/upload-artifact@v4', 'if: always()', '--release=small']:
     assert required in workflow, required
 triggers = workflow.split('\non:\n', 1)[1].split('\npermissions:', 1)[0]

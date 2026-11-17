@@ -17,7 +17,7 @@ Open the combined inbox. Focus the empty composer, chat list or message canvas a
 
 Run after the freeze, once the branch is available on GitHub:
 
-`gh workflow run verify.yml --ref ceo/IGSH-777 -f feature=archive-inbox`
+`gh workflow run verify-desktop.yml --ref ceo/IGSH-777 -f feature=archive-inbox`
 
 Recipe: `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature archive-inbox -Bin zig-out/bin -Evidence verification-evidence`.
 

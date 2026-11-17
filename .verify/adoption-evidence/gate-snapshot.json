@@ -1,0 +1,82 @@
+{
+  "items": [
+    {
+      "id": "real-app",
+      "name": "Agent drives the real app",
+      "pass": false,
+      "missing": "drive: manifest artifact path"
+    },
+    {
+      "id": "agent-verifier",
+      "name": "Human is not the verifier",
+      "pass": false,
+      "missing": "allowlisted agent verdict comment"
+    },
+    {
+      "id": "feature-map",
+      "name": "Feature map",
+      "pass": false,
+      "missing": "supported source adapter python-registration-v1 or javascript-typescript-v1"
+    },
+    {
+      "id": "repro-first",
+      "name": "Reproduce bug first",
+      "pass": true,
+      "missing": null
+    },
+    {
+      "id": "test-first",
+      "name": "Failing test first",
+      "pass": true,
+      "missing": null
+    },
+    {
+      "id": "adversary",
+      "name": "Agents try to break it",
+      "pass": false,
+      "missing": "allowlisted agent verdict comment"
+    },
+    {
+      "id": "skill-tests",
+      "name": "Tests for the verify skill",
+      "pass": false,
+      "missing": "executed verify skill pass/fail fixture tests"
+    },
+    {
+      "id": "hard-rules",
+      "name": "Hard rules in checks",
+      "pass": true,
+      "missing": null
+    },
+    {
+      "id": "current-head",
+      "name": "Auto-merge only once earned",
+      "pass": false,
+      "missing": "verdict covering current PR head SHA before auto-merge"
+    },
+    {
+      "id": "real-size",
+      "name": "Real-size data",
+      "pass": false,
+      "missing": "verdict dataset count, unit and production-size comparison"
+    },
+    {
+      "id": "github-run",
+      "name": "Verifier runs on GitHub",
+      "pass": false,
+      "missing": "GitHub Actions run URL"
+    },
+    {
+      "id": "release-proof",
+      "name": "Video or trace before release",
+      "pass": false,
+      "missing": "release_proof: manifest artifact path"
+    },
+    {
+      "id": "seen-failing",
+      "name": "Check seen failing",
+      "pass": false,
+      "missing": "seen_failing_output: manifest artifact path"
+    }
+  ]
+}

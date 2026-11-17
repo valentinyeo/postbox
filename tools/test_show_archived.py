@@ -476,7 +476,7 @@ class ShowArchivedTests(unittest.TestCase):
             self.assertIn(required, journey)
         for forbidden in ('WM_COMMAND', 'SendMessage', 'PostMessage', '.SetValue(', '/fixture/'):
             self.assertNotIn(forbidden, journey)
-        workflow = (ROOT / '.github/workflows/verify.yml').read_text()
+        workflow = (ROOT / '.github/workflows/verify-desktop.yml').read_text()
         self.assertIn("selected = journeys", workflow)
         self.assertIn('matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}', workflow)
         self.assertIn('feature=show-archived', (ROOT / '.claude/skills/verify-wazig/features/show-archived.md').read_text())

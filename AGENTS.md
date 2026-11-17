@@ -18,3 +18,31 @@
 - **No toolbar**: every command lives in the Ctrl+K palette. Window title shows `<view label> - Postbox v<version>` (or `Combined inbox - Postbox v<version>` for the combined inbox; `Postbox v<version>` before a view is known).
 - **Font size** follows the saved scale; never change the default size or the font (IBM Plex Sans).
 - **The installed app must never be left without a runnable `Messages.exe`** (self-update swaps atomically or not at all).
+
+## Verification gate
+
+Every PR calls the pinned house-rules gate.
+A human approval cannot replace its agent verdict.
+The registered verifier needs another model family.
+No verifier is registered during this bootstrap.
+Keep adoption blocked until policy review completes.
+
+| Requirement | Enforced by |
+| --- | --- |
+| real-app | verify-gate / real-app |
+| agent-verifier | verify-gate / agent-verifier |
+| feature-map | verify-gate / feature-map |
+| repro-first | verify-gate / repro-first |
+| test-first | verify-gate / test-first |
+| adversary | verify-gate / adversary |
+| skill-tests | verify-gate / skill-tests |
+| hard-rules | verify-gate / hard-rules |
+| current-head | verify-gate / current-head |
+| real-size | verify-gate / real-size |
+| github-run | verify-gate / github-run |
+| release-proof | verify-gate / release-proof |
+| seen-failing | verify-gate / seen-failing |
+
+Release workflows still need matching gate dependencies.
+Branch protection still needs the emitted status names.
+Never merge this adoption with failing checks.

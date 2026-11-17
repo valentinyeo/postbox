@@ -8,20 +8,20 @@ description: Verify the Wazig Messages native Windows desktop through real keybo
 ## Launch
 
 A new probe must pass `repeat=3` before it merges.
-Run `gh workflow run verify.yml -f feature=<id> -f repeat=3` and inspect all three runs.
+Run `gh workflow run verify-desktop.yml -f feature=<id> -f repeat=3` and inspect all three runs.
 
 Run only on GitHub-hosted Windows, never on a workstation or shared build host:
 
 ```sh
-gh workflow run verify.yml -f feature=search
-gh run list --workflow verify.yml --event workflow_dispatch --limit 5
+gh workflow run verify-desktop.yml -f feature=search
+gh run list --workflow verify-desktop.yml --event workflow_dispatch --limit 5
 gh run watch <id> --interval 60 --exit-status
 gh run download <id> --name verify-wazig-search --dir evidence/<id>
 ```
 
 Replace `search` with a [feature ID](features/README.md). Confirm the run's branch and commit before trusting it. Dispatch requires this workflow on the default branch. Before merge, retained `pull_request` path triggers run the journeys marked `pr` in [journeys.json](../../../tools/verify-wazig/journeys.json).
 
-`verify.yml` installs Zig 0.16.0 and builds `Messages.exe`, `wazigctl.exe` and bundled IBM Plex fonts with the same Windows `--release=small` build used by ci.yml's unfurl-verification job. The workflow pins the evidence build to `0.0.526` (not the default or release version); this base desktop build does not include TDLib. It does not download or install wacli, authenticate a provider, or install the app. The `whatsapp-hub` journey additionally verifies the production HTTPS backend against an authenticated loopback fake bridge; it never contacts a real provider. Loopback HTTP is allowed only inside the guarded verification fixture.
+`verify-desktop.yml` installs Zig 0.16.0 and builds `Messages.exe`, `wazigctl.exe` and bundled IBM Plex fonts with the same Windows `--release=small` build used by ci.yml's unfurl-verification job. The workflow pins the evidence build to `0.0.526` (not the default or release version); this base desktop build does not include TDLib. It does not download or install wacli, authenticate a provider, or install the app. The `whatsapp-hub` journey additionally verifies the production HTTPS backend against an authenticated loopback fake bridge; it never contacts a real provider. Loopback HTTP is allowed only inside the guarded verification fixture.
 
 The workflow runs `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature search -Bin zig-out/bin -Evidence verification-evidence`. It starts the real `Messages.exe --verify-fixture` with a fresh GUID directory under `RUNNER_TEMP`. Two entirely synthetic local cached chats, `Verification Alpha` and `Verification Beta`, load through the production cache parser. They initially contain no messages except for menus, which seeds one synthetic cached message, and text-comparison, which loads `src/verify_text.json` through the guarded fixture; archive adds an incoming fixture message. Ready means a `MessagesZig` window titled `<view label> - Wazig v0.0.526` (with `Combined inbox` for the combined view; `Wazig v0.0.526` is accepted before a view is known), an enabled composer, and `DOCTOR PASSED` in the log, not merely a living process.
 

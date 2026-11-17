@@ -211,7 +211,7 @@ def check_journey():
                        "== order + [('telegram', 'telegram', 'Telegram'), ('signal', 'signal', 'Signal')]", "+ ['telegram:telegram', 'signal:signal']"])
     require(read('tools/verify-wazig/check-evidence.py'), ["row['name'] == session['feature']", "journey['validator']"])
     require(read('tools/verify-wazig/' + entry['validator']['file']), ['check-views-evidence.py'])
-    workflow = read('.github/workflows/verify.yml')
+    workflow = read('.github/workflows/verify-desktop.yml')
     require(workflow, ['fromJSON(needs.plan.outputs.matrix)', 'if: matrix.evidence', 'selected = journeys'])
     for path in ['src/messenger_view.zig', 'src/chat_key.zig', 'src/control.zig', 'src/outbox.zig']:
         assert (root / path).is_file(), path

@@ -4,7 +4,7 @@ Start with [the skill](../SKILL.md). The offline desktop journeys use the real n
 
 Journey IDs, automatic PR coverage and fixture modes are defined in [journeys.json](../../../../tools/verify-wazig/journeys.json). Read `features/<name>.md` for each registered journey's user-facing recipe. Add a journey through one registry entry and its own files; do not maintain another catalog here.
 
-Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Other than registered automatic PR coverage, journeys remain dispatchable; never claim skipped coverage as verification.
+Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify-desktop.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Other than registered automatic PR coverage, journeys remain dispatchable; never claim skipped coverage as verification.
 
 The source of truth for commands is `src/main.zig:buildPaletteItems`, for keyboard handling `src/main.zig:handleKeyboard`, and for discoverable help `src/shortcuts.zig`. Every feature file has precisely four H2 sections. Capture the input, resulting UI and durable side effects; preserve proof after cleanup. Only archive adds a synthetic incoming message at the fixture provider boundary; search, navigation, drafts, palette and appearance stay empty. No live send, account login, media, voice playback or transcription claim can be made from these local chats.
 
