@@ -153,8 +153,8 @@ function Invoke-VoiceBarClick($Session, [string]$Zone) {
     Assert-That $audio.bar_visible "voice bar: no bar to click for $Zone"
     $canvas = [VerifyVoice]::Bounds($Session.pid, (Get-VoiceCanvas $Session))
     $span = if ($Zone -eq 'speed') { $audio.speed_zone } else { $audio.pause_zone }
-    $x = $canvas.Left + [int][Math]::Floor(($span[0] + $span[1]) / 2) - $audio.bar[0]
-    $y = $canvas.Top + [int][Math]::Floor(($audio.bar[3] - $audio.bar[1]) / 2)
+    $x = $canvas.Left + [int][Math]::Floor(($span[0] + $span[1]) / 2)
+    $y = $canvas.Top + [int][Math]::Floor(($audio.bar[1] + $audio.bar[3]) / 2)
     [VerifyMenus]::Click($Session.pid, $x, $y, $false)
     Add-Content (Join-Path $Session.evidence 'actions.log') "SendInput: voice bar $Zone x=$x y=$y"
 }
