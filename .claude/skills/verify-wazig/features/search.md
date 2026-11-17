@@ -4,7 +4,7 @@
 
 - `search-focus`: Ctrl+F and slash focus palette edit 1064 in exact entity-search mode, including from an empty list.
 - `search-match`: reuse the former bar's case-insensitive name/identifier matching, current-view/archive/unread filters and ordering.
-- `search-empty`: no-match and unread-only empty-list cases remain searchable.
+- `search-empty`: no-match and unread-only empty-list cases remain searchable; the palette's Toggle unread chats command changes the filter.
 - `search-clear`: Escape clears the query and restores the list.
 - `search-parity`: one shared 24-query contract, two shortcut samples per query and ordered provider/account/id evidence.
 - `search-removal`: no sidebar edit 1008 or native child, no old cue and no reserved layout slot.

@@ -24,9 +24,9 @@
     {
       "feature": "command_cancel_selection",
       "source": "buildPaletteItems:command_cancel_selection",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "voice",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_compose",
@@ -38,9 +38,9 @@
     {
       "feature": "command_copy_all_transcripts",
       "source": "buildPaletteItems:command_copy_all_transcripts",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "voice",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_copy_link",
@@ -269,9 +269,9 @@
     {
       "feature": "command_refresh",
       "source": "buildPaletteItems:command_refresh",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "slack-sort",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_replies_slack",
@@ -367,9 +367,9 @@
     {
       "feature": "command_sort_views",
       "source": "buildPaletteItems:command_sort_views",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "views",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_speed_1",
@@ -416,9 +416,9 @@
     {
       "feature": "command_unread",
       "source": "buildPaletteItems:command_unread",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "search",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_update_check",

@@ -7,9 +7,9 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_accounts` | `buildPaletteItems:command_accounts` | GAP | GAP: No journey asserts this command end to end. |
 | `command_archive` | `buildPaletteItems:command_archive` | archive | covered |
 | `command_archived` | `buildPaletteItems:command_archived` | archive | covered |
-| `command_cancel_selection` | `buildPaletteItems:command_cancel_selection` | GAP | GAP: No journey asserts this command end to end. |
+| `command_cancel_selection` | `buildPaletteItems:command_cancel_selection` | voice | covered |
 | `command_compose` | `buildPaletteItems:command_compose` | drafts | covered |
-| `command_copy_all_transcripts` | `buildPaletteItems:command_copy_all_transcripts` | GAP | GAP: No journey asserts this command end to end. |
+| `command_copy_all_transcripts` | `buildPaletteItems:command_copy_all_transcripts` | voice | covered |
 | `command_copy_link` | `buildPaletteItems:command_copy_link` | GAP | GAP: No journey asserts this command end to end. |
 | `command_copy_text` | `buildPaletteItems:command_copy_text` | passage-copy | covered |
 | `command_copy_transcript` | `buildPaletteItems:command_copy_transcript` | GAP | GAP: No journey asserts this command end to end. |
@@ -42,7 +42,7 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_prev_message` | `buildPaletteItems:command_prev_message` | reactions | covered |
 | `command_quit` | `buildPaletteItems:command_quit` | GAP | GAP: No journey asserts this command end to end. |
 | `command_react_menu` | `buildPaletteItems:command_react_menu` | reactions | covered |
-| `command_refresh` | `buildPaletteItems:command_refresh` | GAP | GAP: No journey asserts this command end to end. |
+| `command_refresh` | `buildPaletteItems:command_refresh` | slack-sort | covered |
 | `command_replies_slack` | `buildPaletteItems:command_replies_slack` | GAP | GAP: No journey asserts this command end to end. |
 | `command_replies_whatsapp` | `buildPaletteItems:command_replies_whatsapp` | GAP | GAP: No journey asserts this command end to end. |
 | `command_reply` | `buildPaletteItems:command_reply` | reply | covered |
@@ -56,14 +56,14 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_slack_disconnect_workspace` | `buildPaletteItems:command_slack_disconnect_workspace` | GAP | GAP: No journey asserts this command end to end. |
 | `command_slack_setup` | `buildPaletteItems:command_slack_setup` | GAP | GAP: No journey asserts this command end to end. |
 | `command_slack_threads` | `buildPaletteItems:command_slack_threads` | slack-threads | covered |
-| `command_sort_views` | `buildPaletteItems:command_sort_views` | GAP | GAP: No journey asserts this command end to end. |
+| `command_sort_views` | `buildPaletteItems:command_sort_views` | views | covered |
 | `command_speed_1` | `buildPaletteItems:command_speed_1` | media-speed | covered |
 | `command_speed_150` | `buildPaletteItems:command_speed_150` | media-speed | covered |
 | `command_speed_200` | `buildPaletteItems:command_speed_200` | media-speed | covered |
 | `command_sync` | `buildPaletteItems:command_sync` | GAP | GAP: No journey asserts this command end to end. |
 | `command_theme_amoled` | `buildPaletteItems:command_theme_amoled` | menus | covered |
 | `command_toggle_transcript` | `buildPaletteItems:command_toggle_transcript` | GAP | GAP: No journey asserts this command end to end. |
-| `command_unread` | `buildPaletteItems:command_unread` | GAP | GAP: No journey asserts this command end to end. |
+| `command_unread` | `buildPaletteItems:command_unread` | search | covered |
 | `command_update_check` | `buildPaletteItems:command_update_check` | GAP | GAP: No journey asserts this command end to end. |
 | `command_update_install` | `buildPaletteItems:command_update_install` | GAP | GAP: No journey asserts this command end to end. |
 | `command_voice` | `buildPaletteItems:command_voice` | voice | covered |
