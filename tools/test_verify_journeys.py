@@ -242,12 +242,14 @@ class JourneyRegistryTests(unittest.TestCase):
         step = next(step for step in self.workflow['jobs']['base-fails']['steps']
                     if step.get('name') == 'Run reproduction on base')
         script = step['run']
-        for expected in ['journey-started.txt', 'failure.txt', '$LASTEXITCODE -eq 0',
+        self.assertIn('tools/verify-wazig/classify-red.ps1', script)
+        classifier = (self.tools / 'classify-red.ps1').read_text()
+        for expected in ['journey-started.txt', 'failure.txt', '$ExitCode -eq 0',
                          'App exited', 'Unknown verification journey', 'Hosted runner',
-                         'Verification runs only', 'Timed out:', 'Write-Host $failure', 'exit 0']:
+                         'Verification runs only', 'Timed out:', 'Write-Host $failure']:
             with self.subTest(expected=expected):
-                self.assertIn(expected, script)
-        self.assertNotIn('Base failure cannot be classified', script)
+                self.assertIn(expected, classifier)
+        self.assertIn('exit 0', script)
 
     def test_plan_yaml_and_nightly_matrix(self):
         verify = self.workflow['jobs']['verify']

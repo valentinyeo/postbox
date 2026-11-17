@@ -135,6 +135,23 @@ done
 rm "$fixture/.github/workflows/pr-title.yml"
 reset_automerge
 printf 'test-lint-repeats: B12 rejects missing reproduction guards\n'
+for mutation in planted schedule cron; do
+    reset_automerge
+    case "$mutation" in
+        planted) sed -i 's/^  planted:$/  removed-planted:/' "$fixture/.github/workflows/verify.yml" ;;
+        schedule) sed -i 's/^  schedule:$/  removed-schedule:/' "$fixture/.github/workflows/verify.yml" ;;
+        cron) sed -i '/^    - cron: /d' "$fixture/.github/workflows/verify.yml" ;;
+    esac
+    status=0
+    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+    if (( status != 1 )) || ! grep -Fq '[B13]' "$temp/output"; then
+        cat "$temp/output" >&2
+        printf 'test-lint-repeats: FAIL B13 must reject missing %s\n' "$mutation" >&2
+        exit 1
+    fi
+done
+reset_automerge
+printf 'test-lint-repeats: B13 rejects missing planted job and nightly trigger\n'
 b8_cases=0
 for guard in 'required-checks.txt' 'required=' 'as \$names' 'COMPLETED' 'match-head-commit' 'could not evaluate head checks' 'length) == 0' '!= "code-review"'; do
     reset_automerge
