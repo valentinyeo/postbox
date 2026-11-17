@@ -1,0 +1,1 @@
+Wrapped list text no longer aligns under the text following its marker.

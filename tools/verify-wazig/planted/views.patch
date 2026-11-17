@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -20871,7 +20871,7 @@
+         if (row < a.chat_count) selectChatRow(a, row);
+         return true;
+     }
+-    if (alt and !control and !shift and key >= '1' and key <= '9') {
++    if (alt and !control and shift and key >= '1' and key <= '9') {
+         if (key == '1') switchChatView(a, .all) else if (messenger_view.forNumber(key - '1', a.views.items)) |index| switchAccountView(a, a.views.items[index].key.key());
+         return true;
+     }

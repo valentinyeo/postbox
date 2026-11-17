@@ -1,0 +1,12 @@
+diff --git a/src/chat_list_layout.zig b/src/chat_list_layout.zig
+--- a/src/chat_list_layout.zig
++++ b/src/chat_list_layout.zig
+@@ -73,7 +73,7 @@
+                         const start = self.index + p.marker;
+                         const text_start = self.index + p.text;
+                         const marker_x = metrics.width(self.text[self.index..start]);
+-                        self.line_left = marker_x + metrics.width(self.text[start..text_start]);
++                        self.line_left = marker_x;
+                         self.x = self.line_left;
+                         self.last_right = self.line_left;
+                         self.index = text_start;

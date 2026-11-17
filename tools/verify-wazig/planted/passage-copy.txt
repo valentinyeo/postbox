@@ -1,0 +1,1 @@
+Copying a passage across messages no longer includes the selected passage.

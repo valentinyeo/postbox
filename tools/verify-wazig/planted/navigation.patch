@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -21171,7 +21171,7 @@
+         openLinkPalette(a);
+         return true;
+     }
+-    if (control and key == win.VK_TAB) {
++    if (control and alt and key == win.VK_TAB) {
+         selectChat(a, if (shift) -1 else 1, true);
+         focusCompose(a);
+         return true;
