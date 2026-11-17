@@ -14,6 +14,8 @@ def read(name):
 assert session['sha256'] and session['commit']
 assert read('result.json') == dict(feature='voice', status='passed')
 assert not (folder / 'failure.txt').exists()
+recording = read('voice-recording.json')
+assert recording['active'] and recording['samples'] > 0 and recording['fixture_entries'] == 1
 playback = read('playback.json')
 assert playback['before']['state'] == 'empty'
 samples = [row for row in playback['samples'] if row['id'] == playback['id'] and row['state'] == 'playing']

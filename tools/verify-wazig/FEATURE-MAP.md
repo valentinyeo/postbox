@@ -37,7 +37,7 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_open_video_external` | `buildPaletteItems:command_open_video_external` | GAP | GAP: No journey asserts this command end to end. |
 | `command_pick_mention` | `buildPaletteItems:command_pick_mention` | slack-mentions | covered |
 | `command_pin` | `buildPaletteItems:command_pin` | GAP | GAP: No journey asserts this command end to end. |
-| `command_play_audio` | `buildPaletteItems:command_play_audio` | GAP | GAP: No journey asserts this command end to end. |
+| `command_play_audio` | `buildPaletteItems:command_play_audio` | voice | covered |
 | `command_prev_chat` | `buildPaletteItems:command_prev_chat` | navigation | covered |
 | `command_prev_message` | `buildPaletteItems:command_prev_message` | GAP | GAP: No journey asserts this command end to end. |
 | `command_quit` | `buildPaletteItems:command_quit` | GAP | GAP: No journey asserts this command end to end. |
@@ -57,16 +57,16 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_slack_setup` | `buildPaletteItems:command_slack_setup` | GAP | GAP: No journey asserts this command end to end. |
 | `command_slack_threads` | `buildPaletteItems:command_slack_threads` | slack-threads | covered |
 | `command_sort_views` | `buildPaletteItems:command_sort_views` | GAP | GAP: No journey asserts this command end to end. |
-| `command_speed_1` | `buildPaletteItems:command_speed_1` | GAP | GAP: No journey asserts this command end to end. |
-| `command_speed_150` | `buildPaletteItems:command_speed_150` | GAP | GAP: No journey asserts this command end to end. |
-| `command_speed_200` | `buildPaletteItems:command_speed_200` | GAP | GAP: No journey asserts this command end to end. |
+| `command_speed_1` | `buildPaletteItems:command_speed_1` | media-speed | covered |
+| `command_speed_150` | `buildPaletteItems:command_speed_150` | media-speed | covered |
+| `command_speed_200` | `buildPaletteItems:command_speed_200` | media-speed | covered |
 | `command_sync` | `buildPaletteItems:command_sync` | GAP | GAP: No journey asserts this command end to end. |
 | `command_theme_amoled` | `buildPaletteItems:command_theme_amoled` | menus | covered |
 | `command_toggle_transcript` | `buildPaletteItems:command_toggle_transcript` | GAP | GAP: No journey asserts this command end to end. |
 | `command_unread` | `buildPaletteItems:command_unread` | GAP | GAP: No journey asserts this command end to end. |
 | `command_update_check` | `buildPaletteItems:command_update_check` | GAP | GAP: No journey asserts this command end to end. |
 | `command_update_install` | `buildPaletteItems:command_update_install` | GAP | GAP: No journey asserts this command end to end. |
-| `command_voice` | `buildPaletteItems:command_voice` | GAP | GAP: No journey asserts this command end to end. |
+| `command_voice` | `buildPaletteItems:command_voice` | voice | covered |
 | `reaction_laugh` | `buildPaletteItems:reaction_laugh` | reactions | covered |
 | `reaction_like` | `buildPaletteItems:reaction_like` | GAP | GAP: No journey asserts this command end to end. |
 | `reaction_love` | `buildPaletteItems:reaction_love` | GAP | GAP: No journey asserts this command end to end. |

@@ -10,6 +10,7 @@ def check_media_speed(folder):
     assert read('result.json') == dict(feature='media-speed', status='passed')
     assert not (folder / 'failure.txt').exists()
     ids = [f'SPEED-IMG-{n}' for n in range(1, 7)] + [f'SPEED-VOICE-{n}' for n in range(1, 5)]
+    assert read('playback-speeds.json') == [150, 200, 100]
     proof = read('media-speed.json')
     assert proof['ids'] == ids
     assert sorted(proof['seen']) == sorted(ids), 'every image and voice note must show'

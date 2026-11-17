@@ -722,7 +722,8 @@
         "file": "fake-hub.py",
         "class": "VoiceHandler"
       },
-      "maximize": true
+      "maximize": true,
+      "prepare": "prepare-voice.ps1"
     },
     {
       "name": "media-fit",
