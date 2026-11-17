@@ -195,6 +195,16 @@ else:
                 self.assertEqual(len(merges), 1, result.stdout)
                 self.assertEqual(merges[0][merges[0].index('--match-head-commit') + 1], 'a' * 40)
 
+    def test_SOFT_2593_skipped_planted_jobs_do_not_block_but_failed_ones_do(self):
+        for mode in ('SKIPPED:planted (${{ matrix.feature }})', 'SKIPPED:planted-summary'):
+            with self.subTest(mode=mode):
+                result, calls = self.run_workflow(mode)
+                self.assertTrue(any(args[:2] == ['pr', 'merge'] for args in calls), result.stdout)
+        for mode in ('FAILURE:planted-summary', 'pending:planted-summary', 'SKIPPED:verify-planted'):
+            with self.subTest(mode=mode):
+                result, calls = self.run_workflow(mode)
+                self.assertFalse(any(args[:2] == ['pr', 'merge'] for args in calls), result.stdout)
+
     def test_IGSH_504_unreadable_head_checks_fail_closed(self):
         for mode in ('read-failure', 'invalid-json', 'invalid-head', 'invalid-rollup:all'):
             with self.subTest(mode=mode):
