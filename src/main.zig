@@ -38,6 +38,7 @@ const chat_order = @import("chat_order.zig");
 const chat_menu = @import("chat_menu.zig");
 const chat_reconcile = @import("chat_reconcile.zig");
 const compose_layout = @import("compose_layout.zig");
+const quote_layout = @import("quote_layout.zig");
 const update_card_layout = @import("update_card_layout.zig");
 const media_age = @import("media_age.zig");
 const media_layout = @import("media_layout.zig");
@@ -18124,15 +18125,9 @@ fn layoutQuoteBody(hdc: win.HDC, a: *App, text: []const u16, width: i32, paint: 
     _ = win.SelectObject(hdc, @ptrCast(font));
     const line_height = textLineHeight(hdc, font);
     const metrics = QuoteMetrics{ .hdc = hdc };
-    var measure = @import("chat_list_layout.zig").Layout{ .text = text, .width = width, .line_height = line_height, .lists = false };
-    var overflow = false;
-    while (measure.next(metrics)) |span| {
-        if (span.y >= line_height * quote_max_lines) {
-            overflow = true;
-            break;
-        }
-    }
-    const height = @min(measure.height(), line_height * quote_max_lines);
+    const body = quote_layout.measureBody(text, width, line_height, quote_max_lines, metrics);
+    const height = body.height;
+    const overflow = body.overflow;
     const target = paint orelse return height;
     var layout_text = @import("chat_list_layout.zig").Layout{ .text = text, .width = width, .line_height = line_height, .lists = false };
     const ellipsis = std.mem.span(lit("..."));
@@ -18184,7 +18179,7 @@ fn quoteBlockHeight(hdc: win.HDC, a: *App, message: *const Message, width: i32) 
         const font = a.font_small orelse return 0;
         name_height = textLineHeight(hdc, font);
     }
-    return px(a, quote_vertical_pad) + name_height + quoteBodyHeight(hdc, a, message.quote.slice(), quoteTextWidth(a, width)) + px(a, quote_after_gap);
+    return quote_layout.blockHeight(px(a, quote_vertical_pad), name_height, quoteBodyHeight(hdc, a, message.quote.slice(), quoteTextWidth(a, width)), px(a, quote_after_gap));
 }
 
 fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: bool) u64 {
