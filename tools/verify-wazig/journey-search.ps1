@@ -9,7 +9,10 @@ foreach ($case in $fixture.queries) {
     if ($state.show_archived -ne [bool]$case.archived_only) {
         Invoke-PaletteCommand $session $(if ($case.archived_only) { 'Show archived chats' } else { 'Show inbox chats' })
     }
-    if ((Read-Control $session status).unread_only -ne [bool]$case.unread_only) { Invoke-PaletteCommand $session 'Toggle unread chats' }
+    if ((Read-Control $session status).unread_only -ne [bool]$case.unread_only) {
+        Invoke-PaletteCommand $session 'Toggle unread chats'
+        $null = Wait-Until { (Read-Control $session status).unread_only -eq [bool]$case.unread_only } 'unread filter toggled'
+    }
     $emptyStart = (Read-Control $session status).chat_count -eq 0
     $samples = @()
     foreach ($shortcut in @('^f', '/')) {
