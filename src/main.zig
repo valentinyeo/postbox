@@ -24265,13 +24265,15 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                 for (a.pending_archives[0..a.pending_archive_count], 0..) |pending, index| {
                     if (index < count) {
                         const ok = if (parsed) |reply| result.ok and reply.value.results.len == count and reply.value.results[index].ok and std.mem.eql(u8, reply.value.results[index].chat, pending.jid.slice()) else false;
-                        if (ok) {
-                            if (pending.state == .archive_pending) {
+                        switch (archive_state.completion(pending.state, ok, false)) {
+                            .confirm_archived_and_drop => {
                                 if (a.archive_state) |state| {
                                     if (state.confirmArchived(pending.jid.slice())) saveArchiveState(a);
                                 }
-                            }
-                            continue;
+                                continue;
+                            },
+                            .drop => continue,
+                            .retry, .drop_managed_locally => {},
                         }
                         failed += 1;
                     }
