@@ -170,7 +170,7 @@ function Invoke-VoiceBar($Session) {
     Invoke-VoiceBarClick $Session 'pause'
     $null = Wait-Until { (Read-Control $Session status).audio.state -eq 'playing' } 'voice bar: resume from the bar'
     Invoke-VoiceBarClick $Session 'speed'
-    $null = Wait-Until { $audio = (Read-Control $Session status).audio; $audio.speed -eq 150 -and $audio.row.text -ceq 'Playing voice message 1.5x' } 'voice bar: speed 1.5x from the bar'
+    $null = Wait-Until { $audio = (Read-Control $Session status).audio; $audio.speed -eq 150 -and $audio.row.text -ceq 'Do not copy this marked text message.' } 'voice bar: speed 1.5x from the bar'
     $fast = (Read-Control $Session status).audio
     Save-Screen $Session 'voice-bar-speed'
     Invoke-VoiceBarClick $Session 'speed'
