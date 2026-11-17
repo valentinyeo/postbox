@@ -66,27 +66,29 @@ jobs:
               + 'BROKEN inventory: FAIL\n' + broken.stdout
               + 'VALID inventory: PASS\n' + restored.stdout)
       - name: Record actual gate failures without granting approval
+        shell: python
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > adoption-evidence/pr.json
-          python3 - <<'PY'
           import json
+          import os
+          import subprocess
           from pathlib import Path
-          pr = json.loads(Path('adoption-evidence/pr.json').read_text())
+          raw = subprocess.check_output(['gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY']
+                                        + '/pulls/' + os.environ['PR_NUMBER']], text=True)
+          pr = json.loads(raw)
+          Path('adoption-evidence/pr.json').write_text(raw)
           context = {'repository': pr['base']['repo']['full_name'], 'pr_number': pr['number'],
                      'head_sha': pr['head']['sha'], 'author_login': pr['user']['login'],
                      'labels': [row['name'] for row in pr['labels']],
                      'policy': json.loads(Path('.verify/policy.json').read_text())}
           Path('adoption-evidence/context.json').write_text(json.dumps(context))
-          PY
-          set +e
-          python3 gate/fleet/verify-score . --context adoption-evidence/context.json --json > adoption-evidence/gate-snapshot.json
-          result=$?
-          set -e
-          test "$result" -eq 1
-          echo 'Expected FAIL snapshot. PR policy is not trusted-base attestation.'
+          result = subprocess.run(['python3', 'gate/fleet/verify-score', '.', '--context',
+                                   'adoption-evidence/context.json', '--json'], text=True, capture_output=True)
+          Path('adoption-evidence/gate-snapshot.json').write_text(result.stdout)
+          assert result.returncode == 1, result.stderr
+          print('Expected FAIL snapshot. PR policy is not trusted-base attestation.')
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -150,20 +152,22 @@ jobs:
             "Read $GITHUB_WORKSPACE/.verify/worker.md before anything else. Goal: verify Postbox gate adoption independently. Author family is OpenAI; you are Anthropic. Read AGENTS.md, .verify, source code and downloaded-evidence. Run python3 tools/verify-postbox-map.py. Try removing one marker temporarily, verify failure, then restore it. Inspect for omitted Win32 entry points, inflated counts, broken workflow references and unsafe exclusions. Check actual desktop evidence. Do not fabricate a real-app run, a verdict attestation, or production data size. Do not run the full product suite. Do not commit, merge, publish, change policy or contact anyone. Give FAIL if 100% code entry coverage or current-head app proof is absent. Start your report with PASS, PASS+NOTES or FAIL, then evidence and limits. Inspect comments in this diff too. Return your complete report in your final response." \
             > verifier-evidence/agent.json
       - name: Post independent agent verdict
+        shell: python
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          python3 - <<'PY'
           import json
+          import os
+          import subprocess
           from pathlib import Path
           result = json.loads(Path('verifier-evidence/agent.json').read_text())
           assert not result.get('is_error'), 'Verifier agent failed'
           report = result.get('result')
           assert report, 'Verifier returned no report'
           Path('verifier-evidence/report.md').write_text(report)
-          PY
-          gh pr comment "$PR_NUMBER" --body-file verifier-evidence/report.md
+          subprocess.run(['gh', 'pr', 'comment', os.environ['PR_NUMBER'],
+                          '--body-file', 'verifier-evidence/report.md'], check=True)
       - uses: actions/upload-artifact@v4
         if: always()
         with:
