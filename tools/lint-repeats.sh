@@ -328,6 +328,16 @@ END {
     failed=1
 fi
 
+if [[ -f .github/workflows/automerge.yml && -f .github/workflows/verify.yml ]]; then
+    if ! grep -Eq '^[[:space:]]*pull_request:' .github/workflows/verify.yml ||
+       ! grep -Eq '^[[:space:]]*workflows:.*"verify-wazig"' .github/workflows/automerge.yml ||
+       ! grep -Fq 'actions/workflows/verify.yml/runs?event=pull_request&head_sha=$head_oid' .github/workflows/automerge.yml ||
+       ! grep -Fq '.head_sha == $head and .status == "completed" and .conclusion == "success"' .github/workflows/automerge.yml; then
+        printf 'lint-repeats: .github/workflows/automerge.yml:1: [B11] PR journeys can be skipped. Require the verify-wazig PR trigger and successful head run before merging.\n'
+        failed=1
+    fi
+fi
+
 if [[ -s tools/required-checks.txt ]]; then
     if ! python3 - <<'PYCODE'
 from pathlib import Path

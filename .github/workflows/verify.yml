@@ -2,6 +2,12 @@ name: verify-wazig
 run-name: verify-wazig ${{ inputs.feature || 'pr' }} ${{ github.head_ref || github.ref_name }}
 
 on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "build.zig"
+      - "tools/verify-wazig/**"
+      - ".github/workflows/verify.yml"
   workflow_dispatch:
     inputs:
       feature:
@@ -23,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: verify-${{ github.ref }}-${{ inputs.feature || 'search' }}
+  group: verify-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.feature || 'search' }}
   cancel-in-progress: true
 
 jobs:
@@ -33,6 +39,8 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
@@ -48,16 +56,31 @@ jobs:
         shell: python
         env:
           EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           FEATURE: ${{ inputs.feature || (github.event_name == 'push' && 'voice' || 'search') }}
         run: |
           import json
           import os
           from pathlib import Path
+          import subprocess
 
           journeys = json.loads(Path('tools/verify-wazig/journeys.json').read_text())['journeys']
           feature = os.environ['FEATURE']
           if os.environ['EVENT_NAME'] == 'schedule' or feature == 'all':
               selected = journeys
+          elif os.environ['EVENT_NAME'] == 'pull_request':
+              mapping = json.loads(Path('tools/verify-wazig/pr-journeys.json').read_text())
+              files = subprocess.check_output(['git', 'diff', '--name-only', '--no-renames', '-z', os.environ['BASE_SHA'], 'HEAD']).decode().split('\0')
+              names = set(mapping['default'])
+              for path in files:
+                  for prefix, features in mapping['paths'].items():
+                      if path.startswith(prefix):
+                          names.update(features)
+              if len(names) > mapping['max_journeys']:
+                  raise SystemExit('PR journey limit exceeded; split the change rather than skip coverage')
+              selected = [row for row in journeys if row['name'] in names]
+              if len(selected) != len(names):
+                  raise SystemExit('PR journey map contains unknown journeys')
           else:
               selected = [row for row in journeys if row['name'] == feature]
               if not selected:
@@ -98,7 +121,7 @@ jobs:
     needs: [plan, candidate]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.candidate.result != 'failure' }}
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 20 || 60 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}

@@ -1,7 +1,7 @@
 name: automerge
 on:
   workflow_run:
-    workflows: ["ci", "No code comments", "private-markers", "Gitleaks", "pr-title"]
+    workflows: ["ci", "No code comments", "private-markers", "Gitleaks", "pr-title", "verify-wazig"]
     types: [completed]
   schedule:
     - cron: "0 */6 * * *"
@@ -41,6 +41,14 @@ jobs:
             printf '%s' "$files_json" > "$RUNNER_TEMP/pr-files.json"
             verdict=$(bash tools/automerge-admit.sh "$RUNNER_TEMP/pr-info.json" "$RUNNER_TEMP/pr-files.json" "$behind_by" "$REPO_OWNER") || verdict="skip (admission script failed)"
             if [ "$verdict" != "merge" ]; then echo "#$pr: $verdict"; continue; fi
+            verify_needed=$(printf '%s' "$files_json" | jq -r 'if type != "array" or length == 0 then error("missing files") else any(.[]; startswith("src/") or . == "build.zig" or startswith("tools/verify-wazig/") or . == ".github/workflows/verify.yml") end') || { echo "#$pr: could not evaluate verification paths"; continue; }
+            if [ "$verify_needed" = "true" ]; then
+              verify_runs=$(gh api "repos/$REPO/actions/workflows/verify.yml/runs?event=pull_request&head_sha=$head_oid&per_page=100" --jq '[.workflow_runs[] | {id, status, conclusion, head_sha}] | sort_by(.id) | last' 2>/dev/null) || verify_runs=""
+              if ! printf '%s' "$verify_runs" | jq -e --arg head "$head_oid" '.head_sha == $head and .status == "completed" and .conclusion == "success"' > /dev/null; then
+                echo "#$pr: verify-wazig is missing, pending or failed on the PR head"
+                continue
+              fi
+            fi
             if gh pr merge "$pr" -R "$REPO" --squash --delete-branch --match-head-commit "$head_oid"; then
               echo "#$pr: merged"
               merged_any=1

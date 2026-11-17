@@ -99,7 +99,14 @@ elif args[:2] == ['pr', 'view']:
 elif args[:2] == ['pr', 'merge']:
     pass
 elif args[0] == 'api':
-    print('src/main.zig' if '/files?' in args[1] else '0' if '/compare/' in args[1] else sha)
+    if '/files?' in args[1]:
+        print('docs/readme.md' if mode == 'verify-unrelated' else 'src/main.zig')
+    elif '/compare/' in args[1]: print('0')
+    elif '/actions/workflows/verify.yml/runs?' in args[1]:
+        if mode == 'verify-api-error': sys.exit(1)
+        if mode == 'verify-missing': print('null')
+        else: print(json.dumps(dict(head_sha=('b' * 40 if mode == 'verify-stale' else sha), status=('in_progress' if mode == 'verify-pending' else 'completed'), conclusion=('failure' if mode == 'verify-failed' else 'success'))))
+    else: print(sha)
 elif args[:2] == ['workflow', 'run']:
     if mode == 'dispatch-failure' and args[2] == 'no-comments.yml': sys.exit(1)
     (root / args[2]).touch()
@@ -117,6 +124,19 @@ else:
             result = subprocess.run(['bash', '-c', script], env=env, cwd=ROOT, capture_output=True, text=True)
             calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
             return result, calls
+
+    def test_verify_gate(self):
+        for mode in ('verify-missing', 'verify-api-error', 'verify-pending', 'verify-failed', 'verify-stale'):
+            with self.subTest(mode=mode):
+                result, calls = self.run_workflow(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any(args[:2] == ['pr', 'merge'] for args in calls), result.stdout)
+        for mode in ('merge', 'verify-unrelated'):
+            with self.subTest(mode=mode):
+                result, calls = self.run_workflow(mode)
+                self.assertTrue(any(args[:2] == ['pr', 'merge'] for args in calls), result.stdout)
+                if mode == 'verify-unrelated':
+                    self.assertFalse(any('/actions/workflows/verify.yml/runs?' in arg for args in calls for arg in args))
 
     def test_merge_dispatches_both_checks(self):
         result, calls = self.run_workflow('merge')

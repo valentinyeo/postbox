@@ -22,7 +22,7 @@ def check_reports(workflows):
     for name, workflow in workflows.items():
         triggers = workflow[True]
         expected = {'schedule', 'workflow_dispatch'}
-        if name in PR_ADMISSION:
+        if name in PR_ADMISSION or name == 'verify':
             expected.add('pull_request')
         assert set(triggers) == expected, name
         if name == 'private-markers':
@@ -83,7 +83,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_report_trigger_and_permissions_mutations_fail(self):
         for name in REPORTS:
             mutations = ['push', 'schedule', 'permissions']
-            mutations.append('missing-pr' if name in PR_ADMISSION else 'unexpected-pr')
+            mutations.append('missing-pr' if name in PR_ADMISSION or name == 'verify' else 'unexpected-pr')
             if name == 'private-markers':
                 mutations.append('edited')
             for mutation in mutations:

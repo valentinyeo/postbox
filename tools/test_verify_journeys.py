@@ -56,6 +56,39 @@ class JourneyRegistryTests(unittest.TestCase):
                                 text=True, env=dict(os.environ, EVENT_NAME=event, FEATURE=feature, GITHUB_OUTPUT=str(output)))
         return result, output.read_text()
 
+    def test_pr_map_rejects_unknown_journeys(self):
+        path = self.tools / 'pr-journeys.json'
+        mapping = json.loads(path.read_text())
+        mapping['paths']['src/example'] = ['not-a-journey']
+        path.write_text(json.dumps(mapping))
+        self.assertIn('unknown mapped PR journey', self.check_map().stderr)
+
+    def test_pr_plan_selects_default_and_changed_features(self):
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.email', 'fixture@example.invalid'], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.name', 'Fixture'], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'add', 'src/audio.zig'], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'commit', '-qm', 'fixture'], check=True)
+        base = subprocess.check_output(['git', '-C', str(self.root), 'rev-parse', 'HEAD'], text=True).strip()
+        (self.root / 'src/paste_image.zig').write_text('fixture')
+        subprocess.run(['git', '-C', str(self.root), 'add', 'src/paste_image.zig'], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'commit', '-qm', 'change'], check=True)
+        step = next(step for step in self.workflow['jobs']['plan']['steps'] if step.get('id') == 'matrix')
+        output = self.root / 'plan-output'
+        result = subprocess.run([sys.executable, '-c', step['run']], cwd=self.root, capture_output=True,
+                                text=True, env=dict(os.environ, EVENT_NAME='pull_request', FEATURE='search', BASE_SHA=base, GITHUB_OUTPUT=str(output)))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        names = {row['feature'] for row in json.loads(output.read_text().removeprefix('matrix='))['include']}
+        self.assertEqual(names, {'search', 'voice', 'reply', 'paste-image'})
+        mapping_path = self.tools / 'pr-journeys.json'
+        mapping = json.loads(mapping_path.read_text())
+        mapping['max_journeys'] = 3
+        mapping_path.write_text(json.dumps(mapping))
+        result = subprocess.run([sys.executable, '-c', step['run']], cwd=self.root, capture_output=True,
+                                text=True, env=dict(os.environ, EVENT_NAME='pull_request', FEATURE='search', BASE_SHA=base, GITHUB_OUTPUT=str(output)))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('PR journey limit exceeded', result.stderr)
+
     def test_current_registry_passes(self):
         self.assert_map_passes()
 
@@ -224,7 +257,7 @@ class JourneyRegistryTests(unittest.TestCase):
         path = self.root / '.github/workflows/verify.yml'
         original = path.read_text()
         for changed in [original.replace('  schedule:', '  push:'),
-                        original.replace('  schedule:', '  pull_request:\n  schedule:'),
+                        original.replace('  pull_request:', '  pull_request_target:', 1),
                         original.replace('selected = journeys', "selected = [row for row in journeys if row['pr']]")]:
             with self.subTest(changed=changed != original):
                 self.assertNotEqual(changed, original)
@@ -245,7 +278,7 @@ class JourneyRegistryTests(unittest.TestCase):
             (original.replace('    needs: [plan, candidate]', '    needs: plan'),
              'verify must depend on plan and the shared candidate build'),
             (original.replace('      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n',
-                              '      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n      - run: ' + build, 1),
+                              '      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n      - run: ' + build, 2),
              'a journey leg must not build the candidate desktop'),
             (original.replace('name: Postbox-candidate', 'name: Postbox-build'), 'verify must consume the shared candidate build'),
             (original.replace("  native-tests:\n    runs-on: windows-latest\n", ''),
