@@ -6,7 +6,7 @@
 - `voice-transcript-cache`: cached transcripts beside the downloaded files show in their bubbles, cut to the first part with Show more.
 - `voice-scroll`: mouse-wheel scrolling up and down keeps every bubble, player and time stamp inside its own bubble.
 - `voice-expand`: Show more expands one long transcript; scrolling again keeps the layout clean.
-- `voice-bar`: with a note paused in the voice chat, the row shows `Voice message paused 1x`; in the other chat the bar offers a 1x, 1.5x and 2x speed control, pause and resume, and the row shows `Playing voice message 1.5x`.
+- `voice-bar`: with a note paused in the voice chat, the row keeps its last message; in the other chat the bar offers a 1x, 1.5x and 2x speed control, pause and resume, and the row still keeps its last message.
 - `voice-partial-repaint`: repainting only the voice bubbles, as the playback timer does, draws exactly what a full repaint draws.
 
 - `voice-commands`: Ctrl+Shift+M starts fixture recording; Ctrl+P pauses the selected playing voice note.

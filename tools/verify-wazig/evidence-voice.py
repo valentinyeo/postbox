@@ -28,9 +28,9 @@ for name in ('voice-playing.png', 'voice-paused.png'):
     assert (folder / name).read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
 bar = read('voice-bar.json')
 assert bar['paused']['state'] == 'paused' and bar['paused']['speed'] == 100 and not bar['paused']['bar_visible']
-assert bar['paused']['row'] == dict(chat='fixture-alpha', text='Voice message paused 1x')
+assert bar['paused']['row'] == dict(chat='fixture-alpha', text='Do not copy this marked text message.')
 assert bar['fast']['speed'] == 150 and bar['fast']['state'] == 'playing' and bar['fast']['bar_visible']
-assert bar['fast']['row'] == dict(chat='fixture-alpha', text='Playing voice message 1.5x')
+assert bar['fast']['row'] == dict(chat='fixture-alpha', text='Do not copy this marked text message.')
 assert bar['final']['speed'] == 100 and bar['final']['state'] == 'paused'
 for name in ('voice-bar-paused.png', 'voice-bar-speed.png'):
     assert len((folder / name).read_bytes()) > 10000, name
