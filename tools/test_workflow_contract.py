@@ -9,7 +9,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / '.github/workflows'
-REPORTS = ('ci', 'verify', 'release-proof', 'postbox-upgrade', 'voice-language',
+REPORTS = ('ci', 'verify-desktop', 'release-proof', 'postbox-upgrade', 'voice-language',
            'no-comments', 'gitleaks', 'private-markers', 'run-log-markers')
 PR_ADMISSION = {'ci', 'gitleaks', 'private-markers', 'no-comments'}
 
