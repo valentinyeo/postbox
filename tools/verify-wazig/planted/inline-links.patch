@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -18704,7 +18704,7 @@
+     for (a.messages[0..a.message_count], 0..) |*message, message_index| {
+         if (!rectHasPoint(message.bubble_hit, x, y)) continue;
+         for (message.links[0..message.link_count], 0..) |*link, link_index| {
+-            if (linkSpanHit(link, x, y)) return .{ .body = .{ .message_index = message_index, .link_index = link_index } };
++            if (!linkSpanHit(link, x, y)) return .{ .body = .{ .message_index = message_index, .link_index = link_index } };
+         }
+     }
+     return null;

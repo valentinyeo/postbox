@@ -1,0 +1,1 @@
+Choosing an emoji no longer inserts it into the composer.

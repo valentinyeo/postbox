@@ -1,0 +1,1 @@
+Links in message bodies no longer respond at their visible position.

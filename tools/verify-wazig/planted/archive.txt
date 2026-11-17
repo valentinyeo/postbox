@@ -1,0 +1,1 @@
+Ctrl+E no longer archives the selected chat.

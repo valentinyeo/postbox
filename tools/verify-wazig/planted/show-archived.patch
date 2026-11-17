@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -3848,7 +3848,7 @@
+     a.archive_toggle_fetches = 0;
+     a.archive_toggle_paints = a.paints.list;
+     disarmDictationSend(a);
+-    a.include_archived = !a.include_archived;
++    a.include_archived = false;
+     _ = clearBulkSelection(a);
+     refilterChats(a);
+     reconcileOpenChat(a);

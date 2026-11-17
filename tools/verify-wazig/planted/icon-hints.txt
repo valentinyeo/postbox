@@ -1,0 +1,1 @@
+The reply close icon no longer shows its keyboard shortcut.

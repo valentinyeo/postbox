@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -21114,7 +21114,7 @@
+         runCommand(a, command_dictate);
+         return true;
+     }
+-    if (control and !alt and key == 'E') {
++    if (control and !alt and key == 'Q') {
+         if (!archiveShortcutAllowed(a, focus, message.lParam, true)) return false;
+         archiveSelectedChat(a, shift, .shortcut);
+         return true;

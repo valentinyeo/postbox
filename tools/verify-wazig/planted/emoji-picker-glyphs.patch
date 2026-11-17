@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -13073,7 +13073,7 @@
+     }
+     emoji_picker.pushRecent(&a.emoji_recents, &a.emoji_recents_count, catalog_index);
+     saveEmojiRecents(a);
+-    insertEmoji(a, emoji);
++    insertEmoji(a, "");
+ }
+ 
+ fn emojiCellClicked(a: *App, x: i32, item_index: i32) void {

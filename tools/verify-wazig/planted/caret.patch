@@ -1,0 +1,12 @@
+diff --git a/src/directwrite_edit.zig b/src/directwrite_edit.zig
+--- a/src/directwrite_edit.zig
++++ b/src/directwrite_edit.zig
+@@ -514,7 +514,7 @@
+         },
+         win.WM_TIMER => {
+             if (wparam == caret_timer_id) {
+-                host.caret_on = !host.caret_on;
++                host.caret_on = false;
+                 host.invalidateCaret();
+                 return 0;
+             }

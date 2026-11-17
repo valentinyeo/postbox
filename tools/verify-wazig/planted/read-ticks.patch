@@ -1,0 +1,12 @@
+diff --git a/src/read_receipt.zig b/src/read_receipt.zig
+--- a/src/read_receipt.zig
++++ b/src/read_receipt.zig
+@@ -5,7 +5,7 @@
+ pub fn shows(capability: Capability, from_me: bool, sent: bool, revoked: bool, read_by: i64) bool {
+     if (!from_me or !sent or revoked) return false;
+     return switch (capability) {
+-        .whatsapp_dm, .telegram_dm, .signal_dm => read_by >= 1,
++        .whatsapp_dm, .telegram_dm, .signal_dm => read_by > 1,
+         .whatsapp_group, .slack, .telegram, .signal => false,
+     };
+ }

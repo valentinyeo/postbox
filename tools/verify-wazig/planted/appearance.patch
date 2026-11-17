@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -16741,7 +16741,7 @@
+             });
+             if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+         },
+-        command_font_larger => setFontScale(a, a.font_scale + 10),
++        command_font_larger => setFontScale(a, a.font_scale - 10),
+         command_font_reset, command_font_default => setFontScale(a, @import("font_config.zig").default_scale),
+         command_font_small => setFontScale(a, @import("font_config.zig").small_scale),
+         command_font_large => setFontScale(a, @import("font_config.zig").large_scale),
