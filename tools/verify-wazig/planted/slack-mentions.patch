@@ -1,0 +1,12 @@
+diff --git a/src/slack.zig b/src/slack.zig
+--- a/src/slack.zig
++++ b/src/slack.zig
+@@ -438,7 +438,7 @@
+     return decodeHtmlEntities(buffer, stage1[0..stage1_len]);
+ }
+
+-const mentionFallback = "@someone";
++const mentionFallback = "@unknown";
+
+ fn renderMrkdwnToken(dest: []u8, token: []const u8, users: ?UserLookup) []const u8 {
+     if (token.len == 0) return copyClamped(dest, "<>");

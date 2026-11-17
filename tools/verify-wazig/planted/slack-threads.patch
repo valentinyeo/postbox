@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -24761,7 +24761,7 @@
+     const wide = utf8ToWide(a.allocator, key) catch return;
+     defer a.allocator.free(wide);
+     if (!saveRegistryString(a.allocator, wide.ptr, slack.threadsSettingValue(enabled))) return setStatus(a, "Could not save Slack threads preference");
+-    a.threads_enabled = enabled;
++    a.threads_enabled = !enabled;
+     closeSlackThread(a);
+     a.selected_message = null;
+     invalidateCanvasIconTooltips(a);

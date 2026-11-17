@@ -1,0 +1,12 @@
+diff --git a/src/chat_order.zig b/src/chat_order.zig
+--- a/src/chat_order.zig
++++ b/src/chat_order.zig
+@@ -65,7 +65,7 @@
+
+ pub fn shouldMoveUp(pin_left: bool, pin_right: bool, by_time: std.math.Order, by_name: std.math.Order, jid_tiebreak: std.math.Order) bool {
+     if (pin_right != pin_left) return pin_right;
+-    return by_time == .lt or (by_time == .eq and (by_name == .gt or (by_name == .eq and jid_tiebreak == .gt)));
++    return by_time == .gt or (by_time == .eq and (by_name == .gt or (by_name == .eq and jid_tiebreak == .gt)));
+ }
+
+ test "pinned chats move above unpinned ones regardless of age" {
