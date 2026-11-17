@@ -20,7 +20,7 @@ pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature search -Bin zig-out/bi
 
 The runner installs Zig 0.16.0 first.
 The harness starts real `Messages.exe --verify-fixture`.
-It creates two synthetic cached chats.
+The search journey loads six synthetic chats.
 It isolates profiles, registry settings, and control pipes.
 It blocks live providers, sync, and updates.
 Only production provider boundaries use fixture data.
@@ -90,7 +90,7 @@ Production profile counts remain unavailable here.
 Legacy Slack installations reserve 256 chat slots.
 The active message buffer holds 1,000 messages.
 The combined chat list grows dynamically.
-Two synthetic chats do not prove production scale.
+Six synthetic chats do not prove production scale.
 The verifier must report observed counts and relevance.
 Release still lacks current-head video or trace proof.
 Publishing jobs still need release gate dependencies.
