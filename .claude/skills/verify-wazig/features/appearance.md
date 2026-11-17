@@ -34,7 +34,7 @@ Preconditions: doctor passes, baseline Graphite and IBM Plex Sans loaded from fi
 
 - **Shared dictation:** the appearance journey replays checked-in recorded PCM in the isolated GitHub fixture. Real Ctrl+D expands the production pill to 116 logical pixels; screenshots require white foreground ink and raised grey fill. The production response parser must deliver the exact recorded transcript into the native composer. No paid request, microphone hardware, or acoustic recognition is claimed. `shared-design.png` is the actual 1920×1032 app region; `shared-design-mic.png` crops its active pill.
 
-- **Presets:** choose all four palette rows. Capture each hosted viewport. Require scales 80, 100, 125, and 150. Measure composer text through UI Automation. Measure painted chat and list fonts. Check list geometry and chat bubble bounds. Restart the owned fixture at 150%. Verify its saved size and binary identity. Reset with Ctrl+0.
+- **Presets:** choose all four palette rows. Capture each hosted viewport. Require scales 80, 100, 125, and 150. Measure composer text through UI Automation: Small must be smaller than the fresh default, Default must restore it, and each subsequent preset must increase it. Measure painted chat and list fonts. Check list geometry and chat bubble bounds. Restart the owned fixture at 150%. Verify its saved size and binary identity. Reset with Ctrl+0.
 
 - **Rendered bounds:** retain each preset’s chat geometry. Compare UI Automation lines against RichEdit formatting. Compare renderer lines against installed list items. Record DirectWrite or GDI fallback. Check palette label and heading similarly. Screenshot inspection remains necessary.
 

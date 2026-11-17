@@ -20,12 +20,12 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_dictation_german` | `buildPaletteItems:command_dictation_german` | GAP | GAP: No journey asserts this command end to end. |
 | `command_emoji` | `buildPaletteItems:command_emoji` | emoji-picker-glyphs | covered |
 | `command_emoji_diag` | `buildPaletteItems:command_emoji_diag` | GAP | GAP: No journey asserts this command end to end. |
-| `command_font_default` | `buildPaletteItems:command_font_default` | GAP | GAP: No journey asserts this command end to end. |
-| `command_font_large` | `buildPaletteItems:command_font_large` | GAP | GAP: No journey asserts this command end to end. |
+| `command_font_default` | `buildPaletteItems:command_font_default` | appearance | covered |
+| `command_font_large` | `buildPaletteItems:command_font_large` | appearance | covered |
 | `command_font_larger` | `buildPaletteItems:command_font_larger` | appearance | covered |
-| `command_font_larger_preset` | `buildPaletteItems:command_font_larger_preset` | GAP | GAP: No journey asserts this command end to end. |
+| `command_font_larger_preset` | `buildPaletteItems:command_font_larger_preset` | appearance | covered |
 | `command_font_reset` | `buildPaletteItems:command_font_reset` | appearance | covered |
-| `command_font_small` | `buildPaletteItems:command_font_small` | GAP | GAP: No journey asserts this command end to end. |
+| `command_font_small` | `buildPaletteItems:command_font_small` | appearance | covered |
 | `command_font_smaller` | `buildPaletteItems:command_font_smaller` | appearance | covered |
 | `command_gif` | `buildPaletteItems:command_gif` | gif-picker | covered |
 | `command_include_archived` | `buildPaletteItems:command_include_archived` | show-archived | covered |
