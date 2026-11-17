@@ -57,7 +57,7 @@ for provider, chat, message in [('whatsapp', 'fixture-beta', 'BASELINE_BETA'), (
     assert f'reactions {provider}-laughing-face PASS' in (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
 chip_bodies = [row for row in bodies if row['chat'] == 'fixture-beta' and row['msg'] == 'CHIP']
 heart = '\u2764\ufe0f'
-assert [row['emoji'] for row in chip_bodies] == [heart, ''], chip_bodies
+assert [row['emoji'] for row in chip_bodies] == [heart, '', '👍', heart, '😢', '😮', '🙏', ''], chip_bodies
 for body in chip_bodies:
     assert set(body) == {'chat', 'msg', 'emoji', 'client_id'} and body['client_id']
     assert any(row['wire_path'] == '/v1/wazig/react' and row.get('body') == body and

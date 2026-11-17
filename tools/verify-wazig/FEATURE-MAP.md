@@ -29,17 +29,17 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_font_smaller` | `buildPaletteItems:command_font_smaller` | appearance | covered |
 | `command_gif` | `buildPaletteItems:command_gif` | gif-picker | covered |
 | `command_include_archived` | `buildPaletteItems:command_include_archived` | show-archived | covered |
-| `command_jump_latest` | `buildPaletteItems:command_jump_latest` | GAP | GAP: No journey asserts this command end to end. |
+| `command_jump_latest` | `buildPaletteItems:command_jump_latest` | reactions | covered |
 | `command_links` | `buildPaletteItems:command_links` | inline-links | covered |
 | `command_next_chat` | `buildPaletteItems:command_next_chat` | navigation | covered |
-| `command_next_message` | `buildPaletteItems:command_next_message` | GAP | GAP: No journey asserts this command end to end. |
+| `command_next_message` | `buildPaletteItems:command_next_message` | reactions | covered |
 | `command_open_image_external` | `buildPaletteItems:command_open_image_external` | GAP | GAP: No journey asserts this command end to end. |
 | `command_open_video_external` | `buildPaletteItems:command_open_video_external` | GAP | GAP: No journey asserts this command end to end. |
 | `command_pick_mention` | `buildPaletteItems:command_pick_mention` | slack-mentions | covered |
 | `command_pin` | `buildPaletteItems:command_pin` | GAP | GAP: No journey asserts this command end to end. |
 | `command_play_audio` | `buildPaletteItems:command_play_audio` | voice | covered |
 | `command_prev_chat` | `buildPaletteItems:command_prev_chat` | navigation | covered |
-| `command_prev_message` | `buildPaletteItems:command_prev_message` | GAP | GAP: No journey asserts this command end to end. |
+| `command_prev_message` | `buildPaletteItems:command_prev_message` | reactions | covered |
 | `command_quit` | `buildPaletteItems:command_quit` | GAP | GAP: No journey asserts this command end to end. |
 | `command_react_menu` | `buildPaletteItems:command_react_menu` | reactions | covered |
 | `command_refresh` | `buildPaletteItems:command_refresh` | GAP | GAP: No journey asserts this command end to end. |
@@ -68,12 +68,12 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_update_install` | `buildPaletteItems:command_update_install` | GAP | GAP: No journey asserts this command end to end. |
 | `command_voice` | `buildPaletteItems:command_voice` | voice | covered |
 | `reaction_laugh` | `buildPaletteItems:reaction_laugh` | reactions | covered |
-| `reaction_like` | `buildPaletteItems:reaction_like` | GAP | GAP: No journey asserts this command end to end. |
-| `reaction_love` | `buildPaletteItems:reaction_love` | GAP | GAP: No journey asserts this command end to end. |
-| `reaction_remove` | `buildPaletteItems:reaction_remove` | GAP | GAP: No journey asserts this command end to end. |
-| `reaction_sad` | `buildPaletteItems:reaction_sad` | GAP | GAP: No journey asserts this command end to end. |
-| `reaction_surprised` | `buildPaletteItems:reaction_surprised` | GAP | GAP: No journey asserts this command end to end. |
-| `reaction_thanks` | `buildPaletteItems:reaction_thanks` | GAP | GAP: No journey asserts this command end to end. |
+| `reaction_like` | `buildPaletteItems:reaction_like` | reactions | covered |
+| `reaction_love` | `buildPaletteItems:reaction_love` | reactions | covered |
+| `reaction_remove` | `buildPaletteItems:reaction_remove` | reactions | covered |
+| `reaction_sad` | `buildPaletteItems:reaction_sad` | reactions | covered |
+| `reaction_surprised` | `buildPaletteItems:reaction_surprised` | reactions | covered |
+| `reaction_thanks` | `buildPaletteItems:reaction_thanks` | reactions | covered |
 | `chat-search` | `AGENTS:search` | search | covered |
 | `keyboard-navigation` | `AGENTS:keyboard` | navigation | covered |
 | `queued-sending` | `AGENTS:queued-send` | GAP | GAP: No journey asserts this complete behavior end to end. |
