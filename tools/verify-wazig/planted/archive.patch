@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 5c441f2..6293ac4 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -21116,7 +21116,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
+     }
+     if (control and !alt and key == 'E') {
+         if (!archiveShortcutAllowed(a, focus, message.lParam, true)) return false;
+-        archiveSelectedChat(a, shift, .shortcut);
++        archiveSelectedChat(a, !shift, .shortcut);
+         return true;
+     }
+     if (control and shift and key == 'C') {

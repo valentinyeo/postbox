@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -20823,7 +20823,7 @@
+     if (composing) return false;
+     if (a.dictation_operation != null and key == win.VK_RETURN and control and !shift and !alt and a.image_viewer_window == null and a.shortcut_help == null) {
+         a.dictation_return_held = true;
+-        finishDictation(a);
++        cancelDictation(a);
+         return true;
+     }
+     if (a.dictation_operation != null and key == win.VK_ESCAPE and !control and !shift and !alt and a.image_viewer_window == null and a.shortcut_help == null) {

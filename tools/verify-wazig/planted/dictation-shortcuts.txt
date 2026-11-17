@@ -1,0 +1,1 @@
+Ctrl+Enter cancels dictation instead of finishing it.

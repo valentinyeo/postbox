@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -1667,7 +1667,7 @@
+     addTooltip(a, tt, a.send, lit("Send message  Enter"));
+     addTooltip(a, tt, a.emoji_btn, lit("Emoji menu"));
+     addTooltip(a, tt, a.voice_btn, lit("Record a voice note  Ctrl+Shift+M"));
+-    addIconTooltip(a, hwnd, @intFromEnum(IconTip.reply_close), lit("Cancel reply  Esc in message box"));
++    addIconTooltip(a, hwnd, @intFromEnum(IconTip.reply_close), lit("Cancel reply"));
+     for (0..staged_images.capacity) |index| addIconTooltip(a, hwnd, @intFromEnum(IconTip.staged_first) + index, lit("Remove attachment"));
+     if (a.canvas) |canvas| {
+         addIconTooltip(a, canvas, @intFromEnum(IconTip.react), lit("React"));

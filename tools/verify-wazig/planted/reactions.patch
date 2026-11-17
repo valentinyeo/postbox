@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -12095,7 +12095,7 @@
+     return switch (command) {
+         reaction_like => "👍",
+         reaction_love => "❤️",
+-        reaction_laugh => "😂",
++        reaction_laugh => "😢",
+         reaction_surprised => "😮",
+         reaction_sad => "😢",
+         reaction_thanks => "🙏",

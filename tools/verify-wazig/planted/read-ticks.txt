@@ -1,0 +1,1 @@
+A direct message read by one recipient no longer shows a read tick.
