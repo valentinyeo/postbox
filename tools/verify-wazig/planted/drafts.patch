@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -11504,7 +11504,7 @@
+     };
+     clearReply(a);
+     shortcodeHide(a);
+-    setComposerDraft(a, restored);
++    setComposerDraft(a, restored[0..0]);
+     if (a.compose) |compose| _ = win.EnableWindow(compose, if (next != null) win.TRUE else win.FALSE);
+     persistDrafts(a);
+     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);

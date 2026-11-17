@@ -1,0 +1,1 @@
+The selected-text menu no longer offers the expected Copy selection command.

@@ -1,0 +1,1 @@
+The palette version row no longer shows the exact version message.

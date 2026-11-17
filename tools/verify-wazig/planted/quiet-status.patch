@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -15558,7 +15558,7 @@
+     appendPalette(a, "Compose message", "C", command_compose);
+     if (slackThreadsAccount(a).len > 0) appendPalette(a, "Slack threads like Slack for this account", if (slackThreadsEnabled(a)) "On" else "Off", command_slack_threads);
+     appendPalette(a, "Keyboard shortcuts", "F1", command_shortcuts_help);
+-    appendPalette(a, "You are on v" ++ app_version ++ " - this is the newest version", "", 0);
++    appendPalette(a, "You are on v" ++ app_version ++ " - newest version", "", 0);
+     appendPalette(a, "Dictate", "Ctrl+D", command_dictate);
+     appendPalette(a, "Record a voice note", "Ctrl+Shift+M", command_voice);
+     appendPalette(a, "Dictation language: Automatic", "", command_dictation_auto);

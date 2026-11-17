@@ -1,0 +1,11 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -12198,6 +12198,6 @@
+ fn copyPassage(a: *App) bool {
+     const ends = a.text_selection.bounds() orelse return false;
+-    if (ends[0].message == ends[1].message) return false;
++    if (ends[0].message != ends[1].message) return false;
+     if (ends[1].message >= a.message_count) return false;
+     const days = a.allocator.alloc([20]u8, ends[1].message - ends[0].message + 1) catch {
+         setStatus(a, "Could not copy");

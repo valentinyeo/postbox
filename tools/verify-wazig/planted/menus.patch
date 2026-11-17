@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -19551,7 +19551,7 @@
+                         defer _ = win.DestroyMenu(menu);
+                         _ = win.AppendMenuW(menu, win.MF_STRING, command_reply, lit("Reply"));
+                         _ = win.AppendMenuW(menu, win.MF_SEPARATOR, 0, null);
+-                        _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_selection, lit("Copy selection"));
++                        _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_selection, lit("Copy text"));
+                         _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_text, lit("Copy message text"));
+                         if (item.transcript.len > 0) _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_transcript, lit("Copy transcript"));
+                         if (item.link_count > 0) _ = win.AppendMenuW(menu, win.MF_STRING, command_copy_link, lit("Copy link address"));

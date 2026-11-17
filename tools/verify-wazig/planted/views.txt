@@ -1,0 +1,1 @@
+Alt-number shortcuts no longer open their corresponding views.

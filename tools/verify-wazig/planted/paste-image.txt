@@ -1,0 +1,1 @@
+Pasting an image without clipboard text no longer stages the image.

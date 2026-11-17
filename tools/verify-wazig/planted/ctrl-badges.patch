@@ -1,0 +1,11 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -20776,6 +20776,6 @@
+ fn setCtrlBadges(a: *App, on: bool) void {
+     if (a.ctrl_badges == on) return;
+-    a.ctrl_badges = on;
++    a.ctrl_badges = false;
+     if (!on) a.ctrl_badge_rects = [_]?win.RECT{null} ** 9;
+     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+ }

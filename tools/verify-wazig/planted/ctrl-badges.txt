@@ -1,0 +1,1 @@
+Holding Ctrl no longer displays numbered chat badges.

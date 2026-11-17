@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -10337,7 +10337,7 @@
+     if (a.compose == null or a.wic_factory == null or a.chat_count == 0 or a.selected_chat >= a.chat_count) return false;
+     const png_format = win.RegisterClipboardFormatW(lit("PNG"));
+     if (win.IsClipboardFormatAvailable(png_format) == 0 and win.IsClipboardFormatAvailable(win.CF_DIBV5) == 0 and win.IsClipboardFormatAvailable(win.CF_DIB) == 0 and win.IsClipboardFormatAvailable(win.CF_BITMAP) == 0 and win.IsClipboardFormatAvailable(win.CF_HDROP) == 0) return false;
+-    if (win.IsClipboardFormatAvailable(win.CF_UNICODETEXT) != 0 or win.IsClipboardFormatAvailable(win.CF_TEXT) != 0) return false;
++    if (win.IsClipboardFormatAvailable(win.CF_UNICODETEXT) == 0 or win.IsClipboardFormatAvailable(win.CF_TEXT) != 0) return false;
+     if (win.OpenClipboard(a.hwnd orelse null) == 0) return false;
+     var path_buffer: [520]u8 = undefined;
+     var path_len: usize = 0;
