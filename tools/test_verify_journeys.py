@@ -27,7 +27,7 @@ class JourneyRegistryTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         for name in ['tools/verify-wazig', '.claude/skills/verify-wazig', 'src']:
             shutil.copytree(ROOT / name, self.root / name, ignore=shutil.ignore_patterns('__pycache__'))
-        for name in ['tools/check_private_markers.py', '.github/workflows/verify.yml', 'CHANGELOG.md']:
+        for name in ['tools/check_private_markers.py', 'tools/check-repro-first.sh', '.github/workflows/verify.yml', 'CHANGELOG.md']:
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
@@ -75,17 +75,24 @@ class JourneyRegistryTests(unittest.TestCase):
         subprocess.run(['git', '-C', str(self.root), 'commit', '-qm', 'change'], check=True)
         step = next(step for step in self.workflow['jobs']['plan']['steps'] if step.get('id') == 'matrix')
         output = self.root / 'plan-output'
+        event = self.root / 'event.json'
+        event.write_text(json.dumps({'pull_request': {'title': 'fix: repair search', 'body': 'Repro: caret'}}))
+        env = dict(os.environ, EVENT_NAME='pull_request', FEATURE='search', BASE_SHA=base,
+                   GITHUB_OUTPUT=str(output), GITHUB_EVENT_PATH=str(event), RUNNER_TEMP=str(self.root))
         result = subprocess.run([sys.executable, '-c', step['run']], cwd=self.root, capture_output=True,
-                                text=True, env=dict(os.environ, EVENT_NAME='pull_request', FEATURE='search', BASE_SHA=base, GITHUB_OUTPUT=str(output)))
+                                text=True, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
-        names = {row['feature'] for row in json.loads(output.read_text().removeprefix('matrix='))['include']}
-        self.assertEqual(names, {'search', 'voice', 'reply', 'paste-image'})
+        outputs = dict(line.split('=', 1) for line in output.read_text().splitlines())
+        self.assertEqual(outputs['repro'], 'caret')
+        self.assertEqual(outputs['needed'], 'true')
+        names = {row['feature'] for row in json.loads(outputs['matrix'])['include']}
+        self.assertEqual(names, {'search', 'voice', 'reply', 'paste-image', 'caret'})
         mapping_path = self.tools / 'pr-journeys.json'
         mapping = json.loads(mapping_path.read_text())
         mapping['max_journeys'] = 3
         mapping_path.write_text(json.dumps(mapping))
         result = subprocess.run([sys.executable, '-c', step['run']], cwd=self.root, capture_output=True,
-                                text=True, env=dict(os.environ, EVENT_NAME='pull_request', FEATURE='search', BASE_SHA=base, GITHUB_OUTPUT=str(output)))
+                                text=True, env=env)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('PR journey limit exceeded', result.stderr)
 
@@ -226,6 +233,21 @@ class JourneyRegistryTests(unittest.TestCase):
                 path.write_text(original + '\n| [search](search.md) | hand-maintained |\n')
                 self.assertIn('hand-maintained journey table', self.check_map().stderr)
                 path.write_text(original)
+
+    def test_base_repro_requires_started_journey_and_failure(self):
+        run = (self.tools / 'run.ps1').read_text()
+        doctor = run.index('    Invoke-Doctor $session\n')
+        marker = run.index("    'JOURNEY STARTED' | Set-Content (Join-Path $Evidence 'journey-started.txt')\n")
+        self.assertEqual(marker, doctor + len('    Invoke-Doctor $session\n'))
+        step = next(step for step in self.workflow['jobs']['base-fails']['steps']
+                    if step.get('name') == 'Run reproduction on base')
+        script = step['run']
+        for expected in ['journey-started.txt', 'failure.txt', '$LASTEXITCODE -eq 0',
+                         'App exited', 'Unknown verification journey', 'Hosted runner',
+                         'Verification runs only', 'Timed out:', 'Write-Host $failure', 'exit 0']:
+            with self.subTest(expected=expected):
+                self.assertIn(expected, script)
+        self.assertNotIn('Base failure cannot be classified', script)
 
     def test_plan_yaml_and_nightly_matrix(self):
         verify = self.workflow['jobs']['verify']

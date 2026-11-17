@@ -123,6 +123,7 @@ try {
     }
     if ($journey.ready) { . (Join-Path $PSScriptRoot $journey.ready) }
     Invoke-Doctor $session
+    'JOURNEY STARTED' | Set-Content (Join-Path $Evidence 'journey-started.txt')
     $window = Get-Window $session
     $compose = Get-Edit $window '1032'
     Save-Screen $session before

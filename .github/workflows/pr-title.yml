@@ -50,3 +50,19 @@ jobs:
         run: |
           jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/pr-body.txt"
           bash tools/check-pr-proof.sh "$RUNNER_TEMP/pr-body.txt"
+
+  repro-first:
+    name: repro-first
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check recorded reproduction
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          bash tools/test-check-repro-first.sh
+          jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/pr-body.txt"
+          title=$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/pr-files.txt"
+          bash tools/check-repro-first.sh "$title" "$RUNNER_TEMP/pr-body.txt" "$RUNNER_TEMP/pr-files.txt"

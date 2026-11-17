@@ -7,6 +7,8 @@ description: Verify the Wazig Messages native Windows desktop through real keybo
 
 ## Launch
 
+Bug-fix PRs must name a `Repro:` journey that passes on the PR head and fails on base after the app launches and doctor passes; launch and setup failures do not count.
+
 A new probe must pass `repeat=3` before it merges.
 Run `gh workflow run verify.yml -f feature=<id> -f repeat=3` and inspect all three runs.
 
