@@ -24,9 +24,9 @@
     {
       "feature": "command_cancel_selection",
       "source": "buildPaletteItems:command_cancel_selection",
-      "proof": "voice",
-      "status": "covered",
-      "why": ""
+      "proof": "GAP",
+      "status": "GAP",
+      "why": "No journey asserts this command end to end."
     },
     {
       "feature": "command_compose",

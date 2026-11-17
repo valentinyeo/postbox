@@ -10,7 +10,7 @@
 - `voice-partial-repaint`: repainting only the voice bubbles, as the playback timer does, draws exactly what a full repaint draws.
 
 - `voice-commands`: Ctrl+Shift+M starts fixture recording; Ctrl+P pauses the selected playing voice note.
-- `transcript-selection`: Copy all transcripts copies the marked raw transcripts in chronological order; Cancel selection clears the marks.
+- `transcript-selection`: Copy all transcripts copies the marked raw transcripts in chronological order; Escape clears the marks.
 
 ## How to get to it (user POV)
 
