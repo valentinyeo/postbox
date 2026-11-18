@@ -23,6 +23,7 @@
 | Automerge waits for every non-AI check on the PR head, including unfurl-verification and the TDLib cache; missing, pending, skipped or failed checks block merging (IGSH-504) | `tools/lint-repeats.sh` rule B8 and `tools/test_no_comments.py` |
 | Bug fixes name a recorded reproduction that fails on base and passes on the PR head, or explain why no source or journey files changed (SOFT-2592) | `repro-first` in `.github/workflows/pr-title.yml` and `tools/lint-repeats.sh` rule B12 |
 | A release waits for recorded journey proof of every changed feature (SOFT-2595) | `tools/check_release_proof.py` in the `proof` job of `.github/workflows/release.yml`, `tools/test_release_proof.py` and `tools/lint-repeats.sh` rule B14 |
+| Every workflow has a concurrency group that cancels superseded runs; release.yml never cancels a publish (SOFT-2596) | `tools/lint-repeats.sh` rule B15 |
 | Planted journey coverage cannot decrease and nightly verification retains its planted job (SOFT-2593) | `tools/check-planted.py`, `tools/test_check_planted.py` and `tools/lint-repeats.sh` rule B13 |
 | PR journey verification runs on Windows before automerge for matching paths (SOFT-2591) | `tools/lint-repeats.sh` rule B11 |
 | Automerge only admits same-repository PRs by the repository owner (IGSH-635) | `tools/lint-repeats.sh` rule B9 and `tools/test_no_comments.py` |

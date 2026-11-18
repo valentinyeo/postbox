@@ -368,6 +368,32 @@ if [[ -f .github/workflows/release.yml ]]; then
     fi
 fi
 
+if ! awk '
+BEGIN {
+    for (i = 1; i < ARGC; i++) {
+        file = ARGV[i]
+        concurrency = active = safe = 0
+        while ((getline code < file) > 0) {
+            if (code ~ /^concurrency:/) concurrency = active = 1
+            else if (code ~ /^[^[:space:]]/) active = 0
+            if (active && code ~ /^  cancel-in-progress:[[:space:]]*false[[:space:]]*$/) safe = 1
+        }
+        close(file)
+        if (!concurrency) {
+            printf "lint-repeats: %s:1: [B15] Workflow has no top-level concurrency block. Add concurrency with a workflow-specific group and cancel-in-progress: true; release.yml uses false.\n", file
+            failed = 1
+        }
+        if (file == ".github/workflows/release.yml" && !safe) {
+            printf "lint-repeats: %s:1: [B15] Publishing can be cancelled mid-publish. Add cancel-in-progress: false to the top-level concurrency block.\n", file
+            failed = 1
+        }
+    }
+    exit failed ? 1 : 0
+}
+' .github/workflows/*.yml .github/workflows/*.yaml; then
+    failed=1
+fi
+
 if [[ -s tools/required-checks.txt ]]; then
     if ! python3 - <<'PYCODE'
 from pathlib import Path

@@ -8,6 +8,9 @@ on:
         default: ''
   schedule:
     - cron: "45 2 * * *"
+concurrency:
+  group: voice-language
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:

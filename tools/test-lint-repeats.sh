@@ -68,7 +68,7 @@ for entry in "${cases[@]}"; do
 done
 fixture="$temp/f1-fixtures"
 mkdir -p "$fixture/src" "$fixture/.github/workflows"
-printf 'name: fixture\n' > "$fixture/.github/workflows/fixture.yml"
+printf 'name: fixture\nconcurrency:\n  group: fixture\n  cancel-in-progress: true\n' > "$fixture/.github/workflows/fixture.yml"
 : > "$fixture/src/main.zig"
 for mutation in key paid trigger; do
     case "$mutation" in
@@ -167,6 +167,28 @@ fi
 cp "$repo/.github/workflows/release.yml" "$fixture/.github/workflows/release.yml"
 "$lint" "$fixture"
 printf 'test-lint-repeats: B14 rejects publishing without proof and permits the gated release\n'
+for mutation in missing cancel-release; do
+    cp "$repo/.github/workflows/no-comments.yml" "$fixture/.github/workflows/no-comments.yml"
+    cp "$repo/.github/workflows/release.yml" "$fixture/.github/workflows/release.yml"
+    case "$mutation" in
+        missing) file=no-comments.yml; sed -i '/^concurrency:/,+2d' "$fixture/.github/workflows/$file" ;;
+        cancel-release) file=release.yml; sed -i 's/cancel-in-progress: false/cancel-in-progress: true/' "$fixture/.github/workflows/$file" ;;
+    esac
+    if cmp -s "$repo/.github/workflows/$file" "$fixture/.github/workflows/$file"; then
+        printf 'test-lint-repeats: FAIL B15 %s mutation changed nothing\n' "$mutation" >&2
+        exit 1
+    fi
+    status=0
+    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+    if (( status != 1 )) || ! grep -Fq "lint-repeats: .github/workflows/$file:1: [B15] " "$temp/output"; then
+        cat "$temp/output" >&2
+        printf 'test-lint-repeats: FAIL B15 must reject %s\n' "$mutation" >&2
+        exit 1
+    fi
+done
+cp "$repo/.github/workflows/release.yml" "$fixture/.github/workflows/release.yml"
+"$lint" "$fixture"
+printf 'test-lint-repeats: B15 rejects a missing concurrency block and publish cancellation, and permits safe workflows\n'
 b8_cases=0
 for guard in 'required-checks.txt' 'required=' 'as \$names' 'COMPLETED' 'match-head-commit' 'could not evaluate head checks' 'length) == 0' '!= "code-review"'; do
     reset_automerge
