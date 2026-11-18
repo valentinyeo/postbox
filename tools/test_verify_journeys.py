@@ -742,6 +742,7 @@ class InlineLinksChecksTests(unittest.TestCase):
         self.assertIn("target['fallback' if threaded else 'quote']", text)
         self.assertIn("assert threaded or reply['quoted_msg_id'] == 'INLINE-BODY'", text)
         self.assertIn("by_name['quote-fallback']['messages']['messages']", text)
+        self.assertIn("['fallback' if provider == 'slack' else 'quote'] for provider in providers", text)
         journey = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
         self.assertIn("$fallbackClick['messages'] = $blockShown", journey)
 

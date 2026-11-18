@@ -147,7 +147,7 @@ def check_inline_links(folder):
     dispatch = {
         'body-first': whatsapp['body'], 'body-last': whatsapp['body'],
         'quote-outgoing': whatsapp['quote'], 'quote-fallback': whatsapp['fallback'], 'ctrl-o': whatsapp['body'],
-        **{provider + '-incoming': targets['providers'][provider]['quote'] for provider in providers},
+        **{provider + '-incoming': targets['providers'][provider]['fallback' if provider == 'slack' else 'quote'] for provider in providers},
     }
     last_ack = 0
     for stage in stages:
