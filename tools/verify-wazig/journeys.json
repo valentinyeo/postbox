@@ -937,6 +937,23 @@
       "prepare": "prepare-archive.ps1",
       "maximize": true,
       "provider": true
+    },
+    {
+      "name": "real-size",
+      "pr": true,
+      "hub": "real-size",
+      "evidence": true,
+      "chats": 300,
+      "script": "journey-real-size.ps1",
+      "validator": {
+        "file": "evidence-real-size.py",
+        "function": "check_evidence"
+      },
+      "hub_handler": {
+        "file": "real-size-fixture.py",
+        "class": "RealSizeHandler"
+      },
+      "maximize": true
     }
   ]
 }

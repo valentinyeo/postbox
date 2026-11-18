@@ -1,6 +1,6 @@
 # Feature proof map
 
-The registry records existing journeys, not proof that a journey ran. GAP means the named behavior lacks an end-to-end journey.
+The registry records existing journeys, not proof that a journey ran. GAP means the named behavior lacks an end-to-end journey. Journey guides can live below or in the verification skill's feature folder; each journey has one guide.
 
 | Feature | Source | Proof | Status |
 |---|---|---|---|
@@ -108,3 +108,28 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `view-switching` | `src:views` | views | covered |
 | `chat-list-formatting` | `src:chat-lists` | chat-lists | covered |
 | `slack-threads` | `src:slack-threads` | slack-threads | covered |
+| `real-size-inbox` | `tools/verify-wazig/real_size_seed.py` | real-size | covered |
+
+## Journey: real-size
+
+### Sub-features
+
+Deterministic synthetic data includes 320 chats, 6,704 messages across 60 days, 319 voice notes, 638 images, 40 WhatsApp groups, eight Slack channels, documents and replies. The busiest chat has 1,600 messages. There are 300 inbox chats and 20 archived chats. `COUNTS` is computed from the rows, not declared separately.
+
+### How to get to it (user POV)
+
+Open Postbox's combined inbox, scroll the chat list, open Orchard Busy, scroll older history to the loaded top, search Orchard, open Orchard Voice and Orchard Group 272, then show archived chats and return to the inbox.
+
+### Driving it with PowerShell UI Automation
+
+Run `gh workflow run verify.yml -f feature=real-size`. The registry starts `RealSizeHandler` and drives `journey-real-size.ps1` on Windows. The journey uses keyboard navigation, real mouse-wheel input and the search palette. Read-only app controls verify chat counts, message identities, downloaded media and group sender names.
+
+The evidence validator compares the logged `seeded_*` counts with the seed's own `COUNTS` and enforces independent minimums: 300 chats, 6,000 messages, 50 voice notes, 100 images and 30 groups. It also checks every completed step, chat identities in both views, older history pages, screenshots and cleanup. Shrinking the seed below any minimum fails even if the log changes with it.
+
+`pr: true` enables targeted PR coverage through four file mappings in `pr-journeys.json`. The three default journeys plus this journey use four slots, below the 12-journey cap. Nightly and manual runs also include it; the workflow reads `journeys.json` without a separate journey list.
+
+### Gotchas
+
+Postbox currently retains at most 1,000 loaded messages per chat. This journey pages from the latest 80 messages to that limit and checks the oldest retained message is painted. It does not claim to reach the first of all 1,600 seeded messages. Voice and image downloads reuse the valid Ogg fixture and generated PNG; no audio device is needed because this journey opens voice notes without playing them.
+
+The planted patch drops the older-history cursor from message requests. The busy-top step must fail while the seed remains unchanged. Patch application can be checked locally; clean and planted app execution require Windows CI.

@@ -1,0 +1,1 @@
+Older-history requests omit their cursor, so the busiest chat never loads its older messages.

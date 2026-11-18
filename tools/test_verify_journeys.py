@@ -99,6 +99,18 @@ class JourneyRegistryTests(unittest.TestCase):
     def test_current_registry_passes(self):
         self.assert_map_passes()
 
+    def test_public_journey_guide_is_required_and_has_the_same_sections(self):
+        path = self.tools / 'FEATURE-MAP.md'
+        original = path.read_text()
+        for changed in [original.split('## Journey: real-size', 1)[0],
+                        original.replace('### Gotchas', '### Missing section'),
+                        original.replace('feature=real-size', 'feature=missing-journey')]:
+            with self.subTest(changed=changed[-80:]):
+                path.write_text(changed)
+                self.assertNotEqual(self.check_map().returncode, 0)
+        path.write_text(original)
+        self.assert_map_passes()
+
     def test_removed_archive_commands_and_jobs_fail_map(self):
         path = self.root / 'src/main.zig'
         original = path.read_text()
