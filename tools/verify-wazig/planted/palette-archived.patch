@@ -1,12 +1,13 @@
 diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..f0554b6 100644
 --- a/src/main.zig
 +++ b/src/main.zig
-@@ -3702,7 +3702,7 @@
-         for (a.views.items) |view| {
-             messenger_view.appendUnique(a.allocator, &known, view) catch return;
-         }
--        for (rows) |row| {
-+        for (rows[0 .. rows.len -| 1]) |row| {
-             if (row != .object) continue;
-             const provider = hub.sourceProvider(row.object) orelse continue;
-             const account = hub.viewAccount(row.object, a.cache_tag.slice());
+@@ -15732,7 +15732,7 @@ fn appendPalettePeople(a: *App, query_wide: []const u16, scores: []i32) void {
+     for (matches[0..count]) |entry| {
+         if (!ensurePaletteCapacity(a)) break;
+         const label = (if (entry.origin == .archived)
+-            std.fmt.allocPrint(a.allocator, "{s}  ·  Archived", .{entry.name})
++            std.fmt.allocPrint(a.allocator, "{s}  ·  Archive", .{entry.name})
+         else
+             std.fmt.allocPrint(a.allocator, "{s}", .{entry.name})) catch continue;
+         defer a.allocator.free(label);
