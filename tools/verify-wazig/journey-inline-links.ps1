@@ -193,6 +193,7 @@ foreach ($case in $cases) {
     $fragments = @($reply.quote_fragments | Where-Object { $_.rect[2] -gt $_.rect[0] })
     Assert-That ($reply.quote -ceq $quoteUrl -and $fragments.Count -gt 0) 'Compact quote URL missing'
     if ($case.provider -ceq 'whatsapp') {
+        Assert-That (@($body.link_rects).Count -gt 0 -and $null -ne $body.link_rects[0]) 'Body link rectangles missing'
         $bodyRects = @($body.link_rects[0] | Where-Object { $_[2] -gt $_[0] -and $_[1] -ge 72 })
         Assert-That ($body.links.Count -eq 1 -and $body.links[0] -ceq $bodyUrl -and $bodyRects.Count -ge 2) 'Wrapped body fixture missing'
         $plainWord = @($body.words | Where-Object { $_.start -eq 0 })[0].rect

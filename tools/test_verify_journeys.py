@@ -1095,5 +1095,13 @@ class AppearanceVersionTests(unittest.TestCase):
             self.assertNotEqual(self.run_oracle(folder).returncode, 0)
 
 
+class InlineLinksChecksTests(unittest.TestCase):
+    def test_link_rectangles_are_asserted_before_they_are_indexed(self):
+        text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
+        guard = text.index("'Body link rectangles missing'")
+        index = text.index('$bodyRects = @($body.link_rects[0]')
+        self.assertLess(guard, index)
+
+
 if __name__ == '__main__':
     unittest.main()
