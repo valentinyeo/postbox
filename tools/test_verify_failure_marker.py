@@ -171,6 +171,8 @@ function Get-App($Session) {
                                         capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(marker.exists(), expected, result.stdout + result.stderr)
+                if case == 'crashed-app':
+                    self.assertIn('app check; app lookup failed: App disappeared', result.stdout)
                 if expected:
                     name = 'playback advances' if case == 'check-wait' else 'Search order differs'
                     self.assertEqual(marker.read_text(encoding='utf-8-sig').strip(), f'search: {name}')
