@@ -1,0 +1,1 @@
+A manual retry leaves the recovered message held instead of making it ready to send. The journey must fail while waiting for the retry to be acknowledged.

@@ -321,11 +321,11 @@ class JourneyRegistryTests(unittest.TestCase):
         path = self.root / '.github/workflows/verify.yml'
         original = path.read_text()
         build = 'zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526\n'
+        verify = original.index('  verify:\n')
         cases = [
             (original.replace('    needs: [plan, candidate]', '    needs: plan'),
              'verify must depend on plan and the shared candidate build'),
-            (original.replace('      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n',
-                              '      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n      - run: ' + build, 2),
+            (original[:verify] + original[verify:].replace('    steps:\n', '    steps:\n      - run: ' + build, 1),
              'a journey leg must not build the candidate desktop'),
             (original.replace('name: Postbox-candidate', 'name: Postbox-build'), 'verify must consume the shared candidate build'),
             (original.replace("  native-tests:\n    runs-on: windows-latest\n", ''),

@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -5572,7 +5572,7 @@
+         record.wire_filename.set(basename);
+         return record;
+     };
+-    record.wire_filename.set(basename);
++    record.wire_filename.set(if (original_bytes == null) "recovered.bin" else basename);
+     record.file_bytes = bytes.len;
+     std.crypto.hash.sha2.Sha256.hash(bytes, &record.file_sha256, .{});
+     if (!active) return record;

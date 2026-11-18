@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -21865,7 +21865,7 @@
+     installCrashFilter();
+     const outbox_store = init.environ_map.get("LOCALAPPDATA") orelse return error.MissingLocalAppData;
+     var mutex_name_buffer: [80]u8 = undefined;
+-    const mutex_name = try std.fmt.bufPrint(&mutex_name_buffer, "Global\\MessagesOutbox-{x}", .{std.hash.Wyhash.hash(0, outbox_store)});
++    const mutex_name = try std.fmt.bufPrint(&mutex_name_buffer, "Global\\MessagesOutboxV2-{x}", .{std.hash.Wyhash.hash(0, outbox_store)});
+     const mutex_wide = try std.unicode.utf8ToUtf16LeAllocZ(init.gpa, mutex_name);
+     defer init.gpa.free(mutex_wide);
+     const outbox_mutex = win.CreateMutexW(null, win.FALSE, mutex_wide.ptr) orelse return error.OutboxMutexFailed;
