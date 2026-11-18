@@ -37,6 +37,16 @@ class AskTests(unittest.TestCase):
         self.assertEqual((model, verdict), ("c", "FAIL"))
         self.assertEqual(len(errors), 2)
 
+    def test_http_status_is_named_in_the_error(self):
+        def post(body, key):
+            raise urllib.error.HTTPError("u", 404, "gone", {}, None)
+
+        _, _, _, errors = break_it.ask(["a"], "s", "u", "k", post)
+        self.assertEqual(errors, ["a: HTTPError 404"])
+
+    def test_known_working_model_is_a_fallback(self):
+        self.assertIn("openai/gpt-oss-120b", break_it.DEFAULT_MODELS)
+
     def test_all_models_fail(self):
         model, verdict, _, errors = break_it.ask(["a", "b"], "s", "u", "k", lambda body, key: "nope")
         self.assertEqual((model, verdict), (None, None))
