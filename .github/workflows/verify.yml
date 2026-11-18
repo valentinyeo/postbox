@@ -258,6 +258,41 @@ jobs:
         run: |
           zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}'
           if ($LASTEXITCODE -ne 0) { throw 'Planted build failed' }
+      - name: Build and capture the pre-change sidebar baseline
+        if: matrix.feature == 'sidebar-surface'
+        shell: pwsh
+        run: |
+          python tools/verify-wazig/test-sidebar-surface.py
+          if ($LASTEXITCODE -ne 0) { throw 'Sidebar pixel oracle controls failed' }
+          $candidate = (git rev-parse HEAD).Trim()
+          $assertion = (git log --diff-filter=A --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1 | Select-Object -Last 1).Trim()
+          $baseline = (git rev-parse "$assertion^1").Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Sidebar assertion parent missing' }
+          $source = Join-Path $env:RUNNER_TEMP 'sidebar-baseline-source'
+          $prefix = Join-Path $env:GITHUB_WORKSPACE 'sidebar-baseline-bin'
+          git worktree add --detach $source $baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline checkout failed' }
+          Push-Location $source
+          try {
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix $prefix
+            if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline build failed' }
+          } finally { Pop-Location }
+          New-Item planted-evidence -ItemType Directory -Force | Out-Null
+          $env:GITHUB_SHA = $baseline
+          try {
+            & tools/verify-wazig/run.ps1 -Feature sidebar-surface -ExpectedProduct Wazig -Bin sidebar-baseline-bin/bin -Evidence planted-evidence/baseline
+            if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline capture failed' }
+          } finally { $env:GITHUB_SHA = $candidate }
+          $fixtureText = [IO.File]::ReadAllText((Join-Path $env:GITHUB_WORKSPACE 'src/verify_text.json')).Replace("`r`n", "`n")
+          $fixtureBytes = [Text.Encoding]::UTF8.GetBytes($fixtureText)
+          $fixtureHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($fixtureBytes))
+          @{
+            candidate_commit = $candidate; baseline_commit = $baseline; assertion_commit = $assertion
+            assertion_parent = (git rev-parse "$assertion^1").Trim()
+            candidate_sha256 = (Get-FileHash zig-out/bin/Messages.exe).Hash
+            baseline_sha256 = (Get-FileHash sidebar-baseline-bin/bin/Messages.exe).Hash
+            fixture_sha256 = $fixtureHash
+          } | ConvertTo-Json | Set-Content planted-evidence/sidebar-builds.json
       - name: Install audio output
         if: matrix.feature == 'voice'
         shell: pwsh
@@ -280,7 +315,12 @@ jobs:
           FEATURE: ${{ matrix.feature }}
         run: |
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence planted-evidence -ExpectedVersion ${{ env.BASE_APP_VERSION }}
-          "code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
+          $code = $LASTEXITCODE
+          if ($code -eq 0 -and $env:FEATURE -eq 'sidebar-surface') {
+            python tools/verify-wazig/check-evidence.py planted-evidence
+            $code = $LASTEXITCODE
+          }
+          "code=$code" >> $env:GITHUB_OUTPUT
       - name: Classify planted failure
         id: classify
         shell: pwsh

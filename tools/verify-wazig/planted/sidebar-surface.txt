@@ -1,0 +1,1 @@
+The sidebar is 390 pixels wide instead of 300. The sidebar screenshot validator rejects the measured width.
