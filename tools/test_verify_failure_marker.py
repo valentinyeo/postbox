@@ -87,6 +87,45 @@ class FailureMarkerTests(unittest.TestCase):
         self.assertIn('classify_red.py', wrapper)
         self.assertIn('$LASTEXITCODE -ne 0', wrapper)
 
+    def test_planted_text_comparison_installs_the_same_chrome_driver(self):
+        jobs = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())['jobs']
+        name = 'Install Chrome screenshot driver'
+        clean = next(step for step in jobs['verify']['steps'] if step.get('name') == name)
+        steps = jobs['planted']['steps']
+        planted = next(step for step in steps if step.get('name') == name)
+        self.assertEqual(planted, clean)
+        self.assertEqual(planted['if'], "matrix.feature == 'text-comparison'")
+        journey = next(step for step in steps if step.get('name') == 'Run planted journey')
+        self.assertLess(steps.index(planted), steps.index(journey))
+
+    @unittest.skipUnless(shutil.which('pwsh'), 'Journey marker PowerShell runtime requires hosted CI')
+    def test_text_comparison_marks_native_text_mismatch(self):
+        source = (TOOLS / 'harness.ps1').read_text()
+        assertion = re.search(r'^function Assert-That\([^\n]*\) \{[\s\S]*?^\}', source, re.M).group()
+        journey = (TOOLS / 'journey-text-comparison.ps1').read_text()
+        check = journey.split("Copy-Item $metrics (Join-Path $Evidence 'text-metrics.json')\n", 1)[1].split('Save-Screen', 1)[0]
+        check = check.replace('$PSScriptRoot', TOOLS.as_posix())
+        expected = json.loads((ROOT / 'src/verify_text.json').read_text())['data']['messages'][0]['Text']
+        for text, failed in ((expected, False), ('Wrong paragraph text', True), (expected.lower(), True)):
+            with self.subTest(text=text):
+                marker = self.evidence / 'journey-check-failed.txt'
+                marker.unlink(missing_ok=True)
+                (self.evidence / 'text-metrics.json').write_text(json.dumps(dict(text=text)))
+                session = json.dumps(dict(evidence=str(self.evidence), feature='text-comparison'))
+                script = assertion + '\nfunction Get-App($Session) { return @{ HasExited = $false } }\n'
+                script += f"$Evidence = '{self.evidence}'; $script:JourneyCheckSession = '{session}' | ConvertFrom-Json\n"
+                script += "$ErrorActionPreference = 'Stop'\ntry {\n" + check + '\n} catch {\n'
+                script += 'if (-not [object]::ReferenceEquals($_.Exception, $script:JourneyCheckFailure)) { exit 2 }; exit 1\n}\n'
+                result = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-Command', script],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, int(failed), result.stdout + result.stderr)
+                self.assertEqual(marker.exists(), failed)
+                classified = self.classify(result.returncode, 'text-comparison')
+                self.assertEqual(classified.returncode == 0, failed, classified.stderr)
+                if failed:
+                    self.assertEqual(marker.read_text(encoding='utf-8-sig').strip(),
+                                     'text-comparison: native paragraph matches fixture text')
+
     @unittest.skipUnless(shutil.which('pwsh'), 'Journey marker PowerShell runtime requires hosted CI')
     def test_only_failed_app_checks_write_marker(self):
         source = (TOOLS / 'harness.ps1').read_text()

@@ -9,5 +9,8 @@ $null = Wait-Until {
     $painted.canvas.width -eq [int]$bounds.Width -and $painted.canvas.height -eq [int]$bounds.Height
 } 'fixture paragraph painted at final window size'
 Copy-Item $metrics (Join-Path $Evidence 'text-metrics.json')
+$fixture = Get-Content "$PSScriptRoot/../../src/verify_text.json" -Raw | ConvertFrom-Json
+$painted = Get-Content (Join-Path $Evidence 'text-metrics.json') -Raw | ConvertFrom-Json
+Assert-That ($painted.text -ceq $fixture.data.messages[0].Text) 'native paragraph matches fixture text'
 Save-Screen $session after
 & "$PSScriptRoot/compare-text.ps1" -Session $session -Bin $Bin

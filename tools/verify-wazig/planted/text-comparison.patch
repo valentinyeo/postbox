@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -9440,7 +9440,7 @@
+         if (unifiedHub(a) and std.mem.startsWith(u8, chat.jid.slice(), "slack:")) {
+             setSlackMessageText(a, &message, if (media_drain.isPlaceholder(media_type, text)) "" else text, slack_lookup);
+         } else {
+-            message.text.set(a.allocator, if (media_drain.isPlaceholder(media_type, text)) "" else text);
++            message.text.set(a.allocator, if (std.mem.eql(u8, id, "ISSUE-462-PARAGRAPH")) "Wrong paragraph text" else if (media_drain.isPlaceholder(media_type, text)) "" else text);
+         }
+         if (verification_fixture and getString(object, "fixture_quote").len > 0) {
+             message.quote.set(a.allocator, getString(object, "fixture_quote"));

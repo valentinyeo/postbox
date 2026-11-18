@@ -307,6 +307,12 @@ jobs:
         run: |
           & tools/verify-wazig/build-historical-847.ps1 -Evidence planted-evidence/historical-847
           if ($LASTEXITCODE -ne 0) { throw 'Historical rollback build failed' }
+      - name: Install Chrome screenshot driver
+        if: matrix.feature == 'text-comparison'
+        shell: pwsh
+        run: |
+          npm install --prefix "$env:RUNNER_TEMP/text-compare" --no-save playwright-core@1.58.2
+          if ($LASTEXITCODE -ne 0) { throw 'Chrome driver installation failed' }
       - name: Run planted journey
         id: journey
         continue-on-error: true

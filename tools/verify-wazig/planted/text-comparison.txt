@@ -1,0 +1,1 @@
+Replace the comparison paragraph's imported message text with "Wrong paragraph text", leaving the expected fixture unchanged. The journey must reject the native paragraph because it no longer matches the fixture text.
