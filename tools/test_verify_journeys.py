@@ -713,6 +713,21 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
 
 
 class InlineLinksChecksTests(unittest.TestCase):
+    def test_block_row_is_scrolled_into_view_before_its_quote_is_read(self):
+        text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
+        read = text.index("$block = Get-InlineRow $session 'INLINE-BLOCK'")
+        press = text.rfind('[InlineLinksNative]::Press(0x22)', 0, read)
+        self.assertGreater(press, text.index("'quote-outgoing'"))
+        wait = text.index("'fixture fallback quote painted'")
+        self.assertLess(wait, read)
+
+    def test_reply_row_is_scrolled_back_into_view_after_the_block_row(self):
+        text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
+        ctrl_o = text.index("name='ctrl-o'")
+        press = text.index('[InlineLinksNative]::Press(0x21)', ctrl_o)
+        wait = text.index("'fixture reply painted again'", press)
+        self.assertLess(wait, text.index("$reply = Get-InlineRow $session 'INLINE-REPLY'", ctrl_o))
+
     def test_link_rectangles_are_asserted_before_they_are_indexed(self):
         text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
         guard = text.index("'Body link rectangles missing'")

@@ -223,6 +223,11 @@ foreach ($case in $cases) {
         Assert-That ($out.from_me -and $out.quote_fragments.Count -gt 0) 'Outgoing compact quote missing'
         $point = Center-Inline $out.quote_fragments[0].rect
         Record-InlineStage $session (Invoke-InlineClick $session $point[0] $point[1] 'quote-outgoing' $quoteUrl)
+        [InlineLinksNative]::Press(0x22)
+        $null = Wait-Until {
+            $row = @((Read-Control $session messages).messages | Where-Object id -CEQ 'INLINE-BLOCK')[0]
+            $row -and @($row.quote_fragments).Count -ge 2
+        } 'fixture fallback quote painted'
         $block = Get-InlineRow $session 'INLINE-BLOCK'
         Assert-That ($block.quoted_msg_id -ceq '' -and $block.quote_fragments.Count -ge 2) 'Two-line fallback quote missing'
         $point = Center-Inline $block.quote_fragments[1].rect
@@ -241,6 +246,11 @@ foreach ($case in $cases) {
         [InlineLinksNative]::Press(0x0D)
         Wait-InlineReceipt $session ($before + 1) $bodyUrl
         Record-InlineStage $session @{ name='ctrl-o'; palette_count=$count; receipts=@(Read-InlineReceipts $session) }
+        [InlineLinksNative]::Press(0x21)
+        $null = Wait-Until {
+            $row = @((Read-Control $session messages).messages | Where-Object id -CEQ 'INLINE-REPLY')[0]
+            $row -and @($row.quote_fragments).Count -gt 0
+        } 'fixture reply painted again'
     }
     $reply = Get-InlineRow $session 'INLINE-REPLY'
     $point = Center-Inline $reply.quote_fragments[0].rect
