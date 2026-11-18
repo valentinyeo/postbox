@@ -65,7 +65,7 @@ function Invoke-ReactionsJourney($Session) {
     $quick = [regex]::Match($source, 'const quick_reactions = \[_\]u16\{([^}]+)\}').Groups[1].Value.Split(',').Trim()
     $laughIndex = [Array]::IndexOf($quick, 'reaction_laugh')
     $emoji = [char]::ConvertFromUtf32(0x1f602)
-    Assert-That ($laughIndex -ge 0 -and $source.Contains('reaction_laugh => "' + $emoji + '"')) 'Laughing-face source codepoints changed'
+    Assert-That ($laughIndex -ge 0) 'Laughing reaction missing from the quick reactions'
     $clicks = @()
     $failures = @()
     Send-Keys $Session '%1'

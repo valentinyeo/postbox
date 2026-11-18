@@ -19,7 +19,9 @@ foreach ($press in 1..10) {
     try { $target.SetFocus() } catch { $focused = $false }
     try { $null = Wait-Until { $target.Current.HasKeyboardFocus } "focus $($target.Current.AutomationId)" 5 } catch { $focused = $false }
     Send-Keys $session '^a'
-    $ok = $cleared -and (Read-Control $session status).bulk_selected_count -eq $workload
+    $reached = $true
+    try { $null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq $workload } "Ctrl+A selected $workload chats" 5 -Harness } catch { $reached = $false }
+    $ok = $cleared -and $reached
     $presses += @{ press = $press; ok = $ok; focused = $focused; target = $target.Current.AutomationId }
     Write-Output "ctrl_a_press=$press ok=$($ok.ToString().ToLowerInvariant())"
 }
