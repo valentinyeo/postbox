@@ -181,7 +181,7 @@ function Invoke-HubArchiveJourney($Session, [string]$Messages, $Start) {
     $old = Get-App $Session
     Invoke-PaletteCommand $Session 'Quit Postbox'
     $null = Wait-Until { $old.Refresh(); $old.HasExited } 'close before seeding local archive migration'
-    "$script:PlainReacted`t0`t2026-10-10T10:00:00Z" | Add-Content $files[0].FullName
+    "$script:PlainReacted`t0`t2026-10-10T11:30:00Z" | Add-Content $files[0].FullName
     Copy-Item $files[0].FullName (Join-Path $Session.evidence 'migration-before.txt')
     $before = (Get-AnyHubArchiveWrites $Session).Count
     $Start.Environment['WAZIG_VERIFY_RESTART'] = $Session.id
