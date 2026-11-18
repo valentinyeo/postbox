@@ -1,0 +1,1 @@
+After a restart the app sends a message whose delivery was never confirmed, without the user asking.

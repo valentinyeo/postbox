@@ -1,0 +1,1 @@
+A message typed while the open chat is still loading is held until the history finishes loading.

@@ -1,0 +1,15 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -13470,10 +13470,7 @@
+     }
+     var key: [giphy.max_key_bytes]u8 = undefined;
+     defer std.crypto.secureZero(u8, &key);
+-    if (loadGiphyKey(a, &key) == 0) {
+-        showProblem(a, "GIF search needs a GIPHY key");
+-        return;
+-    }
++    if (loadGiphyKey(a, &key) == 0) return;
+     if (attachUnavailableReason(a)) |reason| {
+         showProblem(a, reason);
+         return;

@@ -1,0 +1,12 @@
+diff --git a/src/hub.zig b/src/hub.zig
+--- a/src/hub.zig
++++ b/src/hub.zig
+@@ -74,7 +74,7 @@
+         const id = rowId(row);
+         if (id.len == 0) continue;
+         var known = false;
+-        for (out.items) |existing| {
++        for (out.items[first.len..]) |existing| {
+             if (std.mem.eql(u8, rowId(existing), id)) {
+                 known = true;
+                 break;

@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -23942,7 +23942,8 @@
+ 
+ fn beginUnifiedSend(a: *App, now_ms: u64) void {
+     if (!unifiedHub(a) or !hubConfigured(a) or a.hub_account.len == 0 or a.outbox_load_failed or a.unified_storage_blocked or
+-        !a.unified_imports_clean or a.unified_inflight != null or wacliPendingGet(a, .hub_send) != 0) return;
++        !a.unified_imports_clean or a.unified_inflight != null or wacliPendingGet(a, .hub_send) != 0 or
++        wacliPendingGet(a, .messages) != 0) return;
+     const live = a.unified_snapshot orelse return;
+     const candidate = a.unified_candidate orelse return;
+     for (live.records[0..live.count], 0..) |*record, index| {

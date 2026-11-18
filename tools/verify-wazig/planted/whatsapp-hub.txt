@@ -1,0 +1,1 @@
+A reply queued before the hub switch is sent as a plain message with no reply target.

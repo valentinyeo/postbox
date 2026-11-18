@@ -1,0 +1,12 @@
+diff --git a/src/outbox.zig b/src/outbox.zig
+--- a/src/outbox.zig
++++ b/src/outbox.zig
+@@ -225,7 +225,7 @@
+         if (source_unified and !target.unified) {
+             const colon = std.mem.indexOfScalar(u8, entry.jid.slice(), ':');
+             const namespace = if (colon) |end| entry.jid.buf[0..end] else target.whatsapp_namespace;
+-            for ([_]*Str(max_jid_len){ &entry.reply_to, &entry.reply_sender }) |field| {
++            for ([_]*Str(max_jid_len){&entry.reply_sender}) |field| {
+                 if (std.mem.startsWith(u8, field.slice(), namespace) and field.len > namespace.len and field.buf[namespace.len] == ':') {
+                     field.set(field.slice()[namespace.len + 1 ..]);
+                 }

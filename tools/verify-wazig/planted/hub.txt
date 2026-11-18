@@ -1,0 +1,1 @@
+Scrolling up repeats one message at the page join, so the thread holds more rows than it has messages.
