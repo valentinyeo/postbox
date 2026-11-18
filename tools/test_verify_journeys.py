@@ -715,7 +715,7 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
 class InlineLinksChecksTests(unittest.TestCase):
     def test_block_row_is_scrolled_into_view_before_its_quote_is_read(self):
         text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
-        read = text.index("$block = Get-InlineRow $session 'INLINE-BLOCK'")
+        read = text.index("$blockShown = Read-Control $session messages")
         press = text.rfind('[InlineLinksNative]::Press(0x22)', 0, read)
         self.assertGreater(press, text.index("'quote-outgoing'"))
         wait = text.index("'fixture fallback quote painted'")
@@ -734,6 +734,16 @@ class InlineLinksChecksTests(unittest.TestCase):
         self.assertIn('Where-Object id -CEQ $quoteRowId', text)
         self.assertIn("$targets[$case.provider][$quoteTargetKey]", text)
         self.assertNotIn("\"$($case.provider)-incoming\" $quoteUrl", text)
+
+    def test_evidence_checker_reads_the_same_visible_slack_row_as_the_journey(self):
+        text = (ROOT / 'tools/verify-wazig/check-inline-links-evidence.py').read_text()
+        self.assertIn("threaded = provider == 'slack'", text)
+        self.assertIn("rows['INLINE-BLOCK' if threaded else 'INLINE-REPLY']", text)
+        self.assertIn("target['fallback' if threaded else 'quote']", text)
+        self.assertIn("assert threaded or reply['quoted_msg_id'] == 'INLINE-BODY'", text)
+        self.assertIn("by_name['quote-fallback']['messages']['messages']", text)
+        journey = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
+        self.assertIn("$fallbackClick['messages'] = $blockShown", journey)
 
     def test_link_rectangles_are_asserted_before_they_are_indexed(self):
         text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()

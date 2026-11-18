@@ -90,13 +90,16 @@ def check_inline_links(folder):
         shown = by_name[provider + '-fixture']['messages']
         assert shown['chat']['id'] == target['id'] and shown['chat']['provider'] == provider
         rows = {row['id']: row for row in shown['messages']}
-        reply = rows['INLINE-REPLY']
-        assert reply['quote'] == target['quote'] and reply['quoted_msg_id'] == 'INLINE-BODY'
+        threaded = provider == 'slack'
+        reply = rows['INLINE-BLOCK' if threaded else 'INLINE-REPLY']
+        expected = target['fallback' if threaded else 'quote']
+        assert reply['quote'] == expected
+        assert threaded or reply['quoted_msg_id'] == 'INLINE-BODY'
         assert reply['quote_fragments']
         for fragment in reply['quote_fragments']:
             units = reply['quote'].encode('utf-16-le')
             token = units[fragment['start'] * 2:fragment['end'] * 2].decode('utf-16-le')
-            assert token == target['quote']
+            assert token == expected
             assert fragment['rect'][2] > fragment['rect'][0] and fragment['rect'][3] > fragment['rect'][1]
         assert any(inside(by_name[provider + '-incoming']['point'], f['rect']) for f in reply['quote_fragments'])
 
@@ -116,7 +119,8 @@ def check_inline_links(folder):
         sample = appearance[key]
         assert underline(folder / sample['screenshot'], sample['pixel_rect']) == sample['longest_bright_run'] >= 8
     rows = {row['id']: row for row in appearance['messages']['messages']}
-    body, reply, outgoing, block = (rows[key] for key in ('INLINE-BODY', 'INLINE-REPLY', 'INLINE-OUT', 'INLINE-BLOCK'))
+    body, reply, outgoing = (rows[key] for key in ('INLINE-BODY', 'INLINE-REPLY', 'INLINE-OUT'))
+    block = {row['id']: row for row in by_name['quote-fallback']['messages']['messages']}['INLINE-BLOCK']
     assert body['links'] == [whatsapp['body']]
     rects = [r for r in body['link_rects'][0] if r[2] > r[0] and r[1] >= 72]
     assert len(rects) >= 2

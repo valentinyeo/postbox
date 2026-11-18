@@ -230,10 +230,13 @@ foreach ($case in $cases) {
             $row = @((Read-Control $session messages).messages | Where-Object id -CEQ 'INLINE-BLOCK')[0]
             $row -and @($row.quote_fragments).Count -ge 2
         } 'fixture fallback quote painted'
-        $block = Get-InlineRow $session 'INLINE-BLOCK'
+        $blockShown = Read-Control $session messages
+        $block = @($blockShown.messages | Where-Object id -CEQ 'INLINE-BLOCK')[0]
         Assert-That ($block.quoted_msg_id -ceq '' -and $block.quote_fragments.Count -ge 2) 'Two-line fallback quote missing'
         $point = Center-Inline $block.quote_fragments[1].rect
-        Record-InlineStage $session (Invoke-InlineClick $session $point[0] $point[1] 'quote-fallback' $fallbackUrl)
+        $fallbackClick = Invoke-InlineClick $session $point[0] $point[1] 'quote-fallback' $fallbackUrl
+        $fallbackClick['messages'] = $blockShown
+        Record-InlineStage $session $fallbackClick
         Focus-InlineApp $session
         $before = @(Read-InlineReceipts $session).Count
         [InlineLinksNative]::Combo(0x4F)
