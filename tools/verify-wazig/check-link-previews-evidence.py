@@ -35,6 +35,7 @@ def check_link_previews(folder):
         assert page['card'][2] > page['card'][0]
         assert '?a=1&b=2' in ' '.join(query['links'] + [query['text']])
         assert not plain['preview']['image']
+        assert plain['card'] == [0, 0, 0, 0] or plain['card'][2] - plain['card'][0] == page['card'][2] - page['card'][0]
         if provider == 'slack':
             assert plain['text'] == 'Clean page label' and page['text'] == 'Synthetic page label'
             assert query['quote'] == 'Quoted & label'
