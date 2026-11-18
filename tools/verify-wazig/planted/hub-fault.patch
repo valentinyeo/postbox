@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -23946,7 +23946,7 @@
+     const live = a.unified_snapshot orelse return;
+     const candidate = a.unified_candidate orelse return;
+     for (live.records[0..live.count], 0..) |*record, index| {
+-        if (record.phase != .ready or record.not_before_ms > now_ms) continue;
++        if ((record.phase != .ready and record.phase != .uncertain) or record.not_before_ms > now_ms) continue;
+         if (record.attempt_serial == std.math.maxInt(u64)) {
+             a.unified_storage_blocked = true;
+             setStatus(a, "Send attempt limit reached; outbox paused");

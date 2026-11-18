@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -3702,7 +3702,7 @@
+         for (a.views.items) |view| {
+             messenger_view.appendUnique(a.allocator, &known, view) catch return;
+         }
+-        for (rows) |row| {
++        for (rows[0 .. rows.len -| 1]) |row| {
+             if (row != .object) continue;
+             const provider = hub.sourceProvider(row.object) orelse continue;
+             const account = hub.viewAccount(row.object, a.cache_tag.slice());

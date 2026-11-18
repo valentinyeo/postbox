@@ -1,0 +1,1 @@
+Send a GIF without a GIPHY key does nothing and never asks for a key.
