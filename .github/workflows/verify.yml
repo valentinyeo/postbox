@@ -806,6 +806,7 @@ jobs:
           path: verification-evidence/
           if-no-files-found: error
   verify-verdict:
+    name: verify-verdict
     if: ${{ always() && github.event_name == 'pull_request' }}
     needs: [plan, base-fails, verify]
     runs-on: ubuntu-latest
