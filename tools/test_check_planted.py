@@ -21,6 +21,7 @@ class PlantedChecks(unittest.TestCase):
         (self.folder / 'planted-limits.txt').write_text('1\n')
         (self.folder / 'planted/search.patch').write_text('diff --git a/src/main.zig b/src/main.zig\n')
         (self.folder / 'planted/search.txt').write_text('Search is broken.\n')
+        (self.folder / 'planted/search.check').write_text('typed query reaches the filter\n')
 
     def test_valid(self):
         self.assertEqual(module.check(self.root), [])
@@ -32,6 +33,10 @@ class PlantedChecks(unittest.TestCase):
     def test_description_required(self):
         (self.folder / 'planted/search.txt').unlink()
         self.assertTrue(any('missing description' in e for e in module.check(self.root)))
+
+    def test_expected_check_required(self):
+        (self.folder / 'planted/search.check').unlink()
+        self.assertTrue(any('missing expected check' in e for e in module.check(self.root)))
 
     def test_patch_shape(self):
         (self.folder / 'planted/search.patch').write_text('diff --git a/tools/file b/tools/file\n')
