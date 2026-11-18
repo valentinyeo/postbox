@@ -58,7 +58,15 @@ def check_release(auto, release):
     assert jobs['build']['if'] == "github.ref_type == 'tag'"
     assert jobs['launch']['needs'] == 'build'
     assert jobs['launch']['runs-on'] == 'windows-latest'
-    assert jobs['release']['needs'] == ['build', 'launch', 'gitleaks']
+    assert jobs['release']['needs'] == ['build', 'launch', 'gitleaks', 'proof']
+    proof = jobs['proof']
+    assert proof['if'] == "github.ref_type == 'tag'"
+    assert proof['runs-on'] == 'ubuntu-latest'
+    assert proof['permissions'] == {'contents': 'read', 'actions': 'read', 'pull-requests': 'read'}
+    checkout, gate = proof['steps']
+    assert checkout['uses'] == 'actions/checkout@v4' and checkout['with']['fetch-depth'] == 0
+    assert gate['env']['GH_TOKEN'] == '${{ github.token }}'
+    assert gate['run'] == 'python3 tools/check_release_proof.py --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"'
     for job in ('build', 'launch', 'gitleaks', 'release'):
         assert 'if' not in jobs[job] or job == 'build'
     build = str(jobs['build']['steps'])
@@ -108,7 +116,8 @@ class WorkflowContractTests(unittest.TestCase):
         check_release(load('auto-release'), load('release'))
 
     def test_fast_release_regressions_fail(self):
-        for mutation in ('branch', 'guard', 'sha', 'retry', 'tag', 'build', 'launch', 'scan', 'publish', 'needs'):
+        for mutation in ('branch', 'guard', 'sha', 'retry', 'tag', 'build', 'launch', 'scan', 'publish', 'needs',
+                         'proof-needs', 'proof-if', 'proof-permissions', 'proof-history', 'proof-token', 'proof-run'):
             with self.subTest(mutation=mutation):
                 auto, release = copy.deepcopy(load('auto-release')), copy.deepcopy(load('release'))
                 steps = {step.get('name'): step for step in auto['jobs']['tag']['steps']}
@@ -121,6 +130,12 @@ class WorkflowContractTests(unittest.TestCase):
                 elif mutation == 'launch': release['jobs']['launch']['steps'] = []
                 elif mutation == 'scan': release['jobs']['gitleaks']['steps'] = []
                 elif mutation == 'publish': release['jobs']['release']['steps'] = []
+                elif mutation == 'proof-needs': release['jobs']['release']['needs'].remove('proof')
+                elif mutation == 'proof-if': release['jobs']['proof']['if'] = "github.ref_type == 'branch'"
+                elif mutation == 'proof-permissions': release['jobs']['proof']['permissions']['actions'] = 'write'
+                elif mutation == 'proof-history': release['jobs']['proof']['steps'][0]['with']['fetch-depth'] = 1
+                elif mutation == 'proof-token': release['jobs']['proof']['steps'][1]['env']['GH_TOKEN'] = ''
+                elif mutation == 'proof-run': release['jobs']['proof']['steps'][1]['run'] = 'true'
                 else: release['jobs']['release']['needs'] = ['build']
                 with self.assertRaises(AssertionError):
                     check_release(auto, release)

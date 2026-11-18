@@ -30,6 +30,7 @@ PYTHON_LIGHT_TESTS=(
     test_recording_paint
     test_repaint
     test_reply_preview
+    test_release_proof
     test_status_line
     test_search_center
     test_show_archived
