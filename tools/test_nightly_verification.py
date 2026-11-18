@@ -37,6 +37,26 @@ class NightlyVerificationTests(unittest.TestCase):
         self.assertEqual(verify['strategy']['matrix'], '${{ fromJSON(needs.plan.outputs.matrix) }}')
         self.assertIn("github.event_name != 'pull_request'", verify['if'])
 
+    def test_planted_historical_journeys_have_the_same_build_input_as_verify(self):
+        planted = self.workflow['jobs']['planted']['steps']
+        verify = self.workflow['jobs']['verify']['steps']
+        checkout = next(step for step in planted if step.get('uses') == 'actions/checkout@v4')
+        self.assertEqual(checkout.get('with', {}).get('fetch-depth'), 0)
+        historical = next(step for step in verify if 'build-historical-847.ps1' in step.get('run', ''))
+        copied = next(step for step in planted if step.get('name') == historical['name'])
+        self.assertEqual(copied, dict(historical, run=historical['run'].replace('verification-evidence/', 'planted-evidence/')))
+        self.assertEqual(copied['if'], "matrix.feature == 'hub-rollback' || matrix.feature == 'hub-migration-crash' || matrix.feature == 'hub-migration-before-rename'")
+        zig = next(step for step in planted if step.get('uses') == 'mlugg/setup-zig@v2')
+        journey = next(step for step in planted if step.get('name') == 'Run planted journey')
+        self.assertLess(planted.index(checkout), planted.index(copied))
+        self.assertLess(planted.index(zig), planted.index(copied))
+        self.assertLess(planted.index(copied), planted.index(journey))
+        for feature in ('hub-rollback', 'hub-migration-crash', 'hub-migration-before-rename'):
+            with self.subTest(feature=feature):
+                patch = ROOT / 'tools/verify-wazig/planted' / (feature + '.patch')
+                self.assertTrue(patch.is_file())
+                self.assertTrue(patch.with_suffix('.txt').read_text().strip())
+
     def test_schedule_retains_every_planted_journey(self):
         outputs = self.plan_step('planted')
         patches = sorted(path.stem for path in (ROOT / 'tools/verify-wazig/planted').glob('*.patch'))

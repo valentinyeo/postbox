@@ -240,6 +240,8 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.planted) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.BASE_ZIG_VERSION }}
@@ -264,6 +266,12 @@ jobs:
         if: matrix.feature == 'drafts' || matrix.feature == 'media-fit'
         shell: pwsh
         run: tools/verify-wazig/install-ffmpeg.ps1
+      - name: Build pinned historical rollback input
+        if: matrix.feature == 'hub-rollback' || matrix.feature == 'hub-migration-crash' || matrix.feature == 'hub-migration-before-rename'
+        shell: pwsh
+        run: |
+          & tools/verify-wazig/build-historical-847.ps1 -Evidence planted-evidence/historical-847
+          if ($LASTEXITCODE -ne 0) { throw 'Historical rollback build failed' }
       - name: Run planted journey
         id: journey
         continue-on-error: true
