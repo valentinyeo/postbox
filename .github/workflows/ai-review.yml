@@ -75,3 +75,13 @@ jobs:
           AI_REVIEW_HEAD_SHA: ${{ steps.pr.outputs.head }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: bash tools/ai-review.sh "$PR_NUMBER"
+
+      - name: Try to break the change
+        if: ${{ !cancelled() && steps.key.outputs.available == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BREAK_IT_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          BREAK_IT_MODELS: ${{ vars.BREAK_IT_MODELS }}
+          BREAK_IT_HEAD_SHA: ${{ steps.pr.outputs.head }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: python3 tools/break_it.py "$PR_NUMBER"

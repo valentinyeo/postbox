@@ -41,3 +41,4 @@
 | Each check still fails on the past commit it was written for | `tools/test-preflight-guard.sh`, `tools/test-lint-repeats.sh`, `tools/test-ci-green.sh` in CI |
 | New Actions run logs carry no private markers | `run-log-markers.yml` hourly, `tools/check_private_markers.py --logs` |
 | The video tool installs through one retrying script that fails when ffmpeg is missing (SOFT-2677) | `tools/test_install_ffmpeg.py` and `tools/verify-wazig/install-ffmpeg.ps1` |
+| Each same-repo PR gets a break-it verdict (PASS, PASS plus notes or FAIL) from a second model family, advisory like the AI review (SOFT-2597) | `tools/test_break_it.py` and the `Try to break the change` step in `.github/workflows/ai-review.yml` |
