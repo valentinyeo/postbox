@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import os
 import runpy
 from pathlib import Path
 import re
@@ -57,6 +58,14 @@ class FailureMarkerTests(unittest.TestCase):
         wrong = self.classify(1, 'search', expected)
         self.assertNotEqual(wrong.returncode, 0)
         self.assertIn('wrong check', wrong.stderr)
+
+    def test_marker_with_emoji_prints_on_a_legacy_console(self):
+        (self.evidence / 'journey-check-failed.txt').write_text('search: expected \U0001f602 received \U0001f622\n', encoding='utf-8')
+        env = {**os.environ, 'PYTHONIOENCODING': 'cp1252', 'PYTHONUTF8': '0'}
+        result = subprocess.run([sys.executable, str(TOOLS / 'classify_red.py'), '--feature', 'search', '--evidence', str(self.evidence), '--exit-code', '1'],
+                                capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('\\U0001f602', result.stdout)
 
     def test_every_planted_bug_names_the_check_it_breaks(self):
         for patch in (TOOLS / 'planted').glob('*.patch'):
