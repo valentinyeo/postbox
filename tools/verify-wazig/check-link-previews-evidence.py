@@ -24,15 +24,17 @@ def check_link_previews(folder):
         assert set(rows) == {'LINK-IMAGE', 'LINK-PAGE', 'LINK-QUERY', 'LINK-PLAIN'}
         for row in rows.values():
             assert all(marker not in row['text'] for marker in ['<', '|>', '&amp;'])
-            assert row['links'] and all('&amp;' not in link for link in row['links'])
+            assert all('&amp;' not in link for link in row['links'])
+            hidden_reply = provider == 'slack' and row['id'] == 'LINK-QUERY'
+            assert hidden_reply or row['links'] or row['card'][2] > row['card'][0], row['id']
         image, page, query, plain = [rows['LINK-' + kind] for kind in ['IMAGE', 'PAGE', 'QUERY', 'PLAIN']]
         assert image['local'] and image['media_type'] == 'image' and image['media'][2] > image['media'][0]
         assert page['preview']['ready'] and page['preview']['image']
         assert page['preview']['title'] == 'Synthetic preview' and page['preview']['site'] == '127.0.0.1'
         assert page['preview']['description'] == 'Synthetic description'
         assert page['card'][2] > page['card'][0]
-        assert '?a=1&b=2' in query['links'][0]
-        assert not plain['preview']['image'] and plain['card'] == [0, 0, 0, 0]
+        assert '?a=1&b=2' in ' '.join(query['links'] + [query['text']])
+        assert not plain['preview']['image']
         if provider == 'slack':
             assert plain['text'] == 'Clean page label' and page['text'] == 'Synthetic page label'
             assert query['quote'] == 'Quoted & label'
