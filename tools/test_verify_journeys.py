@@ -712,6 +712,51 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
             self.assertNotIn('unsupported archive settled', source)
 
 
+class InlineLinksChecksTests(unittest.TestCase):
+    def test_fixture_keeps_a_wrapped_body_url_after_the_preview_url(self):
+        tools = ROOT / 'tools/verify-wazig'
+        namespace = runpy.run_path(str(tools / 'fake-hub.py'))
+        handler_type = runpy.run_path(str(tools / 'inline-links-fixture.py'),
+                                     init_globals=namespace)['InlineLinksHandler']
+        handler = object.__new__(handler_type)
+        handler.server = unittest.mock.Mock(server_port=1234)
+        handler.authorized = unittest.mock.Mock(return_value=True)
+        handler.stamp = unittest.mock.Mock(return_value='2026-01-01T00:00:00Z')
+        handler.respond = unittest.mock.Mock()
+        for chat, _, provider, _ in handler.chats:
+            with self.subTest(provider=provider):
+                handler.path = '/v1/wazig/messages?chat=' + chat
+                handler.do_GET()
+                status, rows = handler.respond.call_args.args
+                self.assertEqual(status, 200)
+                body = next(row for row in rows if row['MsgID'] == 'INLINE-BODY')
+                prefix = 'http://127.0.0.1:1234/inline-links/' + provider
+                self.assertTrue(body['Text'].startswith('Synthetic text '))
+                self.assertEqual(re.findall(r'http://\S+', body['Text']),
+                                 [prefix + '-preview', prefix + '-body-' + 'abcdefghij' * 18])
+
+    def test_journey_accepts_search_and_positions_body_before_reading_rects(self):
+        source = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
+        case = source.split('foreach ($case in $cases) {', 1)[1]
+        steps = [
+            '"fixture $($case.provider) loaded"',
+            '[InlineLinksNative]::Press(0x0D)',
+            "ClassNameProperty, 'MessagesPalette'",
+            '$palettes.Count -eq 0',
+            "'inline chat search closed'",
+            '[InlineLinksNative]::Press(0x21)',
+            '$body.bubble[1] -ge 72',
+            '$body.link_rects.Count -gt 0',
+            '"fixture $($case.provider) painted"',
+            "Record-InlineStage $session @{ name=\"$($case.provider)-fixture\"; messages=$shown }",
+        ]
+        position = 0
+        for step in steps:
+            found = case.find(step, position)
+            self.assertNotEqual(found, -1, f'Missing or out-of-order inline journey step: {step}')
+            position = found + len(step)
+
+
 class ChatListAlignmentTests(unittest.TestCase):
     def test_hanging_indent_evidence_rejects_old_layout_and_weight(self):
         check = runpy.run_path(str(ROOT / 'tools/verify-wazig/evidence-chat-lists.py'), run_name='alignment_test')['check_alignment']

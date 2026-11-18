@@ -168,10 +168,18 @@ foreach ($case in $cases) {
         $shown = Read-Control $session messages
         $shown.chat.id -ceq $case.id -and @($shown.messages | Where-Object id -CEQ 'INLINE-REPLY').Count -eq 1
     } "fixture $($case.provider) loaded"
+    [InlineLinksNative]::Press(0x0D)
+    $null = Wait-Until {
+        $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MessagesPalette')
+        $palettes = (Get-Window $session).FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+        $palettes.Count -eq 0
+    } 'inline chat search closed'
+    [InlineLinksNative]::Press(0x21)
     $null = Wait-Until {
         $rows = (Read-Control $session messages).messages
+        $body = @($rows | Where-Object id -CEQ 'INLINE-BODY')[0]
         $reply = @($rows | Where-Object id -CEQ 'INLINE-REPLY')[0]
-        $reply.quote_fragments.Count -gt 0
+        $body.bubble[1] -ge 72 -and $body.link_rects.Count -gt 0 -and $reply.quote_fragments.Count -gt 0
     } "fixture $($case.provider) painted"
     $bodyUrl = "$($session.bridge_url)/inline-links/$($case.provider)-body-" + ('abcdefghij' * 18)
     $quoteUrl = "$($session.bridge_url)/inline-links/$($case.provider)-quote-" + ('klmnopqrst' * 18)
