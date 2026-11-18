@@ -13,6 +13,7 @@ DEFAULT_MODELS = (
     "moonshotai/kimi-k2-instruct-0905",
     "qwen/qwen3-32b",
     "meta-llama/llama-4-scout-17b-16e-instruct",
+    "openai/gpt-oss-120b",
 )
 API_URL = "https://api.groq.com/openai/v1/chat/completions"
 MAX_DIFF = 120000
@@ -81,7 +82,7 @@ def ask(models, system, user, key, post):
         try:
             reply = post(body, key)
         except (urllib.error.URLError, OSError, ValueError) as error:
-            errors.append(f"{model}: {type(error).__name__}")
+            errors.append(f"{model}: {type(error).__name__} {getattr(error, 'code', '')}".rstrip())
             continue
         verdict, notes = parse_verdict(reply)
         if verdict:
