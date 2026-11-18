@@ -40,3 +40,4 @@
 | Numeric literals in `draw*` and `paint*` functions in `src/main.zig` must not increase; put layout numbers in `src/box_layout.zig` or `src/quote_layout.zig` (SOFT-2508) | `tools/check-no-new-pixel-numbers.sh` and `tools/test-check-no-new-pixel-numbers.sh` |
 | Each check still fails on the past commit it was written for | `tools/test-preflight-guard.sh`, `tools/test-lint-repeats.sh`, `tools/test-ci-green.sh` in CI |
 | New Actions run logs carry no private markers | `run-log-markers.yml` hourly, `tools/check_private_markers.py --logs` |
+| The video tool installs through one retrying script that fails when ffmpeg is missing (SOFT-2677) | `tools/test_install_ffmpeg.py` and `tools/verify-wazig/install-ffmpeg.ps1` |
