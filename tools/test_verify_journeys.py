@@ -1023,6 +1023,12 @@ class InlineLinksChecksTests(unittest.TestCase):
         index = text.index('$bodyRects = @($body.link_rects[0]')
         self.assertLess(guard, index)
 
+    def test_body_links_are_awaited_before_the_body_row_is_read(self):
+        text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
+        wait = text.index("'fixture whatsapp body links painted'")
+        row = text.index("$body = Get-InlineRow $session 'INLINE-BODY'")
+        self.assertLess(wait, row)
+
 
 if __name__ == '__main__':
     unittest.main()

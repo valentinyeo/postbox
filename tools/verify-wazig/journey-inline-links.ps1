@@ -173,6 +173,12 @@ foreach ($case in $cases) {
         $reply = @($rows | Where-Object id -CEQ 'INLINE-REPLY')[0]
         $reply.quote_fragments.Count -gt 0
     } "fixture $($case.provider) painted"
+    if ($case.provider -ceq 'whatsapp') {
+        $null = Wait-Until {
+            $row = @((Read-Control $session messages).messages | Where-Object id -CEQ 'INLINE-BODY')[0]
+            $row -and @($row.link_rects).Count -gt 0
+        } 'fixture whatsapp body links painted'
+    }
     $bodyUrl = "$($session.bridge_url)/inline-links/$($case.provider)-body-" + ('abcdefghij' * 18)
     $quoteUrl = "$($session.bridge_url)/inline-links/$($case.provider)-quote-" + ('klmnopqrst' * 18)
     $fallbackUrl = "$($session.bridge_url)/inline-links/$($case.provider)-fallback-" + ('uvwxyzabcd' * 18)
