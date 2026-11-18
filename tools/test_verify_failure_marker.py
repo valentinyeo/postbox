@@ -1,5 +1,7 @@
 import copy
+import hashlib
 import json
+import runpy
 from pathlib import Path
 import re
 import shutil
@@ -133,6 +135,109 @@ function Get-App($Session) {
                 if expected:
                     name = 'playback advances' if case == 'check-wait' else 'Search order differs'
                     self.assertEqual(marker.read_text(encoding='utf-8-sig').strip(), f'search: {name}')
+
+
+class SidebarPlantedTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.evidence = Path(self.temp.name)
+        self.oracle = runpy.run_path(str(TOOLS / 'check-sidebar-surface.py'))
+
+    def fixture(self, width):
+        for folder, commit, sidebar in [(self.evidence, 'candidate', 24),
+                                        (self.evidence / 'baseline', 'historical', 0)]:
+            folder.mkdir(exist_ok=True)
+            image = [[(16, 16, 16)] * 900 for _ in range(320)]
+            for row in image:
+                row[:width] = [(sidebar,) * 3] * width
+                row[width] = (46,) * 3
+            for y in range(64, 74):
+                image[y][70:140] = [(242,) * 3] * 70
+            for y, shade in [(98, 36), (99, 36), (172, 32), (173, 32)]:
+                image[y][width + 209:width + 213] = [(shade,) * 3] * 4
+            self.oracle['PNG']['write_png'](folder / 'sidebar-amoled.png', image)
+            files = {
+                'session.json': dict(feature='sidebar-surface', commit=commit, sha256=commit),
+                'sidebar-layout.json': [dict(theme='amoled', dpi=96, client=[0, 0, 900, 320],
+                                             edge=width, canvas=[width + 1, 0, 899 - width, 320])],
+                'sidebar-amoled.messages.json': dict(messages=[dict(id='ISSUE-462-PARAGRAPH', bubble=[10, 90, 410, 180])]),
+                'side-effects.json': dict(sync='stopped', pending_sends=0, pending_archives=0,
+                                          production_preferences_absent=True, whatsapp_store_absent=True,
+                                          telegram_store_absent=True),
+            }
+            for name, data in files.items():
+                (folder / name).write_text(json.dumps(data))
+            (folder / 'result.txt').write_text('JOURNEY PASSED: sidebar-surface\n')
+            (folder / 'cleanup.txt').write_text('CLEANUP PASSED:\n')
+        provenance = dict(candidate_commit='candidate', baseline_commit='historical', assertion_parent='historical',
+                          candidate_sha256='candidate', baseline_sha256='historical',
+                          fixture_sha256=hashlib.sha256((ROOT / 'src/verify_text.json').read_bytes().replace(b'\r\n', b'\n')).hexdigest().upper())
+        (self.evidence / 'sidebar-builds.json').write_text(json.dumps(provenance))
+
+    def validate(self):
+        return subprocess.run([sys.executable, str(TOOLS / 'check-evidence.py'), str(self.evidence)],
+                              capture_output=True, text=True)
+
+    def classify(self, code):
+        return subprocess.run([sys.executable, str(TOOLS / 'classify_red.py'), '--feature', 'sidebar-surface',
+                               '--evidence', str(self.evidence), '--exit-code', str(code)],
+                              capture_output=True, text=True)
+
+    def test_clean_width_passes_without_failure_marker(self):
+        self.fixture(300)
+        result = self.validate()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.evidence / 'journey-check-failed.txt').exists())
+        self.assertNotEqual(self.classify(result.returncode).returncode, 0)
+
+    def test_wrong_width_is_an_expected_journey_red(self):
+        self.fixture(390)
+        result = self.validate()
+        self.assertNotEqual(result.returncode, 0)
+        classified = self.classify(result.returncode)
+        self.assertEqual(classified.returncode, 0, classified.stderr)
+        self.assertIn('sidebar-surface: ', classified.stdout)
+
+    def test_missing_baseline_is_not_an_expected_red(self):
+        self.fixture(300)
+        (self.evidence / 'baseline/session.json').unlink()
+        result = self.validate()
+        self.assertNotEqual(result.returncode, 0)
+        classified = self.classify(result.returncode)
+        self.assertNotEqual(classified.returncode, 0)
+        self.assertIn('no journey check failure marker', classified.stderr)
+
+    def test_bad_provenance_is_not_an_expected_red(self):
+        self.fixture(390)
+        (self.evidence / 'sidebar-builds.json').write_text('{}')
+        result = self.validate()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotEqual(self.classify(result.returncode).returncode, 0)
+        self.assertFalse((self.evidence / 'journey-check-failed.txt').exists())
+
+    def test_failed_cleanup_is_not_an_expected_red(self):
+        self.fixture(390)
+        (self.evidence / 'cleanup.txt').write_text('CLEANUP FAILED:\n')
+        result = self.validate()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotEqual(self.classify(result.returncode).returncode, 0)
+        self.assertFalse((self.evidence / 'journey-check-failed.txt').exists())
+
+    def test_planted_job_has_sidebar_baseline_and_validation(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())
+        planted = workflow['jobs']['planted']['steps']
+        checkout = next(step for step in planted if step.get('uses', '').startswith('actions/checkout@'))
+        self.assertEqual(checkout.get('with', {}).get('fetch-depth'), 0)
+        name = 'Build and capture the pre-change sidebar baseline'
+        baseline = next(step for step in planted if step.get('name') == name)
+        clean = next(step for step in workflow['jobs']['verify']['steps'] if step.get('name') == name)
+        self.assertEqual(baseline['if'], clean['if'])
+        self.assertEqual(baseline['run'].replace('planted-evidence', 'verification-evidence'), clean['run'])
+        drive = next(step for step in planted if step.get('id') == 'journey')['run']
+        self.assertIn("if ($code -eq 0 -and $env:FEATURE -eq 'sidebar-surface')", drive)
+        self.assertIn('python tools/verify-wazig/check-evidence.py planted-evidence', drive)
+        self.assertIn('"code=$code" >> $env:GITHUB_OUTPUT', drive)
 
 
 class VersionPinTests(unittest.TestCase):

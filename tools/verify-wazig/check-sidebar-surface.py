@@ -164,7 +164,6 @@ def check_sidebar_surface(folder):
     screenshot = 'sidebar-amoled.png'
     messages = read(folder / 'sidebar-amoled.messages.json')['messages']
     metrics = measure_design(PNG['read_png'](folder / screenshot)[2], layout, messages)
-    validate_design(metrics)
     old_image = PNG['read_png'](baseline / screenshot)[2]
     old_sidebar = mean(pixels(old_image, [old_layout['client'][0]+8, old_layout['client'][1]+136, old_layout['edge']-16, old_layout['client'][3]-8]))
     rejected = dict(metrics, sidebar=old_sidebar)
@@ -182,6 +181,11 @@ def check_sidebar_surface(folder):
         state = read(directory / 'side-effects.json')
         assert state['sync'] == 'stopped' and state['pending_sends'] == state['pending_archives'] == 0
         assert state['production_preferences_absent'] and state['whatsapp_store_absent'] and state['telegram_store_absent']
+    try:
+        validate_design(metrics)
+    except AssertionError:
+        (folder / 'journey-check-failed.txt').write_text('sidebar-surface: Sidebar design pixels differ from approved design\n', encoding='utf-8')
+        raise
     (folder / 'sidebar-pixels.json').write_text(json.dumps(metrics, indent=2) + '\n')
     print('GRAPHITE DESIGN VERIFIED: palette, 300px sidebar, 56px rows, readable text, bounded gradient bubble; historical design rejected')
     return metrics
