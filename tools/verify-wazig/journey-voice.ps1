@@ -1,3 +1,4 @@
+. "$PSScriptRoot/real-size-background.ps1"
 if ($env:VOICE_LANGUAGE_RESULTS) {
     . "$PSScriptRoot/journey-voice-language.ps1"
 } else {

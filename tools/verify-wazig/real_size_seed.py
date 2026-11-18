@@ -1,5 +1,15 @@
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
+from pathlib import Path
+import re
+
+
+def count_rows(chats, messages):
+    return dict(chats=len(chats), messages=sum(map(len, messages.values())),
+                voice=sum(row.get('MediaType') == 'audio' for rows in messages.values() for row in rows),
+                images=sum(row.get('MediaType') == 'image' for rows in messages.values() for row in rows),
+                groups=sum(chat['provider'] == 'whatsapp' and chat['kind'] == 'group' for chat in chats))
 
 
 CHATS = []
@@ -42,10 +52,7 @@ for index in range(320):
                       last_message_ts=rows[-1]['Timestamp'], unread_count=3 if index % 6 == 0 else 0,
                       unread=index % 6 == 0, archived=280 <= index < 300))
 
-COUNTS = dict(chats=len(CHATS), messages=sum(map(len, MESSAGES.values())),
-              voice=sum(row.get('MediaType') == 'audio' for rows in MESSAGES.values() for row in rows),
-              images=sum(row.get('MediaType') == 'image' for rows in MESSAGES.values() for row in rows),
-              groups=sum(chat['provider'] == 'whatsapp' and chat['kind'] == 'group' for chat in CHATS))
+COUNTS = count_rows(CHATS, MESSAGES)
 BUSY = max(MESSAGES, key=lambda chat: len(MESSAGES[chat]))
 VOICE = CHATS[1]['jid']
 GROUP = CHATS[272]['jid']
@@ -54,6 +61,52 @@ ARCHIVED = [chat for chat in CHATS if chat['archived']]
 SEARCH = [chat for chat in INBOX if 'orchard' in chat['name'].lower()]
 MANIFEST = dict(counts=COUNTS, inbox=len(INBOX), archived=len(ARCHIVED), busy=BUSY, voice=VOICE,
                 group=GROUP, busy_messages=len(MESSAGES[BUSY]), search='Orchard', search_count=len(SEARCH))
+
+
+def merge_background(chats, messages):
+    added_chats, added_messages = [], {}
+    used = {row['jid'] for row in chats} | messages.keys()
+    offset = END - datetime(2020, 1, 1, tzinfo=timezone.utc)
+    for index, source in enumerate(CHATS):
+        chat = deepcopy(source)
+        jid = (f'slack:TLOAD:C{index:010}' if chat['provider'] == 'slack' else
+               f'load:1666000{index:04}{"@g.us" if chat["kind"] == "group" else "@s.whatsapp.net"}')
+        if jid in used:
+            raise ValueError(f'Background jid collision: {jid}')
+        rows = deepcopy(MESSAGES[source['jid']])
+        for number, row in enumerate(rows):
+            row.update(MsgID=f'LOAD-{index:03}-{number:04}', ChatJID=jid,
+                       Timestamp=(datetime.fromisoformat(row['Timestamp']) - offset).isoformat().replace('+00:00', 'Z'),
+                       SenderName=f'Load Sender {number % 4 + 1:02}', SenderJID=f'load-sender-{number % 4 + 1}')
+            text = '' if 'MediaType' in row else f'Load {index:03}/{number:04}'
+            row.update(Text=text, DisplayText=text)
+            if 'Filename' in row:
+                row['Filename'] = 'load' + Path(row['Filename']).suffix
+            if 'quoted_msg_id' in row:
+                row.update(quoted_msg_id=rows[number - 1]['MsgID'], quoted_sender_jid=rows[number - 1]['SenderJID'],
+                           DisplayText='> ' + rows[number - 1]['Text'] + '\n' + text)
+        chat.update(jid=jid, account='TLOAD' if chat['provider'] == 'slack' else 'load',
+                    name=f'Load {index:03}', last_message_ts=rows[-1]['Timestamp'], unread=False, unread_count=0)
+        added_chats.append(chat)
+        added_messages[jid] = rows
+    return chats + added_chats, messages | added_messages
+
+
+def check_background_size(folder):
+    folder = Path(folder)
+    log = (folder / 'run.log').read_text(encoding='utf-8-sig')
+    for key, minimum in dict(chats=300, messages=6000).items():
+        assert COUNTS[key] >= minimum, f'Real-size seed shrank: {key}={COUNTS[key]}, minimum={minimum}'
+    for key, value in COUNTS.items():
+        found = re.findall(rf'\bseeded_{key}=(\d+)\b', log)
+        assert found == [str(value)], f'Real-size seeded_{key}: logged {found}, expected {value}'
+    counts = json.loads((folder / 'seed.json').read_text(encoding='utf-8-sig'))
+    assert counts == COUNTS, 'Real-size background counts differ from seed'
+    expected, _ = merge_background([], {})
+    inbox = {row['jid'] for row in expected if not row['archived']}
+    shown = json.loads((folder / 'before.chats.json').read_text(encoding='utf-8-sig'))
+    ids = [row['id'] for row in shown['chats']]
+    assert shown['total'] == len(ids) == len(set(ids)) and inbox <= set(ids), 'Real-size background chats missing from app'
 
 
 if __name__ == '__main__':

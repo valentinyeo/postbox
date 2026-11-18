@@ -1,3 +1,4 @@
+. "$PSScriptRoot/real-size-background.ps1"
 . "$PSScriptRoot/menus.ps1"
 
 function Click-ReplyRect($Session, $Handle, $Rect, [bool]$Right = $false) {

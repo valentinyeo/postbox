@@ -1,3 +1,4 @@
+. "$PSScriptRoot/real-size-background.ps1"
 . "$PSScriptRoot/search-proof.ps1"
 $queryPath = Join-Path $PSScriptRoot 'search-queries.json'
 Copy-Item $queryPath (Join-Path $Evidence 'search-queries.json')
@@ -46,3 +47,4 @@ Assert-That ([Math]::Abs($removal.list_top - $removal.client_top) -le 1) 'Search
 Assert-PaletteSearchShortcuts $session
 Save-PaletteArchiveInk $session
 . "$PSScriptRoot/journey-palette.ps1"
+Read-Control $session chats | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'after.chats.json')

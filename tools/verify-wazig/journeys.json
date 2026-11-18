@@ -58,7 +58,7 @@
       "pr": true,
       "hub": "search",
       "evidence": true,
-      "chats": 6,
+      "chats": 306,
       "script": "journey-search.ps1",
       "validator": {
         "file": "check-search-evidence.py",
@@ -713,7 +713,7 @@
       "pr": true,
       "hub": "voice",
       "evidence": true,
-      "chats": 2,
+      "chats": 302,
       "script": "journey-voice.ps1",
       "validator": {
         "file": "evidence-voice.py"
@@ -857,7 +857,7 @@
       "pr": true,
       "hub": "reply",
       "evidence": true,
-      "chats": 2,
+      "chats": 302,
       "script": "journey-reply.ps1",
       "validator": {
         "file": "check-reply-evidence.py",

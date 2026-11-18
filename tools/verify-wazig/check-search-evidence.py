@@ -154,6 +154,7 @@ def compare(baseline, fixed):
 
 
 def check_evidence(folder):
+    runpy.run_path(str(HERE / 'real_size_seed.py'))['check_background_size'](folder)
     fixture, data, ordered = load_parity(folder, True)
     check_removal(read(folder, 'search-removal.json'))
     check_shortcuts(read(folder, 'search-shortcuts.json'))
@@ -168,7 +169,7 @@ def check_evidence(folder):
     before = read(folder, 'before.state.json')
     matched = read(folder, 'search-match.state.json')
     empty = read(folder, 'empty.state.json')
-    assert before['chat_count'] == 6 and before['search'] == ''
+    assert before['search'] == ''
     assert matched['chat_count'] == 1 and matched['search'] == 'Beta' and matched['selected']['name'] == 'Verification Beta'
     assert empty['chat_count'] == 0 and empty['search'] == 'NoSuchFixture'
     for stage in ('before', 'search-match', 'empty', 'search-archive', 'search-groups', 'removed-status', 'action', 'after'):
@@ -181,7 +182,15 @@ def check_evidence(folder):
         assert tree.splitlines()[0].startswith('MessagesZig | ') and '\n1008 |' not in tree
     final = read(folder, 'side-effects.json')
     assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
-    assert final['chat_count'] == 6 and final['search'] == '' and final['pending_sends'] == final['pending_archives'] == 0
+    assert final['search'] == '' and final['pending_sends'] == final['pending_archives'] == 0
+    known = {row['jid'] for row in fixture['rows']}
+    expected = {row['jid'] for row in fixture['rows'] if not row['archived']}
+    for phase, state in [('before', before), ('after', final)]:
+        shown = read(folder, f'{phase}.chats.json')
+        rows = shown['chats']
+        own = [row['id'] for row in rows if row['id'] in known]
+        assert len(own) == len(expected) == 6 and set(own) == expected, 'Search fixture chats changed'
+        assert state['chat_count'] == shown['total'] == len(rows)
     assert final['sync'] == 'stopped'
     guards = (folder / 'launch-guards.log').read_text(encoding='utf-8-sig')
     assert 'REJECTED: not-actions' in guards and 'REJECTED: not-isolated' in guards

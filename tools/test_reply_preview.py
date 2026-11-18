@@ -13,6 +13,12 @@ class ReplyEvidenceTests(unittest.TestCase):
         def write(name, value):
             (root / name).write_text(json.dumps(value))
 
+        seed = runpy.run_path(str(Path(__file__).parent / 'verify-wazig/real_size_seed.py'))
+        chats, _ = seed['merge_background']([], {})
+        inbox = [dict(id=row['jid']) for row in chats if not row['archived']]
+        write('before.chats.json', dict(total=len(inbox), chats=inbox))
+        write('seed.json', seed['COUNTS'])
+        (root / 'run.log').write_text(' '.join(f'seeded_{key}={value}' for key, value in seed['COUNTS'].items()))
         write('session.json', dict(sha256='fixture-binary', commit='fixture-commit'))
         write('result.json', dict(feature='reply', status='passed'))
         write('side-effects.json', dict(pending_sends=0, pending_archives=0,
@@ -50,6 +56,7 @@ class ReplyEvidenceTests(unittest.TestCase):
     def test_rejects_missing_preview_wrong_target_and_inside_bubble(self):
         for name, change in [
             ('whatsapp-replying.state.json', lambda row: row['reply'].update(id='')),
+            ('whatsapp-replying.state.json', lambda row: row['reply'].update(preview='')),
             ('slack-sent.messages.json', lambda row: row['messages'][0].update(quoted_msg_id='wrong')),
             ('slack-threaded.state.json', lambda row: row['slack_threads'].update(inline_replies=1)),
             ('slack-thread.state.json', lambda row: row['slack_threads'].update(replies=0)),
