@@ -52,6 +52,14 @@ expect "red check overrides behind main" 'skip (required checks not green: ci)' 
     "$(echo "$base_info" | jq -c '(.statusCheckRollup[] | select(.name == "ci")) |= (.conclusion = "FAILURE")')" "$base_files" 1
 expect "missing required check still refused" 'skip (required checks not green: tdlib)' \
     "$(echo "$base_info" | jq -c '.statusCheckRollup |= map(select(.name != "tdlib"))')" "$base_files" 0
+for verdict in FAILURE CANCELLED SKIPPED; do
+    expect "$verdict verifier verdict blocks" 'skip (required checks not green: verify-verdict)' \
+        "$(echo "$base_info" | jq -c --arg verdict "$verdict" '(.statusCheckRollup[] | select(.name == "verify-verdict")) |= (.conclusion = $verdict)')" "$base_files" 0
+done
+expect "missing verifier verdict blocks" 'skip (required checks not green: verify-verdict)' \
+    "$(echo "$base_info" | jq -c '.statusCheckRollup |= map(select(.name != "verify-verdict"))')" "$base_files" 0
+expect "pending verifier verdict blocks" 'skip (required checks not green: verify-verdict)' \
+    "$(echo "$base_info" | jq -c '(.statusCheckRollup[] | select(.name == "verify-verdict")) |= (.status = "IN_PROGRESS")')" "$base_files" 0
 expect "gating workflow edit still refused" 'skip (edits a release-gating workflow, needs manual review)' \
     "$base_info" '[".github/workflows/ci.yml"]' 0
 expect "unlisted files still refused" 'skip (could not list PR files)' "$base_info" "" 0
