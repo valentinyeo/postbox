@@ -61,7 +61,7 @@ function Assert-That($Condition, [string]$Message, [switch]$Harness, [string]$Ch
     if ($Condition) { return }
     $failure = [Exception]::new($Message)
     if ($script:JourneyCheckSession -and -not $Harness) {
-        $null = Get-App $script:JourneyCheckSession
+        try { $null = Get-App $script:JourneyCheckSession } catch { throw [Exception]::new("$Message; app lookup failed: $($_.Exception.Message)") }
         $script:JourneyCheckFailure = $failure
         "$($script:JourneyCheckSession.feature): $CheckName" | Set-Content -LiteralPath (Join-Path $script:JourneyCheckSession.evidence 'journey-check-failed.txt')
     }
