@@ -1,0 +1,12 @@
+diff --git a/src/theme.zig b/src/theme.zig
+--- a/src/theme.zig
++++ b/src/theme.zig
+@@ -93,7 +93,7 @@
+ pub const radius_code: i32 = 8;
+ pub const radius_inline: i32 = 4;
+ pub const selected_row_radius: i32 = design.row_radius;
+-pub const sidebar_width: i32 = 300;
++pub const sidebar_width: i32 = 390;
+ pub const chat_column_width: i32 = design.column_width;
+ pub const bubble_max_width: i32 = @divTrunc(design.column_width * 6, 10);
+ pub const chat_row_height: i32 = 56;
