@@ -102,7 +102,7 @@ def http_post(body, key):
     request = urllib.request.Request(
         API_URL,
         data=json.dumps(body).encode(),
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json", "User-Agent": "postbox-break-it/1"},
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=180) as response:

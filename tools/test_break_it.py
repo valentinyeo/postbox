@@ -1,4 +1,5 @@
 import unittest
+import unittest.mock
 import urllib.error
 from pathlib import Path
 
@@ -43,6 +44,27 @@ class AskTests(unittest.TestCase):
 
         _, _, _, errors = break_it.ask(["a"], "s", "u", "k", post)
         self.assertEqual(errors, ["a: HTTPError 404"])
+
+    def test_request_names_the_client_instead_of_the_default_agent(self):
+        seen = {}
+
+        class Reply:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b'{"choices":[{"message":{"content":"PASS"}}]}'
+
+        def opener(request, timeout):
+            seen.update({k.lower(): v for k, v in request.header_items()})
+            return Reply()
+
+        with unittest.mock.patch("urllib.request.urlopen", opener):
+            break_it.http_post({}, "k")
+        self.assertEqual(seen["user-agent"], "postbox-break-it/1")
 
     def test_known_working_model_is_a_fallback(self):
         self.assertIn("openai/gpt-oss-120b", break_it.DEFAULT_MODELS)
