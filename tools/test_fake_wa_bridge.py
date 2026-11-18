@@ -3,6 +3,7 @@ from http.server import ThreadingHTTPServer
 import hashlib
 import importlib.util
 import json
+import re
 import runpy
 from pathlib import Path
 import tempfile
@@ -251,6 +252,21 @@ class FakeHubArchiveGroupTests(unittest.TestCase):
         self.request('POST', '/fixture/phone-unarchive', {})
         self.assertIn(chat, self.jids('false'))
         self.assertNotIn(chat, self.jids('true'))
+
+    def test_journey_migration_seed_has_no_newer_provider_activity(self):
+        journey = (ROOT / 'tools/verify-wazig/hub-archive.ps1').read_text()
+        seed = re.search(r'"\$script:PlainReacted`t0`t([^"]+)" \| Add-Content', journey)
+        self.assertIsNotNone(seed)
+        baseline = seed.group(1)
+        self.request('POST', '/fixture/plain-dms', {})
+        chat = self.module.PLAIN_REACTED
+        row = next(row for row in self.request('GET', '/v1/wazig/chats?archived=false') if row['jid'] == chat)
+        self.assertFalse(row['archived'])
+        self.assertGreaterEqual(baseline, row['last_message_ts'])
+        messages = self.request('GET', '/v1/wazig/messages?chat=' + quote(chat))
+        self.assertTrue(messages)
+        for message in messages:
+            self.assertGreaterEqual(baseline, message['Timestamp'])
 
     def test_plain_direct_chats_gain_a_later_reaction_or_only_a_later_row_time(self):
         reacted, newer = self.module.PLAIN_REACTED, self.module.PLAIN_NEWER
