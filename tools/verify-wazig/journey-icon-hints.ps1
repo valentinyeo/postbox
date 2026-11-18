@@ -280,7 +280,7 @@ function Invoke-IconIsolated([string]$Name, [bool]$UseHub) {
     $caseSession = [pscustomobject]@{ id = $caseId; pid = $child.Id; startTicks = $child.StartTime.ToUniversalTime().Ticks.ToString(); root = $caseRoot; evidence = $caseEvidence; exe = $session.exe; ctl = $session.ctl; username = "verify-$caseId"; sha256 = $session.sha256; commit = $session.commit; feature = $session.feature; expected_version = $session.expected_version; expected_product = $session.expected_product }
     $caseSession | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $caseEvidence 'session.json')
     try {
-        $null = Wait-Until { $child.Refresh(); if ($child.HasExited) { throw 'Isolated app exited' }; $child.MainWindowHandle -ne [IntPtr]::Zero } "$Name window"
+        $null = Wait-Until { $child.Refresh(); if ($child.HasExited) { throw 'Isolated app exited' }; $child.MainWindowHandle -ne [IntPtr]::Zero } "$Name window" -Harness
         [VerifyWindow]::ShowWindow($child.MainWindowHandle, 3) | Out-Null
         [VerifyWindow]::SetForegroundWindow($child.MainWindowHandle) | Out-Null
         $session = $caseSession

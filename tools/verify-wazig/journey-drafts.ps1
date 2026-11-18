@@ -47,7 +47,7 @@ try {
     if (-not $recorder.HasExited) { $recorder.StandardInput.WriteLine('q') }
     if (-not $recorder.WaitForExit(10000)) { $recorder.Kill(); throw 'Typing recorder did not finish' }
     $recorder.StandardError.ReadToEnd() | Set-Content (Join-Path $Evidence 'typing-recorder.log')
-    Assert-That ($recorder.ExitCode -eq 0) 'Typing recording failed'
+    Assert-That ($recorder.ExitCode -eq 0) 'Typing recording failed' -Harness
 }
 Send-Keys $session '^a{BACKSPACE}'
 Send-Keys $session 'Draft probe'
