@@ -121,7 +121,7 @@ $session.pid = $app.Id
 $session.startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
 $session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'session.json')
 @{ old_pid = $oldPid; old_start = $oldTicks; new_pid = $session.pid; new_start = $session.startTicks; root = $session.root; id = $session.id; sha256 = $session.sha256 } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'font-restart.json')
-$null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw 'font fixture exited after restart' }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'font fixture restarted'
+$null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw 'font fixture exited after restart' }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'font fixture restarted' -Harness
 $null = Wait-Until { (Read-Control $session status).chat_count -eq 3 } 'font fixture chats restored'
 Invoke-Doctor $session | Out-Null
 [VerifyWindow]::ShowWindow($app.MainWindowHandle, 9) | Out-Null

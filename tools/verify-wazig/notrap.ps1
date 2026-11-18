@@ -169,7 +169,7 @@ function Invoke-NotrapJourney($Session) {
             $size = "{0}x{1}" -f $captureWidth, $captureHeight
             $arguments = @('-y', '-f', 'gdigrab', '-framerate', '5', '-offset_x', $captureX, '-offset_y', $captureY, '-video_size', $size, '-i', 'desktop', '-t', '20', '-an', '-c:v', 'mpeg4', '-q:v', '5', "`"$video`"")
             $recorder = Start-Process -FilePath $ffmpeg.Source -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $Session.evidence 'ticketProof-ffmpeg.log')
-            $null = Wait-Until { (Test-Path $video) -and (Get-Item $video).Length -gt 0 } 'fixture recorder started'
+            $null = Wait-Until { (Test-Path $video) -and (Get-Item $video).Length -gt 0 } 'fixture recorder started' -Harness
             $recordStarted = [DateTime]::UtcNow.ToString('o')
         } else {
             $frameDir = Join-Path $Session.evidence 'ticketProof-frames'
@@ -196,7 +196,7 @@ function Invoke-NotrapJourney($Session) {
                 }
                 @{ mode = 'frames'; width = $width; height = $height; fps = 5; frames = $frames } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path (Split-Path $frameDir) 'ticketProof-capture.json')
             }
-            $null = Wait-Until { Test-Path (Join-Path $frameDir 'frame-000.png') } 'fixture frame recorder started'
+            $null = Wait-Until { Test-Path (Join-Path $frameDir 'frame-000.png') } 'fixture frame recorder started' -Harness
         }
         $ledger = @()
         foreach ($demo in @(@('%2', 1), @('%3', 2), @('%1', 0), @('%i', 0), @('gi', 0))) {
@@ -214,14 +214,14 @@ function Invoke-NotrapJourney($Session) {
         $ledger | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'ticketProof.json')
         if ($recorder) {
             $recorder.Refresh()
-            Assert-That (-not $recorder.HasExited) 'Recording ended before shortcut demonstration'
+            Assert-That (-not $recorder.HasExited) 'Recording ended before shortcut demonstration' -Harness
             Wait-Process -Id $recorder.Id -Timeout 30 -ErrorAction Stop
             $recorder.Refresh()
-            Assert-That ($recorder.ExitCode -eq 0 -and (Test-Path $video) -and (Get-Item $video).Length -gt 10000) 'Fixture recording failed'
+            Assert-That ($recorder.ExitCode -eq 0 -and (Test-Path $video) -and (Get-Item $video).Length -gt 10000) 'Fixture recording failed' -Harness
             @{ mode = 'video'; width = $captureWidth; height = $captureHeight; fps = 5; started = $recordStarted; finished = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'ticketProof-capture.json')
         } else {
             $null = Wait-Job -Job $captureJob -Timeout 35
-            Assert-That ($captureJob.State -eq 'Completed') 'Fixture frame recording failed or timed out'
+            Assert-That ($captureJob.State -eq 'Completed') 'Fixture frame recording failed or timed out' -Harness
             Receive-Job -Job $captureJob -ErrorAction Stop | Out-Null
         }
     } finally {

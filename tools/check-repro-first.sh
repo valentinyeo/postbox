@@ -24,5 +24,5 @@ if re.fullmatch(r'none,\s*[^\s,][^,]*', value, re.I):
     if paths and not any(p.startswith(('src/', 'tools/verify-wazig/')) for p in paths):
         print('none')
         sys.exit(0)
-sys.exit('repro-first: name a registered journey, or use Repro: none, <reason> for changes outside src and tools/verify-wazig')
+sys.exit(f'repro-first: unknown or invalid journey {value!r}. Valid journeys: {", ".join(sorted(journeys))}. Use Repro: none, <reason> only for changes outside src and tools/verify-wazig')
 PY

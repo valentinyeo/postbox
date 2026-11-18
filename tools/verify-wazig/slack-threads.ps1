@@ -44,7 +44,7 @@ function Invoke-SlackThreadsJourney($Session, $Start) {
     $Session.startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
     $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'session.json')
     @{ old_pid = $oldPid; old_start = $oldTicks; new_pid = $Session.pid; new_start = $Session.startTicks; root = $Session.root; id = $Session.id; sha256 = $Session.sha256 } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'restart.json')
-    $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted fixture window'
+    $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted fixture window' -Harness
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
     Send-Keys $Session '%2'
     $null = Wait-Until { $thread = (Read-Control $Session status).slack_threads; $thread.threads_option -eq 'off' -and $thread.inline_replies -eq 32 } 'account option survived same-profile restart'

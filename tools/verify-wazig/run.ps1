@@ -6,6 +6,11 @@ param(
     [string]$ExpectedProduct = 'Postbox',
     [switch]$FontBaseline
 )
+$ErrorActionPreference = 'Stop'
+$script:JourneyCheckSession = $null
+$script:JourneyCheckFailure = $null
+$checkMarker = Join-Path $Evidence 'journey-check-failed.txt'
+if (Test-Path -LiteralPath $checkMarker) { Remove-Item -LiteralPath $checkMarker -Force }
 . "$PSScriptRoot/harness.ps1"
 Assert-That ($ExpectedProduct -in @('Postbox', 'Wazig')) 'Unknown product identity'
 $historicalFeature = $Feature -cin @('hub-rollback', 'appearance')
@@ -116,7 +121,7 @@ if ($null -ne $bridge) {
 $session | ConvertTo-Json | Set-Content (Join-Path $Evidence 'session.json')
 $session = Read-Session $Evidence
 try {
-    $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window'
+    $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw "App exited: $($app.ExitCode)" }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'main window' -Harness
     if ($journey.maximize) { [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null }
     if ($null -ne $journey.chats) {
         $null = Wait-Until { (Read-Control $session status).chat_count -eq $journey.chats } 'hub chat list'
@@ -127,11 +132,17 @@ try {
     $window = Get-Window $session
     $compose = Get-Edit $window '1032'
     Save-Screen $session before
-    if ($FontBaseline) {
-        . (Join-Path $PSScriptRoot 'font-baseline.ps1')
-    } else {
-        . (Join-Path $PSScriptRoot $journey.script)
+    try {
+        if ($FontBaseline) {
+            . (Join-Path $PSScriptRoot 'font-baseline.ps1')
+        } else {
+            $script:JourneyCheckSession = $session
+            . (Join-Path $PSScriptRoot $journey.script)
+        }
+    } finally {
+        $script:JourneyCheckSession = $null
     }
+    if (Test-Path -LiteralPath $checkMarker) { Remove-Item -LiteralPath $checkMarker -Force }
     $final = Read-Control $session status
     Assert-That ($final.pending_sends -eq 0 -and $final.pending_archives -eq 0 -and $final.sync -eq 'stopped') 'Unexpected transport side effect'
     Assert-That (-not (Test-Path (Join-Path $profile '.wacli'))) 'Provider store was created'
@@ -156,6 +167,9 @@ try {
         "JOURNEY PASSED: $Feature" | Set-Content (Join-Path $Evidence 'result.txt')
     }
 } catch {
+    if (-not [object]::ReferenceEquals($_.Exception, $script:JourneyCheckFailure) -and (Test-Path -LiteralPath $checkMarker)) {
+        Remove-Item -LiteralPath $checkMarker -Force
+    }
     "${Feature}: $($_.Exception.Message)" | Set-Content (Join-Path $Evidence 'failure.txt')
     try { Save-Screen $session failure } catch { $_ | Out-String | Add-Content (Join-Path $Evidence 'failure.txt') }
     throw

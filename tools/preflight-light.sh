@@ -42,6 +42,7 @@ PYTHON_LIGHT_TESTS=(
     test_tdlib_release
     test_transcript_copy
     test_update_cards
+    test_verify_failure_marker
     test_verify_journeys
     test_voice_language
     test_wait_message
@@ -63,6 +64,7 @@ run bash tools/test-check-required-checks.sh
 run bash tools/check-feature-map.sh .
 run bash tools/test-check-feature-map.sh
 run bash tools/test-check-pr-proof.sh
+run bash tools/test-check-repro-first.sh
 run bash tools/check-no-source-text-tests.sh .
 run bash tools/check-no-empty-catch.sh .
 run bash tools/check-no-new-pixel-numbers.sh .

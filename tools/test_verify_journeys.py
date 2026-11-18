@@ -87,6 +87,20 @@ class JourneyRegistryTests(unittest.TestCase):
         self.assertEqual(outputs['needed'], 'true')
         names = {row['feature'] for row in json.loads(outputs['matrix'])['include']}
         self.assertEqual(names, {'search', 'voice', 'reply', 'paste-image', 'caret'})
+        for body in ('Repro: unknown-journey', '', 'Repro: search\nRepro: voice', 'Repro: none, scripts only'):
+            with self.subTest(body=body):
+                event.write_text(json.dumps({'pull_request': {'title': 'fix: repair search', 'body': body}}))
+                output.write_text('')
+                result = subprocess.run([sys.executable, '-c', step['run']], cwd=self.root, capture_output=True,
+                                        text=True, env=env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                outputs = dict(line.split('=', 1) for line in output.read_text().splitlines())
+                self.assertEqual(outputs['repro'], '')
+                self.assertEqual(outputs['needed'], 'true')
+                self.assertEqual({row['feature'] for row in json.loads(outputs['matrix'])['include']},
+                                 {'search', 'voice', 'reply', 'paste-image'})
+                self.assertNotIn('Traceback', result.stderr)
+        event.write_text(json.dumps({'pull_request': {'title': 'fix: repair search', 'body': 'Repro: caret'}}))
         mapping_path = self.tools / 'pr-journeys.json'
         mapping = json.loads(mapping_path.read_text())
         mapping['max_journeys'] = 3
@@ -246,7 +260,7 @@ class JourneyRegistryTests(unittest.TestCase):
                 self.assertIn('hand-maintained journey table', self.check_map().stderr)
                 path.write_text(original)
 
-    def test_base_repro_requires_started_journey_and_failure(self):
+    def test_base_repro_uses_marker_classifier(self):
         run = (self.tools / 'run.ps1').read_text()
         doctor = run.index('    Invoke-Doctor $session\n')
         marker = run.index("    'JOURNEY STARTED' | Set-Content (Join-Path $Evidence 'journey-started.txt')\n")
@@ -256,11 +270,8 @@ class JourneyRegistryTests(unittest.TestCase):
         script = step['run']
         self.assertIn('tools/verify-wazig/classify-red.ps1', script)
         classifier = (self.tools / 'classify-red.ps1').read_text()
-        for expected in ['journey-started.txt', 'failure.txt', '$ExitCode -eq 0',
-                         'App exited', 'Unknown verification journey', 'Hosted runner',
-                         'Verification runs only', 'Timed out:', 'Write-Host $failure']:
-            with self.subTest(expected=expected):
-                self.assertIn(expected, classifier)
+        self.assertIn('classify_red.py', classifier)
+        self.assertIn('$LASTEXITCODE -ne 0', classifier)
         self.assertIn('exit 0', script)
 
     def test_plan_yaml_and_nightly_matrix(self):

@@ -55,7 +55,7 @@ function Invoke-SlackArchiveJourney($Session, [string]$Messages, $Start) {
     $Session.startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
     $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'session.json')
     @{ old_pid = $oldPid; old_start = $oldTicks; new_pid = $Session.pid; new_start = $Session.startTicks; root = $Session.root; id = $Session.id; sha256 = $Session.sha256 } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'restart.json')
-    $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted Slack archive fixture'
+    $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted Slack archive fixture' -Harness
     $null = Get-App $Session
     $null = Assert-That ($app.MainWindowHandle -eq [IntPtr](Get-Window $Session).Current.NativeWindowHandle) 'Restarted process main window does not match owned app window'
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null

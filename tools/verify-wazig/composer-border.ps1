@@ -56,7 +56,7 @@ function Invoke-ComposerBorderJourney($Session, $Start, $App) {
         $Session.pid = $App.Id
         $Session.startTicks = $App.StartTime.ToUniversalTime().Ticks.ToString()
         $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'session.json')
-        $null = Wait-Until { $App.Refresh(); if ($App.HasExited) { throw 'composer border fixture exited' }; $App.MainWindowHandle -ne [IntPtr]::Zero } 'composer border restarted window'
+        $null = Wait-Until { $App.Refresh(); if ($App.HasExited) { throw 'composer border fixture exited' }; $App.MainWindowHandle -ne [IntPtr]::Zero } 'composer border restarted window' -Harness
         Invoke-Doctor $Session | Out-Null
         Invoke-PaletteCommand $Session 'Compose message'
         $window = Get-Window $Session

@@ -46,7 +46,7 @@ function Restart-IdentityApp($Session) {
     $Session.pid = $newApp.Id
     $Session.startTicks = $newApp.StartTime.ToUniversalTime().Ticks.ToString()
     $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'session.json')
-    $null = Wait-Until { $newApp.Refresh(); $newApp.MainWindowHandle -ne [IntPtr]::Zero } 'identity restart window'
+    $null = Wait-Until { $newApp.Refresh(); $newApp.MainWindowHandle -ne [IntPtr]::Zero } 'identity restart window' -Harness
     [VerifyWindow]::ShowWindow($newApp.MainWindowHandle, 3) | Out-Null
     $null = Wait-Until {
         try {
