@@ -43,7 +43,7 @@ function Restart-FaultApp($Session, [string]$Transition, [string]$Attempt) {
     $Session.pid = $new.Id
     $Session.startTicks = $new.StartTime.ToUniversalTime().Ticks.ToString()
     $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'session.json')
-    $null = Wait-Until { $new.Refresh(); $new.MainWindowHandle -ne [IntPtr]::Zero } 'fault journey restart window'
+    $null = Wait-Until { $new.Refresh(); $new.MainWindowHandle -ne [IntPtr]::Zero } 'fault journey restart window' -Harness
     [VerifyWindow]::ShowWindow($new.MainWindowHandle, 3) | Out-Null
     $null = Wait-Until {
         try {
