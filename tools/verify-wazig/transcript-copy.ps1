@@ -67,8 +67,8 @@ function Invoke-TranscriptCopyJourney($Session, [string]$Messages) {
     foreach ($argument in @('-NoProfile', '-STA', '-File', (Join-Path $PSScriptRoot 'paste-transcripts.ps1'), '-Evidence', $Session.evidence)) { $paste.ArgumentList.Add($argument) }
     $child = [Diagnostics.Process]::Start($paste)
     try {
-        Assert-That ($child.WaitForExit(20000)) 'Separate paste app timed out'
-        Assert-That ($child.ExitCode -eq 0) 'Separate paste app failed'
+        Assert-That ($child.WaitForExit(20000)) 'Separate paste app timed out' -Harness
+        Assert-That ($child.ExitCode -eq 0) 'Separate paste app failed' -Harness
     } finally {
         if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
         $child.Dispose()

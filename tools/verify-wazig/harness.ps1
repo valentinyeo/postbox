@@ -57,11 +57,18 @@ function Get-AttachmentPicker($Session) {
     return $null
 }
 
-function Assert-That($Condition, [string]$Message) {
-    if (-not $Condition) { throw $Message }
+function Assert-That($Condition, [string]$Message, [switch]$Harness, [string]$CheckName = $Message) {
+    if ($Condition) { return }
+    $failure = [Exception]::new($Message)
+    if ($script:JourneyCheckSession -and -not $Harness) {
+        $null = Get-App $script:JourneyCheckSession
+        $script:JourneyCheckFailure = $failure
+        "$($script:JourneyCheckSession.feature): $CheckName" | Set-Content -LiteralPath (Join-Path $script:JourneyCheckSession.evidence 'journey-check-failed.txt')
+    }
+    throw $failure
 }
 
-function Wait-Until([scriptblock]$Check, [string]$Description, [int]$Seconds = 20, [scriptblock]$Observed = $null) {
+function Wait-Until([scriptblock]$Check, [string]$Description, [int]$Seconds = 20, [scriptblock]$Observed = $null, [switch]$Harness) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
         $value = & $Check
@@ -82,7 +89,7 @@ function Wait-Until([scriptblock]$Check, [string]$Description, [int]$Seconds = 2
     $data = @{ step = $Description; expected = $Description; observed = $snapshot; elapsed = $timer.Elapsed.TotalSeconds } | ConvertTo-Json -Compress
     $message = $data | & python "$PSScriptRoot/wait_message.py"
     if ($LASTEXITCODE -ne 0) { throw "Timed out: $Description; observed: $snapshot; elapsed: $($timer.Elapsed.TotalSeconds) seconds" }
-    throw $message
+    Assert-That $false $message -Harness:$Harness -CheckName $Description
 }
 
 function Read-Session([string]$Evidence) {
@@ -91,9 +98,10 @@ function Read-Session([string]$Evidence) {
 
 function Get-App($Session) {
     $app = Get-Process -Id $Session.pid -ErrorAction Stop
-    Assert-That ($app.StartTime.ToUniversalTime().Ticks.ToString() -eq $Session.startTicks) 'PID was reused'
-    Assert-That ($app.Path -eq $Session.exe) 'Wrong executable path'
-    Assert-That ((Get-FileHash $app.Path).Hash -eq $Session.sha256) 'Executable changed after launch'
+    Assert-That (-not $app.HasExited) 'App exited' -Harness
+    Assert-That ($app.StartTime.ToUniversalTime().Ticks.ToString() -eq $Session.startTicks) 'PID was reused' -Harness
+    Assert-That ($app.Path -eq $Session.exe) 'Wrong executable path' -Harness
+    Assert-That ((Get-FileHash $app.Path).Hash -eq $Session.sha256) 'Executable changed after launch' -Harness
     return $app
 }
 
@@ -111,12 +119,12 @@ function Read-Control($Session, [string]$Command, [string[]]$Arguments = @(), [i
     try {
         $output = $child.StandardOutput.ReadToEndAsync()
         $errorOutput = $child.StandardError.ReadToEndAsync()
-        Assert-That ($child.WaitForExit($TimeoutMilliseconds)) "Read-only control client timed out after $TimeoutMilliseconds ms: $Command"
+        Assert-That ($child.WaitForExit($TimeoutMilliseconds)) "Read-only control client timed out after $TimeoutMilliseconds ms: $Command" -Harness
         $text = $output.GetAwaiter().GetResult()
         $errors = $errorOutput.GetAwaiter().GetResult()
-        Assert-That ($child.ExitCode -eq 0) "Read-only control failed: $errors"
+        Assert-That ($child.ExitCode -eq 0) "Read-only control failed: $errors" -Harness
         $response = $text | ConvertFrom-Json
-        Assert-That $response.ok 'Control response is not OK'
+        Assert-That $response.ok 'Control response is not OK' -Harness
         return $response.result
     } finally {
         if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
@@ -137,19 +145,19 @@ function Get-Window($Session) {
         Start-Sleep -Milliseconds 250
         $null = Get-App $Session
     }
-    Assert-That ($null -ne $window) 'App window is not up'
-    Assert-That ($window.Current.ProcessId -eq $Session.pid) 'UI Automation found another process'
-    Assert-That ($window.Current.ClassName -eq 'MessagesZig') 'Wrong window class'
+    Assert-That ($null -ne $window) 'App window is not up' -Harness
+    Assert-That ($window.Current.ProcessId -eq $Session.pid) 'UI Automation found another process' -Harness
+    Assert-That ($window.Current.ClassName -eq 'MessagesZig') 'Wrong window class' -Harness
     $product = if ($Session.expected_product) { $Session.expected_product } else { 'Postbox' }
-    Assert-That ($product -in @('Postbox', 'Wazig')) 'Unknown product identity'
-    Assert-That ($window.Current.Name -cmatch ('^(?:.+ - )?' + [regex]::Escape($product) + ' v' + [regex]::Escape($Session.expected_version) + '$')) 'Wrong build title'
+    Assert-That ($product -in @('Postbox', 'Wazig')) 'Unknown product identity' -Harness
+    Assert-That ($window.Current.Name -cmatch ('^(?:.+ - )?' + [regex]::Escape($product) + ' v' + [regex]::Escape($Session.expected_version) + '$')) 'Wrong build title' -Harness
     return $window
 }
 
 function Get-Edit($Window, [string]$Id) {
     $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
     $edit = $Window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
-    Assert-That ($null -ne $edit) "Missing stable edit AutomationId=$Id"
+    Assert-That ($null -ne $edit) "Missing stable edit AutomationId=$Id" -Harness
     return $edit
 }
 
@@ -157,13 +165,13 @@ function Read-EditText([IntPtr]$Handle) {
     $text = [Text.StringBuilder]::new(65537)
     $length = [UIntPtr]::Zero
     $ok = [VerifyWindow]::ReadText($Handle, 13, [UIntPtr]65537, $text, 2, 2000, [ref]$length)
-    Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only WM_GETTEXT timed out'
+    Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only WM_GETTEXT timed out' -Harness
     return $text.ToString()
 }
 
 function Read-Edit($Edit) {
     $handle = [IntPtr]$Edit.Current.NativeWindowHandle
-    Assert-That ($handle -ne [IntPtr]::Zero -and $Edit.Current.ClassName -eq 'RICHEDIT50W') 'Expected a DirectWrite RichEdit host'
+    Assert-That ($handle -ne [IntPtr]::Zero -and $Edit.Current.ClassName -eq 'RICHEDIT50W') 'Expected a DirectWrite RichEdit host' -Harness
     $valueMismatch = $false
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         $text = Read-EditText $handle
@@ -182,31 +190,31 @@ function Read-Edit($Edit) {
 
 function Read-ListCount($List) {
     $handle = [IntPtr]$List.Current.NativeWindowHandle
-    Assert-That ($handle -ne [IntPtr]::Zero -and $List.Current.ClassName -eq 'LISTBOX') 'Expected a native listbox'
+    Assert-That ($handle -ne [IntPtr]::Zero -and $List.Current.ClassName -eq 'LISTBOX') 'Expected a native listbox' -Harness
     $count = [UIntPtr]::Zero
     $ok = [VerifyWindow]::ReadCount($handle, 0x018B, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$count)
-    Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only LB_GETCOUNT timed out'
-    Assert-That ($count.ToUInt64() -le [int]::MaxValue) 'Read-only LB_GETCOUNT failed'
+    Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only LB_GETCOUNT timed out' -Harness
+    Assert-That ($count.ToUInt64() -le [int]::MaxValue) 'Read-only LB_GETCOUNT failed' -Harness
     return [int]$count.ToUInt64()
 }
 
 function Read-ListLabels($List) {
     $count = Read-ListCount $List
-    Assert-That ($count -le 512) 'Read-only list label count exceeds limit'
+    Assert-That ($count -le 512) 'Read-only list label count exceeds limit' -Harness
     $handle = [IntPtr]$List.Current.NativeWindowHandle
     for ($index = 0; $index -lt $count; $index++) {
         $length = [UIntPtr]::Zero
         $ok = [VerifyWindow]::ReadCount($handle, 0x018A, [UIntPtr]$index, [IntPtr]::Zero, 2, 2000, [ref]$length)
-        Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only LB_GETTEXTLEN timed out'
-        Assert-That ($length.ToUInt64() -le 63) 'Read-only LB_GETTEXTLEN failed or label exceeds limit'
+        Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only LB_GETTEXTLEN timed out' -Harness
+        Assert-That ($length.ToUInt64() -le 63) 'Read-only LB_GETTEXTLEN failed or label exceeds limit' -Harness
         $text = [Text.StringBuilder]::new(64)
         $copied = [UIntPtr]::Zero
         $ok = [VerifyWindow]::ReadText($handle, 0x0189, [UIntPtr]$index, $text, 2, 2000, [ref]$copied)
-        Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only LB_GETTEXT timed out'
-        Assert-That ($copied.ToUInt64() -eq $length.ToUInt64() -and $text.Length -eq $length.ToUInt64()) 'Read-only LB_GETTEXT failed or label changed'
+        Assert-That ($ok -ne [IntPtr]::Zero) 'Read-only LB_GETTEXT timed out' -Harness
+        Assert-That ($copied.ToUInt64() -eq $length.ToUInt64() -and $text.Length -eq $length.ToUInt64()) 'Read-only LB_GETTEXT failed or label changed' -Harness
         $text.ToString()
     }
-    Assert-That ((Read-ListCount $List) -eq $count) 'List changed while reading labels'
+    Assert-That ((Read-ListCount $List) -eq $count) 'List changed while reading labels' -Harness
 }
 
 function Send-Keys($Session, [string]$Keys) {
@@ -223,13 +231,13 @@ function Send-Keys($Session, [string]$Keys) {
             return $false
         }
         return $true
-    } 'app foreground window before keyboard input'
+    } 'app foreground window before keyboard input' -Harness
     $foreground = [VerifyWindow]::GetForegroundWindow()
     $ownerPid = [uint32]0
     if ($foreground -ne [IntPtr]::Zero) {
         [VerifyWindow]::GetWindowThreadProcessId($foreground, [ref]$ownerPid) | Out-Null
     }
-    Assert-That ($foreground -ne [IntPtr]::Zero -and $ownerPid -eq $Session.pid) 'Refusing keyboard input to another app'
+    Assert-That ($foreground -ne [IntPtr]::Zero -and $ownerPid -eq $Session.pid) 'Refusing keyboard input to another app' -Harness
     [System.Windows.Forms.SendKeys]::SendWait($Keys)
     Add-Content (Join-Path $Session.evidence 'actions.log') "keys: $Keys"
 }
@@ -285,7 +293,7 @@ function Save-Screen($Session, [string]$Name) {
 function Invoke-Doctor($Session) {
     $window = Get-Window $Session
     $compose = Get-Edit $window '1032'
-    Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable'
+    Assert-That $compose.Current.IsEnabled 'Fixture chat is not usable' -Harness
     $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, '1008')
     $search = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
     if ($null -ne $search) {
@@ -302,19 +310,19 @@ function Invoke-Doctor($Session) {
         $null = Wait-Until { (Read-Control $Session status).view_order.Count -eq 6 } 'account views baseline'
     }
     $status = Read-Control $Session status
-    Assert-That ($status.version -ceq $Session.expected_version) 'Wrong control build'
+    Assert-That ($status.version -ceq $Session.expected_version) 'Wrong control build' -Harness
     $label = if ($status.current_view.inbox) { 'Combined inbox' } else { $status.current_view.label }
     $product = if ($Session.expected_product) { $Session.expected_product } else { 'Postbox' }
-    Assert-That ((Get-Window $Session).Current.Name -ceq "$label - $product v$($status.version)") 'Window title does not match the active inbox'
-    Assert-That ($status.sync -eq 'stopped' -and -not $status.slack_connected) 'Provider unexpectedly connected'
-    Assert-That ($status.pending_sends -eq 0 -and $status.pending_archives -eq 0) 'Unexpected pending writes'
+    Assert-That ((Get-Window $Session).Current.Name -ceq "$label - $product v$($status.version)") 'Window title does not match the active inbox' -Harness
+    Assert-That ($status.sync -eq 'stopped' -and -not $status.slack_connected) 'Provider unexpectedly connected' -Harness
+    Assert-That ($status.pending_sends -eq 0 -and $status.pending_archives -eq 0) 'Unexpected pending writes' -Harness
     $status | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'doctor.json')
     Write-Output 'DOCTOR PASSED: build, owned window, usable fixture and readable UI Automation edits'
 }
 
 function Start-FakeBridge([string]$Evidence, [string]$Root, [string]$Mode) {
     $registry = Get-Content (Join-Path $PSScriptRoot 'journeys.json') -Raw | ConvertFrom-Json
-    Assert-That ($Mode -in @($registry.journeys.hub | Where-Object { $_ })) "Unknown fake bridge mode: $Mode"
+    Assert-That ($Mode -in @($registry.journeys.hub | Where-Object { $_ })) "Unknown fake bridge mode: $Mode" -Harness
     $portFile = Join-Path $Root 'bridge-port.txt'
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command python).Source)
     $start.UseShellExecute = $false
@@ -331,7 +339,7 @@ function Start-FakeBridge([string]$Evidence, [string]$Root, [string]$Mode) {
     $start.ArgumentList.Add((Join-Path $Evidence 'bridge-requests.jsonl'))
     $process = [Diagnostics.Process]::Start($start)
     try {
-        $null = Wait-Until { if ($process.HasExited) { throw 'Fake bridge exited' }; (Test-Path $portFile) -and (Get-Item $portFile).Length -gt 0 } 'fake bridge listening'
+        $null = Wait-Until { if ($process.HasExited) { throw 'Fake bridge exited' }; (Test-Path $portFile) -and (Get-Item $portFile).Length -gt 0 } 'fake bridge listening' -Harness
         $port = [int](Get-Content $portFile -Raw)
         return @{ process = $process; url = "http://127.0.0.1:$port" }
     } catch {
@@ -434,7 +442,7 @@ function Invoke-WhatsAppHubJourney($Session, [string]$Messages) {
         }
         $sidebar | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'provider-sidebar.json')
         & python (Join-Path $PSScriptRoot 'check-hub-views.py') $Session.evidence
-        Assert-That ($LASTEXITCODE -eq 0) 'Hub provider views failed'
+        Assert-That ($LASTEXITCODE -eq 0) 'Hub provider views failed' -Harness
         Assert-That ((Read-Control $Session status).selected.id -eq $alpha) 'All view did not restore Alpha'
         $null = Wait-Until {
             $shown = Read-Control $Session messages

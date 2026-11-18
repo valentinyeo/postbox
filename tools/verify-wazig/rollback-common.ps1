@@ -64,7 +64,7 @@ function Start-RollbackApp($Session, $Info, [string]$Exe, [string]$Ctl, [string]
     $Session.sha256 = $Hash
     $Session.expected_version = $Version
     $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'session.json')
-    $null = Wait-Until { $child.Refresh(); if ($child.HasExited) { throw "Rollback app exited: $($child.ExitCode)" }; $child.MainWindowHandle -ne [IntPtr]::Zero } 'rollback app window'
+    $null = Wait-Until { $child.Refresh(); if ($child.HasExited) { throw "Rollback app exited: $($child.ExitCode)" }; $child.MainWindowHandle -ne [IntPtr]::Zero } 'rollback app window' -Harness
     [VerifyWindow]::ShowWindow($child.MainWindowHandle, 3) | Out-Null
     $null = Wait-Until { (Read-Control $Session status).chat_count -gt 0 } 'rollback chats'
     $null = Get-App $Session

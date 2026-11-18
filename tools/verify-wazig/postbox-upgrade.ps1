@@ -81,7 +81,7 @@ try {
     $app = [Diagnostics.Process]::Start($start)
     $oldPid = $app.Id
     $session = @{ctl=$ctl;username="verify-$id";pid=$app.Id;startTicks=$app.StartTime.ToUniversalTime().Ticks.ToString();exe=$exe;sha256=$oldHash;expected_version='0.9.216';expected_product='Wazig';evidence=$Evidence}
-    $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw 'Original app exited early' }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'old product window'
+    $null = Wait-Until { $app.Refresh(); if ($app.HasExited) { throw 'Original app exited early' }; $app.MainWindowHandle -ne [IntPtr]::Zero } 'old product window' -Harness
     Read-Control $session messages -Arguments @('verify-alpha') | ConvertTo-Json -Depth 12 | Set-Content "$Evidence/before.messages.json"
     $oldTitle = Capture-Upgrade before $session $app
     Assert-That ($oldTitle -match ' - Wazig v0\.9\.216$') 'Original release identity mismatch'

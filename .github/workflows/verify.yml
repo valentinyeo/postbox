@@ -33,6 +33,10 @@ concurrency:
   group: verify-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.feature || 'search' }}
   cancel-in-progress: true
 
+env:
+  BASE_ZIG_VERSION: '0.16.0'
+  BASE_APP_VERSION: '0.0.526'
+
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -47,7 +51,7 @@ jobs:
           fetch-depth: 0
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: ${{ env.BASE_ZIG_VERSION }}
       - name: Raw transcript provenance and historical summary export control
         run: python tools/check_transcript_copy_regression.py --zig zig
       - name: Unified snapshot and checkpoint proofs
@@ -84,7 +88,8 @@ jobs:
               changed = Path(os.environ['RUNNER_TEMP']) / 'pr-files.txt'
               body.write_text(event.get('body') or '')
               changed.write_text('\n'.join(files))
-              repro = subprocess.check_output(['bash', 'tools/check-repro-first.sh', event['title'], str(body), str(changed)], text=True).strip()
+              validation = subprocess.run(['bash', 'tools/check-repro-first.sh', event['title'], str(body), str(changed)], text=True, capture_output=True)
+              repro = validation.stdout.strip() if validation.returncode == 0 else ''
               needed = bool(repro and repro != 'none') or any(p.startswith(('src/', 'tools/verify-wazig/')) or p in ('build.zig', '.github/workflows/verify.yml') for p in files)
               with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
                   output.write(f'repro={repro if repro != "none" else ""}\nneeded={str(needed).lower()}\n')
@@ -126,13 +131,13 @@ jobs:
       - uses: mlugg/setup-zig@v2
         if: needs.plan.outputs.repro != ''
         with:
-          version: 0.16.0
+          version: ${{ env.BASE_ZIG_VERSION }}
           use-cache: false
       - name: Build base desktop
         if: needs.plan.outputs.repro != ''
         shell: pwsh
         run: |
-          zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
+          zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}'
           if ($LASTEXITCODE -ne 0) { throw 'Base build failed' }
       - uses: actions/checkout@v4
         if: needs.plan.outputs.repro != ''
@@ -174,7 +179,7 @@ jobs:
           FEATURE: ${{ needs.plan.outputs.repro }}
           GITHUB_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence base-evidence -ExpectedVersion 0.0.526
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence base-evidence -ExpectedVersion ${{ env.BASE_APP_VERSION }}
           $code = $LASTEXITCODE
           & tools/verify-wazig/classify-red.ps1 -Feature $env:FEATURE -Evidence base-evidence -ExitCode $code
           exit 0
@@ -198,7 +203,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: ${{ env.BASE_ZIG_VERSION }}
           use-cache: false
       - name: Apply planted bug
         shell: pwsh
@@ -210,7 +215,7 @@ jobs:
       - name: Build planted desktop
         shell: pwsh
         run: |
-          zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526'
+          zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}'
           if ($LASTEXITCODE -ne 0) { throw 'Planted build failed' }
       - name: Install audio output
         if: matrix.feature == 'voice'
@@ -223,7 +228,7 @@ jobs:
         env:
           FEATURE: ${{ matrix.feature }}
         run: |
-          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence planted-evidence -ExpectedVersion 0.0.526
+          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence planted-evidence -ExpectedVersion ${{ env.BASE_APP_VERSION }}
           "code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
       - name: Classify planted failure
         id: classify
@@ -301,9 +306,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: ${{ env.BASE_ZIG_VERSION }}
       - name: Build the candidate Windows desktop once
-        run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526
+        run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=${{ env.BASE_APP_VERSION }}
       - name: Upload the candidate Windows desktop
         uses: actions/upload-artifact@v4
         with:
@@ -316,8 +321,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: ${{ env.BASE_ZIG_VERSION }}
           use-cache: false
+      - name: Journey failure marker negative controls
+        shell: pwsh
+        run: |
+          python -m pip install PyYAML
+          if ($LASTEXITCODE -ne 0) { throw 'Journey test dependencies failed' }
+          python -m unittest discover -s tools -p test_verify_failure_marker.py
+          if ($LASTEXITCODE -ne 0) { throw 'Journey failure marker controls failed' }
       - name: Native DirectWrite editing regression tests
         run: zig build test-edit '-Dtarget=x86_64-windows-gnu' --release=small
   verify:
@@ -354,7 +366,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Chrome driver installation failed' }
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: ${{ env.BASE_ZIG_VERSION }}
           use-cache: false
       - name: Build pinned historical rollback input
         if: matrix.feature == 'hub-rollback' || matrix.feature == 'hub-migration-crash' || matrix.feature == 'hub-migration-before-rename'
@@ -382,7 +394,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Original reply source unavailable' }
           Push-Location $source
           try {
-            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix $prefix
             if ($LASTEXITCODE -ne 0) { throw 'Original reply build failed' }
           } finally { Pop-Location }
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature reply -Bin reply-original-bin/bin -Evidence reply-red-evidence
@@ -405,7 +417,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Original ordering source unavailable' }
           Push-Location $source
           try {
-            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix $prefix
             if ($LASTEXITCODE -ne 0) { throw 'Original ordering build failed' }
           } finally { Pop-Location }
           $env:VERIFY_VIEW_MODIFIER = '^'
@@ -452,7 +464,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path zig-out/bin/Messages.exe)) { throw 'Shared candidate build is missing Messages.exe' }
-          'VERIFY_VERSION=0.0.526' >> $env:GITHUB_ENV
+          'VERIFY_VERSION=${{ env.BASE_APP_VERSION }}' >> $env:GITHUB_ENV
       - name: Download published release
         if: ${{ inputs.tag != '' || startsWith(github.ref_name, 'verify-release/') }}
         shell: pwsh
@@ -489,7 +501,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline checkout failed' }
           Push-Location $source
           try {
-            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix $prefix
             if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline build failed' }
           } finally { Pop-Location }
           New-Item verification-evidence -ItemType Directory -Force | Out-Null
@@ -519,7 +531,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Archive baseline checkout failed' }
           Push-Location $source
           try {
-            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix $prefix
             if ($LASTEXITCODE -ne 0) { throw 'Archive baseline build failed' }
           } finally { Pop-Location }
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature hub-archive -ExpectedProduct Wazig -Bin archive-baseline-bin/bin -Evidence archive-red-evidence
@@ -541,7 +553,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Notification baseline checkout failed' }
           Push-Location $source
           try {
-            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix $prefix
             if ($LASTEXITCODE -ne 0) { throw 'Notification baseline build failed' }
           } finally { Pop-Location }
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature hub-archive -Bin notification-baseline-bin/bin -Evidence notification-red-evidence
@@ -562,7 +574,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Chat design baseline checkout failed' }
           Push-Location $source
           try {
-            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix $prefix
             if ($LASTEXITCODE -ne 0) { throw 'Chat design baseline build failed' }
           } finally { Pop-Location }
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature appearance -Bin chat-design-baseline-bin/bin -Evidence chat-design-red-evidence
@@ -583,7 +595,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Group baseline checkout failed' }
           Push-Location $source
           try {
-            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix $prefix
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix $prefix
             if ($LASTEXITCODE -ne 0) { throw 'Group baseline build failed' }
           } finally { Pop-Location }
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature appearance -Bin group-senders-baseline-bin/bin -Evidence group-senders-red-evidence
@@ -621,7 +633,7 @@ jobs:
           try {
             python tools/verify-wazig/voice-download-red.py
             if ($LASTEXITCODE -ne 0) { throw 'Historical download extraction failed' }
-            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=0.0.526' --prefix voice-red-bin
+            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix voice-red-bin
             if ($LASTEXITCODE -ne 0) { throw 'Historical media build failed' }
           } finally { [IO.File]::WriteAllText('src/main.zig', $original) }
           $failed = $false

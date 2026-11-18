@@ -14,7 +14,7 @@ $session.startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
 $session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'session.json')
 @{ old_pid = $oldPid; old_start = $oldTicks; new_pid = $session.pid; new_start = $session.startTicks; root = $session.root; id = $session.id; sha256 = $session.sha256 } |
     ConvertTo-Json | Set-Content (Join-Path $session.evidence 'restart.json')
-$null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'fresh start window'
+$null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'fresh start window' -Harness
 [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
 $null = Wait-Until { try { (Read-Control $session status).chat_count -ge 1 } catch { $false } } 'inbox shown after the fresh start' 60
 

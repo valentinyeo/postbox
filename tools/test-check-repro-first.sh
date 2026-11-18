@@ -16,4 +16,17 @@ for body in '' 'Repro: unknown-journey' 'Repro: none,' $'Repro: search\nRepro: v
     printf '%s\n' "$body" > "$temp/body"
     if bash "$check" 'FIX: repair search' "$temp/body" "$temp/files" >/dev/null 2>&1; then echo "accepted invalid repro: $body" >&2; exit 1; fi
 done
+printf 'Repro: unknown-journey\n' > "$temp/body"
+if bash "$check" 'fix: repair search' "$temp/body" "$temp/files" > "$temp/output" 2>&1; then exit 1; fi
+python3 - "$repo/tools/verify-wazig/journeys.json" "$temp/output" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+message = Path(sys.argv[2]).read_text()
+assert "unknown or invalid journey 'unknown-journey'" in message
+assert 'Valid journeys: ' in message
+assert ', '.join(sorted(row['name'] for row in json.loads(Path(sys.argv[1]).read_text())['journeys'])) in message
+assert 'Traceback' not in message
+PY
 printf 'test-check-repro-first: PASS\n'

@@ -89,7 +89,7 @@ function Invoke-ShowArchivedJourney($Session, $Start) {
     $Session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'session.json')
     @{ old_pid = $oldPid; old_start = $oldTicks; new_pid = $Session.pid; new_start = $Session.startTicks; root = $Session.root; id = $Session.id; sha256 = $Session.sha256 } |
         ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'show-archived-restart.json')
-    $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted fixture window'
+    $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted fixture window' -Harness
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
     Send-Keys $Session '%i'
     Save-ArchivedSwitch $Session restart-inbox $true 10 5

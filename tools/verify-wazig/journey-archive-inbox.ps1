@@ -77,7 +77,7 @@ $session.startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
 $session | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence 'session.json')
 @{ old_pid = $oldPid; old_start = $oldTicks; new_pid = $session.pid; new_start = $session.startTicks; root = $session.root; id = $session.id; sha256 = $session.sha256 } |
     ConvertTo-Json | Set-Content (Join-Path $session.evidence 'restart.json')
-$null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted archive fixture window'
+$null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted archive fixture window' -Harness
 [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
 Send-Keys $session '%i'
 $null = Wait-Until { $state = Read-Control $session status; $state.current_view.inbox -and $state.chat_count -eq 0 } 'restart preserves empty combined inbox'
