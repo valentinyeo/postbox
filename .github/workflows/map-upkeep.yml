@@ -1,0 +1,22 @@
+name: map-upkeep
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 5 * * *"
+concurrency:
+  group: map-upkeep
+  cancel-in-progress: true
+permissions:
+  contents: read
+  issues: write
+  actions: read
+jobs:
+  upkeep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check maps and the last nightly run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/map-upkeep.sh
