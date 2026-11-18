@@ -889,6 +889,40 @@ Write-Output 'FONT_GEOMETRY_OK'
         self.assertIn('FONT_GEOMETRY_OK', result.stdout)
 
 
+class SidebarSurfaceTests(unittest.TestCase):
+    def setUp(self):
+        self.checker = runpy.run_path(str(ROOT / 'tools/verify-wazig/check-sidebar-surface.py'))
+        self.layout = dict(client=[0, 23, 1024, 720], edge=300, dpi=96,
+                           canvas=[301, 23, 723, 631])
+        self.messages = [dict(id='ISSUE-462-PARAGRAPH', bubble=[14, 505, 554, 617])]
+        self.image = [[(24, 24, 24)] * 300 + [(46, 46, 46)] + [(16, 16, 16)] * 723
+                      for _ in range(720)]
+        self.image[94][66:74] = [(242, 242, 242)] * 8
+        for y in range(528, 640):
+            colour = 36 - (y - 528) * 4 // 111
+            self.image[y][315:855] = [(colour, colour, colour)] * 540
+
+    def measure(self):
+        return self.checker['measure_design'](self.image, self.layout, self.messages)
+
+    def test_empty_chat_subtitle_does_not_require_kind_text(self):
+        metrics = self.measure()
+        self.checker['validate_design'](metrics)
+        self.assertEqual(set(metrics['text']), {'name'})
+        self.assertEqual(metrics['text']['name']['pixels'], 8)
+        self.assertEqual(metrics['text']['name']['rgb'], [242, 242, 242])
+
+    def test_missing_chat_name_is_still_rejected(self):
+        self.image[94][66:74] = [(24, 24, 24)] * 8
+        with self.assertRaisesRegex(AssertionError, 'missing list text'):
+            self.measure()
+
+    def test_wrong_chat_name_colour_is_still_rejected(self):
+        self.image[94][66:74] = [(138, 138, 138)] * 8
+        with self.assertRaises(AssertionError):
+            self.checker['validate_design'](self.measure())
+
+
 class AppearanceVersionTests(unittest.TestCase):
     def fixture(self, folder, version):
         session = dict(feature='appearance', sha256='fixture-binary', commit='fixture-commit',

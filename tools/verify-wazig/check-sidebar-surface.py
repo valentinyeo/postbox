@@ -117,10 +117,8 @@ def measure_design(image, layout, messages):
     sidebar = mean(pixels(image, [x + px(8), y + px(136), edge - px(16), bottom - px(8)]))
     chat = mean(pixels(image, [edge + 2, y + px(8), edge + px(8), y + px(40)]))
     divider = mean(pixels(image, [edge, y, edge + 1, bottom]))
-    text = {}
-    for label, top, end in [('name', 4, 28), ('kind', 28, 52)]:
-        rect = [x + px(66), y + px(56 + top), edge - px(54), y + px(56 + end)]
-        text[label] = ink(image, rect, sidebar)
+    rect = [x + px(66), y + px(60), edge - px(54), y + px(84)]
+    text = dict(name=ink(image, rect, sidebar))
     cx, cy, cw, ch = layout['canvas']
     assert len(messages) == 1 and messages[0]['id'] == 'ISSUE-462-PARAGRAPH'
     bubble = messages[0]['bubble']
