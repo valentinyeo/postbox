@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -76,8 +77,8 @@ class RealSizeTests(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, 'steps missing'):
                     VALIDATOR['check_size'](self.folder)
 
-    def start_server(self):
-        server = ThreadingHTTPServer(('127.0.0.1', 0), FIXTURE['RealSizeHandler'])
+    def start_server(self, handler=None):
+        server = ThreadingHTTPServer(('127.0.0.1', 0), handler or FIXTURE['RealSizeHandler'])
         server.daemon_threads = True
         server.state = HUB['bridge'].State(self.folder / 'requests.jsonl')
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -138,6 +139,117 @@ class RealSizeTests(unittest.TestCase):
         self.assertEqual(len(groups), seed.COUNTS['groups'])
         self.assertEqual(self.get(server, '/v1/wazig/messages?chat=missing')[0], 404)
         self.assertEqual(self.get(server, '/v1/wazig/media/missing/missing')[0], 404)
+
+    def test_background_merge_preserves_owned_rows_and_rejects_collisions(self):
+        own_chats = json.loads((FIXTURES / 'search-queries.json').read_text())['rows']
+        own_messages = {own_chats[0]['jid']: [dict(MsgID='OWN', Text='Keep exactly', FromMe=True)]}
+        original = deepcopy((own_chats, own_messages, seed.CHATS, seed.MESSAGES))
+        chats, messages = seed.merge_background(own_chats, own_messages)
+        self.assertEqual((own_chats, own_messages, seed.CHATS, seed.MESSAGES), original)
+        self.assertEqual(chats[:len(own_chats)], own_chats)
+        self.assertIs(messages[own_chats[0]['jid']], own_messages[own_chats[0]['jid']])
+        added = chats[len(own_chats):]
+        added_messages = {row['jid']: messages[row['jid']] for row in added}
+        self.assertEqual(seed.count_rows(added, added_messages), seed.COUNTS)
+        self.assertEqual(len({row['jid'] for row in chats}), len(chats))
+        self.assertEqual({row['ChatJID'] for rows in added_messages.values() for row in rows}, set(added_messages))
+        self.assertTrue(all(not row['unread'] and row['unread_count'] == 0 for row in added))
+        self.assertLess(max(row['last_message_ts'] for row in added), '2026-01-01T00:00:00Z')
+        fixture = json.loads((FIXTURES / 'search-queries.json').read_text())
+        excluded = [case['query'] for case in fixture['queries']] + [
+            fixture['message'], 'Fixture Sender', 'Fixture Voice', 'voice-note.ogg',
+            *(f'voice-{number}.ogg' for number in range(1, 6)),
+            'First words of the original', 'Synthetic whatsapp reply', 'Synthetic slack reply']
+        searchable = '\n'.join(str(row[key]) for row in added for key in ('jid', 'name', 'account'))
+        searchable += json.dumps(added_messages)
+        for word in excluded:
+            with self.subTest(word=word):
+                self.assertNotIn(word.lower(), searchable.lower())
+        for owned_chats, owned_messages in [([added[0]], {}), ([], {added[0]['jid']: []})]:
+            with self.assertRaises(ValueError):
+                seed.merge_background(owned_chats, owned_messages)
+
+    def test_main_seeds_only_default_journeys(self):
+        from unittest.mock import Mock
+        for mode in ('search', 'voice', 'reply', 'palette-archived'):
+            with self.subTest(mode=mode):
+                server = Mock(server_port=1234)
+                with patch.dict(HUB['main'].__globals__, ThreadingHTTPServer=Mock(return_value=server),
+                                voice_playback_bytes=lambda: b'fixture'), \
+                        patch.dict('os.environ', GITHUB_ACTIONS='true'), \
+                        patch.object(sys, 'argv', ['fake-hub.py', '--' + mode, '--port-file', str(self.folder / 'port'),
+                                                  '--log', str(self.folder / 'requests.jsonl')]):
+                    HUB['main']()
+                if mode == 'palette-archived':
+                    self.assertFalse(hasattr(server.state, 'background_chats'))
+                else:
+                    self.assertEqual(seed.count_rows(server.state.background_chats, server.state.background_messages), seed.COUNTS)
+
+    def test_default_journey_wire_rows_are_unchanged_beside_background(self):
+        registry = json.loads((FIXTURES / 'journeys.json').read_text())['journeys']
+        for mode in ('search', 'voice', 'reply'):
+            with self.subTest(mode=mode):
+                config = next(row['hub_handler'] for row in registry if row['name'] == mode)
+                namespace = HUB if config['file'] == 'fake-hub.py' else runpy.run_path(str(FIXTURES / config['file']), init_globals=HUB)
+                server = self.start_server(namespace[config['class']])
+                paths = ['/v1/wazig/chats', '/v1/wazig/chats?archived=true']
+                own = [json.loads(self.get(server, path)[2]) for path in paths]
+                histories = {row['jid']: json.loads(self.get(server, '/v1/wazig/messages?' + urlencode(dict(chat=row['jid'])))[2])
+                             for rows in own for row in rows}
+                server.state.background_chats, server.state.background_messages = seed.merge_background([], {})
+                self.assertEqual(self.get(server, '/fixture/seed', False)[0], 401)
+                counts = json.loads(self.get(server, '/fixture/seed')[2])
+                self.assertEqual(counts, seed.COUNTS)
+                for path, original in zip(paths, own):
+                    shown = json.loads(self.get(server, path)[2])
+                    self.assertEqual(shown[:len(original)], original)
+                    expected = [row for row in server.state.background_chats if row['archived'] == ('archived=true' in path)]
+                    self.assertEqual(shown[len(original):], expected)
+                    self.assertEqual(len({row['jid'] for row in shown}), len(shown))
+                for jid, original in histories.items():
+                    self.assertEqual(json.loads(self.get(server, '/v1/wazig/messages?' + urlencode(dict(chat=jid)))[2]), original)
+                messages = server.state.background_messages
+                for jid, rows in messages.items():
+                    shown = json.loads(self.get(server, '/v1/wazig/messages?' + urlencode(dict(chat=jid, limit=1600)))[2])
+                    self.assertEqual(shown, list(reversed(rows)))
+                row = next(row for rows in messages.values() for row in rows if row.get('MediaType') == 'audio')
+                path = '/v1/wazig/media/' + quote(row['ChatJID'], safe='') + '/' + row['MsgID']
+                self.assertEqual(self.get(server, path)[2], (FIXTURES / 'voice-note.ogg').read_bytes())
+                server.state.background_messages.pop(next(iter(messages)))
+                self.assertLess(json.loads(self.get(server, '/fixture/seed')[2])['messages'], counts['messages'])
+
+    def test_background_counts_must_be_logged_and_loaded(self):
+        chats, _ = seed.merge_background([], {})
+        inbox = [dict(id=row['jid']) for row in chats if not row['archived']]
+        (self.folder / 'before.chats.json').write_text(json.dumps(dict(total=len(inbox), chats=inbox)))
+        (self.folder / 'seed.json').write_text(json.dumps(seed.COUNTS))
+        path = self.folder / 'run.log'
+        log = ' '.join(f'seeded_{key}={value}' for key, value in seed.COUNTS.items())
+        path.write_text(log)
+        seed.check_background_size(self.folder)
+        for key, value in seed.COUNTS.items():
+            for changed in ('', f'seeded_{key}={value - 1}', f'seeded_{key}={value} seeded_{key}={value}'):
+                with self.subTest(key=key, changed=changed):
+                    path.write_text(log.replace(f'seeded_{key}={value}', changed))
+                    with self.assertRaisesRegex(AssertionError, 'Real-size seeded_'):
+                        seed.check_background_size(self.folder)
+        for key, value in [('chats', 299), ('messages', 5999)]:
+            with patch.dict(seed.COUNTS, {key: value}), self.assertRaisesRegex(AssertionError, 'seed shrank'):
+                seed.check_background_size(self.folder)
+        path.write_text(log)
+        (self.folder / 'before.chats.json').write_text(json.dumps(dict(total=len(inbox) - 1, chats=inbox[1:])))
+        with self.assertRaisesRegex(AssertionError, 'chats missing'):
+            seed.check_background_size(self.folder)
+
+    def test_each_default_validator_rejects_unseeded_evidence(self):
+        (self.folder / 'run.log').write_text('seeded_chats=2 seeded_messages=2')
+        for name, function in [('check-search-evidence.py', 'check_evidence'), ('evidence-voice.py', None),
+                               ('check-reply-evidence.py', 'check_reply')]:
+            with self.subTest(name=name), patch.object(sys, 'argv', [name, str(self.folder)]):
+                with self.assertRaisesRegex(AssertionError, 'Real-size seeded_'):
+                    checker = runpy.run_path(str(FIXTURES / name))
+                    if function:
+                        checker[function](self.folder)
 
     def evidence(self):
         def save(name, value):

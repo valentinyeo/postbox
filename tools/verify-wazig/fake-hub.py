@@ -20,6 +20,9 @@ import zlib
 spec = importlib.util.spec_from_file_location('bridge_fixture', Path(__file__).with_name('fake-wa-bridge.py'))
 bridge = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bridge)
+spec = importlib.util.spec_from_file_location('real_size_seed', Path(__file__).with_name('real_size_seed.py'))
+seed = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(seed)
 ALPHA = 'fixture-alpha'
 BETA = 'fixture-beta'
 
@@ -79,7 +82,53 @@ class Handler(bridge.Handler):
                     if row['jid'] == BETA:
                         stamp = datetime.fromisoformat(row['last_message_ts']) - timedelta(seconds=1)
                         row['last_message_ts'] = stamp.isoformat().replace('+00:00', 'Z')
-        super().respond(status, data, content_type, **extra)
+        super().respond(status, self.background_rows(data), content_type, **extra)
+
+    def background_rows(self, data):
+        chats = getattr(self.state, 'background_chats', [])
+        if isinstance(data, list) and urlsplit(self.wire_path).path == '/v1/wazig/chats':
+            archived = parse_qs(urlsplit(self.wire_path).query).get('archived') == ['true']
+            return data + [row for row in chats if row['archived'] == archived]
+        if isinstance(data, list) and urlsplit(self.wire_path).path == '/v1/wazig/groups':
+            return data + [dict(JID=row['jid'], Name=row['name']) for row in chats
+                           if row['provider'] == 'whatsapp' and row['kind'] == 'group']
+        return data
+
+    def background_GET(self):
+        messages = getattr(self.state, 'background_messages', {})
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        chat = query.get('chat', [''])[0]
+        media = url.path.removeprefix('/v1/wazig/media/').split('/', 1) if url.path.startswith('/v1/wazig/media/') else []
+        if not messages or not (url.path == '/fixture/seed' or
+                url.path == '/v1/wazig/messages' and chat in messages or
+                len(media) == 2 and unquote(media[0]) in messages):
+            return False
+        self.wire_path = self.path
+        if not self.authorized():
+            return True
+        if url.path == '/fixture/seed':
+            counts = seed.count_rows(self.state.background_chats, messages)
+            self.respond(200, counts, seed=counts)
+        elif url.path == '/v1/wazig/messages':
+            rows = list(reversed(messages[chat]))
+            before = query.get('before', [''])[0]
+            if before:
+                position = next((n for n, row in enumerate(rows) if before == row['MsgID'] + ':' + row['Timestamp']), None)
+                if position is None:
+                    self.respond(400, {'error': 'unknown background cursor'})
+                    return True
+                rows = rows[position + 1:]
+            self.respond(200, rows[:min(int(query.get('limit', ['80'])[0]), 1600)])
+        else:
+            chat, message = map(unquote, media)
+            row = next((row for row in messages[chat] if row['MsgID'] == message), None)
+            if row is None or 'MediaType' not in row:
+                self.respond(404, {'error': 'unknown background media'})
+            else:
+                payload = {'audio': VOICE_BYTES, 'image': self.state.image, 'document': b'Load document\n'}[row['MediaType']]
+                self.respond(200, payload, row['MimeType'])
+        return True
 
     def do_GET(self):
         self.wire_path = self.path
@@ -696,7 +745,7 @@ def palette_rows(archived):
 
 class PaletteArchivedHandler(Handler):
     def respond(self, status, data, content_type='application/json', **extra):
-        bridge.Handler.respond(self, status, data, content_type, **extra)
+        bridge.Handler.respond(self, status, self.background_rows(data), content_type, **extra)
 
     def do_GET(self):
         self.wire_path = self.path
@@ -2049,12 +2098,14 @@ VOICE_BYTES = Path(__file__).with_name('voice-note.ogg').read_bytes()
 
 class VoiceHandler(Handler):
     def respond(self, status, data, content_type='application/json', **extra):
-        bridge.Handler.respond(self, status, data, content_type, **extra)
+        bridge.Handler.respond(self, status, self.background_rows(data), content_type, **extra)
 
     def stamp(self, offset):
         return (datetime.fromisoformat(self.state.stamp) + timedelta(seconds=offset)).isoformat().replace('+00:00', 'Z')
 
     def do_GET(self):
+        if self.background_GET():
+            return
         self.wire_path = self.path
         if not self.authorized():
             return
@@ -2658,6 +2709,8 @@ def main():
     server = ThreadingHTTPServer((loopback, 0), handler)
     server.daemon_threads = True
     server.state = bridge.State(args.log)
+    if args.mode in ('search', 'voice', 'reply'):
+        server.state.background_chats, server.state.background_messages = seed.merge_background([], {})
     server.state.snapshot_root = args.snapshot_root if args.mode in ('mixed-lid', 'hub-fault', 'send-independence', 'dictation-shortcuts') else None
     server.state.archive_incoming = 0
     server.state.plain_dms = {}

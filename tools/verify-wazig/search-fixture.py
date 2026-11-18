@@ -1,5 +1,7 @@
 class SearchHandler(PaletteArchivedHandler):
     def do_GET(self):
+        if self.background_GET():
+            return
         self.wire_path = self.path
         if not self.authorized():
             return

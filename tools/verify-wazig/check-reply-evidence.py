@@ -1,10 +1,13 @@
 from pathlib import Path
 import hashlib
 import json
+import runpy
 import sys
 
 
 def check_reply(folder):
+    runpy.run_path(str(Path(__file__).with_name('real_size_seed.py')))['check_background_size'](folder)
+
     def read(name):
         return json.loads((folder / name).read_text(encoding='utf-8-sig'))
 

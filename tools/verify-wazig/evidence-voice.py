@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 folder = Path(sys.argv[1])
+runpy.run_path(str(Path(__file__).with_name('real_size_seed.py')))['check_background_size'](folder)
 session = json.loads((folder / 'session.json').read_text(encoding='utf-8-sig'))
 def read(name):
     return json.loads((folder / name).read_text(encoding='utf-8-sig'))

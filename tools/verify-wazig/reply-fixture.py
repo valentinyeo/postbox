@@ -1,5 +1,7 @@
 class ReplyHandler(Handler):
     def do_GET(self):
+        if self.background_GET():
+            return
         url = urlsplit(self.path)
         if url.path != '/v1/wazig/messages':
             super().do_GET()
