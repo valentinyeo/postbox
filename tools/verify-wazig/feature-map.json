@@ -727,6 +727,13 @@
       "proof": "slack-threads",
       "status": "covered",
       "why": ""
+    },
+    {
+      "feature": "real-size-inbox",
+      "source": "tools/verify-wazig/real_size_seed.py",
+      "proof": "real-size",
+      "status": "covered",
+      "why": ""
     }
   ]
 }

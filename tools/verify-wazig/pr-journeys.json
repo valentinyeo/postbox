@@ -410,6 +410,18 @@
     ],
     "tools/verify-wazig/window.ps1": [
       "window"
+    ],
+    "tools/verify-wazig/journey-real-size.ps1": [
+      "real-size"
+    ],
+    "tools/verify-wazig/real_size_seed.py": [
+      "real-size"
+    ],
+    "tools/verify-wazig/real-size-fixture.py": [
+      "real-size"
+    ],
+    "tools/verify-wazig/evidence-real-size.py": [
+      "real-size"
     ]
   }
 }

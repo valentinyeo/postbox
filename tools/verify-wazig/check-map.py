@@ -9,7 +9,11 @@ skill = root / '.claude/skills/verify-wazig'
 text = (skill / 'SKILL.md').read_text(encoding="utf-8")
 assert text.startswith('---\nname: verify-wazig\ndescription: ')
 assert re.findall(r'^## (.+)$', text, re.M) == ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']
-features = sorted(p.stem for p in (skill / 'features').glob('*.md') if p.name not in {'README.md'})
+public_map = (root / 'tools/verify-wazig/FEATURE-MAP.md').read_text(encoding='utf-8')
+public_journeys = dict(re.findall(r'^## Journey: ([a-z][a-z0-9-]*)\n(.*?)(?=^## Journey: |\Z)', public_map, re.M | re.S))
+private_features = {p.stem for p in (skill / 'features').glob('*.md') if p.name not in {'README.md'}}
+assert not private_features.intersection(public_journeys), 'journey maps must have one owner'
+features = sorted(private_features | public_journeys.keys())
 registry_path = root / 'tools/verify-wazig/journeys.json'
 registry = json.loads(registry_path.read_text(encoding='utf-8'))
 journeys = registry['journeys']
@@ -55,7 +59,8 @@ for filename in ['SKILL.md', 'features/README.md', 'INDEX.md']:
     assert not re.search(r'(?:Matching PRs run|path triggers run the) `', prose), (filename, 'hand-maintained PR journey list')
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
 for feature in features:
-    entry = (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8")
+    entry = (re.sub(r'^### ', '## ', public_journeys[feature], flags=re.M) if feature in public_journeys else
+             (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8"))
     assert re.findall(r'^## (.+)$', entry, re.M) == [
         'Sub-features', 'How to get to it (user POV)', 'Driving it with PowerShell UI Automation', 'Gotchas'
     ], feature

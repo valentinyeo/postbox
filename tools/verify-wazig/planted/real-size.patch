@@ -1,0 +1,13 @@
+diff --git a/src/hub.zig b/src/hub.zig
+index cc22ba5..a1c9554 100644
+--- a/src/hub.zig
++++ b/src/hub.zig
+@@ -23,7 +23,7 @@ pub fn messages(allocator: std.mem.Allocator, chat: []const u8, limit: usize, be
+     try validId(chat);
+     const c = try bridge.encode(allocator, chat);
+     defer allocator.free(c);
+-    const b = try bridge.encode(allocator, before);
++    const b = try bridge.encode(allocator, before[0..0]);
+     defer allocator.free(b);
+     return .{ .path = try std.fmt.allocPrint(allocator, "/v1/wazig/messages?chat={s}&limit={d}&before={s}", .{ c, limit, b }) };
+ }
