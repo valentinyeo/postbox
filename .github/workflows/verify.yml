@@ -335,7 +335,7 @@ jobs:
           CODE: ${{ steps.journey.outputs.code }}
         run: |
           if ($env:CODE -notmatch '^\d+$') { throw 'Journey did not report an exit code' }
-          & tools/verify-wazig/classify-red.ps1 -Feature $env:FEATURE -Evidence planted-evidence -ExitCode ([int]$env:CODE) -PassedMessage 'planted bug not caught'
+          & tools/verify-wazig/classify-red.ps1 -Feature $env:FEATURE -Evidence planted-evidence -ExitCode ([int]$env:CODE) -PassedMessage 'planted bug not caught' -ExpectedCheck "tools/verify-wazig/planted/$($env:FEATURE).check"
           exit 0
       - name: Record planted result
         if: always()

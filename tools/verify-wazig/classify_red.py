@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 
-def classify_red(feature, evidence, exit_code, passed_message):
+def classify_red(feature, evidence, exit_code, passed_message, expected=None):
     if exit_code == 0:
         raise ValueError(passed_message)
     marker = evidence / 'journey-check-failed.txt'
@@ -14,6 +14,8 @@ def classify_red(feature, evidence, exit_code, passed_message):
     prefix = f'{feature}: '
     if not check.startswith(prefix) or not check[len(prefix):].strip():
         raise ValueError('invalid journey check failure marker')
+    if expected is not None and not check[len(prefix):].strip().startswith(expected):
+        raise ValueError(f'planted bug failed the wrong check: got "{check[len(prefix):].strip()}", expected "{expected}"')
     return check
 
 
@@ -24,11 +26,13 @@ if __name__ == '__main__':
     parser.add_argument('--exit-code', type=int, required=True)
     parser.add_argument('--passed-message', default='repro passed on base, so it does not reproduce the bug')
     parser.add_argument('--result-file', type=Path)
+    parser.add_argument('--expected-check', type=Path)
     args = parser.parse_args()
     try:
         if args.result_file:
             args.result_file.unlink(missing_ok=True)
-        check = classify_red(args.feature, args.evidence, args.exit_code, args.passed_message)
+        expected = args.expected_check.read_text(encoding='utf-8-sig').strip() if args.expected_check else None
+        check = classify_red(args.feature, args.evidence, args.exit_code, args.passed_message, expected)
         if args.result_file:
             args.result_file.parent.mkdir(parents=True, exist_ok=True)
             args.result_file.write_text(json.dumps({'feature': args.feature, 'classification': 'reproduced', 'check': check}), encoding='utf-8')

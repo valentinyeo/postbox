@@ -42,10 +42,29 @@ class FailureMarkerTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.evidence = Path(self.temp.name)
 
-    def classify(self, code, feature='search'):
+    def classify(self, code, feature='search', expected=None):
+        extra = ['--expected-check', str(expected)] if expected else []
         return subprocess.run([sys.executable, str(TOOLS / 'classify_red.py'), '--feature', feature,
-                               '--evidence', str(self.evidence), '--exit-code', str(code)],
+                               '--evidence', str(self.evidence), '--exit-code', str(code), *extra],
                               capture_output=True, text=True)
+
+    def test_planted_red_must_start_with_the_expected_check(self):
+        expected = self.evidence / 'expected.check'
+        expected.write_text('typed query reaches the filter\n')
+        (self.evidence / 'journey-check-failed.txt').write_text('search: typed query reaches the filter after 5 s\n')
+        self.assertEqual(self.classify(1, 'search', expected).returncode, 0)
+        (self.evidence / 'journey-check-failed.txt').write_text('search: window did not appear within 90 s\n')
+        wrong = self.classify(1, 'search', expected)
+        self.assertNotEqual(wrong.returncode, 0)
+        self.assertIn('wrong check', wrong.stderr)
+
+    def test_every_planted_bug_names_the_check_it_breaks(self):
+        for patch in (TOOLS / 'planted').glob('*.patch'):
+            with self.subTest(feature=patch.stem):
+                expected = patch.with_suffix('.check')
+                self.assertTrue(expected.is_file() and expected.read_text().strip())
+                (self.evidence / 'journey-check-failed.txt').write_text(f'{patch.stem}: {expected.read_text().strip()}\n')
+                self.assertEqual(self.classify(1, patch.stem, expected).returncode, 0)
 
     def test_nonzero_with_own_check_marker_counts_for_every_planted_journey(self):
         for patch in (TOOLS / 'planted').glob('*.patch'):

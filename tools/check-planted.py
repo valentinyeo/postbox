@@ -14,6 +14,9 @@ def check(root):
             errors.append(f'{patch.name}: unknown journey')
         if not patch.with_suffix('.txt').is_file() or not patch.with_suffix('.txt').read_text(encoding='utf-8').strip():
             errors.append(f'{patch.name}: missing description')
+        check = patch.with_suffix('.check')
+        if not check.is_file() or not check.read_text(encoding='utf-8').strip():
+            errors.append(f'{patch.name}: missing expected check')
         if not patch.read_text(encoding='utf-8').startswith('diff --git a/src/'):
             errors.append(f'{patch.name}: expected a src patch')
     limit = int((folder / 'planted-limits.txt').read_text(encoding='utf-8').strip())
