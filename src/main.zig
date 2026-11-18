@@ -8663,7 +8663,7 @@ fn drawUnfurlCard(shapes: *const smooth.Context, hdc: win.HDC, a: *App, message:
     const old_pen = win.SelectObject(hdc, win.GetStockObject(win.NULL_PEN));
     defer _ = win.SelectObject(hdc, old_pen);
 
-    const thumb_right = if (message.unfurl_provider == .page) x else x + @min(px(a, unfurl_thumb_width), @divTrunc(card_width, 2));
+    const thumb_right = if (message.unfurl_provider == .page and entry.thumb == null) x else x + @min(px(a, unfurl_thumb_width), @divTrunc(card_width, 2));
     if (thumb_right > x) drawUnfurlThumbnail(hdc, entry.thumb, .{ .left = x, .top = top, .right = thumb_right, .bottom = bottom }, unfurlPlaceholderColor(message.unfurl_provider));
     if (message.unfurl_provider != .page) {
         const play_brush = win.CreateSolidBrush(theme.current.on_surface) orelse return;
