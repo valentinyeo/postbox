@@ -28,11 +28,12 @@ class InlineLinksHandler(VoiceHandler):
             if not provider:
                 self.respond(200, [])
                 return
+            preview_url = origin + '/inline-links/' + provider + '-preview'
             body_url = origin + '/inline-links/' + provider + '-body-' + 'abcdefghij' * 18
             quote_url = origin + '/inline-links/' + provider + '-quote-' + 'klmnopqrst' * 18
             fallback_url = origin + '/inline-links/' + provider + '-fallback-' + 'uvwxyzabcd' * 18
             rows = [
-                dict(MsgID='INLINE-BODY', Text='Synthetic text ' + body_url, Timestamp=self.stamp(1)),
+                dict(MsgID='INLINE-BODY', Text='Synthetic text ' + preview_url + ' ' + body_url, Timestamp=self.stamp(1)),
                 dict(MsgID='INLINE-PLAIN', Text='Synthetic ordinary text without a link', Timestamp=self.stamp(2)),
                 dict(MsgID='INLINE-REPLY', Text='Synthetic incoming reply', DisplayText='> ' + quote_url + '\nSynthetic incoming reply',
                      quoted_msg_id='INLINE-BODY', quoted_sender_jid='fixture-sender', Timestamp=self.stamp(3)),
