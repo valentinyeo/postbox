@@ -106,9 +106,25 @@ jobs:
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz gitleaks
           ./gitleaks detect --no-banner --source . --redact --log-opts "$GITHUB_SHA"
 
+  proof:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require recorded journey proof for changed features
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/check_release_proof.py --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"
+
   release:
     name: release
-    needs: [build, launch, gitleaks]
+    needs: [build, launch, gitleaks, proof]
     permissions:
       contents: write
       pull-requests: read

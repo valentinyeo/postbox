@@ -67,6 +67,10 @@ jobs:
           import os
           from pathlib import Path
           import subprocess
+          import sys
+
+          sys.path.insert(0, 'tools/verify-wazig')
+          from plan_journeys import plan_journeys
 
           journeys = json.loads(Path('tools/verify-wazig/journeys.json').read_text())['journeys']
           feature = os.environ['FEATURE']
@@ -82,20 +86,13 @@ jobs:
               changed.write_text('\n'.join(files))
               repro = subprocess.check_output(['bash', 'tools/check-repro-first.sh', event['title'], str(body), str(changed)], text=True).strip()
               needed = bool(repro and repro != 'none') or any(p.startswith(('src/', 'tools/verify-wazig/')) or p in ('build.zig', '.github/workflows/verify.yml') for p in files)
-              names = set(mapping['default']) if needed else set()
-              if repro and repro != 'none':
-                  names.add(repro)
               with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
                   output.write(f'repro={repro if repro != "none" else ""}\nneeded={str(needed).lower()}\n')
-              for path in files:
-                  for prefix, features in mapping['paths'].items():
-                      if path.startswith(prefix):
-                          names.update(features)
-              if len(names) > mapping['max_journeys']:
-                  raise SystemExit('PR journey limit exceeded; split the change rather than skip coverage')
+              try:
+                  names = plan_journeys(files, mapping, journeys, repro)
+              except ValueError as error:
+                  raise SystemExit(str(error))
               selected = [row for row in journeys if row['name'] in names]
-              if len(selected) != len(names):
-                  raise SystemExit('PR journey map contains unknown journeys')
           else:
               selected = [row for row in journeys if row['name'] == feature]
               if not selected:

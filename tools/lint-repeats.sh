@@ -357,6 +357,17 @@ if [[ -f .github/workflows/verify.yml ]]; then
     fi
 fi
 
+if [[ -f .github/workflows/release.yml ]]; then
+    if ! awk '
+        /^  [A-Za-z0-9_-]+:/ { release = $0 ~ /^  release:/ }
+        release && /^    needs:/ && /[ ,\[]proof[ ,\]]/ { proof = 1 }
+        END { exit !proof }
+    ' .github/workflows/release.yml; then
+        printf 'lint-repeats: .github/workflows/release.yml:1: [B14] Publishing can skip recorded journey proof. Require proof in the release job needs.\n'
+        failed=1
+    fi
+fi
+
 if [[ -s tools/required-checks.txt ]]; then
     if ! python3 - <<'PYCODE'
 from pathlib import Path

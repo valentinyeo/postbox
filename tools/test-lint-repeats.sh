@@ -152,6 +152,21 @@ for mutation in planted schedule cron; do
 done
 reset_automerge
 printf 'test-lint-repeats: B13 rejects missing planted job and nightly trigger\n'
+sed 's/needs: \[build, launch, gitleaks, proof\]/needs: [build, launch, gitleaks]/' "$repo/.github/workflows/release.yml" > "$fixture/.github/workflows/release.yml"
+if cmp -s "$repo/.github/workflows/release.yml" "$fixture/.github/workflows/release.yml"; then
+    printf 'test-lint-repeats: FAIL B14 mutation changed nothing\n' >&2
+    exit 1
+fi
+status=0
+"$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+if (( status != 1 )) || ! grep -Fq '[B14]' "$temp/output"; then
+    cat "$temp/output" >&2
+    printf 'test-lint-repeats: FAIL B14 must reject publishing without proof\n' >&2
+    exit 1
+fi
+cp "$repo/.github/workflows/release.yml" "$fixture/.github/workflows/release.yml"
+"$lint" "$fixture"
+printf 'test-lint-repeats: B14 rejects publishing without proof and permits the gated release\n'
 b8_cases=0
 for guard in 'required-checks.txt' 'required=' 'as \$names' 'COMPLETED' 'match-head-commit' 'could not evaluate head checks' 'length) == 0' '!= "code-review"'; do
     reset_automerge
