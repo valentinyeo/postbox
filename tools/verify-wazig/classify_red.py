@@ -36,6 +36,6 @@ if __name__ == '__main__':
         if args.result_file:
             args.result_file.parent.mkdir(parents=True, exist_ok=True)
             args.result_file.write_text(json.dumps({'feature': args.feature, 'classification': 'reproduced', 'check': check}), encoding='utf-8')
-        print(check)
+        print(check.encode('ascii', 'backslashreplace').decode('ascii'))
     except (ValueError, OSError) as error:
-        sys.exit(str(error))
+        sys.exit(str(error).encode('ascii', 'backslashreplace').decode('ascii'))
