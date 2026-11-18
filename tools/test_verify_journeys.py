@@ -728,6 +728,13 @@ class InlineLinksChecksTests(unittest.TestCase):
         wait = text.index("'fixture reply painted again'", press)
         self.assertLess(wait, text.index("$reply = Get-InlineRow $session 'INLINE-REPLY'", ctrl_o))
 
+    def test_slack_reads_the_visible_fallback_quote_because_thread_replies_are_hidden(self):
+        text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
+        self.assertIn("$quoteRowId = if ($case.provider -ceq 'slack') { 'INLINE-BLOCK' } else { 'INLINE-REPLY' }", text)
+        self.assertIn('Where-Object id -CEQ $quoteRowId', text)
+        self.assertIn("$targets[$case.provider][$quoteTargetKey]", text)
+        self.assertNotIn("\"$($case.provider)-incoming\" $quoteUrl", text)
+
     def test_link_rectangles_are_asserted_before_they_are_indexed(self):
         text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
         guard = text.index("'Body link rectangles missing'")

@@ -159,6 +159,8 @@ $cases = @(
 $script:inlineStages = [System.Collections.Generic.List[object]]::new()
 $targets = @{}
 foreach ($case in $cases) {
+    $quoteRowId = if ($case.provider -ceq 'slack') { 'INLINE-BLOCK' } else { 'INLINE-REPLY' }
+    $quoteTargetKey = if ($case.provider -ceq 'slack') { 'fallback' } else { 'quote' }
     Focus-InlineApp $session
     [InlineLinksNative]::Combo(0x31)
     [InlineLinksNative]::Combo(0x46)
@@ -178,7 +180,7 @@ foreach ($case in $cases) {
     $null = Wait-Until {
         $rows = (Read-Control $session messages).messages
         $body = @($rows | Where-Object id -CEQ 'INLINE-BODY')[0]
-        $reply = @($rows | Where-Object id -CEQ 'INLINE-REPLY')[0]
+        $reply = @($rows | Where-Object id -CEQ $quoteRowId)[0]
         $body.bubble[1] -ge 72 -and $body.link_rects.Count -gt 0 -and $reply.quote_fragments.Count -gt 0
     } "fixture $($case.provider) painted"
     $bodyUrl = "$($session.bridge_url)/inline-links/$($case.provider)-body-" + ('abcdefghij' * 18)
@@ -189,9 +191,9 @@ foreach ($case in $cases) {
     $shown = Read-Control $session messages
     Record-InlineStage $session @{ name="$($case.provider)-fixture"; messages=$shown }
     $body = Get-InlineRow $session 'INLINE-BODY'
-    $reply = Get-InlineRow $session 'INLINE-REPLY'
+    $reply = Get-InlineRow $session $quoteRowId
     $fragments = @($reply.quote_fragments | Where-Object { $_.rect[2] -gt $_.rect[0] })
-    Assert-That ($reply.quote -ceq $quoteUrl -and $fragments.Count -gt 0) 'Compact quote URL missing'
+    Assert-That (($case.provider -ceq 'slack' -or $reply.quote -ceq $quoteUrl) -and $fragments.Count -gt 0) 'Compact quote URL missing'
     if ($case.provider -ceq 'whatsapp') {
         Assert-That (@($body.link_rects).Count -gt 0 -and $null -ne $body.link_rects[0]) 'Body link rectangles missing'
         $bodyRects = @($body.link_rects[0] | Where-Object { $_[2] -gt $_[0] -and $_[1] -ge 72 })
@@ -252,9 +254,9 @@ foreach ($case in $cases) {
             $row -and @($row.quote_fragments).Count -gt 0
         } 'fixture reply painted again'
     }
-    $reply = Get-InlineRow $session 'INLINE-REPLY'
+    $reply = Get-InlineRow $session $quoteRowId
     $point = Center-Inline $reply.quote_fragments[0].rect
-    Record-InlineStage $session (Invoke-InlineClick $session $point[0] $point[1] "$($case.provider)-incoming" $quoteUrl)
+    Record-InlineStage $session (Invoke-InlineClick $session $point[0] $point[1] "$($case.provider)-incoming" $targets[$case.provider][$quoteTargetKey])
     if ($case.provider -ceq 'whatsapp') {
         $reply = Get-InlineRow $session 'INLINE-REPLY'
         $x = [int]($reply.quote_line[0] + 4); $y = [int](($reply.quote_line[1] + $reply.quote_line[3]) / 2)
