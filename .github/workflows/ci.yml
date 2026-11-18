@@ -180,9 +180,7 @@ jobs:
           path: bin/
       - name: Install FFmpeg
         shell: pwsh
-        run: |
-          choco install ffmpeg --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+        run: tools/verify-wazig/install-ffmpeg.ps1
       - name: Verify forwarded image caption
         shell: pwsh
         run: tools/verify-wazig/run.ps1 -Feature media-fit -Bin bin -Evidence caption-evidence

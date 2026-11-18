@@ -157,9 +157,7 @@ jobs:
       - name: Install typing recorder
         if: needs.plan.outputs.repro == 'drafts' || needs.plan.outputs.repro == 'media-fit'
         shell: pwsh
-        run: |
-          choco install ffmpeg --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'Typing recorder installation failed' }
+        run: tools/verify-wazig/install-ffmpeg.ps1
       - name: Build historical rollback input
         if: needs.plan.outputs.repro == 'hub-rollback' || needs.plan.outputs.repro == 'hub-migration-crash' || needs.plan.outputs.repro == 'hub-migration-before-rename'
         shell: pwsh
@@ -221,6 +219,10 @@ jobs:
         if: matrix.feature == 'voice'
         shell: pwsh
         run: tools/verify-wazig/install-audio.ps1
+      - name: Install typing recorder
+        if: matrix.feature == 'drafts' || matrix.feature == 'media-fit'
+        shell: pwsh
+        run: tools/verify-wazig/install-ffmpeg.ps1
       - name: Run planted journey
         id: journey
         continue-on-error: true
@@ -676,9 +678,7 @@ jobs:
       - name: Install typing recorder
         if: matrix.feature == 'drafts' || matrix.feature == 'media-fit'
         shell: pwsh
-        run: |
-          choco install ffmpeg --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'Typing recorder installation failed' }
+        run: tools/verify-wazig/install-ffmpeg.ps1
       - name: Launch, doctor and drive
         shell: pwsh
         env:
