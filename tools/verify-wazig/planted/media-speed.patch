@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 5c441f2..1a85f08 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -16730,7 +16730,7 @@ fn runCommand(a: *App, command: u16) void {
+         command_speed_1, command_speed_150, command_speed_200 => {
+             const player = ensureAudioPlayer(a) orelse return;
+             player.setSpeed(switch (command) {
+-                command_speed_150 => 150,
++                command_speed_150 => 100,
+                 command_speed_200 => 200,
+                 else => 100,
+             });

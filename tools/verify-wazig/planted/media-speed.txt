@@ -1,0 +1,1 @@
+The 1.5x playback command sets normal speed instead.

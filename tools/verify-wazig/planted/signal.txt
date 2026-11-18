@@ -1,0 +1,1 @@
+Signal chats show letter badges instead of blue provider marks.

@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 5c441f2..ad93208 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -14591,7 +14591,7 @@ fn selectAllChats(a: *App) void {
+     a.bulk.clearRetainingCapacity();
+     if (a.chats_hwnd) |list| _ = win.InvalidateRect(list, null, win.FALSE);
+     if (a.chat_count == 0) return setStatus(a, "No chats to select");
+-    a.bulk.appendSlice(a.allocator, a.chats[0..a.chat_count]) catch return setStatus(a, "Could not select chats");
++    a.bulk.appendSlice(a.allocator, a.chats[0..0]) catch return setStatus(a, "Could not select chats");
+     var buffer: [128]u8 = undefined;
+     setStatus(a, std.fmt.bufPrint(&buffer, "{d} chats selected - Ctrl+E archives, Esc cancels", .{a.bulk.items.len}) catch "Chats selected");
+ }

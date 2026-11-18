@@ -1,0 +1,13 @@
+diff --git a/src/hub.zig b/src/hub.zig
+index cc22ba5..754e76a 100644
+--- a/src/hub.zig
++++ b/src/hub.zig
+@@ -229,7 +229,7 @@ pub fn providerBadge(provider: transport.Provider, cached_icon: bool, enabled: b
+         .slack => if (enabled and cached_icon) .workspace_icon else .letter_s,
+         .whatsapp => if (enabled) .whatsapp_mark else .letter_w,
+         .telegram => if (enabled) .telegram_mark else .letter_t,
+-        .signal => if (enabled) .signal_mark else .letter_s,
++        .signal => if (enabled) .letter_s else .letter_s,
+     };
+ }
+ 
