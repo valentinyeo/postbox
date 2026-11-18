@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -5857,7 +5857,7 @@
+         fresh_id = outbox.hexId(raw_id);
+         retry.entry.id = fresh_id;
+         retry.entry.client_msg_id.set("");
+-        retry.phase = .ready;
++        retry.phase = .held;
+         retry.entry.attempts = 0;
+         retry.entry.ambiguous = false;
+         retry.failure_reason = .{};
