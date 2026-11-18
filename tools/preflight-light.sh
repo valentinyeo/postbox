@@ -44,6 +44,8 @@ PYTHON_LIGHT_TESTS=(
     test_tdlib_release
     test_transcript_copy
     test_update_cards
+    test_verdict
+    test_base_repro_cache
     test_verify_failure_marker
     test_verify_journeys
     test_voice_language

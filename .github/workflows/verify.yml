@@ -122,57 +122,78 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     outputs:
-      classified: ${{ steps.repro.outputs.classified }}
+      classified: ${{ steps.classification.outputs.classified }}
     steps:
       - uses: actions/checkout@v4
         if: needs.plan.outputs.repro != ''
         with:
           ref: ${{ github.event.pull_request.base.sha }}
-      - uses: mlugg/setup-zig@v2
-        if: needs.plan.outputs.repro != ''
-        with:
-          version: ${{ env.BASE_ZIG_VERSION }}
-          use-cache: false
-      - name: Build base desktop
-        if: needs.plan.outputs.repro != ''
-        shell: pwsh
-        run: |
-          zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}'
-          if ($LASTEXITCODE -ne 0) { throw 'Base build failed' }
       - uses: actions/checkout@v4
         if: needs.plan.outputs.repro != ''
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr-head
-      - name: Overlay PR journey tools
+      - name: Resolve registered repro script
+        id: journey
         if: needs.plan.outputs.repro != ''
+        shell: python
+        env:
+          FEATURE: ${{ needs.plan.outputs.repro }}
+        run: |
+          import json
+          import os
+          from pathlib import Path
+          journeys = json.loads(Path('pr-head/tools/verify-wazig/journeys.json').read_text())['journeys']
+          script = next(row['script'] for row in journeys if row['name'] == os.environ['FEATURE'])
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'script={script}\n')
+      - name: Cache base reproduction classification
+        id: base-cache
+        if: needs.plan.outputs.repro != ''
+        uses: actions/cache@v4
+        with:
+          path: base-evidence/classification.json
+          key: repro-base-v1-${{ github.event.pull_request.base.sha }}-${{ needs.plan.outputs.repro }}-${{ hashFiles(format('pr-head/tools/verify-wazig/{0}', steps.journey.outputs.script)) }}-${{ hashFiles('pr-head/tools/verify-wazig/**') }}-${{ env.BASE_ZIG_VERSION }}-${{ env.BASE_APP_VERSION }}
+      - uses: mlugg/setup-zig@v2
+        if: needs.plan.outputs.repro != '' && steps.base-cache.outputs.cache-hit != 'true'
+        with:
+          version: ${{ env.BASE_ZIG_VERSION }}
+          use-cache: false
+      - name: Build base desktop
+        if: needs.plan.outputs.repro != '' && steps.base-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}'
+          if ($LASTEXITCODE -ne 0) { throw 'Base build failed' }
+      - name: Overlay PR journey tools
+        if: needs.plan.outputs.repro != '' && steps.base-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           Remove-Item tools/verify-wazig -Recurse -Force
           Copy-Item pr-head/tools/verify-wazig tools/verify-wazig -Recurse
       - name: Install audio output
-        if: needs.plan.outputs.repro == 'voice'
+        if: steps.base-cache.outputs.cache-hit != 'true' && (needs.plan.outputs.repro == 'voice')
         shell: pwsh
         run: tools/verify-wazig/install-audio.ps1
       - name: Install typing recorder
-        if: needs.plan.outputs.repro == 'drafts' || needs.plan.outputs.repro == 'media-fit'
+        if: steps.base-cache.outputs.cache-hit != 'true' && (needs.plan.outputs.repro == 'drafts' || needs.plan.outputs.repro == 'media-fit')
         shell: pwsh
         run: tools/verify-wazig/install-ffmpeg.ps1
       - name: Build historical rollback input
-        if: needs.plan.outputs.repro == 'hub-rollback' || needs.plan.outputs.repro == 'hub-migration-crash' || needs.plan.outputs.repro == 'hub-migration-before-rename'
+        if: steps.base-cache.outputs.cache-hit != 'true' && (needs.plan.outputs.repro == 'hub-rollback' || needs.plan.outputs.repro == 'hub-migration-crash' || needs.plan.outputs.repro == 'hub-migration-before-rename')
         shell: pwsh
         run: |
           & tools/verify-wazig/build-historical-847.ps1 -Evidence verification-evidence/historical-847
           if ($LASTEXITCODE -ne 0) { throw 'Historical rollback build failed' }
       - name: Install Chrome screenshot driver
-        if: needs.plan.outputs.repro == 'text-comparison'
+        if: steps.base-cache.outputs.cache-hit != 'true' && (needs.plan.outputs.repro == 'text-comparison')
         shell: pwsh
         run: |
           npm install --prefix "$env:RUNNER_TEMP/text-compare" --no-save playwright-core@1.58.2
           if ($LASTEXITCODE -ne 0) { throw 'Chrome driver installation failed' }
       - name: Run reproduction on base
         id: repro
-        if: needs.plan.outputs.repro != ''
+        if: needs.plan.outputs.repro != '' && steps.base-cache.outputs.cache-hit != 'true'
         shell: pwsh
         env:
           FEATURE: ${{ needs.plan.outputs.repro }}
@@ -180,9 +201,27 @@ jobs:
         run: |
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence base-evidence -ExpectedVersion ${{ env.BASE_APP_VERSION }}
           $code = $LASTEXITCODE
-          & tools/verify-wazig/classify-red.ps1 -Feature $env:FEATURE -Evidence base-evidence -ExitCode $code
-          'classified=true' >> $env:GITHUB_OUTPUT
+          & tools/verify-wazig/classify-red.ps1 -Feature $env:FEATURE -Evidence base-evidence -ExitCode $code -ResultFile base-evidence/classification.json
           exit 0
+      - name: Read base classification
+        id: classification
+        if: needs.plan.outputs.repro != ''
+        shell: pwsh
+        env:
+          FEATURE: ${{ needs.plan.outputs.repro }}
+        run: |
+          $result = Get-Content base-evidence/classification.json -Raw | ConvertFrom-Json
+          if ($result.feature -cne $env:FEATURE -or $result.classification -cne 'reproduced' -or -not $result.check.StartsWith("$($env:FEATURE): ")) { throw 'Invalid cached base classification' }
+          'classified=true' >> $env:GITHUB_OUTPUT
+      - name: Summarize base cache
+        if: always()
+        shell: pwsh
+        env:
+          FEATURE: ${{ needs.plan.outputs.repro }}
+          CACHE_HIT: ${{ steps.base-cache.outputs.cache-hit }}
+        run: |
+          $status = if (-not $env:FEATURE) { 'not used (no repro)' } elseif ($env:CACHE_HIT -eq 'true') { 'hit' } else { 'miss' }
+          "Base repro cache: $status" >> $env:GITHUB_STEP_SUMMARY
       - name: Upload base evidence
         if: ${{ always() && needs.plan.outputs.repro != '' }}
         uses: actions/upload-artifact@v4
