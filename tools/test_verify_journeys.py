@@ -713,6 +713,12 @@ class HubLocalArchiveJourneyTests(unittest.TestCase):
 
 
 class InlineLinksChecksTests(unittest.TestCase):
+    def test_link_rectangles_are_asserted_before_they_are_indexed(self):
+        text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
+        guard = text.index("'Body link rectangles missing'")
+        index = text.index('$bodyRects = @($body.link_rects[0]')
+        self.assertLess(guard, index)
+
     def test_fixture_keeps_a_wrapped_body_url_after_the_preview_url(self):
         tools = ROOT / 'tools/verify-wazig'
         namespace = runpy.run_path(str(tools / 'fake-hub.py'))
@@ -1093,14 +1099,6 @@ class AppearanceVersionTests(unittest.TestCase):
             session['expected_version'] = '1.2.345'
             (folder / 'session.json').write_text(json.dumps(session))
             self.assertNotEqual(self.run_oracle(folder).returncode, 0)
-
-
-class InlineLinksChecksTests(unittest.TestCase):
-    def test_link_rectangles_are_asserted_before_they_are_indexed(self):
-        text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
-        guard = text.index("'Body link rectangles missing'")
-        index = text.index('$bodyRects = @($body.link_rects[0]')
-        self.assertLess(guard, index)
 
 
 if __name__ == '__main__':
