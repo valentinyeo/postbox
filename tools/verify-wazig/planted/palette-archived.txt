@@ -1,1 +1,1 @@
-A network account whose only chat is the oldest in the list loses its own view.
+A Slack account never gets its own view, so the account views list only WhatsApp.
