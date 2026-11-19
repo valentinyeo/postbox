@@ -80,23 +80,23 @@
     {
       "feature": "command_dictation_auto",
       "source": "buildPaletteItems:command_dictation_auto",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "dictation-shortcuts",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_dictation_english",
       "source": "buildPaletteItems:command_dictation_english",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "dictation-shortcuts",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_dictation_german",
       "source": "buildPaletteItems:command_dictation_german",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "dictation-shortcuts",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_emoji",
