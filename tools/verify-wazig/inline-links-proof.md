@@ -1,6 +1,6 @@
 # Inline link proof
 
-- Hosted Windows runs this synthetic journey.
+- A GitHub-hosted Windows runner runs this synthetic journey.
 - Inputs use native `SendInput`.
 - Each mouse release receives an app acknowledgment.
 - Dispatch receipts follow the real Windows call.
