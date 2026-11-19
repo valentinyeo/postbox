@@ -785,7 +785,7 @@ jobs:
           $failed = $false
           for ($i = 1; $i -le [int]$env:REPEAT; $i++) {
             $evidence = if ($i -eq 1) { 'verification-evidence' } else { "verification-evidence/repeat-$i" }
-            pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence $evidence -ExpectedVersion $env:VERIFY_VERSION
+            python tools/verify-wazig/vw.py drive $env:FEATURE --bin zig-out/bin --evidence $evidence --expected-version $env:VERIFY_VERSION
             $code = $LASTEXITCODE
             if ($code -eq 0 -and $env:VALIDATE_EVIDENCE -eq 'true') {
               python tools/verify-wazig/check-evidence.py $evidence

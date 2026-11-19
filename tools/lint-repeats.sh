@@ -426,6 +426,13 @@ PYCODE
     fi
 fi
 
+if [[ -f .github/workflows/verify.yml ]]; then
+    if ! grep -Fq 'python tools/verify-wazig/vw.py drive $env:FEATURE' .github/workflows/verify.yml; then
+        printf 'lint-repeats: .github/workflows/verify.yml:1: [B17] The verify job must drive journeys through the control CLI. Call python tools/verify-wazig/vw.py drive.\n'
+        failed=1
+    fi
+fi
+
 if [[ -f .claude/skills/verify-wazig/SKILL.md ]]; then
     if (( $(grep -Ecx 'pstack: [0-9]+\.[0-9]+\.[0-9]+' .claude/skills/verify-wazig/SKILL.md) != 1 )); then
         printf 'lint-repeats: .claude/skills/verify-wazig/SKILL.md:1: [B16] The verify skill must record one pstack version line. Add a line such as pstack: 0.15.43.\n'

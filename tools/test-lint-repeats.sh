@@ -152,6 +152,17 @@ for mutation in planted schedule cron; do
 done
 reset_automerge
 printf 'test-lint-repeats: B13 rejects missing planted job and nightly trigger\n'
+reset_automerge
+sed -i 's#tools/verify-wazig/vw.py drive#tools/verify-wazig/run.ps1 -Feature#' "$fixture/.github/workflows/verify.yml"
+status=0
+"$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+if (( status != 1 )) || ! grep -Fq '[B17]' "$temp/output"; then
+    cat "$temp/output" >&2
+    printf 'test-lint-repeats: FAIL B17 must reject a verify job that skips the control CLI\n' >&2
+    exit 1
+fi
+reset_automerge
+printf 'test-lint-repeats: B17 requires the control CLI in the verify job\n'
 mkdir -p "$fixture/.claude/skills/verify-wazig"
 for mutation in missing doubled; do
     case "$mutation" in

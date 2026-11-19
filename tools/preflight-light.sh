@@ -46,6 +46,7 @@ PYTHON_LIGHT_TESTS=(
     test_update_cards
     test_nightly_verification
     test_verdict
+    test_vw
     test_verification_job_counts
     test_base_repro_cache
     test_verify_failure_marker
