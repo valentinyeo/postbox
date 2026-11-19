@@ -13,6 +13,7 @@ PUBLIC_SKILL_PATHS = (
     ".claude/skills/verify-wazig/INDEX.md",
     ".claude/skills/verify-wazig/RULE-MAP.md",
     ".claude/skills/verify-wazig/features/README.md",
+    ".claude/skills/verify-send-queue/SKILL.md",
 ) + tuple(
     f".claude/skills/verify-wazig/features/{journey['name']}.md"
     for journey in json.loads((Path(__file__).resolve().parent / 'verify-wazig/journeys.json').read_text(encoding='utf-8'))['journeys']
