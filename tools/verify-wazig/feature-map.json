@@ -563,9 +563,9 @@
     {
       "feature": "voice-playback",
       "source": "AGENTS:voice",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this complete behavior end to end."
+      "proof": "voice",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "voice-transcription-cache",
