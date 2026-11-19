@@ -84,7 +84,7 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `media-cache-reopen` | `AGENTS:media-cache` | GAP | GAP: No journey asserts this complete behavior end to end. |
 | `animated-gifs` | `AGENTS:gif` | slack-emoji | covered |
 | `video-thumbnails` | `AGENTS:video` | GAP | GAP: No journey asserts this complete behavior end to end. |
-| `voice-playback` | `AGENTS:voice` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `voice-playback` | `AGENTS:voice` | voice | covered |
 | `voice-transcription-cache` | `AGENTS:transcription` | GAP | GAP: No journey asserts this complete behavior end to end. |
 | `dictation` | `AGENTS:dictation` | GAP | GAP: No journey asserts this complete behavior end to end. |
 | `dictation-shortcuts` | `src:dictation-shortcuts` | dictation-shortcuts | covered |
