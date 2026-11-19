@@ -25,7 +25,7 @@ blocked=$(echo "$info" | jq -r --argjson req "$required" '
   ([.statusCheckRollup[] | select((.name // .context) != "code-review")] | map(select((((.name // "") | startswith("planted")) and .conclusion == "SKIPPED") | not)) as $roll
    | ($req + [$roll[] | .name // .context] | unique) as $names
    | [ $names[] as $r
-       | [$roll[] | select((.name // .context) == $r)] as $checks
+       | ([$roll[] | select((.name // .context) == $r)] | if length > 1 then [max_by(.startedAt // .completedAt // "")] else . end) as $checks
        | if ($checks | length) == 0
            or any($checks[]; if .__typename == "StatusContext" then .state != "SUCCESS"
                   else .status != "COMPLETED" or .conclusion != "SUCCESS" end)
