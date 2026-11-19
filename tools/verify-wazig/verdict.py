@@ -105,10 +105,12 @@ def read_text(path, limit):
 
 def digest(root):
     root = Path(root)
-    if not root.is_dir():
+    folders = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+    if not folders:
         return ''
+    share = MAX_EVIDENCE // len(folders)
     parts = []
-    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+    for folder in folders:
         lines = [f'## {folder.name}']
         for name in EVIDENCE_FILES:
             for path in sorted(folder.rglob(name)):
@@ -119,9 +121,9 @@ def digest(root):
             lines.append(f'actions.log tail: {tail}')
         if len(lines) == 1:
             lines.append('no text evidence found')
-        parts.append('\n'.join(lines))
-    text = '\n\n'.join(parts)
-    return text if len(text) <= MAX_EVIDENCE else text[:MAX_EVIDENCE] + '\n[evidence cut]'
+        text = '\n'.join(lines)
+        parts.append(text if len(text) <= share else text[:share] + ' [cut]')
+    return '\n\n'.join(parts)
 
 
 def build_system():
@@ -153,11 +155,11 @@ def build_user(pr_text, journeys, evidence, diff):
 
 def parse_reply(text):
     text = re.sub(r'<think>.*?</think>', '', text or '', flags=re.S)
-    match = re.search(r'\{.*\}', text, flags=re.S)
-    if not match:
+    start = text.find('{')
+    if start < 0:
         return None
     try:
-        data = json.loads(match.group(0))
+        data, _ = json.JSONDecoder().raw_decode(text[start:])
     except ValueError:
         return None
     if not isinstance(data, dict) or data.get('verdict') not in ('PASS', 'PASS+NOTES', 'FAIL'):
@@ -173,7 +175,7 @@ def http_post(body, key):
         headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json', 'User-Agent': 'postbox-verify-verdict/1'},
         method='POST',
     )
-    with urllib.request.urlopen(request, timeout=120) as response:
+    with urllib.request.urlopen(request, timeout=60) as response:
         payload = json.load(response)
     return payload['choices'][0]['message']['content']
 
@@ -193,7 +195,7 @@ def ask(judges, system, user, key, post, sleep=time.sleep):
             except urllib.error.HTTPError as error:
                 errors.append(f'{model}: HTTP {error.code}')
                 if error.code == 429 and attempt < 2:
-                    sleep(30)
+                    sleep(20)
                     continue
                 break
             except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError) as error:
@@ -237,7 +239,14 @@ def judge(needs, body, pr_text, journeys, evidence, diff, key, post=http_post, s
 
 
 def failure_lines(evidence):
-    return [line.strip() for line in evidence.splitlines() if line.startswith('failure.txt:')][:5]
+    found = []
+    folder = ''
+    for line in evidence.splitlines():
+        if line.startswith('## '):
+            folder = line[3:]
+        elif line.startswith('failure.txt:') and folder != 'repro-base':
+            found.append(f'{folder} {line.strip()}')
+    return found[:5]
 
 
 def render(result, notes, model, sha, run_url):
@@ -272,8 +281,10 @@ def main():
     repo = os.environ.get('GITHUB_REPOSITORY', '')
     number = pull.get('number')
     plan = needs.get('plan', {}).get('outputs', {})
-    matrix = json.loads(plan.get('matrix') or '{"include": []}')
-    journeys = [row['feature'] for row in matrix.get('include', [])]
+    try:
+        journeys = [row['feature'] for row in json.loads(plan.get('matrix') or '{}').get('include', [])]
+    except (ValueError, TypeError, KeyError, AttributeError):
+        journeys = ['unknown (unreadable plan matrix)']
     evidence = digest(os.environ.get('EVIDENCE_DIR', 'evidence'))
     diff = ''
     if repo and number:
@@ -289,7 +300,10 @@ def main():
         with Path(summary).open('a', encoding='utf-8') as output:
             output.write(result + '\n\n' + text)
     if repo and number and os.environ.get('VERDICT_POST') == '1':
-        post_comment(repo, number, text)
+        try:
+            post_comment(repo, number, text)
+        except (subprocess.CalledProcessError, OSError) as error:
+            print(f'verify-verdict: could not post the PR comment ({type(error).__name__}); the verdict above stands.')
     return int(result == 'FAIL')
 
 

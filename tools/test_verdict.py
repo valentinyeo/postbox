@@ -88,6 +88,9 @@ class VerdictTests(unittest.TestCase):
     def test_verdict_job_runs_main_judge_not_pr_code(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())
         job = workflow['jobs']['verify-verdict']
+        for step in job['steps'][1:3]:
+            self.assertEqual(step['uses'], 'actions/download-artifact@v4')
+            self.assertTrue(step['continue-on-error'])
         checkout = job['steps'][0]
         self.assertEqual(checkout['uses'], 'actions/checkout@v4')
         self.assertEqual(checkout['with']['ref'], '${{ github.event.repository.default_branch }}')
@@ -169,7 +172,7 @@ class JudgeTests(unittest.TestCase):
         model = Model(reply('PASS'))
         result, notes, used = self.run_judge(model, needs=needs)
         self.assertEqual(result, 'FAIL')
-        self.assertIn('failure.txt: search: chats were not filtered', notes)
+        self.assertIn('verify-wazig-search failure.txt: search: chats were not filtered', notes)
         self.assertEqual(model.models, [])
 
     def test_fail_needs_a_real_evidence_quote(self):
@@ -222,7 +225,37 @@ class JudgeTests(unittest.TestCase):
                 extra = Path(temp) / f'verify-wazig-{index:02d}'
                 extra.mkdir()
                 (extra / 'failure.txt').write_text('y' * 2000)
-            self.assertLessEqual(len(MODULE.digest(temp)), MODULE.MAX_EVIDENCE + 20)
+            text = MODULE.digest(temp)
+            self.assertLessEqual(len(text), MODULE.MAX_EVIDENCE + 400)
+            self.assertIn('## verify-wazig-29', text)
+            self.assertIn('## verify-wazig-search', text)
+
+    def test_red_job_lists_head_failures_not_the_base_repro(self):
+        evidence = ('## repro-base\nfailure.txt: base: bug reproduced\n\n'
+                    '## verify-wazig-search\nfailure.txt: search: chats were not filtered')
+        self.assertEqual(MODULE.failure_lines(evidence), ['verify-wazig-search failure.txt: search: chats were not filtered'])
+
+    def test_reply_parsing_takes_the_first_object(self):
+        self.assertEqual(MODULE.parse_reply(reply('PASS') + ' then ' + reply('FAIL')), ('PASS', [], ''))
+        self.assertIsNone(MODULE.parse_reply('{"verdict": "MAYBE"}'))
+        self.assertIsNone(MODULE.parse_reply('no json'))
+
+    def test_failed_comment_post_keeps_the_verdict(self):
+        with tempfile.TemporaryDirectory() as temp:
+            needs = copy.deepcopy(self.needs)
+            needs['verify']['result'] = 'failure'
+            fake = Path(temp) / 'gh'
+            fake.write_text('#!/bin/sh\nexit 1\n')
+            fake.chmod(0o755)
+            event = Path(temp) / 'event.json'
+            event.write_text(json.dumps({'pull_request': {'number': 5, 'title': 't', 'body': '', 'head': {'sha': 'abc'}}}))
+            env = dict(os.environ, NEEDS_JSON=json.dumps(needs), GITHUB_EVENT_PATH=str(event), GITHUB_REPOSITORY='o/r',
+                       VERDICT_POST='1', EVIDENCE_DIR=str(Path(temp) / 'none'), PATH=temp + os.pathsep + os.environ['PATH'])
+            env.pop('GITHUB_STEP_SUMMARY', None)
+            result = subprocess.run([sys.executable, str(SCRIPT)], text=True, capture_output=True, env=env)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(result.stdout.splitlines()[0], 'FAIL')
+            self.assertIn('could not post the PR comment', result.stdout)
 
     def test_comment_carries_marker_verdict_and_judge(self):
         text = MODULE.render('PASS+NOTES', ['A gap.'], 'openai/gpt-oss-120b', 'abc', 'https://run')

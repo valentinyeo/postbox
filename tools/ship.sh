@@ -55,7 +55,8 @@ if [[ -z "$pr" ]]; then
     if [[ -n "${SHIP_EXTRA:-}" ]]; then
         body+=$'\n\n'"$SHIP_EXTRA"
     fi
-    for author in ${SHIP_AUTHOR_MODEL:-}; do
+    authors="${SHIP_AUTHOR_MODEL:-}"
+    for author in ${authors//,/ }; do
         body+=$'\n\nAuthor model: '"$author"
     done
     body+=$'\n\nOpened by tools/ship.sh.'
