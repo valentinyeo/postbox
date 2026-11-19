@@ -1,1 +1,1 @@
-Postbox starts on an empty saved Signal view instead of the combined inbox.
+The Telegram view is missing from the view list, so a saved Telegram view has nowhere to land.

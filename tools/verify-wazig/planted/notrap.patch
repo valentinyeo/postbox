@@ -1,13 +1,12 @@
 diff --git a/src/main.zig b/src/main.zig
-index 8d6f7e7..6b12025 100644
+index 8d6f7e7..291fdc6 100644
 --- a/src/main.zig
 +++ b/src/main.zig
-@@ -2722,7 +2722,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
-     };
-     if (fresh and unifiedHub(a) and !a.show_archived and a.startup_view_pending) {
-         a.startup_view_pending = false;
--        if (a.chat_view == .signal or a.chat_view == .telegram) {
-+        if (a.chat_view == .signal and a.chat_view == .telegram) {
-             var populated = false;
-             for (data.items) |row| {
-                 if (row != .object) continue;
+@@ -3737,7 +3737,6 @@ fn rebuildViews(a: *App, rows: []const std.json.Value) void {
+     }
+     if (unifiedHub(a)) {
+         messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.signal, "signal", "")) catch return;
+-        messenger_view.appendUnique(a.allocator, &known, messenger_view.Account.init(.telegram, "telegram", "")) catch return;
+     }
+     const ordered = messenger_view.mergeOrder(a.allocator, a.view_order, known.items) catch return;
+     for (ordered.items) |*view| {
