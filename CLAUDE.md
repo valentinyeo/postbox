@@ -38,6 +38,7 @@
 | Build marker operations and Python files reading Zig source text must not increase | `tools/check-no-source-text-tests.sh` and `tools/test-check-no-source-text-tests.sh` |
 | Empty catches in Zig source must not increase (SOFT-2509) | `tools/check-no-empty-catch.sh` and `tools/test-check-no-empty-catch.sh` |
 | Numeric literals in `draw*` and `paint*` functions in `src/main.zig` must not increase; put layout numbers in `src/box_layout.zig` or `src/quote_layout.zig` (SOFT-2508) | `tools/check-no-new-pixel-numbers.sh` and `tools/test-check-no-new-pixel-numbers.sh` |
+| A typical PR starts at most 19 jobs; merge small checks into one job instead of adding one (SOFT-2765) | `tools/check_job_budget.py`, `tools/lint-repeats.sh` rule B18 and `tools/test_job_budget.py` |
 | Each check still fails on the past commit it was written for | `tools/test-preflight-guard.sh`, `tools/test-lint-repeats.sh`, `tools/test-ci-green.sh` in CI |
 | New Actions run logs carry no private markers | `run-log-markers.yml` hourly, `tools/check_private_markers.py --logs` |
 | The video tool installs through one retrying script that fails when ffmpeg is missing (SOFT-2677) | `tools/test_install_ffmpeg.py` and `tools/verify-wazig/install-ffmpeg.ps1` |

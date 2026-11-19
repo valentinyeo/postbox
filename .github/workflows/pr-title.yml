@@ -16,6 +16,7 @@ jobs:
     name: pr-title
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: check the PR title says something
         uses: actions/github-script@v7
         with:
@@ -32,11 +33,8 @@ jobs:
             }
             core.info(`PR title ok: ${title}`);
 
-  update-card:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - name: Check product update card line
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -45,12 +43,8 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/pr-files.txt"
           python3 tools/update_cards.py check --body-file "$RUNNER_TEMP/pr-body.txt" --files "$RUNNER_TEMP/pr-files.txt"
 
-  pr-proof:
-    name: pr-proof
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - name: Check PR proof
+        if: ${{ !cancelled() }}
         run: |
           jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/pr-body.txt"
           bash tools/check-pr-proof.sh "$RUNNER_TEMP/pr-body.txt"

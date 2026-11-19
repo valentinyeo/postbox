@@ -14,21 +14,6 @@ permissions:
   contents: read
 
 jobs:
-  pin-icon-tests:
-    name: pin-icon-tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-      - name: IGSH-494 pin geometry
-        run: zig test src/pin_icon_test.zig
-      - name: IGSH-494 pin source regression and negative controls
-        if: ${{ !cancelled() }}
-        run: python3 tools/test_pin_icon.py
-
   ci:
     name: ci
     runs-on: ubuntu-latest
@@ -61,6 +46,13 @@ jobs:
 
       - name: Zig version
         run: zig version
+
+      - name: IGSH-494 pin geometry
+        run: zig test src/pin_icon_test.zig
+
+      - name: IGSH-494 pin source regression and negative controls
+        if: ${{ !cancelled() }}
+        run: python3 tools/test_pin_icon.py
 
       - name: ISSUE-517 voice transcription and historical negative control
         run: python3 tools/check_voice_transcription_regression.py --zig "$(command -v zig)"
@@ -105,17 +97,7 @@ jobs:
           name: Messages-windows-x86_64
           path: zig-out/bin/
 
-  tdlib-cache:
-    name: tdlib-cache / cache
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - name: Reject retired desktop dependencies
-        run: python3 tools/check_hub_only.py
-
   tdlib:
-    needs: tdlib-cache
     name: tdlib
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -124,6 +106,8 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+      - name: Reject retired desktop dependencies
+        run: python3 tools/check_hub_only.py
       - name: Build hub-only desktop
         run: zig build -Dtarget=x86_64-windows-gnu --release=small -Dversion=0.0.526
       - name: Verify hub-only binary

@@ -18,7 +18,7 @@ def verify(workflows):
     assert 'if:' not in smoke
     assert 'tools/verify-wazig/run.ps1 -Feature telegram -Bin ' in smoke
     assert 'python tools/verify-wazig/check-evidence.py verification-evidence' in proof
-    for context in ('tdlib', 'windows-smoke', 'tdlib-cache / cache'):
+    for context in ('tdlib', 'windows-smoke'):
         assert re.search(r'^    name: ' + re.escape(context) + r'$', workflows['ci'], re.M), context
     assert 'python3 tools/check_hub_only.py' in workflows['ci']
     assert 'uses: ./.github/workflows/tdlib-cache.yml' not in workflows['ci']
@@ -54,7 +54,7 @@ class TdlibReleaseTest(unittest.TestCase):
             verify(self.workflows)
 
     def test_missing_required_context_rejected(self):
-        for context in ('tdlib', 'windows-smoke', 'tdlib-cache / cache'):
+        for context in ('tdlib', 'windows-smoke'):
             original = self.workflows['ci']
             self.workflows['ci'] = original.replace('    name: ' + context + '\n', '    name: other\n')
             with self.assertRaises(AssertionError):

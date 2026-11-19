@@ -163,6 +163,19 @@ if (( status != 1 )) || ! grep -Fq '[B17]' "$temp/output"; then
 fi
 reset_automerge
 printf 'test-lint-repeats: B17 requires the control CLI in the verify job\n'
+{
+    printf 'name: budget\non:\n  pull_request:\njobs:\n'
+    for n in $(seq 1 20); do printf '  job-%s:\n    runs-on: ubuntu-latest\n' "$n"; done
+} > "$fixture/.github/workflows/budget.yml"
+status=0
+"$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+if (( status != 1 )) || ! grep -Fq '[B18]' "$temp/output"; then
+    cat "$temp/output" >&2
+    printf 'test-lint-repeats: FAIL B18 must reject a PR that starts more than 19 jobs\n' >&2
+    exit 1
+fi
+rm -f "$fixture/.github/workflows/budget.yml"
+printf 'test-lint-repeats: B18 caps the jobs a typical PR starts\n'
 mkdir -p "$fixture/.claude/skills/verify-wazig"
 for mutation in missing doubled; do
     case "$mutation" in
