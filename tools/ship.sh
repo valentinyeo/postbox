@@ -38,6 +38,11 @@ if [[ ! "$wait_seconds" =~ ^[1-9][0-9]*$ ]]; then
     exit 1
 fi
 
+if [[ -z "${SHIP_AUTHOR_MODEL:-}" ]] && ! grep -Eq '^Author model: [^ ]+$' <<< "${SHIP_EXTRA:-}"; then
+    echo 'ship: set SHIP_AUTHOR_MODEL to each author model, for example anthropic/claude-opus-5-5; the verifier picks a judge from another family.' >&2
+    exit 1
+fi
+
 card_files="$(git diff --name-only origin/main...HEAD)"
 CARD_TEXT="$3" CARD_FILES="$card_files" python3 -c 'import os, sys; sys.path.insert(0, "tools"); from update_cards import validate; validate("Card: " + os.environ["CARD_TEXT"], os.environ["CARD_FILES"].splitlines())'
 
@@ -50,6 +55,10 @@ if [[ -z "$pr" ]]; then
     if [[ -n "${SHIP_EXTRA:-}" ]]; then
         body+=$'\n\n'"$SHIP_EXTRA"
     fi
+    authors="${SHIP_AUTHOR_MODEL:-}"
+    for author in ${authors//,/ }; do
+        body+=$'\n\nAuthor model: '"$author"
+    done
     body+=$'\n\nOpened by tools/ship.sh.'
     pr="$(gh pr create --base main --head "$branch" --title "$1: $2" --body "$body")"
 fi
