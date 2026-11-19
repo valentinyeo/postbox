@@ -231,6 +231,10 @@ class JudgeTests(unittest.TestCase):
             self.assertIn('classification.json: {"classification": "reproduced"}', text)
             self.assertTrue(text.split('actions.log tail: ')[1].split('\n')[0].endswith('last action'))
             self.assertNotIn('PNG', text)
+            control = folder / 'red-control'
+            control.mkdir()
+            (control / 'failure.txt').write_text('reply: Timed out: Reply preview missing')
+            self.assertNotIn('Reply preview missing', MODULE.digest(temp))
             for index in range(30):
                 extra = Path(temp) / f'verify-wazig-{index:02d}'
                 extra.mkdir()
