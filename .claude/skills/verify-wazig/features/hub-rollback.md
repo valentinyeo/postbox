@@ -12,12 +12,12 @@
 ## Driving it with PowerShell UI Automation
 
 - Run `feature=hub-rollback` on GitHub Actions.
-- The fixture builds and launches the pinned old executable.
+- The verify workflow builds the pinned old executable with `tools/verify-wazig/build-historical-847.ps1` (commit 84769d3); the journey checks its provenance and hashes, then launches it.
 
 ## Gotchas
 
 - This is not complete rollback proof.
-- Old writes and re-upgrade remain unimplemented.
+- Old writes remain unimplemented. Re-upgrade recovery is covered only by [hub-migration-crash](hub-migration-crash.md).
 - Offline cleanup requires an isolated Actions runner.
-- Partial migration crashes, capacity and allocator remain unimplemented.
+- Interrupted migration is covered by [hub-migration-crash](hub-migration-crash.md) and [hub-migration-before-rename](hub-migration-before-rename.md). Other crashes, capacity and allocator remain unimplemented.
 - Voice and full routing proof remain unimplemented.
