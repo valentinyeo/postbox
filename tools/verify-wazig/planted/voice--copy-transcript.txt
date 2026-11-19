@@ -1,0 +1,1 @@
+Choosing Copy transcript copies the message text instead of the voice note words.
