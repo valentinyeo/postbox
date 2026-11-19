@@ -12,7 +12,7 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_copy_all_transcripts` | `buildPaletteItems:command_copy_all_transcripts` | voice | covered |
 | `command_copy_link` | `buildPaletteItems:command_copy_link` | inline-links | covered |
 | `command_copy_text` | `buildPaletteItems:command_copy_text` | passage-copy | covered |
-| `command_copy_transcript` | `buildPaletteItems:command_copy_transcript` | GAP | GAP: No journey asserts this command end to end. |
+| `command_copy_transcript` | `buildPaletteItems:command_copy_transcript` | voice | covered |
 | `command_delete_message` | `buildPaletteItems:command_delete_message` | hub | covered |
 | `command_dictate` | `buildPaletteItems:command_dictate` | GAP | GAP: No journey asserts this command end to end. |
 | `command_dictation_auto` | `buildPaletteItems:command_dictation_auto` | dictation-shortcuts | covered |

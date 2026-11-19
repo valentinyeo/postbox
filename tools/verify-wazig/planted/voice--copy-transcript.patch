@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..ed950b3 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -12574,7 +12574,7 @@ fn reactToSelected(a: *App, command: u16) void {
+         if (selected >= a.message_count) return;
+         const message = &a.messages[selected];
+         if (message.transcript.len == 0) return;
+-        setStatus(a, if (copyToClipboard(a, message.transcript.slice())) "Transcript copied" else "Could not copy");
++        setStatus(a, if (copyToClipboard(a, message.text.slice())) "Transcript copied" else "Could not copy");
+         return;
+     }
+     if (command == command_copy_text) {

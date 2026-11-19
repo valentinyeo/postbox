@@ -105,5 +105,17 @@ function Invoke-TranscriptCopyJourney($Session, [string]$Messages) {
     Assert-That (($ranged -join ',') -ceq 'VOICE-3,VOICE-TEXT,VOICE-4,VOICE-5') 'Shift-click did not mark the message range'
     Open-VoiceChatAgain $Session
     Assert-That (@(Read-VoiceMessages $Session | Where-Object marked).Count -eq 0) 'Marks leaked across a chat switch'
+    for ($try = 0; $try -lt 8 -and @(Read-VoiceMessages $Session | Where-Object { $_.selected -and $_.media_type -eq 'audio' -and $_.transcript_chars -gt 0 }).Count -ne 1; $try++) {
+        Send-Keys $Session '%j'
+        [Threading.Thread]::Sleep(300)
+    }
+    $chosen = @(Read-VoiceMessages $Session | Where-Object { $_.selected -and $_.media_type -eq 'audio' -and $_.transcript_chars -gt 0 })
+    Assert-That ($chosen.Count -eq 1) 'No voice note with a transcript could be selected'
+    [Windows.Forms.Clipboard]::SetText('clipboard negative control')
+    Invoke-PaletteCommand $Session 'Copy transcript'
+    $null = Wait-Until {
+        $text = try { [Windows.Forms.Clipboard]::GetText() } catch { '' }
+        $text -cmatch 'Raw words from|Legacy summary'
+    } 'palette Copy transcript copies the selected voice note words'
     @{ range = $ranged; escape_cleared = $true; chat_switch_cleared = $true; pasted = $pasted } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Session.evidence 'transcript-selection.json')
 }
