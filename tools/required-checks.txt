@@ -6,5 +6,4 @@ unfurl-verification
 private-markers
 secret-scan
 pr-title
-tdlib-cache / cache
 verify-verdict
