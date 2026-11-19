@@ -46,7 +46,11 @@ git push -u origin HEAD
 pr="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
 if [[ -z "$pr" ]]; then
     body="$(git log --reverse --format='- %s' origin/main..HEAD)"
-    body+=$'\n\nCard: '"$3"$'\n\nProof: '"$4"$'\n\nOpened by tools/ship.sh.'
+    body+=$'\n\nCard: '"$3"$'\n\nProof: '"$4"
+    if [[ -n "${SHIP_EXTRA:-}" ]]; then
+        body+=$'\n\n'"$SHIP_EXTRA"
+    fi
+    body+=$'\n\nOpened by tools/ship.sh.'
     pr="$(gh pr create --base main --head "$branch" --title "$1: $2" --body "$body")"
 fi
 printf '%s\n' "$pr"
