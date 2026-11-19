@@ -1,0 +1,1 @@
+A kept archived chat comes back to the inbox when a newer message arrives.

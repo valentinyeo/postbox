@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..07be5a2 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -5830,7 +5830,7 @@ fn returnSentChatToInbox(a: *App, entry: *const outbox.Entry) void {
+     const provider = std.meta.stringToEnum(transport.Provider, @tagName(entry.provider)) orelse return;
+     const key = chat_key.Key{ .provider = provider, .account = entry.account.slice(), .id = entry.jid.slice() };
+     const index = visibleChatIndex(a, key) orelse return;
+-    if (chatArchiveState(a, &a.chats[index]) != .archived) return;
++    if (chatArchiveState(a, &a.chats[index]) == .incoming) return;
+     _ = archiveChat(a, key, .unarchive, .send);
+ }
+ 

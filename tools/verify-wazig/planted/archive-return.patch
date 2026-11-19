@@ -1,0 +1,15 @@
+diff --git a/src/archive_rules.zig b/src/archive_rules.zig
+index 6bce7a8..d32345f 100644
+--- a/src/archive_rules.zig
++++ b/src/archive_rules.zig
+@@ -179,8 +179,8 @@ pub const State = struct {
+     pub fn returnsOn(self: *const State, jid: []const u8, ts: []const u8) bool {
+         const index = self.find(jid) orelse return false;
+         const entry = &self.entries[index];
+-        if (entry.keep or entry.returned or entry.ts_len == 0) return false;
+-        return laterStamp(ts, entry.tsSlice());
++        if (entry.returned or entry.ts_len == 0) return false;
++        return std.mem.order(u8, ts, entry.tsSlice()) != .lt;
+     }
+ 
+     pub fn needsReturnProbe(self: *const State, jid: []const u8, ts: []const u8) bool {

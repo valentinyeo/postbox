@@ -1,0 +1,1 @@
+Searching from the inbox no longer lists archived chats.

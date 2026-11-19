@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..8315a68 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -22134,7 +22134,7 @@ pub fn main(init: std.process.Init) !void {
+         .cbClsExtra = 0,
+         .cbWndExtra = 0,
+         .hInstance = instance,
+-        .hIcon = icon_big,
++        .hIcon = win.LoadIconW(null, @as([*:0]const u16, @ptrFromInt(32512))),
+         .hCursor = cursor,
+         .hbrBackground = null,
+         .lpszMenuName = null,
