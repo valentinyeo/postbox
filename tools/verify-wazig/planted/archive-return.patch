@@ -1,13 +1,18 @@
-diff --git a/src/archive_rules.zig b/src/archive_rules.zig
-index 6bce7a8..9af32c7 100644
---- a/src/archive_rules.zig
-+++ b/src/archive_rules.zig
-@@ -207,7 +207,7 @@ pub const State = struct {
-     }
- 
-     pub fn holdKept(self: *State, jid: []const u8, provider_archived: bool, ts: []const u8) bool {
--        if (provider_archived) return false;
-+        if (!provider_archived) return false;
-         const index = self.find(jid) orelse return false;
-         const entry = &self.entries[index];
-         const n = @min(ts.len, max_ts);
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..142b8f4 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -14168,6 +14168,13 @@ fn applyArchiveIncoming(a: *App, jid: []const u8, row_ts: []const u8, raw: []con
+         if (from_me != .bool or from_me.bool or getString(message.object, "ReactionToID").len > 0) continue;
+         if (!state.returnsOn(jid, getString(message.object, "Timestamp"))) continue;
+         if (unifiedHub(a)) {
++            for (state.entries[0..state.count]) |*entry| {
++                if (entry.keep) {
++                    entry.keep = false;
++                    entry.ts_len = 0;
++                    entry.returned = true;
++                }
++            }
+             if (state.returnToInbox(jid)) saveArchiveState(a);
+         } else queueUnarchiveChat(a, jid, .incoming);
+         break;
