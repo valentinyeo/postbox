@@ -1,0 +1,1 @@
+Choosing Cancel selection leaves the chats selected.

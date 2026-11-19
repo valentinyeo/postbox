@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..0865578 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -16665,7 +16665,6 @@ fn runCommand(a: *App, command: u16) void {
+         command_replies_whatsapp => setRepliesSlackMode(a, false),
+         command_replies_slack => setRepliesSlackMode(a, true),
+         command_cancel_selection => {
+-            _ = clearBulkSelection(a);
+             setStatus(a, "Selection cleared");
+         },
+         command_pin => togglePinSelected(a),

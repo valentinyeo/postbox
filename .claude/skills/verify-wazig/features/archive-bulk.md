@@ -6,6 +6,7 @@ Select every visible chat from the empty composer and archive the selection with
 
 - `archive-bulk`: Ctrl+A selects the filtered chat list from list focus or an empty main composer; Ctrl+E archives the selection.
 - `archive-bulk-text`: Ctrl+A with composer text still selects that text rather than chats.
+- `archive-bulk-cancel`: the palette command Cancel selection clears the selected chats.
 
 ## How to get to it (user POV)
 
