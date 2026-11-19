@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..5e7afc4 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -12266,7 +12266,7 @@ fn copySelectedLink(a: *App) void {
+         setStatus(a, "No link in the selected message");
+         return;
+     }
+-    setStatus(a, if (copyToClipboard(a, message.links[0].url.slice())) "Link copied" else "Could not copy the link");
++    setStatus(a, if (copyToClipboard(a, message.text.slice())) "Link copied" else "Could not copy the link");
+ }
+ 
+ fn hitTestWord(message: *const Message, x: i32, y: i32) ?usize {

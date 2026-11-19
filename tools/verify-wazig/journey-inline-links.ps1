@@ -251,6 +251,10 @@ foreach ($case in $cases) {
         [InlineLinksNative]::Press(0x0D)
         Wait-InlineReceipt $session ($before + 1) $bodyUrl
         Record-InlineStage $session @{ name='ctrl-o'; palette_count=$count; receipts=@(Read-InlineReceipts $session) }
+        Focus-InlineApp $session
+        [Windows.Forms.Clipboard]::SetText('clipboard negative control')
+        Invoke-PaletteCommand $session 'Copy message link'
+        $null = Wait-Until { try { [Windows.Forms.Clipboard]::GetText() -ceq $bodyUrl } catch { $false } } 'palette copies the message link'
         [InlineLinksNative]::Press(0x21)
         $null = Wait-Until {
             $row = @((Read-Control $session messages).messages | Where-Object id -CEQ 'INLINE-REPLY')[0]

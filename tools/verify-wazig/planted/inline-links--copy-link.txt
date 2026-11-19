@@ -1,0 +1,1 @@
+Choosing Copy message link copies the message text instead.
