@@ -6,6 +6,7 @@
 - Cancel with Escape and restore the original draft.
 - Keep changed contexts as unsent origin drafts.
 - Preserve ordinary keys and Ctrl+D insertion.
+- Choose Automatic, English or German dictation language in the palette; each choice is saved.
 
 ## How to get to it (user POV)
 

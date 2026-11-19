@@ -7,10 +7,10 @@ def check(root):
     folder = root / 'tools/verify-wazig'
     journeys = {row['name'] for row in json.loads((folder / 'journeys.json').read_text(encoding='utf-8'))['journeys']}
     patches = list((folder / 'planted').glob('*.patch'))
-    names = {patch.stem for patch in patches}
+    names = {patch.stem.split('--')[0] for patch in patches}
     errors = []
     for patch in patches:
-        if patch.stem not in journeys:
+        if patch.stem.split('--')[0] not in journeys:
             errors.append(f'{patch.name}: unknown journey')
         if not patch.with_suffix('.txt').is_file() or not patch.with_suffix('.txt').read_text(encoding='utf-8').strip():
             errors.append(f'{patch.name}: missing description')

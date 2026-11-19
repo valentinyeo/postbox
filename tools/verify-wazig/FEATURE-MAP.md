@@ -15,9 +15,9 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_copy_transcript` | `buildPaletteItems:command_copy_transcript` | GAP | GAP: No journey asserts this command end to end. |
 | `command_delete_message` | `buildPaletteItems:command_delete_message` | hub | covered |
 | `command_dictate` | `buildPaletteItems:command_dictate` | GAP | GAP: No journey asserts this command end to end. |
-| `command_dictation_auto` | `buildPaletteItems:command_dictation_auto` | GAP | GAP: No journey asserts this command end to end. |
-| `command_dictation_english` | `buildPaletteItems:command_dictation_english` | GAP | GAP: No journey asserts this command end to end. |
-| `command_dictation_german` | `buildPaletteItems:command_dictation_german` | GAP | GAP: No journey asserts this command end to end. |
+| `command_dictation_auto` | `buildPaletteItems:command_dictation_auto` | dictation-shortcuts | covered |
+| `command_dictation_english` | `buildPaletteItems:command_dictation_english` | dictation-shortcuts | covered |
+| `command_dictation_german` | `buildPaletteItems:command_dictation_german` | dictation-shortcuts | covered |
 | `command_emoji` | `buildPaletteItems:command_emoji` | emoji-picker-glyphs | covered |
 | `command_emoji_diag` | `buildPaletteItems:command_emoji_diag` | GAP | GAP: No journey asserts this command end to end. |
 | `command_font_default` | `buildPaletteItems:command_font_default` | appearance | covered |

@@ -321,6 +321,11 @@ try {
     Send-Keys $session '{ESC}'
     $inactive = Dictation-Snapshot $session 'inactive-keys'
     Assert-That ($inactive.text -ceq 'Inactive Escape' -and @(Dictation-Sends $session).Count -eq $before) 'Inactive Escape changed or sent the draft'
+    $preferences = "HKCU:\Software\MessagesVerification\$($session.id)\Software\Messages"
+    foreach ($language in @(@('German', 2), @('English', 1), @('Automatic', 0))) {
+        Invoke-PaletteCommand $session "Dictation language: $($language[0])"
+        $null = Wait-Until { (Get-ItemProperty -Path $preferences -Name DictationLanguage -ErrorAction SilentlyContinue).DictationLanguage -eq $language[1] } "palette saves $($language[0]) dictation language"
+    }
 } finally {
     foreach ($key in @($heldKeys)) { [DictationNative]::Key([uint16]$key, $true) | Out-Null }
     foreach ($gate in $gates.Values) { $null = $gate.Set(); $gate.Dispose() }

@@ -61,7 +61,7 @@ class NightlyVerificationTests(unittest.TestCase):
         outputs = self.plan_step('planted')
         patches = sorted(path.stem for path in (ROOT / 'tools/verify-wazig/planted').glob('*.patch'))
         self.assertTrue(patches)
-        self.assertEqual(json.loads(outputs['planted']), {'feature': patches})
+        self.assertEqual(json.loads(outputs['planted']), {'include': [{'feature': name.split('--')[0], 'patch': name} for name in patches]})
         planted = self.workflow['jobs']['planted']
         self.assertEqual(planted['if'], "${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}")
         self.assertEqual(planted['strategy']['matrix'], '${{ fromJSON(needs.plan.outputs.planted) }}')

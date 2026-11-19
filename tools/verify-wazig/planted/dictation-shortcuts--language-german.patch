@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..3016923 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -16703,7 +16703,7 @@ fn runCommand(a: *App, command: u16) void {
+         command_dictation_auto, command_dictation_english, command_dictation_german => {
+             a.dictation_language = switch (command) {
+                 command_dictation_english => .english,
+-                command_dictation_german => .german,
++                command_dictation_german => .english,
+                 else => .automatic,
+             };
+             saveDictationLanguage(a.dictation_language);
