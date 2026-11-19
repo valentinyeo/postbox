@@ -114,3 +114,15 @@ The `repaint` journey uses the unified fake hub for 60 seconds without input: un
 The `voice` journey opens a synthetic WhatsApp chat with five downloaded voice notes and long cached transcripts, scrolls with the wheel, clicks Show more and scrolls again. After each step it repaints only the voice bubbles, as the playback timer does, and requires the canvas pixels to match a full repaint, with no ink outside bubbles, no overlaps, visible time stamps and player circles inside their own bubbles. See [voice](features/voice.md).
 
 The `quiet-status` journey retains quiet-status.json, version.json, sync-problem.json and their screenshots: no native sidebar status or tooltip, reclaimed list bounds, inert former click point, the exact running version in Ctrl+K and a forced HTTP 503 sync read reaching the existing sidebar update-card error surface without a modal dialog.
+
+### Control CLI
+
+`tools/verify-wazig/vw.py` is the one entry point for agents. It prints JSON, passes exit codes through, and has `--help` on every subcommand.
+
+- `journeys`, `describe <feature>`: read the registry and planted bug files.
+- `run <feature> --dry-run`: print the dispatch, then run it without `--dry-run`.
+- `runs`, `status <run id>`, `evidence <run id> <feature>`: read results from any machine with gh.
+- `drive <feature>`: on the runner, launch, doctor and drive one journey. The verify job calls only this.
+- `ctl -- <command>`: on the runner, pass a command to wazigctl. A command that changes state needs `--allow-write` after a `--dry-run` preview.
+
+Errors are JSON with a `next` line that says what to do instead.
