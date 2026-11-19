@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..4f9671a 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -16814,7 +16814,7 @@ fn runCommand(a: *App, command: u16) void {
+             openMedia(a, message);
+         },
+         command_quit => {
+-            if (a.hwnd) |hwnd| _ = win.PostMessageW(hwnd, win.WM_CLOSE, 0, 0);
++            if (a.hwnd) |hwnd| _ = hwnd;
+         },
+         command_react_menu => openReactionPicker(a),
+         command_copy_text => copySelectedText(a),

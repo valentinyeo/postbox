@@ -5,6 +5,7 @@
 - The very first search after a fresh app start lists archived chats, marked `Archived`, without a second try.
 - The archived list loads when the app connects to the hub, not twenty seconds later.
 - Archive and return changes still refresh the archived list.
+- The palette command Quit Postbox closes the app so it can start fresh.
 
 ## How to get to it (user POV)
 
