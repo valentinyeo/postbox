@@ -255,9 +255,9 @@
     {
       "feature": "command_quit",
       "source": "buildPaletteItems:command_quit",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "archived-search",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_react_menu",

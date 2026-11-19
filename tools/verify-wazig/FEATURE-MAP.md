@@ -40,7 +40,7 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_play_audio` | `buildPaletteItems:command_play_audio` | voice | covered |
 | `command_prev_chat` | `buildPaletteItems:command_prev_chat` | navigation | covered |
 | `command_prev_message` | `buildPaletteItems:command_prev_message` | reactions | covered |
-| `command_quit` | `buildPaletteItems:command_quit` | GAP | GAP: No journey asserts this command end to end. |
+| `command_quit` | `buildPaletteItems:command_quit` | archived-search | covered |
 | `command_react_menu` | `buildPaletteItems:command_react_menu` | reactions | covered |
 | `command_refresh` | `buildPaletteItems:command_refresh` | slack-sort | covered |
 | `command_replies_slack` | `buildPaletteItems:command_replies_slack` | reply | covered |
