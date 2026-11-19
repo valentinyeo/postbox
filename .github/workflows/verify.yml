@@ -867,9 +867,34 @@ jobs:
     if: ${{ always() && github.event_name == 'pull_request' }}
     needs: [plan, base-fails, verify]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     steps:
       - uses: actions/checkout@v4
-      - name: Report verifier verdict
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Download head journey evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: verify-wazig-*
+          path: evidence
+        continue-on-error: true
+      - name: Download base reproduction evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: repro-base
+          path: evidence
+        continue-on-error: true
+      - name: Judge and post the verifier verdict
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
+          VERDICT_API_KEY: ${{ github.event.pull_request.head.repo.full_name == github.repository && secrets.GROQ_API_KEY || '' }}
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_DIR: evidence
+          VERDICT_POST: ${{ github.event.pull_request.head.repo.full_name == github.repository && '1' || '0' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: python3 tools/verify-wazig/verdict.py
