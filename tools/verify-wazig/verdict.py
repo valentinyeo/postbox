@@ -113,8 +113,9 @@ def digest(root):
     for folder in folders:
         lines = [f'## {folder.name}']
         for name in EVIDENCE_FILES:
-            for path in sorted(folder.rglob(name)):
-                lines.append(f'{path.relative_to(folder)}: {read_text(path, MAX_FILE)}')
+            path = folder / name
+            if path.is_file():
+                lines.append(f'{name}: {read_text(path, MAX_FILE)}')
         log = folder / 'actions.log'
         if log.is_file():
             tail = log.read_text(encoding='utf-8', errors='replace').strip()[-MAX_LOG_TAIL:]

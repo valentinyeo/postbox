@@ -86,7 +86,7 @@ jobs:
               changed.write_text('\n'.join(files))
               validation = subprocess.run(['bash', 'tools/check-repro-first.sh', event['title'], str(body), str(changed)], text=True, capture_output=True)
               repro = validation.stdout.strip() if validation.returncode == 0 else ''
-              notes = [] if repro and repro != 'none' else ['No repro journey selected.']
+              notes = ['No repro journey selected.'] if repro == 'none' else []
               needed = bool(repro and repro != 'none') or any(p.startswith(('src/', 'tools/verify-wazig/')) or p in ('build.zig', '.github/workflows/verify.yml') for p in files)
               with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
                   output.write('notes=' + json.dumps(notes) + '\n')
