@@ -85,6 +85,16 @@ class VerdictTests(unittest.TestCase):
         self.assertIn("github.event_name == 'pull_request'", job['if'])
         self.assertIn('verify-verdict', (ROOT / 'tools/required-checks.txt').read_text().splitlines())
 
+    def test_only_a_bug_fix_without_repro_gets_the_no_repro_note(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())
+        step = next(s for s in workflow['jobs']['plan']['steps'] if s.get('name') == 'Plan registered journeys')
+        line = next(l.strip() for l in step['run'].splitlines() if 'No repro journey selected.' in l)
+        scope = {}
+        for repro, expected in (('', []), ('search', []), ('none', ['No repro journey selected.'])):
+            scope['repro'] = repro
+            exec(line, {}, scope)
+            self.assertEqual(scope['notes'], expected, repro)
+
     def test_verdict_job_runs_main_judge_not_pr_code(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())
         job = workflow['jobs']['verify-verdict']
