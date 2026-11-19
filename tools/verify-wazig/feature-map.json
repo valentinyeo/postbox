@@ -45,9 +45,9 @@
     {
       "feature": "command_copy_link",
       "source": "buildPaletteItems:command_copy_link",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this command end to end."
+      "proof": "inline-links",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "command_copy_text",

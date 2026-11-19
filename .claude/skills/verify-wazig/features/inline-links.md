@@ -7,6 +7,7 @@
 - Two-line fallback quotes open complete URLs.
 - Plain text and dragging do not dispatch.
 - Ordinary reply navigation and Ctrl+O remain usable.
+- The palette command Copy message link copies the full link address.
 - Control-click marks and unmarks a message.
 - Cursor shape and underlines use native evidence.
 - Four synthetic providers share the journey.
