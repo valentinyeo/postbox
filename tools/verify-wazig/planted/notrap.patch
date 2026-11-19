@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..6b12025 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -2722,7 +2722,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
+     };
+     if (fresh and unifiedHub(a) and !a.show_archived and a.startup_view_pending) {
+         a.startup_view_pending = false;
+-        if (a.chat_view == .signal or a.chat_view == .telegram) {
++        if (a.chat_view == .signal and a.chat_view == .telegram) {
+             var populated = false;
+             for (data.items) |row| {
+                 if (row != .object) continue;

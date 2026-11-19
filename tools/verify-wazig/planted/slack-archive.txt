@@ -1,0 +1,1 @@
+Archiving does nothing for Slack chats: Ctrl+E leaves the channel in the inbox.

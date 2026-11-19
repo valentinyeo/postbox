@@ -1,0 +1,1 @@
+Slack links show the raw URL instead of the label the sender wrote.

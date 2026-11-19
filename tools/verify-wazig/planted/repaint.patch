@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..d2a8ada 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -2809,7 +2809,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
+         const timestamp = media_age.unixSeconds(chat.timestamp.slice()) orelse 0;
+         a.read_state.observeChat(a.allocator, a.cache_tag.slice(), jid, timestamp, chat.provider_unread, fresh and !a.startup_probe_pending);
+         chat.unread = a.read_state.isUnread(a.cache_tag.slice(), jid);
+-        chat.unread_count = if (chat.unread) @max(1, getInt(object, "unread_count")) else 0;
++        chat.unread_count = if (chat.unread) 1 else 0;
+         queueUnreadProbe(a, &chat);
+         chat.pinned = getBool(object, "pinned");
+         chat.archived = if (a.archive_state) |state| state.isArchived(chat_key.of(&chat), getBool(object, "archived")) else getBool(object, "archived");

@@ -1,0 +1,1 @@
+Unread badges stop at one when several messages arrive.

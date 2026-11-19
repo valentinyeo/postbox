@@ -1,0 +1,13 @@
+diff --git a/src/slack.zig b/src/slack.zig
+index d7c7bfd..b76db60 100644
+--- a/src/slack.zig
++++ b/src/slack.zig
+@@ -478,7 +478,7 @@ fn renderMrkdwnToken(dest: []u8, token: []const u8, users: ?UserLookup) []const
+         else => {
+             const pipe = std.mem.indexOfScalar(u8, token, '|');
+             const url = if (pipe) |p| token[0..p] else token;
+-            return copyClamped(dest, if (pipe) |p| (if (token[p + 1 ..].len > 0) token[p + 1 ..] else url) else url);
++            return copyClamped(dest, url);
+         },
+     }
+ }

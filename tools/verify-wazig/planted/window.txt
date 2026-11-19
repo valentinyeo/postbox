@@ -1,0 +1,1 @@
+The window opens at its normal size instead of maximised.

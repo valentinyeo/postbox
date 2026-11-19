@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..9dc1877 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -9394,7 +9394,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
+         const media_type = getString(object, "MediaType");
+         var text = message_filter.stripPlaceholder(getString(object, "DisplayText"));
+         if (text.len == 0 or media_drain.isPlaceholder(media_type, text)) text = message_filter.stripPlaceholder(getString(object, "Text"));
+-        if (text.len == 0 or media_drain.isPlaceholder(media_type, text)) text = message_filter.stripPlaceholder(getString(object, "MediaCaption"));
++        if (text.len == 0 and media_drain.isPlaceholder(media_type, text)) text = message_filter.stripPlaceholder(getString(object, "MediaCaption"));
+         const revoked = getBool(object, "Revoked");
+         const filename = getString(object, "Filename");
+         const local_path = getString(object, "LocalPath");
