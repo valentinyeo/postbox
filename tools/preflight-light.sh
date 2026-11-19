@@ -48,6 +48,7 @@ PYTHON_LIGHT_TESTS=(
     test_verdict
     test_vw
     test_job_budget
+    test_judge_eval
     test_revert_first
     test_verification_job_counts
     test_base_repro_cache
