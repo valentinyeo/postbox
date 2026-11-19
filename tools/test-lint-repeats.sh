@@ -152,6 +152,22 @@ for mutation in planted schedule cron; do
 done
 reset_automerge
 printf 'test-lint-repeats: B13 rejects missing planted job and nightly trigger\n'
+mkdir -p "$fixture/.claude/skills/verify-wazig"
+for mutation in missing doubled; do
+    case "$mutation" in
+        missing) printf 'name: verify-wazig\n' > "$fixture/.claude/skills/verify-wazig/SKILL.md" ;;
+        doubled) printf 'pstack: 0.15.43\npstack: 0.15.36\n' > "$fixture/.claude/skills/verify-wazig/SKILL.md" ;;
+    esac
+    status=0
+    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+    if (( status != 1 )) || ! grep -Fq '[B16]' "$temp/output"; then
+        cat "$temp/output" >&2
+        printf 'test-lint-repeats: FAIL B16 must reject %s pstack line\n' "$mutation" >&2
+        exit 1
+    fi
+done
+rm -rf "$fixture/.claude"
+printf 'test-lint-repeats: B16 requires one pstack version line\n'
 sed 's/needs: \[build, launch, gitleaks, proof\]/needs: [build, launch, gitleaks]/' "$repo/.github/workflows/release.yml" > "$fixture/.github/workflows/release.yml"
 if cmp -s "$repo/.github/workflows/release.yml" "$fixture/.github/workflows/release.yml"; then
     printf 'test-lint-repeats: FAIL B14 mutation changed nothing\n' >&2

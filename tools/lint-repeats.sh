@@ -426,6 +426,13 @@ PYCODE
     fi
 fi
 
+if [[ -f .claude/skills/verify-wazig/SKILL.md ]]; then
+    if (( $(grep -Ecx 'pstack: [0-9]+\.[0-9]+\.[0-9]+' .claude/skills/verify-wazig/SKILL.md) != 1 )); then
+        printf 'lint-repeats: .claude/skills/verify-wazig/SKILL.md:1: [B16] The verify skill must record one pstack version line. Add a line such as pstack: 0.15.43.\n'
+        failed=1
+    fi
+fi
+
 if (( failed )); then
     exit 1
 fi
