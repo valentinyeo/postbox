@@ -1,0 +1,1 @@
+Forwarded documents lose their caption text.

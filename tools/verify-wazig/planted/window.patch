@@ -1,0 +1,23 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..4fb0fad 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -22230,7 +22230,7 @@ pub fn main(init: std.process.Init) !void {
+         win.WS_EX_ACCEPTFILES,
+         lit("MessagesZig"),
+         lit("Postbox v" ++ app_version),
+-        win.WS_OVERLAPPEDWINDOW | win.WS_CLIPCHILDREN | win.WS_MAXIMIZE,
++        win.WS_OVERLAPPEDWINDOW | win.WS_CLIPCHILDREN,
+         if (window_rect) |rect| rect.left else win.CW_USEDEFAULT,
+         if (window_rect) |rect| rect.top else win.CW_USEDEFAULT,
+         if (window_rect) |rect| rect.right - rect.left else 1160,
+@@ -22243,8 +22243,7 @@ pub fn main(init: std.process.Init) !void {
+     updateWindowTitle(app);
+     var dark: win.BOOL = win.TRUE;
+     _ = win.DwmSetWindowAttribute(hwnd, 20, &dark, @sizeOf(win.BOOL));
+-    _ = win.ShowWindow(hwnd, win.SW_SHOWMAXIMIZED);
+-    if (win.IsZoomed(hwnd) == 0) _ = win.ShowWindow(hwnd, win.SW_MAXIMIZE);
++    _ = win.ShowWindow(hwnd, win.SW_SHOWNORMAL);
+     appendLaunchLog(app, if (win.IsZoomed(hwnd) != 0) "startup: window zoomed=true" else "startup: window zoomed=false");
+     _ = win.UpdateWindow(hwnd);
+     focusCompose(app);

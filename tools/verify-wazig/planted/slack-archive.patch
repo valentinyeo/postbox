@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..8e82ba1 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -14460,6 +14460,7 @@ fn chatProvider(a: *App, jid: []const u8) transport.Provider {
+ 
+ fn archiveChat(a: *App, key: chat_key.Key, action: archive_rules.Action, source: archive_rules.Source) ?[]const u8 {
+     const jid = key.id;
++    if (key.provider == .slack) return null;
+     const unarchive = action == .unarchive;
+     if (key.provider == .slack or (unifiedHub(a) and (key.provider == .telegram or key.provider == .signal or (key.provider == .whatsapp and action == .keep)))) {
+         const state = a.archive_state orelse return "Archive is not available";
