@@ -1,0 +1,13 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..709fa34 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -4550,7 +4550,7 @@ fn appendWhatsAppPending(a: *App, pending: *const PendingSend, from_reload: bool
+             if (!std.mem.eql(u8, text, pending.text.slice())) continue;
+             if (pending.file.len > 0 and pending.text.len == 0 and message.media_type.len == 0) continue;
+             const stored_unix = media_age.unixSeconds(message.timestamp.slice()) orelse continue;
+-            if (stored_unix >= pending.queued_unix - 5) {
++            if (stored_unix >= pending.queued_unix + 5) {
+                 if (seen >= earlier) return;
+                 seen += 1;
+             }

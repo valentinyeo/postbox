@@ -1,0 +1,45 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..d7b8b86 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -3027,6 +3027,7 @@ fn applyMessageNotification(a: *App, result: *const WacliResult, probe: WacliJob
+     if (messages != .array) return;
+     const message = message_notifications.incoming(messages.array.items, probe.after) orelse return;
+     if (probe.archived and !isKeptArchived(a, result.jid.slice())) queueUnarchiveChat(a, result.jid.slice(), .incoming);
++    if (probe.archived) releaseKeptAlongside(a);
+     var title = Utf8Text(191){};
+     title.set(probe.name[0..probe.name_len]);
+     const text = getString(message, "Text");
+@@ -14151,6 +14152,20 @@ fn queueUnarchiveChat(a: *App, jid: []const u8, source: archive_rules.Source) vo
+     startNextArchive(a);
+ }
+ 
++fn releaseKeptAlongside(a: *App) void {
++    const state = a.archive_state orelse return;
++    var buffer: [archive_rules.max_jid]u8 = undefined;
++    var length: usize = 0;
++    for (state.entries[0..state.count]) |*entry| {
++        if (!entry.keep or entry.provider != .whatsapp) continue;
++        const slice = entry.jidSlice();
++        @memcpy(buffer[0..slice.len], slice);
++        length = slice.len;
++        break;
++    }
++    if (length > 0) queueUnarchiveChat(a, buffer[0..length], .incoming);
++}
++
+ fn applyArchiveIncoming(a: *App, jid: []const u8, row_ts: []const u8, raw: []const u8) void {
+     const state = a.archive_state orelse return;
+     if (!state.needsReturnProbe(jid, row_ts)) return;
+@@ -14169,7 +14184,10 @@ fn applyArchiveIncoming(a: *App, jid: []const u8, row_ts: []const u8, raw: []con
+         if (!state.returnsOn(jid, getString(message.object, "Timestamp"))) continue;
+         if (unifiedHub(a)) {
+             if (state.returnToInbox(jid)) saveArchiveState(a);
+-        } else queueUnarchiveChat(a, jid, .incoming);
++        } else {
++            queueUnarchiveChat(a, jid, .incoming);
++            releaseKeptAlongside(a);
++        }
+         break;
+     }
+     refreshChats(a);

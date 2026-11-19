@@ -1,0 +1,1 @@
+A message you send shows twice while the hub is still confirming it.

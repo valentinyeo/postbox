@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+index 8d6f7e7..25b1e19 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -15730,6 +15730,7 @@ fn appendPalettePeople(a: *App, query_wide: []const u16, scores: []i32) void {
+     defer a.allocator.free(matches);
+     const count = a.people.search(query, exclude[0..exclude_count], a.cache_tag.slice(), matches, matches.len);
+     for (matches[0..count]) |entry| {
++        if (!a.show_archived and entry.origin == .archived) continue;
+         if (!ensurePaletteCapacity(a)) break;
+         const label = (if (entry.origin == .archived)
+             std.fmt.allocPrint(a.allocator, "{s}  ·  Archived", .{entry.name})
