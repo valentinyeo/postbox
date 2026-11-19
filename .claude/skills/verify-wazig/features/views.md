@@ -4,7 +4,7 @@
 
 - `account-views`: each account or workspace has one view, labelled WhatsApp <account>, or Slack <workspace name> for Slack (hub name or locally saved workspace name for direct sign-ins; Slack <team id> when unknown).
 - `view-keys`: Alt+2..9 selects the saved account position, even when that account has zero visible chats; Alt+1 or Alt+I opens the combined inbox.
-- `view-title`: the native window title is <view label> - Wazig v<version>, using the exact Show palette label; the combined view uses Combined inbox - Wazig v<version>.
+- `view-title`: the native window title is <view label> - Postbox v<version>, using the exact Show palette label; the combined view uses Combined inbox - Postbox v<version>.
 - `view-scope`: search, Ctrl+Shift+Home, next/previous chat and sending stay in the account view. Routing identity includes provider, cache account and the full prefixed id; a separate view account controls membership.
 - `view-order`: Ctrl+K → Sort views uses the existing palette list. Ctrl+Up/Down saves a move immediately, Enter switches to that view and Escape closes.
 - `combined-inbox`: all account chats appear newest activity first, retaining existing app badges and hover tooltips with app/account labels.
@@ -13,7 +13,7 @@
 
 ## How to get to it (user POV)
 
-- Open Messages with hub accounts or configured local providers. Each WhatsApp account and Slack workspace is a separate view; Telegram and Signal views follow; linking is done once through the triage CLI on the hub, never through Wazig.
+- Open Messages with hub accounts or configured local providers. Each WhatsApp account and Slack workspace is a separate view; Telegram and Signal views follow; linking is done once through the triage CLI on the hub, never through Postbox.
 - Press Alt+2..9 or choose Show <view label> in Ctrl+K. Choose Show combined inbox or press Alt+1 / Alt+I for all chats.
 - Choose Sort views, move the selected row with Ctrl+Up/Down, then Enter to switch or Escape to close. ViewOrder persists provider:account entries in the existing settings store. Hub workspace names persist alongside the hub state and label cached startup rows without waiting on the hub. Saved account slots remain available as empty lists when their chats disappear; new accounts append in provider and hub listing order.
 - Hover a chat row for its app and account label. No toolbar or new controls are added.

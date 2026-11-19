@@ -9,7 +9,7 @@
 
 ## How to get to it (user POV)
 
-- Open Messages with the unified hub configured and choose its Slack account with Alt+2 in this single-account fixture (Ctrl+N (account position plus one) follows saved account order).
+- Open Messages with the unified hub configured and choose its Slack account with Alt+2 in this single-account fixture (Alt+N, account position plus one, follows saved account order).
 - Read the chat list from top to bottom; Ctrl+Tab and Ctrl+Shift+Tab follow the same order.
 - Receive a message or compose and press Enter to send; the chat with the newest last message rises to the top. Existing pins keep the same precedence as WhatsApp.
 
@@ -28,12 +28,12 @@
 - This proves the client contract against synthetic loopback data, not a real Slack account, delivery or deployed triage service. Inspect the screenshots before claiming visible behavior.
 - Only real keyboard input drives the desktop. Read-only state and UI Automation supplement screenshots; no private window messages or control mutations are used.
 - Equal-time/name ties, pin precedence and cached timestamp fallback are source/CI coverage, not assertions of this four-row journey. Comparator unit tests include equal timestamps with names deliberately opposite to ID order. No Zig, PowerShell or app execution is performed on the development host.
-- Source: `src/main.zig:3891` fills missing Slack times from message cache; `src/main.zig:12392` and `src/chat_order.zig:3` order pinned rows, last message times, names and identity ties; `src/slack.zig:191` reads actual last-message time rather than channel creation/modification time.
-- Journey and evidence: `tools/verify-wazig/run.ps1:143` drives the three stages, `tools/verify-wazig/fake-hub.py:99` supplies the synthetic hub, and `tools/verify-wazig/check-evidence.py:9` validates retained orders, times, keyboard walks, selection, delivery, send and isolation.
+- Source: `fillSlackTimestamp` (`src/main.zig:3595`) fills missing Slack times from message cache; `controlSortChats` (`src/main.zig:15209`) and `shouldMoveUp` (`src/chat_order.zig:66`) order pinned rows, last message times, names and identity ties; `src/slack.zig:191` reads actual last-message time rather than channel creation/modification time.
+- Journey and evidence: `tools/verify-wazig/journey-slack-sort.ps1` drives the three stages, `SlackSortHandler` (`tools/verify-wazig/fake-hub.py:987`) supplies the synthetic hub, and `tools/verify-wazig/evidence-slack-sort.py` validates retained orders, times, keyboard walks, selection, delivery, send and isolation.
 
 ### Sent chat retention
 
-- The fixture also contains four WhatsApp chats. The journey reads saved account positions, then uses the matching Ctrl+number shortcut.
+- The fixture also contains four WhatsApp chats. The journey reads saved account positions, then uses the matching Alt+number shortcut.
 - Sending a link to Gamma must promote it above Beta immediately, even though the hub continues returning Gamma's old timestamp. A keyboard Refresh must retain that ordering.
 - A newer phone-side message to Alpha must then move Alpha above Gamma. The fixture trigger represents an upstream message; it never sends a real message.
 - Retain `wa-before`, `wa-sent`, `wa-stale`, `wa-phone` screenshots and chat snapshots plus `stale-provider.json`. The validator rejects a send that never promotes, stale regression, or failure to yield to newer activity.

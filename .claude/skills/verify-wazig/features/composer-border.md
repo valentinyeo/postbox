@@ -8,7 +8,7 @@
 
 ## How to get to it (user POV)
 
-Open a chat and focus the bottom message entry box with Ctrl+K → Compose message. Text size commands live in the same palette; Ctrl++ and Ctrl+- change the saved scale in ten-point steps, and Ctrl+0 restores the existing 82% default.
+Open a chat and focus the bottom message entry box with Ctrl+K → Compose message. Text size commands live in the same palette; Ctrl++ and Ctrl+- change the saved scale in ten-point steps, and Ctrl+0 restores the 100% default.
 
 ## Driving it with PowerShell UI Automation
 
@@ -21,6 +21,6 @@ Write all four widths, probe positions, edit/box bounds, measured window DPI, fo
 ## Gotchas
 
 - These percentages are saved app text scale, not Windows display scale. Hosted runners provide no reliable supported per-monitor DPI switch without desktop/session reconfiguration. `px()` follows window DPI only; app zoom changes fonts/content height, not stroke width or layout margins. GetDpiForWindow records the unchanged monitor DPI. This journey does not claim 125%/150% monitor-DPI coverage.
-- Registry seeding is required because ten-point keyboard steps from 82% cannot reach these exact values. Production preferences and the default font/scale are never changed.
-- The baseline is AMOLED with no messages. Top/bottom probes sit at one-third box width to avoid the small grey bar above the centre; left/right probes stay at mid-height, away from glyphs and corner arcs; a blank or missing border fails rather than passing as four zeros.
+- Registry seeding is required because ten-point keyboard steps from 100% cannot reach 125%. Production preferences and the default font/scale are never changed.
+- The baseline is the Graphite theme with no messages. Top/bottom probes sit at one-third box width to avoid the small grey bar above the centre; left/right probes stay at mid-height, away from glyphs and corner arcs; a blank or missing border fails rather than passing as four zeros.
 - The verification-only commit is expected to fail on the old composer paint: its centred stroke uses an exclusive bottom minus one, and the child edit clips the inner bottom row. Windows execution is required to prove the actual red/green pixels; source review alone is not a runtime pass.

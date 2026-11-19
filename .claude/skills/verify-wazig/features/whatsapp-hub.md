@@ -8,7 +8,7 @@ Use the production hub backend against a synthetic authenticated bridge on the G
 - `chat-switch`: opening timestamped, uncached Beta clears Alpha immediately, before delayed Beta history arrives.
 - `hub-live-replay`: a new SSE message appears and reconnects carry Last-Event-ID.
 - `hub-send-dedupe`: a lost response retries the persisted outbox client_id with one accepted send.
-- `hub-read-archive`: viewing marks read; a palette archive removes the row; in hub mode it stays in Wazig and sends nothing, on the direct bridge it posts the archive.
+- `hub-read-archive`: viewing marks read; a palette archive removes the row and posts `/v1/archive` once, acknowledged, in both the hub and the direct-bridge run.
 - `hub-media`: automatic media fetch receives 202, polls, and caches the exact ready bytes.
 - `hub-outbox-adoption`: startup adopts a queued foreign-backend send, strips the legacy namespace, preserves the reply and removes its old journal line.
 - `hub-secret`: the fake key is stored as DPAPI binary; the backend log contains no key or URL.
@@ -30,7 +30,7 @@ Use the production hub backend against a synthetic authenticated bridge on the G
 - The fake emits reset ID 1, closes, and requires a reconnect with Last-Event-ID 1. After history is proven, a fixture-only HTTP trigger adds a message upstream. Require LIVE in live.messages.json and live.png, then a reconnect with Last-Event-ID 2.
 - Use Ctrl+K → Compose message, type Fixture outgoing and Enter. The fake accepts once but loses the first response; require a retry with the same 32-character client_id and exactly one accepted send.
 - Require a mark-read request for Alpha, media requests at the same path returning 202 then 200, and a durable cache file with the response SHA-256. Save sent.png.
-- Use Ctrl+K → Archive selected chat. Require the bridge POST on the direct bridge and no archive request in hub mode, and a one-chat sidebar in after.png, with no pending writes.
+- Use Ctrl+K → Archive selected chat. Require one acknowledged `/v1/archive` POST for the archived chat (the direct-bridge run archives Alpha, the hub run archives Beta) and a one-chat sidebar in after.png, with no pending writes.
 - Older history paging (IGSH-681) runs only through the unified `/v1/wazig` contract, see [hub](hub.md) `mixed-older-pages`; this legacy bridge journey requests only the newest page.
 - Every assertion prints `whatsapp-hub <gate> PASS`; misses fail the job. Preserve bridge-requests.jsonl, hub-proof.log, read-only snapshots, screenshots, final-data and cleanup.txt. check-evidence.py rechecks the artifacts, not merely the PASS lines.
 
@@ -41,4 +41,4 @@ Use the production hub backend against a synthetic authenticated bridge on the G
 - A linked saved `WaBridgeAccount` preference wins, otherwise linked `personal` wins, then the first linked account; its identity namespaces the account-scoped cache. The fake lists two linked accounts with the nonpreferred one first; simultaneous multi-account UI is not covered.
 - The frozen bridge has no pairing, account-removal, or contact-directory endpoint. Hub mode directs account administration to the hub and derives searchable contacts from chats.
 - This proves contract integration, not real WhatsApp delivery, voice playback, transcription, external TLS availability or production deployment. Inspect screenshots before claiming visible behavior.
-- Source: `src/main.zig:19325` migrates the saved bridge key, `src/main.zig:19418` configures the legacy backend, and `src/wa_hub.zig:177` chooses a linked account. `tools/verify-wazig/harness.ps1:239` asserts foreign-outbox adoption.
+- Source: `loadWaBridgeKey` (`src/main.zig:24434`) migrates the saved bridge key, `configureWaHub` (`src/main.zig:24532`) configures the legacy backend, and `pickAccount` (`src/wa_hub.zig:184`) chooses a linked account. `tools/verify-wazig/harness.ps1:389-394` asserts foreign-outbox adoption.

@@ -10,7 +10,7 @@ The IGSH-531 backend runs through the existing transport interface with no new U
 - `hub-live`: fragmented SSE framing, reconnect replay and live history invalidation use the existing cancellable WinHTTP reader.
 - `hub-send`: a lost response retries the persisted client_id; exactly one send is accepted.
 - `message-delete`: the palette deletes a selected sent message, sends one delete request and shows the deleted bubble.
-- `hub-read-archive`: opening a remote chat marks it read and keyboard archiving removes it from the inbox without a hub archive request.
+- `hub-read-archive`: opening a remote chat marks it read and keyboard archiving removes it from the inbox and posts one acknowledged hub archive request (`/v1/wazig/archive`).
 - `hub-media`: automatic fetch polls 202 then caches the exact 200 binary response.
 - `workspace-icons`: Slack provider badges use authenticated `/v1/wazig/workspace-icon/<team>` image bytes through the existing avatar worker and disk cache, with S on loading/missing/error; WhatsApp uses a green handset and Telegram retains T. The dedicated [workspace-icons](workspace-icons.md) journey proves badge pixels.
 - `mixed-lid-page` (IGSH-683): a synthetic WhatsApp chat whose `/v1/wazig/messages` page mixes rows with the requested phone ChatJID and rows with a same-account `@lid` ChatJID is selected through `wazigctl select`; every message text of the page must be returned by `wazigctl messages` and the launch log must hold no WrongChat line.
@@ -43,4 +43,4 @@ The IGSH-531 backend runs through the existing transport interface with no new U
 - The fixture contains Slack Alpha, WhatsApp Beta and WhatsApp Verification Mixed (250 rows, paged), not a Telegram row; Telegram provider filtering is covered by `src/hub_test.zig`, not this live recipe.
 - Opaque chat handles must be globally unique across all source accounts and fit the existing 191-byte chat identity. Network identity remains presentation metadata, while the hub resolves source accounts.
 - This journey proves list/history/live/send/read/archive/media against a fake service, not production delivery, local Slack archive semantics, TLS deployment, voice playback, or transcription.
-- Source: `src/hub.zig:11` selects the configured backend, `src/hub.zig:15` defines unified paths, and `src/main.zig:19362` loads URL/token and DPAPI state. `tools/verify-wazig/fake-hub.py:34` assigns the two fixture networks.
+- Source: `selected` in `src/hub.zig:14` selects the configured backend, `src/hub.zig:18-28` and `:124-132` define the chats, messages and archive paths, and `configureHub` in `src/main.zig` loads URL/token and DPAPI state. The fixture chats are built in `tools/verify-wazig/fake-hub.py`.

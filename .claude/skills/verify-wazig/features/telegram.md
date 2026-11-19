@@ -9,8 +9,8 @@
 
 ## How to get to it (user POV)
 
-- Configure the triage hub and choose Show Telegram in Ctrl+K or its assigned Ctrl+N (account position plus one) position. Account linking belongs to that hub, not a second Wazig connection.
-- Link Telegram through the triage CLI on the hub, never inside Wazig. Esc leaves an empty view and Ctrl+number/Alt+I remain usable; a saved empty Telegram view falls back to the combined inbox at startup.
+- Configure the triage hub and choose Show Telegram in Ctrl+K or its assigned Alt+N (account position plus one) position. Account linking belongs to that hub, not a second Wazig connection.
+- Link Telegram through the triage CLI on the hub, never inside Wazig. Esc leaves an empty view and Alt+number/Alt+I remain usable; a saved empty Telegram view falls back to the combined inbox at startup.
 - Select a chat and use the existing composer, Attach photo or file, Reply to selected message and reaction commands. Saved Messages appears in the same list.
 
 ## Driving it with PowerShell UI Automation
@@ -31,6 +31,6 @@
 - Windows builds, Zig tests, PowerShell parsing/execution and desktop evidence belong to GitHub Actions. Static source checks on the development host are not runtime verification.
 - Empty Telegram and Signal views are registered before provider rows exist. Default provider order puts Telegram before Signal; existing saved order still takes precedence.
 - Routing and cache accounts remain in the existing hub namespace. The view account is fixed to telegram, independent of user/group/channel identifiers. src/hub_test.zig covers opaque IDs, view isolation, badge fallback, exact rate-limit text/status and saved-flag parsing.
-- This checkout has no chat-header avatar for any provider; this journey preserves that layout rather than introducing a new header. Restart reuse follows the existing avatar cache classifier; the journey measures cold fetch and disk persistence, not a second launch.
+- The chat header pill draws a 24-pixel initial-letter circle for every provider (`src/main.zig:18597-18609`); this journey does not measure it. Restart reuse follows the existing avatar cache classifier; the journey measures cold fetch and disk persistence, not a second launch.
 - Startup time, release size, working set, hub CLI linking, voice playback and cached transcription need CI or live-provider evidence; unchanged mechanisms are not re-certified here.
 - IGSH-736 intentionally changes the archiveChat routing identity pin in check-views-source.py: hub Telegram and Signal now use the existing local archive state, preserving opaque provider/account/chat keys and bypassing hub archive writes. Other routing pins remain unchanged.
