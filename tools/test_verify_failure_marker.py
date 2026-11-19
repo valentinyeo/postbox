@@ -108,9 +108,10 @@ class FailureMarkerTests(unittest.TestCase):
 
     def test_both_ci_red_jobs_use_the_same_classifier(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())
-        for job in ('base-fails', 'planted'):
-            steps = workflow['jobs'][job]['steps']
-            self.assertTrue(any('tools/verify-wazig/classify-red.ps1' in step.get('run', '') for step in steps))
+        base = workflow['jobs']['base-fails']['steps']
+        self.assertTrue(any('tools/verify-wazig/classify-red.ps1' in step.get('run', '') for step in base))
+        planted = yaml.safe_load((ROOT / '.github/workflows/planted.yml').read_text())['jobs']['planted']['steps']
+        self.assertTrue(any('tools/verify-wazig/classify-red.ps1' in step.get('run', '') for step in planted))
         wrapper = (TOOLS / 'classify-red.ps1').read_text()
         self.assertIn('classify_red.py', wrapper)
         self.assertIn('$LASTEXITCODE -ne 0', wrapper)
@@ -119,7 +120,7 @@ class FailureMarkerTests(unittest.TestCase):
         jobs = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())['jobs']
         name = 'Install Chrome screenshot driver'
         clean = next(step for step in jobs['verify']['steps'] if step.get('name') == name)
-        steps = jobs['planted']['steps']
+        steps = yaml.safe_load((ROOT / '.github/workflows/planted.yml').read_text())['jobs']['planted']['steps']
         planted = next(step for step in steps if step.get('name') == name)
         self.assertEqual(planted, clean)
         self.assertEqual(planted['if'], "matrix.feature == 'text-comparison'")
@@ -295,7 +296,7 @@ class SidebarPlantedTests(unittest.TestCase):
 
     def test_planted_job_has_sidebar_baseline_and_validation(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())
-        planted = workflow['jobs']['planted']['steps']
+        planted = yaml.safe_load((ROOT / '.github/workflows/planted.yml').read_text())['jobs']['planted']['steps']
         checkout = next(step for step in planted if step.get('uses', '').startswith('actions/checkout@'))
         self.assertEqual(checkout.get('with', {}).get('fetch-depth'), 0)
         name = 'Build and capture the pre-change sidebar baseline'
@@ -325,6 +326,9 @@ class VersionPinTests(unittest.TestCase):
                         changed['jobs'][name]['steps'][index]['with']['version'] = '0.99.1'
                         with self.assertRaises(AssertionError):
                             check_version_pins(changed)
+
+    def test_planted_workflow_reads_the_same_pins(self):
+        check_version_pins(yaml.safe_load((ROOT / '.github/workflows/planted.yml').read_text()))
 
     def test_hardcoded_app_version_and_shadowed_pins_fail(self):
         for mutation in ('build', 'expected', 'export', 'shadow'):

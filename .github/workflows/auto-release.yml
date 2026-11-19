@@ -12,9 +12,8 @@ on:
         default: patch
 
 concurrency:
-  group: auto-release
-  cancel-in-progress: false
-  queue: max
+  group: auto-release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
