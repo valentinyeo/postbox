@@ -13,6 +13,10 @@ $null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 0 } 
 Save-Screen $session palette-cleared-selection
 Send-Keys $session '^a'
 $null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 2 } 'bulk: Ctrl+A did not select both chats again'
+Invoke-PaletteCommand $session 'Cancel selection'
+$null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 0 } 'palette Cancel selection clears the selected chats'
+Send-Keys $session '^a'
+$null = Wait-Until { (Read-Control $session status).bulk_selected_count -eq 2 } 'bulk: Ctrl+A did not select both chats after Cancel selection'
 Send-Keys $session '^e'
 $null = Wait-Until {
     $state = Read-Control $session status

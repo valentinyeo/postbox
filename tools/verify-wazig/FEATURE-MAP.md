@@ -7,7 +7,7 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `command_accounts` | `buildPaletteItems:command_accounts` | GAP | GAP: No journey asserts this command end to end. |
 | `command_archive` | `buildPaletteItems:command_archive` | archive | covered |
 | `command_archived` | `buildPaletteItems:command_archived` | archive | covered |
-| `command_cancel_selection` | `buildPaletteItems:command_cancel_selection` | GAP | GAP: No journey asserts this command end to end. |
+| `command_cancel_selection` | `buildPaletteItems:command_cancel_selection` | archive-bulk | covered |
 | `command_compose` | `buildPaletteItems:command_compose` | drafts | covered |
 | `command_copy_all_transcripts` | `buildPaletteItems:command_copy_all_transcripts` | voice | covered |
 | `command_copy_link` | `buildPaletteItems:command_copy_link` | GAP | GAP: No journey asserts this command end to end. |
