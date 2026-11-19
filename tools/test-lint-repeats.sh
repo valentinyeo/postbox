@@ -176,6 +176,17 @@ if (( status != 1 )) || ! grep -Fq '[B18]' "$temp/output"; then
 fi
 rm -f "$fixture/.github/workflows/budget.yml"
 printf 'test-lint-repeats: B18 caps the jobs a typical PR starts\n'
+cp "$repo/.github/workflows/pr-title.yml" "$fixture/.github/workflows/pr-title.yml"
+sed -i '/tools\/check_revert_first.py/d' "$fixture/.github/workflows/pr-title.yml"
+status=0
+"$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
+if (( status != 1 )) || ! grep -Fq '[B19]' "$temp/output"; then
+    cat "$temp/output" >&2
+    printf 'test-lint-repeats: FAIL B19 must reject a pr-title job without the revert-first check\n' >&2
+    exit 1
+fi
+cp "$repo/.github/workflows/pr-title.yml" "$fixture/.github/workflows/pr-title.yml"
+printf 'test-lint-repeats: B19 requires the revert-first check\n'
 mkdir -p "$fixture/.claude/skills/verify-wazig"
 for mutation in missing doubled; do
     case "$mutation" in

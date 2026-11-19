@@ -440,6 +440,13 @@ if [[ -d .github/workflows ]]; then
     fi
 fi
 
+if [[ -f .github/workflows/pr-title.yml ]]; then
+    if ! grep -Fq 'python3 tools/check_revert_first.py' .github/workflows/pr-title.yml; then
+        printf 'lint-repeats: .github/workflows/pr-title.yml:1: [B19] Bug-fix PRs can skip the revert-first rule. Run python3 tools/check_revert_first.py in the pr-title job.\n'
+        failed=1
+    fi
+fi
+
 if [[ -f .claude/skills/verify-wazig/SKILL.md ]]; then
     if (( $(grep -Ecx 'pstack: [0-9]+\.[0-9]+\.[0-9]+' .claude/skills/verify-wazig/SKILL.md) != 1 )); then
         printf 'lint-repeats: .claude/skills/verify-wazig/SKILL.md:1: [B16] The verify skill must record one pstack version line. Add a line such as pstack: 0.15.43.\n'
