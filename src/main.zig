@@ -15787,7 +15787,7 @@ fn paletteFilter(a: *App) void {
     const query_len: usize = if (a.palette_edit) |edit| @intCast(win.GetWindowTextW(edit, &query_buf, if (a.palette_search_mode) query_buf.len else 64)) else 0;
     const grouped = !a.palette_links_mode and !a.palette_accounts_mode and !a.palette_views_mode;
     if (a.palette_search_mode) {
-        a.search_query.len = query_len;
+        a.search_query.len = 0;
         @memcpy(a.search_query.buf[0..query_len], query_buf[0..query_len]);
         a.search_query.buf[query_len] = 0;
         _ = clearBulkSelection(a);
