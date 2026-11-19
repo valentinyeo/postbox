@@ -6,7 +6,7 @@ Move between chats while keeping the selected conversation and its composer alig
 
 - `navigation-next`: next and previous chat, with wraparound.
 - `navigation-pin`: pin and unpin the selected chat through the palette, checking saved preferences.
-- `navigation-position`: Ctrl+number switches views; Ctrl+Shift+Home selects the first chat.
+- `navigation-position`: Ctrl+1..9 opens the chat in that row (Alt+1..9 switches views); Ctrl+Shift+Home selects the first chat.
 - `navigation-edges`: jump to the first or last chat.
 - `navigation-page`: move by a page; sidebar arrow keys and mouse selection are also available.
 
@@ -31,4 +31,4 @@ Preconditions: doctor passes, two unfiltered chats, Alpha selected and composer 
 - Search changes list positions; reset it before positional navigation.
 - Up/Down in a non-empty composer edits text; with an empty composer and loaded messages it can move the message highlight.
 - The fixture has no messages, so it cannot prove selection/scrolling within a message history or mark-read transport.
-- Source: `src/main.zig:10487` applies bounded/wrapping chat selection; `src/main.zig:16484` handles positional/edge/page keys. `src/shortcuts.zig:13` lists the discoverable chat keys.
+- Source: `selectChat` (`src/main.zig:11997`) applies bounded/wrapping chat selection; `src/main.zig:20869-20892` handles Ctrl+1..9, Alt+1..9, edge and page keys. The Chats group at `src/shortcuts.zig:52-67` lists the discoverable chat keys.

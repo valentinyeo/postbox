@@ -5,8 +5,8 @@
 Run `feature=hub-archive` on GitHub Windows Actions. The journey drives the real desktop with a synthetic hub, never a user's device.
 
 - Ctrl+E archives and unarchives through WhatsApp, including bulk selections.
-- Phone unarchive changes the provider row; Wazig follows it.
-- Incoming messages return when WhatsApp returns them. No Wazig return write.
+- Phone unarchive changes the provider row; Postbox follows it.
+- Incoming messages return when WhatsApp returns them. No Postbox return write.
 - Ctrl+Shift+E remains local: kept chats stay hidden even when WhatsApp returns them.
 - Existing ordinary local entries migrate through acknowledged archive writes. Failed writes retain durable entries. An acknowledged entry stays in the file with the provider mark. Successful migration does not repeat after restart.
 - Telegram archives remain local through bulk selection and restart. Slack and Signal retain their existing local archive tests.

@@ -15,7 +15,7 @@
 ## Driving it with PowerShell UI Automation
 
 - Run `feature=slack-threads` on GitHub Actions only, using the unified fake hub in `--slack-threads` mode.
-- The fixture has parent `1740000000.000100`, exactly thirty replies and two channel messages. Read-only `wazigctl status` must expose `slack_threads`; missing fields fail the journey before any feature action.
+- The fixture has parent `1740000000.000100`, exactly thirty replies, two orphan replies whose parent is not in the chat, and two channel messages (so 32 inline replies with threads off). Read-only `wazigctl status` must expose `slack_threads`; missing fields fail the journey before any feature action.
 - Save threads-on.png/json, select the parent with real Ctrl+Up and Enter, and save thread-panel.png/json with thirty listed replies.
 - Type Synthetic thread reply and Enter; retain thread-reply.png and the authenticated send POST body in bridge-requests.jsonl.
 - Escape, toggle via Ctrl+K and retain threads-off.png/json. Quit normally and restart with the same isolated profile and registry; retain restart.json and threads-restart.png/json.

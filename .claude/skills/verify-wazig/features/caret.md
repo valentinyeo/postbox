@@ -3,7 +3,7 @@
 ## Sub-features
 
 - The message box shows a text caret that blinks while it has focus, with typed text in it.
-- Checked on the AMOLED theme (pure black surround) and on the Green theme.
+- Checked on the Graphite theme (internal name `amoled`) and again after `Theme: Graphite` is chosen a second time. Graphite is the only theme.
 - A synthetic frame series control accepts a blinking series and rejects a steady one.
 
 ## How to get to it (user POV)
@@ -12,9 +12,9 @@ Open a chat and focus the bottom message entry box with Ctrl+K → Compose messa
 
 ## Driving it with PowerShell UI Automation
 
-Dispatch `feature=caret`; matching pull requests also run it. `Invoke-CaretJourney` opens the composer with the palette, types `abc` through SendKeys, waits for UI Automation to read the text back and settles for 900 ms. It then reads the system caret from outside the process with `GetGUIThreadInfo` (owner window, rectangle, focus) and `GetCaretBlinkTime`, and captures 24 screenshots of the composer text area about 130 ms apart with `CopyFromScreen`. Per frame it counts pixels clearly brighter than the field fill. Constant text pixels cancel out; the caret adds a fixed block of pixels on its on phases. The series is split at half the spread into on and off phases and the runs are counted. The same runs happen after `Theme: Green`.
+Dispatch `feature=caret`; matching pull requests also run it. `Invoke-CaretJourney` opens the composer with the palette, types `abc` through SendKeys, waits for UI Automation to read the text back and settles for 900 ms. It then reads the system caret from outside the process with `GetGUIThreadInfo` (owner window, rectangle, focus) and `GetCaretBlinkTime`, and captures 24 screenshots of the composer text area about 130 ms apart with `CopyFromScreen`. Per frame it counts pixels clearly brighter than the field fill. Constant text pixels cancel out; the caret adds a fixed block of pixels on its on phases. The series is split at half the spread into on and off phases and the runs are counted. The same runs happen after `Theme: Graphite` is chosen again, stored as `reapplied`.
 
-`caret.json` keeps both themes with the caret owner, rectangle, blink time, per frame ink counts, timestamps and phase counts; `caret-<theme>-first.png`, `caret-<theme>-brightest.png` and a full screenshot are kept next to it. Each theme must show at least two on phases and two off phases. Failure contains `caret`.
+`caret.json` keeps both runs (`amoled` and `reapplied`) with the caret owner, rectangle, blink time, per frame ink counts, timestamps and phase counts; `caret-<theme>-first.png`, `caret-<theme>-brightest.png` and a full screenshot are kept next to it. Each theme must show at least two on phases and two off phases. Failure contains `caret`.
 
 ## Gotchas
 

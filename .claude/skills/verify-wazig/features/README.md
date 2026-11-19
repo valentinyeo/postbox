@@ -83,7 +83,7 @@ These are source changes in the bounded history window, not claims of live verif
 - WAZI-156: silent dictation skipped and speech clips sent once -> unreachable: microphone/synthetic WAV capture and speech-provider request observation are absent from journeys; covered by src/dictation_policy.zig
 - WAZI-157: people-search CPU-time performance measurement -> unreachable: no user-facing change (speed-test timing oracle); covered by tools/test-people-index-speed.sh
 - WAZI-159: antialiased curves/avatars and GDI fallback -> unreachable: edge-alpha and forced-renderer-fallback measurements are absent from the fixture journeys; covered by src/smooth_geometry.zig and lint-repeats rule F1 for raw rounded calls
-- WAZI-160: selectable AMOLED theme -> `menus` (requires default AMOLED, measures dark popups, then switches to Green and verifies saved preference and light native chat menu)
+- WAZI-160: Graphite theme (internal name `amoled`) -> `menus` (requires the default theme, measures dark popups, then reapplies `Theme: Graphite` and verifies the saved preference and a dark native chat menu)
 - WAZI-161: DirectWrite IBM Plex Medium body text -> `text-comparison` (requires active DirectWrite, exact bundled Medium/SemiBold font hashes and body/heading metric parity with Chrome)
 
 - IGSH-645: right-click reaction chooses the clicked emoji -> `reactions` (real SendInput selection of laughing face on WhatsApp and Slack, exact hub payload and visible chip)
