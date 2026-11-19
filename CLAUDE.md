@@ -40,6 +40,7 @@
 | Numeric literals in `draw*` and `paint*` functions in `src/main.zig` must not increase; put layout numbers in `src/box_layout.zig` or `src/quote_layout.zig` (SOFT-2508) | `tools/check-no-new-pixel-numbers.sh` and `tools/test-check-no-new-pixel-numbers.sh` |
 | A typical PR starts at most 19 jobs; merge small checks into one job instead of adding one (SOFT-2765) | `tools/check_job_budget.py`, `tools/lint-repeats.sh` rule B18 and `tools/test_job_budget.py` |
 | A bug-fix PR names the merged revert that landed first, or gives a reason none was needed (SOFT-2766) | `tools/check_revert_first.py` in the `pr-title` job, `tools/lint-repeats.sh` rule B19 and `tools/test_revert_first.py` |
+| The send queue and transcription retry models match the code they cover: a covered function cannot change until its model is reviewed and the hashes are recorded (SOFT-2769) | `tools/formal/check_formal.py` in both preflights; `--tlc` runs the models and every broken variant |
 | Each check still fails on the past commit it was written for | `tools/test-preflight-guard.sh`, `tools/test-lint-repeats.sh`, `tools/test-ci-green.sh` in CI |
 | New Actions run logs carry no private markers | `run-log-markers.yml` hourly, `tools/check_private_markers.py --logs` |
 | The video tool installs through one retrying script that fails when ffmpeg is missing (SOFT-2677) | `tools/test_install_ffmpeg.py` and `tools/verify-wazig/install-ffmpeg.ps1` |

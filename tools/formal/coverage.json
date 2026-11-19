@@ -1,0 +1,88 @@
+{
+  "sync_commit": "b13ce41d91666a333df5faedef40a8ebc755173e",
+  "tool": "TLC 2.19 from tla2tools.jar v1.7.4, pinned by sha256 in check_formal.py",
+  "models": [
+    "tools/formal/send-queue/SendQueue.tla",
+    "tools/formal/transcribe-retry/TranscribeRetry.tla"
+  ],
+  "functions": [
+    {
+      "file": "src/main.zig",
+      "name": "beginUnifiedSend",
+      "model": "send-queue/SendQueue.tla Dispatch",
+      "sha256": "5275a503c5c96d45392c95f5f4d43715a6a80a1350bad0e09dcbb84ae1976ec8"
+    },
+    {
+      "file": "src/main.zig",
+      "name": "finishUnifiedSend",
+      "model": "send-queue/SendQueue.tla Network",
+      "sha256": "7401e0241cde707081e433519e6dd4efd4dea52f83bf1f889e3a93729bcc78b0"
+    },
+    {
+      "file": "src/main.zig",
+      "name": "commitUnifiedOutcome",
+      "model": "send-queue/SendQueue.tla Commit",
+      "sha256": "5c0f299d5dc2b39da5a3cd265c2ab8de638367286939a735d1e8102b2eda01f1"
+    },
+    {
+      "file": "src/main.zig",
+      "name": "tickUnifiedOutbox",
+      "model": "send-queue/SendQueue.tla Crash and lost result",
+      "sha256": "e0e33b54481cc9d59e47736a7fc2ffa6e6fb24920ba1ab27e95dc2fad91ba2d1"
+    },
+    {
+      "file": "src/main.zig",
+      "name": "retryUnifiedSend",
+      "model": "send-queue/SendQueue.tla UserRetry",
+      "sha256": "776de709d084897a58920d4b1e4a5101ef2498f37c04569ff36fa8d103b31084"
+    },
+    {
+      "file": "src/main.zig",
+      "name": "discardUnifiedSend",
+      "model": "send-queue/SendQueue.tla UserDelete",
+      "sha256": "25ec0180b23a84dea731a47b9314b7d837d1f2721e0952ec5fc22681f22c6512"
+    },
+    {
+      "file": "src/main.zig",
+      "name": "sendRetryDelayMs",
+      "model": "send-queue/SendQueue.tla Commit retry bound",
+      "sha256": "38a2bb396ee9f689f0d2bf69fa4d1c037a44cdae2529d608aa774a90032010d1"
+    },
+    {
+      "file": "src/unified_snapshot.zig",
+      "name": "admit",
+      "model": "send-queue/SendQueue.tla Compose",
+      "sha256": "47782caab724398538f1f6322243e153dec799960f9152ad71f05619fc53ccf7"
+    },
+    {
+      "file": "src/main.zig",
+      "name": "scheduleNextTranscription",
+      "model": "transcribe-retry/TranscribeRetry.tla Start and SkipAttempted",
+      "sha256": "4cbed462763f3723fd96bdb30320d49cbea15d9988ff4a6b0347e5662ff00e2a"
+    },
+    {
+      "file": "src/main.zig",
+      "name": "pollTranscription",
+      "model": "transcribe-retry/TranscribeRetry.tla Finish",
+      "sha256": "4033ca4fee7d91b348ccfc6f67c53976e53c95eb63b063f26c18ca5d0965968a"
+    },
+    {
+      "file": "src/main.zig",
+      "name": "beginTranscriptionOpen",
+      "model": "transcribe-retry/TranscribeRetry.tla Open",
+      "sha256": "d92fabae08d3cb8cc5f9d1ca6226e64cedb97c51eee9a1976388f0e60d7c47da"
+    },
+    {
+      "file": "src/main.zig",
+      "name": "transcribeWasAttempted",
+      "model": "transcribe-retry/TranscribeRetry.tla WasAttempted",
+      "sha256": "99f31249caef2eea7d3d3fa83f164c4b043f7daf7a8c6a15c3810264c63a0ffd"
+    },
+    {
+      "file": "src/dictation.zig",
+      "name": "request",
+      "model": "transcribe-retry/TranscribeRetry.tla one request per start",
+      "sha256": "3a3477742f9e2c38ca27eb7a2f0711ca45449c4714186dd3621b96e8b3b4ea55"
+    }
+  ]
+}

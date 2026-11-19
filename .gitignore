@@ -15,6 +15,7 @@ GATES.md
 board.yml
 .claude/skills/*
 !.claude/skills/verify-wazig/
+!.claude/skills/verify-send-queue/
 .claude/hooks/agent-scope-guard.sh
 .claude/hooks/board-write-guard.sh
 .github/workflows/skills-evals.yml

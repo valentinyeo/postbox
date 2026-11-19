@@ -67,7 +67,7 @@ class PrivateMarkers(unittest.TestCase):
         self.assertEqual(private_paths(paths), ["HANDOFF.md", ".claude/skills/INDEX.md", ".claude/skills", "board.yml"])
 
     def test_only_named_public_skill_files_are_allowed(self):
-        private = [".claude/skills/verify-wazig/private.md", ".claude/skills/verify-wazig/features/private.md", ".claude/skills/verify-wazig-other/SKILL.md"]
+        private = [".claude/skills/verify-wazig/private.md", ".claude/skills/verify-wazig/features/private.md", ".claude/skills/verify-wazig-other/SKILL.md", ".claude/skills/verify-send-queue/other.md"]
         self.assertEqual(private_paths(list(check_private_markers.PUBLIC_SKILL_PATHS) + [".claude/skills/verify-wazig/features/menus.md"] + private), private)
 
     def test_public_skill_content_still_rejects_private_markers(self):

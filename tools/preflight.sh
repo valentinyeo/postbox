@@ -46,6 +46,7 @@ run bash tools/check-no-new-pixel-numbers.sh .
 run python3 -m unittest discover -s tools -p 'test_*.py'
 run python3 tools/check-planted.py
 run python3 tools/check_cache_keys.py
+run python3 tools/formal/check_formal.py
 run node --test tools/strip-comments.test.js
 run node tools/strip-comments.mjs --check
 run git fetch --quiet --no-tags origin '+refs/pull/*/head:refs/remotes/pr/*'
