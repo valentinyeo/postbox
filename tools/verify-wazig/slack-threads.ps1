@@ -52,5 +52,19 @@ function Invoke-SlackThreadsJourney($Session, $Start) {
     $thread = Save-ThreadsState $Session threads-restart
     $thread | Add-Member -NotePropertyName restarted -NotePropertyValue ($old.HasExited -and $Session.startTicks -ne $oldTicks)
     $thread | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'threads-restart.json')
+    Invoke-PaletteCommand $Session 'Slack threads like Slack for this account'
+    $null = Wait-Until { $thread = (Read-Control $Session status).slack_threads; $thread.threads_option -eq 'on' -and $thread.inline_replies -eq 0 -and $thread.parent_reply_line -eq '30 replies' } 'account option back on folds the replies again'
+    Invoke-PaletteCommand $Session 'Replies: WhatsApp style'
+    $null = Wait-Until {
+        $thread = (Read-Control $Session status).slack_threads
+        $thread.replies_style -eq 'whatsapp' -and $thread.inline_replies -eq 32 -and $thread.loose_replies -eq 32 -and $thread.parent_reply_line -eq '' -and $thread.threads_option -eq 'off'
+    } 'this Slack chat follows its own WhatsApp style while the account keeps threads on'
+    $null = Save-ThreadsState $Session chat-whatsapp-style
+    Invoke-PaletteCommand $Session 'Replies: Slack style'
+    $null = Wait-Until {
+        $thread = (Read-Control $Session status).slack_threads
+        $thread.replies_style -eq 'slack' -and $thread.inline_replies -eq 0 -and $thread.loose_replies -eq 0 -and $thread.parent_reply_line -eq '30 replies' -and $thread.threads_option -eq 'on'
+    } 'this Slack chat folds the replies again in Slack style'
+    $null = Save-ThreadsState $Session chat-slack-style
     return $app
 }
