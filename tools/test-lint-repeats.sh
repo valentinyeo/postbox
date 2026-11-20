@@ -93,6 +93,7 @@ yml_src="$repo/.github/workflows/automerge.yml"
 reset_automerge() {
     cp "$yml_src" "$fixture/.github/workflows/automerge.yml"
     cp "$repo/.github/workflows/verify.yml" "$fixture/.github/workflows/verify.yml"
+    cp "$repo/.github/workflows/planted.yml" "$fixture/.github/workflows/planted.yml"
     cp "$admit_src" "$fixture/tools/automerge-admit.sh"
 }
 reset_automerge
@@ -138,9 +139,9 @@ printf 'test-lint-repeats: B12 rejects missing reproduction guards\n'
 for mutation in planted schedule cron; do
     reset_automerge
     case "$mutation" in
-        planted) sed -i 's/^  planted:$/  removed-planted:/' "$fixture/.github/workflows/verify.yml" ;;
+        planted) sed -i 's/^  planted:$/  removed-planted:/' "$fixture/.github/workflows/planted.yml" ;;
         schedule) sed -i 's/^  schedule:$/  removed-schedule:/' "$fixture/.github/workflows/verify.yml" ;;
-        cron) sed -i '/^    - cron: /d' "$fixture/.github/workflows/verify.yml" ;;
+        cron) sed -i '/^    - cron: /d' "$fixture/.github/workflows/planted.yml" ;;
     esac
     status=0
     "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
@@ -151,7 +152,7 @@ for mutation in planted schedule cron; do
     fi
 done
 reset_automerge
-printf 'test-lint-repeats: B13 rejects missing planted job and nightly trigger\n'
+printf 'test-lint-repeats: B13 rejects a missing planted job, planted summary or nightly trigger\n'
 reset_automerge
 sed -i 's#tools/verify-wazig/vw.py drive#tools/verify-wazig/run.ps1 -Feature#' "$fixture/.github/workflows/verify.yml"
 status=0
@@ -218,12 +219,13 @@ fi
 cp "$repo/.github/workflows/release.yml" "$fixture/.github/workflows/release.yml"
 "$lint" "$fixture"
 printf 'test-lint-repeats: B14 rejects publishing without proof and permits the gated release\n'
-for mutation in missing cancel-release; do
+for mutation in missing cancel-release release-group; do
     cp "$repo/.github/workflows/no-comments.yml" "$fixture/.github/workflows/no-comments.yml"
     cp "$repo/.github/workflows/release.yml" "$fixture/.github/workflows/release.yml"
     case "$mutation" in
         missing) file=no-comments.yml; sed -i '/^concurrency:/,+2d' "$fixture/.github/workflows/$file" ;;
-        cancel-release) file=release.yml; sed -i 's/cancel-in-progress: false/cancel-in-progress: true/' "$fixture/.github/workflows/$file" ;;
+        cancel-release) file=release.yml; sed -i 's/cancel-in-progress: true/cancel-in-progress: false/' "$fixture/.github/workflows/$file" ;;
+        release-group) file=release.yml; sed -i 's#group: release-${{ github.ref }}#group: release#' "$fixture/.github/workflows/$file" ;;
     esac
     if cmp -s "$repo/.github/workflows/$file" "$fixture/.github/workflows/$file"; then
         printf 'test-lint-repeats: FAIL B15 %s mutation changed nothing\n' "$mutation" >&2
@@ -239,7 +241,7 @@ for mutation in missing cancel-release; do
 done
 cp "$repo/.github/workflows/release.yml" "$fixture/.github/workflows/release.yml"
 "$lint" "$fixture"
-printf 'test-lint-repeats: B15 rejects a missing concurrency block and publish cancellation, and permits safe workflows\n'
+printf 'test-lint-repeats: B15 rejects a missing concurrency block, a workflow that lets superseded runs finish, and a release group that cancels other tags\n'
 b8_cases=0
 for guard in 'required-checks.txt' 'required=' 'as \$names' 'COMPLETED' 'match-head-commit' 'could not evaluate head checks' 'length) == 0' '!= "code-review"'; do
     reset_automerge

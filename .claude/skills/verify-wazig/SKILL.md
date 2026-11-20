@@ -11,7 +11,7 @@ pstack: 0.15.43
 
 Bug-fix PRs must name a `Repro:` journey that passes on the PR head and fails on base after the app launches and doctor passes; launch and setup failures do not count.
 
-Planted patches in `tools/verify-wazig/planted/` must fail their journeys after launch; scheduled and dispatched runs report red and clean results.
+Planted patches in `tools/verify-wazig/planted/` must fail their journeys after launch; the nightly `planted.yml` workflow, scheduled and dispatched on its own, reports red and clean results.
 
 A new probe must pass `repeat=3` before it merges.
 Run `gh workflow run verify.yml -f feature=<id> -f repeat=3` and inspect all three runs.
