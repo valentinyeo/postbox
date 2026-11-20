@@ -1,5 +1,4 @@
 import argparse
-import json
 from pathlib import Path
 import sys
 
@@ -24,18 +23,12 @@ if __name__ == '__main__':
     parser.add_argument('--feature', required=True)
     parser.add_argument('--evidence', type=Path, required=True)
     parser.add_argument('--exit-code', type=int, required=True)
-    parser.add_argument('--passed-message', default='repro passed on base, so it does not reproduce the bug')
-    parser.add_argument('--result-file', type=Path)
+    parser.add_argument('--passed-message', default='journey passed, so it does not show the bug')
     parser.add_argument('--expected-check', type=Path)
     args = parser.parse_args()
     try:
-        if args.result_file:
-            args.result_file.unlink(missing_ok=True)
         expected = args.expected_check.read_text(encoding='utf-8-sig').strip() if args.expected_check else None
         check = classify_red(args.feature, args.evidence, args.exit_code, args.passed_message, expected)
-        if args.result_file:
-            args.result_file.parent.mkdir(parents=True, exist_ok=True)
-            args.result_file.write_text(json.dumps({'feature': args.feature, 'classification': 'reproduced', 'check': check}), encoding='utf-8')
         print(check.encode('ascii', 'backslashreplace').decode('ascii'))
     except (ValueError, OSError) as error:
         sys.exit(str(error).encode('ascii', 'backslashreplace').decode('ascii'))

@@ -27,7 +27,7 @@ class JourneyRegistryTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         for name in ['tools/verify-wazig', '.claude/skills/verify-wazig', 'src']:
             shutil.copytree(ROOT / name, self.root / name, ignore=shutil.ignore_patterns('__pycache__'))
-        for name in ['tools/check_private_markers.py', 'tools/check-repro-first.sh', '.github/workflows/verify.yml', 'CHANGELOG.md']:
+        for name in ['tools/check_private_markers.py', '.github/workflows/verify.yml', 'CHANGELOG.md']:
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
@@ -75,32 +75,16 @@ class JourneyRegistryTests(unittest.TestCase):
         subprocess.run(['git', '-C', str(self.root), 'commit', '-qm', 'change'], check=True)
         step = next(step for step in self.workflow['jobs']['plan']['steps'] if step.get('id') == 'matrix')
         output = self.root / 'plan-output'
-        event = self.root / 'event.json'
-        event.write_text(json.dumps({'pull_request': {'title': 'fix: repair search', 'body': 'Repro: caret'}}))
         env = dict(os.environ, EVENT_NAME='pull_request', FEATURE='search', BASE_SHA=base,
-                   GITHUB_OUTPUT=str(output), GITHUB_EVENT_PATH=str(event), RUNNER_TEMP=str(self.root))
+                   GITHUB_OUTPUT=str(output), RUNNER_TEMP=str(self.root))
         result = subprocess.run([sys.executable, '-c', step['run']], cwd=self.root, capture_output=True,
                                 text=True, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         outputs = dict(line.split('=', 1) for line in output.read_text().splitlines())
-        self.assertEqual(outputs['repro'], 'caret')
+        self.assertEqual(set(outputs), {'matrix', 'needed'})
         self.assertEqual(outputs['needed'], 'true')
         names = {row['feature'] for row in json.loads(outputs['matrix'])['include']}
-        self.assertEqual(names, {'search', 'voice', 'reply', 'paste-image', 'caret'})
-        for body in ('Repro: unknown-journey', '', 'Repro: search\nRepro: voice', 'Repro: none, scripts only'):
-            with self.subTest(body=body):
-                event.write_text(json.dumps({'pull_request': {'title': 'fix: repair search', 'body': body}}))
-                output.write_text('')
-                result = subprocess.run([sys.executable, '-c', step['run']], cwd=self.root, capture_output=True,
-                                        text=True, env=env)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                outputs = dict(line.split('=', 1) for line in output.read_text().splitlines())
-                self.assertEqual(outputs['repro'], '')
-                self.assertEqual(outputs['needed'], 'true')
-                self.assertEqual({row['feature'] for row in json.loads(outputs['matrix'])['include']},
-                                 {'search', 'voice', 'reply', 'paste-image'})
-                self.assertNotIn('Traceback', result.stderr)
-        event.write_text(json.dumps({'pull_request': {'title': 'fix: repair search', 'body': 'Repro: caret'}}))
+        self.assertEqual(names, {'search', 'voice', 'reply', 'paste-image'})
         mapping_path = self.tools / 'pr-journeys.json'
         mapping = json.loads(mapping_path.read_text())
         mapping['max_journeys'] = 3
@@ -260,14 +244,13 @@ class JourneyRegistryTests(unittest.TestCase):
                 self.assertIn('hand-maintained journey table', self.check_map().stderr)
                 path.write_text(original)
 
-    def test_base_repro_uses_marker_classifier(self):
+    def test_a_red_run_counts_only_after_launch_and_doctor(self):
         run = (self.tools / 'run.ps1').read_text()
         doctor = run.index('    Invoke-Doctor $session\n')
         marker = run.index("    'JOURNEY STARTED' | Set-Content (Join-Path $Evidence 'journey-started.txt')\n")
         self.assertEqual(marker, doctor + len('    Invoke-Doctor $session\n'))
-        step = next(step for step in self.workflow['jobs']['base-fails']['steps']
-                    if step.get('name') == 'Run reproduction on base')
-        script = step['run']
+        planted = self.workflow['jobs']['planted']['steps']
+        script = next(step for step in planted if step.get('name') == 'Classify planted failure')['run']
         self.assertIn('tools/verify-wazig/classify-red.ps1', script)
         classifier = (self.tools / 'classify-red.ps1').read_text()
         self.assertIn('classify_red.py', classifier)

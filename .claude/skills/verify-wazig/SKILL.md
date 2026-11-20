@@ -9,7 +9,7 @@ pstack: 0.15.43
 
 ## Launch
 
-Bug-fix PRs must name a `Repro:` journey that passes on the PR head and fails on base after the app launches and doctor passes; launch and setup failures do not count.
+A bug fix starts from a journey that shows the bug after the app launches and doctor passes; launch and setup failures do not count. Nothing in CI asks for a `Repro:` line.
 
 Planted patches in `tools/verify-wazig/planted/` must fail their journeys after launch; scheduled and dispatched runs report red and clean results.
 

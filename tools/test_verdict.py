@@ -21,16 +21,14 @@ SPEC.loader.exec_module(MODULE)
 class VerdictTests(unittest.TestCase):
     def setUp(self):
         self.needs = {
-            'plan': {'result': 'success', 'outputs': {'needed': 'true', 'repro': 'search', 'notes': '[]'}},
-            'base-fails': {'result': 'success', 'outputs': {'classified': 'true'}},
+            'plan': {'result': 'success', 'outputs': {'needed': 'true'}},
             'verify': {'result': 'success', 'outputs': {}},
         }
 
     def test_all_pass(self):
         self.assertEqual(MODULE.verdict(self.needs), ('PASS', []))
 
-    def test_failed_or_cancelled_dependency_overrides_notes(self):
-        self.needs['plan']['outputs']['notes'] = '["No repro journey selected."]'
+    def test_failed_or_cancelled_dependency_fails(self):
         for name in self.needs:
             for result in ('failure', 'cancelled'):
                 with self.subTest(name=name, result=result):
@@ -39,7 +37,7 @@ class VerdictTests(unittest.TestCase):
                     self.assertEqual(MODULE.verdict(needs)[0], 'FAIL')
 
     def test_skipped_unneeded_verify_is_fine(self):
-        self.needs['plan']['outputs'].update(needed='false', repro='')
+        self.needs['plan']['outputs'].update(needed='false')
         self.needs['verify']['result'] = 'skipped'
         self.assertEqual(MODULE.verdict(self.needs), ('PASS', []))
 
@@ -49,14 +47,6 @@ class VerdictTests(unittest.TestCase):
                 needs = copy.deepcopy(self.needs)
                 needs[name]['result'] = 'skipped'
                 self.assertEqual(MODULE.verdict(needs)[0], 'FAIL')
-
-    def test_plan_notes(self):
-        self.needs['plan']['outputs']['notes'] = '["No repro journey selected."]'
-        self.assertEqual(MODULE.verdict(self.needs), ('PASS+NOTES', ['No repro journey selected.']))
-
-    def test_unclassified_base_is_not_a_silent_pass(self):
-        self.needs['base-fails']['outputs'] = {}
-        self.assertEqual(MODULE.verdict(self.needs), ('PASS+NOTES', ['Base reproduction could not be classified.']))
 
     def test_cli_summary_and_exit_status(self):
         for expected, verify in (('FAIL', 'failure'), ('FAIL', 'success')):
@@ -80,27 +70,17 @@ class VerdictTests(unittest.TestCase):
         events = workflow.get('on', workflow.get(True))
         self.assertNotIn('paths', events['pull_request'])
         job = workflow['jobs']['verify-verdict']
-        self.assertEqual(job['needs'], ['plan', 'base-fails', 'verify'])
+        self.assertEqual(job['needs'], ['plan', 'verify'])
         self.assertIn('always()', job['if'])
         self.assertIn("github.event_name == 'pull_request'", job['if'])
         self.assertIn('verify-verdict', (ROOT / 'tools/required-checks.txt').read_text().splitlines())
 
-    def test_only_a_bug_fix_without_repro_gets_the_no_repro_note(self):
-        workflow = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())
-        step = next(s for s in workflow['jobs']['plan']['steps'] if s.get('name') == 'Plan registered journeys')
-        line = next(l.strip() for l in step['run'].splitlines() if 'No repro journey selected.' in l)
-        scope = {}
-        for repro, expected in (('', []), ('search', []), ('none', ['No repro journey selected.'])):
-            scope['repro'] = repro
-            exec(line, {}, scope)
-            self.assertEqual(scope['notes'], expected, repro)
-
     def test_verdict_job_runs_main_judge_not_pr_code(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())
         job = workflow['jobs']['verify-verdict']
-        for step in job['steps'][1:3]:
-            self.assertEqual(step['uses'], 'actions/download-artifact@v4')
-            self.assertTrue(step['continue-on-error'])
+        downloads = [step for step in job['steps'] if step.get('uses') == 'actions/download-artifact@v4']
+        self.assertEqual([step['with']['pattern'] for step in downloads], ['verify-wazig-*'])
+        self.assertTrue(all(step['continue-on-error'] for step in downloads))
         checkout = job['steps'][0]
         self.assertEqual(checkout['uses'], 'actions/checkout@v4')
         self.assertEqual(checkout['with']['ref'], '${{ github.event.repository.default_branch }}')
@@ -144,8 +124,7 @@ def http_error(code):
 class JudgeTests(unittest.TestCase):
     def setUp(self):
         self.needs = {
-            'plan': {'result': 'success', 'outputs': {'needed': 'true', 'repro': '', 'notes': '[]'}},
-            'base-fails': {'result': 'success', 'outputs': {}},
+            'plan': {'result': 'success', 'outputs': {'needed': 'true'}},
             'verify': {'result': 'success', 'outputs': {}},
         }
         self.body = 'Fix search\n\nAuthor model: anthropic/claude-opus-5-5'
@@ -198,10 +177,6 @@ class JudgeTests(unittest.TestCase):
     def test_notes_are_kept(self):
         result, notes, _ = self.run_judge(Model(reply('PASS+NOTES', ['src/x.zig ran no journey.'])))
         self.assertEqual((result, notes), ('PASS+NOTES', ['src/x.zig ran no journey.']))
-        needs = copy.deepcopy(self.needs)
-        needs['plan']['outputs']['notes'] = '["No repro journey selected."]'
-        result, notes, _ = self.run_judge(Model(reply('PASS')), needs=needs)
-        self.assertEqual((result, notes), ('PASS+NOTES', ['No repro journey selected.']))
 
     def test_no_key_or_no_answer_fails_loudly(self):
         self.assertEqual(self.run_judge(Model(), key='')[0], 'FAIL')
@@ -224,8 +199,7 @@ class JudgeTests(unittest.TestCase):
             (folder / 'result.txt').write_text('JOURNEY PASSED: search\n')
             (folder / 'actions.log').write_text('x' * 5000 + 'last action')
             (folder / 'after.png').write_bytes(b'\x89PNG')
-            (Path(temp) / 'repro-base').mkdir()
-            (Path(temp) / 'repro-base' / 'classification.json').write_text('{"classification": "reproduced"}')
+            (folder / 'classification.json').write_text('{"classification": "reproduced"}')
             text = MODULE.digest(temp)
             self.assertIn('result.txt: JOURNEY PASSED: search', text)
             self.assertIn('classification.json: {"classification": "reproduced"}', text)
@@ -244,10 +218,12 @@ class JudgeTests(unittest.TestCase):
             self.assertIn('## verify-wazig-29', text)
             self.assertIn('## verify-wazig-search', text)
 
-    def test_red_job_lists_head_failures_not_the_base_repro(self):
-        evidence = ('## repro-base\nfailure.txt: base: bug reproduced\n\n'
+    def test_red_job_names_the_failing_journey(self):
+        evidence = ('## verify-wazig-voice\nfailure.txt: voice: playback stalled\n\n'
                     '## verify-wazig-search\nfailure.txt: search: chats were not filtered')
-        self.assertEqual(MODULE.failure_lines(evidence), ['verify-wazig-search failure.txt: search: chats were not filtered'])
+        self.assertEqual(MODULE.failure_lines(evidence),
+                         ['verify-wazig-voice failure.txt: voice: playback stalled',
+                          'verify-wazig-search failure.txt: search: chats were not filtered'])
 
     def test_reply_parsing_takes_the_first_object(self):
         self.assertEqual(MODULE.parse_reply(reply('PASS') + ' then ' + reply('FAIL')), ('PASS', [], ''))

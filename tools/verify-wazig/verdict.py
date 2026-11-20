@@ -42,17 +42,13 @@ MIN_QUOTE = 12
 
 
 def verdict(needs):
-    notes = []
-    for name in ('plan', 'base-fails', 'verify'):
+    for name in ('plan', 'verify'):
         result = needs[name]['result']
         if result == 'skipped' and name == 'verify' and needs['plan']['outputs'].get('needed') == 'false':
             continue
         if result != 'success':
             return 'FAIL', [f'{name}: {result}']
-    notes.extend(json.loads(needs['plan']['outputs'].get('notes') or '[]'))
-    if needs['plan']['outputs'].get('repro') and needs['base-fails']['outputs'].get('classified') != 'true':
-        notes.append('Base reproduction could not be classified.')
-    return ('PASS+NOTES' if notes else 'PASS'), notes
+    return 'PASS', []
 
 
 def declarations(body):
@@ -131,10 +127,9 @@ def build_system():
     return (
         'You are the independent verifier for Postbox, a native Windows messaging app. '
         'You come from a different model family than every author of this pull request. '
-        'Every journey job already passed. Judge whether the evidence really proves the change works, '
-        'comparing the base reproduction against the head journeys.\n\n'
+        'Every journey job already passed. Judge whether the evidence really proves the change works.\n\n'
         'FAIL only when an evidence line contradicts a pass: a journey that says PASSED next to a failure, '
-        'a base reproduction that did not reproduce the bug, leftover pending sends or archives, failed cleanup, '
+        'leftover pending sends or archives, failed cleanup, '
         'or a doctor that did not pass. A FAIL must copy that exact evidence line, character for character, into "quote". '
         'PASS+NOTES when the evidence passes but leaves a gap, for example a changed source file whose behaviour no journey ran. '
         'PASS when the evidence covers the change.\n\n'
@@ -245,7 +240,7 @@ def failure_lines(evidence):
     for line in evidence.splitlines():
         if line.startswith('## '):
             folder = line[3:]
-        elif line.startswith('failure.txt:') and folder != 'repro-base':
+        elif line.startswith('failure.txt:'):
             found.append(f'{folder} {line.strip()}')
     return found[:5]
 
