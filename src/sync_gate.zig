@@ -11,7 +11,13 @@ pub const avatar_failure_ttl_secs: i64 = 24 * 60 * 60;
 pub const delegate_warmup_secs: i64 = 20;
 pub const sync_refresh_gap_ms: u64 = 6 * 60 * 60 * 1000;
 pub const hub_wake_gap_ms: u64 = 60_000;
+pub const hub_wake_gap_secs: i64 = @intCast(hub_wake_gap_ms / 1000);
 pub const hub_inbox_safety_ms: u64 = 60_000;
+
+pub fn hubWakeUnixStale(last_refresh_unix: i64, now_secs: i64) bool {
+    if (last_refresh_unix <= 0) return false;
+    return now_secs -| last_refresh_unix >= hub_wake_gap_secs;
+}
 
 const hub_reconnect_backoff_ms = [_]u64{ 1000, 2000, 4000, 8000, 15_000, 30_000 };
 
@@ -76,6 +82,16 @@ test "hub inbox freshness waits a minute before wake refresh" {
     try std.testing.expect(hubInboxFetchStale(100_000, 160_000));
     try std.testing.expect(hubSafetyPollDue(100_000, 160_000));
     try std.testing.expect(!hubSafetyPollDue(100_000, 120_000));
+}
+
+test "hub wake uses wall clock across sleep when tick does not advance" {
+    const before_sleep: i64 = 1_000_000;
+    const wake: i64 = before_sleep + 4 * 3600;
+    try std.testing.expect(!hubWakeUnixStale(0, wake));
+    try std.testing.expect(!hubWakeUnixStale(before_sleep, before_sleep + 59));
+    try std.testing.expect(hubWakeUnixStale(before_sleep, before_sleep + 60));
+    try std.testing.expect(hubWakeUnixStale(before_sleep, wake));
+    try std.testing.expect(!hubInboxFetchStale(990_000, 991_000));
 }
 
 test "hub SSE reconnect backoff caps at thirty seconds" {

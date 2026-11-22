@@ -275,7 +275,7 @@
     },
     {
       "feature": "hub-inbox-refresh",
-      "source": "main:hubSafetyRefresh",
+      "source": "main:hubSafetyRefreshIfDue",
       "proof": "hub-wake-refresh",
       "status": "covered",
       "why": ""

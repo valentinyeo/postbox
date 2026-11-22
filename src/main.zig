@@ -792,7 +792,7 @@ const App = struct {
     hub_event_pending: std.atomic.Value(bool) = .init(false),
     hub_reset_pending: std.atomic.Value(bool) = .init(false),
     last_inbox_fetch_ms: u64 = 0,
-    hub_reconnect_failures: u32 = 0,
+    hub_reconnect_failures: std.atomic.Value(u32) = .init(0),
     hub_reconnect_logged_ms: ?u64 = null,
     verification_inbox_stale_once: bool = false,
     wacli_path: []u8,
@@ -14998,7 +14998,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.print(",\"include_archived\":{},\"bulk_selected_count\":{d},\"mention_roster\":{d},\"mention_query\":\"{s}\"", .{ a.include_archived, a.bulk.items.len, a.mention_roster, a.mention_query.slice() });
     var buffer: [1024]u8 = undefined;
     try w.print(",\"sync\":\"{s}\",\"last_inbox_fetch_ms\":{d},\"hub_reconnect_failures\":{d},\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
-        sync, a.last_inbox_fetch_ms, a.hub_reconnect_failures, a.slack_connected.load(.acquire), pending_sends, a.pending_archive_count,
+        sync, a.last_inbox_fetch_ms, a.hub_reconnect_failures.load(.acquire), a.slack_connected.load(.acquire), pending_sends, a.pending_archive_count,
         slackChatCount(a), a.chat_count, a.show_archived, a.unread_only,
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
@@ -24456,15 +24456,15 @@ fn hubRefreshInboxAndOpenChat(a: *App) void {
 
 fn hubWakeRefreshIfStale(a: *App) void {
     if (!hubConfigured(a)) return;
-    const now = win.GetTickCount64();
-    if (!sync_gate.hubInboxFetchStale(a.last_inbox_fetch_ms, now)) return;
+    const stale_tick = sync_gate.hubInboxFetchStale(a.last_inbox_fetch_ms, win.GetTickCount64());
+    const stale_wall = sync_gate.hubWakeUnixStale(a.last_refresh_unix, nowUnixSeconds());
+    if (!stale_tick and !stale_wall) return;
     hubRefreshInboxAndOpenChat(a);
 }
 
 fn hubSafetyRefreshIfDue(a: *App) void {
     if (!hubConfigured(a)) return;
-    const hwnd = a.hwnd orelse return;
-    if (win.IsIconic(hwnd) != 0) return;
+    if (a.hwnd == null) return;
     const now = win.GetTickCount64();
     if (!sync_gate.hubSafetyPollDue(a.last_inbox_fetch_ms, now)) return;
     hubRefreshInboxAndOpenChat(a);
@@ -24494,9 +24494,9 @@ fn hubEventsMain(a: *App) void {
     var sse = wa_hub.Sse{};
     while (!a.hub_stop.load(.acquire)) {
         hubEventSession(a, allocator, &sse) catch |err| {
-            const failures = a.hub_reconnect_failures;
+            const failures = a.hub_reconnect_failures.load(.acquire);
             const wait_ms = sync_gate.hubReconnectWaitMs(failures);
-            a.hub_reconnect_failures = failures + 1;
+            a.hub_reconnect_failures.store(failures + 1, .release);
             if (a.hub_reconnect_logged_ms != wait_ms) {
                 a.hub_reconnect_logged_ms = wait_ms;
                 var buffer: [160]u8 = undefined;
@@ -24505,8 +24505,8 @@ fn hubEventsMain(a: *App) void {
             hubReconnectSleep(a, wait_ms);
             continue;
         };
-        if (a.hub_reconnect_failures > 0) appendLaunchLog(a, "hub events: connected");
-        a.hub_reconnect_failures = 0;
+        if (a.hub_reconnect_failures.load(.acquire) > 0) appendLaunchLog(a, "hub events: connected");
+        a.hub_reconnect_failures.store(0, .release);
         a.hub_reconnect_logged_ms = null;
         hubReconnectSleep(a, sync_gate.hubReconnectWaitMs(0));
     }

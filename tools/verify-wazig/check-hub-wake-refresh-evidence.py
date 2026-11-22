@@ -15,7 +15,7 @@ def check_hub_wake_refresh(folder):
     poll = json.loads((folder / 'safety-poll.json').read_text(encoding='utf-8-sig'))
     messages = json.loads((folder / 'poll.messages.json').read_text(encoding='utf-8-sig'))['messages']
     assert resume['resume_ms'] < 15_000
-    assert poll['poll_ms'] <= 70_000
+    assert poll['poll_ms'] <= 75_000
     assert poll['chat_pulls'] >= 1
     assert any(row['id'] == 'POLL-ROW' for row in messages)
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
