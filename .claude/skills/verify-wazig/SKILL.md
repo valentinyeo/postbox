@@ -9,7 +9,7 @@ pstack: 0.15.43
 
 ## Launch
 
-A bug fix starts from a journey that shows the bug after the app launches and doctor passes; launch and setup failures do not count. Nothing in CI asks for a `Repro:` line.
+A bug fix starts from a journey that shows the bug after the app launches and doctor passes; launch and setup failures do not count. Nothing in CI asks for a `Repro:` line. A journey that failed on the latest default-branch run is pre-existing and does not fail a pull request.
 
 Planted patches in `tools/verify-wazig/planted/` must fail their journeys after launch; scheduled and dispatched runs report red and clean results.
 

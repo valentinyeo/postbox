@@ -262,7 +262,7 @@ class JourneyRegistryTests(unittest.TestCase):
         self.assertEqual(verify['needs'], ['plan', 'candidate'])
         self.assertEqual(verify['strategy']['matrix'], '${{ fromJSON(needs.plan.outputs.matrix) }}')
         evidence = next(step for step in verify['steps'] if step.get('name') == 'Validate surviving journey evidence')
-        self.assertEqual(evidence['if'], 'matrix.evidence')
+        self.assertEqual(evidence['if'], "matrix.evidence && steps.drive.outcome == 'success'")
         result, output = self.plan()
         self.assertEqual(result.returncode, 0, result.stderr)
         matrix = json.loads(output.removeprefix('matrix='))

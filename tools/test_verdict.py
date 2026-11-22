@@ -130,9 +130,9 @@ class JudgeTests(unittest.TestCase):
         self.body = 'Fix search\n\nAuthor model: anthropic/claude-opus-5-5'
         self.evidence = '## verify-wazig-search\nresult.txt: JOURNEY PASSED: search\nside-effects.json: {"pendingSends": 2}'
 
-    def run_judge(self, model, body=None, key='k', needs=None):
+    def run_judge(self, model, body=None, key='k', needs=None, evidence=None):
         return MODULE.judge(needs or self.needs, self.body if body is None else body, 'pr', ['search'],
-                            self.evidence, 'diff', key, post=model, sleep=lambda seconds: None)
+                            self.evidence if evidence is None else evidence, 'diff', key, post=model, sleep=lambda seconds: None)
 
     def test_judge_comes_from_a_family_no_author_used(self):
         model = Model(reply('PASS'))
@@ -174,6 +174,25 @@ class JudgeTests(unittest.TestCase):
         result, _, _ = self.run_judge(Model(reply('FAIL', ['Too short.'], 'PASSED')))
         self.assertEqual(result, 'PASS+NOTES')
 
+    def test_a_failure_already_red_on_the_default_branch_does_not_fail_the_pull_request(self):
+        evidence = (
+            '## verify-wazig-search\n'
+            'preexisting.txt: preexisting search failed in https://example.test/run/9 as verify (search, true)\n'
+            'failure.txt: search: chats were not filtered\n'
+            'clean-result.txt: preexisting\n\n'
+            '## verify-wazig-voice\n'
+            'result.txt: JOURNEY PASSED: voice\n'
+            'side-effects.json: {"pendingSends": 2}'
+        )
+        quote = 'failure.txt: search: chats were not filtered'
+        result, notes, _ = self.run_judge(Model(reply('FAIL', ['Search failed.'], quote)), evidence=evidence)
+        self.assertEqual(result, 'PASS+NOTES')
+        self.assertIn('The quoted failure was already red on the default branch.', notes)
+        other = 'side-effects.json: {"pendingSends": 2}'
+        result, notes, _ = self.run_judge(Model(reply('FAIL', ['Sends were left pending.'], other)), evidence=evidence)
+        self.assertEqual(result, 'FAIL')
+        self.assertIn('Evidence: ' + other, notes)
+
     def test_notes_are_kept(self):
         result, notes, _ = self.run_judge(Model(reply('PASS+NOTES', ['src/x.zig ran no journey.'])))
         self.assertEqual((result, notes), ('PASS+NOTES', ['src/x.zig ran no journey.']))
@@ -197,11 +216,13 @@ class JudgeTests(unittest.TestCase):
             folder = Path(temp) / 'verify-wazig-search'
             folder.mkdir()
             (folder / 'result.txt').write_text('JOURNEY PASSED: search\n')
+            (folder / 'preexisting.txt').write_text('preexisting search failed in https://example.test/run/9\n')
             (folder / 'actions.log').write_text('x' * 5000 + 'last action')
             (folder / 'after.png').write_bytes(b'\x89PNG')
             (folder / 'classification.json').write_text('{"classification": "reproduced"}')
             text = MODULE.digest(temp)
             self.assertIn('result.txt: JOURNEY PASSED: search', text)
+            self.assertIn('preexisting.txt: preexisting search failed in https://example.test/run/9', text)
             self.assertIn('classification.json: {"classification": "reproduced"}', text)
             self.assertTrue(text.split('actions.log tail: ')[1].split('\n')[0].endswith('last action'))
             self.assertNotIn('PNG', text)

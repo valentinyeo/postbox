@@ -27,6 +27,7 @@ PYTHON_LIGHT_TESTS=(
     test_palette_archived
     test_pin_icon
     test_postbox
+    test_preexisting_journey
     test_reaction_layout
     test_real_size
     test_recording_paint

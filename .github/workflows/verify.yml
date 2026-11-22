@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: verify-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.feature || 'search' }}
@@ -653,6 +654,8 @@ jobs:
         shell: pwsh
         run: tools/verify-wazig/install-ffmpeg.ps1
       - name: Launch, doctor and drive
+        id: drive
+        continue-on-error: true
         shell: pwsh
         env:
           REPEAT: ${{ inputs.repeat || '1' }}
@@ -679,24 +682,45 @@ jobs:
             }
           }
           if ($failed) { throw 'One or more journey runs failed' }
+      - name: Fail unless the journey passed or was already red on the default branch
+        if: steps.drive.outcome == 'failure'
+        shell: pwsh
+        env:
+          FEATURE: ${{ matrix.feature }}
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if ($env:EVENT_NAME -ne 'pull_request') { throw 'One or more journey runs failed' }
+          $report = python tools/verify-wazig/preexisting.py --feature $env:FEATURE --repo $env:GITHUB_REPOSITORY --branch $env:DEFAULT_BRANCH
+          $code = $LASTEXITCODE
+          if ($report -is [array]) { $report = $report -join "`n" }
+          if ($code -ne 0) {
+            if (-not $report) { $report = 'Journey failed and is not already red on the default branch' }
+            throw $report
+          }
+          New-Item verification-evidence -ItemType Directory -Force | Out-Null
+          Set-Content -Path verification-evidence/preexisting.txt -Value $report
+          "PREEXISTING=true" >> $env:GITHUB_ENV
+          if ($env:GITHUB_STEP_SUMMARY) { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $report }
       - name: Validate surviving journey evidence
-        if: matrix.evidence
+        if: matrix.evidence && steps.drive.outcome == 'success'
         shell: pwsh
         run: |
           python tools/verify-wazig/check-evidence.py verification-evidence
           if ($LASTEXITCODE -ne 0) { throw 'Invalid journey evidence' }
       - name: Compare published and candidate font evidence
-        if: matrix.feature == 'appearance'
+        if: matrix.feature == 'appearance' && steps.drive.outcome == 'success'
         shell: pwsh
         run: |
           python tools/verify-wazig/check-font-baseline.py verification-evidence/font-baseline verification-evidence
           if ($LASTEXITCODE -ne 0) { throw 'Font baseline comparison failed' }
       - name: Archive rows through the production renderer with a light fixture palette
-        if: matrix.feature == 'show-archived'
+        if: matrix.feature == 'show-archived' && steps.drive.outcome == 'success'
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/verify-archive-light.ps1
       - name: Verify offline palette and unconfigured backend after unified search
-        if: matrix.feature == 'search'
+        if: matrix.feature == 'search' && steps.drive.outcome == 'success'
         shell: pwsh
         run: |
           pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature palette -Bin zig-out/bin -Evidence verification-evidence/palette
@@ -704,7 +728,7 @@ jobs:
           python tools/verify-wazig/check-evidence.py verification-evidence/palette
           if ($LASTEXITCODE -ne 0) { throw 'Invalid palette evidence' }
       - name: ISSUE-462 validate text comparison artifact
-        if: matrix.feature == 'text-comparison'
+        if: matrix.feature == 'text-comparison' && steps.drive.outcome == 'success'
         shell: pwsh
         run: |
           node tools/verify-wazig/check-text-comparison.cjs verification-evidence
@@ -714,13 +738,13 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tools/verify-wazig/cleanup.ps1 -Evidence verification-evidence
       - name: Validate menus evidence
-        if: success() && matrix.feature == 'menus'
+        if: success() && matrix.feature == 'menus' && steps.drive.outcome == 'success'
         shell: pwsh
         run: |
           python tools/verify-wazig/check-evidence.py verification-evidence
           if ($LASTEXITCODE -ne 0) { throw 'Invalid menus evidence' }
       - name: Validate archive evidence
-        if: ${{ success() && inputs.feature == 'archive' }}
+        if: ${{ success() && steps.drive.outcome == 'success' && inputs.feature == 'archive' }}
         run: python tools/verify-wazig/check-evidence.py verification-evidence
       - name: Record clean result
         if: always()
@@ -729,7 +753,8 @@ jobs:
           JOB_STATUS: ${{ job.status }}
         run: |
           New-Item verification-evidence -ItemType Directory -Force | Out-Null
-          $env:JOB_STATUS | Set-Content verification-evidence/clean-result.txt
+          if ($env:PREEXISTING -eq 'true' -and $env:JOB_STATUS -eq 'success') { 'preexisting' | Set-Content verification-evidence/clean-result.txt }
+          else { $env:JOB_STATUS | Set-Content verification-evidence/clean-result.txt }
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
