@@ -112,6 +112,36 @@ class VerdictTests(unittest.TestCase):
             if name != 'verify-verdict':
                 self.assertNotIn('GROQ_API_KEY', json.dumps(other))
 
+    def test_verdict_command_uses_the_script_present_on_the_default_branch(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())
+        run = workflow['jobs']['verify-verdict']['steps'][-1]['run']
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            bin_dir = root / 'bin'
+            bin_dir.mkdir()
+            called = root / 'called'
+            launcher = bin_dir / 'python3'
+            launcher.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "$CALLED"\nexit "$PY_EXIT"\n')
+            launcher.chmod(0o755)
+            tools = root / 'tools' / 'verify-wazig'
+            tools.mkdir(parents=True)
+            (tools / 'verdict.py').write_text('previous\n')
+            env = os.environ.copy()
+            env.update(PATH=f'{bin_dir}{os.pathsep}{env["PATH"]}', CALLED=str(called), PY_EXIT='0')
+            result = subprocess.run(['bash', '-e', '-c', run], cwd=root, env=env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(called.read_text().splitlines(), ['tools/verify-wazig/verdict.py'])
+            (tools / 'verifier.py').write_text('current\n')
+            called.write_text('')
+            result = subprocess.run(['bash', '-e', '-c', run], cwd=root, env=env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(called.read_text().splitlines(), ['tools/verify-wazig/verifier.py'])
+            called.write_text('')
+            env['PY_EXIT'] = '7'
+            result = subprocess.run(['bash', '-e', '-c', run], cwd=root, env=env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 7, result.stderr)
+            self.assertEqual(called.read_text().splitlines(), ['tools/verify-wazig/verifier.py'])
+
     def test_automerge_requires_successful_verdict(self):
         result = subprocess.run(['bash', str(ROOT / 'tools/test-automerge-admit.sh')],
                                 text=True, capture_output=True)
