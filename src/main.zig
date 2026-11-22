@@ -11350,6 +11350,24 @@ fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
     return textLineHeight(hdc, a.font_small.?) * 2 + px(a, 6);
 }
 
+fn drawReadMark(hdc: win.HDC, a: *App, bubble: win.RECT, reaction_overhang: i32, slot: i32) void {
+    const font = a.font_small orelse return;
+    _ = win.SelectObject(hdc, @ptrCast(font));
+    const ticks = lit("\u{2713}\u{2713}");
+    const label = lit("Read");
+    const ticks_text = std.mem.span(ticks);
+    const label_text = std.mem.span(label);
+    const ticks_width = runWidth(hdc, ticks_text);
+    const label_width = runWidth(hdc, label_text);
+    const rect = message_layout.readMarkRect(bubble.right, bubble.bottom, reaction_overhang, slot, ticks_width + message_layout.read_mark_text_gap + label_width);
+    var ticks_rect = win.RECT{ .left = rect.left, .top = rect.top, .right = rect.left + ticks_width, .bottom = rect.bottom };
+    _ = win.SetTextColor(hdc, read_mark_ink);
+    _ = text_draw.drawText(hdc, ticks, @intCast(ticks_text.len), &ticks_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+    var label_rect = win.RECT{ .left = ticks_rect.right + message_layout.read_mark_text_gap, .top = rect.top, .right = rect.right, .bottom = rect.bottom };
+    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+    _ = text_draw.drawText(hdc, label, @intCast(label_text.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+}
+
 fn jumpToReply(a: *App, id: []const u8) bool {
     for (a.messages[0..a.message_count], 0..) |*message, index| {
         if (!std.mem.eql(u8, message.id.slice(), id)) continue;
@@ -12045,9 +12063,11 @@ fn scrollToSelectedMessage(a: *App) void {
     _ = win.GetClientRect(canvas, &client);
     const bubble_width = messageBubbleWidth(a, client.right - client.left);
     ensureBitmap(a, &a.messages[selected]);
+    const read_mark_index = readMarkIndex(a);
+    const read_mark_height = readMarkHeight(hdc, a, read_mark_index);
     var total_height: i32 = px(a, 18);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
-        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, startsSenderGroup(a, index)) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message) + messageGap(a, index);
+        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, startsSenderGroup(a, index), messageReadMark(read_mark_index, read_mark_height, index)) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message) + messageGap(a, index);
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     var y = client.bottom - px(a, 14) + a.scroll_y;
@@ -12055,7 +12075,7 @@ fn scrollToSelectedMessage(a: *App) void {
     while (index > 0) {
         index -= 1;
         if (!channelMessageVisible(a, &a.messages[index])) continue;
-        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, startsSenderGroup(a, index)) + threadSummaryHeight(a, &a.messages[index]) + replyLineHeight(hdc, a, &a.messages[index]);
+        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, startsSenderGroup(a, index), messageReadMark(read_mark_index, read_mark_height, index)) + threadSummaryHeight(a, &a.messages[index]) + replyLineHeight(hdc, a, &a.messages[index]);
         y -= height + messageGap(a, index);
         if (index != selected) continue;
         const delta = message_scroll.scrollDelta(y, height, client.top, client.bottom, px(a, 8));
@@ -18052,6 +18072,26 @@ fn ownReadable(a: *App, index: usize) bool {
     return message.from_me and message.send_state == .none and !message.revoked and channelMessageVisible(a, message);
 }
 
+fn readMarkIndex(a: *App) ?usize {
+    const newest = read_receipt.newestOwn(a.message_count, a, ownReadable) orelse return null;
+    const message = &a.messages[newest];
+    return if (read_receipt.shows(receiptCapability(a), message.from_me, message.send_state == .none, message.revoked, message.read_by)) newest else null;
+}
+
+fn readMarkHeight(hdc: win.HDC, a: *App, marked: ?usize) i32 {
+    if (marked == null) return 0;
+    return message_layout.readMarkSlot(textLineHeight(hdc, a.font_small.?));
+}
+
+fn messageReadMark(marked: ?usize, height: i32, index: usize) i32 {
+    const marked_index = marked orelse return 0;
+    return if (marked_index == index) height else 0;
+}
+
+fn reactionOverhang(a: *const App, chip: win.SIZE) i32 {
+    return @max(0, chip.cy - px(a, 4));
+}
+
 fn receiptCapability(a: *const App) read_receipt.Capability {
     if (a.selected_chat >= a.chat_count) return .signal;
     return switch (a.chats[a.selected_chat].provider) {
@@ -18183,7 +18223,7 @@ fn quoteBlockHeight(hdc: win.HDC, a: *App, message: *const Message, width: i32) 
     return quote_layout.blockHeight(px(a, quote_vertical_pad), name_height, quoteBodyHeight(hdc, a, message.quote.slice(), quoteTextWidth(a, width)), px(a, quote_after_gap));
 }
 
-fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: bool) u64 {
+fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: bool, read_mark: i32) u64 {
     var h = std.hash.Wyhash.init(0);
     const parts = [_]u64{
         @intCast(width),
@@ -18204,20 +18244,21 @@ fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: b
         message.reaction.len,
         @intFromEnum(message.unfurl_provider),
         @intCast(threadSummaryHeight(@constCast(a), message)),
+        @intCast(read_mark),
     };
     h.update(std.mem.sliceAsBytes(&parts));
     return h.final() | 1;
 }
 
-fn measureMessageCached(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool) i32 {
+fn measureMessageCached(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool, read_mark: i32) i32 {
     _ = unfurlCardVisible(a, message);
-    if (message.measure_tag == measureTag(a, message, width, show_sender)) return message.measure_height;
-    return measureMessageStore(hdc, a, message, width, show_sender);
+    if (message.measure_tag == measureTag(a, message, width, show_sender, read_mark)) return message.measure_height;
+    return measureMessageStore(hdc, a, message, width, show_sender, read_mark);
 }
 
-fn measureMessageStore(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool) i32 {
-    const height = measureMessage(hdc, a, message, width, show_sender) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message);
-    message.measure_tag = measureTag(a, message, width, show_sender);
+fn measureMessageStore(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool, read_mark: i32) i32 {
+    const height = measureMessage(hdc, a, message, width, show_sender, read_mark) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message);
+    message.measure_tag = measureTag(a, message, width, show_sender, read_mark);
     message.measure_height = height;
     return height;
 }
@@ -18239,7 +18280,7 @@ fn voiceFooterLineHeight(hdc: win.HDC, a: *App) i32 {
     return @max(a.font_small_height, rect.bottom - rect.top);
 }
 
-fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, show_sender: bool) i32 {
+fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, show_sender: bool, read_mark: i32) i32 {
     const width = messageWidth(hdc, a, message, limit);
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
     const header_height = messageHeaderHeight(hdc, a, show_sender);
@@ -18267,11 +18308,13 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, sh
     parts.tail_pad = px(a, 10);
     parts.min_body = px(a, 20);
     parts.reaction_overhang = reactionChipSize(hdc, a, message, width).cy - px(a, 4);
+    parts.read_mark = read_mark;
     return message_layout.total(parts);
 }
 
 const SenderColor = design.SenderColor;
 const sender_palette = design.sender_palette;
+const read_mark_ink: u32 = design.provider_colors.telegram;
 
 fn senderColorFor(seed: []const u8) SenderColor {
     if (seed.len == 0) return sender_palette[0];
@@ -18819,16 +18862,16 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             }
         }
     }
+    const read_mark_index = readMarkIndex(a);
+    const read_mark_height = readMarkHeight(hdc, a, read_mark_index);
     var total_height: i32 = px(a, 90);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
-        if (channelMessageVisible(a, message)) total_height += measureMessageCached(hdc, a, message, bubble_width, startsSenderGroup(a, index)) + messageGap(a, index);
+        if (channelMessageVisible(a, message)) total_height += measureMessageCached(hdc, a, message, bubble_width, startsSenderGroup(a, index), messageReadMark(read_mark_index, read_mark_height, index)) + messageGap(a, index);
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     a.scroll_y = std.math.clamp(a.scroll_y, 0, a.max_scroll);
     a.quote_link_scroll = a.scroll_y;
     var cursor_y = client.bottom - px(a, 14) + a.scroll_y;
-    const receipt_message = read_receipt.newestOwn(a.message_count, a, ownReadable);
-    const receipt_capability = receiptCapability(a);
     var index = a.message_count;
     while (index > 0) {
         index -= 1;
@@ -18847,12 +18890,12 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         message.word_count = 0;
         if (!channelMessageVisible(a, message)) continue;
         const show_sender = startsSenderGroup(a, index);
-        const estimated_height = measureMessageCached(hdc, a, message, bubble_width, show_sender);
+        const estimated_height = measureMessageCached(hdc, a, message, bubble_width, show_sender, messageReadMark(read_mark_index, read_mark_height, index));
         var y = cursor_y - estimated_height;
         cursor_y = y - messageGap(a, index);
         if (y > client.bottom or y + estimated_height < client.top) continue;
         ensureBitmap(a, message);
-        var height = measureMessageStore(hdc, a, message, bubble_width, show_sender);
+        var height = measureMessageStore(hdc, a, message, bubble_width, show_sender, messageReadMark(read_mark_index, read_mark_height, index));
         y -= height - estimated_height;
         cursor_y -= height - estimated_height;
         if (y > client.bottom or y + height < client.top) continue;
@@ -18885,6 +18928,8 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             drawCompactQuote(hdc, &shapes, a, index, line.slice(), quote_start, message.quote_hit, client, message.from_me);
             y += reply_height;
         }
+        const read_mark_slot = messageReadMark(read_mark_index, read_mark_height, index);
+        height -= read_mark_slot;
         const sender_height = if (show_sender) senderBandHeight(hdc, a) + px(a, 8) else @as(i32, 0);
         const bubble_top = y + sender_height;
         const bubble_height = height - sender_height - @max(0, reaction_size.cy - px(a, 4));
@@ -19190,12 +19235,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 }
             }
         }
-        if (receipt_message == index and read_receipt.shows(receipt_capability, message.from_me, message.send_state == .none, message.revoked, message.read_by)) {
-            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-            _ = win.SetTextColor(hdc, design.ReaderHint);
-            var tick_rect = win.RECT{ .left = right - px(a, 20), .top = message.bubble_hit.bottom - px(a, 22), .right = right - px(a, 4), .bottom = message.bubble_hit.bottom - px(a, 4) };
-            _ = text_draw.drawText(hdc, lit("\u{2713}\u{2713}"), 2, &tick_rect, win.DT_RIGHT | win.DT_BOTTOM | win.DT_SINGLELINE | win.DT_NOPREFIX);
-        }
+        if (read_mark_slot != 0) drawReadMark(hdc, a, message.bubble_hit, reactionOverhang(a, reaction_size), read_mark_slot);
         if (message.reaction.len > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font.?));
             var my_reaction: [63]u16 = undefined;
