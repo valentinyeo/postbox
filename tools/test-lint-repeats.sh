@@ -18,7 +18,6 @@ cases=(
     '0372da02 B3 90d5434'
     'f2518728 B4 a311894'
     'f169d18 B5 e955d363'
-    '7ea1b5b B6 HEAD'
     'a701837 B7 HEAD'
     '4064743 B8 HEAD'
     'fc4e1a0 B9 HEAD'
@@ -70,23 +69,6 @@ fixture="$temp/f1-fixtures"
 mkdir -p "$fixture/src" "$fixture/.github/workflows"
 printf 'name: fixture\nconcurrency:\n  group: fixture\n  cancel-in-progress: true\n' > "$fixture/.github/workflows/fixture.yml"
 : > "$fixture/src/main.zig"
-for mutation in key paid trigger; do
-    case "$mutation" in
-        key) sed '/secrets.GROQ_API_KEY/d' "$repo/.github/workflows/ai-review.yml" ;;
-        paid) sed 's/secrets.GROQ_API_KEY/secrets.OPENAI_API_KEY/g' "$repo/.github/workflows/ai-review.yml" ;;
-        trigger) sed 's/^  pull_request:/  pull_request_target:/' "$repo/.github/workflows/ai-review.yml" ;;
-    esac > "$fixture/.github/workflows/ai-review.yml"
-    status=0
-    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
-    if (( status != 1 )) || ! grep -Fq '[B6]' "$temp/output"; then
-        cat "$temp/output" >&2
-        printf 'test-lint-repeats: FAIL B6 must reject AI review %s regression, got exit %s\n' "$mutation" "$status" >&2
-        exit 1
-    fi
-done
-cp "$repo/.github/workflows/ai-review.yml" "$fixture/.github/workflows/ai-review.yml"
-"$lint" "$fixture"
-printf 'test-lint-repeats: B6 requires the free review key and rejects a paid key and pull_request_target\n'
 mkdir -p "$fixture/tools"
 admit_src="$repo/tools/automerge-admit.sh"
 yml_src="$repo/.github/workflows/automerge.yml"

@@ -12,8 +12,8 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / 'tools/verify-wazig/verdict.py'
-SPEC = importlib.util.spec_from_file_location('verdict', SCRIPT)
+SCRIPT = ROOT / 'tools/verify-wazig/verifier.py'
+SPEC = importlib.util.spec_from_file_location('verifier', SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
@@ -162,6 +162,13 @@ class JudgeTests(unittest.TestCase):
         model = Model(reply('PASS'))
         self.run_judge(model, body='Author model: openai/gpt-6.1-sol\nAuthor model: anthropic/claude')
         self.assertEqual(model.models, ['moonshotai/kimi-k2-instruct-0905'])
+
+    def test_cursor_author_is_a_known_family(self):
+        for declared in ('cursor/composer-2.5', 'composer/composer-2.5'):
+            self.assertEqual(MODULE.family_of(declared), {'cursor'}, declared)
+        model = Model(reply('PASS'))
+        self.assertEqual(self.run_judge(model, body='Author model: cursor/composer-2.5')[:2], ('PASS', []))
+        self.assertEqual(model.models, ['openai/gpt-oss-120b'])
 
     def test_missing_unknown_or_exhausted_authors_fail_without_asking(self):
         bodies = ('', 'no line', '```\nAuthor model: anthropic/claude\n```', 'Author model: acme/mystery',

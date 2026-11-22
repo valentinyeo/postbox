@@ -43,6 +43,7 @@ run bash tools/test-check-pr-proof.sh
 run bash tools/check-no-source-text-tests.sh .
 run bash tools/check-no-empty-catch.sh .
 run bash tools/check-no-new-pixel-numbers.sh .
+run python3 tools/check-ladder-calls.py .
 run python3 -m unittest discover -s tools -p 'test_*.py'
 run python3 tools/check-planted.py
 run python3 tools/check_cache_keys.py
@@ -57,5 +58,6 @@ run bash tools/test-check-required-checks.sh
 run bash tools/test-check-no-source-text-tests.sh
 run bash tools/test-check-no-empty-catch.sh
 run bash tools/test-check-no-new-pixel-numbers.sh
+run bash tools/test-check-ladder-calls.sh
 run bash tools/test-people-index-speed.sh
 run bash tools/test-ci-green.sh
