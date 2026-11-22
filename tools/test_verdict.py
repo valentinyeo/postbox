@@ -86,6 +86,8 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(checkout['with']['ref'], '${{ github.event.repository.default_branch }}')
         self.assertEqual(job['permissions']['pull-requests'], 'write')
         judge = job['steps'][-1]
+        self.assertIn('if "base-fails" in needs else {"result": "success", "outputs": {"classified": "true"}}', judge['run'])
+        self.assertIn('runpy.run_path("tools/verify-wazig/verdict.py", run_name="__main__")', judge['run'])
         self.assertIn('secrets.GROQ_API_KEY', judge['env']['VERDICT_API_KEY'])
         self.assertIn('head.repo.full_name == github.repository', judge['env']['VERDICT_API_KEY'])
         for name, other in workflow['jobs'].items():

@@ -78,6 +78,7 @@ jobs:
 
       - name: Try to break the change
         if: ${{ !cancelled() && steps.key.outputs.available == 'true' }}
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           BREAK_IT_API_KEY: ${{ secrets.GROQ_API_KEY }}
