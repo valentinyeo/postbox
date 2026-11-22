@@ -27,7 +27,7 @@ test "paint status contract exposes all cumulative surface counters" {
     try std.testing.expectEqualStrings("{\"window\":9,\"window_full\":2,\"canvas\":8,\"canvas_full\":3,\"list\":7,\"list_full\":4}", out.written());
 }
 
-pub const Command = enum { theme, font, status, chats, search, view, select, messages, archive, unarchive, @"archive-many" };
+pub const Command = enum { theme, font, status, chats, search, view, select, messages, archive, unarchive, @"archive-many", @"hub-resume" };
 pub const Messenger = enum { whatsapp, slack, telegram, all, signal };
 
 pub const Request = struct {

@@ -274,6 +274,13 @@
       "why": ""
     },
     {
+      "feature": "hub-inbox-refresh",
+      "source": "main:hubSafetyRefresh",
+      "proof": "hub-wake-refresh",
+      "status": "covered",
+      "why": ""
+    },
+    {
       "feature": "command_replies_slack",
       "source": "buildPaletteItems:command_replies_slack",
       "proof": "reply",

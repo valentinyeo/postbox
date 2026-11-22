@@ -10,6 +10,25 @@ pub const avatar_cache_ttl_secs: i64 = 7 * 24 * 60 * 60;
 pub const avatar_failure_ttl_secs: i64 = 24 * 60 * 60;
 pub const delegate_warmup_secs: i64 = 20;
 pub const sync_refresh_gap_ms: u64 = 6 * 60 * 60 * 1000;
+pub const hub_wake_gap_ms: u64 = 60_000;
+pub const hub_inbox_safety_ms: u64 = 60_000;
+
+const hub_reconnect_backoff_ms = [_]u64{ 1000, 2000, 4000, 8000, 15_000, 30_000 };
+
+pub fn hubInboxFetchStale(last_success_ms: u64, now_ms: u64) bool {
+    if (last_success_ms == 0) return false;
+    return now_ms -| last_success_ms >= hub_wake_gap_ms;
+}
+
+pub fn hubSafetyPollDue(last_success_ms: u64, now_ms: u64) bool {
+    if (last_success_ms == 0) return false;
+    return now_ms -| last_success_ms >= hub_inbox_safety_ms;
+}
+
+pub fn hubReconnectWaitMs(failures_after_disconnect: u32) u64 {
+    const index = @min(failures_after_disconnect, hub_reconnect_backoff_ms.len - 1);
+    return hub_reconnect_backoff_ms[index];
+}
 
 pub fn gapElapsed(last_stop_ms: ?u64, now_ms: u64, gap_ms: u64) bool {
     const last = last_stop_ms orelse return true;
@@ -49,6 +68,24 @@ pub fn classifyAvatar(image_secs: ?i64, image_decodes: bool, none_secs: ?i64, fa
         return .{ .has_image = true, .needs_fetch = !fresh(image_secs, now_secs, avatar_cache_ttl_secs) };
     }
     return .{ .has_image = false, .needs_fetch = !fresh(none_secs, now_secs, avatar_cache_ttl_secs) };
+}
+
+test "hub inbox freshness waits a minute before wake refresh" {
+    try std.testing.expect(!hubInboxFetchStale(0, 100_000));
+    try std.testing.expect(!hubInboxFetchStale(100_000, 159_999));
+    try std.testing.expect(hubInboxFetchStale(100_000, 160_000));
+    try std.testing.expect(hubSafetyPollDue(100_000, 160_000));
+    try std.testing.expect(!hubSafetyPollDue(100_000, 120_000));
+}
+
+test "hub SSE reconnect backoff caps at thirty seconds" {
+    try std.testing.expectEqual(@as(u64, 1000), hubReconnectWaitMs(0));
+    try std.testing.expectEqual(@as(u64, 2000), hubReconnectWaitMs(1));
+    try std.testing.expectEqual(@as(u64, 4000), hubReconnectWaitMs(2));
+    try std.testing.expectEqual(@as(u64, 8000), hubReconnectWaitMs(3));
+    try std.testing.expectEqual(@as(u64, 15_000), hubReconnectWaitMs(4));
+    try std.testing.expectEqual(@as(u64, 30_000), hubReconnectWaitMs(5));
+    try std.testing.expectEqual(@as(u64, 30_000), hubReconnectWaitMs(99));
 }
 
 test "background pauses are spaced a minute apart" {
