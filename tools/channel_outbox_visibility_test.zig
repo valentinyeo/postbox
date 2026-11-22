@@ -17,6 +17,9 @@ fn localReplyHidden(_: *App, _: *const Message) bool {
 fn slackThreadsEnabled(a: *App) bool {
     return a.provider == .slack and a.threads_enabled;
 }
+fn localSlackStyle(a: *App) bool {
+    return slackThreadsEnabled(a);
+}
 
 test "local pending and failed replies stay in the channel" {
     var app = App{};
