@@ -549,6 +549,8 @@ jobs:
       - name: Queued-send voice download historical red control
         if: matrix.feature == 'voice' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
         shell: pwsh
+        env:
+          VOICE_DOWNLOAD_RED: '1'
         run: |
           $original = [IO.File]::ReadAllText('src/main.zig')
           try {

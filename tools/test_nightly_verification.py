@@ -74,6 +74,18 @@ class NightlyVerificationTests(unittest.TestCase):
                 self.assertTrue(patch.is_file())
                 self.assertTrue(patch.with_suffix('.txt').read_text().strip())
 
+    def test_voice_download_red_skips_transcript_copy(self):
+        step = next(step for step in self.workflow['jobs']['verify']['steps'] if step.get('name') == 'Queued-send voice download historical red control')
+        self.assertEqual(step['env']['VOICE_DOWNLOAD_RED'], '1')
+        self.assertIn('run.ps1 -Feature voice', step['run'])
+        journey = (ROOT / 'tools/verify-wazig/journey-voice.ps1').read_text()
+        red = journey.split('elseif ($env:VOICE_DOWNLOAD_RED)', 1)[1].split('} else {', 1)[0]
+        clean = journey.split('} else {', 1)[1]
+        self.assertNotIn('transcript-copy.ps1', red)
+        self.assertIn('Invoke-VoiceDownloadJourney', red)
+        self.assertIn('transcript-copy.ps1', clean)
+        self.assertIn('Invoke-VoiceDownloadJourney', clean)
+
     def test_schedule_retains_every_planted_journey(self):
         outputs = self.plan_step(self.planted, 'planted')
         patches = sorted(path.stem for path in (ROOT / 'tools/verify-wazig/planted').glob('*.patch'))
