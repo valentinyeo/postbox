@@ -30,11 +30,25 @@ def case_inputs(name, run, pr, evidence_dir, download=download_artifacts, gh=ver
     download(run, root)
     info = json.loads(gh('pr', 'view', str(pr), '--json', 'title,body', *repo_args()))
     pr_text = f"Title: {info.get('title') or ''}\n\n{info.get('body') or ''}"
-    return root, pr_text, gh('pr', 'diff', str(pr), *repo_args())
+    return root, pr_text, gh('pr', 'diff', str(pr), *repo_args()), run_needs(run, journeys_of(root), gh)
 
 
 def journeys_of(root):
     return [path.name[len(PREFIX):] for path in sorted(Path(root).glob(PREFIX + '*')) if path.is_dir()]
+
+
+def run_needs(run, journeys, gh=verifier.gh):
+    jobs = json.loads(gh('run', 'view', str(run), '--json', 'jobs', *repo_args())).get('jobs') or []
+    plan = next((job.get('conclusion') for job in jobs if job.get('name') == 'plan'), 'failure')
+    legs = [job.get('conclusion') for job in jobs if str(job.get('name') or '').startswith('verify (')]
+    if legs and all(result == 'success' for result in legs):
+        verify = 'success'
+    elif legs and any(result != 'skipped' for result in legs):
+        verify = 'failure'
+    else:
+        verify = 'failure' if journeys else 'skipped'
+    return {'plan': {'result': plan, 'outputs': {'needed': 'false' if verify == 'skipped' else 'true'}},
+            'verify': {'result': verify, 'outputs': {}}}
 
 
 def parse_families(raw):
@@ -71,17 +85,22 @@ def pick_family_judges(requested, listed):
     return plan
 
 
-def evaluate(family, judges, case, root, pr_text, diff, key, post, sleep, say):
+def evaluate(family, judges, case, root, pr_text, diff, needs, key, post, sleep, say):
     evidence = verifier.digest(root)
-    user = verifier.build_user(pr_text, journeys_of(root), evidence, diff)
-    model, reply, errors = verifier.ask(judges, verifier.build_system(), user, key, post, sleep, say)
-    if reply is None:
-        print(f'judge-eval: {case} {family} gave no verdict: ' + '; '.join(errors), file=sys.stderr)
-        return {'family': family, 'model': judges[0], 'case': case, 'verdict': 'FAIL', 'quote': '', 'notes': errors, 'ok': False}
-    quote = reply[2]
-    result, notes = verifier.combine('PASS', [], reply, evidence)
+    result, notes, quotes = verifier.journey_gate(needs, evidence)
+    quote = quotes[0] if quotes else ''
+    model = None
+    if result != 'FAIL':
+        user = verifier.build_user(pr_text, journeys_of(root), evidence, diff)
+        model, reply, errors = verifier.ask(judges, verifier.build_system(), user, key, post, sleep, say)
+        if reply is None:
+            print(f'judge-eval: {case} {family} gave no verdict: ' + '; '.join(errors), file=sys.stderr)
+            return {'family': family, 'model': judges[0], 'case': case, 'verdict': 'FAIL', 'quote': '', 'notes': errors, 'ok': False}
+        quote = reply[2]
+        result, notes = verifier.combine('PASS', [], reply, evidence)
     ok = result == EXPECTED[case] and (case != 'planted' or (bool(quote) and quote in evidence))
-    return {'family': family, 'model': model, 'case': case, 'verdict': result, 'quote': quote, 'notes': notes, 'ok': bool(ok)}
+    return {'family': family, 'model': model or 'none (the journey evidence decided)', 'case': case,
+            'verdict': result, 'quote': quote, 'notes': notes, 'ok': bool(ok)}
 
 
 def summary_table(records):
@@ -118,9 +137,9 @@ def run(args, post=verifier.http_post, download=download_artifacts, gh=verifier.
         say(f'judge-eval: {family} judges: ' + ', '.join(judges))
     records = []
     for case, run_id, pr in (('planted', args.planted_run, args.planted_pr), ('clean', args.clean_run, args.clean_pr)):
-        root, pr_text, diff = case_inputs(case, run_id, pr, args.evidence_dir, download, gh)
+        root, pr_text, diff, needs = case_inputs(case, run_id, pr, args.evidence_dir, download, gh)
         for family, judges in plan:
-            records.append(evaluate(family, judges, case, root, pr_text, diff, key, post, sleep, say))
+            records.append(evaluate(family, judges, case, root, pr_text, diff, needs, key, post, sleep, say))
     for record in records:
         print(json.dumps(record))
     summary = os.environ.get('GITHUB_STEP_SUMMARY')

@@ -56,7 +56,8 @@ class JudgeEvalTests(unittest.TestCase):
         folder = Path(target) / 'verify-wazig-search'
         folder.mkdir(parents=True, exist_ok=True)
         if str(run) == PLANTED_RUN:
-            (folder / 'failure.txt').write_text(FAILURE + '\n')
+            (folder / 'failure.txt').write_text(FAILURE + '; expected: settled typed search; observed: foreground=; elapsed: 20.06 seconds\n')
+            (folder / 'journey-check-failed.txt').write_text('search: settled typed search Verification through ^f\n')
             (folder / 'clean-result.txt').write_text('failure\n')
         else:
             (folder / 'result.txt').write_text('JOURNEY PASSED: search\n')
@@ -66,6 +67,10 @@ class JudgeEvalTests(unittest.TestCase):
     def gh(*args):
         if args[:2] == ('pr', 'view'):
             return json.dumps({'title': 'Search filter', 'body': 'Author model: anthropic/claude-opus'})
+        if args[:2] == ('run', 'view'):
+            legs = 'failure' if args[2] == PLANTED_RUN else 'success'
+            return json.dumps({'jobs': [{'name': 'plan', 'conclusion': 'success'},
+                                        {'name': 'verify (search, true)', 'conclusion': legs}]})
         return 'diff --git a/src/main.zig b/src/main.zig\n'
 
     def post(self, answers):
@@ -103,8 +108,7 @@ class JudgeEvalTests(unittest.TestCase):
         return code, records, seen, fetches, err.getvalue()
 
     def test_picks_two_live_families_from_verifier_and_evaluates_both_cases(self):
-        planted = reply('FAIL', ['Search never settled.'], FAILURE)
-        answers = {OPENAI: [planted, reply('PASS')], QWEN_A: [planted, reply('PASS')]}
+        answers = {OPENAI: [reply('PASS')], QWEN_A: [reply('PASS')]}
         code, records, seen, fetches, _ = self.run_eval(answers)
         self.assertEqual(code, 0)
         self.assertEqual(fetches, ['test-key'])
@@ -112,68 +116,100 @@ class JudgeEvalTests(unittest.TestCase):
         self.assertEqual([r['family'] for r in records], ['openai', 'qwen', 'openai', 'qwen'])
         self.assertEqual([r['verdict'] for r in records], ['FAIL', 'FAIL', 'PASS', 'PASS'])
         self.assertTrue(all(r['ok'] for r in records))
-        self.assertEqual(records[0]['quote'], FAILURE)
-        self.assertEqual([r['model'] for r in records[:2]], [OPENAI, QWEN_A])
-        self.assertEqual(seen, [OPENAI, QWEN_A, OPENAI, QWEN_A])
+        self.assertEqual(records[0]['quote'], 'failure.txt: ' + FAILURE + '; expected: settled typed search; observed: foreground=; elapsed: 20.06 seconds')
+        self.assertEqual({r['model'] for r in records[:2]}, {'none (the journey evidence decided)'})
+        self.assertEqual([r['model'] for r in records[2:]], [OPENAI, QWEN_A])
+        self.assertEqual(seen, [OPENAI, QWEN_A])
         self.assertIn('| planted | openai |', self.summary.read_text())
         self.assertIn('| clean | qwen |', self.summary.read_text())
 
-    def test_retired_model_404_moves_to_next_live_model_in_same_family(self):
-        planted = reply('FAIL', ['Search never settled.'], FAILURE)
-        answers = {
-            OPENAI: [planted, reply('PASS')],
-            QWEN_A: [http_error(404), reply('PASS')],
-            QWEN_B: [planted],
-        }
+    def test_planted_evidence_fails_even_when_every_judge_would_answer_pass(self):
+        answers = {OPENAI: [reply('PASS')], QWEN_A: [reply('PASS')]}
         code, records, seen, _, _ = self.run_eval(answers)
         self.assertEqual(code, 0)
-        self.assertEqual(records[1]['family'], 'qwen')
-        self.assertEqual(records[1]['model'], QWEN_B)
-        self.assertEqual(seen, [OPENAI, QWEN_A, QWEN_B, OPENAI, QWEN_A])
+        self.assertEqual({r['verdict'] for r in records[:2]}, {'FAIL'})
+        self.assertEqual(seen, [OPENAI, QWEN_A])
+        notes = ' '.join(records[0]['notes'])
+        self.assertIn(FAILURE, notes)
+        self.assertIn('verify: failure', notes)
+        self.assertIn('journey-check-failed.txt:', notes)
+
+    def test_the_replay_feeds_the_runs_job_results(self):
+        red = MODULE.run_needs(PLANTED_RUN, ['search'], self.gh)
+        self.assertEqual(red, {'plan': {'result': 'success', 'outputs': {'needed': 'true'}},
+                               'verify': {'result': 'failure', 'outputs': {}}})
+        clean = MODULE.run_needs(CLEAN_RUN, ['search'], self.gh)
+        self.assertEqual(clean['verify']['result'], 'success')
+
+    def test_a_skipped_journey_job_with_no_evidence_is_not_needed(self):
+        def gh(*args):
+            return json.dumps({'jobs': [{'name': 'plan', 'conclusion': 'success'},
+                                        {'name': 'verify (search, true)', 'conclusion': 'skipped'}]})
+        needs = MODULE.run_needs(PLANTED_RUN, [], gh)
+        self.assertEqual((needs['verify']['result'], needs['plan']['outputs']['needed']), ('skipped', 'false'))
+        needs = MODULE.run_needs(PLANTED_RUN, ['search'], gh)
+        self.assertEqual((needs['verify']['result'], needs['plan']['outputs']['needed']), ('failure', 'true'))
+
+    def test_retired_model_404_moves_to_next_live_model_in_same_family(self):
+        answers = {OPENAI: [reply('PASS')], QWEN_A: [http_error(404)], QWEN_B: [reply('PASS')]}
+        code, records, seen, _, _ = self.run_eval(answers)
+        self.assertEqual(code, 0)
+        self.assertEqual(records[3]['family'], 'qwen')
+        self.assertEqual(records[3]['model'], QWEN_B)
+        self.assertEqual(seen, [OPENAI, QWEN_A, QWEN_B])
 
     def test_live_list_failure_falls_back_to_verifier_preferences(self):
-        planted = reply('FAIL', ['Search never settled.'], FAILURE)
         first_openai = MODULE.verifier.JUDGE_PREFERENCE['openai'][0]
         first_kimi = MODULE.verifier.JUDGE_PREFERENCE['kimi'][0]
-        answers = {first_openai: [planted, reply('PASS')], first_kimi: [planted, reply('PASS')]}
+        answers = {first_openai: [reply('PASS')], first_kimi: [reply('PASS')]}
         code, records, seen, _, _ = self.run_eval(answers, fetch_error=MODULE.verifier.urllib.error.URLError('down'))
         self.assertEqual(code, 0)
         self.assertEqual([r['family'] for r in records[:2]], ['openai', 'kimi'])
-        self.assertEqual(seen, [first_openai, first_kimi, first_openai, first_kimi])
+        self.assertEqual(seen, [first_openai, first_kimi])
 
-    def test_a_planted_case_judged_pass_fails_the_eval(self):
-        answers = {OPENAI: [reply('PASS'), reply('PASS')], QWEN_A: [reply('PASS'), reply('PASS')]}
-        code, records, _, _, _ = self.run_eval(answers)
+    def test_a_planted_case_without_a_real_quote_fails_the_eval(self):
+        def download(run, target):
+            folder = Path(target) / 'verify-wazig-search'
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / 'clean-result.txt').write_text('failure\n')
+        post, seen = self.post({OPENAI: [reply('PASS')], QWEN_A: [reply('PASS')]})
+        argv = ['--planted-run', PLANTED_RUN, '--planted-pr', '546', '--clean-run', CLEAN_RUN,
+                '--clean-pr', '551', '--families', '', '--evidence-dir', str(self.evidence)]
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {'GITHUB_STEP_SUMMARY': str(self.summary), 'VERDICT_API_KEY': 'test-key'}), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = MODULE.main(argv, post=post, download=download, gh=self.gh,
+                               sleep=lambda seconds: None, fetch=lambda key: list(LIVE_LIST))
+        records = [json.loads(line) for line in out.getvalue().splitlines() if line.startswith('{')]
         self.assertEqual(code, 1)
         self.assertEqual([r['case'] for r in records if not r['ok']], ['planted', 'planted'])
-        self.assertEqual({r['verdict'] for r in records[:2]}, {'PASS'})
+        self.assertEqual({r['quote'] for r in records if not r['ok']}, {''})
 
     def test_a_fail_without_a_real_quote_fails_the_eval(self):
-        answers = {OPENAI: [reply('FAIL', ['Trust me.'], 'invented evidence line'), reply('PASS')],
-                   QWEN_A: [reply('PASS'), reply('PASS')]}
+        answers = {OPENAI: [reply('FAIL', ['Trust me.'], 'invented evidence line')],
+                   QWEN_A: [reply('PASS')]}
         code, records, _, _, _ = self.run_eval(answers)
         self.assertEqual(code, 1)
-        self.assertEqual(records[0]['verdict'], 'PASS+NOTES')
-        self.assertFalse(records[0]['ok'])
-        self.assertTrue(records[2]['ok'])
+        self.assertEqual((records[2]['case'], records[2]['verdict']), ('clean', 'PASS+NOTES'))
+        self.assertFalse(records[2]['ok'])
+        self.assertTrue(all(r['ok'] for r in records[:2]))
 
     def test_an_unreachable_family_fails_the_eval_instead_of_skipping(self):
-        answers = {OPENAI: [reply('FAIL', ['Search never settled.'], FAILURE), reply('PASS')],
-                   QWEN_A: [http_error(500), reply('PASS')],
-                   QWEN_B: [http_error(500)]}
+        answers = {OPENAI: [reply('PASS')], QWEN_A: [http_error(500)], QWEN_B: [http_error(500)]}
         code, records, _, _, _ = self.run_eval(answers)
         self.assertEqual(code, 1)
         self.assertEqual([r['family'] for r in records if not r['ok']], ['qwen'])
         self.assertEqual({r['verdict'] for r in records if not r['ok']}, {'FAIL'})
         self.assertEqual({r['quote'] for r in records if not r['ok']}, {''})
+        self.assertTrue(all(r['ok'] for r in records[:2]))
 
     def test_a_clean_change_judged_fail_with_a_real_quote_fails_the_eval(self):
-        answers = {OPENAI: [reply('FAIL', ['Search never settled.'], FAILURE),
-                            reply('FAIL', ['Gap.'], 'clean-result.txt: success')],
-                   QWEN_A: [reply('FAIL', ['Search never settled.'], FAILURE), reply('PASS')]}
+        answers = {OPENAI: [reply('FAIL', ['Gap.'], 'clean-result.txt: success')],
+                   QWEN_A: [reply('PASS')]}
         code, records, _, _, _ = self.run_eval(answers)
         self.assertEqual(code, 1)
         self.assertEqual((records[2]['verdict'], records[2]['ok']), ('FAIL', False))
+        self.assertTrue(all(r['ok'] for r in records[:2]))
 
     def test_unknown_missing_or_single_family_fails_before_any_model_call(self):
         code, _, seen, fetches, _ = self.run_eval({}, families='openai,acme')
