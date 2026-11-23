@@ -1,0 +1,1 @@
+A window close leaves no last-exit.txt and no clean-exit line, so the next start cannot say who closed the app.
