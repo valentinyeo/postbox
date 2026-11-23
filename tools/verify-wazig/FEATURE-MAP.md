@@ -88,6 +88,7 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `voice-transcription-cache` | `AGENTS:transcription` | GAP | GAP: No journey asserts this complete behavior end to end. |
 | `dictation` | `AGENTS:dictation` | GAP | GAP: No journey asserts this complete behavior end to end. |
 | `dictation-shortcuts` | `src:dictation-shortcuts` | dictation-shortcuts | covered |
+| `dictation-live` | `src:dictation-live` | dictation-live | covered |
 | `gif-picker` | `src:gif-picker` | gif-picker | covered |
 | `link-cards` | `src:link-previews` | link-previews | covered |
 | `drafts` | `src:drafts` | drafts | covered |
@@ -135,3 +136,21 @@ The evidence validator compares the logged `seeded_*` counts with the seed's own
 Postbox currently retains at most 1,000 loaded messages per chat. This journey pages from the latest 80 messages to that limit and checks the oldest retained message is painted. It does not claim to reach the first of all 1,600 seeded messages. Voice and image downloads reuse the valid Ogg fixture and generated PNG; no audio device is needed because this journey opens voice notes without playing them.
 
 The planted patch drops the older-history cursor from message requests. The busy-top step must fail while the seed remains unchanged. Patch application can be checked locally; clean and planted app execution require Windows CI.
+
+## Journey: dictation-live
+
+### Sub-features
+
+Words appear in the composer before Stop, interim revisions replace the same span, and repeated final results insert once. Text before and after the cursor stays intact. Automatic sends English/German hints and accepts only English/German language tags; fixed English and German use their own request language.
+
+### How to get to it (user POV)
+
+Run `gh workflow run verify.yml -f feature=dictation-live -f repeat=3`. Choose a dictation language in Ctrl+K, focus the composer, place the cursor inside existing text, and press Ctrl+D. Press Ctrl+D again to stop.
+
+### Driving it with PowerShell UI Automation
+
+`journey-dictation-live.ps1` types `Before after` and places the cursor between the words using real keys. The loopback Deepgram WebSocket receives PCM through the production WinHTTP transport. It sends a fragmented interim response, waits for the journey to observe that text while recording, then sends a revised interim. Only CloseStream releases the final response, replayed twice. UI Automation and bounded native text reads require the exact composer content and recording/idle phase at each step for all three languages. Evidence includes screenshots, owned-process snapshots, request parameters, and ordered service events.
+
+### Gotchas
+
+The isolated Actions fixture replaces only microphone input and the network destination. It does not prove real microphone conversion, Deepgram recognition quality, or service availability. Auto uses multilingual hints because streaming has no hard language whitelist. Non-English/German results, including missing language metadata, fail closed. This journey must run on a GitHub-hosted Windows runner; it is not a local desktop test.

@@ -16,7 +16,8 @@
       "reply"
     ],
     "src/dictation": [
-      "dictation-shortcuts"
+      "dictation-shortcuts",
+      "dictation-live"
     ],
     "src/paste_image": [
       "paste-image"
@@ -374,7 +375,8 @@
       "palette-archived"
     ],
     "tools/verify-wazig/prepare-dictation.ps1": [
-      "dictation-shortcuts"
+      "dictation-shortcuts",
+      "dictation-live"
     ],
     "tools/verify-wazig/prepare-drafts.ps1": [
       "drafts"
@@ -438,6 +440,16 @@
     ],
     "tools/verify-wazig/evidence-real-size.py": [
       "real-size"
+    ],
+    "tools/verify-wazig/journey-dictation-live.ps1": [
+      "dictation-live"
+    ],
+    "tools/verify-wazig/check-dictation-live-evidence.py": [
+      "dictation-live"
+    ],
+    "tools/verify-wazig/dictation-fixture.py": [
+      "dictation-shortcuts",
+      "dictation-live"
     ],
     "src/exit_record": [
       "exit-record"
