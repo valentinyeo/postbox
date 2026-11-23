@@ -82,7 +82,7 @@
       "source": "buildPaletteItems:command_dictation_auto",
       "proof": "dictation-shortcuts",
       "status": "covered",
-      "why": ""
+      "why": "The journey verifies the saved Auto selection. src/dictation_policy.zig unit tests verify English/German-only requests and fallback; no live speech service is used."
     },
     {
       "feature": "command_dictation_english",

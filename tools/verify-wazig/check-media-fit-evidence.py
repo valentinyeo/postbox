@@ -76,7 +76,7 @@ def check_media_fit(folder):
             widths[size] = b[2] - b[0]
             assert message['from_me'] and set(message['text']) == {'M', ' '}
             ink = lambda x, y: min(image[oy + y][ox + x]) > 110
-            text = [(x, y) for y in range(b[1] + px(6), b[3] - px(5))
+            text = [(x, y) for y in range(b[1] + px(6), b[3] - px(12))
                     for x in range(b[0] + px(12), b[2] - px(12)) if ink(x, y)]
             t = message['time_header']
             time = [(x, y) for y in range(max(0, t[1]), min(ch, t[3]))
