@@ -125,7 +125,7 @@ def pick_judges(families, listed=None):
             if family in families:
                 skipped.append(f'{family} family: named by an `Author model:` line')
                 continue
-            judges.append(preferred[0])
+            judges.extend(model for model in preferred if model not in judges)
         if not judges:
             raise ValueError('Every judge family also wrote this PR: ' + ', '.join(sorted(families)) + '.')
         return judges, skipped
