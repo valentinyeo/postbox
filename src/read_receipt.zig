@@ -24,13 +24,27 @@ pub fn newestOwn(count: usize, context: anytype, comptime own: fn (@TypeOf(conte
     return null;
 }
 
+pub fn newestOwnRead(count: usize, context: anytype, comptime own: fn (@TypeOf(context), usize) bool, comptime read: fn (@TypeOf(context), usize) bool) ?usize {
+    var index = count;
+    while (index > 0) {
+        index -= 1;
+        if (own(context, index) and read(context, index)) return index;
+    }
+    return null;
+}
+
 const Rows = struct {
     from_me: []const bool,
     sent: []const bool,
+    read_by: []const i64,
 };
 
 fn rowOwn(rows: Rows, index: usize) bool {
     return rows.from_me[index] and rows.sent[index];
+}
+
+fn rowRead(rows: Rows, index: usize) bool {
+    return rows.read_by[index] >= 1;
 }
 
 test "IGSH-1307 only a read one-to-one WhatsApp chat shows ticks" {
@@ -65,9 +79,30 @@ test "IGSH-1307 a read mark never goes back to unread" {
 test "IGSH-1307 only the newest own message is picked" {
     const from_me = [_]bool{ true, false, true, false };
     const sent = [_]bool{ true, true, true, true };
-    const rows = Rows{ .from_me = &from_me, .sent = &sent };
+    const read_by = [_]i64{ 1, 0, 1, 0 };
+    const rows = Rows{ .from_me = &from_me, .sent = &sent, .read_by = &read_by };
     try std.testing.expectEqual(@as(?usize, 2), newestOwn(4, rows, rowOwn));
     const none = [_]bool{ false, false };
-    try std.testing.expectEqual(@as(?usize, null), newestOwn(2, Rows{ .from_me = &none, .sent = &sent }, rowOwn));
+    try std.testing.expectEqual(@as(?usize, null), newestOwn(2, Rows{ .from_me = &none, .sent = &sent, .read_by = &read_by }, rowOwn));
     try std.testing.expectEqual(@as(?usize, null), newestOwn(0, rows, rowOwn));
+}
+
+test "SOFT-2913 the mark stays on the newest own message the other person read" {
+    const from_me = [_]bool{ true, false, true, false, true };
+    const sent = [_]bool{ true, true, true, true, true };
+    const read_by = [_]i64{ 1, 0, 0, 0, 0 };
+    const rows = Rows{ .from_me = &from_me, .sent = &sent, .read_by = &read_by };
+    try std.testing.expectEqual(@as(?usize, 4), newestOwn(5, rows, rowOwn));
+    try std.testing.expect(shows(.whatsapp_dm, rows.from_me[4], rows.sent[4], false, rows.read_by[4]) == false);
+    try std.testing.expectEqual(@as(?usize, 0), newestOwnRead(5, rows, rowOwn, rowRead));
+    const picked = newestOwnRead(5, rows, rowOwn, rowRead).?;
+    try std.testing.expect(shows(.whatsapp_dm, rows.from_me[picked], rows.sent[picked], false, rows.read_by[picked]));
+}
+
+test "SOFT-2913 an unread chat with no read own message has no mark" {
+    const from_me = [_]bool{ true, false, true };
+    const sent = [_]bool{ true, true, true };
+    const read_by = [_]i64{ 0, 0, 0 };
+    const rows = Rows{ .from_me = &from_me, .sent = &sent, .read_by = &read_by };
+    try std.testing.expectEqual(@as(?usize, null), newestOwnRead(3, rows, rowOwn, rowRead));
 }

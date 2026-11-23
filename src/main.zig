@@ -18075,8 +18075,12 @@ fn ownReadable(a: *App, index: usize) bool {
     return message.from_me and message.send_state == .none and !message.revoked and channelMessageVisible(a, message);
 }
 
+fn ownReadBy(a: *App, index: usize) bool {
+    return a.messages[index].read_by >= 1;
+}
+
 fn readMarkIndex(a: *App) ?usize {
-    const newest = read_receipt.newestOwn(a.message_count, a, ownReadable) orelse return null;
+    const newest = read_receipt.newestOwnRead(a.message_count, a, ownReadable, ownReadBy) orelse return null;
     const message = &a.messages[newest];
     return if (read_receipt.shows(receiptCapability(a), message.from_me, message.send_state == .none, message.revoked, message.read_by)) newest else null;
 }
@@ -25202,7 +25206,7 @@ fn refreshSlackThreadPanel(a: *App) void {
 }
 
 fn controlReadTick(a: *App, w: *std.Io.Writer) !void {
-    const newest = read_receipt.newestOwn(a.message_count, a, ownReadable) orelse {
+    const newest = read_receipt.newestOwnRead(a.message_count, a, ownReadable, ownReadBy) orelse {
         try w.writeAll(",\"read_tick\":{\"shown\":false,\"message\":\"\"}");
         return;
     };
