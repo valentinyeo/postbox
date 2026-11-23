@@ -41,6 +41,8 @@ class State:
         self.beta_history_requests = 0
         self.stamp = datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
         self.image = png()
+        self.sse_live_enabled = True
+        self.poll_row = None
 
     def record(self, row):
         with self.lock:
@@ -103,8 +105,9 @@ class Handler(BaseHTTPRequestHandler):
             archived = query.get('archived', ['false'])[0] == 'true'
             rows = []
             if archived == state.archived[ALPHA]:
+                alpha_stamp = state.poll_row['stamp'] if state.poll_row else state.stamp
                 rows.append(dict(jid=f'{ACCOUNT}:{ALPHA}', name='Verification Alpha', kind='direct',
-                                 last_message_ts=state.stamp, unread_count=0 if state.read else 2,
+                                 last_message_ts=alpha_stamp, unread_count=0 if state.read else 2,
                                  archived=state.archived[ALPHA]))
             if archived == state.archived[BETA]:
                 rows.append(dict(jid=f'{ACCOUNT}:{BETA}', name='Verification Beta', kind='direct',
@@ -127,7 +130,9 @@ class Handler(BaseHTTPRequestHandler):
             if chat == ALPHA:
                 rows.insert(0, state.message(chat, 'IMAGE', '', MediaType='image', MimeType='image/png',
                                              Filename='fixture.png', LocalPath='server-only-path'))
-                if state.live:
+                if state.poll_row:
+                    rows.insert(0, state.poll_row['message'])
+                if state.live and state.sse_live_enabled:
                     rows.insert(0, state.message(chat, 'LIVE', 'Fixture live event'))
                 for client_id, reply in state.sends.items():
                     if state.send_attempts[client_id] > 1:
@@ -166,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         while True:
             with self.state.lock:
-                if self.state.live and last < 2:
+                if self.state.live and self.state.sse_live_enabled and last < 2:
                     self.event(2, 'msg', f'{ACCOUNT}:{ALPHA}')
                     self.close_connection = True
                     return
@@ -211,6 +216,17 @@ class Handler(BaseHTTPRequestHandler):
                 state.live = True
                 state.lock.notify_all()
             self.respond(200, {'ok': True})
+        elif self.path == '/fixture/mute-sse':
+            with state.lock:
+                state.sse_live_enabled = False
+            self.respond(200, {'ok': True})
+        elif self.path == '/fixture/stale-row':
+            stamp = datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
+            with state.lock:
+                state.poll_row = dict(
+                    stamp=stamp,
+                    message=dict(state.message(ALPHA, 'POLL-ROW', 'Fixture safety poll row'), Timestamp=stamp))
+            self.respond(200, {'ok': True, 'stamp': stamp})
         elif self.path == '/v1/send':
             client_id = body.get('client_id', '')
             if not client_id or body.get('account') != ACCOUNT or body.get('chat') != ALPHA:

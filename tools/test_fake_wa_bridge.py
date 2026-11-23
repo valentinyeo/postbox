@@ -50,6 +50,19 @@ class FakeWaBridgeArchiveTests(unittest.TestCase):
         self.assertEqual(response.status, 200, data)
         return data
 
+    def test_stale_row_is_available_over_http_with_its_injected_timestamp(self):
+        if self.account is None:
+            self.skipTest('Wake refresh uses the legacy bridge fixture')
+        self.connection.request('POST', '/fixture/stale-row', body='{}', headers=self.headers)
+        response = self.connection.getresponse()
+        created = json.loads(response.read())
+        self.connection.close()
+        self.assertEqual(response.status, 200, created)
+        messages = self.request('GET', '/messages?chat=' + quote(self.jids[0]))
+        row = next(row for row in messages if row['MsgID'] == f'{self.account}:POLL-ROW')
+        self.assertEqual(row['Timestamp'], created['stamp'])
+        self.assertEqual(row['Text'], 'Fixture safety poll row')
+
     def archive(self, chat, archived):
         body = dict(chat=chat, archived=archived)
         if self.account is not None:
