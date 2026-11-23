@@ -250,7 +250,7 @@ test "all request paths preserve language and model settings and end with wazig 
         try std.testing.expect(std.mem.endsWith(u8, path(language), "&tag=wazig"));
         try std.testing.expect(std.mem.indexOf(u8, path(language), "language=multi") == null);
     }
-    try std.testing.expectEqualStrings("/v1/listen?model=nova-3&smart_format=true&detect_language=true&tag=wazig", path(.automatic));
+    try std.testing.expectEqualStrings("/v1/listen?model=nova-3&smart_format=true&detect_language=en&detect_language=de&tag=wazig", path(.automatic));
     try std.testing.expectEqualStrings("/v1/listen?model=nova-3&smart_format=true&language=en&tag=wazig", path(.english));
     try std.testing.expectEqualStrings("/v1/listen?model=nova-3&smart_format=true&language=de&tag=wazig", path(.german));
 }
