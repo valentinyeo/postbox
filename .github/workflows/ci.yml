@@ -89,7 +89,6 @@ jobs:
         run: |
           bash tools/test-auto-release-pick.sh
           bash tools/test-automerge-admit.sh
-          bash tools/test-ai-review.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

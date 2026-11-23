@@ -1,0 +1,596 @@
+preflight-light: bash tools/test-preflight-guard.sh --check-light
+preflight-light: bash tools/lint-repeats.sh .
+lint-repeats: PASS
+preflight-light: bash tools/check-required-checks.sh .
+preflight-light: bash tools/test-check-required-checks.sh
+check-required-checks: unknown job name notify-release; edit tools/required-checks.txt or the workflow job name
+test-check-required-checks: PASS
+preflight-light: bash tools/check-feature-map.sh .
+check-feature-map: 107 features, 21 gaps (limit 21)
+preflight-light: bash tools/test-check-feature-map.sh
+check-feature-map: 107 features, 21 gaps (limit 21)
+test-check-feature-map: PASS
+preflight-light: bash tools/test-check-pr-proof.sh
+test-check-pr-proof: PASS
+preflight-light: bash tools/test-map-upkeep.sh
+ok clean-no-issue
+ok clean-closes-open-issue
+ok red-nightly-opens-one-issue
+ok red-nightly-updates-existing-issue
+ok planted-nightly-is-read
+ok red-planted-nightly-opens-one-issue
+preflight-light: bash tools/check-no-source-text-tests.sh .
+check-no-source-text-tests: build_zig_slices 110 (limit 110)
+check-no-source-text-tests: python_zig_readers 31 (limit 31)
+preflight-light: bash tools/check-no-empty-catch.sh .
+check-no-empty-catch: src/audio.zig 1 (limit 1)
+check-no-empty-catch: src/control_pipe.zig 1 (limit 1)
+check-no-empty-catch: src/main.zig 11 (limit 11)
+check-no-empty-catch: src/slack_emoji.zig 1 (limit 1)
+check-no-empty-catch: total 14 (limit 14)
+preflight-light: bash tools/check-no-new-pixel-numbers.sh .
+check-no-new-pixel-numbers: 859 numeric literals in drawing functions (limit 859)
+preflight-light: bash tools/test-check-no-source-text-tests.sh
+check-no-source-text-tests: build_zig_slices 110 (limit 110)
+check-no-source-text-tests: python_zig_readers 31 (limit 31)
+check-no-source-text-tests: build_zig_slices 110 (limit 110)
+check-no-source-text-tests: python_zig_readers 31 (limit 31)
+test-check-no-source-text-tests: PASS
+preflight-light: bash tools/test-check-no-empty-catch.sh
+check-no-empty-catch: src/audio.zig 1 (limit 1)
+check-no-empty-catch: src/control_pipe.zig 1 (limit 1)
+check-no-empty-catch: src/main.zig 11 (limit 11)
+check-no-empty-catch: src/slack_emoji.zig 1 (limit 1)
+check-no-empty-catch: total 14 (limit 14)
+check-no-empty-catch: src/audio.zig 1 (limit 1)
+check-no-empty-catch: src/control_pipe.zig 1 (limit 1)
+check-no-empty-catch: src/main.zig 11 (limit 11)
+check-no-empty-catch: src/slack_emoji.zig 1 (limit 1)
+check-no-empty-catch: total 14 (limit 14)
+test-check-no-empty-catch: PASS
+preflight-light: bash tools/test-check-no-new-pixel-numbers.sh
+check-no-new-pixel-numbers: 859 numeric literals in drawing functions (limit 859)
+check-no-new-pixel-numbers: 859 numeric literals in drawing functions (limit 859)
+test-check-no-new-pixel-numbers: PASS
+preflight-light: node tools/strip-comments.mjs --check
+No code comments found.
+preflight-light: node tools/check-fonts.mjs
+IBMPlexMono-Regular.ttf: Version 2.005, head.fontRevision=131399/65536, weight=400
+IBMPlexSans-Bold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=700
+IBMPlexSans-Italic.ttf: Version 3.005, head.fontRevision=196935/65536, weight=400
+IBMPlexSans-Medium.ttf: Version 3.005, head.fontRevision=196935/65536, weight=500
+IBMPlexSans-Regular.ttf: Version 3.005, head.fontRevision=196935/65536, weight=400
+IBMPlexSans-SemiBold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=600
+WAZI-161 font delivery check passed
+preflight-light: python3 tools/check-planted.py
+planted patch coverage passed
+preflight-light: python3 tools/check_cache_keys.py
+preflight-light: python3 tools/verify-wazig/check-map.py
+SLACK SORT MAP VERIFIED: dispatch, recipe, synthetic hub and passed/failed evidence
+MAP VERIFIED: 60 complete feature entries, workflow/index parity, 87 coverage dispositions, source labels, stable controls, bounded chat-switch journey and GitHub triggers
+WORKSPACE ICON MAP VERIFIED: dispatch, synthetic team icons, screenshot pixels and surviving cache evidence
+SIGNAL MARK MAP VERIFIED: shared provider renderer and workspace-icons screenshot evidence
+TELEGRAM MAP VERIFIED: prelinked hub, messaging journey, CI wiring and indexed evidence
+NOTRAP MAP VERIFIED: saved empty startup, every-view Escape and Alt matrix, dispatch and indexed evidence
+REACTIONS MAP VERIFIED: real mouse journey, exact hub emoji evidence and PR matrix
+SLACK THREADS MAP VERIFIED: synthetic hub, keyboard journey, read-only measurements and restart
+SLACK THREAD BROADCAST MAP VERIFIED: synthetic hub, keyboard journey, hub flag and reset
+HUB ARCHIVE MAP VERIFIED: provider archive, phone unarchive, incoming, kept, acknowledged migration and restart
+PALETTE ARCHIVED MAP VERIFIED: synthetic hub, every-view palette queries, Enter without unarchive, evidence and PR wiring
+WINDOW MAP VERIFIED: unforced startup, real keyboard restore/close, same-profile relaunch and zoomed evidence
+VOICE MAP VERIFIED: voice notes, cached transcripts, scroll, expand and partial-repaint pixel checks
+REPAINT MAP VERIFIED: cumulative counters, no-input incoming workload and PR journey
+SLACK ARCHIVE MAP VERIFIED: ordinary archive, one newer delivery returns to inbox, rearchive, restart, unarchive and no archive endpoint requests
+PASTE IMAGE MAP VERIFIED: native clipboard, decoded uploads, four providers, isolated folders, focused file-name picker, popup diagnostics and remove-first evidence
+LINK PREVIEWS MAP VERIFIED: dispatch, PR matrix, hub mode and surviving evidence
+COMPOSER BORDER MAP VERIFIED: four screenshot edges, exact saved text scales, negative oracle and PR wiring
+CARET MAP VERIFIED: system caret reading, timed composer frames, graphite reapply and PR wiring
+PASSAGE COPY MAP VERIFIED: id-based targets and evidence, chronological clipboard, newest-first wire rows, real drag and held-edge scrolling on both providers
+JOURNEY REGISTRY VERIFIED: 60 journeys, maps, scripts, hub switches, evidence and plan matrix
+MEDIA FIT MAP VERIFIED: hub downloads, wide/narrow geometry and screenshot pixels, timestamp clearance and PR wiring
+verification skill map passed: sidebar screenshot pairs, historical baseline builds, pixel validator and approved graphite
+preflight-light: python3 tools/formal/check_formal.py
+PASS covered code matches the recorded hashes
+preflight-light: private-marker scan skipped (PRIVATE_MARKERS unavailable); CI enforces it.
+preflight-light: node --test tools/check-fonts.test.mjs tools/strip-comments.test.js
+TAP version 13
+# IBMPlexMono-Regular.ttf: Version 2.005, head.fontRevision=131399/65536, weight=400
+# IBMPlexSans-Bold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=700
+# IBMPlexSans-Italic.ttf: Version 3.005, head.fontRevision=196935/65536, weight=400
+# IBMPlexSans-Medium.ttf: Version 3.005, head.fontRevision=196935/65536, weight=500
+# IBMPlexSans-Regular.ttf: Version 3.005, head.fontRevision=196935/65536, weight=400
+# IBMPlexSans-SemiBold.ttf: Version 3.005, head.fontRevision=196935/65536, weight=600
+# WAZI-161 font delivery check passed
+# Subtest: WAZI-161 real bundled fonts and all delivery paths pass
+ok 1 - WAZI-161 real bundled fonts and all delivery paths pass
+  ---
+  duration_ms: 32.990668
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect build install
+ok 2 - WAZI-161 rejects missing or incorrect build install
+  ---
+  duration_ms: 13.134201
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect MSI
+ok 3 - WAZI-161 rejects missing or incorrect MSI
+  ---
+  duration_ms: 4.121774
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect MSI reference
+ok 4 - WAZI-161 rejects missing or incorrect MSI reference
+  ---
+  duration_ms: 3.106864
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect x64 release zip
+ok 5 - WAZI-161 rejects missing or incorrect x64 release zip
+  ---
+  duration_ms: 3.696191
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect ARM64 release zip
+ok 6 - WAZI-161 rejects missing or incorrect ARM64 release zip
+  ---
+  duration_ms: 3.263334
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect install smoke
+ok 7 - WAZI-161 rejects missing or incorrect install smoke
+  ---
+  duration_ms: 3.82459
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect private load list
+ok 8 - WAZI-161 rejects missing or incorrect private load list
+  ---
+  duration_ms: 5.390675
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect smoke private load
+ok 9 - WAZI-161 rejects missing or incorrect smoke private load
+  ---
+  duration_ms: 9.67968
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect startup private load
+ok 10 - WAZI-161 rejects missing or incorrect startup private load
+  ---
+  duration_ms: 10.926982
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect body weight
+ok 11 - WAZI-161 rejects missing or incorrect body weight
+  ---
+  duration_ms: 6.430101
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects missing or incorrect body font size
+ok 12 - WAZI-161 rejects missing or incorrect body font size
+  ---
+  duration_ms: 9.187214
+  type: 'test'
+  ...
+# Subtest: WAZI-161 rejects a missing Medium asset
+ok 13 - WAZI-161 rejects a missing Medium asset
+  ---
+  duration_ms: 6.716624
+  type: 'test'
+  ...
+# Subtest: IGSH-466 OLE initialization preserves both private font-loader boundaries
+ok 14 - IGSH-466 OLE initialization preserves both private font-loader boundaries
+  ---
+  duration_ms: 12.67189
+  type: 'test'
+  ...
+# Subtest: IGSH-1122 rejects the real pre-kit font manifest at 570ac52
+ok 15 - IGSH-1122 rejects the real pre-kit font manifest at 570ac52
+  ---
+  duration_ms: 11.183099
+  type: 'test'
+  ...
+# Subtest: Zig: doc comments, URLs, characters and multiline literal lines
+ok 16 - Zig: doc comments, URLs, characters and multiline literal lines
+  ---
+  duration_ms: 9.1636
+  type: 'test'
+  ...
+# Subtest: JavaScript/TypeScript: regex lexical goals and nested templates
+ok 17 - JavaScript/TypeScript: regex lexical goals and nested templates
+  ---
+  duration_ms: 10.323459
+  type: 'test'
+  ...
+# Subtest: Python: tokenizer/AST distinguish f-strings, docstrings and live strings
+ok 18 - Python: tokenizer/AST distinguish f-strings, docstrings and live strings
+  ---
+  duration_ms: 501.551076
+  type: 'test'
+  ...
+# Subtest: Kotlin/Java/Gradle: nested Kotlin comments, characters and raw strings
+ok 19 - Kotlin/Java/Gradle: nested Kotlin comments, characters and raw strings
+  ---
+  duration_ms: 2.711207
+  type: 'test'
+  ...
+# Subtest: PowerShell: here-strings, quote doubling, escapes and directives
+ok 20 - PowerShell: here-strings, quote doubling, escapes and directives
+  ---
+  duration_ms: 1.140273
+  type: 'test'
+  ...
+# Subtest: Shell: shebangs, directives, word hashes, quoted substitutions and heredocs
+ok 21 - Shell: shebangs, directives, word hashes, quoted substitutions and heredocs
+  ---
+  duration_ms: 12.621186
+  type: 'test'
+  ...
+# Subtest: C/C++ headers: raw literals, escaped characters and token separators
+ok 22 - C/C++ headers: raw literals, escaped characters and token separators
+  ---
+  duration_ms: 1.069721
+  type: 'test'
+  ...
+# Subtest: C\#: normal, verbatim, raw and character literals preserve comment markers
+ok 23 - C\#: normal, verbatim, raw and character literals preserve comment markers
+  ---
+  duration_ms: 12.673926
+  type: 'test'
+  ...
+# Subtest: C\#: interpolated literals preserve text and lex nested expressions and format strings
+ok 24 - C\#: interpolated literals preserve text and lex nested expressions and format strings
+  ---
+  duration_ms: 12.278768
+  type: 'test'
+  ...
+# Subtest: CSS: only block comments, not string contents or URL fragments
+ok 25 - CSS: only block comments, not string contents or URL fragments
+  ---
+  duration_ms: 1.392612
+  type: 'test'
+  ...
+# Subtest: HTML: quoted attributes, script regex/template strings and style blocks
+ok 26 - HTML: quoted attributes, script regex/template strings and style blocks
+  ---
+  duration_ms: 2.209925
+  type: 'test'
+  ...
+# Subtest: YAML: comments, quoted scalars, escapes, URLs, fragments and expressions
+ok 27 - YAML: comments, quoted scalars, escapes, URLs, fragments and expressions
+  ---
+  duration_ms: 3.797389
+  type: 'test'
+  ...
+# Subtest: YAML: block scalars keep literal quotes, hashes and trailing shell text
+ok 28 - YAML: block scalars keep literal quotes, hashes and trailing shell text
+  ---
+  duration_ms: 12.721964
+  type: 'test'
+  ...
+# Subtest: TOML: basic, literal and multiline strings protect hashes and escapes
+ok 29 - TOML: basic, literal and multiline strings protect hashes and escapes
+  ---
+  duration_ms: 1.174777
+  type: 'test'
+  ...
+# Subtest: SQL: line and block comments, doubled quotes and quoted identifiers
+ok 30 - SQL: line and block comments, doubled quotes and quoted identifiers
+  ---
+  duration_ms: 3.092487
+  type: 'test'
+  ...
+# Subtest: Batch: REM and labels are comments only at the start of a command line
+ok 31 - Batch: REM and labels are comments only at the start of a command line
+  ---
+  duration_ms: 1.505403
+  type: 'test'
+  ...
+# Subtest: secret scanner directives remain protected in new languages and existing ones
+ok 32 - secret scanner directives remain protected in new languages and existing ones
+  ---
+  duration_ms: 2.965922
+  type: 'test'
+  ...
+# Subtest: license headers and directives retained in full, never join code lines
+ok 33 - license headers and directives retained in full, never join code lines
+  ---
+  duration_ms: 0.846375
+  type: 'test'
+  ...
+# Subtest: protected directories/data and generated sources are excluded
+ok 34 - protected directories/data and generated sources are excluded
+  ---
+  duration_ms: 1.760617
+  type: 'test'
+  ...
+# Subtest: CLI --verify rejects token changes and protected modifications
+ok 35 - CLI --verify rejects token changes and protected modifications
+  ---
+  duration_ms: 1172.189636
+  type: 'test'
+  ...
+# Subtest: CLI --check fails on a new code comment and names where it is
+ok 36 - CLI --check fails on a new code comment and names where it is
+  ---
+  duration_ms: 252.160987
+  type: 'test'
+  ...
+# Subtest: CLI --check scans new untracked files and skips ignored ones
+ok 37 - CLI --check scans new untracked files and skips ignored ones
+  ---
+  duration_ms: 373.850631
+  type: 'test'
+  ...
+# Subtest: CLI .cs: --check detects comments and --verify accepts only comment removal
+ok 38 - CLI .cs: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 1411.538912
+  type: 'test'
+  ...
+# Subtest: CLI .yml: --check detects comments and --verify accepts only comment removal
+ok 39 - CLI .yml: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 834.90635
+  type: 'test'
+  ...
+# Subtest: CLI .yaml: --check detects comments and --verify accepts only comment removal
+ok 40 - CLI .yaml: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 879.375405
+  type: 'test'
+  ...
+# Subtest: CLI .toml: --check detects comments and --verify accepts only comment removal
+ok 41 - CLI .toml: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 943.460609
+  type: 'test'
+  ...
+# Subtest: CLI .sql: --check detects comments and --verify accepts only comment removal
+ok 42 - CLI .sql: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 1120.19062
+  type: 'test'
+  ...
+# Subtest: CLI .bat: --check detects comments and --verify accepts only comment removal
+ok 43 - CLI .bat: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 1155.377516
+  type: 'test'
+  ...
+# Subtest: CLI .cmd: --check detects comments and --verify accepts only comment removal
+ok 44 - CLI .cmd: --check detects comments and --verify accepts only comment removal
+  ---
+  duration_ms: 948.244956
+  type: 'test'
+  ...
+1..44
+# tests 44
+# suites 0
+# pass 44
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9895.624786
+preflight-light: python3 -m unittest test_ai_review test_install_ffmpeg test_break_it test_app_icon test_archive_palette_proof test_design_kit test_evidence_versions test_font_scale test_shared_design test_check_cache_keys test_check_hub_only test_check_planted test_check_private_markers test_fake_wa_bridge test_identity_fixture test_icon_hint_oracle test_icon_hint_send_boundary test_link_previews test_media_layout test_no_comments test_no_stories test_palette_archived test_pin_icon test_postbox test_preexisting_journey test_reaction_layout test_real_size test_recording_paint test_repaint test_reply_preview test_release_proof test_status_line test_search_center test_show_archived test_slack_emoji test_slack_sort test_slack_thread_broadcast test_slack_threads test_composer_paste_scroll test_tdlib_release test_transcript_copy test_update_cards test_nightly_verification test_verdict test_vw test_job_budget test_revert_first test_verification_job_counts test_verify_failure_marker test_verify_journeys test_voice_language test_wait_message test_workflow_contract test_workspace_names
+........................................................................................................................................................................................................................................................................FONT BASELINE VERIFIED: published package, isolated runtime and fresh candidate
+RED FIXTURE REJECTED: src/main.zig
+RED FIXTURE REJECTED: src/nested/connector.zig
+PRIVATE_MARKERS is empty: set the repo secret from the private companion repo. Refusing to pass.
+EVIDENCE VERIFIED: clean Slack labels, inline image and viewer, Open Graph cards, four providers and URL caches
+PIN RED CONTROL VERIFIED: cd773f1 legacy vector rejected
+BRAND_CONTRACT_PROVEN
+EVIDENCE VERIFIED: real-size {'chats': 320, 'messages': 6704, 'voice': 319, 'images': 638, 'groups': 40}, list scrolling, busy history, search, media, group and archive round trip
+REPLY_NATIVE_OK
+EVIDENCE VERIFIED: quiet sidebar, exact version and visible sync failure
+EVIDENCE VERIFIED: quiet sidebar, exact version and visible sync failure
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=8.831450 contrast_excess_ratio=0.391572 mix_error=12.0 text_delta=87
+archive-sidebar-dim: dark live=21.000000 archived=11.542303 contrast_excess_ratio=0.527115 mix_error=12.0 text_delta=63
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: light live=21.000000 archived=10.530901 contrast_excess_ratio=0.476545 mix_error=12.0 text_delta=63
+archive-sidebar-dim: light live=21.000000 archived=7.226057 contrast_excess_ratio=0.311303 mix_error=12.0 text_delta=87
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0.....
+archive-sidebar-dim: dark live=20.621543 archived=10.128220 contrast_excess_ratio=0.465214 mix_error=7.666666666666657 text_delta=75
+archive-inbox-dim: dark live=20.621543 archived=10.128220 contrast_excess_ratio=0.465214 mix_error=7.666666666666657 text_delta=75
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: light live=20.570953 archived=8.723822 contrast_excess_ratio=0.394657 mix_error=7.333333333333329 text_delta=75
+archive-inbox-dim: light live=20.570953 archived=8.723822 contrast_excess_ratio=0.394657 mix_error=7.333333333333329 text_delta=75
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-sidebar-hover: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+archive-sidebar-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+archive-sidebar-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-inbox-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-inbox-hover: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+archive-inbox-hover: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=12.694435 contrast_excess_ratio=0.584722 mix_error=55.0 text_delta=20
+archive-inbox-selected: dark live=21.000000 archived=15.133529 contrast_excess_ratio=0.706676 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-hover: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+archive-sidebar-selected: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+archive-inbox-hover: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+archive-inbox-selected: dark live=21.000000 archived=20.732638 contrast_excess_ratio=0.986632 mix_error=67.66666666666666 text_delta=22
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-hover: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+archive-sidebar-selected: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+archive-inbox-hover: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+archive-inbox-selected: light live=21.000000 archived=20.759491 contrast_excess_ratio=0.987975 mix_error=67.66666666666667 text_delta=22
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75....s.......................................................................................................................................................s..s..................s.s.....................................Can't find lefthook in PATH
+Can't find lefthook in PATH
+..................................TOOLTIP REGISTRATION VERIFIED: V2 size for registration and updates, failures logged; old V3 source rejected
+WORKSPACE NAMES VERIFIED: fixture names, parsing, cache, shared labels and four journey checks; old parser rejected
+views workspace-names static PASS
+.
+----------------------------------------------------------------------
+Ran 522 tests in 471.948s
+
+OK (skipped=5)
+
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-sidebar-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: light live=21.000000 archived=8.723822 contrast_excess_ratio=0.386191 mix_error=0.0 text_delta=75
+archive-inbox-hover: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: light live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-sidebar-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-sidebar-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-dim: dark live=21.000000 archived=10.128220 contrast_excess_ratio=0.456411 mix_error=0.0 text_delta=75
+archive-inbox-hover: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+archive-inbox-selected: dark live=21.000000 archived=21.000000 contrast_excess_ratio=1.000000 mix_error=75.0 text_delta=0
+EVIDENCE VERIFIED: Slack Unicode, custom message/reaction pixels, animated GIF frames and hub caches
+RED FIXTURE REJECTED: src/main.zig
+RED FIXTURE REJECTED: src/nested/connector.zig
+TRANSCRIPT_COPY_VERIFIED: marked mixed messages, exact raw clipboard, missing notice, range selection and separate-app paste
+TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+SIGNAL EVIDENCE VERIFIED: prelinked hub, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+TELEGRAM EVIDENCE VERIFIED: prelinked hub, cached avatar pixels, account view, history, writes, receipts, media, events, local archive/unarchive and terminal rejections
+preflight-light: all checks passed
+remote: 
+remote: Create a pull request for 'soft-3122-live-dictation' on GitHub by visiting:        
+remote:      https://github.com/valentinyeo/postbox/pull/new/soft-3122-live-dictation        
+remote: 
+To https://github.com/valentinyeo/postbox.git
+ * [new branch]        HEAD -> soft-3122-live-dictation
+branch 'soft-3122-live-dictation' set up to track 'origin/soft-3122-live-dictation'.
+Warning: 1 uncommitted change
+https://github.com/valentinyeo/postbox/pull/568
+ship: timed out after 3600s waiting for automerge: https://github.com/valentinyeo/postbox/pull/568

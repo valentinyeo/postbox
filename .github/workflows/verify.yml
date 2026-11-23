@@ -172,7 +172,7 @@ jobs:
           & tools/verify-wazig/build-historical-847.ps1 -Evidence verification-evidence/historical-847
           if ($LASTEXITCODE -ne 0) { throw 'Historical rollback build failed' }
       - name: Unified private Windows path operations
-        if: matrix.feature == 'hub' || matrix.feature == 'whatsapp-hub'
+        if: matrix.feature == 'hub' || matrix.feature == 'whatsapp-hub' || matrix.feature == 'hub-wake-refresh'
         shell: pwsh
         run: |
           python tools/test_unified_windows_paths.py --zig zig
@@ -614,5 +614,4 @@ jobs:
           EVIDENCE_DIR: evidence
           VERDICT_POST: ${{ github.event.pull_request.head.repo.full_name == github.repository && '1' || '0' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          python3 -c 'import json, os, runpy; needs = json.loads(os.environ["NEEDS_JSON"]); needs["base-fails"] = needs["base-fails"] if "base-fails" in needs else {"result": "success", "outputs": {"classified": "true"}}; os.environ["NEEDS_JSON"] = json.dumps(needs); runpy.run_path("tools/verify-wazig/verdict.py", run_name="__main__")'
+        run: python3 tools/verify-wazig/verifier.py
