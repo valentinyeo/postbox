@@ -1,5 +1,7 @@
 name: judge-eval
 on:
+  schedule:
+    - cron: "15 4 * * 1"
   workflow_dispatch:
     inputs:
       planted_run:
@@ -19,9 +21,9 @@ on:
         type: string
         default: '551'
       families:
-        description: comma separated judge families to test
+        description: comma separated judge families to test, or empty to pick two live families
         type: string
-        default: openai,kimi
+        default: ''
 permissions:
   contents: read
   actions: read
@@ -35,14 +37,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Replay the saved evidence through each judge family
         env:
           VERDICT_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GH_TOKEN: ${{ github.token }}
-          PLANTED_RUN: ${{ inputs.planted_run }}
-          PLANTED_PR: ${{ inputs.planted_pr }}
-          CLEAN_RUN: ${{ inputs.clean_run }}
-          CLEAN_PR: ${{ inputs.clean_pr }}
+          PLANTED_RUN: ${{ inputs.planted_run || '44536500173' }}
+          PLANTED_PR: ${{ inputs.planted_pr || '546' }}
+          CLEAN_RUN: ${{ inputs.clean_run || '44562234769' }}
+          CLEAN_PR: ${{ inputs.clean_pr || '551' }}
           FAMILIES: ${{ inputs.families }}
         run: |
           python3 tools/verify-wazig/judge_eval.py \
