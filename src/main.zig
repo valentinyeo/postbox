@@ -24823,6 +24823,8 @@ fn toggleSlackThreads(a: *App) void {
     closeSlackThread(a);
     a.selected_message = null;
     invalidateCanvasIconTooltips(a);
+    applyAccountRepliesStyle(a, slackThreadsAccount(a), a.threads_enabled);
+    a.replies_mode_key.set("");
     a.scroll_y = 0;
     a.slack_history_hash = 0;
     a.msg_applied_hash = 0;
@@ -24832,9 +24834,19 @@ fn toggleSlackThreads(a: *App) void {
 
 fn localSlackStyle(a: *App) bool {
     if (a.selected_chat >= a.chat_count) return false;
-    const is_slack = a.chats[a.selected_chat].provider == .slack;
-    const workspace_threads = is_slack and slackThreadsEnabled(a);
-    return slack.repliesFold(repliesSlackMode(a), workspace_threads);
+    return slack.repliesFold(repliesSlackMode(a), a.chats[a.selected_chat].provider == .slack);
+}
+
+fn applyAccountRepliesStyle(a: *App, account: []const u8, enabled: bool) void {
+    if (account.len == 0) return;
+    for (a.chats[0..a.chat_count]) |*chat| {
+        if (chat.provider != .slack or !std.mem.eql(u8, chatViewKey(chat).account, account)) continue;
+        const key = std.fmt.allocPrint(a.allocator, "RepliesSlack:{s}:{s}:{s}", .{ @tagName(chat.provider), chat.account.slice(), chat.jid.slice() }) catch continue;
+        defer a.allocator.free(key);
+        const wide = utf8ToWide(a.allocator, key) catch continue;
+        defer a.allocator.free(wide);
+        _ = saveRegistryString(a.allocator, wide.ptr, if (enabled) "1" else "0");
+    }
 }
 
 fn hasDirectReplies(a: *const App, parent: *const Message) bool {

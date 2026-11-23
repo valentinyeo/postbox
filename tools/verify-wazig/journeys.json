@@ -448,7 +448,7 @@
       "pr": true,
       "hub": "slack-threads",
       "evidence": true,
-      "chats": 1,
+      "chats": 3,
       "script": "journey-slack-threads.ps1",
       "validator": {
         "file": "check-slack-threads-evidence.py",
@@ -456,8 +456,9 @@
       },
       "hub_handler": {
         "file": "fake-hub.py",
-        "class": "SlackThreadsHandler"
+        "class": "SlackThreadsDefaultHandler"
       },
+      "prepare": "prepare-slack-threads.ps1",
       "maximize": true
     },
     {
