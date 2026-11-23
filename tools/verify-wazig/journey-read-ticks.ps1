@@ -3,7 +3,7 @@ $chats = @(
     @{ name = 'Verification Sent'; id = 'ticks-sent@s.whatsapp.net'; shown = $false; tick = ''; mark = 'tick-own'; stage = 'ticks-sent' },
     @{ name = 'Verification Late'; id = 'ticks-late@s.whatsapp.net'; shown = $true; tick = 'tick-old'; mark = 'tick-old'; unread = 'tick-own'; stage = 'ticks-late' },
     @{ name = 'Verification Group'; id = 'ticks-group@g.us'; shown = $false; tick = 'tick-own'; mark = 'tick-own'; stage = 'ticks-group' },
-    @{ name = 'Verification Slack'; id = 'slack:fixture-ticks:channel'; shown = $false; tick = 'tick-own'; mark = 'tick-own'; stage = 'ticks-slack' },
+    @{ name = 'Verification Slack'; id = 'slack:fixture-ticks:channel'; shown = $false; tick = ''; mark = 'tick-own'; stage = 'ticks-slack' },
     @{ name = 'Verification Signal Contact'; id = 'signal:ticks-contact'; shown = $true; tick = 'tick-own'; mark = 'tick-own'; stage = 'ticks-signal' },
     @{ name = 'Verification Signal Crowd'; id = 'signal:group:ticks-group'; shown = $false; tick = 'tick-own'; mark = 'tick-own'; stage = 'ticks-signal-group' },
     @{ name = 'Verification Telegram Contact'; id = 'telegram:user:ticks-contact'; shown = $true; tick = 'tick-own'; mark = 'tick-own'; stage = 'ticks-telegram' },
@@ -81,24 +81,24 @@ Send-Keys $session 'Verification Hold'
 $null = Wait-Until {
     $state = Read-Control $session status
     $shown = Read-Control $session messages
-    $shown.chat.id -eq 'ticks-hold@s.whatsapp.net' -and $state.read_tick.shown -and $state.read_tick.message -eq 'hold-39'
-} 'hold chat with its read mark'
+    $shown.chat.id -eq 'ticks-hold@s.whatsapp.net' -and -not $state.read_tick.shown
+} 'hold chat before its newest message is read'
 $paints = (Read-Control $session status).paints.canvas
 Send-Keys $session '{PGUP}'
 $null = Wait-Until { (Read-Control $session status).paints.canvas -gt $paints } 'repaint after scrolling up'
 $before = Get-TopPainted (Read-Control $session messages)
-Assert-That ($null -ne $before -and $before.id -ne 'hold-39') 'Hold chat did not scroll away from the marked message'
+Assert-That ($null -ne $before -and $before.id -ne 'hold-39') 'Hold chat did not scroll away from its newest message'
 $paints = (Read-Control $session status).paints.canvas
-Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/ticks/clear" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
+Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/ticks/read" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
 $null = Wait-Until {
     $state = Read-Control $session status
-    (-not $state.read_tick.shown) -and $state.paints.canvas -gt $paints
-} 'read mark cleared and repainted' -Seconds 90
+    $state.read_tick.shown -and $state.read_tick.message -eq 'hold-39' -and $state.paints.canvas -gt $paints
+} 'read mark shown and repainted' -Seconds 90
 $after = Get-TopPainted (Read-Control $session messages)
-$cleared = Read-Control $session status
+$marked = Read-Control $session status
 Assert-That ($null -ne $after -and $after.id -eq $before.id) "Hold: top message changed from $($before.id) to $(if ($null -ne $after) { $after.id } else { 'none' })"
 $moved = [Math]::Abs($after.y - $before.y)
-@{ before = $before; after = $after; moved = $moved; shown_before = $true; shown_after = $cleared.read_tick.shown } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'ticks-hold.json')
+@{ before = $before; after = $after; moved = $moved; shown_before = $false; shown_after = $marked.read_tick.shown } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'ticks-hold.json')
 Save-Screen $session 'ticks-hold'
-Assert-That ($moved -le 2) "Hold: $($after.id) moved $moved px when the read mark cleared"
+Assert-That ($moved -le 2) "Hold: $($after.id) moved $moved px when the read mark appeared"
 Hub-Pass $session "ticks-hold=$($before.id) moved=$moved"

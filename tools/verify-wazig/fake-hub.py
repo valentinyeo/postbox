@@ -1257,7 +1257,7 @@ TICK_CHATS = [
 TICK_HOLD_ROWS = 40
 
 
-def tick_hold_rows(jid, cleared):
+def tick_hold_rows(jid, read):
     stamp = datetime(2025, 2, 19, 21, 30, tzinfo=timezone.utc)
     rows = []
     for number in range(TICK_HOLD_ROWS):
@@ -1266,7 +1266,7 @@ def tick_hold_rows(jid, cleared):
                          Timestamp=(stamp + timedelta(minutes=number)).isoformat().replace('+00:00', 'Z'),
                          Text=f'Synthetic hold line {number:02d}',
                          SenderName='Me' if own else 'Fixture Sender', ReadBy=0))
-    if not cleared:
+    if read:
         rows[-1]['ReadBy'] = 1
     return rows
 
@@ -1290,8 +1290,8 @@ class ReadTicksHandler(SlackSortHandler):
                 return
             if chat['jid'] == 'ticks-hold@s.whatsapp.net':
                 with self.state.lock:
-                    cleared = self.state.ticks_cleared
-                rows = list(reversed(tick_hold_rows(chat['jid'], cleared)))
+                    read = self.state.ticks_read
+                rows = list(reversed(tick_hold_rows(chat['jid'], read)))
                 self.respond(200, rows)
                 return
             rows = [dict(MsgID='tick-own', ChatJID=chat['jid'], Timestamp='2025-02-19T21:20:30Z', FromMe=True,
@@ -1316,10 +1316,14 @@ class ReadTicksHandler(SlackSortHandler):
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
         if self.path == '/v1/wazig/mark-read':
             self.respond(200, {'status': 'ok'}, body=body)
-        elif self.path == '/fixture/ticks/clear':
+        elif self.path == '/fixture/ticks/read':
             with self.state.lock:
-                self.state.ticks_cleared = True
-            self.respond(200, {'cleared': True}, body=body)
+                self.state.ticks_read = True
+                events = list(getattr(self.state, 'notification_events', []))
+                events.append('ticks-hold@s.whatsapp.net')
+                self.state.notification_events = events
+                self.state.lock.notify_all()
+            self.respond(200, {'read': True}, body=body)
         else:
             self.respond(400, {'error': 'invalid read tick request'}, body=body)
 
@@ -2760,7 +2764,7 @@ def main():
     server.state.telegram_events = []
     server.state.telegram_read = set()
     server.state.gif_attempts = {}
-    server.state.ticks_cleared = False
+    server.state.ticks_read = False
     if args.mode == 'voice':
         server.state.voice_audio = voice_playback_bytes()
     if args.mode == 'media-speed':

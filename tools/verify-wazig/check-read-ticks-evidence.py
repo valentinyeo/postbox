@@ -11,7 +11,7 @@ READ_TICK_STAGES = {
     'ticks-sent': ('whatsapp', 'ticks-sent@s.whatsapp.net', '', 'tick-own', False),
     'ticks-late': ('whatsapp', 'ticks-late@s.whatsapp.net', 'tick-old', 'tick-old', True),
     'ticks-group': ('whatsapp', 'ticks-group@g.us', 'tick-own', 'tick-own', False),
-    'ticks-slack': ('slack', 'slack:fixture-ticks:channel', 'tick-own', 'tick-own', False),
+    'ticks-slack': ('slack', 'slack:fixture-ticks:channel', '', 'tick-own', False),
     'ticks-signal': ('signal', 'signal:ticks-contact', 'tick-own', 'tick-own', True),
     'ticks-signal-group': ('signal', 'signal:group:ticks-group', 'tick-own', 'tick-own', False),
     'ticks-telegram': ('telegram', 'telegram:user:ticks-contact', 'tick-own', 'tick-own', True),
@@ -52,7 +52,7 @@ def check_read_ticks(folder):
         title = (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]
         assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + expected_product_version(folder), title), title
     hold = read('ticks-hold.json')
-    assert hold['shown_before'] and not hold['shown_after'], hold
+    assert not hold['shown_before'] and hold['shown_after'], hold
     assert hold['before']['id'] == hold['after']['id'], hold
     assert hold['before']['id'] != 'hold-39' and hold['before']['painted'] > 3, hold
     assert hold['moved'] == abs(hold['after']['y'] - hold['before']['y']), hold
@@ -67,4 +67,4 @@ def check_read_ticks(folder):
     assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
     assert 'JOURNEY PASSED: read-ticks' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('EVIDENCE VERIFIED: blue double tick and Read label below the bubble right edge on the newest read own message only, none for unread, group or Slack, and the chat stays put when the mark clears')
+    print('EVIDENCE VERIFIED: blue double tick and Read label below the bubble right edge on the newest read own message only, none for unread, group or Slack, and the chat stays put when the mark appears')
