@@ -191,6 +191,26 @@ class PcCheckTests(unittest.TestCase):
         self.assertFalse((units / "pc-check.service").exists())
         self.assertIn("--user disable --now pc-check.timer", self.control_log.read_text(encoding="utf-8"))
 
+    def test_the_live_tool_wins_over_a_stale_shim(self):
+        stale = self.root / ".local/bin"
+        live = self.root / ".multiprompt-runtime"
+        for folder in (stale, live):
+            folder.mkdir(parents=True)
+        (stale / "mp-sessions").write_text(FAKE_CONTROL, encoding="utf-8")
+        (live / "mp-sessions").write_text(FAKE_WAKE, encoding="utf-8")
+        for path in (stale / "mp-sessions", live / "mp-sessions"):
+            path.chmod(0o755)
+        self.env.pop("PC_CHECK_WAKE")
+        self.run_check(reading=OPEN)
+        self.assertEqual(len(self.wakes()), 1)
+        self.assertIn("wake=sent", self.lines()[0])
+
+    def test_a_failed_wake_says_so_in_the_log(self):
+        self.env["PC_CHECK_WAKE"] = str(self.bin / "missing-wake")
+        self.run_check(reading=OPEN)
+        self.assertIn("wake=failed", self.lines()[0])
+        self.assertEqual(self.wakes(), [])
+
     def test_no_wake_leaves_the_chat_alone(self):
         self.run_check("--no-wake", reading=OPEN)
         self.assertIn("state=open", self.lines()[0])

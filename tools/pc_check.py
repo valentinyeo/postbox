@@ -16,7 +16,7 @@ def locate(name):
     found = shutil.which(name)
     if found:
         return found
-    for base in (Path.home() / ".local/bin", Path.home() / ".multiprompt-runtime"):
+    for base in (Path.home() / ".multiprompt-runtime", Path.home() / ".local/bin"):
         candidate = base / name
         if candidate.is_file():
             return str(candidate)
@@ -166,9 +166,12 @@ def sample(args, state):
                 due = due or moment - datetime.fromisoformat(last) >= timedelta(seconds=args.wake_every)
             except ValueError:
                 due = True
-        if due and wake(args.chat, moment):
-            woke = "sent"
-            state["woke_at"] = moment.isoformat()
+        if due:
+            if wake(args.chat, moment):
+                woke = "sent"
+                state["woke_at"] = moment.isoformat()
+            else:
+                woke = "failed"
     state["state"] = name
     line = stamp(moment) + " state=" + name + " wake=" + woke + " detail=" + detail
     path = log_path()
