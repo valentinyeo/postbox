@@ -741,6 +741,13 @@
       "proof": "real-size",
       "status": "covered",
       "why": ""
+    },
+    {
+      "feature": "exit_record",
+      "source": "reportPreviousExit",
+      "proof": "exit-record",
+      "status": "covered",
+      "why": ""
     }
   ]
 }

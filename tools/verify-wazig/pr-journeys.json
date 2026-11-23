@@ -422,6 +422,12 @@
     ],
     "tools/verify-wazig/evidence-real-size.py": [
       "real-size"
+    ],
+    "src/exit_record": [
+      "exit-record"
+    ],
+    "tools/verify-wazig/journey-exit-record": [
+      "exit-record"
     ]
   }
 }

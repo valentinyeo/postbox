@@ -1,0 +1,10 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -20754,6 +20754,5 @@ fn handleMainMessage(
+             if (a.brush_raised) |brush| _ = win.DeleteObject(brush);
+             if (a.brush_muted) |brush| _ = win.DeleteObject(brush);
+-            writeExitRecord(a, .wm_close);
+             win.PostQuitMessage(0);
+             return 0;
+         },
