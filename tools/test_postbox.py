@@ -42,7 +42,7 @@ class ProductContractTests(unittest.TestCase):
                 shutil.copyfile(ROOT / name, target)
             for name, old, new in [
                 ('src/messenger_view.zig', 'Postbox v', 'Wazig v'),
-                ('src/main.zig', '/repos/valentinyeo/postbox/releases', '/repos/valentinyeo/wazig/releases'),
+                ('src/update.zig', 'update_file_path = "/valentinyeo/postbox/releases', 'update_file_path = "/repos/valentinyeo/wazig/releases'),
                 ('src/main.zig', 'Software\\\\Messages', 'Software\\\\Postbox'),
                 ('src/main.zig', 'migrateProductName(init);', ''),
                 ('assets/installer.wxs', 'Name="Postbox"', 'Name="Wazig"'),
@@ -89,6 +89,9 @@ class UpdateFixtureTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def exhaust_github_api(self):
+        (self.root / 'rate-limited').write_text('exhausted')
+
     def test_old_api_redirects_without_weakening_https(self):
         code, headers, _ = self.get('/repos/valentinyeo/wazig/releases/latest')
         self.assertEqual(code, 301)
@@ -110,6 +113,28 @@ class UpdateFixtureTests(unittest.TestCase):
         (self.root / 'offer.json').write_text(json.dumps({'tag': 'v0.10.0'}))
         self.assertEqual(json.loads(self.get('/repos/valentinyeo/postbox/releases/latest')[2])['tag_name'], 'v0.10.0')
         self.assertEqual(self.get('/unsupported')[0], 404)
+
+    def test_release_file_carries_everything_the_update_card_needs(self):
+        code, _, body = self.get('/valentinyeo/postbox/releases/latest/download/update.json')
+        self.assertEqual(code, 200)
+        document = json.loads(body)
+        self.assertEqual(document['tag_name'], 'v0.9.999')
+        self.assertEqual(document['history'], [{'tag_name': 'v0.9.999', 'body': '- Postbox keeps your conversations and settings'}])
+        payload = (self.root / 'update.zip').read_bytes()
+        for asset in document['assets']:
+            self.assertEqual(asset['digest'], 'sha256:' + hashlib.sha256(payload).hexdigest())
+            self.assertEqual(asset['size'], len(payload))
+
+    def test_exhausted_api_leaves_the_release_file_and_payload_working(self):
+        self.exhaust_github_api()
+        code, headers, _ = self.get('/repos/valentinyeo/postbox/releases/latest')
+        self.assertEqual(code, 403)
+        self.assertEqual(headers['X-RateLimit-Remaining'], '0')
+        self.assertEqual(self.get('/valentinyeo/postbox/releases/latest/download/update.json')[0], 200)
+        self.assertEqual(self.get('/update.zip')[2], b'original updater payload')
+        rows = [json.loads(line) for line in (self.root / 'requests.jsonl').read_text().splitlines()]
+        self.assertTrue(rows and all(row['limited'] for row in rows))
+        self.assertEqual([row['path'] for row in rows if row['path'].startswith('/repos/')], ['/repos/valentinyeo/postbox/releases/latest'])
 
 
 if __name__ == '__main__':
