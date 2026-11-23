@@ -1110,6 +1110,19 @@ class ChatListsHandler(SlackSortHandler):
 
 
 class SlackMentionsHandler(SlackSortHandler):
+    def do_POST(self):
+        self.wire_path = self.path
+        if not self.authorized():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+        if self.path == '/v1/wazig/mark-read':
+            self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/v1/wazig/send' and body.get('chat') == MENTIONS_CHAT:
+            stamp = (datetime.fromisoformat(self.state.stamp) + timedelta(seconds=1)).isoformat().replace('+00:00', 'Z')
+            self.respond(200, dict(client_id=body.get('client_id'), msg_id='MENTION-SENT', ts=stamp, status='sent'), body=body)
+        else:
+            self.respond(400, {'error': 'invalid mention request'}, body=body)
+
     def do_GET(self):
         self.wire_path = self.path
         if not self.authorized():
