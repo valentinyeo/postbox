@@ -23,6 +23,7 @@ PYTHON_LIGHT_TESTS=(
     test_no_comments
     test_no_stories
     test_palette_archived
+    test_pc_check
     test_pin_icon
     test_postbox
     test_preexisting_journey
