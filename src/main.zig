@@ -22859,9 +22859,9 @@ fn updateThreadMain(ctx: *UpdateContext) void {
 
 fn checkForUpdate(allocator: std.mem.Allocator) !?UpdateAvailable {
     const current = currentVersion() orelse return error.UpdateBadVersion;
-    const api_headers = try utf8ToWide(allocator, "User-Agent: Postbox updater\r\nAccept: application/vnd.github+json\r\n");
-    defer allocator.free(api_headers);
-    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/postbox/releases/latest"), api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
+    const release_headers = try utf8ToWide(allocator, "User-Agent: Postbox updater\r\n");
+    defer allocator.free(release_headers);
+    const json = try httpGet(allocator, lit(update.update_file_host), lit(update.update_file_path), release_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
     defer allocator.free(json);
     var parsed: std.json.Parsed(std.json.Value) = undefined;
     const maybe_asset = try update.pickAsset(allocator, json, &parsed);
@@ -22870,29 +22870,9 @@ fn checkForUpdate(allocator: std.mem.Allocator) !?UpdateAvailable {
     if (!update.isNewer(asset.tag, current)) return null;
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const history_allocator = arena.allocator();
     var releases: std.ArrayList(update.Release) = .empty;
-    try releases.append(history_allocator, .{ .tag = asset.tag, .body = update.releaseBody(parsed.value) });
-    var page: usize = 1;
-    while (true) : (page += 1) {
-        const path = try std.fmt.allocPrint(allocator, "/repos/valentinyeo/postbox/releases?page={d}", .{page});
-        defer allocator.free(path);
-        const wide_path = try utf8ToWide(allocator, path);
-        defer allocator.free(wide_path);
-        const history_json = try httpGet(allocator, lit("api.github.com"), wide_path.ptr, api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
-        defer allocator.free(history_json);
-        const history = try std.json.parseFromSlice(std.json.Value, allocator, history_json, .{});
-        defer history.deinit();
-        if (history.value != .array) return error.UpdateBadReleaseHistory;
-        if (history.value.array.items.len == 0) break;
-        for (history.value.array.items) |value| {
-            const release = update.releaseFromValue(value) orelse continue;
-            if (!update.isNewer(release.tag, current) or std.mem.eql(u8, release.tag, asset.tag) or update.isNewer(release.tag, asset.version)) continue;
-            try releases.append(history_allocator, .{
-                .tag = try history_allocator.dupe(u8, release.tag),
-                .body = try history_allocator.dupe(u8, release.body),
-            });
-        }
+    if ((try update.collectHistory(arena.allocator(), parsed.value, &releases)) == 0) {
+        try releases.append(arena.allocator(), .{ .tag = asset.tag, .body = update.releaseBody(parsed.value) });
     }
     const notes = try update.notesForReleases(allocator, releases.items, current, asset.version);
     errdefer allocator.free(notes);
@@ -23220,9 +23200,9 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
         return swapStaged(io, allocator, root, stage, update_root, exe_path, exe_dir, exe_name, marker.?.inner_root);
     }
 
-    const api_headers = try utf8ToWide(allocator, "User-Agent: Postbox updater\r\nAccept: application/vnd.github+json\r\n");
-    defer allocator.free(api_headers);
-    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/postbox/releases/latest"), api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
+    const release_headers = try utf8ToWide(allocator, "User-Agent: Postbox updater\r\n");
+    defer allocator.free(release_headers);
+    const json = try httpGet(allocator, lit(update.update_file_host), lit(update.update_file_path), release_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
     defer allocator.free(json);
 
     var parsed: std.json.Parsed(std.json.Value) = undefined;

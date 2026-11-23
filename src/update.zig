@@ -80,6 +80,9 @@ test percent {
     try std.testing.expectEqual(@as(u32, 100), percent(300, 100));
 }
 
+pub const update_file_host = "github.com";
+pub const update_file_path = "/valentinyeo/postbox/releases/latest/download/update.json";
+
 pub const Version = struct {
     major: u32,
     minor: u32,
@@ -289,6 +292,22 @@ test "release history excludes drafts prereleases and malformed versions" {
     const release = releaseFromValue(parsed.value.array.items[5]).?;
     try std.testing.expectEqualStrings("v1.0.1", release.tag);
     try std.testing.expectEqualStrings("- Chat search is faster", release.body);
+}
+
+pub fn collectHistory(allocator: std.mem.Allocator, root: std.json.Value, releases: *std.ArrayList(Release)) !usize {
+    if (root != .object) return 0;
+    const history = root.object.get("history") orelse return 0;
+    if (history != .array) return 0;
+    var added: usize = 0;
+    for (history.array.items) |value| {
+        const release = releaseFromValue(value) orelse continue;
+        try releases.append(allocator, .{
+            .tag = try allocator.dupe(u8, release.tag),
+            .body = try allocator.dupe(u8, release.body),
+        });
+        added += 1;
+    }
+    return added;
 }
 
 fn flagTrue(value: ?std.json.Value) bool {
@@ -559,6 +578,55 @@ test isStaleOrphan {
     try std.testing.expect(!isStaleOrphan(100, 200, true, 0));
     try std.testing.expect(!isStaleOrphan(100, 200, false, 60));
     try std.testing.expect(isStaleOrphan(100, 200, false, orphan_min_age_seconds));
+}
+
+const update_file_json =
+    \\{
+    \\  "tag_name": "v1.0.2",
+    \\  "body": "- Newest change shows up",
+    \\  "assets": [
+    \\    {"name": "Postbox-v1.0.2.zip", "browser_download_url": "https://github.com/valentinyeo/postbox/releases/download/v1.0.2/Postbox-v1.0.2.zip", "size": 30, "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+    \\  ],
+    \\  "history": [
+    \\    {"tag_name": "v1.0.2", "body": "- Newest change shows up"},
+    \\    {"tag_name": "v1.0.1", "body": "- Older change shows up"},
+    \\    {"tag_name": "v1.0.0", "body": "- Already installed"},
+    \\    {"tag_name": "v1.0.3", "draft": true, "body": "- Unpublished change"},
+    \\    {"tag_name": "v1.0.4", "prerelease": true, "body": "- Preview change"},
+    \\    {"tag_name": "junk", "body": "- Malformed"}
+    \\  ]
+    \\}
+;
+
+test "the release file alone gives the card its newest version and skipped notes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, update_file_json, .{});
+    defer parsed.deinit();
+    const asset = findAsset(parsed.value).?;
+    try std.testing.expectEqualStrings("v1.0.2", asset.tag);
+    try std.testing.expect(isNewer(asset.tag, parseVersion("1.0.0").?));
+    var releases: std.ArrayList(Release) = .empty;
+    try std.testing.expectEqual(@as(usize, 3), try collectHistory(allocator, parsed.value, &releases));
+    const notes = try notesForReleases(allocator, releases.items, parseVersion("1.0.0").?, asset.version);
+    try std.testing.expectEqualStrings("- Newest change shows up\n- Older change shows up", notes);
+}
+
+test "a release file without history still names its own changes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator,
+        \\{"tag_name": "v2.0.0", "body": "- Only change", "assets": []}
+    , .{});
+    defer parsed.deinit();
+    var releases: std.ArrayList(Release) = .empty;
+    try std.testing.expectEqual(@as(usize, 0), try collectHistory(allocator, parsed.value, &releases));
+    try releases.append(allocator, .{ .tag = "v2.0.0", .body = releaseBody(parsed.value) });
+    const notes = try notesForReleases(allocator, releases.items, parseVersion("1.0.0").?, parseVersion("2.0.0").?);
+    try std.testing.expectEqualStrings("- Only change", notes);
+    try std.testing.expectEqual(@as(usize, 0), try collectHistory(allocator, .null, &releases));
 }
 
 test "branded update wins over the compatible old asset, duplicate branded assets fail closed" {

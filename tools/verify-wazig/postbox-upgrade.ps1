@@ -65,10 +65,10 @@ try {
     $caseResult.original_sha256 = $oldHash
     Copy-Item $Payload "$root/update.zip"
     @{tag="v$Version"} | ConvertTo-Json | Set-Content "$root/offer.json"
-    & openssl req -x509 -newkey rsa:2048 -nodes -keyout "$root/key.pem" -out "$root/cert.pem" -days 1 -subj '/CN=api.github.com' -addext 'subjectAltName=DNS:api.github.com' 2> "$Evidence/certificate.log"
+    & openssl req -x509 -newkey rsa:2048 -nodes -keyout "$root/key.pem" -out "$root/cert.pem" -days 1 -subj '/CN=api.github.com' -addext 'subjectAltName=DNS:api.github.com,DNS:github.com' 2> "$Evidence/certificate.log"
     Assert-That ($LASTEXITCODE -eq 0) 'Unable to create disposable HTTPS fixture certificate'
     $cert = Import-Certificate -FilePath "$root/cert.pem" -CertStoreLocation Cert:\LocalMachine\Root
-    [IO.File]::AppendAllText($hosts, "`n127.0.0.1 api.github.com`n")
+    [IO.File]::AppendAllText($hosts, "`n127.0.0.1 api.github.com`n127.0.0.1 github.com`n")
     ipconfig /flushdns | Out-Null
     $server = Start-Process python -ArgumentList @("`"$PSScriptRoot/fake-github-updates.py`"", '--root', "`"$root`"") -PassThru -RedirectStandardError "$Evidence/server.log"
     $null = Wait-Until { if ($server.HasExited) { throw 'HTTPS fixture exited' }; Test-Path "$root/ready" } 'HTTPS fixture'
@@ -119,6 +119,7 @@ try {
     } 'offline fixture completes its existing native retries before update-card screenshots' 30
     $next = [version]$Version
     $nextTag = "v$($next.Major).$($next.Minor).$($next.Build + 1)"
+    Set-Content "$root/rate-limited" 'exhausted'
     @{tag=$nextTag} | ConvertTo-Json | Set-Content "$root/offer.json"
     $session.pid = $app.Id
     $session.startTicks = $app.StartTime.ToUniversalTime().Ticks.ToString()
@@ -126,13 +127,15 @@ try {
     $session.expected_version = $Version
     $session.expected_product = 'Postbox'
     Invoke-PaletteCommand $session 'Check for updates now'
-    $null = Wait-Until { (Get-Content "$data/launch-log.txt" -Raw) -match ([regex]::Escape("update: card offered $nextTag")) } 'renamed app finds next update' 90
+    $null = Wait-Until { (Get-Content "$data/launch-log.txt" -Raw) -match ([regex]::Escape("update: card offered $nextTag")) } 'update card finds the newest version while the GitHub API limit is out' 90
     $null = Wait-Until { (Read-Control $session status).update_card.error -ceq '' } 'new offer clears the offline fixture warning'
     $null = Capture-Upgrade after $session $app
     $null = Capture-Upgrade next-update $session $app
-    $paths = @(Get-Content "$root/requests.jsonl" | ForEach-Object { ($_ | ConvertFrom-Json).path })
+    $requests = @(Get-Content "$root/requests.jsonl" | ForEach-Object { $_ | ConvertFrom-Json })
+    $paths = @($requests | ForEach-Object { $_.path })
     Assert-That ($paths -contains '/repos/valentinyeo/wazig/releases/latest') 'Original update route was not exercised'
-    Assert-That ($paths -contains '/repos/valentinyeo/postbox/releases/latest') 'Renamed update route was not exercised'
+    Assert-That ($paths -contains '/valentinyeo/postbox/releases/latest/download/update.json') 'The renamed app did not read the release file'
+    Assert-That (@($requests | Where-Object { $_.limited -and $_.path -like '/repos/*' }).Count -eq 0) 'The update check still spent the exhausted GitHub API'
     $caseResult.status = 'passed'
     $caseResult.old_title = $oldTitle
     $caseResult.new_title = $newTitle

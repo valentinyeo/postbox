@@ -8,8 +8,8 @@ def check(root):
     title = (root / 'src/messenger_view.zig').read_text()
     assert '"{s} - Postbox v{s}"' in title and '"Postbox v{s}"' in title, 'Postbox window title missing'
     main = (root / 'src/main.zig').read_text()
-    assert main.count('/repos/valentinyeo/postbox/releases') == 3, 'Update endpoints must use the renamed repository'
-    assert '/repos/valentinyeo/wazig/releases' not in main, 'Old update endpoint remains'
+    assert main.count('update.update_file_path') == 2, 'The update check and the install must both read the release file'
+    assert '/repos/valentinyeo/' not in main, 'The update check must not spend the shared GitHub API limit'
     for required in ['migrateProductName(init);', '"Postbox.lnk"', '"Messages.lnk"', 'win.IID_IShellLinkW', 'eqlWideIgnoreCase(target[0..target_len], exe[0..exe_len])']:
         assert required in main, required
     for name in ['main.zig', 'messenger_view.zig', 'wazigctl.zig', 'control.zig']:
@@ -31,6 +31,7 @@ def check(root):
     proof = (root / '.github/workflows/release-proof.yml').read_text()
     assert 'Programs\\Postbox.lnk' in proof, 'Release compatibility smoke missing'
     updater = (root / 'src/update.zig').read_text()
+    assert 'update_file_path = "/valentinyeo/postbox/releases/latest/download/update.json"' in updater, 'Update file route must read the renamed repository'
     assert '"Messages_arm64-" else "Messages-"' in updater and '"Postbox_arm64-" else "Postbox-"' in updater, 'Old or new updater package selector missing'
     assert 'if (branded and !std.mem.startsWith(u8, name.string, zip_asset_prefix)) continue;' in updater, 'Branded and compatibility packages are ambiguous'
     print('BRAND_CONTRACT_PROVEN')
