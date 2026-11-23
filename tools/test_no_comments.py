@@ -71,7 +71,7 @@ with (root / 'calls').open('a') as log:
     log.write(json.dumps(args) + '\\n')
 sha = 'a' * 40
 if args[:2] == ['pr', 'list']:
-    print('' if mode == 'self-heal' else '1')
+    print('' if mode.startswith('self-heal') else '1')
 elif args[:2] == ['pr', 'view']:
     if 'mergeCommit' in args:
         print(sha)
@@ -112,7 +112,7 @@ elif args[:2] == ['workflow', 'run']:
     (root / args[2]).touch()
 elif args[:2] == ['run', 'list']:
     name = args[args.index('-w') + 1]
-    print(int((root / name).exists()) if mode != 'missing-check' else 1)
+    print(1 if mode == 'self-heal-release' and name != 'auto-release.yml' else int((root / name).exists()) if mode != 'missing-check' else 1)
 else:
     sys.exit('unexpected gh call: ' + str(args))
 ''')
@@ -138,11 +138,11 @@ else:
                 if mode == 'verify-unrelated':
                     self.assertFalse(any('/actions/workflows/verify.yml/runs?' in arg for args in calls for arg in args))
 
-    def test_merge_dispatches_both_checks(self):
+    def test_merge_dispatches_checks_and_release(self):
         result, calls = self.run_workflow('merge')
         self.assertEqual(result.returncode, 0, result.stderr)
         dispatched = [args[2] for args in calls if args[:2] == ['workflow', 'run']]
-        self.assertEqual(dispatched, ['ci.yml', 'no-comments.yml'])
+        self.assertEqual(dispatched, ['ci.yml', 'no-comments.yml', 'auto-release.yml'])
 
     def test_IGSH_635_cross_repository_pr_is_skipped(self):
         result, calls = self.run_workflow('cross-repository')
@@ -156,11 +156,17 @@ else:
         self.assertIn('#1: skip (not a same-repo PR by the owner)', result.stdout)
         self.assertFalse(any(args[:2] == ['pr', 'merge'] for args in calls))
 
-    def test_self_heal_dispatches_both_checks(self):
+    def test_self_heal_dispatches_checks_and_release(self):
         result, calls = self.run_workflow('self-heal')
         self.assertEqual(result.returncode, 0, result.stderr)
         dispatched = [args[2] for args in calls if args[:2] == ['workflow', 'run']]
-        self.assertEqual(dispatched, ['ci.yml', 'no-comments.yml'])
+        self.assertEqual(dispatched, ['ci.yml', 'no-comments.yml', 'auto-release.yml'])
+
+    def test_SOFT_3104_self_heal_starts_release_when_checks_exist(self):
+        result, calls = self.run_workflow('self-heal-release')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        dispatched = [args for args in calls if args[:2] == ['workflow', 'run']]
+        self.assertEqual(dispatched, [['workflow', 'run', 'auto-release.yml', '-R', 'fixture/repository', '--ref', 'main']])
 
     def test_missing_comment_check_blocks_merge(self):
         result, calls = self.run_workflow('missing-check')
