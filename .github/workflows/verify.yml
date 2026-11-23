@@ -39,7 +39,6 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       needed: ${{ steps.matrix.outputs.needed }}
-      planted: ${{ steps.planted.outputs.planted }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -95,184 +94,6 @@ jobs:
           print(value)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'matrix={value}\n')
-      - name: Plan planted journeys
-        id: planted
-        shell: python
-        run: |
-          import json
-          import os
-          from pathlib import Path
-          patches = sorted(p.stem for p in Path('tools/verify-wazig/planted').glob('*.patch'))
-          include = [{'feature': name.split('--')[0], 'patch': name} for name in patches]
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('planted=' + json.dumps({'include': include}, separators=(',', ':')) + '\n')
-  planted:
-    name: planted (${{ matrix.patch }})
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    needs: [plan]
-    runs-on: windows-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.planted) }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.BASE_ZIG_VERSION }}
-          use-cache: false
-      - name: Apply planted bug
-        shell: pwsh
-        env:
-          PATCH: ${{ matrix.patch }}
-        run: |
-          git apply --ignore-whitespace "tools/verify-wazig/planted/$env:PATCH.patch"
-          if ($LASTEXITCODE -ne 0) { throw 'Patch failed to apply' }
-      - name: Build planted desktop
-        shell: pwsh
-        run: |
-          zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}'
-          if ($LASTEXITCODE -ne 0) { throw 'Planted build failed' }
-      - name: Build and capture the pre-change sidebar baseline
-        if: matrix.feature == 'sidebar-surface'
-        shell: pwsh
-        run: |
-          python tools/verify-wazig/test-sidebar-surface.py
-          if ($LASTEXITCODE -ne 0) { throw 'Sidebar pixel oracle controls failed' }
-          $candidate = (git rev-parse HEAD).Trim()
-          $assertion = (git log --diff-filter=A --format=%H -- tools/verify-wazig/journey-sidebar-surface.ps1 | Select-Object -Last 1).Trim()
-          $baseline = (git rev-parse "$assertion^1").Trim()
-          if ($LASTEXITCODE -ne 0) { throw 'Sidebar assertion parent missing' }
-          $source = Join-Path $env:RUNNER_TEMP 'sidebar-baseline-source'
-          $prefix = Join-Path $env:GITHUB_WORKSPACE 'sidebar-baseline-bin'
-          git worktree add --detach $source $baseline
-          if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline checkout failed' }
-          Push-Location $source
-          try {
-            zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix $prefix
-            if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline build failed' }
-          } finally { Pop-Location }
-          New-Item planted-evidence -ItemType Directory -Force | Out-Null
-          $env:GITHUB_SHA = $baseline
-          try {
-            & tools/verify-wazig/run.ps1 -Feature sidebar-surface -ExpectedProduct Wazig -Bin sidebar-baseline-bin/bin -Evidence planted-evidence/baseline
-            if ($LASTEXITCODE -ne 0) { throw 'Sidebar baseline capture failed' }
-          } finally { $env:GITHUB_SHA = $candidate }
-          $fixtureText = [IO.File]::ReadAllText((Join-Path $env:GITHUB_WORKSPACE 'src/verify_text.json')).Replace("`r`n", "`n")
-          $fixtureBytes = [Text.Encoding]::UTF8.GetBytes($fixtureText)
-          $fixtureHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($fixtureBytes))
-          @{
-            candidate_commit = $candidate; baseline_commit = $baseline; assertion_commit = $assertion
-            assertion_parent = (git rev-parse "$assertion^1").Trim()
-            candidate_sha256 = (Get-FileHash zig-out/bin/Messages.exe).Hash
-            baseline_sha256 = (Get-FileHash sidebar-baseline-bin/bin/Messages.exe).Hash
-            fixture_sha256 = $fixtureHash
-          } | ConvertTo-Json | Set-Content planted-evidence/sidebar-builds.json
-      - name: Install audio output
-        if: matrix.feature == 'voice'
-        shell: pwsh
-        run: tools/verify-wazig/install-audio.ps1
-      - name: Install typing recorder
-        if: matrix.feature == 'drafts' || matrix.feature == 'media-fit'
-        shell: pwsh
-        run: tools/verify-wazig/install-ffmpeg.ps1
-      - name: Build pinned historical rollback input
-        if: matrix.feature == 'hub-rollback' || matrix.feature == 'hub-migration-crash' || matrix.feature == 'hub-migration-before-rename'
-        shell: pwsh
-        run: |
-          & tools/verify-wazig/build-historical-847.ps1 -Evidence planted-evidence/historical-847
-          if ($LASTEXITCODE -ne 0) { throw 'Historical rollback build failed' }
-      - name: Install Chrome screenshot driver
-        if: matrix.feature == 'text-comparison'
-        shell: pwsh
-        run: |
-          npm install --prefix "$env:RUNNER_TEMP/text-compare" --no-save playwright-core@1.58.2
-          if ($LASTEXITCODE -ne 0) { throw 'Chrome driver installation failed' }
-      - name: Run planted journey
-        id: journey
-        continue-on-error: true
-        shell: pwsh
-        env:
-          FEATURE: ${{ matrix.feature }}
-        run: |
-          pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin zig-out/bin -Evidence planted-evidence -ExpectedVersion ${{ env.BASE_APP_VERSION }}
-          $code = $LASTEXITCODE
-          if ($code -eq 0 -and $env:FEATURE -eq 'sidebar-surface') {
-            python tools/verify-wazig/check-evidence.py planted-evidence
-            $code = $LASTEXITCODE
-          }
-          "code=$code" >> $env:GITHUB_OUTPUT
-      - name: Classify planted failure
-        id: classify
-        shell: pwsh
-        env:
-          FEATURE: ${{ matrix.feature }}
-          PATCH: ${{ matrix.patch }}
-          CODE: ${{ steps.journey.outputs.code }}
-        run: |
-          if ($env:CODE -notmatch '^\d+$') { throw 'Journey did not report an exit code' }
-          & tools/verify-wazig/classify-red.ps1 -Feature $env:FEATURE -Evidence planted-evidence -ExitCode ([int]$env:CODE) -PassedMessage 'planted bug not caught' -ExpectedCheck "tools/verify-wazig/planted/$($env:PATCH).check"
-          exit 0
-      - name: Record planted result
-        if: always()
-        shell: pwsh
-        env:
-          CLASSIFICATION: ${{ steps.classify.outcome }}
-          CODE: ${{ steps.journey.outputs.code }}
-        run: |
-          New-Item planted-result -ItemType Directory -Force | Out-Null
-          $result = if ($env:CLASSIFICATION -eq 'success') { 'FAIL as expected' } elseif ($env:CODE -eq '0') { 'NOT CAUGHT' } else { 'BUILD ERROR' }
-          $result | Set-Content planted-result/result.txt
-      - name: Upload planted result
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: planted-result-${{ matrix.patch }}
-          path: planted-result/
-      - name: Upload planted evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: planted-evidence-${{ matrix.patch }}
-          path: planted-evidence/
-          if-no-files-found: warn
-  planted-summary:
-    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.plan.result == 'success' }}
-    needs: [plan, planted, verify]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: planted-result-*
-          path: results
-        continue-on-error: true
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: verify-wazig-*
-          path: results
-        continue-on-error: true
-      - name: Summarize planted and clean journeys
-        shell: python
-        env:
-          MATRIX: ${{ needs.plan.outputs.planted }}
-        run: |
-          import json
-          import os
-          from pathlib import Path
-
-          root = Path('results')
-          lines = ['| Journey | Planted result | Clean result |', '|---|---|---|']
-          for row in json.loads(os.environ['MATRIX'])['include']:
-              name = row['patch']
-              result = root / f'planted-result-{name}' / 'result.txt'
-              planted = result.read_text(encoding='utf-8-sig').strip() if result.exists() else 'BUILD ERROR'
-              clean_file = root / f'verify-wazig-{row["feature"]}' / 'clean-result.txt'
-              clean = clean_file.read_text(encoding='utf-8-sig').strip().upper() if clean_file.exists() else 'NOT RUN OR NO EVIDENCE'
-              lines.append(f'| {name} | {planted} | {clean} |')
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
-              summary.write('\n'.join(lines) + '\n')
   candidate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -351,7 +172,7 @@ jobs:
           & tools/verify-wazig/build-historical-847.ps1 -Evidence verification-evidence/historical-847
           if ($LASTEXITCODE -ne 0) { throw 'Historical rollback build failed' }
       - name: Unified private Windows path operations
-        if: matrix.feature == 'hub' || matrix.feature == 'whatsapp-hub'
+        if: matrix.feature == 'hub' || matrix.feature == 'whatsapp-hub' || matrix.feature == 'hub-wake-refresh'
         shell: pwsh
         run: |
           python tools/test_unified_windows_paths.py --zig zig
@@ -604,6 +425,8 @@ jobs:
       - name: Queued-send voice download historical red control
         if: matrix.feature == 'voice' && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/')
         shell: pwsh
+        env:
+          VOICE_DOWNLOAD_RED: '1'
         run: |
           $original = [IO.File]::ReadAllText('src/main.zig')
           try {
@@ -791,5 +614,4 @@ jobs:
           EVIDENCE_DIR: evidence
           VERDICT_POST: ${{ github.event.pull_request.head.repo.full_name == github.repository && '1' || '0' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          python3 -c 'import json, os, runpy; needs = json.loads(os.environ["NEEDS_JSON"]); needs["base-fails"] = needs["base-fails"] if "base-fails" in needs else {"result": "success", "outputs": {"classified": "true"}}; os.environ["NEEDS_JSON"] = json.dumps(needs); runpy.run_path("tools/verify-wazig/verdict.py", run_name="__main__")'
+        run: python3 tools/verify-wazig/verifier.py

@@ -1,0 +1,25 @@
+plan-pick: lane opencode: first lane that is not used up, limited or ahead of pace: monthly 100%, weekly 0%, 5-hour 0%; $200.00 of $200.00 included allowance; included allowance used up; anchored credit $7.44: $7.90 at 2026-11-23T17:05:37.838042+00:00 (OpenCode live console) less $0.46 run costs (floor $2); never top up; using held prepaid credit
+Pacer launch: opencode 2026-11-23T17:53:22Z
+Done: PR #561 is merged and released. https://github.com/valentinyeo/postbox/pull/561
+
+**Final state**
+- Merged 18:40Z as squash commit `e4faa39` on `main`; branch `soft-3105-read-mark-jump` deleted.
+- Release `v0.9.541` built from that commit: success (https://github.com/valentinyeo/postbox/actions/runs/45241231268).
+- Every check green at the merged head `83fd83e`: `ci`, `tdlib`, `windows-smoke`, `no-comments`, `unfurl-verification`, `private-markers`, `secret-scan`, `pr-title`, `verify-verdict`, plus `verify (read-ticks)`, `verify (media-fit)`, `caption-verification`.
+
+**Failures, cause, fix**
+1. `verify (read-ticks, true)` on the old head: the journey waited 90s for "read mark shown and repainted". The single Read mark no longer exists. Fixed by the ticks commit `8d51c09`: per-message status from `DeliveredTo`/`ReadBy`, rewritten journey that counts grey and blue pixels in each bubble's bottom-right.
+2. `verify (read-ticks, true)` on `b0e2857`: timed out at "the newest hold message reports read". The fake hub's `ReadTicksHandler` only overrode `do_GET`, so `/fixture/ticks/read` published no event and the app never refetched. Fixed in `83fd83e` (own SSE stream in the fixture).
+3. `caption-verification`: "media-fit: calibration must show eight separate M glyphs". The ticks draw inside the own bubble and added a ninth ink run to the word-step scan. Fixed in `b0e2857`: the measured band stops 12px above the bubble bottom in `media-fit.cs` and in `check-media-fit-evidence.py`, where the bubble's 10px bottom pad keeps text out.
+4. `pr-title`: my first body edit dropped the `Revert:` line. Added `Revert: none, ...`. Note `gh pr edit` itself fails here (see fault 1), so I patched title and body through `gh api PATCH`.
+5. The burst of instant "fail 0s" entries (`plan`, `native-tests`, `candidate`, `planted`) were cancelled jobs from superseded runs, not failures. Editing the PR body starts a second verify-wazig run that cancels the first. They passed on the next full run.
+
+**What Valentin sees now**: one grey tick for sent, two grey for delivered, two blue for read, inside every own bubble. Slack and Signal groups show none. A receipt cannot move the chat, because the ticks never change a row's height. The Windows journey proved it on the real binary: pixels counted per chat, and the hold bubble kept its height, bottom edge and scroll position when delivered turned blue.
+
+**Faults for the orchestrator**
+1. Shared GitHub tooling: `gh pr edit` exits 1 with `GraphQL: Projects (classic) is being deprecated ...` and applies nothing. Route to the gh wrapper owner.
+2. Worker repo board/view: `tools/test_verify_journeys.py` fails locally with `ModuleNotFoundError: No module named 'real_size_seed'` for the `real-size` fixture. Pre-existing and sandbox-only, it passes in CI. Already flagged by the earlier worker.
+3. Coordination: a second agent pushed `83fd83e` onto this branch while I was watching CI. Two workers on one ticket can overwrite each other; worth one worker per PR.
+4. No Hypertask board login here, so SOFT-3129, SOFT-3105 and SOFT-2913 are not moved to Done. The orchestrator files that.
+
+Next action: install Postbox `v0.9.541` and open a WhatsApp chat to see the ticks.
