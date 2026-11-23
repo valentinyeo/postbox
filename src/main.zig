@@ -2781,10 +2781,6 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     a.last_refresh_unix = nowUnixSeconds();
     if (fresh) {
         a.last_inbox_fetch_ms = win.GetTickCount64();
-        if (verification_fixture and a.verification_inbox_stale_once) {
-            a.verification_inbox_stale_once = false;
-            a.last_inbox_fetch_ms = a.last_inbox_fetch_ms -| sync_gate.hub_wake_gap_ms -| 1000;
-        }
     }
     for (data.items) |item| {
         if (!unifiedHub(a) and !messenger_view.includes(view, .whatsapp)) break;
@@ -14868,11 +14864,6 @@ fn controlDispatch(a: *App, call: *ControlCall) !void {
             try w.print(",\"queued\":\"{s}\"}}}}\n", .{@tagName(request.cmd)});
         },
         .@"archive-many" => try controlArchiveMany(a, w, request.ids),
-        .@"hub-resume" => {
-            if (!verification_fixture or !hubConfigured(a)) return control_api.writeError(w, "unavailable");
-            hubVerificationResume(a);
-            try w.writeAll("{\"ok\":true,\"result\":{}}\n");
-        },
     }
 }
 
@@ -20064,6 +20055,11 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         },
         win.WM_POWERBROADCAST => {
             if (wparam == win.PBT_APMRESUMEAUTOMATIC) {
+                if (verification_fixture and a.verification_inbox_stale_once) {
+                    a.verification_inbox_stale_once = false;
+                    a.last_inbox_fetch_ms = a.last_inbox_fetch_ms -| sync_gate.hub_wake_gap_ms -| 1000;
+                    a.last_refresh_unix = nowUnixSeconds() - sync_gate.hub_wake_gap_secs - 1;
+                }
                 hubWakeRefreshIfStale(a);
                 startUpdateCheck(hwnd, false);
             }
@@ -24468,11 +24464,6 @@ fn hubSafetyRefreshIfDue(a: *App) void {
     const now = win.GetTickCount64();
     if (!sync_gate.hubSafetyPollDue(a.last_inbox_fetch_ms, now)) return;
     hubRefreshInboxAndOpenChat(a);
-}
-
-fn hubVerificationResume(a: *App) void {
-    if (!verification_fixture or !hubConfigured(a)) return;
-    hubWakeRefreshIfStale(a);
 }
 
 fn hubReconnectSleep(a: *App, wait_ms: u64) void {
