@@ -87,6 +87,7 @@ run python3 tools/check_cache_keys.py
 run python3 tools/verify-wazig/check-map.py
 run python3 tools/verify-wazig/test-lint-assertions.py
 run python3 tools/verify-wazig/test-read-fixture.py
+run python3 tools/verify-wazig/test-mention-fixture.py
 run python3 tools/verify-wazig/lint-assertions.py
 run python3 tools/formal/check_formal.py
 if [ -n "${PRIVATE_MARKERS:-}" ]; then
