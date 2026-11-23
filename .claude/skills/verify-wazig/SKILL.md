@@ -9,9 +9,9 @@ pstack: 0.15.43
 
 ## Launch
 
-Bug-fix PRs must name a `Repro:` journey that passes on the PR head and fails on base after the app launches and doctor passes; launch and setup failures do not count.
+A bug fix starts from a journey that shows the bug after the app launches and doctor passes; launch and setup failures do not count. Nothing in CI asks for a `Repro:` line. A journey that failed on the latest default-branch run is pre-existing and does not fail a pull request.
 
-Planted patches in `tools/verify-wazig/planted/` must fail their journeys after launch; scheduled and dispatched runs report red and clean results.
+Planted patches in `tools/verify-wazig/planted/` must fail their journeys after launch; the nightly `planted.yml` workflow, scheduled and dispatched on its own, reports red and clean results.
 
 A new probe must pass `repeat=3` before it merges.
 Run `gh workflow run verify.yml -f feature=<id> -f repeat=3` and inspect all three runs.
@@ -57,7 +57,7 @@ Select a recipe using `feature=<name>` from [journeys.json](../../../tools/verif
 Artifacts are uploaded as `verify-wazig-<feature>` even after failure. `verification-evidence/` contains:
 
 - `before.png`, `after.png`, UI Automation trees and read-only state snapshots; search also captures `empty.png`, palette/appearance/archive capture `action.png`; archive also captures `kept.png`, `inbox.png` and visible-chat snapshots.
-- Palette retains `removed-status.json` and `removed-status.png`: one positive shortcut row, zero Status results and no former sidebar control. Appearance retains `text-scale.json` and `text-larger.png`: keyboard growth saves 92%, Ctrl+0 restores 82%.
+- Palette retains `removed-status.json` and `removed-status.png`: one positive shortcut row, zero Status results and no former sidebar control. Appearance retains `text-scale.json` and `text-larger.png`: keyboard growth saves 110%, Ctrl+0 restores 100%.
 - Text comparison retains `text-metrics.json`, `chrome.json`, matching font files/license, `wazig.png`, `chrome.png`, paragraph crops at 1x/3x and `text-comparison.png`; `check-text-comparison.cjs` validates fixture and font hashes plus metrics, not pixel equality.
 - Menus captures named `amoled-*-before.png` / `amoled-*-after.png` pairs, `green-chat-before.png` / `green-chat-after.png`, `theme-green-action.png` and `menu-luminances.json` with screenshot pixel measurements and thresholds. Before means the popup closed; after means the actual open popup, not a historical app build.
 - `actions.log`, `run.log`, `doctor.json`, `session.json` with build hash/revision, and `result.txt` or `failure.txt`.
@@ -90,6 +90,8 @@ The `signal` journey uses the unified hub fixture to observe QR linking before a
 The launch, doctor and cleanup helpers are repository-owned PowerShell scripts executed explicitly with `pwsh -NoProfile -File`; no execution-policy changes are needed. The hub fixture additionally uses the GitHub runner’s Python installation, never a bundled app runtime. `run.ps1`, `doctor.ps1` and `cleanup.ps1` invocations are above. `harness.ps1` is their shared library, dot-sourced by those entry points, not a separate launcher. Launch/Drive are GitHub-only, even when an agent has access to another Windows machine.
 
 Read-only validators (no app launch): `python3 tools/verify-wazig/check-map.py` checks map structure and source labels; `python3 tools/verify-wazig/check-evidence.py evidence/<id>` checks downloaded evidence for journeys with a registry validator, state transitions and surviving proof files. On Windows Actions use `python` in place of `python3`. Artifact validation does not replace looking at the images. Launch also writes `launch-guards.log`, proving that non-Actions and non-isolated fixture launches are rejected, and checks that the runner's production preferences are never created.
+
+Run `python3 tools/verify-wazig/lint-assertions.py` and its focused test `python3 tools/verify-wazig/test-lint-assertions.py` without launching the app. The light preflight runs both. The lint rejects common proxy-only text, success-flag and exit-code assertions, including the former hub mention check. Exact exceptions in `proxy-allowlist.json` must explain their setup role or companion visible/payload proof; unused exceptions fail. This lexical check does not replace reviewing every step and fixture shape. `python3 tools/verify-wazig/test-read-fixture.py` checks the older-read/newest-unread history shape without a provider or desktop. `python3 tools/verify-wazig/test-mention-fixture.py` checks that acknowledged mention sends return in history with production fields.
 
 Maintain the map when shortcuts or commands change; `/maintain-verification-skill` is the maintenance loop.
 

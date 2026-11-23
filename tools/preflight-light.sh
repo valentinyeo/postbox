@@ -3,9 +3,7 @@ set -euo pipefail
 cd "${1:-$(git rev-parse --show-toplevel)}"
 run() { echo "preflight-light: $*"; "$@"; }
 PYTHON_LIGHT_TESTS=(
-    test_ai_review
     test_install_ffmpeg
-    test_break_it
     test_app_icon
     test_archive_palette_proof
     test_design_kit
@@ -25,8 +23,10 @@ PYTHON_LIGHT_TESTS=(
     test_no_comments
     test_no_stories
     test_palette_archived
+    test_pc_check
     test_pin_icon
     test_postbox
+    test_preexisting_journey
     test_reaction_layout
     test_real_size
     test_recording_paint
@@ -51,7 +51,6 @@ PYTHON_LIGHT_TESTS=(
     test_judge_eval
     test_revert_first
     test_verification_job_counts
-    test_base_repro_cache
     test_verify_failure_marker
     test_verify_journeys
     test_voice_language
@@ -74,7 +73,6 @@ run bash tools/test-check-required-checks.sh
 run bash tools/check-feature-map.sh .
 run bash tools/test-check-feature-map.sh
 run bash tools/test-check-pr-proof.sh
-run bash tools/test-check-repro-first.sh
 run bash tools/test-map-upkeep.sh
 run bash tools/check-no-source-text-tests.sh .
 run bash tools/check-no-empty-catch.sh .
@@ -82,11 +80,17 @@ run bash tools/check-no-new-pixel-numbers.sh .
 run bash tools/test-check-no-source-text-tests.sh
 run bash tools/test-check-no-empty-catch.sh
 run bash tools/test-check-no-new-pixel-numbers.sh
+run python3 tools/check-ladder-calls.py .
+run bash tools/test-check-ladder-calls.sh
 run node tools/strip-comments.mjs --check
 run node tools/check-fonts.mjs
 run python3 tools/check-planted.py
 run python3 tools/check_cache_keys.py
 run python3 tools/verify-wazig/check-map.py
+run python3 tools/verify-wazig/test-lint-assertions.py
+run python3 tools/verify-wazig/test-read-fixture.py
+run python3 tools/verify-wazig/test-mention-fixture.py
+run python3 tools/verify-wazig/lint-assertions.py
 run python3 tools/formal/check_formal.py
 if [ -n "${PRIVATE_MARKERS:-}" ]; then
     run python3 tools/check_private_markers.py

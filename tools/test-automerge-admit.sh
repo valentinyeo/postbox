@@ -54,10 +54,12 @@ expect "superseded failed run of a check does not block" 'merge' \
     "$(echo "$base_info" | jq -c '.statusCheckRollup += [{__typename: "CheckRun", name: "ci", status: "COMPLETED", conclusion: "FAILURE", startedAt: "2026-11-18T23:29:00Z", completedAt: "2026-11-18T23:29:50Z"}] | (.statusCheckRollup[] | select(.name == "ci" and .conclusion == "SUCCESS")) |= (. + {startedAt: "2026-11-18T23:43:00Z", completedAt: "2026-11-18T23:44:00Z"})')" "$base_files" 0
 expect "newer failed run of a check still blocks" 'skip (required checks not green: ci)' \
     "$(echo "$base_info" | jq -c '.statusCheckRollup += [{__typename: "CheckRun", name: "ci", status: "COMPLETED", conclusion: "FAILURE", startedAt: "2026-11-18T23:50:00Z", completedAt: "2026-11-18T23:51:00Z"}] | (.statusCheckRollup[] | select(.name == "ci" and .conclusion == "SUCCESS")) |= (. + {startedAt: "2026-11-18T23:43:00Z", completedAt: "2026-11-18T23:44:00Z"})')" "$base_files" 0
-for skipped in candidate verify base-fails "verify (hub, true)" "planted (voice)"; do
+for skipped in candidate verify "verify (hub, true)"; do
     expect "skipped $skipped job does not block" 'merge' \
         "$(echo "$base_info" | jq -c --arg n "$skipped" '.statusCheckRollup += [{__typename: "CheckRun", name: $n, status: "COMPLETED", conclusion: "SKIPPED"}]')" "$base_files" 0
 done
+expect "skipped planted job still blocks" 'skip (required checks not green: planted (voice))' \
+    "$(echo "$base_info" | jq -c '.statusCheckRollup += [{__typename: "CheckRun", name: "planted (voice)", status: "COMPLETED", conclusion: "SKIPPED"}]')" "$base_files" 0
 expect "skipped unlisted job still blocks" 'skip (required checks not green: lint)' \
     "$(echo "$base_info" | jq -c '.statusCheckRollup += [{__typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SKIPPED"}]')" "$base_files" 0
 expect "missing required check still refused" 'skip (required checks not green: tdlib)' \

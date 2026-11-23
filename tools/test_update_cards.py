@@ -1,4 +1,8 @@
+import json
+import os
+import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -143,6 +147,78 @@ class UpdateCardTest(unittest.TestCase):
             self.assertEqual(passed.returncode, 0, passed.stderr)
             self.assertIn("Update card line verified", passed.stdout)
 
+    @patch("update_cards.command")
+    def test_update_file_carries_the_card_and_skipped_notes(self, command):
+        release = {
+            "tag_name": "v1.0.2",
+            "body": "- Newest change shows up",
+            "draft": False,
+            "prerelease": False,
+            "assets": [
+                {"name": "Postbox-v1.0.2.zip", "browser_download_url": "https://github.com/example/app/releases/download/v1.0.2/Postbox-v1.0.2.zip", "size": 12, "digest": "sha256:" + "a" * 64},
+                {"name": "SHA256SUMS.txt", "browser_download_url": "https://github.com/example/app/releases/download/v1.0.2/SHA256SUMS.txt", "size": 3, "digest": "sha256:" + "b" * 64},
+                {"name": "Postbox_arm64-v1.0.2.zip", "browser_download_url": "https://github.com/example/app/releases/download/v1.0.2/Postbox_arm64-v1.0.2.zip", "size": 13, "digest": ""},
+            ],
+        }
+        history = [
+            {"tag_name": "v1.0.2", "body": "- Newest change shows up"},
+            {"tag_name": "v1.0.1", "body": "- Older change shows up"},
+            {"tag_name": "v1.0.3", "draft": True, "body": "- Unpublished change"},
+            {"tag_name": "v1.0.4", "prerelease": True, "body": "- Preview change"},
+            {"tag_name": "v1.0.0", "body": "- Only a few notes"},
+        ]
+        command.side_effect = [json.dumps(release), json.dumps(history)]
+        document = json.loads(update_cards.update_file("example/app", "v1.0.2"))
+        self.assertEqual(document["tag_name"], "v1.0.2")
+        self.assertEqual(document["body"], "- Newest change shows up")
+        self.assertEqual([asset["name"] for asset in document["assets"]], ["Postbox-v1.0.2.zip"])
+        self.assertEqual(document["assets"][0]["digest"], "sha256:" + "a" * 64)
+        self.assertEqual([row["tag_name"] for row in document["history"]], ["v1.0.2", "v1.0.1", "v1.0.0"])
+        self.assertEqual(command.call_args_list[0].args, ("gh", "api", "repos/example/app/releases/tags/v1.0.2"))
+        self.assertEqual(command.call_args_list[1].args, ("gh", "api", "repos/example/app/releases?per_page=20"))
+
+    @patch("update_cards.command")
+    def test_update_file_refuses_a_release_without_a_digest(self, command):
+        command.side_effect = [json.dumps({"tag_name": "v1.0.2", "body": "", "assets": [{"name": "Postbox-v1.0.2.zip"}]}), "[]"]
+        with self.assertRaises(ValueError):
+            update_cards.update_file("example/app", "v1.0.2")
+
+    def test_update_file_cli_runs_real_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            release = {
+                "tag_name": "v1.0.2",
+                "body": "- Newest change shows up",
+                "assets": [
+                    {"name": "Postbox-v1.0.2.zip", "browser_download_url": "https://github.com/example/app/releases/download/v1.0.2/Postbox-v1.0.2.zip", "size": 12, "digest": "sha256:" + "a" * 64},
+                ],
+            }
+            history = [{"tag_name": "v1.0.1", "body": "- Older change shows up"}]
+            (root / "release.json").write_text(json.dumps(release))
+            (root / "history.json").write_text(json.dumps(history))
+            fake_gh = root / "gh"
+            fake_gh.write_text(
+                f"#!{sys.executable}\n"
+                "import pathlib, sys\n"
+                "root = pathlib.Path(sys.argv[0]).parent\n"
+                "endpoint = sys.argv[2]\n"
+                "name = 'release.json' if 'releases/tags/' in endpoint else 'history.json'\n"
+                "sys.stdout.write((root / name).read_text())\n"
+            )
+            fake_gh.chmod(fake_gh.stat().st_mode | stat.S_IXUSR)
+            env = dict(os.environ, PATH=f"{root}{os.pathsep}{os.environ.get('PATH', '')}")
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "tools/update_cards.py"), "update-file", "--repo", "example/app", "--tag", "v1.0.2"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            document = json.loads(result.stdout)
+            self.assertEqual(document["tag_name"], "v1.0.2")
+            self.assertEqual([row["tag_name"] for row in document["history"]], ["v1.0.2", "v1.0.1"])
+            self.assertEqual([asset["name"] for asset in document["assets"]], ["Postbox-v1.0.2.zip"])
+
     def test_workflow_and_ship_wiring(self):
         workflow = (ROOT / ".github/workflows/pr-title.yml").read_text()
         self.assertIn("types: [opened, edited, synchronize]", workflow)
@@ -151,6 +227,8 @@ class UpdateCardTest(unittest.TestCase):
         self.assertIn("previous_filename", workflow)
         release = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("tools/update_cards.py release-notes", release)
+        self.assertIn("tools/update_cards.py update-file", release)
+        self.assertIn('gh release upload "${GITHUB_REF_NAME}" "$RUNNER_TEMP/update.json"', release)
         self.assertNotIn("--generate-notes", release)
         self.assertIn('--notes-file "$RUNNER_TEMP/release-notes.txt"', release)
         self.assertIn("gh release edit", release)

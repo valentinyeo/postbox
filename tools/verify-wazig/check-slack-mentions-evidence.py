@@ -60,6 +60,7 @@ def check_slack_mentions(folder):
         assert state['pending_sends'] == state['pending_archives'] == 0
     proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
     assert 'slack-mentions mention-display PASS' in proof
+    assert 'slack-mentions mention-compose PASS' in proof
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     api = [row for row in requests if row['wire_path'].startswith('/v1/wazig/')]
     assert api and all(row['authorized'] for row in api if row['method'] != 'SSE')
@@ -79,14 +80,33 @@ def check_slack_mentions(folder):
         assert wire['MENTION-CONNECT']['Text'] == '@Guest Person meets <@WCONNECT01>'
         for key, user in [('MENTION-GUEST', 'UEXT00001'), ('MENTION-CONNECT', 'WCONNECT01')]:
             assert wire[key]['SenderJID'] == user and wire[key]['SenderName'] == history['users_info'][user]
-    assert not any(urlsplit(row['wire_path']).path in ('/v1/wazig/send', '/v1/wazig/archive', '/v1/wazig/react') for row in api)
+    assert not any(urlsplit(row['wire_path']).path in ('/v1/wazig/archive', '/v1/wazig/react') for row in api)
+    suggestions = read('mention-suggestions.json')
+    assert suggestions['visible'] is True and suggestions['width'] > 0
+    assert 0 < suggestions['height'] < suggestions['width']
+    picked = read('mention-picked.json')
+    assert picked['composer'] == '<@U4A59H6UT>' and picked['popup'] is False
+    sends = [row for row in api if urlsplit(row['wire_path']).path == '/v1/wazig/send']
+    assert len(sends) == 1 and sends[0]['status'] == 200 and sends[0]['authorized']
+    assert sends[0]['body']['chat'] == chat and sends[0]['body']['text'] == '<@U4A59H6UT> hello'
+    sent_history = read('mention-sent.messages.json')
+    assert sent_history['chat']['id'] == chat and len(sent_history['messages']) == 6
+    own, = [row for row in sent_history['messages'] if row['from_me']]
+    assert own['id'] == 'MENTION-SENT' and own['text'] == '@Fixture Peer hello'
+    assert own['bubble'][2] > own['bubble'][0]
+    assert all('<@' not in row['text'] for row in sent_history['messages'])
+    echoes = [row for history in histories for row in history['rows'] if row['MsgID'] == 'MENTION-SENT']
+    assert echoes and all(row['FromMe'] and row['Text'] == sends[0]['body']['text'] for row in echoes)
+    for name in ['mention-suggestions.png', 'mention-picked.png', 'mention-sent.png']:
+        image = (folder / name).read_bytes()
+        assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
     final = read('side-effects.json')
     assert final['chat_count'] == 1 and final['pending_sends'] == final['pending_archives'] == 0
     assert final['sync'] == 'stopped' and not final['slack_connected']
     assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for keys in ['%2', '^{TAB}']:
+    for keys in ['%2', '^{TAB}', '@fix', '{ENTER}', ' hello']:
         assert f'keys: {keys}' in actions
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
     assert 'JOURNEY PASSED: slack-mentions' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
-    print('EVIDENCE VERIFIED: cached Slack sender names, labelled mentions, guest and Connect names, neutral fallback and no rendered raw ids')
+    print('EVIDENCE VERIFIED: cached Slack sender names, labelled mentions, guest and Connect names, neutral fallback, in-app @ autocomplete and a real Slack mention in the sent payload')

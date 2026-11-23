@@ -82,7 +82,7 @@
       "source": "buildPaletteItems:command_dictation_auto",
       "proof": "dictation-shortcuts",
       "status": "covered",
-      "why": ""
+      "why": "The journey verifies the saved Auto selection. src/dictation_policy.zig unit tests verify English/German-only requests and fallback; no live speech service is used."
     },
     {
       "feature": "command_dictation_english",
@@ -270,6 +270,13 @@
       "feature": "command_refresh",
       "source": "buildPaletteItems:command_refresh",
       "proof": "slack-sort",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "hub-inbox-refresh",
+      "source": "main:hubSafetyRefreshIfDue",
+      "proof": "hub-wake-refresh",
       "status": "covered",
       "why": ""
     },
@@ -621,7 +628,7 @@
       "source": "src:update-card",
       "proof": "quiet-status",
       "status": "covered",
-      "why": ""
+      "why": "Card visibility is covered by quiet-status. postbox-upgrade.ps1 checks the newest offer with the GitHub API limit exhausted; tools/test_update_cards.py exercises release-file publishing through the real CLI."
     },
     {
       "feature": "atomic-update",
@@ -704,6 +711,13 @@
       "feature": "reply-navigation",
       "source": "src:reply",
       "proof": "reply",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "mention-autocomplete",
+      "source": "src:mention-autocomplete",
+      "proof": "slack-mentions",
       "status": "covered",
       "why": ""
     },

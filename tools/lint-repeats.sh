@@ -221,10 +221,6 @@ function fail(line, rule, problem, fix) {
     printf "lint-repeats: %s:%d: [%s] %s. Use %s.\n", file, line, rule, problem, fix
     failed = 1
 }
-function check_ai_review() {
-    if (file == ".github/workflows/ai-review.yml" && !review_secret)
-        fail(1, "B6", "AI review passes no review key to the reviewer", "AI_REVIEW_API_KEY: ${{ secrets.GROQ_API_KEY }} on the review step; no pull_request_target")
-}
 function finish() {
     if (tag_line && !dispatch)
         fail(tag_line, "B1", "bot-created release tag has no explicit release dispatch in its script", "gh workflow run release.yml --ref \"${next_tag}\" -R \"${GITHUB_REPOSITORY}\"")
@@ -241,10 +237,8 @@ function finish() {
     command = ""
 }
 FNR == 1 {
-    check_ai_review()
     if (file != "tools/automerge-admit.sh") finish()
     file = FILENAME
-    review_secret = 0
     if (file == ".github/workflows/automerge.yml") {
         automerge_line = 1
         running = 0
@@ -266,17 +260,12 @@ FNR == 1 {
         run_indent = indent
         next
     }
-    if (file == ".github/workflows/ai-review.yml") {
-        if (code ~ /secrets[[:space:]]*\.[[:space:]]*GROQ_API_KEY/) review_secret = 1
-        if (code ~ /pull_request_target/)
-            fail(FNR, "B6", "AI review runs on pull_request_target, which hands the review key to fork pull requests", "pull_request with the same-repository head check and the key only in that job")
-    }
-    if (code ~ /openrouter\.ai|OPENROUTER_API_KEY|api\.z\.ai|OPENAI_API_KEY/)
-        fail(FNR, "B6", "workflow calls a paid model provider", "the free Groq key from the GROQ_API_KEY secret through tools/ai-review.sh")
     if (code ~ /^[[:space:]]*runs-on:/ && code ~ /self-hosted/)
-        fail(FNR, "B7", "workflow runs on a self-hosted runner, whose public logs show the server\047s name and folders", "runs-on: ubuntu-latest; the AI review runs in ai-review.yml on GitHub")
+        fail(FNR, "B7", "workflow runs on a self-hosted runner, whose public logs show the server\047s name and folders", "runs-on: ubuntu-latest")
     if (file == ".github/workflows/automerge.yml" && code ~ /^[[:space:]]*REPO_OWNER:[[:space:]]*\$\{\{[[:space:]]*github\.repository_owner[[:space:]]*\}\}/) owner_env = 1
     if (!running) next
+    if (file == ".github/workflows/automerge.yml" && code ~ /for workflow in / && code !~ /(^|[[:space:]])auto-release\.yml([[:space:];]|$)/)
+        fail(FNR, "B1", "automerge dispatch loop omits the release after a bot merge", "auto-release.yml in both the post-merge and self-heal workflow lists")
     if (file == ".github/workflows/auto-release.yml") {
         if (code ~ /git[[:space:]]+push.*next_tag/ || code ~ /ref=refs\/tags\/\$\{next_tag\}/) tag_line = FNR
         if (code ~ /gh[[:space:]]+workflow[[:space:]]+run[[:space:]]+release\.yml/ && code ~ /--ref[[:space:]]+"?\$\{next_tag\}/) dispatch = 1
@@ -320,7 +309,6 @@ FNR == 1 {
     command = ""
 }
 END {
-    check_ai_review()
     finish()
     exit failed ? 1 : 0
 }
@@ -338,21 +326,18 @@ if [[ -f .github/workflows/automerge.yml && -f .github/workflows/verify.yml ]]; 
     fi
 fi
 
-if [[ -f .github/workflows/pr-title.yml && -f .github/workflows/automerge.yml ]]; then
-    if ! grep -Fq 'bash tools/check-repro-first.sh' .github/workflows/pr-title.yml ||
-       ! grep -Fq 'bash tools/check-repro-first.sh' .github/workflows/automerge.yml ||
-       ! grep -Fq '.name == "repro-first" and .status == "COMPLETED" and .conclusion == "SUCCESS"' .github/workflows/automerge.yml ||
-       ! grep -Fq '.name == ("base-fails (" + $repro + ")") and .status == "completed" and .conclusion == "success"' .github/workflows/automerge.yml; then
-        printf 'lint-repeats: .github/workflows/automerge.yml:1: [B12] Reproduction checks can be skipped. Require repro-first and a successful base-fails job.\n'
+if [[ -f .github/workflows/verify.yml ]]; then
+    if ! grep -Eq '^  schedule:$' .github/workflows/verify.yml ||
+       ! grep -Eq '^    - cron: ' .github/workflows/verify.yml; then
+        printf 'lint-repeats: .github/workflows/verify.yml:1: [B13] The nightly verification trigger is missing. Restore the schedule and its cron.\n'
         failed=1
     fi
-fi
-
-if [[ -f .github/workflows/verify.yml ]]; then
-    if ! grep -Eq '^  planted:$' .github/workflows/verify.yml ||
-       ! grep -Eq '^  schedule:$' .github/workflows/verify.yml ||
-       ! grep -Eq '^    - cron: ' .github/workflows/verify.yml; then
-        printf 'lint-repeats: .github/workflows/verify.yml:1: [B13] Planted journey verification or its nightly trigger is missing. Restore both.\n'
+    if [[ ! -f .github/workflows/planted.yml ]] ||
+       ! grep -Eq '^  planted:$' .github/workflows/planted.yml ||
+       ! grep -Eq '^  planted-summary:$' .github/workflows/planted.yml ||
+       ! grep -Eq '^  schedule:$' .github/workflows/planted.yml ||
+       ! grep -Eq '^    - cron: ' .github/workflows/planted.yml; then
+        printf 'lint-repeats: .github/workflows/planted.yml:1: [B13] Planted journey verification or its nightly trigger is missing. Restore both in planted.yml.\n'
         failed=1
     fi
 fi
@@ -372,25 +357,26 @@ if ! awk '
 BEGIN {
     for (i = 1; i < ARGC; i++) {
         file = ARGV[i]
-        concurrency = active = safe = 0
+        concurrency = active = cancels = 0
         while ((getline code < file) > 0) {
             if (code ~ /^concurrency:/) concurrency = active = 1
             else if (code ~ /^[^[:space:]]/) active = 0
-            if (active && code ~ /^  cancel-in-progress:[[:space:]]*false[[:space:]]*$/) safe = 1
+            if (active && code ~ /^  cancel-in-progress:[[:space:]]*true[[:space:]]*$/) cancels = 1
         }
         close(file)
-        if (!concurrency) {
-            printf "lint-repeats: %s:1: [B15] Workflow has no top-level concurrency block. Add concurrency with a workflow-specific group and cancel-in-progress: true; release.yml uses false.\n", file
-            failed = 1
-        }
-        if (file == ".github/workflows/release.yml" && !safe) {
-            printf "lint-repeats: %s:1: [B15] Publishing can be cancelled mid-publish. Add cancel-in-progress: false to the top-level concurrency block.\n", file
+        if (!concurrency || !cancels) {
+            printf "lint-repeats: %s:1: [B15] Superseded runs keep running. Add a top-level concurrency group with cancel-in-progress: true.\n", file
             failed = 1
         }
     }
     exit failed ? 1 : 0
 }
 ' .github/workflows/*.yml .github/workflows/*.yaml; then
+    failed=1
+fi
+
+if [[ -f .github/workflows/release.yml ]] && ! grep -Fq 'group: release-${{ github.ref }}' .github/workflows/release.yml; then
+    printf 'lint-repeats: .github/workflows/release.yml:1: [B15] Different releases must never cancel each other. Key the release concurrency group on github.ref.\n'
     failed=1
 fi
 

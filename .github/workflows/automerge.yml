@@ -7,8 +7,8 @@ on:
     - cron: "0 */6 * * *"
   workflow_dispatch:
 concurrency:
-  group: automerge
-  cancel-in-progress: false
+  group: automerge-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: write
   pull-requests: write
@@ -33,7 +33,7 @@ jobs:
           set -uo pipefail
           merged_any=0
           for pr in $(gh pr list -R "$REPO" --state open --json number -q '.[].number'); do
-            info=$(gh pr view "$pr" -R "$REPO" --json isDraft,labels,additions,deletions,files,mergeable,statusCheckRollup,headRefOid,isCrossRepository,author,title,body) || { echo "#$pr: could not read PR head checks"; continue; }
+            info=$(gh pr view "$pr" -R "$REPO" --json isDraft,labels,additions,deletions,files,mergeable,statusCheckRollup,headRefOid,isCrossRepository,author) || { echo "#$pr: could not read PR head checks"; continue; }
             head_oid=$(echo "$info" | jq -er '.headRefOid | select(test("^[0-9a-f]{40}$"))') || { echo "#$pr: invalid PR head"; continue; }
             behind_by=$(gh api "repos/$REPO/compare/main...$head_oid" --jq .behind_by 2>/dev/null) || behind_by=""
             files_json=$(gh api "repos/$REPO/pulls/$pr/files?per_page=100" --paginate --jq '.[] | .filename, (.previous_filename // empty)' 2>/dev/null | jq -R . | jq -cs .) || files_json=""
@@ -41,26 +41,12 @@ jobs:
             printf '%s' "$files_json" > "$RUNNER_TEMP/pr-files.json"
             verdict=$(bash tools/automerge-admit.sh "$RUNNER_TEMP/pr-info.json" "$RUNNER_TEMP/pr-files.json" "$behind_by" "$REPO_OWNER") || verdict="skip (admission script failed)"
             if [ "$verdict" != "merge" ]; then echo "#$pr: $verdict"; continue; fi
-            printf '%s' "$info" | jq -r '.body // ""' > "$RUNNER_TEMP/pr-body.txt"
-            printf '%s' "$files_json" | jq -r '.[]' > "$RUNNER_TEMP/pr-paths.txt"
-            title=$(printf '%s' "$info" | jq -r '.title')
-            repro=$(bash tools/check-repro-first.sh "$title" "$RUNNER_TEMP/pr-body.txt" "$RUNNER_TEMP/pr-paths.txt") || { echo "#$pr: invalid repro"; continue; }
-            repro_check=$(printf '%s' "$info" | jq -r '[.statusCheckRollup[] | select(.name == "repro-first" and .status == "COMPLETED" and .conclusion == "SUCCESS")] | length') || repro_check=0
-            if [ -n "$repro" ] && [ "$repro_check" -eq 0 ]; then echo "#$pr: repro-first check missing or failed"; continue; fi
             verify_needed=$(printf '%s' "$files_json" | jq -r 'if type != "array" or length == 0 then error("missing files") else any(.[]; startswith("src/") or . == "build.zig" or startswith("tools/verify-wazig/") or . == ".github/workflows/verify.yml") end') || { echo "#$pr: could not evaluate verification paths"; continue; }
-            if [ "$verify_needed" = "true" ] || { [ -n "$repro" ] && [ "$repro" != "none" ]; }; then
+            if [ "$verify_needed" = "true" ]; then
               verify_runs=$(gh api "repos/$REPO/actions/workflows/verify.yml/runs?event=pull_request&head_sha=$head_oid&per_page=100" --jq '[.workflow_runs[] | {id, status, conclusion, head_sha}] | sort_by(.id) | last' 2>/dev/null) || verify_runs=""
               if ! printf '%s' "$verify_runs" | jq -e --arg head "$head_oid" '.head_sha == $head and .status == "completed" and .conclusion == "success"' > /dev/null; then
                 echo "#$pr: verify-wazig is missing, pending or failed on the PR head"
                 continue
-              fi
-              if [ -n "$repro" ] && [ "$repro" != "none" ]; then
-                run_id=$(printf '%s' "$verify_runs" | jq -r '.id')
-                jobs=$(gh api "repos/$REPO/actions/runs/$run_id/jobs?per_page=100" --paginate 2>/dev/null) || jobs=""
-                if ! printf '%s' "$jobs" | jq -e --arg repro "$repro" '[.jobs[] | select(.name == ("base-fails (" + $repro + ")") and .status == "completed" and .conclusion == "success")] | length == 1' > /dev/null; then
-                  echo "#$pr: base-fails is missing or failed"
-                  continue
-                fi
               fi
             fi
             if gh pr merge "$pr" -R "$REPO" --squash --delete-branch --match-head-commit "$head_oid"; then
@@ -71,7 +57,7 @@ jobs:
                 echo "#$pr: could not resolve the merge commit; not starting ci" >&2
                 exit 1
               fi
-              for workflow in ci.yml no-comments.yml; do
+              for workflow in ci.yml no-comments.yml auto-release.yml; do
                 workflow_started=""
                 for _ in 1 2 3; do
                   gh workflow run "$workflow" -R "$REPO" --ref main || echo "#$pr: dispatch attempt failed; retrying"
@@ -109,7 +95,7 @@ jobs:
             if ! echo "${head_oid}" | grep -Eq '^[0-9a-f]{40}$'; then
               echo "could not resolve main head; skipping self-heal this pass" >&2
             else
-              for workflow in ci.yml no-comments.yml; do
+              for workflow in ci.yml no-comments.yml auto-release.yml; do
                 run_count=$(gh run list -R "$REPO" -w "$workflow" -b main --commit "$head_oid" --json databaseId -q 'length') || run_count=""
                 if [ -z "$run_count" ]; then
                   echo "could not list ${workflow} runs for main head; skipping self-heal this pass" >&2

@@ -1,0 +1,107 @@
+[
+  {
+    "file": "archive-presentation.ps1",
+    "assertion": "$weight.Success",
+    "reason": "The parser success checks a layout prerequisite; check-archive-presentation.py separately measures screenshot row colours and contrast."
+  },
+  {
+    "file": "archive-presentation.ps1",
+    "assertion": "Save-Screen $Session $Name & python \"$PSScriptRoot/check-archive-presentation.py\" $Session.evidence --scene $Name | Out-Host $LASTEXITCODE -eq 0",
+    "reason": "The parser success checks a layout prerequisite; check-archive-presentation.py separately measures screenshot row colours and contrast."
+  },
+  {
+    "file": "build-historical-847.ps1",
+    "assertion": "$LASTEXITCODE -ne 0",
+    "reason": "These are historical build prerequisites; commit, tree, binary hashes and the actual rollback journey are checked separately."
+  },
+  {
+    "file": "build-historical-847.ps1",
+    "assertion": "$buildExit -ne 0",
+    "reason": "These are historical build prerequisites; commit, tree, binary hashes and the actual rollback journey are checked separately."
+  },
+  {
+    "file": "check-chat-rows.ps1",
+    "assertion": "$LASTEXITCODE -ne 0",
+    "reason": "These commands retrieve the historical renderer and run its geometry regression; they do not claim a desktop feature passed."
+  },
+  {
+    "file": "classify-red.ps1",
+    "assertion": "$LASTEXITCODE -ne 0",
+    "reason": "The classifier requires the journey-specific assertion marker after launch and doctor; a generic nonzero process exit is rejected."
+  },
+  {
+    "file": "compare-text.ps1",
+    "assertion": "$LASTEXITCODE -ne 0",
+    "reason": "The external Chrome driver compares fixture hashes, font metrics and captures; check-text-comparison.cjs independently validates the retained evidence."
+  },
+  {
+    "file": "harness.ps1",
+    "assertion": "$LASTEXITCODE -ne 0",
+    "reason": "This guards control-client execution or delegates to check-hub-views.py and check-workspace-icons.py; subsequent parsed state, identity partitions or screenshot pixels supply feature proof."
+  },
+  {
+    "file": "harness.ps1",
+    "assertion": "$child.ExitCode -eq 0",
+    "reason": "This guards control-client execution or delegates to check-hub-views.py and check-workspace-icons.py; subsequent parsed state, identity partitions or screenshot pixels supply feature proof."
+  },
+  {
+    "file": "harness.ps1",
+    "assertion": "$LASTEXITCODE -eq 0",
+    "reason": "This guards control-client execution or delegates to check-hub-views.py and check-workspace-icons.py; subsequent parsed state, identity partitions or screenshot pixels supply feature proof."
+  },
+  {
+    "file": "harness.ps1",
+    "assertion": "Save-Screen $Session workspace-icons-list & python \"$PSScriptRoot/check-workspace-icons.py\" $Session.evidence --capture | Out-Host $LASTEXITCODE -eq 0",
+    "reason": "This guards control-client execution or delegates to check-hub-views.py and check-workspace-icons.py; subsequent parsed state, identity partitions or screenshot pixels supply feature proof."
+  },
+  {
+    "file": "install-audio.ps1",
+    "assertion": "$LASTEXITCODE -ne 0",
+    "reason": "Audio installation is a runner prerequisite; signed archive hashes and the voice journey playback and pixel checks supply independent proof."
+  },
+  {
+    "file": "install-audio.ps1",
+    "assertion": "$installer.ExitCode -ne 0",
+    "reason": "Audio installation is a runner prerequisite; signed archive hashes and the voice journey playback and pixel checks supply independent proof."
+  },
+  {
+    "file": "journey-drafts.ps1",
+    "assertion": "$recorder.ExitCode -eq 0",
+    "reason": "The recorder process exit only guards evidence capture; exact native draft text, UIA selection, geometry and screenshot comparisons assert the feature."
+  },
+  {
+    "file": "postbox-upgrade.ps1",
+    "assertion": "$LASTEXITCODE -eq 0",
+    "reason": "Installer and certificate commands are setup prerequisites; executable hashes, relaunch state and the retained upgrade evidence validate the outcome separately."
+  },
+  {
+    "file": "rollback-offline-cleanup.ps1",
+    "assertion": "[IO.File]::ReadAllText($path) -cne 'read-write-delete'",
+    "reason": "This negative guard rejects bytes different from an exact known string in a disposable ACL probe; it asserts exact file contents, not text mutation."
+  },
+  {
+    "file": "run.ps1",
+    "assertion": "$child.ExitCode -ne 0",
+    "reason": "A nonzero exit is the expected result for deliberately unsafe launches; isolation guards and launch-guards.log corroborate rejection before desktop interaction."
+  },
+  {
+    "file": "telegram.ps1",
+    "assertion": "Save-Screen $Session linked & python \"$PSScriptRoot/check-telegram-evidence.py\" $Session.evidence --capture | Out-Host $LASTEXITCODE -eq 0",
+    "reason": "The delegated check-telegram-evidence.py capture measures avatar pixels against the full screenshot; identity, requests and cached bytes are checked independently."
+  },
+  {
+    "file": "transcript-copy.ps1",
+    "assertion": "$child.ExitCode -eq 0",
+    "reason": "The paste recipient must exit cleanly before its exact clipboard text and newline contents are compared; this exit does not establish copying correctness."
+  },
+  {
+    "file": "verify-archive-light.ps1",
+    "assertion": "$LASTEXITCODE -ne 0",
+    "reason": "These are wrapper command exits for a build, the native journey and screenshot contrast validators; the invoked tools check actual rows and pixels."
+  },
+  {
+    "file": "voice.ps1",
+    "assertion": "(Get-VoiceLayout $Session).signature -cne $before",
+    "reason": "A changed layout signature only synchronizes scrolling; each caller immediately runs Assert-VoicePixels to compare partial and full screenshot ink and bubble geometry."
+  }
+]

@@ -140,6 +140,29 @@ def compose_release(repo, tag):
     return notes + "\n" if notes else ""
 
 
+def update_file(repo, tag, runner=None):
+    runner = runner or command
+    release = json.loads(runner("gh", "api", f"repos/{repo}/releases/tags/{tag}"))
+    if release.get("tag_name") != tag:
+        raise ValueError(f"release {tag} is not published")
+    history = []
+    for row in json.loads(runner("gh", "api", f"repos/{repo}/releases?per_page=20")):
+        if not row.get("tag_name") or row.get("draft") or row.get("prerelease"):
+            continue
+        history.append({"tag_name": row["tag_name"], "body": row.get("body") or ""})
+    if not any(row["tag_name"] == tag for row in history):
+        history.insert(0, {"tag_name": tag, "body": release.get("body") or ""})
+    assets = [
+        {key: asset[key] for key in ("name", "browser_download_url", "size", "digest")}
+        for asset in release.get("assets") or []
+        if str(asset.get("name", "")).endswith(".zip") and asset.get("digest") and asset.get("browser_download_url")
+    ]
+    if not assets:
+        raise ValueError(f"release {tag} has no downloadable zip with a digest")
+    document = {"tag_name": tag, "body": release.get("body") or "", "assets": assets, "history": history}
+    return json.dumps(document, indent=1) + "\n"
+
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -149,6 +172,9 @@ def main():
     release = sub.add_parser("release-notes")
     release.add_argument("--repo", required=True)
     release.add_argument("--tag", required=True)
+    update = sub.add_parser("update-file")
+    update.add_argument("--repo", required=True)
+    update.add_argument("--tag", required=True)
     args = parser.parse_args()
     if args.mode == "check":
         try:
@@ -156,8 +182,13 @@ def main():
         except ValueError as error:
             parser.exit(1, str(error) + "\n")
         print("Update card line verified")
-    else:
+    elif args.mode == "release-notes":
         print(compose_release(args.repo, args.tag), end="")
+    else:
+        try:
+            print(update_file(args.repo, args.tag), end="")
+        except ValueError as error:
+            parser.exit(1, str(error) + "\n")
 
 
 if __name__ == "__main__":

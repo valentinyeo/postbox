@@ -105,6 +105,7 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `image-gallery` | `src:image-gallery` | GAP | GAP: No journey asserts this complete behavior end to end. |
 | `read-ticks` | `src:read-ticks` | read-ticks | covered |
 | `reply-navigation` | `src:reply` | reply | covered |
+| `mention-autocomplete` | `src:mention-autocomplete` | slack-mentions | covered |
 | `view-switching` | `src:views` | views | covered |
 | `chat-list-formatting` | `src:chat-lists` | chat-lists | covered |
 | `slack-threads` | `src:slack-threads` | slack-threads | covered |

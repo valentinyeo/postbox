@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
+if grep -q 'check-planted' "$ROOT/tools/map-upkeep.sh"; then
+    echo 'FAIL map-upkeep still runs planted coverage'
+    exit 1
+fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir "$TMP/bin"
@@ -42,3 +46,5 @@ run_case clean-no-issue '' 'issue \(create\|edit\|close\)' FAKE_RUN=1
 run_case clean-closes-open-issue 'issue close 7' 'issue \(create\|edit\)' FAKE_RUN=1 FAKE_ISSUE=7
 run_case red-nightly-opens-one-issue 'issue create' 'issue \(edit\|close\)' FAKE_RUN=1 FAKE_FAILED='verify (search, true)'
 run_case red-nightly-updates-existing-issue 'issue edit 7' 'issue \(create\|close\)' FAKE_RUN=1 FAKE_FAILED='verify (search, true)' FAKE_ISSUE=7
+run_case planted-nightly-is-read 'run list .*--workflow planted.yml' '' FAKE_RUN=1
+run_case red-planted-nightly-opens-one-issue 'issue create' 'issue \(edit\|close\)' FAKE_RUN=1 FAKE_FAILED='planted (search)'

@@ -1,0 +1,1 @@
+$start.Environment['WAZIG_VERIFY_HUB_STALE'] = '1'

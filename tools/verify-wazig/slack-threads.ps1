@@ -1,3 +1,5 @@
+. "$PSScriptRoot/menus.ps1"
+
 function Save-ThreadsState($Session, [string]$Name) {
     $thread = (Read-Control $Session status).slack_threads
     Assert-That ($null -ne $thread) 'Read-only Slack thread state missing'
@@ -6,8 +8,17 @@ function Save-ThreadsState($Session, [string]$Name) {
     return $thread
 }
 
+function Open-FixtureChat($Session, [string]$Search, [string]$Id) {
+    Send-Keys $Session '^f'
+    Send-Keys $Session $Search
+    $null = Wait-Until { (Read-Control $Session status).selected.id -eq $Id } "$Id selected"
+    Click-Control $Session '1032'
+    Send-Keys $Session '^f'
+    Send-Keys $Session '^a{BACKSPACE}{ESC}'
+}
+
 function Invoke-SlackThreadsJourney($Session, $Start) {
-    Send-Keys $Session '%2'
+    Open-FixtureChat $Session 'Verification Threads' 'slack:fixture-threads:channel'
     $null = Wait-Until {
         $state = Read-Control $Session status
         $state.selected.id -eq 'slack:fixture-threads:channel' -and $state.slack_threads.parent_reply_line -eq '30 replies' -and $state.slack_threads.inline_replies -eq 0 -and $state.slack_threads.loose_replies -eq 0
@@ -46,11 +57,41 @@ function Invoke-SlackThreadsJourney($Session, $Start) {
     @{ old_pid = $oldPid; old_start = $oldTicks; new_pid = $Session.pid; new_start = $Session.startTicks; root = $Session.root; id = $Session.id; sha256 = $Session.sha256 } | ConvertTo-Json | Set-Content (Join-Path $Session.evidence 'restart.json')
     $null = Wait-Until { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero } 'restarted fixture window' -Harness
     [VerifyWindow]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
-    Send-Keys $Session '%2'
-    $null = Wait-Until { $thread = (Read-Control $Session status).slack_threads; $thread.threads_option -eq 'off' -and $thread.inline_replies -eq 32 } 'account option survived same-profile restart'
+    Open-FixtureChat $Session 'Verification Threads' 'slack:fixture-threads:channel'
+    $null = Wait-Until { $thread = (Read-Control $Session status).slack_threads; $thread.threads_option -eq 'off' -and $thread.inline_replies -eq 32 } 'account option applied to the chat survived same-profile restart'
     Invoke-Doctor $Session | Out-Null
     $thread = Save-ThreadsState $Session threads-restart
     $thread | Add-Member -NotePropertyName restarted -NotePropertyValue ($old.HasExited -and $Session.startTicks -ne $oldTicks)
     $thread | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'threads-restart.json')
+    Invoke-PaletteCommand $Session 'Slack threads like Slack for this account'
+    $null = Wait-Until { $thread = (Read-Control $Session status).slack_threads; $thread.threads_option -eq 'on' -and $thread.inline_replies -eq 0 -and $thread.parent_reply_line -eq '30 replies' } 'account option back on folds the replies again'
+    Invoke-PaletteCommand $Session 'Replies: WhatsApp style'
+    $null = Wait-Until {
+        $thread = (Read-Control $Session status).slack_threads
+        $thread.replies_style -eq 'whatsapp' -and $thread.inline_replies -eq 32 -and $thread.loose_replies -eq 32 -and $thread.parent_reply_line -eq '' -and $thread.threads_option -eq 'off'
+    } 'this Slack chat follows its own WhatsApp style while the account keeps threads on'
+    $null = Save-ThreadsState $Session chat-whatsapp-style
+    Invoke-PaletteCommand $Session 'Replies: Slack style'
+    $null = Wait-Until {
+        $thread = (Read-Control $Session status).slack_threads
+        $thread.replies_style -eq 'slack' -and $thread.inline_replies -eq 0 -and $thread.loose_replies -eq 0 -and $thread.parent_reply_line -eq '30 replies' -and $thread.threads_option -eq 'on'
+    } 'this Slack chat folds the replies again in Slack style'
+    $null = Save-ThreadsState $Session chat-slack-style
+    Open-FixtureChat $Session 'Verification Fresh' 'fixture-fresh'
+    $null = Wait-Until {
+        $thread = (Read-Control $Session status).slack_threads
+        $thread.replies_style -eq 'slack' -and $thread.threads_option -eq 'on' -and $thread.parent_id -eq '1750000000.000100' -and $thread.parent_reply_line -eq '2 replies' -and $thread.inline_replies -eq 0 -and $thread.loose_replies -eq 0
+    } 'fresh Slack chat with no saved setting opens in Slack style'
+    $null = Save-ThreadsState $Session fresh-slack-default
+    Open-FixtureChat $Session 'Verification WhatsApp' 'fixture-whatsapp'
+    $null = Wait-Until {
+        $state = Read-Control $Session status
+        $state.selected.provider -eq 'whatsapp' -and $null -eq $state.slack_threads
+    } 'whatsapp chat with no saved setting opens in WhatsApp style'
+    $null = Wait-Until {
+        (Read-Control $Session messages).messages | Where-Object { $_.id -ceq 'WA-REPLY' -and $_.quote_line[2] -gt $_.quote_line[0] }
+    } 'whatsapp reply painted inline with its quote'
+    Read-Control $Session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Session.evidence 'whatsapp-default.messages.json')
+    Save-Screen $Session whatsapp-default
     return $app
 }

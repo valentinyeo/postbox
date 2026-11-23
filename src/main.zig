@@ -501,6 +501,7 @@ const Message = struct {
     my_reaction: Utf8Text(63) = .{},
     from_me: bool = false,
     read_by: i32 = 0,
+    delivered_to: i32 = 0,
     revoked: bool = false,
     forwarded: bool = false,
     send_state: enum { none, pending, failed } = .none,
@@ -791,6 +792,10 @@ const App = struct {
     hub_thread: ?std.Thread = null,
     hub_event_pending: std.atomic.Value(bool) = .init(false),
     hub_reset_pending: std.atomic.Value(bool) = .init(false),
+    last_inbox_fetch_ms: u64 = 0,
+    hub_reconnect_failures: std.atomic.Value(u32) = .init(0),
+    hub_reconnect_logged_ms: ?u64 = null,
+    verification_inbox_stale_once: bool = false,
     wacli_path: []u8,
     avatar_dir: []u8,
     hwnd: ?win.HWND = null,
@@ -817,6 +822,7 @@ const App = struct {
     threads_enabled: bool = true,
     replies_mode_key: Utf8Text(383) = .{},
     replies_mode_on: bool = false,
+    replies_mode_saved: bool = false,
     compose: ?win.HWND = null,
     compose_pill: win.RECT = std.mem.zeroes(win.RECT),
     compose_geometry: compose_layout.Layout = .{},
@@ -1739,24 +1745,25 @@ fn repliesModeKey(a: *App) ?[]u8 {
     return std.fmt.allocPrint(a.allocator, "RepliesSlack:{s}:{s}:{s}", .{ @tagName(chat.provider), chat.account.slice(), chat.jid.slice() }) catch null;
 }
 
-fn repliesSlackMode(a: *App) bool {
-    if (a.selected_chat >= a.chat_count) return false;
+fn repliesSlackMode(a: *App) ?bool {
+    if (a.selected_chat >= a.chat_count) return null;
     const chat = &a.chats[a.selected_chat];
     var key_buffer: [383]u8 = undefined;
     const cached_key = std.fmt.bufPrint(&key_buffer, "RepliesSlack:{s}:{s}:{s}", .{ @tagName(chat.provider), chat.account.slice(), chat.jid.slice() }) catch "";
-    if (cached_key.len > 0 and std.mem.eql(u8, cached_key, a.replies_mode_key.slice())) return a.replies_mode_on;
-    const key = repliesModeKey(a) orelse return false;
+    if (cached_key.len > 0 and std.mem.eql(u8, cached_key, a.replies_mode_key.slice())) return if (a.replies_mode_saved) a.replies_mode_on else null;
+    const key = repliesModeKey(a) orelse return null;
     defer a.allocator.free(key);
-    const wide = utf8ToWide(a.allocator, key) catch return false;
+    const wide = utf8ToWide(a.allocator, key) catch return null;
     defer a.allocator.free(wide);
     const value = loadRegistryString(a.allocator, wide.ptr);
     defer if (value) |text| a.allocator.free(text);
-    const on = if (value) |text| std.mem.eql(u8, text, "1") else false;
+    const saved = slack.repliesSetting(value);
     if (cached_key.len > 0) {
         a.replies_mode_key.set(cached_key);
-        a.replies_mode_on = on;
+        a.replies_mode_saved = saved != null;
+        a.replies_mode_on = saved orelse false;
     }
-    return on;
+    return saved;
 }
 
 fn setRepliesSlackMode(a: *App, enabled: bool) void {
@@ -1766,6 +1773,7 @@ fn setRepliesSlackMode(a: *App, enabled: bool) void {
     defer a.allocator.free(wide);
     _ = saveRegistryString(a.allocator, wide.ptr, if (enabled) "1" else "0");
     a.replies_mode_key.set("");
+    a.replies_mode_saved = false;
     a.msg_applied_hash = 0;
     refreshMessages(a);
     setStatus(a, if (enabled) "Replies: Slack style in this chat" else "Replies: WhatsApp style in this chat");
@@ -2775,6 +2783,9 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     }
     a.chat_count = 0;
     a.last_refresh_unix = nowUnixSeconds();
+    if (fresh) {
+        a.last_inbox_fetch_ms = win.GetTickCount64();
+    }
     for (data.items) |item| {
         if (!unifiedHub(a) and !messenger_view.includes(view, .whatsapp)) break;
         if (a.chat_count >= a.chats.len) break;
@@ -4113,7 +4124,7 @@ fn buildSlackMessage(a: *App, account: []const u8, item: slack.HistoryItem) Mess
     var raw_buffer: [900]u8 = undefined;
     const raw_text = slack.historyItemBody(item, &raw_buffer);
     const text = raw_text;
-    const is_thread_reply = slack.isThreadReply(item.ts, item.thread_ts) and !slackThreadsEnabled(a);
+    const is_thread_reply = slack.isThreadReply(item.ts, item.thread_ts) and !localSlackStyle(a);
     if (is_thread_reply and text.len > 0 and text.len + 4 <= slack.max_text) {
         var threaded: [slack.max_text + 4]u8 = undefined;
         const rendered = std.fmt.bufPrint(&threaded, "\u{21a9} {s}", .{text}) catch text;
@@ -4122,7 +4133,7 @@ fn buildSlackMessage(a: *App, account: []const u8, item: slack.HistoryItem) Mess
         setSlackMessageText(a, &message, text, lookup);
     }
     formatSlackTime(&message.time, a.allocator, item.ts);
-    if (slackThreadsEnabled(a)) rememberSlackThreadRow(a, &message);
+    if (localSlackStyle(a)) rememberSlackThreadRow(a, &message);
     if (item.file_url.len > 0) {
         message.media_type.set(slackMediaKind(item.file_mime));
         message.mime_type.set(item.file_mime);
@@ -4405,7 +4416,7 @@ fn applySlackReplies(a: *App, raw: []const u8, parent: []const u8) void {
         if (item.file_url.len > 0) requestSlackDownload(a, chat.account.slice(), chat.jid.slice(), item);
     }
     const cursor = slack.nextCursor(root);
-    if (slackThreadsEnabled(a) and cursor.len > 0) requestSlackThread(a, parent, cursor);
+    if (localSlackStyle(a) and cursor.len > 0) requestSlackThread(a, parent, cursor);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     if (a.user_viewed) requestSlackMark(a, chat.jid.slice());
 }
@@ -9382,7 +9393,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         .outer_fn = if (slack_installation_lookup) |lookup| lookup.lookupFn else null,
     };
     const slack_lookup = slack.UserLookup{ .context = @ptrCast(&slack_names), .lookupFn = hub.SlackUserNames.find };
-    const take = if (chat.provider == .slack and slackThreadsEnabled(a)) rows.len else @min(rows.len, max_messages);
+    const take = if (chat.provider == .slack and localSlackStyle(a)) rows.len else @min(rows.len, max_messages);
     var source_index = take;
     while (source_index > 0) {
         source_index -= 1;
@@ -9416,7 +9427,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
             message.thread_ts.set(getString(object, "thread_ts"));
             message.reply_count = @intCast(@max(0, getInt(object, "reply_count")));
             message.latest_reply.set(getString(object, "latest_reply"));
-            if (slackThreadsEnabled(a) and slack.isThreadReply(id, message.thread_ts.slice())) {
+            if (localSlackStyle(a) and slack.isThreadReply(id, message.thread_ts.slice())) {
                 if (splitQuote(text, getString(object, "Text"))) |parts| text = parts.body;
             }
         }
@@ -9425,7 +9436,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         message.revoked = revoked;
         if (message.revoked) {
             text = "Message deleted";
-        } else if (!(chat.provider == .slack and slackThreadsEnabled(a) and slack.isThreadReply(id, message.thread_ts.slice())) and getString(object, "quoted_msg_id").len > 0) {
+        } else if (!(chat.provider == .slack and localSlackStyle(a) and slack.isThreadReply(id, message.thread_ts.slice())) and getString(object, "quoted_msg_id").len > 0) {
             if (splitQuote(text, getString(object, "Text"))) |parts| {
                 const quoted_sender_jid = getString(object, "quoted_sender_jid");
                 var quote_buffer: [slack.max_text + 1]u8 = undefined;
@@ -9448,6 +9459,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         }
         message.from_me = getBool(object, "FromMe");
         message.read_by = if (chat.provider == .whatsapp or chat.provider == .telegram or chat.provider == .signal) @intCast(std.math.clamp(getInt(object, "ReadBy"), 0, 1000)) else 0;
+        message.delivered_to = if (chat.provider == .whatsapp) @intCast(std.math.clamp(getInt(object, "DeliveredTo"), 0, 1000)) else 0;
         message.forwarded = !revoked and chat.provider == .whatsapp and getBool(object, "IsForwarded");
         message.media_type.set(media_type);
         message.mime_type.set(getString(object, "MimeType"));
@@ -9473,7 +9485,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
             var reaction_buffer: [4096]u8 = undefined;
             message.reaction.set(a.allocator, slack_emoji.replace(&reaction_buffer, getString(object, "ReactionEmoji"), .{ .context = a, .resolve = resolveCustomEmoji }));
         }
-        if (chat.provider == .slack and slackThreadsEnabled(a)) rememberSlackThreadRow(a, &message);
+        if (chat.provider == .slack and localSlackStyle(a)) rememberSlackThreadRow(a, &message);
         if (source_index >= max_messages) continue;
         a.messages[a.message_count] = message;
         invalidateCanvasIconTooltips(a);
@@ -11242,6 +11254,46 @@ fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     drawFluentIcon(a, hdc, close, 0xE711, theme.current.on_surface_variant);
 }
 
+fn updateMentionPopup(a: *App) bool {
+    const compose = a.compose orelse return false;
+    var wide: [drafts.max_text + 1]u16 = undefined;
+    const length: usize = @intCast(win.GetWindowTextW(compose, &wide, wide.len));
+    var sel_start: u32 = 0;
+    var sel_end: u32 = 0;
+    _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
+    if (sel_start != sel_end or length == 0) return false;
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length]) catch return false;
+    defer a.allocator.free(text);
+    const token = mention_index.activeToken(text, sel_start) orelse return false;
+    var names: [32][128]u8 = undefined;
+    var people: [32]mention_index.Person = undefined;
+    const roster = mentionPeople(a, &names, &people);
+    var matches: [8]?mention_index.Match = @splat(null);
+    a.mention_roster = roster;
+    a.mention_query.set(token.query);
+    const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
+    if (found == 0) {
+        shortcodeHide(a);
+        return true;
+    }
+    a.sc_mention = true;
+    a.sc_sel = 0;
+    a.sc_count = @min(found, a.mention_rows.len);
+    for (matches[0..a.sc_count], 0..) |match, position| a.mention_rows[position] = people[match.?.index];
+    showMentionPopup(a, sel_start);
+    var status_buffer: [320]u8 = undefined;
+    var stream = std.Io.Writer.fixed(&status_buffer);
+    stream.writeAll("Mention: ") catch {};
+    const shown = @min(found, 3);
+    for (matches[0..shown], 0..) |match, position| {
+        if (position > 0) stream.writeAll(", ") catch {};
+        stream.writeAll(people[match.?.index].name) catch {};
+    }
+    if (found > shown) stream.print(" +{d}", .{found - shown}) catch {};
+    setStatus(a, stream.buffered());
+    return true;
+}
+
 fn acceptMention(a: *App) bool {
     const compose = a.compose orelse return false;
     var wide: [drafts.max_text + 1]u16 = undefined;
@@ -11348,6 +11400,16 @@ fn mentionPeople(a: *App, names: [][128]u8, out: []mention_index.Person) usize {
 fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
     if (message.quoted_msg_id.len == 0) return 0;
     return textLineHeight(hdc, a.font_small.?) * 2 + px(a, 6);
+}
+
+fn drawReadTicks(shapes: *const smooth.Context, a: *const App, message: *const Message) void {
+    const state = messageTicks(a, message);
+    if (state == .none) return;
+    var storage: message_layout.TickStorage = undefined;
+    const polylines = message_layout.fillTicks(&storage, message.bubble_hit.right, message.bubble_hit.bottom, read_receipt.ticks(state));
+    const ink = if (state == .read) read_tick_ink else theme.current.on_surface_variant;
+    const width: f32 = @floatFromInt(px(a, message_layout.tick_stroke));
+    for (polylines) |poly| smooth.strokePolyline(shapes, &poly, ink, width);
 }
 
 fn jumpToReply(a: *App, id: []const u8) bool {
@@ -12777,6 +12839,7 @@ fn shortcodeUpdate(a: *App) void {
         if (shortcodes.resolve(t.query())) |emoji| return shortcodeReplace(a, t, emoji);
         return shortcodeHide(a);
     }
+    a.sc_mention = false;
     a.sc_count = shortcodes.matches(t.query(), &a.sc_matches);
     a.sc_sel = 0;
     if (a.sc_count == 0) return shortcodeHide(a);
@@ -14961,9 +15024,9 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.writeByte(']');
     try w.print(",\"include_archived\":{},\"bulk_selected_count\":{d},\"mention_roster\":{d},\"mention_query\":\"{s}\"", .{ a.include_archived, a.bulk.items.len, a.mention_roster, a.mention_query.slice() });
     var buffer: [1024]u8 = undefined;
-    try w.print(",\"sync\":\"{s}\",\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
-        sync,              a.slack_connected.load(.acquire), pending_sends,   a.pending_archive_count,
-        slackChatCount(a), a.chat_count,                     a.show_archived, a.unread_only,
+    try w.print(",\"sync\":\"{s}\",\"last_inbox_fetch_ms\":{d},\"hub_reconnect_failures\":{d},\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
+        sync,              a.last_inbox_fetch_ms, a.hub_reconnect_failures.load(.acquire), a.slack_connected.load(.acquire), pending_sends, a.pending_archive_count,
+        slackChatCount(a), a.chat_count,          a.show_archived,                         a.unread_only,
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
@@ -15098,7 +15161,6 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     }
     try w.writeAll("]}");
     try controlSlackThreads(a, w);
-    try controlReadTick(a, w);
     const memory = readMemorySnapshot();
     try w.print(",\"memory\":{{\"working_set_kb\":{d},\"private_kb\":{d},\"module_count\":{d},\"media_foundation_loaded\":{}}}", .{
         memory.working_set_bytes / 1024,
@@ -15456,7 +15518,7 @@ fn controlMessages(a: *App, call: *ControlCall) !void {
             }
             try w.writeByte(']');
         }
-        try w.print(",\"from_me\":{},\"revoked\":{},\"send_state\":\"{s}\"}}", .{ message.from_me, message.revoked, @tagName(message.send_state) });
+        try w.print(",\"from_me\":{},\"revoked\":{},\"send_state\":\"{s}\",\"ticks\":\"{s}\"}}", .{ message.from_me, message.revoked, @tagName(message.send_state), @tagName(messageTicks(a, message)) });
     }
     try w.writeAll("]}}\n");
 }
@@ -15594,7 +15656,7 @@ fn buildPaletteItems(a: *App) void {
         appendPalette(a, "Cancel selection", "Esc", command_cancel_selection);
     }
     appendPalette(a, "Pick the mention", "", command_pick_mention);
-    const slack_replies = repliesSlackMode(a);
+    const slack_replies = localSlackStyle(a);
     appendPalette(a, if (slack_replies) "Replies: Slack style" else "Replies: WhatsApp style", "", if (slack_replies) command_replies_slack else command_replies_whatsapp);
     appendPalette(a, if (slack_replies) "Replies: WhatsApp style" else "Replies: Slack style", "", if (slack_replies) command_replies_whatsapp else command_replies_slack);
     appendPalette(a, if (a.show_archived) "Show inbox chats" else "Show archived chats", "", command_archived);
@@ -18052,6 +18114,10 @@ fn ownReadable(a: *App, index: usize) bool {
     return message.from_me and message.send_state == .none and !message.revoked and channelMessageVisible(a, message);
 }
 
+fn messageTicks(a: *const App, message: *const Message) read_receipt.Status {
+    return read_receipt.status(receiptCapability(a), message.from_me, message.send_state == .none, message.revoked, message.delivered_to, message.read_by);
+}
+
 fn receiptCapability(a: *const App) read_receipt.Capability {
     if (a.selected_chat >= a.chat_count) return .signal;
     return switch (a.chats[a.selected_chat].provider) {
@@ -18264,7 +18330,7 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, sh
         const shown: c_int = if (message.transcript_expanded) @intCast(message.transcript.len) else @intCast(@min(message.transcript.len, 400));
         parts.transcript = transcriptRender(hdc, a, message, shown, width - px(a, 24), false, 0, 0) + px(a, 2) + @max(px(a, 20), @max(px(a, 18), voiceFooterLineHeight(hdc, a)) + px(a, 2));
     }
-    parts.tail_pad = px(a, 10);
+    parts.tail_pad = px(a, message_layout.bubble_bottom_pad);
     parts.min_body = px(a, 20);
     parts.reaction_overhang = reactionChipSize(hdc, a, message, width).cy - px(a, 4);
     return message_layout.total(parts);
@@ -18272,6 +18338,7 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, sh
 
 const SenderColor = design.SenderColor;
 const sender_palette = design.sender_palette;
+const read_tick_ink: u32 = design.provider_colors.telegram;
 
 fn senderColorFor(seed: []const u8) SenderColor {
     if (seed.len == 0) return sender_palette[0];
@@ -18827,8 +18894,6 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     a.scroll_y = std.math.clamp(a.scroll_y, 0, a.max_scroll);
     a.quote_link_scroll = a.scroll_y;
     var cursor_y = client.bottom - px(a, 14) + a.scroll_y;
-    const receipt_message = read_receipt.newestOwn(a.message_count, a, ownReadable);
-    const receipt_capability = receiptCapability(a);
     var index = a.message_count;
     while (index > 0) {
         index -= 1;
@@ -19190,12 +19255,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 }
             }
         }
-        if (receipt_message == index and read_receipt.shows(receipt_capability, message.from_me, message.send_state == .none, message.revoked, message.read_by)) {
-            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-            _ = win.SetTextColor(hdc, design.ReaderHint);
-            var tick_rect = win.RECT{ .left = right - px(a, 20), .top = message.bubble_hit.bottom - px(a, 22), .right = right - px(a, 4), .bottom = message.bubble_hit.bottom - px(a, 4) };
-            _ = text_draw.drawText(hdc, lit("\u{2713}\u{2713}"), 2, &tick_rect, win.DT_RIGHT | win.DT_BOTTOM | win.DT_SINGLELINE | win.DT_NOPREFIX);
-        }
+        drawReadTicks(&shapes, a, message);
         if (message.reaction.len > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font.?));
             var my_reaction: [63]u16 = undefined;
@@ -20007,11 +20067,20 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return 0;
         },
         win.WM_POWERBROADCAST => {
-            if (wparam == win.PBT_APMRESUMEAUTOMATIC) startUpdateCheck(hwnd, false);
+            if (wparam == win.PBT_APMRESUMEAUTOMATIC) {
+                if (verification_fixture and a.verification_inbox_stale_once) {
+                    a.verification_inbox_stale_once = false;
+                    a.last_inbox_fetch_ms = a.last_inbox_fetch_ms -| sync_gate.hub_wake_gap_ms -| 1000;
+                    a.last_refresh_unix = nowUnixSeconds() - sync_gate.hub_wake_gap_secs - 1;
+                }
+                hubWakeRefreshIfStale(a);
+                startUpdateCheck(hwnd, false);
+            }
             return 1;
         },
         win.WM_ACTIVATE => {
             if (loword(wparam) != win.WA_INACTIVE) {
+                hubWakeRefreshIfStale(a);
                 startUpdateCheck(hwnd, false);
                 focusCompose(a);
             } else shortcodeHide(a);
@@ -20422,46 +20491,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 }
                 if (a.compose) |compose| {
                     if (win.GetWindowTextLengthW(compose) == 0) a.compose_dragged = 0;
-                    var wide: [drafts.max_text + 1]u16 = undefined;
-                    const length: usize = @intCast(win.GetWindowTextW(compose, &wide, wide.len));
-                    var sel_start: u32 = 0;
-                    var sel_end: u32 = 0;
-                    _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
-                    if (sel_start == sel_end and length > 0) {
-                        if (std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length])) |text| {
-                            defer a.allocator.free(text);
-                            if (mention_index.activeToken(text, sel_start)) |token| {
-                                var names: [32][128]u8 = undefined;
-                                var people: [32]mention_index.Person = undefined;
-                                const roster = mentionPeople(a, &names, &people);
-                                var matches: [8]?mention_index.Match = @splat(null);
-                                a.mention_roster = roster;
-                                a.mention_query.set(token.query);
-                                const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
-                                if (found > 0) {
-                                    a.sc_mention = true;
-                                    a.sc_sel = 0;
-                                    a.sc_count = @min(found, a.mention_rows.len);
-                                    for (matches[0..a.sc_count], 0..) |match, position| a.mention_rows[position] = people[match.?.index];
-                                    showMentionPopup(a, sel_start);
-                                    var status_buffer: [320]u8 = undefined;
-                                    var stream = std.Io.Writer.fixed(&status_buffer);
-                                    stream.writeAll("Mention: ") catch {};
-                                    const shown = @min(found, 3);
-                                    for (matches[0..shown], 0..) |match, position| {
-                                        if (position > 0) stream.writeAll(", ") catch {};
-                                        stream.writeAll(people[match.?.index].name) catch {};
-                                    }
-                                    if (found > shown) stream.print(" +{d}", .{found - shown}) catch {};
-                                    setStatus(a, stream.buffered());
-                                }
-                            }
-                        } else |_| {}
-                    }
                 }
                 saveComposerDraft(a);
                 layoutComposer(a);
-                shortcodeUpdate(a);
+                if (!updateMentionPopup(a)) shortcodeUpdate(a);
             }
             return 0;
         },
@@ -20509,6 +20542,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     }
                 }
                 checkSync(a);
+                hubSafetyRefreshIfDue(a);
                 a.group_refresh_ticks += 1;
                 if (a.group_refresh_ticks >= 60) {
                     refreshGroups(a);
@@ -21031,7 +21065,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         }
     }
     if (a.thread_compose != null and focus == a.thread_compose.?) return false;
-    if (!control and !alt and !shift and key == win.VK_RETURN and a.thread_parent.len == 0 and slackThreadsEnabled(a)) {
+    if (!control and !alt and !shift and key == win.VK_RETURN and a.thread_parent.len == 0 and slackThreadsAccount(a).len > 0 and localSlackStyle(a)) {
         if (a.selected_message) |selected| {
             const empty = if (a.compose) |compose| win.GetWindowTextLengthW(compose) == 0 else true;
             if (empty and selected < a.message_count) {
@@ -22030,6 +22064,7 @@ pub fn main(init: std.process.Init) !void {
             app.verification_migration_stop_before_rename = std.mem.eql(u8, migration_case, "hub-migration-before-rename");
         }
         app.verification_retry_evidence = std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_RETRY_EVIDENCE") orelse "", "1");
+        app.verification_inbox_stale_once = std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_HUB_STALE") orelse "", "1");
         if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_FAULT")) |fault| {
             app.unified_write_fault = std.meta.stringToEnum(@TypeOf(app.unified_write_fault), fault) orelse .none;
             if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_TRANSITION")) |transition| {
@@ -22824,9 +22859,9 @@ fn updateThreadMain(ctx: *UpdateContext) void {
 
 fn checkForUpdate(allocator: std.mem.Allocator) !?UpdateAvailable {
     const current = currentVersion() orelse return error.UpdateBadVersion;
-    const api_headers = try utf8ToWide(allocator, "User-Agent: Postbox updater\r\nAccept: application/vnd.github+json\r\n");
-    defer allocator.free(api_headers);
-    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/postbox/releases/latest"), api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
+    const release_headers = try utf8ToWide(allocator, "User-Agent: Postbox updater\r\n");
+    defer allocator.free(release_headers);
+    const json = try httpGet(allocator, lit(update.update_file_host), lit(update.update_file_path), release_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
     defer allocator.free(json);
     var parsed: std.json.Parsed(std.json.Value) = undefined;
     const maybe_asset = try update.pickAsset(allocator, json, &parsed);
@@ -22835,29 +22870,9 @@ fn checkForUpdate(allocator: std.mem.Allocator) !?UpdateAvailable {
     if (!update.isNewer(asset.tag, current)) return null;
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const history_allocator = arena.allocator();
     var releases: std.ArrayList(update.Release) = .empty;
-    try releases.append(history_allocator, .{ .tag = asset.tag, .body = update.releaseBody(parsed.value) });
-    var page: usize = 1;
-    while (true) : (page += 1) {
-        const path = try std.fmt.allocPrint(allocator, "/repos/valentinyeo/postbox/releases?page={d}", .{page});
-        defer allocator.free(path);
-        const wide_path = try utf8ToWide(allocator, path);
-        defer allocator.free(wide_path);
-        const history_json = try httpGet(allocator, lit("api.github.com"), wide_path.ptr, api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
-        defer allocator.free(history_json);
-        const history = try std.json.parseFromSlice(std.json.Value, allocator, history_json, .{});
-        defer history.deinit();
-        if (history.value != .array) return error.UpdateBadReleaseHistory;
-        if (history.value.array.items.len == 0) break;
-        for (history.value.array.items) |value| {
-            const release = update.releaseFromValue(value) orelse continue;
-            if (!update.isNewer(release.tag, current) or std.mem.eql(u8, release.tag, asset.tag) or update.isNewer(release.tag, asset.version)) continue;
-            try releases.append(history_allocator, .{
-                .tag = try history_allocator.dupe(u8, release.tag),
-                .body = try history_allocator.dupe(u8, release.body),
-            });
-        }
+    if ((try update.collectHistory(arena.allocator(), parsed.value, &releases)) == 0) {
+        try releases.append(arena.allocator(), .{ .tag = asset.tag, .body = update.releaseBody(parsed.value) });
     }
     const notes = try update.notesForReleases(allocator, releases.items, current, asset.version);
     errdefer allocator.free(notes);
@@ -23185,9 +23200,9 @@ fn performUpdate(io: std.Io, stage_only: bool) !UpdateOutcome {
         return swapStaged(io, allocator, root, stage, update_root, exe_path, exe_dir, exe_name, marker.?.inner_root);
     }
 
-    const api_headers = try utf8ToWide(allocator, "User-Agent: Postbox updater\r\nAccept: application/vnd.github+json\r\n");
-    defer allocator.free(api_headers);
-    const json = try httpGet(allocator, lit("api.github.com"), lit("/repos/valentinyeo/postbox/releases/latest"), api_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
+    const release_headers = try utf8ToWide(allocator, "User-Agent: Postbox updater\r\n");
+    defer allocator.free(release_headers);
+    const json = try httpGet(allocator, lit(update.update_file_host), lit(update.update_file_path), release_headers.ptr, 4 * 1024 * 1024, win.INTERNET_DEFAULT_HTTPS_PORT, true, true);
     defer allocator.free(json);
 
     var parsed: std.json.Parsed(std.json.Value) = undefined;
@@ -24384,6 +24399,39 @@ fn readHubChats(a: *App, archived: bool) ?[]u8 {
     return a.allocator.dupe(u8, normalized) catch null;
 }
 
+fn hubRefreshInboxAndOpenChat(a: *App) void {
+    if (!hubConfigured(a)) return;
+    const backend = hubTransport(a);
+    backend.refreshChats();
+    if (a.selected_chat < a.chat_count and (unifiedHub(a) or a.chats[a.selected_chat].provider == .whatsapp))
+        backend.refreshMessages(a.chats[a.selected_chat].jid.slice());
+}
+
+fn hubWakeRefreshIfStale(a: *App) void {
+    if (!hubConfigured(a)) return;
+    const stale_tick = sync_gate.hubInboxFetchStale(a.last_inbox_fetch_ms, win.GetTickCount64());
+    const stale_wall = sync_gate.hubWakeUnixStale(a.last_refresh_unix, nowUnixSeconds());
+    if (!stale_tick and !stale_wall) return;
+    hubRefreshInboxAndOpenChat(a);
+}
+
+fn hubSafetyRefreshIfDue(a: *App) void {
+    if (!hubConfigured(a)) return;
+    if (a.hwnd == null) return;
+    const now = win.GetTickCount64();
+    if (!sync_gate.hubSafetyPollDue(a.last_inbox_fetch_ms, now)) return;
+    hubRefreshInboxAndOpenChat(a);
+}
+
+fn hubReconnectSleep(a: *App, wait_ms: u64) void {
+    var waited: u64 = 0;
+    while (waited < wait_ms and !a.hub_stop.load(.acquire)) {
+        const step = @min(@as(u64, 100), wait_ms -| waited);
+        win.Sleep(@intCast(step));
+        waited += step;
+    }
+}
+
 fn startHubEvents(a: *App) void {
     if (a.hub_thread != null or a.hub_stop.load(.acquire)) return;
     a.hub_thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, hubEventsMain, .{a}) catch null;
@@ -24394,11 +24442,21 @@ fn hubEventsMain(a: *App) void {
     var sse = wa_hub.Sse{};
     while (!a.hub_stop.load(.acquire)) {
         hubEventSession(a, allocator, &sse) catch |err| {
-            var buffer: [128]u8 = undefined;
-            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "hub events: session failed: {s}", .{@errorName(err)}) catch "hub events: session failed");
+            const failures = a.hub_reconnect_failures.load(.acquire);
+            const wait_ms = sync_gate.hubReconnectWaitMs(failures);
+            a.hub_reconnect_failures.store(failures + 1, .release);
+            if (a.hub_reconnect_logged_ms != wait_ms) {
+                a.hub_reconnect_logged_ms = wait_ms;
+                var buffer: [160]u8 = undefined;
+                appendLaunchLog(a, std.fmt.bufPrint(&buffer, "hub events: session failed: {s}; retry in {d} ms", .{ @errorName(err), wait_ms }) catch "hub events: session failed");
+            }
+            hubReconnectSleep(a, wait_ms);
+            continue;
         };
-        var wait: usize = 0;
-        while (wait < 10 and !a.hub_stop.load(.acquire)) : (wait += 1) win.Sleep(100);
+        if (a.hub_reconnect_failures.load(.acquire) > 0) appendLaunchLog(a, "hub events: connected");
+        a.hub_reconnect_failures.store(0, .release);
+        a.hub_reconnect_logged_ms = null;
+        hubReconnectSleep(a, sync_gate.hubReconnectWaitMs(0));
     }
 }
 
@@ -24765,6 +24823,8 @@ fn toggleSlackThreads(a: *App) void {
     closeSlackThread(a);
     a.selected_message = null;
     invalidateCanvasIconTooltips(a);
+    applyAccountRepliesStyle(a, slackThreadsAccount(a), a.threads_enabled);
+    a.replies_mode_key.set("");
     a.scroll_y = 0;
     a.slack_history_hash = 0;
     a.msg_applied_hash = 0;
@@ -24774,7 +24834,19 @@ fn toggleSlackThreads(a: *App) void {
 
 fn localSlackStyle(a: *App) bool {
     if (a.selected_chat >= a.chat_count) return false;
-    return if (a.chats[a.selected_chat].provider == .slack) slackThreadsEnabled(a) else repliesSlackMode(a);
+    return slack.repliesFold(repliesSlackMode(a), a.chats[a.selected_chat].provider == .slack);
+}
+
+fn applyAccountRepliesStyle(a: *App, account: []const u8, enabled: bool) void {
+    if (account.len == 0) return;
+    for (a.chats[0..a.chat_count]) |*chat| {
+        if (chat.provider != .slack or !std.mem.eql(u8, chatViewKey(chat).account, account)) continue;
+        const key = std.fmt.allocPrint(a.allocator, "RepliesSlack:{s}:{s}:{s}", .{ @tagName(chat.provider), chat.account.slice(), chat.jid.slice() }) catch continue;
+        defer a.allocator.free(key);
+        const wide = utf8ToWide(a.allocator, key) catch continue;
+        defer a.allocator.free(wide);
+        _ = saveRegistryString(a.allocator, wide.ptr, if (enabled) "1" else "0");
+    }
 }
 
 fn hasDirectReplies(a: *const App, parent: *const Message) bool {
@@ -24808,7 +24880,7 @@ fn localReplyHidden(a: *App, message: *const Message) bool {
 }
 
 fn channelMessageVisible(a: *App, message: *const Message) bool {
-    return (message.from_me and message.send_state != .none) or (!localReplyHidden(a, message) and (!slackThreadsEnabled(a) or !slack.isThreadReply(message.id.slice(), message.thread_ts.slice())));
+    return (message.from_me and message.send_state != .none) or (!localReplyHidden(a, message) and (!localSlackStyle(a) or !slack.isThreadReply(message.id.slice(), message.thread_ts.slice())));
 }
 
 fn threadReplyCount(a: *const App, parent: *const Message) usize {
@@ -24844,7 +24916,7 @@ fn threadLatestReply(a: *const App, parent: *const Message) []const u8 {
 }
 
 fn threadSummaryHeight(a: *App, message: *const Message) i32 {
-    return if ((slackThreadsEnabled(a) or localSlackStyle(a)) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 30), @as(i32, @intCast(@abs(scaledFontHeight(theme.type_preview, a.font_scale, @intCast(a.dpi))))) + px(a, 10)) else 0;
+    return if (localSlackStyle(a) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 30), @as(i32, @intCast(@abs(scaledFontHeight(theme.type_preview, a.font_scale, @intCast(a.dpi))))) + px(a, 10)) else 0;
 }
 
 fn threadPanelWidth(a: *const App, width: i32, left_width: i32) i32 {
@@ -24956,7 +25028,7 @@ fn closeSlackThread(a: *App) void {
 }
 
 fn openSlackThread(a: *App, selected: usize) void {
-    if ((!slackThreadsEnabled(a) and !repliesSlackMode(a)) or selected >= a.message_count or a.hwnd == null) return;
+    if (!localSlackStyle(a) or selected >= a.message_count or a.hwnd == null) return;
     const message = &a.messages[selected];
     var parent = Utf8Text(191){};
     parent.set(if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice())) message.thread_ts.slice() else if (localSlackStyle(a)) localThreadRoot(a, message) orelse message.id.slice() else message.id.slice());
@@ -25156,22 +25228,9 @@ fn refreshSlackThreadPanel(a: *App) void {
     _ = win.InvalidateRect(list, null, win.FALSE);
 }
 
-fn controlReadTick(a: *App, w: *std.Io.Writer) !void {
-    const newest = read_receipt.newestOwn(a.message_count, a, ownReadable) orelse {
-        try w.writeAll(",\"read_tick\":{\"shown\":false,\"message\":\"\"}");
-        return;
-    };
-    const message = &a.messages[newest];
-    const shown = read_receipt.shows(receiptCapability(a), message.from_me, message.send_state == .none, message.revoked, message.read_by);
-    try w.print(",\"read_tick\":{{\"shown\":{},\"message\":", .{shown});
-    try control_api.writeString(w, message.id.slice());
-    try w.writeAll("}");
-}
-
 fn controlSlackThreads(a: *App, w: *std.Io.Writer) !void {
-    const local = localSlackStyle(a);
-    if (slackThreadsAccount(a).len == 0 and !local) return;
-    const enabled = slackThreadsEnabled(a) or local;
+    const enabled = localSlackStyle(a);
+    if (slackThreadsAccount(a).len == 0 and !enabled) return;
     var parent: ?*const Message = null;
     var inline_replies: usize = 0;
     var loose_replies: usize = 0;
@@ -25186,7 +25245,7 @@ fn controlSlackThreads(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, if (parent) |message| message.id.slice() else "");
     try w.writeAll(",\"parent_reply_line\":");
     try control_api.writeString(w, if (enabled and parent != null) slack.repliesLine(&line_buffer, threadReplyCount(a, parent.?)) else "");
-    try w.print(",\"inline_replies\":{d},\"loose_replies\":{d},\"replies\":{d},\"open\":{},\"threads_option\":\"{s}\"", .{ inline_replies, loose_replies, a.thread_panel_replies, a.thread_list != null, slack.threadsSettingValue(enabled) });
+    try w.print(",\"inline_replies\":{d},\"loose_replies\":{d},\"replies\":{d},\"open\":{},\"threads_option\":\"{s}\",\"replies_style\":\"{s}\"", .{ inline_replies, loose_replies, a.thread_panel_replies, a.thread_list != null, slack.threadsSettingValue(enabled), if (enabled) "slack" else "whatsapp" });
     var label = WideText(191){};
     threadBroadcastLabel(a, &label);
     const label_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, label.slice()) catch return error.OutOfMemory;
