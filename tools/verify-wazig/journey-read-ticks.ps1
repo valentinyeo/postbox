@@ -1,7 +1,7 @@
 $chats = @(
     @{ name = 'Verification Read'; id = 'ticks-read@s.whatsapp.net'; shown = $true; tick = 'tick-own'; mark = 'tick-own'; stage = 'ticks-read' },
     @{ name = 'Verification Sent'; id = 'ticks-sent@s.whatsapp.net'; shown = $false; tick = ''; mark = 'tick-own'; stage = 'ticks-sent' },
-    @{ name = 'Verification Late'; id = 'ticks-late@s.whatsapp.net'; shown = $true; tick = 'tick-old'; mark = 'tick-old'; clear = 'tick-own'; stage = 'ticks-late' },
+    @{ name = 'Verification Late'; id = 'ticks-late@s.whatsapp.net'; shown = $true; tick = 'tick-old'; mark = 'tick-old'; unread = 'tick-own'; stage = 'ticks-late' },
     @{ name = 'Verification Group'; id = 'ticks-group@g.us'; shown = $false; tick = 'tick-own'; mark = 'tick-own'; stage = 'ticks-group' },
     @{ name = 'Verification Slack'; id = 'slack:fixture-ticks:channel'; shown = $false; tick = 'tick-own'; mark = 'tick-own'; stage = 'ticks-slack' },
     @{ name = 'Verification Signal Contact'; id = 'signal:ticks-contact'; shown = $true; tick = 'tick-own'; mark = 'tick-own'; stage = 'ticks-signal' },
@@ -69,10 +69,10 @@ foreach ($chat in $chats) {
     } else {
         Assert-That ($mark.blue_below -eq 0) "Read mark drawn under $($chat.mark) in $($chat.name) although it shows none: blue=$($mark.blue_below)"
     }
-    if ($chat.clear) {
-        $clear = Get-BlueBelow $shown $chat.clear (Join-Path $session.evidence "$($chat.stage).png") $canvas $desktop
-        Assert-That ($null -ne $clear) "Unread message $($chat.clear) is not painted in $($chat.name)"
-        Assert-That ($clear.blue_below -eq 0) "Read mark drawn under the unread $($chat.clear) in $($chat.name): blue=$($clear.blue_below)"
+    if ($chat.unread) {
+        $unread = Get-BlueBelow $shown $chat.unread (Join-Path $session.evidence "$($chat.stage).png") $canvas $desktop
+        Assert-That ($null -ne $unread) "Unread message $($chat.unread) is not painted in $($chat.name)"
+        Assert-That ($unread.blue_below -eq 0) "Read mark drawn under the unread $($chat.unread) in $($chat.name): blue=$($unread.blue_below)"
     }
     Hub-Pass $session "$($chat.stage)=$($chat.shown) blue=$($mark.blue_below)"
 }
