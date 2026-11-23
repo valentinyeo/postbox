@@ -1,6 +1,10 @@
 from pathlib import Path
 import json
+import runpy
 import sys
+
+
+SYNC_LINE = runpy.run_path(str(Path(__file__).with_name('check-hub-sync-line-evidence.py')))
 
 
 def check_hub_wake_refresh(folder):
@@ -21,8 +25,12 @@ def check_hub_wake_refresh(folder):
     requests = [json.loads(line) for line in (folder / 'bridge-requests.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert any(row['path'] == '/fixture/mute-sse' and row['status'] == 200 for row in requests)
     assert any(row['path'] == '/fixture/stale-row' and row['status'] == 200 for row in requests)
+    assert any(row['path'] == '/fixture/drop-events' and row['status'] == 200 for row in requests)
+    assert any(row['path'] == '/fixture/restore-events' and row['status'] == 200 for row in requests)
+    assert any(row['path'] == '/v1/events' and row['status'] == 503 for row in requests)
     live_events = [row for row in requests if row.get('path') == '/v1/events' and row.get('id') == '2']
     assert not live_events
+    SYNC_LINE['check_hub_sync_line'](folder)
     print('HUB_WAKE_REFRESH_VERIFIED: safety poll and resume refresh without SSE live events')
 
 

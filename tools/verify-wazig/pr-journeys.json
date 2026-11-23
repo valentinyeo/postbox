@@ -43,6 +43,12 @@
     "src/sync_gate.zig": [
       "hub-wake-refresh"
     ],
+    "src/sync_line.zig": [
+      "hub-wake-refresh"
+    ],
+    "src/message_notifications.zig": [
+      "hub-wake-refresh"
+    ],
     "tools/verify-wazig/fake-wa-bridge.py": [
       "hub-wake-refresh",
       "whatsapp-hub"
@@ -81,6 +87,9 @@
       "hub-fault"
     ],
     "tools/verify-wazig/check-hub-wake-refresh-evidence.py": [
+      "hub-wake-refresh"
+    ],
+    "tools/verify-wazig/check-hub-sync-line-evidence.py": [
       "hub-wake-refresh"
     ],
     "tools/verify-wazig/check-hub-rollback-evidence.py": [

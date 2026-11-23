@@ -47,6 +47,7 @@ const message_layout = @import("message_layout.zig");
 const media_drain = @import("media_drain.zig");
 const video_alias = @import("video_alias.zig");
 const sync_gate = @import("sync_gate.zig");
+const sync_line = @import("sync_line.zig");
 const webp_detect = @import("webp.zig");
 const paste_image = @import("paste_image.zig");
 const scrollbar = @import("scrollbar.zig");
@@ -802,6 +803,12 @@ const App = struct {
     hub_reset_pending: std.atomic.Value(bool) = .init(false),
     last_inbox_fetch_ms: u64 = 0,
     hub_reconnect_failures: std.atomic.Value(u32) = .init(0),
+    hub_live: std.atomic.Value(bool) = .init(false),
+    sync_state: sync_line.State = .catching_up,
+    sync_clock: Utf8Text(5) = .{},
+    sync_text: Utf8Text(sync_line.label_capacity) = .{},
+    sync_label: WideText(sync_line.label_capacity) = .{},
+    gap_clock: Utf8Text(5) = .{},
     hub_reconnect_logged_ms: ?u64 = null,
     verification_inbox_stale_once: bool = false,
     wacli_path: []u8,
@@ -1288,6 +1295,7 @@ const App = struct {
     chats_read_attempts: u32 = 0,
     startup_probe_pending: bool = false,
     notifications: message_notifications.State = .{},
+    notif_gap: message_notifications.Gap = .{},
     alert_chats: [toast.kept]chat_key.Stored = @splat(.{}),
     alert_next: usize = 0,
     notification_message: Utf8Text(191) = .{},
@@ -2797,6 +2805,7 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     a.last_refresh_unix = nowUnixSeconds();
     if (fresh) {
         a.last_inbox_fetch_ms = win.GetTickCount64();
+        recordSyncClock(a);
     }
     for (data.items) |item| {
         if (!unifiedHub(a) and !messenger_view.includes(view, .whatsapp)) break;
@@ -2991,7 +3000,47 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         defer a.palette_keep_selection = false;
         paletteFilter(a);
     }
+    if (fresh) finishNotificationGap(a);
     return true;
+}
+
+fn recordSyncClock(a: *App) void {
+    var clock = std.mem.zeroes(win.SYSTEMTIME);
+    win.GetLocalTime(&clock);
+    var clock_buffer: [5]u8 = undefined;
+    const clock_text = std.fmt.bufPrint(&clock_buffer, "{d:0>2}:{d:0>2}", .{ clock.wHour, clock.wMinute }) catch "";
+    a.sync_clock.set(clock_text);
+}
+
+fn beginNotificationGap(a: *App) void {
+    a.gap_clock.set(a.sync_clock.slice());
+    a.notif_gap.begin(a.last_refresh_unix);
+}
+
+fn finishNotificationGap(a: *App) void {
+    const count = a.notif_gap.finish() orelse return;
+    if (count == 0) return;
+    var buffer: [sync_line.label_capacity + 1]u8 = undefined;
+    const text = message_notifications.gapLabel(&buffer, count, a.gap_clock.slice());
+    const index = a.alert_next;
+    a.alert_next = (index + 1) % toast.kept;
+    a.alert_chats[index] = .{};
+    toast.register("Postbox", @embedFile("postbox_icon"));
+    const accepted = toast.show(a.hwnd orelse null, wm_notification, index, "Postbox", text);
+    var log_buffer: [160]u8 = undefined;
+    appendLaunchLog(a, std.fmt.bufPrint(&log_buffer, "notification: gap summary {s} {s}", .{ if (accepted) @as([]const u8, "shown") else "failed", text }) catch "notification: gap summary");
+}
+
+fn updateSyncLine(a: *App) void {
+    const live = !hubConfigured(a) or a.hub_live.load(.acquire);
+    const state = sync_line.classify(live, a.hub_reconnect_failures.load(.acquire), a.last_inbox_fetch_ms, win.GetTickCount64());
+    var buffer: [sync_line.label_capacity + 1]u8 = undefined;
+    const text = sync_line.label(&buffer, state, a.sync_clock.slice());
+    if (state == a.sync_state and std.mem.eql(u8, text, a.sync_text.slice())) return;
+    a.sync_state = state;
+    a.sync_text.set(text);
+    a.sync_label.set(a.allocator, text);
+    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
 }
 
 fn invalidateChatRow(a: *App, index: usize) void {
@@ -3022,6 +3071,11 @@ fn observeNotificationChats(a: *App, rows: []const std.json.Value) void {
         const timestamp = media_age.unixSeconds(stamp) orelse continue;
         const previous = a.notifications.previous(key);
         if (previous != null and timestamp > previous.?) {
+            if (a.notif_gap.active) {
+                a.notif_gap.observe(getInt(object, "unread_count"));
+                a.notifications.record(a.allocator, key, timestamp);
+                continue;
+            }
             var probe = WacliJob.Notification{ .after = previous.?, .archived = getBool(object, "archived") };
             const name = getString(object, "name");
             probe.name_len = @min(name.len, probe.name.len);
@@ -15128,6 +15182,8 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
+    try w.print(",\"sync_state\":\"{s}\",\"sync_as_of\":\"{s}\",\"sync_line\":", .{ sync_line.stateName(a.sync_state), a.sync_clock.slice() });
+    try control_api.writeString(w, a.sync_text.slice());
     if (verification_fixture) {
         try controlEmojiPicker(a, w);
         try controlGifPicker(a, w);
@@ -15141,6 +15197,15 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         try w.print(",\"staged_capacity\":{d}", .{staged_images.capacity});
         const avatar_rect = a.header_icon_tip_rect;
         try w.print(",\"header_avatar\":[{d},{d},{d},{d}]", .{ avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom });
+        if (a.canvas) |canvas| {
+            var canvas_rect: win.RECT = undefined;
+            const pill_right = if (a.header_pill_rect.right > a.header_pill_rect.left) a.header_pill_rect.right else 0;
+            if (win.GetClientRect(canvas, &canvas_rect) != 0) {
+                if (sync_line.labelRect(.{ .left = canvas_rect.left, .top = canvas_rect.top, .right = canvas_rect.right, .bottom = canvas_rect.bottom }, pill_right, @intCast(a.dpi))) |line_rect| {
+                    try w.print(",\"sync_rect\":[{d},{d},{d},{d}]", .{ line_rect.left, line_rect.top, line_rect.right, line_rect.bottom });
+                } else try w.writeAll(",\"sync_rect\":null");
+            } else try w.writeAll(",\"sync_rect\":null");
+        } else try w.writeAll(",\"sync_rect\":null");
         try w.writeAll(",\"staged_remove_rects\":[");
         for (0..a.staged_images.count) |index| {
             if (index > 0) try w.writeByte(',');
@@ -18729,6 +18794,7 @@ fn drawChatTitle(shapes: *const smooth.Context, hdc: win.HDC, a: *App, client: w
     a.header_pill_rect = std.mem.zeroes(win.RECT);
     if (a.selected_chat >= a.chat_count) {
         if (a.canvas) |owner| setIconTooltipRect(a, owner, @intFromEnum(IconTip.header_avatar), &a.header_icon_tip_rect, std.mem.zeroes(win.RECT));
+        drawSyncLine(hdc, a, client, client.left);
         return;
     }
     const chat = &a.chats[a.selected_chat];
@@ -18779,6 +18845,16 @@ fn drawChatTitle(shapes: *const smooth.Context, hdc: win.HDC, a: *App, client: w
     _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
     var meta = win.RECT{ .left = name.right + px(a, 8), .top = rect.top, .right = rect.right - px(a, 12), .bottom = rect.bottom };
     _ = text_draw.drawText(hdc, subtitle.ptr(), @intCast(subtitle.len), &meta, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);
+    drawSyncLine(hdc, a, client, rect.right);
+}
+
+fn drawSyncLine(hdc: win.HDC, a: *App, client: win.RECT, pill_right: i32) void {
+    const scaled = sync_line.labelRect(.{ .left = client.left, .top = client.top, .right = client.right, .bottom = client.bottom }, pill_right, @intCast(a.dpi)) orelse return;
+    var box = win.RECT{ .left = scaled.left, .top = scaled.top, .right = scaled.right, .bottom = scaled.bottom };
+    _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+    _ = win.SetBkMode(hdc, win.TRANSPARENT);
+    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+    _ = text_draw.drawText(hdc, a.sync_label.ptr(), @intCast(a.sync_label.len), &box, win.DT_RIGHT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_END_ELLIPSIS);
 }
 
 fn messageActionsRect(a: *const App, message: *const Message) win.RECT {
@@ -20664,6 +20740,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 }
                 checkSync(a);
                 hubSafetyRefreshIfDue(a);
+                updateSyncLine(a);
                 a.group_refresh_ticks += 1;
                 if (a.group_refresh_ticks >= 60) {
                     refreshGroups(a);
@@ -24923,6 +25000,7 @@ fn hubWakeRefreshIfStale(a: *App) void {
     const stale_tick = sync_gate.hubInboxFetchStale(a.last_inbox_fetch_ms, win.GetTickCount64());
     const stale_wall = sync_gate.hubWakeUnixStale(a.last_refresh_unix, nowUnixSeconds());
     if (!stale_tick and !stale_wall) return;
+    beginNotificationGap(a);
     hubRefreshInboxAndOpenChat(a);
 }
 
@@ -24984,6 +25062,8 @@ fn hubEventSession(a: *App, allocator: std.mem.Allocator, sse: *wa_hub.Sse) !voi
     const stream = try client.open(allocator, if (unifiedHub(a)) hub.events(sse.lastId()) else wa_hub.events(sse.lastId()), &a.hub_cancel);
     defer stream.deinit();
     if (stream.status != 200) return error.HubHttpFailed;
+    a.hub_live.store(true, .release);
+    defer a.hub_live.store(false, .release);
     postHubEvent(a, true);
     sse.len = 0;
     var buffer: [4096]u8 = undefined;
