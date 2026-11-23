@@ -371,15 +371,23 @@ const Transport = struct {
     }
 
     pub fn send(self: *@This(), selected: Language, mime: []const u8, audio: []const u8) ![]u8 {
-        return switch (selected) {
+        return dictation_policy.transcribeSupported(self, selected, mime, audio);
+    }
+
+    pub fn recognize(self: *@This(), selected: Language, mime: []const u8, audio: []const u8) !dictation_policy.Recognition {
+        const response = try switch (selected) {
             .automatic => self.sendAt(lit(dictation_policy.path(.automatic)), mime, audio),
             .english => self.sendAt(lit(dictation_policy.path(.english)), mime, audio),
             .german => self.sendAt(lit(dictation_policy.path(.german)), mime, audio),
         };
+        defer self.allocator.free(response);
+        return dictation_policy.parseResponse(self.allocator, response);
     }
 
     pub fn sendMultilingual(self: *@This(), mime: []const u8, audio: []const u8) ![]u8 {
-        return self.sendAt(lit(dictation_policy.multilingual_path), mime, audio);
+        const response = try self.sendAt(lit(dictation_policy.multilingual_path), mime, audio);
+        defer self.allocator.free(response);
+        return parseResponse(self.allocator, response);
     }
 };
 
@@ -421,44 +429,11 @@ fn transcribeAt(allocator: std.mem.Allocator, api_key: []const u8, request_path:
         response.shrinkRetainingCapacity(old_len + read);
     }
 
-    return parseResponse(allocator, response.items);
+    return response.toOwnedSlice(allocator);
 }
 
 fn parseResponse(allocator: std.mem.Allocator, response: []const u8) ![]u8 {
-    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, response, .{});
-    defer parsed.deinit();
-    const root = switch (parsed.value) {
-        .object => |value| value,
-        else => return error.BadResponse,
-    };
-    const results = switch (root.get("results") orelse return error.BadResponse) {
-        .object => |value| value,
-        else => return error.BadResponse,
-    };
-    const channels = switch (results.get("channels") orelse return error.BadResponse) {
-        .array => |value| value,
-        else => return error.BadResponse,
-    };
-    if (channels.items.len == 0) return error.NoSpeech;
-    const channel = switch (channels.items[0]) {
-        .object => |value| value,
-        else => return error.BadResponse,
-    };
-    const alternatives = switch (channel.get("alternatives") orelse return error.BadResponse) {
-        .array => |value| value,
-        else => return error.BadResponse,
-    };
-    if (alternatives.items.len == 0) return error.NoSpeech;
-    const alternative = switch (alternatives.items[0]) {
-        .object => |value| value,
-        else => return error.BadResponse,
-    };
-    const transcript = switch (alternative.get("transcript") orelse return error.BadResponse) {
-        .string => |value| value,
-        else => return error.BadResponse,
-    };
-    if (transcript.len == 0) return error.NoSpeech;
-    return allocator.dupe(u8, transcript);
+    return (try dictation_policy.parseResponse(allocator, response)).text;
 }
 
 fn lit(comptime text: []const u8) [*:0]const u16 {
