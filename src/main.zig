@@ -802,6 +802,7 @@ const App = struct {
     hub_event_pending: std.atomic.Value(bool) = .init(false),
     hub_reset_pending: std.atomic.Value(bool) = .init(false),
     last_inbox_fetch_ms: u64 = 0,
+    gap_started_ms: u64 = 0,
     hub_reconnect_failures: std.atomic.Value(u32) = .init(0),
     hub_live: std.atomic.Value(bool) = .init(false),
     sync_state: sync_line.State = .catching_up,
@@ -3000,8 +3001,23 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
         defer a.palette_keep_selection = false;
         paletteFilter(a);
     }
-    if (fresh) finishNotificationGap(a);
     return true;
+}
+
+fn invalidateChatRow(a: *App, index: usize) void {
+    if (a.chats_hwnd) |list| {
+        var row: win.RECT = undefined;
+        if (win.SendMessageW(list, win.LB_GETITEMRECT, index, @bitCast(@intFromPtr(&row))) != win.LB_ERR) _ = win.InvalidateRect(list, &row, win.FALSE);
+    }
+}
+
+fn persistReadState(a: *App) void {
+    if (!a.read_state.dirty) return;
+    const path = messagesDirPath(a, "read-state.txt") orelse return;
+    defer a.allocator.free(path);
+    const data = a.read_state.encode(a.allocator) catch return;
+    defer a.allocator.free(data);
+    if (writeCacheFileAtomic(a, path, data)) a.read_state.dirty = false;
 }
 
 fn recordSyncClock(a: *App) void {
@@ -3014,10 +3030,14 @@ fn recordSyncClock(a: *App) void {
 
 fn beginNotificationGap(a: *App) void {
     a.gap_clock.set(a.sync_clock.slice());
+    a.gap_started_ms = win.GetTickCount64();
     a.notif_gap.begin(a.last_refresh_unix);
 }
 
-fn finishNotificationGap(a: *App) void {
+fn finishNotificationGapIfReady(a: *App) void {
+    if (!a.notif_gap.active) return;
+    const landed = a.last_inbox_fetch_ms > a.gap_started_ms;
+    if (!landed and win.GetTickCount64() -| a.gap_started_ms < sync_line.gap_summary_wait_ms) return;
     const count = a.notif_gap.finish() orelse return;
     if (count == 0) return;
     var buffer: [sync_line.label_capacity + 1]u8 = undefined;
@@ -3041,22 +3061,6 @@ fn updateSyncLine(a: *App) void {
     a.sync_text.set(text);
     a.sync_label.set(a.allocator, text);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
-}
-
-fn invalidateChatRow(a: *App, index: usize) void {
-    if (a.chats_hwnd) |list| {
-        var row: win.RECT = undefined;
-        if (win.SendMessageW(list, win.LB_GETITEMRECT, index, @bitCast(@intFromPtr(&row))) != win.LB_ERR) _ = win.InvalidateRect(list, &row, win.FALSE);
-    }
-}
-
-fn persistReadState(a: *App) void {
-    if (!a.read_state.dirty) return;
-    const path = messagesDirPath(a, "read-state.txt") orelse return;
-    defer a.allocator.free(path);
-    const data = a.read_state.encode(a.allocator) catch return;
-    defer a.allocator.free(data);
-    if (writeCacheFileAtomic(a, path, data)) a.read_state.dirty = false;
 }
 
 fn observeNotificationChats(a: *App, rows: []const std.json.Value) void {
@@ -20741,6 +20745,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 checkSync(a);
                 hubSafetyRefreshIfDue(a);
                 updateSyncLine(a);
+                finishNotificationGapIfReady(a);
                 a.group_refresh_ticks += 1;
                 if (a.group_refresh_ticks >= 60) {
                     refreshGroups(a);

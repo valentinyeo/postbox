@@ -3,6 +3,7 @@ const std = @import("std");
 pub const State = enum { caught_up, catching_up, offline };
 
 pub const stale_after_ms: u64 = 180_000;
+pub const gap_summary_wait_ms: u64 = 10_000;
 pub const label_capacity: usize = 63;
 const min_label_width: i32 = 96;
 
