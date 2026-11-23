@@ -51,10 +51,20 @@ def check_read_ticks(folder):
         pictures.add(image)
         title = (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0]
         assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + expected_product_version(folder), title), title
+    hold = read('ticks-hold.json')
+    assert hold['shown_before'] and not hold['shown_after'], hold
+    assert hold['before']['id'] == hold['after']['id'], hold
+    assert hold['before']['id'] != 'hold-39' and hold['before']['painted'] > 3, hold
+    assert hold['moved'] == abs(hold['after']['y'] - hold['before']['y']), hold
+    assert hold['moved'] <= 2, hold
+    assert (folder / 'ticks-hold.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     assert len(pictures) == len(READ_TICK_STAGES), 'chat screenshots are not distinct'
+    proof = (folder / 'hub-proof.log').read_text(encoding='utf-8-sig')
+    assert 'read-ticks ticks-late=True' in proof and 'read-ticks ticks-sent=False' in proof, proof[-400:]
+    assert 'read-ticks ticks-hold=hold-' in proof, proof[-400:]
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
     assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
     assert 'JOURNEY PASSED: read-ticks' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('EVIDENCE VERIFIED: blue double tick and Read label below the bubble right edge on the newest read own message only, none for unread, group or Slack')
+    print('EVIDENCE VERIFIED: blue double tick and Read label below the bubble right edge on the newest read own message only, none for unread, group or Slack, and the chat stays put when the mark clears')

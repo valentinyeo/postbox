@@ -11,6 +11,7 @@ $chats = @(
 )
 $canvas = (Get-Edit (Get-Window $session) '1024').Current.BoundingRectangle
 $desktop = [System.Windows.Forms.SystemInformation]::VirtualScreen
+$headers = @{ Authorization = 'Bearer fixture-key-not-a-secret' }
 function Measure-ReadMark([string]$Path, [int]$Left, [int]$Top, [int]$Right, [int]$Bottom) {
     $image = [Drawing.Bitmap]::new($Path)
     try {
@@ -38,6 +39,11 @@ function Get-BlueBelow($Shown, [string]$Id, [string]$Path, $Canvas, $Desktop) {
     if ($row.Count -ne 1) { return $null }
     $band = Get-ReadMarkBand $row[0].bubble $Canvas $Desktop
     return @{ bubble = @($row[0].bubble); blue_below = (Measure-ReadMark $Path $band.left $band.top $band.right $band.bottom) }
+}
+function Get-TopPainted($Shown) {
+    $painted = @($Shown.messages | Where-Object { $_.bubble[1] -ne 0 -or $_.bubble[3] -ne 0 })
+    if ($painted.Count -eq 0) { return $null }
+    return @{ id = $painted[0].id; y = [int]$painted[0].bubble[1]; painted = $painted.Count }
 }
 foreach ($chat in $chats) {
     Send-Keys $session '^f'
@@ -70,3 +76,29 @@ foreach ($chat in $chats) {
     }
     Hub-Pass $session "$($chat.stage)=$($chat.shown) blue=$($mark.blue_below)"
 }
+Send-Keys $session '^f'
+Send-Keys $session 'Verification Hold'
+$null = Wait-Until {
+    $state = Read-Control $session status
+    $shown = Read-Control $session messages
+    $shown.chat.id -eq 'ticks-hold@s.whatsapp.net' -and $state.read_tick.shown -and $state.read_tick.message -eq 'hold-39'
+} 'hold chat with its read mark'
+$paints = (Read-Control $session status).paints.canvas
+Send-Keys $session '{PGUP}'
+$null = Wait-Until { (Read-Control $session status).paints.canvas -gt $paints } 'repaint after scrolling up'
+$before = Get-TopPainted (Read-Control $session messages)
+Assert-That ($null -ne $before -and $before.id -ne 'hold-39') 'Hold chat did not scroll away from the marked message'
+$paints = (Read-Control $session status).paints.canvas
+Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/ticks/clear" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
+$null = Wait-Until {
+    $state = Read-Control $session status
+    (-not $state.read_tick.shown) -and $state.paints.canvas -gt $paints
+} 'read mark cleared and repainted' -Seconds 90
+$after = Get-TopPainted (Read-Control $session messages)
+$cleared = Read-Control $session status
+Assert-That ($null -ne $after -and $after.id -eq $before.id) "Hold: top message changed from $($before.id) to $(if ($null -ne $after) { $after.id } else { 'none' })"
+$moved = [Math]::Abs($after.y - $before.y)
+@{ before = $before; after = $after; moved = $moved; shown_before = $true; shown_after = $cleared.read_tick.shown } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'ticks-hold.json')
+Save-Screen $session 'ticks-hold'
+Assert-That ($moved -le 2) "Hold: $($after.id) moved $moved px when the read mark cleared"
+Hub-Pass $session "ticks-hold=$($before.id) moved=$moved"

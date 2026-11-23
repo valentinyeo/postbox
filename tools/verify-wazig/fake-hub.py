@@ -1251,7 +1251,24 @@ TICK_CHATS = [
     dict(jid='signal:group:ticks-group', name='Verification Signal Crowd', provider='signal', kind='group', read_by=2),
     dict(jid='telegram:user:ticks-contact', name='Verification Telegram Contact', provider='telegram', kind='direct', read_by=1),
     dict(jid='telegram:user:ticks-unread', name='Verification Telegram Fresh', provider='telegram', kind='direct', read_by=0),
+    dict(jid='ticks-hold@s.whatsapp.net', name='Verification Hold', provider='whatsapp', kind='direct', read_by=1),
 ]
+
+TICK_HOLD_ROWS = 40
+
+
+def tick_hold_rows(jid, cleared):
+    stamp = datetime(2025, 2, 19, 21, 30, tzinfo=timezone.utc)
+    rows = []
+    for number in range(TICK_HOLD_ROWS):
+        own = number % 3 == 1 or number == TICK_HOLD_ROWS - 1
+        rows.append(dict(MsgID=f'hold-{number:02d}', ChatJID=jid, FromMe=own,
+                         Timestamp=(stamp + timedelta(minutes=number)).isoformat().replace('+00:00', 'Z'),
+                         Text=f'Synthetic hold line {number:02d}',
+                         SenderName='Me' if own else 'Fixture Sender', ReadBy=0))
+    if not cleared:
+        rows[-1]['ReadBy'] = 1
+    return rows
 
 
 class ReadTicksHandler(SlackSortHandler):
@@ -1270,6 +1287,12 @@ class ReadTicksHandler(SlackSortHandler):
             chat = next((row for row in TICK_CHATS if [row['jid']] == query.get('chat')), None)
             if chat is None:
                 self.respond(404, {'error': 'unknown fixture chat'})
+                return
+            if chat['jid'] == 'ticks-hold@s.whatsapp.net':
+                with self.state.lock:
+                    cleared = self.state.ticks_cleared
+                rows = list(reversed(tick_hold_rows(chat['jid'], cleared)))
+                self.respond(200, rows)
                 return
             rows = [dict(MsgID='tick-own', ChatJID=chat['jid'], Timestamp='2025-02-19T21:20:30Z', FromMe=True,
                          Text='Synthetic message you sent', SenderName='Me', ReadBy=chat['read_by']),
@@ -1293,6 +1316,10 @@ class ReadTicksHandler(SlackSortHandler):
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
         if self.path == '/v1/wazig/mark-read':
             self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/fixture/ticks/clear':
+            with self.state.lock:
+                self.state.ticks_cleared = True
+            self.respond(200, {'cleared': True}, body=body)
         else:
             self.respond(400, {'error': 'invalid read tick request'}, body=body)
 
@@ -2733,6 +2760,7 @@ def main():
     server.state.telegram_events = []
     server.state.telegram_read = set()
     server.state.gif_attempts = {}
+    server.state.ticks_cleared = False
     if args.mode == 'voice':
         server.state.voice_audio = voice_playback_bytes()
     if args.mode == 'media-speed':

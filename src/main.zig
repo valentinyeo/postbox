@@ -43,6 +43,7 @@ const update_card_layout = @import("update_card_layout.zig");
 const media_age = @import("media_age.zig");
 const media_layout = @import("media_layout.zig");
 const message_layout = @import("message_layout.zig");
+const message_anchor = @import("message_anchor.zig");
 const media_drain = @import("media_drain.zig");
 const video_alias = @import("video_alias.zig");
 const sync_gate = @import("sync_gate.zig");
@@ -976,6 +977,10 @@ const App = struct {
     selected_message: ?usize = null,
     scroll_y: i32 = 0,
     max_scroll: i32 = 0,
+    read_anchor: Utf8Text(191) = .{},
+    read_anchor_offset: i32 = 0,
+    read_anchor_bottom: i32 = 0,
+    read_anchor_valid: bool = false,
     unread_only: bool = false,
     show_archived: bool = false,
     include_archived: bool = false,
@@ -18095,6 +18100,46 @@ fn messageReadMark(marked: ?usize, height: i32, index: usize) i32 {
     return if (marked_index == index) height else 0;
 }
 
+fn holdReadingPosition(hdc: win.HDC, a: *App, client: win.RECT, bubble_width: i32, marked: ?usize, mark_height: i32) void {
+    if (!a.read_anchor_valid or a.scroll_y <= 0 or a.read_anchor.len == 0) return;
+    var below: i32 = 0;
+    var index = a.message_count;
+    var found = false;
+    while (index > 0) {
+        index -= 1;
+        const message = &a.messages[index];
+        if (!channelMessageVisible(a, message)) continue;
+        if (std.mem.eql(u8, a.read_anchor.slice(), message.id.slice())) {
+            found = true;
+            break;
+        }
+        below += measureMessageCached(hdc, a, message, bubble_width, startsSenderGroup(a, index), messageReadMark(marked, mark_height, index)) + messageGap(a, index);
+    }
+    if (!found) {
+        a.read_anchor_valid = false;
+        return;
+    }
+    const current_offset = client.bottom - px(a, 14) - below;
+    const delta = message_anchor.holdDelta(current_offset, .{ .offset = a.read_anchor_offset, .bottom = a.read_anchor_bottom, .valid = true }, client.bottom, true);
+    if (delta == 0) return;
+    a.scroll_y = std.math.clamp(a.scroll_y + delta, 0, a.max_scroll);
+}
+
+fn recordReadingPosition(a: *App, client: win.RECT, index: ?usize, top: i32) void {
+    const anchor = index orelse {
+        a.read_anchor_valid = false;
+        return;
+    };
+    if (a.scroll_y <= 0) {
+        a.read_anchor_valid = false;
+        return;
+    }
+    a.read_anchor.set(a.messages[anchor].id.slice());
+    a.read_anchor_offset = top - a.scroll_y;
+    a.read_anchor_bottom = client.bottom;
+    a.read_anchor_valid = true;
+}
+
 fn reactionOverhang(a: *const App, chip: win.SIZE) i32 {
     return @max(0, chip.cy - px(a, 4));
 }
@@ -18877,12 +18922,16 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     a.scroll_y = std.math.clamp(a.scroll_y, 0, a.max_scroll);
+    holdReadingPosition(hdc, a, client, bubble_width, read_mark_index, read_mark_height);
     a.quote_link_scroll = a.scroll_y;
     var cursor_y = client.bottom - px(a, 14) + a.scroll_y;
+    var anchor_top: i32 = undefined;
+    var anchor_index: ?usize = null;
     var index = a.message_count;
     while (index > 0) {
         index -= 1;
         const message = &a.messages[index];
+        const row_bottom = cursor_y;
         setPaintingMessageId(message.id.slice());
         defer clearPaintingMessageId();
         message.media_hit = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
@@ -18937,6 +18986,8 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         }
         const read_mark_slot = messageReadMark(read_mark_index, read_mark_height, index);
         height -= read_mark_slot;
+        anchor_index = index;
+        anchor_top = row_bottom;
         const sender_height = if (show_sender) senderBandHeight(hdc, a) + px(a, 8) else @as(i32, 0);
         const bubble_top = y + sender_height;
         const bubble_height = height - sender_height - @max(0, reaction_size.cy - px(a, 4));
@@ -19258,6 +19309,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             _ = wrapMixedSink(hdc, a, message.reaction.ptr(), @intCast(message.reaction.len), reaction_size.cx - px(a, 12), true, chip.left + px(a, 6), chip.top + px(a, 4), null);
         }
     }
+    recordReadingPosition(a, client, anchor_index, anchor_top);
     if (a.selected_chat < a.chat_count) {
         if (archiveMarker(a, &a.chats[a.selected_chat])) |text| {
             _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
