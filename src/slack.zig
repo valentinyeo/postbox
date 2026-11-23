@@ -1539,6 +1539,15 @@ pub fn threadsSetting(value: ?[]const u8) bool {
     return !std.mem.eql(u8, value orelse "on", "off");
 }
 
+pub fn repliesSetting(value: ?[]const u8) ?bool {
+    const text = value orelse return null;
+    return std.mem.eql(u8, text, "1");
+}
+
+pub fn repliesFold(saved: ?bool, workspace_threads: bool) bool {
+    return saved orelse workspace_threads;
+}
+
 pub fn threadsSettingValue(enabled: bool) []const u8 {
     return if (enabled) "on" else "off";
 }
@@ -1579,6 +1588,16 @@ test "Slack thread preference round trip defaults on and stays scoped to each ac
     try saved.put(allocator, second, threadsSettingValue(true));
     try std.testing.expect(!threadsSetting(saved.get(first)));
     try std.testing.expect(threadsSetting(saved.get(second)));
+}
+
+test "saved replies style tells unset from WhatsApp style and falls back to the workspace threads setting" {
+    try std.testing.expectEqual(@as(?bool, null), repliesSetting(null));
+    try std.testing.expectEqual(@as(?bool, false), repliesSetting("0"));
+    try std.testing.expectEqual(@as(?bool, true), repliesSetting("1"));
+    try std.testing.expect(!repliesFold(null, false));
+    try std.testing.expect(repliesFold(null, true));
+    try std.testing.expect(!repliesFold(false, true));
+    try std.testing.expect(repliesFold(true, false));
 }
 
 test "Slack history retains thread summary and latest reply time" {

@@ -309,11 +309,12 @@ assert '[VerifyMenus]::Click' in reaction_journey and "'#32768'" in reaction_jou
 print('REACTIONS MAP VERIFIED: real mouse journey, exact hub emoji evidence and PR matrix')
 
 threads = (root / 'tools/verify-wazig/slack-threads.ps1').read_text(encoding='utf-8')
-for artifact in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart', 'restart.json']:
+for artifact in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart', 'chat-whatsapp-style', 'chat-slack-style', 'restart.json']:
     assert artifact in threads, artifact
 assert 'slack-threads' in options and entries['slack-threads']['evidence']
 assert entries['slack-threads']['validator']['file'] == 'check-slack-threads-evidence.py'
 assert 'slack_threads.parent_reply_line' in threads and 'WAZIG_VERIFY_RESTART' in threads
+assert '.replies_style' in threads
 assert 'slack-threads' in {row['hub'] for row in journeys}
 print('SLACK THREADS MAP VERIFIED: synthetic hub, keyboard journey, read-only measurements and restart')
 
