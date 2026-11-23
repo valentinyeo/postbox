@@ -12,9 +12,10 @@ public static class VerifyMediaFit {
         return new int[] { data[p + 2], data[p + 1], data[p] };
     }
     static bool Ink(int[] p) { return Math.Min(p[0], Math.Min(p[1], p[2])) > 110; }
+    static int TickReserve(int dpi) { return Scale(12, dpi); }
     static int[] TextBand(byte[] data, int stride, int ox, int oy, int[] bubble, int dpi) {
         int top = -1, bottom = -1;
-        for (int y = bubble[1] + Scale(6, dpi); y < bubble[3] - Scale(5, dpi); y++) {
+        for (int y = bubble[1] + Scale(6, dpi); y < bubble[3] - TickReserve(dpi); y++) {
             bool ink = false;
             for (int x = bubble[0] + Scale(12, dpi); x < bubble[2] - Scale(12, dpi); x++) {
                 if (Ink(Pixel(data, stride, ox + x, oy + y))) { ink = true; break; }
